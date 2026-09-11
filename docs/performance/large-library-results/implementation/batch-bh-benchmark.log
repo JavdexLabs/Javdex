@@ -1,0 +1,297 @@
+{
+  "scales": [
+    {
+      "count": 10000,
+      "metrics": [
+        {
+          "name": "legacy.detail",
+          "samples": [
+            77.53045899999995,
+            85.68154199999992,
+            80.10070799999994
+          ],
+          "medianMs": 80.10070799999994,
+          "jsonBytes": 46239374
+        },
+        {
+          "name": "cards.offset-0",
+          "samples": [
+            17.041417000000024,
+            17.004583000000025,
+            16.99141700000007
+          ],
+          "medianMs": 17.004583000000025,
+          "jsonBytes": 7779
+        },
+        {
+          "name": "cards.offset-9940",
+          "samples": [
+            19.736249999999927,
+            19.892875000000004,
+            19.208291999999915
+          ],
+          "medianMs": 19.736249999999927,
+          "jsonBytes": 7912
+        }
+      ],
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 15,
+          "parent": 3,
+          "notused": 141,
+          "detail": "SCAN v USING INDEX idx_videos_release_date"
+        },
+        {
+          "id": 19,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 25,
+          "parent": 19,
+          "notused": 45,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=?)"
+        },
+        {
+          "id": 32,
+          "parent": 19,
+          "notused": 20,
+          "detail": "SEARCH library USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 42,
+          "parent": 3,
+          "notused": 40,
+          "detail": "SEARCH va USING COVERING INDEX sqlite_autoindex_video_actress_1 (video_id=? AND actress_id=?)"
+        },
+        {
+          "id": 71,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY"
+        },
+        {
+          "id": 87,
+          "parent": 0,
+          "notused": 145,
+          "detail": "SCAN p"
+        },
+        {
+          "id": 89,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 98,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 102,
+          "parent": 98,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 111,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 114,
+          "parent": 111,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 122,
+          "parent": 114,
+          "notused": 61,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 127,
+          "parent": 114,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 175,
+          "parent": 114,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 188,
+          "parent": 111,
+          "notused": 82,
+          "detail": "SCAN (subquery-4)"
+        }
+      ]
+    },
+    {
+      "count": 50000,
+      "metrics": [
+        {
+          "name": "legacy.detail",
+          "samples": [
+            413.0472090000003,
+            453.67766699999993,
+            461.8996659999998
+          ],
+          "medianMs": 453.67766699999993,
+          "jsonBytes": 231239374
+        },
+        {
+          "name": "cards.offset-0",
+          "samples": [
+            91.62295799999993,
+            89.26387500000055,
+            90.12662499999988
+          ],
+          "medianMs": 90.12662499999988,
+          "jsonBytes": 7779
+        },
+        {
+          "name": "cards.offset-49940",
+          "samples": [
+            101.16370800000004,
+            101.77662500000042,
+            101.27129199999945
+          ],
+          "medianMs": 101.27129199999945,
+          "jsonBytes": 7972
+        }
+      ],
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 15,
+          "parent": 3,
+          "notused": 165,
+          "detail": "SCAN v USING INDEX idx_videos_release_date"
+        },
+        {
+          "id": 19,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 25,
+          "parent": 19,
+          "notused": 47,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=?)"
+        },
+        {
+          "id": 32,
+          "parent": 19,
+          "notused": 20,
+          "detail": "SEARCH library USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 42,
+          "parent": 3,
+          "notused": 42,
+          "detail": "SEARCH va USING COVERING INDEX sqlite_autoindex_video_actress_1 (video_id=? AND actress_id=?)"
+        },
+        {
+          "id": 71,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY"
+        },
+        {
+          "id": 87,
+          "parent": 0,
+          "notused": 169,
+          "detail": "SCAN p"
+        },
+        {
+          "id": 89,
+          "parent": 0,
+          "notused": 42,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 98,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 102,
+          "parent": 98,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 111,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 114,
+          "parent": 111,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 122,
+          "parent": 114,
+          "notused": 61,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 127,
+          "parent": 114,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 175,
+          "parent": 114,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 188,
+          "parent": 111,
+          "notused": 82,
+          "detail": "SCAN (subquery-4)"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "ANALYZE, one warmup, three warm samples per query; median is the middle sample. Fixed legacy-first order.",
+    "Timing excludes assertion and JSON serialization; old detail/oracle retained. No p95, peak memory, IPC, cold or target-platform claim.",
+    "All works share dates, no resources; 4KiB summaries and 50% overlapping memberships. Count and sort still scan associated works.",
+    "Card strings are not byte-bounded; this probe does not close the long-field requirement."
+  ]
+}
+✔ compares complete actor works with bounded first and last card pages (4985.529042ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5239.600416

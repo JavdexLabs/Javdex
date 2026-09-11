@@ -1,0 +1,281 @@
+diff --git a/src/main/db/database.ts b/src/main/db/database.ts
+index 323e056..03e4c1f 100644
+--- a/src/main/db/database.ts
++++ b/src/main/db/database.ts
+@@ -1,20 +1,33 @@
+ import Database from 'better-sqlite3'
+-import { migrateDatabase } from './migrations'
++import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
+ import { normalizeActressName } from './actressNameNormalization'
+ 
+ let db: Database.Database | null = null
+ 
++/** Invalidates a short-lived read cache after writes on this or another connection. */
++export function getDatabaseReadRevision(): {
++  connection: object
++  changes: number
++  dataVersion: number
++} {
++  const connection = getDb()
++  return {
++    connection,
++    changes: (connection.prepare('SELECT total_changes() AS count').get() as { count: number }).count,
++    dataVersion: connection.pragma('data_version', { simple: true }) as number
++  }
++}
++
+ export function initDatabaseAtPath(dbPath: string): Database.Database {
+   if (db) return db
+   return openDatabase(dbPath)
+ }
+ 
+-function openDatabase(dbPath: string): Database.Database {
+-  db = new Database(dbPath)
+-  // Performance + integrity pragmas.
+-  db.pragma('journal_mode = WAL')
+-  db.pragma('foreign_keys = ON')
+-  db.function('normalize_actress_name', { deterministic: true }, (value: unknown) => {
++function registerReadFunctions(connection: Database.Database): void {
++  // Match renderer Unicode search semantics on both writer and reader connections.
++  connection.function('tag_name_contains_folded', { deterministic: true }, (name: unknown, folded: unknown) =>
++    typeof name === 'string' && typeof folded === 'string' && name.toLowerCase().includes(folded) ? 1 : 0)
++  connection.function('normalize_actress_name', { deterministic: true }, (value: unknown) => {
+     if (typeof value !== 'string') return null
+     try {
+       return normalizeActressName(value)
+@@ -22,10 +35,43 @@ function openDatabase(dbPath: string): Database.Database {
+       return null
+     }
+   })
++}
+ 
+-  migrateDatabase(db)
++function openDatabase(dbPath: string): Database.Database {
++  const connection = new Database(dbPath)
++  try {
++    connection.pragma('journal_mode = WAL')
++    connection.pragma('foreign_keys = ON')
++    registerReadFunctions(connection)
++    migrateDatabase(connection)
++    // Publish only a completely initialized connection. Failure must allow retry.
++    db = connection
++    return connection
++  } catch (error) {
++    connection.close()
++    throw error
++  }
++}
+ 
+-  return db
++/** Caller-owned reader for an already migrated catalog; never initializes or migrates it. */
++export function openReadOnlyDatabaseAtPath(dbPath: string): Database.Database {
++  const connection = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 1000 })
++  try {
++    connection.pragma('query_only = ON')
++    connection.pragma('foreign_keys = ON')
++    const version = Number(connection.pragma('user_version', { simple: true }))
++    if (version !== CURRENT_SCHEMA_VERSION) {
++      throw new Error(`Catalog reader requires schema ${CURRENT_SCHEMA_VERSION}; found ${version}`)
++    }
++    if (connection.pragma('journal_mode', { simple: true }) !== 'wal') {
++      throw new Error('Catalog reader requires WAL mode')
++    }
++    registerReadFunctions(connection)
++    return connection
++  } catch (error) {
++    connection.close()
++    throw error
++  }
+ }
+ 
+ export function getDb(): Database.Database {
+diff --git a/src/main/db/readOnlyDatabase.test.ts b/src/main/db/readOnlyDatabase.test.ts
+new file mode 100644
+index 0000000..f96fea3
+--- /dev/null
++++ b/src/main/db/readOnlyDatabase.test.ts
+@@ -0,0 +1,92 @@
++import { afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import { CURRENT_SCHEMA_VERSION } from './migrations'
++import { closeDatabase, getDb, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from './database'
++
++let root: string | undefined
++function filename(name = 'library.db') {
++  root ??= fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-reader-'))
++  return path.join(root, name)
++}
++afterEach(() => { closeDatabase(); if (root) fs.rmSync(root, { recursive: true, force: true }); root = undefined })
++
++it('opens a separate read-only WAL connection with matching SQL functions and no migration', () => {
++  const file = filename()
++  const writer = initDatabaseAtPath(file)
++  writer.exec("INSERT INTO tags(id,name) VALUES(1,'École')")
++  const schemaBefore = writer.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()
++  const reader = openReadOnlyDatabaseAtPath(file)
++  try {
++    assert.notEqual(reader, writer)
++    assert.equal(getDb(), writer)
++    assert.equal(reader.readonly, true)
++    assert.equal(reader.pragma('query_only', { simple: true }), 1)
++    const sql = "SELECT tag_name_contains_folded(name,'éco') AS matches, normalize_actress_name(name) AS normalized FROM tags"
++    assert.deepEqual(reader.prepare(sql).all(), writer.prepare(sql).all())
++    for (const sql of ["INSERT INTO tags(name) VALUES('forbidden')", 'DELETE FROM tags', 'CREATE TABLE forbidden(id)', 'PRAGMA user_version=0']) {
++      assert.throws(() => reader.exec(sql), /readonly|read-only/i)
++    }
++    assert.deepEqual(writer.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all(), schemaBefore)
++    assert.deepEqual(reader.prepare('SELECT id,name FROM tags').all(), [{ id: 1, name: 'École' }])
++  } finally { reader.close() }
++  assert.equal(writer.prepare('SELECT 1 AS n').get() && getDb(), writer)
++})
++
++it('keeps a read snapshot while the writer commits and observes it on the next transaction', () => {
++  const file = filename()
++  const writer = initDatabaseAtPath(file)
++  writer.exec("INSERT INTO tags(id,name) VALUES(1,'before')")
++  const reader = openReadOnlyDatabaseAtPath(file)
++  const names = () => reader.prepare('SELECT name FROM tags ORDER BY id').all()
++  try {
++    reader.transaction(() => {
++      assert.deepEqual(names(), [{ name: 'before' }])
++      writer.exec("UPDATE tags SET name='after' WHERE id=1")
++      assert.deepEqual(names(), [{ name: 'before' }])
++    })()
++    assert.deepEqual(names(), [{ name: 'after' }])
++    assert.throws(() => reader.transaction(() => { names(); throw new Error('read failed') })(), /read failed/)
++    assert.equal(reader.inTransaction, false)
++    assert.deepEqual(names(), [{ name: 'after' }])
++  } finally { reader.close() }
++})
++
++it('rejects missing, old, newer and non-WAL catalogs without initializing or migrating them', () => {
++  const missing = filename('missing.db')
++  assert.throws(() => openReadOnlyDatabaseAtPath(missing))
++  assert.equal(fs.existsSync(missing), false)
++  for (const version of [0, CURRENT_SCHEMA_VERSION - 1, CURRENT_SCHEMA_VERSION + 1]) {
++    const file = filename(`version-${version}.db`)
++    const fixture = new Database(file)
++    fixture.exec('CREATE TABLE sentinel(value TEXT)')
++    fixture.pragma(`user_version=${version}`)
++    try {
++      assert.throws(() => openReadOnlyDatabaseAtPath(file), /requires schema/)
++      assert.equal(fixture.pragma('user_version', { simple: true }), version)
++      assert.deepEqual(fixture.prepare("SELECT name FROM sqlite_master WHERE type='table'").all(), [{ name: 'sentinel' }])
++    } finally { fixture.close() }
++  }
++  const rollbackFile = filename('rollback.db')
++  const rollback = new Database(rollbackFile)
++  rollback.pragma(`user_version=${CURRENT_SCHEMA_VERSION}`)
++  try {
++    assert.throws(() => openReadOnlyDatabaseAtPath(rollbackFile), /requires WAL/)
++    assert.equal(rollback.pragma('journal_mode', { simple: true }), 'delete')
++  } finally { rollback.close() }
++})
++
++it('does not publish an unsuccessfully initialized writer and permits a subsequent valid initialization', () => {
++  const invalid = filename('newer.db')
++  const fixture = new Database(invalid)
++  fixture.pragma(`user_version=${CURRENT_SCHEMA_VERSION + 1}`)
++  fixture.close()
++  assert.throws(() => initDatabaseAtPath(invalid), /no longer supported/)
++  assert.throws(() => getDb(), /not initialised/)
++  const writer = initDatabaseAtPath(filename())
++  assert.equal(getDb(), writer)
++  assert.equal(writer.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
++})
+diff --git a/scripts/performance/catalog-reader-worker-probe.ts b/scripts/performance/catalog-reader-worker-probe.ts
+new file mode 100644
+index 0000000..47965be
+--- /dev/null
++++ b/scripts/performance/catalog-reader-worker-probe.ts
+@@ -0,0 +1,86 @@
++/** Native SQLite worker viability probe; synthetic catalog, no production IPC wiring. */
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { Worker } from 'node:worker_threads'
++import { buildSync } from 'esbuild'
++import { closeDatabase, initDatabaseAtPath } from '../../src/main/db/database'
++
++it('runs native catalog reads in a worker while main timers continue', async () => {
++const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-reader-worker-'))
++const catalog = path.join(root, 'catalog.db')
++const entry = path.join(root, 'reader.ts')
++const bundle = path.join(root, 'reader.cjs')
++const workload = 'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000) SELECT SUM(x) AS total FROM n'
++let worker: Worker | undefined
++let timer: ReturnType<typeof setInterval> | undefined
++try {
++  const db = initDatabaseAtPath(catalog)
++  db.exec("INSERT INTO tags(id,name) VALUES(1,'École')")
++  fs.writeFileSync(entry, `
++    import { parentPort, workerData } from 'node:worker_threads';
++    import { openReadOnlyDatabaseAtPath } from ${JSON.stringify(path.resolve('src/main/db/database.ts'))};
++    const reader = openReadOnlyDatabaseAtPath(workerData.catalog);
++    let reply;
++    try {
++      const label = reader.prepare("SELECT tag_name_contains_folded(name,'éco') AS matched FROM tags").get();
++      parentPort.postMessage({phase:'reading'});
++      const started = performance.now();
++      const result = reader.prepare(workerData.workload).get();
++      reply = {phase:'done',result,label,elapsedMs:performance.now()-started,readonly:reader.readonly};
++    } finally { reader.close(); }
++    parentPort.postMessage(reply);
++  `)
++  buildSync({ entryPoints: [entry], outfile: bundle, bundle: true, platform: 'node', format: 'cjs',
++    packages: 'external', tsconfig: path.resolve('tsconfig.node.json'),
++    banner: { js: `require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});` } })
++  let ticks = 0
++  let startedTicks = 0
++  let lastTick = performance.now()
++  let maxGap = 0
++  timer = setInterval(() => { const now = performance.now(); maxGap = Math.max(maxGap, now-lastTick); lastTick=now; ticks++ }, 5)
++  const reply = await new Promise<{ result: { total: number }; label: { matched: number }; elapsedMs: number; readonly: boolean; ticksDuringRead: number }>((resolve,reject) => {
++    let completed = false
++    worker = new Worker(bundle, { workerData: { catalog, workload }, execArgv: [] })
++    const watchdog = setTimeout(() => reject(new Error('reader probe timed out')), 15000)
++    worker.once('error', error => { clearTimeout(watchdog); reject(error) })
++    worker.once('exit', code => { clearTimeout(watchdog); if (!completed) reject(new Error(`reader exited ${code} without a result`)) })
++    worker.on('message', message => {
++      if (message.phase === 'reading') startedTicks = ticks
++      if (message.phase === 'done') { completed = true; clearTimeout(watchdog); resolve({ ...message, ticksDuringRead: ticks-startedTicks }) }
++    })
++  })
++  await worker.terminate(); worker = undefined
++  assert.equal(reply.result.total, 500000500000)
++  assert.equal(reply.label.matched, 1)
++  assert.equal(reply.readonly, true)
++  assert.ok(reply.ticksDuringRead > 0, 'main timers must run while the worker read request is in progress')
++  const workerMaxTimerGapMs = maxGap
++  maxGap = 0; lastTick = performance.now()
++  const before = ticks
++  const started = performance.now()
++  const direct = db.prepare(workload).get()
++  const directMs = performance.now()-started
++  assert.deepEqual(direct, reply.result)
++  assert.equal(ticks, before, 'synchronous main query does not yield to timers')
++  await new Promise(resolve => setTimeout(resolve, 10))
++  const output = { runtime: process.versions, platform: process.platform, arch: process.arch,
++    worker: reply, workerMaxTimerGapMs, directMs, directMaxTimerGapMs: maxGap,
++    caveats: ['Single synthetic CPU query; not real large-library latency, p95, Windows/HDD or production IPC validation.',
++      'Worker uses actual read-only factory and native SQLite; bundle creation and fixture setup are outside timer measurement.',
++      'ticksDuringRead spans main receipt of reading/done messages, including message scheduling and reader.close tail; not every tick is proven inside native SELECT.',
++      'workerMaxTimerGapMs includes worker startup/loading/read/termination wait; elapsedMs and directMs measure SQL prepare/get.',
++      'No production worker pool, admission queue, cancellation, packaging path or shutdown integration is claimed.'] }
++  if (process.env.JAVDEX_READER_PROBE_OUTPUT) fs.writeFileSync(path.resolve(process.env.JAVDEX_READER_PROBE_OUTPUT), JSON.stringify(output,null,2)+'\n')
++  console.log(JSON.stringify(output))
++} finally {
++  if (timer) clearInterval(timer)
++  await worker?.terminate()
++  closeDatabase()
++  fs.rmSync(root, { recursive: true, force: true })
++}
++
++})

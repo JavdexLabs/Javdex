@@ -1,0 +1,20 @@
+
+Interrupted while running:
+
+⚠ scripts/performance/actress-conflict-queue-benchmark.ts (scripts/performance/actress-conflict-queue-benchmark.ts:1:1)
+✖ scripts/performance/actress-conflict-queue-benchmark.ts (179932.587ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 0
+ℹ cancelled 1
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 179935.822042
+
+✖ failing tests:
+
+test at scripts/performance/actress-conflict-queue-benchmark.ts:1:1
+✖ scripts/performance/actress-conflict-queue-benchmark.ts (179932.587ms)
+  'Promise resolution is still pending but the event loop has already resolved'
+Electron test runner failed after 180000 ms; inspect leaked handles or increase JAVDEX_TEST_TIMEOUT_MS: spawnSync /Users/nut/Project/JavdexLabs/Javdex/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ETIMEDOUT

@@ -1,0 +1,83 @@
+✔ counts merged subscribers toward capacity, normalizes keys, and clones each successful result (1.476417ms)
+✔ serializes different revisions and keeps a folded expanding query valid in the payload (0.134916ms)
+✔ rejects old generation on identity change and waits for termination (2.275292ms)
+✔ rejects old generation on path change and waits for termination (0.263542ms)
+✔ removes queued aborts but retains an executing slot after all subscribers abort (0.211292ms)
+✔ one subscriber abort does not cancel another or retain its signal listener (0.124666ms)
+✔ rejects all accepted on startup timeout, without retry or overlapping workers (16.485458ms)
+✔ rejects all accepted on query timeout, without retry or overlapping workers (17.7795ms)
+✔ rejects all accepted on exit, without retry or overlapping workers (0.218041ms)
+✔ rejects all accepted on error, without retry or overlapping workers (0.237584ms)
+✔ rejects all accepted on protocol error, without retry or overlapping workers (0.129833ms)
+✔ dispose closes admission immediately and waits for a running termination (0.147291ms)
+✔ fails closed if termination rejects and rejects requests waiting for replacement (0.169916ms)
+✔ rejects invalid queries before creating a worker and contains factory/post failures (0.199541ms)
+✔ bounds subscribers while termination is pending and supersedes a waiting generation (0.306833ms)
+✔ does not launch work after repeated queued cancellations before ready (0.490375ms)
+✔ contains unexpected messages and dispose drains an already-started replacement barrier (0.041584ms)
+✖ expires waiting subscribers and frees capacity while native termination remains pending (0.7915ms)
+✖ keeps independent waiting deadlines for coalesced subscribers and clears them at execution (0.418417ms)
+✖ never executes a page whose only subscriber expired before ready (0.095084ms)
+ℹ Error: Test "keeps independent waiting deadlines for coalesced subscribers and clears them at execution" at src/main/services/catalogReadWorkerClient.test.ts:2:12451 generated asynchronous activity after the test ended. This activity created the error "Error: Catalog read client disposed" and would have caused the test to fail, but instead triggered an unhandledRejection event.
+ℹ Error: Test "keeps independent waiting deadlines for coalesced subscribers and clears them at execution" at src/main/services/catalogReadWorkerClient.test.ts:2:12451 generated asynchronous activity after the test ended. This activity created the error "Error: Catalog read client disposed" and would have caused the test to fail, but instead triggered an unhandledRejection event.
+ℹ tests 20
+ℹ suites 0
+ℹ pass 17
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 177.03425
+
+✖ failing tests:
+
+test at src/main/services/catalogReadWorkerClient.test.ts:2:11431
+✖ expires waiting subscribers and frees capacity while native termination remains pending (0.7915ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 32
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/catalogReadWorkerClient.test.ts:259:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 32,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/main/services/catalogReadWorkerClient.test.ts:2:12451
+✖ keeps independent waiting deadlines for coalesced subscribers and clears them at execution (0.418417ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /queue timed out/. Input:
+  
+  'undefined'
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/catalogReadWorkerClient.test.ts:281:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: /queue timed out/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at src/main/services/catalogReadWorkerClient.test.ts:2:13256
+✖ never executes a page whose only subscriber expired before ready (0.095084ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /queue timed out/. Input:
+  
+  'undefined'
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/catalogReadWorkerClient.test.ts:299:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: /queue timed out/,
+    operator: 'match',
+    diff: 'simple'
+  }

@@ -1,0 +1,47 @@
+
+> Javdex@0.6.2 pretest
+> npm run check:actress-boundaries && npm run check:media-asset-store-boundaries && npm run check:metadata-source-boundaries && npm run check:classification-entity-boundaries && npm run check:agent-platform-boundaries && npm run lint && npm run check:css-architecture && npm run check:ui-controls
+
+
+> Javdex@0.6.2 check:actress-boundaries
+> node scripts/check-actress-boundaries.mjs
+
+Domain IPC, shared types, and process dependency boundaries are valid.
+
+> Javdex@0.6.2 check:media-asset-store-boundaries
+> node scripts/check-media-asset-store-boundaries.mjs
+
+MediaAssetStore implementation boundaries are valid.
+
+> Javdex@0.6.2 check:metadata-source-boundaries
+> node scripts/check-metadata-source-boundaries.mjs
+
+Video metadata source boundaries are valid.
+
+> Javdex@0.6.2 check:classification-entity-boundaries
+> node scripts/check-classification-entity-boundaries.mjs
+
+Classification entity storage and routing boundaries are valid.
+
+> Javdex@0.6.2 check:agent-platform-boundaries
+> node scripts/check-agent-platform-boundaries.mjs
+
+Agent platform boundaries OK
+
+> Javdex@0.6.2 lint
+> npm run lint:ts && npm run lint:css
+
+
+> Javdex@0.6.2 lint:ts
+> eslint "src/**/*.{ts,tsx}" "electron.vite.config.ts"
+
+
+> Javdex@0.6.2 lint:css
+> stylelint "src/renderer/src/**/*.module.css" --allow-empty-input
+
+
+> Javdex@0.6.2 check:css-architecture
+> node scripts/check-css-architecture.mjs
+
+CSS architecture checks failed:
+- classNameBehaviorInferenceCount increased from 0 to 1

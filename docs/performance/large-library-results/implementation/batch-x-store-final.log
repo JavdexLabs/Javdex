@@ -1,0 +1,27 @@
+▶ AgentRunStore
+  ✔ returns every durable non-closed run so each use case can apply its recovery policy (4.130125ms)
+  ✔ persists a frozen config without serializing credentials or functions (0.570125ms)
+  ✔ encrypts recovery payloads and fails closed on integrity damage (2.103625ms)
+  ✔ accepts an idempotent operation once and settles only named command ids (1.738458ms)
+  ✔ keeps repeated product events from the same operation in append order (1.43675ms)
+  ✔ does not overwrite a terminal runtime fault when the runtime subsequently settles (1.008416ms)
+  ✔ allows one rebuild attempt per recovery generation (0.599375ms)
+  ✔ records artifact refs in the product journal and fails closed on damaged refs (0.721667ms)
+✔ AgentRunStore (12.849208ms)
+▶ Agent product journal pagination
+  ✔ reads the last cursor through the run/seq index without parsing any payload in a 100k journal (107.113375ms)
+  ✔ pages with a strict size cap and no cross-run, duplicate or skipped events despite sequence gaps (17.010083ms)
+✔ Agent product journal pagination (124.228625ms)
+▶ Agent recovery enumeration
+  ✔ filters use case and status before parsing, lazily loads one product, and releases temporary ID pages (62.707791ms)
+  ✔ keeps the original recovery order across pages while timestamps change and excludes runs created mid-iteration (21.178459ms)
+  ✔ drops the temporary snapshot if an owned payload cannot be parsed (0.515667ms)
+✔ Agent recovery enumeration (84.471792ms)
+ℹ tests 13
+ℹ suites 3
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 459.3965

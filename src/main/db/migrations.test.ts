@@ -10,6 +10,21 @@ import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 import { ActressIdentityConflictWorkflow } from '../services/actressIdentityConflictWorkflow'
 import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 
+/** Older fixtures intentionally model only the tables relevant to their test.
+ * Supply the unaffected tag index needed by the later V17 migration. */
+function ensureTagFixture(db: Database.Database): void {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='video_tag'").get()) {
+    db.exec(`CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
+      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
+      CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);`)
+  }
+}
+
+function migrateFixture(db: Database.Database): void {
+  if (Number(db.pragma('user_version', { simple: true })) > 0) ensureTagFixture(db)
+  migrateDatabase(db)
+}
+
 function indexNames(db: Database.Database): string[] {
   return (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as {
     name: string
@@ -266,7 +281,7 @@ describe('database schema', () => {
                    '/library', 'WAIT-001.mp4')`
       ).run()
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.equal(columnNamesForTest(db, 'video_resources').has('strm_source_path'), true)
@@ -352,7 +367,7 @@ describe('database schema', () => {
   it('allows duplicate codes while enforcing complete video business identity', () => {
     const db = new Database(':memory:')
     try {
-      migrateDatabase(db)
+      migrateFixture(db)
       db.prepare("INSERT INTO organizations (id, main_name) VALUES (1, 'Publisher')").run()
 
       db.prepare("INSERT INTO videos (code) VALUES ('DUP-001')").run()
@@ -434,7 +449,7 @@ describe('database schema', () => {
          ) VALUES (61, 41, 'Site', NULL, 'ABC-001', 'https://example.test/v/1', 'Source title', '2024-03-05')`
       ).run()
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.deepEqual(
@@ -473,7 +488,7 @@ describe('database schema', () => {
         "INSERT INTO videos (id, code, publisher_organization_id, release_date) VALUES (42, ' ABC-001 ', 7, '2024-03-04')"
       ).run()
 
-      assert.throws(() => migrateDatabase(db), /41.*42|42.*41/)
+      assert.throws(() => migrateFixture(db), /41.*42|42.*41/)
 
       assert.equal(db.pragma('user_version', { simple: true }), 10)
       assert.equal(tableExistsForTest(db, 'video_external_ids'), true)
@@ -507,7 +522,7 @@ describe('database schema', () => {
           ('series', 'Empty Series');
       `)
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.deepEqual(
@@ -622,7 +637,7 @@ describe('database schema', () => {
         series: rowCount(db, 'series'),
         seriesNames: rowCount(db, 'series_names')
       }
-      migrateDatabase(db)
+      migrateFixture(db)
       assert.deepEqual(
         {
           organizations: rowCount(db, 'organizations'),
@@ -643,7 +658,7 @@ describe('database schema', () => {
   it('retires v8 text storage without changing video metadata, entity ids, or child resources', () => {
     const db = new Database(':memory:')
     try {
-      migrateDatabase(db)
+      migrateFixture(db)
       db.exec(`
         ALTER TABLE videos ADD COLUMN maker TEXT;
         ALTER TABLE videos ADD COLUMN publisher TEXT;
@@ -698,7 +713,7 @@ describe('database schema', () => {
       db.prepare("INSERT INTO facet_entries (type, value) VALUES ('maker', 'Unused')").run()
       db.pragma('user_version = 8')
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.deepEqual(
@@ -742,7 +757,7 @@ describe('database schema', () => {
   it('stores classification profiles, hierarchy, roles, links, and video references', () => {
     const db = new Database(':memory:')
     try {
-      migrateDatabase(db)
+      migrateFixture(db)
       const parentOrganizationId = Number(
         db.prepare("INSERT INTO organizations (main_name) VALUES ('Parent Org')").run()
           .lastInsertRowid
@@ -872,7 +887,7 @@ describe('database schema', () => {
         INSERT INTO videos (code, maker) VALUES ('ROLLBACK', 'Broken Org');
       `)
 
-      assert.throws(() => migrateDatabase(db), /forced classification migration failure/)
+      assert.throws(() => migrateFixture(db), /forced classification migration failure/)
       assert.equal(db.pragma('user_version', { simple: true }), 7)
       assert.equal(rowCount(db, 'organizations'), 0)
       assert.equal(tableExistsForTest(db, 'directors'), false)
@@ -898,7 +913,7 @@ describe('database schema', () => {
         CREATE VIEW legacy_video_makers AS SELECT maker FROM videos;
       `)
 
-      assert.throws(() => migrateDatabase(db))
+      assert.throws(() => migrateFixture(db))
 
       assert.equal(db.pragma('user_version', { simple: true }), 7)
       assert.equal(tableExistsForTest(db, 'organizations'), false)
@@ -915,6 +930,7 @@ describe('database schema', () => {
     const fixture = new Database(dbPath)
     try {
       createV4ActressSchema(fixture)
+      ensureTagFixture(fixture)
       fixture.exec(`
         INSERT INTO actresses (id, main_name) VALUES
           (1, 'Ａlice Smith'),
@@ -1037,7 +1053,7 @@ describe('database schema', () => {
           .prepare('SELECT * FROM pending_actress_name_claims ORDER BY id')
           .all()
       }
-      migrateDatabase(db)
+      migrateFixture(db)
       assert.deepEqual(
         {
           ownership: db
@@ -1066,7 +1082,7 @@ describe('database schema', () => {
         VALUES (999, 'Orphan Name', 'alias', 0);
       `)
 
-      assert.throws(() => migrateDatabase(db), /FOREIGN KEY constraint failed/)
+      assert.throws(() => migrateFixture(db), /FOREIGN KEY constraint failed/)
 
       assert.equal(db.pragma('user_version', { simple: true }), 4)
       assert.equal(
@@ -1090,8 +1106,8 @@ describe('database schema', () => {
   it('creates the current schema and records user_version', () => {
     const db = new Database(':memory:')
     try {
-      migrateDatabase(db)
-      migrateDatabase(db)
+      migrateFixture(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       const actressCols = db.prepare('PRAGMA table_info(actresses)').all() as Array<{
@@ -1277,8 +1293,8 @@ describe('database schema', () => {
       `)
       db.pragma('user_version = 6')
 
-      migrateDatabase(db)
-      migrateDatabase(db)
+      migrateFixture(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.deepEqual(
@@ -1358,7 +1374,7 @@ describe('database schema', () => {
       `)
       db.pragma('user_version = 1')
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.deepEqual(
@@ -1396,7 +1412,7 @@ describe('database schema', () => {
     try {
       db.exec('CREATE TABLE videos (id INTEGER PRIMARY KEY)')
       db.pragma('user_version = 99')
-      assert.throws(() => migrateDatabase(db), /no longer supported/)
+      assert.throws(() => migrateFixture(db), /no longer supported/)
     } finally {
       db.close()
     }
@@ -1413,7 +1429,7 @@ describe('database schema', () => {
         )
       `)
       db.pragma('user_version = 1')
-      migrateDatabase(db)
+      migrateFixture(db)
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       const cols = (db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]).map(
         (c) => c.name
@@ -1457,7 +1473,7 @@ describe('database schema', () => {
       `)
       db.pragma('user_version = 2')
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       const names = db
@@ -1502,7 +1518,7 @@ describe('database schema', () => {
         )
       `)
       db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
-      migrateDatabase(db)
+      migrateFixture(db)
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       const cols = (db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]).map(
         (c) => c.name
@@ -1613,7 +1629,7 @@ describe('database schema', () => {
         "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
       ).run(aliasId, 'Visible Alias')
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       const rows = db
         .prepare(
@@ -1658,7 +1674,7 @@ describe('database schema', () => {
          VALUES (?, ?)`
       ).run('Repeatable cleanup', '2025-03-04T05:06:07.000Z')
 
-      migrateDatabase(db)
+      migrateFixture(db)
       const first = db
         .prepare(
           `SELECT main_name, scraped_status, last_scraped_at
@@ -1667,7 +1683,7 @@ describe('database schema', () => {
         )
         .all()
 
-      migrateDatabase(db)
+      migrateFixture(db)
 
       assert.deepEqual(
         db
@@ -1704,7 +1720,7 @@ describe('database schema', () => {
         END;
       `)
 
-      assert.throws(() => migrateDatabase(db), /classification rejected/)
+      assert.throws(() => migrateFixture(db), /classification rejected/)
 
       assert.equal(db.pragma('user_version', { simple: true }), 3)
       assert.equal(

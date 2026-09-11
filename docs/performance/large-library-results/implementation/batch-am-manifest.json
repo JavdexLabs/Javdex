@@ -1,0 +1,26 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-am-audit-presence.patch": "ad80ccc9972ed8623c073f18db52af81eea46fbbbdbb61e29a9e204d48f01327",
+    "batch-am-benchmark.json": "f65ee4bf0d870c797edaec4c9fa4931d75022f051e2926f1503a96aef1fd0a6b",
+    "batch-am-benchmark.log": "5fee68b0a36304caa9e4a35df391224cbb4ceaa254dab492dae43886ff263e8a",
+    "batch-am-browser.log": "c29c9b184f1a456e7e199fa2e875c5cedc5bbc49222c845b5d5421b1996690fc",
+    "batch-am-build.log": "90d187eb273203f521ded5e392b6e1ba3a4c8b048d2f715e39af600757e411c5",
+    "batch-am-full.log": "03b8264687d66516ffd86462b39494cd38f088536e53544d65c6e83dc0814eda",
+    "batch-am-review.md": "67236fdca7046171c2d170da46ee84fd3b739ff2e1aa77977f474de018b7961c",
+    "batch-am-target.log": "cbf119d7b5d4ddb750385ebf60c6dfdd8923c024ac8bc9df3ad719dc0304ba28",
+    "batch-am-ui-1000x640.png": "100bb34b132610d271c571d5325f234c0433134342cdc3f96eddaecaf7716081",
+    "batch-am-ui-1440x900.png": "a4758303006c5f759be65d6c4a81e36a6f4bb7448f0b005cf5c9c3a9806c91bd",
+    "batch-am-ui-results.json": "26712a3b8b43ed91fb92a2dd3153054776932e019d1b5c6b256be3b26bcf9bf3",
+    "batch-am-ui-tests.log": "1e8983e415c551dfb30d7ebd814cda4285697dd5a341fc5b45624e7c0a699157"
+  },
+  "notes": [
+    "Cumulative selected tracked diff vs HEAD plus full untracked hook/tests/scripts; depends on B-AL, not standalone.",
+    "Final full2199pass1skip0fail, build,12 final UI/hook tests and final browser pass after ABA fix. Earlier target log precedes ABA fix; not substituted for final evidence.",
+    "Settings no longer calls full pending scrape API. Existence lookup accepts at most100 IDs, sends no candidate payload; old internal full-list endpoint remains callable.",
+    "All audit tabs locally paginate100; source audit arrays/scanning identity collections remain full and filtering scales with N. No global hard cancellation/backpressure for obsolete presence IPC calls.",
+    "Five benchmark cases after adding existing.ids100; AL historical file contains4 cases.10k synthetic rows withone source/candidate afterANALYZE,3 warm sequential samples. Repo time excludes serialization/assertions; bytes JSON-equivalent not actualIPC.",
+    "Presence100IDs equals expected complete set, median.034167ms/502B; oldfull484.558ms/46503365B in same run. RSS carries full-hydration allocation and is not peak/independent.",
+    "No schema change(current17), user data, commit, push or release. Full15/42 plan remains incomplete."
+  ]
+}

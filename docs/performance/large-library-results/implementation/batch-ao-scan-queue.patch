@@ -1,0 +1,1626 @@
+diff --git a/docs/ROUTING_DESIGN.md b/docs/ROUTING_DESIGN.md
+index 651d074..54077a7 100644
+--- a/docs/ROUTING_DESIGN.md
++++ b/docs/ROUTING_DESIGN.md
+@@ -32,7 +32,7 @@
+ - `/playlists`: 清单列表。
+ - `/playlists/:playlistId`: 清单详情。
+ - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
+-- `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。
++- `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。扫描组合队列使用 `scanOffset`，刮削队列使用 `scrapeOffset` 保存分页位置；扫描 `item=scan:<id>` / `item=scan:identity-<id>` 在所选 `lib` 的活动库范围内定位。`item=scrape:<id>` 或 `videoId` 深链接由服务端定位所在页，删除后的越界页回退到最后一页。列表只读概要，URL 选中项规范化后才加载单项候选详情。
+ - `/actresses/conflicts`: 旧的演员冲突入口，重定向到 `/pending?type=actress`。
+ - `/pending/video/:videoId`: 从待确认工作台打开影片详情。
+ - `/pending/video/:videoId/actress/:actressId`: 从待确认影片详情继续打开演员详情。
+diff --git a/src/main/db/pendingResourceIdentityRepo.ts b/src/main/db/pendingResourceIdentityRepo.ts
+index 1e486c1..63c0135 100644
+--- a/src/main/db/pendingResourceIdentityRepo.ts
++++ b/src/main/db/pendingResourceIdentityRepo.ts
+@@ -316,6 +316,15 @@ export function listPendingResourceIdentities(libraryId: number): PendingResourc
+   ).map(rowToVisible)
+ }
+ 
++export function getPendingResourceIdentity(libraryId: number, identityId: number): PendingResourceIdentity | null {
++  const database = getDb()
++  requireLibrary(database, libraryId)
++  positiveId(identityId, 'identityId')
++  const row = database.prepare('SELECT * FROM pending_resource_identities WHERE library_id = ? AND id = ?')
++    .get(libraryId, identityId) as Row | undefined
++  return row ? rowToVisible(row) : null
++}
++
+ export function getPendingResourceIdentityRecord(
+   libraryId: number,
+   identityId: number
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..3f0fd26 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -379,6 +386,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -507,6 +515,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -634,6 +650,19 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
++    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
++    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
++  }).strict()]),
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
++  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +677,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +688,17 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/main/ipc/scanHandlers.test.ts b/src/main/ipc/scanHandlers.test.ts
+index 3432e37..48a26b3 100644
+--- a/src/main/ipc/scanHandlers.test.ts
++++ b/src/main/ipc/scanHandlers.test.ts
+@@ -36,3 +36,22 @@ describe('scan latest IPC handler', () => {
+     assert.throws(() => handler({} as IpcMainInvokeEvent, 0), /无效的 IPC 请求参数/)
+   })
+ })
++
++it('bounds the combined audit presence request and validates its library',()=>{
++ const schema=appIpcSchemas[IPC.PENDING_AUDIT_PRESENCE]
++ assert.equal(schema.safeParse([1,{groupIds:[1],identityIds:[2],scrapeIds:[3]}]).success,true)
++ for(const args of [[0,{groupIds:[],identityIds:[],scrapeIds:[]}],[1,{groupIds:Array(51).fill(1),identityIds:Array(50).fill(1),scrapeIds:[]}],[1,{groupIds:[Number.MAX_SAFE_INTEGER+1],identityIds:[],scrapeIds:[]}],[1,{groupIds:[],identityIds:[],scrapeIds:[],sql:'anything'}]])assert.equal(schema.safeParse(args).success,false)
++})
++
++it('bounds scan pages and validates scoped detail and anchor inputs',()=>{
++ const page=appIpcSchemas[IPC.PENDING_SCAN_QUEUE_PAGE]
++ assert.equal(page.safeParse([{limit:100,offset:0,libraryId:1,anchor:{kind:'identity',id:2}}]).success,true)
++ for(const query of [{limit:101},{offset:-1},{libraryId:0},{anchor:{kind:'bad',id:1}},{anchor:{kind:'group',id:Number.MAX_SAFE_INTEGER+1}},{sql:'SELECT *'}])assert.equal(page.safeParse([query]).success,false)
++ for(const channel of [IPC.PENDING_SCAN_GET,IPC.PENDING_RESOURCE_IDENTITY_GET]){
++  assert.equal(appIpcSchemas[channel].safeParse([1,2]).success,true)
++  assert.equal(appIpcSchemas[channel].safeParse([0,2]).success,false)
++  assert.equal(appIpcSchemas[channel].safeParse([1,-1]).success,false)
++ }
++ assert.equal(appIpcSchemas[IPC.PENDING_SCAN_QUEUE_COUNT].safeParse([undefined]).success,true)
++ assert.equal(appIpcSchemas[IPC.PENDING_SCAN_QUEUE_COUNT].safeParse([0]).success,false)
++})
+diff --git a/src/main/ipc/scanHandlers.ts b/src/main/ipc/scanHandlers.ts
+index 233c391..cd55eae 100644
+--- a/src/main/ipc/scanHandlers.ts
++++ b/src/main/ipc/scanHandlers.ts
+@@ -11,8 +11,10 @@ import {
+   renameLibraryUnrecognizedFile
+ } from '../db/libraryScanRepo'
+ import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
+-import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
+-import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
++import { pagePendingScanQueue, countPendingScanQueue } from '../db/pendingScanQueueRepo'
++import { getPendingAuditPresence } from '../db/pendingAuditRepo'
++import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '../db/pendingScanRepo'
++import { listPendingResourceIdentities, getPendingResourceIdentity } from '../db/pendingResourceIdentityRepo'
+ import { listVideoResources } from '../db/videoRepo'
+ import {
+   libraryScanAuditContainsPath,
+@@ -86,6 +88,11 @@ export function registerScanHandlers(ctx: IpcContext): void {
+     shell.showItemInFolder(filePath)
+     return { ok: true }
+   })
++  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
++  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) => pagePendingScanQueue(query))
++  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_COUNT, (libraryId) => countPendingScanQueue(libraryId))
++  appCommandAdapter.register(IPC.PENDING_SCAN_GET, (libraryId, groupId) => getPendingScanGroup(libraryId, groupId))
++  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_GET, (libraryId, identityId) => getPendingResourceIdentity(libraryId, identityId))
+   appCommandAdapter.register(IPC.PENDING_SCAN_LIST, (libraryId) =>
+     listPendingScanGroups(libraryId)
+   )
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..6146a1a 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1,3 +1,4 @@
++import type { PendingAuditIds, PendingScanQueueQuery } from '../shared/libraryTypes'
+ import type { WebAccessInput } from '../shared/webTypes'
+ import { contextBridge, ipcRenderer, webUtils } from 'electron'
+ import { IPC } from '../shared/ipc-channels'
+@@ -88,7 +89,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -104,7 +105,7 @@ import type {
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+ import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -337,6 +338,11 @@ const api = {
+       code: string,
+       target: VideoResourceImportTarget
+     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
++    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
++    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
++    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
++    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
++    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
+     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+     resolvePending: (
+       libraryId: number,
+@@ -381,6 +387,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +456,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -491,6 +505,9 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+@@ -557,6 +574,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+diff --git a/src/renderer/src/listView/listQueryParams.ts b/src/renderer/src/listView/listQueryParams.ts
+index e01043b..929d265 100644
+--- a/src/renderer/src/listView/listQueryParams.ts
++++ b/src/renderer/src/listView/listQueryParams.ts
+@@ -21,6 +21,8 @@ export const LIST_PARAM = {
+   pendingType: 'type',
+   pendingItem: 'item',
+   pendingVideoId: 'videoId',
++  pendingScrapeOffset: 'scrapeOffset',
++  pendingScanOffset: 'scanOffset',
+   pendingLibraryId: 'lib'
+ } as const
+ 
+diff --git a/src/renderer/src/listView/pendingRoutes.ts b/src/renderer/src/listView/pendingRoutes.ts
+index 90974b0..41cde50 100644
+--- a/src/renderer/src/listView/pendingRoutes.ts
++++ b/src/renderer/src/listView/pendingRoutes.ts
+@@ -54,14 +54,20 @@ export function parsePendingCenterSearch(params: URLSearchParams): {
+   item: PendingItemKey | null
+   videoId: number | null
+   libraryId: number | null
++  scrapeOffset: number
++  scanOffset: number
+ } {
++  const scanOffset = Number(params.get(LIST_PARAM.pendingScanOffset))
++  const scrapeOffset = Number(params.get(LIST_PARAM.pendingScrapeOffset))
+   const rawType = params.get(LIST_PARAM.pendingType)
+   const videoId = Number(params.get(LIST_PARAM.pendingVideoId))
+   const libraryId = Number(params.get(LIST_PARAM.pendingLibraryId))
+   return {
++    scanOffset: Number.isSafeInteger(scanOffset) && scanOffset >= 0 ? scanOffset : 0,
++    scrapeOffset: Number.isSafeInteger(scrapeOffset) && scrapeOffset >= 0 ? scrapeOffset : 0,
+     type: isPendingDomain(rawType) ? rawType : 'all',
+     item: parsePendingItemKey(params.get(LIST_PARAM.pendingItem)),
+-    videoId: Number.isInteger(videoId) && videoId > 0 ? videoId : null,
++    videoId: Number.isSafeInteger(videoId) && videoId > 0 ? videoId : null,
+     libraryId: Number.isSafeInteger(libraryId) && libraryId > 0 ? libraryId : null
+   }
+ }
+@@ -72,6 +78,8 @@ export function pendingCenterPath(
+     item?: PendingItemKey | null
+     videoId?: number
+     libraryId?: number
++    scanOffset?: number
++    scrapeOffset?: number
+   } = {}
+ ): string {
+   const params = new URLSearchParams()
+@@ -81,6 +89,12 @@ export function pendingCenterPath(
+   if (options.libraryId != null) {
+     params.set(LIST_PARAM.pendingLibraryId, String(options.libraryId))
+   }
++  if (options.scrapeOffset && Number.isSafeInteger(options.scrapeOffset) && options.scrapeOffset > 0) {
++    params.set(LIST_PARAM.pendingScrapeOffset, String(options.scrapeOffset))
++  }
++  if (options.scanOffset && Number.isSafeInteger(options.scanOffset) && options.scanOffset > 0) {
++    params.set(LIST_PARAM.pendingScanOffset, String(options.scanOffset))
++  }
+   const query = params.toString()
+   return query ? `${ROUTE_PATH.pending}?${query}` : ROUTE_PATH.pending
+ }
+diff --git a/src/renderer/src/listView/routeContracts.test.ts b/src/renderer/src/listView/routeContracts.test.ts
+index 8962375..9846255 100644
+--- a/src/renderer/src/listView/routeContracts.test.ts
++++ b/src/renderer/src/listView/routeContracts.test.ts
+@@ -165,7 +165,9 @@ describe('route builders and parsers', () => {
+       type: 'scrape',
+       item: { domain: 'scrape', id: '7' },
+       videoId: null,
+-      libraryId: null
++      libraryId: null,
++      scanOffset: 0,
++      scrapeOffset: 0
+     })
+     // Actress ids are normalized names, so only the first separator splits the key.
+     assert.deepEqual(parsePendingItemKey('actress:a:b'), { domain: 'actress', id: 'a:b' })
+@@ -174,13 +176,17 @@ describe('route builders and parsers', () => {
+       type: 'all',
+       item: null,
+       videoId: null,
+-      libraryId: null
++      libraryId: null,
++      scanOffset: 0,
++      scrapeOffset: 0
+     })
+     assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('type=scan&lib=7')), {
+       type: 'scan',
+       item: null,
+       videoId: null,
+-      libraryId: 7
++      libraryId: 7,
++      scanOffset: 0,
++      scrapeOffset: 0
+     })
+     assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
+     assert.equal(pendingVideoActressPath(42, 7), '/pending/video/42/actress/7')
+diff --git a/src/renderer/src/pages/PendingCenterPage.test.tsx b/src/renderer/src/pages/PendingCenterPage.test.tsx
+index 1e4a85b..fdd6b35 100644
+--- a/src/renderer/src/pages/PendingCenterPage.test.tsx
++++ b/src/renderer/src/pages/PendingCenterPage.test.tsx
+@@ -109,9 +109,13 @@ const fakeApi = {
+     list: async () => [{ id: 1, name: '测试媒体库' }]
+   },
+   scan: {
+-    listPending: async () => [],
+-    listPendingResourceIdentities: async () =>
+-      identityMode && !identityResolved ? [identity] : [],
++    listPending: () => { throw new Error('Unbounded scan queue') },
++    listPendingResourceIdentities: () => { throw new Error('Unbounded identity queue') },
++    countPendingQueue: async () => identityMode && !identityResolved ? 1 : 0,
++    pagePendingQueue: async () => ({total: identityMode && !identityResolved ? 1 : 0, offset: 0,
++      items: identityMode && !identityResolved ? [{kind: 'identity', id: 4, libraryId: 1, revision: 3,
++        label: 'FILE-001 ↔ NFO-002', displayName: identity.displayName}] : []}),
++    getPendingIdentity: async () => identityMode && !identityResolved ? identity : null,
+     resolvePendingResourceIdentity: async (
+       _libraryId: number,
+       _identityId: number,
+@@ -127,7 +131,12 @@ const fakeApi = {
+     conflictSummary: async () => ({ groupCount: 0, conflictGroupCount: 0, applicableGroupCount: 0 })
+   },
+   scrape: {
+-    listPending: async () => (identityMode || resolved ? [] : [pending]),
++    listPending: async () => { throw new Error('Full pending inbox must not be loaded') },
++    countPending: async () => identityMode || resolved ? 0 : 1,
++    pagePending: async () => ({ total: identityMode || resolved ? 0 : 1, offset: 0,
++      items: identityMode || resolved ? [] : [{id:pending.id,videoId:pending.videoId,revision:pending.revision,
++        code:'ABC-123',candidateCount:1,sourceCount:1,stagedCoverPath:null}] }),
++    getPending: async () => identityMode || resolved ? null : pending,
+     discardPending: async () => true,
+     confirmPending: async (input: PendingVideoScrapeConfirmInput) => {
+       confirmationInputs.push(input)
+@@ -277,7 +286,7 @@ describe('PendingCenterPage scrape resolution', () => {
+       await Promise.resolve()
+     })
+     await waitFor(() =>
+-      Boolean(renderer && nodeText(renderer.root).includes('FILE-001 ↔ NFO-002'))
++      Boolean(renderer && renderer.root.findAllByProps({ name: 'resource-identity' }).some(node => node.type === 'input'))
+     )
+ 
+     const choices = renderer!.root.findAllByProps({ name: 'resource-identity' }).filter((node) => node.type === 'input')
+@@ -338,7 +347,7 @@ describe('PendingCenterPage scrape resolution', () => {
+     })
+     await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('此媒体库没有扫描待确认项')))
+     await act(async () => button('查看所有媒体库').props.onClick())
+-    assert.ok(nodeText(renderer!.root).includes('没有扫描资源待确认项'))
++    await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('没有扫描资源待确认项')))
+     assert.equal(button('扫描资源').props['aria-selected'], true)
+     assert.equal(renderer!.root.findByProps({ role: 'tabpanel' }).props['aria-labelledby'], 'pending-types-scan')
+     assert.equal(button('所有媒体库').props['aria-label'], '按媒体库筛选扫描待确认项')
+diff --git a/src/renderer/src/pages/PendingCenterPage.tsx b/src/renderer/src/pages/PendingCenterPage.tsx
+index c6959df..8493146 100644
+--- a/src/renderer/src/pages/PendingCenterPage.tsx
++++ b/src/renderer/src/pages/PendingCenterPage.tsx
+@@ -1,3 +1,4 @@
++import type { PendingScanQueueItem, PendingScanQueueQuery } from '@shared/libraryTypes'
+ import { useCallback, useEffect, useRef } from 'react'
+ import { useQuery, useQueryClient } from '@tanstack/react-query'
+ import { CircleAlert, ListChecks, ScanSearch, UsersRound } from 'lucide-react'
+@@ -35,7 +36,6 @@ import styles from './PendingCenterPage.module.css'
+ import {
+   PENDING_DOMAIN_LABEL,
+   buildPendingQueueSections,
+-  pendingQueueTotal,
+   resolvePendingSelection
+ } from './pendingCenterState'
+ import { useConflictReviewController } from './useConflictReviewController'
+@@ -59,6 +59,8 @@ export default function PendingCenterPage(): JSX.Element {
+     type,
+     item: urlItem,
+     videoId: videoFromUrl,
++    scrapeOffset,
++    scanOffset,
+     libraryId: requestedLibraryId
+   } = parsePendingCenterSearch(params)
+ 
+@@ -75,43 +77,52 @@ export default function PendingCenterPage(): JSX.Element {
+     (librariesQuery.data ?? []).map((library) => [library.id, library.name])
+   )
+ 
++  const scanEnabled = (type === 'all' || type === 'scan') && !detailOpen
++  const scanAnchorId = urlItem?.domain === 'scan'
++    ? Number(urlItem.id.replace(/^identity-/, '')) : NaN
++  const scanPageQuery: PendingScanQueueQuery = {
++    limit: 50, offset: scanOffset, libraryId: selectedLibraryId ?? undefined,
++    anchor: Number.isSafeInteger(scanAnchorId) && scanAnchorId > 0
++      ? { kind: urlItem!.id.startsWith('identity-') ? 'identity' : 'group', id: scanAnchorId }
++      : undefined
++  }
+   const scanQuery = useQuery({
+-    queryKey: ['pending-scan-groups', libraryIds.join(',')],
+-    queryFn: async () =>
+-      (await Promise.all(libraryIds.map((libraryId) => api.scan.listPending(libraryId)))).flat(),
+-    enabled: librariesQuery.isSuccess
++    queryKey: ['pending-scan-groups', 'page', scanPageQuery],
++    queryFn: () => api.scan.pagePendingQueue(scanPageQuery),
++    enabled: librariesQuery.isSuccess && scanEnabled, gcTime: 0
+   })
+-  const identityQuery = useQuery({
+-    queryKey: ['pending-resource-identities', libraryIds.join(',')],
+-    queryFn: async () =>
+-      (
+-        await Promise.all(
+-          libraryIds.map((libraryId) => api.scan.listPendingResourceIdentities(libraryId))
+-        )
+-      ).flat(),
+-    enabled: librariesQuery.isSuccess
++  const scanCountQuery = useQuery({
++    queryKey: ['pending-scan-groups', 'count'],
++    queryFn: () => api.scan.countPendingQueue(),
++    enabled: !scanEnabled && !detailOpen
+   })
++  const scrapeEnabled = (type === 'all' || type === 'scrape') && !detailOpen
++  const scrapeAnchor = urlItem?.domain === 'scrape' && Number.isSafeInteger(Number(urlItem.id)) && Number(urlItem.id) > 0
++    ? Number(urlItem.id) : undefined
++  const scrapePageQuery = {
++    limit: 50, offset: scrapeOffset,
++    ...(videoFromUrl != null ? { videoId: videoFromUrl } : { anchorId: scrapeAnchor })
++  }
+   const scrapeQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending()
++    queryKey: ['pending-video-scrapes', 'page', scrapePageQuery],
++    queryFn: () => api.scrape.pagePending(scrapePageQuery),
++    enabled: scrapeEnabled,
++    gcTime: 0
++  })
++  const scrapeCountQuery = useQuery({
++    queryKey: ['pending-video-scrape-count'],
++    queryFn: () => api.scrape.countPending(),
++    enabled: !scrapeEnabled && !detailOpen
+   })
+   const conflict = useConflictReviewController()
+ 
+-  const allScanGroups = scanQuery.data ?? []
+-  const scanGroups =
+-    selectedLibraryId == null
+-      ? allScanGroups
+-      : allScanGroups.filter((group) => group.libraryId === selectedLibraryId)
+-  const allResourceIdentities = identityQuery.data ?? []
+-  const resourceIdentities =
+-    selectedLibraryId == null
+-      ? allResourceIdentities
+-      : allResourceIdentities.filter((identity) => identity.libraryId === selectedLibraryId)
+-  const scrapeItems = scrapeQuery.data ?? []
++  const scanItems = scanQuery.data?.items ?? []
++  const scanTotal = scanEnabled ? scanQuery.data?.total ?? 0 : scanCountQuery.data ?? 0
++  const scrapeItems = scrapeQuery.data?.items ?? []
++  const scrapeTotal = scrapeEnabled ? scrapeQuery.data?.total ?? 0 : scrapeCountQuery.data ?? 0
+   const conflictGroups = conflict.queue.groups
+   const queueInput = {
+-    scanGroups,
+-    resourceIdentities,
++    scanItems,
+     scrapeItems,
+     conflictGroups,
+     libraryNames
+@@ -119,9 +130,9 @@ export default function PendingCenterPage(): JSX.Element {
+   const sections = buildPendingQueueSections(queueInput, type)
+   const counts: Record<PendingTypeFilter, number> = {
+     all:
+-      scanGroups.length + resourceIdentities.length + scrapeItems.length + conflictGroups.length,
+-    scan: scanGroups.length + resourceIdentities.length,
+-    scrape: scrapeItems.length,
++      scanTotal + scrapeTotal + conflictGroups.length,
++    scan: scanTotal,
++    scrape: scrapeTotal,
+     actress: conflictGroups.length
+   }
+ 
+@@ -133,12 +144,13 @@ export default function PendingCenterPage(): JSX.Element {
+   const selected = resolvePendingSelection(sections, requested)
+ 
+   const loading =
+-    librariesQuery.isLoading ||
+-    scanQuery.isLoading ||
+-    identityQuery.isLoading ||
+-    scrapeQuery.isLoading ||
++    (scanEnabled && librariesQuery.isLoading) ||
++    (scanEnabled && scanQuery.isLoading) ||
++    (scrapeEnabled && scrapeQuery.isLoading) ||
+     conflict.queue.loading
+-  const total = pendingQueueTotal(sections)
++  const total = counts[type]
++  const scanError = scanEnabled && (librariesQuery.isError || scanQuery.isError)
++  const scrapeError = scrapeEnabled && scrapeQuery.isError
+ 
+   const selectItem = useCallback(
+     (key: PendingItemKey, replace = false) => {
+@@ -146,20 +158,22 @@ export default function PendingCenterPage(): JSX.Element {
+         pendingCenterPath({
+           type,
+           item: key,
+-          libraryId: selectedLibraryId ?? undefined
++          libraryId: selectedLibraryId ?? undefined,
++          scanOffset: scanQuery.data?.offset ?? scanOffset,
++          scrapeOffset: scrapeQuery.data?.offset ?? scrapeOffset
+         }),
+         { replace }
+       )
+     },
+-    [navigate, selectedLibraryId, type]
++    [navigate, selectedLibraryId, type, scanQuery.data?.offset, scanOffset, scrapeQuery.data?.offset, scrapeOffset]
+   )
+ 
+   // Canonicalize the URL: resolve deep links and drop selections that no longer exist.
+   useEffect(() => {
+-    if (loading || !selected) return
++    if (loading || scanError || scrapeError || detailOpen || !selected) return
+     if (videoFromUrl == null && samePendingItemKey(selected, urlItem)) return
+     selectItem(selected, true)
+-  }, [loading, selected, urlItem, videoFromUrl, selectItem])
++  }, [loading, scanError, scrapeError, detailOpen, selected, urlItem, videoFromUrl, selectItem])
+ 
+   // Actress conflicts keep their own session state; feed it the queue selection.
+   const chooseConflictGroupRef = useRef(conflict.queue.chooseGroup)
+@@ -187,9 +201,9 @@ export default function PendingCenterPage(): JSX.Element {
+ 
+   const refetchPendingSurface = useCallback((): void => {
+     void Promise.all([
+-      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: false }),
+-      queryClient.refetchQueries({ queryKey: ['pending-resource-identities'], exact: false }),
+-      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true }),
++      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], type: 'active', exact: false }),
++      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], type: 'active', exact: false }),
++      queryClient.refetchQueries({ queryKey: ['pending-video-scrape-count'], exact: true }),
+       queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), exact: true }),
+       queryClient.refetchQueries({ queryKey: actressKeys.conflictSummary(), exact: true })
+     ])
+@@ -202,20 +216,13 @@ export default function PendingCenterPage(): JSX.Element {
+     refetchPendingSurface()
+   }
+ 
+-  const selectedScan =
+-    selected?.domain === 'scan'
+-      ? scanGroups.find((entry) => String(entry.id) === selected.id) ?? null
+-      : null
++  const selectedScan = selected?.domain === 'scan'
++    ? scanItems.find((entry) => (entry.kind === 'group' ? String(entry.id) : `identity-${entry.id}`) === selected.id) ?? null
++    : null
+   const selectedScrape =
+     selected?.domain === 'scrape'
+       ? scrapeItems.find((entry) => String(entry.id) === selected.id) ?? null
+       : null
+-  const selectedIdentity =
+-    selected?.domain === 'scan' && selected.id.startsWith('identity-')
+-      ? resourceIdentities.find(
+-          (identity) => `identity-${identity.id}` === selected.id
+-        ) ?? null
+-      : null
+ 
+   return (
+     <div className={`list-page ${styles.page}`}>
+@@ -237,7 +244,11 @@ export default function PendingCenterPage(): JSX.Element {
+                 <span className={styles.tabLabel}>
+                   {option === 'all' ? <ListChecks {...UI_ICON_SM} aria-hidden /> : DOMAIN_ICON[option]}
+                   {option === 'all' ? '全部' : PENDING_DOMAIN_LABEL[option]}
+-                  {!loading && counts[option] > 0 ? <em className={styles.tabCount}>{counts[option]}</em> : null}
++                  {option === 'scan' && !scanEnabled && (scanCountQuery.isError || scanCountQuery.data === undefined) ? (
++                    <em className={styles.tabCount} title={scanCountQuery.isError ? '扫描数量读取失败' : '正在读取扫描数量'}>{scanCountQuery.isError ? '?' : '…'}</em>
++                  ) : option === 'scrape' && !scrapeEnabled && (scrapeCountQuery.isError || scrapeCountQuery.data === undefined) ? (
++                    <em className={styles.tabCount} title={scrapeCountQuery.isError ? '刮削数量读取失败' : '正在读取刮削数量'}>{scrapeCountQuery.isError ? '?' : '…'}</em>
++                  ) : !loading && counts[option] > 0 ? <em className={styles.tabCount}>{counts[option]}</em> : null}
+                 </span>
+               )
+             }))}
+@@ -275,6 +286,14 @@ export default function PendingCenterPage(): JSX.Element {
+         <WorkbenchShell className={styles.shell}>
+           {loading ? (
+             <EmptyState variant="fill" loading title="正在读取待确认项…" />
++          ) : scanError ? (
++            <EmptyState variant="fill" title="待确认扫描读取失败">
++              <Button onClick={() => { void (librariesQuery.isError ? librariesQuery.refetch() : scanQuery.refetch()) }}>重试</Button>
++            </EmptyState>
++          ) : scrapeError ? (
++            <EmptyState variant="fill" title="待确认刮削读取失败">
++              <Button onClick={() => { void scrapeQuery.refetch() }}>重试</Button>
++            </EmptyState>
+           ) : total === 0 ? (
+             <div className={styles.complete}>
+               <EmptyState
+@@ -305,7 +324,7 @@ export default function PendingCenterPage(): JSX.Element {
+                     <section className={styles.railSection} key={section.domain}>
+                       <h2>
+                         {section.label}
+-                        <span className={styles.railCount}>{section.items.length}</span>
++                        <span className={styles.railCount}>{section.domain === 'scrape' ? scrapeTotal : section.domain === 'scan' ? scanTotal : section.items.length}</span>
+                       </h2>
+                       {section.items.map((queueItem) => {
+                         const keyText = formatPendingItemKey(queueItem.key)
+@@ -342,25 +361,39 @@ export default function PendingCenterPage(): JSX.Element {
+                           </button>
+                         )
+                       })}
++                      {section.domain === 'scan' && scanTotal > 50 ? (
++                        <div className={styles.queuePager} aria-label="扫描队列分页">
++                          <Button size="sm" disabled={!scanQuery.data?.offset} onClick={() => navigate(pendingCenterPath({
++                            type, libraryId: selectedLibraryId ?? undefined, scrapeOffset,
++                            scanOffset: Math.max(0, (scanQuery.data?.offset ?? 0) - 50)
++                          }))}>上一页</Button>
++                          <span>{Math.floor((scanQuery.data?.offset ?? 0) / 50) + 1} / {Math.ceil(scanTotal / 50)}</span>
++                          <Button size="sm" disabled={(scanQuery.data?.offset ?? 0) + 50 >= scanTotal} onClick={() => navigate(pendingCenterPath({
++                            type, libraryId: selectedLibraryId ?? undefined, scrapeOffset,
++                            scanOffset: (scanQuery.data?.offset ?? 0) + 50
++                          }))}>下一页</Button>
++                        </div>
++                      ) : null}
++                      {section.domain === 'scrape' && scrapeTotal > 50 ? (
++                        <div className={styles.queuePager} aria-label="刮削队列分页">
++                          <Button size="sm" disabled={!scrapeQuery.data?.offset} onClick={() => navigate(pendingCenterPath({
++                            type, scanOffset, scrapeOffset: Math.max(0, (scrapeQuery.data?.offset ?? 0) - 50)
++                          }))}>上一页</Button>
++                          <span>{Math.floor((scrapeQuery.data?.offset ?? 0) / 50) + 1} / {Math.ceil(scrapeTotal / 50)}</span>
++                          <Button size="sm" disabled={(scrapeQuery.data?.offset ?? 0) + 50 >= scrapeTotal} onClick={() => navigate(pendingCenterPath({
++                            type, scanOffset, scrapeOffset: (scrapeQuery.data?.offset ?? 0) + 50
++                          }))}>下一页</Button>
++                        </div>
++                      ) : null}
+                     </section>
+                   ))}
+                 </div>
+               </WorkbenchRail>
+-              {selectedIdentity ? (
+-                <PendingResourceIdentityPane
+-                  key={`${selectedIdentity.id}:${selectedIdentity.revision}`}
+-                  identity={selectedIdentity}
+-                  libraryName={libraryNames.get(selectedIdentity.libraryId)}
+-                  onResolved={refresh}
+-                />
+-              ) : selectedScan ? (
+-                <PendingScanPane
+-                  group={selectedScan}
+-                  libraryName={libraryNames.get(selectedScan.libraryId)}
+-                  onResolved={refresh}
+-                />
+-              ) : selectedScrape ? (
+-                <PendingScrapePane pending={selectedScrape} onResolved={refresh} />
++              {selectedScan && samePendingItemKey(selected, urlItem) ? (
++                <PendingScanDetail key={`${selectedScan.kind}:${selectedScan.libraryId}:${selectedScan.id}:${selectedScan.revision}`}
++                  item={selectedScan} libraryName={libraryNames.get(selectedScan.libraryId)} enabled={!detailOpen} onResolved={refresh} />
++              ) : selectedScrape && videoFromUrl == null && samePendingItemKey(selected, urlItem) ? (
++                <PendingScrapeDetail key={`${selectedScrape.id}:${selectedScrape.revision}`} id={selectedScrape.id} revision={selectedScrape.revision} enabled={!detailOpen} onResolved={refresh} />
+               ) : selected?.domain === 'actress' ? (
+                 <PendingActressConflictPane vm={conflict} />
+               ) : (
+@@ -373,3 +406,37 @@ export default function PendingCenterPage(): JSX.Element {
+     </div>
+   )
+ }
++
++
++function PendingScrapeDetail({ id, revision, enabled, onResolved }: {
++  id: number; revision: number; enabled: boolean; onResolved: () => void
++}): JSX.Element {
++  const query = useQuery({
++    queryKey: ['pending-video-scrapes', 'detail', id, revision],
++    queryFn: () => api.scrape.getPending(id), enabled, gcTime: 0
++  })
++  if (query.isError) return <EmptyState variant="fill" title="候选读取失败"><Button onClick={() => { void query.refetch() }}>重试</Button></EmptyState>
++  if (!query.data) return <EmptyState variant="fill" loading={query.isLoading} title={query.isLoading ? '正在读取候选…' : '此待确认项已不存在'}>
++    {!query.isLoading ? <Button onClick={onResolved}>刷新队列</Button> : null}
++  </EmptyState>
++  return <PendingScrapePane pending={query.data} onResolved={onResolved} />
++}
++
++function PendingScanDetail({ item, libraryName, enabled, onResolved }: {
++  item: PendingScanQueueItem; libraryName?: string; enabled: boolean; onResolved: () => void
++}): JSX.Element {
++  const query = useQuery({
++    queryKey: ['pending-scan-groups', 'detail', item.kind, item.libraryId, item.id, item.revision],
++    queryFn: async () => item.kind === 'group'
++      ? { kind: 'group' as const, value: await api.scan.getPendingGroup(item.libraryId, item.id) }
++      : { kind: 'identity' as const, value: await api.scan.getPendingIdentity(item.libraryId, item.id) },
++    enabled, gcTime: 0
++  })
++  if (query.isError) return <EmptyState variant="fill" title="扫描详情读取失败"><Button onClick={() => { void query.refetch() }}>重试</Button></EmptyState>
++  if (!query.data?.value) return <EmptyState variant="fill" loading={query.isLoading} title={query.isLoading ? '正在读取扫描详情…' : '此待确认项已不存在'}>
++    {!query.isLoading ? <Button onClick={onResolved}>刷新队列</Button> : null}
++  </EmptyState>
++  return query.data.kind === 'group'
++    ? <PendingScanPane group={query.data.value} libraryName={libraryName} onResolved={onResolved} />
++    : <PendingResourceIdentityPane identity={query.data.value} libraryName={libraryName} onResolved={onResolved} />
++}
+diff --git a/src/renderer/src/pages/pendingCenterState.test.ts b/src/renderer/src/pages/pendingCenterState.test.ts
+index ef5a891..ace1283 100644
+--- a/src/renderer/src/pages/pendingCenterState.test.ts
++++ b/src/renderer/src/pages/pendingCenterState.test.ts
+@@ -111,17 +111,7 @@ describe('pending center resolution state', () => {
+   it('labels scan decisions with their owning media library', () => {
+     const sections = buildPendingQueueSections(
+       {
+-        scanGroups: [
+-          {
+-            id: 9,
+-            libraryId: 7,
+-            normalizedCode: 'ABC-123',
+-            revision: 1,
+-            createdAt: '2026-08-29T00:00:00.000Z',
+-            updatedAt: '2026-08-29T00:00:00.000Z',
+-            resources: []
+-          }
+-        ],
++        scanItems: [{kind: 'group', id: 9, libraryId: 7, revision: 1, label: 'ABC-123', resourceCount: 0}],
+         scrapeItems: [],
+         conflictGroups: [],
+         libraryNames: new Map([[7, 'NAS 媒体库']])
+@@ -135,23 +125,7 @@ describe('pending center resolution state', () => {
+   it('shows resource identity conflicts in the scan queue without exposing a local path', () => {
+     const sections = buildPendingQueueSections(
+       {
+-        scanGroups: [],
+-        resourceIdentities: [
+-          {
+-            id: 4,
+-            libraryId: 7,
+-            rootId: 2,
+-            sourceKind: 'local',
+-            targetKind: null,
+-            targetDisplay: null,
+-            displayName: 'FILE-001.mp4',
+-            filenameCode: 'FILE-001',
+-            nfoCode: 'NFO-002',
+-            revision: 1,
+-            createdAt: '2026-09-05T00:00:00.000Z',
+-            updatedAt: '2026-09-05T00:00:00.000Z'
+-          }
+-        ],
++        scanItems: [{kind: 'identity', id: 4, libraryId: 7, revision: 1, label: 'FILE-001 ↔ NFO-002', displayName: 'FILE-001.mp4'}],
+         scrapeItems: [],
+         conflictGroups: [],
+         libraryNames: new Map([[7, 'NAS 媒体库']])
+diff --git a/src/renderer/src/pages/pendingCenterState.ts b/src/renderer/src/pages/pendingCenterState.ts
+index f6c5c32..5055df3 100644
+--- a/src/renderer/src/pages/pendingCenterState.ts
++++ b/src/renderer/src/pages/pendingCenterState.ts
+@@ -1,11 +1,10 @@
+ import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
+ import type {
+-  PendingScanGroup,
+-  PendingResourceIdentity,
++  PendingScanQueueItem,
+   PendingScanResource,
+   PendingScanResourceTarget
+ } from '@shared/libraryTypes'
+-import type { PendingVideoScrape } from '@shared/videoScrapeTypes'
++import type { PendingVideoScrapeSummary } from '@shared/videoScrapeTypes'
+ import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+ import {
+   PENDING_DOMAINS,
+@@ -148,49 +147,32 @@ export interface PendingQueueSection {
+ }
+ 
+ export interface PendingQueueInput {
+-  scanGroups: readonly PendingScanGroup[]
+-  resourceIdentities?: readonly PendingResourceIdentity[]
+-  scrapeItems: readonly PendingVideoScrape[]
++  scanItems: readonly PendingScanQueueItem[]
++  scrapeItems: readonly PendingVideoScrapeSummary[]
+   conflictGroups: readonly ActressNameConflictGroup[]
+   libraryNames?: ReadonlyMap<number, string>
+ }
+ 
+ function scanQueueItem(
+-  group: PendingScanGroup,
++  item: PendingScanQueueItem,
+   libraryNames?: ReadonlyMap<number, string>
+ ): PendingQueueItem {
+-  const libraryName = libraryNames?.get(group.libraryId) ?? `媒体库 #${group.libraryId}`
++  const libraryName = libraryNames?.get(item.libraryId) ?? `媒体库 #${item.libraryId}`
+   return {
+-    key: pendingItemKey('scan', group.id),
+-    title: group.normalizedCode,
+-    meta: `${libraryName} · ${group.resources.length} 条资源`,
++    key: pendingItemKey('scan', item.kind === 'group' ? item.id : `identity-${item.id}`),
++    title: item.label,
++    meta: `${libraryName} · ${item.kind === 'group' ? `${item.resourceCount} 条资源` : item.displayName}`,
+     coverPath: null,
+     ready: false
+   }
+ }
+ 
+-function resourceIdentityQueueItem(
+-  identity: PendingResourceIdentity,
+-  libraryNames?: ReadonlyMap<number, string>
+-): PendingQueueItem {
+-  const libraryName = libraryNames?.get(identity.libraryId) ?? `媒体库 #${identity.libraryId}`
+-  return {
+-    key: pendingItemKey('scan', `identity-${identity.id}`),
+-    title: `${identity.filenameCode} ↔ ${identity.nfoCode}`,
+-    meta: `${libraryName} · ${identity.displayName}`,
+-    coverPath: null,
+-    ready: false
+-  }
+-}
+-
+-function scrapeQueueItem(scrape: PendingVideoScrape): PendingQueueItem {
+-  const candidates = scrape.sources.flatMap((source) => source.candidates)
+-  const first = candidates[0]
++function scrapeQueueItem(scrape: PendingVideoScrapeSummary): PendingQueueItem {
+   return {
+     key: pendingItemKey('scrape', scrape.id),
+-    title: first?.result.code?.trim() || `影片 #${scrape.videoId}`,
+-    meta: `${candidates.length} 个候选 · ${scrape.sources.length} 个来源`,
+-    coverPath: first?.stagedCoverPath ?? null,
++    title: scrape.code || `影片 #${scrape.videoId}`,
++    meta: `${scrape.candidateCount} 个候选 · ${scrape.sourceCount} 个来源`,
++    coverPath: scrape.stagedCoverPath,
+     ready: false
+   }
+ }
+@@ -215,12 +197,7 @@ export function buildPendingQueueSections(
+   type: PendingTypeFilter
+ ): PendingQueueSection[] {
+   const byDomain: Record<PendingDomain, PendingQueueItem[]> = {
+-    scan: [
+-      ...input.scanGroups.map((group) => scanQueueItem(group, input.libraryNames)),
+-      ...(input.resourceIdentities ?? []).map((identity) =>
+-        resourceIdentityQueueItem(identity, input.libraryNames)
+-      )
+-    ],
++    scan: input.scanItems.map((item) => scanQueueItem(item, input.libraryNames)),
+     scrape: input.scrapeItems.map(scrapeQueueItem),
+     actress: input.conflictGroups.map(actressQueueItem)
+   }
+diff --git a/src/shared/appIpcContract.ts b/src/shared/appIpcContract.ts
+index 14472f9..31f5a5d 100644
+--- a/src/shared/appIpcContract.ts
++++ b/src/shared/appIpcContract.ts
+@@ -20,6 +20,9 @@ import type {
+   PendingResourceIdentity,
+   PendingResourceIdentityResolution,
+   PendingResourceIdentityResolutionResult,
++  PendingAuditIds,
++  PendingScanQueueQuery,
++  PendingScanQueuePage,
+   PendingScanGroup,
+   PendingScanGroupResolution,
+   PendingScanGroupResolutionResult,
+@@ -27,10 +30,14 @@ import type {
+   RenameImportResult,
+   ScanResult
+ } from './libraryTypes'
+-import type { TagListItem, SortDir } from './commonTypes'
++import type { TagListItem, TagLabel, TagOptionsQuery, TagOptionsPage, TagFilterOptionsPage, SortDir } from './commonTypes'
+ import type {
+   PlaylistCreateInput,
+   PlaylistDetail,
++  PlaylistPage,
++  PlaylistMetadata,
++  PlaylistVideosPage,
++  PlaylistPageQuery,
+   PlaylistListItem,
+   PlaylistUpdateInput,
+   PlaylistVideoMembership,
+@@ -214,6 +221,11 @@ export interface AppIpcContract {
+     ]
+     result: ManualImportResult
+   }
++  [IPC.PENDING_AUDIT_PRESENCE]: { args: [libraryId: number, ids: PendingAuditIds]; result: PendingAuditIds }
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: { args: [query: PendingScanQueueQuery]; result: PendingScanQueuePage }
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: { args: [libraryId?: number]; result: number }
++  [IPC.PENDING_SCAN_GET]: { args: [libraryId: number, groupId: number]; result: PendingScanGroup | null }
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: { args: [libraryId: number, identityId: number]; result: PendingResourceIdentity | null }
+   [IPC.PENDING_SCAN_LIST]: {
+     args: [libraryId: number]
+     result: PendingScanGroup[]
+@@ -236,6 +248,9 @@ export interface AppIpcContract {
+     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
+     result: PlaylistDetail | null
+   }
++  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
++  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
++  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
+   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
+   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
+   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
+@@ -245,6 +260,9 @@ export interface AppIpcContract {
+ 
+   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
+   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
++  [IPC.TAG_LABELS]: { args: [ids: number[]]; result: TagLabel[] }
++  [IPC.TAG_FILTER_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagFilterOptionsPage }
++  [IPC.TAG_MANUAL_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagOptionsPage }
+   [IPC.ORGANIZATION_LIST]: {
+     args: [query: OrganizationListQuery]
+     result: OrganizationListItem[]
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..7ef53a8 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -75,6 +75,11 @@ export const IPC = {
+   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
+   FILE_RENAME: 'file:rename',
+   FILE_IMPORT_MANUAL: 'file:importManual',
++  PENDING_AUDIT_PRESENCE: 'pendingAudit:presence',
++  PENDING_SCAN_QUEUE_PAGE: 'pendingScanQueue:page',
++  PENDING_SCAN_QUEUE_COUNT: 'pendingScanQueue:count',
++  PENDING_SCAN_GET: 'pendingScan:get',
++  PENDING_RESOURCE_IDENTITY_GET: 'pendingResourceIdentity:get',
+   PENDING_SCAN_LIST: 'pendingScan:list',
+   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+   PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+@@ -94,6 +99,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +120,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -148,6 +157,9 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
+@@ -182,6 +194,10 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+diff --git a/src/shared/libraryTypes.ts b/src/shared/libraryTypes.ts
+index bb32aad..4164092 100644
+--- a/src/shared/libraryTypes.ts
++++ b/src/shared/libraryTypes.ts
+@@ -420,3 +420,28 @@ export interface PlayResult {
+   fileMissing?: boolean
+   error?: string
+ }
++
++/** At most100 IDs across all three arrays, for one displayed audit page. */
++export interface PendingAuditIds {
++  groupIds: number[]
++  identityIds: number[]
++  scrapeIds: number[]
++}
++
++export type PendingScanQueueItem = {
++  id: number
++  libraryId: number
++  revision: number
++  label: string
++} & ({kind:'group';resourceCount:number} | {kind:'identity';displayName:string})
++export interface PendingScanQueueQuery {
++  libraryId?: number
++  limit?: number
++  offset?: number
++  anchor?: {kind:'group'|'identity';id:number}
++}
++export interface PendingScanQueuePage {
++  items: PendingScanQueueItem[]
++  total: number
++  offset: number
++}
+diff --git a/src/main/db/pendingScanQueueRepo.ts b/src/main/db/pendingScanQueueRepo.ts
+new file mode 100644
+index 0000000..4c239ff
+--- /dev/null
++++ b/src/main/db/pendingScanQueueRepo.ts
+@@ -0,0 +1,62 @@
++import type { PendingScanQueuePage, PendingScanQueueQuery, PendingScanQueueItem } from '@shared/libraryTypes'
++import { localPathBasename } from '@shared/localPathIdentity'
++import { getDb } from './database'
++
++const queueSql = `WITH queue AS (
++  SELECT 0 AS kind,id,library_id,updated_at FROM pending_scan_groups
++  UNION ALL SELECT 1,id,library_id,updated_at FROM pending_resource_identities
++), eligible AS (
++  SELECT queue.*,library.position FROM queue JOIN media_libraries library ON library.id=queue.library_id
++  WHERE library.status='active' AND (? IS NULL OR library.id=?)
++)`
++function libraryScope(libraryId?: number): number | null {
++  if (libraryId !== undefined && (!Number.isSafeInteger(libraryId) || libraryId < 1)) throw new Error('Invalid scan queue library')
++  return libraryId ?? null
++}
++export function countPendingScanQueue(libraryId?: number): number {
++  const scope=libraryScope(libraryId)
++  return (getDb().prepare(`${queueSql} SELECT COUNT(*) AS n FROM eligible`).get(scope,scope) as {n:number}).n
++}
++function caption(value:string):string {
++  const chars=Array.from(value)
++  return chars.length>128 ? chars.slice(0,128).join('')+'…' : value
++}
++
++/** Group-first and library-position order preserves the existing combined inbox ordering. */
++export function pagePendingScanQueue(query:PendingScanQueueQuery):PendingScanQueuePage {
++  const scope=libraryScope(query.libraryId)
++  const {limit=50,offset=0,anchor}=query
++  if (!Number.isSafeInteger(limit)||limit<1||limit>100||!Number.isSafeInteger(offset)||offset<0||
++      (anchor && (!['group','identity'].includes(anchor.kind)||!Number.isSafeInteger(anchor.id)||anchor.id<1))) throw new Error('Invalid scan queue page')
++  const db=getDb()
++  return db.transaction(()=>{
++    const total=countPendingScanQueue(query.libraryId)
++    let pageOffset=Math.min(offset,Math.max(0,Math.floor((total-1)/limit)*limit))
++    if(anchor){
++      const target=db.prepare(`${queueSql} SELECT kind,position,library_id,updated_at,id FROM eligible WHERE kind=? AND id=?`)
++        .get(scope,scope,anchor.kind==='group'?0:1,anchor.id) as {kind:number;position:number;library_id:number;updated_at:string;id:number}|undefined
++      if(target){
++        const before=db.prepare(`${queueSql} SELECT COUNT(*) AS n FROM eligible WHERE (kind,position,library_id,updated_at,id)<(?,?,?,?,?)`)
++          .get(scope,scope,target.kind,target.position,target.library_id,target.updated_at,target.id) as {n:number}
++        pageOffset=Math.floor(before.n/limit)*limit
++      }
++    }
++    const rows=db.prepare(`${queueSql} SELECT kind,id,library_id FROM eligible ORDER BY kind,position,library_id,updated_at,id LIMIT ? OFFSET ?`)
++      .all(scope,scope,limit,pageOffset) as Array<{kind:number;id:number;library_id:number}>
++    const group=db.prepare(`SELECT revision,substr(normalized_code,1,129) AS code,
++      (SELECT COUNT(*) FROM pending_scan_resources WHERE library_id=g.library_id AND group_id=g.id) AS resourceCount
++      FROM pending_scan_groups g WHERE library_id=? AND id=?`)
++    const identity=db.prepare(`SELECT revision,substr(filename_code,1,129) AS filenameCode,substr(nfo_code,1,129) AS nfoCode,
++      substr(file_path,-4096) AS pathTail FROM pending_resource_identities WHERE library_id=? AND id=?`)
++    const items:PendingScanQueueItem[]=rows.map(row=>{
++      if(row.kind===0){
++        const value=group.get(row.library_id,row.id) as {revision:number;code:string;resourceCount:number}
++        return {kind:'group',id:row.id,libraryId:row.library_id,revision:value.revision,label:caption(value.code),resourceCount:value.resourceCount}
++      }
++      const value=identity.get(row.library_id,row.id) as {revision:number;filenameCode:string;nfoCode:string;pathTail:string}
++      return {kind:'identity',id:row.id,libraryId:row.library_id,revision:value.revision,
++        label:`${caption(value.filenameCode)} ↔ ${caption(value.nfoCode)}`,displayName:caption(localPathBasename(value.pathTail))}
++    })
++    return {items,total,offset:pageOffset}
++  })()
++}
+diff --git a/src/main/db/pendingScanQueueRepo.test.ts b/src/main/db/pendingScanQueueRepo.test.ts
+new file mode 100644
+index 0000000..13c4cad
+--- /dev/null
++++ b/src/main/db/pendingScanQueueRepo.test.ts
+@@ -0,0 +1,41 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { pagePendingScanQueue, countPendingScanQueue } from './pendingScanQueueRepo'
++import { getPendingResourceIdentity } from './pendingResourceIdentityRepo'
++it('pages10k scan decisions in legacy order, scopes active libraries and exposes no resource snapshots',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-scan-queue-'))
++ try{
++  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++  db.exec(`INSERT INTO media_libraries(id,name,position) VALUES(2,'First',-1),(3,'Archived',2);
++   UPDATE media_libraries SET status='archived' WHERE id=3;
++   INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES(1,1,'/one','/one'),(2,2,'/two','/two'),(3,3,'/three','/three');
++   WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++   INSERT INTO pending_scan_groups(id,library_id,normalized_code,updated_at) SELECT x,1,'G-'||x,'2026' FROM n;
++   INSERT INTO pending_scan_groups(id,library_id,normalized_code,updated_at) VALUES(10001,2,'FIRST','2026'),(10002,3,'ARCHIVED','2026');
++   INSERT INTO pending_scan_resources(library_id,group_id,root_id,file_path,normalized_path) VALUES(2,10001,2,'/two/file','/two/file');
++   INSERT INTO pending_resource_identities(id,library_id,root_id,file_path,normalized_path,source_kind,filename_code,nfo_code,updated_at)
++    VALUES(1,2,2,'/private/path/visible.mp4','/private/path/visible.mp4','local','FILE','NFO','2026'),(2,1,1,'/private/second.mp4','/private/second.mp4','local','SECOND','OTHER','2026');`)
++  const first=pagePendingScanQueue({})
++  assert.equal(first.total,10003);assert.equal(first.items.length,50)
++  assert.deepEqual(first.items[0],{kind:'group',id:10001,libraryId:2,revision:1,label:'FIRST',resourceCount:1})
++  assert.equal(first.items[1].id,1);assert.equal('resources' in first.items[0],false)
++  assert.equal(countPendingScanQueue(3),0);assert.equal(countPendingScanQueue(2),2)
++  const identity=pagePendingScanQueue({anchor:{kind:'identity',id:1}})
++  assert.equal(identity.offset,10000)
++  assert.deepEqual(identity.items.map(row=>row.kind),['group','identity','identity'])
++  const row=identity.items[1]
++  assert.deepEqual(row,{kind:'identity',id:1,libraryId:2,revision:1,label:'FILE ↔ NFO',displayName:'visible.mp4'})
++  assert.ok(!JSON.stringify(identity).includes('/private'))
++  assert.equal(getPendingResourceIdentity(1,1),null)
++  assert.equal(getPendingResourceIdentity(2,1)!.displayName,'visible.mp4')
++  const scoped=pagePendingScanQueue({libraryId:2,anchor:{kind:'group',id:1}})
++  assert.equal(scoped.total,2);assert.ok(scoped.items.every(item=>item.libraryId===2))
++  db.exec('DELETE FROM pending_scan_groups WHERE id<10000; DELETE FROM pending_resource_identities')
++  assert.equal(pagePendingScanQueue({offset:10000}).offset,0)
++  for(const query of [{limit:101},{offset:-1},{libraryId:0},{anchor:{kind:'group' as const,id:Number.MAX_SAFE_INTEGER+1}}])assert.throws(()=>pagePendingScanQueue(query),/Invalid/)
++ }finally{closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})
+diff --git a/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx b/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx
+new file mode 100644
+index 0000000..0450cd9
+--- /dev/null
++++ b/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx
+@@ -0,0 +1,119 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import { pendingCenterPath, pendingItemKey, parsePendingCenterSearch } from '../listView/pendingRoutes'
++import type { ElectronApi } from '../../../preload/index'
++import type { PendingScanQueuePage, PendingScanQueueQuery, PendingScanGroup } from '@shared/libraryTypes'
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++const pages: PendingScanQueueQuery[] = []
++const details: Array<{id:number;libraryId:number} & ReturnType<typeof deferred<PendingScanGroup | null>>> = []
++let total = 120, failPage = false, failCount = false, failLibraries = false, identityMode = false
++const identityCalls: number[] = []
++let holdOffset: number | undefined
++const heldPages: Array<{value:PendingScanQueuePage} & ReturnType<typeof deferred<PendingScanQueuePage>>> = []
++let location = ''
++let navigate: NavigateFunction
++const fakeApi = {
++  mediaLibraries: { list: async () => { if(failLibraries)throw new Error('libraries failure');return [{id:1,name:'First'},{id:2,name:'Second'}] } },
++  actressScrape: { listConflicts: async () => [], conflictSummary: async () => ({ totalGroups: 0 }) },
++  scrape: { countPending: async () => 0, pagePending: async () => ({items:[],total:0,offset:0}) },
++  scan: {
++    listPending: () => { throw new Error('Unbounded scan inbox') },
++    listPendingResourceIdentities: () => { throw new Error('Unbounded identities') },
++    countPendingQueue: async () => { if(failCount)throw new Error('count failure');return total },
++    pagePendingQueue: async (query:PendingScanQueueQuery) => {
++      pages.push(query)
++      if(failPage){failPage=false;throw new Error('page failure')}
++      const anchor=query.anchor?.id
++      const offset=anchor && anchor<=total ? Math.floor((anchor-1)/50)*50 : Math.min(query.offset??0,Math.max(0,Math.floor((total-1)/50)*50))
++      if(identityMode)return {total:1,offset:0,items:[{kind:'identity',id:4,libraryId:2,revision:3,label:'FILE ↔ NFO',displayName:'file.mp4'}]}
++      const value:PendingScanQueuePage={total,offset,items:Array.from({length:Math.min(50,total-offset)},(_,i)=>({kind:'group',id:offset+i+1,libraryId:query.libraryId??1,revision:1,label:`GROUP-${offset+i+1}`,resourceCount:2}))}
++      if(holdOffset===offset){holdOffset=undefined;const held={value,...deferred<PendingScanQueuePage>()};heldPages.push(held);return held.promise}
++      return value
++    },
++    getPendingIdentity: async (libraryId:number,id:number) => { identityCalls.push(libraryId,id); return {id,libraryId,rootId:1,sourceKind:'local',targetKind:null,targetDisplay:null,displayName:'file.mp4',filenameCode:'FILE',nfoCode:'NFO',revision:3,createdAt:'2026',updatedAt:'2026'} },
++    getPendingGroup: (libraryId:number,id:number) => { const request={id,libraryId,...deferred<PendingScanGroup|null>()};details.push(request);return request.promise }
++  }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fakeApi})})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let client:QueryClient|undefined
++function Probe():null {navigate=useNavigate();location=useLocation().search;return null}
++async function settle():Promise<void>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++async function mount(url='/pending?type=scan'):Promise<void>{
++  const Page=(await import('./PendingCenterPage')).default
++  client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++  await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client!}><MemoryRouter initialEntries={[url]}><Probe/><Page/></MemoryRouter></QueryClientProvider>)})
++  await settle();await settle()
++}
++function content(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:content(child)).join('')}
++async function click(label:string):Promise<void>{const button=renderer!.root.findAllByType('button').find(node=>content(node)===label);assert.ok(button,label);assert.ok(!button.props.disabled);await act(async()=>button.props.onClick());await settle();await settle()}
++afterEach(async()=>{await act(async()=>renderer?.unmount());client?.clear();renderer=undefined;client=undefined;pages.length=0;details.length=0;total=120;failPage=false;failCount=false;failLibraries=false;identityMode=false;identityCalls.length=0;holdOffset=undefined;heldPages.length=0})
++it('locates scan anchors, reads only selected details and ignores late details after paging',async()=>{
++  await mount(pendingCenterPath({type:'scan',item:pendingItemKey('scan',110),libraryId:2}))
++  assert.deepEqual(pages[0].anchor,{kind:'group',id:110})
++  assert.equal(pages[0].libraryId,2)
++  assert.deepEqual(details.map(({id,libraryId})=>({id,libraryId})),[{id:110,libraryId:2}])
++  await click('上一页')
++  assert.ok(location.includes('scanOffset=50'));assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).libraryId,2)
++  assert.equal(details.at(-1)!.id,51)
++  await act(async()=>details[0].resolve({id:110,libraryId:2,revision:1,normalizedCode:'LATE',resources:[],createdAt:'2026',updatedAt:'2026'}));await settle()
++  assert.ok(!content(renderer!.root).includes('LATE'))
++  assert.ok(client!.getQueryCache().findAll({queryKey:['pending-scan-groups']}).filter(query=>query.state.data!==undefined).length<=2)
++})
++it('reports page errors and missing selected records without treating them as an empty queue',async()=>{
++  failPage=true;await mount();assert.ok(content(renderer!.root).includes('待确认扫描读取失败'));assert.equal(details.length,0)
++  await click('重试');assert.equal(details[0].id,1)
++  await act(async()=>details[0].resolve(null));await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'));assert.ok(content(renderer!.root).includes('120 项待处理'))
++})
++it('clamps the deleted last page and does not show an old library page',async()=>{
++  total=101;await mount(pendingCenterPath({type:'scan',scanOffset:100}))
++  assert.equal(details.at(-1)!.id,101)
++  total=100;await act(async()=>{await client!.refetchQueries({queryKey:['pending-scan-groups','page'],type:'active'})});await settle();await settle()
++  assert.equal(details.at(-1)!.id,51)
++  holdOffset=0
++  await act(async()=>navigate(pendingCenterPath({type:'scan',libraryId:1})));await settle()
++  await act(async()=>navigate(pendingCenterPath({type:'scan',libraryId:2})));await settle();await settle()
++  await act(async()=>heldPages[0].resolve(heldPages[0].value));await settle()
++  assert.equal(details.at(-1)!.libraryId,2)
++  assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).libraryId,2)
++})
++it('uses only count on another category and count failure does not block that category',async()=>{
++  failCount=true;await mount('/pending?type=scrape')
++  assert.equal(pages.length,0);assert.equal(details.length,0)
++  assert.ok(content(renderer!.root).includes('没有影片刮削待确认项'))
++  assert.ok(content(renderer!.root).includes('扫描资源?'))
++})
++
++it('does not block scrape on a library listing failure',async()=>{
++  failLibraries=true;await mount('/pending?type=scrape')
++  assert.ok(content(renderer!.root).includes('没有影片刮削待确认项'))
++  assert.ok(!content(renderer!.root).includes('待确认扫描读取失败'))
++})
++it('resolves identity deep links to the scoped identity pane without group detail reads',async()=>{
++  identityMode=true
++  await mount(pendingCenterPath({type:'scan',libraryId:2,item:pendingItemKey('scan','identity-4')}))
++  assert.deepEqual(pages[0].anchor,{kind:'identity',id:4})
++  assert.deepEqual(identityCalls,[2,4]);assert.equal(details.length,0)
++  const Pane=(await import('./PendingResourceIdentityPane')).default
++  assert.equal(renderer!.root.findAllByType(Pane).length,1)
++  assert.equal(renderer!.root.findByType(Pane).props.identity.revision,3)
++})
++it('retries rejected selected detail without reloading full queues',async()=>{
++  await mount()
++  await act(async()=>details[0].reject(new Error('detail failure')));await settle()
++  assert.ok(content(renderer!.root).includes('扫描详情读取失败'))
++  await click('重试');assert.equal(details.length,2);assert.equal(details[1].id,1)
++  await act(async()=>details[1].resolve(null));await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'))
++})
+diff --git a/src/renderer/src/pages/PendingCenterPage.interaction.test.tsx b/src/renderer/src/pages/PendingCenterPage.interaction.test.tsx
+new file mode 100644
+index 0000000..e3f95b2
+--- /dev/null
++++ b/src/renderer/src/pages/PendingCenterPage.interaction.test.tsx
+@@ -0,0 +1,145 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ElectronApi } from '../../../preload/index'
++import type { PendingVideoScrape, PendingVideoScrapePage, PendingVideoScrapePageQuery } from '@shared/videoScrapeTypes'
++
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  const promise = new Promise<T>(yes => { resolve = yes })
++  return { promise, resolve }
++}
++const pages: PendingVideoScrapePageQuery[] = []
++const details: Array<{id:number} & ReturnType<typeof deferred<PendingVideoScrape | null>>> = []
++let failPage = false
++let location = ''
++let navigate: NavigateFunction
++let holdOffset: number | undefined
++const heldPages: Array<{value:PendingVideoScrapePage} & ReturnType<typeof deferred<PendingVideoScrapePage>>> = []
++let total = 120
++let failCount = false
++const fakeApi = {
++  mediaLibraries: { list: async () => [] },
++  actressScrape: { listConflicts: async () => [], conflictSummary: async () => ({ totalGroups: 0 }) },
++  scan: { countPendingQueue: async () => 0, pagePendingQueue: async () => ({items: [], total: 0, offset: 0}) },
++  scrape: {
++    listPending: () => { throw new Error('Full inbox must never be requested') },
++    countPending: async () => { if(failCount)throw new Error('count failure');return total },
++    pagePending: async (query: PendingVideoScrapePageQuery) => {
++      pages.push(query)
++      if (failPage) { failPage = false; throw new Error('injected page failure') }
++      const anchor = query.videoId ?? query.anchorId
++      const offset = anchor && anchor <= total ? Math.floor((anchor - 1) / 50) * 50 : Math.min(query.offset ?? 0, Math.max(0, Math.floor((total-1)/50)*50))
++      const value = { total, offset, items: Array.from({length:Math.min(50,total-offset)},(_,i)=>({
++        id:offset+i+1,videoId:offset+i+1,revision:1,code:`CODE-${offset+i+1}`,
++        candidateCount:2,sourceCount:1,stagedCoverPath:null
++      })) }
++      if(holdOffset === offset) { holdOffset=undefined; const held={value,...deferred<PendingVideoScrapePage>()};heldPages.push(held);return held.promise }
++      return value
++    },
++    getPending: (id:number) => { const request={id,...deferred<PendingVideoScrape | null>()}; details.push(request); return request.promise }
++  },
++  videos: { get: async () => null }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fakeApi})})
++let renderer: TestRenderer.ReactTestRenderer | undefined
++let client: QueryClient | undefined
++function LocationProbe(): null { navigate=useNavigate(); const current=useLocation(); location=current.search; return null }
++async function settle(): Promise<void> {
++  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,15))})
++}
++async function mount(url='/pending?type=scrape'): Promise<void> {
++  const Page=(await import('./PendingCenterPage')).default
++  client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++  await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client!}>
++    <MemoryRouter initialEntries={[url]}><LocationProbe/><Page/></MemoryRouter>
++  </QueryClientProvider>)})
++  await settle(); await settle()
++}
++function content(node:TestRenderer.ReactTestInstance):string {
++  return node.children.map(child=>typeof child==='string'?child:content(child)).join('')
++}
++async function click(label:string):Promise<void> {
++  const button=renderer!.root.findAllByType('button').find(node=>content(node)===label)
++  assert.ok(button,label);assert.ok(!button.props.disabled)
++  await act(async()=>{button.props.onClick()});await settle();await settle()
++}
++afterEach(async()=>{
++  await act(async()=>{renderer?.unmount()});client?.clear();renderer=undefined;client=undefined
++  pages.length=0;details.length=0;failPage=false;failCount=false;total=120;holdOffset=undefined;heldPages.length=0
++})
++
++it('locates a deep-linked pending item, pages with a bounded cache and ignores a late detail',async()=>{
++  await mount('/pending?type=scrape&videoId=110')
++  assert.equal(pages[0].videoId,110)
++  assert.ok(location.includes('scrape%3A110'))
++  assert.ok(location.includes('scrapeOffset=100'))
++  assert.deepEqual(details.map(entry=>entry.id),[110])
++  assert.equal(renderer!.root.findAllByType('button').filter(node=>node.props['aria-current'] !== undefined).length,20)
++  await click('上一页')
++  assert.equal(details.at(-1)!.id,51)
++  await act(async()=>{details[0].resolve({id:110,videoId:110,revision:1,sources:[],warnings:[],selectedFields:[],applicableFields:[],updateMode:'replace',createdAt:'2026',updatedAt:'2026',stagedBytes:0})})
++  await settle()
++  const Pane=(await import('./PendingScrapePane')).default
++  assert.equal(renderer!.root.findAllByType(Pane).length,0,'old detail cannot appear on new selection')
++  await act(async()=>{details.at(-1)!.resolve(null)});await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'))
++  assert.ok(client!.getQueryCache().findAll({queryKey:['pending-video-scrapes']}).length<=2,'only current summary and selected detail remain')
++})
++
++it('shows an explicit page error and retries without fetching the full inbox',async()=>{
++  failPage=true
++  await mount()
++  assert.ok(content(renderer!.root).includes('待确认刮削读取失败'))
++  assert.equal(details.length,0)
++  await click('重试')
++  assert.equal(details.at(-1)!.id,1)
++  assert.ok(content(renderer!.root).includes('120 项待处理'))
++})
++
++
++it('recovers the last page after deletion and selects the surviving first item',async()=>{
++  total=101
++  await mount('/pending?type=scrape&item=scrape%3A101&scrapeOffset=100')
++  assert.equal(details.at(-1)!.id,101)
++  await act(async()=>{details.at(-1)!.resolve(null)});await settle()
++  total=100
++  await click('刷新队列')
++  assert.ok(location.includes('scrape%3A51'))
++  assert.ok(location.includes('scrapeOffset=50'))
++  assert.equal(details.at(-1)!.id,51)
++})
++
++it('does not block a different queue when scrape count fails or reuse its disabled page total',async()=>{
++  await mount('/pending')
++  const calls=pages.length
++  total=7
++  await act(async()=>{navigate('/pending?type=scan&item=scrape%3A1')});await settle();await settle()
++  assert.ok(content(renderer!.root).includes('没有扫描资源待确认项'))
++  assert.equal(pages.length,calls)
++  const badge=renderer!.root.findAllByType('em').find(node=>content(node)==='7')
++  assert.ok(badge,'disabled page total must not override refreshed count')
++  failCount=true
++  await act(async()=>{await client!.invalidateQueries({queryKey:['pending-video-scrape-count']})});await settle()
++  assert.ok(content(renderer!.root).includes('没有扫描资源待确认项'))
++  assert.ok(!content(renderer!.root).includes('待确认刮削读取失败'))
++})
++
++
++it('ignores an old page that resolves after navigation to a newer page',async()=>{
++  await mount()
++  holdOffset=50
++  await act(async()=>{navigate('/pending?type=scrape&scrapeOffset=50')});await settle()
++  assert.equal(heldPages.length,1)
++  await act(async()=>{navigate('/pending?type=scrape&scrapeOffset=100')});await settle();await settle()
++  assert.equal(details.at(-1)!.id,101)
++  await act(async()=>{heldPages[0].resolve(heldPages[0].value)});await settle()
++  assert.ok(location.includes('scrape%3A101'))
++  assert.equal(details.at(-1)!.id,101)
++  assert.ok(content(renderer!.root).includes('CODE-101'))
++  assert.ok(!content(renderer!.root).includes('CODE-51'))
++})
+diff --git a/scripts/performance/pending-scan-benchmark.ts b/scripts/performance/pending-scan-benchmark.ts
+new file mode 100644
+index 0000000..3350fb9
+--- /dev/null
++++ b/scripts/performance/pending-scan-benchmark.ts
+@@ -0,0 +1,45 @@
++/** Synthetic queue fixture. No user files/database. Repo time excludes JSON sizing/assertions. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++import { listPendingScanGroups, getPendingScanGroup } from '../../src/main/db/pendingScanRepo'
++import { listPendingResourceIdentities } from '../../src/main/db/pendingResourceIdentityRepo'
++import { pagePendingScanQueue, countPendingScanQueue } from '../../src/main/db/pendingScanQueueRepo'
++it('measures mixed scan summary pages against complete hydration',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-scan-bench-'))
++ try{
++  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++  db.transaction(()=>{
++   db.exec(`INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES(1,1,'/synthetic','/synthetic');
++    WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++    INSERT INTO pending_scan_groups(id,library_id,normalized_code,updated_at) SELECT x,1,'GROUP-'||x,'2026' FROM n;
++    INSERT INTO pending_resource_identities(id,library_id,root_id,file_path,normalized_path,source_kind,filename_code,nfo_code,updated_at)
++     SELECT id,1,1,'/synthetic/'||id||'.mp4','/synthetic/'||id||'.mp4','local','FILE-'||id,'NFO-'||id,'2026' FROM pending_scan_groups;`)
++   const insert=db.prepare('INSERT INTO pending_scan_resources(library_id,group_id,root_id,file_path,normalized_path,display_name) VALUES(1,?,1,?,?,?)')
++   for(let id=1;id<=10000;id++)for(let j=0;j<2;j++)insert.run(id,`/synthetic/${id}-${j}.mp4`,`/synthetic/${id}-${j}.mp4`,'x'.repeat(4096))
++  })()
++  db.exec('ANALYZE')
++  const results:Array<{name:string;samples:number[];medianMs:number;jsonBytes:number}>=[]
++  function measure(name:string,read:()=>unknown,verify:(value:unknown)=>void){
++   const samples:number[]=[];let jsonBytes=0
++   for(let i=0;i<3;i++){const start=performance.now();const value=read();samples.push(performance.now()-start);verify(value);jsonBytes=Buffer.byteLength(JSON.stringify(value))}
++   results.push({name,samples,medianMs:[...samples].sort((a,b)=>a-b)[1],jsonBytes})
++  }
++  measure('full',()=>({groups:listPendingScanGroups(1),identities:listPendingResourceIdentities(1)}),value=>{
++   const rows=value as {groups:ReturnType<typeof listPendingScanGroups>;identities:ReturnType<typeof listPendingResourceIdentities>}
++   assert.equal(rows.groups.length,10000);assert.equal(rows.identities.length,10000);assert.equal(rows.groups[9999].resources[1].displayName!.length,4096)
++  })
++  measure('summary.first',()=>pagePendingScanQueue({}),value=>assert.deepEqual(value,{total:20000,offset:0,items:Array.from({length:50},(_,i)=>({kind:'group',id:i+1,libraryId:1,revision:1,label:`GROUP-${i+1}`,resourceCount:2}))}))
++  measure('summary.identity.deep',()=>pagePendingScanQueue({anchor:{kind:'identity',id:9876}}),value=>assert.deepEqual(value,{total:20000,offset:19850,items:Array.from({length:50},(_,i)=>({kind:'identity',id:9851+i,libraryId:1,revision:1,label:`FILE-${9851+i} ↔ NFO-${9851+i}`,displayName:`${9851+i}.mp4`}))}))
++  measure('count',()=>countPendingScanQueue(),value=>assert.equal(value,20000))
++  measure('detail.selected',()=>getPendingScanGroup(1,9876),value=>{const row=value as NonNullable<ReturnType<typeof getPendingScanGroup>>;assert.equal(row.id,9876);assert.equal(row.resources.length,2)})
++  const result={groups:10000,identities:10000,resourcesPerGroup:2,resourceDisplayNameCharacters:4096,results,platform:process.platform,arch:process.arch,
++   sqliteVersion:db.prepare('SELECT sqlite_version() AS version').get(),caveats:['Three sequential warm synthetic samples after ANALYZE; not p95, cold Windows/HDD or full IPC.','Repo time excludes assertions and JSON serialization. JSON bytes approximate transport payload.','Count, UNION ordering, OFFSET and anchor rank still scale with queue size; queries remain on main thread.','Selected group resources remain unbounded; this fixture has only two per group. Full hydration is measured first.']}
++  if(process.env.JAVDEX_SCAN_BENCH_OUTPUT)fs.writeFileSync(path.resolve(process.env.JAVDEX_SCAN_BENCH_OUTPUT),JSON.stringify(result,null,2)+'\n')
++  console.log(JSON.stringify(result))
++ }finally{closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})
+diff --git a/scripts/performance/pending-scan-ui.mjs b/scripts/performance/pending-scan-ui.mjs
+new file mode 100644
+index 0000000..f6a85d2
+--- /dev/null
++++ b/scripts/performance/pending-scan-ui.mjs
+@@ -0,0 +1,70 @@
++/** Actual pending page/router/styles against a synthetic IPC fixture. No Electron/user catalog. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { createServer } from 'vite'
++import react from '@vitejs/plugin-react'
++import { chromium } from 'playwright-core'
++const repo=process.cwd(), root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-scan-ui-'))
++const output=path.resolve(process.env.JAVDEX_SCAN_UI_OUTPUT ?? path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><head><style>html,body,#root{height:100%;margin:0}#root{display:flex;min-height:0;overflow:hidden}</style></head><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';
++import {createRoot} from 'react-dom/client';
++import {MemoryRouter} from 'react-router-dom';
++import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__pages=[];window.__details=[];window.__fail=false;
++window.api={mediaLibraries:{list:async()=>[{id:1,name:'Synthetic'}]},actressScrape:{listConflicts:async()=>[],conflictSummary:async()=>({totalGroups:0})},scrape:{countPending:async()=>0,pagePending:async()=>({items:[],total:0,offset:0})},scan:{
++ listPending:()=>{throw new Error('Unbounded inbox');},listPendingResourceIdentities:()=>{throw new Error('Unbounded identities')},countPendingQueue:async()=>120,
++ pagePendingQueue:async query=>{window.__pages.push(query);if(window.__fail){window.__fail=false;throw new Error('fixture failure')};
++ const anchor=query.anchor?.id;const offset=anchor?Math.floor((anchor-1)/50)*50:(query.offset||0);
++ return {total:120,offset,items:Array.from({length:Math.min(50,120-offset)},(_,i)=>({kind:'group',id:offset+i+1,libraryId:1,revision:1,label:i===1?'长'.repeat(128)+'…':'GROUP-'+(offset+i+1),resourceCount:2}))};},
++ getPendingGroup:async (libraryId,id)=>{window.__details.push(id);return null;}
++
++}};
++const Page=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/pages/PendingCenterPage.tsx'))})).default;
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter initialEntries={['/pending?type=scan']}><Page/></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser
++const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();const port=server.httpServer.address().port
++ browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport});const errors=[]
++  page.on('pageerror',e=>errors.push(e.message))
++  await page.goto(`http://127.0.0.1:${port}`)
++  await page.getByRole('button',{name:'GROUP-1 Synthetic · 2 条资源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),50)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'GROUP-51 Synthetic · 2 条资源',exact:true}).waitFor()
++  await page.waitForFunction(()=>window.__details.at(-1)===51)
++  await page.evaluate(()=>{window.__fail=true})
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('待确认扫描读取失败',{exact:true}).waitFor()
++  await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.getByRole('button',{name:'GROUP-101 Synthetic · 2 条资源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),20)
++  await page.getByRole('button',{name:'上一页',exact:true}).scrollIntoViewIfNeeded()
++  const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth,height:innerHeight}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1)
++  const pager=await page.getByLabel('扫描队列分页',{exact:true}).boundingBox()
++  assert.ok(pager && pager.y>=0 && pager.y+pager.height<=viewport.height+1)
++  const heading=await page.getByRole('heading',{name:'待确认',exact:true}).boundingBox()
++  assert.ok(heading && heading.y>=0 && heading.y+heading.height<=viewport.height)
++  assert.deepEqual(await page.evaluate(()=>window.__details),[1,51,101])
++  assert.deepEqual(errors,[])
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,geometry,pager,pages:await page.evaluate(()=>window.__pages),details:await page.evaluate(()=>window.__details),errors})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n')
++ console.log(JSON.stringify(results))
++} finally {await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/pending-scrape-ui.mjs b/scripts/performance/pending-scrape-ui.mjs
+new file mode 100644
+index 0000000..e4d8026
+--- /dev/null
++++ b/scripts/performance/pending-scrape-ui.mjs
+@@ -0,0 +1,69 @@
++/** Actual pending page/router/styles against a synthetic IPC fixture. No Electron/user catalog. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { createServer } from 'vite'
++import react from '@vitejs/plugin-react'
++import { chromium } from 'playwright-core'
++const repo=process.cwd(), root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-ui-'))
++const output=path.resolve(process.env.JAVDEX_PENDING_UI_OUTPUT ?? path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><head><style>html,body,#root{height:100%;margin:0}#root{display:flex;min-height:0;overflow:hidden}</style></head><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';
++import {createRoot} from 'react-dom/client';
++import {MemoryRouter} from 'react-router-dom';
++import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__pages=[];window.__details=[];window.__fail=false;
++window.api={mediaLibraries:{list:async()=>[]},actressScrape:{listConflicts:async()=>[],conflictSummary:async()=>({totalGroups:0})},scan:{countPendingQueue:async()=>0,pagePendingQueue:async()=>({items:[],total:0,offset:0})},scrape:{
++ listPending:()=>{throw new Error('Unbounded inbox');},countPending:async()=>120,
++ pagePending:async query=>{window.__pages.push(query);if(window.__fail){window.__fail=false;throw new Error('fixture failure')};
++ const anchor=query.videoId||query.anchorId;const offset=anchor?Math.floor((anchor-1)/50)*50:(query.offset||0);
++ return {total:120,offset,items:Array.from({length:Math.min(50,120-offset)},(_,i)=>({id:offset+i+1,videoId:offset+i+1,revision:1,code:i===1?'长'.repeat(128)+'…':'CODE-'+(offset+i+1),candidateCount:2,sourceCount:1,stagedCoverPath:null}))};},
++ getPending:async id=>{window.__details.push(id);return null;}
++}};
++const Page=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/pages/PendingCenterPage.tsx'))})).default;
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter initialEntries={['/pending?type=scrape']}><Page/></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser
++const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();const port=server.httpServer.address().port
++ browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport});const errors=[]
++  page.on('pageerror',e=>errors.push(e.message))
++  await page.goto(`http://127.0.0.1:${port}`)
++  await page.getByRole('button',{name:'CODE-1 2 个候选 · 1 个来源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),50)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'CODE-51 2 个候选 · 1 个来源',exact:true}).waitFor()
++  await page.waitForFunction(()=>window.__details.at(-1)===51)
++  await page.evaluate(()=>{window.__fail=true})
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('待确认刮削读取失败',{exact:true}).waitFor()
++  await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.getByRole('button',{name:'CODE-101 2 个候选 · 1 个来源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),20)
++  await page.getByRole('button',{name:'上一页',exact:true}).scrollIntoViewIfNeeded()
++  const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth,height:innerHeight}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1)
++  const pager=await page.getByLabel('刮削队列分页',{exact:true}).boundingBox()
++  assert.ok(pager && pager.y>=0 && pager.y+pager.height<=viewport.height+1)
++  const heading=await page.getByRole('heading',{name:'待确认',exact:true}).boundingBox()
++  assert.ok(heading && heading.y>=0 && heading.y+heading.height<=viewport.height)
++  assert.deepEqual(await page.evaluate(()=>window.__details),[1,51,101])
++  assert.deepEqual(errors,[])
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,geometry,pager,pages:await page.evaluate(()=>window.__pages),details:await page.evaluate(()=>window.__details),errors})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n')
++ console.log(JSON.stringify(results))
++} finally {await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}

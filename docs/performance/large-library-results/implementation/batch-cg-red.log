@@ -1,0 +1,46 @@
+▶ libraryScanRepo latest snapshot
+  ✔ updates the pending path after a rename without rewriting the original scan audit (9.054959ms)
+  ✔ returns summary, audit, and unrecognized files only from the requested library (6.320667ms)
+  ✔ transactionally settles scan runs abandoned by the previous process (8.194666ms)
+  ✔ releases archive and root-migration busy gates after restart recovery (8.33825ms)
+  ✔ returns an empty snapshot before the first run and rejects an unknown library (6.032042ms)
+✔ libraryScanRepo latest snapshot (38.348375ms)
+✔ reads a scoped audit header without loading audit JSON or pending path arrays (13.382459ms)
+✔ keeps summary failure semantics and rejects oversized summary/header payloads (8.3685ms)
+✔ keeps header summary, audit availability and unrecognized count in one WAL snapshot (6.805833ms)
+▶ finishLibraryScanRun unrecognized replacement transaction
+  ✖ finishes with 40000 replacement root IDs without exceeding SQLite bind limits (10.70275ms)
+  ✔ deduplicates replacement roots and skips incoming files outside the selected roots (6.221ms)
+  ✔ clears selected roots when there are no matching incoming files and preserves other roots (5.741625ms)
+  ✔ does not replace files for absent root targets (6.175125ms)
+  ✔ does not replace files for empty root targets (5.888625ms)
+  ✔ failed run never replaces preexisting unrecognized rows (7.498084ms)
+  ✔ cancelled run never replaces preexisting unrecognized rows (7.54525ms)
+  ✔ rolls back run, state and all original unrecognized rows when a duplicate normalized path fails insertion (6.233208ms)
+✖ finishLibraryScanRun unrecognized replacement transaction (56.195625ms)
+ℹ tests 16
+ℹ suites 2
+ℹ pass 15
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 330.718209
+
+✖ failing tests:
+
+test at src/main/db/libraryScanRepo.test.ts:21:8594
+✖ finishes with 40000 replacement root IDs without exceeding SQLite bind limits (10.70275ms)
+  Error [SqliteError]: too many SQL variables
+      at Database.prepare (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/wrappers.js:5:21)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/libraryScanRepo.ts:220:10)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at finishLibraryScanRun (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/libraryScanRepo.ts:243:4)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/libraryScanRepo.test.ts:444:5)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1794:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    code: 'SQLITE_ERROR'
+  }

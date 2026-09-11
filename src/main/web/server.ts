@@ -1,3 +1,5 @@
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '../services/mediaAssetStore'
+import { parseImageThumbnailSize, type ImageThumbnailSize } from '@shared/imageVariants'
 import {
   createServer,
   type Server,
@@ -411,16 +413,27 @@ export class WebServer {
         })
         return
       }
-      if (url.pathname === '/api/collections') {
-        json(response, 200, this.options.catalog.collections())
-        return
-      }
-      if (url.pathname === '/api/home') {
-        json(response, 200, this.options.catalog.home(url.searchParams.get('seed') ?? 'web'))
-        return
-      }
-      if (url.pathname === '/api/videos') {
-        json(response, 200, this.options.catalog.browse(url.searchParams))
+      if (['/api/collections','/api/home','/api/videos'].includes(url.pathname)) {
+        const controller = new AbortController()
+        const abort = (): void => controller.abort()
+        response.once('close', abort)
+        try {
+          if (response.destroyed) controller.abort()
+          const result = await (url.pathname === '/api/collections'
+            ? this.options.catalog.collections(controller.signal)
+            : url.pathname === '/api/home'
+              ? this.options.catalog.home(url.searchParams.get('seed') ?? 'web',controller.signal)
+              : this.options.catalog.browse(url.searchParams,controller.signal))
+          if (response.destroyed || controller.signal.aborted) return
+          if (!this.sessions.check(token(request))) throw new WebError(401,'请先登录')
+          json(response,200,result)
+        } catch (error) {
+          if (response.destroyed || controller.signal.aborted) return
+          if (error instanceof WebError) throw error
+          throw new WebError(503,'目录读取暂不可用，请稍后重试')
+        } finally {
+          response.off('close',abort)
+        }
         return
       }
       const match =
@@ -434,10 +447,28 @@ export class WebServer {
         return
       }
       if (match[2] === 'images') {
-        const image = this.options.catalog.image(id, match[3])
-        response.setHeader('Content-Type', image.mime)
-        response.setHeader('Content-Length', image.body.length)
-        response.end(method === 'HEAD' ? undefined : image.body)
+        let size: ImageThumbnailSize | undefined
+        try { size = parseImageThumbnailSize(url.searchParams.get('size')) }
+        catch { throw new WebError(400, '图片尺寸参数无效') }
+        const controller = new AbortController()
+        const abort = (): void => controller.abort()
+        response.once('close', abort)
+        try {
+          if (response.destroyed) controller.abort()
+          const image = await this.options.catalog.image(id, match[3], controller.signal, size)
+          if (response.destroyed || controller.signal.aborted) return
+          if (!this.sessions.check(token(request))) throw new WebError(401, '请先登录')
+          response.setHeader('Content-Type', image.mime)
+          response.setHeader('Content-Length', image.body.length)
+          response.end(method === 'HEAD' ? undefined : image.body)
+        } catch (error) {
+          if (error instanceof AssetReadQueueFullError) throw new WebError(503, '图片读取繁忙，请稍后重试')
+          if (error instanceof AssetReadTooLargeError) throw new WebError(413, '图片文件过大')
+          if (error instanceof AssetPixelLimitError) throw new WebError(413, '图片像素尺寸过大')
+          throw error
+        } finally {
+          response.off('close', abort)
+        }
         return
       }
       const download = url.searchParams.get('download') === '1'

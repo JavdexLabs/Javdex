@@ -1,0 +1,1876 @@
+diff --git a/docs/ROUTING_DESIGN.md b/docs/ROUTING_DESIGN.md
+index 651d074..f74c065 100644
+--- a/docs/ROUTING_DESIGN.md
++++ b/docs/ROUTING_DESIGN.md
+@@ -32,7 +32,7 @@
+ - `/playlists`: 清单列表。
+ - `/playlists/:playlistId`: 清单详情。
+ - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
+-- `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。
++- `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。扫描组合队列使用 `scanOffset`，刮削队列使用 `scrapeOffset`，演员队列使用 `actressOffset` 保存分页位置；扫描 `item=scan:<id>` / `item=scan:identity-<id>` 在所选 `lib` 的活动库范围内定位。`item=scrape:<id>` 或 `videoId` 深链接由服务端定位所在页，删除后的越界页回退到最后一页。演员 `item=actress:<normalizedName>` 使用完整名称定位所在页；`queue` 标记翻页目标领域，避免全部视图跳到其他队列。列表只读概要，URL 选中项及分页偏移规范化后才加载单项候选详情。
+ - `/actresses/conflicts`: 旧的演员冲突入口，重定向到 `/pending?type=actress`。
+ - `/pending/video/:videoId`: 从待确认工作台打开影片详情。
+ - `/pending/video/:videoId/actress/:actressId`: 从待确认影片详情继续打开演员详情。
+diff --git a/src/renderer/src/listView/listQueryParams.ts b/src/renderer/src/listView/listQueryParams.ts
+index e01043b..0998afa 100644
+--- a/src/renderer/src/listView/listQueryParams.ts
++++ b/src/renderer/src/listView/listQueryParams.ts
+@@ -21,6 +21,10 @@ export const LIST_PARAM = {
+   pendingType: 'type',
+   pendingItem: 'item',
+   pendingVideoId: 'videoId',
++  pendingScrapeOffset: 'scrapeOffset',
++  pendingScanOffset: 'scanOffset',
++  pendingActressOffset: 'actressOffset',
++  pendingQueueDomain: 'queue',
+   pendingLibraryId: 'lib'
+ } as const
+ 
+diff --git a/src/renderer/src/listView/pendingRoutes.ts b/src/renderer/src/listView/pendingRoutes.ts
+index 90974b0..a7115ed 100644
+--- a/src/renderer/src/listView/pendingRoutes.ts
++++ b/src/renderer/src/listView/pendingRoutes.ts
+@@ -54,14 +54,26 @@ export function parsePendingCenterSearch(params: URLSearchParams): {
+   item: PendingItemKey | null
+   videoId: number | null
+   libraryId: number | null
++  scrapeOffset: number
++  scanOffset: number
++  actressOffset: number
++  queueDomain: PendingDomain | null
+ } {
++  const actressOffset = Number(params.get(LIST_PARAM.pendingActressOffset))
++  const scanOffset = Number(params.get(LIST_PARAM.pendingScanOffset))
++  const scrapeOffset = Number(params.get(LIST_PARAM.pendingScrapeOffset))
++  const queueDomain = params.get(LIST_PARAM.pendingQueueDomain)
+   const rawType = params.get(LIST_PARAM.pendingType)
+   const videoId = Number(params.get(LIST_PARAM.pendingVideoId))
+   const libraryId = Number(params.get(LIST_PARAM.pendingLibraryId))
+   return {
++    queueDomain: isPendingDomain(queueDomain) ? queueDomain : null,
++    actressOffset: Number.isSafeInteger(actressOffset) && actressOffset >= 0 ? actressOffset : 0,
++    scanOffset: Number.isSafeInteger(scanOffset) && scanOffset >= 0 ? scanOffset : 0,
++    scrapeOffset: Number.isSafeInteger(scrapeOffset) && scrapeOffset >= 0 ? scrapeOffset : 0,
+     type: isPendingDomain(rawType) ? rawType : 'all',
+     item: parsePendingItemKey(params.get(LIST_PARAM.pendingItem)),
+-    videoId: Number.isInteger(videoId) && videoId > 0 ? videoId : null,
++    videoId: Number.isSafeInteger(videoId) && videoId > 0 ? videoId : null,
+     libraryId: Number.isSafeInteger(libraryId) && libraryId > 0 ? libraryId : null
+   }
+ }
+@@ -72,6 +84,10 @@ export function pendingCenterPath(
+     item?: PendingItemKey | null
+     videoId?: number
+     libraryId?: number
++    queueDomain?: PendingDomain
++    actressOffset?: number
++    scanOffset?: number
++    scrapeOffset?: number
+   } = {}
+ ): string {
+   const params = new URLSearchParams()
+@@ -81,6 +97,16 @@ export function pendingCenterPath(
+   if (options.libraryId != null) {
+     params.set(LIST_PARAM.pendingLibraryId, String(options.libraryId))
+   }
++  if (options.scrapeOffset && Number.isSafeInteger(options.scrapeOffset) && options.scrapeOffset > 0) {
++    params.set(LIST_PARAM.pendingScrapeOffset, String(options.scrapeOffset))
++  }
++  if (options.scanOffset && Number.isSafeInteger(options.scanOffset) && options.scanOffset > 0) {
++    params.set(LIST_PARAM.pendingScanOffset, String(options.scanOffset))
++  }
++  if (options.actressOffset && Number.isSafeInteger(options.actressOffset) && options.actressOffset > 0) {
++    params.set(LIST_PARAM.pendingActressOffset, String(options.actressOffset))
++  }
++  if (options.queueDomain) params.set(LIST_PARAM.pendingQueueDomain, options.queueDomain)
+   const query = params.toString()
+   return query ? `${ROUTE_PATH.pending}?${query}` : ROUTE_PATH.pending
+ }
+diff --git a/src/renderer/src/listView/routeContracts.test.ts b/src/renderer/src/listView/routeContracts.test.ts
+index 8962375..c876251 100644
+--- a/src/renderer/src/listView/routeContracts.test.ts
++++ b/src/renderer/src/listView/routeContracts.test.ts
+@@ -165,7 +165,11 @@ describe('route builders and parsers', () => {
+       type: 'scrape',
+       item: { domain: 'scrape', id: '7' },
+       videoId: null,
+-      libraryId: null
++      libraryId: null,
++      queueDomain: null,
++      actressOffset: 0,
++      scanOffset: 0,
++      scrapeOffset: 0
+     })
+     // Actress ids are normalized names, so only the first separator splits the key.
+     assert.deepEqual(parsePendingItemKey('actress:a:b'), { domain: 'actress', id: 'a:b' })
+@@ -174,14 +178,31 @@ describe('route builders and parsers', () => {
+       type: 'all',
+       item: null,
+       videoId: null,
+-      libraryId: null
++      libraryId: null,
++      queueDomain: null,
++      actressOffset: 0,
++      scanOffset: 0,
++      scrapeOffset: 0
+     })
+     assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('type=scan&lib=7')), {
+       type: 'scan',
+       item: null,
+       videoId: null,
+-      libraryId: 7
+-    })
++      libraryId: 7,
++      queueDomain: null,
++      actressOffset: 0,
++      scanOffset: 0,
++      scrapeOffset: 0
++    })
++    const actorPage = pendingCenterPath({ type: 'all', actressOffset: 100, scanOffset: 50, scrapeOffset: 150, queueDomain: 'actress' })
++    const actorQuery = parsePendingCenterSearch(new URLSearchParams(actorPage.split('?')[1]))
++    assert.equal(actorQuery.actressOffset, 100)
++    assert.equal(actorQuery.scanOffset, 50)
++    assert.equal(actorQuery.scrapeOffset, 150)
++    assert.equal(actorQuery.queueDomain, 'actress')
++    const invalidActorQuery = parsePendingCenterSearch(new URLSearchParams('actressOffset=-1&queue=invalid'))
++    assert.equal(invalidActorQuery.actressOffset, 0)
++    assert.equal(invalidActorQuery.queueDomain, null)
+     assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
+     assert.equal(pendingVideoActressPath(42, 7), '/pending/video/42/actress/7')
+     assert.equal(pendingActressDetailPath(8), '/pending/actress/8')
+diff --git a/src/renderer/src/pages/PendingCenterPage.test.tsx b/src/renderer/src/pages/PendingCenterPage.test.tsx
+index 1e4a85b..5bfb4d7 100644
+--- a/src/renderer/src/pages/PendingCenterPage.test.tsx
++++ b/src/renderer/src/pages/PendingCenterPage.test.tsx
+@@ -109,9 +109,13 @@ const fakeApi = {
+     list: async () => [{ id: 1, name: '测试媒体库' }]
+   },
+   scan: {
+-    listPending: async () => [],
+-    listPendingResourceIdentities: async () =>
+-      identityMode && !identityResolved ? [identity] : [],
++    listPending: () => { throw new Error('Unbounded scan queue') },
++    listPendingResourceIdentities: () => { throw new Error('Unbounded identity queue') },
++    countPendingQueue: async () => identityMode && !identityResolved ? 1 : 0,
++    pagePendingQueue: async () => ({total: identityMode && !identityResolved ? 1 : 0, offset: 0,
++      items: identityMode && !identityResolved ? [{kind: 'identity', id: 4, libraryId: 1, revision: 3,
++        label: 'FILE-001 ↔ NFO-002', displayName: identity.displayName}] : []}),
++    getPendingIdentity: async () => identityMode && !identityResolved ? identity : null,
+     resolvePendingResourceIdentity: async (
+       _libraryId: number,
+       _identityId: number,
+@@ -123,11 +127,17 @@ const fakeApi = {
+     }
+   },
+   actressScrape: {
+-    listConflicts: async () => [],
++    listConflicts: () => { throw new Error('Full actress queue is forbidden') },
++    pageConflicts: async () => ({items:[],total:0,offset:0}),
+     conflictSummary: async () => ({ groupCount: 0, conflictGroupCount: 0, applicableGroupCount: 0 })
+   },
+   scrape: {
+-    listPending: async () => (identityMode || resolved ? [] : [pending]),
++    listPending: async () => { throw new Error('Full pending inbox must not be loaded') },
++    countPending: async () => identityMode || resolved ? 0 : 1,
++    pagePending: async () => ({ total: identityMode || resolved ? 0 : 1, offset: 0,
++      items: identityMode || resolved ? [] : [{id:pending.id,videoId:pending.videoId,revision:pending.revision,
++        code:'ABC-123',candidateCount:1,sourceCount:1,stagedCoverPath:null}] }),
++    getPending: async () => identityMode || resolved ? null : pending,
+     discardPending: async () => true,
+     confirmPending: async (input: PendingVideoScrapeConfirmInput) => {
+       confirmationInputs.push(input)
+@@ -277,7 +287,7 @@ describe('PendingCenterPage scrape resolution', () => {
+       await Promise.resolve()
+     })
+     await waitFor(() =>
+-      Boolean(renderer && nodeText(renderer.root).includes('FILE-001 ↔ NFO-002'))
++      Boolean(renderer && renderer.root.findAllByProps({ name: 'resource-identity' }).some(node => node.type === 'input'))
+     )
+ 
+     const choices = renderer!.root.findAllByProps({ name: 'resource-identity' }).filter((node) => node.type === 'input')
+@@ -338,7 +348,7 @@ describe('PendingCenterPage scrape resolution', () => {
+     })
+     await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('此媒体库没有扫描待确认项')))
+     await act(async () => button('查看所有媒体库').props.onClick())
+-    assert.ok(nodeText(renderer!.root).includes('没有扫描资源待确认项'))
++    await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('没有扫描资源待确认项')))
+     assert.equal(button('扫描资源').props['aria-selected'], true)
+     assert.equal(renderer!.root.findByProps({ role: 'tabpanel' }).props['aria-labelledby'], 'pending-types-scan')
+     assert.equal(button('所有媒体库').props['aria-label'], '按媒体库筛选扫描待确认项')
+diff --git a/src/renderer/src/pages/PendingCenterPage.tsx b/src/renderer/src/pages/PendingCenterPage.tsx
+index c6959df..9e7247a 100644
+--- a/src/renderer/src/pages/PendingCenterPage.tsx
++++ b/src/renderer/src/pages/PendingCenterPage.tsx
+@@ -1,4 +1,5 @@
+-import { useCallback, useEffect, useRef } from 'react'
++import type { PendingScanQueueItem, PendingScanQueueQuery } from '@shared/libraryTypes'
++import { useCallback, useEffect, useRef, useState } from 'react'
+ import { useQuery, useQueryClient } from '@tanstack/react-query'
+ import { CircleAlert, ListChecks, ScanSearch, UsersRound } from 'lucide-react'
+ import { useMatch, useNavigate, useSearchParams } from 'react-router-dom'
+@@ -35,7 +36,6 @@ import styles from './PendingCenterPage.module.css'
+ import {
+   PENDING_DOMAIN_LABEL,
+   buildPendingQueueSections,
+-  pendingQueueTotal,
+   resolvePendingSelection
+ } from './pendingCenterState'
+ import { useConflictReviewController } from './useConflictReviewController'
+@@ -59,6 +59,10 @@ export default function PendingCenterPage(): JSX.Element {
+     type,
+     item: urlItem,
+     videoId: videoFromUrl,
++    scrapeOffset,
++    scanOffset,
++    actressOffset,
++    queueDomain,
+     libraryId: requestedLibraryId
+   } = parsePendingCenterSearch(params)
+ 
+@@ -75,54 +79,78 @@ export default function PendingCenterPage(): JSX.Element {
+     (librariesQuery.data ?? []).map((library) => [library.id, library.name])
+   )
+ 
++  const scanEnabled = (type === 'all' || type === 'scan') && !detailOpen
++  const scanAnchorId = urlItem?.domain === 'scan'
++    ? Number(urlItem.id.replace(/^identity-/, '')) : NaN
++  const scanPageQuery: PendingScanQueueQuery = {
++    limit: 50, offset: scanOffset, libraryId: selectedLibraryId ?? undefined,
++    anchor: Number.isSafeInteger(scanAnchorId) && scanAnchorId > 0
++      ? { kind: urlItem!.id.startsWith('identity-') ? 'identity' : 'group', id: scanAnchorId }
++      : undefined
++  }
+   const scanQuery = useQuery({
+-    queryKey: ['pending-scan-groups', libraryIds.join(',')],
+-    queryFn: async () =>
+-      (await Promise.all(libraryIds.map((libraryId) => api.scan.listPending(libraryId)))).flat(),
+-    enabled: librariesQuery.isSuccess
++    queryKey: ['pending-scan-groups', 'page', scanPageQuery],
++    queryFn: () => api.scan.pagePendingQueue(scanPageQuery),
++    enabled: librariesQuery.isSuccess && scanEnabled, gcTime: 0
+   })
+-  const identityQuery = useQuery({
+-    queryKey: ['pending-resource-identities', libraryIds.join(',')],
+-    queryFn: async () =>
+-      (
+-        await Promise.all(
+-          libraryIds.map((libraryId) => api.scan.listPendingResourceIdentities(libraryId))
+-        )
+-      ).flat(),
+-    enabled: librariesQuery.isSuccess
++  const scanCountQuery = useQuery({
++    queryKey: ['pending-scan-groups', 'count'],
++    queryFn: () => api.scan.countPendingQueue(),
++    enabled: !scanEnabled && !detailOpen
+   })
++  const scrapeEnabled = (type === 'all' || type === 'scrape') && !detailOpen
++  const scrapeAnchor = urlItem?.domain === 'scrape' && Number.isSafeInteger(Number(urlItem.id)) && Number(urlItem.id) > 0
++    ? Number(urlItem.id) : undefined
++  const scrapePageQuery = {
++    limit: 50, offset: scrapeOffset,
++    ...(videoFromUrl != null ? { videoId: videoFromUrl } : { anchorId: scrapeAnchor })
++  }
+   const scrapeQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending()
++    queryKey: ['pending-video-scrapes', 'page', scrapePageQuery],
++    queryFn: () => api.scrape.pagePending(scrapePageQuery),
++    enabled: scrapeEnabled,
++    gcTime: 0
++  })
++  const scrapeCountQuery = useQuery({
++    queryKey: ['pending-video-scrape-count'],
++    queryFn: () => api.scrape.countPending(),
++    enabled: !scrapeEnabled && !detailOpen
++  })
++  const actressEnabled = (type === 'all' || type === 'actress') && !detailOpen
++  const actressPageQuery = {
++    limit: 50, offset: actressOffset,
++    anchorName: urlItem?.domain === 'actress' ? urlItem.id : undefined
++  }
++  const actressQuery = useQuery({
++    queryKey: [...actressKeys.conflicts(), 'page', actressPageQuery],
++    queryFn: () => api.actressScrape.pageConflicts(actressPageQuery),
++    enabled: actressEnabled, gcTime: 0
++  })
++  const actressSummaryQuery = useQuery({
++    queryKey: actressKeys.conflictSummary(),
++    queryFn: () => api.actressScrape.conflictSummary(),
++    enabled: !actressEnabled && !detailOpen
+   })
+-  const conflict = useConflictReviewController()
+ 
+-  const allScanGroups = scanQuery.data ?? []
+-  const scanGroups =
+-    selectedLibraryId == null
+-      ? allScanGroups
+-      : allScanGroups.filter((group) => group.libraryId === selectedLibraryId)
+-  const allResourceIdentities = identityQuery.data ?? []
+-  const resourceIdentities =
+-    selectedLibraryId == null
+-      ? allResourceIdentities
+-      : allResourceIdentities.filter((identity) => identity.libraryId === selectedLibraryId)
+-  const scrapeItems = scrapeQuery.data ?? []
+-  const conflictGroups = conflict.queue.groups
++  const scanItems = scanQuery.data?.items ?? []
++  const scanTotal = scanEnabled ? scanQuery.data?.total ?? 0 : scanCountQuery.data ?? 0
++  const scrapeItems = scrapeQuery.data?.items ?? []
++  const scrapeTotal = scrapeEnabled ? scrapeQuery.data?.total ?? 0 : scrapeCountQuery.data ?? 0
++  const conflictItems = actressQuery.data?.items ?? []
++  const actressTotal = actressEnabled ? actressQuery.data?.total ?? 0 : actressSummaryQuery.data?.groupCount ?? 0
+   const queueInput = {
+-    scanGroups,
+-    resourceIdentities,
++    scanItems,
+     scrapeItems,
+-    conflictGroups,
++    conflictItems,
+     libraryNames
+   }
+   const sections = buildPendingQueueSections(queueInput, type)
+   const counts: Record<PendingTypeFilter, number> = {
+     all:
+-      scanGroups.length + resourceIdentities.length + scrapeItems.length + conflictGroups.length,
+-    scan: scanGroups.length + resourceIdentities.length,
+-    scrape: scrapeItems.length,
+-    actress: conflictGroups.length
++      scanTotal + scrapeTotal + actressTotal,
++    scan: scanTotal,
++    scrape: scrapeTotal,
++    actress: actressTotal
+   }
+ 
+   // A video deep link wins over the stored item so "查看待确认候选" always lands right.
+@@ -130,15 +158,17 @@ export default function PendingCenterPage(): JSX.Element {
+     ? null
+     : scrapeItems.find((entry) => entry.videoId === videoFromUrl)
+   const requested = deepLinked ? pendingItemKey('scrape', deepLinked.id) : urlItem
+-  const selected = resolvePendingSelection(sections, requested)
++  const selected = resolvePendingSelection(sections, requested, queueDomain ?? requested?.domain)
+ 
+   const loading =
+-    librariesQuery.isLoading ||
+-    scanQuery.isLoading ||
+-    identityQuery.isLoading ||
+-    scrapeQuery.isLoading ||
+-    conflict.queue.loading
+-  const total = pendingQueueTotal(sections)
++    (scanEnabled && librariesQuery.isLoading) ||
++    (scanEnabled && scanQuery.isLoading) ||
++    (scrapeEnabled && scrapeQuery.isLoading) ||
++    (actressEnabled && actressQuery.isLoading)
++  const total = counts[type]
++  const scanError = scanEnabled && (librariesQuery.isError || scanQuery.isError)
++  const actressError = actressEnabled && actressQuery.isError
++  const scrapeError = scrapeEnabled && scrapeQuery.isError
+ 
+   const selectItem = useCallback(
+     (key: PendingItemKey, replace = false) => {
+@@ -146,30 +176,55 @@ export default function PendingCenterPage(): JSX.Element {
+         pendingCenterPath({
+           type,
+           item: key,
+-          libraryId: selectedLibraryId ?? undefined
++          libraryId: selectedLibraryId ?? undefined,
++          actressOffset: actressQuery.data?.offset ?? actressOffset,
++          scanOffset: scanQuery.data?.offset ?? scanOffset,
++          scrapeOffset: scrapeQuery.data?.offset ?? scrapeOffset
+         }),
+         { replace }
+       )
+     },
+-    [navigate, selectedLibraryId, type]
++    [navigate, selectedLibraryId, type, actressQuery.data?.offset, actressOffset, scanQuery.data?.offset, scanOffset, scrapeQuery.data?.offset, scrapeOffset]
+   )
+ 
+-  // Canonicalize the URL: resolve deep links and drop selections that no longer exist.
++  const canonicalOffsets = (!scanEnabled || (scanQuery.data?.offset ?? scanOffset) === scanOffset) &&
++    (!scrapeEnabled || (scrapeQuery.data?.offset ?? scrapeOffset) === scrapeOffset) &&
++    (!actressEnabled || (actressQuery.data?.offset ?? actressOffset) === actressOffset)
++
++  // Canonicalize deep links and actual page offsets before requesting selected details.
+   useEffect(() => {
+-    if (loading || !selected) return
+-    if (videoFromUrl == null && samePendingItemKey(selected, urlItem)) return
++    if (loading || actressError || scanError || scrapeError || detailOpen || !selected) return
++    if (videoFromUrl == null && samePendingItemKey(selected, urlItem) && canonicalOffsets) return
+     selectItem(selected, true)
+-  }, [loading, selected, urlItem, videoFromUrl, selectItem])
++  }, [loading, actressError, scanError, scrapeError, detailOpen, selected, urlItem, videoFromUrl, canonicalOffsets, selectItem])
+ 
+-  // Actress conflicts keep their own session state; feed it the queue selection.
+-  const chooseConflictGroupRef = useRef(conflict.queue.chooseGroup)
+-  chooseConflictGroupRef.current = conflict.queue.chooseGroup
+-  const conflictSelectedName = conflict.queue.selectedGroup?.normalizedName ?? null
+-  useEffect(() => {
+-    if (selected?.domain !== 'actress' || conflictSelectedName === selected.id) return
+-    const group = conflictGroups.find((entry) => entry.normalizedName === selected.id)
+-    if (group) chooseConflictGroupRef.current(group)
+-  }, [selected?.domain, selected?.id, conflictSelectedName, conflictGroups])
++  const actorIntent = useRef(false)
++  actorIntent.current = actressEnabled && (urlItem?.domain === 'actress' ||
++    (!urlItem && (queueDomain === 'actress' || type === 'actress')))
++  const actorPageEnabled = useRef(actressEnabled)
++  actorPageEnabled.current = actressEnabled
++  const [actorFocusRequest, setActorFocusRequest] = useState(0)
++  const actorFocusHandled = useRef(0)
++  const actorPageRefetch = useRef(actressQuery.refetch)
++  actorPageRefetch.current = actressQuery.refetch
++  const onActorResolved = useCallback(async (): Promise<void> => {
++    if (!actorPageEnabled.current) return
++    await actorPageRefetch.current()
++    // Refetch may resolve before React removes the old confirmation control.
++    // Decide whether focus was lost after the canonical page has committed.
++    if (actorIntent.current) {
++      setActorFocusRequest(request => request + 1)
++    }
++  }, [])
++  const conflict = useConflictReviewController({
++    enabled: actressEnabled, summaryEnabled: false,
++    paged: {
++      sessionKey: JSON.stringify([type, urlItem?.domain, urlItem?.id]),
++      selectedName: selected?.domain === 'actress' && samePendingItemKey(selected, urlItem) && videoFromUrl == null && canonicalOffsets
++        ? selected.id : null,
++      onResolved: onActorResolved
++    }
++  })
+ 
+   const railButtons = useRef(new Map<string, HTMLButtonElement>())
+   const { focusAfterRefresh } = conflict.queue
+@@ -177,7 +232,7 @@ export default function PendingCenterPage(): JSX.Element {
+   focusHandledRef.current = conflict.queue.focusHandled
+   useEffect(() => {
+     if (focusAfterRefresh === undefined) return
+-    if (focusAfterRefresh) {
++    if (focusAfterRefresh && document.activeElement === document.body) {
+       railButtons.current
+         .get(formatPendingItemKey(pendingItemKey('actress', focusAfterRefresh)))
+         ?.focus()
+@@ -185,12 +240,24 @@ export default function PendingCenterPage(): JSX.Element {
+     focusHandledRef.current()
+   }, [focusAfterRefresh])
+ 
++  useEffect(() => {
++    if (actorFocusRequest === actorFocusHandled.current) return
++    if (!actorIntent.current) { actorFocusHandled.current = actorFocusRequest; return }
++    if (loading || actressError || detailOpen || selected?.domain !== 'actress' ||
++        !samePendingItemKey(selected, urlItem) || !canonicalOffsets) return
++    const button = railButtons.current.get(formatPendingItemKey(selected))
++    if (button) {
++      if (document.activeElement === document.body) button.focus()
++      actorFocusHandled.current = actorFocusRequest
++    }
++  }, [actorFocusRequest, loading, actressError, detailOpen, selected, urlItem, canonicalOffsets])
++
+   const refetchPendingSurface = useCallback((): void => {
+     void Promise.all([
+-      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: false }),
+-      queryClient.refetchQueries({ queryKey: ['pending-resource-identities'], exact: false }),
+-      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true }),
+-      queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), exact: true }),
++      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], type: 'active', exact: false }),
++      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], type: 'active', exact: false }),
++      queryClient.refetchQueries({ queryKey: ['pending-video-scrape-count'], exact: true }),
++      queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), type: 'active', exact: false }),
+       queryClient.refetchQueries({ queryKey: actressKeys.conflictSummary(), exact: true })
+     ])
+   }, [queryClient])
+@@ -202,20 +269,13 @@ export default function PendingCenterPage(): JSX.Element {
+     refetchPendingSurface()
+   }
+ 
+-  const selectedScan =
+-    selected?.domain === 'scan'
+-      ? scanGroups.find((entry) => String(entry.id) === selected.id) ?? null
+-      : null
++  const selectedScan = selected?.domain === 'scan'
++    ? scanItems.find((entry) => (entry.kind === 'group' ? String(entry.id) : `identity-${entry.id}`) === selected.id) ?? null
++    : null
+   const selectedScrape =
+     selected?.domain === 'scrape'
+       ? scrapeItems.find((entry) => String(entry.id) === selected.id) ?? null
+       : null
+-  const selectedIdentity =
+-    selected?.domain === 'scan' && selected.id.startsWith('identity-')
+-      ? resourceIdentities.find(
+-          (identity) => `identity-${identity.id}` === selected.id
+-        ) ?? null
+-      : null
+ 
+   return (
+     <div className={`list-page ${styles.page}`}>
+@@ -237,7 +297,13 @@ export default function PendingCenterPage(): JSX.Element {
+                 <span className={styles.tabLabel}>
+                   {option === 'all' ? <ListChecks {...UI_ICON_SM} aria-hidden /> : DOMAIN_ICON[option]}
+                   {option === 'all' ? '全部' : PENDING_DOMAIN_LABEL[option]}
+-                  {!loading && counts[option] > 0 ? <em className={styles.tabCount}>{counts[option]}</em> : null}
++                  {option === 'scan' && !scanEnabled && (scanCountQuery.isError || scanCountQuery.data === undefined) ? (
++                    <em className={styles.tabCount} title={scanCountQuery.isError ? '扫描数量读取失败' : '正在读取扫描数量'}>{scanCountQuery.isError ? '?' : '…'}</em>
++                  ) : option === 'scrape' && !scrapeEnabled && (scrapeCountQuery.isError || scrapeCountQuery.data === undefined) ? (
++                    <em className={styles.tabCount} title={scrapeCountQuery.isError ? '刮削数量读取失败' : '正在读取刮削数量'}>{scrapeCountQuery.isError ? '?' : '…'}</em>
++                  ) : option === 'actress' && !actressEnabled && (actressSummaryQuery.isError || actressSummaryQuery.data === undefined) ? (
++                    <em className={styles.tabCount} title={actressSummaryQuery.isError ? '演员冲突数量读取失败' : '正在读取演员冲突数量'}>{actressSummaryQuery.isError ? '?' : '…'}</em>
++                  ) : !loading && counts[option] > 0 ? <em className={styles.tabCount}>{counts[option]}</em> : null}
+                 </span>
+               )
+             }))}
+@@ -275,6 +341,18 @@ export default function PendingCenterPage(): JSX.Element {
+         <WorkbenchShell className={styles.shell}>
+           {loading ? (
+             <EmptyState variant="fill" loading title="正在读取待确认项…" />
++          ) : scanError ? (
++            <EmptyState variant="fill" title="待确认扫描读取失败">
++              <Button onClick={() => { void (librariesQuery.isError ? librariesQuery.refetch() : scanQuery.refetch()) }}>重试</Button>
++            </EmptyState>
++          ) : scrapeError ? (
++            <EmptyState variant="fill" title="待确认刮削读取失败">
++              <Button onClick={() => { void scrapeQuery.refetch() }}>重试</Button>
++            </EmptyState>
++          ) : actressError ? (
++            <EmptyState variant="fill" title="演员冲突队列读取失败">
++              <Button onClick={() => { void actressQuery.refetch() }}>重试</Button>
++            </EmptyState>
+           ) : total === 0 ? (
+             <div className={styles.complete}>
+               <EmptyState
+@@ -305,7 +383,7 @@ export default function PendingCenterPage(): JSX.Element {
+                     <section className={styles.railSection} key={section.domain}>
+                       <h2>
+                         {section.label}
+-                        <span className={styles.railCount}>{section.items.length}</span>
++                        <span className={styles.railCount}>{section.domain === 'scrape' ? scrapeTotal : section.domain === 'scan' ? scanTotal : actressTotal}</span>
+                       </h2>
+                       {section.items.map((queueItem) => {
+                         const keyText = formatPendingItemKey(queueItem.key)
+@@ -342,27 +420,56 @@ export default function PendingCenterPage(): JSX.Element {
+                           </button>
+                         )
+                       })}
++                      {section.domain === 'scan' && scanTotal > 50 ? (
++                        <div className={styles.queuePager} aria-label="扫描队列分页">
++                          <Button size="sm" disabled={!scanQuery.data?.offset} onClick={() => navigate(pendingCenterPath({
++                            type, queueDomain: 'scan', libraryId: selectedLibraryId ?? undefined, scrapeOffset, actressOffset,
++                            scanOffset: Math.max(0, (scanQuery.data?.offset ?? 0) - 50)
++                          }))}>上一页</Button>
++                          <span>{Math.floor((scanQuery.data?.offset ?? 0) / 50) + 1} / {Math.ceil(scanTotal / 50)}</span>
++                          <Button size="sm" disabled={(scanQuery.data?.offset ?? 0) + 50 >= scanTotal} onClick={() => navigate(pendingCenterPath({
++                            type, queueDomain: 'scan', libraryId: selectedLibraryId ?? undefined, scrapeOffset, actressOffset,
++                            scanOffset: (scanQuery.data?.offset ?? 0) + 50
++                          }))}>下一页</Button>
++                        </div>
++                      ) : null}
++                      {section.domain === 'actress' && actressTotal > 50 ? (
++                        <div className={styles.queuePager} aria-label="演员冲突队列分页">
++                          <Button size="sm" disabled={!actressQuery.data?.offset} onClick={() => navigate(pendingCenterPath({
++                            type, queueDomain: 'actress', scanOffset, scrapeOffset,
++                            actressOffset: Math.max(0, (actressQuery.data?.offset ?? 0) - 50)
++                          }))}>上一页</Button>
++                          <span>{Math.floor((actressQuery.data?.offset ?? 0) / 50) + 1} / {Math.ceil(actressTotal / 50)}</span>
++                          <Button size="sm" disabled={(actressQuery.data?.offset ?? 0) + 50 >= actressTotal} onClick={() => navigate(pendingCenterPath({
++                            type, queueDomain: 'actress', scanOffset, scrapeOffset, actressOffset: (actressQuery.data?.offset ?? 0) + 50
++                          }))}>下一页</Button>
++                        </div>
++                      ) : null}
++                      {section.domain === 'scrape' && scrapeTotal > 50 ? (
++                        <div className={styles.queuePager} aria-label="刮削队列分页">
++                          <Button size="sm" disabled={!scrapeQuery.data?.offset} onClick={() => navigate(pendingCenterPath({
++                            type, queueDomain: 'scrape', scanOffset, actressOffset, scrapeOffset: Math.max(0, (scrapeQuery.data?.offset ?? 0) - 50)
++                          }))}>上一页</Button>
++                          <span>{Math.floor((scrapeQuery.data?.offset ?? 0) / 50) + 1} / {Math.ceil(scrapeTotal / 50)}</span>
++                          <Button size="sm" disabled={(scrapeQuery.data?.offset ?? 0) + 50 >= scrapeTotal} onClick={() => navigate(pendingCenterPath({
++                            type, queueDomain: 'scrape', scanOffset, actressOffset, scrapeOffset: (scrapeQuery.data?.offset ?? 0) + 50
++                          }))}>下一页</Button>
++                        </div>
++                      ) : null}
+                     </section>
+                   ))}
+                 </div>
+               </WorkbenchRail>
+-              {selectedIdentity ? (
+-                <PendingResourceIdentityPane
+-                  key={`${selectedIdentity.id}:${selectedIdentity.revision}`}
+-                  identity={selectedIdentity}
+-                  libraryName={libraryNames.get(selectedIdentity.libraryId)}
+-                  onResolved={refresh}
+-                />
+-              ) : selectedScan ? (
+-                <PendingScanPane
+-                  group={selectedScan}
+-                  libraryName={libraryNames.get(selectedScan.libraryId)}
+-                  onResolved={refresh}
+-                />
+-              ) : selectedScrape ? (
+-                <PendingScrapePane pending={selectedScrape} onResolved={refresh} />
+-              ) : selected?.domain === 'actress' ? (
+-                <PendingActressConflictPane vm={conflict} />
++              {selectedScan && samePendingItemKey(selected, urlItem) && canonicalOffsets ? (
++                <PendingScanDetail key={`${selectedScan.kind}:${selectedScan.libraryId}:${selectedScan.id}:${selectedScan.revision}`}
++                  item={selectedScan} libraryName={libraryNames.get(selectedScan.libraryId)} enabled={!detailOpen} onResolved={refresh} />
++              ) : selectedScrape && videoFromUrl == null && samePendingItemKey(selected, urlItem) && canonicalOffsets ? (
++                <PendingScrapeDetail key={`${selectedScrape.id}:${selectedScrape.revision}`} id={selectedScrape.id} revision={selectedScrape.revision} enabled={!detailOpen} onResolved={refresh} />
++              ) : selected?.domain === 'actress' && samePendingItemKey(selected, urlItem) ? (
++                conflict.queue.error ? <EmptyState variant="fill" title="演员冲突详情读取失败"><Button onClick={conflict.queue.retry}>重试</Button></EmptyState>
++                  : conflict.queue.loading ? <EmptyState variant="fill" loading title="正在读取演员冲突详情…" />
++                  : conflict.queue.selectedGroup?.normalizedName !== selected.id ? <EmptyState variant="fill" title="此待确认项已不存在"><Button onClick={refresh}>刷新队列</Button></EmptyState>
++                  : <PendingActressConflictPane vm={conflict} />
+               ) : (
+                 <EmptyState variant="fill" title="请选择一项待确认" />
+               )}
+@@ -373,3 +480,37 @@ export default function PendingCenterPage(): JSX.Element {
+     </div>
+   )
+ }
++
++
++function PendingScrapeDetail({ id, revision, enabled, onResolved }: {
++  id: number; revision: number; enabled: boolean; onResolved: () => void
++}): JSX.Element {
++  const query = useQuery({
++    queryKey: ['pending-video-scrapes', 'detail', id, revision],
++    queryFn: () => api.scrape.getPending(id), enabled, gcTime: 0
++  })
++  if (query.isError) return <EmptyState variant="fill" title="候选读取失败"><Button onClick={() => { void query.refetch() }}>重试</Button></EmptyState>
++  if (!query.data) return <EmptyState variant="fill" loading={query.isLoading} title={query.isLoading ? '正在读取候选…' : '此待确认项已不存在'}>
++    {!query.isLoading ? <Button onClick={onResolved}>刷新队列</Button> : null}
++  </EmptyState>
++  return <PendingScrapePane pending={query.data} onResolved={onResolved} />
++}
++
++function PendingScanDetail({ item, libraryName, enabled, onResolved }: {
++  item: PendingScanQueueItem; libraryName?: string; enabled: boolean; onResolved: () => void
++}): JSX.Element {
++  const query = useQuery({
++    queryKey: ['pending-scan-groups', 'detail', item.kind, item.libraryId, item.id, item.revision],
++    queryFn: async () => item.kind === 'group'
++      ? { kind: 'group' as const, value: await api.scan.getPendingGroup(item.libraryId, item.id) }
++      : { kind: 'identity' as const, value: await api.scan.getPendingIdentity(item.libraryId, item.id) },
++    enabled, gcTime: 0
++  })
++  if (query.isError) return <EmptyState variant="fill" title="扫描详情读取失败"><Button onClick={() => { void query.refetch() }}>重试</Button></EmptyState>
++  if (!query.data?.value) return <EmptyState variant="fill" loading={query.isLoading} title={query.isLoading ? '正在读取扫描详情…' : '此待确认项已不存在'}>
++    {!query.isLoading ? <Button onClick={onResolved}>刷新队列</Button> : null}
++  </EmptyState>
++  return query.data.kind === 'group'
++    ? <PendingScanPane group={query.data.value} libraryName={libraryName} onResolved={onResolved} />
++    : <PendingResourceIdentityPane identity={query.data.value} libraryName={libraryName} onResolved={onResolved} />
++}
+diff --git a/src/renderer/src/pages/conflictReviewRemote.ts b/src/renderer/src/pages/conflictReviewRemote.ts
+index 177b8f6..46771db 100644
+--- a/src/renderer/src/pages/conflictReviewRemote.ts
++++ b/src/renderer/src/pages/conflictReviewRemote.ts
+@@ -45,7 +45,7 @@ export interface ConflictReviewRemoteDeps {
+   api: ConflictReviewRemoteApi
+   toast: { show(message: string, tone: ToastTone): void }
+   invalidateLibrary(): Promise<void>
+-  refetchGroups(): Promise<ActressNameConflictGroup[]>
++  refetchGroups(selectedName?: string | null): Promise<ActressNameConflictGroup[]>
+ }
+ 
+ export type SessionPatch = Partial<ConflictReviewSessionState>
+@@ -230,7 +230,7 @@ export async function resolveConflictDecision(options: {
+   try {
+     const outcome = await options.deps.api.resolveConflict(options.input)
+     await options.deps.invalidateLibrary()
+-    const refreshed = await options.deps.refetchGroups()
++    const refreshed = await options.deps.refetchGroups(previousSelectedName)
+     if (outcome.status === 'stale') {
+       options.apply({ replacementDialog: null })
+       options.deps.toast.show(outcome.message, 'info')
+@@ -276,7 +276,7 @@ export async function discardConflictCandidate(options: {
+     })
+     options.apply({ discardCandidate: null })
+     await options.deps.invalidateLibrary()
+-    const refreshed = await options.deps.refetchGroups()
++    const refreshed = await options.deps.refetchGroups(previousSelectedName)
+     options.applyRefresh({
+       previousGroups,
+       refreshedGroups: refreshed,
+@@ -287,7 +287,7 @@ export async function discardConflictCandidate(options: {
+   } catch (error) {
+     const message = String((error as Error).message)
+     await options.deps.invalidateLibrary()
+-    const refreshed = await options.deps.refetchGroups()
++    const refreshed = await options.deps.refetchGroups(previousSelectedName)
+     options.apply({ discardCandidate: null })
+     options.applyRefresh({
+       previousGroups,
+diff --git a/src/renderer/src/pages/conflictReviewSession.ts b/src/renderer/src/pages/conflictReviewSession.ts
+index 5c11c0d..0dd8357 100644
+--- a/src/renderer/src/pages/conflictReviewSession.ts
++++ b/src/renderer/src/pages/conflictReviewSession.ts
+@@ -120,6 +120,7 @@ const EMPTY_REPLACEMENT_CLAIMANTS: ActressNameConflictGroup['claimants'] = []
+ function resetTransient(state: ConflictReviewSessionState): ConflictReviewSessionState {
+   return {
+     ...state,
++    discardCandidate: null,
+     otherOwnerOpen: false,
+     otherOwnerSearch: '',
+     selectedOtherOwner: null,
+diff --git a/src/renderer/src/pages/pendingCenterState.test.ts b/src/renderer/src/pages/pendingCenterState.test.ts
+index ef5a891..e53b852 100644
+--- a/src/renderer/src/pages/pendingCenterState.test.ts
++++ b/src/renderer/src/pages/pendingCenterState.test.ts
+@@ -111,19 +111,9 @@ describe('pending center resolution state', () => {
+   it('labels scan decisions with their owning media library', () => {
+     const sections = buildPendingQueueSections(
+       {
+-        scanGroups: [
+-          {
+-            id: 9,
+-            libraryId: 7,
+-            normalizedCode: 'ABC-123',
+-            revision: 1,
+-            createdAt: '2026-08-29T00:00:00.000Z',
+-            updatedAt: '2026-08-29T00:00:00.000Z',
+-            resources: []
+-          }
+-        ],
++        scanItems: [{kind: 'group', id: 9, libraryId: 7, revision: 1, label: 'ABC-123', resourceCount: 0}],
+         scrapeItems: [],
+-        conflictGroups: [],
++        conflictItems: [],
+         libraryNames: new Map([[7, 'NAS 媒体库']])
+       },
+       'scan'
+@@ -135,25 +125,9 @@ describe('pending center resolution state', () => {
+   it('shows resource identity conflicts in the scan queue without exposing a local path', () => {
+     const sections = buildPendingQueueSections(
+       {
+-        scanGroups: [],
+-        resourceIdentities: [
+-          {
+-            id: 4,
+-            libraryId: 7,
+-            rootId: 2,
+-            sourceKind: 'local',
+-            targetKind: null,
+-            targetDisplay: null,
+-            displayName: 'FILE-001.mp4',
+-            filenameCode: 'FILE-001',
+-            nfoCode: 'NFO-002',
+-            revision: 1,
+-            createdAt: '2026-09-05T00:00:00.000Z',
+-            updatedAt: '2026-09-05T00:00:00.000Z'
+-          }
+-        ],
++        scanItems: [{kind: 'identity', id: 4, libraryId: 7, revision: 1, label: 'FILE-001 ↔ NFO-002', displayName: 'FILE-001.mp4'}],
+         scrapeItems: [],
+-        conflictGroups: [],
++        conflictItems: [],
+         libraryNames: new Map([[7, 'NAS 媒体库']])
+       },
+       'scan'
+diff --git a/src/renderer/src/pages/pendingCenterState.ts b/src/renderer/src/pages/pendingCenterState.ts
+index f6c5c32..cb50040 100644
+--- a/src/renderer/src/pages/pendingCenterState.ts
++++ b/src/renderer/src/pages/pendingCenterState.ts
+@@ -1,11 +1,10 @@
+-import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
++import type { ActressConflictQueueItem } from '@shared/actressConflictTypes'
+ import type {
+-  PendingScanGroup,
+-  PendingResourceIdentity,
++  PendingScanQueueItem,
+   PendingScanResource,
+   PendingScanResourceTarget
+ } from '@shared/libraryTypes'
+-import type { PendingVideoScrape } from '@shared/videoScrapeTypes'
++import type { PendingVideoScrapeSummary } from '@shared/videoScrapeTypes'
+ import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+ import {
+   PENDING_DOMAINS,
+@@ -148,63 +147,46 @@ export interface PendingQueueSection {
+ }
+ 
+ export interface PendingQueueInput {
+-  scanGroups: readonly PendingScanGroup[]
+-  resourceIdentities?: readonly PendingResourceIdentity[]
+-  scrapeItems: readonly PendingVideoScrape[]
+-  conflictGroups: readonly ActressNameConflictGroup[]
++  scanItems: readonly PendingScanQueueItem[]
++  scrapeItems: readonly PendingVideoScrapeSummary[]
++  conflictItems: readonly ActressConflictQueueItem[]
+   libraryNames?: ReadonlyMap<number, string>
+ }
+ 
+ function scanQueueItem(
+-  group: PendingScanGroup,
++  item: PendingScanQueueItem,
+   libraryNames?: ReadonlyMap<number, string>
+ ): PendingQueueItem {
+-  const libraryName = libraryNames?.get(group.libraryId) ?? `媒体库 #${group.libraryId}`
++  const libraryName = libraryNames?.get(item.libraryId) ?? `媒体库 #${item.libraryId}`
+   return {
+-    key: pendingItemKey('scan', group.id),
+-    title: group.normalizedCode,
+-    meta: `${libraryName} · ${group.resources.length} 条资源`,
++    key: pendingItemKey('scan', item.kind === 'group' ? item.id : `identity-${item.id}`),
++    title: item.label,
++    meta: `${libraryName} · ${item.kind === 'group' ? `${item.resourceCount} 条资源` : item.displayName}`,
+     coverPath: null,
+     ready: false
+   }
+ }
+ 
+-function resourceIdentityQueueItem(
+-  identity: PendingResourceIdentity,
+-  libraryNames?: ReadonlyMap<number, string>
+-): PendingQueueItem {
+-  const libraryName = libraryNames?.get(identity.libraryId) ?? `媒体库 #${identity.libraryId}`
+-  return {
+-    key: pendingItemKey('scan', `identity-${identity.id}`),
+-    title: `${identity.filenameCode} ↔ ${identity.nfoCode}`,
+-    meta: `${libraryName} · ${identity.displayName}`,
+-    coverPath: null,
+-    ready: false
+-  }
+-}
+-
+-function scrapeQueueItem(scrape: PendingVideoScrape): PendingQueueItem {
+-  const candidates = scrape.sources.flatMap((source) => source.candidates)
+-  const first = candidates[0]
++function scrapeQueueItem(scrape: PendingVideoScrapeSummary): PendingQueueItem {
+   return {
+     key: pendingItemKey('scrape', scrape.id),
+-    title: first?.result.code?.trim() || `影片 #${scrape.videoId}`,
+-    meta: `${candidates.length} 个候选 · ${scrape.sources.length} 个来源`,
+-    coverPath: first?.stagedCoverPath ?? null,
++    title: scrape.code || `影片 #${scrape.videoId}`,
++    meta: `${scrape.candidateCount} 个候选 · ${scrape.sourceCount} 个来源`,
++    coverPath: scrape.stagedCoverPath,
+     ready: false
+   }
+ }
+ 
+-function actressQueueItem(group: ActressNameConflictGroup): PendingQueueItem {
+-  const claimCount = group.pendingNameClaims.length
++function actressQueueItem(group: ActressConflictQueueItem): PendingQueueItem {
++  const claimCount = group.pendingNameClaimCount
+   return {
+     key: pendingItemKey('actress', group.normalizedName),
+     title: group.displayName,
+     meta:
+       group.status === 'applicable'
+         ? '冲突已解除，等待应用'
+-        : `刮削 ${group.candidates.length} · 历史 ${claimCount}`,
+-    coverPath: group.candidates[0]?.actressAvatarPath ?? null,
++        : `刮削 ${group.candidateCount} · 历史 ${claimCount}`,
++    coverPath: group.avatarPath,
+     ready: group.status === 'applicable'
+   }
+ }
+@@ -215,14 +197,9 @@ export function buildPendingQueueSections(
+   type: PendingTypeFilter
+ ): PendingQueueSection[] {
+   const byDomain: Record<PendingDomain, PendingQueueItem[]> = {
+-    scan: [
+-      ...input.scanGroups.map((group) => scanQueueItem(group, input.libraryNames)),
+-      ...(input.resourceIdentities ?? []).map((identity) =>
+-        resourceIdentityQueueItem(identity, input.libraryNames)
+-      )
+-    ],
++    scan: input.scanItems.map((item) => scanQueueItem(item, input.libraryNames)),
+     scrape: input.scrapeItems.map(scrapeQueueItem),
+-    actress: input.conflictGroups.map(actressQueueItem)
++    actress: input.conflictItems.map(actressQueueItem)
+   }
+   return PENDING_DOMAINS.filter((domain) => type === 'all' || type === domain)
+     .map((domain) => ({ domain, label: PENDING_DOMAIN_LABEL[domain], items: byDomain[domain] }))
+@@ -239,9 +216,10 @@ export function pendingQueueTotal(sections: readonly PendingQueueSection[]): num
+  */
+ export function resolvePendingSelection(
+   sections: readonly PendingQueueSection[],
+-  requested: PendingItemKey | null
++  requested: PendingItemKey | null,
++  preferredDomain?: PendingDomain | null
+ ): PendingItemKey | null {
+   const items = sections.flatMap((section) => section.items)
+   const match = items.find((item) => samePendingItemKey(item.key, requested))
+-  return match?.key ?? items[0]?.key ?? null
++  return match?.key ?? items.find(item => item.key.domain === preferredDomain)?.key ?? items[0]?.key ?? null
+ }
+diff --git a/src/renderer/src/pages/useConflictReviewController.test.tsx b/src/renderer/src/pages/useConflictReviewController.test.tsx
+index 873bb9d..34ea912 100644
+--- a/src/renderer/src/pages/useConflictReviewController.test.tsx
++++ b/src/renderer/src/pages/useConflictReviewController.test.tsx
+@@ -4,6 +4,7 @@ import React from 'react'
+ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+ import TestRenderer, { act } from 'react-test-renderer'
+ import type { ActressNameConflictGroup, ResolveActressConflictInput } from '@shared/actressConflictTypes'
++import type { ConflictReviewViewModel } from './useConflictReviewController'
+ import type { ElectronApi } from '../../../preload/index'
+ 
+ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+@@ -169,3 +170,29 @@ async function waitFor(predicate: () => boolean): Promise<void> {
+   }
+   assert.fail('controller state did not settle')
+ }
++
++it('preserves an explicit ownership decision while detail reads are disabled and reenabled',async()=>{
++ let reads=0
++ const fixture=group()
++ Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{actressScrape:{listConflicts:async()=>{reads++;return [fixture]},conflictSummary:async()=>({groupCount:1})}}}})
++ const {useConflictReviewController}=await import('./useConflictReviewController')
++ let vm!:ConflictReviewViewModel
++ function Probe({enabled}:{enabled:boolean}):null{vm=useConflictReviewController({enabled,summaryEnabled:enabled});return null}
++ const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++ let renderer:TestRenderer.ReactTestRenderer|undefined
++ const tree=(enabled:boolean)=><QueryClientProvider client={client}><Probe enabled={enabled}/></QueryClientProvider>
++ const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++ try{
++  await act(async()=>{renderer=TestRenderer.create(tree(true))});await settle();await settle()
++  await act(async()=>vm.queue.chooseGroup(fixture));await settle()
++  await act(async()=>vm.detail.selectOwner({actressId:2,revision:3,mainName:'候选演员'}));await settle()
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++  const priorReads=reads
++  await act(async()=>renderer!.update(tree(false)));await settle()
++  assert.equal(reads,priorReads)
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++  assert.equal(vm.queue.selectedGroup?.normalizedName,'冲突名')
++  await act(async()=>renderer!.update(tree(true)));await settle();await settle()
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++ }finally{await act(async()=>renderer?.unmount());client.clear()}
++})
+diff --git a/src/renderer/src/pages/useConflictReviewController.ts b/src/renderer/src/pages/useConflictReviewController.ts
+index dde0ef2..964d37a 100644
+--- a/src/renderer/src/pages/useConflictReviewController.ts
++++ b/src/renderer/src/pages/useConflictReviewController.ts
+@@ -49,6 +49,8 @@ export interface ConflictReviewViewModel {
+     loading: boolean
+     error: string | null
+     summary: ActressConflictReviewSummary | undefined
++    summaryError: boolean
++    retry(): void
+     groups: ActressNameConflictGroup[]
+     sections: { pending: ActressNameConflictGroup[]; applicable: ActressNameConflictGroup[] }
+     selectedGroup: ActressNameConflictGroup | null
+@@ -134,7 +136,7 @@ export interface ConflictReviewViewModel {
+ function createRemoteDeps(
+   toast: { show(message: string, tone: 'success' | 'error' | 'info'): void },
+   invalidateLibrary: () => Promise<void>,
+-  refetchGroups: () => Promise<ActressNameConflictGroup[]>
++  refetchGroups: (selectedName?: string | null) => Promise<ActressNameConflictGroup[]>
+ ): ConflictReviewRemoteDeps {
+   return {
+     api: {
+@@ -152,12 +154,16 @@ function createRemoteDeps(
+   }
+ }
+ 
+-export function useConflictReviewController(): ConflictReviewViewModel {
++export function useConflictReviewController({ enabled = true, summaryEnabled = true, paged }: {
++  enabled?: boolean; summaryEnabled?: boolean
++  paged?: { selectedName: string | null; sessionKey?: string; onResolved(previousName: string | null): Promise<void> }
++} = {}): ConflictReviewViewModel {
+   const queryClient = useQueryClient()
+   const toast = useToast()
+   const [state, dispatch] = useReducer(reduceConflictReviewSession, initialConflictReviewSessionState)
+   const resolvingRef = useRef(false)
+   const discardingRef = useRef(false)
++  const discardDialogIdentity = useRef<object | null>(null)
+   const discardCandidateRef = useRef(state.discardCandidate)
+   discardCandidateRef.current = state.discardCandidate
+   const editedNameRef = useRef(state.editedName)
+@@ -174,13 +180,34 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+ 
+   const groupsQuery = useQuery({
+     queryKey: actressKeys.conflicts(),
+-    queryFn: () => api.actressScrape.listConflicts()
++    queryFn: () => api.actressScrape.listConflicts(),
++    enabled: enabled && !paged
+   })
+   const summaryQuery = useQuery({
+     queryKey: actressKeys.conflictSummary(),
+-    queryFn: () => api.actressScrape.conflictSummary()
++    queryFn: () => api.actressScrape.conflictSummary(),
++    enabled: summaryEnabled
+   })
+-  const groups = groupsQuery.data ?? EMPTY_GROUPS
++  const lastName = useRef<string | null>(null)
++  if (paged?.selectedName != null) lastName.current = paged.selectedName
++  const detailName = paged?.selectedName ?? lastName.current
++  const sessionKey = paged?.sessionKey ?? detailName
++  const selectionSession = useRef({ key: sessionKey })
++  if (selectionSession.current.key !== sessionKey) selectionSession.current = { key: sessionKey }
++  const renderSession = selectionSession.current
++  const detailQuery = useQuery({
++    queryKey: [...actressKeys.conflicts(), 'detail', detailName],
++    queryFn: () => api.actressScrape.getConflict(detailName!),
++    enabled: Boolean(paged && enabled && paged.selectedName != null),
++    gcTime: 0
++  })
++  // Keep one selected snapshot while another category/overlay disables reads.
++  const detailGroups = useMemo(() => detailQuery.data ? [detailQuery.data] : EMPTY_GROUPS, [detailQuery.data])
++  const groups = paged ? detailGroups : groupsQuery.data ?? EMPTY_GROUPS
++  const pagedRef = useRef(paged)
++  pagedRef.current = paged
++  const detailRefetchRef = useRef(detailQuery.refetch)
++  detailRefetchRef.current = detailQuery.refetch
+   const derived = useMemo(
+     () => deriveConflictReviewDetail(state, groups, debouncedEditedName),
+     [debouncedEditedName, groups, state]
+@@ -216,7 +243,12 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+           }
+         },
+         () => invalidateActressLibraryQueries(queryClient),
+-        async () => {
++        async (previousName) => {
++          if (pagedRef.current) {
++            const refreshed = await detailRefetchRef.current()
++            await pagedRef.current.onResolved(previousName ?? null)
++            return refreshed.data ? [refreshed.data] : []
++          }
+           const refreshed = await refetchGroupsRef.current()
+           return refreshed.data ?? []
+         }
+@@ -226,7 +258,7 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+ 
+   useEffect(() => {
+     dispatch({ type: 'syncSelectedGroup', group: derived.selectedGroup })
+-  }, [derived.selectedGroup])
++  }, [derived.selectedGroup, state.selectionGroupName])
+ 
+   const ownerOptionsKey = derived.ownerOptions.map((owner) => owner.actressId).join(',')
+   useEffect(() => {
+@@ -322,6 +354,7 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+     previousSelectedName: string | null
+     stale: boolean
+   }): void => {
++    if (pagedRef.current && (args.previousSelectedName !== lastName.current || renderSession !== selectionSession.current)) return
+     dispatch({
+       type: 'applyRefresh',
+       previousGroups: args.previousGroups,
+@@ -332,15 +365,20 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+   }
+ 
+   const resolveDecision = (input: Parameters<typeof resolveConflictDecision>[0]['input']): void => {
++    const operationSession = selectionSession.current
++    const isCurrent = (): boolean => !pagedRef.current || selectionSession.current === operationSession
+     void resolveConflictDecision({
+       deps: remoteDeps,
+       resolving: resolvingRef.current,
+       groups,
+       selectedGroupName: derived.selectedGroup?.normalizedName ?? null,
+       input,
+-      apply: applyPatch,
++      apply: (patch) => {
++        if (isCurrent()) applyPatch(patch)
++        else if (patch.resolving !== undefined) applyPatch({resolving:patch.resolving})
++      },
+       applyRefresh,
+-      resetTransient: () => dispatch({ type: 'resetTransient' })
++      resetTransient: () => { if (isCurrent()) dispatch({ type: 'resetTransient' }) }
+     })
+   }
+ 
+@@ -372,9 +410,11 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+ 
+   return {
+     queue: {
+-      loading: groupsQuery.isLoading,
+-      error: groupsQuery.error ? String((groupsQuery.error as Error).message) : null,
++      loading: enabled && (paged ? detailQuery.isLoading : groupsQuery.isLoading),
++      error: (paged ? detailQuery.error : groupsQuery.error)?.message ?? null,
++      retry: () => { void (paged ? detailQuery.refetch() : groupsQuery.refetch()) },
+       summary: summaryQuery.data,
++      summaryError: summaryQuery.isError,
+       groups,
+       sections: derived.sections,
+       selectedGroup: derived.selectedGroup,
+@@ -417,7 +457,10 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+           replacementMainNames: []
+         })
+       },
+-      requestDiscard: (candidate) => dispatch({ type: 'requestDiscard', candidate })
++      requestDiscard: (candidate) => {
++        discardDialogIdentity.current = {}
++        dispatch({ type: 'requestDiscard', candidate })
++      }
+     },
+     dialogs: {
+       otherOwner: {
+@@ -514,13 +557,23 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+         candidate: state.discardCandidate,
+         busy: state.discarding,
+         confirm: () => {
++          const operationSession = selectionSession.current
++          const operationDialog = discardDialogIdentity.current
+           void discardConflictCandidate({
+             deps: remoteDeps,
+             discarding: discardingRef.current,
+             discardCandidate: discardCandidateRef.current,
+             groups,
+             selectedGroupName: derived.selectedGroup?.normalizedName ?? null,
+-            apply: applyPatch,
++            apply: (patch) => {
++              if (!pagedRef.current || selectionSession.current === operationSession) applyPatch(patch)
++              else {
++                const completion: Partial<ConflictReviewSessionState> = {}
++                if (patch.discarding !== undefined) completion.discarding = patch.discarding
++                if (patch.discardCandidate === null && discardDialogIdentity.current === operationDialog) completion.discardCandidate = null
++                if (Object.keys(completion).length > 0) applyPatch(completion)
++              }
++            },
+             applyRefresh
+           })
+         },
+diff --git a/src/renderer/src/pages/PendingCenterActress.interaction.test.tsx b/src/renderer/src/pages/PendingCenterActress.interaction.test.tsx
+new file mode 100644
+index 0000000..94f6ecb
+--- /dev/null
++++ b/src/renderer/src/pages/PendingCenterActress.interaction.test.tsx
+@@ -0,0 +1,191 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ElectronApi } from '../../../preload/index'
++import type { ActressConflictQueueQuery, ActressNameConflictGroup, ResolveActressConflictInput } from '@shared/actressConflictTypes'
++import type { ConflictReviewViewModel } from './useConflictReviewController'
++import { pendingCenterPath, pendingItemKey, parsePendingCenterSearch } from '../listView/pendingRoutes'
++import { actressKeys } from '../query/queryKeys'
++function deferred<T>() {let resolve!:(value:T)=>void, reject!:(error:Error)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no});return {promise,resolve,reject}}
++const name=(id:number)=>`actor-${String(id).padStart(3,'0')}`
++const idOf=(key:string)=>Number(key.slice(6))
++function group(id:number):ActressNameConflictGroup{return {
++  status:'conflict',normalizedName:name(id),displayName:`Actor-${id}`,currentOwner:null,claimants:[],pendingNameClaims:[],mergePairs:[],
++  candidates:[{pendingId:id,revision:1,actressId:id+1000,actressRevision:1,actressMainName:`Candidate-${id}`,actressAvatarPath:null,
++    plugin:{name:'Fixture',source:'builtin'},queryName:'Fixture',selectedFields:['aliases'],applicableFields:['aliases'],mode:'fillEmpty',
++    result:{aliases:[name(id)]},warnings:[],createdAt:'2026',resources:[],conflicts:[{name:name(id),normalizedName:name(id),type:'alias'}],
++    fieldImpacts:[],fieldImpactsWhenAssignedToCandidate:[],willApplyAfterDecision:true,remainingConflictCountAfterDecision:0}]
++}}
++let ids=Array.from({length:120},(_,i)=>i+1), failPage=false, failDetail=false
++let includeScan=false, staleResolution=false
++const inspections:string[]=[]
++let holdDetail:string|undefined
++const heldDetails:Array<{name:string}&ReturnType<typeof deferred<ActressNameConflictGroup|null>>>=[]
++const pages:ActressConflictQueueQuery[]=[], details:string[]=[], resolutions:ResolveActressConflictInput[]=[]
++let heldMutation:ReturnType<typeof deferred<void>>|undefined
++let navigate:NavigateFunction,location=''
++const fakeApi={
++  mediaLibraries:{list:async()=>[]},scan:{countPendingQueue:async()=>includeScan?1:0,pagePendingQueue:async()=>({items:includeScan?[{kind:'group',id:1,libraryId:1,revision:1,label:'Scan item',resourceCount:0}]:[],total:includeScan?1:0,offset:0}),getPendingGroup:async()=>null},
++  scrape:{countPending:async()=>0,pagePending:async()=>({items:[],total:0,offset:0})},
++  actresses:{list:async()=>[],get:async()=>null},
++  actressScrape:{
++    listConflicts:()=>{throw new Error('Full actor queue is forbidden')},
++    conflictSummary:async()=>({groupCount:ids.length}),
++    pageConflicts:async(query:ActressConflictQueueQuery)=>{
++      pages.push(query);if(failPage){failPage=false;throw new Error('page failure')}
++      const rank=query.anchorName?ids.indexOf(idOf(query.anchorName)):-1
++      const offset=rank>=0?Math.floor(rank/50)*50:Math.min(query.offset??0,Math.max(0,Math.floor((ids.length-1)/50)*50))
++      return {total:ids.length,offset,items:ids.slice(offset,offset+50).map(id=>({normalizedName:name(id),displayName:`Actor-${id}`,status:'conflict',candidateCount:1,pendingNameClaimCount:0,avatarPath:null}))}
++    },
++    getConflict:async(key:string)=>{
++      details.push(key);if(failDetail){failDetail=false;throw new Error('detail failure')}
++      if(holdDetail===key){holdDetail=undefined;const held={name:key,...deferred<ActressNameConflictGroup|null>()};heldDetails.push(held);return held.promise}
++      return ids.includes(idOf(key))?group(idOf(key)):null
++    },
++    inspectConflictName:async(input:{name:string})=>{inspections.push(input.name);return {normalizedName:'elsewhere',status:'conflict'}},
++    validateIllegalNameReplacements:async()=>({status:'valid'}),
++    discardConflict:async(input:{pendingId:number})=>{
++      if(heldMutation)await heldMutation.promise
++      if(staleResolution)throw new Error('Fixture stale discard')
++      ids=ids.filter(id=>id!==input.pendingId);return {remainingPending:ids.length}
++    },
++    resolveConflict:async(input:ResolveActressConflictInput)=>{
++      resolutions.push(input);if(heldMutation)await heldMutation.promise
++      if(staleResolution)return {status:'stale',message:'Fixture stale snapshot'}
++      if('snapshot' in input)ids=ids.filter(id=>name(id)!==input.snapshot.normalizedName)
++      return {status:'success',remainingPending:ids.length}
++    }
++  }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fakeApi})})
++Object.defineProperty(globalThis,'document',{configurable:true,value:{activeElement:null,body:{style:{overflow:''}}}})
++let renderer:TestRenderer.ReactTestRenderer|undefined,client:QueryClient|undefined
++let Pane:typeof import('./PendingActressConflictPane')['default']
++function Probe():null{navigate=useNavigate();location=useLocation().search;return null}
++const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++async function mount(url=pendingCenterPath({type:'actress'})):Promise<void>{
++ const Page=(await import('./PendingCenterPage')).default;Pane=(await import('./PendingActressConflictPane')).default
++ client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++ await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client!}><MemoryRouter initialEntries={[url]}><Probe/><Page/></MemoryRouter></QueryClientProvider>)})
++ await settle();await settle();await settle()
++}
++const vm=():ConflictReviewViewModel=>renderer!.root.findByType(Pane).props.vm
++function text(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:text(child)).join('')}
++async function click(label:string):Promise<void>{const button=renderer!.root.findAllByType('button').find(node=>text(node)===label);assert.ok(button,label);assert.ok(!button.props.disabled);await act(async()=>button.props.onClick());await settle();await settle();await settle()}
++async function chooseOwner():Promise<void>{const candidate=vm().queue.selectedGroup!.candidates[0];await act(async()=>vm().detail.selectOwner({actressId:candidate.actressId,revision:candidate.actressRevision,mainName:candidate.actressMainName}));await settle()}
++afterEach(async()=>{await act(async()=>renderer?.unmount());client?.clear();renderer=undefined;client=undefined;ids=Array.from({length:120},(_,i)=>i+1);failPage=false;failDetail=false;holdDetail=undefined;heldDetails.length=0;pages.length=0;details.length=0;resolutions.length=0;heldMutation=undefined;includeScan=false;staleResolution=false;inspections.length=0})
++it('locates a deep actor group and loads only its detail before paging',async()=>{
++ await mount(pendingCenterPath({type:'actress',item:pendingItemKey('actress',name(110))}))
++ assert.equal(pages[0].anchorName,name(110));assert.deepEqual(details,[name(110)])
++ assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).actressOffset,100)
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(110))
++ assert.equal(renderer!.root.findAllByType('button').filter(node=>node.props['aria-current']!==undefined).length,20)
++ await click('上一页');assert.equal(vm().queue.selectedGroup!.normalizedName,name(51))
++ assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).actressOffset,50)
++ assert.ok(client!.getQueryCache().findAll({queryKey:actressKeys.conflicts()}).filter(query=>query.state.data!==undefined).length<=2)
++})
++it('keeps page and detail failures distinct and retries without a full list',async()=>{
++ failPage=true;await mount();assert.ok(text(renderer!.root).includes('演员冲突队列读取失败'));assert.equal(details.length,0)
++ failDetail=true;await click('重试');assert.ok(text(renderer!.root).includes('演员冲突详情读取失败'))
++ await click('重试');assert.equal(vm().queue.selectedGroup!.normalizedName,name(1))
++})
++it('ignores a late old detail after selecting another group',async()=>{
++ holdDetail=name(1);await mount()
++ await click('Actor-2刮削 1 · 历史 0')
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(2))
++ await act(async()=>heldDetails[0].resolve(group(1)));await settle()
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(2))
++})
++it('preserves an explicit decision across a category switch and detail overlay',async()=>{
++ await mount();await chooseOwner()
++ await act(async()=>navigate('/pending?type=scan'));await settle()
++ await act(async()=>navigate(pendingCenterPath({type:'actress',item:pendingItemKey('actress',name(1))})));await settle();await settle()
++ assert.equal(vm().detail.selection?.proposedOwner?.actressId,1001)
++ const before=details.length
++ await act(async()=>navigate(`/pending/actress/1001?type=actress&item=actress:${name(1)}`));await settle()
++ assert.equal(details.length,before)
++ await act(async()=>navigate(pendingCenterPath({type:'actress',item:pendingItemKey('actress',name(1))})));await settle();await settle()
++ assert.equal(vm().detail.selection?.proposedOwner?.actressId,1001)
++})
++it('applies an ownership decision then clamps a deleted last page',async()=>{
++ ids=Array.from({length:101},(_,i)=>i+1)
++ await mount(pendingCenterPath({type:'actress',actressOffset:100}));await chooseOwner()
++ await act(async()=>vm().detail.confirmOwnership());await settle();await settle();await settle()
++ assert.equal(resolutions.length,1);assert.ok('snapshot' in resolutions[0]);assert.equal(resolutions[0].snapshot.normalizedName,name(101))
++ assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).actressOffset,50)
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(51))
++})
++it('does not let a completed old mutation reset a newer group decision',async()=>{
++ await mount();await chooseOwner();heldMutation=deferred<void>()
++ await act(async()=>vm().detail.confirmOwnership());await settle()
++ await click('Actor-2刮削 1 · 历史 0');await chooseOwner()
++ await act(async()=>vm().detail.openIllegalName())
++ assert.equal(vm().dialogs.replacement.kind,'illegal')
++ await act(async()=>heldMutation!.resolve());await settle();await settle();await settle()
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(2))
++ assert.equal(vm().detail.selection?.proposedOwner?.actressId,1002)
++ assert.equal(vm().dialogs.replacement.kind,'illegal')
++})
++
++it('keeps actor paging in the all-domain view even when a scan item comes first',async()=>{
++ includeScan=true;await mount('/pending')
++ assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).item?.domain,'scan')
++ await click('下一页')
++ assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).item?.id,name(51))
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(51))
++ assert.equal(renderer!.root.findAllByType('button').filter(node=>node.props['aria-current']!==undefined).length,51)
++})
++it('asks the server about names outside the current page before editing',async()=>{
++ await mount();await act(async()=>vm().detail.openEditName())
++ await act(async()=>vm().dialogs.editName.change('Name outside this page'))
++ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,280))});await settle()
++ assert.ok(inspections.includes('Name outside this page'))
++ assert.equal(vm().detail.editInspection.status,'conflict')
++})
++it('keeps a stale resolution on the same group and requires a renewed decision',async()=>{
++ staleResolution=true;await mount();await chooseOwner()
++ await act(async()=>vm().detail.confirmOwnership());await settle();await settle();await settle()
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(1))
++ const selection=vm().detail.selection
++ assert.ok(selection,'stale result must restore a reviewable group')
++ assert.equal(selection.proposedOwner,null)
++ assert.ok(vm().queue.staleMessage)
++})
++
++it('isolates an old completion after navigating A to B and back to A',async()=>{
++ staleResolution=true;await mount();await chooseOwner();heldMutation=deferred<void>()
++ await act(async()=>vm().detail.confirmOwnership());await settle()
++ await click('Actor-2刮削 1 · 历史 0')
++ await click('Actor-1刮削 1 · 历史 0');await chooseOwner()
++ await act(async()=>vm().detail.openIllegalName())
++ await act(async()=>heldMutation!.resolve());await settle();await settle();await settle()
++ assert.equal(vm().detail.selection?.proposedOwner?.actressId,1001)
++ assert.equal(vm().dialogs.replacement.kind,'illegal')
++ assert.equal(vm().queue.staleMessage,null)
++ assert.equal(vm().busy.resolving,false)
++})
++
++it('stays on the deep-linked page after its selected group is resolved',async()=>{
++ await mount(pendingCenterPath({type:'actress',item:pendingItemKey('actress',name(110))}));await chooseOwner()
++ await act(async()=>vm().detail.confirmOwnership());await settle();await settle();await settle()
++ assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).actressOffset,100)
++ assert.equal(vm().queue.selectedGroup!.normalizedName,name(101))
++})
++
++it('does not close a new discard dialog when an old A-B-A discard fails',async()=>{
++ staleResolution=true;await mount();heldMutation=deferred<void>()
++ await act(async()=>vm().detail.requestDiscard(vm().queue.selectedGroup!.candidates[0]))
++ await act(async()=>vm().dialogs.discard.confirm());await settle()
++ await act(async()=>navigate(pendingCenterPath({type:'actress',item:pendingItemKey('actress',name(2))})));await settle();await settle()
++ await act(async()=>navigate(pendingCenterPath({type:'actress',item:pendingItemKey('actress',name(1))})));await settle();await settle()
++ await chooseOwner()
++ await act(async()=>vm().detail.requestDiscard(vm().queue.selectedGroup!.candidates[0]))
++ await act(async()=>heldMutation!.resolve());await settle();await settle();await settle()
++ assert.equal(vm().detail.selection?.proposedOwner?.actressId,1001)
++ assert.equal(vm().dialogs.discard.candidate?.pendingId,1)
++ assert.equal(vm().dialogs.discard.busy,false)
++})
+diff --git a/src/renderer/src/pages/PendingCenterPage.interaction.test.tsx b/src/renderer/src/pages/PendingCenterPage.interaction.test.tsx
+new file mode 100644
+index 0000000..d4be69b
+--- /dev/null
++++ b/src/renderer/src/pages/PendingCenterPage.interaction.test.tsx
+@@ -0,0 +1,145 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ElectronApi } from '../../../preload/index'
++import type { PendingVideoScrape, PendingVideoScrapePage, PendingVideoScrapePageQuery } from '@shared/videoScrapeTypes'
++
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  const promise = new Promise<T>(yes => { resolve = yes })
++  return { promise, resolve }
++}
++const pages: PendingVideoScrapePageQuery[] = []
++const details: Array<{id:number} & ReturnType<typeof deferred<PendingVideoScrape | null>>> = []
++let failPage = false
++let location = ''
++let navigate: NavigateFunction
++let holdOffset: number | undefined
++const heldPages: Array<{value:PendingVideoScrapePage} & ReturnType<typeof deferred<PendingVideoScrapePage>>> = []
++let total = 120
++let failCount = false
++const fakeApi = {
++  mediaLibraries: { list: async () => [] },
++  actressScrape: { listConflicts: () => { throw new Error('Full actress queue is forbidden') }, pageConflicts: async () => ({items:[],total:0,offset:0}), conflictSummary: async () => ({ groupCount: 0 }) },
++  scan: { countPendingQueue: async () => 0, pagePendingQueue: async () => ({items: [], total: 0, offset: 0}) },
++  scrape: {
++    listPending: () => { throw new Error('Full inbox must never be requested') },
++    countPending: async () => { if(failCount)throw new Error('count failure');return total },
++    pagePending: async (query: PendingVideoScrapePageQuery) => {
++      pages.push(query)
++      if (failPage) { failPage = false; throw new Error('injected page failure') }
++      const anchor = query.videoId ?? query.anchorId
++      const offset = anchor && anchor <= total ? Math.floor((anchor - 1) / 50) * 50 : Math.min(query.offset ?? 0, Math.max(0, Math.floor((total-1)/50)*50))
++      const value = { total, offset, items: Array.from({length:Math.min(50,total-offset)},(_,i)=>({
++        id:offset+i+1,videoId:offset+i+1,revision:1,code:`CODE-${offset+i+1}`,
++        candidateCount:2,sourceCount:1,stagedCoverPath:null
++      })) }
++      if(holdOffset === offset) { holdOffset=undefined; const held={value,...deferred<PendingVideoScrapePage>()};heldPages.push(held);return held.promise }
++      return value
++    },
++    getPending: (id:number) => { const request={id,...deferred<PendingVideoScrape | null>()}; details.push(request); return request.promise }
++  },
++  videos: { get: async () => null }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fakeApi})})
++let renderer: TestRenderer.ReactTestRenderer | undefined
++let client: QueryClient | undefined
++function LocationProbe(): null { navigate=useNavigate(); const current=useLocation(); location=current.search; return null }
++async function settle(): Promise<void> {
++  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,15))})
++}
++async function mount(url='/pending?type=scrape'): Promise<void> {
++  const Page=(await import('./PendingCenterPage')).default
++  client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++  await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client!}>
++    <MemoryRouter initialEntries={[url]}><LocationProbe/><Page/></MemoryRouter>
++  </QueryClientProvider>)})
++  await settle(); await settle()
++}
++function content(node:TestRenderer.ReactTestInstance):string {
++  return node.children.map(child=>typeof child==='string'?child:content(child)).join('')
++}
++async function click(label:string):Promise<void> {
++  const button=renderer!.root.findAllByType('button').find(node=>content(node)===label)
++  assert.ok(button,label);assert.ok(!button.props.disabled)
++  await act(async()=>{button.props.onClick()});await settle();await settle()
++}
++afterEach(async()=>{
++  await act(async()=>{renderer?.unmount()});client?.clear();renderer=undefined;client=undefined
++  pages.length=0;details.length=0;failPage=false;failCount=false;total=120;holdOffset=undefined;heldPages.length=0
++})
++
++it('locates a deep-linked pending item, pages with a bounded cache and ignores a late detail',async()=>{
++  await mount('/pending?type=scrape&videoId=110')
++  assert.equal(pages[0].videoId,110)
++  assert.ok(location.includes('scrape%3A110'))
++  assert.ok(location.includes('scrapeOffset=100'))
++  assert.deepEqual(details.map(entry=>entry.id),[110])
++  assert.equal(renderer!.root.findAllByType('button').filter(node=>node.props['aria-current'] !== undefined).length,20)
++  await click('上一页')
++  assert.equal(details.at(-1)!.id,51)
++  await act(async()=>{details[0].resolve({id:110,videoId:110,revision:1,sources:[],warnings:[],selectedFields:[],applicableFields:[],updateMode:'replace',createdAt:'2026',updatedAt:'2026',stagedBytes:0})})
++  await settle()
++  const Pane=(await import('./PendingScrapePane')).default
++  assert.equal(renderer!.root.findAllByType(Pane).length,0,'old detail cannot appear on new selection')
++  await act(async()=>{details.at(-1)!.resolve(null)});await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'))
++  assert.ok(client!.getQueryCache().findAll({queryKey:['pending-video-scrapes']}).length<=2,'only current summary and selected detail remain')
++})
++
++it('shows an explicit page error and retries without fetching the full inbox',async()=>{
++  failPage=true
++  await mount()
++  assert.ok(content(renderer!.root).includes('待确认刮削读取失败'))
++  assert.equal(details.length,0)
++  await click('重试')
++  assert.equal(details.at(-1)!.id,1)
++  assert.ok(content(renderer!.root).includes('120 项待处理'))
++})
++
++
++it('recovers the last page after deletion and selects the surviving first item',async()=>{
++  total=101
++  await mount('/pending?type=scrape&item=scrape%3A101&scrapeOffset=100')
++  assert.equal(details.at(-1)!.id,101)
++  await act(async()=>{details.at(-1)!.resolve(null)});await settle()
++  total=100
++  await click('刷新队列')
++  assert.ok(location.includes('scrape%3A51'))
++  assert.ok(location.includes('scrapeOffset=50'))
++  assert.equal(details.at(-1)!.id,51)
++})
++
++it('does not block a different queue when scrape count fails or reuse its disabled page total',async()=>{
++  await mount('/pending')
++  const calls=pages.length
++  total=7
++  await act(async()=>{navigate('/pending?type=scan&item=scrape%3A1')});await settle();await settle()
++  assert.ok(content(renderer!.root).includes('没有扫描资源待确认项'))
++  assert.equal(pages.length,calls)
++  const badge=renderer!.root.findAllByType('em').find(node=>content(node)==='7')
++  assert.ok(badge,'disabled page total must not override refreshed count')
++  failCount=true
++  await act(async()=>{await client!.invalidateQueries({queryKey:['pending-video-scrape-count']})});await settle()
++  assert.ok(content(renderer!.root).includes('没有扫描资源待确认项'))
++  assert.ok(!content(renderer!.root).includes('待确认刮削读取失败'))
++})
++
++
++it('ignores an old page that resolves after navigation to a newer page',async()=>{
++  await mount()
++  holdOffset=50
++  await act(async()=>{navigate('/pending?type=scrape&scrapeOffset=50')});await settle()
++  assert.equal(heldPages.length,1)
++  await act(async()=>{navigate('/pending?type=scrape&scrapeOffset=100')});await settle();await settle()
++  assert.equal(details.at(-1)!.id,101)
++  await act(async()=>{heldPages[0].resolve(heldPages[0].value)});await settle()
++  assert.ok(location.includes('scrape%3A101'))
++  assert.equal(details.at(-1)!.id,101)
++  assert.ok(content(renderer!.root).includes('CODE-101'))
++  assert.ok(!content(renderer!.root).includes('CODE-51'))
++})
+diff --git a/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx b/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx
+new file mode 100644
+index 0000000..ba453c2
+--- /dev/null
++++ b/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx
+@@ -0,0 +1,141 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import { actressKeys } from '../query/queryKeys'
++import { pendingCenterPath, pendingItemKey, parsePendingCenterSearch } from '../listView/pendingRoutes'
++import type { ElectronApi } from '../../../preload/index'
++import type { PendingScanQueuePage, PendingScanQueueQuery, PendingScanGroup } from '@shared/libraryTypes'
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++const pages: PendingScanQueueQuery[] = []
++const details: Array<{id:number;libraryId:number} & ReturnType<typeof deferred<PendingScanGroup | null>>> = []
++let total = 120, failPage = false, failCount = false, failLibraries = false, identityMode = false
++const identityCalls: number[] = []
++let conflictReads = 0, conflictCount = 17, failConflictCount = false
++let holdOffset: number | undefined
++const heldPages: Array<{value:PendingScanQueuePage} & ReturnType<typeof deferred<PendingScanQueuePage>>> = []
++let location = ''
++let navigate: NavigateFunction
++const fakeApi = {
++  mediaLibraries: { list: async () => { if(failLibraries)throw new Error('libraries failure');return [{id:1,name:'First'},{id:2,name:'Second'}] } },
++  actressScrape: { listConflicts: () => { throw new Error('Full actress queue is forbidden') }, pageConflicts: async () => {conflictReads++;return {items:[],total:0,offset:0}}, conflictSummary: async () => { if(failConflictCount)throw new Error('summary failure');return {groupCount:conflictCount} } },
++  scrape: { countPending: async () => 0, pagePending: async () => ({items:[],total:0,offset:0}) },
++  scan: {
++    listPending: () => { throw new Error('Unbounded scan inbox') },
++    listPendingResourceIdentities: () => { throw new Error('Unbounded identities') },
++    countPendingQueue: async () => { if(failCount)throw new Error('count failure');return total },
++    pagePendingQueue: async (query:PendingScanQueueQuery) => {
++      pages.push(query)
++      if(failPage){failPage=false;throw new Error('page failure')}
++      const anchor=query.anchor?.id
++      const offset=anchor && anchor<=total ? Math.floor((anchor-1)/50)*50 : Math.min(query.offset??0,Math.max(0,Math.floor((total-1)/50)*50))
++      if(identityMode)return {total:1,offset:0,items:[{kind:'identity',id:4,libraryId:2,revision:3,label:'FILE ↔ NFO',displayName:'file.mp4'}]}
++      const value:PendingScanQueuePage={total,offset,items:Array.from({length:Math.min(50,total-offset)},(_,i)=>({kind:'group',id:offset+i+1,libraryId:query.libraryId??1,revision:1,label:`GROUP-${offset+i+1}`,resourceCount:2}))}
++      if(holdOffset===offset){holdOffset=undefined;const held={value,...deferred<PendingScanQueuePage>()};heldPages.push(held);return held.promise}
++      return value
++    },
++    getPendingIdentity: async (libraryId:number,id:number) => { identityCalls.push(libraryId,id); return {id,libraryId,rootId:1,sourceKind:'local',targetKind:null,targetDisplay:null,displayName:'file.mp4',filenameCode:'FILE',nfoCode:'NFO',revision:3,createdAt:'2026',updatedAt:'2026'} },
++    getPendingGroup: (libraryId:number,id:number) => { const request={id,libraryId,...deferred<PendingScanGroup|null>()};details.push(request);return request.promise }
++  }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fakeApi})})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let client:QueryClient|undefined
++function Probe():null {navigate=useNavigate();location=useLocation().search;return null}
++async function settle():Promise<void>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++async function mount(url='/pending?type=scan'):Promise<void>{
++  const Page=(await import('./PendingCenterPage')).default
++  client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++  await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client!}><MemoryRouter initialEntries={[url]}><Probe/><Page/></MemoryRouter></QueryClientProvider>)})
++  await settle();await settle()
++}
++function content(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:content(child)).join('')}
++async function click(label:string):Promise<void>{const button=renderer!.root.findAllByType('button').find(node=>content(node)===label);assert.ok(button,label);assert.ok(!button.props.disabled);await act(async()=>button.props.onClick());await settle();await settle()}
++afterEach(async()=>{await act(async()=>renderer?.unmount());client?.clear();renderer=undefined;client=undefined;pages.length=0;details.length=0;total=120;failPage=false;failCount=false;failLibraries=false;identityMode=false;identityCalls.length=0;conflictReads=0;conflictCount=17;failConflictCount=false;holdOffset=undefined;heldPages.length=0})
++it('locates scan anchors, reads only selected details and ignores late details after paging',async()=>{
++  await mount(pendingCenterPath({type:'scan',item:pendingItemKey('scan',110),libraryId:2}))
++  assert.deepEqual(pages[0].anchor,{kind:'group',id:110})
++  assert.equal(pages[0].libraryId,2)
++  assert.deepEqual(details.map(({id,libraryId})=>({id,libraryId})),[{id:110,libraryId:2}])
++  await click('上一页')
++  assert.ok(location.includes('scanOffset=50'));assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).libraryId,2)
++  assert.equal(details.at(-1)!.id,51)
++  await act(async()=>details[0].resolve({id:110,libraryId:2,revision:1,normalizedCode:'LATE',resources:[],createdAt:'2026',updatedAt:'2026'}));await settle()
++  assert.ok(!content(renderer!.root).includes('LATE'))
++  assert.ok(client!.getQueryCache().findAll({queryKey:['pending-scan-groups']}).filter(query=>query.state.data!==undefined).length<=2)
++})
++it('reports page errors and missing selected records without treating them as an empty queue',async()=>{
++  failPage=true;await mount();assert.ok(content(renderer!.root).includes('待确认扫描读取失败'));assert.equal(details.length,0)
++  await click('重试');assert.equal(details[0].id,1)
++  await act(async()=>details[0].resolve(null));await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'));assert.ok(content(renderer!.root).includes('120 项待处理'))
++})
++it('clamps the deleted last page and does not show an old library page',async()=>{
++  total=101;await mount(pendingCenterPath({type:'scan',scanOffset:100}))
++  assert.equal(details.at(-1)!.id,101)
++  total=100;await act(async()=>{await client!.refetchQueries({queryKey:['pending-scan-groups','page'],type:'active'})});await settle();await settle()
++  assert.equal(details.at(-1)!.id,51)
++  holdOffset=0
++  await act(async()=>navigate(pendingCenterPath({type:'scan',libraryId:1})));await settle()
++  await act(async()=>navigate(pendingCenterPath({type:'scan',libraryId:2})));await settle();await settle()
++  await act(async()=>heldPages[0].resolve(heldPages[0].value));await settle()
++  assert.equal(details.at(-1)!.libraryId,2)
++  assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).libraryId,2)
++})
++it('uses only count on another category and count failure does not block that category',async()=>{
++  failCount=true;await mount('/pending?type=scrape')
++  assert.equal(pages.length,0);assert.equal(details.length,0)
++  assert.ok(content(renderer!.root).includes('没有影片刮削待确认项'))
++  assert.ok(content(renderer!.root).includes('扫描资源?'))
++})
++
++it('does not block scrape on a library listing failure',async()=>{
++  failLibraries=true;await mount('/pending?type=scrape')
++  assert.ok(content(renderer!.root).includes('没有影片刮削待确认项'))
++  assert.ok(!content(renderer!.root).includes('待确认扫描读取失败'))
++})
++it('resolves identity deep links to the scoped identity pane without group detail reads',async()=>{
++  identityMode=true
++  await mount(pendingCenterPath({type:'scan',libraryId:2,item:pendingItemKey('scan','identity-4')}))
++  assert.deepEqual(pages[0].anchor,{kind:'identity',id:4})
++  assert.deepEqual(identityCalls,[2,4]);assert.equal(details.length,0)
++  const Pane=(await import('./PendingResourceIdentityPane')).default
++  assert.equal(renderer!.root.findAllByType(Pane).length,1)
++  assert.equal(renderer!.root.findByType(Pane).props.identity.revision,3)
++})
++it('retries rejected selected detail without reloading full queues',async()=>{
++  await mount()
++  await act(async()=>details[0].reject(new Error('detail failure')));await settle()
++  assert.ok(content(renderer!.root).includes('扫描详情读取失败'))
++  await click('重试');assert.equal(details.length,2);assert.equal(details[1].id,1)
++  await act(async()=>details[1].resolve(null));await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'))
++})
++
++it('loads actor details only in its category and keeps inactive summary counts current',async()=>{
++  await mount('/pending?type=scan')
++  assert.equal(conflictReads,0)
++  assert.ok(content(renderer!.root).includes('演员名称冲突17'))
++  conflictCount=3
++  await act(async()=>{await client!.refetchQueries({queryKey:actressKeys.conflictSummary(),exact:true})});await settle()
++  assert.ok(content(renderer!.root).includes('演员名称冲突3'))
++  await act(async()=>navigate('/pending?type=actress'));await settle();await settle()
++  assert.equal(conflictReads,1)
++  await act(async()=>navigate('/pending?type=scan'));await settle();await settle()
++  await act(async()=>{await client!.refetchQueries({queryKey:actressKeys.conflicts(),exact:true})});await settle()
++  assert.equal(conflictReads,1,'disabled conflict list is not refetched from a scan refresh')
++})
++it('shows unknown actor count without blocking scan when summary fails',async()=>{
++  failConflictCount=true;await mount()
++  assert.equal(conflictReads,0)
++  assert.ok(content(renderer!.root).includes('演员名称冲突?'))
++  assert.ok(content(renderer!.root).includes('120 项待处理'))
++})
+diff --git a/scripts/performance/pending-actress-ui.mjs b/scripts/performance/pending-actress-ui.mjs
+new file mode 100644
+index 0000000..58024c1
+--- /dev/null
++++ b/scripts/performance/pending-actress-ui.mjs
+@@ -0,0 +1,108 @@
++/** Actual pending page/router/styles against a synthetic IPC fixture. No Electron/user catalog. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { createServer } from 'vite'
++import react from '@vitejs/plugin-react'
++import { chromium } from 'playwright-core'
++const repo=process.cwd(), root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-actress-ui-'))
++const output=path.resolve(process.env.JAVDEX_ACTRESS_UI_OUTPUT ?? path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><head><style>html,body,#root{height:100%;margin:0}#root{display:flex;min-height:0;overflow:hidden}</style></head><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';
++import {createRoot} from 'react-dom/client';
++import {MemoryRouter,useNavigate,useLocation} from 'react-router-dom';
++import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__pages=[];window.__details=[];window.__fail=false;window.__failDetail=false;window.__ids=Array.from({length:101},(_,i)=>i+1);
++const key=id=>'actor-'+String(id).padStart(3,'0');
++const group=id=>({status:'conflict',normalizedName:key(id),displayName:'Actor-'+id,currentOwner:null,claimants:[],pendingNameClaims:[],mergePairs:[],
++ candidates:[{pendingId:id,revision:1,actressId:id+1000,actressRevision:1,actressMainName:'Candidate-'+id,actressAvatarPath:null,plugin:{name:'Fixture',source:'builtin'},queryName:'Fixture',selectedFields:['aliases'],applicableFields:['aliases'],mode:'fillEmpty',result:{aliases:[key(id)]},warnings:[],createdAt:'2026',resources:[],conflicts:[{name:key(id),normalizedName:key(id),type:'alias'}],fieldImpacts:[],fieldImpactsWhenAssignedToCandidate:[],willApplyAfterDecision:true,remainingConflictCountAfterDecision:0}]});
++window.api={mediaLibraries:{list:async()=>[]},scan:{countPendingQueue:async()=>0,pagePendingQueue:async()=>({items:[],total:0,offset:0})},scrape:{countPending:async()=>0,pagePending:async()=>({items:[],total:0,offset:0})},actresses:{list:async()=>[],get:async()=>null},actressScrape:{
++ listConflicts:()=>{throw new Error('Unbounded actor queue')},conflictSummary:async()=>({groupCount:window.__ids.length}),
++ pageConflicts:async query=>{window.__pages.push(query);if(window.__fail){window.__fail=false;throw new Error('fixture page failure')}
++ const rank=query.anchorName?window.__ids.indexOf(Number(query.anchorName.slice(6))):-1;
++ const offset=rank>=0?Math.floor(rank/50)*50:Math.min(query.offset||0,Math.max(0,Math.floor((window.__ids.length-1)/50)*50));
++ return {total:window.__ids.length,offset,items:window.__ids.slice(offset,offset+50).map(id=>({normalizedName:key(id),displayName:'Actor-'+id,status:'conflict',candidateCount:1,pendingNameClaimCount:0,avatarPath:null}))}},
++ getConflict:async name=>{window.__details.push(name);if(window.__failDetail){window.__failDetail=false;throw new Error('fixture detail failure')}const id=Number(name.slice(6));return window.__ids.includes(id)?group(id):null},
++ resolveConflict:async input=>{if(window.__stale){await new Promise(resolve=>{window.__finishStale=resolve});return {status:'stale',message:'Fixture stale'}}window.__ids=window.__ids.filter(id=>key(id)!==input.snapshot.normalizedName);return {status:'success',remainingPending:window.__ids.length}},
++ inspectConflictName:async()=>({normalizedName:'x',status:'available'}),validateIllegalNameReplacements:async()=>({status:'valid'})
++}};
++function Probe(){window.__navigate=useNavigate();window.__location=useLocation();return null}
++const Page=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/pages/PendingCenterPage.tsx'))})).default;
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter initialEntries={['/pending?type=actress']}><Probe/><Page/></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser
++const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();const port=server.httpServer.address().port
++ browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport});const errors=[]
++  page.on('pageerror',e=>errors.push(e.message))
++  await page.goto(`http://127.0.0.1:${port}`)
++  await page.getByRole('button',{name:'Actor-1 刮削 1 · 历史 0',exact:true}).waitFor()
++  await page.locator('input[name="pending-actress-owner"]').check()
++  assert.deepEqual(await page.evaluate(()=>window.__details),['actor-001'])
++  await page.getByRole('button',{name:'查看「Candidate-1」的详情',exact:true}).click()
++  await page.waitForFunction(()=>window.__location.pathname.includes('/actress/'))
++  assert.deepEqual(await page.evaluate(()=>window.__details),['actor-001'])
++  await page.evaluate(()=>window.__navigate(-1))
++  await page.waitForFunction(()=>window.__location.pathname==='/pending')
++  await page.locator('input[name="pending-actress-owner"]:checked').waitFor()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'Actor-51 刮削 1 · 历史 0',exact:true}).waitFor()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'Actor-101 刮削 1 · 历史 0',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),1)
++  await page.locator('input[name="pending-actress-owner"]').check()
++  await page.getByRole('button',{name:'确认名称归属',exact:true}).click()
++  await page.waitForFunction(()=>window.__location.search.includes('actor-051'))
++  console.log('focus after delete',await page.evaluate(()=>({tag:document.activeElement?.tagName,role:document.activeElement?.getAttribute('role'),text:document.activeElement?.textContent?.slice(0,180),location:window.__location})))
++  await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-current')==='true')
++  const focusAfterDelete=await page.evaluate(()=>document.activeElement.textContent)
++  assert.ok(focusAfterDelete.includes('Actor-51'))
++  assert.equal(await page.locator('button[aria-current]').count(),50)
++  await page.getByRole('button',{name:'上一页',exact:true}).click()
++  await page.getByRole('button',{name:'Actor-1 刮削 1 · 历史 0',exact:true}).waitFor()
++  await page.evaluate(()=>{window.__fail=true})
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('演员冲突队列读取失败',{exact:true}).waitFor()
++  await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.getByRole('button',{name:'Actor-52 刮削 1 · 历史 0',exact:true}).waitFor()
++  await page.evaluate(()=>{window.__failDetail=true})
++  await page.getByRole('button',{name:'Actor-52 刮削 1 · 历史 0',exact:true}).click()
++  await page.getByText('演员冲突详情读取失败',{exact:true}).waitFor()
++  await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.locator('input[name="pending-actress-owner"]').waitFor()
++  await page.evaluate(()=>{window.__stale=true})
++  await page.locator('input[name="pending-actress-owner"]').check()
++  await page.getByRole('button',{name:'确认名称归属',exact:true}).click()
++  await page.waitForFunction(()=>typeof window.__finishStale==='function')
++  const previousPage=page.getByRole('button',{name:'上一页',exact:true})
++  await previousPage.focus()
++  await page.evaluate(()=>window.__finishStale())
++  await page.waitForFunction(()=>document.body.textContent.includes('数据已变化，已刷新，请重新确认'))
++  await page.waitForFunction(()=>!document.querySelector('input[name="pending-actress-owner"]:checked'))
++  assert.equal(await previousPage.evaluate(element=>element===document.activeElement),true)
++  await page.getByRole('button',{name:'上一页',exact:true}).scrollIntoViewIfNeeded()
++  const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth,height:innerHeight}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1)
++  const pager=await page.getByLabel('演员冲突队列分页',{exact:true}).boundingBox()
++  assert.ok(pager && pager.y>=0 && pager.y+pager.height<=viewport.height+1)
++  const heading=await page.getByRole('heading',{name:'待确认',exact:true}).boundingBox()
++  assert.ok(heading && heading.y>=0 && heading.y+heading.height<=viewport.height)
++  assert.deepEqual(errors,[])
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,geometry,pager,focusAfterDelete,pages:await page.evaluate(()=>window.__pages),details:await page.evaluate(()=>window.__details),errors})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n')
++ console.log(JSON.stringify(results))
++} finally {await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/pending-scan-ui.mjs b/scripts/performance/pending-scan-ui.mjs
+new file mode 100644
+index 0000000..b924944
+--- /dev/null
++++ b/scripts/performance/pending-scan-ui.mjs
+@@ -0,0 +1,70 @@
++/** Actual pending page/router/styles against a synthetic IPC fixture. No Electron/user catalog. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { createServer } from 'vite'
++import react from '@vitejs/plugin-react'
++import { chromium } from 'playwright-core'
++const repo=process.cwd(), root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-scan-ui-'))
++const output=path.resolve(process.env.JAVDEX_SCAN_UI_OUTPUT ?? path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><head><style>html,body,#root{height:100%;margin:0}#root{display:flex;min-height:0;overflow:hidden}</style></head><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';
++import {createRoot} from 'react-dom/client';
++import {MemoryRouter} from 'react-router-dom';
++import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__pages=[];window.__details=[];window.__fail=false;
++window.api={mediaLibraries:{list:async()=>[{id:1,name:'Synthetic'}]},actressScrape:{listConflicts:()=>{throw new Error('Full actress queue is forbidden')},pageConflicts:async()=>({items:[],total:0,offset:0}),conflictSummary:async()=>({groupCount:0})},scrape:{countPending:async()=>0,pagePending:async()=>({items:[],total:0,offset:0})},scan:{
++ listPending:()=>{throw new Error('Unbounded inbox');},listPendingResourceIdentities:()=>{throw new Error('Unbounded identities')},countPendingQueue:async()=>120,
++ pagePendingQueue:async query=>{window.__pages.push(query);if(window.__fail){window.__fail=false;throw new Error('fixture failure')};
++ const anchor=query.anchor?.id;const offset=anchor?Math.floor((anchor-1)/50)*50:(query.offset||0);
++ return {total:120,offset,items:Array.from({length:Math.min(50,120-offset)},(_,i)=>({kind:'group',id:offset+i+1,libraryId:1,revision:1,label:i===1?'长'.repeat(128)+'…':'GROUP-'+(offset+i+1),resourceCount:2}))};},
++ getPendingGroup:async (libraryId,id)=>{window.__details.push(id);return null;}
++
++}};
++const Page=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/pages/PendingCenterPage.tsx'))})).default;
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter initialEntries={['/pending?type=scan']}><Page/></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser
++const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();const port=server.httpServer.address().port
++ browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport});const errors=[]
++  page.on('pageerror',e=>errors.push(e.message))
++  await page.goto(`http://127.0.0.1:${port}`)
++  await page.getByRole('button',{name:'GROUP-1 Synthetic · 2 条资源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),50)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'GROUP-51 Synthetic · 2 条资源',exact:true}).waitFor()
++  await page.waitForFunction(()=>window.__details.at(-1)===51)
++  await page.evaluate(()=>{window.__fail=true})
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('待确认扫描读取失败',{exact:true}).waitFor()
++  await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.getByRole('button',{name:'GROUP-101 Synthetic · 2 条资源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),20)
++  await page.getByRole('button',{name:'上一页',exact:true}).scrollIntoViewIfNeeded()
++  const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth,height:innerHeight}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1)
++  const pager=await page.getByLabel('扫描队列分页',{exact:true}).boundingBox()
++  assert.ok(pager && pager.y>=0 && pager.y+pager.height<=viewport.height+1)
++  const heading=await page.getByRole('heading',{name:'待确认',exact:true}).boundingBox()
++  assert.ok(heading && heading.y>=0 && heading.y+heading.height<=viewport.height)
++  assert.deepEqual(await page.evaluate(()=>window.__details),[1,51,101])
++  assert.deepEqual(errors,[])
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,geometry,pager,pages:await page.evaluate(()=>window.__pages),details:await page.evaluate(()=>window.__details),errors})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n')
++ console.log(JSON.stringify(results))
++} finally {await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/pending-scrape-ui.mjs b/scripts/performance/pending-scrape-ui.mjs
+new file mode 100644
+index 0000000..64f6a4c
+--- /dev/null
++++ b/scripts/performance/pending-scrape-ui.mjs
+@@ -0,0 +1,69 @@
++/** Actual pending page/router/styles against a synthetic IPC fixture. No Electron/user catalog. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { createServer } from 'vite'
++import react from '@vitejs/plugin-react'
++import { chromium } from 'playwright-core'
++const repo=process.cwd(), root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-ui-'))
++const output=path.resolve(process.env.JAVDEX_PENDING_UI_OUTPUT ?? path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><head><style>html,body,#root{height:100%;margin:0}#root{display:flex;min-height:0;overflow:hidden}</style></head><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';
++import {createRoot} from 'react-dom/client';
++import {MemoryRouter} from 'react-router-dom';
++import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__pages=[];window.__details=[];window.__fail=false;
++window.api={mediaLibraries:{list:async()=>[]},actressScrape:{listConflicts:()=>{throw new Error('Full actress queue is forbidden')},pageConflicts:async()=>({items:[],total:0,offset:0}),conflictSummary:async()=>({groupCount:0})},scan:{countPendingQueue:async()=>0,pagePendingQueue:async()=>({items:[],total:0,offset:0})},scrape:{
++ listPending:()=>{throw new Error('Unbounded inbox');},countPending:async()=>120,
++ pagePending:async query=>{window.__pages.push(query);if(window.__fail){window.__fail=false;throw new Error('fixture failure')};
++ const anchor=query.videoId||query.anchorId;const offset=anchor?Math.floor((anchor-1)/50)*50:(query.offset||0);
++ return {total:120,offset,items:Array.from({length:Math.min(50,120-offset)},(_,i)=>({id:offset+i+1,videoId:offset+i+1,revision:1,code:i===1?'长'.repeat(128)+'…':'CODE-'+(offset+i+1),candidateCount:2,sourceCount:1,stagedCoverPath:null}))};},
++ getPending:async id=>{window.__details.push(id);return null;}
++}};
++const Page=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/pages/PendingCenterPage.tsx'))})).default;
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter initialEntries={['/pending?type=scrape']}><Page/></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser
++const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();const port=server.httpServer.address().port
++ browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport});const errors=[]
++  page.on('pageerror',e=>errors.push(e.message))
++  await page.goto(`http://127.0.0.1:${port}`)
++  await page.getByRole('button',{name:'CODE-1 2 个候选 · 1 个来源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),50)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'CODE-51 2 个候选 · 1 个来源',exact:true}).waitFor()
++  await page.waitForFunction(()=>window.__details.at(-1)===51)
++  await page.evaluate(()=>{window.__fail=true})
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('待确认刮削读取失败',{exact:true}).waitFor()
++  await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.getByRole('button',{name:'CODE-101 2 个候选 · 1 个来源',exact:true}).waitFor()
++  assert.equal(await page.locator('button[aria-current]').count(),20)
++  await page.getByRole('button',{name:'上一页',exact:true}).scrollIntoViewIfNeeded()
++  const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth,height:innerHeight}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1)
++  const pager=await page.getByLabel('刮削队列分页',{exact:true}).boundingBox()
++  assert.ok(pager && pager.y>=0 && pager.y+pager.height<=viewport.height+1)
++  const heading=await page.getByRole('heading',{name:'待确认',exact:true}).boundingBox()
++  assert.ok(heading && heading.y>=0 && heading.y+heading.height<=viewport.height)
++  assert.deepEqual(await page.evaluate(()=>window.__details),[1,51,101])
++  assert.deepEqual(errors,[])
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,geometry,pager,pages:await page.evaluate(()=>window.__pages),details:await page.evaluate(()=>window.__details),errors})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n')
++ console.log(JSON.stringify(results))
++} finally {await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}

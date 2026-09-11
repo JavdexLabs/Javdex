@@ -651,8 +651,11 @@
 .playlist-section-controls {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 8px;
-  flex-shrink: 0;
+  flex-shrink: 1;
 }
 .playlist-video-grid {
   display: grid;
@@ -767,6 +770,9 @@
   line-height: 1.5;
 }
 .merge-actress-body {
+  overflow-y: auto;
+  padding-right: var(--scrollbar-safe-pad);
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -775,6 +781,7 @@
   margin-bottom: 0;
 }
 .merge-actress-flow {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 10px;
@@ -887,7 +894,7 @@
   min-width: 0;
 }
 .merge-actress-picker {
-  flex: 1 1 220px;
+  flex: 1 0 280px;
   min-height: 0;
 }
 .merge-actress-section-head {
@@ -1210,4 +1217,19 @@
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+
+.merge-actress-pagination {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--form-label-gap);
+  color: var(--text-secondary);
+}
+
+.merge-actress-page-error {
+  padding: var(--form-field-gap);
+  color: var(--text-secondary);
 }

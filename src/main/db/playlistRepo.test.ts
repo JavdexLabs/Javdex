@@ -4,11 +4,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
+import type { VideoResourceFilter } from '@shared/videoTypes'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
   addVideoToPlaylist,
   createPlaylistRecord,
   getPlaylistDetail,
+  getPlaylistPage,
+  getPlaylistMetadata,
+  listPlaylistVideoPage,
   listPlaylists,
   listPlaylistsForVideo,
   removeVideoFromPlaylist,
@@ -49,6 +53,82 @@ afterEach(() => {
 })
 
 describe('playlistRepo', () => {
+  it('paginates and filters identically to the full playlist without losing zero-resource rows', () => {
+    setupDb()
+    const db = getDb()
+    db.exec("INSERT INTO videos (id, code, release_date) VALUES (3, 'EMPTY-3', ''), (4, 'EMPTY-4', NULL), (5, 'EMPTY-5', '   ')")
+    const id = createPlaylistRecord({ name: 'Paged' })
+    for (const videoId of [1, 2, 3, 4, 5]) addVideoToPlaylist({ playlistId: id, videoId })
+    db.exec(`UPDATE videos SET release_date = '2024-03-01' WHERE id IN (1, 2);
+      INSERT INTO video_resources (library_id, video_id, kind, locator, resource_key)
+      VALUES (1, 2, 'web', 'https://example.test/2', 'web:2');`)
+    const filterSets: VideoResourceFilter[][] = [[], ['local'], ['none'], ['web'], ['local', 'none']]
+    for (const sortBy of ['added_at', 'release_date'] as const) {
+      for (const sortDir of ['asc', 'desc'] as const) {
+        const full = getPlaylistDetail(id, { sortBy, sortDir })!
+        for (const resourceKinds of filterSets) {
+          const filtered = full.videos.filter(video => resourceKinds.length === 0 || resourceKinds.some(kind =>
+            kind === 'none' ? video.resource_kinds?.length === 0 : video.resource_kinds?.includes(kind)))
+          const actual = []
+          for (let offset = 0; offset <= filtered.length; offset++) {
+            const page = getPlaylistPage(id, { sortBy, sortDir, resourceKinds, offset, limit: 1 })!
+            assert.equal(page.total, 5)
+            assert.equal(page.filteredTotal, filtered.length)
+            assert.equal(page.preview_cover_path, full.videos.find(video => video.cover_path)?.cover_path ?? null)
+            assert.ok(page.videos.length <= 1)
+            actual.push(...page.videos)
+          }
+          assert.deepEqual(actual, filtered.map(({ id, code, title, cover_path, scraped_status,
+            has_pending_scrape, resource_kinds }) => ({
+            id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds
+          })))
+        }
+      }
+    }
+    assert.equal(getPlaylistPage(-1), null)
+  })
+
+  it('limits a large playlist before returning card details', () => {
+    setupDb()
+    const db = getDb()
+    const id = createPlaylistRecord({ name: 'Large' })
+    db.exec(`WITH RECURSIVE n(id) AS (SELECT 3 UNION ALL SELECT id + 1 FROM n WHERE id < 30002)
+      INSERT INTO videos (id, code) SELECT id, 'PAGE-' || id FROM n;
+      INSERT INTO playlist_video (playlist_id, video_id, position, added_at)
+        SELECT ${id}, id, id, '2026' FROM videos;`)
+    db.exec(`UPDATE videos SET summary = printf('%65536s', 'long description')
+      WHERE id IN (SELECT video_id FROM playlist_video WHERE playlist_id = ${id}
+        ORDER BY added_at DESC, position DESC, video_id DESC LIMIT 200 OFFSET 200)`)
+    const page = getPlaylistPage(id, { offset: 200, limit: 999 })!
+    assert.equal(page.total, 30002)
+    assert.equal(page.videos.length, 200)
+    assert.equal(page.limit, 200)
+    assert.ok(page.videos.every(video => !Object.hasOwn(video, 'summary')))
+    assert.equal(new Set(page.videos.map(video => video.id)).size, 200)
+    assert.ok(Buffer.byteLength(JSON.stringify(page)) < 512 * 1024)
+  })
+
+  it('keeps metadata out of subsequent video-page queries', () => {
+    setupDb()
+    const db = getDb()
+    const description = 'metadata-only '.repeat(10000)
+    const id = createPlaylistRecord({ name: 'Metadata', description })
+    addVideoToPlaylist({ playlistId: id, videoId: 1 })
+    assert.equal(getPlaylistMetadata(id)?.description, description.trim())
+    assert.equal(Object.hasOwn(getPlaylistMetadata(id)!, 'videos'), false)
+    const statements: string[] = []
+    const prepare = db.prepare.bind(db)
+    db.prepare = ((sql: string) => {
+      statements.push(sql)
+      return prepare(sql)
+    }) as typeof db.prepare
+    const page = listPlaylistVideoPage(id)!
+    assert.equal(page.total, 1)
+    assert.equal(Object.hasOwn(page, 'description'), false)
+    assert.equal(statements.some(sql => /SELECT \* FROM playlists|playlist_links|v\.cover_path IS NOT NULL/.test(sql)), false)
+    assert.ok(Buffer.byteLength(JSON.stringify(page)) < 1024)
+  })
+
   it('creates playlists with required name and optional fields', () => {
     setupDb()
 

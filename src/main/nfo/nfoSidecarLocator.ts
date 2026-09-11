@@ -1,9 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
-import { normalizeVideoCode } from '@shared/videoCode'
+import { sameLogicalCode, type DirectoryVideoIdentityInput } from './directoryVideoIdentity'
 import type { ManagedRootFileCapability } from '../metadata-sources'
 import type { IssuedNfoFile, NfoFileStore } from './nfoFileStore'
+
+export { sameLogicalCode } from './directoryVideoIdentity'
 
 export type NfoSidecarWarningCode =
   | 'ambiguous-movie-nfo'
@@ -27,7 +29,7 @@ export interface LocateNfoSidecarInput {
   anchorPath: string
   root: Readonly<MediaLibraryRoot>
   /** Filename-derived identities for every video/STRM anchor in this directory. */
-  directoryVideoCodes: readonly (string | null)[]
+  directoryVideoCodes: DirectoryVideoIdentityInput
   /** Reuse directory entries collected by the current scan; never cache across scans. */
   directorySidecars?: ReadonlyMap<string, string>
   fileStore: NfoFileStore
@@ -42,19 +44,6 @@ export function indexNfoSidecars(names: Iterable<string>): ReadonlyMap<string, s
     if (!files.has(name.toLowerCase())) files.set(name.toLowerCase(), name)
   }
   return files
-}
-
-export function sameLogicalCode(values: readonly (string | null)[]): boolean {
-  if (values.length === 1) return true
-  const normalized = values.map((value) => {
-    if (!value) return null
-    try {
-      return normalizeVideoCode(value)
-    } catch {
-      return null
-    }
-  })
-  return normalized.length > 0 && normalized.every((value) => value && value === normalized[0])
 }
 
 function issue(

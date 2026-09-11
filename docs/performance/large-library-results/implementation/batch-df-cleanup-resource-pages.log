@@ -1,0 +1,10 @@
+{"rows":100000,"queries":783,"beats":27,"elapsedMs":27.986374999999953,"maxGap":1.908208000000002,"legacyPlan":[{"id":4,"parent":0,"notused":53,"detail":"SEARCH video_resources USING COVERING INDEX idx_video_resources_library_video (library_id=?)"},{"id":23,"parent":0,"notused":0,"detail":"USE TEMP B-TREE FOR ORDER BY"}],"fixedPlan":[{"id":4,"parent":0,"notused":156,"detail":"SEARCH video_resources USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"}],"notes":"Synthetic file-backed DB. No deletion, audit, filesystem checks or finalization. Only the fixed plan is timed."}
+✔ walks 100000 real resource rows without deletion using bounded monotonic pages (273.933791ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 450.144667

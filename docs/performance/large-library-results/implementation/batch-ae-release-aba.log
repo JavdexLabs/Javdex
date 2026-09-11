@@ -1,0 +1,21 @@
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":458.80070799999976,"warmMedianMs":460.37995799999953,"warmMaxMs":532.4557079999995,"samples":10,"sqlCalls":2,"sqlMsLast":532.2668330000015,"serializedBytes":41452,"rssBytesAfter":178044928}
+BEGIN index.single-library.legacy.release
+{"name":"index.single-library.legacy.release","firstMs":535.9352089999993,"warmMedianMs":573.5458750000016,"warmMaxMs":580.0978750000031,"samples":10,"sqlCalls":2,"sqlMsLast":579.9086250000037,"serializedBytes":41452,"rssBytesAfter":178962432}
+BEGIN index-control.single-library.legacy.release
+{"name":"index-control.single-library.legacy.release","firstMs":591.4716249999983,"warmMedianMs":638.5013749999998,"warmMaxMs":660.434624999998,"samples":10,"sqlCalls":2,"sqlMsLast":659.1057069999988,"serializedBytes":41452,"rssBytesAfter":180453376}
+BEGIN overlap.legacy.release
+{"name":"overlap.legacy.release","firstMs":629.737459,"warmMedianMs":631.2801660000005,"warmMaxMs":636.9079999999958,"samples":10,"sqlCalls":2,"sqlMsLast":636.6999579999974,"serializedBytes":41452,"rssBytesAfter":190119936}
+BEGIN index.after-overlap-write.overlap.legacy.release
+{"name":"index.after-overlap-write.overlap.legacy.release","firstMs":637.8426249999975,"warmMedianMs":631.0709999999963,"warmMaxMs":648.3137500000012,"samples":10,"sqlCalls":2,"sqlMsLast":627.8672080000033,"serializedBytes":41452,"rssBytesAfter":191709184}
+BEGIN index-control.after-overlap-write.overlap.legacy.release
+{"name":"index-control.after-overlap-write.overlap.legacy.release","firstMs":639.8474169999972,"warmMedianMs":628.2562089999992,"warmMaxMs":632.7640420000025,"samples":10,"sqlCalls":2,"sqlMsLast":628.5414170000076,"serializedBytes":41452,"rssBytesAfter":193953792}
+✔ scripts/performance/large-library-benchmark.ts (55415.766958ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 55419.540625

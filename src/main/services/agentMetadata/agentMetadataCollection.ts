@@ -474,14 +474,13 @@ export class AgentMetadataCollection {
   snapshot(runId: string): AgentMetadataSnapshot | null {
     const active = this.active.get(runId)
     if (!active) return null
-    const journal = agentRunStore.readProductJournal(runId)
     const draft = active.state.draftId
       ? agentMetadataDraftService.getDraft(active.state.draftId) ?? undefined
       : undefined
     return {
       runId,
       revision: active.state.revision,
-      cursor: journal.at(-1)?.seq ?? 0,
+      cursor: agentRunStore.getProductJournalCursor(runId),
       target: structuredClone(active.state.target),
       phase: active.state.phase,
       summary: active.state.summary,
@@ -495,7 +494,7 @@ export class AgentMetadataCollection {
 
   async restoreRecoverableRuns(): Promise<Array<{ runId: string; error: string }>> {
     const failures: Array<{ runId: string; error: string }> = []
-    for (const record of agentRunStore.listRecoverableRuns()) {
+    for (const record of agentRunStore.iterateRecoverableRuns('metadata-collector')) {
       if (record.useCase !== 'metadata-collector' || this.active.has(record.id)) continue
       try {
         const state = record.productState as AgentMetadataProductState

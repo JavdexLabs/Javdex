@@ -1,0 +1,23 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-aq-benchmark.json": "17be7951e46cab5cf311a18cec0f618464dad3ccc757bcfa981c96117494ea29",
+    "batch-aq-benchmark.log": "b84eff941377d946e0502f16106b6a461888fd816672df9a28d8b2c1b0d4e4af",
+    "batch-aq-build.log": "b103a8dbc45b02ad8b1336466beff8446a156466e301662ec48a7b98856e86cf",
+    "batch-aq-full.log": "c9f965d6ab1f37a031180c5b20ff44f2abb4acc38ed1ad77a17a3e7fcc345767",
+    "batch-aq-maintenance-guard.patch": "263475eea721679a7dbd21f34b8d88b512783d310ac8d229844304f19dcf9e7d",
+    "batch-aq-review.md": "8eae23016733e83a02371d1f3c2fece4ec32463d508fca01888effa1ee97fe8e",
+    "batch-aq-target.log": "b6680486c2df655cd6536719b78b0cbb84b83b1a42c8d854d1648cc563e72169",
+    "batch-aq-useConflictReviewController.test.tsx": "aa10847050520500396d7181756a37e9c3b9caa782fc31df02c16162ae8f11e6"
+  },
+  "notes": [
+    "Cumulative selected diff versus HEAD plus full new benchmark; depends on B-AP, not standalone.",
+    "Restore hook test from included full batch-aq-useConflictReviewController.test.tsx when reconstructing the AP checkpoint; AP final snapshot had replaced two original tests. AP full log predated that replacement and did include them.",
+    "Final restored full2220pass1skip0fail(2221total); focused64pass; build passed before test-only restoration, production unchanged.",
+    "Single completed maintenance stamp bound to connection/local writes/external data_version/schema. Only no-write passes publish; caller transaction never reuses/publishes.",
+    "Repair with writes requires next-pass checks because later candidates can make earlier candidates conflict. Not a one-call fixed-point algorithm.",
+    "Benchmark compares same-build real-write invalidation/hit/re-invalidation on10000consistent pending4KiB JSON fixtures. Three warm samples each; no p95/cold/Windows/HDD/full IPC claims.",
+    "All summary fields equal/130B, timings exclude probe writes, assertions and JSON sizing; aggregation still executes on hits.",
+    "No schema/user data change, commit, push or release. Entire15/42 objective remains active."
+  ]
+}

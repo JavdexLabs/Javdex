@@ -1,0 +1,47 @@
+{
+  "pending": 10000,
+  "resultSummaryCharacters": 4096,
+  "results": [
+    {
+      "name": "invalidated.full-check",
+      "samples": [
+        262.155167,
+        262.1919999999999,
+        258.95054200000004
+      ],
+      "medianMs": 262.155167,
+      "jsonBytes": 130
+    },
+    {
+      "name": "unchanged.skip-check",
+      "samples": [
+        6.028999999999996,
+        6.019792000000052,
+        6.134958999999981
+      ],
+      "medianMs": 6.028999999999996,
+      "jsonBytes": 130
+    },
+    {
+      "name": "invalidated.again",
+      "samples": [
+        246.93833300000006,
+        290.9771250000001,
+        255.3125829999999
+      ],
+      "medianMs": 255.3125829999999,
+      "jsonBytes": 130
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "sqliteVersion": {
+    "version": "3.53.4"
+  },
+  "caveats": [
+    "Three sequential warm samples per stage after ANALYZE; not p95/cold/Windows/HDD/full IPC.",
+    "Invalidation is a real write to an unrelated probe table before timing; actor business rows unchanged. This compares miss/hit paths in the same implementation, not an old-build benchmark.",
+    "Output equality checks all summary fields. Consistent fixture requires no repairs; repair-heavy workloads still rescan until a no-write pass.",
+    "Group/status aggregation still scans the conflict relation on every call; only redundant consistency maintenance is skipped. No DTO or JSON result cache."
+  ]
+}

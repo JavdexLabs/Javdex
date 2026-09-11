@@ -1,0 +1,814 @@
+{
+  "generatedAt": "2026-09-10T09:02:04.141Z",
+  "videos": 10000,
+  "samples": 3,
+  "distribution": "skew",
+  "candidate": "origin-first",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "sqlite": {
+      "version": "3.53.4"
+    }
+  },
+  "baselineBytes": 7036928,
+  "indexedBytes": 7897088,
+  "baselineLiveBytes": 7094272,
+  "indexedLiveBytes": 7196672,
+  "indexBuildMs": 8.187624999999969,
+  "results": [
+    {
+      "name": "baseline.no_stats.all",
+      "firstTimedMs": 5.711874999999992,
+      "warmMedianMs": 5.682290999999992,
+      "times": [
+        5.711874999999992,
+        5.746874999999989,
+        5.595583000000005,
+        5.682290999999992
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 55,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_recent (is_hidden=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 45,
+              "detail": "SEARCH library USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 28,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 38,
+              "parent": 3,
+              "notused": 18,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 40,
+              "parent": 3,
+              "notused": 53,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 46,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 88,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 94,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 104,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 123,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.manual",
+      "firstTimedMs": 7.357333000000011,
+      "warmMedianMs": 7.461458000000022,
+      "times": [
+        7.357333000000011,
+        7.488332999999983,
+        7.461458000000022,
+        7.297291999999999
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 55,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_recent (is_hidden=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 45,
+              "detail": "SEARCH library USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 28,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 18,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 50,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 92,
+              "parent": 0,
+              "notused": 91,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 96,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 99,
+              "parent": 96,
+              "notused": 62,
+              "detail": "SEARCH manual_link USING INDEX idx_video_tag_origin (origin=?)"
+            },
+            {
+              "id": 118,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 128,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 147,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.all",
+      "firstTimedMs": 5.541375000000016,
+      "warmMedianMs": 5.605165999999997,
+      "times": [
+        5.541375000000016,
+        5.602334000000013,
+        5.664750000000026,
+        5.605165999999997
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 129,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 114,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 45,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 47,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 89,
+              "parent": 0,
+              "notused": 113,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 95,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 105,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 124,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.manual",
+      "firstTimedMs": 6.884916999999973,
+      "warmMedianMs": 6.8737089999999625,
+      "times": [
+        6.884916999999973,
+        7.0817499999999995,
+        6.8737089999999625,
+        6.616541999999981
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 129,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 40,
+              "parent": 3,
+              "notused": 114,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 42,
+              "parent": 3,
+              "notused": 51,
+              "detail": "SEARCH vt USING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 51,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 93,
+              "parent": 0,
+              "notused": 83,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 97,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 100,
+              "parent": 97,
+              "notused": 149,
+              "detail": "SEARCH manual_link USING INDEX idx_video_tag_origin (origin=?)"
+            },
+            {
+              "id": 119,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 129,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 148,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.writes",
+      "rowsPerOperation": 1000,
+      "elapsedMs": 2.923417000000029,
+      "walBytes": 383192
+    },
+    {
+      "name": "candidate.before_analyze.all",
+      "firstTimedMs": 5.417542000000026,
+      "warmMedianMs": 5.471084000000019,
+      "times": [
+        5.417542000000026,
+        5.471084000000019,
+        5.584833000000003,
+        5.389166000000046
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 129,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 114,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 45,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 47,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 89,
+              "parent": 0,
+              "notused": 113,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 95,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 105,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 124,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.manual",
+      "firstTimedMs": 3.3867079999999987,
+      "warmMedianMs": 3.3836670000000026,
+      "times": [
+        3.3867079999999987,
+        3.3836670000000026,
+        3.4202080000000024,
+        3.362875000000031
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 129,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 37,
+              "parent": 3,
+              "notused": 53,
+              "detail": "SEARCH vt USING COVERING INDEX benchmark_tag_cover (origin=?)"
+            },
+            {
+              "id": 45,
+              "parent": 3,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON members (video_id=?)"
+            },
+            {
+              "id": 54,
+              "parent": 3,
+              "notused": 49,
+              "detail": "SEARCH members USING AUTOMATIC COVERING INDEX (video_id=?)"
+            },
+            {
+              "id": 60,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 102,
+              "parent": 0,
+              "notused": 83,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 106,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 108,
+              "parent": 106,
+              "notused": 53,
+              "detail": "SEARCH manual_link USING COVERING INDEX benchmark_tag_cover (origin=?)"
+            },
+            {
+              "id": 126,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 136,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 155,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.all",
+      "firstTimedMs": 5.533625000000029,
+      "warmMedianMs": 5.54441700000001,
+      "times": [
+        5.533625000000029,
+        5.677084000000036,
+        5.535792000000015,
+        5.54441700000001
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 129,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 114,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 45,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 47,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 89,
+              "parent": 0,
+              "notused": 113,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 95,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 105,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 124,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.manual",
+      "firstTimedMs": 3.3731670000000236,
+      "warmMedianMs": 3.548167000000035,
+      "times": [
+        3.3731670000000236,
+        3.4722080000000233,
+        3.548167000000035,
+        3.574416000000042
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 129,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 114,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 42,
+              "detail": "SEARCH vt USING COVERING INDEX benchmark_tag_cover (origin=? AND video_id=?)"
+            },
+            {
+              "id": 48,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 90,
+              "parent": 0,
+              "notused": 83,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 94,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 96,
+              "parent": 94,
+              "notused": 138,
+              "detail": "SEARCH manual_link USING COVERING INDEX benchmark_tag_cover (origin=?)"
+            },
+            {
+              "id": 114,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 124,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 143,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.writes",
+      "rowsPerOperation": 1000,
+      "elapsedMs": 3.466042000000016,
+      "walBytes": 572712
+    }
+  ],
+  "caveats": [
+    "Synthetic local file, warm OS cache; three warm samples by default, not p95 or Windows/HDD.",
+    "Full-result equality checks are outside timing; firstTimedMs follows an untimed EQP/result capture, not cold access.",
+    "Candidate-before-analyze retains baseline statistics; this is not a wholly un-analyzed fixture.",
+    "File sizes include freelist pages and prior write allocations; not isolated index live bytes. WAL bytes are file length, not device write volume.",
+    "Write probe commits 1000 inserts, origin updates, deletes in three transactions; does not model full scan/import."
+  ]
+}

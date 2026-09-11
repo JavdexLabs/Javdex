@@ -11,12 +11,12 @@ import type {
   PluginDevUserResponse
 } from '@shared/pluginDevTypes'
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
-import { agentExecution } from '../../agent-platform/agentExecution'
+import { AgentExecution, agentExecution } from '../../agent-platform/agentExecution'
 import type { AgentRunRecord } from '../../agent-platform/agentRunStore'
 import { agentRunStore } from '../../agent-platform/agentRunStore'
 import { setCacheAffinityDeviceKeyForTests } from '../../agent-platform/cacheAffinity'
 import { toolHost } from '../../agent-platform/toolHost'
-import { closeDatabase, initDatabaseAtPath } from '../../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '../../db/database'
 import type {
   HostedToolBinding,
   PersistedRunConfigurationSnapshot,
@@ -26,6 +26,7 @@ import type {
   RuntimeObservation
 } from '../../agent-platform/types'
 import { PluginDeveloper } from './pluginDeveloper'
+import { buildPluginDevAgentWorkLogFromSnapshot } from './workLog'
 import {
   createSession,
   deleteSession
@@ -154,6 +155,8 @@ interface TestActiveRun {
 
 interface TestablePluginDeveloper {
   active: Map<string, TestActiveRun>
+  emitDomainEvent(active: TestActiveRun, event: PluginDevAgentEvent): void
+  restoreSession(runId: string, state: Record<string, unknown>): PluginDevSession
   materializeWorkspace(session: PluginDevSession, input: PluginDevAgentStartInput): void
   runtimeNotify(active: TestActiveRun, event: RuntimeObservation): void
   runtimeProject(
@@ -327,9 +330,10 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     }
     const restoreList = replaceMethod(
       agentRunStore,
-      'listRecoverableRuns',
-      (() => records) as typeof agentRunStore.listRecoverableRuns
+      'iterateCleanupRunIds',
+      (function* () { yield* records.filter((record) => record.useCase === 'plugin-developer').map((record) => record.id) }) as typeof agentRunStore.iterateCleanupRunIds
     )
+    const restoreCleanupPending = replaceMethod(agentRunStore, 'setResourceCleanupPending', () => {})
     const restoreClose = replaceMethod(agentExecution, 'closeRun', (async (runId) => {
       closed.push(runId)
     }) as typeof agentExecution.closeRun)
@@ -357,6 +361,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       restoreDispose()
       restoreDiscard()
       restoreClose()
+      restoreCleanupPending()
       restoreList()
       fs.rmSync(process.env.JAVDEX_TEST_USER_DATA!, { recursive: true, force: true })
     }
@@ -372,9 +377,10 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     let closeCalls = 0
     const restoreList = replaceMethod(
       agentRunStore,
-      'listRecoverableRuns',
-      (() => []) as typeof agentRunStore.listRecoverableRuns
+      'iterateCleanupRunIds',
+      (function* () {}) as typeof agentRunStore.iterateCleanupRunIds
     )
+    const restoreCleanupPending = replaceMethod(agentRunStore, 'setResourceCleanupPending', () => {})
     const restoreClose = replaceMethod(agentExecution, 'closeRun', (async () => {
       closeCalls += 1
     }) as typeof agentExecution.closeRun)
@@ -384,6 +390,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       assert.equal(testable(developer).active.has(session.id), true)
     } finally {
       restoreClose()
+      restoreCleanupPending()
       restoreList()
       testable(developer).active.delete(session.id)
       deleteSession(session.id)
@@ -427,14 +434,15 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     testable(developer).active.set(running.id, activeRun(running))
     const restoreList = replaceMethod(
       agentRunStore,
-      'listRecoverableRuns',
-      (() => records) as typeof agentRunStore.listRecoverableRuns
+      'iterateCleanupRunIds',
+      (function* () { yield* records.filter((record) => record.useCase === 'plugin-developer').map((record) => record.id) }) as typeof agentRunStore.iterateCleanupRunIds
     )
     const restoreGet = replaceMethod(
       agentRunStore,
-      'getRun',
-      ((runId: string) => records.find((record) => record.id === runId) ?? null) as typeof agentRunStore.getRun
+      'getRunStatus',
+      ((runId: string) => records.find((record) => record.id === runId)?.status ?? null) as typeof agentRunStore.getRunStatus
     )
+    const restoreCleanupPending = replaceMethod(agentRunStore, 'setResourceCleanupPending', () => {})
     const restoreClose = replaceMethod(agentExecution, 'closeRun', (async (runId) => {
       closed.push(runId)
     }) as typeof agentExecution.closeRun)
@@ -455,6 +463,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       restoreDispose()
       restoreDiscard()
       restoreClose()
+      restoreCleanupPending()
       restoreGet()
       restoreList()
       testable(developer).active.delete(waiting.id)
@@ -597,10 +606,19 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       'updateProductState',
       (() => undefined) as typeof agentRunStore.updateProductState
     )
+    let journalSeq = 0
+    const restoreCursor = replaceMethod(agentRunStore, 'getProductJournalCursor', () => journalSeq)
+    const restoreTransition = replaceMethod(agentRunStore, 'updateProductStateFrom', ((
+      _runId: string, _status: string, build: (current: AgentRunRecord) => Record<string, unknown>
+    ) => {
+      const next = build(record)
+      record.productState = next as typeof productState
+      return next
+    }) as typeof agentRunStore.updateProductStateFrom)
     const restoreAppend = replaceMethod(
       agentRunStore,
       'appendProductEvent',
-      (() => 0) as typeof agentRunStore.appendProductEvent
+      (() => ++journalSeq) as typeof agentRunStore.appendProductEvent
     )
     const restoreOpen = replaceMethod(
       agentExecution,
@@ -637,6 +655,8 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       restoreConfiguration()
       restoreOpen()
       restoreAppend()
+      restoreTransition()
+      restoreCursor()
       restoreUpdate()
       restoreGetRun()
       testable(developer).active.delete(runId)
@@ -1739,3 +1759,280 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     }
   })
 })
+
+it('uses the indexed journal cursor for active and persisted plugin snapshots', (t) => {
+  const developer = new PluginDeveloper()
+  const session = createSession({ ...input, package: structuredClone(packageValue) }, 'snapshot-cursor')
+  testable(developer).active.set(session.id, activeRun(session))
+  const cursor = t.mock.method(agentRunStore, 'getProductJournalCursor', () => 12345)
+  t.mock.method(toolHost, 'pendingApprovals', () => [])
+  t.mock.method(agentRunStore, 'readProductJournal', () => { throw new Error('snapshot must not load the journal') })
+  try {
+    const snapshot = developer.getSnapshot(session.id)
+    assert.equal(snapshot?.cursor, 12345)
+    assert.equal(cursor.mock.callCount(), 1)
+    assert.equal(cursor.mock.calls[0].arguments[0], session.id)
+    assert.deepEqual(snapshot?.workLog, [])
+    testable(developer).active.delete(session.id)
+    const record: AgentRunRecord = {
+      id: session.id, useCase: 'plugin-developer', status: 'settled', configRevision: 'test',
+      configSnapshot: frozenSnapshot(), recoveryGeneration: 0, createdAt: '', updatedAt: '',
+      productState: {
+        schemaVersion: 1, input, status: 'completed', package: packageValue, runTargets: [],
+        summary: 'finished', phase: 'ready', step: 1, totalTokens: 17, workLog: []
+      }
+    }
+    t.mock.method(agentRunStore, 'getRun', (() => record) as typeof agentRunStore.getRun)
+    const persisted = developer.getSnapshot(session.id)
+    assert.equal(persisted?.cursor, 12345)
+    assert.equal(persisted?.result.status, 'completed')
+    assert.equal(cursor.mock.callCount(), 2)
+  } finally {
+    t.mock.restoreAll()
+    deleteSession(session.id)
+  }
+})
+
+
+it('preserves incremental logs across stale-runtime cancellation, cold snapshot, restore and export', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-log-integration-'))
+  initDatabaseAtPath(path.join(directory, 'test.sqlite'))
+  const developer = new PluginDeveloper()
+  const session = createSession({ ...input, package: structuredClone(packageValue) }, 'incremental-domain-log')
+  const active = activeRun(session)
+  testable(developer).active.set(session.id, active)
+  const execution = new AgentExecution(agentRunStore, async () => ({
+    runtimeId: 'pi',
+    open: async () => ({
+      source: 'restored',
+      session: {
+        ref: { runtimeId: 'pi', sessionId: 'test', sessionFile: path.join(directory, 'runtime.jsonl'), codecVersion: 1 },
+        dispatch: async () => ({ accepted: true }), requestManualCompaction: async () => ({ accepted: true }),
+        abort: async () => {}, dispose: async () => {}
+      }
+    }),
+    rebuild: async () => { throw new Error('unexpected rebuild') }
+  }))
+  try {
+    const db = getDb()
+    db.prepare(`INSERT INTO agent_runs
+      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
+      VALUES (?,'plugin-developer','running','test',?,'pi',?,'now','now')`)
+      .run(session.id, JSON.stringify(frozenSnapshot()), JSON.stringify({ schemaVersion: 1, workLog: [] }))
+    const clone = globalThis.structuredClone
+    const guard = t.mock.method(globalThis, 'structuredClone', ((value: unknown) => {
+      assert.notEqual(value, session.workLog, 'event persistence must not clone the full work log')
+      return clone(value)
+    }) as typeof globalThis.structuredClone)
+    for (let index = 0; index < 1000; index++) {
+      testable(developer).emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: index })
+    }
+    guard.mock.restore()
+    const stored = agentRunStore.getRun(session.id)!.productState
+    assert.equal(stored.schemaVersion, 2)
+    assert.equal(Array.isArray(stored.workLog), false)
+    assert.equal((stored.workLog as { count: number }).count, 1000)
+    assert.equal((db.prepare("SELECT COUNT(*) AS total FROM agent_product_journal WHERE event_type = 'plugin.work_log_entry'")
+      .get() as { total: number }).total, 1000)
+    const frozen = frozenSnapshot()
+    await execution.openRun({ useCase: 'plugin-developer', productState: stored,
+      resume: agentRunStore.getRun(session.id)!,
+      resolved: { ...frozen, model: access('primary'), verifierModel: undefined, tools: [], sessionDirectory: directory }
+    })
+    // The runtime retains count=1000; this product event advances only durable state.
+    testable(developer).emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: 1000 })
+    const expected = structuredClone(session.workLog)
+    t.mock.method(agentExecution, 'abort', execution.abort.bind(execution))
+    t.mock.method(agentExecution, 'releaseRun', execution.releaseRun.bind(execution))
+    await developer.cancel(session.id)
+    const cancelled = agentRunStore.getRun(session.id)!
+    assert.equal(cancelled.status, 'cancelled')
+    assert.equal((cancelled.productState.workLog as { count: number }).count, 1001)
+    const snapshot = developer.getSnapshot(session.id)!
+    assert.deepEqual(snapshot.workLog, expected)
+    assert.equal(snapshot.events.length, 1001)
+    const exported = buildPluginDevAgentWorkLogFromSnapshot(snapshot)
+    assert.deepEqual(exported.entries, expected)
+    assert.equal(exported.timeline.length, 1001)
+    const restored = testable(developer).restoreSession(session.id, cancelled.productState)
+    assert.deepEqual(restored.workLog, expected)
+    testable(developer).emitDomainEvent(activeRun(restored), { type: 'step_start', sessionId: restored.id, step: 1001 })
+    assert.equal((agentRunStore.getRun(restored.id)!.productState.workLog as { count: number }).count, 1002)
+  } finally {
+    t.mock.restoreAll()
+    testable(developer).active.delete(session.id)
+    deleteSession(session.id)
+    await execution.dispose()
+    closeDatabase()
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+it('keeps the migrated work log reference when runtime reopen fails during recovery', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-log-recovery-'))
+  initDatabaseAtPath(path.join(directory, 'test.sqlite'))
+  const developer = new PluginDeveloper()
+  const id = 'log-recovery-failure'
+  const legacy = [{ at: '2026-09-10T00:00:00Z', kind: 'user_message', sessionId: id, source: 'start', text: 'keep this message' }]
+  const frozen = frozenSnapshot()
+  try {
+    getDb().prepare(`INSERT INTO agent_runs
+      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
+      VALUES (?,'plugin-developer','waiting_user','test',?,'pi',?,'now','now')`)
+      .run(id, JSON.stringify(frozen), JSON.stringify({
+        schemaVersion: 1, input, package: packageValue, status: 'waiting_user', phase: 'working',
+        step: 1, totalTokens: 0, modelTurnCount: 0, discoveryToolCalls: 0, runTargets: [], summary: 'old', workLog: legacy
+      }))
+    t.mock.method(testable(developer), 'materializeWorkspace', () => {})
+    t.mock.method(testable(developer), 'restoredConfiguration', () => ({
+      ...frozen, model: access('primary'), verifierModel: undefined, tools: [], sessionDirectory: directory
+    }))
+    t.mock.method(agentExecution, 'openRun', async () => { throw new Error('restore open failure') })
+    assert.deepEqual(await developer.restoreRecoverableRuns(), [{ runId: id, error: 'restore open failure' }])
+    const current = agentRunStore.getRun(id)!
+    assert.equal(current.productState.schemaVersion, 2)
+    assert.equal(current.productState.recoveryBlocked, true)
+    assert.equal(Array.isArray(current.productState.workLog), false)
+    assert.deepEqual(developer.getSnapshot(id)?.workLog, legacy)
+  } finally {
+    t.mock.restoreAll()
+    deleteSession(id)
+    closeDatabase()
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+it('retries closed workspaces with intact or corrupted state without rewriting diagnostic data', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-cleanup-'))
+  const previous = process.env.JAVDEX_TEST_USER_DATA
+  process.env.JAVDEX_TEST_USER_DATA = directory
+  initDatabaseAtPath(path.join(directory, 'test.sqlite'))
+  const id = 'cleanup-retry'
+  const workspace = path.join(directory, 'agent-sessions', id)
+  fs.mkdirSync(workspace, { recursive: true })
+  fs.writeFileSync(path.join(workspace, 'keep-until-retry.txt'), 'test')
+  try {
+    getDb().prepare(`INSERT INTO agent_runs
+      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
+      VALUES (?,'plugin-developer','settled','test',?,'pi','{}','now','now')`).run(id, JSON.stringify(frozenSnapshot()))
+    const corruptId = 'corrupt-cleanup'
+    getDb().prepare(`INSERT INTO agent_runs
+      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
+      VALUES (?,'plugin-developer','settled','test','bad config','pi','bad state','now','now')`).run(corruptId)
+    const corruptWorkspace = path.join(directory, 'agent-sessions', corruptId)
+    fs.mkdirSync(corruptWorkspace)
+    fs.writeFileSync(path.join(corruptWorkspace, 'file.txt'), 'test')
+    const remove = fs.promises.rm
+    const fault = t.mock.method(fs.promises, 'rm', async (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (target === workspace) throw new Error('file locked')
+      await remove(target, options)
+    })
+    await assert.rejects(() => new PluginDeveloper().clearHistory(), /file locked/)
+    assert.equal(agentRunStore.getRun(id)?.status, 'closed')
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup WHERE run_id = ?').get(id) as { total: number }).total, 1)
+    agentRunStore.updateProductState(id, 'closed', { summary: 'late state update' })
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup WHERE run_id = ?').get(id) as { total: number }).total, 1)
+    assert.deepEqual([...agentRunStore.iterateRecoverableRunIds('plugin-developer')], [corruptId])
+    assert.deepEqual(new Set(agentRunStore.iterateCleanupRunIds('plugin-developer')), new Set([id, corruptId]))
+    assert.equal(fs.existsSync(workspace), true)
+    fault.mock.restore()
+    const corruptFault = t.mock.method(fs.promises, 'rm', async (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (target === corruptWorkspace) throw new Error('corrupt workspace locked')
+      await remove(target, options)
+    })
+    await assert.rejects(() => new PluginDeveloper().discardUnrecoverableSessions(), /corrupt workspace locked/)
+    assert.deepEqual([...agentRunStore.iterateCleanupRunIds('plugin-developer')], [corruptId])
+    assert.equal(fs.existsSync(corruptWorkspace), true)
+    assert.deepEqual(getDb().prepare('SELECT status, product_state_json, config_snapshot_json FROM agent_runs WHERE id = ?').get(corruptId),
+      { status: 'closed', product_state_json: 'bad state', config_snapshot_json: 'bad config' })
+    corruptFault.mock.restore()
+    assert.equal(await new PluginDeveloper().discardUnrecoverableSessions(), 1)
+    assert.equal(fs.existsSync(workspace), false)
+    assert.equal(fs.existsSync(corruptWorkspace), false)
+    assert.deepEqual(getDb().prepare('SELECT status, product_state_json, config_snapshot_json FROM agent_runs WHERE id = ?').get(corruptId),
+      { status: 'closed', product_state_json: 'bad state', config_snapshot_json: 'bad config' })
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup WHERE run_id = ?').get(id) as { total: number }).total, 0)
+    assert.deepEqual([...agentRunStore.iterateCleanupRunIds('plugin-developer')], [])
+  } finally {
+    t.mock.restoreAll()
+    closeDatabase()
+    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+    else process.env.JAVDEX_TEST_USER_DATA = previous
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+for (const scenario of [
+  { initial: 'clear', fail: false, dispose: true },
+  { initial: 'discard', fail: true, dispose: true },
+  { initial: 'clear', fail: true, dispose: false }
+] as const) {
+  it(`serializes cleanup admission and drains safely: ${JSON.stringify(scenario)}`, async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-cleanup-admission-'))
+    const previous = process.env.JAVDEX_TEST_USER_DATA
+    process.env.JAVDEX_TEST_USER_DATA = directory
+    initDatabaseAtPath(path.join(directory, 'test.sqlite'))
+    const developer = new PluginDeveloper()
+    const id = 'cleanup-admission'
+    const workspace = path.join(directory, 'agent-sessions', id)
+    fs.mkdirSync(workspace, { recursive: true })
+    fs.writeFileSync(path.join(workspace, 'file.txt'), 'test')
+    getDb().prepare(`INSERT INTO agent_runs
+      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
+      VALUES (?,'plugin-developer','settled','test','{}','pi','{}','now','now')`).run(id)
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const remove = fs.promises.rm
+    const removal = t.mock.method(fs.promises, 'rm', async (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (target === workspace) {
+        entered()
+        await gate
+        if (scenario.fail) throw new Error('cleanup failure')
+      }
+      await remove(target, options)
+    })
+    const pending = scenario.initial === 'clear' ? developer.clearHistory() : developer.discardUnrecoverableSessions()
+    const outcome = pending.then((value) => ({ value, error: undefined }), (error: unknown) => ({ value: undefined, error }))
+    let shutdown: Promise<void> | undefined
+    try {
+      await started
+      await assert.rejects(() => developer.clearHistory(), /正在清理/)
+      await assert.rejects(() => developer.discardUnrecoverableSessions(), /正在清理/)
+      assert.equal(removal.mock.callCount(), 1)
+      let disposed = false
+      if (scenario.dispose) {
+        shutdown = developer.dispose().then(() => { disposed = true })
+        await new Promise((resolve) => setImmediate(resolve))
+        assert.equal(disposed, false)
+        await assert.rejects(() => developer.clearHistory(), /正在退出/)
+        await assert.rejects(() => developer.discardUnrecoverableSessions(), /正在退出/)
+      }
+      assert.equal(fs.existsSync(workspace), true)
+      release()
+      const result = await outcome
+      if (scenario.fail) assert.match(String(result.error), /cleanup failure/)
+      else assert.equal(result.value, 1)
+      if (shutdown) { await shutdown; assert.equal(disposed, true) }
+      const queued = () => (getDb().prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup').get() as { total: number }).total
+      assert.equal(queued(), scenario.fail ? 1 : 0)
+      removal.mock.restore()
+      if (scenario.fail) {
+        const retry = scenario.dispose ? new PluginDeveloper() : developer
+        assert.equal(await retry.clearHistory(), 1)
+        assert.equal(queued(), 0)
+      }
+      assert.equal(fs.existsSync(workspace), false)
+    } finally {
+      release()
+      await outcome
+      await shutdown
+      t.mock.restoreAll()
+      closeDatabase()
+      if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+      else process.env.JAVDEX_TEST_USER_DATA = previous
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+}

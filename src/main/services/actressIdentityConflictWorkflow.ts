@@ -1,6 +1,6 @@
-import type { ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
+import type { ActressConflictQueueItem, ActressConflictQueuePage, ActressConflictQueueQuery, ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
-import { getDb } from '../db/database'
+import { getDatabaseReadRevision, getDb } from '../db/database'
 import { normalizeActressName } from '../db/actressNameNormalization'
 import {
   markActressScrapeSucceeded,
@@ -474,7 +474,66 @@ function isPendingConflictActive(
   return Boolean(otherPendingTarget)
 }
 
+const ACTIVE_PENDING_CONFLICT_SQL = `CASE WHEN
+                  EXISTS (
+                    SELECT 1 FROM actress_name_ownership o
+                    WHERE o.normalized_name = c.normalized_name
+                      AND o.actress_id != p.actress_id
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM pending_actress_name_claims n
+                    WHERE n.normalized_name = c.normalized_name
+                      AND n.actress_id != p.actress_id
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM pending_actress_scrape_conflicts other_c
+                    JOIN pending_actress_scrapes other_p
+                      ON other_p.id = other_c.pending_scrape_id
+                    WHERE other_c.normalized_name = c.normalized_name
+                      AND other_c.pending_scrape_id != c.pending_scrape_id
+                      AND other_p.actress_id != p.actress_id
+                  )
+                THEN 1 ELSE 0 END`
+
+type PendingConflictMaintenanceRevision = ReturnType<typeof getDatabaseReadRevision> & {
+  schemaVersion: number
+}
+let pendingConflictMaintenanceRevision: PendingConflictMaintenanceRevision | undefined
+
+function readPendingConflictMaintenanceRevision(): PendingConflictMaintenanceRevision {
+  const db = getDb()
+  return {
+    ...getDatabaseReadRevision(db),
+    schemaVersion: db.pragma('schema_version', { simple: true }) as number
+  }
+}
+
+/** Reuse only a completed check of this exact database state; never cache a transaction draft. */
 function ensureCurrentPendingConflicts(): void {
+  const db = getDb()
+  if (db.inTransaction) {
+    pendingConflictMaintenanceRevision = undefined
+    repairCurrentPendingConflicts()
+    return
+  }
+  const before = readPendingConflictMaintenanceRevision()
+  const previous = pendingConflictMaintenanceRevision
+  if (previous?.connection === before.connection && previous.changes === before.changes &&
+      previous.dataVersion === before.dataVersion && previous.schemaVersion === before.schemaVersion) return
+  // Failure or a concurrent external commit must not publish a successful-check stamp.
+  pendingConflictMaintenanceRevision = undefined
+  repairCurrentPendingConflicts()
+  const after = readPendingConflictMaintenanceRevision()
+  // Newly added conflicts can make an earlier candidate conflict on the next pass.
+  // Publish only a no-write pass; a repair must be checked again before reuse.
+  if (before.connection === after.connection && before.changes === after.changes &&
+      before.dataVersion === after.dataVersion && before.schemaVersion === after.schemaVersion) {
+    pendingConflictMaintenanceRevision = after
+  }
+}
+
+function repairCurrentPendingConflicts(): void {
   const db = getDb()
   const pendingRows = db
     .prepare(
@@ -602,9 +661,15 @@ function mergedNameConflictWithThirdPending(
 ): { name: string } | null {
   const db = getDb()
   const placeholders = mergedActressIds.map(() => '?').join(', ')
+  // Materialize once: a correlated lookup otherwise renormalizes every alias per conflict.
   const conflicts = db
     .prepare(
-      `SELECT DISTINCT
+      `WITH merged_names AS MATERIALIZED (
+         SELECT DISTINCT normalize_actress_name(name) AS normalized_name
+         FROM actress_names
+         WHERE actress_id IN (${placeholders})
+       )
+       SELECT DISTINCT
          c.pending_scrape_id,
          c.normalized_name,
          c.name,
@@ -613,15 +678,10 @@ function mergedNameConflictWithThirdPending(
        JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
        WHERE c.pending_scrape_id != ?
          AND p.actress_id NOT IN (${placeholders})
-         AND EXISTS (
-           SELECT 1
-           FROM actress_names an
-           WHERE an.actress_id IN (${placeholders})
-             AND normalize_actress_name(an.name) = c.normalized_name
-         )
+         AND c.normalized_name IN (SELECT normalized_name FROM merged_names)
        ORDER BY c.normalized_name, c.pending_scrape_id`
     )
-    .all(pendingId, ...mergedActressIds, ...mergedActressIds) as Array<{
+    .all(...mergedActressIds, pendingId, ...mergedActressIds) as Array<{
     pending_scrape_id: number
     normalized_name: string
     name: string
@@ -1247,7 +1307,12 @@ export class ActressIdentityConflictWorkflow {
     }
   }
 
-  listConflictGroups(includeFieldImpacts = true): ActressNameConflictGroup[] {
+  getConflictGroup(normalizedName: string): ActressNameConflictGroup | null {
+    if (typeof normalizedName !== 'string' || normalizedName.length === 0) throw new Error('Invalid conflict group name')
+    return this.listConflictGroups(true, normalizedName)[0] ?? null
+  }
+
+  listConflictGroups(includeFieldImpacts = true, onlyName?: string): ActressNameConflictGroup[] {
     const db = getDb()
     ensureCurrentPendingConflicts()
     const pendingRows = db
@@ -1255,16 +1320,18 @@ export class ActressIdentityConflictWorkflow {
         `SELECT p.*, a.main_name, a.avatar_path, a.revision AS current_actress_revision
          FROM pending_actress_scrapes p
          JOIN actresses a ON a.id = p.actress_id
+         ${onlyName === undefined ? '' : 'WHERE p.id IN (SELECT pending_scrape_id FROM pending_actress_scrape_conflicts WHERE normalized_name = ?)'}
          ORDER BY p.created_at, p.id`
       )
-      .all() as PendingRow[]
+      .all(...(onlyName === undefined ? [] : [onlyName])) as PendingRow[]
     const conflicts = db
       .prepare(
         `SELECT pending_scrape_id, normalized_name, name, name_type
          FROM pending_actress_scrape_conflicts
+         ${onlyName === undefined ? '' : 'WHERE pending_scrape_id IN (SELECT pending_scrape_id FROM pending_actress_scrape_conflicts WHERE normalized_name = ?)'}
          ORDER BY id`
       )
-      .all() as Array<{
+      .all(...(onlyName === undefined ? [] : [onlyName])) as Array<{
       pending_scrape_id: number
       normalized_name: string
       name: string
@@ -1274,9 +1341,10 @@ export class ActressIdentityConflictWorkflow {
       .prepare(
         `SELECT pending_scrape_id, field, position, remote_url, staged_path, width, height
          FROM pending_actress_scrape_resources
+         ${onlyName === undefined ? '' : 'WHERE pending_scrape_id IN (SELECT pending_scrape_id FROM pending_actress_scrape_conflicts WHERE normalized_name = ?)'}
          ORDER BY pending_scrape_id, field, position`
       )
-      .all() as PendingResourceRow[]
+      .all(...(onlyName === undefined ? [] : [onlyName])) as PendingResourceRow[]
     const resourcesByPending = new Map<number, PendingActressScrapeResource[]>()
     for (const resource of resourceRows) {
       const rows = resourcesByPending.get(resource.pending_scrape_id) ?? []
@@ -1335,9 +1403,10 @@ export class ActressIdentityConflictWorkflow {
       .prepare(
         `SELECT DISTINCT normalized_name
          FROM pending_actress_name_claims
+         ${onlyName === undefined ? '' : 'WHERE normalized_name = ?'}
          ORDER BY normalized_name`
       )
-      .all() as Array<{ normalized_name: string }>
+      .all(...(onlyName === undefined ? [] : [onlyName])) as Array<{ normalized_name: string }>
     for (const pendingClaimGroup of pendingClaimGroups) {
       const pendingNameClaims = readPendingNameClaims(pendingClaimGroup.normalized_name)
       if (pendingNameClaims.length === 0) continue
@@ -1393,6 +1462,7 @@ export class ActressIdentityConflictWorkflow {
       }
     }
     return [...grouped.values()]
+      .filter(group => onlyName === undefined || group.normalizedName === onlyName)
       .map((group): ActressNameConflictGroup => {
         const plannedCandidates = group.candidates.map((candidate) => {
           const remainingConflictCountAfterDecision =
@@ -1487,6 +1557,77 @@ export class ActressIdentityConflictWorkflow {
       .sort((a, b) => a.displayName.localeCompare(b.displayName, 'zh-Hans-CN'))
   }
 
+  /** Page lightweight group metadata, before candidate JSON/resource/merge-plan hydration. */
+  pageConflictQueue(query: ActressConflictQueueQuery): ActressConflictQueuePage {
+    const { limit = 50, offset = 0, anchorName } = query
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+        !Number.isSafeInteger(offset) || offset < 0 ||
+        (anchorName !== undefined && (typeof anchorName !== 'string' || anchorName.length === 0))) {
+      throw new Error('Invalid actress conflict queue page')
+    }
+    ensureCurrentPendingConflicts()
+    return getDb().transaction(() => {
+      const db = getDb()
+      type Group = Omit<ActressConflictQueueItem, 'candidateCount'> & { candidateIds: Set<number> }
+      const groups = new Map<string, Group>()
+      const claims = db.prepare(`SELECT normalized_name, name FROM pending_actress_name_claims
+        ORDER BY normalized_name, id`).all() as Array<{normalized_name:string;name:string}>
+      for (const claim of claims) {
+        let group = groups.get(claim.normalized_name)
+        if (!group) {
+          group = {normalizedName:claim.normalized_name,displayName:claim.name,status:'conflict',
+            candidateIds:new Set(),pendingNameClaimCount:0,avatarPath:null}
+          groups.set(claim.normalized_name, group)
+        }
+        group.pendingNameClaimCount++
+      }
+      const rows = db.prepare(`SELECT c.pending_scrape_id,c.normalized_name,c.name,
+          CASE WHEN length(a.avatar_path)<=4096 THEN a.avatar_path ELSE NULL END AS avatar_path,
+          ${ACTIVE_PENDING_CONFLICT_SQL} AS is_active
+        FROM pending_actress_scrape_conflicts c
+        JOIN pending_actress_scrapes p ON p.id=c.pending_scrape_id
+        JOIN actresses a ON a.id=p.actress_id
+        ORDER BY p.created_at,p.id,c.id`).all() as Array<{
+          pending_scrape_id:number;normalized_name:string;name:string;avatar_path:string|null;is_active:number
+        }>
+      const byPending = new Map<number, typeof rows>()
+      function add(row: typeof rows[number], status: Group['status']): void {
+        let group = groups.get(row.normalized_name)
+        if (!group) {
+          group = {normalizedName:row.normalized_name,displayName:row.name,status,
+            candidateIds:new Set(),pendingNameClaimCount:0,avatarPath:null}
+          groups.set(row.normalized_name, group)
+        }
+        if (group.candidateIds.size === 0) group.avatarPath = row.avatar_path
+        group.candidateIds.add(row.pending_scrape_id)
+      }
+      for (const row of rows) {
+        const pending = byPending.get(row.pending_scrape_id) ?? []
+        pending.push(row)
+        byPending.set(row.pending_scrape_id,pending)
+        if (row.is_active) add(row,'conflict')
+      }
+      // A candidate with no active conflicts belongs to its first recorded name.
+      // Append these after active candidates, matching the review's stable tie order.
+      for (const pending of byPending.values()) {
+        if (!pending.some(row => Boolean(row.is_active))) add(pending[0],'applicable')
+      }
+      const ordered = [...groups.values()].sort((a,b)=>a.displayName.localeCompare(b.displayName,'zh-Hans-CN'))
+      const total = ordered.length
+      let pageOffset = Math.min(offset,Math.max(0,Math.floor((total-1)/limit)*limit))
+      if (anchorName !== undefined) {
+        const rank = ordered.findIndex(group => group.normalizedName === anchorName)
+        if (rank >= 0) pageOffset = Math.floor(rank/limit)*limit
+      }
+      const items = ordered.slice(pageOffset,pageOffset+limit).map(({candidateIds,...group}) => {
+        const display = Array.from(group.displayName)
+        return {...group,displayName:display.length>128 ? display.slice(0,128).join('')+'…' : group.displayName,
+          candidateCount:candidateIds.size}
+      })
+      return {items,total,offset:pageOffset}
+    })()
+  }
+
   countPendingScrapes(): number {
     return (
       getDb().prepare('SELECT COUNT(*) AS total FROM pending_actress_scrapes').get() as {
@@ -1500,8 +1641,8 @@ export class ActressIdentityConflictWorkflow {
   }
 
   getConflictReviewSummary(): ActressConflictReviewSummary {
-    // The global badge polls frequently: aggregate only group keys/statuses here. The full
-    // workbench query still owns candidate JSON, resources, claimants and field planning.
+    // The global badge omits candidate/resource DTOs and field planning. Conflict repair
+    // below reads candidate JSON after database changes; this is not a constant-work count.
     ensureCurrentPendingConflicts()
     const db = getDb()
     const pendingNameGroups = db
@@ -1510,27 +1651,7 @@ export class ActressIdentityConflictWorkflow {
     const recordedConflicts = db
       .prepare(
         `SELECT c.id, c.pending_scrape_id, c.normalized_name,
-                CASE WHEN
-                  EXISTS (
-                    SELECT 1 FROM actress_name_ownership o
-                    WHERE o.normalized_name = c.normalized_name
-                      AND o.actress_id != p.actress_id
-                  )
-                  OR EXISTS (
-                    SELECT 1 FROM pending_actress_name_claims n
-                    WHERE n.normalized_name = c.normalized_name
-                      AND n.actress_id != p.actress_id
-                  )
-                  OR EXISTS (
-                    SELECT 1
-                    FROM pending_actress_scrape_conflicts other_c
-                    JOIN pending_actress_scrapes other_p
-                      ON other_p.id = other_c.pending_scrape_id
-                    WHERE other_c.normalized_name = c.normalized_name
-                      AND other_c.pending_scrape_id != c.pending_scrape_id
-                      AND other_p.actress_id != p.actress_id
-                  )
-                THEN 1 ELSE 0 END AS is_active
+                ${ACTIVE_PENDING_CONFLICT_SQL} AS is_active
          FROM pending_actress_scrape_conflicts c
          JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
          ORDER BY c.id`

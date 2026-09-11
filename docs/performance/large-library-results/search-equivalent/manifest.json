@@ -1,0 +1,141 @@
+{
+  "date": "2026-09-11",
+  "baseline": "Pre-task dirty workspace (earlier accepted optimizations preserved); not release binary",
+  "branch": "codex/large-library-performance",
+  "scope": "Equivalent actor candidate evaluation in desktop/legacy/Web and visible membership candidate evaluation in Web searches",
+  "sourceSha256": {
+    "src/main/db/actressSearchSql.ts": "0e47e65b19f4fd36b25b6cf7b2ef23e1d7f5f0391ca6b5f5054dd37e6043c83f",
+    "src/main/db/scopedVideoCatalogRepo.ts": "e90c00bb54da4cd6f79b6107503a4c22cb162ebd771c2e5e34bb4ebbd2e37c4e",
+    "src/main/db/videoRepo.ts": "df55f66c3816dc7995a4c23bac8d685a76a1a1c4dd538c4bc4320c11fa5903c3",
+    "src/main/web/catalogQueryReader.ts": "ec988449d2d66fe76926eb6e9228d9f4947f1f69ee61050a46c3ef116db3c055",
+    "src/main/db/videoSearchOptimization.test.ts": "9019bc33b5f46cc04337ede96859ef35ea07dca4781076508c1b0e753fb652e9",
+    "src/main/web/webSearchOptimization.test.ts": "472cea86fbd9a8d5f24d32b803878d397a5ef8af88c03c179d82465784b0cc05"
+  },
+  "checks": {
+    "npm test": {
+      "exitCode": 0,
+      "passed": 2899,
+      "skipped": 1,
+      "failed": 0
+    },
+    "build": {
+      "exitCode": 0
+    },
+    "git diff --check": {
+      "exitCode": 0
+    }
+  },
+  "limits": [
+    "Synthetic macOS arm64 measurements, not Windows/HDD/production p95.",
+    "Some validation overlapped measurements; small timing differences are not evidence of gains.",
+    "Web 300k baseline was interrupted; only completed 10k benchmark reported.",
+    "No FTS, no schema change, no UI changes."
+  ],
+  "artifacts": [
+    {
+      "path": "build.log",
+      "sha256": "637af347aab89fe153051c45e52c81817e6b8e6bbcfb4b907240a86c0c46e9c2",
+      "bytes": 4513
+    },
+    {
+      "path": "desktop-analyzed.json",
+      "sha256": "cb2153fba9c41cb40b695a30c348341c879513afd451bd0c5325ba6c3d53f927",
+      "bytes": 11876
+    },
+    {
+      "path": "desktop-analyzed.log",
+      "sha256": "08e1c17e6430731721501aef96e4217450ac9af7bc56ecf694cf783e56eb956d",
+      "bytes": 6877
+    },
+    {
+      "path": "desktop-before.source.txt",
+      "sha256": "35bede348f9990e0e7f37a41232eee512ca3fc3209075f852d2548496d95243a",
+      "bytes": 20727
+    },
+    {
+      "path": "desktop-no-analyze.fixture.txt",
+      "sha256": "25a369fe32e80d4aaf4a982c1606e4eafa7bd2a06ac14a260bc34acf870f3caa",
+      "bytes": 4140
+    },
+    {
+      "path": "desktop-no-analyze.json",
+      "sha256": "19164513ed53e491ff26ddee60ea09a2be5e60602a8598d22fa1c0dbd65d61e1",
+      "bytes": 7315
+    },
+    {
+      "path": "desktop-no-analyze.log",
+      "sha256": "8423ee695e80b237cd891467c893ea0f4b184451c725ce07f64854cc1c0a1975",
+      "bytes": 4172
+    },
+    {
+      "path": "desktop-union-experiment.source.txt",
+      "sha256": "061b6dbf46f5953ec7a3dedc027b6e711e6d6c0c3db92ddd6581bb33fe264a17",
+      "bytes": 20733
+    },
+    {
+      "path": "desktop.fixture.txt",
+      "sha256": "dbd5e66912668722f6fbb8135c81f13d7031549e625559d5cd083e20c9b1662f",
+      "bytes": 4179
+    },
+    {
+      "path": "full-test.log",
+      "sha256": "c13c74cdc441889dd60e3e4bc96955e96ff4da9d5bc6d1df8c327574fec69f09",
+      "bytes": 310372
+    },
+    {
+      "path": "implementation.patch",
+      "sha256": "4f6670501a92b386b5f3fd0529368cdfc44239e96db630417143ccd24922a432",
+      "bytes": 24761
+    },
+    {
+      "path": "normalization-after.log",
+      "sha256": "19e68b57d08abb8c2c5fd370ed69333067831dbf9d29c5ad1a5fb97e30dea1b2",
+      "bytes": 221
+    },
+    {
+      "path": "normalization-before.log",
+      "sha256": "e946bf56f9622283294b7404fe2d355f29c35a313fcb9f2efa3e8e5b5b33ed68",
+      "bytes": 981
+    },
+    {
+      "path": "web-actor-only.json",
+      "sha256": "7792add1301917854e7b6d3793509bc5d477d1e2d1fef1fea6032c6b423850a1",
+      "bytes": 2750
+    },
+    {
+      "path": "web-before.source.txt",
+      "sha256": "437932db2b104b56b468eff7514113c9ac9100dba326717477935f43efb7973e",
+      "bytes": 5611
+    },
+    {
+      "path": "web-permissions.log",
+      "sha256": "b58582f105458006ea8b58d97774e3bf48d0708434fd94de737462c4544c5132",
+      "bytes": 212
+    },
+    {
+      "path": "web-query-plans.fixture.txt",
+      "sha256": "b33e3ec968edd2c092a06f600986d7c722a9091b55f02da55da45d7fd4286169",
+      "bytes": 2736
+    },
+    {
+      "path": "web-query-plans.json",
+      "sha256": "ff36599b0f4633729ad343df1f6dfb554020cf0bb9a7e391f36e25ae975a8219",
+      "bytes": 3476
+    },
+    {
+      "path": "web.fixture.txt",
+      "sha256": "49a27421cc7f42d635924fe6e53115c1968dabdfc6ab296de5fba997290b3906",
+      "bytes": 2521
+    },
+    {
+      "path": "web.json",
+      "sha256": "5ce09e792d0b71aa4f9d3e25d6c6977b3a4b9498482ba0bbccfa903b4a8acd93",
+      "bytes": 1418
+    },
+    {
+      "path": "web.log",
+      "sha256": "a8dc4b5915284cb3d3d359437c459211527a485040a6d6f40f49aa2ef7f03c0c",
+      "bytes": 1081
+    }
+  ]
+}

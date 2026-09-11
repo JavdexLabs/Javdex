@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
-import { createVideoQueryService } from './videoQueryService'
+import { createVideoQueryService, createAsyncVideoQueryService } from './videoQueryService'
 import { buildVideoResourceSourceIdentity } from '../../shared/videoResourceIdentity'
 
 const DEFAULT_SCOPE = { kind: 'library', libraryId: 1 } as const
@@ -145,4 +145,23 @@ describe('VideoQueryService', () => {
     assert.equal('locator' in projected, false)
     assert.equal(videos.getResource(1, 1, resourceId)?.locator, locator)
   })
+})
+
+
+it('keeps worker failures explicit while detail and resource reads remain local', async t => {
+  setupDb()
+  const local = createVideoQueryService()
+  const expected = local.get(DEFAULT_SCOPE, 1)
+  const resourceId = expected!.resources[0].id
+  t.mock.method(local, 'list', () => { throw new Error('sync fallback forbidden') })
+  t.mock.method(local, 'listYears', () => { throw new Error('sync fallback forbidden') })
+  const failure = new Error('worker unavailable')
+  const service = createAsyncVideoQueryService({
+    readVideos: async () => { throw failure },
+    readVideoYears: async () => { throw failure }
+  }, local)
+  await assert.rejects(service.list(DEFAULT_SCOPE), error => error === failure)
+  await assert.rejects(service.listYears(DEFAULT_SCOPE), error => error === failure)
+  assert.deepEqual(service.get(DEFAULT_SCOPE, 1), expected)
+  assert.equal(service.getResource(1, 1, resourceId)?.id, resourceId)
 })

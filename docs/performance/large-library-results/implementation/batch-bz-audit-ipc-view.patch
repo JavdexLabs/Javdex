@@ -1,0 +1,2579 @@
+diff --git a/src/shared/scanAuditReadTypes.ts b/src/shared/scanAuditReadTypes.ts
+new file mode 100644
+index 0000000..dc68df6
+--- /dev/null
++++ b/src/shared/scanAuditReadTypes.ts
+@@ -0,0 +1,27 @@
++import type { LibraryScanSummary } from './libraryTypes'
++
++export const SCAN_AUDIT_SECTIONS = ['files', 'removedResources', 'promotedResources', 'deletedVideos', 'pendingGroups'] as const
++export const SCAN_AUDIT_OUTCOMES = ['added', 'updated', 'pending', 'skipped', 'unrecognized', 'strm_failure', 'processing_failure'] as const
++export type ScanAuditSection = typeof SCAN_AUDIT_SECTIONS[number]
++export interface ScanAuditSnapshotIdentity { libraryId: number; runId: string; finishedAt: string }
++export interface ScanAuditIndexLimits { sourceBytes: number; indexBytes: number; pageBytes: number }
++export interface ScanAuditIndexQuery {
++  section: ScanAuditSection
++  outcome?: typeof SCAN_AUDIT_OUTCOMES[number]
++  attention?: boolean
++  limit?: number
++  offset?: number
++}
++export interface ScanAuditIndexPage {
++  snapshot: ScanAuditSnapshotIdentity
++  section: ScanAuditSection
++  items: Array<{ ordinal: number; entry: Record<string, unknown> }>
++  total: number
++  limit: number
++  offset: number
++}
++export interface ScanAuditReadHeader {
++  summary: LibraryScanSummary | null
++  snapshot: ScanAuditSnapshotIdentity | null
++  unrecognizedCount: number
++}
+diff --git a/src/shared/scanAuditView.ts b/src/shared/scanAuditView.ts
+new file mode 100644
+index 0000000..f0ace7d
+--- /dev/null
++++ b/src/shared/scanAuditView.ts
+@@ -0,0 +1,119 @@
++import type { LibraryScanFileAuditEntry, LibraryScanResourceAuditEntry } from './libraryTypes'
++
++/** Structural pending target; routing and live status enrichment remain with the caller. */
++export interface ScanAuditPendingTarget {
++  domain: 'scan' | 'scrape' | 'actress'
++  id: string
++}
++
++export type ViewItem = {
++  key: string
++  title: string
++  detail: string
++  outcome?: LibraryScanFileAuditEntry['outcome']
++  path?: string
++  rootId?: number
++  videoId?: number
++  groupId?: number
++  status?: string
++  requiresAttention?: boolean
++  pendingTarget?: ScanAuditPendingTarget
++  isUnrecognizedPending?: boolean
++}
++
++export function fileDetail(entry: LibraryScanFileAuditEntry): string {
++  const primary = (() => {
++    switch (entry.outcome) {
++      case 'added':
++        return entry.createdVideo ? '新建影片并添加资源' : '挂载到已有影片'
++      case 'updated':
++        return {
++          relocated: '路径已重定位',
++          metadata_refreshed: '文件信息已刷新',
++          strm_target_synced: 'STRM 目标已同步'
++        }[entry.updateKind]
++      case 'pending':
++        return `${entry.normalizedCode || '番号未知'} · ${
++          entry.sourceKind === 'strm' ? 'STRM' : '本地文件'
++        } · ${entry.addedToQueue ? '已加入待确认队列' : '仍在待确认队列'}`
++      case 'skipped':
++        return {
++          unchanged: '未变化',
++          below_min_duration: '低于最短时长',
++          duplicate: '重复资源'
++        }[entry.skipReason]
++      case 'unrecognized':
++        return '文件名未识别出番号'
++      case 'strm_failure':
++        return entry.message
++      case 'processing_failure':
++        return entry.message
++    }
++  })()
++  if (!entry.nfo) return primary
++  const nfoLabel = {
++    imported: 'NFO 已导入',
++    skipped: 'NFO 已跳过',
++    warning: 'NFO 警告',
++    'pending-candidate': 'NFO 候选待确认',
++    'identity-conflict': 'NFO 身份冲突'
++  }[entry.nfo.disposition]
++  const warnings = entry.nfo.warnings?.map((warning) => warning.message).join('；')
++  return `${primary} · ${nfoLabel}${warnings ? ` · ${warnings}` : ''}`
++}
++
++export function fileView(entry: LibraryScanFileAuditEntry, index: number): ViewItem {
++  return {
++    key: `file:${index}:${entry.filePath}`,
++    title: entry.filePath.split(/[\\/]/).pop() || entry.filePath,
++    detail: fileDetail(entry),
++    outcome: entry.outcome,
++    path: entry.filePath,
++    rootId: entry.rootId,
++    videoId: 'videoId' in entry ? entry.videoId : undefined,
++    groupId: entry.outcome === 'pending' ? entry.groupId ?? undefined : undefined
++  }
++}
++
++export function isAttentionFile(entry: LibraryScanFileAuditEntry): boolean {
++  return (
++    ['unrecognized', 'strm_failure', 'processing_failure'].includes(entry.outcome) ||
++    entry.nfo?.disposition === 'warning' ||
++    entry.nfo?.disposition === 'identity-conflict' ||
++    entry.nfo?.disposition === 'pending-candidate'
++  )
++}
++
++export function hasNfoPendingTarget(
++  entry: LibraryScanFileAuditEntry
++): boolean {
++  if (entry.nfo?.disposition === 'identity-conflict') {
++    return (
++      entry.nfo.pendingIdentityId != null
++    )
++  }
++  if (entry.nfo?.disposition === 'pending-candidate') {
++    return (
++      entry.nfo.pendingScrapeId != null
++    )
++  }
++  return false
++}
++
++export function resourceView(entry: LibraryScanResourceAuditEntry, index: number): ViewItem {
++  const reason = {
++    missing: '源文件缺失',
++    removed_library_path: '媒体库路径已移除',
++    promoted_after_removal: '原主资源移除后提升'
++  }[entry.reason]
++  return {
++    key: `resource:${index}:${entry.resourceId}`,
++    title: `${entry.videoCode}${entry.videoTitle ? ` · ${entry.videoTitle}` : ''}`,
++    detail: `${entry.resourceKind.toUpperCase()} · ${reason} · ${
++      entry.displayName || entry.sourcePath || '外部目标已隐藏'
++    }`,
++    path: entry.sourcePath ?? undefined,
++    videoId: entry.videoId
++  }
++}
++
+diff --git a/src/shared/scanAuditView.test.ts b/src/shared/scanAuditView.test.ts
+new file mode 100644
+index 0000000..6517ec9
+--- /dev/null
++++ b/src/shared/scanAuditView.test.ts
+@@ -0,0 +1,156 @@
++import assert from 'node:assert/strict'
++import { describe, it } from 'node:test'
++import type { LibraryScanFileAuditEntry, LibraryScanNfoDisposition, LibraryScanResourceAuditEntry } from './libraryTypes'
++import { fileDetail, fileView, hasNfoPendingTarget, isAttentionFile, resourceView, type ViewItem } from './scanAuditView'
++
++const base = { rootId: 7, filePath: 'C:\\library\\ABC-001.mp4', sourceKind: 'local' as const }
++const resource = { videoId: 31, videoCode: 'ABC-001', resourceId: 42, resourceKind: 'local' as const }
++const cases: Array<{
++  name: string
++  entry: LibraryScanFileAuditEntry
++  detail: string
++  videoId?: number
++  groupId?: number
++  attention: boolean
++}> = [
++  { name: 'added new video', entry: { ...base, ...resource, outcome: 'added', createdVideo: true }, detail: '新建影片并添加资源', videoId: 31, attention: false },
++  { name: 'added existing video', entry: { ...base, ...resource, outcome: 'added', createdVideo: false }, detail: '挂载到已有影片', videoId: 31, attention: false },
++  { name: 'updated relocated', entry: { ...base, ...resource, outcome: 'updated', updateKind: 'relocated' }, detail: '路径已重定位', videoId: 31, attention: false },
++  { name: 'updated metadata', entry: { ...base, ...resource, outcome: 'updated', updateKind: 'metadata_refreshed' }, detail: '文件信息已刷新', videoId: 31, attention: false },
++  { name: 'updated STRM', entry: { ...base, ...resource, sourceKind: 'strm', outcome: 'updated', updateKind: 'strm_target_synced' }, detail: 'STRM 目标已同步', videoId: 31, attention: false },
++  { name: 'pending new local', entry: { ...base, outcome: 'pending', normalizedCode: 'ABC-001', groupId: 9, addedToQueue: true }, detail: 'ABC-001 · 本地文件 · 已加入待确认队列', groupId: 9, attention: false },
++  { name: 'pending retained STRM', entry: { ...base, sourceKind: 'strm', outcome: 'pending', normalizedCode: null, groupId: null, addedToQueue: false }, detail: '番号未知 · STRM · 仍在待确认队列', attention: false },
++  { name: 'pending empty code and zero group', entry: { ...base, outcome: 'pending', normalizedCode: '', groupId: 0, addedToQueue: false }, detail: '番号未知 · 本地文件 · 仍在待确认队列', groupId: 0, attention: false },
++  { name: 'skipped unchanged with video', entry: { ...base, ...resource, outcome: 'skipped', skipReason: 'unchanged' }, detail: '未变化', videoId: 31, attention: false },
++  { name: 'skipped short without video', entry: { ...base, outcome: 'skipped', skipReason: 'below_min_duration' }, detail: '低于最短时长', attention: false },
++  { name: 'skipped duplicate with zero video', entry: { ...base, outcome: 'skipped', skipReason: 'duplicate', videoId: 0 }, detail: '重复资源', videoId: 0, attention: false },
++  { name: 'unrecognized', entry: { ...base, outcome: 'unrecognized' }, detail: '文件名未识别出番号', attention: true },
++  { name: 'STRM failure', entry: { ...base, sourceKind: 'strm', outcome: 'strm_failure', failureCode: 'read_failed', message: '读取失败 · 原始提示' }, detail: '读取失败 · 原始提示', attention: true },
++  { name: 'processing failure', entry: { ...base, outcome: 'processing_failure', message: '处理失败\n第二行' }, detail: '处理失败\n第二行', attention: true }
++]
++
++describe('file scan audit presentation', () => {
++  for (const testCase of cases) it(testCase.name, () => {
++    const { entry, detail, videoId, groupId, attention } = testCase
++    const before = structuredClone(entry)
++    assert.equal(fileDetail(entry), detail)
++    assert.deepEqual(fileView(entry, 13), {
++      key: 'file:13:C:\\library\\ABC-001.mp4', title: 'ABC-001.mp4', detail,
++      outcome: entry.outcome, path: 'C:\\library\\ABC-001.mp4', rootId: 7, videoId, groupId
++    })
++    assert.equal(isAttentionFile(entry), attention)
++    assert.equal(hasNfoPendingTarget(entry), false)
++    assert.deepEqual(entry, before)
++  })
++
++  it('preserves caller indices, path fallback and explicit undefined fields', () => {
++    for (const [path, title] of [
++      ['/library/ABC.mp4', 'ABC.mp4'], ['mixed\\directory/ABC.mp4', 'ABC.mp4'],
++      ['/library/', '/library/'], ['bare.mp4', 'bare.mp4'], ['', '']
++    ]) {
++      const entry: LibraryScanFileAuditEntry = { rootId: 0, sourceKind: 'local', filePath: path, outcome: 'unrecognized' }
++      assert.deepEqual(fileView(entry, 0), {
++        key: `file:0:${path}`, title, detail: '文件名未识别出番号', outcome: 'unrecognized',
++        path, rootId: 0, videoId: undefined, groupId: undefined
++      })
++      assert.equal(fileView(entry, 99).key, `file:99:${path}`)
++    }
++  })
++})
++
++const nfoCases: Array<[LibraryScanNfoDisposition, string, boolean]> = [
++  ['imported', 'NFO 已导入', false], ['skipped', 'NFO 已跳过', false],
++  ['warning', 'NFO 警告', true], ['pending-candidate', 'NFO 候选待确认', true],
++  ['identity-conflict', 'NFO 身份冲突', true]
++]
++describe('NFO secondary presentation', () => {
++  for (const [disposition, label, attention] of nfoCases) it(`${disposition}: every primary outcome, warnings and attention`, () => {
++    for (const testCase of cases) {
++      for (const [warnings, suffix] of [
++        [undefined, ''], [[], ''], [[{ code: 'empty', message: '' }], ''],
++        [[{ code: 'one', message: '第一条' }, { code: 'two', message: '第二条' }], ' · 第一条；第二条']
++      ] as const) {
++        const entry: LibraryScanFileAuditEntry = { ...testCase.entry, nfo: { disposition, warnings: warnings?.map(warning => ({ ...warning })) } }
++        const expected = `${testCase.detail} · ${label}${suffix}`
++        assert.equal(fileDetail(entry), expected)
++        assert.deepEqual(fileView(entry, 4), {
++          key: 'file:4:C:\\library\\ABC-001.mp4', title: 'ABC-001.mp4', detail: expected,
++          outcome: entry.outcome, path: 'C:\\library\\ABC-001.mp4', rootId: 7,
++          videoId: testCase.videoId, groupId: testCase.groupId
++        })
++        assert.equal(isAttentionFile(entry), testCase.attention || attention)
++        assert.equal(hasNfoPendingTarget(entry), false)
++      }
++    }
++  })
++
++  it('uses only the disposition-specific non-null pending id, including zero', () => {
++    for (const [disposition] of nfoCases) {
++      for (const id of [undefined, 0, 73]) {
++        const entry: LibraryScanFileAuditEntry = {
++          ...base, outcome: 'unrecognized', nfo: { disposition, pendingIdentityId: id }
++        }
++        assert.equal(hasNfoPendingTarget(entry), disposition === 'identity-conflict' && id !== undefined)
++        entry.nfo = { disposition, pendingScrapeId: id }
++        assert.equal(hasNfoPendingTarget(entry), disposition === 'pending-candidate' && id !== undefined)
++        entry.nfo = { disposition, pendingIdentityId: id, pendingScrapeId: id }
++        assert.equal(hasNfoPendingTarget(entry), ['identity-conflict', 'pending-candidate'].includes(disposition) && id !== undefined)
++      }
++    }
++    // Persisted legacy nulls retain the original != null semantics.
++    for (const disposition of ['identity-conflict', 'pending-candidate'] as const) {
++      const entry = JSON.parse(JSON.stringify({ ...base, outcome: 'unrecognized', nfo: {
++        disposition, pendingIdentityId: null, pendingScrapeId: null
++      } })) as LibraryScanFileAuditEntry
++      assert.equal(hasNfoPendingTarget(entry), false)
++    }
++  })
++})
++
++describe('resource scan audit presentation', () => {
++  const reasons: Array<[LibraryScanResourceAuditEntry['reason'], string]> = [
++    ['missing', '源文件缺失'], ['removed_library_path', '媒体库路径已移除'],
++    ['promoted_after_removal', '原主资源移除后提升']
++  ]
++  const kinds: Array<[LibraryScanResourceAuditEntry['resourceKind'], string]> = [
++    ['local', 'LOCAL'], ['direct', 'DIRECT'], ['web', 'WEB'], ['magnet', 'MAGNET'], ['ed2k', 'ED2K']
++  ]
++  for (const [reason, label] of reasons) it(`${reason}: full fields, source/title/display fallback and kinds`, () => {
++    for (const [resourceKind, kindLabel] of kinds) {
++      for (const [sourcePath, displayName, display] of [
++        ['/source/video.mp4', '首选显示名', '首选显示名'],
++        ['/source/video.mp4', null, '/source/video.mp4'],
++        ['/source/video.mp4', '', '/source/video.mp4'],
++        [null, '已脱敏目标', '已脱敏目标'], [null, null, '外部目标已隐藏'],
++        ['', '', '外部目标已隐藏']
++      ]) {
++        for (const [videoTitle, title] of [[null, 'ABC-001'], ['', 'ABC-001'], ['影片名称', 'ABC-001 · 影片名称']]) {
++          const entry: LibraryScanResourceAuditEntry = {
++            resourceId: 42, videoId: 31, videoCode: 'ABC-001', videoTitle,
++            resourceKind, sourcePath, displayName, reason
++          }
++          const before = structuredClone(entry)
++          assert.deepEqual(resourceView(entry, 17), {
++            key: 'resource:17:42', title, detail: `${kindLabel} · ${label} · ${display}`,
++            path: sourcePath ?? undefined, videoId: 31
++          })
++          assert.equal(resourceView(entry, 0).key, 'resource:0:42')
++          assert.deepEqual(entry, before)
++        }
++      }
++    }
++  })
++})
++
++it('keeps optional enrichment fields structurally available without enriching raw views', () => {
++  const view: ViewItem = {
++    key: 'pending-group:9', title: '待确认', detail: '资源', groupId: 9,
++    status: '待处理', requiresAttention: true, isUnrecognizedPending: false,
++    pendingTarget: { domain: 'scan', id: 'identity-73' }
++  }
++  assert.deepEqual(view.pendingTarget, { domain: 'scan', id: 'identity-73' })
++  for (const domain of ['scan', 'scrape', 'actress'] as const) {
++    view.pendingTarget = { domain, id: '73' }
++    assert.deepEqual(view.pendingTarget, { domain, id: '73' })
++  }
++})
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..f28c10c 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -70,11 +70,18 @@ export const IPC = {
+   SCAN_CANCEL: 'scan:cancel',
+   SCAN_LATEST_GET: 'scan:getLatest',
+   SCAN_AUDIT_GET: 'scan:auditGet',
++  SCAN_AUDIT_HEADER: 'scan:auditHeader',
++  SCAN_AUDIT_PAGE: 'scan:auditPage',
+   SCAN_AUDIT_REVEAL_FILE: 'scan:auditRevealFile',
+   SCAN_PROGRESS: 'scan:progress', // main -> renderer event
+   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
+   FILE_RENAME: 'file:rename',
+   FILE_IMPORT_MANUAL: 'file:importManual',
++  PENDING_AUDIT_PRESENCE: 'pendingAudit:presence',
++  PENDING_SCAN_QUEUE_PAGE: 'pendingScanQueue:page',
++  PENDING_SCAN_QUEUE_COUNT: 'pendingScanQueue:count',
++  PENDING_SCAN_GET: 'pendingScan:get',
++  PENDING_RESOURCE_IDENTITY_GET: 'pendingResourceIdentity:get',
+   PENDING_SCAN_LIST: 'pendingScan:list',
+   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+   PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+@@ -94,6 +101,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +122,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -124,7 +135,18 @@ export const IPC = {
+   // Actresses
+   ACTRESS_LIST: 'actress:list',
+   ACTRESS_LIST_PAGE: 'actress:listPage',
++  ACTRESS_PICKER_PAGE: 'actress:pickerPage',
++  ACTRESS_AVATAR_CROP_TARGETS: 'actress:avatarCropTargets',
++  ACTRESS_AVATAR_CROP_COUNT: 'actress:avatarCropCount',
++  ACTRESS_TEST_TARGET_PAGE: 'actress:testTargetPage',
++  ACTRESS_TEST_TARGET_GET: 'actress:testTargetGet',
++  ACTRESS_PICKER_GET: 'actress:pickerGet',
++  ACTRESS_MERGE_CANDIDATES: 'actress:mergeCandidates',
+   ACTRESS_FACE_SCAN_MANIFEST: 'actress:faceScanManifest',
++  ACTRESS_GALLERY_PAGE: 'actress:galleryPage',
++  ACTRESS_PROFILE: 'actress:profile',
++  ACTRESS_METADATA: 'actress:metadata',
++  ACTRESS_VIDEO_PAGE: 'actress:videoPage',
+   ACTRESS_GET: 'actress:get',
+   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
+   ACTRESS_EDIT: 'actress:edit',
+@@ -138,6 +160,8 @@ export const IPC = {
+   ACTRESS_MERGE: 'actress:merge',
+   ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
+   ACTRESS_CONFLICT_LIST: 'actressConflict:list',
++  ACTRESS_CONFLICT_QUEUE_PAGE: 'actressConflict:queuePage',
++  ACTRESS_CONFLICT_GET: 'actressConflict:get',
+   ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+   ACTRESS_CONFLICT_SUMMARY: 'actressConflict:summary',
+   ACTRESS_CONFLICT_INSPECT_NAME: 'actressConflict:inspectName',
+@@ -148,9 +172,13 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
++  ORGANIZATION_PAGE: 'organization:page',
+   ORGANIZATION_GET: 'organization:get',
+   ORGANIZATION_OPTIONS: 'organization:options',
+   ORGANIZATION_MERGE_OPTIONS: 'organization:mergeOptions',
+@@ -161,6 +189,7 @@ export const IPC = {
+   ORGANIZATION_ROLE_REMOVE: 'organization:roleRemove',
+   ORGANIZATION_DELETE_PREVIEW: 'organization:deletePreview',
+   ORGANIZATION_DELETE: 'organization:delete',
++  DIRECTOR_PAGE: 'director:page',
+   DIRECTOR_LIST: 'director:list',
+   DIRECTOR_GET: 'director:get',
+   DIRECTOR_OPTIONS: 'director:options',
+@@ -170,6 +199,7 @@ export const IPC = {
+   DIRECTOR_DELETE_PREVIEW: 'director:deletePreview',
+   DIRECTOR_DELETE: 'director:delete',
+   SERIES_LIST: 'series:list',
++  SERIES_PAGE: 'series:page',
+   SERIES_GET: 'series:get',
+   SERIES_OPTIONS: 'series:options',
+   SERIES_CREATE: 'series:create',
+@@ -177,11 +207,16 @@ export const IPC = {
+   SERIES_MERGE: 'series:merge',
+   SERIES_DELETE_PREVIEW: 'series:deletePreview',
+   SERIES_DELETE: 'series:delete',
++  CLASSIFICATION_IMAGE_PAGE: 'classificationImage:page',
+   CLASSIFICATION_IMAGE_CANDIDATES: 'classificationImage:candidates',
+   CLASSIFICATION_IMAGE_SET: 'classificationImage:set',
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+@@ -201,6 +236,7 @@ export const IPC = {
+   BATCH_SCRAPE_RESUME: 'batchScrape:resume',
+   BATCH_SCRAPE_DISCARD: 'batchScrape:discard',
+   AVATAR_AUTO_CROP_BATCH_BEGIN: 'avatarAutoCropBatch:begin',
++  AVATAR_AUTO_CROP_BATCH_TARGETS: 'avatarAutoCropBatch:targets',
+   AVATAR_AUTO_CROP_BATCH_END: 'avatarAutoCropBatch:end',
+   SCRAPER_LIST: 'scrape:listPlugins',
+   SCRAPER_PLUGIN_DETAILS: 'scrape:pluginDetails',
+diff --git a/src/shared/appIpcContract.ts b/src/shared/appIpcContract.ts
+index 14472f9..24ade3c 100644
+--- a/src/shared/appIpcContract.ts
++++ b/src/shared/appIpcContract.ts
+@@ -1,3 +1,5 @@
++import type { ScanAuditSnapshotIdentity, ScanAuditIndexQuery, ScanAuditIndexPage, ScanAuditReadHeader } from './scanAuditReadTypes'
++import type { ClassificationPageQuery, ClassificationListPage } from './classificationTypes'
+ import type { WebAccessInput, WebAccessStatus } from './webTypes'
+ import { IPC } from './ipc-channels'
+ import type {
+@@ -20,6 +22,9 @@ import type {
+   PendingResourceIdentity,
+   PendingResourceIdentityResolution,
+   PendingResourceIdentityResolutionResult,
++  PendingAuditIds,
++  PendingScanQueueQuery,
++  PendingScanQueuePage,
+   PendingScanGroup,
+   PendingScanGroupResolution,
+   PendingScanGroupResolutionResult,
+@@ -27,10 +32,14 @@ import type {
+   RenameImportResult,
+   ScanResult
+ } from './libraryTypes'
+-import type { TagListItem, SortDir } from './commonTypes'
++import type { TagListItem, TagLabel, TagOptionsQuery, TagOptionsPage, TagFilterOptionsPage, SortDir } from './commonTypes'
+ import type {
+   PlaylistCreateInput,
+   PlaylistDetail,
++  PlaylistPage,
++  PlaylistMetadata,
++  PlaylistVideosPage,
++  PlaylistPageQuery,
+   PlaylistListItem,
+   PlaylistUpdateInput,
+   PlaylistVideoMembership,
+@@ -187,6 +196,8 @@ export interface AppIpcContract {
+     args: [libraryId: number]
+     result: LibraryScanLatestSnapshot
+   }
++  [IPC.SCAN_AUDIT_HEADER]: { args: [libraryId: number]; result: ScanAuditReadHeader }
++  [IPC.SCAN_AUDIT_PAGE]: { args: [snapshot: ScanAuditSnapshotIdentity, query: ScanAuditIndexQuery]; result: ScanAuditIndexPage }
+   [IPC.SCAN_AUDIT_GET]: {
+     args: [libraryId: number]
+     result: LibraryScanAudit | null
+@@ -214,6 +225,11 @@ export interface AppIpcContract {
+     ]
+     result: ManualImportResult
+   }
++  [IPC.PENDING_AUDIT_PRESENCE]: { args: [libraryId: number, ids: PendingAuditIds]; result: PendingAuditIds }
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: { args: [query: PendingScanQueueQuery]; result: PendingScanQueuePage }
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: { args: [libraryId?: number]; result: number }
++  [IPC.PENDING_SCAN_GET]: { args: [libraryId: number, groupId: number]; result: PendingScanGroup | null }
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: { args: [libraryId: number, identityId: number]; result: PendingResourceIdentity | null }
+   [IPC.PENDING_SCAN_LIST]: {
+     args: [libraryId: number]
+     result: PendingScanGroup[]
+@@ -236,6 +252,9 @@ export interface AppIpcContract {
+     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
+     result: PlaylistDetail | null
+   }
++  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
++  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
++  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
+   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
+   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
+   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
+@@ -245,6 +264,11 @@ export interface AppIpcContract {
+ 
+   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
+   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
++  [IPC.TAG_LABELS]: { args: [ids: number[]]; result: TagLabel[] }
++  [IPC.TAG_FILTER_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagFilterOptionsPage }
++  [IPC.TAG_MANUAL_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagOptionsPage }
++  [IPC.ORGANIZATION_PAGE]: { args: [query: OrganizationListQuery & ClassificationPageQuery]; result: ClassificationListPage<OrganizationListItem> }
++  [IPC.SERIES_PAGE]: { args: [query: SeriesListQuery & ClassificationPageQuery]; result: ClassificationListPage<SeriesListItem> }
+   [IPC.ORGANIZATION_LIST]: {
+     args: [query: OrganizationListQuery]
+     result: OrganizationListItem[]
+@@ -286,6 +310,7 @@ export interface AppIpcContract {
+     args: [id: number]
+     result: OrganizationDeleteResult
+   }
++  [IPC.DIRECTOR_PAGE]: { args: [query: DirectorListQuery & ClassificationPageQuery]; result: ClassificationListPage<DirectorListItem> }
+   [IPC.DIRECTOR_LIST]: { args: [query: DirectorListQuery]; result: DirectorListItem[] }
+   [IPC.DIRECTOR_GET]: { args: [id: number]; result: DirectorDetail | null }
+   [IPC.DIRECTOR_OPTIONS]: { args: [search?: string]; result: DirectorOption[] }
+@@ -302,6 +327,7 @@ export interface AppIpcContract {
+   [IPC.SERIES_MERGE]: { args: [input: SeriesMergeInput]; result: SeriesMergeResult }
+   [IPC.SERIES_DELETE_PREVIEW]: { args: [id: number]; result: SeriesDeleteImpact }
+   [IPC.SERIES_DELETE]: { args: [id: number]; result: SeriesDeleteResult }
++  [IPC.CLASSIFICATION_IMAGE_PAGE]: { args: [entity: ClassificationEntityRef, query?: ClassificationPageQuery]; result: ClassificationListPage<ClassificationImageCandidate> }
+   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: {
+     args: [entity: ClassificationEntityRef]
+     result: ClassificationImageCandidate[]
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..aed0c9d 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -1,3 +1,4 @@
++import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
+ import { z } from 'zod'
+ import { IPC } from '@shared/ipc-channels'
+ import type { ActressIpcContract } from '@shared/actressIpcContract'
+@@ -22,6 +23,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -365,6 +373,14 @@ const pluginPackage = z
+   })
+   .strict()
+ 
++const classificationPageQuery = z.object({
++  search: z.string().optional(),
++  sortBy: z.enum(['video_count', 'updated_at']).optional(),
++  sortDir: z.enum(['asc','desc']).optional(),
++  limit: z.number().int().min(1).max(100).optional(),
++  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++}).strict()
++
+ export const videoIpcSchemas = {
+   [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
+   [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
+@@ -379,6 +395,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -423,6 +440,26 @@ export const videoIpcSchemas = {
+ } satisfies IpcArgsSchemaMap<VideoIpcContract>
+ 
+ export const actressIpcSchemas = {
++  [IPC.ACTRESS_MERGE_CANDIDATES]: z.tuple([z.object({
++    keepId: positiveSafeInteger,
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()]),
++  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: z.tuple([]),
++  [IPC.ACTRESS_AVATAR_CROP_COUNT]: z.tuple([]),
++  [IPC.ACTRESS_TEST_TARGET_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_TEST_TARGET_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PICKER_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_PICKER_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_LIST]: z.tuple([
+     optionalText,
+     z.enum(['female', 'male', 'all']).optional(),
+@@ -431,6 +468,19 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_LIST_PAGE]: z.tuple([object.optional()]),
+   [IPC.ACTRESS_FACE_SCAN_MANIFEST]: noArgs,
++  [IPC.ACTRESS_GALLERY_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    anchorId: positiveSafeInteger.optional(),
++    localOnly: z.boolean().optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PROFILE]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_METADATA]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_VIDEO_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    withCover: z.boolean().optional(),
++    limit: z.number().int().min(1).max(240).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_GET]: z.tuple([id]),
+   [IPC.ACTRESS_AVATAR_SOURCE_INFO]: z.tuple([id]),
+   [IPC.ACTRESS_EDIT]: z.tuple([id, object]),
+@@ -450,6 +500,12 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
+   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
++  [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
++  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorName: nonEmptyText.optional()
++  }).strict()]),
+   [IPC.ACTRESS_CONFLICT_COUNT]: noArgs,
+   [IPC.ACTRESS_CONFLICT_SUMMARY]: noArgs,
+   [IPC.ACTRESS_CONFLICT_INSPECT_NAME]: z.tuple([
+@@ -507,6 +563,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -530,6 +594,7 @@ export const scrapeIpcSchemas = {
+   [IPC.BATCH_SCRAPE_RESUME]: noArgs,
+   [IPC.BATCH_SCRAPE_DISCARD]: noArgs,
+   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: noArgs,
++  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: z.tuple([nonEmptyText, z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.AVATAR_AUTO_CROP_BATCH_END]: z.tuple([nonEmptyText]),
+   [IPC.SCRAPER_LIST]: noArgs,
+   [IPC.SCRAPER_PLUGIN_DETAILS]: noArgs,
+@@ -620,6 +685,13 @@ export const appIpcSchemas = {
+   [IPC.SCAN_CANCEL]: z.tuple([nonEmptyText]),
+   [IPC.SCAN_LATEST_GET]: z.tuple([id]),
+   [IPC.SCAN_AUDIT_GET]: z.tuple([id]),
++  [IPC.SCAN_AUDIT_HEADER]: z.tuple([positiveSafeInteger]),
++  [IPC.SCAN_AUDIT_PAGE]: z.tuple([
++    z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict(),
++    z.object({section:z.enum(SCAN_AUDIT_SECTIONS),outcome:z.enum(SCAN_AUDIT_OUTCOMES).optional(),attention:z.boolean().optional(),
++      limit:z.number().int().min(1).max(100).optional(),offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++    }).strict().refine(query=>query.section==='files'||(query.outcome===undefined&&query.attention===undefined),'Only files support outcome and attention filters')
++  ]),
+   [IPC.SCAN_AUDIT_REVEAL_FILE]: z.tuple([id, nonEmptyText]),
+   [IPC.FILE_RENAME]: z.tuple([
+     id,
+@@ -634,6 +706,19 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
++    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
++    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
++  }).strict()]),
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
++  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +733,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +744,19 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.ORGANIZATION_PAGE]: z.tuple([classificationPageQuery.extend({role: z.enum(['maker','publisher'])})]),
++  [IPC.SERIES_PAGE]: z.tuple([classificationPageQuery]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+@@ -667,6 +768,7 @@ export const appIpcSchemas = {
+   [IPC.ORGANIZATION_ROLE_REMOVE]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_DELETE_PREVIEW]: z.tuple([id]),
+   [IPC.ORGANIZATION_DELETE]: z.tuple([id]),
++  [IPC.DIRECTOR_PAGE]: z.tuple([classificationPageQuery]),
+   [IPC.DIRECTOR_LIST]: z.tuple([listQuery]),
+   [IPC.DIRECTOR_GET]: z.tuple([id]),
+   [IPC.DIRECTOR_OPTIONS]: z.tuple([optionalText]),
+@@ -683,6 +785,10 @@ export const appIpcSchemas = {
+   [IPC.SERIES_MERGE]: z.tuple([mergeInput]),
+   [IPC.SERIES_DELETE_PREVIEW]: z.tuple([id]),
+   [IPC.SERIES_DELETE]: z.tuple([id]),
++  [IPC.CLASSIFICATION_IMAGE_PAGE]: z.tuple([classificationEntity.extend({id: positiveSafeInteger}), z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: z.tuple([classificationEntity]),
+   [IPC.CLASSIFICATION_IMAGE_SET]: z.tuple([
+     classificationEntity,
+diff --git a/src/main/ipc/scanHandlers.ts b/src/main/ipc/scanHandlers.ts
+index 233c391..a05132e 100644
+--- a/src/main/ipc/scanHandlers.ts
++++ b/src/main/ipc/scanHandlers.ts
+@@ -1,3 +1,5 @@
++import { catalogReadService } from '../services/catalogReadService'
++import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
+ import fs from 'node:fs'
+ import { shell } from 'electron'
+ import { IPC } from '@shared/ipc-channels'
+@@ -11,8 +13,10 @@ import {
+   renameLibraryUnrecognizedFile
+ } from '../db/libraryScanRepo'
+ import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
+-import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
+-import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
++import { pagePendingScanQueue, countPendingScanQueue } from '../db/pendingScanQueueRepo'
++import { getPendingAuditPresence } from '../db/pendingAuditRepo'
++import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '../db/pendingScanRepo'
++import { listPendingResourceIdentities, getPendingResourceIdentity } from '../db/pendingResourceIdentityRepo'
+ import { listVideoResources } from '../db/videoRepo'
+ import {
+   libraryScanAuditContainsPath,
+@@ -46,6 +50,14 @@ export function registerScanLatestHandler(
+   commandAdapter.register(IPC.SCAN_LATEST_GET, (libraryId) => readLatest(libraryId))
+ }
+ 
++export function registerScanAuditReadHandlers(
++  commandAdapter: Pick<typeof appCommandAdapter, 'register'> = appCommandAdapter,
++  reader: Pick<typeof catalogReadService, 'readAuditHeader' | 'readAuditPage'> = catalogReadService
++): void {
++  commandAdapter.register(IPC.SCAN_AUDIT_HEADER, libraryId => reader.readAuditHeader(libraryId))
++  commandAdapter.register(IPC.SCAN_AUDIT_PAGE, (snapshot, query) => reader.readAuditPage(snapshot, query, SCAN_AUDIT_READ_LIMITS))
++}
++
+ export function registerScanHandlers(ctx: IpcContext): void {
+   scanCoordinator.subscribe((event) => {
+     const webContents = ctx.getWindow()?.webContents
+@@ -67,6 +79,7 @@ export function registerScanHandlers(ctx: IpcContext): void {
+ 
+   appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => scanCoordinator.cancel(runId))
+   registerScanLatestHandler()
++  registerScanAuditReadHandlers()
+   appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) =>
+     readLibraryScanAudit(libraryId)
+   )
+@@ -86,6 +99,11 @@ export function registerScanHandlers(ctx: IpcContext): void {
+     shell.showItemInFolder(filePath)
+     return { ok: true }
+   })
++  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
++  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) => pagePendingScanQueue(query))
++  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_COUNT, (libraryId) => countPendingScanQueue(libraryId))
++  appCommandAdapter.register(IPC.PENDING_SCAN_GET, (libraryId, groupId) => getPendingScanGroup(libraryId, groupId))
++  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_GET, (libraryId, identityId) => getPendingResourceIdentity(libraryId, identityId))
+   appCommandAdapter.register(IPC.PENDING_SCAN_LIST, (libraryId) =>
+     listPendingScanGroups(libraryId)
+   )
+diff --git a/src/main/ipc/scanHandlers.test.ts b/src/main/ipc/scanHandlers.test.ts
+index 3432e37..fec4da6 100644
+--- a/src/main/ipc/scanHandlers.test.ts
++++ b/src/main/ipc/scanHandlers.test.ts
+@@ -5,7 +5,8 @@ import type { AppIpcContract } from '@shared/appIpcContract'
+ import { IPC, type IpcChannel } from '@shared/ipc-channels'
+ import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
+ import { appIpcSchemas } from './ipcCommandSchemas'
+-import { registerScanLatestHandler } from './scanHandlers'
++import { registerScanLatestHandler, registerScanAuditReadHandlers } from './scanHandlers'
++import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
+ import { createTypedIpcAdapter } from './typedIpcAdapter'
+ 
+ describe('scan latest IPC handler', () => {
+@@ -36,3 +37,41 @@ describe('scan latest IPC handler', () => {
+     assert.throws(() => handler({} as IpcMainInvokeEvent, 0), /无效的 IPC 请求参数/)
+   })
+ })
++
++it('bounds the combined audit presence request and validates its library',()=>{
++ const schema=appIpcSchemas[IPC.PENDING_AUDIT_PRESENCE]
++ assert.equal(schema.safeParse([1,{groupIds:[1],identityIds:[2],scrapeIds:[3]}]).success,true)
++ for(const args of [[0,{groupIds:[],identityIds:[],scrapeIds:[]}],[1,{groupIds:Array(51).fill(1),identityIds:Array(50).fill(1),scrapeIds:[]}],[1,{groupIds:[Number.MAX_SAFE_INTEGER+1],identityIds:[],scrapeIds:[]}],[1,{groupIds:[],identityIds:[],scrapeIds:[],sql:'anything'}]])assert.equal(schema.safeParse(args).success,false)
++})
++
++it('bounds scan pages and validates scoped detail and anchor inputs',()=>{
++ const page=appIpcSchemas[IPC.PENDING_SCAN_QUEUE_PAGE]
++ assert.equal(page.safeParse([{limit:100,offset:0,libraryId:1,anchor:{kind:'identity',id:2}}]).success,true)
++ for(const query of [{limit:101},{offset:-1},{libraryId:0},{anchor:{kind:'bad',id:1}},{anchor:{kind:'group',id:Number.MAX_SAFE_INTEGER+1}},{sql:'SELECT *'}])assert.equal(page.safeParse([query]).success,false)
++ for(const channel of [IPC.PENDING_SCAN_GET,IPC.PENDING_RESOURCE_IDENTITY_GET]){
++  assert.equal(appIpcSchemas[channel].safeParse([1,2]).success,true)
++  assert.equal(appIpcSchemas[channel].safeParse([0,2]).success,false)
++  assert.equal(appIpcSchemas[channel].safeParse([1,-1]).success,false)
++ }
++ assert.equal(appIpcSchemas[IPC.PENDING_SCAN_QUEUE_COUNT].safeParse([undefined]).success,true)
++ assert.equal(appIpcSchemas[IPC.PENDING_SCAN_QUEUE_COUNT].safeParse([0]).success,false)
++})
++
++it('routes audit header/page through the async reader with trusted budgets and strict scope',async()=>{
++ const handlers=new Map<IpcChannel,(event:IpcMainInvokeEvent,...args:unknown[])=>unknown>()
++ const adapter=createTypedIpcAdapter<AppIpcContract>(appIpcSchemas,(channel,handler)=>handlers.set(channel,handler))
++ const calls:unknown[]=[]
++ registerScanAuditReadHandlers(adapter,{
++  readAuditHeader:async libraryId=>{calls.push(['header',libraryId]);return{summary:null,snapshot:null,unrecognizedCount:0}},
++  readAuditPage:async(snapshot,query,limits)=>{calls.push(['page',snapshot,query,limits]);return{snapshot,section:query.section,items:[],total:0,limit:100,offset:0}}
++ })
++ const snapshot={libraryId:1,runId:'one',finishedAt:'now'},event={} as IpcMainInvokeEvent
++ await handlers.get(IPC.SCAN_AUDIT_HEADER)!(event,1)
++ await handlers.get(IPC.SCAN_AUDIT_PAGE)!(event,snapshot,{section:'files',attention:true})
++ assert.deepEqual(calls,[['header',1],['page',snapshot,{section:'files',attention:true},SCAN_AUDIT_READ_LIMITS]])
++ for(const args of [[{...snapshot,libraryId:0},{section:'files'}],[snapshot,{section:'files',limit:101}],[snapshot,{section:'files',offset:-1}],[snapshot,{section:'files',limits:{sourceBytes:1e12}}],[snapshot,{section:'files'},SCAN_AUDIT_READ_LIMITS],[snapshot,{section:'pendingGroups',attention:true}],[{...snapshot,runId:'x'.repeat(257)},{section:'files'}]]){
++  assert.throws(()=>handlers.get(IPC.SCAN_AUDIT_PAGE)!(event,...args),/无效的 IPC/)
++ }
++ assert.throws(()=>handlers.get(IPC.SCAN_AUDIT_HEADER)!(event,Number.MAX_SAFE_INTEGER+1),/无效的 IPC/)
++ assert.equal(calls.length,2)
++})
+diff --git a/src/main/services/scanAuditReadIndex.ts b/src/main/services/scanAuditReadIndex.ts
+new file mode 100644
+index 0000000..75b345a
+--- /dev/null
++++ b/src/main/services/scanAuditReadIndex.ts
+@@ -0,0 +1,113 @@
++import { openReadOnlyDatabaseAtPath } from '../db/database'
++
++import { SCAN_AUDIT_SECTIONS as sections, SCAN_AUDIT_OUTCOMES as outcomes } from '@shared/scanAuditReadTypes'
++import type { ScanAuditSection, ScanAuditSnapshotIdentity, ScanAuditIndexLimits, ScanAuditIndexQuery, ScanAuditIndexPage } from '@shared/scanAuditReadTypes'
++export type { ScanAuditSection, ScanAuditSnapshotIdentity, ScanAuditIndexLimits, ScanAuditIndexQuery, ScanAuditIndexPage } from '@shared/scanAuditReadTypes'
++
++interface CountGroup { section: ScanAuditSection; outcome: string | null; attention: number; n: number }
++
++/** Connection-owned derived data only. Synchronous: callers must dispatch construction/read to a worker. */
++export function createScanAuditReadIndex(databasePath: string, identity: ScanAuditSnapshotIdentity, limits: ScanAuditIndexLimits) {
++  if (!Number.isSafeInteger(identity.libraryId) || identity.libraryId <= 0
++    || typeof identity.runId !== 'string' || !identity.runId || identity.runId.length > 256
++    || typeof identity.finishedAt !== 'string' || !identity.finishedAt || identity.finishedAt.length > 100) {
++    throw new Error('Invalid audit snapshot identity')
++  }
++  for (const value of [limits.sourceBytes, limits.indexBytes, limits.pageBytes]) {
++    if (!Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid audit index budget')
++  }
++  const snapshot = { libraryId: identity.libraryId, runId: identity.runId, finishedAt: identity.finishedAt }, budget = { ...limits }
++  const db = openReadOnlyDatabaseAtPath(databasePath)
++  let sourceBytes = 0, indexBytes = 0
++  let groups: CountGroup[] = []
++  try {
++    // Native SQLITE_OPEN_READONLY continues to protect main while this private connection builds TEMP.
++    db.pragma('query_only = OFF')
++    db.pragma('temp_store = FILE')
++    db.pragma('temp.cache_size = -8192')
++    const pageSize = Number(db.pragma('temp.page_size', { simple: true }))
++    const maxPages = Math.floor(budget.indexBytes / pageSize)
++    if (maxPages < 1) throw new Error('Audit index exceeds space budget')
++    const acceptedPages = Number(db.pragma(`temp.max_page_count = ${maxPages}`, { simple: true }))
++    if (acceptedPages > maxPages) throw new Error('Audit index exceeds space budget')
++    db.transaction(() => {
++      // Reject excessive input before asking SQLite to parse the JSON document.
++      const size = db.prepare(`SELECT length(CAST(audit_json AS BLOB)) AS bytes
++        FROM library_scan_runs WHERE library_id = ? AND id = ?`).get(snapshot.libraryId, snapshot.runId) as { bytes: number | null } | undefined
++      if (size?.bytes == null) throw new Error('Audit snapshot unavailable')
++      sourceBytes = size.bytes
++      if (sourceBytes > budget.sourceBytes) throw new Error('Audit source exceeds byte budget')
++      const valid = db.prepare('SELECT json_valid(audit_json) AS valid FROM library_scan_runs WHERE library_id = ? AND id = ?')
++        .get(snapshot.libraryId, snapshot.runId) as { valid: number }
++      if (!valid.valid) throw new Error('Invalid audit JSON')
++      const meta = db.prepare(`SELECT json_extract(audit_json,'$.schemaVersion') AS version,
++        json_extract(audit_json,'$.libraryId') AS libraryId, json_extract(audit_json,'$.runId') AS runId,
++        json_extract(audit_json,'$.finishedAt') AS finishedAt,
++        ${sections.map(section => `json_type(audit_json,'$.${section}') AS ${section}`).join(',')}
++        FROM library_scan_runs WHERE library_id = ? AND id = ?`).get(snapshot.libraryId, snapshot.runId) as Record<string, unknown>
++      if ((meta.version !== 1 && meta.version !== 2)
++        || meta.libraryId !== snapshot.libraryId || meta.runId !== snapshot.runId || meta.finishedAt !== snapshot.finishedAt
++        || sections.some(section => meta[section] !== 'array')) throw new Error('Audit snapshot does not match requested identity or structure')
++      db.exec(`CREATE TEMP TABLE scan_audit_entries(
++        section TEXT NOT NULL, ordinal INTEGER NOT NULL,
++        entry TEXT NOT NULL CHECK(json_type(entry) = 'object'),
++        entry_bytes INTEGER NOT NULL CHECK(entry_bytes >= 0),
++        outcome TEXT, attention INTEGER NOT NULL,
++        PRIMARY KEY(section,ordinal),
++        CHECK(section != 'files' OR (outcome IS NOT NULL AND outcome IN (${outcomes.map(value => `'${value}'`).join(',')})))) WITHOUT ROWID`)
++      for (const section of sections) {
++        const file = section === 'files'
++        const outcome = file ? "json_extract(value,'$.outcome')" : 'NULL'
++        const attention = file ? `(json_extract(value,'$.outcome') IN ('unrecognized','strm_failure','processing_failure')
++          OR COALESCE(json_extract(value,'$.nfo.disposition') IN ('warning','identity-conflict','pending-candidate'),0))` : '0'
++        db.prepare(`INSERT INTO temp.scan_audit_entries(section,ordinal,entry,entry_bytes,outcome,attention)
++          SELECT ?,CAST(key AS INTEGER),CASE WHEN e.type = 'object' THEN value ELSE NULL END,length(CAST(value AS BLOB)),${outcome},${attention}
++          FROM library_scan_runs r,json_each(r.audit_json,'$.${section}') AS e
++          WHERE r.library_id = ? AND r.id = ?`).run(section, snapshot.libraryId, snapshot.runId)
++      }
++      db.exec(`CREATE INDEX temp.scan_audit_ordinal ON scan_audit_entries(section,ordinal,outcome,attention,entry_bytes);
++        CREATE INDEX temp.scan_audit_outcome ON scan_audit_entries(section,outcome,ordinal,attention,entry_bytes);
++        CREATE INDEX temp.scan_audit_attention ON scan_audit_entries(section,attention,ordinal,outcome,entry_bytes)`)
++      groups = db.prepare('SELECT section,outcome,attention,COUNT(*) AS n FROM temp.scan_audit_entries GROUP BY section,outcome,attention').all() as CountGroup[]
++      indexBytes = Number(db.pragma('temp.page_count', { simple: true })) * pageSize
++      if (indexBytes > budget.indexBytes) throw new Error('Audit index exceeds space budget')
++    })()
++    db.pragma('query_only = ON')
++  } catch (error) {
++    if (db.open) db.close()
++    throw error
++  }
++
++  return {
++    getInfo: () => ({ snapshot: { ...snapshot }, sourceBytes, indexBytes }),
++    readPage(query: ScanAuditIndexQuery): ScanAuditIndexPage {
++      if (!db.open) throw new Error('Audit index is closed')
++      const { section, outcome, attention, limit = 100, offset = 0 } = query
++      if (!sections.includes(section) || (outcome !== undefined && !outcomes.includes(outcome))
++        || (attention !== undefined && typeof attention !== 'boolean')
++        || (section !== 'files' && (outcome !== undefined || attention !== undefined))
++        || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
++        || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid audit page query')
++      const parameters: Array<string | number> = [section]
++      let where = 'section = ?'
++      if (outcome !== undefined) { where += ' AND outcome = ?'; parameters.push(outcome) }
++      if (attention !== undefined) { where += ' AND attention = ?'; parameters.push(Number(attention)) }
++      const total = groups.reduce((sum, group) => sum + (group.section === section
++        && (outcome === undefined || group.outcome === outcome)
++        && (attention === undefined || group.attention === Number(attention)) ? group.n : 0), 0)
++      const pageParameters = [...parameters, limit, offset]
++      const sizes = db.prepare(`SELECT ordinal,entry_bytes AS bytes FROM temp.scan_audit_entries
++        WHERE ${where} ORDER BY ordinal LIMIT ? OFFSET ?`).all(...pageParameters) as { ordinal: number; bytes: number }[]
++      if (sizes.reduce((sum, row) => sum + row.bytes, 0) > budget.pageBytes) throw new Error('Audit page exceeds byte budget')
++      // The index is immutable. Hydrate only the selected ordinal span, avoiding a second deep OFFSET.
++      const rows = sizes.length === 0 ? [] : db.prepare(`SELECT ordinal,entry FROM temp.scan_audit_entries
++        WHERE ${where} AND ordinal >= ? AND ordinal <= ? ORDER BY ordinal`)
++        .all(...parameters,sizes[0].ordinal,sizes[sizes.length - 1].ordinal) as { ordinal: number; entry: string }[]
++      const result: ScanAuditIndexPage = { snapshot: { ...snapshot }, section,
++        items: rows.map(row => ({ ordinal: row.ordinal, entry: JSON.parse(row.entry) as Record<string, unknown> })), total, limit, offset }
++      if (Buffer.byteLength(JSON.stringify(result)) > budget.pageBytes) throw new Error('Audit page exceeds byte budget')
++      return result
++    },
++    dispose() { if (db.open) db.close() }
++  }
++}
+diff --git a/src/main/services/scanAuditReadRequest.ts b/src/main/services/scanAuditReadRequest.ts
+new file mode 100644
+index 0000000..f6c94bc
+--- /dev/null
++++ b/src/main/services/scanAuditReadRequest.ts
+@@ -0,0 +1,24 @@
++import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
++import type { ScanAuditIndexLimits, ScanAuditIndexQuery, ScanAuditSnapshotIdentity } from './scanAuditReadIndex'
++
++/** Validate before worker allocation and copy only the supported scalar fields. */
++export function normalizeScanAuditReadRequest(snapshot: ScanAuditSnapshotIdentity, query: ScanAuditIndexQuery, limits: ScanAuditIndexLimits) {
++  if (!Number.isSafeInteger(snapshot.libraryId) || snapshot.libraryId <= 0
++    || typeof snapshot.runId !== 'string' || !snapshot.runId || snapshot.runId.length > 256
++    || typeof snapshot.finishedAt !== 'string' || !snapshot.finishedAt || snapshot.finishedAt.length > 100) throw new Error('Invalid audit snapshot identity')
++  for (const value of [limits.sourceBytes, limits.indexBytes, limits.pageBytes]) {
++    if (!Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid audit index budget')
++  }
++  const {section,outcome,attention,limit=100,offset=0} = query
++  if (!SCAN_AUDIT_SECTIONS.includes(section)
++    || (outcome !== undefined && !SCAN_AUDIT_OUTCOMES.includes(outcome))
++    || (attention !== undefined && typeof attention !== 'boolean')
++    || (section !== 'files' && (outcome !== undefined || attention !== undefined))
++    || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
++    || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid audit page query')
++  return {
++    snapshot: {libraryId:snapshot.libraryId,runId:snapshot.runId,finishedAt:snapshot.finishedAt},
++    query: {section,outcome,attention,limit,offset},
++    limits: {sourceBytes:limits.sourceBytes,indexBytes:limits.indexBytes,pageBytes:limits.pageBytes}
++  }
++}
+diff --git a/src/main/services/scanAuditReadHeader.ts b/src/main/services/scanAuditReadHeader.ts
+new file mode 100644
+index 0000000..7d2db31
+--- /dev/null
++++ b/src/main/services/scanAuditReadHeader.ts
+@@ -0,0 +1,32 @@
++import type Database from 'better-sqlite3'
++import type { LibraryScanSummary } from '@shared/libraryTypes'
++import type { ScanAuditReadHeader } from '@shared/scanAuditReadTypes'
++import { SCAN_AUDIT_HEADER_BYTES } from './scanAuditReadPolicy'
++
++/** No audit JSON or unrecognized row arrays cross this boundary. Run on the shared read worker. */
++export function readScanAuditHeader(db: Database.Database, libraryId: number): ScanAuditReadHeader {
++  if (!Number.isSafeInteger(libraryId) || libraryId <= 0) throw new Error('媒体库 ID 无效')
++  return db.transaction(() => {
++    if (!db.prepare('SELECT 1 FROM media_libraries WHERE id=?').get(libraryId)) throw new Error('媒体库不存在')
++    const bytes = db.prepare('SELECT length(CAST(last_summary_json AS BLOB)) AS bytes FROM media_library_scan_state WHERE library_id=?')
++      .get(libraryId) as {bytes:number|null}|undefined
++    if ((bytes?.bytes??0)>SCAN_AUDIT_HEADER_BYTES) throw new Error('Audit summary exceeds byte budget')
++    const row = db.prepare('SELECT last_summary_json AS value FROM media_library_scan_state WHERE library_id=?')
++      .get(libraryId) as {value:string|null}|undefined
++    let summary: LibraryScanSummary|null = null
++    try {
++      const value:unknown = row?.value ? JSON.parse(row.value) : null
++      if (value && typeof value==='object' && !Array.isArray(value)) {
++        const candidate=value as Record<string,unknown>
++        if (candidate.libraryId===libraryId && typeof candidate.runId==='string'
++          && typeof candidate.status==='string' && typeof candidate.finishedAt==='string') summary=candidate as unknown as LibraryScanSummary
++      }
++    } catch { /* Match the existing latest snapshot's malformed-summary null behavior. */ }
++    const hasAudit = summary ? db.prepare('SELECT 1 FROM library_scan_runs WHERE library_id=? AND id=? AND audit_json IS NOT NULL')
++      .get(libraryId,summary.runId) : undefined
++    const unrecognizedCount = (db.prepare('SELECT COUNT(*) AS n FROM library_unrecognized_files WHERE library_id=?').get(libraryId) as {n:number}).n
++    const result:ScanAuditReadHeader = {summary,snapshot:summary&&hasAudit?{libraryId,runId:summary.runId,finishedAt:summary.finishedAt}:null,unrecognizedCount}
++    if (Buffer.byteLength(JSON.stringify(result))>SCAN_AUDIT_HEADER_BYTES) throw new Error('Audit summary exceeds byte budget')
++    return result
++  })()
++}
+diff --git a/src/main/services/scanAuditReadPolicy.ts b/src/main/services/scanAuditReadPolicy.ts
+new file mode 100644
+index 0000000..e53b52b
+--- /dev/null
++++ b/src/main/services/scanAuditReadPolicy.ts
+@@ -0,0 +1,7 @@
++/** Trusted IPC policy; renderers cannot increase worker budgets. Oversize data fails explicitly. */
++export const SCAN_AUDIT_READ_LIMITS = Object.freeze({
++  sourceBytes: 128 * 1024 * 1024,
++  indexBytes: 256 * 1024 * 1024,
++  pageBytes: 1024 * 1024
++})
++export const SCAN_AUDIT_HEADER_BYTES = 256 * 1024
+diff --git a/src/main/services/catalogReadWorker.ts b/src/main/services/catalogReadWorker.ts
+new file mode 100644
+index 0000000..ed25c64
+--- /dev/null
++++ b/src/main/services/catalogReadWorker.ts
+@@ -0,0 +1,52 @@
++import { readScanAuditHeader } from './scanAuditReadHeader'
++import type { CatalogReadCommand } from './catalogReadWorkerClient'
++import { ScanAuditIndexSession } from './scanAuditIndexSession'
++import { createScanAuditReadIndex } from './scanAuditReadIndex'
++import { normalizeScanAuditReadRequest } from './scanAuditReadRequest'
++import { createClassificationImagePageReader } from './classificationImagePage'
++import { parentPort, workerData } from 'node:worker_threads'
++import { openReadOnlyDatabaseAtPath } from '../db/database'
++import { createTagFilterOptionsReader } from './tagQueryService'
++
++const port = parentPort
++if (!port || typeof workerData?.databasePath !== 'string') throw new Error('Invalid catalog reader startup')
++const connection = openReadOnlyDatabaseAtPath(workerData.databasePath)
++const read = createTagFilterOptionsReader(() => connection)
++const readImages = createClassificationImagePageReader(() => connection)
++const auditSession = new ScanAuditIndexSession({
++  build: (snapshot, limits) => createScanAuditReadIndex(workerData.databasePath, snapshot, limits),
++  revision: () => JSON.stringify([connection.pragma('data_version', {simple:true}), connection.pragma('schema_version', {simple:true})])
++})
++port.on('close', () => { auditSession.dispose(); if (connection.open) connection.close() })
++port.on('message', (message: CatalogReadCommand | {type:'close'}) => {
++  if (message.type === 'close') {
++    auditSession.dispose()
++    connection.close()
++    port.close()
++    return
++  }
++  if (message.type !== 'read' || !Number.isSafeInteger(message.id) || Number(message.id) <= 0) {
++    throw new Error('Invalid catalog reader command')
++  }
++  try {
++    if (!message.query) throw new Error('Missing catalog query')
++    if (message.operation === 'scan-audit-header') {
++      port.postMessage({ type:'result', id:message.id, result:readScanAuditHeader(connection,message.query.libraryId) })
++      return
++    }
++    if (message.operation === 'scan-audit-page') {
++      const request = normalizeScanAuditReadRequest(message.snapshot, message.query, message.limits)
++      const result = auditSession.read(request.snapshot, request.query, request.limits)
++      port.postMessage({ type: 'result', id: message.id, result })
++      return
++    }
++    if (message.operation !== undefined && message.operation !== 'tag-options' && message.operation !== 'classification-images') throw new Error('Unknown catalog read operation')
++    if (message.operation === 'classification-images' && !message.entity) throw new Error('Missing classification entity')
++    const result = message.operation === 'classification-images'
++      ? readImages(message.entity!, message.query) : read(message.query)
++    port.postMessage({ type: 'result', id: message.id, result })
++  } catch (error) {
++    port.postMessage({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) })
++  }
++})
++port.postMessage({ type: 'ready' })
+diff --git a/src/main/services/catalogReadWorkerClient.ts b/src/main/services/catalogReadWorkerClient.ts
+new file mode 100644
+index 0000000..d1ad077
+--- /dev/null
++++ b/src/main/services/catalogReadWorkerClient.ts
+@@ -0,0 +1,295 @@
++import type { ScanAuditReadHeader } from '@shared/scanAuditReadTypes'
++import type { ScanAuditIndexLimits, ScanAuditIndexPage, ScanAuditIndexQuery, ScanAuditSnapshotIdentity } from './scanAuditReadIndex'
++import { normalizeScanAuditReadRequest } from './scanAuditReadRequest'
++import type { ClassificationEntityRef, ClassificationImageCandidate, ClassificationListPage, ClassificationPageQuery } from '@shared/classificationTypes'
++import type { TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
++
++export type CatalogReadPage = ScanAuditReadHeader | ScanAuditIndexPage | TagFilterOptionsPage | ClassificationListPage<ClassificationImageCandidate>
++type CatalogReadRequest =
++  | { operation: 'scan-audit-header'; query: { libraryId: number } }
++  | { operation: 'scan-audit-page'; snapshot: ScanAuditSnapshotIdentity; query: ScanAuditIndexQuery; limits: ScanAuditIndexLimits }
++  | { operation?: 'tag-options'; query: TagOptionsQuery }
++  | { operation: 'classification-images'; entity: ClassificationEntityRef; query: ClassificationPageQuery }
++export type CatalogReadCommand = CatalogReadRequest & { type: 'read'; id: number }
++
++export interface CatalogReadContext {
++  identity: object
++  path: string
++  revision: string
++}
++
++export type CatalogReadWorkerMessage =
++  | { type: 'ready' }
++  | { type: 'result'; id: number; result: CatalogReadPage }
++  | { type: 'error'; id: number; message: string }
++
++/** Factory returns a transport before it emits ready. off must remove the supplied listener. */
++export interface CatalogReadWorkerTransport {
++  postMessage(message: CatalogReadCommand): void
++  on(event: 'message', listener: (message: CatalogReadWorkerMessage) => void): unknown
++  on(event: 'error', listener: (error: Error) => void): unknown
++  on(event: 'exit', listener: (code: number) => void): unknown
++  off(event: 'message', listener: (message: CatalogReadWorkerMessage) => void): unknown
++  off(event: 'error', listener: (error: Error) => void): unknown
++  off(event: 'exit', listener: (code: number) => void): unknown
++  terminate(): Promise<unknown>
++}
++
++export interface CatalogReadWorkerClientOptions {
++  contextProvider: () => CatalogReadContext
++  transportFactory: (context: CatalogReadContext) => CatalogReadWorkerTransport
++  startupTimeoutMs?: number
++  queryTimeoutMs?: number
++  queueTimeoutMs?: number
++}
++
++interface Subscriber {
++  resolve: (page: CatalogReadPage) => void
++  reject: (error: Error) => void
++  cleanup: () => void
++  stopWaiting: () => void
++}
++interface Flight {
++  id: number
++  key: string
++  request: CatalogReadRequest
++  subscribers: Set<Subscriber>
++}
++interface WorkerState {
++  transport: CatalogReadWorkerTransport
++  ready: boolean
++  timer?: ReturnType<typeof setTimeout>
++  detach: () => void
++}
++
++function abortError(): Error {
++  const error = new Error('Catalog read aborted')
++  error.name = 'AbortError'
++  return error
++}
++
++function normalize(query: TagOptionsQuery): Required<TagOptionsQuery> {
++  const { search = '', limit = 100, offset = 0 } = query
++  if (typeof search !== 'string' || search.length > 500
++    || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
++    || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid tag options query')
++  // Keep original casing in the payload: lowercasing can expand a valid 500-unit query.
++  return { search: search.trim(), limit, offset }
++}
++
++/** One worker, one executing query, at most 32 accepted subscribers (including coalesced reads). */
++export class CatalogReadWorkerClient {
++  private context?: CatalogReadContext
++  private worker?: WorkerState
++  private stopping?: Promise<void>
++  private terminationError?: Error
++  private disposed = false
++  private accepted = 0
++  private nextId = 0
++  private flights = new Map<string, Flight>()
++  private queue: Flight[] = []
++  private running?: Flight
++  private readonly startupTimeoutMs: number
++  private readonly queryTimeoutMs: number
++  private readonly queueTimeoutMs: number
++
++  constructor(private readonly options: CatalogReadWorkerClientOptions) {
++    this.startupTimeoutMs = options.startupTimeoutMs ?? 15_000
++    this.queryTimeoutMs = options.queryTimeoutMs ?? 15_000
++    this.queueTimeoutMs = options.queueTimeoutMs ?? 30_000
++    for (const timeout of [this.startupTimeoutMs, this.queryTimeoutMs, this.queueTimeoutMs]) {
++      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 2_147_483_647) {
++        throw new Error('Invalid catalog worker deadline')
++      }
++    }
++  }
++
++  read(query: TagOptionsQuery, signal?: AbortSignal): Promise<TagFilterOptionsPage> {
++    try {
++      const normalized = normalize(query)
++      return this.enqueue({ query: normalized }, ['tag-options', normalized.search.toLowerCase(), normalized.limit, normalized.offset], signal) as Promise<TagFilterOptionsPage>
++    } catch (error) { return Promise.reject(error) }
++  }
++
++  readImageCandidates(entity: ClassificationEntityRef, query: ClassificationPageQuery = {}, signal?: AbortSignal): Promise<ClassificationListPage<ClassificationImageCandidate>> {
++    try {
++      if (!['organization','director','series'].includes(entity.kind) || !Number.isSafeInteger(entity.id) || entity.id <= 0) throw new Error('Invalid classification entity')
++      const limit = query.limit ?? 60, offset = query.offset ?? 0
++      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid image candidate page')
++      const identity = {kind:entity.kind, id:entity.id}
++      return this.enqueue({operation:'classification-images', entity:identity, query:{limit,offset}}, ['classification-images',identity.kind,identity.id,limit,offset], signal) as Promise<ClassificationListPage<ClassificationImageCandidate>>
++    } catch (error) { return Promise.reject(error) }
++  }
++
++  readAuditHeader(libraryId: number, signal?: AbortSignal): Promise<ScanAuditReadHeader> {
++    if (!Number.isSafeInteger(libraryId) || libraryId <= 0) return Promise.reject(new Error('Invalid audit library'))
++    return this.enqueue({operation:'scan-audit-header',query:{libraryId}}, ['scan-audit-header',libraryId], signal) as Promise<ScanAuditReadHeader>
++  }
++
++  readAuditPage(snapshot: ScanAuditSnapshotIdentity, query: ScanAuditIndexQuery, limits: ScanAuditIndexLimits, signal?: AbortSignal): Promise<ScanAuditIndexPage> {
++    try {
++      const request = normalizeScanAuditReadRequest(snapshot, query, limits)
++      return this.enqueue({operation:'scan-audit-page', ...request}, ['scan-audit-page',request], signal) as Promise<ScanAuditIndexPage>
++    } catch (error) { return Promise.reject(error) }
++  }
++
++  // Request kind is part of the coalescing key and stays attached to the running
++  // ID. Public methods narrow the trusted worker response to that request kind.
++  private enqueue(request: CatalogReadRequest, requestKey: unknown[], signal?: AbortSignal): Promise<CatalogReadPage> {
++    try {
++      if (this.disposed) throw new Error('Catalog read client disposed')
++      if (this.terminationError) throw this.terminationError
++      if (signal?.aborted) throw abortError()
++      const context = { ...this.options.contextProvider() }
++      if (this.context && (this.context.identity !== context.identity || this.context.path !== context.path)) {
++        this.fail(new Error('Catalog read context changed'))
++      }
++      this.context = context
++      if (this.accepted >= 32) throw new Error('Catalog read capacity exceeded')
++      const key = JSON.stringify([context.revision, ...requestKey])
++      let flight = this.flights.get(key)
++      if (!flight) {
++        flight = { id: ++this.nextId, key, request, subscribers: new Set() }
++        this.flights.set(key, flight)
++        this.queue.push(flight)
++      }
++      const selected = flight
++      const promise = new Promise<CatalogReadPage>((resolve, reject) => {
++        let waitingTimer: ReturnType<typeof setTimeout> | undefined
++        const stopWaiting = (): void => { clearTimeout(waitingTimer); waitingTimer = undefined }
++        const withdraw = (error: Error): void => {
++          this.settleSubscriber(selected, subscriber, error)
++          if (selected.subscribers.size === 0 && selected !== this.running) {
++            this.queue = this.queue.filter(item => item !== selected)
++            this.forget(selected)
++          }
++        }
++        const abort = (): void => withdraw(abortError())
++        const subscriber: Subscriber = {
++          resolve, reject, stopWaiting,
++          cleanup: () => { stopWaiting(); signal?.removeEventListener('abort', abort) }
++        }
++        selected.subscribers.add(subscriber)
++        this.accepted++
++        signal?.addEventListener('abort', abort, { once: true })
++        if (selected !== this.running) {
++          waitingTimer = setTimeout(() => withdraw(new Error('Catalog worker queue timed out')), this.queueTimeoutMs)
++        }
++      })
++      this.pump()
++      return promise
++    } catch (error) {
++      return Promise.reject(error)
++    }
++  }
++
++  /** Rejects immediately; resolution means native worker termination has completed. */
++  async dispose(): Promise<void> {
++    this.disposed = true
++    this.fail(new Error('Catalog read client disposed'))
++    await this.stopping
++    if (this.terminationError) throw this.terminationError
++  }
++
++  private forget(flight: Flight): void {
++    if (this.flights.get(flight.key) === flight) this.flights.delete(flight.key)
++  }
++
++  private settleSubscriber(flight: Flight, subscriber: Subscriber, error?: Error, page?: CatalogReadPage): void {
++    if (!flight.subscribers.delete(subscriber)) return
++    this.accepted--
++    subscriber.cleanup()
++    if (error) subscriber.reject(error)
++    else {
++      try { subscriber.resolve(structuredClone(page!)) }
++      catch (cause) { subscriber.reject(cause instanceof Error ? cause : new Error(String(cause))) }
++    }
++  }
++
++  private rejectAll(error: Error): void {
++    for (const flight of this.flights.values()) {
++      for (const subscriber of flight.subscribers) this.settleSubscriber(flight, subscriber, error)
++    }
++    this.flights.clear()
++    this.queue = []
++    this.running = undefined
++  }
++
++  private fail(error: Error): void {
++    this.rejectAll(error)
++    const worker = this.worker
++    if (!worker) return
++    this.worker = undefined
++    clearTimeout(worker.timer)
++    // Keep error/exit listeners until termination settles: EventEmitter errors must stay handled.
++    this.stopping = Promise.resolve().then(() => worker.transport.terminate()).then(
++      () => {},
++      cause => {
++        this.terminationError = new Error(`Catalog worker termination failed: ${String(cause)}`)
++        this.rejectAll(this.terminationError)
++      }
++    ).then(() => {
++      worker.detach()
++      this.stopping = undefined
++      this.pump()
++    })
++  }
++
++  private pump(): void {
++    if (this.disposed || this.terminationError || this.stopping || !this.queue.length || this.running) return
++    if (!this.worker) {
++      try {
++        const transport = this.options.transportFactory({ ...this.context! })
++        const worker: WorkerState = { transport, ready: false, detach: () => {} }
++        this.worker = worker
++        const message = (event: CatalogReadWorkerMessage): void => {
++          if (this.worker !== worker) return
++          if (!event || typeof event !== 'object') {
++            this.fail(new Error('Unexpected catalog worker message'))
++            return
++          }
++          if (event.type === 'ready' && !worker.ready) {
++            clearTimeout(worker.timer)
++            worker.ready = true
++            this.pump()
++          } else if (event.type === 'result' && this.running && this.running.id === event.id) {
++            clearTimeout(worker.timer)
++            const flight = this.running
++            this.running = undefined
++            this.forget(flight)
++            for (const subscriber of flight.subscribers) this.settleSubscriber(flight, subscriber, undefined, event.result)
++            this.pump()
++          } else if (event.type === 'error') {
++            this.fail(new Error(event.message))
++          } else {
++            this.fail(new Error('Unexpected catalog worker message'))
++          }
++        }
++        const error = (cause: Error): void => { if (this.worker === worker) this.fail(cause) }
++        const exit = (code: number): void => {
++          if (this.worker === worker) this.fail(new Error(`Unexpected catalog worker exit: ${code}`))
++        }
++        worker.detach = () => {
++          transport.off('message', message)
++          transport.off('error', error)
++          transport.off('exit', exit)
++        }
++        transport.on('message', message)
++        transport.on('error', error)
++        transport.on('exit', exit)
++        worker.timer = setTimeout(() => this.fail(new Error('Catalog worker startup timed out')), this.startupTimeoutMs)
++      } catch (error) {
++        this.fail(error instanceof Error ? error : new Error(String(error)))
++      }
++      return
++    }
++    if (!this.worker.ready) return
++    const worker = this.worker
++    const flight = this.queue.shift()!
++    this.running = flight
++    for (const subscriber of flight.subscribers) subscriber.stopWaiting()
++    worker.timer = setTimeout(() => this.fail(new Error('Catalog worker query timed out')), this.queryTimeoutMs)
++    try { worker.transport.postMessage({ type: 'read', id: flight.id, ...flight.request }) }
++    catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))) }
++  }
++}
+diff --git a/src/main/services/catalogReadWorkerClient.test.ts b/src/main/services/catalogReadWorkerClient.test.ts
+new file mode 100644
+index 0000000..c40ca61
+--- /dev/null
++++ b/src/main/services/catalogReadWorkerClient.test.ts
+@@ -0,0 +1,392 @@
++import assert from 'node:assert/strict'
++import { EventEmitter } from 'node:events'
++import { it } from 'node:test'
++import type { TagOptionsQuery } from '@shared/commonTypes'
++import { CatalogReadWorkerClient, type CatalogReadContext, type CatalogReadCommand, type CatalogReadPage } from './catalogReadWorkerClient'
++
++function deferred() {
++  let resolve!: () => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++class Transport extends EventEmitter {
++  sent: CatalogReadCommand[] = []
++  termination = deferred()
++  terminations = 0
++  postMessage(message: CatalogReadCommand): void { this.sent.push(message) }
++  terminate(): Promise<void> { this.terminations++; return this.termination.promise }
++  ready(): void { this.emit('message', { type: 'ready' }) }
++  result(page: CatalogReadPage = { items: [{ id: 1, label: 'One', video_count: 2 }], hasMore: false }): void {
++    this.emit('message', { type: 'result', id: this.sent.at(-1)!.id, result: page })
++  }
++}
++const tick = async (): Promise<void> => { await new Promise<void>(resolve => setImmediate(resolve)) }
++function fixture(timeout = 1000, queueTimeoutMs = 30_000) {
++  let context: CatalogReadContext = { identity: {}, path: '/synthetic/library.db', revision: '1' }
++  const transports: Transport[] = []
++  const client = new CatalogReadWorkerClient({
++    contextProvider: () => context,
++    transportFactory: () => { const transport = new Transport(); transports.push(transport); return transport },
++    startupTimeoutMs: timeout, queryTimeoutMs: timeout, queueTimeoutMs
++  })
++  return { client, transports, context: () => context,
++    change: (patch: Partial<CatalogReadContext>) => { context = { ...context, ...patch } },
++    async close() {
++      const done = client.dispose()
++      for (const transport of transports) transport.termination.resolve()
++      await done
++      for (const transport of transports) assert.deepEqual(transport.eventNames(), [])
++    }
++  }
++}
++
++it('counts merged subscribers toward capacity, normalizes keys, and clones each successful result', async () => {
++  const f = fixture()
++  try {
++    const reads = Array.from({ length: 32 }, (_, i) => f.client.read(i % 2 ? { search: ' ONE ' } : { search: 'one', limit: 100, offset: 0 }))
++    await assert.rejects(f.client.read({ search: 'other' }), /capacity/)
++    assert.equal(f.transports.length, 1)
++    const worker = f.transports[0]
++    assert.equal(worker.sent.length, 0)
++    worker.ready()
++    assert.equal(worker.sent.length, 1)
++    worker.result()
++    const pages = await Promise.all(reads)
++    pages[0].items[0].label = 'Mutated'
++    assert.equal(pages[1].items[0].label, 'One')
++    const next = f.client.read({})
++    worker.result()
++    await next
++  } finally { await f.close() }
++})
++
++it('serializes different revisions and keeps a folded expanding query valid in the payload', async () => {
++  const f = fixture()
++  try {
++    const first = f.client.read({ search: 'İ'.repeat(500) })
++    const worker = f.transports[0]; worker.ready()
++    f.change({ revision: '2' })
++    const second = f.client.read({ search: 'İ'.repeat(500) })
++    assert.equal(worker.sent.length, 1)
++    assert.equal((worker.sent[0].query as TagOptionsQuery).search!.length, 500)
++    worker.result(); await first
++    assert.equal(worker.sent.length, 2)
++    worker.result(); await second
++  } finally { await f.close() }
++})
++
++for (const patch of [{ identity: {} }, { path: '/synthetic/other.db' }]) {
++  it(`rejects old generation on ${Object.keys(patch)[0]} change and waits for termination`, async () => {
++    const f = fixture()
++    try {
++      const old = assert.rejects(f.client.read({}), /context changed/)
++      const worker = f.transports[0]; worker.ready()
++      f.change(patch)
++      const next = f.client.read({})
++      await old; await tick()
++      assert.equal(worker.terminations, 1)
++      assert.equal(f.transports.length, 1)
++      worker.result(); worker.emit('error', new Error('late')); worker.emit('exit', 0)
++      worker.termination.resolve(); await tick()
++      assert.equal(f.transports.length, 2)
++      assert.deepEqual(worker.eventNames(), [])
++      f.transports[1].ready(); f.transports[1].result(); await next
++    } finally { await f.close() }
++  })
++}
++
++it('removes queued aborts but retains an executing slot after all subscribers abort', async () => {
++  const f = fixture()
++  try {
++    const a = new AbortController(), b = new AbortController(), queued = new AbortController()
++    const first = assert.rejects(f.client.read({}, a.signal), { name: 'AbortError' })
++    const merged = assert.rejects(f.client.read({}, b.signal), { name: 'AbortError' })
++    const worker = f.transports[0]; worker.ready()
++    const removed = assert.rejects(f.client.read({ offset: 100 }, queued.signal), { name: 'AbortError' })
++    queued.abort(); a.abort(); b.abort(); await Promise.all([first, merged, removed])
++    const next = f.client.read({ offset: 200 })
++    assert.equal(worker.sent.length, 1)
++    worker.result()
++    assert.equal(worker.sent.length, 2)
++    assert.equal((worker.sent[1].query as TagOptionsQuery).offset, 200)
++    worker.result(); await next
++  } finally { await f.close() }
++})
++
++it('one subscriber abort does not cancel another or retain its signal listener', async () => {
++  const f = fixture()
++  try {
++    const controller = new AbortController()
++    let removed = 0
++    const original = controller.signal.removeEventListener.bind(controller.signal)
++    controller.signal.removeEventListener = (...args) => { removed++; original(...args) }
++    const cancelled = assert.rejects(f.client.read({}, controller.signal), { name: 'AbortError' })
++    const survivor = f.client.read({})
++    controller.abort(); await cancelled
++    f.transports[0].ready(); f.transports[0].result(); await survivor
++    assert.equal(removed, 1)
++    await assert.rejects(f.client.read({}, controller.signal), { name: 'AbortError' })
++  } finally { await f.close() }
++})
++
++for (const failure of ['startup timeout', 'query timeout', 'exit', 'error', 'protocol error'] as const) {
++  it(`rejects all accepted on ${failure}, without retry or overlapping workers`, async () => {
++    const f = fixture(failure.includes('timeout') ? 15 : 1000)
++    try {
++      const first = assert.rejects(f.client.read({}), /timed out|exit|injected/)
++      const second = assert.rejects(f.client.read({ offset: 100 }), /timed out|exit|injected/)
++      const worker = f.transports[0]
++      if (failure !== 'startup timeout') worker.ready()
++      if (failure === 'exit') worker.emit('exit', 0)
++      if (failure === 'error') worker.emit('error', new Error('injected'))
++      if (failure === 'protocol error') worker.emit('message', { type: 'error', id: worker.sent[0].id, message: 'injected' })
++      await Promise.all([first, second]); await tick()
++      assert.equal(worker.terminations, 1)
++      assert.equal(f.transports.length, 1)
++      worker.termination.resolve(); await tick()
++      assert.equal(f.transports.length, 1, 'no automatic retry')
++    } finally { await f.close() }
++  })
++}
++
++it('dispose closes admission immediately and waits for a running termination', async () => {
++  const f = fixture()
++  const read = assert.rejects(f.client.read({}), /disposed/)
++  f.transports[0].ready()
++  let finished = false
++  const done = f.client.dispose().then(() => { finished = true })
++  await read; await tick()
++  await assert.rejects(f.client.read({}), /disposed/)
++  assert.equal(finished, false)
++  f.transports[0].termination.resolve(); await done
++  await f.client.dispose()
++  assert.equal(f.transports[0].terminations, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++it('fails closed if termination rejects and rejects requests waiting for replacement', async () => {
++  const f = fixture()
++  const old = assert.rejects(f.client.read({}), /context changed/)
++  f.change({ identity: {} })
++  const waiting = assert.rejects(f.client.read({}), /termination failed/)
++  await old
++  f.transports[0].termination.reject(new Error('cannot terminate'))
++  await waiting; await tick()
++  await assert.rejects(f.client.read({}), /termination failed/)
++  await assert.rejects(f.client.dispose(), /termination failed/)
++  assert.equal(f.transports.length, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++it('rejects invalid queries before creating a worker and contains factory/post failures', async () => {
++  const f = fixture()
++  for (const query of [{ limit: 101 }, { offset: -1 }, { search: 'x'.repeat(501) }]) {
++    await assert.rejects(f.client.read(query), /Invalid/)
++  }
++  assert.equal(f.transports.length, 0)
++  await f.close()
++  const client = new CatalogReadWorkerClient({ contextProvider: f.context, transportFactory: () => { throw new Error('factory') } })
++  await assert.rejects(client.read({}), /factory/)
++  await client.dispose()
++  const g = fixture()
++  const failed = assert.rejects(g.client.read({}), /post/)
++  g.transports[0].postMessage = () => { throw new Error('post') }
++  g.transports[0].ready(); await failed
++  await g.close()
++})
++
++it('bounds subscribers while termination is pending and supersedes a waiting generation', async () => {
++  const f = fixture()
++  try {
++    const old = assert.rejects(f.client.read({}), /context changed/)
++    f.change({ identity: {} })
++    const waiting = Array.from({ length: 32 }, () => assert.rejects(f.client.read({}), /context changed/))
++    await assert.rejects(f.client.read({}), /capacity/)
++    assert.equal(f.transports.length, 1)
++    f.change({ identity: {} })
++    const latest = f.client.read({})
++    await old; await Promise.all(waiting)
++    f.transports[0].termination.resolve(); await tick()
++    assert.equal(f.transports.length, 2)
++    f.transports[1].ready(); f.transports[1].result(); await latest
++  } finally { await f.close() }
++})
++
++it('does not launch work after repeated queued cancellations before ready', async () => {
++  const f = fixture()
++  try {
++    for (let offset = 0; offset < 64; offset++) {
++      const controller = new AbortController()
++      const cancelled = assert.rejects(f.client.read({ offset }, controller.signal), { name: 'AbortError' })
++      controller.abort(); await cancelled
++    }
++    assert.equal(f.transports.length, 1)
++    f.transports[0].ready()
++    assert.equal(f.transports[0].sent.length, 0)
++    const next = f.client.read({})
++    assert.equal(f.transports[0].sent.length, 1)
++    f.transports[0].result(); await next
++  } finally { await f.close() }
++})
++
++it('contains unexpected messages and dispose drains an already-started replacement barrier', async () => {
++  const f = fixture()
++  const old = assert.rejects(f.client.read({}), /Unexpected/)
++  f.transports[0].emit('message', null)
++  await old
++  const queued = assert.rejects(f.client.read({}), /disposed/)
++  const done = f.client.dispose()
++  await queued
++  f.transports[0].termination.resolve(); await done
++  assert.equal(f.transports.length, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++
++it('expires waiting subscribers and frees capacity while native termination remains pending', async (t) => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  const f = fixture(1000, 50)
++  try {
++    const old = assert.rejects(f.client.read({}), /context changed/)
++    f.change({ identity: {} })
++    const errors: unknown[] = []
++    const waiting = Array.from({ length: 32 }, () => f.client.read({}).catch(error => { errors.push(error) }))
++    await old
++    await assert.rejects(f.client.read({}), /capacity/)
++    t.mock.timers.tick(50)
++    await Promise.resolve()
++    assert.equal(errors.length, 32)
++    for (const error of errors) assert.match(String(error), /queue timed out/)
++    await Promise.all(waiting)
++    assert.equal(f.transports.length, 1, 'expiration must not bypass the native termination barrier')
++    const next = f.client.read({})
++    f.transports[0].termination.resolve(); await tick()
++    assert.equal(f.transports.length, 2)
++    f.transports[1].ready(); f.transports[1].result(); await next
++  } finally { await f.close() }
++})
++
++it('keeps independent waiting deadlines for coalesced subscribers and clears them at execution', async (t) => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  const f = fixture(1000, 50)
++  try {
++    const active = f.client.read({})
++    void active.catch(() => {})
++    const worker = f.transports[0]; worker.ready()
++    let expired: unknown
++    const first = f.client.read({ offset: 100 }).catch(error => { expired = error })
++    t.mock.timers.tick(30)
++    const survivor = f.client.read({ offset: 100 })
++    void survivor.catch(() => {})
++    t.mock.timers.tick(20); await Promise.resolve()
++    assert.match(String(expired), /queue timed out/)
++    await first
++    assert.equal(worker.sent.length, 1)
++    worker.result(); await active
++    assert.equal(worker.sent.length, 2)
++    t.mock.timers.tick(60)
++    worker.result(); await survivor
++    assert.equal(worker.terminations, 0)
++  } finally { await f.close() }
++})
++
++it('never executes a page whose only subscriber expired before ready', async (t) => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  const f = fixture(1000, 50)
++  try {
++    let expired: unknown
++    const pending = f.client.read({}).catch(error => { expired = error })
++    t.mock.timers.tick(50); await Promise.resolve()
++    assert.match(String(expired), /queue timed out/)
++    await pending
++    f.transports[0].ready()
++    assert.equal(f.transports[0].sent.length, 0)
++    const next = f.client.read({})
++    f.transports[0].result(); await next
++  } finally { await f.close() }
++})
++
++
++it('shares admission across tag/image requests, keys entity kinds separately and copies caller inputs', async () => {
++  const f=fixture()
++  const imagePage={items:[{videoId:1,code:'ONE',title:null,coverPath:'one.jpg'}],total:1,limit:60,offset:0}
++  try {
++    const entity={kind:'director' as const,id:1},query={offset:0}
++    const first=f.client.readImageCandidates(entity,query)
++    entity.id=99;query.offset=60
++    const duplicate=f.client.readImageCandidates({kind:'director',id:1},{limit:60})
++    const tags=f.client.read({limit:60})
++    const others=Array.from({length:29},()=>f.client.readImageCandidates({kind:'series',id:1}))
++    await assert.rejects(f.client.readImageCandidates({kind:'organization',id:1}),/capacity/)
++    const worker=f.transports[0];worker.ready()
++    assert.deepEqual(worker.sent[0],{type:'read',id:1,operation:'classification-images',entity:{kind:'director',id:1},query:{limit:60,offset:0}})
++    worker.result(imagePage)
++    const [a,b]=await Promise.all([first,duplicate]);a.items[0].code='mutated';assert.equal(b.items[0].code,'ONE')
++    assert.equal(worker.sent.length,2);assert.equal(worker.sent[1].operation,undefined)
++    worker.result();await tags
++    assert.equal(worker.sent.length,3);assert.equal(worker.sent[2].operation,'classification-images')
++    if(worker.sent[2].operation==='classification-images') assert.equal(worker.sent[2].entity.kind,'series')
++    worker.result(imagePage);assert.equal((await Promise.all(others)).length,29)
++    assert.equal(f.transports.length,1)
++  } finally {await f.close()}
++})
++
++it('retains the executing image slot after cancellation and retires it before switching databases',async()=>{
++ const f=fixture()
++ try{
++  const abort=new AbortController()
++  const cancelled=assert.rejects(f.client.readImageCandidates({kind:'director',id:1},{},abort.signal),{name:'AbortError'})
++  const worker=f.transports[0];worker.ready();abort.abort();await cancelled
++  const queued=assert.rejects(f.client.read({}),/context changed/)
++  assert.equal(worker.sent.length,1)
++  f.change({path:'/synthetic/new.db',identity:{}})
++  const next=f.client.readImageCandidates({kind:'director',id:1})
++  await queued;await tick();assert.equal(f.transports.length,1)
++  worker.result({items:[],total:0,limit:60,offset:0});worker.termination.resolve();await tick()
++  assert.equal(f.transports.length,2)
++  f.transports[1].ready();f.transports[1].result({items:[],total:0,limit:60,offset:0});assert.equal((await next).total,0)
++ } finally {await f.close()}
++})
++
++it('validates image requests before allocating a reader',async()=>{
++ const f=fixture()
++ try{
++  for(const id of [0,-1,1.5,Infinity,Number.MAX_SAFE_INTEGER+1])await assert.rejects(f.client.readImageCandidates({kind:'series',id}),/entity/)
++  for(const query of [{limit:101},{limit:0},{offset:-1},{offset:Infinity}])await assert.rejects(f.client.readImageCandidates({kind:'series',id:1},query),/page/)
++  assert.equal(f.transports.length,0)
++ }finally{await f.close()}
++})
++
++it('shares audit admission with tag/image work, coalesces snapshots and copies audit budgets',async()=>{
++ const f=fixture(),snapshot={libraryId:1,runId:'audit',finishedAt:'now'},limits={sourceBytes:10000,indexBytes:10000,pageBytes:1000}
++ const page={snapshot:{...snapshot},section:'files' as const,items:[{ordinal:0,entry:{outcome:'skipped'}}],total:1,limit:100,offset:0}
++ try{
++  const first=f.client.readAuditPage(snapshot,{section:'files'},limits)
++  snapshot.runId='mutated';limits.pageBytes=1
++  const duplicates=Array.from({length:29},()=>f.client.readAuditPage(page.snapshot,{section:'files'},{...limits,pageBytes:1000}))
++  const tag=f.client.read({}),image=f.client.readImageCandidates({kind:'director',id:1})
++  await assert.rejects(f.client.read({search:'extra'}),/capacity/)
++  const worker=f.transports[0];worker.ready();assert.equal(worker.sent.length,1)
++  const sent=worker.sent[0];assert.equal(sent.operation,'scan-audit-page')
++  if(sent.operation==='scan-audit-page'){assert.equal(sent.snapshot.runId,'audit');assert.equal(sent.limits.pageBytes,1000)}
++  worker.result(page);const pages=await Promise.all([first,...duplicates]);pages[0].items[0].entry.outcome='mutated';assert.equal(pages[1].items[0].entry.outcome,'skipped')
++  assert.equal(worker.sent.length,2);worker.result();await tag
++  worker.result({items:[],total:0,limit:60,offset:0});await image
++  assert.equal(worker.sent.length,3);assert.equal(f.transports.length,1)
++ }finally{await f.close()}
++})
++it('rejects invalid audit requests before allocation and removes an aborted queued audit',async()=>{
++ const f=fixture(),snapshot={libraryId:1,runId:'audit',finishedAt:'now'},limits={sourceBytes:10000,indexBytes:10000,pageBytes:1000}
++ try{
++  await assert.rejects(f.client.readAuditHeader(0),/Invalid/)
++  await assert.rejects(f.client.readAuditPage({...snapshot,libraryId:0},{section:'files'},limits),/identity/)
++  await assert.rejects(f.client.readAuditPage(snapshot,{section:'files',limit:101},limits),/page/)
++  await assert.rejects(f.client.readAuditPage(snapshot,{section:'pendingGroups',attention:true},limits),/page/)
++  await assert.rejects(f.client.readAuditPage(snapshot,{section:'files'},{...limits,indexBytes:0}),/budget/)
++  assert.equal(f.transports.length,0)
++  const tag=f.client.read({}),worker=f.transports[0];worker.ready()
++  const abort=new AbortController(),audit=assert.rejects(f.client.readAuditPage(snapshot,{section:'files'},limits,abort.signal),{name:'AbortError'})
++  abort.abort();await audit;worker.result();await tag;assert.equal(worker.sent.length,1)
++ }finally{await f.close()}
++})
+diff --git a/src/main/services/catalogReadWorker.integration.test.ts b/src/main/services/catalogReadWorker.integration.test.ts
+new file mode 100644
+index 0000000..dcd67d9
+--- /dev/null
++++ b/src/main/services/catalogReadWorker.integration.test.ts
+@@ -0,0 +1,130 @@
++import { listClassificationImagePage, createClassificationImagePageReader } from './classificationImagePage'
++import { openReadOnlyDatabaseAtPath } from '../db/database'
++import assert from 'node:assert/strict'
++import { after, afterEach, before, it } from 'node:test'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { buildSync } from 'esbuild'
++import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath } from '../db/database'
++import { listTagFilterOptions } from '../db/tagRepo'
++import { insertTestVideoWithFile } from '../db/testVideoFixtures'
++import { CatalogReadWorkerClient } from './catalogReadWorkerClient'
++import { createCatalogReadWorkerTransport } from './catalogReadWorkerTransport'
++
++let root: string
++let bundle: string
++let client: CatalogReadWorkerClient | undefined
++let sequence = 0
++before(() => {
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-catalog-worker-test-'))
++  bundle = path.join(root, 'worker.cjs')
++  buildSync({ entryPoints: [path.resolve('src/main/services/catalogReadWorker.ts')], outfile: bundle,
++    bundle: true, platform: 'node', format: 'cjs', packages: 'external', tsconfig: path.resolve('tsconfig.node.json'),
++    banner: { js: `require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});` } })
++})
++afterEach(async () => { await client?.dispose(); client = undefined; closeDatabase() })
++after(() => fs.rmSync(root, { recursive: true, force: true }))
++function setup() {
++  const filename = path.join(root, `catalog-${sequence++}.db`)
++  const db = initDatabaseAtPath(filename)
++  insertTestVideoWithFile(db, { code: 'WORKER-1', filePath: 'synthetic.mp4', scrapedStatus: 0 })
++  db.exec("INSERT INTO tags(id,name) VALUES(1,'École'); INSERT INTO video_tag(video_id,tag_id) VALUES(1,1)")
++  client = new CatalogReadWorkerClient({
++    contextProvider: () => {
++      const revision = getDatabaseReadRevision(db)
++      return { identity: db, path: filename, revision: JSON.stringify([revision.changes, revision.dataVersion]) }
++    },
++    transportFactory: context => createCatalogReadWorkerTransport(bundle, context.path)
++  })
++  return db
++}
++
++it('executes real read-only tag queries and observes writes through the worker cache', async () => {
++  const db = setup()
++  assert.deepEqual(await client!.read({ search: 'éco' }), listTagFilterOptions({ search: 'éco' }))
++  const page = await client!.read({})
++  page.items[0].label = 'caller mutation'
++  assert.equal((await client!.read({})).items[0].label, 'École')
++  db.exec('UPDATE library_video_memberships SET is_hidden=1')
++  const pages = await Promise.all([client!.read({}), client!.read({})])
++  assert.equal(pages[0].items[0].video_count, 0)
++  pages[0].items[0].label = 'subscriber mutation'
++  assert.equal(pages[1].items[0].label, 'École')
++  await client!.dispose()
++  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM video_tag').get() && db.open, true)
++  await assert.rejects(client!.read({}), /disposed/)
++})
++
++it('rejects a changed catalog version at worker startup without migration', async () => {
++  const db = setup()
++  db.pragma('user_version=16')
++  await assert.rejects(client!.read({}), /schema|worker|reader/i)
++  await client!.dispose()
++  assert.equal(db.pragma('user_version', { simple: true }), 16)
++  assert.deepEqual(db.prepare('SELECT name FROM tags').all(), [{ name: 'École' }])
++})
++
++it('settles in-flight initialization and queued requests when disposed', async () => {
++  setup()
++  const first = client!.read({})
++  const second = client!.read({ search: 'other' })
++  const rejected = Promise.all([assert.rejects(first, /disposed/), assert.rejects(second, /disposed/)])
++  await client!.dispose()
++  await rejected
++})
++
++
++it('executes all classification cover pages on the readonly worker and observes committed writes',async()=>{
++ const db=setup()
++ db.exec("INSERT INTO organizations(id,main_name) VALUES(1,'Org');INSERT INTO directors(id,main_name) VALUES(1,'Director');INSERT INTO series(id,main_name) VALUES(1,'Series')")
++ const insert=db.prepare('INSERT INTO videos(code,title,cover_path,release_date,maker_organization_id,publisher_organization_id,director_id,series_id) VALUES(?,?,?,?,1,1,1,1)')
++ for(let n=0;n<125;n++)insert.run(`COVER-${n}`,`Title-${n}`,n%7===0?' ':`cover-${n}.jpg`,n%2?'2026-01-01':null)
++ for(const kind of ['organization','director','series'] as const)for(const offset of [0,60,120]){
++   const entity={kind,id:1},expected=listClassificationImagePage(entity,{offset})
++   assert.deepEqual(await client!.readImageCandidates(entity,{offset}),expected)
++ }
++ db.exec("UPDATE videos SET cover_path=NULL WHERE code='COVER-1'")
++ const pages=await Promise.all([client!.readImageCandidates({kind:'director',id:1}),client!.readImageCandidates({kind:'director',id:1})])
++ assert.deepEqual(pages[0],listClassificationImagePage({kind:'director',id:1}))
++ pages[0].items[0].code='mutated';assert.notEqual(pages[1].items[0].code,'mutated')
++ assert.deepEqual(await client!.read({}),listTagFilterOptions({}))
++ const readonly=openReadOnlyDatabaseAtPath(db.name)
++ try{assert.deepEqual(createClassificationImagePageReader(()=>readonly)({kind:'series',id:1}),listClassificationImagePage({kind:'series',id:1}));assert.throws(()=>readonly.exec('DELETE FROM videos'),/readonly|read-only/i)}finally{readonly.close()}
++})
++
++it('rejects image initialization against an incompatible schema without rewriting it',async()=>{
++ const db=setup();db.pragma('user_version=16')
++ await assert.rejects(client!.readImageCandidates({kind:'director',id:1}),/schema|worker|reader/i)
++ await client!.dispose();assert.equal(db.pragma('user_version',{simple:true}),16)
++})
++
++it('reads bounded audit pages in the real worker, isolates operations and observes audit replacement',async()=>{
++ const db=setup(),snapshot={libraryId:1,runId:'audit-worker',finishedAt:'2026-09-11T00:00:00Z'}
++ const limits={sourceBytes:8*1024*1024,indexBytes:16*1024*1024,pageBytes:64*1024}
++ const files=Array.from({length:325},(_,i)=>({rootId:1,filePath:`/audit/${i}.mp4`,sourceKind:'local',outcome:i%2?'skipped':'unrecognized',skipReason:'unchanged'}))
++ const audit={...snapshot,schemaVersion:2,files,removedResources:[],promotedResources:[],deletedVideos:[],pendingGroups:[]}
++ db.prepare("INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json) VALUES(?,1,1,'manual','completed','2026-09-11',?)").run(snapshot.runId,JSON.stringify(audit))
++ for(const offset of [0,100,200,300]){
++  const page=await client!.readAuditPage(snapshot,{section:'files',offset},limits)
++  assert.equal(page.total,325);assert.deepEqual(page.items.map(item=>item.entry),files.slice(offset,offset+100))
++ }
++ const [one,two,tags]=await Promise.all([client!.readAuditPage(snapshot,{section:'files'},limits),client!.readAuditPage(snapshot,{section:'files'},limits),client!.read({})])
++ one.items[0].entry.filePath='mutated';assert.equal(two.items[0].entry.filePath,files[0].filePath);assert.deepEqual(tags,listTagFilterOptions({}))
++ db.prepare('UPDATE library_scan_runs SET audit_json=? WHERE id=?').run(JSON.stringify({...audit,files:[]}),snapshot.runId)
++ assert.equal((await client!.readAuditPage(snapshot,{section:'files'},limits)).total,0)
++ await assert.rejects(client!.readAuditPage({...snapshot,finishedAt:'mismatch'},{section:'files'},limits),/identity|structure/)
++ assert.equal((await client!.readAuditPage(snapshot,{section:'files'},limits)).total,0)
++ await client!.dispose();assert.equal(db.open,true)
++})
++
++it('reads audit headers on the real worker without building an index from the audit body',async()=>{
++ const db=setup(),summary={libraryId:1,runId:'header',status:'success',finishedAt:'now'}
++ db.prepare("INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json) VALUES('header',1,1,'manual','completed','now',?)").run('invalid audit JSON')
++ db.prepare('INSERT OR REPLACE INTO media_library_scan_state(library_id,last_summary_json) VALUES(1,?)').run(JSON.stringify(summary))
++ assert.deepEqual(await client!.readAuditHeader(1),{summary,snapshot:{libraryId:1,runId:'header',finishedAt:'now'},unrecognizedCount:0})
++ const [one,two]=await Promise.all([client!.readAuditHeader(1),client!.readAuditHeader(1)])
++ one.snapshot!.runId='mutated';assert.equal(two.snapshot!.runId,'header')
++ await assert.rejects(client!.readAuditHeader(0),/Invalid/)
++ assert.deepEqual(await client!.read({}),listTagFilterOptions({}))
++})
+diff --git a/src/main/db/libraryScanRepo.test.ts b/src/main/db/libraryScanRepo.test.ts
+index 418adf2..ed52447 100644
+--- a/src/main/db/libraryScanRepo.test.ts
++++ b/src/main/db/libraryScanRepo.test.ts
+@@ -349,3 +349,62 @@ describe('libraryScanRepo latest snapshot', () => {
+     assert.throws(() => getLatestLibraryScanSnapshot(99_999), /媒体库不存在/)
+   })
+ })
++
++it('reads a scoped audit header without loading audit JSON or pending path arrays',async()=>{
++ const {readScanAuditHeader}=await import('../services/scanAuditReadHeader')
++ const directory=path.join(tempRoot,'header');fs.mkdirSync(directory)
++ const library=createMediaLibrary({name:'Header',roots:[{path:directory}]})
++ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-run',filePath:path.join(directory,'unknown.mp4')})
++ const expected=getLatestLibraryScanSnapshot(library.id),db=getDb(),prepare=db.prepare.bind(db),queries:string[]=[]
++ // The header must not parse even an invalid/large audit body; the page reader validates it separately.
++ db.prepare('UPDATE library_scan_runs SET audit_json=? WHERE id=?').run('x'.repeat(2*1024*1024),'header-run')
++ db.prepare=((sql:string)=>{queries.push(sql);assert.doesNotMatch(sql,/SELECT\s+audit_json|json_each|json_extract|SELECT\s+root_id,\s*file_path/i);return prepare(sql)}) as typeof db.prepare
++ try{
++  const header=readScanAuditHeader(db,library.id)
++  assert.deepEqual(header,{summary:expected.summary,snapshot:{libraryId:library.id,runId:'header-run',finishedAt:expected.summary!.finishedAt},unrecognizedCount:1})
++  assert.ok(queries.some(sql=>sql.includes('COUNT(*)')))
++  assert.equal('audit' in header,false);assert.equal('unrecognized' in header,false)
++  assert.throws(()=>readScanAuditHeader(db,0),/ID/)
++  assert.throws(()=>readScanAuditHeader(db,99999),/不存在/)
++ }finally{db.prepare=prepare}
++})
++
++it('keeps summary failure semantics and rejects oversized summary/header payloads',async()=>{
++ const {readScanAuditHeader}=await import('../services/scanAuditReadHeader'),{SCAN_AUDIT_HEADER_BYTES}=await import('../services/scanAuditReadPolicy')
++ const directory=path.join(tempRoot,'header-errors');fs.mkdirSync(directory)
++ const library=createMediaLibrary({name:'Header errors',roots:[{path:directory}]})
++ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-errors',filePath:path.join(directory,'unknown.mp4')})
++ const db=getDb(),expected=getLatestLibraryScanSnapshot(library.id).summary!
++ const update=(value:string)=>db.prepare('UPDATE media_library_scan_state SET last_summary_json=? WHERE library_id=?').run(value,library.id)
++ for(const raw of ['{bad',JSON.stringify({...expected,libraryId:999})]){update(raw);assert.deepEqual(readScanAuditHeader(db,library.id),{summary:null,snapshot:null,unrecognizedCount:1})}
++ update(JSON.stringify({...expected,padding:'x'.repeat(SCAN_AUDIT_HEADER_BYTES)}));assert.throws(()=>readScanAuditHeader(db,library.id),/byte budget/)
++ const base={...expected,padding:''},raw=JSON.stringify({...base,padding:'x'.repeat(SCAN_AUDIT_HEADER_BYTES-Buffer.byteLength(JSON.stringify(base))-1)})
++ assert.ok(Buffer.byteLength(raw)<SCAN_AUDIT_HEADER_BYTES);update(raw);assert.throws(()=>readScanAuditHeader(db,library.id),/byte budget/)
++ update(JSON.stringify(expected));assert.deepEqual(readScanAuditHeader(db,library.id).summary,expected)
++})
++
++it('keeps header summary, audit availability and unrecognized count in one WAL snapshot',async()=>{
++ const {default:Database}=await import('better-sqlite3'),{readScanAuditHeader}=await import('../services/scanAuditReadHeader')
++ const directory=path.join(tempRoot,'header-snapshot');fs.mkdirSync(directory)
++ const library=createMediaLibrary({name:'Header snapshot',roots:[{path:directory}]})
++ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'old-header',filePath:path.join(directory,'unknown.mp4')})
++ const db=getDb(),old=getLatestLibraryScanSnapshot(library.id).summary!,next={...old,runId:'new-header',finishedAt:'later'},other=new Database(path.join(tempRoot,'library.db'))
++ const prepare=db.prepare.bind(db);let changed=false
++ db.prepare=((sql:string)=>{
++  const statement=prepare(sql)
++  if(sql.startsWith('SELECT last_summary_json AS value')){
++   const get=statement.get.bind(statement)
++   statement.get=((...args:unknown[])=>{
++    const row=get(...args)
++    if(!changed){changed=true;other.transaction(()=>{other.prepare('UPDATE media_library_scan_state SET last_summary_json=? WHERE library_id=?').run(JSON.stringify(next),library.id);other.prepare('DELETE FROM library_unrecognized_files WHERE library_id=?').run(library.id)})()}
++    return row
++   }) as typeof statement.get
++  }
++  return statement
++ }) as typeof db.prepare
++ try{
++  assert.deepEqual(readScanAuditHeader(db,library.id),{summary:old,snapshot:{libraryId:library.id,runId:old.runId,finishedAt:old.finishedAt},unrecognizedCount:1})
++  assert.equal(changed,true)
++  assert.deepEqual(readScanAuditHeader(db,library.id),{summary:next,snapshot:null,unrecognizedCount:0})
++ }finally{db.prepare=prepare;other.close()}
++})
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..db3a837 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1,3 +1,10 @@
++import type { ScanAuditSnapshotIdentity, ScanAuditIndexQuery } from '@shared/scanAuditReadTypes'
++import type { ClassificationPageQuery } from '@shared/classificationTypes'
++import type { ActressGalleryPageQuery } from '../shared/actressTypes'
++import type { ActressVideoPageQuery } from '../shared/actressTypes'
++import type { ActressMergeCandidateQuery } from '../shared/actressTypes'
++import type { ActressPickerQuery } from '../shared/actressTypes'
++import type { PendingAuditIds, PendingScanQueueQuery } from '../shared/libraryTypes'
+ import type { WebAccessInput } from '../shared/webTypes'
+ import { contextBridge, ipcRenderer, webUtils } from 'electron'
+ import { IPC } from '../shared/ipc-channels'
+@@ -88,7 +95,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -103,8 +110,8 @@ import type {
+ } from '../shared/libraryTypes'
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+-import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -314,6 +321,8 @@ const api = {
+       invokeApp(IPC.SCAN_RUN, libraryId, rootIds),
+     cancel: (runId: string) => invokeApp(IPC.SCAN_CANCEL, runId),
+     getLatest: (libraryId: number) => invokeApp(IPC.SCAN_LATEST_GET, libraryId),
++    getAuditHeader: (libraryId: number) => invokeApp(IPC.SCAN_AUDIT_HEADER, libraryId),
++    getAuditPage: (snapshot: ScanAuditSnapshotIdentity, query: ScanAuditIndexQuery) => invokeApp(IPC.SCAN_AUDIT_PAGE, snapshot, query),
+     getAudit: (libraryId: number) => invokeApp(IPC.SCAN_AUDIT_GET, libraryId),
+     revealAuditFile: (libraryId: number, filePath: string) =>
+       invokeApp(IPC.SCAN_AUDIT_REVEAL_FILE, libraryId, filePath),
+@@ -337,6 +346,11 @@ const api = {
+       code: string,
+       target: VideoResourceImportTarget
+     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
++    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
++    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
++    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
++    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
++    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
+     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+     resolvePending: (
+       libraryId: number,
+@@ -381,6 +395,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +464,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -463,6 +485,13 @@ const api = {
+       invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
+   },
+   actresses: {
++    mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
++    avatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_TARGETS),
++    countAvatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_COUNT),
++    testTargetPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_TEST_TARGET_PAGE, query),
++    testTargetGet: (id: number) => invokeActress(IPC.ACTRESS_TEST_TARGET_GET, id),
++    pickerGet: (id: number) => invokeActress(IPC.ACTRESS_PICKER_GET, id),
++    pickerPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_PICKER_PAGE, query),
+     list: (
+       search?: string,
+       gender?: ActressGenderFilter,
+@@ -471,6 +500,10 @@ const api = {
+     ) => invokeActress(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
+     listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
+     faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),
++    galleryPage: (id: number, query?: ActressGalleryPageQuery) => invokeActress(IPC.ACTRESS_GALLERY_PAGE, id, query),
++    profile: (id: number) => invokeActress(IPC.ACTRESS_PROFILE, id),
++    metadata: (id: number) => invokeActress(IPC.ACTRESS_METADATA, id),
++    videoPage: (id: number, query?: ActressVideoPageQuery) => invokeActress(IPC.ACTRESS_VIDEO_PAGE, id, query),
+     get: (id: number) => invokeActress(IPC.ACTRESS_GET, id),
+     getAvatarSourceInfo: (id: number) =>
+       invokeActress(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
+@@ -491,12 +524,16 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+       invokeApp(IPC.TAG_LIST_MANUAL)
+   },
+   organizations: {
++    page: (query: OrganizationListQuery & ClassificationPageQuery) => invokeApp(IPC.ORGANIZATION_PAGE, query),
+     list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),
+     get: (id: number, role: OrganizationRole) => invokeApp(IPC.ORGANIZATION_GET, id, role),
+     options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
+@@ -513,6 +550,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE, id)
+   },
+   directors: {
++    page: (query: DirectorListQuery & ClassificationPageQuery) => invokeApp(IPC.DIRECTOR_PAGE, query),
+     list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),
+     get: (id: number) => invokeApp(IPC.DIRECTOR_GET, id),
+     options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
+@@ -524,6 +562,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.DIRECTOR_DELETE, id)
+   },
+   series: {
++    page: (query: SeriesListQuery & ClassificationPageQuery) => invokeApp(IPC.SERIES_PAGE, query),
+     list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),
+     get: (id: number) => invokeApp(IPC.SERIES_GET, id),
+     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
+@@ -534,6 +573,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.SERIES_DELETE, id)
+   },
+   classificationImages: {
++    page: (entity: ClassificationEntityRef, query?: ClassificationPageQuery) => invokeApp(IPC.CLASSIFICATION_IMAGE_PAGE, entity, query),
+     candidates: (entity: ClassificationEntityRef) =>
+       invokeApp(IPC.CLASSIFICATION_IMAGE_CANDIDATES, entity),
+     set: (entity: ClassificationEntityRef, input: ClassificationImageInput | null) =>
+@@ -557,6 +597,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+@@ -625,6 +669,8 @@ const api = {
+         autoCropAvatar
+       ),
+     listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
++    getConflict: (normalizedName: string) => invokeActress(IPC.ACTRESS_CONFLICT_GET, normalizedName),
++    pageConflicts: (query: ActressConflictQueueQuery) => invokeActress(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, query),
+     conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
+     conflictSummary: () =>
+       invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
+@@ -755,6 +801,7 @@ const api = {
+   },
+   avatarAutoCropBatch: {
+     begin: () => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
++    targets: (token: string, afterId: number) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, token, afterId),
+     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
+   },
+   player: {
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+index a301be8..abe2bbf 100644
+--- a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+@@ -1,13 +1,19 @@
+-import { useEffect, useMemo, useRef, useState } from 'react'
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+ import { FixedSizeList, type ListChildComponentProps } from 'react-window'
+ import type {
+   LibraryScanAudit,
+   LibraryScanFileAuditEntry,
+   LibraryScanMetricKey,
+-  LibraryScanResourceAuditEntry,
+   LibraryScanSummary,
+   LibraryScanLatestSnapshot
+ } from '@shared/libraryTypes'
++import {
++  fileView,
++  isAttentionFile,
++  hasNfoPendingTarget,
++  resourceView,
++  type ViewItem
++} from '@shared/scanAuditView'
+ import { Copy, FolderOpen, AlertTriangle, CheckCircle2, RefreshCw, FileText, Trash2 } from 'lucide-react'
+ import Button from '../Button'
+ import IconButton from '../IconButton'
+@@ -15,6 +21,7 @@ import SelectControl from '../SelectControl'
+ import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
+ import UnrecognizedRow from './UnrecognizedRow'
+ import { api } from '../../api'
++import { usePendingAuditPresence } from '../../hooks/usePendingAuditPresence'
+ import { pendingItemKey, type PendingItemKey } from '../../listView/pendingRoutes'
+ import { useToast } from '../Toast'
+ import styles from './LibraryScanAuditPanel.module.css'
+@@ -35,127 +42,12 @@ const OUTCOME_LABEL: Record<LibraryScanFileAuditEntry['outcome'], string> = {
+   processing_failure: '处理失败'
+ }
+ 
+-type ViewItem = {
+-  key: string
+-  title: string
+-  detail: string
+-  outcome?: LibraryScanFileAuditEntry['outcome']
+-  path?: string
+-  rootId?: number
+-  videoId?: number
+-  groupId?: number
+-  status?: string
+-  requiresAttention?: boolean
+-  pendingTarget?: PendingItemKey
+-  isUnrecognizedPending?: boolean
+-}
+-
+ function auditItemAnchor(item: ViewItem): string {
+   if (item.groupId) return `group:${item.groupId}`
+   if (item.path) return `path:${encodeURIComponent(item.path)}`
+   return `item:${encodeURIComponent(item.key)}`
+ }
+ 
+-function fileDetail(entry: LibraryScanFileAuditEntry): string {
+-  const primary = (() => {
+-    switch (entry.outcome) {
+-      case 'added':
+-        return entry.createdVideo ? '新建影片并添加资源' : '挂载到已有影片'
+-      case 'updated':
+-        return {
+-          relocated: '路径已重定位',
+-          metadata_refreshed: '文件信息已刷新',
+-          strm_target_synced: 'STRM 目标已同步'
+-        }[entry.updateKind]
+-      case 'pending':
+-        return `${entry.normalizedCode || '番号未知'} · ${
+-          entry.sourceKind === 'strm' ? 'STRM' : '本地文件'
+-        } · ${entry.addedToQueue ? '已加入待确认队列' : '仍在待确认队列'}`
+-      case 'skipped':
+-        return {
+-          unchanged: '未变化',
+-          below_min_duration: '低于最短时长',
+-          duplicate: '重复资源'
+-        }[entry.skipReason]
+-      case 'unrecognized':
+-        return '文件名未识别出番号'
+-      case 'strm_failure':
+-        return entry.message
+-      case 'processing_failure':
+-        return entry.message
+-    }
+-  })()
+-  if (!entry.nfo) return primary
+-  const nfoLabel = {
+-    imported: 'NFO 已导入',
+-    skipped: 'NFO 已跳过',
+-    warning: 'NFO 警告',
+-    'pending-candidate': 'NFO 候选待确认',
+-    'identity-conflict': 'NFO 身份冲突'
+-  }[entry.nfo.disposition]
+-  const warnings = entry.nfo.warnings?.map((warning) => warning.message).join('；')
+-  return `${primary} · ${nfoLabel}${warnings ? ` · ${warnings}` : ''}`
+-}
+-
+-function fileView(entry: LibraryScanFileAuditEntry, index: number): ViewItem {
+-  return {
+-    key: `file:${index}:${entry.filePath}`,
+-    title: entry.filePath.split(/[\\/]/).pop() || entry.filePath,
+-    detail: fileDetail(entry),
+-    outcome: entry.outcome,
+-    path: entry.filePath,
+-    rootId: entry.rootId,
+-    videoId: 'videoId' in entry ? entry.videoId : undefined,
+-    groupId: entry.outcome === 'pending' ? entry.groupId ?? undefined : undefined
+-  }
+-}
+-
+-function isAttentionFile(entry: LibraryScanFileAuditEntry): boolean {
+-  return (
+-    ['unrecognized', 'strm_failure', 'processing_failure'].includes(entry.outcome) ||
+-    entry.nfo?.disposition === 'warning' ||
+-    entry.nfo?.disposition === 'identity-conflict' ||
+-    entry.nfo?.disposition === 'pending-candidate'
+-  )
+-}
+-
+-function isCurrentNfoPending(
+-  entry: LibraryScanFileAuditEntry,
+-  currentPendingIdentityIds: ReadonlySet<number>,
+-  currentPendingScrapeIds: ReadonlySet<number>
+-): boolean {
+-  if (entry.nfo?.disposition === 'identity-conflict') {
+-    return (
+-      entry.nfo.pendingIdentityId != null &&
+-      currentPendingIdentityIds.has(entry.nfo.pendingIdentityId)
+-    )
+-  }
+-  if (entry.nfo?.disposition === 'pending-candidate') {
+-    return (
+-      entry.nfo.pendingScrapeId != null &&
+-      currentPendingScrapeIds.has(entry.nfo.pendingScrapeId)
+-    )
+-  }
+-  return false
+-}
+-
+-function resourceView(entry: LibraryScanResourceAuditEntry, index: number): ViewItem {
+-  const reason = {
+-    missing: '源文件缺失',
+-    removed_library_path: '媒体库路径已移除',
+-    promoted_after_removal: '原主资源移除后提升'
+-  }[entry.reason]
+-  return {
+-    key: `resource:${index}:${entry.resourceId}`,
+-    title: `${entry.videoCode}${entry.videoTitle ? ` · ${entry.videoTitle}` : ''}`,
+-    detail: `${entry.resourceKind.toUpperCase()} · ${reason} · ${
+-      entry.displayName || entry.sourcePath || '外部目标已隐藏'
+-    }`,
+-    path: entry.sourcePath ?? undefined,
+-    videoId: entry.videoId
+-  }
+-}
+-
+ function getOutcomeClass(outcome?: LibraryScanFileAuditEntry['outcome']): string {
+   switch (outcome) {
+     case 'added':
+@@ -329,9 +221,6 @@ export default function LibraryScanAuditPanel({
+   audit,
+   selected,
+   unrecognized,
+-  currentPendingGroupIds,
+-  currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+   onResolvedUnrecognized,
+   onOpenVideo,
+@@ -341,9 +230,6 @@ export default function LibraryScanAuditPanel({
+   audit: LibraryScanAudit | null
+   selected: LibraryScanMetricKey | null
+   unrecognized: LibraryScanLatestSnapshot['unrecognized']
+-  currentPendingGroupIds: Set<number>
+-  currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+   onResolvedUnrecognized: (path: string) => void
+   onOpenVideo: (videoId: number) => void
+@@ -363,6 +249,14 @@ export default function LibraryScanAuditPanel({
+     audit.finishedAt === summary.finishedAt
+       ? audit
+       : null
++  const uniqueUnrecognized = useMemo(() => {
++    const seen = new Set<string>()
++    return unrecognized.filter(item => {
++      if (seen.has(item.filePath)) return false
++      seen.add(item.filePath)
++      return true
++    })
++  }, [unrecognized])
+   const cachedUnrecognizedPaths = useMemo(
+     () => new Set(unrecognized.map((item) => item.filePath)),
+     [unrecognized]
+@@ -376,11 +270,7 @@ export default function LibraryScanAuditPanel({
+       ),
+     [matchedAudit]
+   )
+-  const extraCachedUnrecognizedCount = unrecognized.filter(
+-    (item, index) =>
+-      unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-      !auditedUnrecognizedPaths.has(item.filePath)
+-  ).length
++  const extraCachedUnrecognizedCount = uniqueUnrecognized.filter(item => !auditedUnrecognizedPaths.has(item.filePath)).length
+ 
+   const totalFailed =
+     (matchedAudit?.files.filter(isAttentionFile).length ?? 0) +
+@@ -434,11 +324,7 @@ export default function LibraryScanAuditPanel({
+           entry.nfo?.disposition === 'identity-conflict' ||
+           entry.nfo?.disposition === 'pending-candidate'
+         ) {
+-          const pending = isCurrentNfoPending(
+-            entry,
+-            currentPendingIdentityIds,
+-            currentPendingScrapeIds
+-          )
++          const pending = hasNfoPendingTarget(entry)
+           item.status = pending ? '待处理' : '已处理'
+           item.requiresAttention = pending
+           if (pending) {
+@@ -455,22 +341,16 @@ export default function LibraryScanAuditPanel({
+         key: `pending-group:${entry.groupId}`,
+         title: `待确认归属 · ${entry.normalizedCode}`,
+         detail: `${entry.resourceCount} 个扫描资源`,
+-        groupId: currentPendingGroupIds.has(entry.groupId) ? entry.groupId : undefined,
+-        pendingTarget: currentPendingGroupIds.has(entry.groupId)
+-          ? pendingItemKey('scan', entry.groupId)
+-          : undefined,
+-        status: currentPendingGroupIds.has(entry.groupId) ? '待处理' : '已处理',
+-        requiresAttention: currentPendingGroupIds.has(entry.groupId)
++        groupId: entry.groupId,
++        pendingTarget: pendingItemKey('scan', entry.groupId),
++        status: '待处理',
++        requiresAttention: true
+       }))
+ 
+       // Unrecognized files that might not be in file list (e.g. persistent across scans)
+       const listedPaths = new Set(failedFileEntries.map((f) => f.filePath))
+-      const extraUnrecItems: ViewItem[] = unrecognized
+-        .filter(
+-          (item, index) =>
+-            unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-            !listedPaths.has(item.filePath)
+-        )
++      const extraUnrecItems: ViewItem[] = uniqueUnrecognized
++        .filter(item => !listedPaths.has(item.filePath))
+         .map((item, idx) => ({
+           key: `extra-unrec:${idx}:${item.filePath}`,
+           title: item.filePath.split(/[\\/]/).pop() || item.filePath,
+@@ -531,11 +411,7 @@ export default function LibraryScanAuditPanel({
+         entry.nfo?.disposition === 'identity-conflict' ||
+         entry.nfo?.disposition === 'pending-candidate'
+       ) {
+-        const pending = isCurrentNfoPending(
+-          entry,
+-          currentPendingIdentityIds,
+-          currentPendingScrapeIds
+-        )
++        const pending = hasNfoPendingTarget(entry)
+         item.status = pending ? '待处理' : '已处理'
+         item.requiresAttention = pending
+         if (pending) {
+@@ -547,7 +423,7 @@ export default function LibraryScanAuditPanel({
+         if (!pending) item.groupId = undefined
+       } else if (entry.outcome === 'pending') {
+         const pending =
+-          entry.groupId != null && currentPendingGroupIds.has(entry.groupId)
++          entry.groupId != null
+         item.status = pending ? '待处理' : '已处理'
+         item.requiresAttention = pending
+         if (pending) item.pendingTarget = pendingItemKey('scan', entry.groupId!)
+@@ -563,12 +439,9 @@ export default function LibraryScanAuditPanel({
+     activeTab,
+     cachedUnrecognizedPaths,
+     changesFilter,
+-    currentPendingGroupIds,
+-    currentPendingIdentityIds,
+-    currentPendingScrapeIds,
+-    matchedAudit,
++          matchedAudit,
+     outcome,
+-    unrecognized
++    uniqueUnrecognized
+   ])
+ 
+   const filtered = useMemo(() => {
+@@ -580,15 +453,39 @@ export default function LibraryScanAuditPanel({
+       : items
+   }, [activeTab, items, search])
+ 
++  const pageScope = JSON.stringify([summary.libraryId,summary.runId,summary.finishedAt,activeTab,search,outcome,changesFilter])
++  const [pageState, setPageState] = useState({scope:'',index:0})
++  const pageIndex = Math.min(pageState.scope === pageScope ? pageState.index : 0, Math.max(0,Math.ceil(filtered.length/100)-1))
++  const setPage = useCallback((index:number) => setPageState({scope:pageScope,index}),[pageScope])
++  const pageItems = filtered.slice(pageIndex*100,(pageIndex+1)*100)
++  const targets = {groupIds:[] as number[],identityIds:[] as number[],scrapeIds:[] as number[]}
++  for (const item of pageItems) {
++    const target=item.pendingTarget
++    if (!target) continue
++    if (target.domain==='scrape') targets.scrapeIds.push(Number(target.id))
++    else if (target.id.startsWith('identity-')) targets.identityIds.push(Number(target.id.slice('identity-'.length)))
++    else targets.groupIds.push(Number(target.id))
++  }
++  const presence = usePendingAuditPresence(summary.libraryId, targets, pageScope)
++  const displayedItems = pageItems.map(item => {
++    if (!item.pendingTarget) return item
++    const known = presence.state === 'ready'
++    const pending = known && presence.ids.has(`${item.pendingTarget.domain}:${item.pendingTarget.id}`)
++    return { ...item, status: !known ? presence.state === 'error' ? '状态未知' : '读取中…' : pending ? '待处理' : '已处理',
++      requiresAttention: pending, pendingTarget: pending ? item.pendingTarget : undefined }
++  })
++
+   const rowHeight = auditRowHeight(activeTab)
+-  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, filtered.length)
++  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, displayedItems.length)
+ 
+   useEffect(() => {
+     virtualListRef.current?.scrollTo(0)
+-  }, [activeTab, changesFilter, outcome, search, summary.finishedAt])
++  }, [activeTab, changesFilter, outcome, search, summary.finishedAt, pageIndex])
+ 
+   useEffect(() => {
+     if (activeTab !== 'failed' || !attentionTarget) return
++    const targetIndex = filtered.findIndex(item => auditItemAnchor(item) === attentionTarget)
++    if (targetIndex >= 0 && Math.floor(targetIndex / 100) !== pageIndex) { setPage(Math.floor(targetIndex / 100)); return }
+     const frame = window.requestAnimationFrame(() => {
+       const target = listContainerRef.current?.querySelector<HTMLElement>(
+         `[data-audit-anchor="${attentionTarget}"]`
+@@ -598,7 +495,7 @@ export default function LibraryScanAuditPanel({
+       setAttentionTarget(null)
+     })
+     return () => window.cancelAnimationFrame(frame)
+-  }, [activeTab, attentionTarget, filtered])
++  }, [activeTab, attentionTarget, filtered, pageIndex, setPage])
+ 
+   const handleTabChange = (tab: ScanAuditTab): void => {
+     setActiveTab(tab)
+@@ -695,6 +592,15 @@ export default function LibraryScanAuditPanel({
+           <SettingsStatusPill status="muted">{filtered.length} 项</SettingsStatusPill>
+         </div>
+ 
++        {presence.state === 'error' ? <div role="status" className={styles.subFilters}>
++          <span>待办状态读取失败</span><Button size="sm" onClick={presence.retry}>重试状态</Button>
++        </div> : null}
++        {filtered.length > 100 ? <nav aria-label="扫描审计分页" className={styles.subFilters}>
++          <Button size="sm" disabled={pageIndex === 0} onClick={() => setPage(pageIndex-1)}>上一页</Button>
++          <span>{pageIndex+1} / {Math.ceil(filtered.length/100)}</span>
++          <Button size="sm" disabled={(pageIndex+1)*100 >= filtered.length} onClick={() => setPage(pageIndex+1)}>下一页</Button>
++        </nav> : null}
++
+         {/* 资源清理分类下的子标签 */}
+         {activeTab === 'changes' ? (
+           <div className={styles.subFilters}>
+@@ -772,13 +678,13 @@ export default function LibraryScanAuditPanel({
+                   <FixedSizeList
+                     ref={virtualListRef}
+                     className={styles.virtualList}
+-                    height={Math.min(480, filtered.length * rowHeight)}
++                    height={Math.min(480, displayedItems.length * rowHeight)}
+                     width="100%"
+-                    itemCount={filtered.length}
++                    itemCount={displayedItems.length}
+                     itemSize={rowHeight}
+                     itemData={{
+                       libraryId: summary.libraryId,
+-                      items: filtered,
++                      items: displayedItems,
+                       activeTab,
+                       onOpenAttention: handleOpenAttention,
+                       onOpenPending,
+@@ -788,7 +694,7 @@ export default function LibraryScanAuditPanel({
+                     {AuditRow}
+                   </FixedSizeList>
+                 ) : (
+-                  filtered.map((item) => (
++                  displayedItems.map((item) => (
+                     <AuditRowContent
+                       key={item.key}
+                       libraryId={summary.libraryId}

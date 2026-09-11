@@ -120,6 +120,7 @@ async function scanFolders(
     onProgress,
     {
       ...scopedOptions,
+      resultMode: 'detailed',
       unavailableRootIds: unavailableRoots.map(ensureTestRoot),
       autoMergeSameCodeResources: scopedOptions.autoMergeSameCodeResources ?? true
     }
@@ -972,6 +973,47 @@ describe('scanFolders', () => {
     assert.equal(renamed.relocated, 0)
     assert.equal(renamed.imported, 1)
     assert.equal(listVideoResources(videoId).length, 2)
+  })
+
+  it('loads STRM candidates once per scan across imports, moves and pending writes', async (t) => {
+    const root = makeTempRoot()
+    const before = path.join(root, 'before')
+    const after = path.join(root, 'after')
+    fs.mkdirSync(before)
+    fs.mkdirSync(after)
+    const db = initDatabaseAtPath(path.join(root, 'library.db'))
+    for (let i = 1; i <= 40; i++) {
+      fs.writeFileSync(path.join(before, `MOVE-${String(i).padStart(3, '0')}.strm`), `https://example.test/${i}.mp4`)
+    }
+    let candidateLists = 0
+    const prepare = db.prepare.bind(db)
+    t.mock.method(db, 'prepare', (sql: string) => {
+      if (sql.includes('strm_source_path AS source_path')) candidateLists++
+      return prepare(sql)
+    })
+    const imported = await scanFolders([before, after], undefined, { minImportDurationSeconds: null })
+    assert.equal(imported.imported, 40)
+    assert.equal(candidateLists, 1)
+    const ids = (db.prepare('SELECT id FROM video_resources ORDER BY id').all() as Array<{ id: number }>).map((r) => r.id)
+    for (const name of fs.readdirSync(before)) fs.renameSync(path.join(before, name), path.join(after, name))
+    const moved = await scanFolders([before, after], undefined, { minImportDurationSeconds: null })
+    assert.equal(moved.relocated, 40)
+    assert.equal(moved.imported, 0)
+    assert.equal(candidateLists, 2)
+    const resources = db.prepare('SELECT id, strm_source_path FROM video_resources ORDER BY id').all() as Array<{ id: number; strm_source_path: string }>
+    assert.deepEqual(resources.map((r) => r.id), ids)
+    assert.ok(resources.every((r) => path.dirname(r.strm_source_path) === after))
+    for (let i = 1; i <= 40; i++) {
+      const code = String(i).padStart(3, '0')
+      fs.writeFileSync(path.join(after, `MOVE-${code}-extra.strm`), `https://example.test/extra-${i}.mp4`)
+      fs.writeFileSync(path.join(after, `NEW-${code}.strm`), `https://example.test/new-${i}.mp4`)
+    }
+    const mixed = await scanFolders([before, after], undefined, {
+      minImportDurationSeconds: null, autoMergeSameCodeResources: false
+    })
+    assert.equal(mixed.imported, 40)
+    assert.equal(mixed.pendingResources, 40)
+    assert.equal(candidateLists, 3, 'pending-only writes do not reload the resource index')
   })
 
   it('relocates a bound STRM after its video code has been corrected', async () => {
@@ -1862,6 +1904,272 @@ describe('scanFolders', () => {
     assert.equal(enabledPath.endsWith('enabled-name.mp4'), true)
   })
 
+  it('yields between immediately resolved NFO batches so abort runs without losing committed audits or primaries', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'nfo-tail-yield')
+    fs.mkdirSync(library)
+    const codes = Array.from({ length: 30 }, (_, index) => `NFO-${300 + index}`)
+    for (const code of codes) fs.writeFileSync(path.join(library, `${code}.mp4`), 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const controller = new AbortController()
+    const applied: Array<{ videoId: number; anchors: string[] }> = []
+    const audit: LibraryScanFileAuditEntry[] = []
+    let observedApplied = 0
+    let signalDelivered!: () => void
+    const delivered = new Promise<void>(resolve => { signalDelivered = resolve })
+    const result = await scanFolders([library], undefined, {
+      signal: controller.signal,
+      yieldEvery: 5,
+      minImportDurationSeconds: null,
+      autoImportLocalNfo: true,
+      localNfoService: fakeLocalNfoService({
+        inspect: anchor => ({ status: 'found', code: path.basename(anchor.anchorPath, '.mp4'), warnings: [] }),
+        apply: (videoId, _code, anchors) => {
+          applied.push({ videoId, anchors: anchors.map(anchor => anchor.anchorPath) })
+          if (applied.length === 1) setImmediate(() => {
+            observedApplied = applied.length
+            controller.abort()
+            signalDelivered()
+          })
+          return Promise.resolve({ disposition: 'imported', warnings: [] })
+        }
+      }),
+      onFileResult: entry => audit.push(structuredClone(entry))
+    })
+    await delivered
+    // All resources were committed before the NFO tail; cancellation must not lose any.
+    assert.equal(result.imported, codes.length)
+    assert.equal(result.scannedFiles, codes.length)
+    assert.equal(audit.length, codes.length)
+    assert.equal(new Set(audit.map(entry => entry.filePath)).size, codes.length)
+    assert.ok(audit.every(entry => entry.outcome === 'added'))
+    assert.equal(listVideos({}).total, codes.length)
+    for (const entry of audit) {
+      assert.equal(entry.outcome, 'added')
+      if (entry.outcome !== 'added') continue
+      const resources = listVideoResources(entry.videoId)
+      assert.equal(resources.length, 1)
+      assert.equal(resources.filter(resource => resource.is_primary).length, 1)
+    }
+    const committedNfoPaths = applied.flatMap(batch => batch.anchors).sort()
+    assert.deepEqual(audit.filter(entry => entry.nfo?.disposition === 'imported').map(entry => entry.filePath).sort(), committedNfoPaths)
+    assert.ok(observedApplied > 0 && observedApplied < codes.length,
+      `setImmediate abort must run before all 30 immediate NFO applications; observed ${observedApplied}`)
+    assert.equal(applied.length, observedApplied)
+    assert.equal(result.cancelled, true)
+  })
+
+  it('yields while delivering final audits but drains every committed entry and reports cancellation', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'audit-tail-yield')
+    fs.mkdirSync(library)
+    const codes = Array.from({ length: 30 }, (_, index) => `TAIL-${400 + index}`)
+    for (const code of codes) fs.writeFileSync(path.join(library, `${code}.mp4`), 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const controller = new AbortController()
+    const audit: LibraryScanFileAuditEntry[] = []
+    let observedDelivered = 0
+    let signalDelivered!: () => void
+    const delivered = new Promise<void>(resolve => { signalDelivered = resolve })
+    const result = await scanFolders([library], undefined, {
+      signal: controller.signal,
+      yieldEvery: 5,
+      minImportDurationSeconds: null,
+      autoImportLocalNfo: false,
+      onFileResult: entry => {
+        audit.push(structuredClone(entry))
+        if (audit.length === 1) setImmediate(() => {
+          observedDelivered = audit.length
+          controller.abort()
+          signalDelivered()
+        })
+      }
+    })
+    await delivered
+    assert.equal(result.imported, codes.length)
+    assert.equal(result.scannedFiles, codes.length)
+    assert.equal(audit.length, codes.length, 'abort must not truncate already committed audit delivery')
+    assert.equal(new Set(audit.map(entry => entry.filePath)).size, codes.length)
+    assert.ok(audit.every(entry => entry.outcome === 'added'))
+    for (const entry of audit) {
+      if (entry.outcome === 'added') assert.equal(listVideoResources(entry.videoId).filter(resource => resource.is_primary).length, 1)
+    }
+    assert.ok(observedDelivered > 0 && observedDelivered < codes.length,
+      `setImmediate must observe partial audit delivery; observed ${observedDelivered}`)
+    assert.equal(result.cancelled, true)
+  })
+
+  it('yields inside one committed NFO batch and retains imported audits for all its anchors', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'single-batch-anchor-yield')
+    fs.mkdirSync(library)
+    const filePaths = Array.from({ length: 30 }, (_, index) => path.join(library,
+      `fragment-${String.fromCharCode(65 + Math.floor(index / 26))}${String.fromCharCode(65 + index % 26)}.mp4`))
+    for (const filePath of filePaths) fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const controller = new AbortController()
+    const audit: LibraryScanFileAuditEntry[] = []
+    const restore: Array<() => void> = []
+    let applications = 0
+    let readAnchors = 0
+    let observedAnchors = 0
+    let observedAudits = -1
+    let firstAuditSawAbort = false
+    let signalDelivered!: () => void
+    const delivered = new Promise<void>(resolve => { signalDelivered = resolve })
+    try {
+      const result = await scanFolders([library], undefined, {
+        signal: controller.signal, yieldEvery: 5, minImportDurationSeconds: null,
+        autoImportLocalNfo: true,
+        localNfoService: fakeLocalNfoService({
+          inspect: () => ({ status: 'found', code: 'NFO-700', warnings: [] }),
+          apply: (_videoId, _code, anchors) => {
+            applications++
+            assert.equal(anchors.length, filePaths.length)
+            // Observe consumption of the actual service-provided anchors, not an imitation loop.
+            for (const anchor of anchors) {
+              const descriptor = Object.getOwnPropertyDescriptor(anchor, 'anchorPath')!
+              const anchorPath = anchor.anchorPath
+              Object.defineProperty(anchor, 'anchorPath', { configurable: true, enumerable: true,
+                get: () => { readAnchors++; return anchorPath } })
+              restore.push(() => Object.defineProperty(anchor, 'anchorPath', descriptor))
+            }
+            setImmediate(() => {
+              observedAnchors = readAnchors
+              observedAudits = audit.length
+              controller.abort()
+              signalDelivered()
+            })
+            return Promise.resolve({ disposition: 'imported', warnings: [] })
+          }
+        }),
+        onFileResult: entry => {
+          if (!audit.length) firstAuditSawAbort = controller.signal.aborted
+          audit.push(structuredClone(entry))
+        }
+      })
+      await delivered
+      assert.equal(applications, 1)
+      assert.ok(observedAnchors > 0 && observedAnchors < filePaths.length,
+        `abort must run inside the anchor loop, not at batch end; observed ${observedAnchors}`)
+      assert.equal(observedAudits, 0)
+      assert.equal(firstAuditSawAbort, true)
+      assert.equal(result.cancelled, true)
+      assert.equal(result.imported, filePaths.length)
+      assert.deepEqual(audit.map(entry => entry.filePath).sort(), [...filePaths].sort())
+      assert.ok(audit.every(entry => entry.nfo?.disposition === 'imported'))
+      const videos = listVideos({})
+      assert.equal(videos.total, 1)
+      const resources = listVideoResources(videos.items[0].id)
+      assert.equal(resources.length, filePaths.length)
+      assert.equal(resources.filter(resource => resource.is_primary).length, 1)
+    } finally {
+      for (const undo of restore) undo()
+    }
+  })
+
+  it('yields between completed primary selections and still settles every committed resource after abort', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'primary-tail-yield')
+    fs.mkdirSync(library)
+    const codes = Array.from({ length: 30 }, (_, index) => `PRIM-${800 + index}`)
+    for (const code of codes) fs.writeFileSync(path.join(library, `${code}.mp4`), 'video')
+    const db = initDatabaseAtPath(path.join(root, 'library.db'))
+    const originalPrepare = db.prepare
+    const prepare = db.prepare.bind(db)
+    const controller = new AbortController()
+    const audit: LibraryScanFileAuditEntry[] = []
+    let selected = 0
+    let observedSelected = 0
+    let observedAudits = -1
+    let inTransactionAtYield: boolean | undefined
+    let signalDelivered!: () => void
+    const delivered = new Promise<void>(resolve => { signalDelivered = resolve })
+    db.prepare = ((sql: string) => {
+      const statement = prepare(sql)
+      if (sql === 'UPDATE video_resources SET is_primary = 1 WHERE id = ? AND library_id = ?') {
+        const run = statement.run.bind(statement)
+        statement.run = ((...args: unknown[]) => {
+          const result = run(...args)
+          selected++
+          if (selected === 1) setImmediate(() => {
+            observedSelected = selected
+            observedAudits = audit.length
+            inTransactionAtYield = db.inTransaction
+            controller.abort()
+            signalDelivered()
+          })
+          return result
+        }) as typeof statement.run
+      }
+      return statement
+    }) as typeof db.prepare
+    try {
+      const result = await scanFolders([library], undefined, {
+        signal: controller.signal, yieldEvery: 5, minImportDurationSeconds: null,
+        autoImportLocalNfo: false,
+        onFileResult: entry => audit.push(structuredClone(entry))
+      })
+      await delivered
+      assert.ok(observedSelected > 0 && observedSelected < codes.length,
+        `setImmediate must run before all primary selections finish; observed ${observedSelected}`)
+      assert.equal(inTransactionAtYield, false, 'the per-primary transaction must commit before yielding')
+      assert.equal(observedAudits, 0, 'this must be a primary-loop yield, not final audit delivery')
+      assert.equal(selected, codes.length, 'abort must not abandon primary selection for committed resources')
+      assert.equal(result.cancelled, true)
+      assert.equal(result.imported, codes.length)
+      assert.equal(audit.length, codes.length)
+      assert.equal(new Set(audit.map(entry => entry.filePath)).size, codes.length)
+      for (const entry of audit) {
+        assert.equal(entry.outcome, 'added')
+        if (entry.outcome !== 'added') continue
+        const resources = listVideoResources(entry.videoId)
+        assert.equal(resources.length, 1)
+        assert.equal(resources.filter(resource => resource.is_primary).length, 1)
+      }
+    } finally {
+      db.prepare = originalPrepare
+    }
+  })
+
+  it('handles cancellation during the only or first NFO application and preserves committed file audits', async () => {
+    for (const codes of [['NFO-201'], ['NFO-201', 'NFO-202']]) {
+      const root = makeTempRoot()
+      const library = path.join(root, 'library')
+      fs.mkdirSync(library)
+      for (const code of codes) {
+        fs.writeFileSync(path.join(library, `${code}.mp4`), 'video')
+      }
+      initDatabaseAtPath(path.join(root, 'library.db'))
+      const controller = new AbortController()
+      let applied = 0
+      const audit: LibraryScanFileAuditEntry[] = []
+      const result = await scanFolders([library], undefined, {
+        signal: controller.signal,
+        autoImportLocalNfo: true,
+        minImportDurationSeconds: null,
+        onFileResult: entry => audit.push(entry),
+        localNfoService: fakeLocalNfoService({
+          inspect: anchor => ({
+            status: 'found', code: path.basename(anchor.anchorPath, '.mp4'), warnings: []
+          }),
+          apply: async () => {
+            applied++
+            controller.abort()
+            return { disposition: 'imported', warnings: [] }
+          }
+        })
+      })
+      assert.equal(applied, 1)
+      assert.equal(result.cancelled, true)
+      assert.equal(result.imported, codes.length)
+      assert.equal(audit.length, codes.length)
+      assert.equal(audit.filter(entry => entry.nfo?.disposition === 'imported').length, 1)
+      assert.equal(listVideos({}).total, codes.length)
+      closeDatabase()
+    }
+  })
+
   it('aggregates first-discovery NFO candidates once per video after all resources are assigned', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
@@ -2224,6 +2532,33 @@ describe('scanFolders', () => {
 
     const result = await scanPromise
     assert.equal(result.imported, 30)
+  })
+
+  it('collects a very large root without overflowing call arguments before cancellation', async () => {
+    for (const size of [300_382, 600_764]) {
+      const root = makeTempRoot()
+      const library = path.join(root, 'library')
+      fs.mkdirSync(library)
+      initDatabaseAtPath(path.join(root, 'library.db'))
+      const controller = new AbortController()
+      const result = await scanFolders([library], undefined, {
+        signal: controller.signal,
+        readDirectory: async () => {
+          // Abort on the last entry, after the whole root has been accumulated.
+          return Array.from({ length: size }, (_, index) => ({
+            name: `TEST-${index}.mp4`,
+            isFile: () => {
+              if (index === size - 1) controller.abort()
+              return true
+            },
+            isDirectory: () => false
+          }) as fs.Dirent)
+        }
+      })
+      assert.equal(result.cancelled, true)
+      assert.equal(result.imported, 0)
+      closeDatabase()
+    }
   })
 
   it('stops when cancelled', async () => {

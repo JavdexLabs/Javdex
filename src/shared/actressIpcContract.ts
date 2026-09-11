@@ -1,3 +1,10 @@
+import type { ActressProfile } from './actressTypes'
+import type { ActressGalleryPage, ActressGalleryPageQuery } from './actressTypes'
+import type { ActressMetadata } from './actressTypes'
+import type { ActressVideoPage, ActressVideoPageQuery } from './actressTypes'
+import type { ActressAvatarAutoCropTarget } from './actressAvatarCropTypes'
+import type { ActressMergeCandidatePage, ActressMergeCandidateQuery } from './actressTypes'
+import type { ActressPickerIdentity, ActressPickerPage, ActressPickerQuery } from './actressTypes'
 import { IPC } from './ipc-channels'
 import type {
   IpcContractArgs,
@@ -6,7 +13,7 @@ import type {
 } from './typedIpcContract'
 import type { SortDir } from './commonTypes'
 import type { ActressAvatarSourceInfo, ActressDetail, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from './actressTypes'
-import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from './actressConflictTypes'
+import type { ActressConflictQueuePage, ActressConflictQueueQuery, ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from './actressConflictTypes'
 
 export interface ActressDeleteCleanupFailure {
   path: string
@@ -42,6 +49,28 @@ export interface ActressIpcContract {
     ]
     result: ActressListItem[]
   }
+  [IPC.ACTRESS_MERGE_CANDIDATES]: {
+    args: [query: ActressMergeCandidateQuery]
+    result: ActressMergeCandidatePage
+  }
+  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: {
+    args: []
+    result: ActressAvatarAutoCropTarget[]
+  }
+  [IPC.ACTRESS_AVATAR_CROP_COUNT]: {
+    args: []
+    result: number
+  }
+  [IPC.ACTRESS_TEST_TARGET_PAGE]: { args: [query?: ActressPickerQuery]; result: ActressPickerPage }
+  [IPC.ACTRESS_TEST_TARGET_GET]: { args: [id: number]; result: string | null }
+  [IPC.ACTRESS_PICKER_GET]: {
+    args: [id: number]
+    result: ActressPickerIdentity | null
+  }
+  [IPC.ACTRESS_PICKER_PAGE]: {
+    args: [query?: ActressPickerQuery]
+    result: ActressPickerPage
+  }
   [IPC.ACTRESS_LIST_PAGE]: {
     args: [query?: ActressListQuery]
     result: ActressListPage
@@ -49,6 +78,19 @@ export interface ActressIpcContract {
   [IPC.ACTRESS_FACE_SCAN_MANIFEST]: {
     args: []
     result: ActressFaceScanManifestItem[]
+  }
+  [IPC.ACTRESS_GALLERY_PAGE]: {
+    args: [id: number, query?: ActressGalleryPageQuery]
+    result: ActressGalleryPage | null
+  }
+  [IPC.ACTRESS_PROFILE]: { args: [id: number]; result: ActressProfile | null }
+  [IPC.ACTRESS_METADATA]: {
+    args: [id: number]
+    result: ActressMetadata | null
+  }
+  [IPC.ACTRESS_VIDEO_PAGE]: {
+    args: [id: number, query?: ActressVideoPageQuery]
+    result: ActressVideoPage | null
   }
   [IPC.ACTRESS_GET]: {
     args: [id: number]
@@ -101,6 +143,14 @@ export interface ActressIpcContract {
   [IPC.ACTRESS_CONFLICT_LIST]: {
     args: []
     result: ActressNameConflictGroup[]
+  }
+  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: {
+    args: [query: ActressConflictQueueQuery]
+    result: ActressConflictQueuePage
+  }
+  [IPC.ACTRESS_CONFLICT_GET]: {
+    args: [normalizedName: string]
+    result: ActressNameConflictGroup | null
   }
   [IPC.ACTRESS_CONFLICT_COUNT]: {
     args: []

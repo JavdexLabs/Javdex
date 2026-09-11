@@ -1,0 +1,284 @@
+diff --git a/src/main/services/actressIdentityConflictWorkflow.test.ts b/src/main/services/actressIdentityConflictWorkflow.test.ts
+index e98c4e7..802c6ff 100644
+--- a/src/main/services/actressIdentityConflictWorkflow.test.ts
++++ b/src/main/services/actressIdentityConflictWorkflow.test.ts
+@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
++import Database from 'better-sqlite3'
+ import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
+ import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+ import {
+@@ -2566,3 +2567,106 @@ describe('ActressIdentityConflictWorkflow', () => {
+     assert.deepEqual(storedFiles, [])
+   })
+ })
++
++
++function createMaintenanceFixture(): ActressIdentityConflictWorkflow {
++  const owner = createActress('Maintenance Owner')
++  editActress(owner, { aliases: ['Maintenance Collision'] })
++  const target = createActress('Maintenance Target')
++  const workflow = new ActressIdentityConflictWorkflow()
++  workflow.processPreparedScrape({ actressId: target, plugin: {name:'Fixture',source:'builtin'},
++    queryName:'Maintenance Target',selectedFields:['aliases'],applicableFields:['aliases'],mode:'replace',
++    result:{aliases:['Maintenance Collision']},warnings:[],resources:[] })
++  return workflow
++}
++
++it('reuses maintenance only until local writes, schema changes or external commits',()=>{
++  const workflow=createMaintenanceFixture(), db=getDb()
++  const original=db.prepare.bind(db)
++  let scans=0
++  db.prepare=((sql:string)=>{if(sql.includes('SELECT id, actress_id, applicable_fields_json, result_json'))scans++;return original(sql)}) as typeof db.prepare
++  let other:Database.Database|undefined
++  try{
++    const expected=workflow.getConflictReviewSummary()
++    assert.equal(scans,1)
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,1)
++    db.exec('UPDATE actresses SET revision=revision')
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,2)
++    db.exec('CREATE TABLE maintenance_schema_probe(id INTEGER)')
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,3)
++    other=new Database(path.join(tempRoot,'library.db'))
++    other.exec('DELETE FROM pending_actress_scrape_conflicts')
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,4)
++    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM pending_actress_scrape_conflicts').get() as {n:number}).n,1)
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,5,'a repair requires a subsequent no-write pass')
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,5)
++  }finally{other?.close();db.prepare=original}
++})
++
++it('does not publish rolled-back maintenance or skip checks inside a caller transaction',()=>{
++  const workflow=createMaintenanceFixture(),db=getDb()
++  workflow.getConflictReviewSummary()
++  db.exec('DELETE FROM pending_actress_scrape_conflicts')
++  const before=(db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision
++  assert.throws(()=>db.transaction(()=>{
++    workflow.getConflictReviewSummary()
++    assert.equal((db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision,before+1)
++    db.exec('DELETE FROM pending_actress_scrape_conflicts')
++    workflow.getConflictReviewSummary()
++    assert.equal((db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision,before+2)
++    throw new Error('rollback maintenance')
++  })(),/rollback maintenance/)
++  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM pending_actress_scrape_conflicts').get() as {n:number}).n,0)
++  assert.equal(workflow.getConflictReviewSummary().groupCount,1)
++  assert.equal((db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision,before+1)
++})
++
++it('retries failed maintenance and invalidates after reopening the same catalog',()=>{
++  const workflow=createMaintenanceFixture(),db=getDb()
++  workflow.getConflictReviewSummary()
++  db.exec('DELETE FROM pending_actress_scrape_conflicts')
++  const original=db.prepare.bind(db)
++  db.prepare=((sql:string)=>{if(sql.includes('SELECT id, actress_id, applicable_fields_json, result_json'))throw new Error('injected read failure');return original(sql)}) as typeof db.prepare
++  try{assert.throws(()=>workflow.getConflictReviewSummary(),/injected read failure/)}finally{db.prepare=original}
++  assert.equal(workflow.getConflictReviewSummary().groupCount,1)
++  closeDatabase()
++  const other=new Database(path.join(tempRoot,'library.db'))
++  try{other.exec('DELETE FROM pending_actress_scrape_conflicts')}finally{other.close()}
++  const reopened=initDatabaseAtPath(path.join(tempRoot,'library.db'))
++  assert.equal(workflow.getConflictReviewSummary().groupCount,1)
++  assert.equal((reopened.prepare('SELECT COUNT(*) AS n FROM pending_actress_scrape_conflicts').get() as {n:number}).n,1)
++})
++
++it('does not publish a maintenance stamp if an external commit occurs during the check',()=>{
++  const workflow=createMaintenanceFixture(),db=getDb()
++  const other=new Database(path.join(tempRoot,'library.db'))
++  const original=db.prepare.bind(db)
++  let scans=0
++  db.prepare=((sql:string)=>{
++    if(sql.includes('SELECT id, actress_id, applicable_fields_json, result_json')){
++      scans++
++      if(scans===1)other.exec('UPDATE actresses SET revision=revision')
++    }
++    return original(sql)
++  }) as typeof db.prepare
++  try{
++    const expected=workflow.getConflictReviewSummary()
++    assert.equal(scans,1)
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,2)
++    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,2)
++  }finally{db.prepare=original;other.close()}
++})
++
++it('rechecks earlier candidates after a later candidate introduces a new conflict',()=>{
++  const workflow=createMaintenanceFixture(),db=getDb()
++  db.exec(`DELETE FROM pending_actress_scrape_conflicts;
++    UPDATE pending_actress_scrapes SET id=2;
++    INSERT INTO pending_actress_scrapes(id,actress_id,target_actress_revision,plugin_name,plugin_source,query_name,selected_fields_json,applicable_fields_json,update_mode,result_json,warnings_json,created_at)
++    SELECT 1,id,revision,'Fixture','builtin',main_name,'["aliases"]','["aliases"]','replace','{"aliases":["Maintenance Collision"]}','[]','2026'
++    FROM actresses WHERE main_name='Maintenance Owner';`)
++  workflow.getConflictReviewSummary()
++  const ids=()=>db.prepare('SELECT pending_scrape_id AS id FROM pending_actress_scrape_conflicts ORDER BY pending_scrape_id').all()
++  assert.deepEqual(ids(),[{id:2}],'the owner was visited before the new foreign conflict existed')
++  workflow.getConflictReviewSummary()
++  assert.deepEqual(ids(),[{id:1},{id:2}],'the next check must revisit the earlier owner')
++})
+diff --git a/src/main/services/actressIdentityConflictWorkflow.ts b/src/main/services/actressIdentityConflictWorkflow.ts
+index df7b3a9..845e123 100644
+--- a/src/main/services/actressIdentityConflictWorkflow.ts
++++ b/src/main/services/actressIdentityConflictWorkflow.ts
+@@ -1,6 +1,6 @@
+ import type { ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
+ import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
+-import { getDb } from '../db/database'
++import { getDatabaseReadRevision, getDb } from '../db/database'
+ import { normalizeActressName } from '../db/actressNameNormalization'
+ import {
+   markActressScrapeSucceeded,
+@@ -474,7 +474,44 @@ function isPendingConflictActive(
+   return Boolean(otherPendingTarget)
+ }
+ 
++type PendingConflictMaintenanceRevision = ReturnType<typeof getDatabaseReadRevision> & {
++  schemaVersion: number
++}
++let pendingConflictMaintenanceRevision: PendingConflictMaintenanceRevision | undefined
++
++function readPendingConflictMaintenanceRevision(): PendingConflictMaintenanceRevision {
++  const db = getDb()
++  return {
++    ...getDatabaseReadRevision(db),
++    schemaVersion: db.pragma('schema_version', { simple: true }) as number
++  }
++}
++
++/** Reuse only a completed check of this exact database state; never cache a transaction draft. */
+ function ensureCurrentPendingConflicts(): void {
++  const db = getDb()
++  if (db.inTransaction) {
++    pendingConflictMaintenanceRevision = undefined
++    repairCurrentPendingConflicts()
++    return
++  }
++  const before = readPendingConflictMaintenanceRevision()
++  const previous = pendingConflictMaintenanceRevision
++  if (previous?.connection === before.connection && previous.changes === before.changes &&
++      previous.dataVersion === before.dataVersion && previous.schemaVersion === before.schemaVersion) return
++  // Failure or a concurrent external commit must not publish a successful-check stamp.
++  pendingConflictMaintenanceRevision = undefined
++  repairCurrentPendingConflicts()
++  const after = readPendingConflictMaintenanceRevision()
++  // Newly added conflicts can make an earlier candidate conflict on the next pass.
++  // Publish only a no-write pass; a repair must be checked again before reuse.
++  if (before.connection === after.connection && before.changes === after.changes &&
++      before.dataVersion === after.dataVersion && before.schemaVersion === after.schemaVersion) {
++    pendingConflictMaintenanceRevision = after
++  }
++}
++
++function repairCurrentPendingConflicts(): void {
+   const db = getDb()
+   const pendingRows = db
+     .prepare(
+@@ -1500,8 +1537,8 @@ export class ActressIdentityConflictWorkflow {
+   }
+ 
+   getConflictReviewSummary(): ActressConflictReviewSummary {
+-    // The global badge polls frequently: aggregate only group keys/statuses here. The full
+-    // workbench query still owns candidate JSON, resources, claimants and field planning.
++    // The global badge omits candidate/resource DTOs and field planning. Conflict repair
++    // below reads candidate JSON after database changes; this is not a constant-work count.
+     ensureCurrentPendingConflicts()
+     const db = getDb()
+     const pendingNameGroups = db
+diff --git a/src/renderer/src/pages/useConflictReviewController.test.tsx b/src/renderer/src/pages/useConflictReviewController.test.tsx
+index 873bb9d..34ea912 100644
+--- a/src/renderer/src/pages/useConflictReviewController.test.tsx
++++ b/src/renderer/src/pages/useConflictReviewController.test.tsx
+@@ -4,6 +4,7 @@ import React from 'react'
+ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+ import TestRenderer, { act } from 'react-test-renderer'
+ import type { ActressNameConflictGroup, ResolveActressConflictInput } from '@shared/actressConflictTypes'
++import type { ConflictReviewViewModel } from './useConflictReviewController'
+ import type { ElectronApi } from '../../../preload/index'
+ 
+ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+@@ -169,3 +170,29 @@ async function waitFor(predicate: () => boolean): Promise<void> {
+   }
+   assert.fail('controller state did not settle')
+ }
++
++it('preserves an explicit ownership decision while detail reads are disabled and reenabled',async()=>{
++ let reads=0
++ const fixture=group()
++ Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{actressScrape:{listConflicts:async()=>{reads++;return [fixture]},conflictSummary:async()=>({groupCount:1})}}}})
++ const {useConflictReviewController}=await import('./useConflictReviewController')
++ let vm!:ConflictReviewViewModel
++ function Probe({enabled}:{enabled:boolean}):null{vm=useConflictReviewController({enabled,summaryEnabled:enabled});return null}
++ const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++ let renderer:TestRenderer.ReactTestRenderer|undefined
++ const tree=(enabled:boolean)=><QueryClientProvider client={client}><Probe enabled={enabled}/></QueryClientProvider>
++ const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++ try{
++  await act(async()=>{renderer=TestRenderer.create(tree(true))});await settle();await settle()
++  await act(async()=>vm.queue.chooseGroup(fixture));await settle()
++  await act(async()=>vm.detail.selectOwner({actressId:2,revision:3,mainName:'候选演员'}));await settle()
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++  const priorReads=reads
++  await act(async()=>renderer!.update(tree(false)));await settle()
++  assert.equal(reads,priorReads)
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++  assert.equal(vm.queue.selectedGroup?.normalizedName,'冲突名')
++  await act(async()=>renderer!.update(tree(true)));await settle();await settle()
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++ }finally{await act(async()=>renderer?.unmount());client.clear()}
++})
+diff --git a/scripts/performance/actress-conflict-maintenance-benchmark.ts b/scripts/performance/actress-conflict-maintenance-benchmark.ts
+new file mode 100644
+index 0000000..e0fc181
+--- /dev/null
++++ b/scripts/performance/actress-conflict-maintenance-benchmark.ts
+@@ -0,0 +1,49 @@
++/** Synthetic, already-consistent actor queue; no user database/media access. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++import { ActressIdentityConflictWorkflow } from '../../src/main/services/actressIdentityConflictWorkflow'
++it('measures unchanged versus invalidated actor conflict maintenance',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-actor-maintenance-'))
++ try{
++  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++  db.transaction(()=>{
++   db.exec(`CREATE TABLE maintenance_benchmark_probe(value INTEGER); INSERT INTO maintenance_benchmark_probe VALUES(0);
++    WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10001)
++    INSERT INTO actresses(id,main_name) SELECT x,'Actor-'||x FROM n;
++    INSERT INTO actress_names(actress_id,name,type,source) SELECT id,main_name,'main','manual' FROM actresses;
++    INSERT INTO actress_name_ownership(normalized_name,actress_id) SELECT normalize_actress_name(main_name),id FROM actresses;
++    INSERT INTO actress_name_ownership(normalized_name,actress_id) SELECT normalize_actress_name('Collision-'||id),10001 FROM actresses WHERE id<=10000;
++    INSERT INTO actress_names(actress_id,name,type,source) SELECT 10001,'Collision-'||id,'alias','manual' FROM actresses WHERE id<=10000;`)
++   const insert=db.prepare(`INSERT INTO pending_actress_scrapes(id,actress_id,target_actress_revision,plugin_name,plugin_source,query_name,selected_fields_json,applicable_fields_json,update_mode,result_json,warnings_json,created_at)
++     VALUES(?,?,1,'Fixture','builtin',?,'["aliases"]','["aliases"]','replace',?,'[]','2026')`)
++   for(let id=1;id<=10000;id++)insert.run(id,id,`Actor-${id}`,JSON.stringify({aliases:[`Collision-${id}`],summary:'x'.repeat(4096)}))
++   db.exec(`INSERT INTO pending_actress_scrape_conflicts(pending_scrape_id,normalized_name,name,name_type)
++     SELECT id,normalize_actress_name('Collision-'||id),'Collision-'||id,'alias' FROM pending_actress_scrapes`)
++  })()
++  db.exec('ANALYZE')
++  const workflow=new ActressIdentityConflictWorkflow()
++  const expected={groupCount:10000,conflictGroupCount:10000,applicableGroupCount:0,pendingScrapeCount:10000,pendingNameClaimGroupCount:0}
++  const results:Array<{name:string;samples:number[];medianMs:number;jsonBytes:number}>=[]
++  function measure(name:string,invalidate:boolean){
++   const samples:number[]=[];let jsonBytes=0
++   for(let i=0;i<3;i++){
++    if(invalidate)db.exec('UPDATE maintenance_benchmark_probe SET value=value+1')
++    const start=performance.now();const value=workflow.getConflictReviewSummary();samples.push(performance.now()-start)
++    assert.deepEqual(value,expected);jsonBytes=Buffer.byteLength(JSON.stringify(value))
++   }
++   results.push({name,samples,medianMs:[...samples].sort((a,b)=>a-b)[1],jsonBytes})
++  }
++  measure('invalidated.full-check',true)
++  measure('unchanged.skip-check',false)
++  measure('invalidated.again',true)
++  const result={pending:10000,resultSummaryCharacters:4096,results,platform:process.platform,arch:process.arch,
++   sqliteVersion:db.prepare('SELECT sqlite_version() AS version').get(),caveats:['Three sequential warm samples per stage after ANALYZE; not p95/cold/Windows/HDD/full IPC.','Invalidation is a real write to an unrelated probe table before timing; actor business rows unchanged. This compares miss/hit paths in the same implementation, not an old-build benchmark.','Output equality checks all summary fields. Consistent fixture requires no repairs; repair-heavy workloads still rescan until a no-write pass.','Group/status aggregation still scans the conflict relation on every call; only redundant consistency maintenance is skipped. No DTO or JSON result cache.']}
++  if(process.env.JAVDEX_ACTRESS_MAINTENANCE_OUTPUT)fs.writeFileSync(path.resolve(process.env.JAVDEX_ACTRESS_MAINTENANCE_OUTPUT),JSON.stringify(result,null,2)+'\n')
++  console.log(JSON.stringify(result))
++ }finally{closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})

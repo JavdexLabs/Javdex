@@ -1,0 +1,2 @@
+# Preserve raw performance evidence, including diff context and captured logs.
+docs/performance/large-library-results/** -whitespace

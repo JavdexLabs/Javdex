@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "a794d9a9a4f86b908184b328b17271a4188bbdc76e1be5a81f5a0a1450e9e9bf",
+  "notes": [
+    "Cumulative againstHEAD; includes dependencies from U/V/X in selected files, not standalone incremental patch.",
+    "Async awaited fs.promises.rm perworkspace; withinretirement operation workspaces processedsequentially. Native rm internal scheduling and concurrent separate IPC operations not claimed fixedbound.",
+    "Schema16 adds independent agent_resource_cleanup(run_id PK/FK,requested_at); intent beforeclose, clear afterrm. CleanupIDs includeclosedpending; narrowstatuslookup allowscorruptproduct/config cleanup. Originalpayload untouched.",
+    "Initial JSONmarker design was rejected during review: corruptpayload blockedcleanup and normalstate writes paid extraJSONcost. Final usesseparatetable; ordinaryupdateProductState restoredoriginalSQL.",
+    "ActualSQLite/filesystem failure test: normalworkspace locked/closedpending, lateproductstateupdate, newcontroller discardretry, thencorruptworkspace locked/closedpending andnextretry, originalbadconfig/state preserved. Asyncgateprovescallerawaits and no rmSync.",
+    "Synthetic V15fixture built from current schema minusnewtable; migration comparesalloldschema/businessdata,FK/cascade/integrity; postDDL failure rollsbacktable+version15, retry16. Not a customer/releaseddatabase file.",
+    "Finalfullnpmtest2120pass/1skip/0fail, buildpass. Standards/Spec P2 corruptpayloadissue fixed and re-reviewed.",
+    "Schema16 incompatible withofficial0.6.2/schema15; no downgrade procedure claimed. No userdatabase opened, no commit/push/release.",
+    "Remaining: realWindowslockedfiles/powerloss/largeworkspacememory/time, globalcleanupadmissionbounds, startupdrain/retention andotherfullplanwork."
+  ]
+}

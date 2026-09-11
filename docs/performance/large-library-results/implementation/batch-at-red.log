@@ -1,0 +1,93 @@
+▶ ActressIdentityConflictWorkflow
+  ✔ inspects live ownership even when the name is not yet in a review group (11.43125ms)
+  ✔ summarizes the same aggregated name groups returned by the review list (7.185292ms)
+  ✔ keeps summary counts exact for mixed, multi-result, and multi-conflict groups (19.96175ms)
+  ✔ lists pending name ownership without inventing a pending scrape (6.762958ms)
+  ✔ rejects an unsupported pending name type instead of silently reclassifying it (6.499667ms)
+  ✔ rejects a pending-name-ownership decision when the shown claim row changed (10.724084ms)
+  ✔ assigns pending name ownership without creating or applying scrape data (7.873417ms)
+  ✔ edits one pending name claim and resolves both resulting unique owners (7.280791ms)
+  ✔ moves an edited pending name claim into another normalized-name group (7.667792ms)
+  ✔ merges actresses directly from pending name ownership (7.884541ms)
+  ✔ removes an illegal pending name without persisting a blacklist (7.549833ms)
+  ✔ reassigns the only pending scrape to the explicit keeper after a merge (9.1555ms)
+  ✔ keeps a usable keeper avatar while clearing its missing source and crop state (9.413459ms)
+  ✔ uses the explicitly selected pending actress as keeper and the other current main name (8.55525ms)
+  ✔ rejects merging when both actresses own pending scrape snapshots (8.463375ms)
+  ✔ does not treat another conflict between the same actress pair as a merge blocker (7.14725ms)
+  ✔ rejects the whole workbench merge when a resulting name belongs to a third actress (8.032208ms)
+  ✔ rejects the whole merge when the pending scrape also conflicts with a third actress (7.944417ms)
+  ✔ rejects merging a persisted name claimed by a third actress pending scrape (8.268667ms)
+  ✔ returns stale without merging when either actress changed after confirmation was shown (7.262667ms)
+  ✔ rolls back the actress merge when pending reassociation fails (8.624625ms)
+  ✔ edits only the selected conflicting name and applies the unlocked scrape atomically (8.346959ms)
+  ✔ moves only the edited item when its new name conflicts in another dynamic group (9.29325ms)
+  ✔ moves an edited name into a group claimed by another naturally unlocked pending result (9.264792ms)
+  ✔ transfers complete ownership to the pending actress only with a replacement main name (7.9505ms)
+  ✔ previews and applies an assigned conflicting alias in a fill-empty alias collection (8.050833ms)
+  ✔ keeps earlier ownership decisions in the final fill-empty alias preview and apply (9.444583ms)
+  ✔ validates and removes every legacy claimant when assigning to the pending actress (9.392834ms)
+  ✔ assigns a whole conflict group to an existing actress while applying profiles to original targets (8.682333ms)
+  ✔ keeps confirmed ownership when the chosen existing actress is also a replace candidate (7.890375ms)
+  ✔ removes an illegal normalized name from the whole group and applies unlocked profiles (9.744416ms)
+  ✔ requires a valid replacement for every main-name claimant before illegal-name removal (9.739125ms)
+  ✔ validates illegal-name replacement main names against the live conflict snapshot (7.63525ms)
+  ✔ does not reconcile newly active conflicts while rejecting a stale illegal-name decision (9.903333ms)
+  ✔ removes only the current illegal group and does not remember a blacklist rule (10.376ms)
+  ✔ applies a result when its other recorded conflict has already become inactive (8.518958ms)
+  ✔ rolls back illegal-name handling when name deletion fails (8.197041ms)
+  ✔ rolls back illegal-name handling when main replacement fails (7.826292ms)
+  ✔ rolls back illegal-name handling when profile application fails (8.081458ms)
+  ✔ rolls back illegal-name handling when pending cleanup fails (7.715ms)
+  ✔ keeps the whole illegal-name group pending when any resource preparation fails (11.020542ms)
+  ✔ requires a replacement when assigning a current main name to a third existing actress (8.33575ms)
+  ✔ finishes name-only results and preserves the original fill-empty update mode (8.329ms)
+  ✔ promotes staged resources when a name edit unlocks a pending scrape (9.543459ms)
+  ✔ keeps a naturally unlocked result pending until the user explicitly applies it (7.46225ms)
+  ✔ returns a stale outcome without writes when an involved actress changed (6.550667ms)
+  ✔ rolls back every profile and promoted resource when a group apply fails (10.191708ms)
+  ✔ freezes the complete scrape when one selected name belongs to another actress (6.711125ms)
+  ✔ applies a complete result when equivalent names only belong to the target actress (6.371042ms)
+  ✔ atomically replaces one actress current snapshot and removes its old staged resources (8.314292ms)
+  ✔ rolls back a conflict-free apply when removing the previous snapshot fails (6.924417ms)
+  ✔ does not delete an existing same-url gallery file when a later apply rolls back (7.337667ms)
+  ✔ discards only the selected wrong match, records cumulative failure, and cleans staging (9.786666ms)
+  ✔ startup cleanup removes only old unreferenced staging directories (7.956584ms)
+  ✔ deleting a target actress also removes its staged pending resources (7.964916ms)
+  ✔ removes prepared formal resources when profile application rolls back (7.803292ms)
+✔ ActressIdentityConflictWorkflow (481.877042ms)
+✔ reuses maintenance only until local writes, schema changes or external commits (7.8685ms)
+✔ does not publish rolled-back maintenance or skip checks inside a caller transaction (7.063583ms)
+✔ retries failed maintenance and invalidates after reopening the same catalog (8.687625ms)
+✔ does not publish a maintenance stamp if an external commit occurs during the check (7.203833ms)
+✔ rechecks earlier candidates after a later candidate introduces a new conflict (6.737291ms)
+✔ bounds a 10k legacy-claim queue without hydrating candidates after maintenance (27.081791ms)
+✔ does not hydrate unrelated candidate results for a selected name group (7.816709ms)
+✔ sorts full conflict names before truncating display captions and preserves exact anchors (6.70075ms)
+✔ keeps legacy equal-caption order across pages and clamps missing anchors in a nonempty queue (6.247541ms)
+✖ normalizes merged actor names once instead of once per third pending conflict (15.00725ms)
+ℹ tests 66
+ℹ suites 1
+ℹ pass 65
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 947.370875
+
+✖ failing tests:
+
+test at src/main/services/actressIdentityConflictWorkflow.test.ts:87:2246
+✖ normalizes merged actor names once instead of once per third pending conflict (15.00725ms)
+  AssertionError [ERR_ASSERTION]: Repeated normalization: 5549 for 100 names
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/actressIdentityConflictWorkflow.test.ts:2784:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

@@ -1,0 +1,114 @@
+[
+  {
+    "sql": "SELECT COUNT(*) AS count FROM videos v WHERE EXISTS (SELECT 1 FROM library_video_memberships m\n  JOIN media_libraries l ON l.id = m.library_id\n  WHERE m.video_id = v.id AND m.is_hidden = 0 AND l.status = 'active') AND (v.code LIKE ? ESCAPE '\\' OR v.title LIKE ? ESCAPE '\\' OR EXISTS\n        (SELECT 1 FROM video_actress va JOIN actresses a ON a.id = va.actress_id WHERE va.video_id = v.id AND a.main_name LIKE ? ESCAPE '\\'))",
+    "plan": [
+      {
+        "id": 3,
+        "parent": 0,
+        "notused": 216,
+        "detail": "SCAN v"
+      },
+      {
+        "id": 6,
+        "parent": 0,
+        "notused": 0,
+        "detail": "CORRELATED SCALAR SUBQUERY 1"
+      },
+      {
+        "id": 11,
+        "parent": 6,
+        "notused": 55,
+        "detail": "SEARCH m USING COVERING INDEX idx_library_video_memberships_recent (is_hidden=?)"
+      },
+      {
+        "id": 18,
+        "parent": 6,
+        "notused": 45,
+        "detail": "SEARCH l USING INTEGER PRIMARY KEY (rowid=?)"
+      },
+      {
+        "id": 35,
+        "parent": 0,
+        "notused": 0,
+        "detail": "CORRELATED SCALAR SUBQUERY 2"
+      },
+      {
+        "id": 40,
+        "parent": 35,
+        "notused": 56,
+        "detail": "SEARCH va USING COVERING INDEX sqlite_autoindex_video_actress_1 (video_id=?)"
+      },
+      {
+        "id": 44,
+        "parent": 35,
+        "notused": 45,
+        "detail": "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)"
+      }
+    ]
+  },
+  {
+    "sql": "SELECT COUNT(*) AS count FROM videos v WHERE v.id IN (\n      SELECT m.video_id FROM library_video_memberships m\n      JOIN media_libraries l ON l.id = m.library_id\n      WHERE m.is_hidden = 0 AND l.status = 'active'\n    ) AND (v.code LIKE ? ESCAPE '\\' OR v.title LIKE ? ESCAPE '\\' OR v.id IN (\n        WITH matched_actresses AS MATERIALIZED (\n          SELECT a.id FROM actresses a WHERE a.main_name LIKE ? ESCAPE '\\'\n        )\n        SELECT va.video_id FROM matched_actresses matched\n        CROSS JOIN video_actress va ON va.actress_id = matched.id\n      ))",
+    "plan": [
+      {
+        "id": 3,
+        "parent": 0,
+        "notused": 91,
+        "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+      },
+      {
+        "id": 7,
+        "parent": 0,
+        "notused": 0,
+        "detail": "LIST SUBQUERY 1"
+      },
+      {
+        "id": 10,
+        "parent": 7,
+        "notused": 55,
+        "detail": "SEARCH m USING COVERING INDEX idx_library_video_memberships_recent (is_hidden=?)"
+      },
+      {
+        "id": 14,
+        "parent": 7,
+        "notused": 45,
+        "detail": "SEARCH l USING INTEGER PRIMARY KEY (rowid=?)"
+      },
+      {
+        "id": 38,
+        "parent": 0,
+        "notused": 0,
+        "detail": "LIST SUBQUERY 3"
+      },
+      {
+        "id": 42,
+        "parent": 38,
+        "notused": 0,
+        "detail": "MATERIALIZE matched_actresses"
+      },
+      {
+        "id": 45,
+        "parent": 42,
+        "notused": 209,
+        "detail": "SCAN a USING COVERING INDEX sqlite_autoindex_actresses_1"
+      },
+      {
+        "id": 60,
+        "parent": 38,
+        "notused": 260,
+        "detail": "SCAN matched"
+      },
+      {
+        "id": 62,
+        "parent": 38,
+        "notused": 62,
+        "detail": "SEARCH va USING INDEX idx_video_actress_actress_id (actress_id=?)"
+      },
+      {
+        "id": 73,
+        "parent": 38,
+        "notused": 0,
+        "detail": "CREATE BLOOM FILTER"
+      }
+    ]
+  }
+]

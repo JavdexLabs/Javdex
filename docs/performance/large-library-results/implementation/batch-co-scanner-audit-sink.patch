@@ -1,0 +1,1240 @@
+diff --git a/src/main/scanner/scanner.ts b/src/main/scanner/scanner.ts
+index 79920b9..1cdb741 100644
+--- a/src/main/scanner/scanner.ts
++++ b/src/main/scanner/scanner.ts
+@@ -33,7 +33,7 @@ import type {
+   ScanResult,
+   StrmScanFailure
+ } from '@shared/libraryTypes'
+-import type { ScannedVideoInput, StrmVideoResourceRef } from '../db/videoRepo'
++import type { ScannedVideoInput } from '../db/videoRepo'
+ import type {
+   LocalVideoResource,
+   VideoResource,
+@@ -59,7 +59,8 @@ import {
+   readStrmFile,
+   type ParsedStrmTarget
+ } from './strmParser'
+-import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
++import { getDatabaseReadRevision } from '../db/database'
++import { StrmRelocationIndex } from './strmRelocationIndex'
+ import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+ import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+ import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
+@@ -126,6 +127,13 @@ export interface ScanFoldersRequest {
+   filePaths?: readonly string[]
+ }
+ 
++/** Caller-owned synchronous persistence; never holds a transaction across scan awaits. */
++export interface ScanAuditSink {
++  recordFile(entry: LibraryScanFileAuditEntry): void
++  readFileNfo(filePath: string): { nfo?: LibraryScanNfoAudit } | undefined
++  patchNfo(filePath: string, nfo: LibraryScanNfoAudit): boolean
++}
++
+ export interface ScanOptions {
+   yieldEvery?: number
+   signal?: AbortSignal
+@@ -147,6 +155,19 @@ export interface ScanOptions {
+   localNfoService?: LocalNfoScanService
+   /** Receives exactly one final audit outcome for every processed file. */
+   onFileResult?: (entry: LibraryScanFileAuditEntry) => void
++  /** Incremental storage instead of the legacy in-memory final callback collection. */
++  auditSink?: ScanAuditSink
++}
++
++function synchronousAuditResult<T>(value: T): T {
++  if (value != null && (typeof value === 'object' || typeof value === 'function')
++    && typeof (value as { then?: unknown }).then === 'function') {
++    // A caller may accidentally pass an async function to a void callback.
++    // Observe rejection, but never pretend an in-flight write has completed.
++    void Promise.resolve(value).catch(() => {})
++    throw new Error('Audit sink methods must be synchronous')
++  }
++  return value
+ }
+ 
+ const DEFAULT_YIELD_EVERY = 50
+@@ -250,34 +271,6 @@ function readStrmTarget(sourcePath: string): PreparedStrm {
+   }
+ }
+ 
+-function targetKeyForStrmResource(resource: StrmVideoResourceRef): string | null {
+-  try {
+-    return normalizeExternalVideoResource(resource.locator, resource.kind).resourceKey
+-  } catch {
+-    return null
+-  }
+-}
+-
+-function findStrmRelocationCandidate(
+-  libraryId: number,
+-  sourcePath: string,
+-  targetKey: string,
+-  unavailableRootIds: ReadonlySet<number>,
+-  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+-): StrmVideoResourceRef | null {
+-  const sourceName = path.basename(sourcePath)
+-  const candidates = listStrmVideoResourceRefs(libraryId)
+-    .filter((resource) => {
+-      const oldSourcePath = resource.source_path
+-      if (path.basename(oldSourcePath) !== sourceName) return false
+-      const record = getVideoResourceInLibrary(libraryId, resource.resource_id)
+-      if (!record?.root_id || unavailableRootIds.has(record.root_id)) return false
+-      if (inspectPath(oldSourcePath) !== 'missing') return false
+-      return targetKeyForStrmResource(resource) === targetKey
+-    })
+-  return candidates.length === 1 ? candidates[0] : null
+-}
+-
+ function samePath(a: string, b: string): boolean {
+   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+ }
+@@ -425,6 +418,8 @@ export async function scanFolders(
+     throw new Error('媒体库 ID 无效')
+   }
+   if (!request.runId.trim()) throw new Error('扫描运行 ID 不能为空')
++  if (options.auditSink && options.onFileResult) throw new Error('Audit sink and final callback are mutually exclusive')
++  const auditSink = options.auditSink
+   const roots = request.roots.map((root) => ({ ...root }))
+   if (
+     roots.some(
+@@ -473,6 +468,26 @@ export async function scanFolders(
+     options.readDirectory ??
+     ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
+   const inspectPath = options.inspectPath ?? inspectScannedResourcePath
++  const asStrmRef = (resource: VideoResource | null) =>
++    resource?.strm_source_path && resource.kind !== 'local'
++      ? {
++          library_id: resource.library_id,
++          video_id: resource.video_id,
++          resource_id: resource.id,
++          source_path: resource.strm_source_path,
++          kind: resource.kind,
++          locator: resource.locator,
++          root_id: resource.root_id
++        }
++      : null
++  const strmRelocations = new StrmRelocationIndex({
++    revision: getDatabaseReadRevision,
++    list: () => listStrmVideoResourceRefs(libraryId),
++    get: (id) => asStrmRef(getVideoResourceInLibrary(libraryId, id)),
++    getByPath: (sourcePath) => asStrmRef(strmResourceInLibrary(libraryId, sourcePath)),
++    inspect: inspectPath,
++    unavailableRootIds
++  })
+   for (const root of roots) {
+     if (options.signal?.aborted) {
+       result.cancelled = true
+@@ -501,7 +516,11 @@ export async function scanFolders(
+     } else {
+       await collectScannableFiles(root.path, rootFiles, options.signal, readIndexedDirectory)
+     }
+-    files.push(...rootFiles.map((filePath) => ({ filePath, root })))
++    for (const filePath of rootFiles) files.push({ filePath, root })
++  }
++  if (options.signal?.aborted) {
++    result.cancelled = true
++    return result
+   }
+   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
+   const readDurationSeconds = options.readDurationSeconds ?? readLocalVideoDurationSeconds
+@@ -510,8 +529,14 @@ export async function scanFolders(
+   const autoMergeSameCodeResources = options.autoMergeSameCodeResources ?? false
+   const autoImportLocalNfo = options.autoImportLocalNfo ?? false
+   const nfoService = options.localNfoService ?? localNfoScanService
++  let indexedFiles = 0
+   for (const { filePath } of files) {
+     if (request.filePaths) break
++    await maybeYield(++indexedFiles, yieldEvery)
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      return result
++    }
+     const directory = path.dirname(filePath)
+     const codes = directoryVideoCodes.get(directory) ?? []
+     codes.push(parseCode(path.basename(filePath, path.extname(filePath))))
+@@ -521,6 +546,7 @@ export async function scanFolders(
+   if (autoImportLocalNfo) {
+     let inspectedNfoFiles = 0
+     for (const { filePath, root } of files) {
++      await maybeYield(++inspectedNfoFiles, Math.min(yieldEvery, 10))
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+@@ -550,7 +576,6 @@ export async function scanFolders(
+           warnings: [sanitizeLibraryScanError(error)]
+         }
+       }
+-      inspectedNfoFiles += 1
+       if (inspection.status !== 'missing') {
+         let nfoCode: string | null = null
+         try {
+@@ -574,7 +599,6 @@ export async function scanFolders(
+           inspection
+         })
+       }
+-      await maybeYield(inspectedNfoFiles, Math.min(yieldEvery, 10))
+     }
+   }
+   const codeForNewFile = (filePath: string): string | null => {
+@@ -582,7 +606,13 @@ export async function scanFolders(
+     return preflight ? preflight.effectiveCode : parseCode(path.basename(filePath, path.extname(filePath)))
+   }
+   const newFileCounts = new Map<string, number>()
++  let countedFiles = 0
+   for (const { filePath: file } of files) {
++    await maybeYield(++countedFiles, yieldEvery)
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      return result
++    }
+     if (
+       getLocalVideoResourceByLocator(libraryId, file) ||
+       getStrmVideoResourceBySourcePath(libraryId, file) ||
+@@ -598,6 +628,7 @@ export async function scanFolders(
+   if (!autoMergeSameCodeResources) {
+     let checkedStrmFiles = 0
+     for (const { filePath: file } of files) {
++      await maybeYield(++checkedStrmFiles, Math.min(yieldEvery, 10))
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+@@ -614,16 +645,15 @@ export async function scanFolders(
+       ) {
+         continue
+       }
+-      checkedStrmFiles += 1
+       if (!readStrmTarget(file).ok) {
+         newFileCounts.set(code, Math.max(0, (newFileCounts.get(code) ?? 0) - 1))
+       }
+-      await maybeYield(checkedStrmFiles, Math.min(yieldEvery, 10))
+     }
+   }
+   const pendingGroupIds = new Set<number>()
+   const primarySelectionVideoIds = new Set<number>()
+-  const auditEntriesByFile = new Map<string, LibraryScanFileAuditEntry>()
++  const auditEntriesByFile = !auditSink && options.onFileResult ? new Map<string, LibraryScanFileAuditEntry>() : undefined
++  let auditWriteFailed = false
+   const nfoBatchesByVideo = new Map<number, LocalNfoVideoBatch>()
+   const queueNfoCandidate = (videoId: number, code: string, filePath: string): void => {
+     const preflight = nfoPreflightByFile.get(filePath)
+@@ -649,6 +679,7 @@ export async function scanFolders(
+       authorizeMediaLibraryRootFile(libraryId, rootId, file, root)
+     }
+     const recordFile = (entry: ScanFileAuditWithoutRoot): void => {
++      if (!auditSink && !auditEntriesByFile) return
+       const fullEntry = { ...entry, rootId } as LibraryScanFileAuditEntry
+       const preflight = nfoPreflightByFile.get(file)
+       if (
+@@ -661,7 +692,10 @@ export async function scanFolders(
+           warnings: safeNfoWarnings(preflight.inspection.warnings)
+         }
+       }
+-      auditEntriesByFile.set(file, fullEntry)
++      if (auditSink) {
++        try { synchronousAuditResult(auditSink.recordFile(fullEntry)) }
++        catch (error) { auditWriteFailed = true; throw error }
++      } else auditEntriesByFile!.set(file, fullEntry)
+     }
+     if (options.signal?.aborted) {
+       result.cancelled = true
+@@ -679,7 +713,7 @@ export async function scanFolders(
+         }
+         if (!prepared.ok) {
+           authorizeFileWrite()
+-          removePendingScanResource(libraryId, file)
++          strmRelocations.mutateWithoutResourceChanges(() => removePendingScanResource(libraryId, file))
+           recordStrmFailure(prepared.failure)
+           recordFile({
+             filePath: file,
+@@ -698,10 +732,10 @@ export async function scanFolders(
+         if (existingResource) {
+           authorizeFileWrite()
+           if (
+-            updateStrmVideoResourceTarget(existingResource.id, {
++            strmRelocations.mutate(file, () => updateStrmVideoResourceTarget(existingResource.id, {
+               kind: target.kind,
+               locator: target.locator
+-            })
++            }))
+           ) {
+             result.refreshed += 1
+             recordFile({
+@@ -731,7 +765,7 @@ export async function scanFolders(
+         }
+ 
+         const code = codeForNewFile(file)
+-        if (refreshPendingIdentity(libraryId, root, file, target)) {
++        if (strmRelocations.mutateWithoutResourceChanges(() => refreshPendingIdentity(libraryId, root, file, target))) {
+           recordFile({
+             filePath: file,
+             sourceKind: 'strm',
+@@ -747,9 +781,10 @@ export async function scanFolders(
+         }
+         const nfoPreflight = nfoPreflightByFile.get(file)
+         if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++          const { filenameCode, nfoCode } = nfoPreflight
+           authorizeFileWrite()
+           const fingerprint = statFileFingerprint(file)
+-          const pendingIdentity = upsertPendingResourceIdentity({
++          const pendingIdentity = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingResourceIdentity({
+             libraryId,
+             rootId,
+             filePath: file,
+@@ -757,11 +792,11 @@ export async function scanFolders(
+             targetKind: target.kind,
+             targetLocator: target.locator,
+             targetKey: target.targetKey,
+-            filenameCode: nfoPreflight.filenameCode,
+-            nfoCode: nfoPreflight.nfoCode,
++            filenameCode,
++            nfoCode,
+             sizeBytes: fingerprint?.file_size ?? null,
+             fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-          })
++          }))
+           result.pendingResources += 1
+           recordFile({
+             filePath: file,
+@@ -786,7 +821,7 @@ export async function scanFolders(
+           let groupId: number | null = null
+           if (code) {
+             authorizeFileWrite()
+-            const pending = upsertPendingScanResources(libraryId, code, [
++            const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+               {
+                 rootId,
+                 filePath: file,
+@@ -799,7 +834,7 @@ export async function scanFolders(
+                 fileMtimeMs: null,
+                 displayName: path.basename(file)
+               }
+-            ])
++            ]))
+             pendingGroupIds.add(pending.groupId)
+             groupId = pending.groupId
+           }
+@@ -816,21 +851,15 @@ export async function scanFolders(
+           continue
+         }
+ 
+-        const relocation = findStrmRelocationCandidate(
+-          libraryId,
+-          file,
+-          target.targetKey,
+-          unavailableRootIds,
+-          inspectPath
+-        )
++        const relocation = strmRelocations.find(file, target.targetKey)
+         if (relocation) {
+           authorizeFileWrite()
+-          relocateStrmVideoResource(libraryId, relocation.resource_id, {
++          strmRelocations.mutate(file, () => relocateStrmVideoResource(libraryId, relocation.resource_id, {
+             rootId,
+             sourcePath: file,
+             kind: target.kind,
+             locator: target.locator
+-          })
++          }))
+           result.relocated += 1
+           recordFile({
+             filePath: file,
+@@ -862,7 +891,7 @@ export async function scanFolders(
+           : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+         if (mustConfirm) {
+           authorizeFileWrite()
+-          const pending = upsertPendingScanResources(libraryId, code, [
++          const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+             {
+               rootId,
+               filePath: file,
+@@ -875,7 +904,7 @@ export async function scanFolders(
+               fileMtimeMs: null,
+               displayName: path.basename(file)
+             }
+-          ])
++          ]))
+           pendingGroupIds.add(pending.groupId)
+           result.pendingResources += pending.addedResources
+           recordFile({
+@@ -895,7 +924,7 @@ export async function scanFolders(
+           const needsPrimarySelection =
+             listVideoResources(libraryId, existingVideos[0].id).length === 0
+           authorizeFileWrite()
+-          const resourceId = insertStrmVideoResource({
++          const resourceId = strmRelocations.mutate(file, () => insertStrmVideoResource({
+             libraryId,
+             videoId: existingVideos[0].id,
+             rootId,
+@@ -903,7 +932,7 @@ export async function scanFolders(
+             kind: target.kind,
+             locator: target.locator,
+             displayName: path.basename(file)
+-          })
++          }))
+           if (resourceId == null) result.skipped += 1
+           else {
+             result.imported += 1
+@@ -931,7 +960,7 @@ export async function scanFolders(
+           )
+         } else {
+           authorizeFileWrite()
+-          const videoId = insertNewScannedStrmVideo({
++          const videoId = strmRelocations.mutate(file, () => insertNewScannedStrmVideo({
+             libraryId,
+             rootId,
+             code,
+@@ -939,7 +968,7 @@ export async function scanFolders(
+             kind: target.kind,
+             locator: target.locator,
+             displayName: path.basename(file)
+-          })
++          }))
+           if (videoId == null) result.skipped += 1
+           else {
+             result.imported += 1
+@@ -1018,7 +1047,7 @@ export async function scanFolders(
+         continue
+       }
+ 
+-      if (refreshPendingIdentity(libraryId, root, file)) {
++      if (strmRelocations.mutateWithoutResourceChanges(() => refreshPendingIdentity(libraryId, root, file))) {
+         recordFile({
+           filePath: file,
+           sourceKind: 'local',
+@@ -1040,7 +1069,7 @@ export async function scanFolders(
+           const fileDurationSeconds = await readDurationSeconds(file)
+           authorizeFileWrite()
+           const fingerprint = statFileFingerprint(file)
+-          const pending = upsertPendingScanResources(libraryId, code, [
++          const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+             {
+               rootId,
+               filePath: file,
+@@ -1049,7 +1078,7 @@ export async function scanFolders(
+               fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+               displayName: path.basename(file)
+             }
+-          ])
++          ]))
+           pendingGroupIds.add(pending.groupId)
+           groupId = pending.groupId
+         }
+@@ -1087,18 +1116,19 @@ export async function scanFolders(
+ 
+       const nfoPreflight = nfoPreflightByFile.get(file)
+       if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++        const { filenameCode, nfoCode } = nfoPreflight
+         authorizeFileWrite()
+         const fingerprint = statFileFingerprint(file)
+-        const pendingIdentity = upsertPendingResourceIdentity({
++        const pendingIdentity = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingResourceIdentity({
+           libraryId,
+           rootId,
+           filePath: file,
+           sourceKind: 'local',
+-          filenameCode: nfoPreflight.filenameCode,
+-          nfoCode: nfoPreflight.nfoCode,
++          filenameCode,
++          nfoCode,
+           sizeBytes: fingerprint?.file_size ?? null,
+           fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-        })
++        }))
+         result.pendingResources += 1
+         recordFile({
+           filePath: file,
+@@ -1177,7 +1207,7 @@ export async function scanFolders(
+         : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+       if (mustConfirm) {
+         authorizeFileWrite()
+-        const pending = upsertPendingScanResources(libraryId, code, [
++        const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+           {
+             rootId,
+             filePath: file,
+@@ -1186,7 +1216,7 @@ export async function scanFolders(
+             fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+             displayName: path.basename(file)
+           }
+-        ])
++        ]))
+         pendingGroupIds.add(pending.groupId)
+         result.pendingResources += pending.addedResources
+         recordFile({
+@@ -1276,6 +1306,9 @@ export async function scanFolders(
+         })
+       }
+     } catch (err) {
++      // Storage failures must abort the run; converting them into a normal file
++      // failure would conceal a missing durable audit after business writes.
++      if (auditWriteFailed) throw err
+       console.error('Scan error for', file, err)
+       result.failed += 1
+       recordFile({
+@@ -1290,7 +1323,13 @@ export async function scanFolders(
+     await maybeYield(result.scannedFiles, yieldEvery)
+   }
+ 
++  let appliedNfoBatches = 0
++  let updatedNfoAnchors = 0
+   for (const [videoId, batch] of nfoBatchesByVideo) {
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      break
++    }
+     let nfo: LibraryScanNfoAudit
+     try {
+       const applied = await nfoService.apply(videoId, batch.code, batch.anchors)
+@@ -1308,21 +1347,30 @@ export async function scanFolders(
+       }
+     }
+     for (const anchor of batch.anchors) {
+-      const auditEntry = auditEntriesByFile.get(anchor.anchorPath)
++      // Finish the committed batch's audit even when cancellation arrives while yielding.
++      await maybeYield(++updatedNfoAnchors, yieldEvery)
++      const auditEntry = auditSink ? synchronousAuditResult(auditSink.readFileNfo(anchor.anchorPath)) : auditEntriesByFile?.get(anchor.anchorPath)
+       if (!auditEntry) continue
+       const warnings = safeNfoWarnings([
+         ...(auditEntry.nfo?.warnings?.map((warning) => warning.message) ?? []),
+         ...(nfo.warnings?.map((warning) => warning.message) ?? [])
+       ])
+-      auditEntry.nfo = {
++      const mergedNfo = {
+         ...nfo,
+         ...(warnings.length > 0 ? { warnings } : {})
+       }
++      if (auditSink) {
++        if (!synchronousAuditResult(auditSink.patchNfo(anchor.anchorPath, mergedNfo))) throw new Error('Audit anchor disappeared during NFO revision')
++      } else auditEntry.nfo = mergedNfo
+     }
++    // An immediately resolved apply promise alone does not let timers or cancellation run.
++    await maybeYield(++appliedNfoBatches, Math.min(yieldEvery, 10))
+   }
+ 
++  if (options.signal?.aborted) result.cancelled = true
+   result.pendingGroups = pendingGroupIds.size
+ 
++  let selectedPrimaries = 0
+   for (const videoId of primarySelectionVideoIds) {
+     const candidates = listVideoResources(libraryId, videoId).map((resource) => ({
+       resource,
+@@ -1346,11 +1394,16 @@ export async function scanFolders(
+       }
+       setPrimaryVideoResource(libraryId, videoId, primary.resource.id)
+     }
++    // Keep read/select/authorize/write synchronous; settle already committed resources on cancel.
++    await maybeYield(++selectedPrimaries, yieldEvery)
+   }
+ 
+-  for (const entry of auditEntriesByFile.values()) {
++  let deliveredAudits = 0
++  for (const entry of auditEntriesByFile?.values() ?? []) {
+     options.onFileResult?.(entry)
++    await maybeYield(++deliveredAudits, yieldEvery)
+   }
++  if (options.signal?.aborted) result.cancelled = true
+ 
+   return result
+ }
+diff --git a/src/main/scanner/scannerAuditSink.test.ts b/src/main/scanner/scannerAuditSink.test.ts
+new file mode 100644
+index 0000000..8c929c9
+--- /dev/null
++++ b/src/main/scanner/scannerAuditSink.test.ts
+@@ -0,0 +1,168 @@
++import { afterEach, beforeEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type { LibraryScanFileAuditEntry } from '@shared/libraryTypes'
++import { closeDatabase, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { beginLibraryScanRun } from '../db/libraryScanRepo'
++import { createScanAuditWriter, type ScanAuditMetadata } from '../db/scanAuditWriter'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import type { LocalNfoScanService } from '../services/localNfoScanService'
++import { scanFolders, type ScanOptions } from './scanner'
++
++let directory:string, media:string, sequence=0
++let previousUserData:string|undefined
++beforeEach(()=>{
++  previousUserData=process.env.JAVDEX_TEST_USER_DATA
++  directory=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-scanner-sink-'))
++  media=path.join(directory,'media');fs.mkdirSync(media)
++  process.env.JAVDEX_TEST_USER_DATA=directory
++})
++afterEach(()=>{
++  closeDatabase();resetSettingsCacheForTests()
++  if(previousUserData===undefined)delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA=previousUserData
++  fs.rmSync(directory,{recursive:true,force:true})
++})
++
++function setup(names:string[]) {
++  closeDatabase();resetSettingsCacheForTests()
++  for(const name of names)fs.writeFileSync(path.join(media,name),'synthetic video')
++  const db=initDatabaseAtPath(path.join(directory,`catalog-${++sequence}.db`))
++  const library=createMediaLibrary({name:'Sink',roots:[{path:media}]})
++  const request={libraryId:library.id,runId:'scan',roots:library.roots}
++  beginLibraryScanRun({...request,configRevision:1,trigger:'manual',startedAt:'start'})
++  const meta:ScanAuditMetadata={schemaVersion:2,libraryId:library.id,runId:'scan',configRevision:1,trigger:'manual',startedAt:'start',finishedAt:'pending',status:'success'}
++  const writer=createScanAuditWriter(db,request)
++  const rows=()=>db.prepare("SELECT ordinal,entry_key,entry_json FROM library_scan_audit_entries WHERE run_id='scan' AND section='files' ORDER BY ordinal").all() as {ordinal:number;entry_key:string;entry_json:string}[]
++  const sink:NonNullable<ScanOptions['auditSink']>={
++    recordFile:entry=>writer.writeBatch('files',[entry]),
++    readFileNfo:filePath=>writer.readFileNfo(filePath),
++    patchNfo:(filePath,nfo)=>writer.patchNfo(filePath,nfo)
++  }
++  const options:ScanOptions={yieldEvery:1,minImportDurationSeconds:1,autoMergeSameCodeResources:true,
++    readDurationSeconds:async()=>{assert.equal(db.inTransaction,false);return 120},
++    readDirectory:async dir=>(await fs.promises.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))}
++  return {db,request,meta,writer,rows,sink,options}
++}
++
++function nfoService():LocalNfoScanService {
++  return {
++    inspectIdentity:anchor=>({status:'found',code:path.basename(anchor.anchorPath).replace(/\.[^.]+$/,''),warnings:['preflight warning']}),
++    apply:async()=>({disposition:'imported',warnings:['apply warning']})
++  }
++}
++
++it('matches final legacy callbacks on equivalent fresh catalogs including merged NFO and repeated paths',async()=>{
++  const names=['SINK-001.mp4','SINK-002.mp4','unknown.mp4']
++  const legacy=setup(names),expected:LibraryScanFileAuditEntry[]=[]
++  const withDuplicate=(base:NonNullable<ScanOptions['readDirectory']>)=>async(dir:string)=>{
++    const items=await base(dir);return [...items,items[0]]
++  }
++  const oldResult=await scanFolders(legacy.request,undefined,{...legacy.options,readDirectory:withDuplicate(legacy.options.readDirectory!),
++    autoImportLocalNfo:true,localNfoService:nfoService(),onFileResult:entry=>expected.push(entry)})
++  const current=setup(names);current.writer.start(current.meta)
++  let deliveries=0,patches=0
++  const newResult=await scanFolders(current.request,undefined,{...current.options,readDirectory:withDuplicate(current.options.readDirectory!),
++    autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:{...current.sink,
++      recordFile:entry=>{deliveries++;current.sink.recordFile(entry)},
++      patchNfo:(file,nfo)=>{patches++;return current.sink.patchNfo(file,nfo)}}})
++  const rows=current.rows()
++  assert.deepEqual(newResult,oldResult)
++  assert.deepEqual(rows.map(row=>JSON.parse(row.entry_json)),expected)
++  assert.equal(rows.length,names.length)
++  assert.deepEqual(rows.map(row=>row.ordinal),[0,1,2])
++  assert.equal(new Set(rows.map(row=>row.entry_key)).size,rows.length)
++  assert.ok(deliveries>rows.length,'repeated paths update their original entry rather than append')
++  assert.ok(patches>0)
++  assert.ok(expected.some(entry=>entry.nfo?.warnings?.some(warning=>warning.message==='preflight warning')&&entry.nfo.warnings.some(warning=>warning.message==='apply warning')))
++  const before=deliveries;await new Promise(resolve=>setImmediate(resolve));assert.equal(deliveries,before,'no deferred tail delivery')
++})
++
++it('commits singleton audit deliveries while the next duration probe is held, outside a database transaction',async()=>{
++  const current=setup(['LIVE-001.mp4','LIVE-002.mp4']);current.writer.start(current.meta)
++  let release!:()=>void,entered!:()=>void,calls=0,finished=false
++  const gate=new Promise<void>(resolve=>{release=resolve}),waiting=new Promise<void>(resolve=>{entered=resolve})
++  const scanning=scanFolders(current.request,undefined,{...current.options,auditSink:current.sink,
++    readDurationSeconds:async()=>{assert.equal(current.db.inTransaction,false);if(++calls===2){entered();await gate}return 120}}).then(result=>{finished=true;return result})
++  try{
++    await Promise.race([waiting,scanning.then(()=>{throw new Error('Scan ended before the second duration probe')})])
++    assert.equal(finished,false);assert.equal(current.rows().length,1)
++    const reader=openReadOnlyDatabaseAtPath(current.db.name)
++    try{assert.equal((reader.prepare("SELECT COUNT(*) AS n FROM library_scan_audit_entries WHERE run_id='scan'").get() as {n:number}).n,1)}finally{reader.close()}
++    assert.equal((current.db.prepare("SELECT state FROM library_scan_audit_manifests WHERE run_id='scan'").get() as {state:string}).state,'collecting')
++    assert.equal(current.db.inTransaction,false)
++  }finally{release();await scanning.catch(()=>{})}
++  const result=await scanning
++  assert.equal(result.imported,2);assert.equal(current.rows().length,2)
++})
++
++it('timer cancellation preserves already committed entries and stops incremental delivery',async()=>{
++  const current=setup(Array.from({length:20},(_,i)=>`CANCEL-${String(i+1).padStart(3,'0')}.mp4`));current.writer.start(current.meta)
++  const abort=new AbortController();let delivered=0,timer:ReturnType<typeof setTimeout>|undefined
++  try{
++    const result=await scanFolders(current.request,undefined,{...current.options,signal:abort.signal,auditSink:{...current.sink,
++      recordFile:entry=>{current.sink.recordFile(entry);if(++delivered===1)timer=setTimeout(()=>abort.abort(),0)}}})
++    assert.equal(result.cancelled,true);assert.ok(delivered>0&&delivered<20)
++    assert.equal(current.rows().length,delivered)
++    assert.equal(result.scannedFiles,delivered)
++    assert.ok(current.rows().every(row=>JSON.parse(row.entry_json).outcome==='added'))
++    const before=current.rows();await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(current.rows(),before)
++  }finally{if(timer)clearTimeout(timer)}
++})
++
++it('rejects mutually exclusive sinks before database, directory, probe or callback work',async(t)=>{
++  const current=setup(['EXCLUSIVE-001.mp4']);current.writer.start(current.meta)
++  let work=0
++  const prepare=current.db.prepare
++  const spy=t.mock.method(current.db,'prepare',function(sql:string){work++;return prepare.call(current.db,sql)})
++  try{
++    await assert.rejects(scanFolders(current.request,undefined,{auditSink:current.sink,onFileResult:()=>{work++},
++      readDirectory:async()=>{work++;return []},readDurationSeconds:async()=>{work++;return 120}}))
++    assert.equal(work,0)
++  }finally{spy.mock.restore()}
++})
++
++for(const operation of ['recordFile','readFileNfo','patchNfo'] as const)it(`propagates ${operation} sink failure without converting it to processing_failure`,async()=>{
++  const current=setup(operation==='recordFile'?['FATAL-001.mp4','FATAL-002.mp4']:['FATAL-001.mp4']);current.writer.start(current.meta)
++  const failure=new Error(`fatal ${operation}`);let calls=0,records=0
++  const sink:NonNullable<ScanOptions['auditSink']>={...current.sink,recordFile:entry=>{records++;current.sink.recordFile(entry)}}
++  if(operation==='recordFile')sink.recordFile=()=>{calls++;throw failure}
++  if(operation==='readFileNfo')sink.readFileNfo=()=>{calls++;throw failure}
++  if(operation==='patchNfo')sink.patchNfo=()=>{calls++;throw failure}
++  await assert.rejects(scanFolders(current.request,undefined,{...current.options,autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:sink}),error=>error===failure)
++  assert.equal(calls,1)
++  assert.ok(current.rows().every(row=>JSON.parse(row.entry_json).outcome!=='processing_failure'))
++  assert.equal(records,operation==='recordFile'?0:1)
++  if(operation==='recordFile')assert.equal((current.db.prepare('SELECT COUNT(*) AS n FROM videos').get() as {n:number}).n,1,'next file must not be processed')
++})
++
++it('treats a missing NFO patch target after a successful read as fatal',async()=>{
++  const current=setup(['PATCH-001.mp4']);current.writer.start(current.meta)
++  let reads=0,patches=0
++  await assert.rejects(scanFolders(current.request,undefined,{...current.options,autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:{...current.sink,
++    readFileNfo:file=>{reads++;const value=current.sink.readFileNfo(file);assert.ok(value);return value},
++    patchNfo:()=>{patches++;return false}}}),/Audit anchor disappeared/)
++  assert.equal(reads,1);assert.equal(patches,1)
++  assert.equal(current.rows().length,1)
++  assert.equal(JSON.parse(current.rows()[0].entry_json).outcome,'added')
++})
++
++for(const operation of ['recordFile','readFileNfo','patchNfo'] as const)for(const rejected of [false,true])it(`rejects ${operation} ${rejected?'rejected':'resolved'} thenables without late unhandled rejection`,async()=>{
++  const current=setup(operation==='recordFile'?['ASYNC-001.mp4','ASYNC-002.mp4']:['ASYNC-001.mp4']);current.writer.start(current.meta)
++  let calls=0
++  const asyncMethod=()=>{
++    calls++
++    return rejected?Promise.reject(new Error('async sink rejected')):Promise.resolve(operation==='readFileNfo'?{}:operation==='patchNfo'?true:undefined)
++  }
++  // Deliberately invalid caller crosses the TypeScript boundary with a thenable.
++  const sink={...current.sink,[operation]:asyncMethod} as unknown as NonNullable<ScanOptions['auditSink']>
++  await assert.rejects(scanFolders(current.request,undefined,{...current.options,autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:sink}),/synchronous/i)
++  assert.equal(calls,1)
++  assert.ok(current.rows().every(row=>JSON.parse(row.entry_json).outcome!=='processing_failure'))
++  if(operation==='recordFile')assert.equal((current.db.prepare('SELECT COUNT(*) AS n FROM videos').get() as {n:number}).n,1)
++  // The node test runner also fails on unhandledRejection; allow rejection observers to run.
++  await new Promise(resolve=>setImmediate(resolve))
++})
+diff --git a/src/main/db/scanAuditWriter.ts b/src/main/db/scanAuditWriter.ts
+new file mode 100644
+index 0000000..975beba
+--- /dev/null
++++ b/src/main/db/scanAuditWriter.ts
+@@ -0,0 +1,196 @@
++import type Database from 'better-sqlite3'
++import type { LibraryScanAudit, LibraryScanNfoAudit } from '@shared/libraryTypes'
++import { SCAN_AUDIT_SECTIONS, type ScanAuditSection } from '@shared/scanAuditReadTypes'
++import { isFileEntry, isResourceEntry, normalizeAudit } from '../scanner/libraryScanAuditValidation'
++
++export type ScanAuditMetadata = Omit<LibraryScanAudit, ScanAuditSection>
++export interface ScanAuditWriterScope { libraryId: number; runId: string }
++export const SCAN_AUDIT_WRITE_MAX_ITEMS = 100
++export const SCAN_AUDIT_WRITE_MAX_BYTES = 1024 * 1024
++export const SCAN_AUDIT_META_MAX_BYTES = 256 * 1024
++
++function encodeObject(value: unknown): { body: string; value: Record<string, unknown> } {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Audit input must be a JSON object')
++  const body = JSON.stringify(value)
++  if (typeof body !== 'string') throw new Error('Audit input is not serializable')
++  const parsed: unknown = JSON.parse(body)
++  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Audit input must serialize to an object')
++  return { body, value: parsed as Record<string, unknown> }
++}
++
++function positiveId(value: unknown): boolean { return Number.isSafeInteger(value) && Number(value) > 0 }
++function text(value: unknown): boolean { return typeof value === 'string' && value.length > 0 }
++
++function validateEntry(section: ScanAuditSection, value: Record<string, unknown>): void {
++  let valid: boolean
++  switch (section) {
++    case 'files': valid = isFileEntry(value); break
++    case 'removedResources':
++    case 'promotedResources': valid = isResourceEntry(value); break
++    case 'deletedVideos':
++      valid = positiveId(value.videoId) && text(value.videoCode) &&
++        (value.videoTitle === null || typeof value.videoTitle === 'string') && value.reason === 'resource_less'
++      break
++    case 'pendingGroups':
++      valid = positiveId(value.groupId) && text(value.normalizedCode) &&
++        Number.isSafeInteger(value.resourceCount) && Number(value.resourceCount) >= 0
++      break
++    default: throw new Error('Unknown audit section')
++  }
++  if (!valid) throw new Error(`Invalid audit entry in ${section}`)
++}
++
++/**
++ * Synchronous, caller-owned connection. Nested transactions are savepoints, so
++ * callers may commit business changes and audit writes in one outer transaction.
++ * This module does not publish, recover, activate scanning, or own the connection.
++ * Budgets apply to each operation, not cumulative retention. Initial finishedAt
++ * may be a nonempty placeholder; seal supplies final metadata before publication.
++ * Encoding precedes byte checks: these limits do not bound caller input memory
++ * or the temporary allocation made by JSON.stringify.
++ */
++export function createScanAuditWriter(db: Database.Database, scope: ScanAuditWriterScope) {
++  const { libraryId, runId } = scope
++  if (!positiveId(libraryId) || typeof runId !== 'string' || !runId || runId.length > 256) throw new Error('Invalid audit writer scope')
++
++  function assertRunning(): void {
++    const run = db.prepare('SELECT library_id, status, audit_json IS NULL AS json_free FROM library_scan_runs WHERE id=?')
++      .get(runId) as { library_id: number; status: string; json_free: number } | undefined
++    if (!run || run.library_id !== libraryId) throw new Error('Audit run does not belong to library')
++    if (run.status !== 'running' || run.json_free !== 1) throw new Error('Audit requires a running JSON-free run')
++  }
++
++  function assertCollecting(): void {
++    assertRunning()
++    const row = db.prepare('SELECT state FROM library_scan_audit_manifests WHERE run_id=?').get(runId) as
++      { state: string } | undefined
++    if (row?.state !== 'collecting') throw new Error('Audit is not collecting')
++  }
++
++  function metadata(meta: ScanAuditMetadata): string {
++    const { body, value } = encodeObject(meta)
++    if (Buffer.byteLength(body) > SCAN_AUDIT_META_MAX_BYTES) throw new Error('Audit metadata exceeds 256 KiB')
++    if (value.libraryId !== libraryId || value.runId !== runId ||
++        typeof value.finishedAt !== 'string' || !value.finishedAt || value.finishedAt.length > 100 ||
++        SCAN_AUDIT_SECTIONS.some((section) => Object.hasOwn(value, section)) ||
++        !normalizeAudit({ ...value, files: [], removedResources: [], promotedResources: [], deletedVideos: [], pendingGroups: [] })) {
++      throw new Error('Invalid audit metadata or scope')
++    }
++    return body
++  }
++
++  function assertPageFits(section: ScanAuditSection, ordinal: number, body: string): void {
++    if (!Number.isSafeInteger(ordinal) || ordinal < 0) throw new Error('Audit ordinal exceeds safe integer range')
++    // Match the raw ScanAuditIndexPage wrapper. Reserve 100 UTF-16 code units at
++    // the worst JSON escape size (6 bytes each), plus safe maximum count/offset
++    // and the largest legal limit. Future final timestamps cannot grow the bound.
++    const wrapper = JSON.stringify({
++      snapshot: { libraryId, runId, finishedAt: '\u0000'.repeat(100) }, section,
++      items: [], total: Number.MAX_SAFE_INTEGER, limit: 100, offset: Number.MAX_SAFE_INTEGER
++    })
++    const itemHead = JSON.stringify({ ordinal })
++    const item = `${itemHead.slice(0, -1)},"entry":${body}}`
++    if (Buffer.byteLength(wrapper) + Buffer.byteLength(item) > SCAN_AUDIT_WRITE_MAX_BYTES) {
++      throw new Error('Single audit entry page exceeds 1 MiB')
++    }
++  }
++
++  function start(meta: ScanAuditMetadata): void {
++    const body = metadata(meta)
++    db.transaction(() => {
++      assertRunning()
++      db.prepare('INSERT INTO library_scan_audit_manifests(run_id,meta_json) VALUES(?,?)').run(runId, body)
++    })()
++  }
++
++  function writeBatch<S extends ScanAuditSection>(section: S, entries: readonly LibraryScanAudit[S][number][]): void {
++    if (!SCAN_AUDIT_SECTIONS.includes(section)) throw new Error('Unknown audit section')
++    if (!Array.isArray(entries) || entries.length > SCAN_AUDIT_WRITE_MAX_ITEMS) throw new Error('Audit batch exceeds 100 items')
++    let bytes = 2
++    const rows = entries.map((entry, index) => {
++      const row = encodeObject(entry)
++      validateEntry(section, row.value)
++      bytes += Buffer.byteLength(row.body) + (index === 0 ? 0 : 1)
++      if (bytes > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('Audit batch exceeds 1 MiB')
++      return { body: row.body, key: section === 'files' ? row.value.filePath as string : null }
++    })
++    db.transaction(() => {
++      assertCollecting()
++      const existing = db.prepare('SELECT ordinal FROM library_scan_audit_entries WHERE run_id=? AND section=? AND entry_key=?')
++      const next = db.prepare('SELECT COALESCE(MAX(ordinal), -1) + 1 AS ordinal FROM library_scan_audit_entries WHERE run_id=? AND section=?')
++      const write = db.prepare(`INSERT INTO library_scan_audit_entries(run_id,section,ordinal,entry_key,entry_json,entry_bytes)
++        VALUES(?,?,?,?,?,?) ON CONFLICT(run_id,section,entry_key) DO UPDATE SET
++        entry_json=excluded.entry_json,entry_bytes=excluded.entry_bytes`)
++      for (const row of rows) {
++        const previous = row.key === null ? undefined : existing.get(runId, section, row.key) as { ordinal: number } | undefined
++        const { ordinal } = previous ?? next.get(runId, section) as { ordinal: number }
++        assertPageFits(section, ordinal, row.body)
++        write.run(runId, section, ordinal, row.key, row.body, Buffer.byteLength(row.body))
++      }
++    })()
++  }
++
++  /** Detached NFO only: undefined means missing file; {} means no NFO field. */
++  function readFileNfo(filePath: string): { nfo?: LibraryScanNfoAudit } | undefined {
++    if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid audit file path')
++    return db.transaction(() => {
++      assertCollecting()
++      const size = db.prepare("SELECT entry_bytes FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?")
++        .get(runId, filePath) as { entry_bytes: number } | undefined
++      if (!size) return undefined
++      if (size.entry_bytes > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('Stored audit entry exceeds 1 MiB before hydration')
++      const row = db.prepare(`SELECT json_type(entry_json, '$.nfo') AS nfo_type,
++        CASE WHEN json_type(entry_json, '$.nfo') = 'object'
++          THEN json_extract(entry_json, '$.nfo') END AS nfo_json
++        FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?`)
++        .get(runId, filePath) as { nfo_type: string | null; nfo_json: string | null }
++      if (row.nfo_type === null || row.nfo_type === 'null') return {}
++      if (row.nfo_type !== 'object' || row.nfo_json === null) throw new Error('Invalid stored audit NFO')
++      const nfo: unknown = JSON.parse(row.nfo_json)
++      const entry = { rootId: 1, filePath, sourceKind: 'local', outcome: 'unrecognized', nfo }
++      if (!isFileEntry(entry)) throw new Error('Invalid stored audit NFO')
++      return { nfo: entry.nfo }
++    })()
++  }
++
++  /** Replaces the whole NFO value; caller supplies final merged warnings/fields. */
++  function patchNfo(filePath: string, nfo: LibraryScanNfoAudit): boolean {
++    if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid audit file path')
++    const patch = encodeObject(nfo)
++    if (Buffer.byteLength(patch.body) > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('NFO patch exceeds 1 MiB')
++    // Reuse the shared NFO validator through its containing file entry, even if
++    // the target is absent; malformed patches must not silently become no-ops.
++    validateEntry('files', { rootId: 1, filePath, sourceKind: 'local', outcome: 'unrecognized', nfo: patch.value })
++    return db.transaction(() => {
++      assertCollecting()
++      const size = db.prepare("SELECT entry_bytes FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?")
++        .get(runId, filePath) as { entry_bytes: number } | undefined
++      if (!size) return false
++      if (size.entry_bytes > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('Stored audit entry exceeds 1 MiB before hydration')
++      const row = db.prepare("SELECT ordinal,entry_json FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?")
++        .get(runId, filePath) as { ordinal: number; entry_json: string } | undefined
++      if (!row) return false
++      const updated = encodeObject({ ...JSON.parse(row.entry_json), nfo: patch.value })
++      validateEntry('files', updated.value)
++      if (updated.value.filePath !== filePath) throw new Error('Audit file key mismatch')
++      assertPageFits('files', row.ordinal, updated.body)
++      db.prepare("UPDATE library_scan_audit_entries SET entry_json=?,entry_bytes=? WHERE run_id=? AND section='files' AND entry_key=?")
++        .run(updated.body, Buffer.byteLength(updated.body), runId, filePath)
++      return true
++    })()
++  }
++
++  function seal(meta: ScanAuditMetadata): void {
++    const body = metadata(meta)
++    db.transaction(() => {
++      assertCollecting()
++      const previous = db.prepare('SELECT meta_json = ? AS same FROM library_scan_audit_manifests WHERE run_id=?').get(body, runId) as { same: number }
++      if (previous.same !== 1) {
++        db.prepare('UPDATE library_scan_audit_manifests SET meta_json=? WHERE run_id=?').run(body, runId)
++      }
++      db.prepare("UPDATE library_scan_audit_manifests SET state='sealed',sealed_at=CURRENT_TIMESTAMP WHERE run_id=?").run(runId)
++    })()
++  }
++
++  return { start, writeBatch, readFileNfo, patchNfo, seal }
++}
+diff --git a/src/main/db/scanAuditWriter.test.ts b/src/main/db/scanAuditWriter.test.ts
+new file mode 100644
+index 0000000..da74baf
+--- /dev/null
++++ b/src/main/db/scanAuditWriter.test.ts
+@@ -0,0 +1,318 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import type Database from 'better-sqlite3'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type { LibraryScanFileAuditEntry, LibraryScanSummary } from '@shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { finishLibraryScanEntriesRun } from './libraryScanRepo'
++import { createScanAuditWriter, type ScanAuditMetadata, SCAN_AUDIT_WRITE_MAX_BYTES } from './scanAuditWriter'
++import { readScanAuditSource } from './scanAuditSource'
++
++let db: Database.Database
++let directory: string
++const scope = { libraryId: 1, runId: 'writer-run' }
++const meta = (finishedAt = 'pending'): ScanAuditMetadata => ({
++  schemaVersion: 2, ...scope, configRevision: 1, trigger: 'manual',
++  startedAt: 'start', finishedAt, status: 'success'
++})
++const file = (filePath: string): LibraryScanFileAuditEntry => ({
++  rootId: 1, filePath, sourceKind: 'local', outcome: 'unrecognized'
++})
++beforeEach(() => {
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-audit-writer-'))
++  db = initDatabaseAtPath(path.join(directory, 'catalog.db'))
++  db.prepare(`INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at)
++    VALUES(?,1,1,'manual','running','start')`).run(scope.runId)
++})
++afterEach(() => { closeDatabase(); fs.rmSync(directory, { recursive: true, force: true }) })
++function snapshot() {
++  return {
++    manifest: db.prepare('SELECT * FROM library_scan_audit_manifests').all(),
++    entries: db.prepare('SELECT * FROM library_scan_audit_entries ORDER BY section,ordinal').all()
++  }
++}
++function rows() {
++  return db.prepare('SELECT section,ordinal,entry_key,entry_json,entry_bytes FROM library_scan_audit_entries ORDER BY section,ordinal')
++    .all() as { section: string; ordinal: number; entry_key: string | null; entry_json: string; entry_bytes: number }[]
++}
++
++it('upserts exact file paths with stable ordinals, appends other sections and preserves UTF-8 bytes', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  writer.writeBatch('files', [file('/中文'), file('/B'), { ...file('/中文'), sourceKind: 'strm' }])
++  writer.writeBatch('files', [file('/C'), file('/b')])
++  writer.writeBatch('pendingGroups', [{ groupId: 1, normalizedCode: 'ABC', resourceCount: 0 }])
++  writer.writeBatch('pendingGroups', [{ groupId: 1, normalizedCode: 'ABC', resourceCount: 2 }])
++  const actual = rows()
++  assert.deepEqual(actual.slice(0, 4).map((row) => [row.ordinal, row.entry_key]), [[0, '/中文'], [1, '/B'], [2, '/C'], [3, '/b']])
++  assert.equal(JSON.parse(actual[0].entry_json).sourceKind, 'strm')
++  assert.deepEqual(actual.slice(4).map((row) => [row.ordinal, row.entry_key]), [[0, null], [1, null]])
++  for (const row of actual) assert.equal(row.entry_bytes, Buffer.byteLength(row.entry_json))
++})
++
++it('rolls back the entire batch including earlier upserts after a later SQL failure', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  writer.writeBatch('files', [file('/old')])
++  const before = snapshot()
++  db.exec(`CREATE TRIGGER reject_writer_test BEFORE INSERT ON library_scan_audit_entries
++    WHEN NEW.entry_key='/reject' BEGIN SELECT RAISE(ABORT, 'injected failure'); END`)
++  assert.throws(() => writer.writeBatch('files', [
++    { ...file('/old'), sourceKind: 'strm' }, file('/new'), file('/reject')
++  ]), /injected failure/)
++  assert.deepEqual(snapshot(), before)
++})
++
++it('participates in caller transactions and uses savepoints for recoverable batch errors', () => {
++  const writer = createScanAuditWriter(db, scope)
++  const before = db.prepare('SELECT name FROM media_libraries WHERE id=1').get()
++  assert.throws(() => db.transaction(() => {
++    db.prepare("UPDATE media_libraries SET name='business' WHERE id=1").run()
++    writer.start(meta())
++    writer.writeBatch('files', [file('/atomic')])
++    writer.seal(meta('finish'))
++    throw new Error('outer failure')
++  })(), /outer failure/)
++  assert.deepEqual(snapshot(), { manifest: [], entries: [] })
++  assert.deepEqual(db.prepare('SELECT name FROM media_libraries WHERE id=1').get(), before)
++  writer.start(meta())
++  db.exec(`CREATE TRIGGER reject_writer_test BEFORE INSERT ON library_scan_audit_entries
++    WHEN NEW.entry_key='/reject' BEGIN SELECT RAISE(ABORT, 'injected failure'); END`)
++  db.transaction(() => {
++    db.prepare("UPDATE media_libraries SET name='committed' WHERE id=1").run()
++    assert.throws(() => writer.writeBatch('files', [file('/rolled-back'), file('/reject')]), /injected failure/)
++    writer.writeBatch('files', [file('/kept')])
++  })()
++  assert.deepEqual(rows().map((row) => row.entry_key), ['/kept'])
++  assert.deepEqual(db.prepare('SELECT name FROM media_libraries WHERE id=1').get(), { name: 'committed' })
++})
++
++it('patches NFO in place without inserting missing files or losing the primary audit outcome', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  writer.writeBatch('files', [file('/file')])
++  const nfo = { disposition: 'warning' as const, warnings: [{ code: 'warning', message: '中文警告' }] }
++  assert.equal(writer.patchNfo('/file', nfo), true)
++  assert.equal(writer.patchNfo('/missing', nfo), false)
++  assert.equal(rows().length, 1)
++  assert.equal(rows()[0].ordinal, 0)
++  assert.deepEqual(JSON.parse(rows()[0].entry_json), { ...file('/file'), nfo })
++  const before = snapshot()
++  assert.throws(() => writer.patchNfo('/missing', { disposition: 'invalid' } as never), /Invalid audit entry/)
++  assert.throws(() => writer.patchNfo('/file', { disposition: 'warning', warnings: [{ code: '', message: 'bad' }] }), /Invalid audit entry/)
++  assert.deepEqual(snapshot(), before)
++})
++
++it('seals final metadata atomically, keeps the run running, and does not publish or permit late writes', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  writer.writeBatch('files', [file('/file')])
++  const before = snapshot()
++  db.exec(`CREATE TRIGGER reject_seal_test BEFORE UPDATE OF state ON library_scan_audit_manifests
++    WHEN NEW.state='sealed' BEGIN SELECT RAISE(ABORT, 'seal failure'); END`)
++  assert.throws(() => writer.seal(meta('finish')), /seal failure/)
++  assert.deepEqual(snapshot(), before)
++  db.exec('DROP TRIGGER reject_seal_test')
++  writer.seal(meta('finish'))
++  assert.deepEqual(db.prepare('SELECT state,meta_json FROM library_scan_audit_manifests').get(),
++    { state: 'sealed', meta_json: JSON.stringify(meta('finish')) })
++  assert.deepEqual(db.prepare('SELECT status,audit_json FROM library_scan_runs WHERE id=?').get(scope.runId),
++    { status: 'running', audit_json: null })
++  assert.equal(readScanAuditSource(db, scope, 'body'), undefined)
++  const sealed = snapshot()
++  assert.throws(() => writer.writeBatch('files', []), /not collecting/)
++  assert.throws(() => writer.patchNfo('/missing', { disposition: 'imported' }), /not collecting/)
++  assert.throws(() => writer.seal(meta('finish')), /not collecting/)
++  assert.deepEqual(snapshot(), sealed)
++})
++
++it('seals unchanged metadata without a forbidden no-op metadata update', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta('finish'))
++  writer.seal(meta('finish'))
++  assert.deepEqual(db.prepare('SELECT state FROM library_scan_audit_manifests').get(), { state: 'sealed' })
++})
++
++it('guards scope, running status and legacy JSON and snapshots scope against caller mutation', () => {
++  assert.throws(() => createScanAuditWriter(db, { ...scope, libraryId: 0 }), /scope/)
++  assert.throws(() => createScanAuditWriter(db, { ...scope, runId: 'x'.repeat(257) }), /scope/)
++  const wrong = createScanAuditWriter(db, { ...scope, libraryId: 999 })
++  assert.throws(() => wrong.start({ ...meta(), libraryId: 999 }), /belong/)
++  const mutable = { ...scope }, writer = createScanAuditWriter(db, mutable)
++  mutable.runId = 'other'
++  writer.start(meta())
++  assert.throws(() => wrong.writeBatch('files', [file('/wrong')]), /belong/)
++  assert.throws(() => writer.start({ ...meta(), runId: 'other' }), /scope/)
++  db.prepare("UPDATE library_scan_runs SET status='failed' WHERE id=?").run(scope.runId)
++  assert.throws(() => writer.patchNfo('/missing', { disposition: 'imported' }), /running/)
++  assert.throws(() => writer.seal(meta('finish')), /running/)
++  db.prepare(`INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json)
++    VALUES('legacy',1,1,'manual','running','start','{}')`).run()
++  assert.throws(() => createScanAuditWriter(db, { ...scope, runId: 'legacy' }).start({ ...meta(), runId: 'legacy' }), /JSON-free/)
++})
++
++it('rejects malformed metadata and section shapes without writing anything', () => {
++  const writer = createScanAuditWriter(db, scope)
++  for (const invalid of [null, [], { ...meta(), files: [] }, { ...meta(), finishedAt: '' },
++    { ...meta(), finishedAt: 'x'.repeat(101) }, { ...meta(), extra: 'x'.repeat(256 * 1024) }]) {
++    assert.throws(() => writer.start(invalid as never))
++  }
++  writer.start(meta())
++  const before = snapshot()
++  assert.throws(() => writer.writeBatch('bad' as never, []), /section/)
++  for (const [section, entry] of [
++    ['files', {}], ['removedResources', {}], ['promotedResources', []],
++    ['deletedVideos', { videoId: 1, videoCode: 'A', reason: 'resource_less' }],
++    ['deletedVideos', { videoId: -1, videoCode: 'A', videoTitle: null, reason: 'resource_less' }],
++    ['pendingGroups', { groupId: 1, normalizedCode: 'A', resourceCount: -1 }],
++    ['pendingGroups', { groupId: 1, normalizedCode: '', resourceCount: 0 }]
++  ] as const) assert.throws(() => writer.writeBatch(section, [entry] as never))
++  const circular: Record<string, unknown> = { ...file('/circular') }; circular.self = circular
++  assert.throws(() => writer.writeBatch('files', [circular] as never))
++  assert.deepEqual(snapshot(), before)
++})
++
++it('enforces item, normalized batch and reserved single-page budgets without truncation', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  assert.throws(() => writer.writeBatch('files', Array.from({ length: 101 }, (_, i) => file(`/${i}`))), /100 items/)
++  assert.throws(() => writer.writeBatch('files', [{ ...file('/big'), extra: '中'.repeat(400_000) }] as never), /batch exceeds/)
++  // Fits the input array, but cannot fit a raw page after the reserved envelope.
++  const base = { ...file('/edge'), extra: '' }
++  const edge = { ...base, extra: 'x'.repeat(SCAN_AUDIT_WRITE_MAX_BYTES - Buffer.byteLength(JSON.stringify([base])) - 100) }
++  assert.ok(Buffer.byteLength(JSON.stringify([edge])) < SCAN_AUDIT_WRITE_MAX_BYTES)
++  assert.throws(() => writer.writeBatch('files', [file('/first'), edge] as never), /page exceeds/)
++  assert.equal(rows().length, 0)
++  writer.writeBatch('files', [file('/patch')])
++  const before = snapshot()
++  const hugeNfo = { disposition: 'imported', extra: 'x'.repeat(SCAN_AUDIT_WRITE_MAX_BYTES - 200) }
++  assert.throws(() => writer.patchNfo('/patch', hugeNfo as never), /page exceeds/)
++  assert.deepEqual(snapshot(), before)
++  writer.writeBatch('files', Array.from({ length: 100 }, (_, i) => file(`/batch-${i}`)))
++  assert.equal(rows().length, 101)
++})
++
++it('writes and patches all sections, seals, finishes through the actual repository, and reads compatibility output', () => {
++  const writer = createScanAuditWriter(db, scope)
++  const resource = { resourceId: 1, videoId: 1, videoCode: 'A', videoTitle: null,
++    resourceKind: 'local' as const, sourcePath: null, displayName: null, reason: 'missing' as const }
++  const deleted = { videoId: 1, videoCode: 'A', videoTitle: null, reason: 'resource_less' as const }
++  const pending = { groupId: 1, normalizedCode: 'A', resourceCount: 1 }
++  writer.start(meta())
++  writer.writeBatch('files', [file('/file')])
++  writer.writeBatch('removedResources', [resource])
++  writer.writeBatch('promotedResources', [{ ...resource, reason: 'promoted_after_removal' }])
++  writer.writeBatch('deletedVideos', [deleted])
++  writer.writeBatch('pendingGroups', [pending])
++  const nfo = { disposition: 'imported' as const, warnings: [] }
++  assert.equal(writer.patchNfo('/file', nfo), true)
++  writer.seal(meta('finish'))
++  const summary: LibraryScanSummary = {
++    ...scope, configRevision: 1, trigger: 'manual', startedAt: 'start', finishedAt: 'finish', status: 'success',
++    scannedFiles: 1, resourcesAdded: 0, resourcesUpdated: 0, resourcesRemoved: 1, primaryResourcesPromoted: 1,
++    videosDeleted: 1, skippedFiles: 0, failedFiles: 0, pendingScanGroups: 1, pendingScanResources: 1,
++    offlineFolders: [], errorSummary: null
++  }
++  finishLibraryScanEntriesRun({ ...scope, status: 'completed', summary })
++  assert.deepEqual(db.prepare('SELECT state FROM library_scan_audit_manifests').get(), { state: 'published' })
++  assert.deepEqual(JSON.parse(readScanAuditSource(db, scope, 'body')!.body), {
++    ...meta('finish'), files: [{ ...file('/file'), nfo }], removedResources: [resource],
++    promotedResources: [{ ...resource, reason: 'promoted_after_removal' }], deletedVideos: [deleted], pendingGroups: [pending]
++  })
++})
++
++
++it('rejects raw oversized stored entries before selecting their JSON for an NFO patch', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  const body = JSON.stringify({ ...file('/raw'), extra: 'x'.repeat(SCAN_AUDIT_WRITE_MAX_BYTES) })
++  db.prepare(`INSERT INTO library_scan_audit_entries(run_id,section,ordinal,entry_key,entry_json,entry_bytes)
++    VALUES(?,'files',0,'/raw',?,?)`).run(scope.runId, body, Buffer.byteLength(body))
++  const originalPrepare = db.prepare, prepare = db.prepare.bind(db)
++  let preflight = false
++  db.prepare = ((sql: string) => {
++    assert.doesNotMatch(sql, /SELECT\s+ordinal,entry_json/i)
++    if (sql.startsWith('SELECT entry_bytes')) preflight = true
++    return prepare(sql)
++  }) as typeof db.prepare
++  try {
++    assert.throws(() => writer.patchNfo('/raw', { disposition: 'imported' }), /before hydration/)
++    assert.equal(preflight, true)
++  } finally { db.prepare = originalPrepare }
++  assert.equal(rows()[0].entry_json, body)
++})
++
++it('reads only detached NFO values and distinguishes missing files from absent NFO', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  writer.writeBatch('files', [file('/empty'), file('/nfo')])
++  writer.writeBatch('files', [{ ...file('/null'), nfo: null }] as never)
++  const nfo = { disposition: 'warning' as const, warnings: [{ code: 'old', message: '保留旧警告' }], pendingScrapeId: 9 }
++  writer.patchNfo('/nfo', nfo)
++  assert.equal(writer.readFileNfo('/missing'), undefined)
++  assert.deepEqual(writer.readFileNfo('/empty'), {})
++  assert.deepEqual(writer.readFileNfo('/null'), {})
++  const originalPrepare = db.prepare, prepare = db.prepare.bind(db)
++  let projected = false
++  db.prepare = ((sql: string) => {
++    assert.equal(db.inTransaction, true)
++    assert.doesNotMatch(sql, /SELECT\s+(?:ordinal,)?entry_json\b/i)
++    if (sql.startsWith('SELECT json_type')) projected = true
++    return prepare(sql)
++  }) as typeof db.prepare
++  try {
++    const result = writer.readFileNfo('/nfo')!
++    assert.deepEqual(result, { nfo })
++    assert.equal(projected, true)
++    result.nfo!.warnings![0].message = 'mutated'
++    result.nfo!.warnings!.push({ code: 'new', message: 'new' })
++    assert.deepEqual(writer.readFileNfo('/nfo'), { nfo })
++  } finally { db.prepare = originalPrepare }
++})
++
++it('rejects invalid raw NFO values instead of treating them as absent', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  for (const nfo of [{}, [], 'imported', 1, { disposition: 'bad' },
++    { disposition: 'warning', warnings: [{ code: '', message: 'bad' }] }]) {
++    const body = JSON.stringify({ ...file('/raw'), nfo })
++    db.prepare(`INSERT INTO library_scan_audit_entries(run_id,section,ordinal,entry_key,entry_json,entry_bytes)
++      VALUES(?,'files',0,'/raw',?,?) ON CONFLICT(run_id,section,entry_key)
++      DO UPDATE SET entry_json=excluded.entry_json,entry_bytes=excluded.entry_bytes`)
++      .run(scope.runId, body, Buffer.byteLength(body))
++    assert.throws(() => writer.readFileNfo('/raw'), /Invalid stored audit NFO/)
++  }
++})
++
++it('checks NFO read scope and lifecycle even for missing paths', () => {
++  const writer = createScanAuditWriter(db, scope)
++  assert.throws(() => writer.readFileNfo('/missing'), /not collecting/)
++  writer.start(meta())
++  assert.throws(() => writer.readFileNfo(''), /file path/)
++  assert.throws(() => createScanAuditWriter(db, { ...scope, libraryId: 999 }).readFileNfo('/missing'), /belong/)
++  writer.seal(meta('finish'))
++  assert.throws(() => writer.readFileNfo('/missing'), /not collecting/)
++  db.prepare("UPDATE library_scan_runs SET status='failed' WHERE id=?").run(scope.runId)
++  assert.throws(() => writer.readFileNfo('/missing'), /running/)
++})
++
++it('rejects oversized raw rows before projecting any NFO JSON', () => {
++  const writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  const body = JSON.stringify({ ...file('/large'), extra: 'x'.repeat(SCAN_AUDIT_WRITE_MAX_BYTES), nfo: { disposition: 'imported' } })
++  db.prepare(`INSERT INTO library_scan_audit_entries(run_id,section,ordinal,entry_key,entry_json,entry_bytes)
++    VALUES(?,'files',0,'/large',?,?)`).run(scope.runId, body, Buffer.byteLength(body))
++  const originalPrepare = db.prepare, prepare = db.prepare.bind(db)
++  let preflight = false
++  db.prepare = ((sql: string) => {
++    assert.doesNotMatch(sql, /entry_json/)
++    if (sql.startsWith('SELECT entry_bytes')) preflight = true
++    return prepare(sql)
++  }) as typeof db.prepare
++  try {
++    assert.throws(() => writer.readFileNfo('/large'), /before hydration/)
++    assert.equal(preflight, true)
++  } finally { db.prepare = originalPrepare }
++})

@@ -1,0 +1,303 @@
+import assert from 'node:assert/strict'
+import { afterEach, beforeEach, test } from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import type { CatalogScope } from '@shared/mediaLibraryTypes'
+import type { VideoQuery } from '@shared/videoTypes'
+import { closeDatabase, getDb, initDatabaseAtPath } from './database'
+import { createScopedVideoCatalogRepo } from './scopedVideoCatalogRepo'
+import { listVideos } from './videoRepo'
+import { normalizeActressName } from './actressNameNormalization'
+import { resetSettingsCacheForTests } from '../settings/settingsStore'
+
+// Frozen from 4c953a960d910aed3fb102b39a337b418c6292f9:
+// videoRepo.buildWhere / scopedVideoCatalogRepo.buildWhere and actressSearchSql.
+// Deliberately do not import the optimized predicate or its searchable-type list.
+const OLD_SEARCH = `(v.code LIKE ? OR v.title LIKE ? OR v.id IN (
+  SELECT va.video_id FROM video_actress va
+  JOIN actresses a ON a.id = va.actress_id
+  WHERE EXISTS (
+    SELECT 1 FROM actress_names an
+    JOIN actress_name_ownership ano ON ano.actress_id = an.actress_id
+      AND ano.normalized_name = normalize_actress_name(an.name)
+    WHERE an.actress_id = a.id
+      AND an.type IN ('main', 'alias', 'zh', 'chinese', 'en', 'english', 'romaji')
+      AND an.name LIKE ?
+  )
+))`
+
+let root: string
+let previousUserData: string | undefined
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-video-search-oracle-'))
+  previousUserData = process.env.JAVDEX_TEST_USER_DATA
+  process.env.JAVDEX_TEST_USER_DATA = root
+  resetSettingsCacheForTests()
+  initDatabaseAtPath(path.join(root, 'catalog.db'))
+  const db = getDb()
+  db.exec(`
+    INSERT INTO media_libraries(id,name,icon,color,position,status,is_default,revision)
+    VALUES(2,'Second','star','amber',1,'active',0,1),(3,'Archived','film','slate',2,'archived',0,1);
+    INSERT INTO media_library_configs(library_id) VALUES(2),(3);
+    INSERT INTO actresses(id,main_name) VALUES(1,'Actor Alpha'),(2,'Actor Beta'),(3,'Actor Gamma'),(4,'Main row only');
+    INSERT INTO tags(id,name) VALUES(1,'one'),(2,'two');
+  `)
+  const insertVideo = db.prepare(`INSERT INTO videos(id,code,title,rating,scraped_status,release_date,add_time)
+    VALUES(?,?,?,?,?,?,?)`)
+  const membership = db.prepare(`INSERT INTO library_video_memberships
+    (library_id,video_id,added_at,updated_at,added_via,discovery_key,is_hidden)
+    VALUES(?,?,'2026-01-01','2026-01-01','scan',?,?)`)
+  db.transaction(() => {
+    for (let id = 1; id <= 28; id++) {
+      insertVideo.run(id, id === 20 ? 'Literal_%\\Code' : `CODE-${String(id).padStart(2, '0')}`,
+        id === 21 ? 'Title % _ \\ É é 東京 Ａ Alice' : `Plain ${id}`,
+        id % 6, id % 3, id % 2 ? '2024-01-01' : '2023-01-01', `2026-01-${String(id).padStart(2, '0')}`)
+      // Include shared, hidden-only, archived-only and entirely unassigned videos.
+      if (id <= 24) membership.run(1, id, id, id === 23 ? 1 : 0)
+      if (id % 2 === 0 || id === 23) membership.run(2, id, id + 100, id === 23 || id === 24 ? 1 : 0)
+      if (id >= 25 && id !== 28) membership.run(3, id, id + 200, 0)
+      if (id % 2 === 0) db.prepare('INSERT INTO video_tag(video_id,tag_id) VALUES(?,1)').run(id)
+      if (id % 3 === 0) db.prepare('INSERT INTO video_tag(video_id,tag_id) VALUES(?,2)').run(id)
+    }
+    db.exec('INSERT INTO video_actress(video_id,actress_id) VALUES(1,1),(2,2),(3,3),(4,4),(6,1),(6,2),(23,1),(25,1)')
+    const name = db.prepare('INSERT INTO actress_names(actress_id,name,type) VALUES(?,?,?)')
+    const own = db.prepare(`INSERT OR IGNORE INTO actress_name_ownership(normalized_name,actress_id)
+      VALUES(normalize_actress_name(?),?)`)
+    for (const [type, label] of [
+      ['main', 'Owned Main'], ['alias', 'Shared Alias'], ['zh', '中文名'], ['chinese', '传统中文'],
+      ['en', 'English Name'], ['english', 'Other English'], ['romaji', 'Romaji Name'],
+      ['alias', 'Ａｌｉｃｅ'], ['alias', 'Alice'], ['alias', 'Élodie'], ['alias', 'éclair'],
+      ['alias', 'wild%_\\name'], ['former', 'Excluded Former'], ['native', 'Excluded Native']
+    ]) { name.run(1, label, type); own.run(label, 1) }
+    // Same normalized alias, but only actor 1 owns it. Actor 2 must not match.
+    name.run(2, 'Shared Alias', 'alias')
+    name.run(2, 'Missing Ownership', 'main')
+    name.run(3, 'Wrong Ownership', 'alias'); own.run('Wrong Ownership', 1)
+  })()
+})
+afterEach(() => {
+  closeDatabase(); resetSettingsCacheForTests()
+  if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+  else process.env.JAVDEX_TEST_USER_DATA = previousUserData
+  fs.rmSync(root, { recursive: true, force: true })
+})
+
+function expected(query: VideoQuery, scope?: CatalogScope): number[] {
+  const conditions: string[] = []
+  const params: Array<string | number> = []
+  if (query.search?.trim()) {
+    conditions.push(OLD_SEARCH)
+    const pattern = `%${query.search.trim()}%`
+    params.push(pattern, pattern, pattern)
+  }
+  if (scope) {
+    let selected = ''
+    if (scope.kind === 'library') { selected = 'AND m.library_id=?'; params.push(scope.libraryId) }
+    else if (scope.libraryIds?.length) {
+      selected = 'AND m.library_id IN (SELECT value FROM json_each(?))'
+      params.push(JSON.stringify(scope.libraryIds))
+    }
+    conditions.push(`EXISTS (SELECT 1 FROM library_video_memberships m
+      JOIN media_libraries l ON l.id=m.library_id WHERE m.video_id=v.id
+      AND m.is_hidden=0 AND l.status='active' ${selected})`)
+  }
+  if (query.tagId !== undefined) {
+    conditions.push('EXISTS (SELECT 1 FROM video_tag t WHERE t.video_id=v.id AND t.tag_id=?)')
+    params.push(query.tagId)
+  }
+  for (const id of query.tagIds ?? []) {
+    conditions.push('EXISTS (SELECT 1 FROM video_tag t WHERE t.video_id=v.id AND t.tag_id=?)')
+    params.push(id)
+  }
+  if (query.actressId !== undefined) {
+    conditions.push('EXISTS (SELECT 1 FROM video_actress a WHERE a.video_id=v.id AND a.actress_id=?)')
+    params.push(query.actressId)
+  }
+  if (query.scrapedStatus !== undefined && query.scrapedStatus !== 'all') {
+    conditions.push('v.scraped_status=?'); params.push(query.scrapedStatus)
+  }
+  if (query.minRating !== undefined) { conditions.push('v.rating>=?'); params.push(query.minRating) }
+  if (query.year !== undefined && query.year !== 'all') {
+    conditions.push("strftime('%Y',v.release_date)=?"); params.push(String(query.year))
+  }
+  const direction = query.sortDir === 'desc' ? 'DESC' : 'ASC'
+  return (getDb().prepare(`SELECT v.id FROM videos v
+    ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''} ORDER BY v.code ${direction}`)
+    .all(...params) as { id: number }[]).map(row => row.id)
+}
+
+const scopes: CatalogScope[] = [
+  { kind: 'all' }, { kind: 'library', libraryId: 1 }, { kind: 'library', libraryId: 2 },
+  { kind: 'library', libraryId: 3 }, { kind: 'all', libraryIds: [2, 3] }
+]
+
+function compare(query: VideoQuery, scope?: CatalogScope): void {
+  const all = expected(query, scope)
+  const actual = scope ? createScopedVideoCatalogRepo().list(scope, query) : listVideos(query)
+  const context = JSON.stringify({ query, scope: scope ?? 'legacy' })
+  assert.equal(actual.total, all.length, `total: ${context}`)
+  const offset = query.offset ?? 0
+  assert.deepEqual(actual.items.map(row => row.id), all.slice(offset, offset + (query.limit ?? 60)), context)
+}
+
+for (const analyzed of [false, true]) {
+test(`default desktop LIKE matches frozen old SQL for character/type/ownership matrix and all scopes (ANALYZE=${analyzed})`, () => {
+  if (analyzed) getDb().exec('ANALYZE')
+  for (const search of [undefined, '', '   ', ' CODE ', 'code-01', 'Owned Main', 'shared alias',
+    '中文', '传统', 'English', 'Romaji', 'Alice', 'Ａｌｉｃｅ', 'alice', 'É', 'é', '東京',
+    '%', '_', '\\', '%_\\', '  wild%_\\name  ', 'Missing Ownership', 'Wrong Ownership',
+    'Main row only', 'Excluded Former', 'Excluded Native', 'not-found']) {
+    for (const sortDir of ['asc', 'desc'] as const) {
+      const query: VideoQuery = { search, sortBy: 'code', sortDir, limit: 60 }
+      compare(query)
+      for (const scope of scopes) compare(query, scope)
+    }
+  }
+  // Guard the fixture: these cases must exercise ownership and type exclusions.
+  assert.deepEqual(expected({ search: 'Shared Alias', sortBy: 'code' }), [1, 6, 23, 25])
+  assert.deepEqual(expected({ search: 'Missing Ownership' }), [])
+  assert.deepEqual(expected({ search: 'Wrong Ownership' }), [])
+  assert.deepEqual(expected({ search: 'Excluded Former' }), [])
+  assert.deepEqual(expected({ search: 'Alice' }), [1, 6, 21, 23, 25])
+})
+
+test(`search keeps conjunction filters, deduplication, total and ascending/descending page boundaries (ANALYZE=${analyzed})`, () => {
+  if (analyzed) getDb().exec('ANALYZE')
+  for (const filter of [{}, { tagId: 1 }, { tagIds: [1, 2] }, { actressId: 1 },
+    { scrapedStatus: 0 as const, year: 2024 }, { minRating: 2 }, { tagId: 1, actressId: 1 }]) {
+    for (const search of ['%', 'Shared Alias', 'CODE', 'missing']) {
+      for (const sortDir of ['asc', 'desc'] as const) {
+        for (const offset of [0, 2, 24, 100]) {
+          const query: VideoQuery = { ...filter, search, sortBy: 'code', sortDir, offset, limit: 2 }
+          compare(query)
+          for (const scope of scopes.slice(0, 3)) compare(query, scope)
+        }
+      }
+    }
+  }
+})
+}
+
+test('1000 videos sharing one actress normalize once per query, without ANALYZE or warm cache', () => {
+  const db = getDb()
+  db.exec(`DELETE FROM videos; DELETE FROM actresses;
+    INSERT INTO actresses(id,main_name) VALUES(1,'Actor');
+    INSERT INTO actress_names(actress_id,name,type) VALUES(1,'Actor','main');
+    INSERT INTO actress_name_ownership(normalized_name,actress_id) VALUES('actor',1);
+    WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
+      INSERT INTO videos(id,code) SELECT x,'CODE-'||x FROM n;
+    INSERT INTO video_actress(video_id,actress_id) SELECT id,1 FROM videos;
+    INSERT INTO library_video_memberships(library_id,video_id,discovery_key) SELECT 1,id,id FROM videos;`)
+  let calls = 0
+  const normalize = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null
+    try { return normalizeActressName(value) } catch { return null }
+  }
+  db.function('normalize_actress_name', { deterministic: true }, (value: unknown) => {
+    calls++
+    return normalize(value)
+  })
+  try {
+    const query: VideoQuery = { search: 'Actor', sortBy: 'code', sortDir: 'asc', limit: 20 }
+    const oldIds = expected(query)
+    assert.equal(oldIds.length, 1000)
+    assert.ok(calls >= 1000, `frozen old predicate must expose repeated normalization, got ${calls}`)
+    calls = 0
+    const scoped = createScopedVideoCatalogRepo().list({ kind: 'library', libraryId: 1 }, query)
+    assert.equal(scoped.total, 1000)
+    assert.deepEqual(scoped.items.map(row => row.id), oldIds.slice(0, 20))
+    assert.ok(calls > 0 && calls <= 2, `cold scoped count+page normalization calls: ${calls}`)
+    calls = 0
+    const legacy = listVideos(query)
+    assert.equal(legacy.total, 1000)
+    assert.deepEqual(legacy.items.map(row => row.id), oldIds.slice(0, 20))
+    assert.ok(calls > 0 && calls <= 2, `legacy count+page normalization calls: ${calls}`)
+  } finally {
+    db.function('normalize_actress_name', { deterministic: true }, normalize)
+  }
+})
+
+test('cached scoped pages/counts refresh after ownership, relations, title, visibility and tag writes', () => {
+  const db = getDb()
+  const scope: CatalogScope = { kind: 'all' }
+  const query: VideoQuery = { search: 'Shared Alias', sortBy: 'code', sortDir: 'asc', limit: 2 }
+  const check = () => {
+    for (const offset of [0, 2, 4]) {
+      compare({ ...query, offset }, scope)
+      compare({ ...query, offset, tagId: 1 }, scope)
+      compare({ ...query, offset })
+    }
+  }
+  check(); check()
+  const before = createScopedVideoCatalogRepo().list(scope, query)
+  db.prepare(`UPDATE actress_name_ownership SET actress_id=2 WHERE normalized_name=normalize_actress_name(?)`).run('Shared Alias')
+  check()
+  const after = createScopedVideoCatalogRepo().list(scope, query)
+  assert.notEqual(after.readRevision, before.readRevision)
+  assert.deepEqual(after.items.map(row => row.id), [2, 6])
+  db.exec('INSERT INTO video_actress(video_id,actress_id) VALUES(8,2)'); check()
+  db.exec("UPDATE videos SET title='Shared Alias' WHERE id=10"); check()
+  db.exec('UPDATE library_video_memberships SET is_hidden=1 WHERE video_id=2'); check()
+  db.exec('DELETE FROM video_tag WHERE video_id=6 AND tag_id=1'); check()
+  db.exec("UPDATE media_libraries SET status='archived' WHERE id=2"); check()
+})
+
+test('old predicate preserves add_time/release_date/rating ordering and both page directions', () => {
+  const db = getDb()
+  // Membership time intentionally disagrees with global add_time; shared videos
+  // choose the newest eligible membership, and release-date blanks must stay last.
+  db.exec(`UPDATE library_video_memberships SET added_at=CASE library_id
+      WHEN 1 THEN printf('2026-01-%02d',video_id)
+      ELSE printf('2026-02-%02d',29-video_id) END;
+    UPDATE videos SET release_date=CASE id%5 WHEN 0 THEN NULL WHEN 1 THEN ''
+      WHEN 2 THEN '  ' ELSE release_date END;`)
+  const repo = createScopedVideoCatalogRepo()
+  const optimizedPredicate = /\(v\.code LIKE \? OR v\.title LIKE \? OR v\.id IN \(\s*WITH matched_actresses AS MATERIALIZED \([\s\S]*?CROSS JOIN video_actress va ON va\.actress_id = matched\.id\s*\)\)/
+  const read = (query: VideoQuery, scope: CatalogScope | undefined, old: boolean) => {
+    const originalPrepare = db.prepare
+    let replacements = 0
+    if (old) {
+      db.prepare = ((sql: string) => {
+        if (optimizedPredicate.test(sql)) {
+          sql = sql.replace(optimizedPredicate, OLD_SEARCH)
+          replacements++
+        }
+        return originalPrepare.call(db, sql)
+      }) as typeof db.prepare
+    }
+    try {
+      // Both sides bypass page/count caches; never let the oracle seed or read
+      // an optimized cached page. Keep all non-search SQL and parameters intact.
+      const page = db.transaction(() => scope ? repo.list(scope, query) : listVideos(query))()
+      if (old) assert.equal(replacements, 2, 'must replace the actual count AND page search predicates')
+      return { total: page.total, ids: page.items.map(row => row.id) }
+    } finally {
+      db.prepare = originalPrepare
+    }
+  }
+  for (const analyzed of [false, true]) {
+    if (analyzed) db.exec('ANALYZE')
+    for (const sortBy of ['add_time', 'release_date', 'rating'] as const) {
+      for (const sortDir of ['asc', 'desc'] as const) {
+        for (const search of ['%', 'Shared Alias']) {
+          for (const scope of [undefined, ...scopes]) {
+            const query: VideoQuery = { search, sortBy, sortDir, limit: 3 }
+            const oldFull = read({ ...query, limit: 60 }, scope, true)
+            const stitched: number[] = []
+            for (let offset = 0; offset < 30; offset += 3) {
+              const paged = { ...query, offset }
+              const oldPage = read(paged, scope, true)
+              const actual = read(paged, scope, false)
+              assert.deepEqual(actual, oldPage, JSON.stringify({ analyzed, scope, paged }))
+              assert.deepEqual(oldPage.ids, oldFull.ids.slice(offset, offset + 3))
+              stitched.push(...actual.ids)
+            }
+            assert.deepEqual(stitched, oldFull.ids)
+            assert.equal(new Set(stitched).size, oldFull.total)
+          }
+        }
+      }
+    }
+  }
+})

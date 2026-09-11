@@ -1,3 +1,5 @@
+import Button from '../components/Button'
+import { useActressVideoPage } from '../hooks/useActressVideoPage'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
@@ -8,7 +10,7 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { buildActressScrapeMatchNameOptions } from '@shared/actressProfileOptions'
-import type { ActressDetail } from '@shared/actressTypes'
+import type { ActressProfile } from '@shared/actressTypes'
 import type { ActressDeleteResult } from '@shared/actressIpcContract'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -64,13 +66,22 @@ export default function ActressDetailPage(): JSX.Element {
     pendingActressStack
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
   const actressId = Number(actressIdParam ?? id)
+  const works = useActressVideoPage(actressId)
+  const knownTotal = useRef<{ id: number; total: number } | null>(null)
+  if (works.data) knownTotal.current = { id: actressId, total: works.data.total }
+  const videoTotal = knownTotal.current?.id === actressId ? knownTotal.current.total : null
+  const reloadWorks = useRef(works.reload)
+  reloadWorks.current = works.reload
+  const activeActressId = useRef(actressId)
+  activeActressId.current = actressId
+  const metadataSequence = useRef(0)
 
   const toast = useToast()
   const queryClient = useQueryClient()
   const toastRef = useRef(toast)
   toastRef.current = toast
   const { setBackground, clearBackground } = useAppBackground()
-  const [actress, setActress] = useState<ActressDetail | null>(null)
+  const [actress, setActress] = useState<ActressProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -103,14 +114,18 @@ export default function ActressDetailPage(): JSX.Element {
 
   const load = useCallback(
     (options?: { silent?: boolean }) => {
+      if (activeActressId.current !== actressId) return Promise.resolve()
       const silent = options?.silent ?? false
+      const sequence = ++metadataSequence.current
+      const isCurrent = () => sequence === metadataSequence.current && activeActressId.current === actressId
       if (!silent) setLoading(true)
+      else reloadWorks.current()
       return api.actresses
-        .get(actressId)
-        .then(setActress)
-        .catch((e) => toastRef.current.show(String(e.message ?? e), 'error'))
+        .profile(actressId)
+        .then(value => { if (isCurrent()) setActress(value) })
+        .catch((e) => { if (isCurrent()) { setActress(null); toastRef.current.show(String(e.message ?? e), 'error') } })
         .finally(() => {
-          if (!silent) setLoading(false)
+          if (isCurrent()) setLoading(false)
         })
     },
     [actressId]
@@ -119,6 +134,7 @@ export default function ActressDetailPage(): JSX.Element {
 
   useEffect(() => {
     void load()
+    return () => { metadataSequence.current += 1 }
   }, [actressId, load])
 
   useEffect(
@@ -143,7 +159,7 @@ export default function ActressDetailPage(): JSX.Element {
 
   useEffect(() => {
     const scope = `actress:${actressId}`
-    if (!actress) return
+    if (!actress || actress.id !== actressId) return
     const path = resolveActressDetailDisplayBackgroundPath(
       actress,
       actressDetailUseFirstGalleryBackground
@@ -269,7 +285,7 @@ export default function ActressDetailPage(): JSX.Element {
     </div>
   ) : null
 
-  if (loading) {
+  if (loading || (actress !== null && actress.id !== actressId)) {
     return (
       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
         <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
@@ -294,10 +310,10 @@ export default function ActressDetailPage(): JSX.Element {
     )
   }
 
-  const avatar = assetUrl(actress.avatar_path)
-  const avatarPreview = assetUrl(actress.avatar_source_path) ?? avatar
+  const avatar = assetUrl(actress.avatar_path, 640)
+  const avatarPreview = assetUrl(actress.avatar_source_path) ?? assetUrl(actress.avatar_path)
   const profileSubtitle = buildActressProfileSubtitle(actress)
-  const profileStats = buildActressProfileStats(actress)
+  const profileStats = buildActressProfileStats(actress, videoTotal)
 
   const onAvatarKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (!avatarPreview || !avatarPreviewEnabled || e.defaultPrevented) return
@@ -341,6 +357,7 @@ export default function ActressDetailPage(): JSX.Element {
         {
           key: 'merge',
           label: '合并演员',
+          disabled: !works.data,
           onClick: () => setShowMerge(true)
         },
         {
@@ -440,7 +457,9 @@ export default function ActressDetailPage(): JSX.Element {
       </div>
 
       {activeTab === 'videos' ? (
-        actress.videos.length === 0 ? (
+        works.loading ? <EmptyState loading /> : works.error ? (
+          <div role="alert">{works.error}<Button onClick={works.reload}>重试</Button></div>
+        ) : !works.data || works.data.videos.length === 0 ? (
           <EmptyState
             variant="compact"
             icon={<Inbox {...UI_ICON} aria-hidden />}
@@ -448,16 +467,22 @@ export default function ActressDetailPage(): JSX.Element {
             description="影片刮削后会自动建立关联。"
           />
         ) : (
-          <div className="poster-grid">
-            {actress.videos.map((v) => (
+          <><div className="poster-grid">
+            {works.data.videos.map((v) => (
               <PosterCard key={v.id} video={v} />
             ))}
           </div>
+          <nav className="actress-works-pagination" aria-label="演员作品分页">
+            <Button disabled={works.offset === 0} onClick={() => works.move(works.offset - 60)}>上一页</Button>
+            <span>第 {Math.floor(works.offset / 60) + 1} 页 · 共 {works.data.total} 部</span>
+            <Button disabled={works.offset + works.data.videos.length >= works.data.total} onClick={() => works.move(works.offset + 60)}>下一页</Button>
+          </nav></>
         )
       ) : (
         <ActressGalleryPanel
+          key={actress.id}
           actressId={actress.id}
-          gallery={actress.gallery}
+          revision={actress}
           posterPath={actress.poster_path}
           onChanged={() => {
             void load({ silent: true })
@@ -536,9 +561,10 @@ export default function ActressDetailPage(): JSX.Element {
         />
       )}
 
-      {showMerge && (
+      {showMerge && videoTotal !== null && (
         <MergeActressModal
           keepActress={actress}
+          keepVideoCount={videoTotal}
           onCancel={() => setShowMerge(false)}
           onMerged={() => {
             setShowMerge(false)

@@ -1,4 +1,7 @@
+import { createActressAvatarCropSnapshot } from '../db/actressAvatarCropSnapshot'
+import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
 import { randomUUID } from 'node:crypto'
+import { createProgressPublisher } from './progressPublisher'
 import { IPC } from '@shared/ipc-channels'
 import type { ScrapeIpcEvent, ScrapeIpcEventChannel } from '@shared/scrapeIpcContract'
 import type {
@@ -25,6 +28,8 @@ import type {
 import type { BatchProgress, BatchScrapeState } from '@shared/batchScrapeTypes'
 import type {
   PendingVideoScrape,
+  PendingVideoScrapePage,
+  PendingVideoScrapePageQuery,
   PendingVideoScrapeConfirmInput,
   PendingVideoScrapeResolutionResult
 } from '@shared/videoScrapeTypes'
@@ -66,7 +71,7 @@ type ProgressListener = (progress: BatchProgress) => void
 
 interface BatchQueue<Request> {
   isRunning(): boolean
-  setListener(listener: ProgressListener): void
+  setListener(listener: ProgressListener | null): void
   start(request?: Request | string): Promise<void>
   resume(): Promise<void>
   pause(): void
@@ -137,13 +142,17 @@ export interface ScrapeJobControllerDependencies {
   rendererAvailable(): boolean
   checkpoints: BatchScrapeCheckpointPort
   pendingVideoScrapes: {
+    count(): number
+    existingIds(ids: number[]): number[]
+    page(query: PendingVideoScrapePageQuery): PendingVideoScrapePage
+    get(id: number): PendingVideoScrape | null
     list(): PendingVideoScrape[]
     confirm(input: PendingVideoScrapeConfirmInput): PendingVideoScrapeResolutionResult
     discard(pendingScrapeId: number): boolean
   }
   avatarAutoCrop?: AvatarAutoCropMediator
   avatarAutoCropOptions?: Partial<
-    Pick<AvatarAutoCropMediatorDependencies, 'randomId' | 'autoCropTimeoutMs'>
+    Pick<AvatarAutoCropMediatorDependencies, 'randomId' | 'autoCropTimeoutMs' | 'createBatchTargets'>
   >
 }
 
@@ -158,18 +167,24 @@ export class ScrapeJobController {
         rendererAvailable: () => this.dependencies.rendererAvailable(),
         randomId: dependencies.avatarAutoCropOptions?.randomId ?? randomUUID,
         autoCropTimeoutMs: dependencies.avatarAutoCropOptions?.autoCropTimeoutMs ?? 5_000,
-        assertCanBeginBatch: () => this.assertQueuesIdleForNewBatch()
+        assertCanBeginBatch: () => this.assertQueuesIdleForNewBatch(),
+        createBatchTargets: dependencies.avatarAutoCropOptions?.createBatchTargets ?? createActressAvatarCropSnapshot
       })
   }
 
   initialize(): void {
     this.avatarAutoCrop.clearBatchToken()
-    const interrupted = this.dependencies.checkpoints.load()
-    if (interrupted?.status === 'running') {
-      this.dependencies.checkpoints.markPaused(
-        interrupted,
-        this.dependencies.checkpoints.toProgress(interrupted)
-      )
+    try {
+      const interrupted = this.dependencies.checkpoints.load()
+      if (interrupted?.status === 'running') {
+        this.dependencies.checkpoints.markPaused(
+          interrupted,
+          this.dependencies.checkpoints.toProgress(interrupted)
+        )
+      }
+    } catch (error) {
+      // Preserve unreadable checkpoints and keep the app available; state/resume still surface the error.
+      console.error('Failed to recover batch scrape checkpoint:', error)
     }
     this.dependencies.actressQueue.setAvatarAutoCropListener((target) =>
       this.avatarAutoCrop.request(target)
@@ -264,6 +279,22 @@ export class ScrapeJobController {
     return this.dependencies.getBatchState()
   }
 
+  countPendingVideoScrapes(): number {
+    return this.dependencies.pendingVideoScrapes.count()
+  }
+
+  existingPendingVideoScrapeIds(ids: number[]): number[] {
+    return this.dependencies.pendingVideoScrapes.existingIds(ids)
+  }
+
+  pagePendingVideoScrapes(query: PendingVideoScrapePageQuery): PendingVideoScrapePage {
+    return this.dependencies.pendingVideoScrapes.page(query)
+  }
+
+  getPendingVideoScrape(id: number): PendingVideoScrape | null {
+    return this.dependencies.pendingVideoScrapes.get(id)
+  }
+
   listPendingVideoScrapes(): PendingVideoScrape[] {
     return this.dependencies.pendingVideoScrapes.list()
   }
@@ -311,12 +342,8 @@ export class ScrapeJobController {
   ): boolean {
     this.assertCanStartNewBatch()
     if (!request.fields?.length) throw new Error('请至少选择一个要更新的字段')
-    this.dependencies.videoQueue.setListener((progress) =>
-      this.dependencies.emit(progressChannel, progress)
-    )
-    void this.dependencies.coordinator
-      .runExclusive('影片批量更新', () => this.dependencies.videoQueue.start(request))
-      .catch((error) => console.error('video batch scrape failed:', error))
+    this.runBatch(this.dependencies.videoQueue, progressChannel, '影片批量更新',
+      () => this.dependencies.videoQueue.start(request), 'video batch scrape failed:')
     return true
   }
 
@@ -334,12 +361,8 @@ export class ScrapeJobController {
     if (typeof request !== 'string' && request && !request.fields?.length) {
       throw new Error('请至少选择一个要更新的字段')
     }
-    this.dependencies.actressQueue.setListener((progress) =>
-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
-    )
-    void this.dependencies.coordinator
-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.start(request))
-      .catch((error) => console.error('actress scrape batch failed:', error))
+    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
+      () => this.dependencies.actressQueue.start(request), 'actress scrape batch failed:')
     return true
   }
 
@@ -366,21 +389,45 @@ export class ScrapeJobController {
     const job = this.dependencies.checkpoints.load()
     if (!job) throw new Error('没有可继续的批量刮削任务')
     if (job.kind === 'video') {
-      this.dependencies.videoQueue.setListener((progress) =>
-        this.dependencies.emit(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, progress)
-      )
-      void this.dependencies.coordinator
-        .runExclusive('影片批量更新', () => this.dependencies.videoQueue.resume())
-        .catch((error) => console.error('video batch scrape resume failed:', error))
+      this.runBatch(this.dependencies.videoQueue, IPC.SCRAPE_VIDEO_BATCH_PROGRESS, '影片批量更新',
+        () => this.dependencies.videoQueue.resume(), 'video batch scrape resume failed:')
       return true
     }
-    this.dependencies.actressQueue.setListener((progress) =>
-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
-    )
-    void this.dependencies.coordinator
-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.resume())
-      .catch((error) => console.error('actress batch scrape resume failed:', error))
+    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
+      () => this.dependencies.actressQueue.resume(), 'actress batch scrape resume failed:')
     return true
+  }
+
+  private runBatch(
+    queue: Pick<BatchQueue<unknown>, 'setListener'>,
+    channel: typeof IPC.SCRAPE_BATCH_PROGRESS | typeof IPC.SCRAPE_VIDEO_BATCH_PROGRESS |
+      typeof IPC.SCRAPE_REMATCH_BATCH_PROGRESS | typeof IPC.ACTRESS_SCRAPE_BATCH_PROGRESS,
+    label: string,
+    run: () => Promise<void>,
+    errorMessage: string
+  ): void {
+    void this.dependencies.coordinator.runExclusive(label, async () => {
+      const publisher = createProgressPublisher<BatchProgress>((progress) => {
+        try {
+          this.dependencies.emit(channel, progress)
+        } catch (error) {
+          console.error('batch progress delivery failed:', error)
+        }
+      })
+      let failed = 0
+      queue.setListener((progress) => {
+        const immediate = progress.status !== 'running' || progress.failed > failed
+        failed = progress.failed
+        publisher.update(progress, immediate)
+      })
+      try {
+        await run()
+      } finally {
+        // Clear pending delivery before releasing the coordinator's exclusive run.
+        publisher.close()
+        queue.setListener(null)
+      }
+    }).catch((error) => console.error(errorMessage, error))
   }
 
   discardActiveBatch(): boolean {
@@ -402,6 +449,10 @@ export class ScrapeJobController {
 
   beginAvatarAutoCropBatch(): string {
     return this.avatarAutoCrop.beginBatch()
+  }
+
+  pageAvatarAutoCropTargets(token: string, afterId: number): ActressAvatarCropTargetPage {
+    return this.avatarAutoCrop.pageBatchTargets(token, afterId)
   }
 
   endAvatarAutoCropBatch(token: string): boolean {

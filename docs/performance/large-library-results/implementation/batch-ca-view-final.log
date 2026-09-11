@@ -1,0 +1,489 @@
+{
+  "results": [
+    {
+      "count": 10000,
+      "snapshot": {
+        "libraryId": 1,
+        "runId": "probe",
+        "finishedAt": "2026-09-11T00:00:00Z"
+      },
+      "sourceBytes": 2914146,
+      "indexBytes": 6901760,
+      "buildMs": 44.479792,
+      "samples": [
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "firstReadMs": 9.832375000000013,
+          "elapsedMs": 1.008291999999983,
+          "jsonBytes": 70044
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "firstReadMs": 9.832375000000013,
+          "elapsedMs": 1.0392079999999737,
+          "jsonBytes": 70044
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "firstReadMs": 9.832375000000013,
+          "elapsedMs": 1.067707999999982,
+          "jsonBytes": 70044
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 9900,
+          "firstReadMs": 1.4631669999999986,
+          "elapsedMs": 1.343999999999994,
+          "jsonBytes": 70677
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 9900,
+          "firstReadMs": 1.4631669999999986,
+          "elapsedMs": 0.9829590000000508,
+          "jsonBytes": 70677
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 9900,
+          "firstReadMs": 1.4631669999999986,
+          "elapsedMs": 0.9352080000000456,
+          "jsonBytes": 70677
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "firstReadMs": 6.1949579999999855,
+          "elapsedMs": 0.9994590000000017,
+          "jsonBytes": 76653
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "firstReadMs": 6.1949579999999855,
+          "elapsedMs": 1.011000000000024,
+          "jsonBytes": 76653
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "firstReadMs": 6.1949579999999855,
+          "elapsedMs": 0.9550409999999943,
+          "jsonBytes": 76653
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 4900,
+          "firstReadMs": 1.2045830000000137,
+          "elapsedMs": 1.0878749999999968,
+          "jsonBytes": 77176
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 4900,
+          "firstReadMs": 1.2045830000000137,
+          "elapsedMs": 0.9825410000000261,
+          "jsonBytes": 77176
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 4900,
+          "firstReadMs": 1.2045830000000137,
+          "elapsedMs": 0.9824590000000057,
+          "jsonBytes": 77176
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "firstReadMs": 5.529250000000047,
+          "elapsedMs": 0.9374579999999924,
+          "jsonBytes": 66653
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "firstReadMs": 5.529250000000047,
+          "elapsedMs": 1.0453749999999786,
+          "jsonBytes": 66653
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "firstReadMs": 5.529250000000047,
+          "elapsedMs": 0.9858340000000112,
+          "jsonBytes": 66653
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 4900,
+          "firstReadMs": 0.9268339999999853,
+          "elapsedMs": 0.8941670000000386,
+          "jsonBytes": 67176
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 4900,
+          "firstReadMs": 0.9268339999999853,
+          "elapsedMs": 1.6722910000000297,
+          "jsonBytes": 67176
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 4900,
+          "firstReadMs": 0.9268339999999853,
+          "elapsedMs": 1.0598339999999666,
+          "jsonBytes": 67176
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "firstReadMs": 26.368416000000025,
+          "elapsedMs": 0.9832910000000084,
+          "jsonBytes": 70636
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "firstReadMs": 26.368416000000025,
+          "elapsedMs": 0.9746660000000134,
+          "jsonBytes": 70636
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "firstReadMs": 26.368416000000025,
+          "elapsedMs": 0.9287080000000287,
+          "jsonBytes": 70636
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 100,
+          "firstReadMs": 0.12324999999998454,
+          "elapsedMs": 0.1083749999999668,
+          "jsonBytes": 7894
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 100,
+          "firstReadMs": 0.12324999999998454,
+          "elapsedMs": 0.12375000000002956,
+          "jsonBytes": 7894
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 100,
+          "firstReadMs": 0.12324999999998454,
+          "elapsedMs": 0.14575000000002092,
+          "jsonBytes": 7894
+        }
+      ]
+    },
+    {
+      "count": 300000,
+      "snapshot": {
+        "libraryId": 1,
+        "runId": "probe",
+        "finishedAt": "2026-09-11T00:00:00Z"
+      },
+      "sourceBytes": 87939146,
+      "indexBytes": 206848000,
+      "buildMs": 1631.4101670000002,
+      "samples": [
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "firstReadMs": 267.12987499999963,
+          "elapsedMs": 1.1516249999999673,
+          "jsonBytes": 70047
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "firstReadMs": 267.12987499999963,
+          "elapsedMs": 1.238416000000143,
+          "jsonBytes": 70047
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "firstReadMs": 267.12987499999963,
+          "elapsedMs": 1.2266659999995682,
+          "jsonBytes": 70047
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 299900,
+          "firstReadMs": 1.2277500000000146,
+          "elapsedMs": 1.1512500000003456,
+          "jsonBytes": 71282
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 299900,
+          "firstReadMs": 1.2277500000000146,
+          "elapsedMs": 1.1408329999999296,
+          "jsonBytes": 71282
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 299900,
+          "firstReadMs": 1.2277500000000146,
+          "elapsedMs": 1.1032500000001164,
+          "jsonBytes": 71282
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "firstReadMs": 133.51974999999993,
+          "elapsedMs": 1.302458999999999,
+          "jsonBytes": 76657
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "firstReadMs": 133.51974999999993,
+          "elapsedMs": 1.1384579999999005,
+          "jsonBytes": 76657
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "firstReadMs": 133.51974999999993,
+          "elapsedMs": 1.0284590000001117,
+          "jsonBytes": 76657
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 149900,
+          "firstReadMs": 1.1164169999997284,
+          "elapsedMs": 1.0824589999997443,
+          "jsonBytes": 77782
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 149900,
+          "firstReadMs": 1.1164169999997284,
+          "elapsedMs": 1.0976250000003347,
+          "jsonBytes": 77782
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 149900,
+          "firstReadMs": 1.1164169999997284,
+          "elapsedMs": 1.163332999999966,
+          "jsonBytes": 77782
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "firstReadMs": 125.13283299999966,
+          "elapsedMs": 1.0222090000002026,
+          "jsonBytes": 66657
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "firstReadMs": 125.13283299999966,
+          "elapsedMs": 0.9393330000002607,
+          "jsonBytes": 66657
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "firstReadMs": 125.13283299999966,
+          "elapsedMs": 0.956166000000394,
+          "jsonBytes": 66657
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 149900,
+          "firstReadMs": 0.977125000000342,
+          "elapsedMs": 0.9260420000000522,
+          "jsonBytes": 67782
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 149900,
+          "firstReadMs": 0.977125000000342,
+          "elapsedMs": 0.9775840000002063,
+          "jsonBytes": 67782
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 149900,
+          "firstReadMs": 0.977125000000342,
+          "elapsedMs": 0.9587500000002365,
+          "jsonBytes": 67782
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "firstReadMs": 700.0529579999998,
+          "elapsedMs": 1.051792000000205,
+          "jsonBytes": 70640
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "firstReadMs": 700.0529579999998,
+          "elapsedMs": 1.0747499999997672,
+          "jsonBytes": 70640
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "firstReadMs": 700.0529579999998,
+          "elapsedMs": 1.0012909999995827,
+          "jsonBytes": 70640
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 11100,
+          "firstReadMs": 0.12779200000022684,
+          "elapsedMs": 0.1123330000000351,
+          "jsonBytes": 7966
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 11100,
+          "firstReadMs": 0.12779200000022684,
+          "elapsedMs": 0.11529199999949924,
+          "jsonBytes": 7966
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 11100,
+          "firstReadMs": 0.12779200000022684,
+          "elapsedMs": 0.12320799999997689,
+          "jsonBytes": 7966
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Actual readonly factory with views=true; 128MiB source/256MiB TEMP/1MiB page.",
+    "One build per scale; firstReadMs includes cold query preparation on each first offset, then three warm samples. Full legacy oracle retained; assertions excluded. indexBytes reports initial index before derived match table, not runtime total.",
+    "No persistent unrecognized rows or resource changes in this timing fixture; mixed semantics covered by module tests.",
+    "Not p95/cold/Windows/HDD/UI/IPC/peak memory; SQL synchronous here, production worker integration still pending."
+  ]
+}
+✔ measures combined audit views against historical full-array output (3994.150917ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4233.099417

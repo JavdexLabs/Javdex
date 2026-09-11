@@ -1,0 +1,2116 @@
+diff --git a/electron.vite.config.ts b/electron.vite.config.ts
+index 8b6dd44..c929a69 100644
+--- a/electron.vite.config.ts
++++ b/electron.vite.config.ts
+@@ -115,7 +115,8 @@ export default defineConfig({
+     build: {
+       rollupOptions: {
+         input: {
+-          index: resolve('src/main/index.ts')
++          index: resolve('src/main/index.ts'),
++          catalogReadWorker: resolve('src/main/services/catalogReadWorker.ts')
+         }
+       }
+     }
+diff --git a/package-lock.json b/package-lock.json
+index 0d78c3f..b2aadad 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -20,6 +20,7 @@
+         "music-metadata": "^11.14.0",
+         "playwright-core": "1.62.1",
+         "qrcode": "^1.5.4",
++        "sharp": "0.35.4",
+         "socks": "2.8.9",
+         "strtok3": "^10.3.5",
+         "undici": "^7.28.0",
+@@ -45,6 +46,7 @@
+         "electron": "43.4.1",
+         "electron-builder": "^26.15.3",
+         "electron-vite": "^5.0.0",
++        "esbuild": "0.25.12",
+         "eslint": "^9.39.5",
+         "eslint-plugin-react-hooks": "^7.1.1",
+         "globals": "^16.5.0",
+@@ -2704,6 +2706,16 @@
+         "node": ">=14.14"
+       }
+     },
++    "node_modules/@emnapi/runtime": {
++      "version": "1.11.3",
++      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz",
++      "integrity": "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "tslib": "^2.4.0"
++      }
++    },
+     "node_modules/@esbuild/aix-ppc64": {
+       "version": "0.25.12",
+       "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.25.12.tgz",
+@@ -3477,6 +3489,506 @@
+         "url": "https://github.com/sponsors/nzakas"
+       }
+     },
++    "node_modules/@img/colour": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
++      "integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@img/sharp-darwin-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.35.4.tgz",
++      "integrity": "sha512-Uhfl4V4lhP2nbUVF9+hyH1+luj86f1gUFeo8ALYxFoULoU+G87D43BfeMP8XHsk9boxAnCY/bf2EHwhA7MuGsA==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-darwin-arm64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-darwin-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.35.4.tgz",
++      "integrity": "sha512-hWniXY3bG5qKpkKrAwPe4y+VTPmf086YQAnkxWh7uA1YrlRouWGa0M0Mxj3ZjnXFkv7/TD1bTy9lGUK26vRvWw==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-darwin-x64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-freebsd-wasm32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-freebsd-wasm32/-/sharp-freebsd-wasm32-0.35.4.tgz",
++      "integrity": "sha512-lIsKw/BU+kjB4eZjxrYrZmwOJYi3Ajrv66iAlBmUPyKc3HpnloevB1g3wxGD9P/5BbQ1brBGl65VRRrCvQDEqA==",
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "dependencies": {
++        "@img/sharp-wasm32": "0.35.4"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-darwin-arm64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.3.tgz",
++      "integrity": "sha512-suTBPTDGrI9WodccaDdwZItTSaBYASlBk1NSfElSHrUfzu3szG6lvIF58+WiFvnfzuK8ZBFS5zE00PxqxnRiPg==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-darwin-x64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.3.tgz",
++      "integrity": "sha512-FVJZ5mITMobmXIz/hPDTw0EintTW5H3WfrxwLqEqjiIihlu+hVRyGrFQ60xl0Lxn7Bt3zdpevPaQi0HEzqz9fw==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-arm": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.3.3.tgz",
++      "integrity": "sha512-3rbU4vqXXc3hY/OiXdl52xZvT0F1yEngWfvqudtPJg/KkyiaQw2DRsFrNzpmLvfavbwOq3qXn36GP8obHRULQA==",
++      "cpu": [
++        "arm"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-arm64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.3.3.tgz",
++      "integrity": "sha512-0DaL0A6Xu6sQSQFwe4iVCrKWU2cCTItnRsYsCdxAMm9NF6twAA9BKnoqy4hqz4+azQ0JHuA26qiUKsf1XJ/v5A==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-ppc64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.3.3.tgz",
++      "integrity": "sha512-cdn1OvUBwsXhbC0zSzJnNzf5MZ/mTrobawDvNXBTxe8VtqKAm0sRuEY2Evzovb/w9JMk4TvRxqt1mekSuJz64w==",
++      "cpu": [
++        "ppc64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-riscv64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.3.3.tgz",
++      "integrity": "sha512-HjPVx7yKz+0lqdhDlTw1tt90wamBoxhiXpvl1XZpJLiHH4RCJ5yDTqH+VlYPv2fwFs89JFw4c1IexYOcQUi4IQ==",
++      "cpu": [
++        "riscv64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-s390x": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.3.3.tgz",
++      "integrity": "sha512-neWLh+3yCNThxnfy3c4BbVBeGgt9aftno+XbT56iK28RgeDs3UOFWviLWlUu0bArYVYJaFDK+RRohbicUNCm8Q==",
++      "cpu": [
++        "s390x"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-x64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.3.tgz",
++      "integrity": "sha512-4vKmvAst9nrowcqquKFAyZJUDolUaIp8uRiN0mWFguJ1IplC9/pitXtlnnlU4aa/eJw3J7i67V+pwUL+wZGdsA==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linuxmusl-arm64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.3.3.tgz",
++      "integrity": "sha512-Y9kQaLMuNoB0bPYOOdcZMaseNrFpPodIWWMrx+CZyydf2xn68j9WYc6sWWRrDwNkzCQjKYfc68L7jKjGlHMibw==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linuxmusl-x64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.3.3.tgz",
++      "integrity": "sha512-fj8Mv0HHfD1Rr+4I68+3agJynxDWtBFgicTbSOb9Bke6pIwzGcJ+RX/yHjmiEGFMCavY/dxvem7MyNaJF+wDiw==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-linux-arm": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.35.4.tgz",
++      "integrity": "sha512-7OAS8gI0EReKGVN2HssHlM6umJgxF5VI3xN0p9FA91p/YO+ou5hiNghLdZ5BEHztwaaK5+bLKRf8x/o2L2nk9A==",
++      "cpu": [
++        "arm"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-arm": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.35.4.tgz",
++      "integrity": "sha512-De4jpEnAU8Hd5oT0j1G3uL4ZvTuipVMn7YC6vPaJhy6/7EwEae0SVAoBrUMYQbkLGDm85taVWwuPc1a44LTzCQ==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-arm64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-ppc64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.35.4.tgz",
++      "integrity": "sha512-2oYZJeIl4kCcMGk4ouZVjnkCtFrpQFlNEtJ6GbxzhHQchwH0NH/qEb9ykmOl29dqwMq+JhFdZn+1ak2FKhI9fQ==",
++      "cpu": [
++        "ppc64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-ppc64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-riscv64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.35.4.tgz",
++      "integrity": "sha512-cPbNChoRURAWdebDIHSenxRpgEdy7JkPydSnUxRm9VvKD7m0/xVaR/8Fzlu81pk5nHEvHH87UZUA7cTtwnbJSA==",
++      "cpu": [
++        "riscv64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-riscv64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-s390x": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.35.4.tgz",
++      "integrity": "sha512-RY0JFY8Fd6RonCBtHz+DvadaPkXDSI1AUn6yWL9TipqkZ1vY8w8evqdgyDFnkm4/K1ve1TvZiaePP5oSd4+WVQ==",
++      "cpu": [
++        "s390x"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-s390x": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.4.tgz",
++      "integrity": "sha512-9qvvEAuk8k89TfWUoX2htWjbAMX8p+NxCppjpcg5k6xMsjhBQPTsoIh36h9Qde4WRuGpJeYnOjdosDn/cnv+OA==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-x64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linuxmusl-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.35.4.tgz",
++      "integrity": "sha512-KB5jxpfWQTr0nc3xdHtWChdbifHrBGsd2SM62Eyxrl8afikm+f5qGBU75SJIZBT/S1MC8XyacdlXBMSWq6OURA==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linuxmusl-arm64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linuxmusl-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.35.4.tgz",
++      "integrity": "sha512-f+eZJZIQNEEd26RPSW+76chwOf1XtA2Y/O+5ocVyLliHkeih3e+jhLVBdNTd2rS3IbNXK8+ug93Vf5ZXtF5Lxg==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linuxmusl-x64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-wasm32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.4.tgz",
++      "integrity": "sha512-zQnl4Kwp7Q6NHsENtU2T/00Zi+w3AQNwz3+UaTyVBy2FpXrzXzGjndpK61onhZjRtRpQXxCTeqw19bVyXOh7jA==",
++      "license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
++      "optional": true,
++      "dependencies": {
++        "@emnapi/runtime": "^1.11.3"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-webcontainers-wasm32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-webcontainers-wasm32/-/sharp-webcontainers-wasm32-0.35.4.tgz",
++      "integrity": "sha512-ESfNkywmCfPNyaZjxooddJQiQ+l/nTpGEOGthxiLnIHXC/CmcBixnfwUleX9mCz9ovrUUvKMap/pm8RYbzfwaA==",
++      "cpu": [
++        "wasm32"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "dependencies": {
++        "@img/sharp-wasm32": "0.35.4"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.35.4.tgz",
++      "integrity": "sha512-iNdlBX9gLVvqe2I3uIJSIKTq6wckP/DYxZtcqxm09x5Gi24DnFBmPAWZmr60ZyYMG0xlzo6goG3670ar+RXvRw==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-ia32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.35.4.tgz",
++      "integrity": "sha512-kqRsbaa5CS6KHlpxnN7WhE6vAAugXyZButpRdvDWetlv6Qv4N9WTcrWzF7tXfB9T7MsoadqdI8hmwLq6UlLvtw==",
++      "cpu": [
++        "ia32"
++      ],
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": "^20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.4.tgz",
++      "integrity": "sha512-XtmnYhBcrORsJ4XJngyzr/EWP0hRZLAZRFaApdKuviyqF78+ylxh2y06ZmtULAMOnObJ3ucpN0AcwSWnMowTRg==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
+     "node_modules/@isaacs/fs-minipass": {
+       "version": "4.0.1",
+       "resolved": "https://registry.npmjs.org/@isaacs/fs-minipass/-/fs-minipass-4.0.1.tgz",
+@@ -6258,6 +6770,15 @@
+         "node": ">=6"
+       }
+     },
++    "node_modules/detect-libc": {
++      "version": "2.1.2",
++      "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
++      "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
++      "license": "Apache-2.0",
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/detect-node": {
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/detect-node/-/detect-node-2.1.0.tgz",
+@@ -11398,10 +11919,9 @@
+       }
+     },
+     "node_modules/semver": {
+-      "version": "7.8.1",
+-      "resolved": "https://registry.npmmirror.com/semver/-/semver-7.8.1.tgz",
+-      "integrity": "sha512-rkVq3IXh+4FDGch+KwzX3aV9W3kO54GyEgpvBzSyctDA6Xtd7RJQV1xmXbeQp5v7+VzLOfVqiutSE6GICgPFvg==",
+-      "dev": true,
++      "version": "7.8.5",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
++      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+       "license": "ISC",
+       "bin": {
+         "semver": "bin/semver.js"
+@@ -11529,6 +12049,55 @@
+       "devOptional": true,
+       "license": "ISC"
+     },
++    "node_modules/sharp": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz",
++      "integrity": "sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "@img/colour": "^1.1.0",
++        "detect-libc": "^2.1.2",
++        "semver": "^7.8.5"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-darwin-arm64": "0.35.4",
++        "@img/sharp-darwin-x64": "0.35.4",
++        "@img/sharp-freebsd-wasm32": "0.35.4",
++        "@img/sharp-libvips-darwin-arm64": "1.3.3",
++        "@img/sharp-libvips-darwin-x64": "1.3.3",
++        "@img/sharp-libvips-linux-arm": "1.3.3",
++        "@img/sharp-libvips-linux-arm64": "1.3.3",
++        "@img/sharp-libvips-linux-ppc64": "1.3.3",
++        "@img/sharp-libvips-linux-riscv64": "1.3.3",
++        "@img/sharp-libvips-linux-s390x": "1.3.3",
++        "@img/sharp-libvips-linux-x64": "1.3.3",
++        "@img/sharp-libvips-linuxmusl-arm64": "1.3.3",
++        "@img/sharp-libvips-linuxmusl-x64": "1.3.3",
++        "@img/sharp-linux-arm": "0.35.4",
++        "@img/sharp-linux-arm64": "0.35.4",
++        "@img/sharp-linux-ppc64": "0.35.4",
++        "@img/sharp-linux-riscv64": "0.35.4",
++        "@img/sharp-linux-s390x": "0.35.4",
++        "@img/sharp-linux-x64": "0.35.4",
++        "@img/sharp-linuxmusl-arm64": "0.35.4",
++        "@img/sharp-linuxmusl-x64": "0.35.4",
++        "@img/sharp-webcontainers-wasm32": "0.35.4",
++        "@img/sharp-win32-arm64": "0.35.4",
++        "@img/sharp-win32-ia32": "0.35.4",
++        "@img/sharp-win32-x64": "0.35.4"
++      },
++      "peerDependenciesMeta": {
++        "@types/node": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/shebang-command": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmmirror.com/shebang-command/-/shebang-command-2.0.0.tgz",
+@@ -12289,7 +12858,7 @@
+       "version": "2.8.1",
+       "resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
+       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
+-      "dev": true,
++      "devOptional": true,
+       "license": "0BSD"
+     },
+     "node_modules/tsx": {
+diff --git a/package.json b/package.json
+index 8197321..7040077 100644
+--- a/package.json
++++ b/package.json
+@@ -58,6 +58,7 @@
+     "music-metadata": "^11.14.0",
+     "playwright-core": "1.62.1",
+     "qrcode": "^1.5.4",
++    "sharp": "0.35.4",
+     "socks": "2.8.9",
+     "strtok3": "^10.3.5",
+     "undici": "^7.28.0",
+@@ -83,6 +84,7 @@
+     "electron": "43.4.1",
+     "electron-builder": "^26.15.3",
+     "electron-vite": "^5.0.0",
++    "esbuild": "0.25.12",
+     "eslint": "^9.39.5",
+     "eslint-plugin-react-hooks": "^7.1.1",
+     "globals": "^16.5.0",
+diff --git a/scripts/check-actress-boundaries.mjs b/scripts/check-actress-boundaries.mjs
+index e5866d5..c8c0c5f 100644
+--- a/scripts/check-actress-boundaries.mjs
++++ b/scripts/check-actress-boundaries.mjs
+@@ -160,6 +160,7 @@ for (const specifier of importsOf(videoHandler)) {
+ const classificationHandler = 'src/main/ipc/facetHandlers.ts'
+ const classificationApplicationSeams = new Set([
+   '../services/tagQueryService',
++  '../services/catalogReadService',
+   '../services/classificationQueryService',
+   '../services/classificationMaintenanceService',
+   '../services/classificationImageService',
+diff --git a/src/main/appMain.ts b/src/main/appMain.ts
+index 5c6f461..5119633 100644
+--- a/src/main/appMain.ts
++++ b/src/main/appMain.ts
+@@ -8,12 +8,13 @@ import { applyAppIcons, resolveWindowIcon } from './appIcon'
+ import { configureAppIdentity } from './appPaths'
+ import fs from 'node:fs'
+ import { initDatabaseAtPath, closeDatabase } from './db/database'
++import { catalogReadService } from './services/catalogReadService'
+ import { recoverInterruptedLibraryScanRuns } from './db/libraryScanRepo'
+ import { mediaAssetStore } from './services/mediaAssetStore'
+ import { registerIpcHandlers } from './ipc'
+ import { scrapeBrowser } from './scrapers/scrapeBrowser'
+ import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
+-import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
++import { serveMediaAssetRequest } from './services/mediaProtocol'
+ import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
+ import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
+ import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
+@@ -133,31 +134,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
+ 
+ /** Serve files from the media_assets directory through the media:// scheme. */
+ function registerAssetProtocol(): void {
+-  protocol.handle('media', (request) => {
+-    const root = mediaAssetStore.rootPath()
+-    const abs = resolveMediaAssetPath(request.url, root)
+-
+-    const corsHeaders = {
+-      'Access-Control-Allow-Origin': '*',
+-      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+-      'Access-Control-Allow-Headers': '*'
+-    }
+-    if (request.method === 'OPTIONS') {
+-      return new Response(null, { status: 204, headers: corsHeaders })
+-    }
+-    if (!abs) {
+-      return new Response('Forbidden', { status: 403, headers: corsHeaders })
+-    }
+-    try {
+-      const relPosix = toStoredAssetPath(abs, root)
+-      const { body, mime } = mediaAssetStore.readForServe(relPosix)
+-      return new Response(body, {
+-        headers: { 'Content-Type': mime, ...corsHeaders }
+-      })
+-    } catch {
+-      return new Response('Not Found', { status: 404, headers: corsHeaders })
+-    }
+-  })
++  protocol.handle('media', (request) => serveMediaAssetRequest(request, mediaAssetStore))
+ }
+ 
+ if (gotSingleInstanceLock) {
+@@ -245,7 +222,12 @@ if (gotSingleInstanceLock) {
+     shutdownInProgress = true
+     automaticScanScheduler.stop()
+     powerMonitor.off('resume', handleSystemResume)
++    let readerTerminationFailed = false
+     void Promise.allSettled([
++      catalogReadService.dispose().catch((error: unknown) => {
++        readerTerminationFailed = true
++        console.error('[catalog-reader] Failed to confirm termination', error)
++      }),
+       webAccess.stop(),
+       pluginDeveloper.dispose(),
+       libraryCurator.dispose(),
+@@ -258,6 +240,12 @@ if (gotSingleInstanceLock) {
+       ]))
+       .finally(() => {
+         destroyAppTray()
++        if (readerTerminationFailed) {
++          // Do not report a clean database shutdown while a native reader may
++          // still be alive. Other product cleanup has settled before process exit.
++          app.exit(1)
++          return
++        }
+         closeDatabase()
+         shutdownReady = true
+         app.quit()
+diff --git a/src/main/db/database.ts b/src/main/db/database.ts
+index 323e056..0a790d6 100644
+--- a/src/main/db/database.ts
++++ b/src/main/db/database.ts
+@@ -1,20 +1,32 @@
+ import Database from 'better-sqlite3'
+-import { migrateDatabase } from './migrations'
++import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
+ import { normalizeActressName } from './actressNameNormalization'
+ 
+ let db: Database.Database | null = null
+ 
++/** Invalidates a short-lived read cache after writes on this or another connection. */
++export function getDatabaseReadRevision(connection: Database.Database = getDb()): {
++  connection: object
++  changes: number
++  dataVersion: number
++} {
++  return {
++    connection,
++    changes: (connection.prepare('SELECT total_changes() AS count').get() as { count: number }).count,
++    dataVersion: connection.pragma('data_version', { simple: true }) as number
++  }
++}
++
+ export function initDatabaseAtPath(dbPath: string): Database.Database {
+   if (db) return db
+   return openDatabase(dbPath)
+ }
+ 
+-function openDatabase(dbPath: string): Database.Database {
+-  db = new Database(dbPath)
+-  // Performance + integrity pragmas.
+-  db.pragma('journal_mode = WAL')
+-  db.pragma('foreign_keys = ON')
+-  db.function('normalize_actress_name', { deterministic: true }, (value: unknown) => {
++function registerReadFunctions(connection: Database.Database): void {
++  // Match renderer Unicode search semantics on both writer and reader connections.
++  connection.function('tag_name_contains_folded', { deterministic: true }, (name: unknown, folded: unknown) =>
++    typeof name === 'string' && typeof folded === 'string' && name.toLowerCase().includes(folded) ? 1 : 0)
++  connection.function('normalize_actress_name', { deterministic: true }, (value: unknown) => {
+     if (typeof value !== 'string') return null
+     try {
+       return normalizeActressName(value)
+@@ -22,10 +34,43 @@ function openDatabase(dbPath: string): Database.Database {
+       return null
+     }
+   })
++}
+ 
+-  migrateDatabase(db)
++function openDatabase(dbPath: string): Database.Database {
++  const connection = new Database(dbPath)
++  try {
++    connection.pragma('journal_mode = WAL')
++    connection.pragma('foreign_keys = ON')
++    registerReadFunctions(connection)
++    migrateDatabase(connection)
++    // Publish only a completely initialized connection. Failure must allow retry.
++    db = connection
++    return connection
++  } catch (error) {
++    connection.close()
++    throw error
++  }
++}
+ 
+-  return db
++/** Caller-owned reader for an already migrated catalog; never initializes or migrates it. */
++export function openReadOnlyDatabaseAtPath(dbPath: string): Database.Database {
++  const connection = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 1000 })
++  try {
++    connection.pragma('query_only = ON')
++    connection.pragma('foreign_keys = ON')
++    const version = Number(connection.pragma('user_version', { simple: true }))
++    if (version !== CURRENT_SCHEMA_VERSION) {
++      throw new Error(`Catalog reader requires schema ${CURRENT_SCHEMA_VERSION}; found ${version}`)
++    }
++    if (connection.pragma('journal_mode', { simple: true }) !== 'wal') {
++      throw new Error('Catalog reader requires WAL mode')
++    }
++    registerReadFunctions(connection)
++    return connection
++  } catch (error) {
++    connection.close()
++    throw error
++  }
+ }
+ 
+ export function getDb(): Database.Database {
+diff --git a/src/main/db/tagRepo.ts b/src/main/db/tagRepo.ts
+index 3382a1e..d832827 100644
+--- a/src/main/db/tagRepo.ts
++++ b/src/main/db/tagRepo.ts
+@@ -1,5 +1,6 @@
++import type Database from 'better-sqlite3'
+ import { getDb } from './database'
+-import type { TagListItem } from '@shared/commonTypes'
++import type { TagLabel, TagListItem, TagOptionsPage, TagOptionsQuery, TagFilterOptionsPage } from '@shared/commonTypes'
+ 
+ /** Find or create a tag, returning its id. */
+ export function ensureTag(name: string): number {
+@@ -15,47 +16,109 @@ export function ensureTag(name: string): number {
+ 
+ export type { TagListItem }
+ 
++function queryTags(manualOnly: boolean): TagListItem[] {
++  // Materialize visibility once; shared membership must not multiply relationship counts.
++  // The uncorrelated manual-tag set also retains invisible-only associations.
++  // A correlated EXISTS can repeatedly scan all manual links under skewed statistics.
++  return getDb().prepare(
++    `WITH members AS MATERIALIZED (
++       SELECT DISTINCT membership.video_id
++       FROM library_video_memberships membership
++       JOIN media_libraries library ON library.id = membership.library_id
++       WHERE membership.is_hidden = 0 AND library.status = 'active'
++     ), counts AS (
++       SELECT vt.tag_id, COUNT(members.video_id) AS video_count
++       FROM video_tag vt JOIN members ON members.video_id = vt.video_id
++       ${manualOnly ? "WHERE vt.origin = 'manual'" : ''}
++       GROUP BY vt.tag_id
++     )
++     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count
++     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id
++     ${manualOnly ? `WHERE t.id IN (
++       SELECT manual_link.tag_id FROM video_tag manual_link
++       WHERE manual_link.origin = 'manual'
++     )` : ''}
++     ORDER BY video_count DESC, t.name`
++  ).all() as TagListItem[]
++}
++
+ export function listTags(): TagListItem[] {
+-  const db = getDb()
+-  return db
+-    .prepare(
+-      `SELECT t.*, COUNT(
+-         CASE WHEN EXISTS (
+-           SELECT 1
+-           FROM library_video_memberships membership
+-           JOIN media_libraries library ON library.id = membership.library_id
+-           WHERE membership.video_id = vt.video_id
+-             AND membership.is_hidden = 0
+-             AND library.status = 'active'
+-         ) THEN vt.video_id END
+-       ) AS video_count
+-       FROM tags t
+-       LEFT JOIN video_tag vt ON vt.tag_id = t.id
+-       GROUP BY t.id
+-       ORDER BY video_count DESC, t.name`
+-    )
+-    .all() as TagListItem[]
++  return queryTags(false)
+ }
+ 
+-/** Tags that appear as custom/manual on at least one video. */
++/** Tags with any manual association, including ones with no currently visible videos. */
+ export function listManualTags(): TagListItem[] {
+-  const db = getDb()
+-  return db
+-    .prepare(
+-      `SELECT t.*, COUNT(DISTINCT CASE WHEN EXISTS (
+-         SELECT 1
+-         FROM library_video_memberships membership
+-         JOIN media_libraries library ON library.id = membership.library_id
+-         WHERE membership.video_id = vt.video_id
+-           AND membership.is_hidden = 0
+-           AND library.status = 'active'
+-       ) THEN vt.video_id END) AS video_count
+-       FROM tags t
+-       JOIN video_tag vt ON vt.tag_id = t.id AND vt.origin = 'manual'
+-       GROUP BY t.id
+-       ORDER BY video_count DESC, t.name`
++  return queryTags(true)
++}
++
++/** Resolve only selected filter labels, without scanning relationships or computing counts. */
++export function getTagLabels(ids: number[]): TagLabel[] {
++  if (ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) {
++    throw new Error('标签名称查询最多接受100个有效ID')
++  }
++  const selected = [...new Set(ids)]
++  if (selected.length === 0) return []
++  // 100 labels of at most 129 code points keep even JSON-escaped control text below 96KiB.
++  // Full names remain in the database; this DTO is only for filter-chip display.
++  return getDb().prepare(`SELECT id,
++    substr(name, 1, 128) || CASE WHEN length(name) > 128 THEN '…' ELSE '' END AS label
++    FROM tags WHERE id IN (${selected.map(() => '?').join(',')}) ORDER BY id`
++  ).all(...selected) as TagLabel[]
++}
++
++/** Validate raw input before folding; Unicode folding may expand beyond 500 chars. */
++export function normalizeTagOptionsQuery(query: TagOptionsQuery): { limit: number; offset: number; search: string } {
++  const limit = query.limit ?? 100
++  const offset = query.offset ?? 0
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
++    || !Number.isSafeInteger(offset) || offset < 0
++    || (query.search !== undefined && (typeof query.search !== 'string' || query.search.length > 500))) {
++    throw new Error('无效的标签候选查询')
++  }
++  const search = (query.search ?? '').trim().toLowerCase()
++  return { limit, offset, search }
++}
++
++/** Alphabetical manual-tag candidates, with no visibility counts or full-name payloads. */
++export function listManualTagOptions(query: TagOptionsQuery): TagOptionsPage {
++  const { limit, offset, search } = normalizeTagOptionsQuery(query)
++  // Pin the existing tag-key path: skewed statistics can otherwise select origin
++  // for every outer tag and repeatedly scan all manual relationships.
++  const rows = getDb().prepare(`SELECT t.id,
++      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label
++    FROM tags t
++    WHERE ${search ? 'tag_name_contains_folded(t.name, ?) AND' : ''} EXISTS (
++      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id
++      WHERE vt.tag_id = t.id AND vt.origin = 'manual'
+     )
+-    .all() as TagListItem[]
++    ORDER BY t.name LIMIT ? OFFSET ?`
++  ).all(...(search ? [search] : []), limit + 1, offset) as TagLabel[]
++  return { items: rows.slice(0, limit), hasMore: rows.length > limit }
++}
++
++/** Select a bounded name page before counting its visible associations. */
++export function listTagFilterOptions(query: TagOptionsQuery, connection?: Database.Database): TagFilterOptionsPage {
++  const { limit, offset, search } = normalizeTagOptionsQuery(query)
++  const db = connection ?? getDb()
++  return db.transaction(() => {
++    const rows = db.prepare(`SELECT id,
++      substr(name, 1, 128) || CASE WHEN length(name) > 128 THEN '…' ELSE '' END AS label
++      FROM tags ${search ? 'WHERE tag_name_contains_folded(name, ?)' : ''}
++      ORDER BY name, id LIMIT ? OFFSET ?`)
++      .all(...(search ? [search] : []), limit + 1, offset) as TagLabel[]
++    const page = rows.slice(0, limit)
++    if (page.length === 0) return { items: [], hasMore: false }
++    // video_tag PK makes each video/tag pair unique; EXISTS avoids counting
++    // shared library memberships twice. All origins and zero-count tags remain.
++    const counts = db.prepare(`SELECT vt.tag_id, COUNT(*) AS video_count
++      FROM video_tag vt INDEXED BY idx_video_tag_tag_id
++      WHERE vt.tag_id IN (${page.map(() => '?').join(',')}) AND EXISTS (
++        SELECT 1 FROM library_video_memberships m JOIN media_libraries l ON l.id=m.library_id
++        WHERE m.video_id=vt.video_id AND m.is_hidden=0 AND l.status='active'
++      ) GROUP BY vt.tag_id`).all(...page.map(row => row.id)) as { tag_id: number; video_count: number }[]
++    const byId = new Map(counts.map(row => [row.tag_id, row.video_count]))
++    return { items: page.map(row => ({ ...row, video_count: byId.get(row.id) ?? 0 })), hasMore: rows.length > limit }
++  })()
+ }
+ 
+ /** Drop tag row when it has no video associations left (e.g. last manual link removed). */
+diff --git a/src/main/ipc/facetHandlers.ts b/src/main/ipc/facetHandlers.ts
+index 2378b30..4a9a697 100644
+--- a/src/main/ipc/facetHandlers.ts
++++ b/src/main/ipc/facetHandlers.ts
+@@ -1,6 +1,7 @@
+ import { IPC } from '@shared/ipc-channels'
+ import { appCommandAdapter } from './appContractAdapter'
+ import { tagQueryService } from '../services/tagQueryService'
++import { catalogReadService } from '../services/catalogReadService'
+ import { classificationQueryService } from '../services/classificationQueryService'
+ import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
+ import { classificationImageService } from '../services/classificationImageService'
+@@ -106,6 +107,9 @@ export function registerClassificationHandlers(
+ }
+ 
+ export function registerFacetHandlers(): void {
++  appCommandAdapter.register(IPC.TAG_LABELS, (ids) => tagQueryService.labels(ids))
++  appCommandAdapter.register(IPC.TAG_FILTER_OPTIONS, (query) => catalogReadService.read(query))
++  appCommandAdapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => tagQueryService.manualOptions(query))
+   appCommandAdapter.register(
+     IPC.TAG_LIST,
+     (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()
+diff --git a/src/main/services/tagQueryService.ts b/src/main/services/tagQueryService.ts
+index 31f9616..c4dcde6 100644
+--- a/src/main/services/tagQueryService.ts
++++ b/src/main/services/tagQueryService.ts
+@@ -1,12 +1,67 @@
+-import type { TagListItem } from '@shared/commonTypes'
+-import { listManualTags, listTags } from '../db/tagRepo'
++import type Database from 'better-sqlite3'
++import type { TagLabel, TagListItem, TagOptionsPage, TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
++import { getDatabaseReadRevision, getDb } from '../db/database'
++import { getTagLabels, listTagFilterOptions, normalizeTagOptionsQuery, listManualTagOptions, listManualTags, listTags } from '../db/tagRepo'
+ 
+ export interface TagQueryService {
+   list(): TagListItem[]
+   listManual(): TagListItem[]
++  labels(ids: number[]): TagLabel[]
++  filterOptions(query: TagOptionsQuery): TagFilterOptionsPage
++  manualOptions(query: TagOptionsQuery): TagOptionsPage
++}
++
++/** A private cache bound to the supplied connection provider; safe for independent workers. */
++export function createTagFilterOptionsReader(getConnection: () => Database.Database = getDb): (query: TagOptionsQuery) => TagFilterOptionsPage {
++  // Keep at most eight pages and 512KiB of UTF-8 serialized keys/results.
++  // JS strings may use more heap than their UTF-8 encoding; this is not a total RSS budget.
++  const pageCache = new Map<string, { json: string; bytes: number }>()
++  let cachedBytes = 0
++  let revision: (ReturnType<typeof getDatabaseReadRevision> & { schemaVersion: number }) | undefined
++  function readRevision(connection: Database.Database) {
++    return { ...getDatabaseReadRevision(connection), schemaVersion: connection.pragma('schema_version', { simple: true }) as number }
++  }
++  function sameRevision(a: typeof revision, b: NonNullable<typeof revision>): boolean {
++    return a?.connection === b.connection && a.changes === b.changes
++      && a.dataVersion === b.dataVersion && a.schemaVersion === b.schemaVersion
++  }
++  return function filterOptions(query: TagOptionsQuery): TagFilterOptionsPage {
++    const normalized = normalizeTagOptionsQuery(query)
++    const connection = getConnection()
++    // Reads inside another transaction must use its snapshot and must never
++    // publish uncommitted data (including reads followed by rollback).
++    if (connection.inTransaction) return listTagFilterOptions(query, connection)
++    const before = readRevision(connection)
++    if (!sameRevision(revision, before)) {
++      pageCache.clear(); cachedBytes = 0; revision = before
++    }
++    const key = JSON.stringify(normalized)
++    const cached = pageCache.get(key)
++    if (cached) {
++      pageCache.delete(key); pageCache.set(key, cached)
++      return JSON.parse(cached.json) as TagFilterOptionsPage
++    }
++    const result = listTagFilterOptions(query, connection)
++    if (!sameRevision(before, readRevision(connection))) return result
++    // Store a serialization rather than caller-owned mutable arrays/objects.
++    const json = JSON.stringify(result)
++    const bytes = Buffer.byteLength(json) + Buffer.byteLength(key)
++    if (bytes > 512 * 1024) return result
++    while (pageCache.size >= 8 || cachedBytes + bytes > 512 * 1024) {
++      const oldest = pageCache.keys().next().value as string
++      cachedBytes -= pageCache.get(oldest)!.bytes
++      pageCache.delete(oldest)
++    }
++    pageCache.set(key, { json, bytes }); cachedBytes += bytes
++    return result
++  }
++
+ }
+ 
+ export const tagQueryService: TagQueryService = {
+   list: listTags,
+-  listManual: listManualTags
++  listManual: listManualTags,
++  labels: getTagLabels,
++  filterOptions: createTagFilterOptionsReader(),
++  manualOptions: listManualTagOptions
+ }
+diff --git a/src/main/services/catalogReadService.ts b/src/main/services/catalogReadService.ts
+new file mode 100644
+index 0000000..17f920a
+--- /dev/null
++++ b/src/main/services/catalogReadService.ts
+@@ -0,0 +1,17 @@
++import { app } from 'electron'
++import path from 'node:path'
++import { getDatabaseReadRevision, getDb } from '../db/database'
++import { CatalogReadWorkerClient } from './catalogReadWorkerClient'
++import { createCatalogReadWorkerTransport } from './catalogReadWorkerTransport'
++
++/** Lazy startup occurs only after normal writer initialization and IPC registration. */
++export const catalogReadService = new CatalogReadWorkerClient({
++  contextProvider: () => {
++    const connection = getDb()
++    const revision = getDatabaseReadRevision(connection)
++    return { identity: connection, path: connection.name,
++      revision: JSON.stringify([revision.changes, revision.dataVersion, connection.pragma('schema_version', { simple: true })]) }
++  },
++  transportFactory: context => createCatalogReadWorkerTransport(
++    path.join(app.getAppPath(), 'out/main/catalogReadWorker.js'), context.path)
++})
+diff --git a/src/main/services/catalogReadWorker.ts b/src/main/services/catalogReadWorker.ts
+new file mode 100644
+index 0000000..679c8dc
+--- /dev/null
++++ b/src/main/services/catalogReadWorker.ts
+@@ -0,0 +1,27 @@
++import { parentPort, workerData } from 'node:worker_threads'
++import type { TagOptionsQuery } from '@shared/commonTypes'
++import { openReadOnlyDatabaseAtPath } from '../db/database'
++import { createTagFilterOptionsReader } from './tagQueryService'
++
++const port = parentPort
++if (!port || typeof workerData?.databasePath !== 'string') throw new Error('Invalid catalog reader startup')
++const connection = openReadOnlyDatabaseAtPath(workerData.databasePath)
++const read = createTagFilterOptionsReader(() => connection)
++port.on('message', (message: { type?: string; id?: number; query?: TagOptionsQuery }) => {
++  if (message.type === 'close') {
++    connection.close()
++    port.close()
++    return
++  }
++  if (message.type !== 'read' || !Number.isSafeInteger(message.id) || Number(message.id) <= 0) {
++    throw new Error('Invalid catalog reader command')
++  }
++  try {
++    if (!message.query) throw new Error('Missing tag query')
++    const result = read(message.query)
++    port.postMessage({ type: 'result', id: message.id, result })
++  } catch (error) {
++    port.postMessage({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) })
++  }
++})
++port.postMessage({ type: 'ready' })
+diff --git a/src/main/services/catalogReadWorkerClient.ts b/src/main/services/catalogReadWorkerClient.ts
+new file mode 100644
+index 0000000..e4e2c09
+--- /dev/null
++++ b/src/main/services/catalogReadWorkerClient.ts
+@@ -0,0 +1,241 @@
++import type { TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
++
++export interface CatalogReadContext {
++  identity: object
++  path: string
++  revision: string
++}
++
++export type CatalogReadWorkerMessage =
++  | { type: 'ready' }
++  | { type: 'result'; id: number; result: TagFilterOptionsPage }
++  | { type: 'error'; id: number; message: string }
++
++/** Factory returns a transport before it emits ready. off must remove the supplied listener. */
++export interface CatalogReadWorkerTransport {
++  postMessage(message: { type: 'read'; id: number; query: TagOptionsQuery }): void
++  on(event: 'message', listener: (message: CatalogReadWorkerMessage) => void): unknown
++  on(event: 'error', listener: (error: Error) => void): unknown
++  on(event: 'exit', listener: (code: number) => void): unknown
++  off(event: 'message', listener: (message: CatalogReadWorkerMessage) => void): unknown
++  off(event: 'error', listener: (error: Error) => void): unknown
++  off(event: 'exit', listener: (code: number) => void): unknown
++  terminate(): Promise<unknown>
++}
++
++export interface CatalogReadWorkerClientOptions {
++  contextProvider: () => CatalogReadContext
++  transportFactory: (context: CatalogReadContext) => CatalogReadWorkerTransport
++  startupTimeoutMs?: number
++  queryTimeoutMs?: number
++}
++
++interface Subscriber {
++  resolve: (page: TagFilterOptionsPage) => void
++  reject: (error: Error) => void
++  cleanup: () => void
++}
++interface Flight {
++  id: number
++  key: string
++  query: TagOptionsQuery
++  subscribers: Set<Subscriber>
++}
++interface WorkerState {
++  transport: CatalogReadWorkerTransport
++  ready: boolean
++  timer?: ReturnType<typeof setTimeout>
++  detach: () => void
++}
++
++function abortError(): Error {
++  const error = new Error('Catalog read aborted')
++  error.name = 'AbortError'
++  return error
++}
++
++function normalize(query: TagOptionsQuery): Required<TagOptionsQuery> {
++  const { search = '', limit = 100, offset = 0 } = query
++  if (typeof search !== 'string' || search.length > 500
++    || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
++    || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid tag options query')
++  // Keep original casing in the payload: lowercasing can expand a valid 500-unit query.
++  return { search: search.trim(), limit, offset }
++}
++
++/** One worker, one executing query, at most 32 accepted subscribers (including coalesced reads). */
++export class CatalogReadWorkerClient {
++  private context?: CatalogReadContext
++  private worker?: WorkerState
++  private stopping?: Promise<void>
++  private terminationError?: Error
++  private disposed = false
++  private accepted = 0
++  private nextId = 0
++  private flights = new Map<string, Flight>()
++  private queue: Flight[] = []
++  private running?: Flight
++  private readonly startupTimeoutMs: number
++  private readonly queryTimeoutMs: number
++
++  constructor(private readonly options: CatalogReadWorkerClientOptions) {
++    this.startupTimeoutMs = options.startupTimeoutMs ?? 15_000
++    this.queryTimeoutMs = options.queryTimeoutMs ?? 15_000
++    for (const timeout of [this.startupTimeoutMs, this.queryTimeoutMs]) {
++      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 2_147_483_647) {
++        throw new Error('Invalid catalog worker deadline')
++      }
++    }
++  }
++
++  read(query: TagOptionsQuery, signal?: AbortSignal): Promise<TagFilterOptionsPage> {
++    try {
++      if (this.disposed) throw new Error('Catalog read client disposed')
++      if (this.terminationError) throw this.terminationError
++      if (signal?.aborted) throw abortError()
++      const normalized = normalize(query)
++      const context = { ...this.options.contextProvider() }
++      if (this.context && (this.context.identity !== context.identity || this.context.path !== context.path)) {
++        this.fail(new Error('Catalog read context changed'))
++      }
++      this.context = context
++      if (this.accepted >= 32) throw new Error('Catalog read capacity exceeded')
++      const key = JSON.stringify([context.revision, normalized.search.toLowerCase(), normalized.limit, normalized.offset])
++      let flight = this.flights.get(key)
++      if (!flight) {
++        flight = { id: ++this.nextId, key, query: normalized, subscribers: new Set() }
++        this.flights.set(key, flight)
++        this.queue.push(flight)
++      }
++      const selected = flight
++      const promise = new Promise<TagFilterOptionsPage>((resolve, reject) => {
++        const abort = (): void => {
++          this.settleSubscriber(selected, subscriber, abortError())
++          if (selected.subscribers.size === 0 && selected !== this.running) {
++            this.queue = this.queue.filter(item => item !== selected)
++            this.forget(selected)
++          }
++        }
++        const subscriber: Subscriber = {
++          resolve, reject, cleanup: () => signal?.removeEventListener('abort', abort)
++        }
++        selected.subscribers.add(subscriber)
++        this.accepted++
++        signal?.addEventListener('abort', abort, { once: true })
++      })
++      this.pump()
++      return promise
++    } catch (error) {
++      return Promise.reject(error)
++    }
++  }
++
++  /** Rejects immediately; resolution means native worker termination has completed. */
++  async dispose(): Promise<void> {
++    this.disposed = true
++    this.fail(new Error('Catalog read client disposed'))
++    await this.stopping
++    if (this.terminationError) throw this.terminationError
++  }
++
++  private forget(flight: Flight): void {
++    if (this.flights.get(flight.key) === flight) this.flights.delete(flight.key)
++  }
++
++  private settleSubscriber(flight: Flight, subscriber: Subscriber, error?: Error, page?: TagFilterOptionsPage): void {
++    if (!flight.subscribers.delete(subscriber)) return
++    this.accepted--
++    subscriber.cleanup()
++    if (error) subscriber.reject(error)
++    else {
++      try { subscriber.resolve(structuredClone(page!)) }
++      catch (cause) { subscriber.reject(cause instanceof Error ? cause : new Error(String(cause))) }
++    }
++  }
++
++  private rejectAll(error: Error): void {
++    for (const flight of this.flights.values()) {
++      for (const subscriber of flight.subscribers) this.settleSubscriber(flight, subscriber, error)
++    }
++    this.flights.clear()
++    this.queue = []
++    this.running = undefined
++  }
++
++  private fail(error: Error): void {
++    this.rejectAll(error)
++    const worker = this.worker
++    if (!worker) return
++    this.worker = undefined
++    clearTimeout(worker.timer)
++    // Keep error/exit listeners until termination settles: EventEmitter errors must stay handled.
++    this.stopping = Promise.resolve().then(() => worker.transport.terminate()).then(
++      () => {},
++      cause => {
++        this.terminationError = new Error(`Catalog worker termination failed: ${String(cause)}`)
++        this.rejectAll(this.terminationError)
++      }
++    ).then(() => {
++      worker.detach()
++      this.stopping = undefined
++      this.pump()
++    })
++  }
++
++  private pump(): void {
++    if (this.disposed || this.terminationError || this.stopping || !this.queue.length || this.running) return
++    if (!this.worker) {
++      try {
++        const transport = this.options.transportFactory({ ...this.context! })
++        const worker: WorkerState = { transport, ready: false, detach: () => {} }
++        this.worker = worker
++        const message = (event: CatalogReadWorkerMessage): void => {
++          if (this.worker !== worker) return
++          if (!event || typeof event !== 'object') {
++            this.fail(new Error('Unexpected catalog worker message'))
++            return
++          }
++          if (event.type === 'ready' && !worker.ready) {
++            clearTimeout(worker.timer)
++            worker.ready = true
++            this.pump()
++          } else if (event.type === 'result' && this.running && this.running.id === event.id) {
++            clearTimeout(worker.timer)
++            const flight = this.running
++            this.running = undefined
++            this.forget(flight)
++            for (const subscriber of flight.subscribers) this.settleSubscriber(flight, subscriber, undefined, event.result)
++            this.pump()
++          } else if (event.type === 'error') {
++            this.fail(new Error(event.message))
++          } else {
++            this.fail(new Error('Unexpected catalog worker message'))
++          }
++        }
++        const error = (cause: Error): void => { if (this.worker === worker) this.fail(cause) }
++        const exit = (code: number): void => {
++          if (this.worker === worker) this.fail(new Error(`Unexpected catalog worker exit: ${code}`))
++        }
++        worker.detach = () => {
++          transport.off('message', message)
++          transport.off('error', error)
++          transport.off('exit', exit)
++        }
++        transport.on('message', message)
++        transport.on('error', error)
++        transport.on('exit', exit)
++        worker.timer = setTimeout(() => this.fail(new Error('Catalog worker startup timed out')), this.startupTimeoutMs)
++      } catch (error) {
++        this.fail(error instanceof Error ? error : new Error(String(error)))
++      }
++      return
++    }
++    if (!this.worker.ready) return
++    const worker = this.worker
++    const flight = this.queue.shift()!
++    this.running = flight
++    worker.timer = setTimeout(() => this.fail(new Error('Catalog worker query timed out')), this.queryTimeoutMs)
++    try { worker.transport.postMessage({ type: 'read', id: flight.id, query: flight.query }) }
++    catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))) }
++  }
++}
+diff --git a/src/main/services/catalogReadWorkerClient.test.ts b/src/main/services/catalogReadWorkerClient.test.ts
+new file mode 100644
+index 0000000..8a7ba97
+--- /dev/null
++++ b/src/main/services/catalogReadWorkerClient.test.ts
+@@ -0,0 +1,244 @@
++import assert from 'node:assert/strict'
++import { EventEmitter } from 'node:events'
++import { it } from 'node:test'
++import type { TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
++import { CatalogReadWorkerClient, type CatalogReadContext } from './catalogReadWorkerClient'
++
++function deferred() {
++  let resolve!: () => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++class Transport extends EventEmitter {
++  sent: Array<{ type: 'read'; id: number; query: TagOptionsQuery }> = []
++  termination = deferred()
++  terminations = 0
++  postMessage(message: { type: 'read'; id: number; query: TagOptionsQuery }): void { this.sent.push(message) }
++  terminate(): Promise<void> { this.terminations++; return this.termination.promise }
++  ready(): void { this.emit('message', { type: 'ready' }) }
++  result(page: TagFilterOptionsPage = { items: [{ id: 1, label: 'One', video_count: 2 }], hasMore: false }): void {
++    this.emit('message', { type: 'result', id: this.sent.at(-1)!.id, result: page })
++  }
++}
++const tick = async (): Promise<void> => { await new Promise<void>(resolve => setImmediate(resolve)) }
++function fixture(timeout = 1000) {
++  let context: CatalogReadContext = { identity: {}, path: '/synthetic/library.db', revision: '1' }
++  const transports: Transport[] = []
++  const client = new CatalogReadWorkerClient({
++    contextProvider: () => context,
++    transportFactory: () => { const transport = new Transport(); transports.push(transport); return transport },
++    startupTimeoutMs: timeout, queryTimeoutMs: timeout
++  })
++  return { client, transports, context: () => context,
++    change: (patch: Partial<CatalogReadContext>) => { context = { ...context, ...patch } },
++    async close() {
++      const done = client.dispose()
++      for (const transport of transports) transport.termination.resolve()
++      await done
++      for (const transport of transports) assert.deepEqual(transport.eventNames(), [])
++    }
++  }
++}
++
++it('counts merged subscribers toward capacity, normalizes keys, and clones each successful result', async () => {
++  const f = fixture()
++  try {
++    const reads = Array.from({ length: 32 }, (_, i) => f.client.read(i % 2 ? { search: ' ONE ' } : { search: 'one', limit: 100, offset: 0 }))
++    await assert.rejects(f.client.read({ search: 'other' }), /capacity/)
++    assert.equal(f.transports.length, 1)
++    const worker = f.transports[0]
++    assert.equal(worker.sent.length, 0)
++    worker.ready()
++    assert.equal(worker.sent.length, 1)
++    worker.result()
++    const pages = await Promise.all(reads)
++    pages[0].items[0].label = 'Mutated'
++    assert.equal(pages[1].items[0].label, 'One')
++    const next = f.client.read({})
++    worker.result()
++    await next
++  } finally { await f.close() }
++})
++
++it('serializes different revisions and keeps a folded expanding query valid in the payload', async () => {
++  const f = fixture()
++  try {
++    const first = f.client.read({ search: 'İ'.repeat(500) })
++    const worker = f.transports[0]; worker.ready()
++    f.change({ revision: '2' })
++    const second = f.client.read({ search: 'İ'.repeat(500) })
++    assert.equal(worker.sent.length, 1)
++    assert.equal(worker.sent[0].query.search!.length, 500)
++    worker.result(); await first
++    assert.equal(worker.sent.length, 2)
++    worker.result(); await second
++  } finally { await f.close() }
++})
++
++for (const patch of [{ identity: {} }, { path: '/synthetic/other.db' }]) {
++  it(`rejects old generation on ${Object.keys(patch)[0]} change and waits for termination`, async () => {
++    const f = fixture()
++    try {
++      const old = assert.rejects(f.client.read({}), /context changed/)
++      const worker = f.transports[0]; worker.ready()
++      f.change(patch)
++      const next = f.client.read({})
++      await old; await tick()
++      assert.equal(worker.terminations, 1)
++      assert.equal(f.transports.length, 1)
++      worker.result(); worker.emit('error', new Error('late')); worker.emit('exit', 0)
++      worker.termination.resolve(); await tick()
++      assert.equal(f.transports.length, 2)
++      assert.deepEqual(worker.eventNames(), [])
++      f.transports[1].ready(); f.transports[1].result(); await next
++    } finally { await f.close() }
++  })
++}
++
++it('removes queued aborts but retains an executing slot after all subscribers abort', async () => {
++  const f = fixture()
++  try {
++    const a = new AbortController(), b = new AbortController(), queued = new AbortController()
++    const first = assert.rejects(f.client.read({}, a.signal), { name: 'AbortError' })
++    const merged = assert.rejects(f.client.read({}, b.signal), { name: 'AbortError' })
++    const worker = f.transports[0]; worker.ready()
++    const removed = assert.rejects(f.client.read({ offset: 100 }, queued.signal), { name: 'AbortError' })
++    queued.abort(); a.abort(); b.abort(); await Promise.all([first, merged, removed])
++    const next = f.client.read({ offset: 200 })
++    assert.equal(worker.sent.length, 1)
++    worker.result()
++    assert.equal(worker.sent.length, 2)
++    assert.equal(worker.sent[1].query.offset, 200)
++    worker.result(); await next
++  } finally { await f.close() }
++})
++
++it('one subscriber abort does not cancel another or retain its signal listener', async () => {
++  const f = fixture()
++  try {
++    const controller = new AbortController()
++    let removed = 0
++    const original = controller.signal.removeEventListener.bind(controller.signal)
++    controller.signal.removeEventListener = (...args) => { removed++; original(...args) }
++    const cancelled = assert.rejects(f.client.read({}, controller.signal), { name: 'AbortError' })
++    const survivor = f.client.read({})
++    controller.abort(); await cancelled
++    f.transports[0].ready(); f.transports[0].result(); await survivor
++    assert.equal(removed, 1)
++    await assert.rejects(f.client.read({}, controller.signal), { name: 'AbortError' })
++  } finally { await f.close() }
++})
++
++for (const failure of ['startup timeout', 'query timeout', 'exit', 'error', 'protocol error'] as const) {
++  it(`rejects all accepted on ${failure}, without retry or overlapping workers`, async () => {
++    const f = fixture(failure.includes('timeout') ? 15 : 1000)
++    try {
++      const first = assert.rejects(f.client.read({}), /timed out|exit|injected/)
++      const second = assert.rejects(f.client.read({ offset: 100 }), /timed out|exit|injected/)
++      const worker = f.transports[0]
++      if (failure !== 'startup timeout') worker.ready()
++      if (failure === 'exit') worker.emit('exit', 0)
++      if (failure === 'error') worker.emit('error', new Error('injected'))
++      if (failure === 'protocol error') worker.emit('message', { type: 'error', id: worker.sent[0].id, message: 'injected' })
++      await Promise.all([first, second]); await tick()
++      assert.equal(worker.terminations, 1)
++      assert.equal(f.transports.length, 1)
++      worker.termination.resolve(); await tick()
++      assert.equal(f.transports.length, 1, 'no automatic retry')
++    } finally { await f.close() }
++  })
++}
++
++it('dispose closes admission immediately and waits for a running termination', async () => {
++  const f = fixture()
++  const read = assert.rejects(f.client.read({}), /disposed/)
++  f.transports[0].ready()
++  let finished = false
++  const done = f.client.dispose().then(() => { finished = true })
++  await read; await tick()
++  await assert.rejects(f.client.read({}), /disposed/)
++  assert.equal(finished, false)
++  f.transports[0].termination.resolve(); await done
++  await f.client.dispose()
++  assert.equal(f.transports[0].terminations, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++it('fails closed if termination rejects and rejects requests waiting for replacement', async () => {
++  const f = fixture()
++  const old = assert.rejects(f.client.read({}), /context changed/)
++  f.change({ identity: {} })
++  const waiting = assert.rejects(f.client.read({}), /termination failed/)
++  await old
++  f.transports[0].termination.reject(new Error('cannot terminate'))
++  await waiting; await tick()
++  await assert.rejects(f.client.read({}), /termination failed/)
++  await assert.rejects(f.client.dispose(), /termination failed/)
++  assert.equal(f.transports.length, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++it('rejects invalid queries before creating a worker and contains factory/post failures', async () => {
++  const f = fixture()
++  for (const query of [{ limit: 101 }, { offset: -1 }, { search: 'x'.repeat(501) }]) {
++    await assert.rejects(f.client.read(query), /Invalid/)
++  }
++  assert.equal(f.transports.length, 0)
++  await f.close()
++  const client = new CatalogReadWorkerClient({ contextProvider: f.context, transportFactory: () => { throw new Error('factory') } })
++  await assert.rejects(client.read({}), /factory/)
++  await client.dispose()
++  const g = fixture()
++  const failed = assert.rejects(g.client.read({}), /post/)
++  g.transports[0].postMessage = () => { throw new Error('post') }
++  g.transports[0].ready(); await failed
++  await g.close()
++})
++
++it('bounds subscribers while termination is pending and supersedes a waiting generation', async () => {
++  const f = fixture()
++  try {
++    const old = assert.rejects(f.client.read({}), /context changed/)
++    f.change({ identity: {} })
++    const waiting = Array.from({ length: 32 }, () => assert.rejects(f.client.read({}), /context changed/))
++    await assert.rejects(f.client.read({}), /capacity/)
++    assert.equal(f.transports.length, 1)
++    f.change({ identity: {} })
++    const latest = f.client.read({})
++    await old; await Promise.all(waiting)
++    f.transports[0].termination.resolve(); await tick()
++    assert.equal(f.transports.length, 2)
++    f.transports[1].ready(); f.transports[1].result(); await latest
++  } finally { await f.close() }
++})
++
++it('does not launch work after repeated queued cancellations before ready', async () => {
++  const f = fixture()
++  try {
++    for (let offset = 0; offset < 64; offset++) {
++      const controller = new AbortController()
++      const cancelled = assert.rejects(f.client.read({ offset }, controller.signal), { name: 'AbortError' })
++      controller.abort(); await cancelled
++    }
++    assert.equal(f.transports.length, 1)
++    f.transports[0].ready()
++    assert.equal(f.transports[0].sent.length, 0)
++    const next = f.client.read({})
++    assert.equal(f.transports[0].sent.length, 1)
++    f.transports[0].result(); await next
++  } finally { await f.close() }
++})
++
++it('contains unexpected messages and dispose drains an already-started replacement barrier', async () => {
++  const f = fixture()
++  const old = assert.rejects(f.client.read({}), /Unexpected/)
++  f.transports[0].emit('message', null)
++  await old
++  const queued = assert.rejects(f.client.read({}), /disposed/)
++  const done = f.client.dispose()
++  await queued
++  f.transports[0].termination.resolve(); await done
++  assert.equal(f.transports.length, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
+diff --git a/src/main/services/catalogReadWorkerTransport.ts b/src/main/services/catalogReadWorkerTransport.ts
+new file mode 100644
+index 0000000..54b4fae
+--- /dev/null
++++ b/src/main/services/catalogReadWorkerTransport.ts
+@@ -0,0 +1,34 @@
++import { Worker } from 'node:worker_threads'
++
++/** Production worker entry path is supplied by the application, never by an IPC caller. */
++export function createCatalogReadWorkerTransport(entryPath: string, databasePath: string): Worker {
++  const worker = new Worker(entryPath, { workerData: { databasePath }, execArgv: [] })
++  const terminateNative = worker.terminate.bind(worker)
++  // Keep an error listener during retirement even after the client detaches its own.
++  worker.on('error', () => {})
++  let retirement: Promise<number> | undefined
++  worker.terminate = () => {
++    if (retirement) return retirement
++    retirement = new Promise<number>((resolve, reject) => {
++      if (worker.threadId === -1) { resolve(0); return }
++      const finish = (code: number): void => {
++        if (timer) clearTimeout(timer)
++        worker.off('exit', finish)
++        resolve(code)
++      }
++      const fail = (error: unknown): void => {
++        if (timer) clearTimeout(timer)
++        worker.off('exit', finish)
++        reject(error)
++      }
++      worker.once('exit', finish)
++      // A close message releases SQLite normally when the current synchronous
++      // read ends. Native termination is the fallback, not a SQLite interrupt.
++      const timer = setTimeout(() => { void terminateNative().then(finish, fail) }, 1000)
++      try { worker.postMessage({ type: 'close' }) }
++      catch { void terminateNative().then(finish, fail) }
++    })
++    return retirement
++  }
++  return worker
++}
+diff --git a/src/main/services/catalogReadWorker.integration.test.ts b/src/main/services/catalogReadWorker.integration.test.ts
+new file mode 100644
+index 0000000..75f7443
+--- /dev/null
++++ b/src/main/services/catalogReadWorker.integration.test.ts
+@@ -0,0 +1,73 @@
++import assert from 'node:assert/strict'
++import { after, afterEach, before, it } from 'node:test'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { buildSync } from 'esbuild'
++import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath } from '../db/database'
++import { listTagFilterOptions } from '../db/tagRepo'
++import { insertTestVideoWithFile } from '../db/testVideoFixtures'
++import { CatalogReadWorkerClient } from './catalogReadWorkerClient'
++import { createCatalogReadWorkerTransport } from './catalogReadWorkerTransport'
++
++let root: string
++let bundle: string
++let client: CatalogReadWorkerClient | undefined
++let sequence = 0
++before(() => {
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-catalog-worker-test-'))
++  bundle = path.join(root, 'worker.cjs')
++  buildSync({ entryPoints: [path.resolve('src/main/services/catalogReadWorker.ts')], outfile: bundle,
++    bundle: true, platform: 'node', format: 'cjs', packages: 'external', tsconfig: path.resolve('tsconfig.node.json'),
++    banner: { js: `require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});` } })
++})
++afterEach(async () => { await client?.dispose(); client = undefined; closeDatabase() })
++after(() => fs.rmSync(root, { recursive: true, force: true }))
++function setup() {
++  const filename = path.join(root, `catalog-${sequence++}.db`)
++  const db = initDatabaseAtPath(filename)
++  insertTestVideoWithFile(db, { code: 'WORKER-1', filePath: 'synthetic.mp4', scrapedStatus: 0 })
++  db.exec("INSERT INTO tags(id,name) VALUES(1,'École'); INSERT INTO video_tag(video_id,tag_id) VALUES(1,1)")
++  client = new CatalogReadWorkerClient({
++    contextProvider: () => {
++      const revision = getDatabaseReadRevision(db)
++      return { identity: db, path: filename, revision: JSON.stringify([revision.changes, revision.dataVersion]) }
++    },
++    transportFactory: context => createCatalogReadWorkerTransport(bundle, context.path)
++  })
++  return db
++}
++
++it('executes real read-only tag queries and observes writes through the worker cache', async () => {
++  const db = setup()
++  assert.deepEqual(await client!.read({ search: 'éco' }), listTagFilterOptions({ search: 'éco' }))
++  const page = await client!.read({})
++  page.items[0].label = 'caller mutation'
++  assert.equal((await client!.read({})).items[0].label, 'École')
++  db.exec('UPDATE library_video_memberships SET is_hidden=1')
++  const pages = await Promise.all([client!.read({}), client!.read({})])
++  assert.equal(pages[0].items[0].video_count, 0)
++  pages[0].items[0].label = 'subscriber mutation'
++  assert.equal(pages[1].items[0].label, 'École')
++  await client!.dispose()
++  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM video_tag').get() && db.open, true)
++  await assert.rejects(client!.read({}), /disposed/)
++})
++
++it('rejects a changed catalog version at worker startup without migration', async () => {
++  const db = setup()
++  db.pragma('user_version=16')
++  await assert.rejects(client!.read({}), /schema|worker|reader/i)
++  await client!.dispose()
++  assert.equal(db.pragma('user_version', { simple: true }), 16)
++  assert.deepEqual(db.prepare('SELECT name FROM tags').all(), [{ name: 'École' }])
++})
++
++it('settles in-flight initialization and queued requests when disposed', async () => {
++  setup()
++  const first = client!.read({})
++  const second = client!.read({ search: 'other' })
++  const rejected = Promise.all([assert.rejects(first, /disposed/), assert.rejects(second, /disposed/)])
++  await client!.dispose()
++  await rejected
++})
+diff --git a/src/main/services/tagQueryService.test.ts b/src/main/services/tagQueryService.test.ts
+new file mode 100644
+index 0000000..dc1a33b
+--- /dev/null
++++ b/src/main/services/tagQueryService.test.ts
+@@ -0,0 +1,168 @@
++import { afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '../db/database'
++import { insertTestVideoWithFile } from '../db/testVideoFixtures'
++import { createTagFilterOptionsReader, tagQueryService } from './tagQueryService'
++
++let root: string | undefined
++function setup() {
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-tag-cache-'))
++  const filename = path.join(root, 'library.db')
++  const db = initDatabaseAtPath(filename)
++  insertTestVideoWithFile(db, { code: 'CACHE-1', filePath: 'fixture.mp4', scrapedStatus: 0 })
++  db.exec("INSERT INTO tags(id,name) VALUES(1,'Linked'); INSERT INTO video_tag(video_id,tag_id) VALUES(1,1)")
++  return { db, filename }
++}
++afterEach(() => { closeDatabase(); if (root) fs.rmSync(root, { recursive: true, force: true }); root = undefined })
++
++it('reuses canonical query pages, isolates caller mutations, and invalidates local and external writes', (t) => {
++  const { db, filename } = setup()
++  const prepare = db.prepare.bind(db)
++  let reads = 0
++  t.mock.method(db, 'prepare', (sql: string) => { if (sql.includes('FROM tags ')) reads++; return prepare(sql) })
++  const original = tagQueryService.filterOptions({ search: ' LINKED ' })
++  original.items[0].label = 'caller mutation'
++  assert.equal(tagQueryService.filterOptions({ search: 'linked', offset: 0, limit: 100 }).items[0].label, 'Linked')
++  assert.equal(reads, 1)
++  db.exec('UPDATE library_video_memberships SET is_hidden=1')
++  assert.equal(tagQueryService.filterOptions({ search: 'linked' }).items[0].video_count, 0)
++  assert.equal(reads, 2)
++  const external = new Database(filename)
++  try { external.exec('UPDATE library_video_memberships SET is_hidden=0') } finally { external.close() }
++  assert.equal(tagQueryService.filterOptions({ search: 'linked' }).items[0].video_count, 1)
++  assert.equal(reads, 3)
++  db.exec('CREATE INDEX cache_schema_probe ON tags(name,id)')
++  tagQueryService.filterOptions({ search: 'linked' })
++  assert.equal(reads, 4, 'same-connection DDL invalidates even without total_changes advancing')
++  closeDatabase()
++  const replacement = initDatabaseAtPath(filename)
++  replacement.exec("UPDATE tags SET name='Changed' WHERE id=1")
++  assert.deepEqual(tagQueryService.filterOptions({ search: 'linked' }), { items: [], hasMore: false })
++})
++
++it('bypasses cached pages inside transactions and never publishes data that is rolled back', () => {
++  const { db } = setup()
++  assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 1)
++  assert.throws(() => db.transaction(() => {
++    db.exec('UPDATE library_video_memberships SET is_hidden=1')
++    assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 0)
++    throw new Error('rollback')
++  })(), /rollback/)
++  assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 1)
++  db.transaction(() => {
++    db.exec('UPDATE library_video_memberships SET is_hidden=1')
++    assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 0)
++  })()
++  assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 0)
++})
++
++it('evicts least recently used pages and validates raw search before cache lookup', (t) => {
++  const { db } = setup()
++  const prepare = db.prepare.bind(db)
++  let reads = 0
++  t.mock.method(db, 'prepare', (sql: string) => { if (sql.includes('FROM tags ')) reads++; return prepare(sql) })
++  for (let offset = 0; offset < 8; offset++) tagQueryService.filterOptions({ offset, limit: 1 })
++  tagQueryService.filterOptions({ offset: 0, limit: 1 })
++  assert.equal(reads, 8)
++  tagQueryService.filterOptions({ offset: 8, limit: 1 })
++  tagQueryService.filterOptions({ offset: 0, limit: 1 })
++  assert.equal(reads, 9)
++  tagQueryService.filterOptions({ offset: 1, limit: 1 })
++  assert.equal(reads, 10)
++  assert.throws(() => tagQueryService.filterOptions({ search: ' '.repeat(501) }))
++  assert.equal(reads, 10)
++  assert.deepEqual(tagQueryService.filterOptions({ search: 'İ'.repeat(500) }), { items: [], hasMore: false })
++})
++
++it('evicts by serialized byte budget before eight large pages accumulate', (t) => {
++  const { db } = setup()
++  const insert = db.prepare('INSERT INTO tags(id,name) VALUES(?,?)')
++  db.transaction(() => { for (let id = 2; id <= 801; id++) insert.run(id, '\u0001'.repeat(128) + String(id).padStart(4,'0')) })()
++  const prepare = db.prepare.bind(db)
++  let reads = 0
++  t.mock.method(db, 'prepare', (sql: string) => { if (sql.includes('FROM tags ')) reads++; return prepare(sql) })
++  for (let offset = 0; offset < 700; offset += 100) {
++    const page = tagQueryService.filterOptions({ offset })
++    assert.ok(Buffer.byteLength(JSON.stringify(page)) > 75 * 1024)
++  }
++  assert.equal(reads, 7)
++  tagQueryService.filterOptions({ offset: 0 })
++  assert.equal(reads, 8, 'old page must be evicted by bytes before reaching the eight-entry cap')
++})
++
++it('observes an external commit during a read and refreshes on the next call', (t) => {
++  const { db, filename } = setup()
++  const external = new Database(filename)
++  const prepare = db.prepare.bind(db)
++  let commitDuringRead = true
++  let reads = 0
++  t.mock.method(db, 'prepare', (sql: string) => {
++    if (sql.includes('FROM tags ')) reads++
++    if (commitDuringRead && sql.includes('FROM video_tag')) {
++      commitDuringRead = false
++      // The tag page has already established the main connection's read snapshot.
++      external.exec('UPDATE library_video_memberships SET is_hidden=1')
++    }
++    return prepare(sql)
++  })
++  try {
++    assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 1, 'in-progress read keeps its snapshot')
++    assert.equal(commitDuringRead, false)
++    assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 0)
++    assert.equal(reads, 2)
++    assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 0)
++    assert.equal(reads, 2)
++  } finally { external.close() }
++})
++
++it('does not cache a failed read and allows the same query to retry', (t) => {
++  const { db } = setup()
++  const prepare = db.prepare.bind(db)
++  let fail = true
++  t.mock.method(db, 'prepare', (sql: string) => {
++    if (fail && sql.includes('FROM tags ')) { fail = false; throw new Error('read interrupted') }
++    return prepare(sql)
++  })
++  assert.throws(() => tagQueryService.filterOptions({}), /read interrupted/)
++  assert.equal(tagQueryService.filterOptions({}).items[0].video_count, 1)
++})
++
++
++it('separates connections even when their revision counters match', () => {
++  setup()
++  const first = getDatabaseReadRevision()
++  assert.equal(tagQueryService.filterOptions({}).items[0].label, 'Linked')
++  closeDatabase()
++  const secondDb = initDatabaseAtPath(path.join(root!, 'second.db'))
++  insertTestVideoWithFile(secondDb, { code: 'CACHE-1', filePath: 'fixture.mp4', scrapedStatus: 0 })
++  secondDb.exec("INSERT INTO tags(id,name) VALUES(1,'Different'); INSERT INTO video_tag(video_id,tag_id) VALUES(1,1)")
++  const second = getDatabaseReadRevision()
++  assert.equal(first.changes, second.changes)
++  assert.equal(first.dataVersion, second.dataVersion)
++  assert.notEqual(first.connection, second.connection)
++  assert.equal(tagQueryService.filterOptions({}).items[0].label, 'Different')
++})
++
++
++it('binds a separate cache and repository to a readonly connection, without using the writer getter', (t) => {
++  const { db, filename } = setup()
++  const reader = openReadOnlyDatabaseAtPath(filename)
++  const read = createTagFilterOptionsReader(() => reader)
++  const prepare = reader.prepare.bind(reader)
++  let reads = 0
++  t.mock.method(reader, 'prepare', (sql: string) => { if (sql.includes('FROM tags ')) reads++; return prepare(sql) })
++  try {
++    assert.equal(read({}).items[0].video_count, 1)
++    assert.equal(read({}).items[0].video_count, 1)
++    assert.equal(reads, 1)
++    db.exec('UPDATE library_video_memberships SET is_hidden=1')
++    assert.equal(read({}).items[0].video_count, 0)
++    assert.equal(reads, 2)
++    closeDatabase()
++    assert.equal(read({}).items[0].video_count, 0, 'reader stays usable without global writer')
++  } finally { reader.close() }
++})
+diff --git a/scripts/performance/catalog-worker-benchmark.ts b/scripts/performance/catalog-worker-benchmark.ts
+new file mode 100644
+index 0000000..d414cb6
+--- /dev/null
++++ b/scripts/performance/catalog-worker-benchmark.ts
+@@ -0,0 +1,73 @@
++/** Built production worker/client on a disposable large catalog; no Electron UI or user DB. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { initDatabaseAtPath, closeDatabase, getDatabaseReadRevision } from '../../src/main/db/database'
++import { listTagFilterOptions } from '../../src/main/db/tagRepo'
++import { CatalogReadWorkerClient } from '../../src/main/services/catalogReadWorkerClient'
++import { createCatalogReadWorkerTransport } from '../../src/main/services/catalogReadWorkerTransport'
++
++it('measures actual built-worker reads and main event-loop responsiveness on a large catalog', async () => {
++  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-catalog-worker-bench-'))
++  const videos=Number(process.env.JAVDEX_WORKER_BENCH_VIDEOS ?? 300382)
++  assert.ok(Number.isSafeInteger(videos) && videos>=1000 && videos<=300382)
++  let client: CatalogReadWorkerClient | undefined
++  let interval: ReturnType<typeof setInterval> | undefined
++  try {
++    const file=path.join(root,'catalog.db')
++    const db=initDatabaseAtPath(file)
++    db.transaction(()=>{
++      db.exec(`WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${videos})
++        INSERT INTO videos(id,code) SELECT x,'WORKER-'||x FROM n;
++        INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key) SELECT 1,id,'2026',id FROM videos;
++        WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
++        INSERT INTO tags(id,name) SELECT x,'Tag '||x FROM n;`)
++      for(let offset=0;offset<4;offset++)db.exec(`INSERT INTO video_tag(video_id,tag_id,origin) SELECT id,1+(id+${offset})%1000,CASE WHEN id%7=0 THEN 'manual' ELSE 'scraped' END FROM videos`)
++    })()
++    db.exec('ANALYZE')
++    client=new CatalogReadWorkerClient({contextProvider:()=>{
++      const revision=getDatabaseReadRevision(db)
++      return {identity:db,path:file,revision:JSON.stringify([revision.changes,revision.dataVersion])}
++    },transportFactory:context=>createCatalogReadWorkerTransport(path.resolve('out/main/catalogReadWorker.js'),context.path)})
++    const expected=listTagFilterOptions({})
++    let last=performance.now(),maxGap=0,ticks=0
++    interval=setInterval(()=>{const now=performance.now();maxGap=Math.max(maxGap,now-last);last=now;ticks++},5)
++    const results=[]
++    async function measure(name: string, action: () => unknown | Promise<unknown>) {
++      maxGap=0;last=performance.now();ticks=0
++      const times=[]
++      for(let i=0;i<3;i++){
++        await new Promise(resolve=>setTimeout(resolve,10))
++        const start=performance.now()
++        assert.deepEqual(await action(),expected)
++        times.push(performance.now()-start)
++      }
++      await new Promise(resolve=>setTimeout(resolve,10))
++      results.push({name,times,medianMs:[...times].sort((a,b)=>a-b)[1],maxTimerGapMs:maxGap,ticks,rssBytes:process.memoryUsage().rss})
++    }
++    await measure('main.repository',()=>listTagFilterOptions({}))
++    const started=performance.now()
++    assert.deepEqual(await client.read({}),expected)
++    const firstWorkerReadMs=performance.now()-started
++    await measure('worker.cached',()=>client!.read({}))
++    await measure('worker.invalidated',()=>{
++      db.exec("UPDATE videos SET updated_at=COALESCE(updated_at,'') || '.' WHERE id=1")
++      return client!.read({})
++    })
++    await client.dispose()
++    const output={videos,firstWorkerReadMs,results,versions:process.versions,platform:process.platform,arch:process.arch,
++      caveats:['Synthetic narrow tag fixture, three local warm samples, not p95/customer Windows/HDD/full renderer IPC.',
++        'Timing includes result equality assertions; timer sampling and fixed inter-sample delays affect gap statistics.',
++        'First worker read includes startup and cache miss; later invalidated samples include a committed video timestamp change that leaves the tag result unchanged.',
++        'Worker transport is built production entry/client; native SQLite termination is not a hard SQL interrupt.']}
++    if(process.env.JAVDEX_WORKER_BENCH_OUTPUT)fs.writeFileSync(path.resolve(process.env.JAVDEX_WORKER_BENCH_OUTPUT),JSON.stringify(output,null,2)+'\n')
++    console.log(JSON.stringify(output))
++  } finally {
++    if(interval)clearInterval(interval)
++    await client?.dispose()
++    closeDatabase();fs.rmSync(root,{recursive:true,force:true})
++  }
++})
+diff --git a/scripts/performance/catalog-worker-asar-smoke.ts b/scripts/performance/catalog-worker-asar-smoke.ts
+new file mode 100644
+index 0000000..553d1d9
+--- /dev/null
++++ b/scripts/performance/catalog-worker-asar-smoke.ts
+@@ -0,0 +1,77 @@
++/** Starts a windowless Electron fixture, never the Javdex application or user catalog. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { spawn } from 'node:child_process'
++import electron from 'electron'
++import { createPackageWithOptions } from '@electron/asar'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++
++it('loads the built catalog worker and native SQLite from an ASAR in real Electron', async () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-worker-asar-'))
++  try {
++    const catalog = path.join(root,'catalog.db')
++    const db = initDatabaseAtPath(catalog)
++    db.exec("INSERT INTO tags(id,name) VALUES(1,'Packaged label')")
++    const stage = path.join(root,'stage')
++    fs.mkdirSync(stage)
++    const copied = new Set<string>()
++    function copyModule(relative: string): void {
++      if (copied.has(relative)) return
++      copied.add(relative)
++      const source = path.resolve('out/main',relative)
++      const text = fs.readFileSync(source,'utf8')
++      const target = path.join(stage,'out/main',relative)
++      fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,text)
++      for (const match of text.matchAll(/require\("(\.[^"]+)"\)/g)) copyModule(path.normalize(path.join(path.dirname(relative),match[1])))
++    }
++    copyModule('catalogReadWorker.js')
++    fs.cpSync(path.resolve('node_modules/better-sqlite3'),path.join(stage,'node_modules/better-sqlite3'),{recursive:true})
++    fs.writeFileSync(path.join(stage,'package.json'),JSON.stringify({name:'javdex-reader-asar-probe',version:'1.0.0'}))
++    const archive = path.join(root,'app.asar')
++    await createPackageWithOptions(stage,archive,{unpack:'**/*.node'})
++    const harness = path.join(root,'harness')
++    fs.mkdirSync(harness)
++    fs.writeFileSync(path.join(harness,'package.json'),JSON.stringify({name:'javdex-reader-harness',version:'1.0.0',main:'main.cjs'}))
++    const resultPath = path.join(root,'result.json')
++    fs.writeFileSync(path.join(harness,'main.cjs'),`
++      const {app}=require('electron');const {Worker}=require('node:worker_threads');const fs=require('node:fs');
++      app.setPath('userData',${JSON.stringify(path.join(root,'userData'))});
++      const timer=setTimeout(()=>app.exit(2),15000);
++      app.whenReady().then(()=>{
++        app.dock?.hide();
++        const worker=new Worker(${JSON.stringify(path.join(archive,'out/main/catalogReadWorker.js'))},{workerData:{databasePath:${JSON.stringify(catalog)}},execArgv:[]});
++        let result;
++        worker.on('message',message=>{
++          if(message.type==='ready')worker.postMessage({type:'read',id:1,query:{}});
++          if(message.type==='result'){result=message.result;worker.postMessage({type:'close'});}
++          if(message.type==='error'){console.error(message.message);app.exit(1);}
++        });
++        worker.on('error',error=>{console.error(error);app.exit(1);});
++        worker.on('exit',code=>{clearTimeout(timer);if(code!==0||!result){app.exit(1);return;}
++          fs.writeFileSync(${JSON.stringify(resultPath)},JSON.stringify({result,versions:process.versions}));app.exit(0);});
++      }).catch(error=>{console.error(error);app.exit(1);});
++    `)
++    const childEnv = {...process.env}
++    delete childEnv.ELECTRON_RUN_AS_NODE
++    const executable = typeof electron === 'string' ? electron : process.execPath
++    await new Promise<void>((resolve,reject) => {
++      const child = spawn(executable,[harness],{env:childEnv,stdio:['ignore','pipe','pipe']})
++      let output = ''
++      child.stdout.on('data',chunk=>{output+=String(chunk)})
++      child.stderr.on('data',chunk=>{output+=String(chunk)})
++      const timer = setTimeout(()=>{child.kill('SIGKILL');reject(new Error('Electron ASAR fixture timed out'))},25000)
++      child.once('error',error=>{clearTimeout(timer);reject(error)})
++      child.once('exit',code=>{clearTimeout(timer);if(code===0)resolve();else reject(new Error(`Electron ASAR fixture exited ${code}: ${output}`))})
++    })
++    const result = JSON.parse(fs.readFileSync(resultPath,'utf8'))
++    assert.deepEqual(result.result,{items:[{id:1,label:'Packaged label',video_count:0}],hasMore:false})
++    const report = {...result, copiedModules:[...copied], nativeUnpack:'**/*.node',
++      caveats:['Windowless real Electron, built worker/chunks and native SQLite in synthetic ASAR.',
++        'Not a signed installer, all-platform release, full application startup or user catalog.']}
++    if(process.env.JAVDEX_ASAR_PROBE_OUTPUT)fs.writeFileSync(path.resolve(process.env.JAVDEX_ASAR_PROBE_OUTPUT),JSON.stringify(report,null,2)+'\n')
++    console.log(JSON.stringify(report))
++  } finally {closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})

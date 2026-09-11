@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bi-target.log": "7a7de1d06f9ba5f0aacaff4c24b8ae3d2149769bcad879c1efbf9e822d6b9056",
+    "batch-bi-full.log": "d2597c99cddb3b4fedb6e82a79b550b6a6f2dc21727345302e64a12d5040fb87",
+    "batch-bi-build.log": "5ffad75fb37373933812a55e95a2f4f9374e931ae971b442da6bd38e2d8759d4",
+    "batch-bi-metadata-cover-api.patch": "7ba2840255652f2b78497dc45fea58196604a1254c03b1584bc1ffa91f675bb0",
+    "batch-bi-review.md": "5329818fb3bcae7d4a4410dd21cff8cea5294d0667b4002f9f92b77cacefb8c2"
+  },
+  "notes": [
+    "Selected cumulative diff plus new files, depends on prior batches.",
+    "32focused; full2303pass1skip0fail; build passed.",
+    "UI migration and full15/42scope still in progress."
+  ]
+}

@@ -1103,7 +1103,7 @@ export default function DetailPage(): JSX.Element {
           </div>
           <div className="actress-row-avatars">
             {video.actresses.map((a) => {
-              const avatar = assetUrl(a.avatar_path)
+              const avatar = assetUrl(a.avatar_path, 320)
               return (
                 <button
                   key={a.id}

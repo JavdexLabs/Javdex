@@ -131,6 +131,10 @@ export interface Video {
 
 export type TagOrigin = 'manual' | 'scraped'
 
+/** Fields rendered by a poster card; long descriptions and editing data stay in detail reads. */
+export type VideoCard = Pick<Video,
+  'id' | 'code' | 'title' | 'cover_path' | 'scraped_status' | 'has_pending_scrape' | 'resource_kinds'>
+
 export interface VideoTag extends Tag {
   origin: TagOrigin
   source: string | null

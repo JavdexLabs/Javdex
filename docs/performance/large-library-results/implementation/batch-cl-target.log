@@ -1,0 +1,60 @@
+▶ database schema
+  ✔ adds STRM source identity without changing existing resource identity or link deduplication (9.065ms)
+  ✔ allows duplicate codes while enforcing complete video business identity (4.880584ms)
+  ✔ upgrades video identity without changing ids, resources, or site sources (8.730208ms)
+  ✔ leaves a v10 database untouched when normalized business identities conflict (1.479083ms)
+  ✔ migrates legacy classification text into stable entities and retires legacy storage (11.010875ms)
+  ✔ retires v8 text storage without changing video metadata, entity ids, or child resources (45.644875ms)
+  ✔ stores classification profiles, hierarchy, roles, links, and video references (4.598583ms)
+  ✔ rolls back the complete classification migration when entity creation fails (6.4255ms)
+  ✔ rolls back classification entities when retiring legacy storage fails (5.635666ms)
+  ✔ migrates uncontested names to ownership and preserves cross-actress collisions for review (20.571833ms)
+  ✔ rolls back name ownership data and schema version when migration fails (9.281625ms)
+  ✔ creates the current schema and records user_version (7.14475ms)
+  ✔ migrates v6 video files to local resources without losing data (30.8635ms)
+  ✔ migrates released v1 inline video files and removes the obsolete write constraint (71.910166ms)
+  ✔ rejects databases newer than the supported schema version (0.576208ms)
+  ✔ upgrades v1 actresses table with avatar source columns (23.862834ms)
+  ✔ upgrades v2 actress names to one current primary name without removing visible names (13.072583ms)
+  ✔ leaves current-version databases unchanged (0.353375ms)
+  ✔ classifies v3 actresses only when a success time has actual profile evidence (9.932334ms)
+  ✔ keeps the migrated classification unchanged when migration is run again (9.363166ms)
+  ✔ rolls back the whole actress status migration when classification fails (0.702167ms)
+✔ database schema (296.03125ms)
+▶ V14 unreleased feature consolidation migration
+  ✔ creates a fresh database with one active default media library (40.839542ms)
+  ✔ upgrades released V13 data while keeping playlist import sessions out of the schema (17.0605ms)
+  ✔ scopes pending path identity to each library in the final V14 schema (46.224542ms)
+  ✔ enforces one primary per membership while archived sources can be adopted by another library (10.233291ms)
+  ✔ rolls back V14 when released source paths normalize to the same identity (8.595291ms)
+✔ V14 unreleased feature consolidation migration (123.963292ms)
+▶ V15 local NFO import migration
+  ✔ creates fresh V15 databases with automatic import enabled and identity constraints (10.813584ms)
+  ✔ upgrades V14 rows, preserves the default, and enforces minimal pending identity snapshots (29.045708ms)
+  ✔ rolls the migration back and leaves user_version at V14 on schema conflict (0.959709ms)
+✔ V15 local NFO import migration (41.720667ms)
+✔ adds the cleanup queue and later indexes when upgrading V15 and preserves old business data and damaged diagnostic state (84.294916ms)
+✔ rolls back both DDL and version when V16 fails after table creation, then upgrades on retry (4.352125ms)
+✔ upgrades V16 without changing any business rows or other schema and matches the current fresh tag index (17.661166ms)
+✔ rolls back index DDL and version after drop failure, then retries (30.922834ms)
+✔ rolls back index DDL and version after create failure, then retries (49.899625ms)
+✔ adds V18 to a complete V17 schema without rewriting any legacy data or relationships (98.21975ms)
+✔ rolls back executed V18 DDL and version, preserves foreign_keys=0, then retries (56.807125ms)
+✔ rolls back executed V18 DDL and version, preserves foreign_keys=1, then retries (59.979708ms)
+✔ upgrades a structurally restored V15 through cleanup, tag index and V18 without losing legacy rows (31.083417ms)
+✔ accepts collecting revisions and ordered section entries with exact byte accounting (8.09775ms)
+✔ rejects invalid sections, JSON, identities, byte metadata and duplicate file keys (14.067208ms)
+✔ does not mix legacy JSON audits with the new manifest or start from terminal runs (13.742167ms)
+✔ enforces sealed immutability and permits publication only with a terminal completed run (10.536833ms)
+✔ rolls back run completion and audit publication together on a later failure (12.695916ms)
+✔ retains interrupted audit entries for abandoned cleanup and does not permit late writes (19.086625ms)
+✔ allows deleting whole runs or a library to cascade without permitting partial published deletion (12.494875ms)
+✔ keeps entry identity stable while collecting and preserves every terminal publication outcome (18.528334ms)
+ℹ tests 46
+ℹ suites 3
+ℹ pass 46
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1203.190667

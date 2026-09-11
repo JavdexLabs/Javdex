@@ -1,0 +1,1354 @@
+diff --git a/src/main/services/classificationListPage.ts b/src/main/services/classificationListPage.ts
+new file mode 100644
+index 0000000..924da9e
+--- /dev/null
++++ b/src/main/services/classificationListPage.ts
+@@ -0,0 +1,62 @@
++import type { DirectorListItem, DirectorListQuery, ClassificationListPage, ClassificationPageQuery, OrganizationListItem, OrganizationListQuery, SeriesListItem, SeriesListQuery } from '@shared/classificationTypes'
++import { normalizeClassificationName } from '@shared/classificationNameNormalization'
++import { getDb } from '../db/database'
++
++function bounds(query: ClassificationPageQuery): { limit: number; offset: number } {
++  const limit = query.limit ?? 60, offset = query.offset ?? 0
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid classification page limit')
++  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid classification page offset')
++  return { limit, offset }
++}
++function pattern(search?: string): string {
++  const trimmed = search?.trim()
++  if (!trimmed) return ''
++  const normalized = normalizeClassificationName(trimmed)
++  return normalized ? `%${normalized.replace(/[\\%_]/g, '\\$&')}%` : ''
++}
++
++/** Count/rank retain original all-video semantics; only page identities hydrate covers/owners. */
++function readPage(kind: 'series' | 'director' | 'maker' | 'publisher', query: SeriesListQuery & ClassificationPageQuery) {
++  const {limit,offset} = bounds(query)
++  const db = getDb(), search = pattern(query.search)
++  const series = kind === 'series'
++  const organization = kind === 'maker' || kind === 'publisher'
++  const table = series ? 'series' : organization ? 'organizations' : 'directors'
++  const names = series ? 'series_names' : organization ? 'organization_names' : 'director_names'
++  const nameFk = series ? 'series_id' : organization ? 'organization_id' : 'director_id'
++  const videoFk = series ? 'series_id' : kind === 'director' ? 'director_id' : kind === 'maker' ? 'maker_organization_id' : 'publisher_organization_id'
++  const role = !organization ? '' : `EXISTS (SELECT 1 FROM organization_roles r WHERE r.organization_id=e.id AND r.role=?) AND `
++  const where = `${role}(? = '' OR EXISTS (SELECT 1 FROM ${names} n WHERE n.${nameFk}=e.id AND n.normalized_name LIKE ? ESCAPE '\\'))`
++  const parameters = !organization ? [search,search] : [kind,search,search]
++  const direction = query.sortDir === 'asc' ? 'ASC' : 'DESC'
++  const order = query.sortBy === 'updated_at' ? `updated_at ${direction}, id ASC` : `video_count ${direction}, id ASC`
++  return db.transaction(() => {
++    const total = (db.prepare(`SELECT COUNT(*) AS n FROM ${table} e WHERE ${where}`).get(...parameters) as {n:number}).n
++    const rows = db.prepare(`WITH page AS MATERIALIZED (
++      SELECT e.id, e.updated_at, (SELECT COUNT(*) FROM videos v WHERE v.${videoFk}=e.id) AS video_count
++      FROM ${table} e WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?
++    ) SELECT e.id, e.main_name AS mainName, e.image_path AS imagePath, e.updated_at AS updatedAt,
++      page.video_count AS videoCount,
++      (SELECT v.cover_path FROM videos v WHERE v.${videoFk}=e.id AND v.cover_path IS NOT NULL
++       ORDER BY v.release_date DESC, v.add_time DESC, v.id DESC LIMIT 1) AS fallbackCoverPath
++      ${series ? ', owner.id AS ownerId, owner.main_name AS ownerName' : ''}
++    FROM page JOIN ${table} e ON e.id=page.id
++    ${series ? 'LEFT JOIN organizations owner ON owner.id=e.owner_organization_id' : ''}
++    ORDER BY ${query.sortBy === 'updated_at' ? `page.updated_at ${direction}` : `page.video_count ${direction}`}, page.id ASC`)
++      .all(...parameters,limit,offset) as Array<OrganizationListItem & {ownerId?:number|null;ownerName?:string|null}>
++    return { items:rows, total,limit,offset }
++  })()
++}
++
++export function listOrganizationPage(query: OrganizationListQuery & ClassificationPageQuery): ClassificationListPage<OrganizationListItem> {
++  if (query.role !== 'maker' && query.role !== 'publisher') throw new Error('无效的机构角色')
++  return readPage(query.role, query)
++}
++export function listSeriesPage(query: SeriesListQuery & ClassificationPageQuery): ClassificationListPage<SeriesListItem> {
++  const page = readPage('series', query)
++  return { ...page, items:page.items.map(({ownerId,ownerName,...item})=>({...item, ownerOrganization:ownerId == null || ownerName == null ? null : {id:ownerId,mainName:ownerName}})) }
++}
++
++export function listDirectorPage(query: DirectorListQuery & ClassificationPageQuery): ClassificationListPage<DirectorListItem> {
++  return readPage('director', query)
++}
+diff --git a/src/main/services/classificationListPage.test.ts b/src/main/services/classificationListPage.test.ts
+new file mode 100644
+index 0000000..03e1dbb
+--- /dev/null
++++ b/src/main/services/classificationListPage.test.ts
+@@ -0,0 +1,78 @@
++import assert from 'node:assert/strict'
++import { afterEach, beforeEach, it } from 'node:test'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import { getDb, initDatabaseAtPath, closeDatabase } from '../db/database'
++import { classificationMaintenanceService as write } from './classificationMaintenanceService'
++import { classificationQueryService as read } from './classificationQueryService'
++import { appIpcSchemas } from '../ipc/ipcCommandSchemas'
++import { IPC } from '@shared/ipc-channels'
++let root: string
++beforeEach(()=>{root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-classification-page-'));initDatabaseAtPath(path.join(root,'catalog.db'))})
++afterEach(()=>{closeDatabase();fs.rmSync(root,{recursive:true,force:true})})
++
++it('matches every old list field and global ordering over pages, aliases, roles and cover boundaries',()=>{
++  const db=getDb()
++  for(let n=0;n<125;n++) {
++    const org=write.createOrganization({role:'maker',mainName:`Org-${n}`,aliases:[n===2?'literal%_\\':`Alias-${n}`]})
++    if(n%2===0) db.prepare("INSERT INTO organization_roles(organization_id,role) VALUES(?,'publisher')").run(org)
++    const director=write.createDirector({mainName:`Director-${n}`,aliases:[n===2?'literal%_\\':`Alias-${n}`]})
++    const series=write.createSeries({mainName:`Series-${n}`,ownerOrganizationId:n%3===0?org:null,aliases:[n===2?'literal%_\\':`Alias-${n}`]})
++    for(let v=0;v<n%4;v++) db.prepare(`INSERT INTO videos(code,maker_organization_id,publisher_organization_id,series_id,director_id,release_date,add_time,cover_path)
++      VALUES(?,?,?,?,?,?,?,?)`).run(`CODE-${n}-${v}`,org,n%2===0?org:null,series,director,v===1?null:'2020-01-01','2021-01-01',[null,'','cover.jpg'][v%3])
++    db.prepare('UPDATE organizations SET updated_at=? WHERE id=?').run(n%2?'2024-01-01':'2020-01-01',org)
++    db.prepare('UPDATE directors SET updated_at=? WHERE id=?').run(n%2?'2024-01-01':'2020-01-01',director)
++    db.prepare('UPDATE series SET updated_at=? WHERE id=?').run(n%2?'2024-01-01':'2020-01-01',series)
++  }
++  for(const sortBy of ['video_count','updated_at'] as const) for(const sortDir of ['asc','desc'] as const) {
++    for(const search of ['', 'alias', '%_', 'missing']) {
++      const query={sortBy,sortDir,search}
++      const expectedDirectors=read.listDirectors(query),actualDirectors=[]
++      for(let offset=0;offset<=expectedDirectors.length;offset+=60){const page=read.listDirectorsPage({...query,offset});assert.equal(page.total,expectedDirectors.length);assert.ok(page.items.length<=60);actualDirectors.push(...page.items)}
++      assert.deepEqual(actualDirectors,expectedDirectors)
++      const expectedSeries=read.listSeries(query),actualSeries=[]
++      for(let offset=0;offset<=expectedSeries.length;offset+=60){const page=read.listSeriesPage({...query,offset});assert.equal(page.total,expectedSeries.length);assert.ok(page.items.length<=60);actualSeries.push(...page.items)}
++      assert.deepEqual(actualSeries,expectedSeries)
++      for(const role of ['maker','publisher'] as const) {
++        const expected=read.listOrganizations({...query,role}),actual=[]
++        for(let offset=0;offset<=expected.length;offset+=60){const page=read.listOrganizationsPage({...query,role,offset});assert.equal(page.total,expected.length);assert.ok(page.items.length<=60);actual.push(...page.items)}
++        assert.deepEqual(actual,expected)
++      }
++    }
++  }
++})
++
++it('keeps count and page in one read snapshot across another connection changing the role',()=>{
++  const org=write.createOrganization({role:'maker',mainName:'Snapshot'})
++  const db=getDb(),other=new Database(path.join(root,'catalog.db')),prepare=db.prepare.bind(db)
++  let fired=false
++  db.prepare=((sql:string)=>{
++    const statement=prepare(sql)
++    if(sql.startsWith('SELECT COUNT(*) AS n FROM organizations')) {
++      const get=statement.get.bind(statement)
++      statement.get=((...args:unknown[])=>{const result=get(...args);if(!fired){fired=true;other.prepare("DELETE FROM organization_roles WHERE organization_id=? AND role='maker'").run(org)}return result}) as typeof statement.get
++    }
++    return statement
++  }) as typeof db.prepare
++  try {const page=read.listOrganizationsPage({role:'maker'});assert.equal(page.total,1);assert.deepEqual(page.items.map(i=>i.id),[org]);assert.equal(read.listOrganizationsPage({role:'maker'}).total,0)}
++  finally {db.prepare=prepare;other.close()}
++})
++
++it('validates page boundaries in the service and typed IPC without changing complete-list APIs',()=>{
++  for(const query of [{limit:0},{limit:101},{offset:-1},{offset:0.5},{offset:Infinity},{offset:Number.MAX_SAFE_INTEGER+1}]) {
++    assert.throws(()=>read.listDirectorsPage(query));
++    assert.equal(appIpcSchemas[IPC.DIRECTOR_PAGE].safeParse([query]).success,false)
++    assert.throws(()=>read.listSeriesPage(query));assert.throws(()=>read.listOrganizationsPage({...query,role:'maker'}))
++    assert.equal(appIpcSchemas[IPC.SERIES_PAGE].safeParse([query]).success,false)
++    assert.equal(appIpcSchemas[IPC.ORGANIZATION_PAGE].safeParse([{...query,role:'maker'}]).success,false)
++  }
++  assert.equal(appIpcSchemas[IPC.DIRECTOR_PAGE].safeParse([{limit:100,offset:60}]).success,true)
++  assert.equal(appIpcSchemas[IPC.DIRECTOR_PAGE].safeParse([{role:'maker'}]).success,false)
++  assert.deepEqual(read.listDirectorsPage({}),{items:[],total:0,limit:60,offset:0})
++  assert.deepEqual(read.listSeriesPage({}),{items:[],total:0,limit:60,offset:0})
++  assert.equal(appIpcSchemas[IPC.SERIES_PAGE].safeParse([{limit:100,offset:120,sortBy:'updated_at',sortDir:'asc'}]).success,true)
++  assert.equal(appIpcSchemas[IPC.ORGANIZATION_PAGE].safeParse([{role:'maker'}]).success,true)
++  for(const query of [{role:'bad'},{role:'maker',full:true},{search:1}]) assert.equal(appIpcSchemas[IPC.ORGANIZATION_PAGE].safeParse([query]).success,false)
++})
+diff --git a/src/main/services/classificationQueryService.ts b/src/main/services/classificationQueryService.ts
+index f3af6fc..9015691 100644
+--- a/src/main/services/classificationQueryService.ts
++++ b/src/main/services/classificationQueryService.ts
+@@ -1,3 +1,4 @@
++import { listOrganizationPage, listSeriesPage, listDirectorPage } from './classificationListPage'
+ import type {
+   ClassificationEntityRef,
+   ClassificationImageCandidate,
+@@ -42,6 +43,9 @@ function searchLikePattern(search: string | undefined): string {
+ }
+ 
+ export interface ClassificationQueryService {
++  listDirectorsPage: typeof listDirectorPage
++  listOrganizationsPage: typeof listOrganizationPage
++  listSeriesPage: typeof listSeriesPage
+   listImageCandidates(entity: ClassificationEntityRef): ClassificationImageCandidate[]
+   listOrganizations(query: OrganizationListQuery): OrganizationListItem[]
+   getOrganization(id: number, role: OrganizationRole): OrganizationDetail | null
+@@ -56,6 +60,9 @@ export interface ClassificationQueryService {
+ }
+ 
+ export const classificationQueryService: ClassificationQueryService = {
++  listDirectorsPage: listDirectorPage,
++  listOrganizationsPage: listOrganizationPage,
++  listSeriesPage,
+   listImageCandidates(entity): ClassificationImageCandidate[] {
+     if (!Number.isInteger(entity.id) || entity.id <= 0) throw new Error('分类实体参数无效')
+     const predicate =
+diff --git a/src/main/ipc/facetHandlers.ts b/src/main/ipc/facetHandlers.ts
+index 2378b30..0ee9250 100644
+--- a/src/main/ipc/facetHandlers.ts
++++ b/src/main/ipc/facetHandlers.ts
+@@ -1,6 +1,7 @@
+ import { IPC } from '@shared/ipc-channels'
+ import { appCommandAdapter } from './appContractAdapter'
+ import { tagQueryService } from '../services/tagQueryService'
++import { catalogReadService } from '../services/catalogReadService'
+ import { classificationQueryService } from '../services/classificationQueryService'
+ import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
+ import { classificationImageService } from '../services/classificationImageService'
+@@ -34,6 +35,8 @@ export function registerClassificationHandlers(
+     seriesMergeService
+   }
+ ): void {
++  adapter.register(IPC.ORGANIZATION_PAGE, (query) => dependencies.queryService.listOrganizationsPage(query))
++  adapter.register(IPC.SERIES_PAGE, (query) => dependencies.queryService.listSeriesPage(query))
+   adapter.register(IPC.ORGANIZATION_LIST, (query) =>
+     dependencies.queryService.listOrganizations(query)
+   )
+@@ -67,6 +70,7 @@ export function registerClassificationHandlers(
+   adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
+     dependencies.organizationDeletionService.deleteOrganization(id)
+   )
++  adapter.register(IPC.DIRECTOR_PAGE, (query) => dependencies.queryService.listDirectorsPage(query))
+   adapter.register(IPC.DIRECTOR_LIST, (query) => dependencies.queryService.listDirectors(query))
+   adapter.register(IPC.DIRECTOR_GET, (id) => dependencies.queryService.getDirector(id))
+   adapter.register(IPC.DIRECTOR_OPTIONS, (search) =>
+@@ -106,6 +110,9 @@ export function registerClassificationHandlers(
+ }
+ 
+ export function registerFacetHandlers(): void {
++  appCommandAdapter.register(IPC.TAG_LABELS, (ids) => tagQueryService.labels(ids))
++  appCommandAdapter.register(IPC.TAG_FILTER_OPTIONS, (query) => catalogReadService.read(query))
++  appCommandAdapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => tagQueryService.manualOptions(query))
+   appCommandAdapter.register(
+     IPC.TAG_LIST,
+     (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()
+diff --git a/src/main/ipc/facetHandlers.test.ts b/src/main/ipc/facetHandlers.test.ts
+index 95ac8bd..c8fc742 100644
+--- a/src/main/ipc/facetHandlers.test.ts
++++ b/src/main/ipc/facetHandlers.test.ts
+@@ -17,6 +17,9 @@ describe('classification IPC contract', () => {
+   it('registers every command and forwards typed arguments to the public services', async () => {
+     const calls: unknown[] = []
+     const queryService: ClassificationQueryService = {
++      listDirectorsPage: query => { calls.push(['director-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
++      listOrganizationsPage: query => { calls.push(['organization-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
++      listSeriesPage: query => { calls.push(['series-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
+       listImageCandidates(entity) {
+         calls.push(['image-candidates', entity])
+         return []
+@@ -355,5 +358,13 @@ describe('classification IPC contract', () => {
+       ['image-candidates', imageEntity],
+       ['image-set', imageEntity, imageInput]
+     ])
++    const organizationPage = { ...listQuery, limit:60, offset:120 }
++    const seriesPage = { ...seriesQuery, limit:60, offset:60 }
++    assert.deepEqual(handlers.get(IPC.ORGANIZATION_PAGE)?.(organizationPage), {items:[],total:0,limit:60,offset:120})
++    assert.deepEqual(handlers.get(IPC.SERIES_PAGE)?.(seriesPage), {items:[],total:0,limit:60,offset:60})
++    assert.deepEqual(calls.slice(-2), [['organization-page',organizationPage],['series-page',seriesPage]])
++    const directorPage = { ...directorQuery, limit:60, offset:120 }
++    assert.deepEqual(handlers.get(IPC.DIRECTOR_PAGE)?.(directorPage), {items:[],total:0,limit:60,offset:120})
++    assert.deepEqual(calls.at(-1), ['director-page',directorPage])
+   })
+ })
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..2c9e196 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -365,6 +372,14 @@ const pluginPackage = z
+   })
+   .strict()
+ 
++const classificationPageQuery = z.object({
++  search: z.string().optional(),
++  sortBy: z.enum(['video_count', 'updated_at']).optional(),
++  sortDir: z.enum(['asc','desc']).optional(),
++  limit: z.number().int().min(1).max(100).optional(),
++  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++}).strict()
++
+ export const videoIpcSchemas = {
+   [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
+   [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
+@@ -379,6 +394,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -423,6 +439,26 @@ export const videoIpcSchemas = {
+ } satisfies IpcArgsSchemaMap<VideoIpcContract>
+ 
+ export const actressIpcSchemas = {
++  [IPC.ACTRESS_MERGE_CANDIDATES]: z.tuple([z.object({
++    keepId: positiveSafeInteger,
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()]),
++  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: z.tuple([]),
++  [IPC.ACTRESS_AVATAR_CROP_COUNT]: z.tuple([]),
++  [IPC.ACTRESS_TEST_TARGET_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_TEST_TARGET_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PICKER_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_PICKER_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_LIST]: z.tuple([
+     optionalText,
+     z.enum(['female', 'male', 'all']).optional(),
+@@ -431,6 +467,19 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_LIST_PAGE]: z.tuple([object.optional()]),
+   [IPC.ACTRESS_FACE_SCAN_MANIFEST]: noArgs,
++  [IPC.ACTRESS_GALLERY_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    anchorId: positiveSafeInteger.optional(),
++    localOnly: z.boolean().optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PROFILE]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_METADATA]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_VIDEO_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    withCover: z.boolean().optional(),
++    limit: z.number().int().min(1).max(240).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_GET]: z.tuple([id]),
+   [IPC.ACTRESS_AVATAR_SOURCE_INFO]: z.tuple([id]),
+   [IPC.ACTRESS_EDIT]: z.tuple([id, object]),
+@@ -450,6 +499,12 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
+   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
++  [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
++  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorName: nonEmptyText.optional()
++  }).strict()]),
+   [IPC.ACTRESS_CONFLICT_COUNT]: noArgs,
+   [IPC.ACTRESS_CONFLICT_SUMMARY]: noArgs,
+   [IPC.ACTRESS_CONFLICT_INSPECT_NAME]: z.tuple([
+@@ -507,6 +562,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -530,6 +593,7 @@ export const scrapeIpcSchemas = {
+   [IPC.BATCH_SCRAPE_RESUME]: noArgs,
+   [IPC.BATCH_SCRAPE_DISCARD]: noArgs,
+   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: noArgs,
++  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: z.tuple([nonEmptyText, z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.AVATAR_AUTO_CROP_BATCH_END]: z.tuple([nonEmptyText]),
+   [IPC.SCRAPER_LIST]: noArgs,
+   [IPC.SCRAPER_PLUGIN_DETAILS]: noArgs,
+@@ -634,6 +698,19 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
++    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
++    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
++  }).strict()]),
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
++  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +725,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +736,19 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.ORGANIZATION_PAGE]: z.tuple([classificationPageQuery.extend({role: z.enum(['maker','publisher'])})]),
++  [IPC.SERIES_PAGE]: z.tuple([classificationPageQuery]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+@@ -667,6 +760,7 @@ export const appIpcSchemas = {
+   [IPC.ORGANIZATION_ROLE_REMOVE]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_DELETE_PREVIEW]: z.tuple([id]),
+   [IPC.ORGANIZATION_DELETE]: z.tuple([id]),
++  [IPC.DIRECTOR_PAGE]: z.tuple([classificationPageQuery]),
+   [IPC.DIRECTOR_LIST]: z.tuple([listQuery]),
+   [IPC.DIRECTOR_GET]: z.tuple([id]),
+   [IPC.DIRECTOR_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..7aae0be 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -75,6 +75,11 @@ export const IPC = {
+   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
+   FILE_RENAME: 'file:rename',
+   FILE_IMPORT_MANUAL: 'file:importManual',
++  PENDING_AUDIT_PRESENCE: 'pendingAudit:presence',
++  PENDING_SCAN_QUEUE_PAGE: 'pendingScanQueue:page',
++  PENDING_SCAN_QUEUE_COUNT: 'pendingScanQueue:count',
++  PENDING_SCAN_GET: 'pendingScan:get',
++  PENDING_RESOURCE_IDENTITY_GET: 'pendingResourceIdentity:get',
+   PENDING_SCAN_LIST: 'pendingScan:list',
+   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+   PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+@@ -94,6 +99,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +120,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -124,7 +133,18 @@ export const IPC = {
+   // Actresses
+   ACTRESS_LIST: 'actress:list',
+   ACTRESS_LIST_PAGE: 'actress:listPage',
++  ACTRESS_PICKER_PAGE: 'actress:pickerPage',
++  ACTRESS_AVATAR_CROP_TARGETS: 'actress:avatarCropTargets',
++  ACTRESS_AVATAR_CROP_COUNT: 'actress:avatarCropCount',
++  ACTRESS_TEST_TARGET_PAGE: 'actress:testTargetPage',
++  ACTRESS_TEST_TARGET_GET: 'actress:testTargetGet',
++  ACTRESS_PICKER_GET: 'actress:pickerGet',
++  ACTRESS_MERGE_CANDIDATES: 'actress:mergeCandidates',
+   ACTRESS_FACE_SCAN_MANIFEST: 'actress:faceScanManifest',
++  ACTRESS_GALLERY_PAGE: 'actress:galleryPage',
++  ACTRESS_PROFILE: 'actress:profile',
++  ACTRESS_METADATA: 'actress:metadata',
++  ACTRESS_VIDEO_PAGE: 'actress:videoPage',
+   ACTRESS_GET: 'actress:get',
+   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
+   ACTRESS_EDIT: 'actress:edit',
+@@ -138,6 +158,8 @@ export const IPC = {
+   ACTRESS_MERGE: 'actress:merge',
+   ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
+   ACTRESS_CONFLICT_LIST: 'actressConflict:list',
++  ACTRESS_CONFLICT_QUEUE_PAGE: 'actressConflict:queuePage',
++  ACTRESS_CONFLICT_GET: 'actressConflict:get',
+   ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+   ACTRESS_CONFLICT_SUMMARY: 'actressConflict:summary',
+   ACTRESS_CONFLICT_INSPECT_NAME: 'actressConflict:inspectName',
+@@ -148,9 +170,13 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
++  ORGANIZATION_PAGE: 'organization:page',
+   ORGANIZATION_GET: 'organization:get',
+   ORGANIZATION_OPTIONS: 'organization:options',
+   ORGANIZATION_MERGE_OPTIONS: 'organization:mergeOptions',
+@@ -161,6 +187,7 @@ export const IPC = {
+   ORGANIZATION_ROLE_REMOVE: 'organization:roleRemove',
+   ORGANIZATION_DELETE_PREVIEW: 'organization:deletePreview',
+   ORGANIZATION_DELETE: 'organization:delete',
++  DIRECTOR_PAGE: 'director:page',
+   DIRECTOR_LIST: 'director:list',
+   DIRECTOR_GET: 'director:get',
+   DIRECTOR_OPTIONS: 'director:options',
+@@ -170,6 +197,7 @@ export const IPC = {
+   DIRECTOR_DELETE_PREVIEW: 'director:deletePreview',
+   DIRECTOR_DELETE: 'director:delete',
+   SERIES_LIST: 'series:list',
++  SERIES_PAGE: 'series:page',
+   SERIES_GET: 'series:get',
+   SERIES_OPTIONS: 'series:options',
+   SERIES_CREATE: 'series:create',
+@@ -182,6 +210,10 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+@@ -201,6 +233,7 @@ export const IPC = {
+   BATCH_SCRAPE_RESUME: 'batchScrape:resume',
+   BATCH_SCRAPE_DISCARD: 'batchScrape:discard',
+   AVATAR_AUTO_CROP_BATCH_BEGIN: 'avatarAutoCropBatch:begin',
++  AVATAR_AUTO_CROP_BATCH_TARGETS: 'avatarAutoCropBatch:targets',
+   AVATAR_AUTO_CROP_BATCH_END: 'avatarAutoCropBatch:end',
+   SCRAPER_LIST: 'scrape:listPlugins',
+   SCRAPER_PLUGIN_DETAILS: 'scrape:pluginDetails',
+diff --git a/src/shared/appIpcContract.ts b/src/shared/appIpcContract.ts
+index 14472f9..93c9e30 100644
+--- a/src/shared/appIpcContract.ts
++++ b/src/shared/appIpcContract.ts
+@@ -1,3 +1,4 @@
++import type { ClassificationPageQuery, ClassificationListPage } from './classificationTypes'
+ import type { WebAccessInput, WebAccessStatus } from './webTypes'
+ import { IPC } from './ipc-channels'
+ import type {
+@@ -20,6 +21,9 @@ import type {
+   PendingResourceIdentity,
+   PendingResourceIdentityResolution,
+   PendingResourceIdentityResolutionResult,
++  PendingAuditIds,
++  PendingScanQueueQuery,
++  PendingScanQueuePage,
+   PendingScanGroup,
+   PendingScanGroupResolution,
+   PendingScanGroupResolutionResult,
+@@ -27,10 +31,14 @@ import type {
+   RenameImportResult,
+   ScanResult
+ } from './libraryTypes'
+-import type { TagListItem, SortDir } from './commonTypes'
++import type { TagListItem, TagLabel, TagOptionsQuery, TagOptionsPage, TagFilterOptionsPage, SortDir } from './commonTypes'
+ import type {
+   PlaylistCreateInput,
+   PlaylistDetail,
++  PlaylistPage,
++  PlaylistMetadata,
++  PlaylistVideosPage,
++  PlaylistPageQuery,
+   PlaylistListItem,
+   PlaylistUpdateInput,
+   PlaylistVideoMembership,
+@@ -214,6 +222,11 @@ export interface AppIpcContract {
+     ]
+     result: ManualImportResult
+   }
++  [IPC.PENDING_AUDIT_PRESENCE]: { args: [libraryId: number, ids: PendingAuditIds]; result: PendingAuditIds }
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: { args: [query: PendingScanQueueQuery]; result: PendingScanQueuePage }
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: { args: [libraryId?: number]; result: number }
++  [IPC.PENDING_SCAN_GET]: { args: [libraryId: number, groupId: number]; result: PendingScanGroup | null }
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: { args: [libraryId: number, identityId: number]; result: PendingResourceIdentity | null }
+   [IPC.PENDING_SCAN_LIST]: {
+     args: [libraryId: number]
+     result: PendingScanGroup[]
+@@ -236,6 +249,9 @@ export interface AppIpcContract {
+     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
+     result: PlaylistDetail | null
+   }
++  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
++  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
++  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
+   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
+   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
+   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
+@@ -245,6 +261,11 @@ export interface AppIpcContract {
+ 
+   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
+   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
++  [IPC.TAG_LABELS]: { args: [ids: number[]]; result: TagLabel[] }
++  [IPC.TAG_FILTER_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagFilterOptionsPage }
++  [IPC.TAG_MANUAL_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagOptionsPage }
++  [IPC.ORGANIZATION_PAGE]: { args: [query: OrganizationListQuery & ClassificationPageQuery]; result: ClassificationListPage<OrganizationListItem> }
++  [IPC.SERIES_PAGE]: { args: [query: SeriesListQuery & ClassificationPageQuery]; result: ClassificationListPage<SeriesListItem> }
+   [IPC.ORGANIZATION_LIST]: {
+     args: [query: OrganizationListQuery]
+     result: OrganizationListItem[]
+@@ -286,6 +307,7 @@ export interface AppIpcContract {
+     args: [id: number]
+     result: OrganizationDeleteResult
+   }
++  [IPC.DIRECTOR_PAGE]: { args: [query: DirectorListQuery & ClassificationPageQuery]; result: ClassificationListPage<DirectorListItem> }
+   [IPC.DIRECTOR_LIST]: { args: [query: DirectorListQuery]; result: DirectorListItem[] }
+   [IPC.DIRECTOR_GET]: { args: [id: number]; result: DirectorDetail | null }
+   [IPC.DIRECTOR_OPTIONS]: { args: [search?: string]; result: DirectorOption[] }
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..cde658d 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1,3 +1,9 @@
++import type { ClassificationPageQuery } from '@shared/classificationTypes'
++import type { ActressGalleryPageQuery } from '../shared/actressTypes'
++import type { ActressVideoPageQuery } from '../shared/actressTypes'
++import type { ActressMergeCandidateQuery } from '../shared/actressTypes'
++import type { ActressPickerQuery } from '../shared/actressTypes'
++import type { PendingAuditIds, PendingScanQueueQuery } from '../shared/libraryTypes'
+ import type { WebAccessInput } from '../shared/webTypes'
+ import { contextBridge, ipcRenderer, webUtils } from 'electron'
+ import { IPC } from '../shared/ipc-channels'
+@@ -88,7 +94,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -103,8 +109,8 @@ import type {
+ } from '../shared/libraryTypes'
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+-import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -337,6 +343,11 @@ const api = {
+       code: string,
+       target: VideoResourceImportTarget
+     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
++    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
++    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
++    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
++    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
++    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
+     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+     resolvePending: (
+       libraryId: number,
+@@ -381,6 +392,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +461,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -463,6 +482,13 @@ const api = {
+       invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
+   },
+   actresses: {
++    mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
++    avatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_TARGETS),
++    countAvatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_COUNT),
++    testTargetPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_TEST_TARGET_PAGE, query),
++    testTargetGet: (id: number) => invokeActress(IPC.ACTRESS_TEST_TARGET_GET, id),
++    pickerGet: (id: number) => invokeActress(IPC.ACTRESS_PICKER_GET, id),
++    pickerPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_PICKER_PAGE, query),
+     list: (
+       search?: string,
+       gender?: ActressGenderFilter,
+@@ -471,6 +497,10 @@ const api = {
+     ) => invokeActress(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
+     listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
+     faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),
++    galleryPage: (id: number, query?: ActressGalleryPageQuery) => invokeActress(IPC.ACTRESS_GALLERY_PAGE, id, query),
++    profile: (id: number) => invokeActress(IPC.ACTRESS_PROFILE, id),
++    metadata: (id: number) => invokeActress(IPC.ACTRESS_METADATA, id),
++    videoPage: (id: number, query?: ActressVideoPageQuery) => invokeActress(IPC.ACTRESS_VIDEO_PAGE, id, query),
+     get: (id: number) => invokeActress(IPC.ACTRESS_GET, id),
+     getAvatarSourceInfo: (id: number) =>
+       invokeActress(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
+@@ -491,12 +521,16 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+       invokeApp(IPC.TAG_LIST_MANUAL)
+   },
+   organizations: {
++    page: (query: OrganizationListQuery & ClassificationPageQuery) => invokeApp(IPC.ORGANIZATION_PAGE, query),
+     list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),
+     get: (id: number, role: OrganizationRole) => invokeApp(IPC.ORGANIZATION_GET, id, role),
+     options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
+@@ -513,6 +547,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE, id)
+   },
+   directors: {
++    page: (query: DirectorListQuery & ClassificationPageQuery) => invokeApp(IPC.DIRECTOR_PAGE, query),
+     list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),
+     get: (id: number) => invokeApp(IPC.DIRECTOR_GET, id),
+     options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
+@@ -524,6 +559,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.DIRECTOR_DELETE, id)
+   },
+   series: {
++    page: (query: SeriesListQuery & ClassificationPageQuery) => invokeApp(IPC.SERIES_PAGE, query),
+     list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),
+     get: (id: number) => invokeApp(IPC.SERIES_GET, id),
+     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
+@@ -557,6 +593,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+@@ -625,6 +665,8 @@ const api = {
+         autoCropAvatar
+       ),
+     listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
++    getConflict: (normalizedName: string) => invokeActress(IPC.ACTRESS_CONFLICT_GET, normalizedName),
++    pageConflicts: (query: ActressConflictQueueQuery) => invokeActress(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, query),
+     conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
+     conflictSummary: () =>
+       invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
+@@ -755,6 +797,7 @@ const api = {
+   },
+   avatarAutoCropBatch: {
+     begin: () => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
++    targets: (token: string, afterId: number) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, token, afterId),
+     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
+   },
+   player: {
+diff --git a/src/renderer/src/pages/DirectorListPage.tsx b/src/renderer/src/pages/DirectorListPage.tsx
+index dfe6dfb..079217c 100644
+--- a/src/renderer/src/pages/DirectorListPage.tsx
++++ b/src/renderer/src/pages/DirectorListPage.tsx
+@@ -1,27 +1,20 @@
+-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
++import { useCallback, useEffect, useState } from 'react'
+ import { Clapperboard, Plus, SearchX } from 'lucide-react'
+-import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
+-import { useQuery } from '@tanstack/react-query'
++import { useLocation, useMatch, useNavigate } from 'react-router-dom'
+ import type { ClassificationListSortBy, DirectorUpdateInput } from '@shared/classificationTypes'
+-import type { SortDir } from '@shared/commonTypes'
+ import { api, assetUrl } from '../api'
+ import AppliedFilterBar from '../components/AppliedFilterBar'
+-import DirectorEditModal from '../components/DirectorEditModal'
+ import EmptyState from '../components/EmptyState'
+ import ListSurface from '../components/ListSurface'
+ import ListToolbar from '../components/ListToolbar'
++import DirectorEditModal from '../components/DirectorEditModal'
+ import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
+-import { useDebounce } from '../hooks/useDebounce'
+-import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
++import { useClassificationPage } from '../hooks/useClassificationPage'
+ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
++import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
+ import { useToast } from '../components/Toast'
+ import { UI_ICON_SM } from '../components/iconDefaults'
+-import {
+-  classificationListQueryHash,
+-  LIST_PARAM,
+-  parseClassificationSort,
+-  patchSearchParams,
+-} from '../listView/listQueryParams'
++import { CLASSIFICATION_PAGE_SIZE } from '../listView/listQueryParams'
+ import { navigateToDirectorDetail } from '../listView/listNavigation'
+ import { ROUTE_MATCH } from '../listView/routePaths'
+ import { directorKeys } from '../query/queryKeys'
+@@ -29,66 +22,27 @@ import Button from '../components/Button'
+ 
+ const SORT_OPTIONS: SortSwitchOption<ClassificationListSortBy>[] = [
+   { value: 'video_count', label: '影片', title: '关联影片数量' },
+-  { value: 'updated_at', label: '更新', title: '最近更新时间' },
++  { value: 'updated_at', label: '更新', title: '最近更新时间' }
+ ]
+ 
+ export default function DirectorListPage(): JSX.Element {
+   const navigate = useNavigate()
+   const location = useLocation()
+   const toast = useToast()
+-  const [params, setParams] = useSearchParams()
+-  const [searchInput, setSearchInput] = useState(params.get(LIST_PARAM.q) ?? '')
+-  const syncingSearchFromUrl = useRef(false)
+   const [creating, setCreating] = useState(false)
+   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.directorDetailOpen, end: false }))
+-  const debounced = useDebounce(searchInput, 250)
+-  const urlQ = params.get(LIST_PARAM.q) ?? ''
+-  const { sortBy, sortDir } = parseClassificationSort(
+-    params.get(LIST_PARAM.sort),
+-    params.get(LIST_PARAM.dir),
+-  )
+-  const queryHash = useMemo(() => classificationListQueryHash('director', params), [params])
+-  const query = useQuery({
+-    queryKey: directorKeys.list(queryHash),
+-    queryFn: () =>
+-      api.directors.list({
+-        search: params.get(LIST_PARAM.q) ?? '',
+-        sortBy,
+-        sortDir,
+-      }),
+-    placeholderData: (previous) => previous,
+-  })
++  const {
++    query, queryHash, searchInput, setSearchInput, sortBy, sortDir, patchSort,
++    items, loading, total, offset, move, canNext
++  } = useClassificationPage('director', directorKeys.list, input => api.directors.page(input))
+   const refetchSilent = useCallback(() => void query.refetch(), [query])
+   useListSurfaceRefetch(detailOpen, refetchSilent)
+   const { ref, showScrollToTop, scrollToTop } = useScrollContainerMemory(`facet:${queryHash}`)
+-  useEffect(() => {
+-    if (searchInput === urlQ) return
+-    syncingSearchFromUrl.current = true
+-    setSearchInput(urlQ)
+-  }, [searchInput, urlQ])
+-  useEffect(() => {
+-    const value = debounced.trim()
+-    if (syncingSearchFromUrl.current) {
+-      if (value === urlQ.trim()) syncingSearchFromUrl.current = false
+-      return
+-    }
+-    if (value === urlQ.trim()) return
+-    setParams((previous) => patchSearchParams(previous, { [LIST_PARAM.q]: value || null }), {
+-      replace: true,
+-    })
+-  }, [debounced, setParams, urlQ])
++
+   useEffect(() => {
+     if (query.isError) toast.show(String(query.error), 'error')
+   }, [query.error, query.isError, toast])
+-  const patchSort = (next: ClassificationListSortBy, dir: SortDir): void =>
+-    setParams(
+-      (previous) =>
+-        patchSearchParams(previous, {
+-          [LIST_PARAM.sort]: next,
+-          [LIST_PARAM.dir]: dir,
+-        }),
+-      { replace: true },
+-    )
++
+   const create = async (input: DirectorUpdateInput): Promise<void> => {
+     try {
+       const id = await api.directors.create(input)
+@@ -99,7 +53,6 @@ export default function DirectorListPage(): JSX.Element {
+       toast.show(String((error as Error).message), 'error')
+     }
+   }
+-  const items = query.data ?? []
+   return (
+     <div className="list-page">
+       <div className="topbar">
+@@ -108,13 +61,13 @@ export default function DirectorListPage(): JSX.Element {
+             value: searchInput,
+             placeholder: '搜索导演主名或别名…',
+             ariaLabel: '搜索导演',
+-          onChange: (value) => {
+-            syncingSearchFromUrl.current = false
+-            setSearchInput(value)
+-          },
++            onChange: setSearchInput
+           }}
+           controls={
+             <>
++              <Button size="sm" disabled={offset === 0} onClick={() => move(offset - CLASSIFICATION_PAGE_SIZE)}>上一页</Button>
++              <span aria-live="polite">第 {offset / CLASSIFICATION_PAGE_SIZE + 1} 页</span>
++              <Button size="sm" disabled={!canNext || loading} onClick={() => move(offset + CLASSIFICATION_PAGE_SIZE)}>下一页</Button>
+               <SortSwitch
+                 label="排序"
+                 options={SORT_OPTIONS}
+@@ -123,21 +76,15 @@ export default function DirectorListPage(): JSX.Element {
+                 compact
+                 onChange={patchSort}
+               />
+-              <Button
+-                type="button"
+-                variant="primary"
+-
+-                size="sm"
+-                onClick={() => setCreating(true)}
+-              >
+-                <Plus {...UI_ICON_SM} />
++              <Button type="button" variant="primary" size="sm" onClick={() => setCreating(true)}>
++                <Plus {...UI_ICON_SM} aria-hidden />
+                 新增
+               </Button>
+             </>
+           }
+           resultCount={
+             <span className="count-badge count-badge--stable count-badge--facet">
+-              共 {items.length} 位导演
++              共 {total ?? '…'} 位导演
+             </span>
+           }
+         />
+@@ -149,8 +96,8 @@ export default function DirectorListPage(): JSX.Element {
+                   {
+                     key: 'sort',
+                     label: `排序：${sortBy === 'video_count' ? '影片数量' : '最近更新'}${sortDir === 'asc' ? '正序' : '倒序'}`,
+-                    onRemove: () => patchSort('video_count', 'desc'),
+-                  },
++                    onRemove: () => patchSort('video_count', 'desc')
++                  }
+                 ]
+           }
+           onClear={() => patchSort('video_count', 'desc')}
+@@ -162,8 +109,12 @@ export default function DirectorListPage(): JSX.Element {
+         showScrollToTop={showScrollToTop}
+         onScrollToTop={scrollToTop}
+       >
+-        {query.isLoading ? (
++        {loading ? (
+           <EmptyState loading />
++        ) : query.isError ? (
++          <EmptyState title="导演加载失败" description={String(query.error.message)}>
++            <Button onClick={() => void query.refetch()} disabled={query.isFetching}>重试</Button>
++          </EmptyState>
+         ) : items.length === 0 ? (
+           <EmptyState
+             icon={searchInput ? <SearchX {...UI_ICON_SM} /> : <Clapperboard {...UI_ICON_SM} />}
+@@ -173,7 +124,7 @@ export default function DirectorListPage(): JSX.Element {
+         ) : (
+           <div className="facet-grid">
+             {items.map((item) => {
+-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath)
++              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
+               return (
+                 <div className="facet-card-wrap" key={item.id}>
+                   <button
+@@ -186,7 +137,7 @@ export default function DirectorListPage(): JSX.Element {
+                         <img src={cover} alt="" loading="lazy" />
+                       ) : (
+                         <span className="facet-thumb-placeholder">
+-                          <Clapperboard {...UI_ICON_SM} />
++                          <Clapperboard {...UI_ICON_SM} aria-hidden />
+                         </span>
+                       )}
+                     </div>
+diff --git a/src/renderer/src/pages/ClassificationListPage.interaction.test.tsx b/src/renderer/src/pages/ClassificationListPage.interaction.test.tsx
+new file mode 100644
+index 0000000..ee20a5d
+--- /dev/null
++++ b/src/renderer/src/pages/ClassificationListPage.interaction.test.tsx
+@@ -0,0 +1,226 @@
++import assert from 'node:assert/strict'
++import { afterEach, before, describe, it } from 'node:test'
++import React from 'react'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import { MemoryRouter, Routes, Route, useLocation, useNavigate, useParams } from 'react-router-dom'
++import TestRenderer, { act } from 'react-test-renderer'
++import type { OrganizationRole, ClassificationListPage, SeriesListItem, SeriesListQuery, ClassificationPageQuery } from '@shared/classificationTypes'
++import { parseFacetOffset, classificationListQueryHash } from '../listView/listQueryParams'
++
++type Input = SeriesListQuery & ClassificationPageQuery & { role?: OrganizationRole }
++type Page = ClassificationListPage<SeriesListItem>
++const requests: Input[] = []
++let total = 125
++let read: (query: Input) => Promise<Page>
++function result(query: Input): Page {
++  const offset = query.offset ?? 0
++  return {
++    items: Array.from({ length: Math.max(0, Math.min(60, total - offset)) }, (_, index) => ({
++      id: offset + index + 1, mainName: `${query.role ?? 'series'}:${query.search}:${offset + index + 1}`,
++      imagePath: index % 2 ? null : 'classification/explicit.jpg', fallbackCoverPath: 'classification/fallback.jpg', ownerOrganization: null, videoCount: 1, updatedAt: ''
++    })), total, limit: 60, offset
++  }
++}
++const page = (query: Input): Promise<Page> => { requests.push(query); return read(query) }
++Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: {
++  directors: { page, list: () => { throw Error('Full list forbidden') } },
++  series: { page, list: () => { throw Error('Full list forbidden') } },
++  organizations: { page, list: () => { throw Error('Full list forbidden') } }
++} } })
++Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { platform: 'Win32' } })
++let DirectorListPage: typeof import('./DirectorListPage').default
++let SeriesListPage: typeof import('./SeriesListPage').default
++let OrganizationListPage: typeof import('./OrganizationListPage').default
++let ListDetailShell: typeof import('../components/ListDetailShell').default
++before(async () => {
++  DirectorListPage = (await import('./DirectorListPage')).default
++  SeriesListPage = (await import('./SeriesListPage')).default
++  OrganizationListPage = (await import('./OrganizationListPage')).default
++  ListDetailShell = (await import('../components/ListDetailShell')).default
++})
++let renderer: TestRenderer.ReactTestRenderer
++let client: QueryClient
++let location: ReturnType<typeof useLocation>
++let navigate: ReturnType<typeof useNavigate>
++let scrollListener: (() => void) | undefined
++const scroll = {
++  scrollTop: 0,
++  addEventListener: (_event: string, listener: () => void) => { scrollListener = listener },
++  removeEventListener: () => { scrollListener = undefined },
++  scrollTo: ({ top }: { top: number }) => { scroll.scrollTop = top }
++}
++function Probe(): null { location = useLocation(); navigate = useNavigate(); return null }
++function Surface(): React.JSX.Element {
++  const { type } = useParams()
++  return <ListDetailShell list={type === 'series' ? <SeriesListPage /> : type === 'director' ? <DirectorListPage /> : <OrganizationListPage role={type as OrganizationRole} />}
++    detailMatchPath={['/facet/director/d/:id', '/facet/series/s/:id', '/facet/:type/o/:id']} detailMatchEnd={false} />
++}
++async function mount(kind: string, query = ''): Promise<void> {
++  total = 125; requests.length = 0; read = async query => result(query)
++  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
++  await act(async () => {
++    renderer = TestRenderer.create(<QueryClientProvider client={client}>
++      <MemoryRouter initialEntries={[`/facet/${kind}${query}`]}><Probe /><Routes>
++        <Route path="/facet/:type" element={<Surface />}>
++          <Route path="d/:id/*" element={<div>detail</div>} />
++          <Route path="s/:id/*" element={<div>detail</div>} />
++          <Route path="o/:id/*" element={<div>detail</div>} />
++        </Route>
++      </Routes></MemoryRouter>
++    </QueryClientProvider>, { createNodeMock: element =>
++      element.props.className === 'scroll-body scroll-body--scroll' ? scroll : null })
++  })
++  await wait(() => cards().length > 0)
++}
++async function wait(check: () => boolean): Promise<void> {
++  for (let attempt = 0; attempt < 100; attempt++) {
++    if (check()) return
++    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
++  }
++  assert.ok(check(), 'condition did not settle')
++}
++function text(node: TestRenderer.ReactTestInstance | string): string {
++  return typeof node === 'string' ? node : node.children.map(text).join('')
++}
++function cards(): TestRenderer.ReactTestInstance[] {
++  return renderer.root.findAllByProps({ className: 'facet-card card-interactive' })
++}
++function button(label: string): TestRenderer.ReactTestInstance {
++  return renderer.root.findAllByType('button').find(node => text(node) === label)!
++}
++async function click(label: string): Promise<void> { await act(async () => { button(label).props.onClick() }) }
++async function go(url: string | number): Promise<void> {
++  await act(async () => { if (typeof url === 'number') navigate(url); else navigate(url) })
++}
++afterEach(async () => {
++  if (renderer) await act(async () => renderer.unmount())
++  client?.clear()
++})
++
++for (const kind of ['series', 'maker', 'director']) describe(`${kind} real list page`, () => {
++  it('renders 60/60/5 with server total and bounded page cache', async () => {
++    await mount(kind)
++    assert.equal(cards().length, 60)
++    assert.deepEqual(cards().slice(0,2).map(card=>card.findByType('img').props.src), ['media://classification/explicit.jpg?size=640','media://classification/fallback.jpg?size=640'])
++    assert.ok(text(renderer.root).includes('共 125'))
++    assert.equal(button('上一页').props.disabled, true)
++    await click('下一页'); await wait(() => cards().length === 60 && text(cards()[0]).includes(':61'))
++    assert.equal(location.search, '?facetOffset=60')
++    await click('下一页'); await wait(() => cards().length === 5)
++    assert.equal(button('下一页').props.disabled, true)
++    await click('上一页'); await wait(() => cards().length === 60)
++    assert.deepEqual(requests.map(query => query.offset), [0, 60, 120, 60])
++    assert.ok(requests.every(query => query.limit === 60))
++    total = 6000
++    for (let offset = 120; offset < 6000; offset += 60) {
++      await go(`/facet/${kind}?facetOffset=${offset}`)
++      await wait(() => cards().length === 60 && text(cards()[0]).includes(`:${offset + 1}`))
++    }
++    await wait(() => client.getQueryCache().getAll().length === 1)
++  })
++  it('clears old cards while loading and supports failed-page retry', async () => {
++    await mount(kind)
++    let reject!: (error: Error) => void
++    read = () => new Promise((_resolve, fail) => { reject = fail })
++    await click('下一页')
++    assert.equal(cards().length, 0)
++    await act(async () => reject(Error('page unavailable')))
++    await wait(() => Boolean(button('重试')))
++    assert.equal(cards().length, 0)
++    read = async query => result(query)
++    await click('重试'); await wait(() => cards().length === 60)
++    assert.ok(text(cards()[0]).includes(':61'))
++  })
++  it('clamps a shrinking total to its last page, including zero', async () => {
++    await mount(kind, '?facetOffset=120')
++    total = 61
++    await act(async () => { await client.refetchQueries({ type: 'active' }) })
++    await wait(() => location.search === '?facetOffset=60' && cards().length === 1)
++    total = 0
++    await act(async () => { await client.refetchQueries({ type: 'active' }) })
++    await wait(() => location.search === '' && button('下一页').props.disabled && text(renderer.root).includes('共 0'))
++    assert.equal(cards().length, 0)
++    assert.ok(text(renderer.root).includes('共 0'))
++  })
++  it('resets search/sort to page one and rejects late search data', async () => {
++    await mount(kind, '?facetOffset=60')
++    let resolveOld!: (value: Page) => void
++    read = query => query.search === 'old' ? new Promise(resolve => { resolveOld = resolve }) : Promise.resolve(result(query))
++    await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'old' } }))
++    assert.equal(renderer.root.findByType('input').props.value, 'old')
++    await wait(() => requests.some(query => query.search === 'old'))
++    assert.equal(location.search, '?q=old')
++    assert.equal(cards().length, 0)
++    await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'new' } }))
++    await wait(() => cards().length === 60 && text(cards()[0]).includes(':new:'))
++    await act(async () => resolveOld(result({ search: 'old', offset: 0 })))
++    assert.ok(text(cards()[0]).includes(':new:'))
++    await click('下一页'); await wait(() => location.search.includes('facetOffset=60'))
++    await click('更新'); await wait(() => requests.at(-1)?.sortBy === 'updated_at')
++    assert.equal(requests.at(-1)?.offset, 0)
++    assert.equal(requests.at(-1)?.search, 'new')
++    await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'discard' } }))
++    await go(`/facet/${kind}?q=external&facetOffset=60`)
++    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
++    assert.equal(renderer.root.findByType('input').props.value, 'external')
++    assert.equal(location.search, '?q=external&facetOffset=60')
++  })
++  it('invalidates uncommitted input across A → B → A history navigation', async () => {
++    await mount(kind, '?q=original&facetOffset=60')
++    await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'discard' } }))
++    await go(`/facet/${kind}?q=other`)
++    await go(-1)
++    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
++    assert.equal(location.search, '?q=original&facetOffset=60')
++    assert.equal(renderer.root.findByType('input').props.value, 'original')
++    assert.ok(requests.every(query => query.search !== 'discard'))
++  })
++  it('invalidates pending input when opening detail without changing search', async () => {
++    await mount(kind, '?q=original&facetOffset=60')
++    await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'discard' } }))
++    await act(async () => cards()[0].props.onClick())
++    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
++    assert.equal(location.search, '?q=original&facetOffset=60')
++    assert.equal(renderer.root.findByType('input').props.value, 'original')
++    await go(-1)
++    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
++    assert.equal(location.search, '?q=original&facetOffset=60')
++    assert.ok(requests.every(query => query.search !== 'discard'))
++  })
++  it('retains page, active observer and scroll through nested detail and return', async () => {
++    await mount(kind, '?q=kept&facetOffset=60')
++    await act(async () => { scroll.scrollTop = 432; scrollListener?.() })
++    await act(async () => cards()[0].props.onClick())
++    assert.ok(location.pathname.includes(kind === 'series' ? '/s/61' : kind === 'director' ? '/d/61' : '/o/61'))
++    assert.equal(location.search, '?q=kept&facetOffset=60')
++    await go(`${location.pathname}/99${location.search}`)
++    assert.equal(client.getQueryCache().getAll().filter(query => query.isActive()).length, 1)
++    await go(-1); await go(-1)
++    await wait(() => requests.length >= 2)
++    assert.equal(location.pathname, `/facet/${kind}`)
++    assert.equal(location.search, '?q=kept&facetOffset=60')
++    assert.equal(scroll.scrollTop, 432)
++    assert.equal(cards().length, 60)
++    assert.ok(requests.every(query => query.offset === 60 && query.search === 'kept'))
++  })
++})
++it('organization role change discards old filters and pending search', async () => {
++  await mount('maker', '?q=maker&facetOffset=60')
++  await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'discard' } }))
++  await go('/facet/publisher?q=maker&facetOffset=60')
++  await wait(() => cards().length === 60 && text(cards()[0]).startsWith('publisher::1'))
++  await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
++  assert.equal(location.search, '')
++  assert.equal(renderer.root.findByType('input').props.value, '')
++  assert.ok(requests.filter(query => query.role === 'publisher').every(query => query.offset === 0 && query.search === ''))
++})
++it('normalizes URL offsets safely and keys distinct pages', async () => {
++  for (const raw of [null, '', '-60', 'NaN', 'Infinity', '1e3', '60.5', '9007199254740992']) assert.equal(parseFacetOffset(raw), 0)
++  assert.equal(parseFacetOffset('119'), 60)
++  assert.equal(parseFacetOffset('000120'), 120)
++  assert.notEqual(classificationListQueryHash('series', new URLSearchParams()), classificationListQueryHash('series', new URLSearchParams('facetOffset=60')))
++  await mount('series', '?facetOffset=119')
++  assert.equal(location.search, '?facetOffset=60')
++  assert.ok(requests.every(query => query.offset === 60))
++})
+diff --git a/scripts/performance/classification-list-ui.mjs b/scripts/performance/classification-list-ui.mjs
+new file mode 100644
+index 0000000..d22f477
+--- /dev/null
++++ b/scripts/performance/classification-list-ui.mjs
+@@ -0,0 +1,85 @@
++/** Actual classification list pages/styles with synthetic IPC and bounded query-cache evidence. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-classification-ui-'))
++const output=path.resolve(process.env.JAVDEX_CLASSIFICATION_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++const local=p=>JSON.stringify('/@fs'+path.join(repo,p))
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root" style="height:100vh"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'image.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="640" height="400" fill="#334455"/><circle cx="320" cy="175" r="95" fill="#879aab"/></svg>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import{createRoot}from'react-dom/client';import{MemoryRouter,Route,Routes,useNavigate,useLocation,useParams}from'react-router-dom';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';
++import ${local('src/renderer/src/styles/global.css')};
++window.React=React;window.__calls=[];window.__total=125;
++const read=async(kind,query)=>{window.__calls.push({kind,query});if(window.__fail){window.__fail=false;throw Error('Synthetic page failed')}const total=query.search?17:window.__total,offset=query.offset??0;return{items:Array.from({length:Math.min(60,Math.max(0,total-offset))},(_,n)=>({id:offset+n+1,mainName:kind+' '+(offset+n+1),imagePath:kind==='director'?'directors/'+(offset+n+1)+'.jpg':null,fallbackCoverPath:null,videoCount:123,updatedAt:'2026-01-01',ownerOrganization:{id:1,mainName:'示例制作商'}})),total,offset,limit:60}};
++window.api={directors:{page:q=>read('director',q),list:()=>{throw Error('Full list forbidden')}},series:{page:q=>read('series',q),list:()=>{throw Error('Full list forbidden')}},organizations:{page:q=>read(q.role,q),list:()=>{throw Error('Full list forbidden')}}};
++const Director=(await import(${local('src/renderer/src/pages/DirectorListPage.tsx')})).default;
++const Series=(await import(${local('src/renderer/src/pages/SeriesListPage.tsx')})).default;const Organization=(await import(${local('src/renderer/src/pages/OrganizationListPage.tsx')})).default;
++const Shell=(await import(${local('src/renderer/src/components/ListDetailShell.tsx')})).default;
++function Surface(){const {type}=useParams();return <Shell list={type==='series'?<Series/>:type==='director'?<Director/>:<Organization role={type}/>} detailMatchPath={['/facet/director/d/:id','/facet/series/s/:id','/facet/:type/o/:id']} detailMatchEnd={false}/>}
++const client=new QueryClient({defaultOptions:{queries:{retry:false}}});window.__client=client;
++function Nav(){window.__navigate=useNavigate();window.__location=useLocation();return null}
++const kind=new URLSearchParams(location.search).get('kind')||'series';
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/facet/'+kind]}><Nav/><Routes><Route path="/facet/:type" element={<Surface/>}><Route path="d/:id/*" element={<div>Detail fixture</div>}/><Route path="s/:id/*" element={<div>Detail fixture</div>}/><Route path="o/:id/*" element={<div>Detail fixture</div>}/></Route></Routes></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser;const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/image.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')}},server:{host:'127.0.0.1',port:0,fs:{allow:[repo,root]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) for(const kind of ['series','maker','director']) {
++  const page=await browser.newPage({viewport}),errors=[],mediaRequests=[];page.on('request',request=>{if(request.url().includes('/image.svg?'))mediaRequests.push(request.url())});page.on('pageerror',error=>errors.push(error.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port+'/?kind='+kind)
++  await page.waitForFunction(()=>document.querySelectorAll('.facet-card').length===60)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelector('.facet-name')?.textContent.endsWith(' 61'))
++  await page.evaluate(()=>window.__fail=true)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.facet-card').length===5)
++  assert.equal(await page.evaluate(()=>new URLSearchParams(window.__location.search).get('facetOffset')),'120')
++  await page.locator('.facet-card').first().click()
++  await page.waitForFunction(kind=>window.__location.pathname.includes(kind==='series'?'/s/':kind==='director'?'/d/':'/o/'),kind)
++  await page.evaluate(kind=>window.__navigate('/facet/'+kind+'?facetOffset=120'),kind)
++  await page.waitForFunction(()=>document.querySelectorAll('.facet-card').length===5)
++  const next=page.getByRole('button',{name:'下一页',exact:true});await next.scrollIntoViewIfNeeded()
++  const geometry=await next.evaluate(el=>({bottom:el.getBoundingClientRect().bottom,viewport:innerHeight,horizontal:document.documentElement.scrollWidth>innerWidth}))
++  assert.ok(geometry.bottom<=geometry.viewport);assert.equal(geometry.horizontal,false)
++  if(kind==='director') await page.waitForFunction(()=>Array.from(document.querySelectorAll('.facet-card img')).every(img=>img.complete&&img.naturalWidth>0))
++  await page.screenshot({path:path.join(output,kind+'-'+viewport.width+'x'+viewport.height+'.png')})
++  await page.getByRole('searchbox').fill('stale-draft')
++  await page.evaluate(kind=>window.__navigate('/facet/'+kind+'?facetOffset=60'),kind)
++  await page.waitForFunction(()=>document.querySelector('.facet-name')?.textContent.endsWith(' 61'))
++  await page.evaluate(kind=>window.__navigate('/facet/'+kind+'?facetOffset=120'),kind)
++  await page.waitForTimeout(350)
++  assert.equal(await page.getByRole('searchbox').inputValue(),'')
++  assert.equal(await page.evaluate(()=>new URLSearchParams(window.__location.search).get('q')),null)
++  await page.getByRole('searchbox').fill('stale-detail')
++  await page.locator('.facet-card').first().click()
++  await page.waitForFunction(kind=>window.__location.pathname.includes(kind==='series'?'/s/':kind==='director'?'/d/':'/o/'),kind)
++  await page.waitForTimeout(350)
++  assert.equal(await page.evaluate(()=>new URLSearchParams(window.__location.search).get('q')),null)
++  await page.evaluate(kind=>window.__navigate('/facet/'+kind+'?facetOffset=120'),kind)
++  await page.waitForFunction(()=>document.querySelectorAll('.facet-card').length===5)
++  // Navigate many pages without keeping successful inactive pages in the cache.
++  await page.evaluate(()=>window.__total=6000)
++  for(let n=0;n<100;n++) {
++    await page.evaluate(({kind,n})=>window.__navigate('/facet/'+kind+(n?'?facetOffset='+n*60:'')),{kind,n})
++    await page.waitForFunction(n=>document.querySelector('.facet-name')?.textContent.endsWith(' '+(n*60+1)),n)
++  }
++  await page.waitForFunction(()=>window.__client.getQueryCache().getAll().length<=1)
++  const cacheCount=await page.evaluate(()=>window.__client.getQueryCache().getAll().length)
++  assert.equal(await page.locator('.facet-card').count(),60)
++  await page.getByRole('searchbox').fill('needle')
++  await page.waitForFunction(()=>document.querySelectorAll('.facet-card').length===17)
++  assert.equal(await page.evaluate(()=>new URLSearchParams(window.__location.search).get('facetOffset')),null)
++  if(kind==='director'){assert.ok(mediaRequests.length>0);assert.ok(mediaRequests.every(value=>new URL(value).searchParams.get('size')==='640'))}
++  assert.deepEqual(errors,[])
++  results.push({kind,viewport,geometry,cacheCount,pagesTraversed:100,draftNavigationPassed:true,maxFinalCards:60,errors,mediaRequests,calls:await page.evaluate(()=>window.__calls)})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2));console.log(output)
++} finally {await browser?.close();await server?.close();if(!output.startsWith(root+path.sep))fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/classification-page-benchmark.ts b/scripts/performance/classification-page-benchmark.ts
+new file mode 100644
+index 0000000..751a058
+--- /dev/null
++++ b/scripts/performance/classification-page-benchmark.ts
+@@ -0,0 +1,47 @@
++/** Isolated synthetic classification list probe; run with run-electron-tests.mjs. */
++import {it} from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {performance} from 'node:perf_hooks'
++import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
++import {classificationQueryService as read} from '../../src/main/services/classificationQueryService'
++it('compares complete entity lists to first/last pages with 100k associated videos',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-classification-bench-'))
++ try {
++  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++  db.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++    INSERT INTO organizations(id,main_name,updated_at) SELECT x,printf('Organization-%06d',x),'2026-01-01' FROM n;
++    INSERT INTO organization_roles SELECT id,'maker' FROM organizations;
++    INSERT INTO organization_names(organization_id,name,normalized_name,type) SELECT id,main_name,lower(main_name),'main' FROM organizations;
++    INSERT INTO directors(id,main_name,updated_at) SELECT id,printf('Director-%06d',id),'2026-01-01' FROM organizations;
++    INSERT INTO director_names(director_id,name,normalized_name,type) SELECT id,main_name,lower(main_name),'main' FROM directors;
++    INSERT INTO series(id,main_name,owner_organization_id,updated_at) SELECT id,printf('Series-%06d',id),id,'2026-01-01' FROM organizations;
++    INSERT INTO series_names(series_id,name,normalized_name,type) SELECT id,main_name,lower(main_name),'main' FROM series;
++    WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000)
++    INSERT INTO videos(id,code,maker_organization_id,series_id,director_id,cover_path,release_date,add_time)
++      SELECT x,printf('VIDEO-%06d',x),(x%10000)+1,(x%10000)+1,(x%10000)+1,printf('cover/%06d.jpg',x),'2026-01-01','2026-01-01' FROM n;
++    ANALYZE;`)
++  const metrics:unknown[]=[],plans:unknown[]=[]
++  for(const kind of ['maker','series','director'] as const) for(const sortBy of ['video_count','updated_at'] as const) {
++    const query={sortBy,sortDir:'desc' as const}
++    const full=()=>kind==='series'?read.listSeries(query):kind==='director'?read.listDirectors(query):read.listOrganizations({...query,role:kind})
++    const expected=full()
++    const measure=(name:string,run:()=>unknown,check:(v:unknown)=>void)=>{
++      check(run());const samples:number[]=[];let bytes=0
++      for(let n=0;n<3;n++){const start=performance.now(),value=run();samples.push(performance.now()-start);check(value);bytes=Buffer.byteLength(JSON.stringify(value))}
++      metrics.push({kind,sortBy,name,samples,medianMs:[...samples].sort((a,b)=>a-b)[1],jsonBytes:bytes})
++    }
++    measure('legacy',full,value=>assert.deepEqual(value,expected))
++    for(const offset of [0,9960]) {
++      const prepare=db.prepare.bind(db)
++      db.prepare=((sql:string)=>{if(sql.startsWith('WITH page AS MATERIALIZED'))plans.push({kind,sortBy,offset,plan:prepare('EXPLAIN QUERY PLAN '+sql).all(...(kind!=='maker'?['','',60,offset]:[kind,'','',60,offset]))});return prepare(sql)}) as typeof db.prepare
++      let once=true
++      const run=()=>{const result=kind==='series'?read.listSeriesPage({...query,offset}):kind==='director'?read.listDirectorsPage({...query,offset}):read.listOrganizationsPage({...query,role:kind,offset});if(once){db.prepare=prepare;once=false}return result}
++      try {measure(offset?'last':'first',run,value=>{const page=value as {items:unknown[];total:number};assert.equal(page.total,10000);assert.deepEqual(page.items,expected.slice(offset,offset+60))})} finally{db.prepare=prepare}
++    }
++  }
++  console.log(JSON.stringify({entitiesPerKind:10000,videos:100000,metrics,plans,notes:['Ten videos per entity; all update/release dates tied. ANALYZE, one warmup, 3 warm samples, fixed legacy-first ordering.','Timing excludes assertions/JSON serialization; complete oracle retained. No p95, cold, peak-memory, IPC or Windows/HDD claim.','Counts/ranking still scan entity/video relations; page payload and hydration are bounded, field byte lengths are not.']},null,2))
++ }finally{closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})

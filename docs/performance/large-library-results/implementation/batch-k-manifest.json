@@ -1,0 +1,11 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "e44be71135e888b789c979c1b913bd36ad8525c534815a631d145083f22dfdcb",
+  "notes": [
+    "Patch is against HEAD, not incremental; filesystem and Store tests also contain batch J. Apply the J facade/protocol/queue changes to reproduce the complete desktop serving path.",
+    "Existing AVPK bytes and KDF inputs retained. Async serving uses crypto.scrypt and Web Crypto AES-GCM native asynchronous jobs; synchronous business API remains.",
+    "Full npm test: 2008 passed, 1 skipped. Build succeeded. Later cache-failure/reset/cancellation tests: final targeted 46 passed, node types and changed-file lint passed.",
+    "Benchmark was repeated after this task test/build handles completed; raw output is the later run. Synthetic 1MiB/16MiB buffers, one cold-key and five warm-key operations, no disk or actual UI.",
+    "Observed timer delay is not p95 or Windows/HDD performance. Async buffers/import/bootstrap still have main-thread cost and elapsed time can increase; no total-byte or pixel-budget acceptance."
+  ]
+}

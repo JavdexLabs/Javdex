@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "8fa2951ab089bb5320d473c8f817e8d2bf3357fb61ce86d2a7e63d243ab3dc75",
+  "notes": [
+    "Patch is against HEAD. Async image serving depends on MediaAssetStore/queue/crypto changes in batches J and K.",
+    "Web image lookup reads the authorized path with point queries before and after async work, without loading full video details. Actor/sample joins remain video-scoped.",
+    "HTTP response close cancels image work. Session validity is checked after await; hidden/archive/changed-image/removed-association states reject stale output; overload maps to 503 with no-store retained.",
+    "Full npm test: 2023 passed, 1 skipped. Build succeeded. Subsequent exact session-expiry and Catalog signal tests: final 39 Web tests passed, node types and changed-file lint passed.",
+    "Session expiry test injects its mutable clock before creating the isolated server, preserving an open response while validity expires.",
+    "No measured multi-device p95, pixel/byte budgets, thumbnail/cache hit-rate or fairness guarantee. Shared queue and narrower SQL are partial PERF07/WEB02 progress."
+  ]
+}

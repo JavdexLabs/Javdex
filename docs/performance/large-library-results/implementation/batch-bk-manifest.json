@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bk-target.log": "4ed5bfa01827ece6b0ec750b3acc9e56e4f21d72bfbe2c3fed1400ed41bd29cd",
+    "batch-bk-full.log": "87fc176b688918b0e632995ac163ca121230c53e379983c7abc52bc30fa6c876",
+    "batch-bk-build.log": "d0553479b4df0689df2564ed10ad24e5e6fdad168f31ae9a7c94967ffe5d42b1",
+    "batch-bk-benchmark.log": "da26e19cd36d2a20240905ba32922907aeb2b9f8adbbf9492f13dd45838479ab",
+    "batch-bk-gallery-api.patch": "b9477370c4111a0eb5bf1f6405970828534e2c23bd80a2e0187ab74f2e767f8d",
+    "batch-bk-review.md": "7bbe41ae2aa4defe8ce4a7ab38d23f03fa948756f4366197687dc5ea4a0e1f74",
+    "batch-bk-evaluation.md": "1ff62222bc51b1f17ab68cdaf35d678d120d7d88fdc898ff2f37073d54de7d00"
+  },
+  "notes": [
+    "Selected cumulative diff plus new files; prior batch dependencies remain.",
+    "31focused; full2314pass1skip0fail; build passed; independent benchmark passed.",
+    "Backend only. UI/full metadata gallery, long paths and full15/42scope remain incomplete."
+  ]
+}

@@ -32,7 +32,7 @@
 - `/playlists`: 清单列表。
 - `/playlists/:playlistId`: 清单详情。
 - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
-- `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。
+- `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。扫描组合队列使用 `scanOffset`，刮削队列使用 `scrapeOffset`，演员队列使用 `actressOffset` 保存分页位置；扫描 `item=scan:<id>` / `item=scan:identity-<id>` 在所选 `lib` 的活动库范围内定位。`item=scrape:<id>` 或 `videoId` 深链接由服务端定位所在页，删除后的越界页回退到最后一页。演员 `item=actress:<normalizedName>` 使用完整名称定位所在页；`queue` 标记翻页目标领域，避免全部视图跳到其他队列。列表只读概要，URL 选中项及分页偏移规范化后才加载单项候选详情。
 - `/actresses/conflicts`: 旧的演员冲突入口，重定向到 `/pending?type=actress`。
 - `/pending/video/:videoId`: 从待确认工作台打开影片详情。
 - `/pending/video/:videoId/actress/:actressId`: 从待确认影片详情继续打开演员详情。
@@ -81,7 +81,7 @@
 - **清空 query**：只通过列表筛选重置；重置时应 `forget` 该根的导航记忆，避免之后跨分区又带回旧筛选。
 - 分类类型之间切换仍不继承对方 query。
 
-清单列表搜索也属于 Shareable state；它虽然是本地过滤，但会改变用户看到的结果集，应使用 `q` query。
+清单列表搜索也属于 Shareable state，使用 `q` query；服务端分页位置使用 `playlistOffset`，打开详情与返回时保留，修改搜索时重置。
 
 搜索词虽然使用 `q` query，但它属于 toolbar search state，不属于 `AppliedFilterBar` 的筛选 chip state。
 
@@ -139,3 +139,19 @@
 ## Overlay History
 
 需要响应系统后退、鼠标返回键或 macOS 返回手势的全屏 overlay，不能在组件 Effect cleanup 中直接调用 `history.back()`。History 所有权、实例 token、关闭来源和跨平台测试规范见 [`IMAGE_PREVIEW_HISTORY_DESIGN.md`](IMAGE_PREVIEW_HISTORY_DESIGN.md)。
+
+### 系列与厂商分类分页
+
+`SeriesListPage`、`OrganizationListPage` 使用 `page` API，每页固定 60 项，计数来自服务端 `total`。URL 参数 `facetOffset` 表示分类列表偏移，与详情内影片分页参数独立；只接受非负安全整数并向下对齐 60，非法值归零，零偏移从 URL 删除。搜索提交、排序及分类 role 切换重置偏移；搜索草稿绑定当前 navigation key、pathname 和 query，离开时清除（包括返回同一历史 key 的 A→B→A）；导航后未提交的 debounce 不得覆盖新 URL 或详情 URL。
+
+分页 query key 包含规范化偏移，并与旧全量 list 缓存隔离。不使用跨页 placeholder，加载和错误时不展示上一页卡片；错误支持当前页重试。服务端总量缩小时，越界页自动 replace 到最后有效页（空库归零）。查询设置 `gcTime: 0` 回收不活跃页，已发出的 IPC 请求不能取消时，其结果仍只属于原 query key。
+
+详情通过现有 `ListDetailShell` 保留列表和 active observer，导航 helper 透传 query；分页偏移同时参与滚动记忆 key。因此进入详情及嵌套影片再返回保留当前页/滚动位置，关闭详情仅刷新当前页。翻页使用 replace，不增加详情返回栈。实际页面交互回归见 `ClassificationListPage.interaction.test.tsx`（60/60/5、100 页缓存边界、重试、总量缩小、搜索迟到响应、role 切换与详情返回）。
+
+### 主网格窗口与跨页选择
+
+媒体库、演员、首页搜索及全局搜索使用 `useWindowedCatalog`。网格高度和事件索引按服务端总量及绝对位置计算，不能用当前保留的 `items.length` 推导下一页偏移或选择索引。每个挂载列表保留最多3页，不活跃页 `gcTime: 0`；滚动及读取锚点各最多20个轻量条目。返回旧位置时按需补读，后续页失败不能卸载整个网格，首屏失败提供明确重试。
+
+卡片数据在进入查询缓存前投影并检查单页1 MiB JSON编码预算；宽详情仍由GET读取。仅选中ID独立于卡片缓存。Shift采用半开绝对范围，逐页获取ID并比较读取修订、总数和端点；取消或结果变化不提交部分范围。只读返回仅刷新活动且过期的查询，不遍历已淘汰历史页。
+
+导演、系列和机构详情的关联影片使用独立 `relatedVideoOffset`（每页60），翻页replace URL，筛选变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。

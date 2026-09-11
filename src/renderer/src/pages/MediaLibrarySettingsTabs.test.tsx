@@ -81,9 +81,6 @@ describe('ScanSettingsTab', () => {
             refreshLatest: async () => undefined
           } as never}
           latestScanSummary={null}
-          pendingScanGroupIds={new Set()}
-          pendingResourceIdentityIds={new Set()}
-          pendingVideoScrapeIds={new Set()}
           selectedScanMetric={null}
           setSelectedScanMetric={() => undefined}
           configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG}
@@ -110,4 +107,51 @@ describe('ScanSettingsTab', () => {
 
     assert.deepEqual(updates, [['autoImportLocalNfo', false]])
   })
+})
+
+it('distinguishes scan history loading, failure with retry and an empty result', async () => {
+  const { ScanSettingsTab } = await import('./MediaLibrarySettingsTabs')
+  let retries = 0
+  const render = (latestLoading: boolean, latestError: string | null) => (
+    <ScanSettingsTab libraryId={library.id} library={library}
+      scan={{running:false,cancelling:false,activeRunId:null,progress:null,error:null,latest:null,
+        latestLoading,latestError,start:async()=>undefined,cancel:async()=>undefined,
+        refreshLatest:async()=>{retries++}} as never}
+      latestScanSummary={null} selectedScanMetric={null} setSelectedScanMetric={()=>undefined}
+      configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG} updateConfigImmediately={async()=>undefined}
+      formDisabled={false} navigate={()=>undefined}/>
+  )
+  await act(async()=>{renderer=TestRenderer.create(render(true,null))})
+  assert.match(nodeText(renderer!.root),/正在加载扫描记录/)
+  assert.doesNotMatch(nodeText(renderer!.root),/尚无扫描记录/)
+  await act(async()=>renderer!.update(render(false,'injected')))
+  assert.match(nodeText(renderer!.root),/扫描记录加载失败：injected/)
+  const retry=renderer!.root.findAllByType('button').find(node=>nodeText(node)==='重试')
+  assert.ok(retry)
+  await act(async()=>retry.props.onClick());assert.equal(retries,1)
+  await act(async()=>renderer!.update(render(false,null)))
+  assert.match(nodeText(renderer!.root),/尚无扫描记录/)
+})
+it('feeds summary-only history into the paged panel and refreshes pages when the header revision advances',async()=>{
+ const {ScanSettingsTab}=await import('./MediaLibrarySettingsTabs')
+ const summary:import('@shared/libraryTypes').LibraryScanSummary={libraryId:1,runId:'header-only',configRevision:1,trigger:'manual',startedAt:'2026-09-11T00:00:00Z',finishedAt:'2026-09-11T00:01:00Z',status:'success',scannedFiles:0,resourcesAdded:0,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,skippedFiles:0,failedFiles:0,pendingScanGroups:0,pendingScanResources:0,offlineFolders:[],errorSummary:null}
+ const calls:unknown[]=[]
+ window.api.scan.getLatest=async()=>{throw new Error('Full snapshot forbidden')}
+ window.api.scan.getAuditViewPage=async(snapshot,query)=>{calls.push({snapshot,query});return{snapshot,auditAvailable:false,items:[],total:0,attentionBadgeCount:0,limit:100,offset:0,anchorOffset:null}}
+ window.api.scan.pendingAuditPresence=async(_libraryId,ids)=>ids
+ window.setTimeout=setTimeout as unknown as typeof window.setTimeout
+ window.clearTimeout=clearTimeout as unknown as typeof window.clearTimeout
+ window.requestAnimationFrame=callback=>setTimeout(()=>callback(0),0) as unknown as number
+ window.cancelAnimationFrame=id=>clearTimeout(id)
+ const render=(revision:number)=><ScanSettingsTab libraryId={1} library={library}
+  scan={{running:false,cancelling:false,activeRunId:null,progress:null,error:null,latest:{summary,snapshot:null,unrecognizedCount:0},latestRevision:revision,latestLoading:false,latestError:null,result:null,start:async()=>undefined,cancel:async()=>undefined,refreshLatest:async()=>undefined}}
+  latestScanSummary={summary} selectedScanMetric={null} setSelectedScanMetric={()=>undefined}
+  configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG} updateConfigImmediately={async()=>undefined} formDisabled={false} navigate={()=>undefined}/>
+ await act(async()=>{renderer=TestRenderer.create(render(1));await new Promise(resolve=>setTimeout(resolve,20))})
+ assert.ok(calls.length>0)
+ const first=calls.length
+ await act(async()=>{renderer!.update(render(2));await new Promise(resolve=>setTimeout(resolve,20))})
+ assert.ok(calls.length>first)
+ for(const call of calls){const request=call as {snapshot:{runId:string};query:{limit:number}};assert.equal(request.snapshot.runId,'header-only');assert.equal(request.query.limit,100)}
+ assert.match(nodeText(renderer!.root),/审计|明细/)
 })

@@ -108,37 +108,11 @@ export function MediaLibrarySettingsContent({
     queryKey: ['media-libraries', 'list', 'active'],
     queryFn: () => api.mediaLibraries.list()
   })
-  const pendingGroupsQuery = useQuery({
-    queryKey: ['pending-scan-groups', libraryId],
-    queryFn: () => api.scan.listPending(libraryId)
-  })
-  const pendingScanGroupIds = useMemo(
-    () => new Set((pendingGroupsQuery.data ?? []).map((group) => group.id)),
-    [pendingGroupsQuery.data]
-  )
-  const pendingIdentitiesQuery = useQuery({
-    queryKey: ['pending-resource-identities', libraryId],
-    queryFn: () => api.scan.listPendingResourceIdentities(libraryId)
-  })
-  const pendingResourceIdentityIds = useMemo(
-    () => new Set((pendingIdentitiesQuery.data ?? []).map((identity) => identity.id)),
-    [pendingIdentitiesQuery.data]
-  )
-  const pendingScrapesQuery = useQuery({
-    queryKey: ['pending-video-scrapes'],
-    queryFn: () => api.scrape.listPending()
-  })
-  const pendingVideoScrapeIds = useMemo(
-    () => new Set((pendingScrapesQuery.data ?? []).map((pending) => pending.id)),
-    [pendingScrapesQuery.data]
-  )
   const scan = useMediaLibraryScanController(libraryId, {
+    loadLatest: tab === 'sources',
     onSettled: () =>
       Promise.all([
-        libraryQuery.refetch(),
-        pendingGroupsQuery.refetch(),
-        pendingIdentitiesQuery.refetch(),
-        pendingScrapesQuery.refetch()
+        libraryQuery.refetch()
       ]).then(() => undefined)
   })
   const library = libraryQuery.data ?? null
@@ -445,11 +419,11 @@ export function MediaLibrarySettingsContent({
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['pending-scan-groups'] }),
           queryClient.invalidateQueries({
-            queryKey: ['media-library-scan-latest', libraryId],
+            queryKey: ['media-library-scan-header', libraryId],
             exact: true
           }),
           queryClient.invalidateQueries({
-            queryKey: ['media-library-scan-latest', requested.targetLibraryId],
+            queryKey: ['media-library-scan-header', requested.targetLibraryId],
             exact: true
           })
         ])
@@ -693,9 +667,6 @@ export function MediaLibrarySettingsContent({
               library={library}
               scan={scan}
               latestScanSummary={latestScanSummary}
-              pendingScanGroupIds={pendingScanGroupIds}
-              pendingResourceIdentityIds={pendingResourceIdentityIds}
-              pendingVideoScrapeIds={pendingVideoScrapeIds}
               selectedScanMetric={selectedScanMetric}
               setSelectedScanMetric={setSelectedScanMetric}
               configDraft={configDraft}

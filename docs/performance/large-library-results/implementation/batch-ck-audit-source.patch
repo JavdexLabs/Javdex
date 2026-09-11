@@ -1,0 +1,1033 @@
+diff --git a/src/main/db/scanAuditSource.ts b/src/main/db/scanAuditSource.ts
+new file mode 100644
+index 0000000..2da7b6b
+--- /dev/null
++++ b/src/main/db/scanAuditSource.ts
+@@ -0,0 +1,46 @@
++import type Database from 'better-sqlite3'
++
++export type ScanAuditSourceSelection =
++  | { libraryId: number; runId: string }
++  | { libraryId: number; latest: true }
++
++interface JsonAuditSource {
++  format: 'json'
++  libraryId: number
++  runId: string
++}
++
++export function readScanAuditSource(
++  db: Database.Database, selection: ScanAuditSourceSelection, projection: 'identity'
++): JsonAuditSource | undefined
++export function readScanAuditSource(
++  db: Database.Database, selection: ScanAuditSourceSelection, projection: 'bytes'
++): (JsonAuditSource & { bytes: number }) | undefined
++export function readScanAuditSource(
++  db: Database.Database, selection: ScanAuditSourceSelection, projection: 'body'
++): (JsonAuditSource & { body: string }) | undefined
++/**
++ * Select stored audit data without changing each caller's run-selection policy.
++ * Legacy availability is non-NULL JSON, including malformed/empty bodies and
++ * nonterminal historical rows. Validation stays at the reader boundary.
++ * Call inside the reader's transaction when subsequent queries need its snapshot.
++ * Identity/byte projections never return the full body to JavaScript.
++ */
++export function readScanAuditSource(
++  db: Database.Database,
++  selection: ScanAuditSourceSelection,
++  projection: 'identity' | 'bytes' | 'body'
++): (JsonAuditSource & { bytes?: number; body?: string }) | undefined {
++  const columns = projection === 'body' ? 'id,audit_json AS body'
++    : projection === 'bytes' ? 'id,length(CAST(audit_json AS BLOB)) AS bytes' : 'id'
++  const exact = 'runId' in selection
++  const row = db.prepare(`SELECT ${columns} FROM library_scan_runs
++    WHERE library_id=? AND audit_json IS NOT NULL${exact ? ' AND id=?' : ' ORDER BY started_at DESC,id DESC LIMIT 1'}`)
++    .get(...(exact ? [selection.libraryId, selection.runId] : [selection.libraryId])) as
++      { id: string; bytes?: number; body?: string } | undefined
++  if (!row) return undefined
++  const source: JsonAuditSource = { format: 'json', libraryId: selection.libraryId, runId: row.id }
++  if (projection === 'body') return { ...source, body: row.body! }
++  if (projection === 'bytes') return { ...source, bytes: row.bytes! }
++  return source
++}
+diff --git a/src/main/db/scanAuditSource.test.ts b/src/main/db/scanAuditSource.test.ts
+new file mode 100644
+index 0000000..62707c2
+--- /dev/null
++++ b/src/main/db/scanAuditSource.test.ts
+@@ -0,0 +1,73 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import { initDatabaseAtPath, closeDatabase, getDb } from './database'
++import { createMediaLibrary } from './mediaLibraryRepo'
++import { readScanAuditSource } from './scanAuditSource'
++let directory: string, filename: string, libraryId: number, otherId: number
++beforeEach(() => {
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-audit-source-'))
++  filename = path.join(directory, 'db.sqlite')
++  initDatabaseAtPath(filename)
++  const first = path.join(directory, 'first'); fs.mkdirSync(first)
++  libraryId = createMediaLibrary({ name: 'Source', roots: [{ path: first }] }).id
++  const other = path.join(directory, 'other'); fs.mkdirSync(other)
++  otherId = createMediaLibrary({ name: 'Other', roots: [{ path: other }] }).id
++})
++afterEach(() => { closeDatabase(); fs.rmSync(directory, { recursive: true, force: true }) })
++function insert(id: string, body: string | null, started = 'same', library = libraryId, status = 'completed') {
++  getDb().prepare(`INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json)
++    VALUES(?,?,1,'manual',?,?,?)`).run(id, library, status, started, body)
++}
++
++it('keeps exact-run and latest non-NULL policies distinct, scoped and deterministically ordered', () => {
++  insert('old', '{"old":true}', 'a')
++  insert('tie-a', '{"a":true}')
++  insert('tie-b', '{"b":true}')
++  insert('new-null', null, 'z')
++  insert('other-new', '{}', 'zz', otherId)
++  const db = getDb()
++  assert.deepEqual(readScanAuditSource(db, { libraryId, latest: true }, 'identity'), { format: 'json', libraryId, runId: 'tie-b' })
++  assert.equal(readScanAuditSource(db, { libraryId, runId: 'new-null' }, 'body'), undefined)
++  assert.equal(readScanAuditSource(db, { libraryId, runId: 'other-new' }, 'identity'), undefined)
++  assert.equal(readScanAuditSource(db, { libraryId, runId: 'missing' }, 'bytes'), undefined)
++  assert.deepEqual(readScanAuditSource(db, { libraryId, runId: 'old' }, 'body'), { format: 'json', libraryId, runId: 'old', body: '{"old":true}' })
++})
++
++it('does not silently filter empty, malformed, or nonterminal legacy audit bodies', () => {
++  insert('empty', '', 'a', libraryId, 'running')
++  insert('bad', '{bad', 'b', libraryId, 'failed')
++  assert.deepEqual(readScanAuditSource(getDb(), { libraryId, runId: 'empty' }, 'bytes'), { format: 'json', libraryId, runId: 'empty', bytes: 0 })
++  assert.equal(readScanAuditSource(getDb(), { libraryId, latest: true }, 'body')?.body, '{bad')
++})
++
++it('projects only requested fields and counts raw UTF-8 bytes including NUL', () => {
++  const body = '中文\0payload'
++  insert('bytes', body)
++  const db = getDb(), originalPrepare = db.prepare, prepare = db.prepare.bind(db), sql: string[] = []
++  db.prepare = ((statement: string) => { sql.push(statement); return prepare(statement) }) as typeof db.prepare
++  try {
++    assert.deepEqual(readScanAuditSource(db, { libraryId, runId: 'bytes' }, 'identity'), { format: 'json', libraryId, runId: 'bytes' })
++    assert.match(sql.pop()!, /^SELECT id FROM/)
++    assert.deepEqual(readScanAuditSource(db, { libraryId, runId: 'bytes' }, 'bytes'), { format: 'json', libraryId, runId: 'bytes', bytes: Buffer.byteLength(body) })
++    assert.doesNotMatch(sql.pop()!, /AS body/)
++    assert.deepEqual(readScanAuditSource(db, { libraryId, runId: 'bytes' }, 'body'), { format: 'json', libraryId, runId: 'bytes', body })
++  } finally { db.prepare = originalPrepare }
++})
++
++it('binds literal run IDs and leaves snapshot ownership with the reader transaction', () => {
++  const id = "' OR 1=1 --"
++  insert(id, 'before')
++  const db = getDb(), writer = new Database(filename)
++  try {
++    db.transaction(() => {
++      const selected = readScanAuditSource(db, { libraryId, runId: id }, 'identity')!
++      writer.prepare('UPDATE library_scan_runs SET audit_json=? WHERE id=?').run('after', id)
++      assert.equal(readScanAuditSource(db, selected, 'body')?.body, 'before')
++    })()
++    assert.equal(readScanAuditSource(db, { libraryId, runId: id }, 'body')?.body, 'after')
++  } finally { writer.close() }
++})
+diff --git a/src/main/db/libraryScanRepo.ts b/src/main/db/libraryScanRepo.ts
+index 0582976..83205a3 100644
+--- a/src/main/db/libraryScanRepo.ts
++++ b/src/main/db/libraryScanRepo.ts
+@@ -6,6 +6,7 @@ import type {
+   LibraryScanTrigger
+ } from '@shared/libraryTypes'
+ import { getDb } from './database'
++import { readScanAuditSource } from './scanAuditSource'
+ 
+ type PersistedScanTrigger = 'manual' | 'automatic' | 'initial' | 'root'
+ type PersistedScanStatus = 'completed' | 'failed' | 'cancelled'
+@@ -214,21 +215,20 @@ export function finishLibraryScanRun(input: {
+       )
+ 
+     if (successful && input.replaceUnrecognizedRootIds?.length) {
+-      const rootIds = Array.from(new Set(input.replaceUnrecognizedRootIds))
+-      const placeholders = rootIds.map(() => '?').join(', ')
++      const rootIds = new Set(input.replaceUnrecognizedRootIds)
+       database
+         .prepare(
+           `DELETE FROM library_unrecognized_files
+-            WHERE library_id = ? AND root_id IN (${placeholders})`
++            WHERE library_id = ? AND root_id IN (SELECT value FROM json_each(?))`
+         )
+-        .run(input.libraryId, ...rootIds)
++        .run(input.libraryId, JSON.stringify([...rootIds]))
+       const insert = database.prepare(
+         `INSERT INTO library_unrecognized_files (
+            library_id, root_id, file_path, normalized_path, reason, scan_run_id, last_seen_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+       )
+       for (const file of input.unrecognizedFiles ?? []) {
+-        if (!rootIds.includes(file.rootId)) continue
++        if (!rootIds.has(file.rootId)) continue
+         insert.run(
+           input.libraryId,
+           file.rootId,
+@@ -264,25 +264,13 @@ export function getLatestLibraryScanSnapshot(libraryId: number): LibraryScanLate
+         typeof candidate.status === 'string' &&
+         typeof candidate.finishedAt === 'string'
+     )
+-    const latestRun = summary
+-      ? (database
+-          .prepare(
+-            `SELECT audit_json
+-               FROM library_scan_runs
+-              WHERE id = ? AND library_id = ? AND audit_json IS NOT NULL`
+-          )
+-          .get(summary.runId, libraryId) as { audit_json: string | null } | undefined)
+-      : (database
+-          .prepare(
+-            `SELECT audit_json
+-               FROM library_scan_runs
+-              WHERE library_id = ? AND audit_json IS NOT NULL
+-              ORDER BY started_at DESC, id DESC
+-              LIMIT 1`
+-          )
+-          .get(libraryId) as { audit_json: string | null } | undefined)
++    const source = readScanAuditSource(
++      database,
++      summary ? { libraryId, runId: summary.runId } : { libraryId, latest: true },
++      'body'
++    )
+     const audit = parseScopedScanJson<LibraryScanAudit>(
+-      latestRun?.audit_json,
++      source?.body,
+       libraryId,
+       (candidate) =>
+         (candidate.schemaVersion === 1 || candidate.schemaVersion === 2) &&
+diff --git a/src/main/db/libraryScanRepo.test.ts b/src/main/db/libraryScanRepo.test.ts
+index 418adf2..17f95b5 100644
+--- a/src/main/db/libraryScanRepo.test.ts
++++ b/src/main/db/libraryScanRepo.test.ts
+@@ -29,12 +29,12 @@ afterEach(() => {
+   fs.rmSync(tempRoot, { recursive: true, force: true })
+ })
+ 
+-function persistSuccessfulRun(input: {
++function beginSuccessfulRun(input: {
+   libraryId: number
+   rootId: number
+   runId: string
+   filePath: string
+-}): void {
++}): Parameters<typeof finishLibraryScanRun>[0] {
+   const startedAt = '2026-08-29T01:00:00.000Z'
+   const finishedAt = '2026-08-29T01:00:01.000Z'
+   const summary: LibraryScanSummary = {
+@@ -87,7 +87,7 @@ function persistSuccessfulRun(input: {
+     trigger: 'manual',
+     startedAt
+   })
+-  finishLibraryScanRun({
++  return {
+     libraryId: input.libraryId,
+     runId: input.runId,
+     status: 'completed',
+@@ -102,10 +102,51 @@ function persistSuccessfulRun(input: {
+         reason: 'unrecognized_code'
+       }
+     ]
+-  })
++  }
++}
++
++function persistSuccessfulRun(input: Parameters<typeof beginSuccessfulRun>[0]): void {
++  finishLibraryScanRun(beginSuccessfulRun(input))
+ }
+ 
+ describe('libraryScanRepo latest snapshot', () => {
++  it('keeps a valid summary pinned to its run when its audit is NULL', () => {
++    const directory = path.join(tempRoot, 'pinned-audit')
++    fs.mkdirSync(directory)
++    const library = createMediaLibrary({ name: 'Pinned', roots: [{ path: directory }] })
++    for (const runId of ['older-audit', 'summary-run']) {
++      persistSuccessfulRun({ libraryId: library.id, rootId: library.roots[0].id, runId,
++        filePath: path.join(directory, `${runId}.mp4`) })
++    }
++    getDb().prepare('UPDATE library_scan_runs SET audit_json = NULL WHERE id = ?').run('summary-run')
++    const snapshot = getLatestLibraryScanSnapshot(library.id)
++    assert.equal(snapshot.summary?.runId, 'summary-run')
++    assert.equal(snapshot.audit, null)
++  })
++
++  it('falls back for malformed summary by timestamp then id, excluding NULL bodies without a status filter', () => {
++    const directory = path.join(tempRoot, 'fallback-audit')
++    fs.mkdirSync(directory)
++    const library = createMediaLibrary({ name: 'Fallback', roots: [{ path: directory }] })
++    for (const runId of ['z-older', 'a-newer', 'b-newer', 'c-null']) {
++      persistSuccessfulRun({ libraryId: library.id, rootId: library.roots[0].id, runId,
++        filePath: path.join(directory, `${runId}.mp4`) })
++    }
++    const db = getDb()
++    db.prepare('UPDATE media_library_scan_state SET last_summary_json = ? WHERE library_id = ?')
++      .run('{malformed', library.id)
++    db.prepare('UPDATE library_scan_runs SET started_at = ? WHERE id <> ? AND library_id = ?')
++      .run('2026-09-01T00:00:00.000Z', 'z-older', library.id)
++    db.prepare("UPDATE library_scan_runs SET status = 'running' WHERE id = ?").run('b-newer')
++    db.prepare('UPDATE library_scan_runs SET audit_json = NULL WHERE id = ?').run('c-null')
++    const snapshot = getLatestLibraryScanSnapshot(library.id)
++    assert.equal(snapshot.summary, null)
++    assert.equal(snapshot.audit?.runId, 'b-newer')
++
++    db.prepare('UPDATE library_scan_runs SET audit_json = ? WHERE id = ?').run('{malformed', 'b-newer')
++    assert.equal(getLatestLibraryScanSnapshot(library.id).audit, null)
++  })
++
+   it('updates the pending path after a rename without rewriting the original scan audit', () => {
+     const directory = path.join(tempRoot, 'library')
+     fs.mkdirSync(directory)
+@@ -349,3 +390,222 @@ describe('libraryScanRepo latest snapshot', () => {
+     assert.throws(() => getLatestLibraryScanSnapshot(99_999), /媒体库不存在/)
+   })
+ })
++
++it('reads a scoped audit header without loading audit JSON or pending path arrays',async()=>{
++ const {readScanAuditHeader}=await import('../services/scanAuditReadHeader')
++ const directory=path.join(tempRoot,'header');fs.mkdirSync(directory)
++ const library=createMediaLibrary({name:'Header',roots:[{path:directory}]})
++ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-run',filePath:path.join(directory,'unknown.mp4')})
++ const expected=getLatestLibraryScanSnapshot(library.id),db=getDb(),prepare=db.prepare.bind(db),queries:string[]=[]
++ // The header must not parse even an invalid/large audit body; the page reader validates it separately.
++ db.prepare('UPDATE library_scan_runs SET audit_json=? WHERE id=?').run('x'.repeat(2*1024*1024),'header-run')
++ db.prepare=((sql:string)=>{queries.push(sql);assert.doesNotMatch(sql,/SELECT\s+audit_json|json_each|json_extract|SELECT\s+root_id,\s*file_path/i);return prepare(sql)}) as typeof db.prepare
++ try{
++  const header=readScanAuditHeader(db,library.id)
++  assert.deepEqual(header,{summary:expected.summary,snapshot:{libraryId:library.id,runId:'header-run',finishedAt:expected.summary!.finishedAt},unrecognizedCount:1})
++  assert.ok(queries.some(sql=>sql.includes('COUNT(*)')))
++  assert.equal('audit' in header,false);assert.equal('unrecognized' in header,false)
++  assert.throws(()=>readScanAuditHeader(db,0),/ID/)
++  assert.throws(()=>readScanAuditHeader(db,99999),/不存在/)
++ }finally{db.prepare=prepare}
++})
++
++it('keeps summary failure semantics and rejects oversized summary/header payloads',async()=>{
++ const {readScanAuditHeader}=await import('../services/scanAuditReadHeader'),{SCAN_AUDIT_HEADER_BYTES}=await import('../services/scanAuditReadPolicy')
++ const directory=path.join(tempRoot,'header-errors');fs.mkdirSync(directory)
++ const library=createMediaLibrary({name:'Header errors',roots:[{path:directory}]})
++ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-errors',filePath:path.join(directory,'unknown.mp4')})
++ const db=getDb(),expected=getLatestLibraryScanSnapshot(library.id).summary!
++ const update=(value:string)=>db.prepare('UPDATE media_library_scan_state SET last_summary_json=? WHERE library_id=?').run(value,library.id)
++ for(const raw of ['{bad',JSON.stringify({...expected,libraryId:999})]){update(raw);assert.deepEqual(readScanAuditHeader(db,library.id),{summary:null,snapshot:null,unrecognizedCount:1})}
++ update(JSON.stringify({...expected,padding:'x'.repeat(SCAN_AUDIT_HEADER_BYTES)}));assert.throws(()=>readScanAuditHeader(db,library.id),/byte budget/)
++ const base={...expected,padding:''},raw=JSON.stringify({...base,padding:'x'.repeat(SCAN_AUDIT_HEADER_BYTES-Buffer.byteLength(JSON.stringify(base))-1)})
++ assert.ok(Buffer.byteLength(raw)<SCAN_AUDIT_HEADER_BYTES);update(raw);assert.throws(()=>readScanAuditHeader(db,library.id),/byte budget/)
++ update(JSON.stringify(expected));assert.deepEqual(readScanAuditHeader(db,library.id).summary,expected)
++})
++
++it('keeps header summary, audit availability and unrecognized count in one WAL snapshot',async()=>{
++ const {default:Database}=await import('better-sqlite3'),{readScanAuditHeader}=await import('../services/scanAuditReadHeader')
++ const directory=path.join(tempRoot,'header-snapshot');fs.mkdirSync(directory)
++ const library=createMediaLibrary({name:'Header snapshot',roots:[{path:directory}]})
++ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'old-header',filePath:path.join(directory,'unknown.mp4')})
++ const db=getDb(),old=getLatestLibraryScanSnapshot(library.id).summary!,next={...old,runId:'new-header',finishedAt:'later'},other=new Database(path.join(tempRoot,'library.db'))
++ const prepare=db.prepare.bind(db);let changed=false
++ db.prepare=((sql:string)=>{
++  const statement=prepare(sql)
++  if(sql.startsWith('SELECT last_summary_json AS value')){
++   const get=statement.get.bind(statement)
++   statement.get=((...args:unknown[])=>{
++    const row=get(...args)
++    if(!changed){changed=true;other.transaction(()=>{other.prepare('UPDATE media_library_scan_state SET last_summary_json=? WHERE library_id=?').run(JSON.stringify(next),library.id);other.prepare('DELETE FROM library_unrecognized_files WHERE library_id=?').run(library.id)})()}
++    return row
++   }) as typeof statement.get
++  }
++  return statement
++ }) as typeof db.prepare
++ try{
++  assert.deepEqual(readScanAuditHeader(db,library.id),{summary:old,snapshot:{libraryId:library.id,runId:old.runId,finishedAt:old.finishedAt},unrecognizedCount:1})
++  assert.equal(changed,true)
++  assert.deepEqual(readScanAuditHeader(db,library.id),{summary:next,snapshot:null,unrecognizedCount:0})
++ }finally{db.prepare=prepare;other.close()}
++})
++
++function replacementFixture() {
++  const firstPath = path.join(tempRoot, 'replace-first')
++  const secondPath = path.join(tempRoot, 'replace-second')
++  fs.mkdirSync(firstPath)
++  fs.mkdirSync(secondPath)
++  const library = createMediaLibrary({ name: 'Replacement', roots: [{ path: firstPath }, { path: secondPath }] })
++  const [first, second] = library.roots
++  persistSuccessfulRun({ libraryId: library.id, rootId: first.id, runId: 'old-first', filePath: path.join(firstPath, 'old.mp4') })
++  persistSuccessfulRun({ libraryId: library.id, rootId: second.id, runId: 'old-second', filePath: path.join(secondPath, 'kept.mp4') })
++  const next = () => beginSuccessfulRun({ libraryId: library.id, rootId: first.id, runId: 'replacement', filePath: path.join(firstPath, 'new.mp4') })
++  return { library, first, second, next }
++}
++
++function persistedReplacementState(libraryId: number) {
++  const db = getDb()
++  return {
++    runs: db.prepare('SELECT * FROM library_scan_runs WHERE library_id=? ORDER BY id').all(libraryId),
++    state: db.prepare('SELECT * FROM media_library_scan_state WHERE library_id=?').get(libraryId),
++    files: db.prepare('SELECT * FROM library_unrecognized_files WHERE library_id=? ORDER BY root_id,normalized_path').all(libraryId)
++  }
++}
++
++describe('finishLibraryScanRun unrecognized replacement transaction', () => {
++  it('finishes with 40000 replacement root IDs without exceeding SQLite bind limits', () => {
++    const { library, first, second, next } = replacementFixture()
++    const input = next()
++    input.replaceUnrecognizedRootIds = [first.id, ...Array.from({ length: 39_999 }, (_, index) => 1_000_000 + index)]
++    assert.equal(input.replaceUnrecognizedRootIds.length, 40_000)
++    finishLibraryScanRun(input)
++    const latest = getLatestLibraryScanSnapshot(library.id)
++    assert.deepEqual(latest.summary, input.summary)
++    assert.deepEqual(latest.audit, input.audit)
++    assert.deepEqual(latest.unrecognized, [
++      { rootId: first.id, filePath: input.unrecognizedFiles![0].filePath },
++      { rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }
++    ])
++    assert.deepEqual(getDb().prepare('SELECT status,finished_at FROM library_scan_runs WHERE id=?').get(input.runId),
++      { status: 'completed', finished_at: input.summary.finishedAt })
++    assert.deepEqual(getDb().prepare('SELECT active_run_id,last_status FROM media_library_scan_state WHERE library_id=?').get(library.id),
++      { active_run_id: null, last_status: 'completed' })
++  })
++
++  it('deduplicates replacement roots and skips incoming files outside the selected roots', () => {
++    const { library, first, second, next } = replacementFixture()
++    const input = next()
++    input.replaceUnrecognizedRootIds = [first.id, first.id, first.id]
++    input.unrecognizedFiles = [input.unrecognizedFiles![0],
++      { rootId: second.id, filePath: '/must-not-insert', normalizedPath: '/must-not-insert' },
++      { rootId: 999_999, filePath: '/missing-root', normalizedPath: '/missing-root' }]
++    finishLibraryScanRun(input)
++    assert.deepEqual(getLatestLibraryScanSnapshot(library.id).unrecognized, [
++      { rootId: first.id, filePath: input.unrecognizedFiles[0].filePath },
++      { rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }
++    ])
++  })
++
++  it('clears selected roots when there are no matching incoming files and preserves other roots', () => {
++    const { library, first, second, next } = replacementFixture()
++    const input = next()
++    input.replaceUnrecognizedRootIds = [first.id, first.id]
++    input.unrecognizedFiles = [{ rootId: second.id, filePath: '/not-selected', normalizedPath: '/not-selected' }]
++    finishLibraryScanRun(input)
++    assert.deepEqual(getLatestLibraryScanSnapshot(library.id).unrecognized,
++      [{ rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }])
++  })
++
++  for (const roots of [undefined, []] as const) it(`does not replace files for ${roots === undefined ? 'absent' : 'empty'} root targets`, () => {
++    const { library, next } = replacementFixture()
++    const input = next()
++    const before = persistedReplacementState(library.id).files
++    input.replaceUnrecognizedRootIds = roots
++    finishLibraryScanRun(input)
++    assert.deepEqual(persistedReplacementState(library.id).files, before)
++  })
++
++  for (const status of ['failed', 'cancelled'] as const) it(`${status} run never replaces preexisting unrecognized rows`, () => {
++    const { library, first, next } = replacementFixture()
++    const input = next()
++    const before = persistedReplacementState(library.id).files
++    input.status = status
++    input.summary.status = status
++    input.audit.status = status
++    input.replaceUnrecognizedRootIds = [first.id, ...Array.from({ length: 39_999 }, (_, index) => 1_000_000 + index)]
++    finishLibraryScanRun(input)
++    assert.deepEqual(persistedReplacementState(library.id).files, before)
++    assert.deepEqual(getLatestLibraryScanSnapshot(library.id).summary, input.summary)
++    assert.deepEqual(getDb().prepare('SELECT status FROM library_scan_runs WHERE id=?').get(input.runId), { status })
++  })
++
++  it('rolls back run, state and all original unrecognized rows when a duplicate normalized path fails insertion', () => {
++    const { library, next } = replacementFixture()
++    const input = next()
++    const before = persistedReplacementState(library.id)
++    const file = input.unrecognizedFiles![0]
++    input.unrecognizedFiles = [file, { ...file, filePath: `${file.filePath}.duplicate` }]
++    assert.throws(() => finishLibraryScanRun(input), /UNIQUE constraint failed/)
++    assert.deepEqual(persistedReplacementState(library.id), before,
++      'run completion, revision/summary update, deletion and first insert must all roll back')
++    assert.deepEqual(getDb().prepare('SELECT status,finished_at,summary_json,audit_json FROM library_scan_runs WHERE id=?').get(input.runId),
++      { status: 'running', finished_at: null, summary_json: null, audit_json: null })
++    input.unrecognizedFiles = [file]
++    finishLibraryScanRun(input)
++    assert.equal(getLatestLibraryScanSnapshot(library.id).summary?.runId, input.runId)
++  })
++})
++
++it('does not hold a writer lock during audit stringify before the deferred transaction’s first SQL statement', async () => {
++  const { default: Database } = await import('better-sqlite3')
++  const { library, next } = replacementFixture()
++  const unrelatedPath = path.join(tempRoot, 'unrelated-library')
++  fs.mkdirSync(unrelatedPath)
++  const unrelated = createMediaLibrary({ name: 'Before stringify', roots: [{ path: unrelatedPath }] })
++  const input = next()
++  const other = new Database(path.join(tempRoot, 'library.db'), { timeout: 0 })
++  const stringify = JSON.stringify
++  let intercepted = 0
++  try {
++    JSON.stringify = ((value: unknown, ...args: unknown[]) => {
++      if (value === input.audit) {
++        intercepted++
++        assert.equal(getDb().inTransaction, true, 'the deferred transaction has begun')
++        assert.equal(other.pragma('busy_timeout', { simple: true }), 0)
++        const result = other.prepare('UPDATE media_libraries SET name=? WHERE id=?')
++          .run('Written during stringify', unrelated.id)
++        assert.equal(result.changes, 1, 'a second writer must succeed without waiting')
++      }
++      return Reflect.apply(stringify, JSON, [value, ...args])
++    }) as typeof JSON.stringify
++    finishLibraryScanRun(input)
++  } finally {
++    JSON.stringify = stringify
++    other.close()
++  }
++  assert.equal(intercepted, 1)
++  assert.deepEqual(getDb().prepare('SELECT name FROM media_libraries WHERE id=?').get(unrelated.id),
++    { name: 'Written during stringify' })
++  assert.deepEqual(getLatestLibraryScanSnapshot(library.id).audit, input.audit)
++})
++
++it('does not delete another library’s unrecognized rows even when its root ID is in the replacement set', () => {
++  const { library, first, second, next } = replacementFixture()
++  const otherPath = path.join(tempRoot, 'replacement-other-library')
++  fs.mkdirSync(otherPath)
++  const other = createMediaLibrary({ name: 'Other replacement scope', roots: [{ path: otherPath }] })
++  const otherRoot = other.roots[0]
++  persistSuccessfulRun({ libraryId: other.id, rootId: otherRoot.id, runId: 'other-preserved',
++    filePath: path.join(otherPath, 'untouched.mp4') })
++  const beforeOther = persistedReplacementState(other.id)
++  const input = next()
++  input.replaceUnrecognizedRootIds = [first.id, otherRoot.id, first.id, otherRoot.id]
++  finishLibraryScanRun(input)
++  assert.deepEqual(persistedReplacementState(other.id), beforeOther,
++    'foreign root IDs must not delete files or change the other library’s run/state')
++  assert.deepEqual(getLatestLibraryScanSnapshot(library.id).unrecognized, [
++    { rootId: first.id, filePath: input.unrecognizedFiles![0].filePath },
++    { rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }
++  ])
++  assert.equal(getLatestLibraryScanSnapshot(library.id).summary?.runId, input.runId)
++})
+diff --git a/src/main/scanner/libraryScanAuditStore.ts b/src/main/scanner/libraryScanAuditStore.ts
+index 71efa27..7f86b1c 100644
+--- a/src/main/scanner/libraryScanAuditStore.ts
++++ b/src/main/scanner/libraryScanAuditStore.ts
+@@ -3,12 +3,10 @@ import fs from 'node:fs'
+ import path from 'node:path'
+ import process from 'node:process'
+ import { readTestUserDataPath } from '@shared/appIdentity'
+-import type {
+-  LibraryScanAudit,
+-  LibraryScanFileAuditEntry,
+-  LibraryScanResourceAuditEntry
+-} from '@shared/libraryTypes'
++import type { LibraryScanAudit } from '@shared/libraryTypes'
++import { normalizeAudit } from './libraryScanAuditValidation'
+ import { getDb } from '../db/database'
++import { readScanAuditSource } from '../db/scanAuditSource'
+ 
+ function auditFilePath(libraryId: number): string {
+   const userData = readTestUserDataPath() ?? (app?.getPath ? app.getPath('userData') : undefined)
+@@ -16,112 +14,11 @@ function auditFilePath(libraryId: number): string {
+   return path.join(userData, `library-scan-audit-${libraryId}.json`)
+ }
+ 
+-function isRecord(value: unknown): value is Record<string, unknown> {
+-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+-}
+-
+-function hasText(value: unknown): value is string {
+-  return typeof value === 'string' && value.length > 0
+-}
+-
+-function isNfoAudit(value: unknown): boolean {
+-  if (!isRecord(value)) return false
+-  if (
+-    !['imported', 'skipped', 'warning', 'pending-candidate', 'identity-conflict'].includes(
+-      String(value.disposition)
+-    )
+-  ) {
+-    return false
+-  }
+-  if (
+-    value.pendingScrapeId != null &&
+-    (!Number.isSafeInteger(value.pendingScrapeId) || Number(value.pendingScrapeId) <= 0)
+-  ) {
+-    return false
+-  }
+-  if (
+-    value.pendingIdentityId != null &&
+-    (!Number.isSafeInteger(value.pendingIdentityId) || Number(value.pendingIdentityId) <= 0)
+-  ) {
+-    return false
+-  }
+-  return (
+-    value.warnings == null ||
+-    (Array.isArray(value.warnings) &&
+-      value.warnings.length <= 20 &&
+-      value.warnings.every(
+-        (warning) =>
+-          isRecord(warning) &&
+-          hasText(warning.code) &&
+-          warning.code.length <= 64 &&
+-          hasText(warning.message) &&
+-          warning.message.length <= 500
+-      ))
+-  )
+-}
+-
+-function isFileEntry(value: unknown): value is LibraryScanFileAuditEntry {
+-  if (!isRecord(value) || !Number.isSafeInteger(value.rootId) || Number(value.rootId) <= 0) {
+-    return false
+-  }
+-  if (!hasText(value.filePath)) return false
+-  if (value.sourceKind !== 'local' && value.sourceKind !== 'strm') return false
+-  if (value.nfo != null && !isNfoAudit(value.nfo)) return false
+-  return [
+-    'added',
+-    'updated',
+-    'pending',
+-    'skipped',
+-    'unrecognized',
+-    'strm_failure',
+-    'processing_failure'
+-  ].includes(String(value.outcome))
+-}
+-
+-function isResourceEntry(value: unknown): value is LibraryScanResourceAuditEntry {
+-  return (
+-    isRecord(value) &&
+-    Number.isInteger(value.resourceId) &&
+-    Number.isInteger(value.videoId) &&
+-    hasText(value.videoCode) &&
+-    (value.sourcePath === null || hasText(value.sourcePath))
+-  )
+-}
+-
+-function normalizeAudit(value: unknown): LibraryScanAudit | null {
+-  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2)) return null
+-  if (!Number.isSafeInteger(value.libraryId) || Number(value.libraryId) <= 0) return null
+-  if (!hasText(value.runId)) return null
+-  if (!Number.isSafeInteger(value.configRevision) || Number(value.configRevision) < 0) return null
+-  if (!['manual', 'startup', 'interval', 'resume'].includes(String(value.trigger))) return null
+-  if (!['success', 'completed_with_errors', 'cancelled', 'failed'].includes(String(value.status))) {
+-    return null
+-  }
+-  if (!hasText(value.startedAt) || !hasText(value.finishedAt)) return null
+-  if (!Array.isArray(value.files) || !value.files.every(isFileEntry)) return null
+-  if (!Array.isArray(value.removedResources) || !value.removedResources.every(isResourceEntry)) {
+-    return null
+-  }
+-  if (!Array.isArray(value.promotedResources) || !value.promotedResources.every(isResourceEntry)) {
+-    return null
+-  }
+-  if (!Array.isArray(value.deletedVideos) || !Array.isArray(value.pendingGroups)) return null
+-  return value as unknown as LibraryScanAudit
+-}
+-
+ function readPersistedAudit(libraryId: number): LibraryScanAudit | null | undefined {
+   try {
+-    const row = getDb()
+-      .prepare(
+-        `SELECT audit_json
+-           FROM library_scan_runs
+-          WHERE library_id = ? AND audit_json IS NOT NULL
+-          ORDER BY started_at DESC, id DESC
+-          LIMIT 1`
+-      )
+-      .get(libraryId) as { audit_json: string } | undefined
+-    if (!row) return null
+-    const audit = normalizeAudit(JSON.parse(row.audit_json))
++    const source = readScanAuditSource(getDb(), { libraryId, latest: true }, 'body')
++    if (!source) return null
++    const audit = normalizeAudit(JSON.parse(source.body))
+     return audit?.libraryId === libraryId ? audit : null
+   } catch (error) {
+     if ((error as Error).message.includes('Database not initialised')) return undefined
+diff --git a/src/main/scanner/libraryScanAuditStore.test.ts b/src/main/scanner/libraryScanAuditStore.test.ts
+index 0670e50..171080d 100644
+--- a/src/main/scanner/libraryScanAuditStore.test.ts
++++ b/src/main/scanner/libraryScanAuditStore.test.ts
+@@ -4,6 +4,8 @@ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
+ import type { LibraryScanAudit } from '@shared/libraryTypes'
++import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
+ import {
+   libraryScanAuditContainsPath,
+   readLibraryScanAudit,
+@@ -20,6 +22,7 @@ beforeEach(() => {
+ })
+ 
+ afterEach(() => {
++  closeDatabase()
+   if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+   else process.env.JAVDEX_TEST_USER_DATA = previousUserData
+   fs.rmSync(tempRoot, { recursive: true, force: true })
+@@ -51,6 +54,32 @@ function audit(): LibraryScanAudit {
+ }
+ 
+ describe('libraryScanAuditStore', () => {
++  it('uses the latest non-NULL database body and never falls back to disk on missing or malformed persisted audit', () => {
++    initDatabaseAtPath(path.join(tempRoot, 'library.db'))
++    const directory = path.join(tempRoot, 'media')
++    fs.mkdirSync(directory)
++    const library = createMediaLibrary({ name: 'Audit', roots: [{ path: directory }] })
++    const value = { ...audit(), libraryId: library.id }
++    writeLibraryScanAudit(value)
++    assert.equal(readLibraryScanAudit(library.id), null)
++    const insert = getDb().prepare(`
++      INSERT INTO library_scan_runs(id, library_id, config_revision, trigger, status, started_at, audit_json)
++      VALUES (?, ?, 1, 'manual', 'running', ?, ?)
++    `)
++    for (const [runId, startedAt, body] of [
++      ['z-old', '2026-08-01', JSON.stringify({ ...value, runId: 'z-old' })],
++      ['a-new', '2026-09-01', JSON.stringify({ ...value, runId: 'a-new' })],
++      ['b-new', '2026-09-01', JSON.stringify({ ...value, runId: 'b-new' })],
++      ['c-null', '2026-10-01', null]
++    ]) insert.run(runId, library.id, startedAt, body)
++    assert.equal(readLibraryScanAudit(library.id)?.runId, 'b-new')
++    getDb().prepare('UPDATE library_scan_runs SET audit_json = ? WHERE id = ?').run('{malformed', 'b-new')
++    assert.equal(readLibraryScanAudit(library.id), null)
++    getDb().prepare('UPDATE library_scan_runs SET audit_json = ? WHERE id = ?')
++      .run(JSON.stringify({ ...value, libraryId: library.id + 1 }), 'b-new')
++    assert.equal(readLibraryScanAudit(library.id), null)
++  })
++
+   it('atomically replaces and restores the complete latest audit', () => {
+     const value = audit()
+     writeLibraryScanAudit(value)
+diff --git a/src/main/services/scanAuditReadHeader.ts b/src/main/services/scanAuditReadHeader.ts
+new file mode 100644
+index 0000000..6795d12
+--- /dev/null
++++ b/src/main/services/scanAuditReadHeader.ts
+@@ -0,0 +1,32 @@
++import type Database from 'better-sqlite3'
++import type { LibraryScanSummary } from '@shared/libraryTypes'
++import type { ScanAuditReadHeader } from '@shared/scanAuditReadTypes'
++import { SCAN_AUDIT_HEADER_BYTES } from './scanAuditReadPolicy'
++import { readScanAuditSource } from '../db/scanAuditSource'
++
++/** No audit JSON or unrecognized row arrays cross this boundary. Run on the shared read worker. */
++export function readScanAuditHeader(db: Database.Database, libraryId: number): ScanAuditReadHeader {
++  if (!Number.isSafeInteger(libraryId) || libraryId <= 0) throw new Error('媒体库 ID 无效')
++  return db.transaction(() => {
++    if (!db.prepare('SELECT 1 FROM media_libraries WHERE id=?').get(libraryId)) throw new Error('媒体库不存在')
++    const bytes = db.prepare('SELECT length(CAST(last_summary_json AS BLOB)) AS bytes FROM media_library_scan_state WHERE library_id=?')
++      .get(libraryId) as {bytes:number|null}|undefined
++    if ((bytes?.bytes??0)>SCAN_AUDIT_HEADER_BYTES) throw new Error('Audit summary exceeds byte budget')
++    const row = db.prepare('SELECT last_summary_json AS value FROM media_library_scan_state WHERE library_id=?')
++      .get(libraryId) as {value:string|null}|undefined
++    let summary: LibraryScanSummary|null = null
++    try {
++      const value:unknown = row?.value ? JSON.parse(row.value) : null
++      if (value && typeof value==='object' && !Array.isArray(value)) {
++        const candidate=value as Record<string,unknown>
++        if (candidate.libraryId===libraryId && typeof candidate.runId==='string'
++          && typeof candidate.status==='string' && typeof candidate.finishedAt==='string') summary=candidate as unknown as LibraryScanSummary
++      }
++    } catch { /* Match the existing latest snapshot's malformed-summary null behavior. */ }
++    const hasAudit = summary ? readScanAuditSource(db, { libraryId, runId: summary.runId }, 'identity') : undefined
++    const unrecognizedCount = (db.prepare('SELECT COUNT(*) AS n FROM library_unrecognized_files WHERE library_id=?').get(libraryId) as {n:number}).n
++    const result:ScanAuditReadHeader = {summary,snapshot:summary&&hasAudit?{libraryId,runId:summary.runId,finishedAt:summary.finishedAt}:null,unrecognizedCount}
++    if (Buffer.byteLength(JSON.stringify(result))>SCAN_AUDIT_HEADER_BYTES) throw new Error('Audit summary exceeds byte budget')
++    return result
++  })()
++}
+diff --git a/src/main/services/scanAuditReadIndex.ts b/src/main/services/scanAuditReadIndex.ts
+new file mode 100644
+index 0000000..c68bf79
+--- /dev/null
++++ b/src/main/services/scanAuditReadIndex.ts
+@@ -0,0 +1,134 @@
++import { readScanAuditHeader } from './scanAuditReadHeader'
++import { prepareScanAuditViews } from './scanAuditViewIndex'
++import type { ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
++import { openReadOnlyDatabaseAtPath } from '../db/database'
++import { readScanAuditSource } from '../db/scanAuditSource'
++
++import { SCAN_AUDIT_SECTIONS as sections, SCAN_AUDIT_OUTCOMES as outcomes } from '@shared/scanAuditReadTypes'
++import type { ScanAuditSection, ScanAuditSnapshotIdentity, ScanAuditIndexLimits, ScanAuditIndexQuery, ScanAuditIndexPage } from '@shared/scanAuditReadTypes'
++export type { ScanAuditSection, ScanAuditSnapshotIdentity, ScanAuditIndexLimits, ScanAuditIndexQuery, ScanAuditIndexPage } from '@shared/scanAuditReadTypes'
++
++interface CountGroup { section: ScanAuditSection; outcome: string | null; attention: number; n: number }
++
++/** Connection-owned derived data only. Synchronous: callers must dispatch construction/read to a worker. */
++export function createScanAuditReadIndex(databasePath: string, identity: ScanAuditSnapshotIdentity, limits: ScanAuditIndexLimits, options: { views?: boolean } = {}) {
++  if (!Number.isSafeInteger(identity.libraryId) || identity.libraryId <= 0
++    || typeof identity.runId !== 'string' || !identity.runId || identity.runId.length > 256
++    || typeof identity.finishedAt !== 'string' || !identity.finishedAt || identity.finishedAt.length > 100) {
++    throw new Error('Invalid audit snapshot identity')
++  }
++  for (const value of [limits.sourceBytes, limits.indexBytes, limits.pageBytes]) {
++    if (!Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid audit index budget')
++  }
++  const snapshot = { libraryId: identity.libraryId, runId: identity.runId, finishedAt: identity.finishedAt }, budget = { ...limits }
++  const db = openReadOnlyDatabaseAtPath(databasePath)
++  let sourceBytes = 0, indexBytes = 0, auditAvailable = true
++  let groups: CountGroup[] = []
++  let readViews: ReturnType<typeof prepareScanAuditViews> | undefined
++  try {
++    // Native SQLITE_OPEN_READONLY continues to protect main while this private connection builds TEMP.
++    db.pragma('query_only = OFF')
++    db.pragma('temp_store = FILE')
++    db.pragma('temp.cache_size = -8192')
++    const pageSize = Number(db.pragma('temp.page_size', { simple: true }))
++    const maxPages = Math.floor(budget.indexBytes / pageSize)
++    if (maxPages < 1) throw new Error('Audit index exceeds space budget')
++    const acceptedPages = Number(db.pragma(`temp.max_page_count = ${maxPages}`, { simple: true }))
++    if (acceptedPages > maxPages) throw new Error('Audit index exceeds space budget')
++    db.transaction(() => {
++      // Reject excessive input before asking SQLite to parse the JSON document.
++      const size = readScanAuditSource(db, { libraryId: snapshot.libraryId, runId: snapshot.runId }, 'bytes')
++      auditAvailable = size?.bytes != null
++      if (!auditAvailable) {
++        if (!options.views) throw new Error('Audit snapshot unavailable')
++        // Missing audit bodies are legitimate after retention/import, but only
++        // the current matching summary may authorize an unrecognized-only view.
++        const header = readScanAuditHeader(db, snapshot.libraryId)
++        if (!header.summary || header.summary.runId !== snapshot.runId
++          || header.summary.finishedAt !== snapshot.finishedAt) throw new Error('Audit summary changed; refresh scan history')
++      }
++      sourceBytes = size?.bytes ?? 0
++      if (sourceBytes > budget.sourceBytes) throw new Error('Audit source exceeds byte budget')
++      if (auditAvailable) {
++      const valid = db.prepare('SELECT json_valid(audit_json) AS valid FROM library_scan_runs WHERE library_id = ? AND id = ?')
++        .get(snapshot.libraryId, snapshot.runId) as { valid: number }
++      if (!valid.valid) throw new Error('Invalid audit JSON')
++      const meta = db.prepare(`SELECT json_extract(audit_json,'$.schemaVersion') AS version,
++        json_extract(audit_json,'$.libraryId') AS libraryId, json_extract(audit_json,'$.runId') AS runId,
++        json_extract(audit_json,'$.finishedAt') AS finishedAt,
++        ${sections.map(section => `json_type(audit_json,'$.${section}') AS ${section}`).join(',')}
++        FROM library_scan_runs WHERE library_id = ? AND id = ?`).get(snapshot.libraryId, snapshot.runId) as Record<string, unknown>
++      if ((meta.version !== 1 && meta.version !== 2)
++        || meta.libraryId !== snapshot.libraryId || meta.runId !== snapshot.runId || meta.finishedAt !== snapshot.finishedAt
++        || sections.some(section => meta[section] !== 'array')) throw new Error('Audit snapshot does not match requested identity or structure')
++      }
++      db.exec(`CREATE TEMP TABLE scan_audit_entries(
++        section TEXT NOT NULL, ordinal INTEGER NOT NULL,
++        entry TEXT NOT NULL CHECK(json_type(entry) = 'object'),
++        entry_bytes INTEGER NOT NULL CHECK(entry_bytes >= 0),
++        outcome TEXT, attention INTEGER NOT NULL,
++        PRIMARY KEY(section,ordinal),
++        CHECK(section != 'files' OR (outcome IS NOT NULL AND outcome IN (${outcomes.map(value => `'${value}'`).join(',')})))) WITHOUT ROWID`)
++      for (const section of auditAvailable ? sections : []) {
++        const file = section === 'files'
++        const outcome = file ? "json_extract(value,'$.outcome')" : 'NULL'
++        const attention = file ? `(json_extract(value,'$.outcome') IN ('unrecognized','strm_failure','processing_failure')
++          OR COALESCE(json_extract(value,'$.nfo.disposition') IN ('warning','identity-conflict','pending-candidate'),0))` : '0'
++        db.prepare(`INSERT INTO temp.scan_audit_entries(section,ordinal,entry,entry_bytes,outcome,attention)
++          SELECT ?,CAST(key AS INTEGER),CASE WHEN e.type = 'object' THEN value ELSE NULL END,length(CAST(value AS BLOB)),${outcome},${attention}
++          FROM library_scan_runs r,json_each(r.audit_json,'$.${section}') AS e
++          WHERE r.library_id = ? AND r.id = ?`).run(section, snapshot.libraryId, snapshot.runId)
++      }
++      db.exec(`CREATE INDEX temp.scan_audit_ordinal ON scan_audit_entries(section,ordinal,outcome,attention,entry_bytes);
++        CREATE INDEX temp.scan_audit_outcome ON scan_audit_entries(section,outcome,ordinal,attention,entry_bytes);
++        CREATE INDEX temp.scan_audit_attention ON scan_audit_entries(section,attention,ordinal,outcome,entry_bytes)`)
++      if (options.views) readViews = prepareScanAuditViews(db, snapshot, budget.pageBytes, auditAvailable)
++      groups = db.prepare('SELECT section,outcome,attention,COUNT(*) AS n FROM temp.scan_audit_entries GROUP BY section,outcome,attention').all() as CountGroup[]
++      indexBytes = Number(db.pragma('temp.page_count', { simple: true })) * pageSize
++      if (indexBytes > budget.indexBytes) throw new Error('Audit index exceeds space budget')
++    })()
++    db.pragma('query_only = ON')
++  } catch (error) {
++    if (db.open) db.close()
++    throw error
++  }
++
++  return {
++    readViewPage(query: ScanAuditViewQuery) {
++      if (!db.open) throw new Error('Audit index is closed')
++      if (!readViews) throw new Error('Audit view index was not requested')
++      return readViews(query)
++    },
++    getInfo: () => ({ snapshot: { ...snapshot }, sourceBytes, indexBytes }),
++    readPage(query: ScanAuditIndexQuery): ScanAuditIndexPage {
++      if (!db.open) throw new Error('Audit index is closed')
++      if (!auditAvailable) throw new Error('Audit snapshot unavailable')
++      const { section, outcome, attention, limit = 100, offset = 0 } = query
++      if (!sections.includes(section) || (outcome !== undefined && !outcomes.includes(outcome))
++        || (attention !== undefined && typeof attention !== 'boolean')
++        || (section !== 'files' && (outcome !== undefined || attention !== undefined))
++        || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
++        || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid audit page query')
++      const parameters: Array<string | number> = [section]
++      let where = 'section = ?'
++      if (outcome !== undefined) { where += ' AND outcome = ?'; parameters.push(outcome) }
++      if (attention !== undefined) { where += ' AND attention = ?'; parameters.push(Number(attention)) }
++      const total = groups.reduce((sum, group) => sum + (group.section === section
++        && (outcome === undefined || group.outcome === outcome)
++        && (attention === undefined || group.attention === Number(attention)) ? group.n : 0), 0)
++      const pageParameters = [...parameters, limit, offset]
++      const sizes = db.prepare(`SELECT ordinal,entry_bytes AS bytes FROM temp.scan_audit_entries
++        WHERE ${where} ORDER BY ordinal LIMIT ? OFFSET ?`).all(...pageParameters) as { ordinal: number; bytes: number }[]
++      if (sizes.reduce((sum, row) => sum + row.bytes, 0) > budget.pageBytes) throw new Error('Audit page exceeds byte budget')
++      // The index is immutable. Hydrate only the selected ordinal span, avoiding a second deep OFFSET.
++      const rows = sizes.length === 0 ? [] : db.prepare(`SELECT ordinal,entry FROM temp.scan_audit_entries
++        WHERE ${where} AND ordinal >= ? AND ordinal <= ? ORDER BY ordinal`)
++        .all(...parameters,sizes[0].ordinal,sizes[sizes.length - 1].ordinal) as { ordinal: number; entry: string }[]
++      const result: ScanAuditIndexPage = { snapshot: { ...snapshot }, section,
++        items: rows.map(row => ({ ordinal: row.ordinal, entry: JSON.parse(row.entry) as Record<string, unknown> })), total, limit, offset }
++      if (Buffer.byteLength(JSON.stringify(result)) > budget.pageBytes) throw new Error('Audit page exceeds byte budget')
++      return result
++    },
++    dispose() { if (db.open) db.close() }
++  }
++}
+diff --git a/src/main/services/scanAuditPathPermission.ts b/src/main/services/scanAuditPathPermission.ts
+new file mode 100644
+index 0000000..de4b1aa
+--- /dev/null
++++ b/src/main/services/scanAuditPathPermission.ts
+@@ -0,0 +1,66 @@
++import type Database from 'better-sqlite3'
++import path from 'node:path'
++import { normalizeAbsoluteLocalPath } from '@shared/localPathIdentity'
++import { isFileEntry, isResourceEntry, normalizeAudit } from '../scanner/libraryScanAuditValidation'
++import { SCAN_AUDIT_READ_LIMITS } from './scanAuditReadPolicy'
++import { readScanAuditSource } from '../db/scanAuditSource'
++
++export function normalizeAuditPathRequest(libraryId: number, filePath: string) {
++  if (!Number.isSafeInteger(libraryId) || libraryId <= 0 || typeof filePath !== 'string' || filePath.length > 32768) throw new Error('Invalid audit path request')
++  normalizeAbsoluteLocalPath(filePath)
++  return {libraryId,filePath}
++}
++
++/** Read on the shared readonly worker: project scalars and one validated entry at a time. */
++export function createScanAuditPathPermissionReader(db: Database.Database) {
++  db.function('scan_audit_path_entry_check', {deterministic:true}, (section:unknown, type:unknown, raw:unknown, target:unknown) => {
++    if (type !== 'object' || typeof raw !== 'string' || typeof target !== 'string') return 0
++    const value:unknown = JSON.parse(raw)
++    if (section === 'files') {
++      if (!isFileEntry(value)) return 0
++      return path.resolve(value.filePath).toLowerCase() === target ? 2 : 1
++    }
++    if (!isResourceEntry(value)) return 0
++    return value.sourcePath != null && path.resolve(value.sourcePath).toLowerCase() === target ? 2 : 1
++  })
++  return (libraryId: number, filePath: string): boolean => {
++    normalizeAuditPathRequest(libraryId,filePath)
++    const normalized = normalizeAbsoluteLocalPath(filePath).normalizedPath
++    // Match the historical audit comparison, which folds case on every platform.
++    const target = path.resolve(filePath).toLowerCase()
++    return db.transaction(() => {
++      if (db.prepare('SELECT 1 FROM library_unrecognized_files WHERE library_id=? AND normalized_path=? LIMIT 1').get(libraryId,normalized)) return true
++      const latest = readScanAuditSource(db, { libraryId, latest: true }, 'bytes')
++      if (!latest) return false
++      if (latest.bytes > SCAN_AUDIT_READ_LIMITS.sourceBytes) throw new Error('Audit source exceeds byte budget')
++      if (!(db.prepare('SELECT json_valid(audit_json) AS valid FROM library_scan_runs WHERE library_id=? AND id=?').get(libraryId,latest.runId) as {valid:number}).valid) return false
++      const fields=['schemaVersion','libraryId','runId','configRevision','trigger','status','startedAt','finishedAt']
++      const collections=['files','removedResources','promotedResources','deletedVideos','pendingGroups']
++      const meta:Record<string,unknown>={},seen=new Set<string>()
++      const properties=db.prepare(`SELECT e.key,e.type,CASE WHEN e.type IN ('text','integer','real','true','false','null') THEN e.value ELSE NULL END AS scalar
++        FROM library_scan_runs r,json_each(r.audit_json) e WHERE r.library_id=? AND r.id=?
++        AND e.key IN (${[...fields,...collections].map(name=>`'${name}'`).join(',')})`).iterate(libraryId,latest.runId)
++      for (const property of properties) {
++        const row=property as {key:string;type:string;scalar:unknown}
++        // Persisted JSON.stringify audits have unique fields. Do not authorize an ambiguous duplicate-key document.
++        if (seen.has(row.key)) return false
++        seen.add(row.key)
++        if (collections.includes(row.key)) { if(row.type!=='array') return false;meta[row.key]=[] }
++        else meta[row.key]=row.type==='true'?true:row.type==='false'?false:row.scalar
++      }
++      const valid=normalizeAudit(meta)
++      if (!valid || valid.libraryId!==libraryId) return false
++      let found=false
++      for (const section of ['files','removedResources','promotedResources']) {
++        const rows=db.prepare(`SELECT scan_audit_path_entry_check(?,e.type,e.value,?) AS code
++          FROM library_scan_runs r,json_each(r.audit_json,?) e WHERE r.library_id=? AND r.id=?`).iterate(section,target,`$.${section}`,libraryId,latest.runId)
++        for (const result of rows) {
++          const code=(result as {code:number}).code
++          if (code===0) return false
++          if (code===2) found=true
++        }
++      }
++      return found
++    })()
++  }
++}
+diff --git a/src/main/services/scanAuditPathPermission.test.ts b/src/main/services/scanAuditPathPermission.test.ts
+new file mode 100644
+index 0000000..6611c78
+--- /dev/null
++++ b/src/main/services/scanAuditPathPermission.test.ts
+@@ -0,0 +1,82 @@
++import {beforeEach,afterEach,it} from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type {LibraryScanAudit} from '@shared/libraryTypes'
++import {normalizeLocalPathIdentity} from '@shared/localPathIdentity'
++import {initDatabaseAtPath,closeDatabase,openReadOnlyDatabaseAtPath} from '../db/database'
++import {createMediaLibrary} from '../db/mediaLibraryRepo'
++import {libraryScanAuditContainsPath} from '../scanner/libraryScanAuditStore'
++import {normalizeAudit} from '../scanner/libraryScanAuditValidation'
++import {createScanAuditPathPermissionReader} from './scanAuditPathPermission'
++let root:string,writer:Database.Database,reader:Database.Database,audit:LibraryScanAudit,rootId:number,read:ReturnType<typeof createScanAuditPathPermissionReader>
++beforeEach(()=>{
++ root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-path-'));const filename=path.join(root,'db.sqlite');writer=initDatabaseAtPath(filename)
++ const media=path.join(root,'media');fs.mkdirSync(media);const library=createMediaLibrary({name:'Paths',roots:[{path:media}]});rootId=library.roots[0].id
++ audit={schemaVersion:2,libraryId:library.id,runId:'one',configRevision:1,trigger:'manual',status:'success',startedAt:'before',finishedAt:'after',
++  files:[{rootId,filePath:'/A.mp4',sourceKind:'local',outcome:'unrecognized'}],
++  removedResources:[{resourceId:1,videoId:1,videoCode:'R',videoTitle:null,resourceKind:'local',sourcePath:'/REMOVED.mp4',displayName:null,reason:'missing'}],
++  promotedResources:[{resourceId:2,videoId:2,videoCode:'P',videoTitle:null,resourceKind:'local',sourcePath:'/PROMOTED.mp4',displayName:null,reason:'promoted_after_removal'}],deletedVideos:[],pendingGroups:[]}
++ writer.prepare("INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json) VALUES('one',?,1,'manual','completed','before',?)").run(library.id,JSON.stringify(audit))
++ reader=openReadOnlyDatabaseAtPath(filename);read=createScanAuditPathPermissionReader(reader)
++})
++afterEach(()=>{reader?.close();closeDatabase();fs.rmSync(root,{recursive:true,force:true})})
++function replace(value:unknown){writer.prepare("UPDATE library_scan_runs SET audit_json=? WHERE id='one'").run(JSON.stringify(value))}
++it('matches legacy validation and folded path membership across all permitted sources',()=>{
++ for(const candidate of ['/a.mp4','/removed.mp4','/promoted.mp4','/no.mp4'])assert.equal(read(audit.libraryId,candidate),libraryScanAuditContainsPath(audit,candidate))
++ for(const change of [{schemaVersion:1},{schemaVersion:3},{schemaVersion:true},{configRevision:false},{startedAt:''},{files:[...audit.files,{...audit.files[0],rootId:0}]},{files:[...audit.files,{...audit.files[0],nfo:{disposition:'bad'}}]},{removedResources:[{...audit.removedResources[0],sourcePath:4}]},{promotedResources:{}},{pendingGroups:null},{deletedVideos:[null,1]}]){
++  const value={...audit,...change};replace(value);const old=normalizeAudit(value)
++  assert.equal(read(audit.libraryId,'/a.mp4'),Boolean(old&&libraryScanAuditContainsPath(old,'/a.mp4')),JSON.stringify(change))
++ }
++ replace({...audit,libraryId:1});assert.equal(read(audit.libraryId,'/a.mp4'),false)
++ assert.equal(read(1,'/a.mp4'),false)
++ assert.throws(()=>read(audit.libraryId,'relative.mp4'))
++ assert.throws(()=>read(0,'/a.mp4'))
++})
++it('uses the latest non-null run, ignores summary identity and allows indexed unrecognized paths without parsing bad audit',()=>{
++ writer.prepare("INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json) VALUES('two',?,1,'manual','completed','later','invalid')").run(audit.libraryId)
++ assert.equal(read(audit.libraryId,'/a.mp4'),false)
++ writer.prepare('INSERT INTO library_unrecognized_files(library_id,root_id,file_path,normalized_path,scan_run_id,last_seen_at) VALUES(?,?,?,?,?,?)').run(audit.libraryId,rootId,'/PENDING.mp4',normalizeLocalPathIdentity('/PENDING.mp4'),'one','now')
++ assert.equal(read(audit.libraryId,'/PENDING.mp4'),true)
++ writer.exec("UPDATE library_scan_runs SET audit_json=NULL WHERE id='two'")
++ assert.equal(read(audit.libraryId,'/a.mp4'),true)
++ writer.prepare('INSERT OR REPLACE INTO media_library_scan_state(library_id,last_summary_json) VALUES(?,?)').run(audit.libraryId,JSON.stringify({runId:'other'}))
++ assert.equal(read(audit.libraryId,'/removed.mp4'),true)
++ assert.equal(reader.pragma('query_only',{simple:true}),1)
++ assert.throws(()=>reader.exec('DELETE FROM library_scan_runs'),/readonly/i)
++})
++it('never parses the complete body in JavaScript and validates later entries after an early path match',()=>{
++ audit.files=Array.from({length:2000},(_,i)=>({...audit.files[0],filePath:`/media/${i}.mp4`}))
++ replace(audit);const original=JSON.parse;let maxParsed=0,calls=0
++ JSON.parse=((value,...args)=>{maxParsed=Math.max(maxParsed,value.length);calls++;return original(value,...args)}) as typeof JSON.parse
++ try{assert.equal(read(audit.libraryId,'/media/0.mp4'),true);assert.equal(calls,2002);assert.ok(maxParsed<500)}finally{JSON.parse=original}
++ replace({...audit,files:[...audit.files,{...audit.files[0],nfo:{disposition:'warning',warnings:Array(21).fill({code:'x',message:'x'})}}]})
++ assert.equal(read(audit.libraryId,'/media/0.mp4'),false)
++})
++it('keeps authorization on one WAL snapshot when a writer replaces the audit during entry validation',()=>{
++ const original=JSON.parse;let changed=false
++ JSON.parse=((value,...args)=>{if(!changed){changed=true;replace({...audit,files:[],removedResources:[],promotedResources:[]})}return original(value,...args)}) as typeof JSON.parse
++ try{assert.equal(read(audit.libraryId,'/removed.mp4'),true)}finally{JSON.parse=original}
++ assert.equal(changed,true);assert.equal(read(audit.libraryId,'/removed.mp4'),false)
++})
++it('fails closed on duplicate known fields and object strings instead of object entries',()=>{
++ for(const body of [JSON.stringify(audit).replace('"schemaVersion":2','"schemaVersion":1,"schemaVersion":2'),JSON.stringify({...audit,files:[JSON.stringify(audit.files[0])]}),'null','[]']){
++  writer.prepare("UPDATE library_scan_runs SET audit_json=? WHERE id='one'").run(body)
++  assert.equal(read(audit.libraryId,'/a.mp4'),false)
++ }
++})
++it('checks the trusted source cap before parsing audit JSON',()=>{
++ const prepare=reader.prepare.bind(reader);let capped=false
++ reader.prepare=((sql:string)=>{
++  if(/length\s*\(CAST\(audit_json AS BLOB\)\)/i.test(sql)){
++   const statement=prepare(sql),get=statement.get.bind(statement)
++   statement.get=((...parameters:unknown[])=>{capped=true;return{...get(...parameters) as Record<string,unknown>,bytes:128*1024*1024+1}}) as typeof statement.get
++   return statement
++  }
++  assert.doesNotMatch(sql,/json_valid|json_each/,'over-budget body must never reach JSON parsing')
++  return prepare(sql)
++ }) as typeof reader.prepare
++ try{assert.throws(()=>read(audit.libraryId,'/a.mp4'),/source exceeds byte budget/);assert.equal(capped,true)}finally{reader.prepare=prepare}
++})

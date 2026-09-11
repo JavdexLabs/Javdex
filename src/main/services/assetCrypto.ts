@@ -10,6 +10,9 @@ const TAG_LEN = 16
 const KEY_LEN = 32
 
 let cachedKey: Buffer | null = null
+let pendingKey: Promise<Buffer> | null = null
+let decryptKey: Promise<crypto.webcrypto.CryptoKey> | null = null
+let keyGeneration = 0
 
 function resolveUserDataPath(): string {
   const testPath = readTestUserDataPath()
@@ -35,6 +38,36 @@ export function deriveAssetKey(): Buffer {
 
 export function resetAssetKeyCacheForTests(): void {
   cachedKey = null
+  pendingKey = null
+  decryptKey = null
+  keyGeneration++
+}
+
+function deriveAssetKeyAsync(): Promise<Buffer> {
+  if (cachedKey) return Promise.resolve(cachedKey)
+  if (pendingKey) return pendingKey
+  const generation = keyGeneration
+  const task = new Promise<Buffer>((resolve, reject) => {
+    crypto.scrypt(buildAssetKeyMaterial(resolveUserDataPath()), 'javdex-asset-salt', KEY_LEN, (error, key) => {
+      if (error) { reject(error); return }
+      if (generation === keyGeneration) cachedKey = key
+      resolve(key)
+    })
+  }).finally(() => {
+    if (pendingKey === task) pendingKey = null
+  })
+  pendingKey = task
+  return task
+}
+
+function getDecryptKey(): Promise<crypto.webcrypto.CryptoKey> {
+  if (decryptKey) return decryptKey
+  const task = deriveAssetKeyAsync().then(key => crypto.webcrypto.subtle.importKey(
+    'raw', new Uint8Array(key), { name: 'AES-GCM' }, false, ['decrypt']
+  ))
+  decryptKey = task
+  void task.catch(() => { if (decryptKey === task) decryptKey = null })
+  return task
 }
 
 export function isEncryptedBlob(buf: Buffer): boolean {
@@ -57,6 +90,31 @@ export function encryptPlain(plain: Buffer, ext: string): Buffer {
 
 /** Decrypt an AVPK blob back to raw image bytes + original extension. */
 export function decryptBlob(blob: Buffer): { data: Buffer; ext: string } {
+  const { ext, nonce, ciphertextAndTag } = parseEncryptedBlob(blob)
+  const tag = ciphertextAndTag.subarray(ciphertextAndTag.length - TAG_LEN)
+  const ciphertext = ciphertextAndTag.subarray(0, ciphertextAndTag.length - TAG_LEN)
+  const decipher = crypto.createDecipheriv('aes-256-gcm', deriveAssetKey(), nonce)
+  decipher.setAuthTag(tag)
+  const data = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+  return { data, ext }
+}
+
+/** Native asynchronous crypto jobs; callers keep their queue slot until completion, even on abort. */
+export async function decryptBlobAsync(blob: Buffer, signal?: AbortSignal): Promise<{ data: Buffer; ext: string }> {
+  signal?.throwIfAborted()
+  const { ext, nonce, ciphertextAndTag } = parseEncryptedBlob(blob)
+  const key = await getDecryptKey()
+  signal?.throwIfAborted()
+  const plain = await crypto.webcrypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(nonce), tagLength: TAG_LEN * 8 },
+    key,
+    new Uint8Array(ciphertextAndTag.buffer, ciphertextAndTag.byteOffset, ciphertextAndTag.byteLength)
+  )
+  signal?.throwIfAborted()
+  return { data: Buffer.from(plain), ext }
+}
+
+function parseEncryptedBlob(blob: Buffer): { ext: string; nonce: Buffer; ciphertextAndTag: Buffer } {
   if (!isEncryptedBlob(blob)) throw new Error('不是有效的加密图片文件')
 
   let off = MAGIC.length
@@ -66,13 +124,7 @@ export function decryptBlob(blob: Buffer): { data: Buffer; ext: string } {
   off += extLen
   const nonce = blob.subarray(off, off + NONCE_LEN)
   off += NONCE_LEN
-  const tag = blob.subarray(blob.length - TAG_LEN)
-  const ciphertext = blob.subarray(off, blob.length - TAG_LEN)
-
-  const decipher = crypto.createDecipheriv('aes-256-gcm', deriveAssetKey(), nonce)
-  decipher.setAuthTag(tag)
-  const data = Buffer.concat([decipher.update(ciphertext), decipher.final()])
-  return { data, ext }
+  return { ext, nonce, ciphertextAndTag: blob.subarray(off) }
 }
 
 export function mimeFromExt(ext: string): string {

@@ -362,33 +362,42 @@ export default function PendingActressConflictPane({
               type="search"
               className="search-input form-control-full"
               placeholder="搜索演员主名或别名…"
+              aria-label="搜索其他演员"
+              maxLength={256}
               value={otherOwner.search}
               onChange={(event) => otherOwner.changeSearch(event.target.value)}
             />
             <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
               {otherOwner.loading ? (
                 <EmptyState loading variant="modal" />
+              ) : otherOwner.error ? (
+                <div role="alert"><p>演员候选读取失败</p><Button size="sm" onClick={otherOwner.retry}>重试</Button></div>
               ) : otherOwner.options.length === 0 ? (
-                <EmptyState title="没有匹配的演员" variant="modal" />
+                <EmptyState title={otherOwner.offset > 0 || otherOwner.hasMore ? '本页没有可选演员' : '没有匹配的演员'} variant="modal" />
               ) : (
                 otherOwner.options.map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     aria-pressed={otherOwner.selected?.id === item.id}
+                    aria-busy={otherOwner.choosingId === item.id}
                     className={otherOwner.selected?.id === item.id ? 'is-selected' : ''}
                     onClick={() => otherOwner.choose(item)}
                   >
                     <ActressAvatar
                       src={resolveMediaSrc(item.avatar_path)}
                       name={item.main_name}
-                      gender={item.gender}
                       decorative
                     />
-                    <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
+                    <span><strong>{item.main_name}</strong><small>{otherOwner.choosingId === item.id ? '读取中…' : '选择为拟定归属'}</small></span>
                   </button>
                 ))
               )}
+            </div>
+            <div className="conflict-workbench-owner-pagination" aria-label="演员候选分页">
+              <Button size="sm" disabled={otherOwner.loading || otherOwner.offset === 0} onClick={otherOwner.previousPage}>上一页</Button>
+              <span aria-live="polite">第 {Math.floor(otherOwner.offset / 40) + 1} 页</span>
+              <Button size="sm" disabled={otherOwner.loading || !otherOwner.hasMore} onClick={otherOwner.nextPage}>下一页</Button>
             </div>
           </div>
         </ConfirmModal>
@@ -679,7 +688,6 @@ export default function PendingActressConflictPane({
                   name={otherOwner.selected.main_name}
                   hint="已从演员库选择"
                   avatarSrc={otherOwner.selected.avatar_path}
-                  gender={otherOwner.selected.gender}
                   actressId={otherOwner.selected.id}
                   extraAction={
                     <IconButton

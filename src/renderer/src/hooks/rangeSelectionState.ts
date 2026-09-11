@@ -24,3 +24,13 @@ export function addSelectedRange(
   }
   return next
 }
+
+/** Never commit a partial or shifted range returned by a refreshed catalog. */
+export function validateSelectionRange(
+  items: readonly SelectableItem[], count: number, firstId: number, lastId: number
+): void {
+  if (items.length !== count || items[0]?.id !== firstId || items.at(-1)?.id !== lastId ||
+    new Set(items.map((item) => item.id)).size !== count) {
+    throw new Error('列表已变化，请重新选择范围')
+  }
+}

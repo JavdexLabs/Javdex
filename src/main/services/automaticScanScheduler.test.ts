@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { LibraryScanTrigger, ScanResult } from '@shared/libraryTypes'
+import type { LibraryScanTrigger, ScanCompletionResult } from '@shared/libraryTypes'
 import type { MediaLibraryAutomaticScanState } from '@shared/mediaLibraryTypes'
 import {
   AUTOMATIC_SCAN_RESUME_DELAY_MS,
@@ -54,7 +54,7 @@ function library(
   }
 }
 
-function result(libraryId: number): ScanResult {
+function result(libraryId: number): ScanCompletionResult {
   return {
     libraryId,
     runId: `run-${libraryId}`,
@@ -71,8 +71,7 @@ function result(libraryId: number): ScanResult {
     promoted: 0,
     deletedVideos: 0,
     offlineFolders: [],
-    newCodes: [],
-    unrecognizedFiles: [],
+    unrecognizedCount: 0,
     strmFailures: [],
     omittedStrmFailures: 0
   }
@@ -90,7 +89,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 
 function createHarness(
   initial: MediaLibraryAutomaticScanState[],
-  onRun?: (libraryId: number, trigger: LibraryScanTrigger) => Promise<ScanResult>
+  onRun?: (libraryId: number, trigger: LibraryScanTrigger) => Promise<ScanCompletionResult>
 ) {
   const timers = new FakeTimers()
   let now = Date.parse('2026-08-10T02:00:00.000Z')

@@ -4,7 +4,8 @@ import path from 'node:path'
 import type { WebAccessInput, WebAccessStatus } from '@shared/webTypes'
 import { getDb } from '../db/database'
 import { hashPassword, WebSessions } from './auth'
-import { WebCatalog } from './catalog'
+import { createWorkerWebCatalog } from './catalogWorkerAdapter'
+import { catalogReadService } from '../services/catalogReadService'
 import { localAddresses, WebServer } from './server'
 
 interface StoredAccess {
@@ -59,7 +60,7 @@ export class WebAccess {
       ...this.config,
       sessions: this.store(),
       staticRoot,
-      catalog: new WebCatalog(getDb()),
+      catalog: createWorkerWebCatalog(getDb(), catalogReadService),
       onError: (message) => {
         if (this.server === server) {
           this.server = null

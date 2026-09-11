@@ -1,0 +1,18 @@
+▶ classification IPC contract
+  ✔ registers every command and forwards typed arguments to the public services (1.088917ms)
+✔ classification IPC contract (1.359ms)
+✔ matches all candidate fields/order and deduplicates dual-role organization links before LIMIT (20.491167ms)
+✔ holds count and candidate rows in the same snapshot across a cover removal (7.735875ms)
+✔ rejects unsafe entity IDs, unsupported page flags and excessive pages (8.696459ms)
+✔ loads only the video source and retains the chosen original across 60/60/5 and error retry (129.968541ms)
+✔ clamps a shrunken last page and ignores a response after an entity switch (4.768917ms)
+✔ does not close or refresh a new entity editor when an old save settles (2.526375ms)
+✔ does not replace a chosen video cover with a late URL preview after switching sources (2.89925ms)
+ℹ tests 8
+ℹ suites 1
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 409.243125

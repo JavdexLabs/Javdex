@@ -1,6 +1,7 @@
+import { useActressGalleryPage } from '../hooks/useActressGalleryPage'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActressGalleryAsset } from '@shared/actressTypes'
-import type { Video } from '@shared/videoTypes'
+import { useActressVideoPage } from '../hooks/useActressVideoPage'
 import { DEFAULT_AVATAR_FACE_RATIO } from '@shared/avatarFaceScale'
 import {
   DEFAULT_AVATAR_CENTERING_MODE,
@@ -13,7 +14,6 @@ import {
   type ActressAvatarCommit,
   type AvatarCropV1
 } from '@shared/avatarCrop'
-import { prepareActressGalleryForDisplay } from '@shared/mediaGalleryDisplay'
 import { assetUrl, api } from '../api'
 import {
   analyzeAvatarBitmap,
@@ -42,8 +42,7 @@ interface Props {
   displayUrl: string | null
   sourceUrl: string | null
   savedCrop: AvatarCropV1 | null
-  videos: Video[]
-  gallery: ActressGalleryAsset[]
+  actressId: number
   onAvatarChange: (commit: ActressAvatarCommit | null) => void
 }
 
@@ -180,8 +179,7 @@ export default function ActressAvatarEditor({
   displayUrl,
   sourceUrl,
   savedCrop,
-  videos,
-  gallery,
+  actressId,
   onAvatarChange
 }: Props): JSX.Element {
   const toast = useToast()
@@ -196,8 +194,10 @@ export default function ActressAvatarEditor({
   const coverScroll = useHorizontalDragScroll()
   const galleryScroll = useHorizontalDragScroll()
 
-  const coverVideos = useMemo(() => videos.filter((v) => v.cover_path), [videos])
-  const galleryItems = useMemo(() => prepareActressGalleryForDisplay(gallery), [gallery])
+  const covers = useActressVideoPage(actressId, true)
+  const coverVideos = covers.data?.videos ?? []
+  const photos = useActressGalleryPage(actressId, true)
+  const galleryItems = photos.data?.items ?? []
 
   const editableSourceUrl = sourceUrl || displayUrl
   const hasOriginalSource = Boolean(sourceUrl)
@@ -210,6 +210,13 @@ export default function ActressAvatarEditor({
   }, [coverVideos.length, editableSourceUrl, galleryItems.length])
 
   const [activeTab, setActiveTab] = useState<SourceTab>(defaultTab)
+  const initialTabResolved = useRef(false)
+  useEffect(() => {
+    if (!initialTabResolved.current && !covers.loading && !photos.loading) {
+      initialTabResolved.current = true
+      setActiveTab(defaultTab)
+    }
+  }, [covers.loading, photos.loading, defaultTab])
   const [editUrl, setEditUrl] = useState<string | null>(null)
   const [activeSourceKey, setActiveSourceKey] = useState<string | null>(null)
   const [baseScale, setBaseScale] = useState(1)
@@ -730,8 +737,8 @@ export default function ActressAvatarEditor({
   const tabs: Array<{ id: SourceTab; label: string; disabled?: boolean }> = [
     { id: 'current', label: '当前', disabled: !editableSourceUrl },
     { id: 'local', label: '本地' },
-    { id: 'cover', label: '封面', disabled: coverVideos.length === 0 },
-    { id: 'gallery', label: '写真', disabled: galleryItems.length === 0 }
+    { id: 'cover', label: '封面', disabled: false },
+    { id: 'gallery', label: '写真', disabled: false }
   ]
 
   const editingCurrent = editing && activeSourceKey === 'current'
@@ -834,6 +841,7 @@ export default function ActressAvatarEditor({
                   disabled={tab.disabled}
                   onClick={() => {
                     setOpenError(null)
+                    initialTabResolved.current = true
                     setActiveTab(tab.id)
                   }}
                 >
@@ -878,7 +886,7 @@ export default function ActressAvatarEditor({
 
                     size="sm"
                     variant={activeSourceKey === 'local' ? 'primary' : 'default'}
-                    onClick={() => fileRef.current?.click()}
+                    onClick={() => { initialTabResolved.current = true; fileRef.current?.click() }}
                   >
                     选择本地图片…
                   </Button>
@@ -898,7 +906,9 @@ export default function ActressAvatarEditor({
                 onPointerUp={coverScroll.onPointerUp}
                 onPointerCancel={coverScroll.onPointerCancel}
               >
-                {coverVideos.length === 0 ? (
+                {covers.loading ? <p className="avatar-source-empty">加载中…</p> : covers.error ? (
+                  <div role="alert">{covers.error}<Button onClick={covers.reload}>重试</Button></div>
+                ) : coverVideos.length === 0 ? (
                   <p className="avatar-source-empty">暂无关联封面</p>
                 ) : (
                   coverVideos.map((video) => {
@@ -924,12 +934,14 @@ export default function ActressAvatarEditor({
                           })
                         }}
                       >
-                        <img src={url} alt="" loading="lazy" draggable={false} />
+                        <img src={assetUrl(video.cover_path, 320) ?? undefined} alt="" loading="lazy" draggable={false} />
                       </button>
                     )
                   })
                 )}
               </div>
+
+
 
               <div
                 ref={galleryScroll.ref}
@@ -943,14 +955,16 @@ export default function ActressAvatarEditor({
                 onPointerUp={galleryScroll.onPointerUp}
                 onPointerCancel={galleryScroll.onPointerCancel}
               >
-                {galleryItems.length === 0 ? (
+                {photos.loading ? <p className="avatar-source-empty">加载中…</p> : photos.error ? (
+                  <div role="alert">{photos.error}<Button onClick={photos.reload}>重试</Button></div>
+                ) : galleryItems.length === 0 ? (
                   <p className="avatar-source-empty">暂无写真</p>
                 ) : (
                   galleryItems.map((asset, index) => {
                     const url = gallerySrc(asset)
                     if (!url || !asset.local_path) return null
                     const sourceKey = `gallery:${asset.id}`
-                    const label = `写真 ${index + 1}`
+                    const label = `写真 ${photos.offset + index + 1}`
                     return (
                       <button
                         key={asset.id}
@@ -970,7 +984,7 @@ export default function ActressAvatarEditor({
                           })
                         }}
                       >
-                        <img src={url} alt="" loading="lazy" draggable={false} />
+                        <img src={assetUrl(asset.local_path, 320) ?? undefined} alt="" loading="lazy" draggable={false} />
                       </button>
                     )
                   })
@@ -982,6 +996,20 @@ export default function ActressAvatarEditor({
                 </div>
               ) : null}
             </div>
+              {activeTab === 'cover' && covers.data && covers.data.total > 60 ? (
+                <nav className="actress-works-pagination" aria-label="头像封面分页">
+                  <Button size="sm" disabled={covers.offset === 0} onClick={() => covers.move(covers.offset - 60)}>上一页</Button>
+                  <span>第 {Math.floor(covers.offset / 60) + 1} 页</span>
+                  <Button size="sm" disabled={covers.offset + coverVideos.length >= covers.data.total} onClick={() => covers.move(covers.offset + 60)}>下一页</Button>
+                </nav>
+              ) : null}
+              {activeTab === 'gallery' && photos.data && photos.data.total > 60 ? (
+                <nav className="actress-works-pagination" aria-label="头像写真分页">
+                  <Button size="sm" disabled={photos.offset === 0} onClick={() => photos.move(photos.offset - 60)}>上一页</Button>
+                  <span>第 {Math.floor(photos.offset / 60) + 1} 页</span>
+                  <Button size="sm" disabled={photos.offset + galleryItems.length >= photos.data.total} onClick={() => photos.move(photos.offset + 60)}>下一页</Button>
+                </nav>
+              ) : null}
           </div>
 
           <div

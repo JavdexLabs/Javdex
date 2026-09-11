@@ -32,6 +32,10 @@ function rowCount(database: Database.Database, table: string): number {
 function createV13ReleaseFixture(database: Database.Database): void {
   database.exec(`
     PRAGMA foreign_keys = ON;
+    -- Minimal unaffected relationship/index required by the later V17 migration.
+    CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
+      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
+    CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);
 
     CREATE TABLE videos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,7 +151,7 @@ describe('V14 unreleased feature consolidation migration', () => {
 
       migrateDatabase(database)
 
-      assert.equal(CURRENT_SCHEMA_VERSION, 15)
+      assert.equal(CURRENT_SCHEMA_VERSION, 18)
       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       for (const table of [
         'media_libraries',

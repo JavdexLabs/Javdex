@@ -817,9 +817,9 @@ function bumpLibraryRevision(
 }
 
 export function listMediaLibraries(
-  options: { includeArchived?: boolean } = {}
+  options: { includeArchived?: boolean } = {},
+  database: Database.Database = getDb()
 ): MediaLibrarySummary[] {
-  const database = getDb()
   const where = options.includeArchived ? '' : "WHERE library.status = 'active'"
   const rows = database
     .prepare(

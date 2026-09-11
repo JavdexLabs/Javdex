@@ -1,0 +1,26 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ag-browser-1000x640.png": "b5c4369fc41266977c2106f38361d97b84bee313017a9397278d32ed83ee8202",
+    "batch-ag-browser-1440x900.png": "d80fa7e2c5082883bbed3193f8261182a1febc636fef32093e6d56a4dcda2216",
+    "batch-ag-browser-results.json": "9f047b717b0064b2b28c693990c2821b321d3b4cc87f378be42b45a1efad4028",
+    "batch-ag-browser.log": "c7029559114b3538e6425869ef4a6ec5c247b3a268858bf92c5a70790448257a",
+    "batch-ag-build.log": "e3706f55c6a549e6c45b12bed453667ad7fad0c261b2fa3af93aa9e134b6f2a1",
+    "batch-ag-filter-300382.json": "de73876184b000a6645cb70175cb0707d0d97ca24aac784604408d827b1ac06e",
+    "batch-ag-filter-300382.log": "ea24ac43483157bf7a9acb4b218a5990e3952d865bf2d4817785429ec02ae932",
+    "batch-ag-full-tests.log": "65c082e7978ff6bd78d122858201cf41485316a8337da4188e985ef993d25140",
+    "batch-ag-tag-filter-pagination.patch": "b3de059d5d8d83f980d283c3a18f550c85f65e7c6002659ac07da17c62bba133",
+    "batch-ag-target-tests.log": "274321fbb33f7c30d5e46a1c9b6a079d83303fc8f5cbafa997656d46d28678d5",
+    "batch-ag-tests-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "batch-ag-typecheck.log": "a1499b3bc5addd579ca0b5fbe2dfacab17f004bb6597d0b95b5a9d5039c665bc"
+  },
+  "notes": [
+    "Cumulative selected source snapshot vs HEAD, includes prior shared/IPC/tag changes, depends on B-AF, not standalone patch.",
+    "TagFilter now alphabetic <=100 candidate page, count only returned IDs in same transaction; global active visible shared-deduplicated counts unchanged, all origins and zero counts retained. Sorting intentionally changes from popularity to name and UI labels it.",
+    "Full npm test2152pass1skip, build pass. Later test-only enhancements (actual parameterized EQP and both candidate IPC schemas) passed final34 targets, typecheck and changed-test lint.",
+    "Actual parent popover Chrome fixture at1000x640 and1440x900, mocked IPC, screenshots visually checked after animation settles and scrolling to pager. Not native Electron/full LibraryPage navigation or exhaustive keyboard QA.",
+    "10001 unrelated tag/link EQP test checks one zero-link candidate before/after ANALYZE; does not prove hot100-tag-page work bounded.300382 analyzed full35-case benchmark: fulltags573.051ms46787B,filter first77.988ms4806B,search8.602ms553B,offset90078.371ms4809B. Local three warm samples, not p95/customer Windows/HDD.",
+    "Main script adds3filter cases; current probes would be33/35. Historical counts unchanged; AG did not rerun statistics/index probes with new cases.",
+    "Schema17 unchanged; no user data, commit,push or release. Entire15packages42risks goal incomplete."
+  ]
+}

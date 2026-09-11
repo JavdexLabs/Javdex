@@ -1,0 +1,28 @@
+✖ serializes startup before target loading and releases ownership on empty, failed or unmounted startup (25.248541ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 219.045125
+
+✖ failing tests:
+
+test at src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx:2:1282
+✖ serializes startup before target loading and releases ownership on empty, failed or unmounted startup (25.248541ms)
+  AssertionError [ERR_ASSERTION]: active crop must retain the lock until it settles
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx:96:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

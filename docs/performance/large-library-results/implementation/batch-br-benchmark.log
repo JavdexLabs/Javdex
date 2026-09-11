@@ -1,0 +1,70 @@
+{
+  "startupAndFirstReadMs": 127.28783300000003,
+  "samples": [
+    {
+      "mode": "writer",
+      "sample": 0,
+      "elapsedMs": 111.06587499999989,
+      "callbacksDuringRead": 0,
+      "maxTimerGapMs": 111.10470899999996,
+      "jsonBytes": 10762
+    },
+    {
+      "mode": "writer",
+      "sample": 1,
+      "elapsedMs": 111.00704099999996,
+      "callbacksDuringRead": 0,
+      "maxTimerGapMs": 111.05208300000004,
+      "jsonBytes": 10762
+    },
+    {
+      "mode": "writer",
+      "sample": 2,
+      "elapsedMs": 130.09191700000008,
+      "callbacksDuringRead": 0,
+      "maxTimerGapMs": 130.1612080000001,
+      "jsonBytes": 10762
+    },
+    {
+      "mode": "worker",
+      "sample": 0,
+      "elapsedMs": 126.38579099999993,
+      "callbacksDuringRead": 52,
+      "maxTimerGapMs": 2.594000000000051,
+      "jsonBytes": 10762
+    },
+    {
+      "mode": "worker",
+      "sample": 1,
+      "elapsedMs": 125.94683299999997,
+      "callbacksDuringRead": 50,
+      "maxTimerGapMs": 2.730000000000018,
+      "jsonBytes": 10762
+    },
+    {
+      "mode": "worker",
+      "sample": 2,
+      "elapsedMs": 123.85112499999991,
+      "callbacksDuringRead": 50,
+      "maxTimerGapMs": 2.619833000000199,
+      "jsonBytes": 10762
+    }
+  ],
+  "coalescedSubscribers": 32,
+  "coalescedDispatches": 1,
+  "notes": [
+    "50k videos / same director, date ties, 256-char titles and >200-char cover paths; existing deep OFFSET query unchanged.",
+    "One warmup then three samples per mode, writer first; 2ms interval before read, 8ms drain afterwards. Timer gaps are diagnostic samples, not p95 or a universal frame bound.",
+    "Worker timing includes queue/message/copy/context overhead; first read includes worker startup. All file data seeded locally/warm OS cache; no cold/Windows/HDD or main-process IPC claim.",
+    "Oracle/assertions/JSON excluded from timed read; full data retained, no peak memory claim. Native interruption/termination limits and byte budgets remain."
+  ]
+}
+✔ measures real read worker responsiveness without claiming faster SQL (1610.040583ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1780.298

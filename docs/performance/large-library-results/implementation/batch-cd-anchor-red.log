@@ -1,0 +1,51 @@
+✔ uses server totals/offset, 100/100/5 rows, browser locale and current-page presence (48.947833ms)
+✔ hides rows during loading/error and waits for refreshed header before retrying current props (6.903417ms)
+✔ isolates old retry resolve across library A → B → A (3.008333ms)
+✔ isolates old retry reject across library A → B → A (4.819417ms)
+✔ debounces 200ms, hides rows immediately, and rejects search ABA and library ABA responses (622.979916ms)
+✔ cancels a search timer on library change and unmount; filters reset offset and use the server (527.312084ms)
+✔ resolves unrecognized once through header refresh and refetches the current page (3.905375ms)
+✔ renders missing-body notice alongside cached rows and never calls it a filtered empty page (1.318667ms)
+✔ anchors all → failed by path, honors returned page and safely focuses exact DOM anchor (14.312458ms)
+✔ anchors all → failed by group, honors returned page and safely focuses exact DOM anchor (15.11225ms)
+✔ waits for delayed header props after refresh promise resolves (run) (33.79875ms)
+✔ waits for delayed header props after refresh promise resolves (next) (32.174875ms)
+✔ shows refresh errors with retry and allows a new library to proceed (1.493083ms)
+✔ held anchor response respects user focus: origin (21.549417ms)
+✔ held anchor response respects user focus: body (24.072833ms)
+✔ held anchor response respects user focus: documentElement (25.61525ms)
+✔ held anchor response respects user focus: input (46.047542ms)
+✔ held anchor response respects user focus: toolbar (44.213167ms)
+✖ keeps the actual anchored page when resolving its target, clears anchor and accepts server clamp (3.834417ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 18
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2062.389417
+
+✖ failing tests:
+
+test at src/renderer/src/components/settings/LibraryScanAuditPanel.interaction.test.tsx:2:19181
+✖ keeps the actual anchored page when resolving its target, clears anchor and accepts server clamp (3.834417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + {
+  +   kind: 'path',
+  +   value: '/file-201'
+  + }
+  - undefined
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/components/settings/LibraryScanAuditPanel.interaction.test.tsx:357:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { kind: 'path', value: '/file-201' },
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

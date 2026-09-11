@@ -1,0 +1,55 @@
+{
+  "results": [
+    {
+      "count": 1000,
+      "mode": "legacy-array",
+      "samplesMs": [
+        16.592708000000002,
+        16.45391699999999,
+        16.162542000000002
+      ]
+    },
+    {
+      "count": 1000,
+      "mode": "summary",
+      "samplesMs": [
+        0.09108399999999506,
+        0.08808300000001168,
+        0.07083299999999326
+      ]
+    },
+    {
+      "count": 5000,
+      "mode": "legacy-array",
+      "samplesMs": [
+        405.23179100000004,
+        406.74529100000007,
+        403.729875
+      ]
+    },
+    {
+      "count": 5000,
+      "mode": "summary",
+      "samplesMs": [
+        0.22991699999988668,
+        0.2588330000000951,
+        0.26808299999993324
+      ]
+    }
+  ],
+  "notes": [
+    "Frozen pre-DA array predicate versus current summary builder and current sameLogicalCode consumer.",
+    "One warmup and three samples; each sample includes summary construction and N eligibility checks for N same-code anchors.",
+    "Raw code fixture is allocated before timing for both modes; no filesystem, parseCode, NFO parsing/application, audit or IPC measured.",
+    "Not a whole-scanner RSS/throughput/p95 or Windows/HDD acceptance test."
+  ]
+}
+✔ measures one directory identity build and one eligibility check per anchor (1688.800708ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1806.948209

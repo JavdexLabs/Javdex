@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-by-audit-worker.patch": "336f61a2a79d374c432b705eff6c0af1a56511695780d3719b7b4ce9c953a712",
+    "batch-by-benchmark.json": "c0990a921d20d9d6b9c07c3aad3d9a7f1fb5f21114d5c607bc038d71df0f42bb",
+    "batch-by-benchmark.log": "a04460ab53ca30f19b86c3adcdec693dd967ac8945bada4fb76222e8f3cf3b21",
+    "batch-by-build.log": "d3988a55f5caa0dc69eb3175c5002afc66cd2cd271d7a9ff45bc84c8ce5f9a64",
+    "batch-by-full.log": "c60b1cf5e86c7f4c7590cfee549055d73f9aa99f357e557e0d90be2564e80c21",
+    "batch-by-review.md": "a6334e7b135217acafd0ee3c512a267c9497f6306e24ad86d6b271ed5787aedf",
+    "batch-by-target.log": "5bbc2e86da1c6d2e48ab6752c71d0db136ad2a61e2730f700d0e2647024bedf9"
+  },
+  "notes": [
+    "Selected cumulative source snapshot depends on earlier batches, especially BX.",
+    "33 focused; full2380pass1skip0fail; build terminal0.",
+    "Real worker responsiveness probe is diagnostic, not p95/mixed fairness/native interruption evidence.",
+    "Actual audit IPC and UI integration not yet implemented. Full15/42goal remains incomplete."
+  ]
+}

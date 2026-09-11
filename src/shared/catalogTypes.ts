@@ -20,6 +20,8 @@ export interface ScopedVideo extends Video {
 
 export interface ScopedVideoListResult extends Omit<VideoListResult, 'items'> {
   items: ScopedVideo[]
+  /** Opaque read snapshot identity for cross-page selection consistency. */
+  readRevision?: string
 }
 
 export interface ScopedVideoDetail extends VideoDetail {

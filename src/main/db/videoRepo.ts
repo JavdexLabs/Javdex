@@ -24,7 +24,7 @@ import type {
   VideoScrapeField
 } from '@shared/videoScrapeTypes'
 import { upsertActressFromScrape } from './actressRepo'
-import { actressOwnedNamePatternSearchSql } from './actressSearchSql'
+import { actressOwnedNameVideoIdsSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from './libraryCleanup'
 import {
@@ -762,6 +762,30 @@ export function listSourceManagedVideoResourceRefs(libraryId: number): LocalVide
     .all(libraryId) as LocalVideoResourceRef[]
 }
 
+/** Iterate within the caller's cleanup transaction; each query releases its cursor before deletion. */
+export function* iterateSourceManagedVideoResourceRefs(libraryId: number): IterableIterator<LocalVideoResourceRef> {
+  const db = getDb()
+  if (!db.inTransaction) throw new Error('Source resource iteration requires a transaction')
+  const highWater = (db.prepare('SELECT MAX(id) AS id FROM video_resources WHERE library_id = ?')
+    .get(libraryId) as { id: number | null }).id
+  if (highWater === null) return
+  // The library indexes require sorting each page; retain the rowid range scan instead.
+  const statement = db.prepare(`SELECT library_id, id AS resource_id, video_id,
+      CASE WHEN kind = 'local' THEN locator ELSE strm_source_path END AS locator
+    FROM video_resources NOT INDEXED
+    WHERE library_id = ? AND id > ? AND id <= ?
+      AND (kind = 'local' OR strm_source_path IS NOT NULL)
+    ORDER BY id LIMIT 256`)
+  let afterId = 0
+  while (afterId < highWater) {
+    if (!db.inTransaction) throw new Error('Source resource iteration requires a transaction')
+    const page = statement.all(libraryId, afterId, highWater) as LocalVideoResourceRef[]
+    if (page.length === 0) return
+    afterId = page[page.length - 1].resource_id
+    yield* page
+  }
+}
+
 export function listStrmVideoResourceRefs(libraryId: number): StrmVideoResourceRef[] {
   return getDb()
     .prepare(
@@ -1206,9 +1230,7 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
     const like = `%${q.search.trim()}%`
     conditions.push(
       `(v.code LIKE ? OR v.title LIKE ? OR v.id IN (
-       SELECT va.video_id FROM video_actress va
-         JOIN actresses a ON a.id = va.actress_id
-         WHERE ${actressOwnedNamePatternSearchSql('a')}
+       ${actressOwnedNameVideoIdsSql()}
        ))`
     )
     params.push(like, like, like)
@@ -1450,7 +1472,22 @@ export function addManualVideoTag(videoId: number, name: string): void {
   const trimmed = name.trim()
   if (!trimmed) throw new Error('标签名称不能为空')
   const db = getDb()
-  const tagId = ensureTag(trimmed)
+  db.transaction(() => setManualVideoTag(videoId, ensureTag(trimmed)))()
+}
+
+/** Attach the exact selected tag even when its display label is truncated. */
+export function addExistingManualVideoTag(videoId: number, tagId: number): void {
+  const db = getDb()
+  db.transaction(() => {
+    const tag = db.prepare('SELECT name FROM tags WHERE id = ?').get(tagId) as { name: string } | undefined
+    if (!tag) throw new Error('标签已不存在，请重新选择')
+    if (!tag.name.trim()) throw new Error('标签名称不能为空')
+    setManualVideoTag(videoId, tagId)
+  })()
+}
+
+function setManualVideoTag(videoId: number, tagId: number): void {
+  const db = getDb()
   const existing = db
     .prepare('SELECT origin FROM video_tag WHERE video_id = ? AND tag_id = ?')
     .get(videoId, tagId) as { origin: string } | undefined

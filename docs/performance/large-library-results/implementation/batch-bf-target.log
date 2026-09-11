@@ -1,0 +1,62 @@
+✔ pages narrow labels from 10000 actors without catalog statistics or profile data (124.383291ms)
+✔ preserves owned-name search matching and includes all genders (8.838167ms)
+✔ sorts full names before shortening labels and bounds escaped JSON payloads (10.82875ms)
+✔ rejects invalid limits, offsets and overlong search before reading (4.877917ms)
+✔ bounds labels containing embedded NUL without losing the valid prefix (7.710417ms)
+✔ keeps a full page below512KiB even with worst-case JSON escaping (7.737ms)
+✔ reads current picker identity by ID without hydrating actor works or profile (10.110875ms)
+✔ pages female test choices by full name and retains owned alias search without wide data (63.689959ms)
+✔ resolves the complete current runtime identity rather than its shortened display label (6.639583ms)
+✔ validates manual tag candidate bounds and existing-tag identities (1.749416ms)
+✔ bounds selected tag label IPC requests before repository access (0.303042ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.163583ms)
+  ✔ forwards command arguments and returns the application result (0.130125ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.205208ms)
+  ✔ accepts link-resource updates without an import-only target (0.21975ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.0625ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.208833ms)
+  ✔ accepts only explicit plugin continuation kinds (0.078375ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.630166ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.072542ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.062ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.282417ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (0.522042ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.103833ms)
+  ✔ accepts only the structured model-management command vocabulary (0.439875ms)
+  ✔ serializes successful results and thrown errors (0.616209ms)
+  ✔ sends the contracted event payload unchanged (0.055416ms)
+✔ typed IPC adapter (4.104792ms)
+✔ bounds actress conflict summary pages and keeps detail identities exact (0.181083ms)
+✔ validates bounded actress picker requests (0.142667ms)
+✔ validates narrow actress identity IDs (0.079416ms)
+✔ validates merge candidate paging and keep identity (0.144917ms)
+✔ accepts only zero arguments for avatar crop count (0.021833ms)
+✔ accepts only zero arguments for avatar crop target enumeration (0.021834ms)
+✔ validates plugin actress test picker bounds and identities (0.152875ms)
+▶ actressQueryService.listActresses
+  ✔ returns a stable page and the full matching total from the real database (11.694792ms)
+  ✔ reuses one exact avatar-filter snapshot across subsequent pages (0.169458ms)
+  ✔ refreshes the avatar-filter snapshot whenever the first page reloads (0.093959ms)
+  ✔ inspects avatar health and fingerprints outside the database repository (13.848209ms)
+✔ actressQueryService.listActresses (26.208333ms)
+▶ actressQueryService.listFaceScanManifest
+  ✔ exposes the dedicated minimal manifest through the query seam (0.13575ms)
+✔ actressQueryService.listFaceScanManifest (0.187833ms)
+✔ delegates avatar count without reading the legacy list or inspecting images (0.0735ms)
+▶ pluginDevKindProfile
+  ✔ normalizes testTarget and testTargets (0.899833ms)
+  ✔ splits test targets only on commas or newlines and trims each group (0.114792ms)
+  ✔ uses typed explicit targets as a diagnostic subset (0.709041ms)
+  ✔ rejects URL/path targets and wrong-kind arguments (0.215583ms)
+  ✔ testTargetsFromDryRun extracts identity from dry-run result (0.368792ms)
+  ✔ profiles expose kind-specific labels and field helpers (0.148958ms)
+✔ pluginDevKindProfile (2.92875ms)
+ℹ tests 46
+ℹ suites 4
+ℹ pass 46
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 475.445583

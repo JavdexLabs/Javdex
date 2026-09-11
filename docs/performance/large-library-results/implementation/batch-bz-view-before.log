@@ -1,0 +1,21 @@
+▶ LibraryScanAuditPanel
+  ✔ defaults to the attention tab even when the latest scan has no issues (179.280292ms)
+  ✔ keeps cached unrecognized files visible with their root-scoped resolution controls (2.651667ms)
+  ✔ does not describe current scan failures as resolved (0.847625ms)
+  ✔ offers a processing jump for cached unrecognized rows in the all-files tab (2.157375ms)
+  ✔ shows an NFO identity conflict as a secondary scan disposition and opens the pending center (1.700625ms)
+  ✔ routes a current NFO candidate to its scrape pending item (1.03975ms)
+  ✔ shows historical NFO pending dispositions as resolved when their current rows are gone (0.871042ms)
+  ✔ keeps the attention badge equal to the visible list when only an NFO warning exists (0.801084ms)
+✔ LibraryScanAuditPanel (189.836667ms)
+✔ limits a large failed audit to100 visible rows and queries only their pending IDs (16.579834ms)
+✔ routes all three kinds from one mixed pending presence response (1.067125ms)
+✔ keeps a stable audit anchor when a historical group is no longer pending (0.727ms)
+ℹ tests 11
+ℹ suites 1
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 350.07

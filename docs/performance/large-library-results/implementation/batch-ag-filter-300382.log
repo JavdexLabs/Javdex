@@ -1,0 +1,79 @@
+BEGIN startup.current_schema
+{"name":"startup.current_schema","firstMs":249.5219589999997,"warmMedianMs":248.757791,"warmMaxMs":249.3891249999997,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":177389568}
+BEGIN legacy.first
+{"name":"legacy.first","firstMs":3.9147090000005846,"warmMedianMs":2.950249999999869,"warmMaxMs":2.9651249999997162,"samples":3,"sqlCalls":2,"sqlMsLast":2.885457999999744,"serializedBytes":41393,"rssBytesAfter":177586176}
+BEGIN legacy.deep
+{"name":"legacy.deep","firstMs":551.46,"warmMedianMs":564.002375,"warmMaxMs":586.8511659999995,"samples":3,"sqlCalls":2,"sqlMsLast":586.6292920000005,"serializedBytes":40895,"rssBytesAfter":177700864}
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":569.7527499999997,"warmMedianMs":574.3305830000008,"warmMaxMs":576.0822079999998,"samples":3,"sqlCalls":2,"sqlMsLast":575.8752499999991,"serializedBytes":41452,"rssBytesAfter":177799168}
+BEGIN legacy.search_code
+{"name":"legacy.search_code","firstMs":96.8752080000013,"warmMedianMs":96.17416699999922,"warmMaxMs":96.35174999999981,"samples":3,"sqlCalls":2,"sqlMsLast":94.5878759999996,"serializedBytes":708,"rssBytesAfter":177946624}
+BEGIN scoped.library
+{"name":"scoped.library","firstMs":66.52983400000085,"warmMedianMs":66.07558299999982,"warmMaxMs":66.28208300000006,"samples":3,"sqlCalls":2,"sqlMsLast":65.74975099999938,"serializedBytes":50573,"rssBytesAfter":178126848}
+BEGIN scoped.all_single_active
+{"name":"scoped.all_single_active","firstMs":66.1337910000002,"warmMedianMs":66.35124999999971,"warmMaxMs":66.54370799999924,"samples":3,"sqlCalls":3,"sqlMsLast":65.37579099999857,"serializedBytes":50573,"rssBytesAfter":178257920}
+BEGIN scoped.all_selected_one
+{"name":"scoped.all_selected_one","firstMs":66.23775000000023,"warmMedianMs":66.47808299999997,"warmMaxMs":66.62937500000044,"samples":3,"sqlCalls":3,"sqlMsLast":66.11745799999699,"serializedBytes":50573,"rssBytesAfter":178487296}
+BEGIN scoped.release
+{"name":"scoped.release","firstMs":81.22875000000022,"warmMedianMs":81.56012499999997,"warmMaxMs":82.38600000000042,"samples":3,"sqlCalls":2,"sqlMsLast":81.28741599999739,"serializedBytes":50632,"rssBytesAfter":178716672}
+BEGIN scoped.search_code
+{"name":"scoped.search_code","firstMs":371.96295800000007,"warmMedianMs":370.69095899999957,"warmMaxMs":371.05624999999964,"samples":3,"sqlCalls":3,"sqlMsLast":370.7273759999989,"serializedBytes":861,"rssBytesAfter":179240960}
+BEGIN tags.all
+{"name":"tags.all","firstMs":573.3873330000006,"warmMedianMs":573.0510000000013,"warmMaxMs":575.8691249999993,"samples":3,"sqlCalls":1,"sqlMsLast":572.9542920000004,"serializedBytes":46787,"rssBytesAfter":187957248}
+BEGIN tags.manual
+{"name":"tags.manual","firstMs":1400.577333000001,"warmMedianMs":1401.4604169999984,"warmMaxMs":1401.7653329999994,"samples":3,"sqlCalls":1,"sqlMsLast":1401.3495409999996,"serializedBytes":46787,"rssBytesAfter":188301312}
+BEGIN tags.selected_labels
+{"name":"tags.selected_labels","firstMs":0.1327499999970314,"warmMedianMs":0.019250000001193257,"warmMaxMs":0.019834000002447283,"samples":3,"sqlCalls":1,"sqlMsLast":0.006417000000510598,"serializedBytes":76,"rssBytesAfter":188301312}
+BEGIN tags.selected_labels_100
+{"name":"tags.selected_labels_100","firstMs":0.0663330000024871,"warmMedianMs":0.055416999999579275,"warmMaxMs":0.08308299999771407,"samples":3,"sqlCalls":1,"sqlMsLast":0.03800000000046566,"serializedBytes":2685,"rssBytesAfter":188432384}
+BEGIN tags.filter_options
+{"name":"tags.filter_options","firstMs":79.88254199999938,"warmMedianMs":77.98841600000014,"warmMaxMs":79.13683399999718,"samples":3,"sqlCalls":2,"sqlMsLast":77.64654099999825,"serializedBytes":4806,"rssBytesAfter":188678144}
+BEGIN tags.filter_options_search
+{"name":"tags.filter_options_search","firstMs":9.858791999999085,"warmMedianMs":8.601625000002969,"warmMaxMs":8.802750000002561,"samples":3,"sqlCalls":2,"sqlMsLast":8.534250000000611,"serializedBytes":553,"rssBytesAfter":188973056}
+BEGIN tags.filter_options_deep
+{"name":"tags.filter_options_deep","firstMs":77.40095900000233,"warmMedianMs":78.37054199999693,"warmMaxMs":80.17983299999833,"samples":3,"sqlCalls":2,"sqlMsLast":78.11658299999908,"serializedBytes":4809,"rssBytesAfter":189186048}
+BEGIN tags.manual_options
+{"name":"tags.manual_options","firstMs":0.28191700000024866,"warmMedianMs":0.05545899999924586,"warmMaxMs":0.06291600000258768,"samples":3,"sqlCalls":1,"sqlMsLast":0.042583999998896616,"serializedBytes":2906,"rssBytesAfter":189267968}
+BEGIN tags.manual_options_search
+{"name":"tags.manual_options_search","firstMs":0.15212500000052387,"warmMedianMs":0.14724999999816646,"warmMaxMs":0.18008299999928568,"samples":3,"sqlCalls":1,"sqlMsLast":0.13533300000199233,"serializedBytes":344,"rssBytesAfter":189546496}
+BEGIN tags.manual_options_deep
+{"name":"tags.manual_options_deep","firstMs":0.9632500000006985,"warmMedianMs":0.2599579999987327,"warmMaxMs":0.30520899999828544,"samples":3,"sqlCalls":1,"sqlMsLast":0.2463339999994787,"serializedBytes":2909,"rssBytesAfter":189612032}
+BEGIN actors.first
+{"name":"actors.first","firstMs":431.3207500000026,"warmMedianMs":431.9447919999984,"warmMaxMs":433.20300000000134,"samples":3,"sqlCalls":3,"sqlMsLast":430.1477080000004,"serializedBytes":104927,"rssBytesAfter":196018176}
+BEGIN overview
+{"name":"overview","firstMs":7.054374999999709,"warmMedianMs":6.775916999999026,"warmMaxMs":6.812459000000672,"samples":3,"sqlCalls":6,"sqlMsLast":6.730916000000434,"serializedBytes":268,"rssBytesAfter":196182016}
+BEGIN home.single
+{"name":"home.single","firstMs":77.125,"warmMedianMs":77.45441699999719,"warmMaxMs":77.67833299999984,"samples":3,"sqlCalls":7,"sqlMsLast":76.89120900000125,"serializedBytes":21173,"rssBytesAfter":197574656}
+BEGIN web.first
+{"name":"web.first","firstMs":84.48649999999907,"warmMedianMs":84.04112499999974,"warmMaxMs":84.10745799999859,"samples":3,"sqlCalls":2,"sqlMsLast":83.92316699999719,"serializedBytes":4919,"rssBytesAfter":197787648}
+BEGIN web.search
+{"name":"web.search","firstMs":440.2070840000015,"warmMedianMs":437.9752920000028,"warmMaxMs":438.23129199999676,"samples":3,"sqlCalls":2,"sqlMsLast":436.08945899999526,"serializedBytes":177,"rssBytesAfter":197885952}
+BEGIN web.collections
+{"name":"web.collections","firstMs":38.87429200000042,"warmMedianMs":37.35633299999972,"warmMaxMs":37.38429199999882,"samples":3,"sqlCalls":2,"sqlMsLast":37.242458000000624,"serializedBytes":135,"rssBytesAfter":197984256}
+BEGIN playlist.full
+{"name":"playlist.full","firstMs":95.51425000000017,"warmMedianMs":96.02645800000028,"warmMaxMs":107.03349999999773,"samples":3,"sqlCalls":3,"sqlMsLast":80.17954300000201,"serializedBytes":20601442,"rssBytesAfter":371425280}
+BEGIN playlist.page
+{"name":"playlist.page","firstMs":10.03429199999664,"warmMedianMs":7.770958000000974,"warmMaxMs":7.819958000000042,"samples":3,"sqlCalls":6,"sqlMsLast":7.48512600000322,"serializedBytes":9718,"rssBytesAfter":371539968}
+BEGIN playlist.metadata
+{"name":"playlist.metadata","firstMs":1.191791999997804,"warmMedianMs":1.1642500000016298,"warmMaxMs":1.1717500000013388,"samples":3,"sqlCalls":3,"sqlMsLast":1.1379159999960393,"serializedBytes":169,"rssBytesAfter":371556352}
+BEGIN playlist.video_page
+{"name":"playlist.video_page","firstMs":6.776708000001236,"warmMedianMs":6.268707999999606,"warmMaxMs":6.401417000000947,"samples":3,"sqlCalls":3,"sqlMsLast":6.143541999997979,"serializedBytes":9550,"rssBytesAfter":371671040}
+BEGIN playlist.deep_page
+{"name":"playlist.deep_page","firstMs":14.136458999997558,"warmMedianMs":13.450124999999389,"warmMaxMs":13.981374999999389,"samples":3,"sqlCalls":6,"sqlMsLast":13.302833999998256,"serializedBytes":9344,"rssBytesAfter":371834880}
+BEGIN experiment.no_distinct.0
+{"name":"experiment.no_distinct.0","firstMs":0.03862499999740976,"warmMedianMs":0.024582999998528976,"warmMaxMs":0.025916999999026302,"samples":3,"sqlCalls":1,"sqlMsLast":0.01900000000023283,"serializedBytes":12,"rssBytesAfter":371867648}
+BEGIN experiment.no_distinct.1
+{"name":"experiment.no_distinct.1","firstMs":0.2532089999986056,"warmMedianMs":0.20599999999831198,"warmMaxMs":0.2162079999980051,"samples":3,"sqlCalls":1,"sqlMsLast":0.1766250000000582,"serializedBytes":41248,"rssBytesAfter":371982336}
+BEGIN scoped.all_overlap
+{"name":"scoped.all_overlap","firstMs":499.69974999999977,"warmMedianMs":500.3867909999972,"warmMaxMs":501.5617910000001,"samples":3,"sqlCalls":3,"sqlMsLast":499.9611670000013,"serializedBytes":51893,"rssBytesAfter":372342784}
+BEGIN home.overlap
+{"name":"home.overlap","firstMs":708.9324579999993,"warmMedianMs":709.7738750000026,"warmMaxMs":753.0123749999984,"samples":3,"sqlCalls":7,"sqlMsLast":752.0323739999949,"serializedBytes":22552,"rssBytesAfter":374063104}
+✔ scripts/performance/large-library-benchmark.ts (33046.177833ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33049.54775

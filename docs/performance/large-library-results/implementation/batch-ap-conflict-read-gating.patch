@@ -1,0 +1,652 @@
+diff --git a/src/main/services/actressIdentityConflictWorkflow.ts b/src/main/services/actressIdentityConflictWorkflow.ts
+index df7b3a9..f1bbec5 100644
+--- a/src/main/services/actressIdentityConflictWorkflow.ts
++++ b/src/main/services/actressIdentityConflictWorkflow.ts
+@@ -1500,8 +1500,8 @@ export class ActressIdentityConflictWorkflow {
+   }
+ 
+   getConflictReviewSummary(): ActressConflictReviewSummary {
+-    // The global badge polls frequently: aggregate only group keys/statuses here. The full
+-    // workbench query still owns candidate JSON, resources, claimants and field planning.
++    // The global badge omits candidate/resource DTOs and field planning. Conflict repair
++    // below still reads candidate JSON; this is not a constant-work or JSON-free count.
+     ensureCurrentPendingConflicts()
+     const db = getDb()
+     const pendingNameGroups = db
+diff --git a/src/renderer/src/pages/PendingCenterPage.tsx b/src/renderer/src/pages/PendingCenterPage.tsx
+index c6959df..fd389b4 100644
+--- a/src/renderer/src/pages/PendingCenterPage.tsx
++++ b/src/renderer/src/pages/PendingCenterPage.tsx
+@@ -1,3 +1,4 @@
++import type { PendingScanQueueItem, PendingScanQueueQuery } from '@shared/libraryTypes'
+ import { useCallback, useEffect, useRef } from 'react'
+ import { useQuery, useQueryClient } from '@tanstack/react-query'
+ import { CircleAlert, ListChecks, ScanSearch, UsersRound } from 'lucide-react'
+@@ -35,7 +36,6 @@ import styles from './PendingCenterPage.module.css'
+ import {
+   PENDING_DOMAIN_LABEL,
+   buildPendingQueueSections,
+-  pendingQueueTotal,
+   resolvePendingSelection
+ } from './pendingCenterState'
+ import { useConflictReviewController } from './useConflictReviewController'
+@@ -59,6 +59,8 @@ export default function PendingCenterPage(): JSX.Element {
+     type,
+     item: urlItem,
+     videoId: videoFromUrl,
++    scrapeOffset,
++    scanOffset,
+     libraryId: requestedLibraryId
+   } = parsePendingCenterSearch(params)
+ 
+@@ -75,43 +77,54 @@ export default function PendingCenterPage(): JSX.Element {
+     (librariesQuery.data ?? []).map((library) => [library.id, library.name])
+   )
+ 
++  const scanEnabled = (type === 'all' || type === 'scan') && !detailOpen
++  const scanAnchorId = urlItem?.domain === 'scan'
++    ? Number(urlItem.id.replace(/^identity-/, '')) : NaN
++  const scanPageQuery: PendingScanQueueQuery = {
++    limit: 50, offset: scanOffset, libraryId: selectedLibraryId ?? undefined,
++    anchor: Number.isSafeInteger(scanAnchorId) && scanAnchorId > 0
++      ? { kind: urlItem!.id.startsWith('identity-') ? 'identity' : 'group', id: scanAnchorId }
++      : undefined
++  }
+   const scanQuery = useQuery({
+-    queryKey: ['pending-scan-groups', libraryIds.join(',')],
+-    queryFn: async () =>
+-      (await Promise.all(libraryIds.map((libraryId) => api.scan.listPending(libraryId)))).flat(),
+-    enabled: librariesQuery.isSuccess
++    queryKey: ['pending-scan-groups', 'page', scanPageQuery],
++    queryFn: () => api.scan.pagePendingQueue(scanPageQuery),
++    enabled: librariesQuery.isSuccess && scanEnabled, gcTime: 0
+   })
+-  const identityQuery = useQuery({
+-    queryKey: ['pending-resource-identities', libraryIds.join(',')],
+-    queryFn: async () =>
+-      (
+-        await Promise.all(
+-          libraryIds.map((libraryId) => api.scan.listPendingResourceIdentities(libraryId))
+-        )
+-      ).flat(),
+-    enabled: librariesQuery.isSuccess
++  const scanCountQuery = useQuery({
++    queryKey: ['pending-scan-groups', 'count'],
++    queryFn: () => api.scan.countPendingQueue(),
++    enabled: !scanEnabled && !detailOpen
+   })
++  const scrapeEnabled = (type === 'all' || type === 'scrape') && !detailOpen
++  const scrapeAnchor = urlItem?.domain === 'scrape' && Number.isSafeInteger(Number(urlItem.id)) && Number(urlItem.id) > 0
++    ? Number(urlItem.id) : undefined
++  const scrapePageQuery = {
++    limit: 50, offset: scrapeOffset,
++    ...(videoFromUrl != null ? { videoId: videoFromUrl } : { anchorId: scrapeAnchor })
++  }
+   const scrapeQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending()
++    queryKey: ['pending-video-scrapes', 'page', scrapePageQuery],
++    queryFn: () => api.scrape.pagePending(scrapePageQuery),
++    enabled: scrapeEnabled,
++    gcTime: 0
++  })
++  const scrapeCountQuery = useQuery({
++    queryKey: ['pending-video-scrape-count'],
++    queryFn: () => api.scrape.countPending(),
++    enabled: !scrapeEnabled && !detailOpen
+   })
+-  const conflict = useConflictReviewController()
++  const actressEnabled = (type === 'all' || type === 'actress') && !detailOpen
++  const conflict = useConflictReviewController({ enabled: actressEnabled, summaryEnabled: !detailOpen })
+ 
+-  const allScanGroups = scanQuery.data ?? []
+-  const scanGroups =
+-    selectedLibraryId == null
+-      ? allScanGroups
+-      : allScanGroups.filter((group) => group.libraryId === selectedLibraryId)
+-  const allResourceIdentities = identityQuery.data ?? []
+-  const resourceIdentities =
+-    selectedLibraryId == null
+-      ? allResourceIdentities
+-      : allResourceIdentities.filter((identity) => identity.libraryId === selectedLibraryId)
+-  const scrapeItems = scrapeQuery.data ?? []
++  const scanItems = scanQuery.data?.items ?? []
++  const scanTotal = scanEnabled ? scanQuery.data?.total ?? 0 : scanCountQuery.data ?? 0
++  const scrapeItems = scrapeQuery.data?.items ?? []
++  const scrapeTotal = scrapeEnabled ? scrapeQuery.data?.total ?? 0 : scrapeCountQuery.data ?? 0
+   const conflictGroups = conflict.queue.groups
++  const actressTotal = actressEnabled ? conflictGroups.length : conflict.queue.summary?.groupCount ?? 0
+   const queueInput = {
+-    scanGroups,
+-    resourceIdentities,
++    scanItems,
+     scrapeItems,
+     conflictGroups,
+     libraryNames
+@@ -119,10 +132,10 @@ export default function PendingCenterPage(): JSX.Element {
+   const sections = buildPendingQueueSections(queueInput, type)
+   const counts: Record<PendingTypeFilter, number> = {
+     all:
+-      scanGroups.length + resourceIdentities.length + scrapeItems.length + conflictGroups.length,
+-    scan: scanGroups.length + resourceIdentities.length,
+-    scrape: scrapeItems.length,
+-    actress: conflictGroups.length
++      scanTotal + scrapeTotal + actressTotal,
++    scan: scanTotal,
++    scrape: scrapeTotal,
++    actress: actressTotal
+   }
+ 
+   // A video deep link wins over the stored item so "查看待确认候选" always lands right.
+@@ -133,12 +146,13 @@ export default function PendingCenterPage(): JSX.Element {
+   const selected = resolvePendingSelection(sections, requested)
+ 
+   const loading =
+-    librariesQuery.isLoading ||
+-    scanQuery.isLoading ||
+-    identityQuery.isLoading ||
+-    scrapeQuery.isLoading ||
++    (scanEnabled && librariesQuery.isLoading) ||
++    (scanEnabled && scanQuery.isLoading) ||
++    (scrapeEnabled && scrapeQuery.isLoading) ||
+     conflict.queue.loading
+-  const total = pendingQueueTotal(sections)
++  const total = counts[type]
++  const scanError = scanEnabled && (librariesQuery.isError || scanQuery.isError)
++  const scrapeError = scrapeEnabled && scrapeQuery.isError
+ 
+   const selectItem = useCallback(
+     (key: PendingItemKey, replace = false) => {
+@@ -146,20 +160,22 @@ export default function PendingCenterPage(): JSX.Element {
+         pendingCenterPath({
+           type,
+           item: key,
+-          libraryId: selectedLibraryId ?? undefined
++          libraryId: selectedLibraryId ?? undefined,
++          scanOffset: scanQuery.data?.offset ?? scanOffset,
++          scrapeOffset: scrapeQuery.data?.offset ?? scrapeOffset
+         }),
+         { replace }
+       )
+     },
+-    [navigate, selectedLibraryId, type]
++    [navigate, selectedLibraryId, type, scanQuery.data?.offset, scanOffset, scrapeQuery.data?.offset, scrapeOffset]
+   )
+ 
+   // Canonicalize the URL: resolve deep links and drop selections that no longer exist.
+   useEffect(() => {
+-    if (loading || !selected) return
++    if (loading || scanError || scrapeError || detailOpen || !selected) return
+     if (videoFromUrl == null && samePendingItemKey(selected, urlItem)) return
+     selectItem(selected, true)
+-  }, [loading, selected, urlItem, videoFromUrl, selectItem])
++  }, [loading, scanError, scrapeError, detailOpen, selected, urlItem, videoFromUrl, selectItem])
+ 
+   // Actress conflicts keep their own session state; feed it the queue selection.
+   const chooseConflictGroupRef = useRef(conflict.queue.chooseGroup)
+@@ -187,9 +203,9 @@ export default function PendingCenterPage(): JSX.Element {
+ 
+   const refetchPendingSurface = useCallback((): void => {
+     void Promise.all([
+-      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: false }),
+-      queryClient.refetchQueries({ queryKey: ['pending-resource-identities'], exact: false }),
+-      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true }),
++      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], type: 'active', exact: false }),
++      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], type: 'active', exact: false }),
++      queryClient.refetchQueries({ queryKey: ['pending-video-scrape-count'], exact: true }),
+       queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), exact: true }),
+       queryClient.refetchQueries({ queryKey: actressKeys.conflictSummary(), exact: true })
+     ])
+@@ -202,20 +218,13 @@ export default function PendingCenterPage(): JSX.Element {
+     refetchPendingSurface()
+   }
+ 
+-  const selectedScan =
+-    selected?.domain === 'scan'
+-      ? scanGroups.find((entry) => String(entry.id) === selected.id) ?? null
+-      : null
++  const selectedScan = selected?.domain === 'scan'
++    ? scanItems.find((entry) => (entry.kind === 'group' ? String(entry.id) : `identity-${entry.id}`) === selected.id) ?? null
++    : null
+   const selectedScrape =
+     selected?.domain === 'scrape'
+       ? scrapeItems.find((entry) => String(entry.id) === selected.id) ?? null
+       : null
+-  const selectedIdentity =
+-    selected?.domain === 'scan' && selected.id.startsWith('identity-')
+-      ? resourceIdentities.find(
+-          (identity) => `identity-${identity.id}` === selected.id
+-        ) ?? null
+-      : null
+ 
+   return (
+     <div className={`list-page ${styles.page}`}>
+@@ -237,7 +246,13 @@ export default function PendingCenterPage(): JSX.Element {
+                 <span className={styles.tabLabel}>
+                   {option === 'all' ? <ListChecks {...UI_ICON_SM} aria-hidden /> : DOMAIN_ICON[option]}
+                   {option === 'all' ? '全部' : PENDING_DOMAIN_LABEL[option]}
+-                  {!loading && counts[option] > 0 ? <em className={styles.tabCount}>{counts[option]}</em> : null}
++                  {option === 'scan' && !scanEnabled && (scanCountQuery.isError || scanCountQuery.data === undefined) ? (
++                    <em className={styles.tabCount} title={scanCountQuery.isError ? '扫描数量读取失败' : '正在读取扫描数量'}>{scanCountQuery.isError ? '?' : '…'}</em>
++                  ) : option === 'scrape' && !scrapeEnabled && (scrapeCountQuery.isError || scrapeCountQuery.data === undefined) ? (
++                    <em className={styles.tabCount} title={scrapeCountQuery.isError ? '刮削数量读取失败' : '正在读取刮削数量'}>{scrapeCountQuery.isError ? '?' : '…'}</em>
++                  ) : option === 'actress' && !actressEnabled && (conflict.queue.summaryError || conflict.queue.summary === undefined) ? (
++                    <em className={styles.tabCount} title={conflict.queue.summaryError ? '演员冲突数量读取失败' : '正在读取演员冲突数量'}>{conflict.queue.summaryError ? '?' : '…'}</em>
++                  ) : !loading && counts[option] > 0 ? <em className={styles.tabCount}>{counts[option]}</em> : null}
+                 </span>
+               )
+             }))}
+@@ -275,6 +290,14 @@ export default function PendingCenterPage(): JSX.Element {
+         <WorkbenchShell className={styles.shell}>
+           {loading ? (
+             <EmptyState variant="fill" loading title="正在读取待确认项…" />
++          ) : scanError ? (
++            <EmptyState variant="fill" title="待确认扫描读取失败">
++              <Button onClick={() => { void (librariesQuery.isError ? librariesQuery.refetch() : scanQuery.refetch()) }}>重试</Button>
++            </EmptyState>
++          ) : scrapeError ? (
++            <EmptyState variant="fill" title="待确认刮削读取失败">
++              <Button onClick={() => { void scrapeQuery.refetch() }}>重试</Button>
++            </EmptyState>
+           ) : total === 0 ? (
+             <div className={styles.complete}>
+               <EmptyState
+@@ -305,7 +328,7 @@ export default function PendingCenterPage(): JSX.Element {
+                     <section className={styles.railSection} key={section.domain}>
+                       <h2>
+                         {section.label}
+-                        <span className={styles.railCount}>{section.items.length}</span>
++                        <span className={styles.railCount}>{section.domain === 'scrape' ? scrapeTotal : section.domain === 'scan' ? scanTotal : section.items.length}</span>
+                       </h2>
+                       {section.items.map((queueItem) => {
+                         const keyText = formatPendingItemKey(queueItem.key)
+@@ -342,25 +365,39 @@ export default function PendingCenterPage(): JSX.Element {
+                           </button>
+                         )
+                       })}
++                      {section.domain === 'scan' && scanTotal > 50 ? (
++                        <div className={styles.queuePager} aria-label="扫描队列分页">
++                          <Button size="sm" disabled={!scanQuery.data?.offset} onClick={() => navigate(pendingCenterPath({
++                            type, libraryId: selectedLibraryId ?? undefined, scrapeOffset,
++                            scanOffset: Math.max(0, (scanQuery.data?.offset ?? 0) - 50)
++                          }))}>上一页</Button>
++                          <span>{Math.floor((scanQuery.data?.offset ?? 0) / 50) + 1} / {Math.ceil(scanTotal / 50)}</span>
++                          <Button size="sm" disabled={(scanQuery.data?.offset ?? 0) + 50 >= scanTotal} onClick={() => navigate(pendingCenterPath({
++                            type, libraryId: selectedLibraryId ?? undefined, scrapeOffset,
++                            scanOffset: (scanQuery.data?.offset ?? 0) + 50
++                          }))}>下一页</Button>
++                        </div>
++                      ) : null}
++                      {section.domain === 'scrape' && scrapeTotal > 50 ? (
++                        <div className={styles.queuePager} aria-label="刮削队列分页">
++                          <Button size="sm" disabled={!scrapeQuery.data?.offset} onClick={() => navigate(pendingCenterPath({
++                            type, scanOffset, scrapeOffset: Math.max(0, (scrapeQuery.data?.offset ?? 0) - 50)
++                          }))}>上一页</Button>
++                          <span>{Math.floor((scrapeQuery.data?.offset ?? 0) / 50) + 1} / {Math.ceil(scrapeTotal / 50)}</span>
++                          <Button size="sm" disabled={(scrapeQuery.data?.offset ?? 0) + 50 >= scrapeTotal} onClick={() => navigate(pendingCenterPath({
++                            type, scanOffset, scrapeOffset: (scrapeQuery.data?.offset ?? 0) + 50
++                          }))}>下一页</Button>
++                        </div>
++                      ) : null}
+                     </section>
+                   ))}
+                 </div>
+               </WorkbenchRail>
+-              {selectedIdentity ? (
+-                <PendingResourceIdentityPane
+-                  key={`${selectedIdentity.id}:${selectedIdentity.revision}`}
+-                  identity={selectedIdentity}
+-                  libraryName={libraryNames.get(selectedIdentity.libraryId)}
+-                  onResolved={refresh}
+-                />
+-              ) : selectedScan ? (
+-                <PendingScanPane
+-                  group={selectedScan}
+-                  libraryName={libraryNames.get(selectedScan.libraryId)}
+-                  onResolved={refresh}
+-                />
+-              ) : selectedScrape ? (
+-                <PendingScrapePane pending={selectedScrape} onResolved={refresh} />
++              {selectedScan && samePendingItemKey(selected, urlItem) ? (
++                <PendingScanDetail key={`${selectedScan.kind}:${selectedScan.libraryId}:${selectedScan.id}:${selectedScan.revision}`}
++                  item={selectedScan} libraryName={libraryNames.get(selectedScan.libraryId)} enabled={!detailOpen} onResolved={refresh} />
++              ) : selectedScrape && videoFromUrl == null && samePendingItemKey(selected, urlItem) ? (
++                <PendingScrapeDetail key={`${selectedScrape.id}:${selectedScrape.revision}`} id={selectedScrape.id} revision={selectedScrape.revision} enabled={!detailOpen} onResolved={refresh} />
+               ) : selected?.domain === 'actress' ? (
+                 <PendingActressConflictPane vm={conflict} />
+               ) : (
+@@ -373,3 +410,37 @@ export default function PendingCenterPage(): JSX.Element {
+     </div>
+   )
+ }
++
++
++function PendingScrapeDetail({ id, revision, enabled, onResolved }: {
++  id: number; revision: number; enabled: boolean; onResolved: () => void
++}): JSX.Element {
++  const query = useQuery({
++    queryKey: ['pending-video-scrapes', 'detail', id, revision],
++    queryFn: () => api.scrape.getPending(id), enabled, gcTime: 0
++  })
++  if (query.isError) return <EmptyState variant="fill" title="候选读取失败"><Button onClick={() => { void query.refetch() }}>重试</Button></EmptyState>
++  if (!query.data) return <EmptyState variant="fill" loading={query.isLoading} title={query.isLoading ? '正在读取候选…' : '此待确认项已不存在'}>
++    {!query.isLoading ? <Button onClick={onResolved}>刷新队列</Button> : null}
++  </EmptyState>
++  return <PendingScrapePane pending={query.data} onResolved={onResolved} />
++}
++
++function PendingScanDetail({ item, libraryName, enabled, onResolved }: {
++  item: PendingScanQueueItem; libraryName?: string; enabled: boolean; onResolved: () => void
++}): JSX.Element {
++  const query = useQuery({
++    queryKey: ['pending-scan-groups', 'detail', item.kind, item.libraryId, item.id, item.revision],
++    queryFn: async () => item.kind === 'group'
++      ? { kind: 'group' as const, value: await api.scan.getPendingGroup(item.libraryId, item.id) }
++      : { kind: 'identity' as const, value: await api.scan.getPendingIdentity(item.libraryId, item.id) },
++    enabled, gcTime: 0
++  })
++  if (query.isError) return <EmptyState variant="fill" title="扫描详情读取失败"><Button onClick={() => { void query.refetch() }}>重试</Button></EmptyState>
++  if (!query.data?.value) return <EmptyState variant="fill" loading={query.isLoading} title={query.isLoading ? '正在读取扫描详情…' : '此待确认项已不存在'}>
++    {!query.isLoading ? <Button onClick={onResolved}>刷新队列</Button> : null}
++  </EmptyState>
++  return query.data.kind === 'group'
++    ? <PendingScanPane group={query.data.value} libraryName={libraryName} onResolved={onResolved} />
++    : <PendingResourceIdentityPane identity={query.data.value} libraryName={libraryName} onResolved={onResolved} />
++}
+diff --git a/src/renderer/src/pages/useConflictReviewController.ts b/src/renderer/src/pages/useConflictReviewController.ts
+index dde0ef2..ff21d04 100644
+--- a/src/renderer/src/pages/useConflictReviewController.ts
++++ b/src/renderer/src/pages/useConflictReviewController.ts
+@@ -49,6 +49,7 @@ export interface ConflictReviewViewModel {
+     loading: boolean
+     error: string | null
+     summary: ActressConflictReviewSummary | undefined
++    summaryError: boolean
+     groups: ActressNameConflictGroup[]
+     sections: { pending: ActressNameConflictGroup[]; applicable: ActressNameConflictGroup[] }
+     selectedGroup: ActressNameConflictGroup | null
+@@ -152,7 +153,9 @@ function createRemoteDeps(
+   }
+ }
+ 
+-export function useConflictReviewController(): ConflictReviewViewModel {
++export function useConflictReviewController({ enabled = true, summaryEnabled = true }: {
++  enabled?: boolean; summaryEnabled?: boolean
++} = {}): ConflictReviewViewModel {
+   const queryClient = useQueryClient()
+   const toast = useToast()
+   const [state, dispatch] = useReducer(reduceConflictReviewSession, initialConflictReviewSessionState)
+@@ -174,12 +177,16 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+ 
+   const groupsQuery = useQuery({
+     queryKey: actressKeys.conflicts(),
+-    queryFn: () => api.actressScrape.listConflicts()
++    queryFn: () => api.actressScrape.listConflicts(),
++    enabled
+   })
+   const summaryQuery = useQuery({
+     queryKey: actressKeys.conflictSummary(),
+-    queryFn: () => api.actressScrape.conflictSummary()
++    queryFn: () => api.actressScrape.conflictSummary(),
++    enabled: summaryEnabled
+   })
++  // Keep an already-open review session across detail overlays/category switches.
++  // Disabling reads does not evict its cached snapshot or reset the user decision.
+   const groups = groupsQuery.data ?? EMPTY_GROUPS
+   const derived = useMemo(
+     () => deriveConflictReviewDetail(state, groups, debouncedEditedName),
+@@ -372,9 +379,10 @@ export function useConflictReviewController(): ConflictReviewViewModel {
+ 
+   return {
+     queue: {
+-      loading: groupsQuery.isLoading,
++      loading: enabled && groupsQuery.isLoading,
+       error: groupsQuery.error ? String((groupsQuery.error as Error).message) : null,
+       summary: summaryQuery.data,
++      summaryError: summaryQuery.isError,
+       groups,
+       sections: derived.sections,
+       selectedGroup: derived.selectedGroup,
+diff --git a/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx b/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx
+new file mode 100644
+index 0000000..6cbf6cf
+--- /dev/null
++++ b/src/renderer/src/pages/PendingCenterScan.interaction.test.tsx
+@@ -0,0 +1,141 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import { actressKeys } from '../query/queryKeys'
++import { pendingCenterPath, pendingItemKey, parsePendingCenterSearch } from '../listView/pendingRoutes'
++import type { ElectronApi } from '../../../preload/index'
++import type { PendingScanQueuePage, PendingScanQueueQuery, PendingScanGroup } from '@shared/libraryTypes'
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++const pages: PendingScanQueueQuery[] = []
++const details: Array<{id:number;libraryId:number} & ReturnType<typeof deferred<PendingScanGroup | null>>> = []
++let total = 120, failPage = false, failCount = false, failLibraries = false, identityMode = false
++const identityCalls: number[] = []
++let conflictReads = 0, conflictCount = 17, failConflictCount = false
++let holdOffset: number | undefined
++const heldPages: Array<{value:PendingScanQueuePage} & ReturnType<typeof deferred<PendingScanQueuePage>>> = []
++let location = ''
++let navigate: NavigateFunction
++const fakeApi = {
++  mediaLibraries: { list: async () => { if(failLibraries)throw new Error('libraries failure');return [{id:1,name:'First'},{id:2,name:'Second'}] } },
++  actressScrape: { listConflicts: async () => { conflictReads++;return [] }, conflictSummary: async () => { if(failConflictCount)throw new Error('summary failure');return {groupCount:conflictCount} } },
++  scrape: { countPending: async () => 0, pagePending: async () => ({items:[],total:0,offset:0}) },
++  scan: {
++    listPending: () => { throw new Error('Unbounded scan inbox') },
++    listPendingResourceIdentities: () => { throw new Error('Unbounded identities') },
++    countPendingQueue: async () => { if(failCount)throw new Error('count failure');return total },
++    pagePendingQueue: async (query:PendingScanQueueQuery) => {
++      pages.push(query)
++      if(failPage){failPage=false;throw new Error('page failure')}
++      const anchor=query.anchor?.id
++      const offset=anchor && anchor<=total ? Math.floor((anchor-1)/50)*50 : Math.min(query.offset??0,Math.max(0,Math.floor((total-1)/50)*50))
++      if(identityMode)return {total:1,offset:0,items:[{kind:'identity',id:4,libraryId:2,revision:3,label:'FILE ↔ NFO',displayName:'file.mp4'}]}
++      const value:PendingScanQueuePage={total,offset,items:Array.from({length:Math.min(50,total-offset)},(_,i)=>({kind:'group',id:offset+i+1,libraryId:query.libraryId??1,revision:1,label:`GROUP-${offset+i+1}`,resourceCount:2}))}
++      if(holdOffset===offset){holdOffset=undefined;const held={value,...deferred<PendingScanQueuePage>()};heldPages.push(held);return held.promise}
++      return value
++    },
++    getPendingIdentity: async (libraryId:number,id:number) => { identityCalls.push(libraryId,id); return {id,libraryId,rootId:1,sourceKind:'local',targetKind:null,targetDisplay:null,displayName:'file.mp4',filenameCode:'FILE',nfoCode:'NFO',revision:3,createdAt:'2026',updatedAt:'2026'} },
++    getPendingGroup: (libraryId:number,id:number) => { const request={id,libraryId,...deferred<PendingScanGroup|null>()};details.push(request);return request.promise }
++  }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fakeApi})})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let client:QueryClient|undefined
++function Probe():null {navigate=useNavigate();location=useLocation().search;return null}
++async function settle():Promise<void>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++async function mount(url='/pending?type=scan'):Promise<void>{
++  const Page=(await import('./PendingCenterPage')).default
++  client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++  await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client!}><MemoryRouter initialEntries={[url]}><Probe/><Page/></MemoryRouter></QueryClientProvider>)})
++  await settle();await settle()
++}
++function content(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:content(child)).join('')}
++async function click(label:string):Promise<void>{const button=renderer!.root.findAllByType('button').find(node=>content(node)===label);assert.ok(button,label);assert.ok(!button.props.disabled);await act(async()=>button.props.onClick());await settle();await settle()}
++afterEach(async()=>{await act(async()=>renderer?.unmount());client?.clear();renderer=undefined;client=undefined;pages.length=0;details.length=0;total=120;failPage=false;failCount=false;failLibraries=false;identityMode=false;identityCalls.length=0;conflictReads=0;conflictCount=17;failConflictCount=false;holdOffset=undefined;heldPages.length=0})
++it('locates scan anchors, reads only selected details and ignores late details after paging',async()=>{
++  await mount(pendingCenterPath({type:'scan',item:pendingItemKey('scan',110),libraryId:2}))
++  assert.deepEqual(pages[0].anchor,{kind:'group',id:110})
++  assert.equal(pages[0].libraryId,2)
++  assert.deepEqual(details.map(({id,libraryId})=>({id,libraryId})),[{id:110,libraryId:2}])
++  await click('上一页')
++  assert.ok(location.includes('scanOffset=50'));assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).libraryId,2)
++  assert.equal(details.at(-1)!.id,51)
++  await act(async()=>details[0].resolve({id:110,libraryId:2,revision:1,normalizedCode:'LATE',resources:[],createdAt:'2026',updatedAt:'2026'}));await settle()
++  assert.ok(!content(renderer!.root).includes('LATE'))
++  assert.ok(client!.getQueryCache().findAll({queryKey:['pending-scan-groups']}).filter(query=>query.state.data!==undefined).length<=2)
++})
++it('reports page errors and missing selected records without treating them as an empty queue',async()=>{
++  failPage=true;await mount();assert.ok(content(renderer!.root).includes('待确认扫描读取失败'));assert.equal(details.length,0)
++  await click('重试');assert.equal(details[0].id,1)
++  await act(async()=>details[0].resolve(null));await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'));assert.ok(content(renderer!.root).includes('120 项待处理'))
++})
++it('clamps the deleted last page and does not show an old library page',async()=>{
++  total=101;await mount(pendingCenterPath({type:'scan',scanOffset:100}))
++  assert.equal(details.at(-1)!.id,101)
++  total=100;await act(async()=>{await client!.refetchQueries({queryKey:['pending-scan-groups','page'],type:'active'})});await settle();await settle()
++  assert.equal(details.at(-1)!.id,51)
++  holdOffset=0
++  await act(async()=>navigate(pendingCenterPath({type:'scan',libraryId:1})));await settle()
++  await act(async()=>navigate(pendingCenterPath({type:'scan',libraryId:2})));await settle();await settle()
++  await act(async()=>heldPages[0].resolve(heldPages[0].value));await settle()
++  assert.equal(details.at(-1)!.libraryId,2)
++  assert.equal(parsePendingCenterSearch(new URLSearchParams(location)).libraryId,2)
++})
++it('uses only count on another category and count failure does not block that category',async()=>{
++  failCount=true;await mount('/pending?type=scrape')
++  assert.equal(pages.length,0);assert.equal(details.length,0)
++  assert.ok(content(renderer!.root).includes('没有影片刮削待确认项'))
++  assert.ok(content(renderer!.root).includes('扫描资源?'))
++})
++
++it('does not block scrape on a library listing failure',async()=>{
++  failLibraries=true;await mount('/pending?type=scrape')
++  assert.ok(content(renderer!.root).includes('没有影片刮削待确认项'))
++  assert.ok(!content(renderer!.root).includes('待确认扫描读取失败'))
++})
++it('resolves identity deep links to the scoped identity pane without group detail reads',async()=>{
++  identityMode=true
++  await mount(pendingCenterPath({type:'scan',libraryId:2,item:pendingItemKey('scan','identity-4')}))
++  assert.deepEqual(pages[0].anchor,{kind:'identity',id:4})
++  assert.deepEqual(identityCalls,[2,4]);assert.equal(details.length,0)
++  const Pane=(await import('./PendingResourceIdentityPane')).default
++  assert.equal(renderer!.root.findAllByType(Pane).length,1)
++  assert.equal(renderer!.root.findByType(Pane).props.identity.revision,3)
++})
++it('retries rejected selected detail without reloading full queues',async()=>{
++  await mount()
++  await act(async()=>details[0].reject(new Error('detail failure')));await settle()
++  assert.ok(content(renderer!.root).includes('扫描详情读取失败'))
++  await click('重试');assert.equal(details.length,2);assert.equal(details[1].id,1)
++  await act(async()=>details[1].resolve(null));await settle()
++  assert.ok(content(renderer!.root).includes('此待确认项已不存在'))
++})
++
++it('loads actor details only in its category and keeps inactive summary counts current',async()=>{
++  await mount('/pending?type=scan')
++  assert.equal(conflictReads,0)
++  assert.ok(content(renderer!.root).includes('演员名称冲突17'))
++  conflictCount=3
++  await act(async()=>{await client!.refetchQueries({queryKey:actressKeys.conflictSummary(),exact:true})});await settle()
++  assert.ok(content(renderer!.root).includes('演员名称冲突3'))
++  await act(async()=>navigate('/pending?type=actress'));await settle();await settle()
++  assert.equal(conflictReads,1)
++  await act(async()=>navigate('/pending?type=scan'));await settle();await settle()
++  await act(async()=>{await client!.refetchQueries({queryKey:actressKeys.conflicts(),exact:true})});await settle()
++  assert.equal(conflictReads,1,'disabled conflict list is not refetched from a scan refresh')
++})
++it('shows unknown actor count without blocking scan when summary fails',async()=>{
++  failConflictCount=true;await mount()
++  assert.equal(conflictReads,0)
++  assert.ok(content(renderer!.root).includes('演员名称冲突?'))
++  assert.ok(content(renderer!.root).includes('120 项待处理'))
++})
+diff --git a/src/renderer/src/pages/useConflictReviewController.test.tsx b/src/renderer/src/pages/useConflictReviewController.test.tsx
+new file mode 100644
+index 0000000..7e90cc0
+--- /dev/null
++++ b/src/renderer/src/pages/useConflictReviewController.test.tsx
+@@ -0,0 +1,90 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
++import type { ConflictReviewViewModel } from './useConflictReviewController'
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++const candidate = {
++  pendingId: 10,
++  revision: 1,
++  actressId: 2,
++  actressRevision: 3,
++  actressMainName: '候选演员',
++  actressAvatarPath: null,
++  plugin: { id: 'test', name: 'Test', version: '1' },
++  queryName: '候选演员',
++  selectedFields: ['aliases'],
++  applicableFields: ['aliases'],
++  mode: 'fillEmpty' as const,
++  result: { aliases: ['冲突名'] },
++  warnings: [],
++  createdAt: '2026-08-07T00:00:00.000Z',
++  resources: [],
++  conflicts: [{ name: '冲突名', normalizedName: '冲突名', type: 'alias' as const }],
++  fieldImpactsWhenAssignedToCandidate: [],
++  fieldImpacts: [],
++  willApplyAfterDecision: true,
++  remainingConflictCountAfterDecision: 0
++}
++
++function group(withMainClaimant = false): ActressNameConflictGroup {
++  return {
++    status: 'conflict',
++    normalizedName: '冲突名',
++    displayName: '冲突名',
++    currentOwner: withMainClaimant
++      ? {
++          actressId: 1,
++          revision: 4,
++          mainName: '冲突名',
++          avatarPath: null,
++          nameTypes: ['main'],
++          hasPendingScrape: false
++        }
++      : null,
++    claimants: withMainClaimant
++      ? [
++          {
++            actressId: 1,
++            revision: 4,
++            mainName: '冲突名',
++            avatarPath: null,
++            nameTypes: ['main'],
++            hasPendingScrape: false
++          }
++        ]
++      : [],
++    pendingNameClaims: [],
++    candidates: [candidate] as unknown as ActressNameConflictGroup['candidates'],
++    mergePairs: []
++  }
++}
++
++
++it('preserves an explicit ownership decision while detail reads are disabled and reenabled',async()=>{
++ let reads=0
++ const fixture=group()
++ Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{actressScrape:{listConflicts:async()=>{reads++;return [fixture]},conflictSummary:async()=>({groupCount:1})}}}})
++ const {useConflictReviewController}=await import('./useConflictReviewController')
++ let vm!:ConflictReviewViewModel
++ function Probe({enabled}:{enabled:boolean}):null{vm=useConflictReviewController({enabled,summaryEnabled:enabled});return null}
++ const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++ let renderer:TestRenderer.ReactTestRenderer|undefined
++ const tree=(enabled:boolean)=><QueryClientProvider client={client}><Probe enabled={enabled}/></QueryClientProvider>
++ const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++ try{
++  await act(async()=>{renderer=TestRenderer.create(tree(true))});await settle();await settle()
++  await act(async()=>vm.queue.chooseGroup(fixture));await settle()
++  await act(async()=>vm.detail.selectOwner({actressId:2,revision:3,mainName:'候选演员'}));await settle()
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++  const priorReads=reads
++  await act(async()=>renderer!.update(tree(false)));await settle()
++  assert.equal(reads,priorReads)
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++  assert.equal(vm.queue.selectedGroup?.normalizedName,'冲突名')
++  await act(async()=>renderer!.update(tree(true)));await settle();await settle()
++  assert.equal(vm.detail.selection?.proposedOwner?.actressId,2)
++ }finally{await act(async()=>renderer?.unmount());client.clear()}
++})

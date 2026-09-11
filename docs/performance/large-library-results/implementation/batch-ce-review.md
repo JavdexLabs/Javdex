@@ -1,0 +1,11 @@
+# CE acceptance
+
+Actual reveal handler now awaits shared-worker permission, then async fs.access, then calls shell with the original path. Invalid, denied or failed permission never reaches access/shell. Reader first checks indexed unrecognized membership; otherwise it validates latest non-null audit through scalar metadata and three entry iterators. Six extracted legacy validator function bodies were AST-compared with HEAD and are identical. Known top-level duplicate JSON keys are explicitly rejected, a deliberate restriction on ambiguous manually authored documents.
+
+Two independent read-only reviews found no concrete semantic/standards/lifecycle blocker. Early matching does not skip later validation, source budget precedes JSON queries, native readonly/WAL snapshot preserved, boolean false is delivered correctly, new operation shares existing capacity/cancellation/lifecycle. Authorization is one read snapshot; this is not an atomic filesystem/database transaction.
+
+60 parent focused pass. Includes legacy path/validation comparison, wrong scope, latest non-null run independent of summary, malformed audit with valid unrecognized path, entry-only JSON.parse monitoring, later invalid records, readonly, WAL writer replacement, known duplicate/object-string denial, source-cap ordering injection, real worker booleans/revalidation, mixed shared capacity/cancellation, and actual IPC handler permission/access gates. Full npm test2469pass1skip0fail; npm run build terminal0. AP/AQ controller delta remains +27/-0.
+
+Real-worker300k /87,189,134B fixture: first572.515ms, main2ms timer232callbacks/max3.097ms incl8ms drain; subsequent552.783/531.368/532.805ms. Still O(N), native JSON parsing and shared-slot occupation; no p95/cold/platform/peak-memory/real-shell claim. Source cap is not total memory or execution-time bound. The cap test injects oversized length metadata; it is not a real oversized-disk fault. Source oracle retained during benchmark.
+
+Patch is selected cumulative source, dependent on earlier batches. No persistent schema changes, user database/media access, commit/push/release. Legacy full API and audit construction/writing/large-input/queue/platform acceptance remain; full15/42 incomplete.

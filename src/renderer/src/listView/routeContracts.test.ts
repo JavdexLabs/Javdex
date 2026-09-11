@@ -165,7 +165,11 @@ describe('route builders and parsers', () => {
       type: 'scrape',
       item: { domain: 'scrape', id: '7' },
       videoId: null,
-      libraryId: null
+      libraryId: null,
+      queueDomain: null,
+      actressOffset: 0,
+      scanOffset: 0,
+      scrapeOffset: 0
     })
     // Actress ids are normalized names, so only the first separator splits the key.
     assert.deepEqual(parsePendingItemKey('actress:a:b'), { domain: 'actress', id: 'a:b' })
@@ -174,14 +178,31 @@ describe('route builders and parsers', () => {
       type: 'all',
       item: null,
       videoId: null,
-      libraryId: null
+      libraryId: null,
+      queueDomain: null,
+      actressOffset: 0,
+      scanOffset: 0,
+      scrapeOffset: 0
     })
     assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('type=scan&lib=7')), {
       type: 'scan',
       item: null,
       videoId: null,
-      libraryId: 7
+      libraryId: 7,
+      queueDomain: null,
+      actressOffset: 0,
+      scanOffset: 0,
+      scrapeOffset: 0
     })
+    const actorPage = pendingCenterPath({ type: 'all', actressOffset: 100, scanOffset: 50, scrapeOffset: 150, queueDomain: 'actress' })
+    const actorQuery = parsePendingCenterSearch(new URLSearchParams(actorPage.split('?')[1]))
+    assert.equal(actorQuery.actressOffset, 100)
+    assert.equal(actorQuery.scanOffset, 50)
+    assert.equal(actorQuery.scrapeOffset, 150)
+    assert.equal(actorQuery.queueDomain, 'actress')
+    const invalidActorQuery = parsePendingCenterSearch(new URLSearchParams('actressOffset=-1&queue=invalid'))
+    assert.equal(invalidActorQuery.actressOffset, 0)
+    assert.equal(invalidActorQuery.queueDomain, null)
     assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
     assert.equal(pendingVideoActressPath(42, 7), '/pending/video/42/actress/7')
     assert.equal(pendingActressDetailPath(8), '/pending/actress/8')
@@ -213,7 +234,7 @@ describe('classification list query contract', () => {
   it('includes organization search and sorting in the shareable query identity', () => {
     assert.equal(
       classificationListQueryHash('maker', new URLSearchParams('q=studio&sort=updated_at&dir=asc')),
-      'dir=asc&q=studio&sort=updated_at&type=maker'
+      'dir=asc&offset=0&q=studio&sort=updated_at&type=maker'
     )
   })
 

@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "02e84f14570513dc722c1929c3165c4da0057b59a052a56c498cfd1fb192651e",
+  "notes": [
+    "Cumulative againstHEAD inselected files; depends on priorY asyncworkspace/schema16cleanupqueue andearlierbatches.",
+    "Singlecontroller clear/discard admission gate rejectsconcurrentrequests withoutqueuing, releasesonsuccess/failure. Disposestopsnewrequests anddrainscurrentcleanup beforeappMainclosesdatabase.",
+    "RealSQLite/gatedasyncfs testsinitialclear/discard success/failure: both concurrententries rejected,1rm only,disposependinguntilgate resolves,queuefailure retained,samecontrollerretry ornewinstanceafterdispose works.",
+    "Fullnpmtest2123pass/1skip/0fail; buildpassed. Initial34plugin tests passed. Standards/Specno blockers.",
+    "Separate actual1000/10000smallfilebenchmark passed afterfullsuite/buildterminal: 10k sync318.86ms maxinterval318.99ms vsasync239.22ms maxinterval11.23ms. SinglelocalmacOSsample,warmOS; no p95/coldcache/Windows/HDD/memory/globalnativeIO claim.",
+    "Limits: oneappsingletoncontroller,notcrossprocessinstances. Nativefs.rm internals andinitialIDset memory remainoutsidefixedbudget. Fullplan notcomplete; no userdata/commit/push/release."
+  ]
+}

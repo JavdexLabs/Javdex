@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bh-target.log": "39cb4aac55411d9cada0795b5f9d9bb62bfbea968afd3c3887cf1d3f6f4a8fd2",
+    "batch-bh-full.log": "8cda206dcd6ab473cc492b378c72d76fe1f1f4ee2d5c96dffd869b5fc5d78708",
+    "batch-bh-types.log": "a1499b3bc5addd579ca0b5fbe2dfacab17f004bb6597d0b95b5a9d5039c665bc",
+    "batch-bh-build.log": "62d90b32d077d6c1bf5e93c0a4ec6f65aeb3c908f2df772eb186f473373d3ded",
+    "batch-bh-benchmark.log": "262270f76ce8d73217a6fe18341e9d3962bd5d002cb3c5f104696346fc80aa47",
+    "batch-bh-actress-video-api.patch": "dee89294bc3606987696e9c47a36c616c840ccf410cdb7e5c4122f78e491d89f",
+    "batch-bh-review.md": "fd15efb0929050a7cd146a0ab0ba192243ba25a6e409087a48d83cf5fb4e7729",
+    "batch-bh-evaluation.md": "9bc1a8ac8da884e87e42e5603a49e17bc95f0bc7d501bc718ecb785bbdde2e59"
+  },
+  "notes": [
+    "Selected cumulative diff plus new files; dependent on earlier batches.",
+    "29 final focused; initial full2300pass1skip0fail; final typecheck/build passed.",
+    "Backend only; UI, field byte budgets and full15/42scope remain incomplete."
+  ]
+}

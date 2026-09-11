@@ -1,0 +1,691 @@
+diff --git a/src/main/metadata-sources/localNfoSourceAdapter.ts b/src/main/metadata-sources/localNfoSourceAdapter.ts
+index afe2a50..f4401ac 100644
+--- a/src/main/metadata-sources/localNfoSourceAdapter.ts
++++ b/src/main/metadata-sources/localNfoSourceAdapter.ts
+@@ -17,7 +17,9 @@ import { isStrmFile } from '../scanner/strmParser'
+ import { authorizeMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
+ import { createNfoFileStore, type NfoFileStore } from '../nfo/nfoFileStore'
+ import { parseNfoArtifact, type NormalizedNfoArtifact } from '../nfo/nfoArtifactCodec'
+-import { locateNfoSidecar, sameLogicalCode } from '../nfo/nfoSidecarLocator'
++import { summarizeDirectoryVideoCodes, type DirectoryVideoIdentityInput } from '../nfo/directoryVideoIdentity'
++import { NfoDirectoryCache } from './nfoDirectoryCache'
++import { indexNfoSidecars, locateNfoSidecar, sameLogicalCode } from '../nfo/nfoSidecarLocator'
+ import { projectVideoScrapeResult } from '../scrapers/videoScrapeFieldProjection'
+ import type {
+   MetadataAssetRef,
+@@ -48,7 +50,7 @@ export const LOCAL_NFO_SUPPORTED_FIELDS = [
+ export interface LocalNfoAnchor {
+   root: Readonly<MediaLibraryRoot>
+   anchorPath: string
+-  directoryVideoCodes: readonly (string | null)[]
++  directoryVideoCodes: DirectoryVideoIdentityInput
+   directorySidecars?: ReadonlyMap<string, string>
+ }
+ 
+@@ -67,17 +69,8 @@ export interface LocalNfoIdentityInspection {
+ const naturalOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+ const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
+ 
+-function directoryVideoCodes(anchorPath: string): Array<string | null> {
+-  let names: string[]
+-  try {
+-    names = fs.readdirSync(path.dirname(anchorPath))
+-  } catch {
+-    return [parseCode(path.basename(anchorPath, path.extname(anchorPath)))]
+-  }
+-  return names
+-    .filter((name) => isVideoFile(name) || isStrmFile(name))
+-    .sort(naturalOrder.compare)
+-    .map((name) => parseCode(path.basename(name, path.extname(name))))
++function directoryScopeKey(root: Readonly<MediaLibraryRoot>, anchorPath: string): string {
++  return JSON.stringify([root.libraryId, root.id, path.dirname(anchorPath)])
+ }
+ 
+ function listProductionAnchors(videoId: number): LocalNfoAnchor[] {
+@@ -92,14 +85,39 @@ function listProductionAnchors(videoId: number): LocalNfoAnchor[] {
+     `)
+     .all(videoId) as Array<{ library_id: number; root_id: number; anchor_path: string | null }>
+   const anchors: LocalNfoAnchor[] = []
++  const directories = new NfoDirectoryCache<{
++    directoryVideoCodes: DirectoryVideoIdentityInput
++    directorySidecars?: ReadonlyMap<string, string>
++  }>()
+   for (const row of rows) {
+     if (!row.anchor_path) continue
+     const root = getMediaLibraryRoot(row.library_id, row.root_id)
+     if (!root || root.state !== 'active') continue
++    const key = directoryScopeKey(root, row.anchor_path)
++    let context = directories.get(key)
++    if (!context) {
++      try {
++        const names = fs.readdirSync(path.dirname(row.anchor_path))
++        const summary = summarizeDirectoryVideoCodes((function* () {
++          // Preserve the manual helper's name-only filter, including directory names.
++          for (const name of names) {
++            if (isVideoFile(name) || isStrmFile(name)) yield parseCode(path.basename(name, path.extname(name)))
++          }
++        })())
++        const sidecars = indexNfoSidecars(names)
++        const snapshot = { directoryVideoCodes: summary, directorySidecars: sidecars }
++        context = directories.admit(key, snapshot, sidecars, summary.normalizedCode)
++          ? snapshot
++          : { directoryVideoCodes: summary }
++        // Rejected maps must not escape through anchors and defeat the aggregate budget.
++      } catch {
++        // Failed reads are not snapshots: the next anchor and collect may retry.
++      }
++    }
+     anchors.push({
+       root,
+       anchorPath: row.anchor_path,
+-      directoryVideoCodes: directoryVideoCodes(row.anchor_path)
++      ...(context ?? { directoryVideoCodes: [parseCode(path.basename(row.anchor_path, path.extname(row.anchor_path)))] })
+     })
+   }
+   return anchors
+@@ -191,7 +209,7 @@ function collectLocalAssets(input: {
+   actors: NormalizedNfoArtifact['actors']
+   anchorPath: string
+   root: Readonly<MediaLibraryRoot>
+-  directoryVideoCodes: readonly (string | null)[]
++  directoryVideoCodes: DirectoryVideoIdentityInput
+   fileStore: NfoFileStore
+   selectedFields: ReadonlySet<VideoScrapeField>
+ }): { assets: MetadataAssetRef[]; warnings: string[] } {
+@@ -343,13 +361,28 @@ export class LocalNfoSourceAdapter implements VideoMetadataSource {
+     const warnings: string[] = []
+     const candidates: VideoMetadataCandidate[] = []
+     const seenPhysicalNfo = new Set<string>()
++    const directorySidecarsByScope = new NfoDirectoryCache<ReadonlyMap<string, string>>()
+ 
+     for (const anchor of anchors) {
++      let directorySidecars = anchor.directorySidecars
++      if (directorySidecars === undefined) {
++        const key = directoryScopeKey(anchor.root, anchor.anchorPath)
++        directorySidecars = directorySidecarsByScope.get(key)
++        if (directorySidecars === undefined) {
++          try {
++            directorySidecars = indexNfoSidecars(fs.readdirSync(path.dirname(anchor.anchorPath)))
++            directorySidecarsByScope.admit(key, directorySidecars, directorySidecars)
++          } catch {
++            // Avoid a second read by the locator for this anchor, but retry the next.
++            directorySidecars = new Map()
++          }
++        }
++      }
+       const located = locateNfoSidecar({
+         anchorPath: anchor.anchorPath,
+         root: anchor.root,
+         directoryVideoCodes: anchor.directoryVideoCodes,
+-        directorySidecars: anchor.directorySidecars,
++        directorySidecars,
+         fileStore: this.options.fileStore
+       })
+       warnings.push(...located.warnings.map((warning) => warning.message))
+diff --git a/src/main/metadata-sources/nfoDirectoryCache.ts b/src/main/metadata-sources/nfoDirectoryCache.ts
+new file mode 100644
+index 0000000..0523681
+--- /dev/null
++++ b/src/main/metadata-sources/nfoDirectoryCache.ts
+@@ -0,0 +1,30 @@
++export const NFO_DIRECTORY_CACHE_MAX_SCOPES = 64
++export const NFO_DIRECTORY_CACHE_MAX_BYTES = 1024 * 1024
++
++const encodedBytes = (value: string): number => Buffer.byteLength(JSON.stringify(value), 'utf8')
++
++/** Per-instance/per-layer request cache, non-evicting: anchors may retain admitted values.
++ * Production anchor snapshots and collect lookups each have these limits (combined
++ * at most 128 scopes / 2 MiB encoded cache strings). This excludes caller-provided
++ * maps, uncached anchor summaries, transient listings, and JS object overhead.
++ * Callers must not mutate admitted maps; provided caller-owned maps bypass this cache.
++ */
++export class NfoDirectoryCache<T> {
++  private readonly values = new Map<string, T>()
++  private bytes = 0
++
++  get(key: string): T | undefined { return this.values.get(key) }
++
++  admit(key: string, value: T, sidecars: ReadonlyMap<string, string>, normalizedCode?: string | null): boolean {
++    if (this.values.has(key) || this.values.size >= NFO_DIRECTORY_CACHE_MAX_SCOPES) return false
++    let bytes = encodedBytes(key) + (normalizedCode == null ? 0 : encodedBytes(normalizedCode))
++    for (const [name, filename] of sidecars) {
++      bytes += encodedBytes(name) + encodedBytes(filename)
++      if (bytes > NFO_DIRECTORY_CACHE_MAX_BYTES - this.bytes) return false
++    }
++    if (bytes > NFO_DIRECTORY_CACHE_MAX_BYTES - this.bytes) return false
++    this.values.set(key, value)
++    this.bytes += bytes
++    return true
++  }
++}
+diff --git a/src/main/metadata-sources/nfoDirectoryCache.test.ts b/src/main/metadata-sources/nfoDirectoryCache.test.ts
+new file mode 100644
+index 0000000..b99445b
+--- /dev/null
++++ b/src/main/metadata-sources/nfoDirectoryCache.test.ts
+@@ -0,0 +1,40 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import { NfoDirectoryCache, NFO_DIRECTORY_CACHE_MAX_BYTES, NFO_DIRECTORY_CACHE_MAX_SCOPES } from './nfoDirectoryCache'
++
++it('caps scopes without eviction or replacement and starts fresh per instance', () => {
++  const cache = new NfoDirectoryCache<number>()
++  for (let index = 0; index < NFO_DIRECTORY_CACHE_MAX_SCOPES; index++) {
++    assert.equal(cache.admit(String(index), index, new Map()), true)
++  }
++  assert.equal(cache.admit('overflow', 100, new Map()), false)
++  assert.equal(cache.admit('0', 999, new Map()), false)
++  assert.equal(cache.get('0'), 0)
++  assert.equal(cache.get('overflow'), undefined)
++  const fresh = new NfoDirectoryCache<number>()
++  assert.equal(fresh.get('0'), undefined)
++  assert.equal(fresh.admit('overflow', 100, new Map()), true)
++})
++
++it('accounts exact encoded UTF8 keys, map keys and values, and summary code at the byte boundary', () => {
++  const cache = new NfoDirectoryCache<number>()
++  const key = '库"', code = '号\\', name = '名\n'
++  const encoded = (value: string) => Buffer.byteLength(JSON.stringify(value), 'utf8')
++  const fixed = encoded(key) + encoded(code) + encoded(name)
++  const value = 'a'.repeat(NFO_DIRECTORY_CACHE_MAX_BYTES - fixed - 2)
++  assert.equal(cache.admit(key, 1, new Map([[name, value + 'a']]), code), false)
++  assert.equal(cache.get(key), undefined)
++  assert.equal(cache.admit(key, 2, new Map([[name, value]]), code), true)
++  assert.equal(cache.get(key), 2)
++  assert.equal(cache.admit('x', 3, new Map()), false)
++})
++
++it('rejection consumes neither scope slots nor bytes, including a huge key or code with no names', () => {
++  const cache = new NfoDirectoryCache<number>()
++  const oversized = 'x'.repeat(NFO_DIRECTORY_CACHE_MAX_BYTES)
++  assert.equal(cache.admit(oversized, 1, new Map()), false)
++  assert.equal(cache.admit('code', 1, new Map(), oversized), false)
++  for (let index = 0; index < NFO_DIRECTORY_CACHE_MAX_SCOPES; index++) {
++    assert.equal(cache.admit(String(index), index, new Map()), true)
++  }
++})
+diff --git a/src/main/metadata-sources/localNfoProductionDirectory.test.ts b/src/main/metadata-sources/localNfoProductionDirectory.test.ts
+new file mode 100644
+index 0000000..56cdc25
+--- /dev/null
++++ b/src/main/metadata-sources/localNfoProductionDirectory.test.ts
+@@ -0,0 +1,129 @@
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { it } from 'node:test'
++import { closeDatabase, initDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { createDefaultLocalNfoSourceAdapter } from './localNfoSourceAdapter'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++
++for (const failFirstListing of [false, true]) {
++it(failFirstListing
++  ? 'retries a failed production listing per anchor and starts fresh on the next collect'
++  : 'reads one production directory snapshot per collect and refreshes sidecars and siblings next time', async (t) => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-production-nfo-'))
++  const media = path.join(directory, 'media')
++  fs.mkdirSync(media)
++  const previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = directory
++  resetSettingsCacheForTests()
++  try {
++    const db = initDatabaseAtPath(path.join(directory, 'catalog.db'))
++    const library = createMediaLibrary({ name: 'NFO snapshot', roots: [{ path: media }] })
++    db.prepare("INSERT INTO videos(id,code) VALUES(1,'ABC-001')").run()
++    db.prepare("INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(?,1,1)").run(library.id)
++    const insert = db.prepare(`INSERT INTO video_resources
++      (library_id,video_id,root_id,kind,locator,resource_key,source_identity)
++      VALUES(?,1,?,'local',?,?,?)`)
++    for (let index = 1; index <= 24; index++) {
++      const file = path.join(media, `ABC-001-CD${index}.mp4`)
++      fs.writeFileSync(file, '')
++      insert.run(library.id, library.roots[0].id, file, file, file)
++    }
++    const movie = path.join(media, 'movie.nfo')
++    const writeMovie = (title: string) => fs.writeFileSync(movie, `<movie><num>ABC-001</num><title>${title}</title></movie>`)
++    writeMovie('Initial exact title')
++    const original = fs.readdirSync
++    let reads = 0
++    let shouldFail = failFirstListing
++    t.mock.method(fs, 'readdirSync', (...args: Parameters<typeof fs.readdirSync>) => {
++      if (String(args[0]) === media) {
++        reads++
++        if (shouldFail) {
++          shouldFail = false
++          throw new Error('first directory listing failed')
++        }
++      }
++      return Reflect.apply(original, fs, args)
++    })
++    const adapter = createDefaultLocalNfoSourceAdapter()
++    const collect = () => adapter.collect({ target: { kind: 'video', videoId: 1, code: 'ABC-001' }, fields: ['title'] })
++    assert.equal((await collect()).candidates[0]?.result.title, 'Initial exact title')
++    // Failure remains uncached: next list anchor succeeds, then the first anchor retries in collect.
++    assert.equal(reads, failFirstListing ? 3 : 1)
++    reads = 0
++    assert.equal((await collect()).candidates[0]?.result.title, 'Initial exact title')
++    assert.equal(reads, 1)
++    reads = 0
++    fs.unlinkSync(movie)
++    assert.equal((await collect()).candidates.length, 0)
++    assert.equal(reads, 1)
++    writeMovie('Fresh title')
++    const sibling = path.join(media, 'OTHER-002.mp4')
++    fs.writeFileSync(sibling, '')
++    reads = 0
++    assert.equal((await collect()).candidates.length, 0)
++    assert.equal(reads, 1)
++    fs.unlinkSync(sibling)
++    reads = 0
++    assert.equal((await collect()).candidates[0]?.result.title, 'Fresh title')
++    assert.equal(reads, 1)
++  } finally {
++    t.mock.restoreAll()
++    closeDatabase()
++    resetSettingsCacheForTests()
++    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++    else process.env.JAVDEX_TEST_USER_DATA = previous
++    fs.rmSync(directory, { recursive: true, force: true })
++  }
++})
++}
++
++it('does not retain rejected sidecar maps in production anchors beyond 64 scopes', async (t) => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-production-nfo-budget-'))
++  const media = path.join(directory, 'media')
++  fs.mkdirSync(media)
++  const previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = directory
++  try {
++    const db = initDatabaseAtPath(path.join(directory, 'catalog.db'))
++    const library = createMediaLibrary({ name: 'NFO bounded snapshot', roots: [{ path: media }] })
++    db.prepare("INSERT INTO videos(id,code) VALUES(1,'ABC-001')").run()
++    db.prepare('INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(?,1,1)').run(library.id)
++    const insert = db.prepare(`INSERT INTO video_resources
++      (library_id,video_id,root_id,kind,locator,resource_key,source_identity)
++      VALUES(?,1,?,'local',?,?,?)`)
++    for (let index = 0; index < 65; index++) {
++      const folder = path.join(media, String(index))
++      fs.mkdirSync(folder)
++      fs.writeFileSync(path.join(folder, 'movie.nfo'), '<movie><num>ABC-001</num><title>Complete title</title></movie>')
++      const file = path.join(folder, 'ABC-001.mp4')
++      fs.writeFileSync(file, '')
++      insert.run(library.id, library.roots[0].id, file, file, file)
++    }
++    const adapter = createDefaultLocalNfoSourceAdapter()
++    const original = adapter.collectFromAnchors.bind(adapter)
++    let observed = false
++    t.mock.method(adapter, 'collectFromAnchors', (...[request, anchors]: Parameters<typeof original>) => {
++      assert.equal(anchors.length, 65)
++      assert.equal(anchors.filter((anchor) => anchor.directorySidecars !== undefined).length, 64)
++      assert.equal(anchors[64].directorySidecars, undefined)
++      assert.deepEqual(anchors[64].directoryVideoCodes, {
++        kind: 'summary', count: 1, normalizedCode: 'ABC-001', consistent: true
++      })
++      observed = true
++      return original(request, anchors)
++    })
++    const result = await adapter.collect({ target: { kind: 'video', videoId: 1, code: 'ABC-001' }, fields: ['title'] })
++    assert.equal(observed, true)
++    assert.equal(result.candidates.length, 65)
++    assert.ok(result.candidates.every((candidate) => candidate.result.title === 'Complete title'))
++  } finally {
++    t.mock.restoreAll()
++    closeDatabase()
++    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++    else process.env.JAVDEX_TEST_USER_DATA = previous
++    fs.rmSync(directory, { recursive: true, force: true })
++  }
++})
+diff --git a/src/main/metadata-sources/localNfoDirectorySnapshot.test.ts b/src/main/metadata-sources/localNfoDirectorySnapshot.test.ts
+new file mode 100644
+index 0000000..2c84cf0
+--- /dev/null
++++ b/src/main/metadata-sources/localNfoDirectorySnapshot.test.ts
+@@ -0,0 +1,271 @@
++import { afterEach, beforeEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { closeDatabase, initDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import {
++  LocalNfoSourceAdapter, createDefaultNfoFileStore, createDefaultLocalNfoSourceAdapter,
++  type LocalNfoAnchor
++} from './localNfoSourceAdapter'
++
++let directory: string, media: string, previousUserData: string | undefined
++beforeEach(() => {
++  previousUserData = process.env.JAVDEX_TEST_USER_DATA
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-snapshot-'))
++  media = path.join(directory, 'media'); fs.mkdirSync(media)
++  process.env.JAVDEX_TEST_USER_DATA = directory
++})
++afterEach(() => {
++  closeDatabase(); resetSettingsCacheForTests()
++  if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = previousUserData
++  fs.rmSync(directory, { recursive: true, force: true })
++})
++const request = { target: { kind: 'video' as const, videoId: 1, code: 'ABC-001' }, fields: ['title' as const] }
++function fixture(count = 3) {
++  const db = initDatabaseAtPath(path.join(directory, 'catalog.db'))
++  const library = createMediaLibrary({ name: 'NFO snapshot', roots: [{ path: media }] })
++  const anchors: LocalNfoAnchor[] = Array.from({ length: count }, (_, index) => {
++    const stem = `ABC-001-CD${index + 1}`
++    fs.writeFileSync(path.join(media, `${stem}.mp4`), 'synthetic video')
++    fs.writeFileSync(path.join(media, `${stem}.nfo`), `<movie><num>ABC-001</num><title>Part ${index + 1}</title></movie>`)
++    return { root: library.roots[0], anchorPath: path.join(media, `${stem}.mp4`), directoryVideoCodes: Array(count).fill('ABC-001') }
++  })
++  const fileStore = createDefaultNfoFileStore()
++  const source = new LocalNfoSourceAdapter({ listAnchors: () => anchors, fileStore, findExistingActorGender: () => null })
++  return { db, library, anchors, fileStore, source }
++}
++function sidecars(): ReadonlyMap<string, string> {
++  return new Map(fs.readdirSync(media).filter(name => name.endsWith('.nfo')).map(name => [name, name]))
++}
++
++it('reads a successful directory once for three direct anchors with complete candidate equality', async context => {
++  const current = fixture()
++  const supplied = sidecars()
++  const baseline = await current.source.collectFromAnchors(request, current.anchors.map(anchor => ({ ...anchor, directorySidecars: supplied })))
++  assert.deepEqual(baseline.candidates.map(candidate => candidate.result.title), ['Part 1', 'Part 2', 'Part 3'])
++  const original = fs.readdirSync
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    if (args[0] === media) reads++
++    return Reflect.apply(original, fs, args)
++  })
++  const actual = await current.source.collectFromAnchors(request, current.anchors)
++  assert.deepEqual(actual, baseline)
++  assert.equal(reads, 1)
++})
++
++
++it('does not cache a failed directory read and retries the next anchor', async context => {
++  const current = fixture()
++  const original = fs.readdirSync
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    if (args[0] === media && ++reads === 1) throw new Error('transient directory read failure')
++    return Reflect.apply(original, fs, args)
++  })
++  const result = await current.source.collectFromAnchors(request, current.anchors)
++  assert.deepEqual(result.candidates.map(candidate => candidate.result.title), ['Part 2', 'Part 3'])
++  assert.equal(reads, 2, 'first failure is anchor-local; subsequent success is reused')
++})
++
++it('refreshes sidecars on each call while keeping explicitly supplied identities authoritative', async context => {
++  const current = fixture()
++  for (let index = 1; index <= 3; index++) fs.unlinkSync(path.join(media, `ABC-001-CD${index}.nfo`))
++  const original = fs.readdirSync
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    if (args[0] === media) reads++
++    return Reflect.apply(original, fs, args)
++  })
++  assert.equal((await current.source.collectFromAnchors(request, current.anchors)).candidates.length, 0)
++  assert.equal(reads, 1)
++  fs.writeFileSync(path.join(media, 'movie.nfo'), '<movie><num>ABC-001</num><title>New movie</title></movie>')
++  fs.writeFileSync(path.join(media, 'OTHER-002.mp4'), 'new sibling')
++  const supplied = await current.source.collectFromAnchors(request, current.anchors)
++  assert.deepEqual(supplied.candidates.map(candidate => candidate.result.title), ['New movie'])
++  assert.equal(reads, 2)
++  const mixed = await current.source.collectFromAnchors(request, current.anchors.map(anchor => ({ ...anchor, directoryVideoCodes: ['ABC-001', 'OTHER-002'] })))
++  assert.equal(mixed.candidates.length, 0)
++  assert.ok(mixed.warnings.length > 0)
++  assert.equal(reads, 3, 'no successful snapshot leaks into a later call')
++})
++
++it('preserves explicit maps including empty maps and does not overwrite them from the filesystem', async context => {
++  const current = fixture()
++  fs.writeFileSync(path.join(media, 'movie.nfo'), '<movie><num>ABC-001</num><title>Movie fallback</title></movie>')
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', () => { reads++; throw new Error('explicit maps must not read directories') })
++  const exact = 'ABC-001-CD2.nfo'
++  const result = await current.source.collectFromAnchors(request, [
++    { ...current.anchors[0], directorySidecars: new Map() },
++    { ...current.anchors[1], directorySidecars: new Map([[exact, exact]]) },
++    { ...current.anchors[2], directorySidecars: new Map([['movie.nfo', 'movie.nfo']]) }
++  ])
++  assert.deepEqual(result.candidates.map(candidate => candidate.result.title), ['Part 2', 'Movie fallback'])
++  assert.deepEqual(result.warnings, [])
++  assert.equal(reads, 0)
++})
++
++it('preserves exact-sidecar precedence and warnings over movie.nfo with a cached directory', async context => {
++  const current = fixture()
++  fs.writeFileSync(path.join(media, 'movie.nfo'), '<movie><num>ABC-001</num><title>Different fallback</title></movie>')
++  const supplied = sidecars()
++  const baseline = await current.source.collectFromAnchors(request, current.anchors.map(anchor => ({ ...anchor, directorySidecars: supplied })))
++  assert.equal(baseline.warnings.length, 3)
++  const original = fs.readdirSync
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    if (args[0] === media) reads++
++    return Reflect.apply(original, fs, args)
++  })
++  const actual = await current.source.collectFromAnchors(request, current.anchors)
++  assert.deepEqual(actual, baseline)
++  assert.deepEqual(actual.candidates.map(candidate => candidate.result.title), ['Part 1', 'Part 2', 'Part 3'])
++  assert.equal(reads, 1)
++})
++
++it('does not seed shared directory state from an explicitly empty anchor map', async context => {
++  const current = fixture()
++  const original = fs.readdirSync
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    if (args[0] === media) reads++
++    return Reflect.apply(original, fs, args)
++  })
++  const result = await current.source.collectFromAnchors(request, [
++    { ...current.anchors[0], directorySidecars: new Map() },
++    current.anchors[1], current.anchors[2]
++  ])
++  assert.deepEqual(result.candidates.map(candidate => candidate.result.title), ['Part 2', 'Part 3'])
++  assert.equal(reads, 1)
++})
++
++it('separates a foreign root scope at the same lexical directory and still rejects its outside anchor', async context => {
++  const current = fixture()
++  const otherPath = path.join(directory, 'other-root')
++  fs.mkdirSync(otherPath)
++  const other = createMediaLibrary({ name: 'Other scope', roots: [{ path: otherPath }] })
++  const original = fs.readdirSync
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    if (args[0] === media) reads++
++    return Reflect.apply(original, fs, args)
++  })
++  const result = await current.source.collectFromAnchors(request, [
++    current.anchors[0], { ...current.anchors[1], root: other.roots[0] }, current.anchors[2]
++  ])
++  assert.deepEqual(result.candidates.map(candidate => candidate.result.title), ['Part 1', 'Part 3'])
++  assert.equal(result.warnings.length, 1, 'foreign root cannot authorize an anchor outside its own directory')
++  assert.equal(reads, 2)
++})
++
++it('still authorizes every file after a root is revoked within a cached-directory collection', async context => {
++  const current = fixture()
++  let attempts = 0, reads = 0, revoked = false
++  const original = fs.readdirSync
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    if (args[0] === media) reads++
++    return Reflect.apply(original, fs, args)
++  })
++  const source = new LocalNfoSourceAdapter({
++    listAnchors: () => current.anchors, findExistingActorGender: () => null,
++    fileStore: {
++      ...current.fileStore,
++      issue: (root, filePath) => { attempts++; return current.fileStore.issue(root, filePath) },
++      readBytes: (capability, maxBytes) => {
++        const bytes = current.fileStore.readBytes(capability, maxBytes)
++        if (!revoked) {
++          revoked = true
++          current.db.prepare("UPDATE media_library_roots SET state='disabled' WHERE id=?").run(current.library.roots[0].id)
++        }
++        return bytes
++      }
++    }
++  })
++  const result = await source.collectFromAnchors(request, current.anchors)
++  assert.equal(revoked, true)
++  assert.equal(attempts, 3)
++  assert.deepEqual(result.candidates.map(candidate => candidate.result.title), ['Part 1'])
++  assert.equal(result.warnings.length, 2)
++  assert.equal(reads, 1, 'reusing filenames cannot bypass per-file root authorization')
++})
++
++
++function oversizedSidecarNames(): string[] {
++  // Synthetic directory entries only: real exact sidecars remain on disk.
++  const names = Array.from({ length: 5000 }, (_, index) => `${'X'.repeat(220)}-${index}.NFO`)
++  assert.ok(Buffer.byteLength(JSON.stringify(names)) > 1024 * 1024)
++  return names
++}
++
++it('does not retain an oversized direct sidecar map while preserving all real exact candidates', async context => {
++  const current = fixture()
++  const baseline = await current.source.collectFromAnchors(request, current.anchors)
++  assert.equal(baseline.candidates.length, 3)
++  const extraNames = oversizedSidecarNames()
++  const original = fs.readdirSync
++  let reads = 0
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    const names = Reflect.apply(original, fs, args)
++    if (args[0] === media) { reads++; return [...names, ...extraNames] }
++    return names
++  })
++  const actual = await current.source.collectFromAnchors(request, current.anchors)
++  assert.deepEqual(actual, baseline)
++  assert.equal(reads, 3, 'each anchor uses but does not retain the oversized map')
++})
++
++it('does not hide oversized maps on production anchors, retaining the ordinary one-read baseline', async context => {
++  const current = fixture(24)
++  current.db.prepare("INSERT INTO videos(id,code) VALUES(1,'ABC-001')").run()
++  current.db.prepare('INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(?,1,1)').run(current.library.id)
++  const insert = current.db.prepare(`INSERT INTO video_resources
++    (library_id,video_id,root_id,kind,locator,resource_key,source_identity)
++    VALUES(?,1,?,'local',?,?,?)`)
++  for (const anchor of current.anchors) insert.run(current.library.id, anchor.root.id, anchor.anchorPath, anchor.anchorPath, anchor.anchorPath)
++  const source = createDefaultLocalNfoSourceAdapter(current.fileStore)
++  const extraNames = oversizedSidecarNames()
++  const original = fs.readdirSync
++  let reads = 0, oversized = false
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    const names = Reflect.apply(original, fs, args)
++    if (args[0] === media) { reads++; return oversized ? [...names, ...extraNames] : names }
++    return names
++  })
++  const baseline = await source.collect(request)
++  assert.equal(baseline.candidates.length, 24)
++  assert.equal(reads, 1)
++  oversized = true; reads = 0
++  const actual = await source.collect(request)
++  assert.deepEqual(actual, baseline)
++  assert.equal(reads, 48, '24 production identity reads plus 24 uncached sidecar reads; no hidden retained maps')
++})
++
++it('admits at most 64 scopes without evicting earlier successful snapshots', async context => {
++  const current = fixture(0)
++  const anchors: LocalNfoAnchor[] = []
++  for (let index = 0; index < 65; index++) {
++    const folder = path.join(media, `scope-${index}`)
++    fs.mkdirSync(folder)
++    const file = path.join(folder, 'ABC-001.mp4')
++    fs.writeFileSync(file, 'video')
++    fs.writeFileSync(path.join(folder, 'ABC-001.nfo'), `<movie><num>ABC-001</num><title>Scope ${index}</title></movie>`)
++    anchors.push({ root: current.library.roots[0], anchorPath: file, directoryVideoCodes: ['ABC-001'] })
++  }
++  const original = fs.readdirSync
++  const reads = new Map<string, number>()
++  context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
++    const dir = String(args[0])
++    if (dir.startsWith(`${media}${path.sep}`)) reads.set(dir, (reads.get(dir) ?? 0) + 1)
++    return Reflect.apply(original, fs, args)
++  })
++  const actual = await current.source.collectFromAnchors(request, [...anchors, anchors[0], anchors[64]])
++  assert.deepEqual(actual.candidates.map(candidate => candidate.result.title), Array.from({ length: 65 }, (_, index) => `Scope ${index}`))
++  assert.equal(reads.size, 65)
++  for (let index = 0; index < 64; index++) assert.equal(reads.get(path.dirname(anchors[index].anchorPath)), 1)
++  assert.equal(reads.get(path.dirname(anchors[64].anchorPath)), 2)
++})
+diff --git a/scripts/performance/nfo-production-directory-benchmark.ts b/scripts/performance/nfo-production-directory-benchmark.ts
+new file mode 100644
+index 0000000..351b824
+--- /dev/null
++++ b/scripts/performance/nfo-production-directory-benchmark.ts
+@@ -0,0 +1,67 @@
++/** Real default NFO adapter, temporary synthetic catalog/media only. Run in isolation. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++import { createMediaLibrary } from '../../src/main/db/mediaLibraryRepo'
++import { createDefaultLocalNfoSourceAdapter } from '../../src/main/metadata-sources'
++import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
++
++it('measures default NFO collection and directory read counts with many resources in one directory', async () => {
++  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-production-probe-'))
++  const previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = temp; resetSettingsCacheForTests()
++  const results: unknown[] = []
++  try {
++    for (const count of [100, 1000]) {
++      const media = path.join(temp, `media-${count}`); fs.mkdirSync(media)
++      const db = initDatabaseAtPath(path.join(temp, `catalog-${count}.db`))
++      const library = createMediaLibrary({ name: 'NFO probe', roots: [{ path: media }] })
++      db.prepare("INSERT INTO videos(id,code) VALUES(1,'ABC-001')").run()
++      db.prepare('INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(?,1,1)').run(library.id)
++      const insert = db.prepare(`INSERT INTO video_resources(library_id,root_id,video_id,kind,locator,resource_key,source_identity)
++        VALUES(?,?,1,'local',?,?,?)`)
++      db.transaction(() => {
++        for (let index = 1; index <= count; index++) {
++          const file = path.join(media, `ABC-001-CD${index}.mp4`)
++          fs.writeFileSync(file, 'synthetic')
++          insert.run(library.id, library.roots[0].id, file, `local:${file}`, file)
++        }
++      })()
++      fs.writeFileSync(path.join(media, 'movie.nfo'), '<movie><num>ABC-001</num><title>Probe title</title></movie>')
++      const source = createDefaultLocalNfoSourceAdapter(), samples: unknown[] = []
++      for (let sample = -1; sample < 3; sample++) {
++        const original = fs.readdirSync
++        let directoryReads = 0
++        fs.readdirSync = ((...args: Parameters<typeof fs.readdirSync>) => {
++          if (String(args[0]) === media) directoryReads++
++          return Reflect.apply(original, fs, args)
++        }) as typeof fs.readdirSync
++        try {
++          const start = performance.now()
++          const batch = await source.collect({ target: { kind: 'video', videoId: 1, code: 'ABC-001' }, fields: ['title'] })
++          const elapsedMs = performance.now() - start
++          assert.equal(batch.candidates.length, 1)
++          assert.equal(batch.candidates[0].result.title, 'Probe title')
++          if (sample >= 0) samples.push({ elapsedMs, directoryReads, candidates: batch.candidates.length })
++        } finally { fs.readdirSync = original }
++      }
++      results.push({ count, samples })
++      closeDatabase(); resetSettingsCacheForTests()
++    }
++  } finally {
++    closeDatabase(); resetSettingsCacheForTests()
++    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++    else process.env.JAVDEX_TEST_USER_DATA = previous
++    fs.rmSync(temp, { recursive: true, force: true })
++  }
++  console.log(JSON.stringify({ results, notes: [
++    'Actual default adapter, same-video local parts sharing one movie.nfo; title-only collection with real catalog/root/file authorization.',
++    'One warmup plus3 samples per scale; includes collect and directory read counting, excludes fixture setup and candidate application.',
++    'Repeated calls remain separate requests. Ordinary cache-warm temporary filesystem; no cold disk, p95, Windows/HDD, concurrent devices or peak RSS claim.',
++    'Other file authorization/stat/read work remains; this measures request-local directory reuse, not full scan throughput.'
++  ] }, null, 2))
++})

@@ -1,0 +1,21 @@
+{"action":"publish-old","run":"old","state":{"state":"published","count":1,"bytes":44,"sections":[{"section":"files","count":1,"bytes":44}]}}
+{"action":"mutate-and-reject-bad-batches","run":"new","state":{"state":"collecting","count":3,"bytes":184,"sections":[{"section":"files","count":3,"bytes":184}]}}
+{"action":"publication-rollback","run":"new","state":{"state":"sealed","count":3,"bytes":184,"sections":[{"section":"files","count":3,"bytes":184}]}}
+{"action":"atomic-publication","run":"new","state":{"state":"published","count":3,"bytes":184,"sections":[{"section":"files","count":3,"bytes":184}]}}
+{"action":"restart-abandons-staging-without-deleting-history","run":"interrupted","state":{"state":"abandoned","count":3,"bytes":150,"sections":[{"section":"files","count":3,"bytes":150}]}}
+{"action":"100k-prototype","count":100000,"maxRows":100,"maxBytes":24501,"writeMs":650.49275,"publishMs":0.08820799999989504,"pageMs":4.112791000000016,"databaseBytes":31227904,"walBytes":4202432,"notes":["single run, no warm/p95 or peak-memory claim","publish timing only prototype run marker, excludes actual finish state/unrecognized work","source generated one batch at a time; native SQLite and individual serialization allocations not a total RSS bound","OFFSET deep page still walks earlier ordinal index entries; production reader/index integration not implemented"]}
+{"action":"budget-boundaries","nearLimitSinglePageBytes":1048503,"oversizedKeyPageRejectedBeforeHydration":true}
+✔ drives scratch staging, revision, failed publication, visible publication and restart recovery (16.569875ms)
+✔ streams a scratch 100k-file run using bounded input batches and reads a deep page (672.190375ms)
+✔ rejects unreadable patched rows and oversized key pages before hydration (21.971167ms)
+{"action":"SIGKILL-recovery","phase":"staged","stagedRowsPreserved":3,"previousPublishedPreserved":true}
+{"action":"SIGKILL-recovery","phase":"uncommitted-publication","stagedRowsPreserved":3,"previousPublishedPreserved":true}
+✔ recovers committed staging and rolls back uncommitted publication after SIGKILL (255.4985ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1145.155917

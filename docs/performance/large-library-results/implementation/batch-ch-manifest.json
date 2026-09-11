@@ -1,0 +1,16 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ch-benchmark.log": "c759d8598200ed649ac53599b073626cf5319c4a08870cf8194db2c0d42ebe99",
+    "batch-ch-build.log": "3eda12361944722bd41c623dd5a3d0f318de9894f888fafa28c500f7d7a89e33",
+    "batch-ch-full.log": "770e167817df46b36fb40257f99a188b984726ef359713a2cce6b6e16ce5b827",
+    "batch-ch-review.md": "be35f35f654b8ac3f56994900c08604b7f485a047df80cabf5aff037ac2f8e49",
+    "batch-ch-root-matcher.patch": "4d33e106ddb663222d28a6bd9cf2a0067f442bbc624b8197ec3e5f505c49eb9b",
+    "batch-ch-target.log": "6c5b28966b7948bc6aa8b9311405450dbda3693aaed266748c0477fa1cb0a24c"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "47 focused; full2504pass1skip0fail; build terminal0.",
+    "Lexical root selection optimized; no filesystem authorization caching; full15/42 incomplete."
+  ]
+}

@@ -1,0 +1,46 @@
+✔ matches old group order and global exact path counts without hydrating unrelated groups or resource DTOs (16.031708ms)
+✔ handles empty targets and empty paths while preserving zero-resource groups and library isolation (10.644041ms)
+✔ keeps selected group metadata and path counts in one snapshot across an external write (14.075042ms)
+✔ drives selected groups by primary key and resources by the scoped group index (10.300042ms)
+✔ releases the transaction and connection when resource statement preparation fails (10.278083ms)
+▶ ScanCoordinator
+  ✔ coalesces display progress while preserving per-file callbacks and the final event (11.988458ms)
+  ✔ flushes pending progress before a failure without delaying the failure event (0.482917ms)
+  ✔ binds an offline-created root identity and refreshes the frozen snapshot before scanning (0.676167ms)
+  ✔ persists matching complete audit details with the latest summary (0.232167ms)
+  ✔ publishes scan lifecycle events for every trigger (0.149958ms)
+  ✔ uses one frozen configuration snapshot for the complete run (0.097084ms)
+  ✔ reconciles resource identity pending rows only under roots proven safe after traversal (0.111875ms)
+  ✔ preserves offline roots and removes only missing local resources under accessible roots (0.326042ms)
+  ✔ aborts cleanup when a local path cannot be audited (0.211709ms)
+  ✔ treats a root that becomes unreadable after traversal as offline (0.145583ms)
+  ✔ rechecks the frozen root identity immediately before cleanup writes (0.112208ms)
+  ✔ does not run cleanup after cancellation and releases the mutual-exclusion lease (0.1315ms)
+  ✔ keeps resources after a coordinator-level failure (0.089042ms)
+  ✔ skips every destructive cleanup after a file processing failure (0.063042ms)
+  ✔ replaces the unrecognized-file snapshot after every safe completed scan (0.076042ms)
+  ✔ completes safe cleanup with errors when failures are isolated to STRM files (0.097125ms)
+  ✔ consumes deferred path cleanup only after a successful uncancelled scan (0.055041ms)
+  ✔ keeps deferred path cleanup queued after a partial folder scan (0.075708ms)
+  ✔ allows a full cleanup-only scan after the final configured folder was removed (0.048209ms)
+  ✔ removes many non-primary resources without reading sibling resource lists (1.698042ms)
+  ✔ consumes cleanup references lazily and closes iteration on a path failure (0.138667ms)
+  ✔ preserves all three cleanup audit sequences above the argument limit (218.033834ms)
+  ✔ removes resource-less memberships after deferred cleanup on a safe full scan (0.211417ms)
+  ✔ persists a sanitized failed summary without running destructive cleanup (0.168208ms)
+  ✔ rolls back resource cleanup and keeps pending roots when auto-delete fails (0.125375ms)
+  ✔ keeps pending roots when the cleanup transaction cannot commit (0.107959ms)
+  ✔ rejects duplicate scans and scans blocked by resource maintenance (7.954416ms)
+✔ ScanCoordinator (244.211916ms)
+✔ reads pending audit summaries with only referenced groups and all exact pending paths (0.152167ms)
+✔ skips the pending audit DB reader for no-files (0.0685ms)
+✔ skips the pending audit DB reader for non-pending (0.028959ms)
+✔ skips the pending audit DB reader for pending-without-group (0.032459ms)
+ℹ tests 36
+ℹ suites 1
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 611.007375

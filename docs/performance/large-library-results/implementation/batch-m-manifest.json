@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "5a5774f7e88ee460769698de8a3ff5efdc961940bfaa6c3e03d03fb95fe8afd7",
+  "notes": [
+    "Patch is against HEAD. Filesystem and Store tests contain prior async read/crypto changes; use batches J/K/L for facade/queue/protocol/Web integration.",
+    "Byte cache is limited to 256 entries and 96MiB plaintext. File signature includes resolved path, mtime, ctime, size, device and inode. Explicit invalidation revision blocks stale fill.",
+    "Full npm test: 2033 passed, 1 skipped. Later exact stat-slot and hot-cache cancellation tests: final target suite 54 passed, node types and changed-file lint passed.",
+    "Synthetic benchmark ran after the task test handles completed: 1MiB/16MiB transport buffers, not real pixel images; five sequential requests, OS cache and key warm.",
+    "Hot requests eliminate body read/decrypt, but retain stat and defensive Buffer copies. Cache capacity is not a bound on active input/output/native/response bytes.",
+    "Concurrent identical cache misses are not merged in this batch. Thumbnail, in-flight byte/pixel budgets and multi-device fairness remain outstanding."
+  ]
+}

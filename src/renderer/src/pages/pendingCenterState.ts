@@ -1,11 +1,10 @@
-import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
+import type { ActressConflictQueueItem } from '@shared/actressConflictTypes'
 import type {
-  PendingScanGroup,
-  PendingResourceIdentity,
+  PendingScanQueueItem,
   PendingScanResource,
   PendingScanResourceTarget
 } from '@shared/libraryTypes'
-import type { PendingVideoScrape } from '@shared/videoScrapeTypes'
+import type { PendingVideoScrapeSummary } from '@shared/videoScrapeTypes'
 import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
 import {
   PENDING_DOMAINS,
@@ -148,63 +147,46 @@ export interface PendingQueueSection {
 }
 
 export interface PendingQueueInput {
-  scanGroups: readonly PendingScanGroup[]
-  resourceIdentities?: readonly PendingResourceIdentity[]
-  scrapeItems: readonly PendingVideoScrape[]
-  conflictGroups: readonly ActressNameConflictGroup[]
+  scanItems: readonly PendingScanQueueItem[]
+  scrapeItems: readonly PendingVideoScrapeSummary[]
+  conflictItems: readonly ActressConflictQueueItem[]
   libraryNames?: ReadonlyMap<number, string>
 }
 
 function scanQueueItem(
-  group: PendingScanGroup,
+  item: PendingScanQueueItem,
   libraryNames?: ReadonlyMap<number, string>
 ): PendingQueueItem {
-  const libraryName = libraryNames?.get(group.libraryId) ?? `媒体库 #${group.libraryId}`
+  const libraryName = libraryNames?.get(item.libraryId) ?? `媒体库 #${item.libraryId}`
   return {
-    key: pendingItemKey('scan', group.id),
-    title: group.normalizedCode,
-    meta: `${libraryName} · ${group.resources.length} 条资源`,
+    key: pendingItemKey('scan', item.kind === 'group' ? item.id : `identity-${item.id}`),
+    title: item.label,
+    meta: `${libraryName} · ${item.kind === 'group' ? `${item.resourceCount} 条资源` : item.displayName}`,
     coverPath: null,
     ready: false
   }
 }
 
-function resourceIdentityQueueItem(
-  identity: PendingResourceIdentity,
-  libraryNames?: ReadonlyMap<number, string>
-): PendingQueueItem {
-  const libraryName = libraryNames?.get(identity.libraryId) ?? `媒体库 #${identity.libraryId}`
-  return {
-    key: pendingItemKey('scan', `identity-${identity.id}`),
-    title: `${identity.filenameCode} ↔ ${identity.nfoCode}`,
-    meta: `${libraryName} · ${identity.displayName}`,
-    coverPath: null,
-    ready: false
-  }
-}
-
-function scrapeQueueItem(scrape: PendingVideoScrape): PendingQueueItem {
-  const candidates = scrape.sources.flatMap((source) => source.candidates)
-  const first = candidates[0]
+function scrapeQueueItem(scrape: PendingVideoScrapeSummary): PendingQueueItem {
   return {
     key: pendingItemKey('scrape', scrape.id),
-    title: first?.result.code?.trim() || `影片 #${scrape.videoId}`,
-    meta: `${candidates.length} 个候选 · ${scrape.sources.length} 个来源`,
-    coverPath: first?.stagedCoverPath ?? null,
+    title: scrape.code || `影片 #${scrape.videoId}`,
+    meta: `${scrape.candidateCount} 个候选 · ${scrape.sourceCount} 个来源`,
+    coverPath: scrape.stagedCoverPath,
     ready: false
   }
 }
 
-function actressQueueItem(group: ActressNameConflictGroup): PendingQueueItem {
-  const claimCount = group.pendingNameClaims.length
+function actressQueueItem(group: ActressConflictQueueItem): PendingQueueItem {
+  const claimCount = group.pendingNameClaimCount
   return {
     key: pendingItemKey('actress', group.normalizedName),
     title: group.displayName,
     meta:
       group.status === 'applicable'
         ? '冲突已解除，等待应用'
-        : `刮削 ${group.candidates.length} · 历史 ${claimCount}`,
-    coverPath: group.candidates[0]?.actressAvatarPath ?? null,
+        : `刮削 ${group.candidateCount} · 历史 ${claimCount}`,
+    coverPath: group.avatarPath,
     ready: group.status === 'applicable'
   }
 }
@@ -215,14 +197,9 @@ export function buildPendingQueueSections(
   type: PendingTypeFilter
 ): PendingQueueSection[] {
   const byDomain: Record<PendingDomain, PendingQueueItem[]> = {
-    scan: [
-      ...input.scanGroups.map((group) => scanQueueItem(group, input.libraryNames)),
-      ...(input.resourceIdentities ?? []).map((identity) =>
-        resourceIdentityQueueItem(identity, input.libraryNames)
-      )
-    ],
+    scan: input.scanItems.map((item) => scanQueueItem(item, input.libraryNames)),
     scrape: input.scrapeItems.map(scrapeQueueItem),
-    actress: input.conflictGroups.map(actressQueueItem)
+    actress: input.conflictItems.map(actressQueueItem)
   }
   return PENDING_DOMAINS.filter((domain) => type === 'all' || type === domain)
     .map((domain) => ({ domain, label: PENDING_DOMAIN_LABEL[domain], items: byDomain[domain] }))
@@ -239,9 +216,10 @@ export function pendingQueueTotal(sections: readonly PendingQueueSection[]): num
  */
 export function resolvePendingSelection(
   sections: readonly PendingQueueSection[],
-  requested: PendingItemKey | null
+  requested: PendingItemKey | null,
+  preferredDomain?: PendingDomain | null
 ): PendingItemKey | null {
   const items = sections.flatMap((section) => section.items)
   const match = items.find((item) => samePendingItemKey(item.key, requested))
-  return match?.key ?? items[0]?.key ?? null
+  return match?.key ?? items.find(item => item.key.domain === preferredDomain)?.key ?? items[0]?.key ?? null
 }

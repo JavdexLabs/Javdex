@@ -504,8 +504,10 @@ export function getPendingScanGroup(libraryId: number, groupId: number): Pending
 export function reconcilePendingScanResources(
   libraryId: number,
   accessibleRootIds: number[],
-  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown',
+  candidateIds?: readonly number[]
 ): { removedResources: number; removedGroups: number } {
+  if (candidateIds && (candidateIds.length > 128 || candidateIds.some(id => !Number.isSafeInteger(id) || id <= 0))) throw new Error('Invalid cleanup candidate IDs')
   const database = getDb()
   requireLibrary(database, libraryId)
   const rootIds = Array.from(
@@ -516,13 +518,13 @@ export function reconcilePendingScanResources(
   return database.transaction(() => {
     requireLibrary(database, libraryId)
     for (const rootId of rootIds) requireActiveRoot(database, libraryId, rootId)
-    const placeholders = rootIds.map(() => '?').join(', ')
     const resources = database
       .prepare(
-        `SELECT id, group_id, file_path FROM pending_scan_resources
-          WHERE library_id = ? AND root_id IN (${placeholders}) ORDER BY id`
+        `SELECT id, group_id, file_path FROM pending_scan_resources ${candidateIds ? 'NOT INDEXED' : ''}
+          WHERE library_id = ? AND root_id IN (SELECT value FROM json_each(?))
+          ${candidateIds ? 'AND id IN (SELECT value FROM json_each(?))' : ''} ORDER BY id`
       )
-      .all(libraryId, ...rootIds) as Array<{
+      .all(libraryId, JSON.stringify(rootIds), ...(candidateIds ? [JSON.stringify(candidateIds)] : [])) as Array<{
       id: number
       group_id: number
       file_path: string

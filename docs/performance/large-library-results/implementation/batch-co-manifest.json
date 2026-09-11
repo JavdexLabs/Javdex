@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-co-build.log": "31d731963ede2aacc4ee387964542c1e14b7d03e57c3bd76dd51dff3b95cc595",
+    "batch-co-full.log": "d241125f9c1c282c24c73bd434ab1c16deabe73942b76294e589d03a9df1ea73",
+    "batch-co-review.md": "09e20f7c33576e117ae721a39b19984bf9d623b3fad925c896e582ed11cfbfe2",
+    "batch-co-scanner-audit-sink.patch": "42e4f53e3f43c2949e52f3b9c882e5728b0eee265a56ef8f30678d6bbe80d22e",
+    "batch-co-sink-cleanup.log": "ad1cf54eb0f0756e6515d333e257584c75754776a120df06ac01596bf4673b0a",
+    "batch-co-sink-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "batch-co-target.log": "45704f87f407ca83783a1a130eb11b5e17f6154c0bd0426cfd22ddb9fbb4716f"
+  },
+  "notes": [
+    "Selected cumulative patch depends on prior batches.",
+    "147 focused; correctedgate14+lint; full2579pass1skip0fail; build terminal0.",
+    "Scanner optional sink wired; coordinator still legacy; business/audit atomicity and full15/42 incomplete."
+  ]
+}

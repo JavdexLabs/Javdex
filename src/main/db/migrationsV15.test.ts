@@ -25,12 +25,30 @@ function columnNames(database: Database.Database, table: string): Set<string> {
 function createV14ReleaseFixture(database: Database.Database): void {
   database.exec(`
     PRAGMA foreign_keys = ON;
+    -- Minimal unaffected relationship/index required by the later V17 migration.
+    CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
+      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
+    CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);
     CREATE TABLE media_libraries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       revision INTEGER NOT NULL DEFAULT 1
     );
+CREATE TABLE IF NOT EXISTS library_scan_runs (
+    id TEXT PRIMARY KEY,
+    library_id INTEGER NOT NULL,
+    config_revision INTEGER NOT NULL,
+    trigger TEXT NOT NULL CHECK(trigger IN ('manual', 'automatic', 'initial', 'root')),
+    status TEXT NOT NULL
+        CHECK(status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'unavailable')),
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    summary_json TEXT,
+    audit_json TEXT,
+    error_summary TEXT,
+    FOREIGN KEY (library_id) REFERENCES media_libraries(id) ON DELETE CASCADE
+);
     CREATE TABLE media_library_configs (
       library_id INTEGER PRIMARY KEY,
       auto_scan_enabled INTEGER NOT NULL DEFAULT 0 CHECK(auto_scan_enabled IN (0, 1)),
@@ -77,8 +95,8 @@ describe('V15 local NFO import migration', () => {
     try {
       database.pragma('foreign_keys = ON')
       migrateDatabase(database)
-      assert.equal(CURRENT_SCHEMA_VERSION, 15)
-      assert.equal(database.pragma('user_version', { simple: true }), 15)
+      assert.equal(CURRENT_SCHEMA_VERSION, 18)
+      assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.equal(columnNames(database, 'media_library_configs').has('auto_import_local_nfo'), true)
       assert.equal(tableExists(database, 'pending_resource_identities'), true)
       assert.deepEqual(
@@ -104,7 +122,7 @@ describe('V15 local NFO import migration', () => {
     try {
       createV14ReleaseFixture(database)
       migrateDatabase(database)
-      assert.equal(database.pragma('user_version', { simple: true }), 15)
+      assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.deepEqual(
         database
           .prepare('SELECT auto_import_local_nfo, revision FROM media_library_configs WHERE library_id = 1')

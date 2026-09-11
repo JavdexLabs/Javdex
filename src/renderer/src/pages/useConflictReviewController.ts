@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ActressListItem } from '@shared/actressTypes'
+import type { ActressPickerItem } from '@shared/actressTypes'
 import type {
   ActressConflictReviewSummary,
   ActressNameConflictGroup,
@@ -49,6 +49,8 @@ export interface ConflictReviewViewModel {
     loading: boolean
     error: string | null
     summary: ActressConflictReviewSummary | undefined
+    summaryError: boolean
+    retry(): void
     groups: ActressNameConflictGroup[]
     sections: { pending: ActressNameConflictGroup[]; applicable: ActressNameConflictGroup[] }
     selectedGroup: ActressNameConflictGroup | null
@@ -87,11 +89,18 @@ export interface ConflictReviewViewModel {
     otherOwner: {
       open: boolean
       search: string
-      options: ActressListItem[]
+      options: ActressPickerItem[]
       loading: boolean
-      selected: ActressListItem | null
+      offset: number
+      hasMore: boolean
+      error: string | null
+      choosingId: number | null
+      previousPage(): void
+      nextPage(): void
+      retry(): void
+      selected: ActressPickerItem | null
       changeSearch(value: string): void
-      choose(item: ActressListItem): void
+      choose(item: ActressPickerItem): void
       close(): void
     }
     editName: {
@@ -134,12 +143,12 @@ export interface ConflictReviewViewModel {
 function createRemoteDeps(
   toast: { show(message: string, tone: 'success' | 'error' | 'info'): void },
   invalidateLibrary: () => Promise<void>,
-  refetchGroups: () => Promise<ActressNameConflictGroup[]>
+  refetchGroups: (selectedName?: string | null) => Promise<ActressNameConflictGroup[]>
 ): ConflictReviewRemoteDeps {
   return {
     api: {
-      listActresses: (search) => api.actresses.list(search, 'all'),
-      getActress: (id) => api.actresses.get(id),
+      pageActresses: (query) => api.actresses.pickerPage(query),
+      getActressIdentity: (id) => api.actresses.pickerGet(id),
       inspectConflictName: (input) => api.actressScrape.inspectConflictName(input),
       validateIllegalNameReplacements: (input) =>
         api.actressScrape.validateIllegalNameReplacements(input),
@@ -152,12 +161,16 @@ function createRemoteDeps(
   }
 }
 
-export function useConflictReviewController(): ConflictReviewViewModel {
+export function useConflictReviewController({ enabled = true, summaryEnabled = true, paged }: {
+  enabled?: boolean; summaryEnabled?: boolean
+  paged?: { selectedName: string | null; sessionKey?: string; onResolved(previousName: string | null): Promise<void> }
+} = {}): ConflictReviewViewModel {
   const queryClient = useQueryClient()
   const toast = useToast()
   const [state, dispatch] = useReducer(reduceConflictReviewSession, initialConflictReviewSessionState)
   const resolvingRef = useRef(false)
   const discardingRef = useRef(false)
+  const discardDialogIdentity = useRef<object | null>(null)
   const discardCandidateRef = useRef(state.discardCandidate)
   discardCandidateRef.current = state.discardCandidate
   const editedNameRef = useRef(state.editedName)
@@ -168,19 +181,42 @@ export function useConflictReviewController(): ConflictReviewViewModel {
   replacementMainNamesRef.current = state.replacementMainNames
   const editInspectionGate = useRef(createLatestRequestGate())
   const ownerSearchGate = useRef(createLatestRequestGate())
+  const ownerChoiceGate = useRef(createLatestRequestGate())
+  useEffect(() => () => { ownerChoiceGate.current.next() }, [])
   const replacementValidationGate = useRef(createLatestRequestGate())
   const debouncedOwnerSearch = useDebounce(state.otherOwnerSearch, 250)
   const debouncedEditedName = useDebounce(state.editedName, 250)
 
   const groupsQuery = useQuery({
     queryKey: actressKeys.conflicts(),
-    queryFn: () => api.actressScrape.listConflicts()
+    queryFn: () => api.actressScrape.listConflicts(),
+    enabled: enabled && !paged
   })
   const summaryQuery = useQuery({
     queryKey: actressKeys.conflictSummary(),
-    queryFn: () => api.actressScrape.conflictSummary()
+    queryFn: () => api.actressScrape.conflictSummary(),
+    enabled: summaryEnabled
   })
-  const groups = groupsQuery.data ?? EMPTY_GROUPS
+  const lastName = useRef<string | null>(null)
+  if (paged?.selectedName != null) lastName.current = paged.selectedName
+  const detailName = paged?.selectedName ?? lastName.current
+  const sessionKey = paged?.sessionKey ?? detailName
+  const selectionSession = useRef({ key: sessionKey })
+  if (selectionSession.current.key !== sessionKey) selectionSession.current = { key: sessionKey }
+  const renderSession = selectionSession.current
+  const detailQuery = useQuery({
+    queryKey: [...actressKeys.conflicts(), 'detail', detailName],
+    queryFn: () => api.actressScrape.getConflict(detailName!),
+    enabled: Boolean(paged && enabled && paged.selectedName != null),
+    gcTime: 0
+  })
+  // Keep one selected snapshot while another category/overlay disables reads.
+  const detailGroups = useMemo(() => detailQuery.data ? [detailQuery.data] : EMPTY_GROUPS, [detailQuery.data])
+  const groups = paged ? detailGroups : groupsQuery.data ?? EMPTY_GROUPS
+  const pagedRef = useRef(paged)
+  pagedRef.current = paged
+  const detailRefetchRef = useRef(detailQuery.refetch)
+  detailRefetchRef.current = detailQuery.refetch
   const derived = useMemo(
     () => deriveConflictReviewDetail(state, groups, debouncedEditedName),
     [debouncedEditedName, groups, state]
@@ -216,7 +252,12 @@ export function useConflictReviewController(): ConflictReviewViewModel {
           }
         },
         () => invalidateActressLibraryQueries(queryClient),
-        async () => {
+        async (previousName) => {
+          if (pagedRef.current) {
+            const refreshed = await detailRefetchRef.current()
+            await pagedRef.current.onResolved(previousName ?? null)
+            return refreshed.data ? [refreshed.data] : []
+          }
           const refreshed = await refetchGroupsRef.current()
           return refreshed.data ?? []
         }
@@ -226,17 +267,26 @@ export function useConflictReviewController(): ConflictReviewViewModel {
 
   useEffect(() => {
     dispatch({ type: 'syncSelectedGroup', group: derived.selectedGroup })
-  }, [derived.selectedGroup])
+  }, [derived.selectedGroup, state.selectionGroupName])
 
+  const ownerPickerKey = JSON.stringify([derived.selectedGroup?.normalizedName, enabled, state.otherOwnerOpen, state.otherOwnerSearch, state.otherOwnerOffset])
+  const ownerPickerSession = useRef({ group: renderSession, key: ownerPickerKey })
+  if (ownerPickerSession.current.group !== renderSession || ownerPickerSession.current.key !== ownerPickerKey) {
+    ownerPickerSession.current = { group: renderSession, key: ownerPickerKey }
+  }
+  useEffect(() => {
+    dispatch({ type: 'patch', patch: { otherOwnerChoosingId: null } })
+  }, [ownerPickerKey, renderSession])
   const ownerOptionsKey = derived.ownerOptions.map((owner) => owner.actressId).join(',')
   useEffect(() => {
     return runOwnerSearch({
       gate: ownerSearchGate.current,
       deps: remoteDeps,
-      open: state.otherOwnerOpen,
+      open: state.otherOwnerOpen && enabled,
+      ready: state.otherOwnerSearch === debouncedOwnerSearch,
+      offset: state.otherOwnerOffset,
       search: debouncedOwnerSearch,
       ownerOptions: derived.ownerOptions,
-      selectedOtherOwner: state.selectedOtherOwner,
       apply: applyPatch
     })
     // ownerOptions identity changes every derive; key contents instead.
@@ -246,7 +296,10 @@ export function useConflictReviewController(): ConflictReviewViewModel {
     ownerOptionsKey,
     remoteDeps,
     state.otherOwnerOpen,
-    state.selectedOtherOwner
+    state.otherOwnerSearch,
+    state.otherOwnerOffset,
+    state.otherOwnerRetry,
+    enabled
   ])
 
   useEffect(() => {
@@ -322,6 +375,7 @@ export function useConflictReviewController(): ConflictReviewViewModel {
     previousSelectedName: string | null
     stale: boolean
   }): void => {
+    if (pagedRef.current && (args.previousSelectedName !== lastName.current || renderSession !== selectionSession.current)) return
     dispatch({
       type: 'applyRefresh',
       previousGroups: args.previousGroups,
@@ -332,15 +386,22 @@ export function useConflictReviewController(): ConflictReviewViewModel {
   }
 
   const resolveDecision = (input: Parameters<typeof resolveConflictDecision>[0]['input']): void => {
+    ownerChoiceGate.current.next()
+    dispatch({ type: 'patch', patch: { otherOwnerChoosingId: null } })
+    const operationSession = selectionSession.current
+    const isCurrent = (): boolean => !pagedRef.current || selectionSession.current === operationSession
     void resolveConflictDecision({
       deps: remoteDeps,
       resolving: resolvingRef.current,
       groups,
       selectedGroupName: derived.selectedGroup?.normalizedName ?? null,
       input,
-      apply: applyPatch,
+      apply: (patch) => {
+        if (isCurrent()) applyPatch(patch)
+        else if (patch.resolving !== undefined) applyPatch({resolving:patch.resolving})
+      },
       applyRefresh,
-      resetTransient: () => dispatch({ type: 'resetTransient' })
+      resetTransient: () => { if (isCurrent()) dispatch({ type: 'resetTransient' }) }
     })
   }
 
@@ -372,9 +433,11 @@ export function useConflictReviewController(): ConflictReviewViewModel {
 
   return {
     queue: {
-      loading: groupsQuery.isLoading,
-      error: groupsQuery.error ? String((groupsQuery.error as Error).message) : null,
+      loading: enabled && (paged ? detailQuery.isLoading : groupsQuery.isLoading),
+      error: (paged ? detailQuery.error : groupsQuery.error)?.message ?? null,
+      retry: () => { void (paged ? detailQuery.refetch() : groupsQuery.refetch()) },
       summary: summaryQuery.data,
+      summaryError: summaryQuery.isError,
       groups,
       sections: derived.sections,
       selectedGroup: derived.selectedGroup,
@@ -396,7 +459,10 @@ export function useConflictReviewController(): ConflictReviewViewModel {
       editInspection: derived.editInspection,
       editInspectionPending: derived.editInspectionPending,
       selectTab: (tab) => dispatch({ type: 'selectTab', tab }),
-      selectOwner: (owner) => dispatch({ type: 'selectOwner', owner }),
+      selectOwner: (owner) => {
+        ownerChoiceGate.current.next()
+        dispatch({ type: 'selectOwner', owner })
+      },
       selectSource: (source) => dispatch({ type: 'selectSource', source }),
       openEditName: () => dispatch({ type: 'openEditName', sourceName: derived.editSourceName }),
       openMerge: () => dispatch({ type: 'openMerge' }),
@@ -417,7 +483,10 @@ export function useConflictReviewController(): ConflictReviewViewModel {
           replacementMainNames: []
         })
       },
-      requestDiscard: (candidate) => dispatch({ type: 'requestDiscard', candidate })
+      requestDiscard: (candidate) => {
+        discardDialogIdentity.current = {}
+        dispatch({ type: 'requestDiscard', candidate })
+      }
     },
     dialogs: {
       otherOwner: {
@@ -425,15 +494,27 @@ export function useConflictReviewController(): ConflictReviewViewModel {
         search: state.otherOwnerSearch,
         options: state.otherOwnerOptions,
         loading: state.otherOwnerLoading,
+        offset: state.otherOwnerOffset,
+        hasMore: state.otherOwnerHasMore,
+        error: state.otherOwnerError,
+        choosingId: state.otherOwnerChoosingId,
+        previousPage: () => { if (!state.otherOwnerLoading && state.otherOwnerOffset > 0) dispatch({ type: 'changeOtherOwnerPage', offset: Math.max(0, state.otherOwnerOffset - 40) }) },
+        nextPage: () => { if (!state.otherOwnerLoading && state.otherOwnerHasMore) dispatch({ type: 'changeOtherOwnerPage', offset: state.otherOwnerOffset + 40 }) },
+        retry: () => dispatch({ type: 'retryOtherOwner' }),
         selected: state.selectedOtherOwner,
         changeSearch: (value) => dispatch({ type: 'changeOtherOwnerSearch', value }),
         choose: (item) => {
+          const requestId = ownerChoiceGate.current.next()
+          const session = ownerPickerSession.current
+          const isCurrent = () => ownerChoiceGate.current.isLatest(requestId) && ownerPickerSession.current === session
+          dispatch({ type: 'patch', patch: { otherOwnerChoosingId: item.id } })
           void chooseOtherOwnerRemote({
             deps: remoteDeps,
             item,
+            isCurrent,
             onChosen: (chosen, revision) =>
               dispatch({ type: 'chooseOtherOwner', item: chosen, revision })
-          })
+          }).finally(() => { if (isCurrent()) dispatch({ type: 'patch', patch: { otherOwnerChoosingId: null } }) })
         },
         close: () => dispatch({ type: 'closeOtherOwner' })
       },
@@ -514,13 +595,23 @@ export function useConflictReviewController(): ConflictReviewViewModel {
         candidate: state.discardCandidate,
         busy: state.discarding,
         confirm: () => {
+          const operationSession = selectionSession.current
+          const operationDialog = discardDialogIdentity.current
           void discardConflictCandidate({
             deps: remoteDeps,
             discarding: discardingRef.current,
             discardCandidate: discardCandidateRef.current,
             groups,
             selectedGroupName: derived.selectedGroup?.normalizedName ?? null,
-            apply: applyPatch,
+            apply: (patch) => {
+              if (!pagedRef.current || selectionSession.current === operationSession) applyPatch(patch)
+              else {
+                const completion: Partial<ConflictReviewSessionState> = {}
+                if (patch.discarding !== undefined) completion.discarding = patch.discarding
+                if (patch.discardCandidate === null && discardDialogIdentity.current === operationDialog) completion.discardCandidate = null
+                if (Object.keys(completion).length > 0) applyPatch(completion)
+              }
+            },
             applyRefresh
           })
         },

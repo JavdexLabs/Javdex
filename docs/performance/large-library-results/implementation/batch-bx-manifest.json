@@ -1,0 +1,19 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bx-audit-index.patch": "7d99e42620d1cb257adcffb72f37425a0a5274be663dd1f206d3ebf77f161249",
+    "batch-bx-benchmark.json": "c204ac7ba02001c76499171046e6e754aecf5072963abb4ea642e17430ae6460",
+    "batch-bx-benchmark.log": "75613f051508fd9b3695664f2f7068eea4a4e3dc019c42ead6d6e5ee62dd1cb2",
+    "batch-bx-build.log": "75a61d6218647817efc2bbc093215cfd3fec087a3f88d745b0e08834d529f6e4",
+    "batch-bx-full.log": "521a8dd87943f51b41edd050234735c530bb4ea24bff37e2d56c945272266a86",
+    "batch-bx-review.md": "89b1f205e2104519c2590f28cd8954d6f685b41b90a3a86ca10fc9ba38e3aff9",
+    "batch-bx-target.log": "3c230dac107fe58defdf35d4c3ecb3cc6e684402d2c134604855b5f048fe2273"
+  },
+  "notes": [
+    "New module and probe depend on current readonly database initializer/schema/runtime.",
+    "9 focused; full2375pass1skip0fail; build terminal0.",
+    "Synchronous primitive only; no worker/IPC/UI integration or product default quotas yet.",
+    "Factory benchmark includes source validation and quotas, not equivalent to earlier same-writer TEMP probe.",
+    "Full15/42goal remains incomplete."
+  ]
+}

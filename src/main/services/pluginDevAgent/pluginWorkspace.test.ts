@@ -415,3 +415,29 @@ describe('PluginWorkspaceModule', () => {
     )
   })
 })
+
+it('awaits asynchronous removal without recursively deleting through the synchronous API', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-workspace-remove-'))
+  roots.push(root)
+  const workspace = new PluginWorkspaceModule()
+  fs.mkdirSync(path.join(root, 'nested'))
+  fs.writeFileSync(path.join(root, 'nested', 'file.txt'), 'test')
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  const remove = fs.promises.rm
+  t.mock.method(fs.promises, 'rm', async (target: fs.PathLike, options?: fs.RmOptions) => { await gate; await remove(target, options) })
+  const sync = t.mock.method(fs, 'rmSync', () => { throw new Error('synchronous removal') })
+  let settled = false
+  const pending = workspace.remove(root).then(() => { settled = true })
+  try {
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(settled, false)
+    assert.equal(fs.existsSync(root), true)
+    assert.equal(sync.mock.callCount(), 0)
+  } finally {
+    release()
+    await pending
+    t.mock.restoreAll()
+  }
+  assert.equal(fs.existsSync(root), false)
+})

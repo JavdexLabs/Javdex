@@ -1,5 +1,8 @@
 import type {
   PendingVideoScrape,
+  PendingVideoScrapePage,
+  PendingVideoScrapePageQuery,
+  PendingVideoScrapeSummary,
   ScrapeResult,
   VideoScrapeField,
   VideoScrapeUpdateMode
@@ -357,6 +360,12 @@ export function getPendingVideoScrapeForVideo(videoId: number): PendingVideoScra
   return row ? getPendingVideoScrapeById(row.id) : null
 }
 
+export function countPendingVideoScrapes(): number {
+  return (getDb().prepare('SELECT COUNT(*) AS count FROM pending_video_scrapes').get() as {
+    count: number
+  }).count
+}
+
 export function listPendingVideoScrapes(): PendingVideoScrape[] {
   const rows = getDb()
     .prepare('SELECT id FROM pending_video_scrapes ORDER BY created_at, id')
@@ -399,4 +408,60 @@ export function deletePendingVideoScrapeForVideo(
     .prepare('SELECT id FROM pending_video_scrapes WHERE video_id = ?')
     .get(videoId) as { id: number } | undefined
   return row ? deletePendingVideoScrape(row.id) : null
+}
+
+
+/** Page and summaries share a snapshot; only page-local candidate metadata reaches JS. */
+export function pagePendingVideoScrapes(query: PendingVideoScrapePageQuery): PendingVideoScrapePage {
+  const { limit = 50, offset = 0, anchorId, videoId } = query
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+      !Number.isSafeInteger(offset) || offset < 0 ||
+      [anchorId, videoId].some(id => id !== undefined && (!Number.isSafeInteger(id) || id < 1)) ||
+      (anchorId !== undefined && videoId !== undefined)) throw new Error('Invalid pending scrape page')
+  const db = getDb()
+  return db.transaction(() => {
+    const total = countPendingVideoScrapes()
+    let pageOffset = Math.min(offset, Math.max(0, Math.floor((total - 1) / limit) * limit))
+    if (anchorId !== undefined || videoId !== undefined) {
+      const anchor = db.prepare(`SELECT id, created_at FROM pending_video_scrapes WHERE ${anchorId !== undefined ? 'id' : 'video_id'} = ?`)
+        .get(anchorId ?? videoId) as { id: number; created_at: string } | undefined
+      if (anchor) {
+        const before = db.prepare(`SELECT COUNT(*) AS n FROM pending_video_scrapes
+          WHERE (created_at, id) < (?, ?)`).get(anchor.created_at, anchor.id) as { n: number }
+        pageOffset = Math.floor(before.n / limit) * limit
+      }
+    }
+    const rows = db.prepare(`SELECT id, video_id AS videoId, revision FROM pending_video_scrapes
+      ORDER BY created_at, id LIMIT ? OFFSET ?`).all(limit, pageOffset) as Array<Pick<PendingVideoScrapeSummary, 'id' | 'videoId' | 'revision'>>
+    const counts = db.prepare(`SELECT COUNT(DISTINCT s.id) AS sourceCount, COUNT(c.id) AS candidateCount
+      FROM pending_video_scrape_sources s LEFT JOIN pending_video_scrape_candidates c ON c.source_id=s.id
+      WHERE s.pending_scrape_id=?`)
+    const first = db.prepare(`SELECT c.id, CASE WHEN json_valid(c.result_json)
+      THEN CASE WHEN json_type(c.result_json, '$.code') = 'text'
+        THEN substr(trim(json_extract(c.result_json, '$.code'), char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)), 1, 129) END END AS code
+      FROM pending_video_scrape_sources s JOIN pending_video_scrape_candidates c ON c.source_id=s.id
+      WHERE s.pending_scrape_id=? ORDER BY s.position,s.id,c.position,c.id LIMIT 1`)
+    const cover = db.prepare(`SELECT CASE WHEN length(staged_path) <= 4096 THEN staged_path END AS staged_path FROM pending_video_scrape_resources
+      WHERE candidate_id=? AND field='cover' ORDER BY position,id LIMIT 1`)
+    const items = rows.map(row => {
+      const summary = counts.get(row.id) as { sourceCount: number; candidateCount: number }
+      const candidate = first.get(row.id) as { id: number; code: string | null } | undefined
+      const resource = candidate ? cover.get(candidate.id) as { staged_path: string | null } | undefined : undefined
+      // SQLite substr counts Unicode code points; preserve full values in the detail snapshot.
+      const label = Array.from(candidate?.code?.trim() ?? '')
+      return { ...row, ...summary, code: label.length > 128 ? label.slice(0,128).join('') + '…' : label.join(''),
+        stagedCoverPath: resource?.staged_path ?? null }
+    })
+    return { items, total, offset: pageOffset }
+  })()
+}
+
+
+/** Existence only, for the currently displayed audit page. No snapshot hydration. */
+export function existingPendingVideoScrapeIds(ids: readonly number[]): number[] {
+  if (ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id < 1)) throw new Error('Invalid pending scrape IDs')
+  const unique = [...new Set(ids)]
+  if (!unique.length) return []
+  return (getDb().prepare(`SELECT id FROM pending_video_scrapes WHERE id IN (${unique.map(() => '?').join(',')}) ORDER BY id`)
+    .all(...unique) as Array<{ id: number }>).map(row => row.id)
 }

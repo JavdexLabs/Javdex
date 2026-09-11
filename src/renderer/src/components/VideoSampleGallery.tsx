@@ -1,3 +1,4 @@
+import type { ImageThumbnailSize } from '@shared/imageVariants'
 import { useCallback, useMemo, useState } from 'react'
 import { useImagePreviewById } from '../hooks/useImagePreviewById'
 import type { VideoAsset } from '@shared/videoTypes'
@@ -18,8 +19,8 @@ import { UI_ICON } from './iconDefaults'
 const SAMPLE_MASONRY_GAP = 10
 const SAMPLE_MASONRY_MIN_COL_WIDTH = 260
 
-function sampleSrc(asset: VideoAsset): string | null {
-  return assetUrl(asset.local_path) ?? asset.remote_url
+function sampleSrc(asset: VideoAsset, size?: ImageThumbnailSize): string | null {
+  return assetUrl(asset.local_path, size) ?? asset.remote_url
 }
 
 function sampleRatio(asset: VideoAsset, measuredRatios?: Record<number, number>): number {
@@ -207,7 +208,7 @@ export default function VideoSampleGallery({
             {masonryColumns.map((column, columnIndex) => (
               <div key={columnIndex} className="sample-masonry-column">
                 {column.items.map(({ asset, index }) => {
-                  const src = sampleSrc(asset)
+                  const src = sampleSrc(asset, 640)
                   if (!src) return null
                   return (
                     <div key={asset.id} className="sample-masonry-item">

@@ -1,0 +1,33 @@
+✔ pages narrow labels from 10000 actors without catalog statistics or profile data (112.410333ms)
+✔ preserves owned-name search matching and includes all genders (8.779834ms)
+✔ sorts full names before shortening labels and bounds escaped JSON payloads (14.57925ms)
+✔ rejects invalid limits, offsets and overlong search before reading (6.077209ms)
+✖ bounds labels containing embedded NUL without losing the valid prefix (10.401875ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 373.759042
+
+✖ failing tests:
+
+test at src/main/db/actressPickerRepo.test.ts:3:3400
+✖ bounds labels containing embedded NUL without losing the valid prefix (10.401875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  600002 !== 129
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/actressPickerRepo.test.ts:88:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 600002,
+    expected: 129,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

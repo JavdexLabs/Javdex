@@ -1,0 +1,24 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ar-benchmark-1000-source.ts": "0f4222e5497bba1a6cde2e5b6179b5d55c301e2e04feafc1ac55d0d43882eab9",
+    "batch-ar-benchmark-1000-timeout.log": "a2e159708e5fd09ade10065884a9df1f7a24a53de04603d65cfccec9654119ce",
+    "batch-ar-benchmark.json": "36a0671203fca2f915725dfe9b5fb81273d5f33f3941ed24e440610373b47981",
+    "batch-ar-benchmark.log": "1aff436594f72c3cd587db90067ef6039c90e7af2f16d6ebfeac6b0b1e86c4d1",
+    "batch-ar-build.log": "ceb21772cd74e0e602dd489dcf997db169e860cdf5f97e1e9b0369971cab07a6",
+    "batch-ar-conflict-queue-api.patch": "12c81dd39d37d553750475f6a5dbc023ef7946e3106a0a07e86a3e5a09ce9e13",
+    "batch-ar-full.log": "a0dd7843d6ac90f4d1bb99d89199971a6c8fe9e9a66ea943d4a4b505cbedd2d8",
+    "batch-ar-review.md": "56dfbd4f94240296f2f2a6eec8f39e956f1cf122492edcc635cf19e19f63a1bf",
+    "batch-ar-target.log": "5cb313db70ab9ef58a5ed43e0933bcab9573188feb2a9a38a2be0533a9a3816b"
+  },
+  "notes": [
+    "Cumulative selected diff vs HEAD plus full new benchmark; depends on B-AQ, not standalone.",
+    "Final84focused and full2225pass1skip0fail(2226total); build passed before final test-only additions, production unchanged.",
+    "Backend typed page/get only; actor UI remains on legacy full list. Do not mark02B/05 frontend paging complete.",
+    "Page max100/default50; full-name locale stable sort and anchors; captions128codepoints+ellipsis. Complete normalizedName identity retained, so no fixed-byte budget claimed.",
+    "Selected get preserves all conflicts/resources of relevant candidates; field planning/merge preflight only selected group. Single-group work unbounded; metadata grouping/sort global; cold maintenance can write.",
+    "1000-group shared-owner1000alias run hit180s aggregate runner timeout without stages. Preserve failure/source, no single-query timing attribution.",
+    "Completed100group/100alias same-skew fixture3warm samples afterANALYZE/maintenance warmup. Full comparator disables field previews; selectedget equality against default full legacy group. Not p95/cold/Windows/HDD/full IPC or1000group extrapolation.",
+    "No user data/schema changes, commit, push or release. Complete15/42 goal remains active."
+  ]
+}

@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict'
+import { it } from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { initDatabaseAtPath, closeDatabase } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/database.ts'
+import { createScopedVideoCatalogRepo } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scopedVideoCatalogRepo.ts'
+import { createHomeDiscoveryRepo } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/homeDiscoveryRepo.ts'
+import { createVideoQueryService } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/services/videoQueryService.ts'
+
+for (const mode of ['list', 'home'] as const) it(`unchanged ${mode} calls must reuse aggregate work`, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-catalog-red-'))
+  const db = initDatabaseAtPath(path.join(dir, 'catalog.db'))
+  const original = db.prepare, prepare = db.prepare.bind(db)
+  try {
+    db.exec(`INSERT INTO videos(id,code,title) VALUES(100,'ABC-100','Actual title');
+      INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(1,100,100);
+      INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key) VALUES(1,100,'web','https://example.test','resource');`)
+    const trace: string[] = []
+    db.prepare = ((sql: string) => {
+      const statement = prepare(sql)
+      for (const method of ['get', 'all'] as const) {
+        const run = statement[method].bind(statement)
+        statement[method] = ((...args: unknown[]) => { trace.push(sql); return run(...args) }) as never
+      }
+      return statement
+    }) as typeof db.prepare
+    if (mode === 'list') {
+      const service = createVideoQueryService({ catalog: createScopedVideoCatalogRepo(db) })
+      const first = service.list({ kind: 'library', libraryId: 1 }, { limit: 1, offset: 0 })
+      const second = service.list({ kind: 'library', libraryId: 1 }, { limit: 1, offset: 1 })
+      assert.equal(first.total, 1); assert.equal(second.total, 1)
+      assert.equal(first.items[0].title, 'Actual title'); assert.equal(second.items.length, 0)
+      const aggregates = trace.filter(sql => /^\s*SELECT COUNT\(\*\) AS count FROM library_video_memberships/.test(sql))
+      console.log(JSON.stringify({ mode, actualAggregateExecutions: aggregates.length, expected: 1 }))
+      assert.equal(aggregates.length, 1, 'same filter across pages repeats aggregate')
+    } else {
+      const repo = createHomeDiscoveryRepo({ database: db })
+      const first = repo.load({ seed: 'stable' }), second = repo.load({ seed: 'stable' })
+      assert.deepEqual(second, first)
+      assert.equal(first.libraries[0].membershipCount, 1)
+      const aggregates = trace.filter(sql => /^\s*WITH membership_counts AS/.test(sql))
+      console.log(JSON.stringify({ mode, actualAggregateExecutions: aggregates.length, expected: 1 }))
+      assert.equal(aggregates.length, 1, 'unchanged home repeats status aggregates')
+    }
+  } finally { db.prepare = original; closeDatabase(); fs.rmSync(dir, { recursive: true, force: true }) }
+})

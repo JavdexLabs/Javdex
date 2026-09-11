@@ -1,0 +1,25 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bp-target.log": "6c343a2f032197da62114fbaf96db61386cb5bcc97bcf4e2692e256286dce3c6",
+    "batch-bp-full.log": "d990e4e7918f93714bc2dc22f8bbf5433592f7f34af3dde0b15ada543c7e0cdd",
+    "batch-bp-build.log": "fa77f8b6681aa7944b28ee59204bd53d789ea5bb165882e448992b352e62a95c",
+    "batch-bp-browser.log": "6de8ed34fefeab52d58a6b5335b272f4653687758c9825b55e7f2db4816a4641",
+    "batch-bp-benchmark.log": "a96bc363d59d66a26bb6676edd771d3a59a92f80163067cde8a1103476c35b04",
+    "batch-bp-benchmark.json": "855518fdec28aa5a0533f97f0f3e56e2bfd2db21b614d164d88ec9640134257c",
+    "batch-bp-ui-director-1000x640.png": "80d9675493fc59dc63bff5887d111059cd7f9bbe2c143dc1d7fb1adf0b470ab9",
+    "batch-bp-ui-director-1440x900.png": "4627b8a4b0d2c624d5e1b4c226a38adbf1ebc31ab2ce39567c13c0556bc90513",
+    "batch-bp-ui-maker-1000x640.png": "e80cf8a07964357805c62fecc59be1fb56dc3fb15444effe4b3d80065343f47a",
+    "batch-bp-ui-maker-1440x900.png": "2526ae2f43cc3bc769606f921a0e5cac979024945753a020c9d24c1544f9b54f",
+    "batch-bp-ui-results.json": "c1ac5601b8cd3e83c5cd20baf1ee88a1c8f9d5244099f76278e79ba9a1b686b3",
+    "batch-bp-ui-series-1000x640.png": "ea82a811cb3a5fd0de073ff1ec89dde892239fcc5bcf192c9506164f6bfc595d",
+    "batch-bp-ui-series-1440x900.png": "65d990450893ed5ecba374afce396f53016337f7975663e97fc46c6f53268e05",
+    "batch-bp-director-page.patch": "b348ffed923b56ec0e48e98f4c310ad347a6fd2c495516a5e5399a00ae9e22cc",
+    "batch-bp-review.md": "515c3fa0a5acb3d5d620e627bb0fdea6fa4f6c8c53158d11cd02b0e6d431905c"
+  },
+  "notes": [
+    "Selected cumulative diff and full new files depend on earlier batches.",
+    "60 focused; full2351pass1skip0fail; build and six actual browser scenarios passed.",
+    "Director primary list now bounded; complete-list callers and full15/42goal remain incomplete."
+  ]
+}

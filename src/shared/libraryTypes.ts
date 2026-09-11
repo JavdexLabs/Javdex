@@ -261,6 +261,10 @@ export interface ScanResult {
   omittedStrmFailures: number
 }
 
+/** Compact completion payload; detailed paths/codes remain in durable scan audit storage. */
+export type ScanCompletionResult = Omit<ScanResult, 'newCodes' | 'unrecognizedFiles'> & { unrecognizedCount: number }
+export type ScanExecutionResult = ScanResult | ScanCompletionResult
+
 export interface PendingScanResource {
   id: number
   libraryId: number
@@ -370,7 +374,7 @@ export type LibraryScanEvent =
       libraryId: number
       runId: string
       trigger: LibraryScanTrigger
-      result: ScanResult
+      result: ScanCompletionResult
     }
   | {
       phase: 'failed'
@@ -419,4 +423,29 @@ export interface PlayResult {
   /** True when the file no longer exists on disk. */
   fileMissing?: boolean
   error?: string
+}
+
+/** At most100 IDs across all three arrays, for one displayed audit page. */
+export interface PendingAuditIds {
+  groupIds: number[]
+  identityIds: number[]
+  scrapeIds: number[]
+}
+
+export type PendingScanQueueItem = {
+  id: number
+  libraryId: number
+  revision: number
+  label: string
+} & ({kind:'group';resourceCount:number} | {kind:'identity';displayName:string})
+export interface PendingScanQueueQuery {
+  libraryId?: number
+  limit?: number
+  offset?: number
+  anchor?: {kind:'group'|'identity';id:number}
+}
+export interface PendingScanQueuePage {
+  items: PendingScanQueueItem[]
+  total: number
+  offset: number
 }

@@ -1,0 +1,24 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bz-audit-ipc-view.patch": "eb80f500b3ac47527816b5d45d2f1ea8918892d19fb544e0e32a8a05e5f93678",
+    "batch-bz-build.log": "f1596cc872e5d178f42204f105de425724550f05280bbb9a12c8f950809e83aa",
+    "batch-bz-full.log": "c31afb3563a7027b662f1b77eae18e229a1c5b7f4b3d0cc28031dba4c211b503",
+    "batch-bz-function-identity.json": "5e4e1f99fae05e8dc19874059c690e51e0973fdd17836260eede26ca691f99ce",
+    "batch-bz-review.md": "dbb3e0ffd6a54f502cda15d4960239640d99d6d323b8fee3668ef3eafc2b0409",
+    "batch-bz-target.log": "2a5493de5a3029e7277d37cbfca4dd89c4ac90c7b8911e599bbad886774cfd96",
+    "batch-bz-view-after.log": "dd8331d2f3b09b3e183106fd2578dec72025c4ab5d7b70d3dc0782bde8ab9d90",
+    "batch-bz-view-before.log": "13f62047fb1451c9ad125e6a9a803ea139ac0f35866c2af26a78f8b17ddd7f69",
+    "batch-bz-view-before.tsx": "43af14c63ffc751058383956109e1c9b1c320142beb5e883cde66c779e1e984a",
+    "batch-bz-view-oracle-preload.cjs": "689535b329b4e936ef6e6916355806751607fa7ff365c65882f09b936ad82078",
+    "batch-bz-view-oracle.cjs": "2525c4023622182cb7d0c2dcc4999a805ba211ac4d201e7ea8875a43ac184364",
+    "batch-bz-view-oracle.log": "4da94ecc15b52c32310b075cc6b13a12e24c6c174a144705c4a762ad2a7c48c7"
+  },
+  "notes": [
+    "Selected cumulative source snapshot depends on earlier batches.",
+    "80 parent focused; original helper oracle25 and extracted shared/UI36; full2410pass1skip0fail; build terminal0.",
+    "Initial typed worker test needed tag-specific query narrowing; original assertion retained.",
+    "New APIs registered but existing page still uses full latest snapshot. No browser/performance benchmark this batch.",
+    "Full15/42goal remains incomplete."
+  ]
+}

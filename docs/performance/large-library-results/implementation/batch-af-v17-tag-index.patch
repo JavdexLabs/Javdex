@@ -1,0 +1,1027 @@
+diff --git a/src/main/db/migrations.test.ts b/src/main/db/migrations.test.ts
+index c87259a..a0fbe3d 100644
+--- a/src/main/db/migrations.test.ts
++++ b/src/main/db/migrations.test.ts
+@@ -10,6 +10,21 @@ import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
+ import { ActressIdentityConflictWorkflow } from '../services/actressIdentityConflictWorkflow'
+ import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+ 
++/** Older fixtures intentionally model only the tables relevant to their test.
++ * Supply the unaffected tag index needed by the later V17 migration. */
++function ensureTagFixture(db: Database.Database): void {
++  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='video_tag'").get()) {
++    db.exec(`CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
++      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
++      CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);`)
++  }
++}
++
++function migrateFixture(db: Database.Database): void {
++  if (Number(db.pragma('user_version', { simple: true })) > 0) ensureTagFixture(db)
++  migrateDatabase(db)
++}
++
+ function indexNames(db: Database.Database): string[] {
+   return (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as {
+     name: string
+@@ -266,7 +281,7 @@ describe('database schema', () => {
+                    '/library', 'WAIT-001.mp4')`
+       ).run()
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.equal(columnNamesForTest(db, 'video_resources').has('strm_source_path'), true)
+@@ -352,7 +367,7 @@ describe('database schema', () => {
+   it('allows duplicate codes while enforcing complete video business identity', () => {
+     const db = new Database(':memory:')
+     try {
+-      migrateDatabase(db)
++      migrateFixture(db)
+       db.prepare("INSERT INTO organizations (id, main_name) VALUES (1, 'Publisher')").run()
+ 
+       db.prepare("INSERT INTO videos (code) VALUES ('DUP-001')").run()
+@@ -434,7 +449,7 @@ describe('database schema', () => {
+          ) VALUES (61, 41, 'Site', NULL, 'ABC-001', 'https://example.test/v/1', 'Source title', '2024-03-05')`
+       ).run()
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.deepEqual(
+@@ -473,7 +488,7 @@ describe('database schema', () => {
+         "INSERT INTO videos (id, code, publisher_organization_id, release_date) VALUES (42, ' ABC-001 ', 7, '2024-03-04')"
+       ).run()
+ 
+-      assert.throws(() => migrateDatabase(db), /41.*42|42.*41/)
++      assert.throws(() => migrateFixture(db), /41.*42|42.*41/)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), 10)
+       assert.equal(tableExistsForTest(db, 'video_external_ids'), true)
+@@ -507,7 +522,7 @@ describe('database schema', () => {
+           ('series', 'Empty Series');
+       `)
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.deepEqual(
+@@ -622,7 +637,7 @@ describe('database schema', () => {
+         series: rowCount(db, 'series'),
+         seriesNames: rowCount(db, 'series_names')
+       }
+-      migrateDatabase(db)
++      migrateFixture(db)
+       assert.deepEqual(
+         {
+           organizations: rowCount(db, 'organizations'),
+@@ -643,7 +658,7 @@ describe('database schema', () => {
+   it('retires v8 text storage without changing video metadata, entity ids, or child resources', () => {
+     const db = new Database(':memory:')
+     try {
+-      migrateDatabase(db)
++      migrateFixture(db)
+       db.exec(`
+         ALTER TABLE videos ADD COLUMN maker TEXT;
+         ALTER TABLE videos ADD COLUMN publisher TEXT;
+@@ -698,7 +713,7 @@ describe('database schema', () => {
+       db.prepare("INSERT INTO facet_entries (type, value) VALUES ('maker', 'Unused')").run()
+       db.pragma('user_version = 8')
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.deepEqual(
+@@ -742,7 +757,7 @@ describe('database schema', () => {
+   it('stores classification profiles, hierarchy, roles, links, and video references', () => {
+     const db = new Database(':memory:')
+     try {
+-      migrateDatabase(db)
++      migrateFixture(db)
+       const parentOrganizationId = Number(
+         db.prepare("INSERT INTO organizations (main_name) VALUES ('Parent Org')").run()
+           .lastInsertRowid
+@@ -872,7 +887,7 @@ describe('database schema', () => {
+         INSERT INTO videos (code, maker) VALUES ('ROLLBACK', 'Broken Org');
+       `)
+ 
+-      assert.throws(() => migrateDatabase(db), /forced classification migration failure/)
++      assert.throws(() => migrateFixture(db), /forced classification migration failure/)
+       assert.equal(db.pragma('user_version', { simple: true }), 7)
+       assert.equal(rowCount(db, 'organizations'), 0)
+       assert.equal(tableExistsForTest(db, 'directors'), false)
+@@ -898,7 +913,7 @@ describe('database schema', () => {
+         CREATE VIEW legacy_video_makers AS SELECT maker FROM videos;
+       `)
+ 
+-      assert.throws(() => migrateDatabase(db))
++      assert.throws(() => migrateFixture(db))
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), 7)
+       assert.equal(tableExistsForTest(db, 'organizations'), false)
+@@ -915,6 +930,7 @@ describe('database schema', () => {
+     const fixture = new Database(dbPath)
+     try {
+       createV4ActressSchema(fixture)
++      ensureTagFixture(fixture)
+       fixture.exec(`
+         INSERT INTO actresses (id, main_name) VALUES
+           (1, 'Ａlice Smith'),
+@@ -1037,7 +1053,7 @@ describe('database schema', () => {
+           .prepare('SELECT * FROM pending_actress_name_claims ORDER BY id')
+           .all()
+       }
+-      migrateDatabase(db)
++      migrateFixture(db)
+       assert.deepEqual(
+         {
+           ownership: db
+@@ -1066,7 +1082,7 @@ describe('database schema', () => {
+         VALUES (999, 'Orphan Name', 'alias', 0);
+       `)
+ 
+-      assert.throws(() => migrateDatabase(db), /FOREIGN KEY constraint failed/)
++      assert.throws(() => migrateFixture(db), /FOREIGN KEY constraint failed/)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), 4)
+       assert.equal(
+@@ -1090,8 +1106,8 @@ describe('database schema', () => {
+   it('creates the current schema and records user_version', () => {
+     const db = new Database(':memory:')
+     try {
+-      migrateDatabase(db)
+-      migrateDatabase(db)
++      migrateFixture(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       const actressCols = db.prepare('PRAGMA table_info(actresses)').all() as Array<{
+@@ -1277,8 +1293,8 @@ describe('database schema', () => {
+       `)
+       db.pragma('user_version = 6')
+ 
+-      migrateDatabase(db)
+-      migrateDatabase(db)
++      migrateFixture(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.deepEqual(
+@@ -1358,7 +1374,7 @@ describe('database schema', () => {
+       `)
+       db.pragma('user_version = 1')
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.deepEqual(
+@@ -1396,7 +1412,7 @@ describe('database schema', () => {
+     try {
+       db.exec('CREATE TABLE videos (id INTEGER PRIMARY KEY)')
+       db.pragma('user_version = 99')
+-      assert.throws(() => migrateDatabase(db), /no longer supported/)
++      assert.throws(() => migrateFixture(db), /no longer supported/)
+     } finally {
+       db.close()
+     }
+@@ -1413,7 +1429,7 @@ describe('database schema', () => {
+         )
+       `)
+       db.pragma('user_version = 1')
+-      migrateDatabase(db)
++      migrateFixture(db)
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       const cols = (db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]).map(
+         (c) => c.name
+@@ -1457,7 +1473,7 @@ describe('database schema', () => {
+       `)
+       db.pragma('user_version = 2')
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       const names = db
+@@ -1502,7 +1518,7 @@ describe('database schema', () => {
+         )
+       `)
+       db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+-      migrateDatabase(db)
++      migrateFixture(db)
+       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       const cols = (db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]).map(
+         (c) => c.name
+@@ -1613,7 +1629,7 @@ describe('database schema', () => {
+         "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+       ).run(aliasId, 'Visible Alias')
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       const rows = db
+         .prepare(
+@@ -1658,7 +1674,7 @@ describe('database schema', () => {
+          VALUES (?, ?)`
+       ).run('Repeatable cleanup', '2025-03-04T05:06:07.000Z')
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+       const first = db
+         .prepare(
+           `SELECT main_name, scraped_status, last_scraped_at
+@@ -1667,7 +1683,7 @@ describe('database schema', () => {
+         )
+         .all()
+ 
+-      migrateDatabase(db)
++      migrateFixture(db)
+ 
+       assert.deepEqual(
+         db
+@@ -1704,7 +1720,7 @@ describe('database schema', () => {
+         END;
+       `)
+ 
+-      assert.throws(() => migrateDatabase(db), /classification rejected/)
++      assert.throws(() => migrateFixture(db), /classification rejected/)
+ 
+       assert.equal(db.pragma('user_version', { simple: true }), 3)
+       assert.equal(
+diff --git a/src/main/db/migrations.ts b/src/main/db/migrations.ts
+index e0752bb..6b67d15 100644
+--- a/src/main/db/migrations.ts
++++ b/src/main/db/migrations.ts
+@@ -9,6 +9,7 @@ import {
+   CLASSIFICATION_V8_SCHEMA_SQL,
+   AGENT_METADATA_SCHEMA_SQL,
+   AGENT_PLATFORM_SCHEMA_SQL,
++  AGENT_RESOURCE_CLEANUP_SCHEMA_SQL,
+   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
+   MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
+   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
+@@ -22,7 +23,7 @@ import {
+   VIDEO_SOURCES_SCHEMA_SQL
+ } from './schema'
+ 
+-export const CURRENT_SCHEMA_VERSION = 15
++export const CURRENT_SCHEMA_VERSION = 17
+ 
+ type Migration = {
+   version: number
+@@ -1369,6 +1370,19 @@ const MIGRATIONS: Migration[] = [
+   {
+     version: 15,
+     migrate: migrateToV15
++  },
++  {
++    version: 16,
++    migrate: (database) => database.exec(AGENT_RESOURCE_CLEANUP_SCHEMA_SQL)
++  },
++  {
++    version: 17,
++    migrate: (database) => {
++      // Keep the tag-key contract while covering manual-origin qualification.
++      // The enclosing migration transaction rolls back both DDL and version.
++      database.exec('DROP INDEX idx_video_tag_tag_id')
++      database.exec('CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id,origin)')
++    }
+   }
+ ]
+ 
+diff --git a/src/main/db/migrationsV14.test.ts b/src/main/db/migrationsV14.test.ts
+index 95a837a..a537b2c 100644
+--- a/src/main/db/migrationsV14.test.ts
++++ b/src/main/db/migrationsV14.test.ts
+@@ -32,6 +32,10 @@ function rowCount(database: Database.Database, table: string): number {
+ function createV13ReleaseFixture(database: Database.Database): void {
+   database.exec(`
+     PRAGMA foreign_keys = ON;
++    -- Minimal unaffected relationship/index required by the later V17 migration.
++    CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
++      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
++    CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);
+ 
+     CREATE TABLE videos (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+@@ -147,7 +151,7 @@ describe('V14 unreleased feature consolidation migration', () => {
+ 
+       migrateDatabase(database)
+ 
+-      assert.equal(CURRENT_SCHEMA_VERSION, 15)
++      assert.equal(CURRENT_SCHEMA_VERSION, 17)
+       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       for (const table of [
+         'media_libraries',
+diff --git a/src/main/db/migrationsV15.test.ts b/src/main/db/migrationsV15.test.ts
+index 9a727e8..ea2b6c9 100644
+--- a/src/main/db/migrationsV15.test.ts
++++ b/src/main/db/migrationsV15.test.ts
+@@ -25,6 +25,10 @@ function columnNames(database: Database.Database, table: string): Set<string> {
+ function createV14ReleaseFixture(database: Database.Database): void {
+   database.exec(`
+     PRAGMA foreign_keys = ON;
++    -- Minimal unaffected relationship/index required by the later V17 migration.
++    CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
++      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
++    CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);
+     CREATE TABLE media_libraries (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       name TEXT NOT NULL,
+@@ -77,8 +81,8 @@ describe('V15 local NFO import migration', () => {
+     try {
+       database.pragma('foreign_keys = ON')
+       migrateDatabase(database)
+-      assert.equal(CURRENT_SCHEMA_VERSION, 15)
+-      assert.equal(database.pragma('user_version', { simple: true }), 15)
++      assert.equal(CURRENT_SCHEMA_VERSION, 17)
++      assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.equal(columnNames(database, 'media_library_configs').has('auto_import_local_nfo'), true)
+       assert.equal(tableExists(database, 'pending_resource_identities'), true)
+       assert.deepEqual(
+@@ -104,7 +108,7 @@ describe('V15 local NFO import migration', () => {
+     try {
+       createV14ReleaseFixture(database)
+       migrateDatabase(database)
+-      assert.equal(database.pragma('user_version', { simple: true }), 15)
++      assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.deepEqual(
+         database
+           .prepare('SELECT auto_import_local_nfo, revision FROM media_library_configs WHERE library_id = 1')
+diff --git a/src/main/db/schema.ts b/src/main/db/schema.ts
+index 9dcff47..03bf886 100644
+--- a/src/main/db/schema.ts
++++ b/src/main/db/schema.ts
+@@ -679,6 +679,14 @@ CREATE INDEX IF NOT EXISTS idx_playlist_links_playlist
+     ON playlist_links(playlist_id, position);
+ `
+ 
++export const AGENT_RESOURCE_CLEANUP_SCHEMA_SQL = `
++CREATE TABLE IF NOT EXISTS agent_resource_cleanup (
++    run_id TEXT PRIMARY KEY,
++    requested_at TEXT NOT NULL,
++    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
++);
++`
++
+ export const AGENT_PLATFORM_SCHEMA_SQL = `
+ CREATE TABLE IF NOT EXISTS agent_runs (
+     id TEXT PRIMARY KEY,
+@@ -699,6 +707,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
+ CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated
+     ON agent_runs(status, updated_at);
+ 
++${AGENT_RESOURCE_CLEANUP_SCHEMA_SQL}
++
+ CREATE TABLE IF NOT EXISTS agent_operations (
+     id TEXT PRIMARY KEY,
+     run_id TEXT NOT NULL,
+@@ -1128,7 +1138,7 @@ CREATE TABLE IF NOT EXISTS video_tag (
+     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+     FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+ );
+-CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id);
++CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id,origin);
+ CREATE INDEX IF NOT EXISTS idx_video_tag_origin ON video_tag(origin);
+ 
+ ${VIDEO_SOURCES_SCHEMA_SQL}
+diff --git a/src/main/db/migrationsV16.test.ts b/src/main/db/migrationsV16.test.ts
+new file mode 100644
+index 0000000..af062bd
+--- /dev/null
++++ b/src/main/db/migrationsV16.test.ts
+@@ -0,0 +1,65 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { SCHEMA_SQL } from './schema'
++import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
++
++function releasedDatabase() {
++  const db = new Database(':memory:')
++  db.pragma('foreign_keys = ON')
++  db.exec(SCHEMA_SQL)
++  db.exec('DROP TABLE agent_resource_cleanup')
++  db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++  db.pragma('user_version = 15')
++  db.prepare(`INSERT INTO agent_runs
++    (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++    VALUES ('old-run','plugin-developer','closed','test','bad config','pi','bad state','old','old')`).run()
++  db.prepare("INSERT INTO actresses (main_name) VALUES ('migration fixture')").run()
++  return db
++}
++
++it('adds the cleanup queue and later indexes when upgrading V15 and preserves old business data and damaged diagnostic state', () => {
++  const db = releasedDatabase()
++  try {
++    const schemaBefore = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name <> 'idx_video_tag_tag_id' ORDER BY name").all()
++    const runsBefore = db.prepare('SELECT * FROM agent_runs').all()
++    const actressesBefore = db.prepare('SELECT * FROM actresses').all()
++    migrateDatabase(db)
++    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
++    const schemaAfter = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' ORDER BY name").all()
++    assert.deepEqual(schemaAfter, schemaBefore)
++    assert.deepEqual(db.prepare('SELECT * FROM agent_runs').all(), runsBefore)
++    assert.deepEqual(db.prepare('SELECT * FROM actresses').all(), actressesBefore)
++    db.prepare("INSERT INTO agent_resource_cleanup VALUES ('old-run','now')").run()
++    assert.throws(() => db.prepare("INSERT INTO agent_resource_cleanup VALUES ('missing','now')").run(), /FOREIGN KEY/)
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++    assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++    migrateDatabase(db)
++    assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup').get() as { total: number }).total, 1)
++    db.prepare("DELETE FROM agent_runs WHERE id = 'old-run'").run()
++    assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup').get() as { total: number }).total, 0)
++  } finally { db.close() }
++})
++
++it('rolls back both DDL and version when V16 fails after table creation, then upgrades on retry', (t) => {
++  const db = releasedDatabase()
++  try {
++    const exec = db.exec
++    const fault = t.mock.method(db, 'exec', (sql: string) => {
++      const result = exec.call(db, sql)
++      if (sql.includes('CREATE TABLE IF NOT EXISTS agent_resource_cleanup')) throw new Error('migration interrupted')
++      return result
++    })
++    assert.throws(() => migrateDatabase(db), /migration interrupted/)
++    assert.equal(db.pragma('user_version', { simple: true }), 15)
++    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'agent_resource_cleanup'").get(), undefined)
++    assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
++    fault.mock.restore()
++    migrateDatabase(db)
++    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++  } finally {
++    t.mock.restoreAll()
++    db.close()
++  }
++})
+diff --git a/src/main/db/migrationsV17.test.ts b/src/main/db/migrationsV17.test.ts
+new file mode 100644
+index 0000000..1bb8c6c
+--- /dev/null
++++ b/src/main/db/migrationsV17.test.ts
+@@ -0,0 +1,77 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { SCHEMA_SQL } from './schema'
++import { migrateDatabase } from './migrations'
++
++function v16() {
++  const db = new Database(':memory:')
++  db.pragma('foreign_keys = ON')
++  db.exec(SCHEMA_SQL)
++  db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++  db.pragma('user_version = 16')
++  db.exec(`INSERT INTO videos(id,code) VALUES (1,'migration-1'),(2,'migration-2');
++    INSERT INTO tags(id,name) VALUES (1,'manual'),(2,'scraped');
++    INSERT INTO video_tag(video_id,tag_id,origin,source,created_at)
++      VALUES (1,1,'manual',NULL,'old'),(1,2,'scraped','source','old'),(2,1,'scraped','source','old');`)
++  return db
++}
++function snapshot(db: Database.Database) {
++  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]
++  return tables.map(({ name }) => ({ name, rows: db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all() }))
++}
++function columns(db: Database.Database) {
++  return (db.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name)
++}
++
++it('upgrades V16 without changing any business rows or other schema and matches fresh V17', () => {
++  const db = v16()
++  const fresh = new Database(':memory:')
++  try {
++    const before = snapshot(db)
++    const schema = () => db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name <> 'idx_video_tag_tag_id' ORDER BY name").all()
++    const oldSchema = schema()
++    migrateDatabase(db)
++    assert.equal(db.pragma('user_version', { simple: true }), 17)
++    assert.deepEqual(columns(db), ['tag_id', 'origin'])
++    assert.deepEqual(snapshot(db), before)
++    assert.deepEqual(schema(), oldSchema)
++    migrateDatabase(fresh)
++    assert.deepEqual(columns(db), columns(fresh))
++    assert.deepEqual(db.prepare("SELECT sql FROM sqlite_master WHERE name='idx_video_tag_tag_id'").get(), fresh.prepare("SELECT sql FROM sqlite_master WHERE name='idx_video_tag_tag_id'").get())
++    migrateDatabase(db)
++    assert.deepEqual(snapshot(db), before)
++    db.exec("UPDATE video_tag SET origin='manual',source=NULL WHERE video_id=1 AND tag_id=2")
++    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM video_tag INDEXED BY idx_video_tag_tag_id WHERE tag_id=2 AND origin='manual'").get() as { n: number }).n, 1)
++    db.exec('DELETE FROM tags WHERE id=1')
++    db.exec('DELETE FROM videos WHERE id=1')
++    assert.deepEqual(db.prepare('SELECT * FROM video_tag').all(), [])
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++    assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++  } finally { db.close(); fresh.close() }
++})
++
++for (const phase of ['drop', 'create'] as const) {
++  it(`rolls back index DDL and version after ${phase} failure, then retries`, (t) => {
++    const db = v16()
++    try {
++      const before = snapshot(db)
++      const exec = db.exec
++      const fault = t.mock.method(db, 'exec', (sql: string) => {
++        const result = exec.call(db, sql)
++        if (sql.includes(phase === 'drop' ? 'DROP INDEX idx_video_tag_tag_id' : 'CREATE INDEX idx_video_tag_tag_id')) throw new Error('index migration interrupted')
++        return result
++      })
++      assert.throws(() => migrateDatabase(db), /index migration interrupted/)
++      assert.equal(db.pragma('user_version', { simple: true }), 16)
++      assert.deepEqual(columns(db), ['tag_id'])
++      assert.deepEqual(snapshot(db), before)
++      assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
++      fault.mock.restore()
++      migrateDatabase(db)
++      assert.equal(db.pragma('user_version', { simple: true }), 17)
++      assert.deepEqual(columns(db), ['tag_id', 'origin'])
++      assert.deepEqual(snapshot(db), before)
++    } finally { t.mock.restoreAll(); db.close() }
++  })
++}
+diff --git a/scripts/performance/large-library-benchmark.ts b/scripts/performance/large-library-benchmark.ts
+new file mode 100644
+index 0000000..8f77a3e
+--- /dev/null
++++ b/scripts/performance/large-library-benchmark.ts
+@@ -0,0 +1,306 @@
++/** Synthetic, disposable SQLite benchmark; never opens the user's library.
++ * JAVDEX_BENCH_VIDEOS=300382 JAVDEX_BENCH_ANALYZE=1 JAVDEX_BENCH_OUTPUT=/tmp/results.json \
++ * node scripts/run-electron-tests.mjs scripts/performance/large-library-benchmark.ts
++ */
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import assert from 'node:assert/strict'
++import { performance } from 'node:perf_hooks'
++import { execFileSync } from 'node:child_process'
++import Database from 'better-sqlite3'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++import { migrateDatabase } from '../../src/main/db/migrations'
++import { listVideos } from '../../src/main/db/videoRepo'
++import { createScopedVideoCatalogRepo } from '../../src/main/db/scopedVideoCatalogRepo'
++import { createHomeDiscoveryRepo } from '../../src/main/db/homeDiscoveryRepo'
++import { getTagLabels, listManualTagOptions, listTags, listManualTags } from '../../src/main/db/tagRepo'
++import { listActressPage } from '../../src/main/db/actressRepo'
++import { getLibraryOverviewStats } from '../../src/main/db/overviewRepo'
++import { getPlaylistDetail, getPlaylistPage, getPlaylistMetadata, listPlaylistVideoPage } from '../../src/main/db/playlistRepo'
++import { WebCatalog } from '../../src/main/web/catalog'
++
++const count = Number(process.env.JAVDEX_BENCH_VIDEOS ?? 10000)
++assert.ok(Number.isSafeInteger(count) && count >= 1000 && count <= 1000000)
++const analyzed = process.env.JAVDEX_BENCH_ANALYZE === '1'
++const sparseManual = process.env.JAVDEX_BENCH_MANUAL_SPARSE === '1'
++const statisticsProbe = process.env.JAVDEX_BENCH_STATS_PROBE ?? ''
++const indexProbe = process.env.JAVDEX_BENCH_INDEX_PROBE ?? ''
++const migrationFrom = process.env.JAVDEX_BENCH_MIGRATE_FROM ?? ''
++assert.ok(['', '16'].includes(migrationFrom))
++assert.ok(!migrationFrom || (!indexProbe && !statisticsProbe && !process.env.JAVDEX_BENCH_PROFILE),
++  'Migration probes require the full matrix without other experiments')
++const selectedCase = process.env.JAVDEX_BENCH_CASE ?? ''
++assert.ok(!selectedCase || (indexProbe && /^[a-z_]+\.[a-z_]+$/.test(selectedCase)),
++  'A focused case is only supported for index regression diagnosis')
++assert.ok(['', 'tag-origin'].includes(indexProbe))
++assert.ok(!indexProbe || (analyzed && !statisticsProbe && !process.env.JAVDEX_BENCH_PROFILE),
++  'Index probes require the full analyzed matrix and cannot mix with statistics probes')
++assert.ok(['', 'analyze', 'optimize'].includes(statisticsProbe))
++assert.ok(!statisticsProbe || (!analyzed && !process.env.JAVDEX_BENCH_PROFILE), 'Statistics probes require the full un-analyzed matrix')
++const experimentsOnly = process.env.JAVDEX_BENCH_PROFILE === 'experiments'
++const coreOnly = process.env.JAVDEX_BENCH_PROFILE === 'core'
++assert.ok(count <= 10000 || analyzed || coreOnly, 'Large default-statistics runs require PROFILE=core or ANALYZE=1 to bound pathological aggregation time')
++const samples = Number(process.env.JAVDEX_BENCH_SAMPLES ?? 3)
++assert.ok(Number.isSafeInteger(samples) && samples >= 1 && samples <= 20)
++const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-library-bench-'))
++const priorUserData = process.env.JAVDEX_TEST_USER_DATA
++process.env.JAVDEX_TEST_USER_DATA = directory
++const db = initDatabaseAtPath(path.join(directory, 'synthetic.db'))
++const actors = Math.min(10000, Math.floor(count / 5))
++const results: any[] = []
++const plans = new Map<string, any>()
++const statisticsRuns: any[] = []
++const indexRuns: any[] = []
++const probeActions: Array<{ name: string; action: () => any; before: any }> = []
++let replayingProbe = false
++// Preserve the pre-V17 comparison baseline in disposable index experiments.
++if (indexProbe || migrationFrom) db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++if (migrationFrom) db.pragma('user_version = 16')
++const rawPrepare = db.prepare.bind(db)
++let current: { calls: number; sqlMs: number; statements: any[] } | null = null
++// Record the real repository statements without changing their SQL or execution order.
++;(db as any).prepare = (sql: string) => {
++  const statement = rawPrepare(sql)
++  return new Proxy(statement, { get(target, property) {
++    const value = Reflect.get(target, property)
++    if (typeof value !== 'function') return value
++    if (!['get', 'all', 'run'].includes(String(property))) return value.bind(target)
++    return (...params: any[]) => {
++      const started = performance.now()
++      const result = value.apply(target, params)
++      if (current) {
++        current.calls++
++        current.sqlMs += performance.now() - started
++        current.statements.push({ sql, params, method: property })
++      }
++      return result
++    }
++  } })
++}
++function measure(name: string, action: () => any) {
++  if (selectedCase && name !== selectedCase && !name.endsWith(`.${selectedCase}`)) return { value: null, statements: [] }
++  if (process.env.JAVDEX_BENCH_PROFILE === 'playlist' && !name.startsWith('playlist.')) return {value:null,statements:[]}
++  if (process.env.JAVDEX_BENCH_PROFILE === 'startup' && name !== 'startup.current_schema') return {value:null,statements:[]}
++  if (experimentsOnly && !/^(legacy.first|scoped.library|tags.all|experiment\.)$/.test(name) && !name.startsWith('experiment.')) return {value:null,statements:[]}
++  if (coreOnly && /^(tags\.|actors\.|web\.|home\.)/.test(name)) return {value: null, statements: []}
++  console.log(`BEGIN ${name}`)
++  const times: number[] = []
++  let trace: any
++  let value: any
++  for (let i = 0; i <= samples; i++) {
++    current = { calls: 0, sqlMs: 0, statements: [] }
++    const started = performance.now()
++    value = action()
++    times.push(performance.now() - started)
++    trace = current
++    current = null
++  }
++  for (const entry of trace.statements) {
++    const planKey = statisticsProbe || indexProbe ? `${name}\0${entry.sql}` : entry.sql
++    if (!plans.has(planKey)) {
++      try { plans.set(planKey, { ...entry, caseName: name, plan: rawPrepare(`EXPLAIN QUERY PLAN ${entry.sql}`).all(...entry.params) }) }
++      catch { /* Some PRAGMA statements do not expose EQP. */ }
++    }
++  }
++  const warm = times.slice(1).sort((a,b) => a-b)
++  const bytes = Buffer.byteLength(JSON.stringify(value) ?? '')
++  const row = { name, firstMs: times[0], warmMedianMs: warm[Math.floor(warm.length / 2)], warmMaxMs: warm.at(-1), samples,
++    sqlCalls: trace.calls, sqlMsLast: trace.sqlMs, serializedBytes: bytes, rssBytesAfter: process.memoryUsage().rss }
++  results.push(row)
++  console.log(JSON.stringify(row))
++  if ((statisticsProbe || indexProbe) && !replayingProbe) probeActions.push({ name, action, before: structuredClone(value) })
++  return { value, statements: trace.statements }
++}
++function probeStatistics(stage: string): void {
++  if (!statisticsProbe) return
++  const actions = probeActions.splice(0)
++  const priorLimit = db.pragma('analysis_limit', { simple: true }) as number
++  const started = performance.now()
++  try {
++    if (statisticsProbe === 'analyze') db.exec('ANALYZE')
++    else {
++      // Explicit budget plus the current runtime's bounded-analysis bit. This
++      // is an experiment, not an automatic production maintenance hook.
++      db.pragma('analysis_limit = 1000')
++      db.pragma('optimize = 0x10012')
++    }
++  } finally { db.pragma(`analysis_limit = ${priorLimit}`) }
++  const elapsedMs = performance.now() - started
++  const statRows = rawPrepare('SELECT tbl, idx, stat FROM sqlite_stat1 ORDER BY tbl, idx').all()
++  replayingProbe = true
++  try {
++    for (const entry of actions) {
++      const after = measure(`statistics.${stage}.${entry.name}`, entry.action)
++      assert.deepEqual(after.value, entry.before, `Statistics changed results for ${entry.name}`)
++    }
++  } finally { replayingProbe = false }
++  statisticsRuns.push({ stage, mode: statisticsProbe, elapsedMs, analysisLimitRestored: db.pragma('analysis_limit', { simple: true }),
++    comparedCases: actions.map((entry) => entry.name), statRows })
++}
++function probeIndex(stage: string): void {
++  if (!indexProbe) return
++  const actions = probeActions.splice(0)
++  assert.ok(actions.length > 0, 'Index probe must compare at least one case in each stage; JAVDEX_BENCH_CASE must name a single-library case')
++  const replaceIndex = (fields: string) => db.transaction(() => {
++    db.exec('DROP INDEX idx_video_tag_tag_id')
++    db.exec(`CREATE INDEX idx_video_tag_tag_id ON video_tag(${fields})`)
++  })()
++  const started = performance.now()
++  replaceIndex('tag_id,origin')
++  db.exec('ANALYZE')
++  const buildAndAnalyzeMs = performance.now() - started
++  replayingProbe = true
++  try {
++    for (const entry of actions) {
++      const after = measure(`index.${stage}.${entry.name}`, entry.action)
++      assert.deepEqual(after.value, entry.before, `Index changed results for ${entry.name}`)
++    }
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++    assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++  } finally {
++    // Restore the baseline before adding overlapping library memberships so
++    // each stage compares the same data with and without the candidate.
++    try {
++      replaceIndex('tag_id')
++      db.exec('ANALYZE')
++      if (selectedCase) {
++        for (const entry of actions) {
++          const restored = measure(`index-control.${stage}.${entry.name}`, entry.action)
++          assert.deepEqual(restored.value, entry.before, `Restored index changed results for ${entry.name}`)
++        }
++      }
++    } finally { replayingProbe = false }
++  }
++  indexRuns.push({ stage, candidate: indexProbe, buildAndAnalyzeMs,
++    comparedCases: actions.map(entry => entry.name) })
++}
++try {
++  const seedStart = performance.now()
++  db.transaction(() => {
++    db.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${count})
++      INSERT INTO videos(id,code,title,summary,release_date,rating,add_time)
++      SELECT x,printf('TEST-%06d',x),'Synthetic movie '||x, printf('%0128d',x),
++        CASE WHEN x%20=0 THEN NULL WHEN x%20=1 THEN '' WHEN x%20=2 THEN ' ' ELSE date('2000-01-01','+'||(x%9000)||' days') END,
++        x%100/10.0,datetime('2020-01-01','+'||x||' seconds') FROM n;
++      INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key)
++        SELECT 1,id,add_time,(id*1103515245+12345)%2147483648 FROM videos;
++      INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,is_primary)
++        SELECT 1,id,'direct','https://example.invalid/'||id||'.mp4','bench-'||id,1 FROM videos;
++      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${actors})
++        INSERT INTO actresses(id,main_name,gender) SELECT x,'Actor '||x,'female' FROM n;
++      INSERT INTO actress_names(actress_id,name,type,is_primary) SELECT id,main_name,'main',1 FROM actresses;
++      INSERT INTO actress_name_ownership(normalized_name,actress_id) SELECT 'actor'||id,id FROM actresses;
++      INSERT INTO video_actress SELECT id,1+id%${actors} FROM videos;
++      INSERT INTO video_actress SELECT id,1+(id+1)%${actors} FROM videos;
++      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
++        INSERT INTO tags(id,name) SELECT x,'Tag '||x FROM n;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+id%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+1)%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+2)%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+3)%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+4)%1000 FROM videos WHERE id%3=0;
++      ${sparseManual ? "UPDATE video_tag SET origin=CASE WHEN video_id%100=0 THEN 'manual' ELSE 'scraped' END;" : ''}
++      INSERT INTO playlists(id,name) VALUES(1,'Synthetic large playlist');
++      INSERT INTO playlist_video(playlist_id,video_id,position) SELECT 1,id,id FROM videos WHERE id<=30000;`)
++  })()
++  db.pragma('wal_checkpoint(TRUNCATE)')
++  if (analyzed) db.exec('ANALYZE')
++  const seedMs = performance.now() - seedStart
++  measure('startup.current_schema', () => { migrateDatabase(db); return {schema: db.pragma('user_version',{simple:true})} })
++  const catalog = createScopedVideoCatalogRepo(db)
++  const web = new WebCatalog(db)
++  const base = measure('legacy.first', () => listVideos({ limit: 60 }))
++  measure('legacy.deep', () => listVideos({ limit: 60, offset: Math.max(0,count-60) }))
++  measure('legacy.release', () => listVideos({ limit: 60, sortBy: 'release_date' }))
++  measure('legacy.search_code', () => listVideos({ search: 'TEST-001234', limit: 60 }))
++  const scopedBase = measure('scoped.library', () => catalog.list({ kind:'library',libraryId:1 }))
++  measure('scoped.all_single_active', () => catalog.list({ kind:'all' }))
++  measure('scoped.all_selected_one', () => catalog.list({ kind:'all',libraryIds:[1] }))
++  measure('scoped.release', () => catalog.list({ kind:'library',libraryId:1 },{sortBy:'release_date'}))
++  measure('scoped.search_code', () => catalog.list({ kind:'all' },{search:'TEST-001234'}))
++  const tagsBase = measure('tags.all', () => listTags())
++  measure('tags.manual', () => listManualTags())
++  measure('tags.selected_labels', () => getTagLabels([1, 2, 3]))
++  measure('tags.selected_labels_100', () => getTagLabels(Array.from({ length: 100 }, (_, i) => i + 1)))
++  measure('tags.manual_options', () => listManualTagOptions({}))
++  measure('tags.manual_options_search', () => listManualTagOptions({ search: 'Tag 99' }))
++  measure('tags.manual_options_deep', () => listManualTagOptions({ offset: 900 }))
++  measure('actors.first', () => listActressPage({ limit: 240 }))
++  measure('overview', () => getLibraryOverviewStats())
++  measure('home.single', () => createHomeDiscoveryRepo({database:db}).load({seed:'benchmark'}))
++  measure('web.first', () => web.browse(new URLSearchParams()))
++  measure('web.search', () => web.browse(new URLSearchParams('q=TEST-001234')))
++  measure('web.collections', () => web.collections())
++  measure('playlist.full', () => getPlaylistDetail(1))
++  measure('playlist.page', () => getPlaylistPage(1, {limit:60}))
++  measure('playlist.metadata', () => getPlaylistMetadata(1))
++  measure('playlist.video_page', () => listPlaylistVideoPage(1, {limit:60}))
++  measure('playlist.deep_page', () => getPlaylistPage(1, {limit:60, offset: Math.min(count, 30000) - 60}))
++  // Diagnostic SQL experiment only. No production schema or query changes.
++  for (const [index,entry] of base.statements.entries()) {
++    const sql = entry.sql.replace('COUNT(DISTINCT v.id)', 'COUNT(*)').replace('SELECT DISTINCT v.*','SELECT v.*')
++    const original = rawPrepare(entry.sql)[entry.method](...entry.params)
++    const variant = rawPrepare(sql)[entry.method](...entry.params)
++    assert.deepEqual(variant, original)
++    measure(`experiment.no_distinct.${index}`, () => (db.prepare(sql) as any)[entry.method](...entry.params))
++  }
++  if (experimentsOnly) {
++    for (const [index,entry] of scopedBase.statements.entries()) {
++      const sql = entry.sql.replace('COUNT(DISTINCT v.id)', 'COUNT(*)').replace('SELECT DISTINCT v.*','SELECT v.*')
++      assert.deepEqual(rawPrepare(sql)[entry.method](...entry.params),rawPrepare(entry.sql)[entry.method](...entry.params))
++      measure(`experiment.scoped_no_distinct.${index}`, () => (db.prepare(sql) as any)[entry.method](...entry.params))
++    }
++    const tagsSql = `WITH members AS MATERIALIZED (
++      SELECT DISTINCT m.video_id FROM library_video_memberships m JOIN media_libraries l ON l.id=m.library_id
++      WHERE m.is_hidden=0 AND l.status='active'
++    ), counts AS (
++      SELECT vt.tag_id,COUNT(*) AS n FROM video_tag vt JOIN members m ON m.video_id=vt.video_id GROUP BY vt.tag_id
++    ) SELECT t.*,COALESCE(c.n,0) AS video_count FROM tags t LEFT JOIN counts c ON c.tag_id=t.id
++      ORDER BY video_count DESC,t.name`
++    assert.deepEqual(rawPrepare(tagsSql).all(),tagsBase.value)
++    measure('experiment.tags_preaggregate', () => db.prepare(tagsSql).all())
++  }
++  const singleLibraryActions = probeActions.map(({ name, action }) => ({ name, action }))
++  probeStatistics('single-library')
++  probeIndex('single-library')
++  db.transaction(() => db.exec(`INSERT INTO media_libraries(id,name,status) VALUES(2,'Overlap','active');
++    INSERT INTO media_library_configs(library_id) VALUES(2);
++    INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key)
++      SELECT 2,video_id,added_at,discovery_key FROM library_video_memberships WHERE library_id=1 AND video_id%3=0;
++    INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,is_primary)
++      SELECT 2,video_id,kind,locator,resource_key,1 FROM video_resources WHERE library_id=1 AND video_id%3=0;`))()
++  if (analyzed) db.exec('ANALYZE')
++  // Capture fresh expected results after the write, rather than comparing with
++  // the old single-library fixture. Replay the whole matrix in this state too.
++  for (const entry of singleLibraryActions) measure(`overlap.${entry.name}`, entry.action)
++  measure('scoped.all_overlap', () => catalog.list({kind:'all'}))
++  measure('home.overlap', () => createHomeDiscoveryRepo({database:db}).load({seed:'benchmark'}))
++  probeStatistics('after-overlap-write')
++  probeIndex('after-overlap-write')
++  const output = { baselineCommit: execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),
++    generatedAt: new Date().toISOString(), environment: { sqliteRuntime: rawPrepare('SELECT sqlite_version() AS version').get(), compileOptions: db.pragma('compile_options'), platform:process.platform,arch:process.arch,cpu:os.cpus()[0]?.model,totalMemory:os.totalmem(),versions:process.versions },
++    fixture: { analyzed, sparseManual, statisticsProbe, indexProbe, migrationFrom, selectedCase, coreOnly, experimentsOnly, videos:count,actors,tags:1000,videoTags:rawPrepare('SELECT count(*) AS n FROM video_tag').get(),summaryBytes:128,seedMs,
++      finalDatabaseBytes:(db.pragma('page_count',{simple:true}) as number) * (db.pragma('page_size',{simple:true}) as number) },
++    pragmas: Object.fromEntries(['journal_mode','synchronous','cache_size','mmap_size','temp_store','busy_timeout','user_version'].map(p=>[p,db.pragma(p,{simple:true})])),
++    caveats:['Synthetic data on local host; not the reporter Windows/HDD database.', 'First call is not cold-disk: fixture generation warms OS cache.', 'Three warm samples by default; median/max are not p95.', 'RSS after each case includes retained fixture/query memory and is not peak RSS.', 'SQL interception and timing bookkeeping are included; EQP and JSON byte calculation are outside the measured action.', 'Without a statistics or index probe, overlap library is added only for the last two cases. Probes replay the full matrix on fresh overlap results unless fixture.selectedCase is nonempty; focused diagnosis compares only that single-library case in each stage and additionally measures the restored baseline index. Index probes replace only the disposable tag index, compare full results, and restore the baseline index before the next stage. Full ANALYZE when fixture.analyzed=true; optional statisticsProbe explicitly records maintenance and result-equality checks. Probe analysis_limit is restored afterward.'],
++    statisticsRuns, indexRuns, results,plans:[...plans.values()] }
++  if (migrationFrom) {
++    closeDatabase()
++    const reopened = new Database(path.join(directory, 'synthetic.db'), { readonly: true })
++    try {
++      assert.equal(reopened.pragma('user_version', { simple: true }), 17)
++      assert.deepEqual((reopened.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name), ['tag_id', 'origin'])
++      assert.deepEqual(reopened.prepare('SELECT count(*) AS n FROM video_tag').get(), output.fixture.videoTags)
++      assert.equal((reopened.prepare('SELECT count(*) AS n FROM videos').get() as { n: number }).n, count)
++      assert.deepEqual(reopened.pragma('foreign_key_check'), [])
++      assert.deepEqual(reopened.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++    } finally { reopened.close() }
++  }
++  if (process.env.JAVDEX_BENCH_OUTPUT) fs.writeFileSync(path.resolve(process.env.JAVDEX_BENCH_OUTPUT),JSON.stringify(output,null,2)+'\n')
++} finally {
++  closeDatabase()
++  if(priorUserData===undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA=priorUserData
++  fs.rmSync(directory,{recursive:true,force:true})
++}
+diff --git a/scripts/performance/tag-index-benchmark.ts b/scripts/performance/tag-index-benchmark.ts
+new file mode 100644
+index 0000000..509d7cd
+--- /dev/null
++++ b/scripts/performance/tag-index-benchmark.ts
+@@ -0,0 +1,164 @@
++/** Disposable real-repository experiment. No production schema changes. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++import { listTags, listManualTags, listManualTagOptions } from '../../src/main/db/tagRepo'
++
++const videos = Number(process.env.JAVDEX_TAG_BENCH_VIDEOS ?? 10000)
++const samples = Number(process.env.JAVDEX_TAG_BENCH_SAMPLES ?? 3)
++const distribution = process.env.JAVDEX_TAG_BENCH_DISTRIBUTION ?? 'all'
++const candidate = process.env.JAVDEX_TAG_BENCH_INDEX ?? 'origin-first'
++assert.ok(Number.isSafeInteger(videos) && videos >= 1000 && videos <= 300382)
++assert.ok(Number.isSafeInteger(samples) && samples >= 1 && samples <= 10)
++assert.ok(['all', 'sparse', 'skew'].includes(distribution))
++assert.ok(videos <= 10000 || distribution !== 'skew' || process.env.JAVDEX_TAG_BENCH_ALLOW_LARGE_SKEW === '1',
++  'Skew baseline is pathological at 10k; validate the fixed plan before enabling ALLOW_LARGE_SKEW=1')
++assert.ok(['origin-first', 'video-first', 'tag-origin'].includes(candidate))
++const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-tag-index-bench-'))
++const databasePath = path.join(directory, 'synthetic.db')
++const priorUserData = process.env.JAVDEX_TEST_USER_DATA
++process.env.JAVDEX_TEST_USER_DATA = directory
++const db = initDatabaseAtPath(databasePath)
++// Preserve the pre-V17 comparison baseline in disposable index experiments.
++db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++const rawPrepare = db.prepare.bind(db)
++let plans: unknown[] = []
++// EXPLAIN is captured outside timed calls.
++let capture = false
++;(db as any).prepare = (sql: string) => {
++  const statement = rawPrepare(sql)
++  return new Proxy(statement, { get(target, property) {
++    const value = Reflect.get(target, property)
++    if (typeof value !== 'function') return value
++    if (!['all', 'get', 'run'].includes(String(property))) return value.bind(target)
++    return (...params: unknown[]) => {
++      if (capture) plans.push({ sql, params, plan: rawPrepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) })
++      return value.apply(target, params)
++    }
++  } })
++}
++const results: unknown[] = []
++const optionQueries = [
++  { name: 'options.first', query: {} },
++  { name: 'options.search', query: { search: 'Tag 99' } },
++  { name: 'options.search_hit', query: { search: 'Tag 1' } },
++  { name: 'options.page_hit', query: { offset: 2, limit: 1 } },
++  { name: 'options.deep', query: { offset: 900 } },
++  { name: 'options.missing', query: { search: 'absent' } }
++]
++function measureOptions(prefix: string) {
++  return optionQueries.map(({ name, query }) => measureQuery(`${prefix}.${name}`, () => listManualTagOptions(query)))
++}
++function measureQuery(name: string, action: () => unknown) {
++  capture = true
++  const value = action()
++  capture = false
++  const times: number[] = []
++  for (let i = 0; i <= samples; i++) {
++    const start = performance.now()
++    const result = action()
++    times.push(performance.now() - start)
++    assert.deepEqual(result, value)
++  }
++  const warm = times.slice(1).sort((a, b) => a - b)
++  results.push({ name, firstTimedMs: times[0], warmMedianMs: warm[Math.floor(warm.length / 2)], times, plans })
++  plans = []
++  return value
++}
++function measureWrites(name: string) {
++  db.pragma('wal_checkpoint(TRUNCATE)')
++  const insert = rawPrepare("INSERT INTO video_tag(video_id,tag_id,origin) VALUES (?,1001,'manual')")
++  const count = Math.min(1000, videos)
++  const start = performance.now()
++  db.transaction(() => { for (let id = 1; id <= count; id++) insert.run(id) })()
++  db.transaction(() => db.exec("UPDATE video_tag SET origin='scraped' WHERE tag_id=1001"))()
++  db.transaction(() => db.exec('DELETE FROM video_tag WHERE tag_id=1001'))()
++  results.push({ name, rowsPerOperation: count, elapsedMs: performance.now() - start,
++    walBytes: fs.statSync(databasePath + '-wal').size })
++}
++try {
++  const origin = distribution === 'all' ? "'manual'" : distribution === 'sparse'
++    ? "CASE WHEN id % 100 = 0 THEN 'manual' ELSE 'scraped' END"
++    : "CASE WHEN id % 7 = 0 THEN 'manual' ELSE 'scraped' END"
++  db.transaction(() => {
++    db.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${videos})
++      INSERT INTO videos(id,code) SELECT x,'TAG-'||x FROM n;
++      INSERT INTO library_video_memberships(library_id,video_id,added_at,is_hidden,discovery_key)
++        SELECT 1,id,'2026',id%17=0,id FROM videos;
++      INSERT INTO media_libraries(id,name,status) VALUES (2,'Shared','active'),(3,'Archived','archived');
++      INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key)
++        SELECT 2,id,'2026',id FROM videos WHERE id%3=0;
++      INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key)
++        SELECT 3,id,'2026',id FROM videos WHERE id%5=0;
++      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1001)
++        INSERT INTO tags(id,name) SELECT x,'Tag '||x FROM n;`)
++    for (let offset = 0; offset < 4; offset++) {
++      const tag = distribution === 'skew' ? `${offset + 1}` : `1+(id+${offset})%1000`
++      db.exec(`INSERT INTO video_tag(video_id,tag_id,origin) SELECT id,${tag},${origin} FROM videos`)
++    }
++  })()
++  db.pragma('wal_checkpoint(TRUNCATE)')
++  const baselineBytes = fs.statSync(databasePath).size
++  const expectedAll = measureQuery('baseline.no_stats.all', listTags)
++  const expectedManual = measureQuery('baseline.no_stats.manual', listManualTags)
++  const expectedOptions = measureOptions('baseline.no_stats')
++  for (const name of ['options.search_hit', 'options.page_hit']) {
++    const page = expectedOptions[optionQueries.findIndex(entry => entry.name === name)] as ReturnType<typeof listManualTagOptions>
++    assert.ok(page.items.length > 0, `${distribution} fixture must exercise a nonempty ${name}`)
++  }
++  db.exec('ANALYZE')
++  assert.deepEqual(measureQuery('baseline.analyzed.all', listTags), expectedAll)
++  assert.deepEqual(measureQuery('baseline.analyzed.manual', listManualTags), expectedManual)
++  assert.deepEqual(measureOptions('baseline.analyzed'), expectedOptions)
++  measureWrites('baseline.writes')
++  const liveBytes = () => ((db.pragma('page_count', { simple: true }) as number)
++    - (db.pragma('freelist_count', { simple: true }) as number)) * (db.pragma('page_size', { simple: true }) as number)
++  const baselineLiveBytes = liveBytes()
++  const fields = candidate === 'origin-first' ? 'origin,video_id,tag_id' : 'video_id,origin,tag_id'
++  const buildStart = performance.now()
++  if (candidate === 'tag-origin') {
++    // Preserve the production query's explicit index name, but cover its origin
++    // predicate. This is a disposable experiment, not a production migration.
++    db.transaction(() => {
++      db.exec('DROP INDEX idx_video_tag_tag_id')
++      db.exec('CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id,origin)')
++    })()
++  } else db.exec(`CREATE INDEX benchmark_tag_cover ON video_tag(${fields})`)
++  // Replace the narrow origin index only when its leading-key contract is retained.
++  if (candidate === 'origin-first') db.exec('DROP INDEX idx_video_tag_origin')
++  const indexBuildMs = performance.now() - buildStart
++  db.pragma('wal_checkpoint(TRUNCATE)')
++  const indexedBytes = fs.statSync(databasePath).size
++  const indexedLiveBytes = liveBytes()
++  assert.deepEqual(measureQuery('candidate.before_analyze.all', listTags), expectedAll)
++  assert.deepEqual(measureQuery('candidate.before_analyze.manual', listManualTags), expectedManual)
++  assert.deepEqual(measureOptions('candidate.before_analyze'), expectedOptions)
++  db.exec('ANALYZE')
++  assert.deepEqual(measureQuery('candidate.analyzed.all', listTags), expectedAll)
++  assert.deepEqual(measureQuery('candidate.analyzed.manual', listManualTags), expectedManual)
++  assert.deepEqual(measureOptions('candidate.analyzed'), expectedOptions)
++  measureWrites('candidate.writes')
++  assert.deepEqual(listTags(), expectedAll)
++  assert.deepEqual(listManualTags(), expectedManual)
++  assert.deepEqual(optionQueries.map(({ query }) => listManualTagOptions(query)), expectedOptions)
++  assert.deepEqual(db.pragma('foreign_key_check'), [])
++  assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++  const output = { generatedAt: new Date().toISOString(), videos, samples, distribution, candidate,
++    environment: { platform: process.platform, arch: process.arch, sqlite: rawPrepare('SELECT sqlite_version() AS version').get() },
++    baselineBytes, indexedBytes, baselineLiveBytes, indexedLiveBytes, indexBuildMs, results,
++    caveats: ['Synthetic local file, warm OS cache; three warm samples by default, not p95 or Windows/HDD.',
++      'Full-result equality checks are outside timing; firstTimedMs follows an untimed EQP/result capture, not cold access.',
++      'Candidate-before-analyze retains baseline statistics; this is not a wholly un-analyzed fixture.',
++      'File sizes include freelist pages and prior write allocations; not isolated index live bytes. WAL bytes are file length, not device write volume.',
++      'Write probe commits 1000 inserts, origin updates, deletes in three transactions; does not model full scan/import.'] }
++  if (process.env.JAVDEX_TAG_BENCH_OUTPUT) fs.writeFileSync(path.resolve(process.env.JAVDEX_TAG_BENCH_OUTPUT), JSON.stringify(output, null, 2) + '\n')
++  console.log(JSON.stringify({ videos, distribution, candidate, indexBuildMs, baselineBytes, indexedBytes, results }))
++} finally {
++  closeDatabase()
++  if (priorUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = priorUserData
++  fs.rmSync(directory, { recursive: true, force: true })
++}

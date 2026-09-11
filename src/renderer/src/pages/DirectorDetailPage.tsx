@@ -1,3 +1,4 @@
+import RelatedVideoPager from '../components/RelatedVideoPager'
 import { useCallback, useMemo, useState } from 'react'
 import { Clapperboard, ExternalLink, GitMerge, ImagePlus, Pencil, SearchX, Trash2 } from 'lucide-react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
@@ -20,7 +21,7 @@ import ListToolbar from '../components/ListToolbar'
 import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
+import { useCatalogVideoPage } from '../query/useCatalogVideoPage'
 import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import { directorKeys, videoKeys } from '../query/queryKeys'
 import { hashListQuery } from '../listView/listQueryParams'
@@ -56,8 +57,9 @@ export default function DirectorDetailPage(): JSX.Element {
     (error: unknown) => toast.show(String((error as Error).message), 'error'),
     [toast],
   )
-  const { videos, total, loading, loadingMore, hasMore, loadMore, refetchSilent } =
-    useInfiniteVideoList(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
+  const videoPage =
+    useCatalogVideoPage(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
+  const { videos, total, loading, refetchSilent } = videoPage
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`director-detail:${hash}`)
   const save = async (input: DirectorUpdateInput): Promise<void> => {
@@ -245,7 +247,11 @@ export default function DirectorDetailPage(): JSX.Element {
           <div className="organization-video-heading">关联影片</div>
           {loading ? (
             <EmptyState loading variant="compact" />
-          ) : videos.length === 0 ? (
+          ) : videoPage.error && total === 0 ? (
+            <EmptyState variant="compact" title="关联影片加载失败">
+              <Button size="sm" onClick={videoPage.retry}>重试</Button>
+            </EmptyState>
+          ) : total === 0 ? (
             <EmptyState
               variant="compact"
               icon={<Clapperboard {...UI_ICON_SM} />}
@@ -259,19 +265,7 @@ export default function DirectorDetailPage(): JSX.Element {
                   <PosterCard key={video.id} video={video} />
                 ))}
               </div>
-              {hasMore && (
-                <Button
-                  type="button"
-                  variant="ghost"
-
-                  size="sm"
-                  className="organization-load-more"
-                  disabled={loadingMore}
-                  onClick={loadMore}
-                >
-                  {loadingMore ? '加载中…' : '加载更多'}
-                </Button>
-              )}
+              <RelatedVideoPager {...videoPage} />
             </>
           )}
         </ListSurface>

@@ -4,9 +4,33 @@ import { IPC } from '@shared/ipc-channels'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
 import { executeIpcHandler } from './shared'
-import { appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
+import { actressIpcSchemas, appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
 import type { IpcMainInvokeEvent } from 'electron'
 
+it('validates manual tag candidate bounds and existing-tag identities', () => {
+  for (const channel of [IPC.TAG_MANUAL_OPTIONS, IPC.TAG_FILTER_OPTIONS] as const) {
+    const options = appIpcSchemas[channel]
+    assert.equal(options.safeParse([{}]).success, true)
+    assert.equal(options.safeParse([{ search: 'École', limit: 100, offset: 100 }]).success, true)
+    for (const query of [{ limit: 101 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 }, { search: 'x'.repeat(501) }, { extra: true }]) {
+      assert.equal(options.safeParse([query]).success, false)
+    }
+  }
+  const attach = videoIpcSchemas[IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]
+  assert.equal(attach.safeParse([1, 2]).success, true)
+  for (const args of [[0, 2], [1, -1], [1, 1.5], [1, Number.MAX_SAFE_INTEGER + 1], [1, 'name']]) {
+    assert.equal(attach.safeParse(args).success, false)
+  }
+})
+
+it('bounds selected tag label IPC requests before repository access', () => {
+  const schema = appIpcSchemas[IPC.TAG_LABELS]
+  assert.equal(schema.safeParse([[]]).success, true)
+  assert.equal(schema.safeParse([Array.from({ length: 100 }, (_, index) => index + 1)]).success, true)
+  for (const args of [[[0]], [[-1]], [[1.5]], [[Number.MAX_SAFE_INTEGER + 1]], [Array(101).fill(1)], [[1], 'extra']]) {
+    assert.equal(schema.safeParse(args).success, false)
+  }
+})
 describe('typed IPC adapter', () => {
   it('does not expose the legacy unreviewed video deletion command', () => {
     assert.equal('VIDEO_DELETE' in IPC, false)
@@ -294,4 +318,108 @@ describe('typed IPC adapter', () => {
 
     assert.deepEqual(sent, [[IPC.SCRAPE_BATCH_PROGRESS, { current: 3 }]])
   })
+})
+
+it('bounds actress conflict summary pages and keeps detail identities exact',()=>{
+  const schema=actressIpcSchemas[IPC.ACTRESS_CONFLICT_QUEUE_PAGE]
+  assert.equal(schema.safeParse([{limit:100,offset:100,anchorName:'演员名'}]).success,true)
+  for(const query of [{limit:101},{limit:0},{offset:-1},{offset:Number.MAX_SAFE_INTEGER+1},{anchorName:''},{extra:true}])assert.equal(schema.safeParse([query]).success,false)
+  assert.equal(actressIpcSchemas[IPC.ACTRESS_CONFLICT_GET].safeParse(['Exact Name']).success,true)
+  assert.equal(actressIpcSchemas[IPC.ACTRESS_CONFLICT_GET].safeParse(['']).success,false)
+})
+
+
+it('validates bounded actress picker requests', () => {
+  const schema = actressIpcSchemas[IPC.ACTRESS_PICKER_PAGE]
+  assert.equal(schema.safeParse([undefined]).success, true)
+  assert.equal(schema.safeParse([{ limit: 100, offset: 40, search: 'name' }]).success, true)
+  for (const query of [{ limit: 101 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 },
+    { offset: Infinity }, { search: 'x'.repeat(257) }, { extra: true }]) {
+    assert.equal(schema.safeParse([query]).success, false)
+  }
+})
+
+
+it('validates narrow actress identity IDs', () => {
+  const schema = actressIpcSchemas[IPC.ACTRESS_PICKER_GET]
+  assert.equal(schema.safeParse([1]).success, true)
+  for (const args of [[0], [-1], [1.5], [Infinity], [Number.MAX_SAFE_INTEGER+1], ['1'], [1, 2]]) {
+    assert.equal(schema.safeParse(args).success, false)
+  }
+})
+
+
+it('validates merge candidate paging and keep identity', () => {
+  const schema = actressIpcSchemas[IPC.ACTRESS_MERGE_CANDIDATES]
+  assert.equal(schema.safeParse([{keepId:1,limit:100,offset:40,search:'name'}]).success,true)
+  for (const query of [{},{keepId:0},{keepId:1.5},{keepId:1,limit:101},{keepId:1,offset:-1},{keepId:1,search:'x'.repeat(257)},{keepId:1,gender:'female'}]) {
+    assert.equal(schema.safeParse([query]).success,false)
+  }
+})
+
+
+it('accepts only zero arguments for avatar crop count', () => {
+  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_COUNT]
+  assert.equal(schema.safeParse([]).success, true)
+  assert.equal(schema.safeParse([1]).success, false)
+})
+
+
+it('accepts only zero arguments for avatar crop target enumeration', () => {
+  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_TARGETS]
+  assert.equal(schema.safeParse([]).success, true)
+  assert.equal(schema.safeParse([1]).success, false)
+})
+
+
+it('validates plugin actress test picker bounds and identities', () => {
+  const page=actressIpcSchemas[IPC.ACTRESS_TEST_TARGET_PAGE]
+  assert.equal(page.safeParse([{}]).success,true)
+  for(const q of [{limit:101},{offset:-1},{search:'x'.repeat(257)},{gender:'male'}])assert.equal(page.safeParse([q]).success,false)
+  const get=actressIpcSchemas[IPC.ACTRESS_TEST_TARGET_GET]
+  assert.equal(get.safeParse([1]).success,true)
+  for(const id of [0,-1,1.5,Infinity])assert.equal(get.safeParse([id]).success,false)
+})
+
+it('validates actress works page bounds and rejects unexpected filter fields', () => {
+  const schema = actressIpcSchemas[IPC.ACTRESS_VIDEO_PAGE]
+  assert.equal(schema.safeParse([1]).success, true)
+  assert.equal(schema.safeParse([1, { limit: 240, offset: 0 }]).success, true)
+  for (const args of [[0], [1, { limit: 241 }], [1, { limit: 0 }], [1, { offset: -1 }], [1, { offset: Infinity }], [1, { offset: Number.MAX_SAFE_INTEGER + 1 }], [1, { gender: 'male' }]]) {
+    assert.equal(schema.safeParse(args).success, false)
+  }
+})
+
+it('validates metadata IDs and the optional cover-only actor works filter', () => {
+  const metadata = actressIpcSchemas[IPC.ACTRESS_METADATA]
+  assert.equal(metadata.safeParse([1]).success, true)
+  for (const id of [0, -1, 1.5, Infinity]) assert.equal(metadata.safeParse([id]).success, false)
+  const page = actressIpcSchemas[IPC.ACTRESS_VIDEO_PAGE]
+  assert.equal(page.safeParse([1, { withCover: true }]).success, true)
+  assert.equal(page.safeParse([1, { withCover: false }]).success, true)
+  assert.equal(page.safeParse([1, { withCover: 'true' }]).success, false)
+})
+
+it('validates bounded actress gallery pages', () => {
+  const page = actressIpcSchemas[IPC.ACTRESS_GALLERY_PAGE]
+  assert.equal(page.safeParse([1]).success, true)
+  assert.equal(page.safeParse([1, { limit: 100, offset: 60 }]).success, true)
+  assert.equal(page.safeParse([1, { anchorId: 77 }]).success, true)
+  for (const anchorId of [0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1, '77']) assert.equal(page.safeParse([1, { anchorId }]).success, false)
+  for (const args of [[0], [1, { limit: 101 }], [1, { offset: -1 }], [1, { offset: Number.MAX_SAFE_INTEGER + 1 }], [1, { sort: 'position' }]]) {
+    assert.equal(page.safeParse(args).success, false)
+  }
+})
+
+it('validates a profile header identity without optional wide-data flags', () => {
+  const schema = actressIpcSchemas[IPC.ACTRESS_PROFILE]
+  assert.equal(schema.safeParse([1]).success, true)
+  for (const args of [[0], [-1], [1.5], [Infinity], [1, { gallery: true }]]) assert.equal(schema.safeParse(args).success, false)
+})
+
+it('validates the optional local photo source filter', () => {
+  const page = actressIpcSchemas[IPC.ACTRESS_GALLERY_PAGE]
+  assert.equal(page.safeParse([1, { localOnly: true }]).success, true)
+  assert.equal(page.safeParse([1, { localOnly: false }]).success, true)
+  assert.equal(page.safeParse([1, { localOnly: 'true' }]).success, false)
 })

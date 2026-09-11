@@ -330,9 +330,9 @@ export class PluginWorkspaceModule {
     }, null, 2)}\n`)
   }
 
-  remove(directoryInput: string): void {
+  async remove(directoryInput: string): Promise<void> {
     const directory = assertWorkspacePath(directoryInput)
-    fs.rmSync(directory, { recursive: true, force: true })
+    await fs.promises.rm(directory, { recursive: true, force: true })
   }
 }
 

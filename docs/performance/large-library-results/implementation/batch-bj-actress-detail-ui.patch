@@ -1,0 +1,1199 @@
+diff --git a/src/renderer/src/components/ActressAvatarEditor.test.tsx b/src/renderer/src/components/ActressAvatarEditor.test.tsx
+index a92da50..1fe6c5b 100644
+--- a/src/renderer/src/components/ActressAvatarEditor.test.tsx
++++ b/src/renderer/src/components/ActressAvatarEditor.test.tsx
+@@ -4,6 +4,10 @@ import React from 'react'
+ import TestRenderer, { act } from 'react-test-renderer'
+ import { createAvatarCropV1 } from '@shared/avatarCrop'
+ 
++let coverHold: Promise<void> | null = null
++let coverTotal = 0
++const coverCalls: Array<{ offset?: number; withCover?: boolean }> = []
++
+ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+ 
+ class TestImage {
+@@ -54,6 +58,7 @@ Object.defineProperty(globalThis, 'window', {
+   configurable: true,
+   value: {
+     api: {
++      actresses: { videoPage: async (_id: number, query: { offset?: number; withCover?: boolean }) => { coverCalls.push(query); if (coverHold) await coverHold; const offset = query.offset ?? 0; return { videos: Array.from({ length: Math.min(60, Math.max(0, coverTotal - offset)) }, (_, n) => ({ id: offset+n+1, code: `COVER-${offset+n+1}`, cover_path: `cover-${offset+n+1}.jpg` })), total: coverTotal, limit: 60, offset } } },
+       assets: {
+         getPathForFile: () => null
+       }
+@@ -84,6 +89,9 @@ async function waitFor(predicate: () => boolean): Promise<void> {
+ afterEach(async () => {
+   await act(async () => renderer?.unmount())
+   renderer = null
++  coverTotal = 0
++  coverHold = null
++  coverCalls.length = 0
+ })
+ 
+ describe('ActressAvatarEditor', () => {
+@@ -102,7 +110,7 @@ describe('ActressAvatarEditor', () => {
+           displayUrl="media://avatar-display.jpg"
+           sourceUrl="media://avatar-source.jpg"
+           savedCrop={crop}
+-          videos={[]}
++          actressId={1}
+           gallery={[]}
+           onAvatarChange={() => undefined}
+         />
+@@ -139,7 +147,7 @@ describe('ActressAvatarEditor', () => {
+           displayUrl="media://legacy-avatar.jpg"
+           sourceUrl={null}
+           savedCrop={null}
+-          videos={[]}
++          actressId={1}
+           gallery={[]}
+           onAvatarChange={() => undefined}
+         />
+@@ -161,3 +169,34 @@ describe('ActressAvatarEditor', () => {
+     assert.match(nodeText(renderer!.root), /编辑中/)
+   })
+ })
++
++it('pages associated covers without loading an actress detail or accumulating tiles', async () => {
++  coverTotal = 125
++  const Component = (await import('./ActressAvatarEditor')).default
++  await act(async () => { renderer = TestRenderer.create(<Component actressId={1} displayUrl={null} sourceUrl={null} savedCrop={null} gallery={[]} onAvatarChange={() => undefined} />) })
++  const tiles = () => renderer!.root.findAllByType('button').filter(node => /^COVER-\d+$/.test(node.props['aria-label'] ?? ''))
++  const click = async (label: string) => { await act(async () => { renderer!.root.findAllByType('button').find(node => nodeText(node) === label)!.props.onClick() }) }
++  assert.equal(tiles().length, 60)
++  assert.ok(coverCalls.every(query => query.withCover === true))
++  await click('下一页')
++  assert.equal(tiles().length, 60)
++  assert.equal(tiles()[0].props['aria-label'], 'COVER-61')
++  await click('下一页')
++  assert.equal(tiles().length, 5)
++  await click('上一页')
++  await click('上一页')
++  assert.equal(tiles()[0].props['aria-label'], 'COVER-1')
++  assert.deepEqual(coverCalls.map(query => query.offset), [0,60,120,60,0])
++})
++
++it('does not replace a user-selected source tab when the first cover page arrives late', async () => {
++  coverTotal = 125
++  let resolve!: () => void
++  coverHold = new Promise(done => { resolve = done })
++  const Component = (await import('./ActressAvatarEditor')).default
++  await act(async () => { renderer = TestRenderer.create(<Component actressId={1} displayUrl={null} sourceUrl={null} savedCrop={null} gallery={[]} onAvatarChange={() => undefined} />) })
++  const local = () => renderer!.root.findAllByProps({ role: 'tab' }).find(node => nodeText(node) === '本地')!
++  await act(async () => local().props.onClick())
++  await act(async () => resolve())
++  assert.equal(local().props['aria-selected'], true)
++})
+diff --git a/src/renderer/src/components/ActressAvatarEditor.tsx b/src/renderer/src/components/ActressAvatarEditor.tsx
+index ccba76d..5e979f0 100644
+--- a/src/renderer/src/components/ActressAvatarEditor.tsx
++++ b/src/renderer/src/components/ActressAvatarEditor.tsx
+@@ -1,6 +1,6 @@
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+ import type { ActressGalleryAsset } from '@shared/actressTypes'
+-import type { Video } from '@shared/videoTypes'
++import { useActressVideoPage } from '../hooks/useActressVideoPage'
+ import { DEFAULT_AVATAR_FACE_RATIO } from '@shared/avatarFaceScale'
+ import {
+   DEFAULT_AVATAR_CENTERING_MODE,
+@@ -42,7 +42,7 @@ interface Props {
+   displayUrl: string | null
+   sourceUrl: string | null
+   savedCrop: AvatarCropV1 | null
+-  videos: Video[]
++  actressId: number
+   gallery: ActressGalleryAsset[]
+   onAvatarChange: (commit: ActressAvatarCommit | null) => void
+ }
+@@ -180,7 +180,7 @@ export default function ActressAvatarEditor({
+   displayUrl,
+   sourceUrl,
+   savedCrop,
+-  videos,
++  actressId,
+   gallery,
+   onAvatarChange
+ }: Props): JSX.Element {
+@@ -196,7 +196,8 @@ export default function ActressAvatarEditor({
+   const coverScroll = useHorizontalDragScroll()
+   const galleryScroll = useHorizontalDragScroll()
+ 
+-  const coverVideos = useMemo(() => videos.filter((v) => v.cover_path), [videos])
++  const covers = useActressVideoPage(actressId, true)
++  const coverVideos = covers.data?.videos ?? []
+   const galleryItems = useMemo(() => prepareActressGalleryForDisplay(gallery), [gallery])
+ 
+   const editableSourceUrl = sourceUrl || displayUrl
+@@ -210,6 +211,13 @@ export default function ActressAvatarEditor({
+   }, [coverVideos.length, editableSourceUrl, galleryItems.length])
+ 
+   const [activeTab, setActiveTab] = useState<SourceTab>(defaultTab)
++  const initialTabResolved = useRef(false)
++  useEffect(() => {
++    if (!initialTabResolved.current && !covers.loading) {
++      initialTabResolved.current = true
++      setActiveTab(defaultTab)
++    }
++  }, [covers.loading, defaultTab])
+   const [editUrl, setEditUrl] = useState<string | null>(null)
+   const [activeSourceKey, setActiveSourceKey] = useState<string | null>(null)
+   const [baseScale, setBaseScale] = useState(1)
+@@ -730,7 +738,7 @@ export default function ActressAvatarEditor({
+   const tabs: Array<{ id: SourceTab; label: string; disabled?: boolean }> = [
+     { id: 'current', label: '当前', disabled: !editableSourceUrl },
+     { id: 'local', label: '本地' },
+-    { id: 'cover', label: '封面', disabled: coverVideos.length === 0 },
++    { id: 'cover', label: '封面', disabled: false },
+     { id: 'gallery', label: '写真', disabled: galleryItems.length === 0 }
+   ]
+ 
+@@ -834,6 +842,7 @@ export default function ActressAvatarEditor({
+                   disabled={tab.disabled}
+                   onClick={() => {
+                     setOpenError(null)
++                    initialTabResolved.current = true
+                     setActiveTab(tab.id)
+                   }}
+                 >
+@@ -898,7 +907,9 @@ export default function ActressAvatarEditor({
+                 onPointerUp={coverScroll.onPointerUp}
+                 onPointerCancel={coverScroll.onPointerCancel}
+               >
+-                {coverVideos.length === 0 ? (
++                {covers.loading ? <p className="avatar-source-empty">加载中…</p> : covers.error ? (
++                  <div role="alert">{covers.error}<Button onClick={covers.reload}>重试</Button></div>
++                ) : coverVideos.length === 0 ? (
+                   <p className="avatar-source-empty">暂无关联封面</p>
+                 ) : (
+                   coverVideos.map((video) => {
+@@ -931,6 +942,8 @@ export default function ActressAvatarEditor({
+                 )}
+               </div>
+ 
++
++
+               <div
+                 ref={galleryScroll.ref}
+                 className={`avatar-source-page avatar-source-page--scroll${
+@@ -982,6 +995,13 @@ export default function ActressAvatarEditor({
+                 </div>
+               ) : null}
+             </div>
++              {activeTab === 'cover' && covers.data && covers.data.total > 60 ? (
++                <nav className="actress-works-pagination" aria-label="头像封面分页">
++                  <Button size="sm" disabled={covers.offset === 0} onClick={() => covers.move(covers.offset - 60)}>上一页</Button>
++                  <span>第 {Math.floor(covers.offset / 60) + 1} 页</span>
++                  <Button size="sm" disabled={covers.offset + coverVideos.length >= covers.data.total} onClick={() => covers.move(covers.offset + 60)}>下一页</Button>
++                </nav>
++              ) : null}
+           </div>
+ 
+           <div
+diff --git a/src/renderer/src/components/ActressProfileMeta.tsx b/src/renderer/src/components/ActressProfileMeta.tsx
+index 538142b..14f05c8 100644
+--- a/src/renderer/src/components/ActressProfileMeta.tsx
++++ b/src/renderer/src/components/ActressProfileMeta.tsx
+@@ -5,7 +5,7 @@ import {
+   ZODIAC_OPTIONS
+ } from '@shared/actressProfileOptions'
+ import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressMetadata } from '@shared/actressTypes'
+ import type { ScrapedStatus } from '@shared/commonTypes'
+ import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/actressTypes'
+ import RelatedLinksList from './RelatedLinksList'
+@@ -71,7 +71,7 @@ export function canMarkActressScrapeSuccess(status: ScrapedStatus): boolean {
+ }
+ 
+ export function buildActressScrapeMetaItems(
+-  actress: Pick<ActressDetail, 'scraped_status' | 'last_scraped_at'>
++  actress: Pick<ActressMetadata, 'scraped_status' | 'last_scraped_at'>
+ ): MetaItem[] {
+   // Successful records are the common case; keep the detail page quiet unless attention is needed.
+   if (actress.scraped_status === 1) return []
+@@ -91,13 +91,13 @@ export function buildActressScrapeMetaItems(
+   return items
+ }
+ 
+-function findTypedName(actress: ActressDetail, type: string): string | null {
++function findTypedName(actress: ActressMetadata, type: string): string | null {
+   const row = actress.names.find((item) => item.type === type)
+   const name = row?.name.trim()
+   return name || null
+ }
+ 
+-function buildActressMetaSections(actress: ActressDetail): Array<{
++function buildActressMetaSections(actress: ActressMetadata): Array<{
+   id: string
+   title: string
+   items: MetaItem[]
+@@ -191,7 +191,7 @@ function buildActressMetaSections(actress: ActressDetail): Array<{
+   return sections
+ }
+ 
+-export function buildActressProfileSubtitle(actress: ActressDetail): string | null {
++export function buildActressProfileSubtitle(actress: ActressMetadata): string | null {
+   const parts = [actress.name_zh, actress.name_en]
+     .map((name) => name?.trim())
+     .filter((name): name is string => Boolean(name && name !== actress.main_name))
+@@ -199,8 +199,8 @@ export function buildActressProfileSubtitle(actress: ActressDetail): string | nu
+   return unique.length > 0 ? unique.join(' · ') : null
+ }
+ 
+-export function buildActressProfileStats(actress: ActressDetail): string[] {
+-  const stats: string[] = [`${actress.videos.length} 部`]
++export function buildActressProfileStats(actress: ActressMetadata, videoCount: number | null): string[] {
++  const stats: string[] = [videoCount === null ? '作品数读取中…' : `${videoCount} 部`]
+   if (actress.height_cm != null) stats.push(`${actress.height_cm} cm`)
+   if (!isBlank(actress.birth_date)) {
+     const age = computeAge(actress.birth_date!.trim())
+@@ -215,7 +215,7 @@ export function buildActressProfileStats(actress: ActressDetail): string[] {
+ export default function ActressProfileMeta({
+   actress
+ }: {
+-  actress: ActressDetail
++  actress: ActressMetadata
+ }): JSX.Element | null {
+   const sections = useMemo(() => buildActressMetaSections(actress), [actress])
+   const aliases = actress.aliases.filter((alias) => alias.trim().length > 0)
+diff --git a/src/renderer/src/components/EditActressModal.tsx b/src/renderer/src/components/EditActressModal.tsx
+index c001d2c..eb09a11 100644
+--- a/src/renderer/src/components/EditActressModal.tsx
++++ b/src/renderer/src/components/EditActressModal.tsx
+@@ -16,7 +16,7 @@ import {
+ import { parseAvatarCrop, type ActressAvatarCommit } from '@shared/avatarCrop'
+ import { normalizeCupSize } from '@shared/cupSizeUtils'
+ import type { ActressEditInput, ActressGender } from '@shared/actressTypes'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressMetadata } from '@shared/actressTypes'
+ import { assetUrl } from '../api'
+ import ActressAvatarEditor from './ActressAvatarEditor'
+ import AliasTagEditor from './AliasTagEditor'
+@@ -29,7 +29,7 @@ import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
+ import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
+ 
+ interface Props {
+-  actress: ActressDetail
++  actress: ActressMetadata
+   onCancel: () => void
+   onSave: (input: ActressEditInput) => Promise<void>
+ }
+@@ -179,7 +179,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props):
+                   displayUrl={assetUrl(actress.avatar_path)}
+                   sourceUrl={assetUrl(actress.avatar_source_path)}
+                   savedCrop={savedCrop}
+-                  videos={actress.videos}
++                  actressId={actress.id}
+                   gallery={actress.gallery}
+                   onAvatarChange={handleAvatarChange}
+                 />
+diff --git a/src/renderer/src/components/MergeActressModal.tsx b/src/renderer/src/components/MergeActressModal.tsx
+index 6640a48..7f395f7 100644
+--- a/src/renderer/src/components/MergeActressModal.tsx
++++ b/src/renderer/src/components/MergeActressModal.tsx
+@@ -1,11 +1,10 @@
+-import { useEffect, useState } from 'react'
++import { useEffect, useRef, useState } from 'react'
+ import { SearchX, UserRound } from 'lucide-react'
+ import {
+-  actressGenderMergeLabel,
+-  canMergeActressGenders
++  actressGenderMergeLabel
+ } from '@shared/actressProfileOptions'
+-import type { ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/actressTypes'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressGender, ActressMergeCandidate, ActressMergeMainNameFrom } from '@shared/actressTypes'
++import type { ActressMetadata } from '@shared/actressTypes'
+ import { api, assetUrl } from '../api'
+ import { useDebounce } from '../hooks/useDebounce'
+ import ActressName from './ActressName'
+@@ -16,7 +15,8 @@ import { UI_ICON_SM } from './iconDefaults'
+ import Button from './Button'
+ 
+ interface Props {
+-  keepActress: ActressDetail
++  keepActress: ActressMetadata
++  keepVideoCount: number
+   onCancel: () => void
+   onMerged: () => void
+ }
+@@ -88,54 +88,59 @@ function MergeActressCard({
+   )
+ }
+ 
+-export default function MergeActressModal({
++export default function MergeActressModal(props: Props): JSX.Element {
++  return <MergeActressSession key={`${props.keepActress.id}:${props.keepActress.gender ?? ''}`} {...props} />
++}
++
++function MergeActressSession({
+   keepActress,
++  keepVideoCount,
+   onCancel,
+   onMerged
+ }: Props): JSX.Element {
+   const [searchInput, setSearchInput] = useState('')
+   const debouncedQ = useDebounce(searchInput, 300)
+-  const [items, setItems] = useState<ActressListItem[]>([])
+-  const [loading, setLoading] = useState(false)
+-  const [selected, setSelected] = useState<ActressListItem | null>(null)
++  const [items, setItems] = useState<ActressMergeCandidate[]>([])
++  const [loading, setLoading] = useState(true)
++  const [selected, setSelected] = useState<ActressMergeCandidate | null>(null)
+   const [mainNameFrom, setMainNameFrom] = useState<ActressMergeMainNameFrom>('keep')
+   const [merging, setMerging] = useState(false)
+   const [error, setError] = useState<string | null>(null)
++  const errorRef = useRef<HTMLParagraphElement>(null)
++  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'nearest' }) }, [error])
++  const [pageError, setPageError] = useState<string | null>(null)
++  const [offset, setOffset] = useState(0)
++  const [hasMore, setHasMore] = useState(false)
++  const [retry, setRetry] = useState(0)
++  const mergeInFlight = useRef(false)
++  const mounted = useRef(true)
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
++
+ 
+   useEffect(() => {
+     let cancelled = false
+     setLoading(true)
+-    setError(null)
+-    api.actresses
+-      .list(debouncedQ.trim(), 'all')
+-      .then((list) => {
+-        if (cancelled) return
+-        setItems(
+-          list.filter(
+-            (item) =>
+-              item.id !== keepActress.id &&
+-              canMergeActressGenders(keepActress.gender, item.gender)
+-          )
+-        )
+-      })
+-      .catch((e) => {
+-        if (!cancelled) setError(String((e as Error).message ?? e))
+-      })
+-      .finally(() => {
+-        if (!cancelled) setLoading(false)
++    setItems([])
++    setHasMore(false)
++    setPageError(null)
++    if (searchInput !== debouncedQ) return () => { cancelled = true }
++    void api.actresses.mergeCandidates({ keepId: keepActress.id, search: debouncedQ.trim(), limit: 40, offset })
++      .then(page => {
++        if (!cancelled) { setItems(page.items); setHasMore(page.hasMore) }
+       })
++      .catch(e => { if (!cancelled) setPageError(String((e as Error).message ?? e)) })
++      .finally(() => { if (!cancelled) setLoading(false) })
++    return () => { cancelled = true }
++  }, [debouncedQ, searchInput, keepActress.id, offset, retry])
+ 
+-    return () => {
+-      cancelled = true
+-    }
+-  }, [debouncedQ, keepActress.gender, keepActress.id])
+-
+-  useEffect(() => {
+-    setMainNameFrom('keep')
+-  }, [selected?.id])
++  const changePage = (nextOffset: number): void => {
++    if (merging || loading) return
++    setItems([]); setLoading(true); setPageError(null); setOffset(nextOffset)
++  }
+ 
+   const doMerge = async (): Promise<void> => {
+-    if (!selected || merging) return
++    if (!selected || mergeInFlight.current) return
++    mergeInFlight.current = true
+     setMerging(true)
+     setError(null)
+     try {
+@@ -144,11 +149,12 @@ export default function MergeActressModal({
+         mergeId: selected.id,
+         mainNameFrom
+       })
+-      onMerged()
++      if (mounted.current) onMerged()
+     } catch (e) {
+-      setError(String((e as Error).message ?? e))
++      if (mounted.current) setError(String((e as Error).message ?? e))
+     } finally {
+-      setMerging(false)
++      mergeInFlight.current = false
++      if (mounted.current) setMerging(false)
+     }
+   }
+ 
+@@ -156,7 +162,7 @@ export default function MergeActressModal({
+     main_name: keepActress.main_name,
+     gender: keepActress.gender ?? null,
+     avatar_path: keepActress.avatar_path,
+-    video_count: keepActress.videos.length,
++    video_count: keepVideoCount,
+     gallery_count: keepActress.gallery.length
+   }
+ 
+@@ -184,7 +190,7 @@ export default function MergeActressModal({
+         : keepActress.main_name
+ 
+   const mergedVideoCount =
+-    selected == null ? keepActress.videos.length : keepActress.videos.length + selected.video_count
++    selected == null ? keepVideoCount : keepVideoCount + selected.video_count
+   return (
+     <Modal
+       title="合并演员"
+@@ -194,6 +200,7 @@ export default function MergeActressModal({
+       className="merge-actress-modal"
+       bodyOverflow="hidden"
+       onCancel={onCancel}
++      closeDisabled={merging}
+       actions={
+         <>
+           <Button type="button" onClick={onCancel} disabled={merging}>
+@@ -228,28 +235,36 @@ export default function MergeActressModal({
+           <div className="merge-actress-section-head">
+             <span className="merge-actress-section-title">选择要合并的演员</span>
+             {!loading && items.length > 0 && (
+-              <span className="merge-actress-section-meta">{items.length} 名候选</span>
++              <span className="merge-actress-section-meta">本页 {items.length} 名候选</span>
+             )}
+           </div>
+           <input
+             className="search-input merge-actress-search"
+             type="search"
+             placeholder="搜索主名或别名…"
++            aria-label="搜索合并候选"
++            maxLength={256}
++            disabled={merging}
+             value={searchInput}
+-            onChange={(e) => setSearchInput(e.target.value)}
++            onChange={(e) => { setItems([]); setLoading(true); setOffset(0); setSearchInput(e.target.value) }}
+             autoFocus
+           />
+ 
+           <div className="merge-actress-pick-panel">
+             {loading ? (
+               <EmptyState variant="modal" loading />
++            ) : pageError ? (
++              <div role="alert" className="merge-actress-page-error">
++                <p>合并候选读取失败</p>
++                <Button size="sm" disabled={merging} onClick={() => setRetry(value => value + 1)}>重试</Button>
++              </div>
+             ) : items.length === 0 ? (
+               <EmptyState
+                 variant="modal"
+                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+-                title={debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
++                title={offset > 0 ? '本页没有候选演员' : debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
+                 description={
+-                  debouncedQ.trim()
++                  offset > 0 ? '返回上一页或调整搜索关键词。' : debouncedQ.trim()
+                     ? '调整搜索关键词后再试。'
+                     : '当前演员没有同组可合并候选。'
+                 }
+@@ -263,9 +278,11 @@ export default function MergeActressModal({
+                       key={item.id}
+                       type="button"
+                       role="option"
++                      aria-label={`选择合并演员 ${item.main_name}`}
+                       aria-selected={isSelected}
+                       className={`merge-actress-pick-item${isSelected ? ' is-selected' : ''}`}
+-                      onClick={() => setSelected(isSelected ? null : item)}
++                      disabled={merging}
++                      onClick={() => { setSelected(isSelected ? null : item); setMainNameFrom('keep') }}
+                     >
+                       <span className="merge-actress-pick-radio" aria-hidden="true" />
+                       <ActressAvatar
+@@ -287,6 +304,11 @@ export default function MergeActressModal({
+               </div>
+             )}
+           </div>
++          <div className="merge-actress-pagination" aria-label="合并候选分页">
++            <Button size="sm" disabled={merging || loading || offset === 0} onClick={() => changePage(Math.max(0, offset - 40))}>上一页</Button>
++            <span aria-live="polite">第 {Math.floor(offset / 40) + 1} 页</span>
++            <Button size="sm" disabled={merging || loading || !hasMore} onClick={() => changePage(offset + 40)}>下一页</Button>
++          </div>
+         </section>
+ 
+         <section
+@@ -305,6 +327,7 @@ export default function MergeActressModal({
+                   <input
+                     type="radio"
+                     name="merge-main-name"
++                    disabled={merging}
+                     checked={mainNameFrom === 'keep'}
+                     onChange={() => setMainNameFrom('keep')}
+                   />
+@@ -319,6 +342,7 @@ export default function MergeActressModal({
+                   <input
+                     type="radio"
+                     name="merge-main-name"
++                    disabled={merging}
+                     checked={mainNameFrom === 'merge'}
+                     onChange={() => setMainNameFrom('merge')}
+                   />
+@@ -334,7 +358,7 @@ export default function MergeActressModal({
+                   当前条目保留为「{finalMainName}」，对方记录将删除
+                 </li>
+                 <li>
+-                  影片合并：{keepActress.videos.length} + {selected.video_count}，约{' '}
++                  影片合并：{keepVideoCount} + {selected.video_count}，约{' '}
+                   <strong>{mergedVideoCount}</strong> 部关联到保留条目
+                 </li>
+                 <li>写真与资料字段将合并到保留条目，已有字段优先保留</li>
+@@ -352,7 +376,7 @@ export default function MergeActressModal({
+           )}
+         </section>
+ 
+-        {error && <p className="merge-actress-error">{error}</p>}
++        {error && <p ref={errorRef} role="alert" className="merge-actress-error">{error}</p>}
+       </div>
+     </Modal>
+   )
+diff --git a/src/renderer/src/pages/ActressDetailPage.tsx b/src/renderer/src/pages/ActressDetailPage.tsx
+index 162ccb0..2ffb5cd 100644
+--- a/src/renderer/src/pages/ActressDetailPage.tsx
++++ b/src/renderer/src/pages/ActressDetailPage.tsx
+@@ -1,3 +1,5 @@
++import Button from '../components/Button'
++import { useActressVideoPage } from '../hooks/useActressVideoPage'
+ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+ import { useQueryClient } from '@tanstack/react-query'
+ import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
+@@ -8,7 +10,7 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+ import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
+ import { ROUTE_MATCH } from '../listView/routePaths'
+ import { buildActressScrapeMatchNameOptions } from '@shared/actressProfileOptions'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressMetadata } from '@shared/actressTypes'
+ import type { ActressDeleteResult } from '@shared/actressIpcContract'
+ import { api, assetUrl } from '../api'
+ import { useToast } from '../components/Toast'
+@@ -64,13 +66,22 @@ export default function ActressDetailPage(): JSX.Element {
+     pendingActressStack
+   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
+   const actressId = Number(actressIdParam ?? id)
++  const works = useActressVideoPage(actressId)
++  const knownTotal = useRef<{ id: number; total: number } | null>(null)
++  if (works.data) knownTotal.current = { id: actressId, total: works.data.total }
++  const videoTotal = knownTotal.current?.id === actressId ? knownTotal.current.total : null
++  const reloadWorks = useRef(works.reload)
++  reloadWorks.current = works.reload
++  const activeActressId = useRef(actressId)
++  activeActressId.current = actressId
++  const metadataSequence = useRef(0)
+ 
+   const toast = useToast()
+   const queryClient = useQueryClient()
+   const toastRef = useRef(toast)
+   toastRef.current = toast
+   const { setBackground, clearBackground } = useAppBackground()
+-  const [actress, setActress] = useState<ActressDetail | null>(null)
++  const [actress, setActress] = useState<ActressMetadata | null>(null)
+   const [loading, setLoading] = useState(true)
+   const [confirmDelete, setConfirmDelete] = useState(false)
+   const [confirmClear, setConfirmClear] = useState(false)
+@@ -103,14 +114,18 @@ export default function ActressDetailPage(): JSX.Element {
+ 
+   const load = useCallback(
+     (options?: { silent?: boolean }) => {
++      if (activeActressId.current !== actressId) return Promise.resolve()
+       const silent = options?.silent ?? false
++      const sequence = ++metadataSequence.current
++      const isCurrent = () => sequence === metadataSequence.current && activeActressId.current === actressId
+       if (!silent) setLoading(true)
++      else reloadWorks.current()
+       return api.actresses
+-        .get(actressId)
+-        .then(setActress)
+-        .catch((e) => toastRef.current.show(String(e.message ?? e), 'error'))
++        .metadata(actressId)
++        .then(value => { if (isCurrent()) setActress(value) })
++        .catch((e) => { if (isCurrent()) { setActress(null); toastRef.current.show(String(e.message ?? e), 'error') } })
+         .finally(() => {
+-          if (!silent) setLoading(false)
++          if (isCurrent()) setLoading(false)
+         })
+     },
+     [actressId]
+@@ -119,6 +134,7 @@ export default function ActressDetailPage(): JSX.Element {
+ 
+   useEffect(() => {
+     void load()
++    return () => { metadataSequence.current += 1 }
+   }, [actressId, load])
+ 
+   useEffect(
+@@ -143,7 +159,7 @@ export default function ActressDetailPage(): JSX.Element {
+ 
+   useEffect(() => {
+     const scope = `actress:${actressId}`
+-    if (!actress) return
++    if (!actress || actress.id !== actressId) return
+     const path = resolveActressDetailDisplayBackgroundPath(
+       actress,
+       actressDetailUseFirstGalleryBackground
+@@ -269,7 +285,7 @@ export default function ActressDetailPage(): JSX.Element {
+     </div>
+   ) : null
+ 
+-  if (loading) {
++  if (loading || (actress !== null && actress.id !== actressId)) {
+     return (
+       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+         <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
+@@ -294,10 +310,10 @@ export default function ActressDetailPage(): JSX.Element {
+     )
+   }
+ 
+-  const avatar = assetUrl(actress.avatar_path)
+-  const avatarPreview = assetUrl(actress.avatar_source_path) ?? avatar
++  const avatar = assetUrl(actress.avatar_path, 640)
++  const avatarPreview = assetUrl(actress.avatar_source_path) ?? assetUrl(actress.avatar_path)
+   const profileSubtitle = buildActressProfileSubtitle(actress)
+-  const profileStats = buildActressProfileStats(actress)
++  const profileStats = buildActressProfileStats(actress, videoTotal)
+ 
+   const onAvatarKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+     if (!avatarPreview || !avatarPreviewEnabled || e.defaultPrevented) return
+@@ -341,6 +357,7 @@ export default function ActressDetailPage(): JSX.Element {
+         {
+           key: 'merge',
+           label: '合并演员',
++          disabled: !works.data,
+           onClick: () => setShowMerge(true)
+         },
+         {
+@@ -440,7 +457,9 @@ export default function ActressDetailPage(): JSX.Element {
+       </div>
+ 
+       {activeTab === 'videos' ? (
+-        actress.videos.length === 0 ? (
++        works.loading ? <EmptyState loading /> : works.error ? (
++          <div role="alert">{works.error}<Button onClick={works.reload}>重试</Button></div>
++        ) : !works.data || works.data.videos.length === 0 ? (
+           <EmptyState
+             variant="compact"
+             icon={<Inbox {...UI_ICON} aria-hidden />}
+@@ -448,11 +467,16 @@ export default function ActressDetailPage(): JSX.Element {
+             description="影片刮削后会自动建立关联。"
+           />
+         ) : (
+-          <div className="poster-grid">
+-            {actress.videos.map((v) => (
++          <><div className="poster-grid">
++            {works.data.videos.map((v) => (
+               <PosterCard key={v.id} video={v} />
+             ))}
+           </div>
++          <nav className="actress-works-pagination" aria-label="演员作品分页">
++            <Button disabled={works.offset === 0} onClick={() => works.move(works.offset - 60)}>上一页</Button>
++            <span>第 {Math.floor(works.offset / 60) + 1} 页 · 共 {works.data.total} 部</span>
++            <Button disabled={works.offset + works.data.videos.length >= works.data.total} onClick={() => works.move(works.offset + 60)}>下一页</Button>
++          </nav></>
+         )
+       ) : (
+         <ActressGalleryPanel
+@@ -536,9 +560,10 @@ export default function ActressDetailPage(): JSX.Element {
+         />
+       )}
+ 
+-      {showMerge && (
++      {showMerge && videoTotal !== null && (
+         <MergeActressModal
+           keepActress={actress}
++          keepVideoCount={videoTotal}
+           onCancel={() => setShowMerge(false)}
+           onMerged={() => {
+             setShowMerge(false)
+diff --git a/src/renderer/src/styles/entity-browsing.css b/src/renderer/src/styles/entity-browsing.css
+index baf802b..47a158f 100644
+--- a/src/renderer/src/styles/entity-browsing.css
++++ b/src/renderer/src/styles/entity-browsing.css
+@@ -1064,3 +1064,27 @@ button.actress-mini:focus-visible .actress-avatar {
+   font-size: 12px;
+   margin-top: 6px;
+ }
++
++
++.tag-filter-pagination {
++  display: flex;
++  flex-wrap: wrap;
++  gap: var(--control-pad-x);
++  margin-top: var(--control-pad-x);
++}
++
++.tag-chip-cloud-item:disabled {
++  cursor: default;
++  color: var(--text-muted);
++  border-color: var(--border-subtle);
++}
++
++.actress-works-pagination {
++  display: flex;
++  flex: 0 0 auto;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--form-label-gap);
++  padding-block: var(--form-label-gap);
++  color: var(--text-secondary);
++}
+diff --git a/src/renderer/src/hooks/useActressVideoPage.ts b/src/renderer/src/hooks/useActressVideoPage.ts
+new file mode 100644
+index 0000000..aaf9ca3
+--- /dev/null
++++ b/src/renderer/src/hooks/useActressVideoPage.ts
+@@ -0,0 +1,39 @@
++import { useCallback, useEffect, useRef, useState } from 'react'
++import type { ActressVideoPage } from '@shared/actressTypes'
++import { api } from '../api'
++
++/** Holds only one page; pending responses belong to one actor/filter/page session. */
++export function useActressVideoPage(actressId: number, withCover = false) {
++  const scope = `${actressId}:${withCover}`
++  const [position, setPosition] = useState({ scope, offset: 0 })
++  const offset = position.scope === scope ? position.offset : 0
++  const [retry, setRetry] = useState(0)
++  const [result, setResult] = useState<{ key: string; pageKey: string; data: ActressVideoPage | null; error: string | null } | null>(null)
++  const pageKey = `${scope}:${offset}`
++  const navigation = useRef({ pageKey, generation: 0 })
++  if (navigation.current.pageKey !== pageKey) {
++    navigation.current = { pageKey, generation: navigation.current.generation + 1 }
++  }
++  const sessionKey = `${pageKey}:${navigation.current.generation}`
++  const key = `${sessionKey}:${retry}`
++  const activeKey = useRef(key)
++  activeKey.current = key
++  const reload = useCallback(() => setRetry(value => value + 1), [])
++  const move = (next: number) => setPosition({ scope, offset: Math.max(0, next) })
++  useEffect(() => {
++    let cancelled = false
++    void api.actresses.videoPage(actressId, { limit: 60, offset, withCover }).then(data => {
++      if (cancelled || activeKey.current !== key) return
++      if (data && offset > 0 && offset >= data.total) {
++        setPosition({ scope, offset: Math.max(0, Math.floor((data.total - 1) / 60) * 60) })
++        return
++      }
++      setResult({ key, pageKey: sessionKey, data, error: null })
++    }).catch(error => {
++      if (!cancelled && activeKey.current === key) setResult({ key, pageKey: sessionKey, data: null, error: String(error.message ?? error) })
++    })
++    return () => { cancelled = true }
++  }, [actressId, withCover, scope, offset, key, sessionKey])
++  const current = result?.pageKey === sessionKey ? result : null
++  return { data: current?.data ?? null, loading: !current || (current.error !== null && current.key !== key), error: current?.error ?? null, offset, move, reload }
++}
+diff --git a/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx b/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx
+new file mode 100644
+index 0000000..ffd0642
+--- /dev/null
++++ b/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx
+@@ -0,0 +1,161 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ActressMetadata, ActressVideoPageQuery } from '@shared/actressTypes'
++import type { ElectronApi } from '../../../preload/index'
++
++let metadataResponse: ((id: number) => Promise<ActressMetadata>) | null = null
++let editResponse: (() => Promise<boolean>) | null = null
++let fail = false
++let hold: (() => Promise<unknown>) | null = null
++let total = 125
++const calls: Array<{ id: number; query: ActressVideoPageQuery }> = []
++const metadataCalls: number[] = []
++function metadata(id: number): ActressMetadata {
++  return { id, main_name: `Actor-${id}`, gender: 'female', names: [], aliases: [], gallery: [], links: [], avatar_path: null, avatar_source_path: null, scraped_status: 0 } as unknown as ActressMetadata
++}
++function page(id: number, offset: number) {
++  return { videos: Array.from({ length: Math.min(60, Math.max(0, total - offset)) }, (_, n) => ({ id: id * 1000 + offset + n, code: `WORK-${id}-${offset+n}`, title: null, cover_path: null, scraped_status: 0, resource_kinds: [] })), total, limit: 60, offset }
++}
++const fake = {
++  actresses: {
++    get: () => { throw new Error('Full actress detail forbidden') },
++    metadata: async (id: number) => { metadataCalls.push(id); return metadataResponse ? metadataResponse(id) : metadata(id) },
++    edit: async () => editResponse ? editResponse() : true,
++    mergeCandidates: async () => ({ items: [], hasMore: false, offset: 0 }),
++    videoPage: async (id: number, query: ActressVideoPageQuery) => {
++      if (query.withCover) return { videos: [], total: 0, limit: 60, offset: 0 }
++      calls.push({ id, query })
++      if (hold) { const run = hold; hold = null; return run() }
++      if (fail) { fail = false; throw new Error('Page failed') }
++      return page(id, query.offset ?? 0)
++    }
++  },
++  settings: { get: async () => ({}) },
++  actressScrape: { listPlugins: async () => [], listPluginDetails: async () => [] },
++  agentMetadata: { onSnapshotChanged: () => () => {} }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), { api: fake, requestAnimationFrame: (fn: () => void) => fn() }) })
++Object.defineProperty(globalThis, 'document', { configurable: true, value: { body: { style: { overflow: '' } }, activeElement: null } })
++let renderer: TestRenderer.ReactTestRenderer | undefined
++let client: QueryClient
++let navigate: NavigateFunction
++function Nav() { navigate = useNavigate(); return null }
++const text = (node: TestRenderer.ReactTestInstance): string => node.children.map(child => typeof child === 'string' ? child : text(child)).join('')
++async function click(label: string) {
++  await act(async () => {
++    const button = renderer!.root.findAllByType('button').find(node => text(node) === label || node.props['aria-label'] === label)!
++    assert.ok(button, label)
++    assert.ok(!button.props.disabled, label)
++    button.props.onClick()
++  })
++}
++async function mount() {
++  const Component = (await import('./ActressDetailPage')).default
++  const { ImagePreviewOverlayProvider } = await import('../components/ImagePreviewOverlayContext')
++  const { AppBackgroundProvider } = await import('../components/AppBackgroundContext')
++  const { AgentMetadataCollectorProvider } = await import('../components/agentMetadata/AgentMetadataCollectorContext')
++  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
++  await act(async () => {
++    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video</div>} /></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>)
++  })
++}
++afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined; calls.length = 0; metadataCalls.length = 0; total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
++
++it('loads metadata once while paging 60/60/5 works and preserving the full count', async () => {
++  await mount()
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++  assert.ok(text(renderer!.root).includes('125 部'))
++  await click('下一页')
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++  await click('下一页')
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 5)
++  assert.deepEqual(metadataCalls, [1])
++  assert.deepEqual(calls.map(call => call.query.offset), [0,60,120])
++  await act(async () => navigate('/actresses/1/1120'))
++  await act(async () => navigate('/actresses/1'))
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 5)
++})
++
++it('retries page errors, clamps a removed last page, and rejects late actor results', async () => {
++  await mount()
++  fail = true
++  await click('下一页')
++  assert.ok(text(renderer!.root).includes('Page failed'))
++  await click('重试')
++  total = 30
++  await click('下一页')
++  assert.deepEqual(calls.slice(-2).map(call => call.query.offset), [120, 0])
++  assert.ok(text(renderer!.root).includes('共 30 部'))
++  total = 125
++  let resolve!: (value: unknown) => void
++  hold = () => new Promise(done => { resolve = done })
++  // Refresh the visible page by navigating to another actor, then leave before it completes.
++  await act(async () => navigate('/actresses/2'))
++  await act(async () => navigate('/actresses/3'))
++  await act(async () => resolve(page(2, 0)))
++  assert.ok(text(renderer!.root).includes('Actor-3'))
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.ok(renderer!.root.findAllByType(PosterCard).every(node => node.props.video.id >= 3000))
++})
++
++it('does not invalidate the new actor metadata when the old editor save settles late', async () => {
++  await mount()
++  await click('编辑')
++  const EditModal = (await import('../components/EditActressModal')).default
++  const save = renderer!.root.findByType(EditModal).props.onSave
++  let finishEdit!: (value: boolean) => void
++  editResponse = () => new Promise(done => { finishEdit = done })
++  let operation!: Promise<void>
++  await act(async () => { operation = save({ main_name: 'Updated A' }); await Promise.resolve() })
++  let finishMetadata!: (value: ActressMetadata) => void
++  metadataResponse = id => id === 2 ? new Promise(done => { finishMetadata = done }) : Promise.resolve(metadata(id))
++  await act(async () => navigate('/actresses/2'))
++  await act(async () => { finishEdit(true); await operation })
++  await act(async () => finishMetadata(metadata(2)))
++  assert.ok(text(renderer!.root).includes('Actor-2'))
++  assert.deepEqual(metadataCalls, [1,2])
++})
++
++it('retains an open merge plan and its full count while the visible works refresh', async () => {
++  await mount()
++  await click('更多')
++  await click('合并演员')
++  const MergeModal = (await import('../components/MergeActressModal')).default
++  const modal = renderer!.root.findByType(MergeModal)
++  assert.equal(modal.props.keepVideoCount, 125)
++  const input = modal.findByType('input')
++  await act(async () => input.props.onChange({ target: { value: 'Keep this search' } }))
++  let resolve!: (value: unknown) => void
++  hold = () => new Promise(done => { resolve = done })
++  const { notifyAvatarAutoCropSaved } = await import('../avatarAutoCrop/events')
++  await act(async () => notifyAvatarAutoCropSaved(1))
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++  const during = renderer!.root.findByType(MergeModal)
++  assert.equal(during, modal)
++  assert.equal(during.props.keepVideoCount, 125)
++  assert.equal(during.findByType('input').props.value, 'Keep this search')
++  await act(async () => resolve(page(1, 0)))
++})
++
++it('does not reuse the prior actor page when an intervening actor request is still pending', async () => {
++  await mount()
++  let finishB!: (value: unknown) => void
++  hold = () => new Promise(done => { finishB = done })
++  await act(async () => navigate('/actresses/2'))
++  let finishA!: (value: unknown) => void
++  hold = () => new Promise(done => { finishA = done })
++  await act(async () => navigate('/actresses/1'))
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 0)
++  await act(async () => finishB(page(2, 0)))
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 0)
++  await act(async () => finishA(page(1, 0)))
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++})
+diff --git a/src/renderer/src/components/MergeActressModal.interaction.test.tsx b/src/renderer/src/components/MergeActressModal.interaction.test.tsx
+new file mode 100644
+index 0000000..99ea3f3
+--- /dev/null
++++ b/src/renderer/src/components/MergeActressModal.interaction.test.tsx
+@@ -0,0 +1,79 @@
++import assert from 'node:assert/strict'
++import {afterEach,it} from 'node:test'
++import React from 'react'
++import TestRenderer,{act} from 'react-test-renderer'
++import type {ActressDetail,ActressMergeCandidatePage,ActressMergeCandidateQuery,ActressMergeInput} from '@shared/actressTypes'
++import type {ElectronApi} from '../../../preload/index'
++function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes});return {promise,resolve}}
++const calls:ActressMergeCandidateQuery[]=[],merges:ActressMergeInput[]=[]
++const heldPages:Array<ReturnType<typeof deferred<ActressMergeCandidatePage>>>=[]
++let holdPage=false,failPage=false,failMerge=false,heldMerge:ReturnType<typeof deferred<void>>|undefined,merged=0,cancelled=0
++function page(query:ActressMergeCandidateQuery):ActressMergeCandidatePage {
++ const rows=Array.from({length:101},(_,i)=>({id:i+2,main_name:`Candidate-${i+2}`,avatar_path:null,gender:'female' as const,video_count:i+1}))
++  .filter(row=>row.id!==query.keepId&&(!query.search||row.main_name.includes(query.search)))
++ const offset=query.offset??0
++ return {items:rows.slice(offset,offset+40),hasMore:rows.length>offset+40,offset}
++}
++const fake={actresses:{list:()=>{throw new Error('Full candidate list forbidden')},
++ mergeCandidates:async(query:ActressMergeCandidateQuery)=>{calls.push(query);if(failPage){failPage=false;throw new Error('Page failure')}if(holdPage){holdPage=false;const held=deferred<ActressMergeCandidatePage>();heldPages.push(held);return held.promise}return page(query)},
++ merge:async(input:ActressMergeInput)=>{merges.push(input);if(heldMerge)await heldMerge.promise;if(failMerge)throw new Error('Merge failure');return true}
++}} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fake})})
++Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}}}})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let Component:typeof import('./MergeActressModal')['default']
++const keep=(id:number):ActressDetail=>({id,main_name:`Keep-${id}`,gender:'female',avatar_path:null,videos:[],gallery:[]} as unknown as ActressDetail)
++const element=(id:number)=><Component keepActress={keep(id)} keepVideoCount={keep(id).videos.length} onCancel={()=>cancelled++} onMerged={()=>merged++}/>
++const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++async function mount(){Component=(await import('./MergeActressModal')).default;await act(async()=>{renderer=TestRenderer.create(element(1))});await settle()}
++function text(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:text(child)).join('')}
++function button(label:string){const result=renderer!.root.findAllByType('button').find(node=>text(node)===label);assert.ok(result,label);return result}
++async function click(label:string){const node=button(label);assert.ok(!node.props.disabled);await act(async()=>node.props.onClick());await settle()}
++function options(){return renderer!.root.findAllByType('button').filter(node=>node.props.role==='option')}
++async function choose(id:number){const node=options().find(node=>node.props['aria-label']===`选择合并演员 Candidate-${id}`);assert.ok(node);assert.ok(!node.props.disabled);await act(async()=>node.props.onClick());await settle()}
++function radios(){return renderer!.root.findAllByType('input').filter(node=>node.props.name==='merge-main-name')}
++async function search(value:string){const input=renderer!.root.findAllByType('input').find(node=>node.props.type==='search')!;await act(async()=>input.props.onChange({target:{value}}))}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;calls.length=0;merges.length=0;heldPages.length=0;holdPage=false;failPage=false;failMerge=false;heldMerge=undefined;merged=0;cancelled=0})
++
++it('pages40 candidates and preserves selection and name plan across pages and search',async()=>{
++ await mount();assert.deepEqual(calls,[{keepId:1,search:'',limit:40,offset:0}]);assert.equal(options().length,40)
++ await choose(2);await act(async()=>radios()[1].props.onChange())
++ await click('下一页');assert.equal(calls.at(-1)?.offset,40);assert.equal(radios()[1].props.checked,true)
++ await click('下一页');assert.equal(options().length,21);assert.equal(button('下一页').props.disabled,true)
++ await search('not-found');await act(async()=>{await new Promise(resolve=>setTimeout(resolve,330))});await settle()
++ assert.equal(calls.at(-1)?.offset,0);assert.equal(options().length,0);assert.equal(radios()[1].props.checked,true)
++ await click('确认合并');assert.deepEqual(merges,[{keepId:1,mergeId:2,mainNameFrom:'merge'}]);assert.equal(merged,1)
++})
++it('retries page failures without losing the selected merge plan',async()=>{
++ await mount();await choose(2);await act(async()=>radios()[1].props.onChange());failPage=true
++ await click('下一页');assert.ok(renderer!.root.findAllByProps({role:'alert'}).length);assert.equal(options().length,0)
++ await click('重试');assert.equal(options().length,40);assert.equal(radios()[1].props.checked,true)
++})
++it('ignores old page responses while a changed search is debouncing',async()=>{
++ await mount();holdPage=true;await click('下一页');await search('Candidate-100')
++ await act(async()=>heldPages[0].resolve(page({keepId:1,offset:40})));await settle();assert.equal(options().length,0)
++ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,330))});await settle()
++ assert.equal(options().length,1);assert.equal(options()[0].props['aria-label'],'选择合并演员 Candidate-100')
++})
++it('locks a captured merge against duplicate submission and retains plan on failure',async()=>{
++ await mount();await choose(2);await act(async()=>radios()[1].props.onChange());heldMerge=deferred<void>();failMerge=true
++ const submit=button('确认合并');await act(async()=>{submit.props.onClick();submit.props.onClick()});await settle()
++ assert.equal(merges.length,1);assert.equal(button('取消').props.disabled,true)
++ assert.ok(options().every(node=>node.props.disabled));assert.ok(radios().every(node=>node.props.disabled))
++ await act(async()=>heldMerge!.resolve());await settle();assert.equal(merged,0);assert.equal(radios()[1].props.checked,true)
++ failPage=true;await click('下一页');assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(node=>text(node)==='Merge failure'))
++ await click('重试');assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(node=>text(node)==='Merge failure'));assert.equal(radios()[1].props.checked,true)
++ failMerge=false;heldMerge=undefined;await click('确认合并');assert.equal(merged,1);assert.equal(merges.length,2)
++})
++it('resets session on keep identity change and ignores old page and merge completion',async()=>{
++ holdPage=true;await mount();await act(async()=>renderer!.update(element(9)));await settle()
++ await act(async()=>heldPages[0].resolve({items:[],hasMore:false,offset:0}));await settle();assert.equal(options().length,40)
++ await choose(2);heldMerge=deferred<void>();await click('确认合并')
++ await act(async()=>renderer!.update(element(10)));await settle();assert.equal(button('确认合并').props.disabled,true)
++ await act(async()=>heldMerge!.resolve());await settle();assert.equal(merged,0);assert.equal(calls.at(-1)?.keepId,10)
++})
++it('resets the name plan only when choosing a different merge candidate or clearing selection',async()=>{
++ await mount();await choose(2);await act(async()=>radios()[1].props.onChange());await choose(3)
++ assert.equal(radios()[0].props.checked,true);await choose(3);assert.equal(button('确认合并').props.disabled,true)
++})
+diff --git a/scripts/performance/merge-actress-ui.mjs b/scripts/performance/merge-actress-ui.mjs
+new file mode 100644
+index 0000000..d9cde4d
+--- /dev/null
++++ b/scripts/performance/merge-actress-ui.mjs
+@@ -0,0 +1,77 @@
++/** Actual merge modal and styles, synthetic IPC, no user database. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-merge-ui-'))
++const output=path.resolve(process.env.JAVDEX_MERGE_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import {createRoot} from 'react-dom/client';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__calls=[];window.__merges=[];window.__merged=0;window.__cancelled=0;
++window.api={actresses:{list:()=>{throw new Error('Full actress list forbidden')},mergeCandidates:async query=>{
++ window.__calls.push(query);if(window.__failPage){window.__failPage=false;throw new Error('Page failure')}
++ const all=Array.from({length:101},(_,i)=>({id:i+2,main_name:'Candidate-'+(i+2),gender:'female',avatar_path:null,video_count:i+1})).filter(item=>!query.search||item.main_name.includes(query.search));
++ return {items:all.slice(query.offset,query.offset+40),hasMore:all.length>query.offset+40,offset:query.offset}
++},merge:async input=>{window.__merges.push(input);if(window.__holdMerge)await new Promise(resolve=>{window.__releaseMerge=resolve});if(window.__failMerge){window.__failMerge=false;throw new Error('Merge failure')}return true}}};
++const Component=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/MergeActressModal.tsx'))})).default;
++createRoot(document.getElementById('root')).render(<Component keepVideoCount={0} keepActress={{id:1,main_name:'Keep-1',gender:'female',avatar_path:null,videos:[],gallery:[]}} onCancel={()=>window.__cancelled++} onMerged={()=>window.__merged++}/>);
++`)
++let server,browser;const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport}),errors=[];page.on('pageerror',error=>errors.push(error.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.getByRole('option',{name:'选择合并演员 Candidate-2',exact:true}).click()
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-selected.png`)})
++  const layout=await page.evaluate(()=>{
++    const flow=document.querySelector('.merge-actress-flow').getBoundingClientRect(),picker=document.querySelector('.merge-actress-picker').getBoundingClientRect(),plan=document.querySelector('.merge-actress-plan').getBoundingClientRect();
++    return {flowBottom:flow.bottom,pickerTop:picker.top,pickerBottom:picker.bottom,planTop:plan.top}
++  })
++  assert.ok(layout.flowBottom<=layout.pickerTop && layout.pickerBottom<=layout.planTop,'Preview, picker and plan must not overlap')
++  const pager=page.getByLabel('合并候选分页',{exact:true})
++  await pager.scrollIntoViewIfNeeded()
++  const firstPager=await pager.boundingBox();assert.ok(firstPager&&firstPager.y>=0&&firstPager.y+firstPager.height<=viewport.height)
++  await page.getByText('使用对方主名',{exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('option',{name:'选择合并演员 Candidate-42',exact:true}).waitFor()
++  assert.equal(await page.getByRole('option').count(),40)
++  assert.equal(await page.getByRole('radio',{name:/使用对方主名/}).isChecked(),true)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('option',{name:'选择合并演员 Candidate-82',exact:true}).waitFor();assert.equal(await page.getByRole('option').count(),21)
++  await page.evaluate(()=>{window.__failPage=true});await page.getByRole('button',{name:'上一页',exact:true}).click()
++  await page.getByText('合并候选读取失败',{exact:true}).waitFor();await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.getByRole('option',{name:'选择合并演员 Candidate-42',exact:true}).waitFor()
++  await page.getByRole('searchbox',{name:'搜索合并候选'}).fill('Candidate-100')
++  await page.getByRole('option',{name:'选择合并演员 Candidate-100',exact:true}).waitFor();assert.equal(await page.getByRole('option').count(),1)
++  await page.getByRole('searchbox',{name:'搜索合并候选'}).fill('')
++  await page.getByRole('option',{name:'选择合并演员 Candidate-2',exact:true}).waitFor()
++  assert.equal(await page.getByRole('option',{name:'选择合并演员 Candidate-2',exact:true}).getAttribute('aria-selected'),'true')
++  await page.evaluate(()=>{window.__failMerge=true});await page.getByRole('button',{name:'确认合并',exact:true}).click()
++  await page.getByText('Merge failure',{exact:true}).waitFor()
++  const errorBox=await page.getByText('Merge failure',{exact:true}).boundingBox()
++  const submitBox=await page.getByRole('button',{name:'确认合并',exact:true}).boundingBox()
++  assert.ok(errorBox&&submitBox&&errorBox.y>=0&&errorBox.y+errorBox.height<=submitBox.y,'Merge failure must be visible above the fixed actions')
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  await page.evaluate(()=>{window.__holdMerge=true});await page.getByRole('button',{name:'确认合并',exact:true}).click()
++  await page.waitForFunction(()=>typeof window.__releaseMerge==='function')
++  assert.equal(await page.getByRole('searchbox',{name:'搜索合并候选'}).isDisabled(),true)
++  assert.equal(await page.getByRole('radio',{name:/使用对方主名/}).isDisabled(),true)
++  await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>window.__cancelled),0)
++  await page.evaluate(()=>window.__releaseMerge());await page.waitForFunction(()=>window.__merged===1)
++  assert.deepEqual(await page.evaluate(()=>window.__merges),[{keepId:1,mergeId:2,mainNameFrom:'merge'},{keepId:1,mergeId:2,mainNameFrom:'merge'}])
++  const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1);assert.deepEqual(errors,[])
++  results.push({viewport,geometry,layout,firstPager,errorBox,submitBox,queries:await page.evaluate(()=>window.__calls),merges:await page.evaluate(()=>window.__merges),errors});await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n');console.log(JSON.stringify(results))
++}finally{await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/actress-detail-ui.mjs b/scripts/performance/actress-detail-ui.mjs
+new file mode 100644
+index 0000000..31ef5cc
+--- /dev/null
++++ b/scripts/performance/actress-detail-ui.mjs
+@@ -0,0 +1,73 @@
++/** Actual actor detail/edit UI with synthetic IPC and a local image standing in for media://. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-actor-detail-ui-'))
++const output=path.resolve(process.env.JAVDEX_ACTOR_DETAIL_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root" style="height:100vh"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'cover.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="160" height="240"><rect width="160" height="240" fill="#334455"/><circle cx="80" cy="80" r="32" fill="#b8c5d6"/><path d="M25 220V160Q80 110 135 160V220" fill="#889aaa"/></svg>')
++const local=p=>JSON.stringify('/@fs'+path.join(repo,p))
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import {createRoot} from 'react-dom/client';import {MemoryRouter,Route,Routes,useNavigate} from 'react-router-dom';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
++import ${local('src/renderer/src/styles/global.css')};
++window.React=React;window.__calls=[];window.__metadata=[];
++window.api={actresses:{get:()=>{throw Error('Full detail forbidden')},metadata:async id=>{window.__metadata.push(id);return {id,main_name:'Actor-'+id,gender:'female',names:[],aliases:[],links:[],gallery:[],avatar_path:null,avatar_source_path:null,scraped_status:0}},videoPage:async(id,query)=>{window.__calls.push({id,query});if(window.__fail){window.__fail=false;throw Error('Page failed')}const total=125,offset=query.offset??0;return {videos:Array.from({length:Math.min(60,Math.max(0,total-offset))},(_,n)=>({id:id*1000+offset+n,code:'WORK-'+(offset+n),title:'Synthetic work '+(offset+n),cover_path:'covers/'+(offset+n)+'.jpg',scraped_status:0,resource_kinds:[]})),total,limit:60,offset}}} ,settings:{get:async()=>({})},actressScrape:{listPlugins:async()=>[],listPluginDetails:async()=>[]},agentMetadata:{onSnapshotChanged:()=>()=>{}},assets:{getPathForFile:()=>null}};
++const Component=(await import(${local('src/renderer/src/pages/ActressDetailPage.tsx')})).default;
++const {AppBackgroundProvider}=await import(${local('src/renderer/src/components/AppBackgroundContext.tsx')});
++const {ImagePreviewOverlayProvider}=await import(${local('src/renderer/src/components/ImagePreviewOverlayContext.tsx')});
++const {AgentMetadataCollectorProvider}=await import(${local('src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx')});
++function Nav(){window.__navigate=useNavigate();return null}
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav/><Routes><Route path="/actresses/:id" element={<Component/>}><Route path=":videoId" element={<div>Nested video</div>}/></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser;const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/cover.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport}),errors=[];page.on('pageerror',error=>errors.push(error.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.waitForFunction(()=>document.querySelectorAll('.poster-card').length===60)
++  const works=page.getByRole('navigation',{name:'演员作品分页'})
++  await works.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>window.__calls.filter(c=>!c.query.withCover).at(-1).query.offset===60)
++  await works.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.poster-card').length===5)
++  assert.equal(await page.evaluate(()=>window.__metadata.length),1)
++  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.poster-card img')).every(img=>img.complete))
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-works.png`)})
++  await page.getByRole('button',{name:'编辑',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.avatar-pick-tile').length===60)
++  const covers=page.getByRole('navigation',{name:'头像封面分页'})
++  await covers.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile')?.getAttribute('aria-label')==='WORK-60')
++  await covers.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.avatar-pick-tile').length===5)
++  await covers.getByRole('button',{name:'上一页'}).click()
++  await covers.getByRole('button',{name:'上一页'}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile')?.getAttribute('aria-label')==='WORK-0')
++  await page.getByRole('button',{name:'WORK-0',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-busy')==='false' && document.querySelector('.avatar-editor-edit-bar--visible'))
++  const zoom=page.locator('input[type=range]');await zoom.focus();await zoom.press('ArrowRight');const chosenZoom=await zoom.inputValue();assert.ok(Number(chosenZoom)>1)
++  await covers.getByRole('button',{name:'下一页'}).click()
++  await covers.getByRole('button',{name:'上一页'}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-label')==='WORK-0')
++  assert.equal(await zoom.inputValue(),chosenZoom,'crop zoom must survive cover page changes')
++  await covers.scrollIntoViewIfNeeded()
++  const geometry=await page.evaluate(()=>{const body=document.querySelector('.avatar-source-panel-body').getBoundingClientRect(),pager=document.querySelector('[aria-label="头像封面分页"]').getBoundingClientRect();return {bodyBottom:body.bottom,pagerTop:pager.top,pagerBottom:pager.bottom,viewport:innerHeight,horizontal:document.documentElement.scrollWidth>innerWidth}})
++  assert.ok(geometry.bodyBottom<=geometry.pagerTop,'cover pager must be outside image panel')
++  assert.ok(geometry.pagerBottom<=geometry.viewport,'cover pager must be reachable')
++  assert.equal(geometry.horizontal,false)
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-editor.png`)})
++  assert.deepEqual(errors,[])
++  results.push({viewport,geometry,chosenZoom,calls:await page.evaluate(()=>window.__calls),errors})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2));console.log(output)
++} finally {await browser?.close();await server?.close();if(output!==root&&!output.startsWith(root+path.sep))fs.rmSync(root,{recursive:true,force:true})}

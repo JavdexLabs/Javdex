@@ -1,0 +1,17 @@
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":460.7804160000005,"warmMedianMs":473.4890839999998,"warmMaxMs":519.1802499999994,"samples":10,"sqlCalls":2,"sqlMsLast":518.981624,"serializedBytes":41452,"rssBytesAfter":178159616}
+BEGIN index.single-library.legacy.release
+{"name":"index.single-library.legacy.release","firstMs":532.6797499999993,"warmMedianMs":569.6203329999989,"warmMaxMs":599.3161660000005,"samples":10,"sqlCalls":2,"sqlMsLast":599.1372499999998,"serializedBytes":41452,"rssBytesAfter":179044352}
+BEGIN overlap.legacy.release
+{"name":"overlap.legacy.release","firstMs":628.228667000003,"warmMedianMs":627.4008749999994,"warmMaxMs":636.565584,"samples":10,"sqlCalls":2,"sqlMsLast":630.9172089999993,"serializedBytes":41452,"rssBytesAfter":189431808}
+BEGIN index.after-overlap-write.overlap.legacy.release
+{"name":"index.after-overlap-write.overlap.legacy.release","firstMs":636.7745840000025,"warmMedianMs":629.3846249999988,"warmMaxMs":641.3479999999981,"samples":10,"sqlCalls":2,"sqlMsLast":641.156415999998,"serializedBytes":41452,"rssBytesAfter":190218240}
+✔ scripts/performance/large-library-benchmark.ts (41483.76425ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41487.080958

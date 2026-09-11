@@ -1,0 +1,604 @@
+diff --git a/src/renderer/src/components/settings/BatchSettingsPanel.tsx b/src/renderer/src/components/settings/BatchSettingsPanel.tsx
+index c90d0b8..72760d3 100644
+--- a/src/renderer/src/components/settings/BatchSettingsPanel.tsx
++++ b/src/renderer/src/components/settings/BatchSettingsPanel.tsx
+@@ -16,6 +16,7 @@ export default function BatchSettingsPanel({
+   resumeDisabledReason = null,
+   logRef,
+   emptyLog,
++  logNotice,
+   skipped,
+   customControls,
+   pendingGroupCount = 0,
+@@ -32,6 +33,7 @@ export default function BatchSettingsPanel({
+   resumeDisabledReason?: string | null
+   logRef: RefObject<HTMLDivElement>
+   emptyLog: string
++  logNotice?: string
+   skipped?: number
+   customControls?: ReactNode
+   pendingGroupCount?: number
+@@ -158,6 +160,7 @@ export default function BatchSettingsPanel({
+           <span>执行日志</span>
+           <small>{batch?.logs.length ?? 0} 条</small>
+         </div>
++        {logNotice ? <div className="batch-log-head"><small>{logNotice}</small></div> : null}
+         {batch?.logs.length ? (
+           <div className="log-box log-box--batch copyable-text" ref={logRef}>
+             {batch.logs.map((line, index) => (
+diff --git a/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx b/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
+index c1ea90e..12ca13c 100644
+--- a/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
++++ b/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
+@@ -1,3 +1,4 @@
++import { appendAvatarLog, type AvatarLogState } from '../avatarAutoCrop/logs'
+ import { useQueryClient } from '@tanstack/react-query'
+ import {
+   createContext,
+@@ -11,7 +12,6 @@ import {
+ } from 'react'
+ import { createAvatarCropV1, type ActressAvatarCommit } from '@shared/avatarCrop'
+ import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
+-import type { ActressListItem } from '@shared/actressTypes'
+ import type { BatchLogEntry } from '@shared/batchScrapeTypes'
+ import { api, assetUrl } from '../api'
+ import { createAvatarAnalysisBitmap, loadAvatarAnalysisImage } from '../avatarAutoCrop/image'
+@@ -28,7 +28,7 @@ import {
+ export type AvatarAutoCropBatchStatus = 'idle' | 'running' | 'cancelling' | 'done'
+ export type AvatarAutoCropBatchSource = 'manual'
+ 
+-export interface AvatarAutoCropBatchState {
++export interface AvatarAutoCropBatchState extends AvatarLogState {
+   status: AvatarAutoCropBatchStatus
+   source: AvatarAutoCropBatchSource | null
+   total: number
+@@ -38,7 +38,6 @@ export interface AvatarAutoCropBatchState {
+   skipped: number
+   currentName: string | null
+   cancelled: boolean
+-  logs: BatchLogEntry[]
+ }
+ 
+ interface AvatarAutoCropBatchContextValue {
+@@ -58,7 +57,9 @@ const INITIAL_STATE: AvatarAutoCropBatchState = {
+   skipped: 0,
+   currentName: null,
+   cancelled: false,
+-  logs: []
++  logs: [],
++  totalLogCount: 0,
++  shortenedLogCount: 0
+ }
+ 
+ const Context = createContext<AvatarAutoCropBatchContextValue | null>(null)
+@@ -76,13 +77,6 @@ function batchLog(
+   }
+ }
+ 
+-function avatarTargets(items: ActressListItem[]): ActressAvatarAutoCropTarget[] {
+-  return items
+-    .filter((item) => Boolean(item.avatar_source_path || item.avatar_path))
+-    .map((item) => ({ actressId: item.id, mainName: item.main_name }))
+-}
+-
+-
+ async function smartCropAvatar(
+   target: ActressAvatarAutoCropTarget,
+   settings: Awaited<ReturnType<typeof api.settings.get>>
+@@ -140,8 +134,10 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+   const toast = useToast()
+   const [state, setState] = useState<AvatarAutoCropBatchState>(INITIAL_STATE)
+   const pendingRef = useRef<ActressAvatarAutoCropTarget[]>([])
+-  const queuedIdsRef = useRef(new Set<number>())
+   const runningRef = useRef(false)
++  const startingRef = useRef(false)
++  const mountedRef = useRef(true)
++  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+   const scrapeCropRunningRef = useRef(false)
+   const batchLockTokenRef = useRef<string | null>(null)
+   const cancelRequestedRef = useRef(false)
+@@ -154,7 +150,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+     try {
+       settings = await api.settings.get()
+       while (!cancelRequestedRef.current) {
+-        const target = pendingRef.current.shift()
++        const target = pendingRef.current.pop()
+         if (!target) break
+ 
+         setState((current) => ({
+@@ -170,16 +166,13 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+             notifyAvatarAutoCropSaved(target.actressId)
+             setState((current) => ({
+               ...current,
+-              logs: [...current.logs, batchLog(target.mainName, 'success', '智能构图完成')]
++              ...appendAvatarLog(current, batchLog(target.mainName, 'success', '智能构图完成'))
+             }))
+           } else {
+             totalsRef.current.skipped += 1
+             setState((current) => ({
+               ...current,
+-              logs: [
+-                ...current.logs,
+-                batchLog(target.mainName, 'info', '没有可用的头像原图，已跳过')
+-              ]
++              ...appendAvatarLog(current, batchLog(target.mainName, 'info', '没有可用的头像原图，已跳过'))
+             }))
+           }
+         } catch (error) {
+@@ -187,11 +180,10 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+           totalsRef.current.failed += 1
+           setState((current) => ({
+             ...current,
+-            logs: [...current.logs, batchLog(target.mainName, 'error', errorMessage)]
++            ...appendAvatarLog(current, batchLog(target.mainName, 'error', errorMessage))
+           }))
+         } finally {
+           totalsRef.current.current += 1
+-          queuedIdsRef.current.delete(target.actressId)
+           setState((current) => ({
+             ...current,
+             current: totalsRef.current.current,
+@@ -206,13 +198,9 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+       totalsRef.current.failed += unprocessed
+       totalsRef.current.current += unprocessed
+       pendingRef.current = []
+-      queuedIdsRef.current.clear()
+       setState((current) => ({
+         ...current,
+-        logs: [
+-          ...current.logs,
+-          batchLog('-', 'error', `批量构图中断：${(error as Error).message}`)
+-        ]
++        ...appendAvatarLog(current, batchLog('-', 'error', `批量构图中断：${(error as Error).message}`))
+       }))
+     } finally {
+       const cancelled = cancelRequestedRef.current
+@@ -227,7 +215,6 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+         }
+       }
+       pendingRef.current = []
+-      queuedIdsRef.current.clear()
+       runningRef.current = false
+       cancelRequestedRef.current = false
+       sourceRef.current = null
+@@ -241,14 +228,11 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+         skipped: totalsRef.current.skipped,
+         currentName: null,
+         cancelled,
+-        logs: [
+-          ...current.logs,
+-          batchLog(
++        ...appendAvatarLog(current, batchLog(
+             '-',
+             cancelled ? 'info' : totalsRef.current.failed > 0 ? 'error' : 'success',
+             `${cancelled ? '批量构图已停止' : '批量构图已完成'}：成功 ${totalsRef.current.success}，失败 ${totalsRef.current.failed}，跳过 ${totalsRef.current.skipped}`
+-          )
+-        ]
++          ))
+       }))
+ 
+       const result = totalsRef.current
+@@ -263,8 +247,8 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+ 
+   const startQueue = useCallback(
+     (targets: ActressAvatarAutoCropTarget[]): void => {
+-      pendingRef.current = targets
+-      queuedIdsRef.current = new Set(targets.map((target) => target.actressId))
++      // Reverse once so each FIFO removal is O(1), without changing caller-owned input.
++      pendingRef.current = targets.slice().reverse()
+       runningRef.current = true
+       cancelRequestedRef.current = false
+       sourceRef.current = 'manual'
+@@ -285,13 +269,11 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+         skipped: 0,
+         currentName: null,
+         cancelled: false,
+-        logs: [
+-          batchLog(
++        ...appendAvatarLog(INITIAL_STATE, batchLog(
+             '-',
+             'info',
+             `开始批量智能构图，共 ${targets.length} 张头像`
+-          )
+-        ]
++          ))
+       })
+       void drainQueue()
+     },
+@@ -300,7 +282,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+ 
+   const cropScrapedAvatar = useCallback(
+     async (request: ActressAvatarAutoCropRequest): Promise<ActressAvatarAutoCropOutcome> => {
+-      if (runningRef.current) {
++      if (runningRef.current || startingRef.current) {
+         return { status: 'failed', message: '正在执行“构图全部头像”，请稍后重试' }
+       }
+       if (scrapeCropRunningRef.current) {
+@@ -335,6 +317,12 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+ 
+   useEffect(
+     () => () => {
++      if (runningRef.current) {
++        cancelRequestedRef.current = true
++        pendingRef.current = []
++        // The in-flight operation owns the lock until drainQueue finally settles.
++        return
++      }
+       const batchLockToken = batchLockTokenRef.current
+       if (!batchLockToken) return
+       batchLockTokenRef.current = null
+@@ -344,29 +332,38 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+   )
+ 
+   const listAllAvatarTargets = useCallback(async (): Promise<ActressAvatarAutoCropTarget[]> => {
+-    return avatarTargets(await api.actresses.list(undefined, 'all'))
++    return api.actresses.avatarCropTargets()
+   }, [])
+ 
+   const countAllAvatars = useCallback(async (): Promise<number> => {
+-    return (await listAllAvatarTargets()).length
+-  }, [listAllAvatarTargets])
++    return api.actresses.countAvatarCropTargets()
++  }, [])
+ 
+   const startAllAvatars = useCallback(async (): Promise<number> => {
+-    if (runningRef.current) throw new Error('已有头像智能构图任务正在进行')
++    if (runningRef.current || startingRef.current) throw new Error('已有头像智能构图任务正在进行')
+     if (scrapeCropRunningRef.current) throw new Error('请等待当前演员头像智能构图完成')
+-    const targets = await listAllAvatarTargets()
+-    if (targets.length === 0) return 0
+-
+-    const batchLockToken = await api.avatarAutoCropBatch.begin()
+-    batchLockTokenRef.current = batchLockToken
++    startingRef.current = true
++    let token: string | null = null
++    let handedOff = false
+     try {
++      token = await api.avatarAutoCropBatch.begin()
++      if (!mountedRef.current) {
++        await api.avatarAutoCropBatch.end(token)
++        return 0
++      }
++      batchLockTokenRef.current = token
++      const targets = await listAllAvatarTargets()
++      if (!mountedRef.current || targets.length === 0) return 0
+       startQueue(targets)
+-    } catch (error) {
+-      batchLockTokenRef.current = null
+-      await api.avatarAutoCropBatch.end(batchLockToken).catch(() => undefined)
+-      throw error
++      handedOff = true
++      return targets.length
++    } finally {
++      startingRef.current = false
++      if (!handedOff && token && batchLockTokenRef.current === token) {
++        batchLockTokenRef.current = null
++        await api.avatarAutoCropBatch.end(token)
++      }
+     }
+-    return targets.length
+   }, [listAllAvatarTargets, startQueue])
+ 
+   const cancel = useCallback((): void => {
+@@ -376,7 +373,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+     setState((current) => ({
+       ...current,
+       status: 'cancelling',
+-      logs: [...current.logs, batchLog('-', 'info', '已请求停止，将在当前头像处理完成后结束')]
++      ...appendAvatarLog(current, batchLog('-', 'info', '已请求停止，将在当前头像处理完成后结束'))
+     }))
+   }, [])
+ 
+diff --git a/src/renderer/src/pages/SettingsPage.tsx b/src/renderer/src/pages/SettingsPage.tsx
+index 3f283cd..9ff3b3c 100644
+--- a/src/renderer/src/pages/SettingsPage.tsx
++++ b/src/renderer/src/pages/SettingsPage.tsx
+@@ -1,3 +1,4 @@
++import { avatarLogNotice } from '../avatarAutoCrop/logs'
+ import WebAccessPanel from '../components/settings/WebAccessPanel'
+ import { useQuery, useQueryClient } from '@tanstack/react-query'
+ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+@@ -287,7 +288,7 @@ export default function SettingsPage(): JSX.Element {
+ 
+   useEffect(() => {
+     scrollBatchLogToBottom(avatarBatchLogRef)
+-  }, [avatarAutoCropBatch.state.logs.length])
++  }, [avatarAutoCropBatch.state.totalLogCount])
+ 
+   const refreshVideoBatchScopeHint = useCallback(async (
+     status: VideoBatchScrapeStatus,
+@@ -982,6 +983,7 @@ export default function SettingsPage(): JSX.Element {
+                   ? avatarBatchLogRef
+                   : videoBatchLogRef
+             }
++            logNotice={batchDetailScope === 'avatar' ? avatarLogNotice(avatarAutoCropBatch.state) : undefined}
+             emptyLog={
+               batchDetailScope === 'actress'
+                 ? '暂无演员任务日志'
+diff --git a/src/renderer/src/avatarAutoCrop/logs.ts b/src/renderer/src/avatarAutoCrop/logs.ts
+new file mode 100644
+index 0000000..96ca35e
+--- /dev/null
++++ b/src/renderer/src/avatarAutoCrop/logs.ts
+@@ -0,0 +1,31 @@
++import type { BatchLogEntry } from '@shared/batchScrapeTypes'
++
++export const AVATAR_LOG_LIMIT = 200
++export interface AvatarLogState {
++  logs: BatchLogEntry[]
++  totalLogCount: number
++  shortenedLogCount: number
++}
++
++function preview(value: string, limit: number): string {
++  if (value.length <= limit) return value
++  let prefix = value.slice(0, limit - 1)
++  const last = prefix.charCodeAt(prefix.length - 1)
++  if (last >= 0xd800 && last <= 0xdbff) prefix = prefix.slice(0, -1)
++  return prefix + '…'
++}
++
++export function appendAvatarLog(state: AvatarLogState, entry: BatchLogEntry): AvatarLogState {
++  const bounded = { ...entry, time: preview(entry.time, 64), code: preview(entry.code, 128), message: preview(entry.message, 1024) }
++  const shortened = bounded.time !== entry.time || bounded.code !== entry.code || bounded.message !== entry.message
++  return {
++    logs: [...state.logs.slice(-(AVATAR_LOG_LIMIT - 1)), bounded],
++    totalLogCount: state.totalLogCount + 1,
++    shortenedLogCount: state.shortenedLogCount + Number(shortened)
++  }
++}
++
++export function avatarLogNotice(state: AvatarLogState): string {
++  const omitted = state.totalLogCount - state.logs.length
++  return `日志仅保留最近 ${AVATAR_LOG_LIMIT} 条。${omitted > 0 ? `已省略 ${omitted} 条较早日志。` : ''}${state.shortenedLogCount > 0 ? `${state.shortenedLogCount} 条日志的长文本已截断。` : ''}`
++}
+diff --git a/src/renderer/src/avatarAutoCrop/logs.test.ts b/src/renderer/src/avatarAutoCrop/logs.test.ts
+new file mode 100644
+index 0000000..0d59870
+--- /dev/null
++++ b/src/renderer/src/avatarAutoCrop/logs.test.ts
+@@ -0,0 +1,25 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import { appendAvatarLog, avatarLogNotice, type AvatarLogState } from './logs'
++it('keeps only recent log previews after 100000 entries while counting omissions', () => {
++  let state: AvatarLogState = {logs:[],totalLogCount:0,shortenedLogCount:0}
++  for (let i=0;i<100000;i++) state=appendAvatarLog(state,{time:'now',code:String(i),message:'result',level:'info'})
++  assert.equal(state.totalLogCount,100000)
++  assert.equal(state.logs.length,200)
++  assert.equal(state.logs[0].code,'99800')
++  assert.equal(state.logs[199].code,'99999')
++  assert.match(avatarLogNotice(state),/99800 条较早日志/)
++})
++it('bounds oversized fields without splitting surrogate pairs or mutating prior state', () => {
++  const original: AvatarLogState = {logs:[],totalLogCount:0,shortenedLogCount:0}
++  const entry={time:'t'.repeat(10000),code:'😀'.repeat(10000),message:'\u0000'.repeat(20000),level:'error' as const}
++  const state=appendAvatarLog(original,entry)
++  assert.equal(original.logs.length,0)
++  assert.equal(entry.code.length,20000)
++  assert.equal(state.logs[0].time.length,64)
++  assert.ok(state.logs[0].code.length<=128)
++  assert.equal(state.logs[0].code.slice(-3),'😀…')
++  assert.equal(state.logs[0].message.length,1024)
++  assert.equal(state.shortenedLogCount,1)
++  assert.match(avatarLogNotice(state),/1 条日志的长文本已截断/)
++})
+diff --git a/src/renderer/src/components/settings/BatchSettingsPanel.test.tsx b/src/renderer/src/components/settings/BatchSettingsPanel.test.tsx
+new file mode 100644
+index 0000000..516f254
+--- /dev/null
++++ b/src/renderer/src/components/settings/BatchSettingsPanel.test.tsx
+@@ -0,0 +1,21 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import BatchSettingsPanel from './BatchSettingsPanel'
++import { appendAvatarLog, avatarLogNotice, type AvatarLogState } from '../../avatarAutoCrop/logs'
++it('shows bounded log preview with explicit omission notice and full task counters', async () => {
++  Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++  let state: AvatarLogState = {logs:[],totalLogCount:0,shortenedLogCount:0}
++  for(let i=0;i<500;i++) state=appendAvatarLog(state,{time:new Date(0).toISOString(),code:String(i),message:'Skipped',level:'info'})
++  let renderer!:TestRenderer.ReactTestRenderer
++  try {
++    await act(async()=>{renderer=TestRenderer.create(<BatchSettingsPanel scope="avatar" batch={{total:500,current:500,success:0,failed:0,pending:0,currentCode:null,status:'done',logs:state.logs}} running={false} paused={false} skipped={500} logRef={{current:null}} emptyLog="Empty" logNotice={avatarLogNotice(state)} onPause={()=>{}} onResume={()=>{}} onDiscard={()=>{}} />)})
++    const rows=renderer.root.findAll(node=>typeof node.props.className==='string'&&node.props.className.startsWith('log-line '))
++    assert.equal(rows.length,200)
++    const output=JSON.stringify(renderer.toJSON())
++    assert.match(output,/已省略 300 条较早日志/)
++    assert.match(output,/500\/500/)
++    assert.doesNotMatch(output,/\[00:00:00\] 0 /)
++  } finally {await act(async()=>renderer?.unmount())}
++})
+diff --git a/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx b/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx
+new file mode 100644
+index 0000000..1baf39f
+--- /dev/null
++++ b/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx
+@@ -0,0 +1,139 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ElectronApi } from '../../../preload/index'
++import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++
++it('serializes startup before target loading and releases ownership on empty, failed or unmounted startup', async () => {
++  let begin = deferred<string>()
++  let targets = deferred<ActressAvatarAutoCropTarget[]>()
++  let begins = 0, reads = 0
++  const ended: string[] = []
++  const processed: number[] = []
++  let heldSource: ReturnType<typeof deferred<null>> | null = null
++  const fake = {
++    actresses: {
++      list: () => { throw new Error('Wide list forbidden') },
++      avatarCropTargets: () => { reads++; return targets.promise },
++      getAvatarSourceInfo: async (id: number) => { processed.push(id); return heldSource ? heldSource.promise : null }
++    },
++    settings: { get: async () => ({}) },
++    avatarAutoCropBatch: {
++      begin: () => { begins++; return begin.promise },
++      end: async (token: string) => { ended.push(token); return true }
++    },
++    actressScrape: { onAvatarAutoCropRequest: () => () => {} }
++  } as unknown as ElectronApi
++  Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++  Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: fake } })
++  const { AvatarAutoCropBatchProvider, useAvatarAutoCropBatch } = await import('./AvatarAutoCropBatchContext')
++  let current!: ReturnType<typeof useAvatarAutoCropBatch>
++  function Probe() { current = useAvatarAutoCropBatch(); return null }
++  const client = new QueryClient()
++  let renderer!: TestRenderer.ReactTestRenderer
++  const mount = async () => { await act(async () => { renderer = TestRenderer.create(
++    <QueryClientProvider client={client}><AvatarAutoCropBatchProvider><Probe /></AvatarAutoCropBatchProvider></QueryClientProvider>
++  ) }) }
++  const unmount = async () => { await act(async () => renderer.unmount()) }
++  try {
++    await mount()
++    const first = current.startAllAvatars()
++    await assert.rejects(current.startAllAvatars(), /已有头像/)
++    assert.equal(begins, 1); assert.equal(reads, 0)
++    begin.resolve('failure')
++    await new Promise(resolve => setImmediate(resolve))
++    assert.equal(reads, 1)
++    const rejected = assert.rejects(first, /Target failed/)
++    targets.reject(new Error('Target failed')); await rejected
++    assert.deepEqual(ended, ['failure'])
++    begin = deferred(); targets = deferred()
++    const empty = current.startAllAvatars(); begin.resolve('empty'); targets.resolve([])
++    assert.equal(await empty, 0)
++    assert.deepEqual(ended, ['failure', 'empty'])
++    begin = deferred(); targets = deferred()
++    const pendingLock = current.startAllAvatars()
++    await unmount(); begin.resolve('late-lock')
++    assert.equal(await pendingLock, 0)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock'])
++    assert.equal(reads, 2)
++    await mount(); begin = deferred(); targets = deferred()
++    const pendingTargets = current.startAllAvatars(); begin.resolve('late-targets')
++    await new Promise(resolve => setImmediate(resolve))
++    await unmount()
++    targets.resolve([{actressId: 1, mainName: 'Never starts'}])
++    assert.equal(await pendingTargets, 0)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock', 'late-targets'])
++    await mount(); begin = deferred(); targets = deferred()
++    let completed!: Promise<number>
++    await act(async () => {
++      completed = current.startAllAvatars(); begin.resolve('normal')
++      targets.resolve([{actressId: 7, mainName: 'First'}, {actressId: 2, mainName: 'Second'}])
++      assert.equal(await completed, 2)
++      await new Promise(resolve => setImmediate(resolve))
++    })
++    assert.deepEqual(processed, [7, 2])
++    assert.equal(current.state.status, 'done')
++    assert.equal(current.state.current, 2)
++    assert.equal(current.state.skipped, 2)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock', 'late-targets', 'normal'])
++    await unmount(); await mount(); begin = deferred(); targets = deferred(); heldSource = deferred()
++    await act(async () => {
++      const running = current.startAllAvatars(); begin.resolve('active-unmount')
++      targets.resolve([{actressId: 11, mainName: 'In flight'}, {actressId: 12, mainName: 'Must not start'}])
++      assert.equal(await running, 2)
++      await new Promise(resolve => setImmediate(resolve))
++    })
++    assert.deepEqual(processed, [7, 2, 11])
++    await unmount()
++    assert.equal(ended.includes('active-unmount'), false, 'active crop must retain the lock until it settles')
++    heldSource.resolve(null)
++    await act(async () => { await new Promise(resolve => setImmediate(resolve)) })
++    assert.deepEqual(processed, [7, 2, 11], 'unmount must discard waiting targets')
++    assert.equal(ended.filter(token => token === 'active-unmount').length, 1)
++    await mount(); begin = deferred(); targets = deferred(); heldSource = deferred()
++    const originalTargets = [{actressId: 21, mainName: 'Stop current'}, {actressId: 22, mainName: 'Skip waiting'}]
++    await act(async () => {
++      const running = current.startAllAvatars(); begin.resolve('cancel')
++      targets.resolve(originalTargets)
++      assert.equal(await running, 2)
++      await new Promise(resolve => setImmediate(resolve))
++      current.cancel()
++    })
++    assert.equal(current.state.status, 'cancelling')
++    assert.equal(ended.includes('cancel'), false)
++    assert.deepEqual(originalTargets.map(target => target.actressId), [21, 22])
++    heldSource.resolve(null)
++    await act(async () => { await new Promise(resolve => setImmediate(resolve)) })
++    assert.deepEqual(processed, [7, 2, 11, 21])
++    assert.equal(current.state.status, 'done')
++    assert.equal(current.state.cancelled, true)
++    assert.equal(current.state.current, 1)
++    assert.equal(current.state.total, 2)
++    assert.equal(ended.filter(token => token === 'cancel').length, 1)
++    begin = deferred(); targets = deferred(); heldSource = null
++    await act(async () => {
++      const many = current.startAllAvatars(); begin.resolve('bounded-logs')
++      targets.resolve(Array.from({length:230},(_,i)=>({actressId:100+i,mainName:'Actor-'+i})))
++      assert.equal(await many,230)
++      await new Promise(resolve=>setImmediate(resolve))
++    })
++    assert.equal(current.state.current,230)
++    assert.equal(current.state.skipped,230)
++    assert.equal(current.state.logs.length,200)
++    assert.equal(current.state.totalLogCount,232)
++    assert.equal(current.state.shortenedLogCount,0)
++    assert.match(current.state.logs.at(-1)!.message,/批量构图已完成/)
++
++
++
++
++  } finally { await unmount(); client.clear() }
++})
+diff --git a/scripts/performance/avatar-log-ui.mjs b/scripts/performance/avatar-log-ui.mjs
+new file mode 100644
+index 0000000..6d98feb
+--- /dev/null
++++ b/scripts/performance/avatar-log-ui.mjs
+@@ -0,0 +1,41 @@
++/** Actual avatar log modal and styles, synthetic progress, no user database. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-avatar-log-ui-'))
++const output=path.resolve(process.env.JAVDEX_AVATAR_LOG_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import {createRoot} from 'react-dom/client';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.api={};
++const Panel=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/settings/BatchSettingsPanel.tsx'))})).default;
++const Modal=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/Modal.tsx'))})).default;
++const {appendAvatarLog,avatarLogNotice}=await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/avatarAutoCrop/logs.ts'))});
++let state={logs:[],totalLogCount:0,shortenedLogCount:0};for(let i=0;i<500;i++)state=appendAvatarLog(state,{time:new Date(0).toISOString(),code:'演员-'+i,message:'诊断'.repeat(2000),level:'error'});
++createRoot(document.getElementById('root')).render(<Modal title="头像构图任务" size="xl" className="modal--batch-detail" bodyClassName="modal-body--batch-detail" hideActions onCancel={()=>{}}><Panel scope="avatar" batch={{total:500,current:500,success:0,failed:500,pending:0,currentCode:null,status:'done',logs:state.logs}} running={false} paused={false} logRef={React.createRef()} emptyLog="无日志" logNotice={avatarLogNotice(state)} onPause={()=>{}} onResume={()=>{}} onDiscard={()=>{}} /></Modal>);
++`)
++let server,browser;const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport}),errors=[];page.on('pageerror',error=>errors.push(error.message))
++  await page.goto(server.resolvedUrls.local[0]);await page.locator('.log-line').first().waitFor()
++  assert.equal(await page.locator('.log-line').count(),200)
++  const notice=page.getByText(/已省略 300 条较早日志/)
++  await notice.scrollIntoViewIfNeeded();assert.equal(await notice.isVisible(),true)
++  const geometry=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth}))
++  assert.equal(geometry.width,geometry.scrollWidth);assert.deepEqual(errors,[])
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,geometry,notice:await notice.textContent(),errors});await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results))
++}finally{await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}

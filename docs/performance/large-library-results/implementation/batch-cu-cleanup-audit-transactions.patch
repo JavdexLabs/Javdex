@@ -1,0 +1,781 @@
+diff --git a/src/main/scanner/scanCoordinator.ts b/src/main/scanner/scanCoordinator.ts
+index 7c08dde..6ffca65 100644
+--- a/src/main/scanner/scanCoordinator.ts
++++ b/src/main/scanner/scanCoordinator.ts
+@@ -1,10 +1,10 @@
+ import fs from 'node:fs'
++import { createProgressPublisher } from '../services/progressPublisher'
+ import { randomUUID } from 'node:crypto'
+ import type {
+   LibraryScanAudit,
+   LibraryScanEvent,
+-  LibraryScanFileAuditEntry,
+-  LibraryScanPendingGroupAuditEntry,
++  LibraryScanDeletedVideoAuditEntry,
+   LibraryScanResourceAuditEntry,
+   LibraryScanSummary,
+   LibraryScanTrigger,
+@@ -20,7 +20,7 @@ import type { Video, VideoResource } from '@shared/videoTypes'
+ import {
+   getVideoById,
+   getVideoResourceInLibrary,
+-  listSourceManagedVideoResourceRefs,
++  iterateSourceManagedVideoResourceRefs,
+   listVideoResources,
+   removeVideoResourceRecord,
+   setPrimaryVideoResource,
+@@ -41,7 +41,8 @@ import {
+   finishLibraryScanRun,
+   type LibraryUnrecognizedFileInput
+ } from '../db/libraryScanRepo'
+-import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { readPendingScanAuditEntries } from '../db/pendingScanAuditRepo'
+ import { reconcilePendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+ import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+ import {
+@@ -55,9 +56,9 @@ import {
+   listPendingLibraryPathCleanupRoots,
+   recoverLegacyLibraryPathCleanups,
+   type RecoverLegacyLibraryPathCleanupResult,
+-  type PendingLibraryPathCleanupResult
++  type LibraryPathCleanupAuditEvent
+ } from '../services/libraryPathCleanupService'
+-import { isPathUnderRoot } from './libraryPathUtils'
++import { createLibraryRootMatcher } from './libraryRootMatcher'
+ import {
+   scanFolders,
+   type ScanFoldersRequest,
+@@ -87,6 +88,11 @@ interface FinishRunInput {
+   unrecognizedFiles?: readonly LibraryUnrecognizedFileInput[]
+ }
+ 
++export type ScanCleanupAuditEvent = LibraryPathCleanupAuditEvent | {
++  section: 'deletedVideos'
++  entry: LibraryScanDeletedVideoAuditEntry
++}
++
+ export interface ScanCoordinatorDependencies {
+   readScanSnapshot: (libraryId: number) => MediaLibraryScanSnapshot
+   bindRootIdentities: typeof bindOnlineMediaLibraryRootIdentities
+@@ -99,7 +105,7 @@ export interface ScanCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions
+   ) => Promise<ScanResult>
+-  listLocalResources: (libraryId: number) => LocalVideoResourceRef[]
++  listLocalResources: (libraryId: number) => Iterable<LocalVideoResourceRef>
+   getResourceById: (libraryId: number, resourceId: number) => VideoResource | null
+   getVideoById: (videoId: number) => Video | null
+   listResources: (libraryId: number, videoId: number) => VideoResource[]
+@@ -110,12 +116,15 @@ export interface ScanCoordinatorDependencies {
+   reconcilePendingResourceIdentities: typeof reconcilePendingResourceIdentities
+   recoverPendingPathCleanups: (libraryId: number) => RecoverLegacyLibraryPathCleanupResult
+   listPendingPathCleanups: (libraryId: number) => PendingLibraryPathCleanup[]
+-  applyPendingPathCleanups: (
+-    cleanups: PendingLibraryPathCleanup[]
+-  ) => PendingLibraryPathCleanupResult
++  applyPendingPathCleanups: typeof applyPendingLibraryPathCleanups
++  /** Synchronous, inside the cleanup transaction; durable sinks must use its database connection. */
++  recordCleanupAudit?: (
++    identity: { libraryId: number; runId: string },
++    event: ScanCleanupAuditEvent
++  ) => void
+   runCleanupTransaction: <T>(operation: () => T) => T
+   removeResourceLessMemberships: (libraryId: number) => RemovedResourceLessMembership[]
+-  listPendingScanGroups: typeof listPendingScanGroups
++  readPendingScanAuditEntries: typeof readPendingScanAuditEntries
+   beginRun: typeof beginLibraryScanRun
+   finishRun: (input: FinishRunInput) => void
+   now: () => string
+@@ -200,6 +209,9 @@ export class ScanCoordinator {
+     let snapshot: MediaLibraryScanSnapshot | null = null
+     let selectedRoots: Readonly<MediaLibraryRoot>[] = []
+     let beganRun = false
++    const progressPublisher = createProgressPublisher<ScanProgress>((progress) => {
++      this.emit({ phase: 'progress', libraryId: request.libraryId, runId, trigger, progress })
++    })
+     const auditState: Omit<
+       LibraryScanAudit,
+       | 'schemaVersion'
+@@ -285,13 +297,7 @@ export class ScanCoordinator {
+         },
+         (progress) => {
+           request.onProgress?.(progress)
+-          this.emit({
+-            phase: 'progress',
+-            libraryId: request.libraryId,
+-            runId,
+-            trigger,
+-            progress
+-          })
++          progressPublisher.update(progress)
+         },
+         {
+           signal: controller.signal,
+@@ -357,16 +363,23 @@ export class ScanCoordinator {
+         selectedRoots.every((root) => snapshot?.roots.some((item) => item.id === root.id))
+       const safeRootIds = new Set(safeRoots.map((root) => root.id))
+       const safeRootsById = new Map(safeRoots.map((root) => [root.id, root] as const))
++      const matchPendingRoot = createLibraryRootMatcher(safeRoots, true)
++      const recordCleanupAudit = (event: ScanCleanupAuditEvent): void => {
++        const returned: unknown = this.dependencies.recordCleanupAudit?.(
++          { libraryId: request.libraryId, runId }, event
++        )
++        if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
++            typeof (returned as { then?: unknown }).then === 'function') {
++          void Promise.resolve(returned).catch(() => {})
++          throw new Error('Cleanup audit callback must be synchronous')
++        }
++      }
+       const cleanup = this.dependencies.runCleanupTransaction(() => {
+         for (const root of safeRoots) {
+           this.dependencies.authorizeRoot(request.libraryId, root.id, root)
+         }
+         const inspectAuthorizedPendingPath = (filePath: string): LocalPathState => {
+-          const root = safeRoots.find(
+-            (candidate) =>
+-              isPathUnderRoot(filePath, candidate.path) ||
+-              Boolean(candidate.realPath && isPathUnderRoot(filePath, candidate.realPath))
+-          )
++          const root = matchPendingRoot(filePath)
+           if (!root) return 'unknown'
+           const state = this.dependencies.inspectPath(filePath)
+           if (state === 'present') {
+@@ -395,31 +408,50 @@ export class ScanCoordinator {
+         )
+         const missingResources = this.removeMissingAccessibleResources(
+           request.libraryId,
+-          safeRootsById
++          safeRootsById,
++          recordCleanupAudit
+         )
++        const deferredRemoved: LibraryScanResourceAuditEntry[] = []
++        const deferredPromoted: LibraryScanResourceAuditEntry[] = []
+         const deferredCleanup =
+           isFullScan && pendingPathCleanups.length > 0
+-            ? this.dependencies.applyPendingPathCleanups(pendingPathCleanups)
++            ? this.dependencies.applyPendingPathCleanups(pendingPathCleanups, (event) => {
++                recordCleanupAudit(event)
++                if (event.section === 'removedResources') deferredRemoved.push(event.entry)
++                else deferredPromoted.push(event.entry)
++              })
+             : { removed: 0, promoted: 0, consumedRoots: [] }
+         const removedMemberships =
+           isFullScan && offlineRoots.length === 0 && snapshot?.config.removeResourceLessMemberships
+             ? this.dependencies.removeResourceLessMemberships(request.libraryId)
+             : []
+-        return { missingResources, deferredCleanup, removedMemberships }
++        for (const video of removedMemberships) {
++          recordCleanupAudit({ section: 'deletedVideos', entry: {
++            videoId: video.videoId, videoCode: video.videoCode,
++            videoTitle: video.videoTitle, reason: 'resource_less'
++          } })
++        }
++        return { missingResources, deferredCleanup, removedMemberships, deferredRemoved, deferredPromoted }
+       })
+       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+       result.deletedVideos = cleanup.removedMemberships.length
+-      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+-      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
+-      auditState.deletedVideos.push(
+-        ...cleanup.removedMemberships.map((video) => ({
++      for (const resource of cleanup.missingResources.removedResources) {
++        auditState.removedResources.push(resource)
++      }
++      for (const resource of cleanup.missingResources.promotedResources) {
++        auditState.promotedResources.push(resource)
++      }
++      for (const resource of cleanup.deferredRemoved) auditState.removedResources.push(resource)
++      for (const resource of cleanup.deferredPromoted) auditState.promotedResources.push(resource)
++      for (const video of cleanup.removedMemberships) {
++        auditState.deletedVideos.push({
+           videoId: video.videoId,
+           videoCode: video.videoCode,
+           videoTitle: video.videoTitle,
+-          reason: 'resource_less' as const
+-        }))
+-      )
++          reason: 'resource_less'
++        })
++      }
+       const status =
+         result.strmFailures.length + result.omittedStrmFailures > 0
+           ? 'completed_with_errors'
+@@ -460,6 +492,7 @@ export class ScanCoordinator {
+       }
+       throw new Error(errorSummary)
+     } finally {
++      progressPublisher.close()
+       if (this.activeRun?.controller === controller) this.activeRun = null
+       lease.release()
+       if (beganRun) {
+@@ -505,26 +538,16 @@ export class ScanCoordinator {
+     libraryId: number,
+     auditState: Pick<LibraryScanAudit, 'files' | 'pendingGroups'>
+   ): void {
+-    const auditPendingIds = new Set(
+-      auditState.files
+-        .filter(
+-          (entry): entry is Extract<LibraryScanFileAuditEntry, { outcome: 'pending' }> =>
+-            entry.outcome === 'pending' && entry.groupId != null
+-        )
+-        .map((entry) => entry.groupId as number)
+-    )
+-    auditState.pendingGroups = this.dependencies
+-      .listPendingScanGroups(libraryId)
+-      .filter((group) => auditPendingIds.has(group.id))
+-      .map((group): LibraryScanPendingGroupAuditEntry => ({
+-        groupId: group.id,
+-        normalizedCode: group.normalizedCode,
+-        resourceCount: group.resources.filter((resource) =>
+-          auditState.files.some(
+-            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+-          )
+-        ).length
+-      }))
++    const groupIds = new Set<number>()
++    const pendingPaths = new Set<string>()
++    for (const entry of auditState.files) {
++      if (entry.outcome !== 'pending') continue
++      pendingPaths.add(entry.filePath)
++      if (entry.groupId != null) groupIds.add(entry.groupId)
++    }
++    auditState.pendingGroups = groupIds.size === 0
++      ? []
++      : this.dependencies.readPendingScanAuditEntries(libraryId, groupIds, pendingPaths)
+   }
+ 
+   private emit(event: LibraryScanEvent): void {
+@@ -637,9 +660,10 @@ export class ScanCoordinator {
+       status,
+       ...auditState
+     }
++    const matchUnrecognizedRoot = createLibraryRootMatcher(safeRoots)
+     const unrecognizedFiles: LibraryUnrecognizedFileInput[] = result.unrecognizedFiles.flatMap(
+       (filePath) => {
+-        const root = safeRoots.find((candidate) => isPathUnderRoot(filePath, candidate.path))
++        const root = matchUnrecognizedRoot(filePath)
+         if (!root) return []
+         this.dependencies.authorizeRootFile(snapshot.libraryId, root.id, filePath, root)
+         return [
+@@ -674,7 +698,8 @@ export class ScanCoordinator {
+ 
+   private removeMissingAccessibleResources(
+     libraryId: number,
+-    accessibleRoots: ReadonlyMap<number, Readonly<MediaLibraryRoot>>
++    accessibleRoots: ReadonlyMap<number, Readonly<MediaLibraryRoot>>,
++    recordAudit: (event: LibraryPathCleanupAuditEvent) => void
+   ): {
+     removed: number
+     promoted: number
+@@ -703,13 +728,23 @@ export class ScanCoordinator {
+         ref.locator,
+         root
+       )
+-      const remaining = this.dependencies
+-        .listResources(libraryId, ref.video_id)
+-        .filter((item) => item.id !== resource.id)
++      const remaining = resource.is_primary
++        ? this.dependencies.listResources(libraryId, ref.video_id)
++          .filter((item) => item.id !== resource.id)
++        : []
+       const removedAudit = this.resourceAuditEntry(resource, 'missing')
++      if (!removedAudit && this.dependencies.recordCleanupAudit) {
++        throw new Error('Cannot record cleanup audit for a missing video')
++      }
+       this.dependencies.removeResourceRecord(libraryId, resource.id)
++      if (this.dependencies.recordCleanupAudit && this.dependencies.getResourceById(libraryId, resource.id)) {
++        throw new Error('Cleanup resource deletion did not take effect')
++      }
+       removed += 1
+-      if (removedAudit) removedResources.push(removedAudit)
++      if (removedAudit) {
++        recordAudit({ section: 'removedResources', entry: removedAudit })
++        removedResources.push(removedAudit)
++      }
+       if (!resource.is_primary) continue
+       const promotedResource = selectPrimaryVideoResourceCandidate(
+         remaining,
+@@ -717,9 +752,21 @@ export class ScanCoordinator {
+       )
+       if (!promotedResource) continue
+       this.dependencies.setPrimaryResource(libraryId, ref.video_id, promotedResource.id)
++      if (this.dependencies.recordCleanupAudit) {
++        const current = this.dependencies.getResourceById(libraryId, promotedResource.id)
++        if (!current || current.video_id !== ref.video_id || current.is_primary !== 1) {
++          throw new Error('Cleanup primary resource promotion did not take effect')
++        }
++      }
+       promoted += 1
+       const promotedAudit = this.resourceAuditEntry(promotedResource, 'promoted_after_removal')
+-      if (promotedAudit) promotedResources.push(promotedAudit)
++      if (!promotedAudit && this.dependencies.recordCleanupAudit) {
++        throw new Error('Cannot record promotion audit for a missing video')
++      }
++      if (promotedAudit) {
++        recordAudit({ section: 'promotedResources', entry: promotedAudit })
++        promotedResources.push(promotedAudit)
++      }
+     }
+     return { removed, promoted, removedResources, promotedResources }
+   }
+@@ -756,7 +803,7 @@ export function createScanCoordinator(
+     authorizeRootDeletionTarget:
+       dependencies.authorizeRootDeletionTarget ?? authorizeMediaLibraryRootDeletionTarget,
+     scanFolders: dependencies.scanFolders ?? scanFolders,
+-    listLocalResources: dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
++    listLocalResources: dependencies.listLocalResources ?? iterateSourceManagedVideoResourceRefs,
+     getResourceById: dependencies.getResourceById ?? getVideoResourceInLibrary,
+     getVideoById: dependencies.getVideoById ?? getVideoById,
+     listResources: dependencies.listResources ?? listVideoResources,
+@@ -773,10 +820,11 @@ export function createScanCoordinator(
+       dependencies.listPendingPathCleanups ?? listPendingLibraryPathCleanupRoots,
+     applyPendingPathCleanups:
+       dependencies.applyPendingPathCleanups ?? applyPendingLibraryPathCleanups,
++    recordCleanupAudit: dependencies.recordCleanupAudit,
+     runCleanupTransaction: dependencies.runCleanupTransaction ?? runCleanupTransaction,
+     removeResourceLessMemberships:
+       dependencies.removeResourceLessMemberships ?? removeResourceLessMemberships,
+-    listPendingScanGroups: dependencies.listPendingScanGroups ?? listPendingScanGroups,
++    readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? readPendingScanAuditEntries,
+     beginRun: dependencies.beginRun ?? beginLibraryScanRun,
+     finishRun: dependencies.finishRun ?? finishLibraryScanRun,
+     now: dependencies.now ?? (() => new Date().toISOString()),
+diff --git a/src/main/services/libraryPathCleanupService.test.ts b/src/main/services/libraryPathCleanupService.test.ts
+index 817fd27..6d19fac 100644
+--- a/src/main/services/libraryPathCleanupService.test.ts
++++ b/src/main/services/libraryPathCleanupService.test.ts
+@@ -1085,3 +1085,87 @@ describe('libraryPathCleanupService', () => {
+     )
+   })
+ })
++
++function prepareAuditCleanup() {
++  const library = createLibrary('Audit cleanup', makeDirectory('audit-cleanup'))
++  const filePath = path.join(library.path, 'AUDIT-001.mp4')
++  const videoId = createLocalVideo({ ...library, code: 'AUDIT-001', filePath })
++  const removed = listVideoResources(library.libraryId, videoId)[0]
++  const promotedId = addWebResource(library.libraryId, videoId, 'AUDIT-001')
++  const database = getDb()
++  const groupId = Number(database.prepare('INSERT INTO pending_scan_groups(library_id,normalized_code) VALUES(?,?)')
++    .run(library.libraryId, 'PENDING-AUDIT').lastInsertRowid)
++  database.prepare(`INSERT INTO pending_scan_resources(library_id,group_id,root_id,file_path,normalized_path,source_kind)
++    VALUES(?,?,?,?,?,'local')`).run(library.libraryId, groupId, library.rootId, filePath, filePath)
++  const preview = previewLibraryPathRemoval(library)
++  const cleanup = confirmLibraryPathRemoval({ ...library, expectedRevision: library.revision, expectedImpactRevision: preview.impactRevision })
++  database.exec('CREATE TABLE test_cleanup_audit (section TEXT, entry_json TEXT)')
++  return { library, videoId, removed, promotedId, cleanup, filePath }
++}
++
++function auditCleanupSnapshot() {
++  return ['video_resources', 'library_root_cleanup_jobs', 'media_library_roots', 'pending_scan_resources',
++    'pending_scan_groups', 'pending_resource_identities', 'library_unrecognized_files', 'media_libraries',
++    'library_video_memberships', 'test_cleanup_audit'].map((table) =>
++    getDb().prepare(`SELECT * FROM ${table}`).all())
++}
++
++it('rolls back cleanup and audit writes on a native audit INSERT failure, then retries with safe source entries', () => {
++  const { library, videoId, removed, promotedId, cleanup, filePath } = prepareAuditCleanup()
++  const database = getDb(), before = auditCleanupSnapshot()
++  let calls = 0
++  database.exec(`CREATE TRIGGER fail_cleanup_audit_test AFTER INSERT ON test_cleanup_audit
++    WHEN NEW.section='promotedResources'
++    BEGIN SELECT RAISE(ABORT, 'native cleanup audit failed'); END`)
++  assert.throws(() => applyPendingLibraryPathCleanups([cleanup], (event) => {
++    calls++
++    assert.equal(database.inTransaction, true)
++    assert.deepEqual(listVideoResources(library.libraryId, videoId).map((resource) => [resource.id, resource.is_primary]), [[promotedId, 1]])
++    assert.equal(getMediaLibraryRoot(library.libraryId, library.rootId)?.state, 'disabled')
++    assert.deepEqual(database.prepare('SELECT state FROM library_root_cleanup_jobs WHERE id=?').get(cleanup.jobId), { state: 'completed' })
++    assert.deepEqual(database.prepare('SELECT * FROM pending_scan_resources WHERE root_id=?').all(library.rootId), [])
++    database.prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))
++  }), /native cleanup audit failed/)
++  assert.equal(calls, 2)
++  assert.deepEqual(auditCleanupSnapshot(), before)
++  database.exec('DROP TRIGGER fail_cleanup_audit_test')
++  const events: import('./libraryPathCleanupService').LibraryPathCleanupAuditEvent[] = []
++  const result = applyPendingLibraryPathCleanups([cleanup], (event) => {
++    events.push(event)
++    database.prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))
++  })
++  assert.deepEqual(result, { removed: 1, promoted: 1, consumedRoots: [{ libraryId: library.libraryId, rootId: library.rootId }] })
++  assert.deepEqual(events.map((event) => [event.section, event.entry.resourceId, event.entry.sourcePath, event.entry.reason]), [
++    ['removedResources', removed.id, filePath, 'removed_library_path'],
++    ['promotedResources', promotedId, null, 'promoted_after_removal']
++  ])
++  assert.equal(events[0].entry.videoCode, 'AUDIT-001')
++  assert.equal(JSON.stringify(events).includes('https://'), false)
++  assert.equal(database.prepare('SELECT * FROM test_cleanup_audit').all().length, 2)
++})
++
++for (const rejected of [false, true]) {
++  it(`rejects ${rejected ? 'rejected' : 'resolved'} thenable cleanup callbacks without committing or leaking a rejection`, async () => {
++    const { cleanup } = prepareAuditCleanup()
++    const before = auditCleanupSnapshot()
++    assert.throws(() => applyPendingLibraryPathCleanups([cleanup], async (event) => {
++      getDb().prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))
++      if (rejected) throw new Error('async audit failed')
++    }), /must be synchronous/)
++    await new Promise<void>((resolve) => setImmediate(resolve))
++    assert.deepEqual(auditCleanupSnapshot(), before)
++    assert.equal(applyPendingLibraryPathCleanups([cleanup]).removed, 1)
++  })
++}
++
++
++it('does not emit planned audit facts if the batch skips a resource deletion', () => {
++  const { cleanup, removed } = prepareAuditCleanup()
++  const database = getDb(), before = auditCleanupSnapshot()
++  database.exec(`CREATE TRIGGER skip_cleanup_test BEFORE DELETE ON video_resources
++    WHEN OLD.id=${removed.id} BEGIN SELECT RAISE(IGNORE); END`)
++  let notified = false
++  assert.throws(() => applyPendingLibraryPathCleanups([cleanup], () => { notified = true }), /do not match the audit plan/)
++  assert.equal(notified, false)
++  assert.deepEqual(auditCleanupSnapshot(), before)
++})
+diff --git a/src/main/services/libraryPathCleanupService.ts b/src/main/services/libraryPathCleanupService.ts
+index 64cbb63..f0f42e0 100644
+--- a/src/main/services/libraryPathCleanupService.ts
++++ b/src/main/services/libraryPathCleanupService.ts
+@@ -6,6 +6,7 @@ import {
+ } from '@shared/legacyLibraryCleanup'
+ import { resolveMediaLibraryRootIdentity } from '@shared/mediaLibraryRootPath'
+ import type {
++  LibraryScanResourceAuditEntry,
+   LibraryPathRemovalPreview,
+   PendingLibraryPathCleanup
+ } from '@shared/libraryTypes'
+@@ -46,6 +47,10 @@ export interface PendingLibraryPathCleanupResult {
+   consumedRoots: LibraryRootScope[]
+ }
+ 
++export type LibraryPathCleanupAuditEvent =
++  | { section: 'removedResources'; entry: LibraryScanResourceAuditEntry }
++  | { section: 'promotedResources'; entry: LibraryScanResourceAuditEntry }
++
+ interface LibraryRow {
+   id: number
+   status: 'active' | 'archived'
+@@ -694,7 +699,8 @@ export function confirmLibraryPathRemoval(
+ }
+ 
+ function applyPendingLibraryPathCleanupsInTransaction(
+-  cleanups: PendingLibraryPathCleanup[]
++  cleanups: PendingLibraryPathCleanup[],
++  beforeCommit?: (event: LibraryPathCleanupAuditEvent) => void
+ ): PendingLibraryPathCleanupResult {
+   if (cleanups.length === 0) return { removed: 0, promoted: 0, consumedRoots: [] }
+   const database = getDb()
+@@ -714,6 +720,12 @@ function applyPendingLibraryPathCleanupsInTransaction(
+   }
+ 
+   const plans: VideoResourceBatchRemovalPlan[] = []
++  const auditSnapshots = beforeCommit
++    ? new Map<string, { code: string; title: string | null; promoted: VideoResource | null }>()
++    : undefined
++  const readAuditVideo = beforeCommit
++    ? database.prepare('SELECT code, title FROM videos WHERE id = ?')
++    : undefined
+   for (const affected of resourcesByVideo.values()) {
+     const { library_id: libraryId, video_id: videoId } = affected[0]
+     const affectedIds = new Set(affected.map((resource) => resource.id))
+@@ -723,6 +735,11 @@ function applyPendingLibraryPathCleanupsInTransaction(
+     const promoted = removesPrimary
+       ? selectPrimaryVideoResourceCandidate(remaining, fs.existsSync)
+       : null
++    if (auditSnapshots) {
++      const video = readAuditVideo!.get(videoId) as { code: string; title: string | null } | undefined
++      if (!video) throw new Error('Cannot record cleanup audit for a missing video')
++      auditSnapshots.set(`${libraryId}:${videoId}`, { ...video, promoted })
++    }
+     plans.push({
+       libraryId,
+       videoId,
+@@ -732,6 +749,13 @@ function applyPendingLibraryPathCleanupsInTransaction(
+   }
+ 
+   const result = removeSourceManagedVideoResourcesBatch(plans)
++  // Each resource belongs to exactly one deduplicated root/video plan. Batch SQL
++  // reports actual changes and may skip missing rows: require every planned write
++  // before emitting historical facts, otherwise roll back the entire cleanup.
++  if (beforeCommit && (result.removed !== affectedResources.length ||
++      result.promoted !== plans.filter((plan) => plan.promotedResourceId !== null).length)) {
++    throw new Error('Cleanup resource changes do not match the audit plan')
++  }
+   const timestamp = new Date().toISOString()
+   const affectedLibraries = new Set<number>()
+   for (const job of jobs) {
+@@ -780,6 +804,29 @@ function applyPendingLibraryPathCleanupsInTransaction(
+       .run(timestamp, libraryId)
+   }
+ 
++  if (beforeCommit && auditSnapshots) {
++    const notify = (section: LibraryPathCleanupAuditEvent['section'], resource: VideoResource,
++      video: { code: string; title: string | null }): void => {
++      const returned: unknown = beforeCommit({ section, entry: {
++        resourceId: resource.id, videoId: resource.video_id, videoCode: video.code, videoTitle: video.title,
++        resourceKind: resource.kind,
++        sourcePath: resource.kind === 'local' ? resource.locator : resource.strm_source_path,
++        displayName: resource.display_name,
++        reason: section === 'removedResources' ? 'removed_library_path' : 'promoted_after_removal'
++      } })
++      if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
++          typeof (returned as { then?: unknown }).then === 'function') {
++        void Promise.resolve(returned).catch(() => {})
++        throw new Error('Cleanup audit callback must be synchronous')
++      }
++    }
++    for (const affected of resourcesByVideo.values()) {
++      const video = auditSnapshots.get(`${affected[0].library_id}:${affected[0].video_id}`)!
++      for (const resource of affected) notify('removedResources', resource, video)
++      if (video.promoted) notify('promotedResources', video.promoted, video)
++    }
++  }
++
+   return {
+     ...result,
+     consumedRoots: jobs.map((job) => ({ libraryId: job.library_id, rootId: job.root_id }))
+@@ -787,9 +834,11 @@ function applyPendingLibraryPathCleanupsInTransaction(
+ }
+ 
+ export function applyPendingLibraryPathCleanups(
+-  cleanups: PendingLibraryPathCleanup[]
++  cleanups: PendingLibraryPathCleanup[],
++  /** Synchronous post-write notification before commit; throwing rolls back the cleanup. */
++  beforeCommit?: (event: LibraryPathCleanupAuditEvent) => void
+ ): PendingLibraryPathCleanupResult {
+-  return getDb().transaction(() => applyPendingLibraryPathCleanupsInTransaction(cleanups))()
++  return getDb().transaction(() => applyPendingLibraryPathCleanupsInTransaction(cleanups, beforeCommit))()
+ }
+ 
+ export function consumePendingLibraryPathCleanups(
+diff --git a/src/main/scanner/scanCleanupAudit.test.ts b/src/main/scanner/scanCleanupAudit.test.ts
+new file mode 100644
+index 0000000..e6e099b
+--- /dev/null
++++ b/src/main/scanner/scanCleanupAudit.test.ts
+@@ -0,0 +1,223 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type { ScanResult } from '@shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase, openReadOnlyDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { insertTestVideoWithFile } from '../db/testVideoFixtures'
++import { insertLocalVideoResource } from '../db/videoRepo'
++import { beginLibraryScanRun } from '../db/libraryScanRepo'
++import { createScanAuditWriter } from '../db/scanAuditWriter'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import { createScanCoordinator, type ScanCoordinatorDependencies } from './scanCoordinator'
++
++let directory:string,db:Database.Database,previousUserData:string|undefined
++beforeEach(()=>{
++  previousUserData=process.env.JAVDEX_TEST_USER_DATA
++  directory=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-cleanup-audit-'))
++  process.env.JAVDEX_TEST_USER_DATA=directory
++  db=initDatabaseAtPath(path.join(directory,'catalog.db'))
++})
++afterEach(()=>{
++  closeDatabase();resetSettingsCacheForTests()
++  if(previousUserData===undefined)delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA=previousUserData
++  fs.rmSync(directory,{recursive:true,force:true})
++})
++
++function empty(libraryId:number,runId:string):ScanResult {
++  return {libraryId,runId,scannedFiles:0,imported:0,skipped:0,skippedShort:0,failed:0,pendingGroups:0,pendingResources:0,
++    relocated:0,refreshed:0,removed:0,promoted:0,deletedVideos:0,offlineFolders:[],newCodes:[],unrecognizedFiles:[],strmFailures:[],omittedStrmFailures:0}
++}
++function businessSnapshot(connection:Database.Database) {
++  // Run admission/finish state is deliberately outside cleanup. Include every other
++  // user table, including all resource, membership, pending and audit-entry rows.
++  const tables=connection.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
++    AND name NOT IN ('library_scan_runs','media_library_scan_state','library_scan_audit_manifests') ORDER BY name`).all() as {name:string}[]
++  return tables.map(({name})=>({name,rows:connection.prepare(`SELECT * FROM "${name.replaceAll('"','""')}"`).all()
++    .sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))}))
++}
++
++for(const section of ['removedResources','promotedResources','deletedVideos'] as const)it(`native ${section} audit INSERT failure rolls back real cleanup tables and retries without phantom counts`,async()=>{
++  const media=path.join(directory,'media');fs.mkdirSync(media)
++  const library=createMediaLibrary({name:'Cleanup',roots:[{path:media}]})
++  if(section==='deletedVideos')db.prepare('UPDATE media_library_configs SET remove_resource_less_memberships=1 WHERE library_id=?').run(library.id)
++  const missing=path.join(media,'CLEAN-001.mp4')
++  const initial=insertTestVideoWithFile(db,{libraryId:library.id,rootId:library.roots[0].id,code:'CLEAN-001',filePath:missing,isPrimary:true})
++  let promotedId:number|null=null
++  if(section==='promotedResources'){
++    const existing=path.join(media,'CLEAN-001-CD2.mp4');fs.writeFileSync(existing,'present')
++    promotedId=insertLocalVideoResource({libraryId:library.id,videoId:initial.videoId,rootId:library.roots[0].id,locator:existing,sizeBytes:7,durationSeconds:120,fileMtimeMs:1000})
++    assert.ok(promotedId)
++  }
++  const before=businessSnapshot(db),reader=openReadOnlyDatabaseAtPath(db.name)
++  let sequence=0,writer:ReturnType<typeof createScanAuditWriter>,activeRunId='',faults=0,targetCalls=0
++  const finished:Parameters<ScanCoordinatorDependencies['finishRun']>[0][]=[]
++  db.function('observe_cleanup_audit',()=>{faults++;return 1})
++  db.exec(`CREATE TEMP TRIGGER fail_cleanup_audit AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='${section}' BEGIN SELECT observe_cleanup_audit();SELECT RAISE(ABORT,'native cleanup audit failure');END;`)
++  const coordinator=createScanCoordinator({
++    createRunId:()=>`cleanup-${++sequence}`,
++    beginRun:input=>{
++      beginLibraryScanRun(input);activeRunId=input.runId
++      writer=createScanAuditWriter(db,input)
++      writer.start({schemaVersion:2,...input,finishedAt:'pending',status:'success'})
++    },
++    // Deliberately capture final summaries: this seam does not publish manifests
++    // or pass a legacy JSON audit to an entries-backed run.
++    finishRun:input=>{finished.push(input)},
++    scanFolders:async request=>{assert.equal(db.inTransaction,false);return empty(request.libraryId,request.runId)},
++    recordCleanupAudit:(identity,event)=>{
++      assert.deepEqual(identity,{libraryId:library.id,runId:activeRunId});assert.equal(db.inTransaction,true)
++      if(event.section===section){
++        targetCalls++
++        assert.equal(db.prepare('SELECT id FROM video_resources WHERE id=?').get(initial.fileId),undefined)
++        if(section==='promotedResources')assert.equal((db.prepare('SELECT is_primary FROM video_resources WHERE id=?').get(promotedId!) as {is_primary:number}).is_primary,1)
++        if(section==='deletedVideos')assert.equal(db.prepare('SELECT 1 FROM library_video_memberships WHERE library_id=? AND video_id=?').get(library.id,initial.videoId),undefined)
++        assert.deepEqual(businessSnapshot(reader),before,'independent connection cannot see uncommitted cleanup or earlier audit entries')
++      }
++      if(event.section==='deletedVideos')writer.writeBatch('deletedVideos',[event.entry])
++      else writer.writeBatch(event.section,[event.entry])
++    }
++  })
++  try{
++    await assert.rejects(coordinator.run({libraryId:library.id,trigger:'manual'}),/native cleanup audit failure/)
++    assert.equal(faults,1);assert.equal(targetCalls,1);assert.equal(db.inTransaction,false)
++    assert.deepEqual(businessSnapshot(db),before);assert.deepEqual(businessSnapshot(reader),before)
++    assert.equal(finished.length,1);assert.equal(finished[0].summary.status,'failed')
++    assert.equal(finished[0].summary.resourcesRemoved,0);assert.equal(finished[0].summary.primaryResourcesPromoted,0);assert.equal(finished[0].summary.videosDeleted,0)
++    assert.deepEqual(finished[0].audit.removedResources,[]);assert.deepEqual(finished[0].audit.promotedResources,[]);assert.deepEqual(finished[0].audit.deletedVideos,[])
++    db.exec('DROP TRIGGER fail_cleanup_audit')
++    const result=await coordinator.run({libraryId:library.id,trigger:'manual'})
++    assert.equal(targetCalls,2);assert.equal(result.removed,1)
++    assert.equal(result.promoted,section==='promotedResources'?1:0);assert.equal(result.deletedVideos,section==='deletedVideos'?1:0)
++    assert.equal(finished[1].summary.resourcesRemoved,1)
++    assert.equal(finished[1].summary.primaryResourcesPromoted,result.promoted);assert.equal(finished[1].summary.videosDeleted,result.deletedVideos)
++    assert.equal(db.prepare('SELECT id FROM video_resources WHERE id=?').get(initial.fileId),undefined)
++    const entries=db.prepare('SELECT run_id,section,ordinal,entry_json FROM library_scan_audit_entries ORDER BY section,ordinal').all() as {run_id:string;section:string;ordinal:number;entry_json:string}[]
++    assert.equal(entries.length,section==='removedResources'?1:2)
++    for(const entry of entries){assert.equal(entry.run_id,activeRunId);assert.equal(entry.ordinal,0)}
++    for(const name of ['removedResources','promotedResources','deletedVideos'] as const){
++      assert.deepEqual(entries.filter(entry=>entry.section===name).map(entry=>JSON.parse(entry.entry_json)),finished[1].audit[name])
++    }
++    assert.deepEqual(businessSnapshot(reader),businessSnapshot(db))
++    assert.deepEqual(db.pragma('foreign_key_check'),[])
++  }finally{reader.close()}
++})
++
++for(const rejected of [false,true])it(`rejects ${rejected?'rejected':'resolved'} async cleanup callbacks and rolls back synchronous writes`,async()=>{
++  const media=path.join(directory,'media');fs.mkdirSync(media)
++  const library=createMediaLibrary({name:'Async cleanup',roots:[{path:media}]})
++  insertTestVideoWithFile(db,{libraryId:library.id,rootId:library.roots[0].id,code:'ASYNC-001',filePath:path.join(media,'ASYNC-001.mp4')})
++  const before=businessSnapshot(db)
++  let writer:ReturnType<typeof createScanAuditWriter>,calls=0
++  const coordinator=createScanCoordinator({
++    beginRun:input=>{beginLibraryScanRun(input);writer=createScanAuditWriter(db,input);writer.start({schemaVersion:2,...input,finishedAt:'pending',status:'success'})},
++    finishRun:()=>{},scanFolders:async request=>empty(request.libraryId,request.runId),
++    recordCleanupAudit:(_identity,event)=>{
++      calls++;assert.equal(db.inTransaction,true)
++      if(event.section==='deletedVideos')writer.writeBatch(event.section,[event.entry])
++      else writer.writeBatch(event.section,[event.entry])
++      return rejected?Promise.reject(new Error('async cleanup rejected')):Promise.resolve()
++    }
++  })
++  await assert.rejects(coordinator.run({libraryId:library.id}),/synchronous/i)
++  assert.equal(calls,1);assert.deepEqual(businessSnapshot(db),before)
++  await new Promise(resolve=>setImmediate(resolve))
++  assert.equal(db.inTransaction,false)
++})
++
++it('copies deferred cleanup events into legacy audit only after the outer transaction commits',async()=>{
++  const media=path.join(directory,'media');fs.mkdirSync(media)
++  const library=createMediaLibrary({name:'Deferred seam',roots:[{path:media}]})
++  const file=path.join(media,'DEFER-001.mp4');fs.writeFileSync(file,'present')
++  const video=insertTestVideoWithFile(db,{libraryId:library.id,rootId:library.roots[0].id,code:'DEFER-001',filePath:file})
++  const base={resourceId:video.fileId,videoId:video.videoId,videoCode:'DEFER-001',videoTitle:null,resourceKind:'local' as const,sourcePath:file,displayName:null}
++  const events=[
++    {section:'removedResources' as const,entry:{...base,reason:'removed_library_path' as const}},
++    {section:'promotedResources' as const,entry:{...base,reason:'promoted_after_removal' as const}}
++  ]
++  const before=businessSnapshot(db),finished:Parameters<ScanCoordinatorDependencies['finishRun']>[0][]=[]
++  let writer:ReturnType<typeof createScanAuditWriter>,sequence=0,applyCalls=0
++  db.exec(`CREATE TEMP TRIGGER fail_deferred_audit AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='promotedResources' BEGIN SELECT RAISE(ABORT,'deferred audit fault');END;`)
++  const coordinator=createScanCoordinator({
++    createRunId:()=>`deferred-${++sequence}`,
++    beginRun:input=>{beginLibraryScanRun(input);writer=createScanAuditWriter(db,input);writer.start({schemaVersion:2,...input,finishedAt:'pending',status:'success'})},
++    finishRun:input=>{finished.push(input)},scanFolders:async request=>empty(request.libraryId,request.runId),
++    listPendingPathCleanups:()=>[{jobId:'synthetic-deferred',libraryId:library.id,rootId:library.roots[0].id}],
++    // Only the coordinator event seam is modeled here; actual deferred deletion
++    // and authorization are covered by the cleanup service's integration tests.
++    applyPendingPathCleanups:(cleanups,record)=>{
++      applyCalls++;assert.equal(db.inTransaction,true);assert.equal(cleanups.length,1);assert.ok(record)
++      for(const event of events)record(event)
++      return {removed:1,promoted:1,consumedRoots:[{libraryId:library.id,rootId:library.roots[0].id}]}
++    },
++    recordCleanupAudit:(_identity,event)=>{
++      assert.equal(db.inTransaction,true)
++      if(event.section==='deletedVideos')writer.writeBatch(event.section,[event.entry])
++      else writer.writeBatch(event.section,[event.entry])
++    }
++  })
++  await assert.rejects(coordinator.run({libraryId:library.id}),/deferred audit fault/)
++  assert.deepEqual(businessSnapshot(db),before)
++  assert.deepEqual(finished[0].audit.removedResources,[]);assert.deepEqual(finished[0].audit.promotedResources,[])
++  assert.equal(finished[0].summary.resourcesRemoved,0);assert.equal(finished[0].summary.primaryResourcesPromoted,0)
++  db.exec('DROP TRIGGER fail_deferred_audit')
++  const result=await coordinator.run({libraryId:library.id})
++  assert.equal(applyCalls,2);assert.equal(result.removed,1);assert.equal(result.promoted,1)
++  for(const event of events){
++    const persisted=db.prepare('SELECT entry_json FROM library_scan_audit_entries WHERE section=? ORDER BY ordinal').all(event.section) as {entry_json:string}[]
++    assert.deepEqual(persisted.map(row=>JSON.parse(row.entry_json)),[event.entry])
++    assert.deepEqual(finished[1].audit[event.section],[event.entry])
++  }
++})
++
++for(const blocked of ['remove','promote'] as const)it(`rejects an SQL-ignored ${blocked} write without emitting its audit and rolls back earlier cleanup`,async()=>{
++  const media=path.join(directory,'media');fs.mkdirSync(media)
++  const library=createMediaLibrary({name:'Ignored cleanup',roots:[{path:media}]})
++  // This first resource is removed successfully before the ignored write, proving
++  // that both its deletion and its earlier audit INSERT roll back with the batch.
++  const earlier=insertTestVideoWithFile(db,{libraryId:library.id,rootId:library.roots[0].id,code:'EARLY-001',filePath:path.join(media,'EARLY-001.mp4')})
++  const target=insertTestVideoWithFile(db,{libraryId:library.id,rootId:library.roots[0].id,code:'BLOCK-001',filePath:path.join(media,'BLOCK-001.mp4'),isPrimary:true})
++  let promotedId:number|null=null
++  if(blocked==='promote'){
++    const file=path.join(media,'BLOCK-001-CD2.mp4');fs.writeFileSync(file,'present')
++    promotedId=insertLocalVideoResource({libraryId:library.id,videoId:target.videoId,rootId:library.roots[0].id,locator:file,sizeBytes:7,durationSeconds:120,fileMtimeMs:1000})
++    assert.ok(promotedId)
++    db.exec(`CREATE TEMP TRIGGER ignore_primary BEFORE UPDATE OF is_primary ON video_resources
++      WHEN OLD.id=${promotedId} AND NEW.is_primary=1 BEGIN SELECT RAISE(IGNORE);END;`)
++  }else{
++    db.exec(`CREATE TEMP TRIGGER ignore_removal BEFORE DELETE ON video_resources
++      WHEN OLD.id=${target.fileId} BEGIN SELECT RAISE(IGNORE);END;`)
++  }
++  const before=businessSnapshot(db),finished:Parameters<ScanCoordinatorDependencies['finishRun']>[0][]=[]
++  const observed:Array<{section:string;resourceId:number}>=[]
++  let writer:ReturnType<typeof createScanAuditWriter>
++  const coordinator=createScanCoordinator({
++    beginRun:input=>{beginLibraryScanRun(input);writer=createScanAuditWriter(db,input);writer.start({schemaVersion:2,...input,finishedAt:'pending',status:'success'})},
++    scanFolders:async request=>empty(request.libraryId,request.runId),finishRun:input=>{finished.push(input)},
++    recordCleanupAudit:(_identity,event)=>{
++      assert.equal(db.inTransaction,true)
++      if(event.section==='deletedVideos')writer.writeBatch(event.section,[event.entry])
++      else {
++        observed.push({section:event.section,resourceId:event.entry.resourceId})
++        writer.writeBatch(event.section,[event.entry])
++      }
++    }
++  })
++  await assert.rejects(coordinator.run({libraryId:library.id}))
++  assert.ok(observed.some(event=>event.section==='removedResources'&&event.resourceId===earlier.fileId))
++  assert.equal(observed.some(event=>blocked==='remove'
++    ? event.section==='removedResources'&&event.resourceId===target.fileId
++    : event.section==='promotedResources'&&event.resourceId===promotedId),false)
++  assert.deepEqual(businessSnapshot(db),before)
++  assert.equal(db.inTransaction,false);assert.equal(finished.length,1)
++  assert.equal(finished[0].summary.status,'failed')
++  assert.equal(finished[0].summary.resourcesRemoved,0);assert.equal(finished[0].summary.primaryResourcesPromoted,0);assert.equal(finished[0].summary.videosDeleted,0)
++  assert.deepEqual(finished[0].audit.removedResources,[]);assert.deepEqual(finished[0].audit.promotedResources,[])
++  assert.deepEqual(db.pragma('foreign_key_check'),[])
++})

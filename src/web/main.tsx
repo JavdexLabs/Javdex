@@ -12,6 +12,7 @@ import {
   type FormEvent
 } from 'react'
 import { createRoot } from 'react-dom/client'
+import { imageThumbnailUrl } from '../shared/imageVariants'
 const ImagePreview = lazy(() => import('./ImagePreview'))
 import {
   ArrowLeft,
@@ -63,7 +64,7 @@ function Poster({
     <div className={`poster${large ? ' poster-large' : ''}`}>
       {video.cover && !failed ? (
         <img
-          src={video.cover}
+          src={large ? video.cover : imageThumbnailUrl(video.cover, 640)}
           alt=""
           loading={large ? 'eager' : 'lazy'}
           decoding="async"
@@ -193,7 +194,7 @@ function CastMember({ actress }: { actress: WebDetail['actresses'][number] }): J
   const next = new URLSearchParams({ actress: String(actress.id), label: actress.name })
   return <a className="cast-member" href={route('/browse', next)}>
     <span className="cast-avatar" aria-hidden="true">
-      {actress.avatar && !failed ? <img src={actress.avatar} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+      {actress.avatar && !failed ? <img src={imageThumbnailUrl(actress.avatar, 320)} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
         : <UserRound />}
     </span>
     <span className="cast-name">{actress.name}</span>
@@ -457,7 +458,7 @@ function Detail({
                     aria-label={`预览剧照 ${index + 1}`}
                     onClick={event => openPreview(index + (video.cover ? 1 : 0), event.currentTarget)}
                   >
-                    <img src={src} alt={`影片剧照 ${index + 1}`} loading="lazy" />
+                    <img src={imageThumbnailUrl(src, 640)} alt={`影片剧照 ${index + 1}`} loading="lazy" />
                   </button>
                 ))}
               </div>

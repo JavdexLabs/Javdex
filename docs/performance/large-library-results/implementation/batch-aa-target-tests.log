@@ -1,0 +1,16 @@
+▶ tagRepo.pruneUnusedTags
+  ✔ deletes tags with no video links and keeps tags still used by a video (8.29125ms)
+✔ tagRepo.pruneUnusedTags (8.573167ms)
+▶ tagRepo active catalog projection
+  ✔ matches manual association and visibility semantics before and after statistics maintenance (20.370125ms)
+  ✔ deduplicates shared memberships and preserves manual origin and zero-count tags (5.48125ms)
+  ✔ counts only videos that can be opened through the active visible catalog (5.441958ms)
+✔ tagRepo active catalog projection (31.409ms)
+ℹ tests 4
+ℹ suites 2
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 197.013375

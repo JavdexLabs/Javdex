@@ -7,6 +7,7 @@ import {
   jobToBatchProgress,
   loadBatchScrapeJob,
   saveBatchScrapeJob,
+  saveBatchScrapeProgress,
   type BatchScrapeJobKind,
   type BatchScrapeJobTarget,
   type PersistedBatchScrapeJob
@@ -104,7 +105,7 @@ export function persistBatchScrapeCheckpoint(
   nextIndex: number,
   status: PersistedBatchScrapeJob['status'] = 'running'
 ): void {
-  saveBatchScrapeJob({
+  saveBatchScrapeProgress({
     ...job,
     nextIndex,
     success: progress.success,

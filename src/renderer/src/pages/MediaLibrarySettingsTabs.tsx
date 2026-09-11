@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import { AUTO_SCAN_INTERVAL_MINUTES } from '@shared/settingsTypes'
 import type {
-  LibraryScanLatestSnapshot,
   LibraryScanMetricKey,
   LibraryScanSummary
 } from '@shared/libraryTypes'
@@ -130,26 +129,18 @@ export function scanAuditPendingCenterPath(
 
 function ScanHistorySummary({
   summary,
-  audit,
+  revision,
+  onRefreshHistory,
   selected,
-  unrecognized,
-  currentPendingGroupIds,
-  currentPendingIdentityIds,
-  currentPendingScrapeIds,
   onSelect,
-  onResolvedUnrecognized,
   onOpenPending,
   onOpenVideo
 }: {
   summary: LibraryScanSummary
-  audit: LibraryScanLatestSnapshot['audit']
+  revision: number
+  onRefreshHistory: () => Promise<void>
   selected: LibraryScanMetricKey | null
-  unrecognized: LibraryScanLatestSnapshot['unrecognized']
-  currentPendingGroupIds: Set<number>
-  currentPendingIdentityIds: Set<number>
-  currentPendingScrapeIds: Set<number>
   onSelect: (key: LibraryScanMetricKey | null) => void
-  onResolvedUnrecognized: (path: string) => void
   onOpenPending: (target: PendingItemKey) => void
   onOpenVideo: (videoId: number) => void
 }): JSX.Element {
@@ -175,14 +166,10 @@ function ScanHistorySummary({
       </div>
       <LibraryScanAuditPanel
         summary={summary}
-        audit={audit}
+        revision={revision}
+        onRefreshHistory={onRefreshHistory}
         selected={selected}
-        unrecognized={unrecognized}
-        currentPendingGroupIds={currentPendingGroupIds}
-        currentPendingIdentityIds={currentPendingIdentityIds}
-        currentPendingScrapeIds={currentPendingScrapeIds}
         onSelect={onSelect}
-        onResolvedUnrecognized={onResolvedUnrecognized}
         onOpenPending={onOpenPending}
         onOpenVideo={onOpenVideo}
       />
@@ -470,9 +457,6 @@ export function ScanSettingsTab({
   library,
   scan,
   latestScanSummary,
-  pendingScanGroupIds,
-  pendingResourceIdentityIds,
-  pendingVideoScrapeIds,
   selectedScanMetric,
   setSelectedScanMetric,
   configDraft,
@@ -484,9 +468,6 @@ export function ScanSettingsTab({
   library: MediaLibraryDetail
   scan: ScanController
   latestScanSummary: LibraryScanSummary | null
-  pendingScanGroupIds: Set<number>
-  pendingResourceIdentityIds: Set<number>
-  pendingVideoScrapeIds: Set<number>
   selectedScanMetric: LibraryScanMetricKey | null
   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
   configDraft: MediaLibraryConfigValues
@@ -593,19 +574,20 @@ export function ScanSettingsTab({
             <h5 id="library-last-scan-title">最近一次扫描</h5>
             <span>只保留最近一次手动或后台扫描的审计摘要。</span>
           </div>
-          {latestScanSummary ? (
+          {scan.latestLoading ? (
+            <SettingsEmptyPanel variant="compact">正在加载扫描记录…</SettingsEmptyPanel>
+          ) : scan.latestError ? (
+            <SettingsEmptyPanel variant="compact">
+              <span role="alert">扫描记录加载失败：{scan.latestError}</span>
+              <Button size="sm" onClick={() => void scan.refreshLatest()}>重试</Button>
+            </SettingsEmptyPanel>
+          ) : latestScanSummary ? (
             <ScanHistorySummary
               summary={latestScanSummary}
-              audit={scan.latest?.audit ?? null}
+              revision={scan.latestRevision}
+              onRefreshHistory={scan.refreshLatest}
               selected={selectedScanMetric}
-              unrecognized={scan.latest?.unrecognized ?? []}
-              currentPendingGroupIds={pendingScanGroupIds}
-              currentPendingIdentityIds={pendingResourceIdentityIds}
-              currentPendingScrapeIds={pendingVideoScrapeIds}
               onSelect={setSelectedScanMetric}
-              onResolvedUnrecognized={() => {
-                void scan.refreshLatest()
-              }}
               onOpenVideo={(videoId) =>
                 navigate(mediaLibraryVideoDetailPath(libraryId, videoId))
               }

@@ -1,0 +1,28 @@
+{
+  "count": 300000,
+  "startupAndBuildMs": 1788.416667,
+  "searchAndQueuedTagMs": 675.2470829999997,
+  "queuedTagMs": 675.161333,
+  "callbacksDuringBuild": 716,
+  "maxTimerGapMs": 6.446541000000025,
+  "deepPageSamplesMs": [
+    1.5890420000000631,
+    1.3888750000000982,
+    1.3695000000002437
+  ],
+  "firstPageBytes": 66554,
+  "notes": [
+    "2ms main-thread timer; one real worker startup/build and first combined-query preparation, warm filesystem; 8ms drain. Diagnostic timing, not p95 or universal latency bound.",
+    "Warm deep page one warmup+3 samples includes client context/message/copy; assertions excluded. Source oracle retained; no peak memory claim.",
+    "Includes one tag queued behind first search; no general fairness, UI/IPC handler, idle expiry timing, forced termination during native SQL, Windows/HDD or cold-disk evidence."
+  ]
+}
+✔ measures responsiveness and shared-worker queuing for combined audit views (2966.626042ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3140.524875

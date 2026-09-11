@@ -1,26 +1,28 @@
+import type { ScanAuditReadHeader } from '@shared/scanAuditReadTypes'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   LibraryScanEvent,
-  LibraryScanLatestSnapshot,
   ScanProgress,
-  ScanResult
+  ScanCompletionResult
 } from '@shared/libraryTypes'
 import { api } from '../api'
 import { matchesMediaLibraryScanRun } from '../mediaLibraryScanState'
 import { invalidateAllLibraryQueries } from '../query/invalidateLibraryQueries'
 
 export const mediaLibraryScanLatestKey = (libraryId: number): readonly unknown[] =>
-  ['media-library-scan-latest', libraryId] as const
+  ['media-library-scan-header', libraryId] as const
 
 export interface MediaLibraryScanController {
-  latest: LibraryScanLatestSnapshot | null
+  latest: ScanAuditReadHeader | null
+  latestRevision: number
   latestLoading: boolean
+  latestError: string | null
   running: boolean
   cancelling: boolean
   activeRunId: string | null
   progress: ScanProgress | null
-  result: ScanResult | null
+  result: ScanCompletionResult | null
   error: string | null
   start: () => Promise<void>
   cancel: () => Promise<void>
@@ -29,7 +31,7 @@ export interface MediaLibraryScanController {
 
 export function useMediaLibraryScanController(
   libraryId: number,
-  options?: { onSettled?: () => void | Promise<void> }
+  options?: { onSettled?: () => void | Promise<void>; loadLatest?: boolean }
 ): MediaLibraryScanController {
   const queryClient = useQueryClient()
   const activeRunIdRef = useRef<string | null>(null)
@@ -40,11 +42,21 @@ export function useMediaLibraryScanController(
   const [cancelling, setCancelling] = useState(false)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
-  const [result, setResult] = useState<ScanResult | null>(null)
+  const [result, setResult] = useState<ScanCompletionResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const loadLatest = options?.loadLatest ?? true
+  const latestContextRef = useRef({ libraryId, loadLatest })
+  latestContextRef.current = { libraryId, loadLatest }
+  const latestRevisionRef = useRef(0)
   const latestQuery = useQuery({
-    queryKey: mediaLibraryScanLatestKey(libraryId),
-    queryFn: () => api.scan.getLatest(libraryId)
+    queryKey: loadLatest ? mediaLibraryScanLatestKey(libraryId) : ['media-library-scan-inactive', libraryId],
+    enabled: loadLatest,
+    gcTime: 0,
+    queryFn: async ({ signal }) => {
+      const latest = await api.scan.getAuditHeader(libraryId)
+      signal.throwIfAborted()
+      return { header: latest, revision: ++latestRevisionRef.current }
+    }
   })
 
   const setRunId = useCallback((runId: string | null): void => {
@@ -62,7 +74,7 @@ export function useMediaLibraryScanController(
   }, [libraryId, queryClient])
 
   const completeRun = useCallback(
-    async (nextResult: ScanResult): Promise<void> => {
+    async (nextResult: ScanCompletionResult): Promise<void> => {
       if (handledRunIdsRef.current.has(nextResult.runId)) return
       if (!matchesMediaLibraryScanRun(libraryId, activeRunIdRef.current, nextResult)) return
       handledRunIdsRef.current.add(nextResult.runId)
@@ -160,12 +172,15 @@ export function useMediaLibraryScanController(
   }
 
   const refreshLatest = async (): Promise<void> => {
-    await latestQuery.refetch()
+    if (latestContextRef.current.libraryId === libraryId && latestContextRef.current.loadLatest) await latestQuery.refetch()
+    else await queryClient.invalidateQueries({queryKey: mediaLibraryScanLatestKey(libraryId), exact: true, refetchType: 'none'})
   }
 
   return {
-    latest: latestQuery.data ?? null,
-    latestLoading: latestQuery.isLoading,
+    latest: loadLatest ? latestQuery.data?.header ?? null : null,
+    latestRevision: loadLatest ? latestQuery.data?.revision ?? 0 : 0,
+    latestLoading: loadLatest && latestQuery.isLoading,
+    latestError: loadLatest && latestQuery.error ? latestQuery.error.message : null,
     running,
     cancelling,
     activeRunId,

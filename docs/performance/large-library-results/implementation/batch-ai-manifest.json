@@ -1,0 +1,19 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ai-build.log": "33bedbb879117a48c794edbf3f26b528a6f1008192dbce8e87ac6ff3f1ccf3a7",
+    "batch-ai-full.log": "e1026a72461f6a46f8ab509839c65d418078a4d14d1b9a668a8748bd86df2604",
+    "batch-ai-read-connection.patch": "62013b2cfd09b436f7733f256c7e898f569b626314e3566b4c217aa8a4783f0b",
+    "batch-ai-target.log": "274b8205f189ab36c8cac252b390000b31000f1c3859e6534771b8b943a8cc79",
+    "batch-ai-worker-probe.json": "6f232092867c4ea4d056c623d65c1cdc68debc300d368309ab85e46188776a75",
+    "batch-ai-worker-probe.log": "c8c4447543faff8b0c28334c555a1a110f1d86490bb66d9f8a5e44687a66d570"
+  },
+  "notes": [
+    "Cumulative selected database source plus full untracked tests/probe; depends on B-AH, not standalone.",
+    "Caller-owned readonly existing-file reader requires current user_version and WAL, query_only, identical SQL functions; never migrates, changes journal mode, or replaces global writer. This is not a complete schema integrity audit.",
+    "Writer is published only after successful initialization/migration; failure closes local connection and permits retry.",
+    "12 targeted tests pass, full2163pass1skip, build pass. Native worker probe passed after final metric caveats.",
+    "Worker fixture uses actual reader/native SQLite with generated temporary CJS bundle. Message-to-message ticks include scheduling/close tail; timer gap also includes worker startup/loading/termination. Not packaged runtime or production IPC isolation.",
+    "No schema change/user data/commit/push/release. Production queue, dispatcher, shutdown and remaining full plan unimplemented."
+  ]
+}

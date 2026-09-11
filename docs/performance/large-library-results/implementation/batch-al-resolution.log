@@ -1,0 +1,18 @@
+✔ locates a deep-linked pending item, pages with a bounded cache and ignores a late detail (308.38875ms)
+✔ shows an explicit page error and retries without fetching the full inbox (69.302292ms)
+✔ recovers the last page after deletion and selects the surviving first item (87.317708ms)
+✔ does not block a different queue when scrape count fails or reuse its disabled page total (89.487041ms)
+▶ PendingCenterPage scrape resolution
+  ✔ carries an explicit director through merge-and-apply without stacking prompts (231.783333ms)
+  ✔ previews either persisted identity and submits only after explicit confirmation (14.290625ms)
+  ✔ shows the library filter only for scan decisions (13.934667ms)
+  ✔ clears the library filter from the scoped empty state and keeps the scan tab selected (13.807125ms)
+✔ PendingCenterPage scrape resolution (274.336ms)
+ℹ tests 8
+ℹ suites 1
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 809.41875

@@ -1,0 +1,83 @@
+{
+  "videos": 300382,
+  "firstWorkerReadMs": 142.84716600000002,
+  "results": [
+    {
+      "name": "main.repository",
+      "times": [
+        72.98554100000001,
+        72.34629199999972,
+        72.46029199999975
+      ],
+      "medianMs": 72.46029199999975,
+      "maxTimerGapMs": 78.12291699999969,
+      "ticks": 7,
+      "rssBytes": 133464064
+    },
+    {
+      "name": "worker.cached",
+      "times": [
+        0.31483399999979156,
+        0.31320899999991525,
+        0.33874999999989086
+      ],
+      "medianMs": 0.31483399999979156,
+      "maxTimerGapMs": 6.764916000000085,
+      "ticks": 7,
+      "rssBytes": 161300480
+    },
+    {
+      "name": "worker.invalidated",
+      "times": [
+        75.83937500000002,
+        75.53354199999967,
+        74.33508299999994
+      ],
+      "medianMs": 75.53354199999967,
+      "maxTimerGapMs": 6.3085839999998825,
+      "ticks": 44,
+      "rssBytes": 161497088
+    }
+  ],
+  "versions": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "platform": "darwin",
+  "arch": "arm64",
+  "caveats": [
+    "Synthetic narrow tag fixture, three local warm samples, not p95/customer Windows/HDD/full renderer IPC.",
+    "Timing includes result equality assertions; timer sampling and fixed inter-sample delays affect gap statistics.",
+    "First worker read includes startup and cache miss; later invalidated samples include a committed video timestamp change that leaves the tag result unchanged.",
+    "Worker transport is built production entry/client; native SQLite termination is not a hard SQL interrupt."
+  ]
+}

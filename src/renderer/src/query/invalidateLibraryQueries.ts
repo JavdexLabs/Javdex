@@ -47,10 +47,10 @@ export function invalidateAllLibraryQueries(queryClient: QueryClient): void {
 
 /** Refetch stale library queries when a list surface becomes visible again. */
 export function refetchStaleLibraryQueries(queryClient: QueryClient): void {
-  void queryClient.refetchQueries({ queryKey: videoKeys.all, type: 'all', stale: true })
-  void queryClient.refetchQueries({ queryKey: actressKeys.all, type: 'all', stale: true })
-  void queryClient.refetchQueries({ queryKey: organizationKeys.all, type: 'all', stale: true })
-  void queryClient.refetchQueries({ queryKey: directorKeys.all, type: 'all', stale: true })
-  void queryClient.refetchQueries({ queryKey: seriesKeys.all, type: 'all', stale: true })
-  void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'all', stale: true })
+  void queryClient.refetchQueries({ queryKey: videoKeys.all, type: 'active', stale: true })
+  void queryClient.refetchQueries({ queryKey: actressKeys.all, type: 'active', stale: true })
+  void queryClient.refetchQueries({ queryKey: organizationKeys.all, type: 'active', stale: true })
+  void queryClient.refetchQueries({ queryKey: directorKeys.all, type: 'active', stale: true })
+  void queryClient.refetchQueries({ queryKey: seriesKeys.all, type: 'active', stale: true })
+  void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'active', stale: true })
 }

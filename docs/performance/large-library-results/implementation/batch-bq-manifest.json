@@ -1,0 +1,22 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bq-target.log": "f88e9df6f7841fbe7582cac6b8e7fabdbef84756a1153a39109f0ebc64626fe3",
+    "batch-bq-full.log": "d02ab55ba400c07b7ef0fa39ce397d6f6a32f95b307757522a560190b805a1a5",
+    "batch-bq-build.log": "9deb8b3732976d7ed57a7234901be728e1914af8e9a9c34efba4484395afaa73",
+    "batch-bq-browser.log": "ec71477be5733a9205dca99e85e93f1f9f500678d2b770f65c4420da21d439f8",
+    "batch-bq-benchmark.log": "dfafe0b8fe02f3fdbe13ce1baa74dc29f13832501a78dc6d8d78e6ba1de473fc",
+    "batch-bq-benchmark.json": "994360a5adf5a8b2d87bf333d47c275296cf5baa0081a250c0960597bf216cbf",
+    "batch-bq-ui-1000x640.png": "80b122b34d8e44aa22963cd1e7fbdc53175e76443ac25a00c4de5d899636d977",
+    "batch-bq-ui-1440x900.png": "2e3e46404a0f9ab76573845c33ab33f6495b1810e2e5e21384500a533844e941",
+    "batch-bq-ui-results.json": "2cc9b60e7aeaf4560acb4ff65f6b8da5ce2ed97365e73a1ebca84c72a4c6c8ff",
+    "batch-bq-image-candidate-page.patch": "0cea7fcb816fe06f1a550e38336b1c5fba038ea177bb99a6c2d3ebf025499a36",
+    "batch-bq-review.md": "971e3cc1f4fec9d2746e9ad63f992ca8cd664ddb8fbbf2da9e21fbad5419ec45"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "8 focused; full2358pass1skip0fail; build and two actual browser scenarios passed.",
+    "Deep page is slower than legacy: query-cost risk remains open; return/DOM bounded only.",
+    "Full15/42goal remains incomplete; next evaluate classification image read worker."
+  ]
+}

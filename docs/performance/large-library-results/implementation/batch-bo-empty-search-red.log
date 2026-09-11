@@ -1,0 +1,52 @@
+▶ classification IPC contract
+  ✔ registers every command and forwards typed arguments to the public services (1.504834ms)
+✔ classification IPC contract (1.790417ms)
+✖ matches every old list field and global ordering over pages, aliases, roles and cover boundaries (63.645ms)
+✖ keeps count and page in one read snapshot across another connection changing the role (6.671625ms)
+✖ validates page boundaries in the service and typed IPC without changing complete-list APIs (8.761208ms)
+ℹ tests 4
+ℹ suites 1
+ℹ pass 1
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 417.142125
+
+✖ failing tests:
+
+test at src/main/services/classificationListPage.test.ts:2:1821
+✖ matches every old list field and global ordering over pages, aliases, roles and cover boundaries (63.645ms)
+  Error: 分类名称不能为空
+      at normalizeClassificationName (/Users/nut/Project/JavdexLabs/Javdex/src/shared/classificationNameNormalization.ts:4:26)
+      at pattern (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:12:22)
+      at readPage (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:19:32)
+      at Object.listSeriesPage (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:53:16)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.test.ts:31:82)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3)
+
+test at src/main/services/classificationListPage.test.ts:3:1538
+✖ keeps count and page in one read snapshot across another connection changing the role (6.671625ms)
+  Error: 分类名称不能为空
+      at normalizeClassificationName (/Users/nut/Project/JavdexLabs/Javdex/src/shared/classificationNameNormalization.ts:4:26)
+      at pattern (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:12:22)
+      at readPage (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:19:32)
+      at Object.listOrganizationPage (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:50:10)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.test.ts:54:24)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7)
+
+test at src/main/services/classificationListPage.test.ts:3:2720
+✖ validates page boundaries in the service and typed IPC without changing complete-list APIs (8.761208ms)
+  Error: 分类名称不能为空
+      at normalizeClassificationName (/Users/nut/Project/JavdexLabs/Javdex/src/shared/classificationNameNormalization.ts:4:26)
+      at pattern (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:12:22)
+      at readPage (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:19:32)
+      at Object.listSeriesPage (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.ts:53:16)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/classificationListPage.test.ts:64:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7)

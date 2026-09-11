@@ -1,0 +1,25 @@
+▶ ActressAvatarEditor
+  ✔ keeps rendering when the current avatar enters crop editing (65.955917ms)
+  ✔ keeps rendering when a legacy avatar without its original enters crop editing (3.6955ms)
+✔ ActressAvatarEditor (70.071042ms)
+✔ pages associated covers without loading an actress detail or accumulating tiles (4.4965ms)
+✔ does not replace a user-selected source tab when the first cover page arrives late (2.554417ms)
+✔ pages40 candidates and preserves selection and name plan across pages and search (595.095375ms)
+✔ retries page failures without losing the selected merge plan (112.889875ms)
+✔ ignores old page responses while a changed search is debouncing (429.2315ms)
+✔ locks a captured merge against duplicate submission and retains plan on failure (169.175375ms)
+✔ resets session on keep identity change and ignores old page and merge completion (162.319708ms)
+✔ resets the name plan only when choosing a different merge candidate or clearing selection (105.524375ms)
+✔ loads metadata once while paging 60/60/5 works and preserving the full count (256.298208ms)
+✔ retries page errors, clamps a removed last page, and rejects late actor results (6.974125ms)
+✔ does not invalidate the new actor metadata when the old editor save settles late (6.442125ms)
+✔ retains an open merge plan and its full count while the visible works refresh (7.672ms)
+✔ does not reuse the prior actor page when an intervening actor request is still pending (3.606208ms)
+ℹ tests 15
+ℹ suites 1
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1749.432958

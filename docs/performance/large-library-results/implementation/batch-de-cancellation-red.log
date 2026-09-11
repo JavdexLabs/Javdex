@@ -1,0 +1,54 @@
+✔ matches detailed real NFO results and audits for several videos and many anchors while TEMP remains alive through apply (112.284167ms)
+✔ retains the discovered sidecar and directory identity snapshot across filesystem changes before apply (11.495833ms)
+✔ preserves duplicate-path preflight overwrite and final warning audit semantics (15.981ms)
+✔ does not create or query any NFO workset with summary NFO disabled (7.669875ms)
+✔ keeps an actual SQL sidecar lookup failure fatal during inspect (6.854458ms)
+✔ keeps an actual SQL sidecar lookup failure fatal during apply (8.004875ms)
+✔ rolls queue INSERT failure back with the mp4 new video and retries actual NFO (11.633792ms)
+✔ rolls queue INSERT failure back with the mp4 existing-video resource and retries actual NFO (11.121375ms)
+✔ rolls queue INSERT failure back with the strm new video and retries actual NFO (11.607959ms)
+✔ rolls queue INSERT failure back with the strm existing-video resource and retries actual NFO (10.944791ms)
+✖ keeps the workset alive while draining committed NFO audit warnings on cancellation and skips the next batch (10.219417ms)
+✔ rolls real NFO business updates back with a native audit revision fault while disposing the workset (9.525917ms)
+✔ disposes earlier scratch stores if creating the NFO workset fails (6.704ms)
+✔ tracks queue writes without rebuilding the STRM relocation index on each NFO candidate (13.574292ms)
+✔ attempts all three scratch cleanups without replacing an original discovery failure (6.096167ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 14
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 578.201584
+
+✖ failing tests:
+
+test at src/main/scanner/scannerNfoWorkset.test.ts:6:1528
+✖ keeps the workset alive while draining committed NFO audit warnings on cancellation and skips the next batch (10.219417ms)
+  ScanFoldersFailure: no such table: scan_nfo_workset_859de7d8e30843f28a76fc5e92668d53_queue
+      at scanFolders (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:509:11)
+      at async TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scannerNfoWorkset.test.ts:214:18)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    partialResult: { libraryId: 2, runId: 'nfo-workset', scannedFiles: 3, imported: 3, skipped: 0, skippedShort: 0, failed: 0, pendingGroups: 0, pendingResources: 0, relocated: 0, refreshed: 0, removed: 0, promoted: 0, deletedVideos: 0, offlineFolders: [], unrecognizedCount: 0, strmFailures: [], omittedStrmFailures: 0 },
+    [cause]: Error [ScanNfoWorksetError]: no such table: scan_nfo_workset_859de7d8e30843f28a76fc5e92668d53_queue
+        at checked (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanNfoWorkset.ts:43:11)
+        at Object.[Symbol.iterator] (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanNfoWorkset.ts:215:25)
+        ... 5 lines matching cause stack trace ...
+        at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+      [cause]: Error [SqliteError]: no such table: scan_nfo_workset_859de7d8e30843f28a76fc5e92668d53_queue
+          at Object.queueNext (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanNfoWorkset.ts:288:67)
+          at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanNfoWorkset.ts:215:64)
+          at checked (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanNfoWorkset.ts:41:16)
+          at Object.[Symbol.iterator] (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanNfoWorkset.ts:215:25)
+          at [Symbol.iterator].next (<anonymous>)
+          at scanPreparedFolders (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:1474:29)
+          at async scanFolders (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:494:25)
+          at async TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scannerNfoWorkset.test.ts:214:18)
+          at async Test.run (node:internal/test_runner/test:1332:7)
+          at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+        code: 'SQLITE_ERROR'
+      }
+    }
+  }

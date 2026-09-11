@@ -19,6 +19,7 @@ import type {
 } from '@shared/videoTypes'
 import {
   addManualVideoTag,
+  addExistingManualVideoTag,
   addVideoSampleAsset,
   clearVideoMetadataRecord,
   deleteVideoSampleAsset,
@@ -75,6 +76,7 @@ export interface VideoMaintenanceService {
   deleteSample(id: number, assetId: number): boolean
   setPoster(id: number, posterPath: string | null): boolean
   addManualTag(id: number, name: string): boolean
+  addExistingManualTag(id: number, tagId: number): boolean
   removeManualTag(id: number, tagId: number): boolean
   importLinkResource(input: VideoLinkResourceImportInput): VideoResourceImportResult
   checkLinkResource(url: string): Promise<VideoResourceLinkCheckResult>
@@ -118,6 +120,7 @@ interface VideoMaintenanceServiceDependencies {
   deleteVideoSampleAsset: typeof deleteVideoSampleAsset
   setVideoPosterPath: typeof setVideoPosterPath
   addManualVideoTag: typeof addManualVideoTag
+  addExistingManualVideoTag: typeof addExistingManualVideoTag
   removeManualVideoTag: typeof removeManualVideoTag
   importVideoLinkResourceRecord: typeof importVideoLinkResourceRecord
   checkLinkResource: typeof videoResourceLinkService.check
@@ -174,6 +177,7 @@ export function createVideoMaintenanceService(
   const deleteSampleAsset = dependencies.deleteVideoSampleAsset ?? deleteVideoSampleAsset
   const writePoster = dependencies.setVideoPosterPath ?? setVideoPosterPath
   const writeManualTag = dependencies.addManualVideoTag ?? addManualVideoTag
+  const writeExistingManualTag = dependencies.addExistingManualVideoTag ?? addExistingManualVideoTag
   const deleteManualTag = dependencies.removeManualVideoTag ?? removeManualVideoTag
   const importLinkResourceRecord =
     dependencies.importVideoLinkResourceRecord ?? importVideoLinkResourceRecord
@@ -633,6 +637,12 @@ export function createVideoMaintenanceService(
       if (!readVideoById(id)) throw new Error('Video not found')
       assertMetadataUnlocked(id)
       writeManualTag(id, name)
+      return true
+    },
+    addExistingManualTag(id, tagId): boolean {
+      if (!readVideoById(id)) throw new Error('Video not found')
+      assertMetadataUnlocked(id)
+      writeExistingManualTag(id, tagId)
       return true
     },
     removeManualTag(id, tagId): boolean {

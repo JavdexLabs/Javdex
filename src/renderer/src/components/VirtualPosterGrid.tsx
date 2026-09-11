@@ -1,6 +1,8 @@
+import type { CatalogWindow } from '../query/useWindowedCatalog'
+import Button from './Button'
 import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FixedSizeGrid, type GridChildComponentProps } from 'react-window'
-import type { Video } from '@shared/videoTypes'
+import type { VideoCard } from '@shared/videoTypes'
 import Spinner from './Spinner'
 import { useElementSize } from '../hooks/useElementSize'
 import { useLayoutSpacing } from '../hooks/useLayoutSpacing'
@@ -8,7 +10,7 @@ import { resolveScrollTopForKey, setListScroll } from '../listView/listViewMemor
 import ScrollToTopButton, { SCROLL_TO_TOP_THRESHOLD } from './ScrollToTopButton'
 import PosterCard from './PosterCard'
 import ScopedPosterCard from './ScopedPosterCard'
-import type { ScopedVideo } from '@shared/catalogTypes'
+import type { ScopedVideoCard } from '@shared/cardProjection'
 import { useDisplayMode } from './DisplayModeContext'
 import {
   computePosterGridLayout,
@@ -18,15 +20,16 @@ import { scrollbarWidth } from '../utils/scrollbar'
 
 const GAP = 12
 
-function isScopedVideo(video: Video): video is ScopedVideo {
-  const candidate = video as Partial<ScopedVideo>
+function isScopedVideo(video: VideoCard): video is ScopedVideoCard {
+  const candidate = video as Partial<ScopedVideoCard>
   return (
     Number.isSafeInteger(candidate.preferredLibraryId) &&
     Array.isArray(candidate.libraries)
   )
 }
 
-interface VirtualPosterGridProps<TVideo extends Video> {
+interface VirtualPosterGridProps<TVideo extends VideoCard> {
+  catalogWindow?: CatalogWindow<TVideo>
   videos: TVideo[]
   detailLibraryId?: number
   detailLibraryIds?: ReadonlyMap<number, number>
@@ -53,8 +56,9 @@ interface VirtualPosterGridProps<TVideo extends Video> {
  * Windowed poster wall. Only renders visible cells, so tens of thousands of
  * videos scroll smoothly. Column count is derived from container width.
  */
-export default function VirtualPosterGrid<TVideo extends Video>({
+export default function VirtualPosterGrid<TVideo extends VideoCard>({
   videos,
+  catalogWindow,
   detailLibraryId,
   detailLibraryIds,
   hasMore = false,
@@ -111,7 +115,7 @@ export default function VirtualPosterGrid<TVideo extends Video>({
     gap: GAP,
     showLibraryBadges
   })
-  const renderedItemCount = videos.length + (hasMore ? columnCount : 0)
+  const renderedItemCount = catalogWindow?.total ?? (videos.length + (hasMore ? columnCount : 0))
   const rowCount = Math.ceil(renderedItemCount / columnCount)
   const stride = columnWidth + GAP
   const gridHeight = layoutHeight
@@ -166,7 +170,14 @@ export default function VirtualPosterGrid<TVideo extends Video>({
 
   const Cell = ({ columnIndex, rowIndex, style }: GridChildComponentProps): JSX.Element | null => {
     const index = rowIndex * columnCount + columnIndex
-    if (index >= videos.length) {
+    const windowVideo = catalogWindow?.getItem(index)
+    if (catalogWindow && !windowVideo) {
+      if (index >= catalogWindow.total) return null
+      return <div style={{ ...style, top: Number(style.top) + cardAreaPadTop, left: pagePadX + columnIndex * stride, width: columnWidth }}>
+        {catalogWindow.error ? <Button size="sm" onClick={catalogWindow.retry}>加载失败，重试</Button> : <Spinner aria-label="正在加载影片" />}
+      </div>
+    }
+    if (!catalogWindow && index >= videos.length) {
       if (loadingMore && columnIndex === 0 && index === videos.length) {
         return (
           <div
@@ -189,7 +200,7 @@ export default function VirtualPosterGrid<TVideo extends Video>({
       }
       return null
     }
-    const video = videos[index]
+    const video = windowVideo ?? videos[index]
     const cellWidth =
       columnIndex === columnCount - 1 ? columnWidth + widthRemainder : columnWidth
     return (
@@ -281,9 +292,10 @@ export default function VirtualPosterGrid<TVideo extends Video>({
           onScroll={({ scrollTop }) => {
             persistScroll(scrollTop)
           }}
-          onItemsRendered={({ overscanRowStopIndex }) => {
+          onItemsRendered={({ overscanRowStartIndex, overscanRowStopIndex }) => {
             persistScroll(scrollTopRef.current, overscanRowStopIndex)
-            if (hasMore && overscanRowStopIndex >= rowCount - 3) {
+            catalogWindow?.onVisibleRange(overscanRowStartIndex * columnCount, Math.min(renderedItemCount - 1, (overscanRowStopIndex + 1) * columnCount - 1))
+            if (!catalogWindow && hasMore && overscanRowStopIndex >= rowCount - 3) {
               onLoadMore?.()
             }
           }}

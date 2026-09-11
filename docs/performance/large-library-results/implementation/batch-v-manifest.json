@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "d6beacead12a311a9fb4a5f8e95b3759198a7aad08da3a6c4744cd5415a01bd9",
+  "notes": [
+    "Cumulative against HEAD for listed files; contains U cursor/page changes and expects preceding workspace batches.",
+    "PluginDeveloper product state2 stores append-only workLog interval/count in existing journal. Legacy1 reads unchanged, first update migrates. Initial new run may inline its first message until first update. No DB schema change.",
+    "updateProductStateFrom commits delta+reference in one SQLite transaction. Read validates count/index/range, with throughSeq boundary preventing future unrelated payload reads.",
+    "Abort now preserves current durable state instead of stale runtime productState. Restorecatch preserves postmigration durable state. Both corrections required to avoid reference rollback.",
+    "100k storage test measures logical JSON bytes, not disk write volume. Actual PluginDeveloper1000-event test prevents full workLog structuredClone and verifies reference state.",
+    "Cross-module realPluginDeveloper/AgentExecution/SQLite test: stale runtime1000 ref -> domain1001 -> no-projection abort/cancel -> cold snapshot/export/restore -> append1002. Only model-runtime and instance routing replaced.",
+    "Full npm test2108pass/1skip/0fail and build passed. Subsequent migration-then-open-failure test included in final30plugin tests; types/lint passed. Review abort P1 fixed and re-reviewed; recoverycatch gap also closed.",
+    "Remaining: actual recovery-generation rebuild with new log refs, fullhistory snapshot/session/export memory, byte-limited pages, metadata activities, physical write/Windows/HDD/fault matrix. Existing encrypted ExecutionHistory/hash/codec/generation tests remain passing; no new exactly-once claim.",
+    "Old clients cannot recover schema2 plugin sessions. No user data touched; no commit/push/release."
+  ]
+}

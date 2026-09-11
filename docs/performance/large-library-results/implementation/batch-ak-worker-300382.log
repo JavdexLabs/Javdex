@@ -1,0 +1,10 @@
+{"videos":300382,"firstWorkerReadMs":89.70925000000034,"results":[{"name":"main.repository","times":[72.97358299999996,71.57054199999993,72.0497919999998],"medianMs":72.0497919999998,"maxTimerGapMs":78.09670799999958,"ticks":7,"rssBytes":126009344},{"name":"worker.cached","times":[0.35012500000038926,0.26195800000004965,0.25479100000029575],"medianMs":0.26195800000004965,"maxTimerGapMs":6.496583000000101,"ticks":7,"rssBytes":153780224},{"name":"worker.invalidated","times":[78.57020799999964,74.08787499999971,74.60045799999989],"medianMs":74.60045799999989,"maxTimerGapMs":6.535333999999693,"ticks":45,"rssBytes":153944064}],"versions":{"node":"24.18.1","acorn":"8.16.0","ada":"3.4.4","amaro":"1.1.9","ares":"1.34.6","brotli":"1.2.0","cldr":"48.0","icu":"78.2","llhttp":"9.4.3","merve":"1.2.2","modules":"148","napi":"10","nbytes":"0.1.4","ncrypto":"0.0.1","nghttp2":"1.69.0","nghttp3":"","ngtcp2":"","openssl":"0.0.0","simdjson":"4.6.4","simdutf":"7.7.0","sqlite":"3.53.1","tz":"2025c","undici":"7.29.0","unicode":"17.0","uv":"1.52.1","uvwasi":"0.0.23","v8":"15.0.245.28-electron.0","zlib":"1.3.2.1-motley","zstd":"1.6.0","electron":"43.4.1","chrome":"150.0.7871.224"},"platform":"darwin","arch":"arm64","caveats":["Synthetic narrow tag fixture, three local warm samples, not p95/customer Windows/HDD/full renderer IPC.","Timing includes result equality assertions; timer sampling and fixed inter-sample delays affect gap statistics.","First worker read includes startup and cache miss; later invalidated samples include a committed video timestamp change that leaves the tag result unchanged.","Worker transport is built production entry/client; native SQLite termination is not a hard SQL interrupt."]}
+✔ measures actual built-worker reads and main event-loop responsiveness on a large catalog (3376.157083ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3513.850042

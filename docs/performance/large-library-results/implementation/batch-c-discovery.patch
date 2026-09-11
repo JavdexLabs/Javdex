@@ -1,0 +1,219 @@
+diff --git a/src/main/db/homeDiscoveryRepo.test.ts b/src/main/db/homeDiscoveryRepo.test.ts
+index 7d76db6..a595abb 100644
+--- a/src/main/db/homeDiscoveryRepo.test.ts
++++ b/src/main/db/homeDiscoveryRepo.test.ts
+@@ -535,6 +535,60 @@ describe('home discovery repo', () => {
+     }
+   })
+ 
++  it('matches global ranking across cursor wrap, equal keys and hidden shared memberships', () => {
++    const database = createFixture()
++    try {
++      seedLargeSharedCatalog(database, 180)
++      database.exec(`
++        UPDATE library_video_memberships SET discovery_key = 100 WHERE video_id % 3 = 0;
++        UPDATE library_video_memberships SET discovery_key = 50 WHERE library_id = 2 AND video_id % 5 = 0;
++        UPDATE library_video_memberships SET is_hidden = 1 WHERE library_id = 1 AND video_id % 7 = 0;
++        DELETE FROM video_resources WHERE library_id = 2 AND video_id % 11 = 0;
++      `)
++      // Exercise compound-query chunking and canonical selection across chunk boundaries.
++      database.transaction(() => {
++        for (let id = 3; id <= 70; id++) {
++          database.prepare('INSERT INTO media_libraries (id, name) VALUES (?, ?)').run(id, `Library ${id}`)
++          database.prepare('INSERT INTO media_library_configs (library_id) VALUES (?)').run(id)
++          database.prepare('INSERT INTO library_video_memberships (library_id, video_id, discovery_key) VALUES (?, 201, ?)').run(id, 71 - id)
++          database.prepare(`INSERT INTO video_resources (library_id, video_id, kind, locator, resource_key)
++            VALUES (?, 201, 'web', 'https://example.test/shared', 'web:shared')`).run(id)
++        }
++      })()
++      const repo = createHomeDiscoveryRepo({ database, listLibraries: () => [] })
++      for (const selected of [[1], [2], [1, 2], Array.from({ length: 70 }, (_, id) => id + 1)]) {
++        const ranked = database.prepare(`
++          SELECT video_id, library_id, discovery_key FROM (
++            SELECT membership.video_id, membership.library_id, membership.discovery_key,
++              ROW_NUMBER() OVER (PARTITION BY membership.video_id
++                ORDER BY membership.discovery_key, membership.library_id) AS rank
++            FROM library_video_memberships membership
++            JOIN media_libraries library ON library.id = membership.library_id
++            JOIN media_library_configs config ON config.library_id = library.id
++            WHERE membership.library_id IN (${selected.join(',')})
++              AND membership.is_hidden = 0 AND library.status = 'active'
++              AND config.include_in_home_discovery = 1
++              AND EXISTS (SELECT 1 FROM video_resources r
++                WHERE r.video_id = membership.video_id AND r.library_id = membership.library_id)
++          ) WHERE rank = 1 ORDER BY discovery_key, video_id
++        `).all() as Array<{ video_id: number; library_id: number; discovery_key: number }>
++        for (let index = 0; index < 20; index++) {
++          const seed = `ranking-parity-${index}`
++          const cursor = discoveryCursorForSeed(seed)
++          const expected = [...ranked.filter(row => row.discovery_key >= cursor),
++            ...ranked.filter(row => row.discovery_key < cursor)].slice(0, 16)
++          assert.deepEqual(
++            repo.load({ seed, libraryIds: selected, discoveryLimit: 16 }).discovery
++              .map(video => [video.id, video.preferredLibraryId]),
++            expected.map(row => [row.video_id, row.library_id])
++          )
++        }
++      }
++    } finally {
++      database.close()
++    }
++  })
++
+   it('keeps large recent and discovery loads bounded and index-backed', () => {
+     const trace: string[] = []
+     const database = createFixture((sql) => trace.push(sql))
+@@ -556,7 +610,7 @@ describe('home discovery repo', () => {
+ 
+       const recent = statements.find(
+         (statement) =>
+-          statement.includes('SELECT DISTINCT v.*') &&
++          statement.includes('WITH page AS MATERIALIZED') &&
+           statement.includes('scope_m.membership_added_at DESC')
+       )
+       const discovery = statements.find((statement) => statement.startsWith('WITH candidate AS'))
+@@ -608,8 +662,8 @@ describe('home discovery repo', () => {
+       assert.equal(second.items.length, 100)
+       const combinedIds = [...first.items, ...second.items].map((video) => video.id)
+       assert.equal(new Set(combinedIds).size, 200)
+-      assert.equal(firstStatements.length, 2)
+-      assert.equal(selectStatements(trace).length, 2)
++      assert.equal(firstStatements.length, 3)
++      assert.equal(selectStatements(trace).length, 3)
+       assert.equal(
+         [...firstStatements, ...selectStatements(trace)].some((statement) =>
+           /ORDER\s+BY\s+RANDOM\s*\(/i.test(statement)
+@@ -618,7 +672,7 @@ describe('home discovery repo', () => {
+       )
+ 
+       const pageStatement = firstStatements.find((statement) =>
+-        statement.includes('SELECT DISTINCT v.*')
++        statement.includes('WITH page AS MATERIALIZED')
+       )
+       assert.ok(pageStatement)
+       const plan = explainPlan(database, pageStatement).join('\n')
+diff --git a/src/main/db/homeDiscoveryRepo.ts b/src/main/db/homeDiscoveryRepo.ts
+index 3ec4714..28b4298 100644
+--- a/src/main/db/homeDiscoveryRepo.ts
++++ b/src/main/db/homeDiscoveryRepo.ts
+@@ -203,58 +203,57 @@ function discoveryVideoSelections(
+ ): DiscoveryVideoSelection[] {
+   if (libraryIds.length === 0 || limit <= 0) return []
+   const ids = libraryIds.join(',')
++  const eligibleResource = (member: string): string => `EXISTS (
++    SELECT 1 FROM video_resources resource
++    LEFT JOIN media_library_roots resource_root
++      ON resource_root.id = resource.root_id
++     AND resource_root.library_id = resource.library_id
++    WHERE resource.library_id = ${member}.library_id
++      AND resource.video_id = ${member}.video_id
++      AND ((resource.root_id IS NULL AND resource.source_identity IS NULL)
++        OR (resource.root_id IS NOT NULL AND resource.source_identity IS NOT NULL
++          AND resource_root.state = 'active'))
++  )`
+   const selectRange = (
+     operator: '>=' | '<',
+     rangeLimit: number
+-  ): DiscoveryVideoSelection[] =>
+-    (
+-      database
+-        .prepare(
+-          `WITH candidate AS (
+-             SELECT membership.video_id,
+-                    membership.library_id,
+-                    membership.discovery_key,
+-                    ROW_NUMBER() OVER (
+-                      PARTITION BY membership.video_id
+-                      ORDER BY membership.discovery_key ASC, membership.library_id ASC
+-                    ) AS source_rank
+-             FROM library_video_memberships membership
+-             WHERE membership.library_id IN (${ids})
+-               AND membership.is_hidden = 0
+-               AND EXISTS (
+-                 SELECT 1
+-                 FROM video_resources resource
+-                 LEFT JOIN media_library_roots resource_root
+-                   ON resource_root.id = resource.root_id
+-                  AND resource_root.library_id = resource.library_id
+-                 WHERE resource.library_id = membership.library_id
+-                   AND resource.video_id = membership.video_id
+-                   AND (
+-                     (resource.root_id IS NULL AND resource.source_identity IS NULL)
+-                     OR (
+-                       resource.root_id IS NOT NULL
+-                       AND resource.source_identity IS NOT NULL
+-                       AND resource_root.state = 'active'
+-                     )
+-                   )
+-               )
+-           )
+-           SELECT video_id, library_id, discovery_key
+-           FROM candidate
+-           WHERE source_rank = 1 AND discovery_key ${operator} ?
+-           ORDER BY discovery_key ASC, video_id ASC
+-           LIMIT ?`
+-        )
+-        .all(cursor, rangeLimit) as Array<{
+-        video_id: number
+-        library_id: number
+-        discovery_key: number
+-      }>
+-    ).map((row) => ({
+-      videoId: row.video_id,
+-      libraryId: row.library_id,
+-      discoveryKey: row.discovery_key
+-    }))
++  ): DiscoveryVideoSelection[] => {
++    const result: DiscoveryVideoSelection[] = []
++    // Each video has one canonical eligible membership. The global first N therefore
++    // belongs to the union of each library's first N; no full-catalog ranking is needed.
++    // Bound compound SELECT size independently of the number of configured libraries.
++    for (let offset = 0; offset < libraryIds.length; offset += 64) {
++      const branches = libraryIds.slice(offset, offset + 64).map(libraryId => `
++        SELECT * FROM (
++          SELECT membership.video_id, membership.library_id, membership.discovery_key
++          FROM library_video_memberships membership
++          WHERE membership.library_id = ${libraryId} AND membership.is_hidden = 0
++            AND membership.discovery_key ${operator} ${cursor}
++            AND ${eligibleResource('membership')}
++            ${libraryIds.length === 1 ? '' : `AND NOT EXISTS (
++              SELECT 1 FROM library_video_memberships better
++              WHERE better.video_id = membership.video_id
++                AND better.library_id IN (${ids}) AND better.is_hidden = 0
++                AND (better.discovery_key < membership.discovery_key
++                  OR (better.discovery_key = membership.discovery_key
++                    AND better.library_id < membership.library_id))
++                AND ${eligibleResource('better')}
++            )`}
++          ORDER BY membership.discovery_key ASC, membership.video_id ASC
++          LIMIT ${rangeLimit}
++        )`)
++      const rows = database.prepare(`WITH candidate AS (${branches.join(' UNION ALL ')})
++        SELECT video_id, library_id, discovery_key FROM candidate
++        ORDER BY discovery_key ASC, video_id ASC LIMIT ?`
++      ).all(rangeLimit) as Array<{ video_id: number; library_id: number; discovery_key: number }>
++      for (const row of rows) result.push({
++        videoId: row.video_id, libraryId: row.library_id, discoveryKey: row.discovery_key
++      })
++      result.sort((left, right) => left.discoveryKey - right.discoveryKey || left.videoId - right.videoId)
++      if (result.length > rangeLimit) result.length = rangeLimit
++    }
++    return result
++  }
+ 
+   const first = selectRange('>=', limit)
+   if (first.length >= limit) return first
+@@ -281,11 +280,11 @@ export function createHomeDiscoveryRepo(
+       }
+ 
+       const scope = { kind: 'all' as const, libraryIds: eligibleLibraryIds }
+-      const recent = catalog.list(scope, {
++      const recent = catalog.listPage(scope, {
+         sortBy: 'add_time',
+         sortDir: 'desc',
+         limit: normalizedLimit(input.recentLimit, 12)
+-      }).items
++      })
+       const candidates = discoveryVideoSelections(
+         database,
+         eligibleLibraryIds,

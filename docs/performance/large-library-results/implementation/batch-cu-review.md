@@ -1,0 +1,13 @@
+# CU 清理审计复核
+
+scanCoordinator增加可选同步recordCleanupAudit，普通缺失资源删除、清理引起的主资源提升、无资源membership移除都在原清理事务内记录；同连接writer才具有事务原子性。计数和legacy审计数组在外层成功提交后才改变。启用sink时强制确认删除/提升实际生效，无法生成必需影片快照则失败。
+
+延迟目录清理新增beforeCommit回调，保留原API调用方式。复用已有resources/plans，回调启用时保留每影片code/title/提升资源快照，逐项生成审计而不另建全量audit DTO数组；影片查询只prepare一次。实际删除/提升计数不等于计划则回滚，防止计划冒充事实。removed_library_path与promoted_after_removal使用正确reason，外部URL不写入sourcePath。
+
+正式legacy协调器现在也接收延迟清理事件，补齐过去只有计数而没有逐项审计的缺口；这些条目仍由旧JSON路径保存。新writer回调默认未启用，生命周期与封存发布接入继续后续推进。
+
+新增12测试：服务4项覆盖真实第二条审计INSERT故障全回滚/重试、resolved/rejected回调拒绝、IGNORE删除导致计划/实际不一致；协调器8项覆盖三类真实业务清理+native审计故障/重试、两类异步回调拒绝、延迟事件外层事务失败不污染数组及两类IGNORE写入回滚。独立reader可见性、全业务表与审计行、失败summary零计数均有断言。延迟路径协调器拼接使用注入事件，真实延迟业务另由服务测试证明；不等同已验证整条生产新格式发布链。
+
+最终95项联合测试通过；生产静态复核的普通清理实际写入确认问题已修正，新IGNORE测试已通过。无资源影片审计实际描述当前库membership移除，不是删除全局video。cleanup中原有全量资源枚举/分组、legacy数组、同步文件检查和长事务仍存在；没有新的吞吐/RSS/Windows验收证据，完整15/42不完成。
+
+最终npm test退出0：2624通过/1跳过/0失败（2625项）；npm run build退出0。schema18及冲突controller测试+27/-0未改变。无用户数据访问、提交、推送或发布。

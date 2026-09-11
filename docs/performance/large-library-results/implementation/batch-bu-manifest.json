@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bu-build.log": "f405accc94b224c9966fc90d2f2ff9f976198a5071cf6f59a11a2a5628494f7a",
+    "batch-bu-full.log": "701350f667a5e2dc1f0436c4ef7caf440f8e2b56c5010ff5604e4378a4ce1675",
+    "batch-bu-red.log": "02a217e3ffa3aa19ec6aec75ffc6b46d4f67ee0c4f855424152128afe979ac4d",
+    "batch-bu-review.md": "104cebaeae8f8d098ae7b0010b3b12c92bcff00f6d15795b1345d2205c0b1d66",
+    "batch-bu-sibling-query.patch": "93b1a36f318a20b0c6974e4bd996313c877b11814284595b745737640eddc4b3",
+    "batch-bu-target.log": "99a16b181274f4309dcf473e98ba5c2fc56ede87b3d0016e2ab44d775a1b8adb"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "Red test reproduced unused sibling query; 28 focused passed after fix.",
+    "Full2366pass1skip0fail; build terminal0.",
+    "No new throughput or memory benchmark. Full15/42goal remains incomplete."
+  ]
+}

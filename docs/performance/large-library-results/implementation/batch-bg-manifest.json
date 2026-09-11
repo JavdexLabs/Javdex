@@ -1,0 +1,21 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bg-target.log": "164e4670eb07e6c667cabae30580c58f07086acfe62bc7a47f322a592a8fb0f8",
+    "batch-bg-full.log": "9d6151add4989fb7be11e0b88e949341f735d2601d887b3c64800b16b63f5b0e",
+    "batch-bg-build.log": "8c0fa4863601d194b8383a0ed8f04980a43a0dee198286c01a303e78b4a3d09b",
+    "batch-bg-layout-red.log": "0cddfc7da308017e3594fa63e243bbc53681ba5ffd4faf82469d1bf42022e76f",
+    "batch-bg-ui-1000x640.png": "168a0b1c576bf7e75804bed0cc1194dca75b4f75b1a778776f409ac6857a0bde",
+    "batch-bg-ui-results.json": "3504ed3743cd95118be0e1b4821ac8353a2415fa9d366c2194a8a90a2275deae",
+    "batch-bg-ui-1440x900.png": "2dac823dfc6c744848634c31b2dc5af85ba95700de8131a264804f91d2fd95ba",
+    "batch-bg-ui-1000x640-error.png": "1bc234eefd8526758b449f05ffb8e738b8d21f850cc4066979728cbf74ecd0c2",
+    "batch-bg-ui-1440x900-error.png": "fd98de08eca23b11b22bf77099e2074875722177f882ed2102fca8125c70bec5",
+    "batch-bg-plugin-target-ui.patch": "853e14466c41512d2a3540a007d17f02bf27643aeb5b33522cc80c5bc16aa8b8",
+    "batch-bg-review.md": "cc5913b7b07b1f87ccb59559cdab746f028a9b04a5d649bf39f44c6ee88db2f5"
+  },
+  "notes": [
+    "Selected cumulative diff vs HEAD plus new files; depends on earlier batches, including BF backend.",
+    "9 focused; full2296pass1skip0fail; final browser and build passed.",
+    "Full15/42scope remains active."
+  ]
+}

@@ -1,0 +1,3539 @@
+diff --git a/src/main/scanner/scanner.ts b/src/main/scanner/scanner.ts
+index 79920b9..e0c838d 100644
+--- a/src/main/scanner/scanner.ts
++++ b/src/main/scanner/scanner.ts
+@@ -1,3 +1,6 @@
++import { createScanNfoWorkset, createMemoryScanNfoWorkset, ScanNfoWorksetError, type ScanNfoWorkset } from './scanNfoWorkset'
++import { createScanCodeCounts, createMemoryScanCodeCounts, ScanCodeCountsError, type ScanCodeCounts } from './scanCodeCounts'
++import { createScanFileSpool, createMemoryScanFileInventory } from './scanFileInventory'
+ import fs from 'node:fs'
+ import path from 'node:path'
+ import { isVideoFile, parseCode } from './codeParser'
+@@ -31,9 +34,11 @@ import type {
+   RenameImportResult,
+   ScanProgress,
+   ScanResult,
++  ScanCompletionResult,
++  ScanExecutionResult,
+   StrmScanFailure
+ } from '@shared/libraryTypes'
+-import type { ScannedVideoInput, StrmVideoResourceRef } from '../db/videoRepo'
++import type { ScannedVideoInput } from '../db/videoRepo'
+ import type {
+   LocalVideoResource,
+   VideoResource,
+@@ -59,7 +64,8 @@ import {
+   readStrmFile,
+   type ParsedStrmTarget
+ } from './strmParser'
+-import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
++import { getDb, getDatabaseReadRevision } from '../db/database'
++import { StrmRelocationIndex } from './strmRelocationIndex'
+ import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+ import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+ import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
+@@ -74,41 +80,44 @@ import {
+ } from '../db/pendingResourceIdentityRepo'
+ import {
+   localNfoScanService,
+-  type LocalNfoScanService
++  type LocalNfoScanService,
++  type LocalNfoScanApplyResult
+ } from '../services/localNfoScanService'
+ import type {
+   LocalNfoAnchor,
+   LocalNfoIdentityInspection
+ } from '../metadata-sources'
++import { appendDirectoryVideoCode, summarizeDirectoryVideoCodes } from '../nfo/directoryVideoIdentity'
+ import { indexNfoSidecars } from '../nfo/nfoSidecarLocator'
+ import { getMediaLibraryConfig } from '../db/mediaLibraryRepo'
+ 
+ export type ScanProgressFn = (progress: ScanProgress) => void
+ 
+ /** Rescanning refreshes file evidence without choosing either pending identity. */
+-function refreshPendingIdentity(
++function preparePendingIdentityRefresh(
+   libraryId: number,
+   root: Readonly<MediaLibraryRoot>,
+   filePath: string,
+   target?: ParsedStrmTarget
+-): boolean {
++): (() => void) | null {
+   const pending = getPendingResourceIdentityByPath(libraryId, filePath)
+-  if (!pending) return false
++  if (!pending) return null
+   authorizeMediaLibraryRootFile(libraryId, root.id, filePath, root)
+   const fingerprint = statFileFingerprint(filePath)
+   if (!fingerprint) throw new Error('待确认资源无法读取，保留原身份待办。')
+-  if (pending.sizeBytes !== fingerprint.file_size ||
+-    pending.fileMtimeMs !== fingerprint.file_mtime_ms ||
+-    (target && (pending.targetKind !== target.kind || pending.targetLocator !== target.locator ||
+-      pending.targetKey !== target.targetKey))) {
+-    upsertPendingResourceIdentity({
+-      ...pending,
+-      sizeBytes: fingerprint.file_size,
+-      fileMtimeMs: fingerprint.file_mtime_ms,
+-      ...(target ? { targetKind: target.kind, targetLocator: target.locator, targetKey: target.targetKey } : {})
+-    })
++  return () => {
++    if (pending.sizeBytes !== fingerprint.file_size ||
++      pending.fileMtimeMs !== fingerprint.file_mtime_ms ||
++      (target && (pending.targetKind !== target.kind || pending.targetLocator !== target.locator ||
++        pending.targetKey !== target.targetKey))) {
++      upsertPendingResourceIdentity({
++        ...pending,
++        sizeBytes: fingerprint.file_size,
++        fileMtimeMs: fingerprint.file_mtime_ms,
++        ...(target ? { targetKind: target.kind, targetLocator: target.locator, targetKey: target.targetKey } : {})
++      })
++    }
+   }
+-  return true
+ }
+ 
+ type ScanFileAuditWithoutRoot = LibraryScanFileAuditEntry extends infer Entry
+@@ -126,7 +135,16 @@ export interface ScanFoldersRequest {
+   filePaths?: readonly string[]
+ }
+ 
++/** Caller-owned synchronous audit persistence. Must not mutate video_resources or hold a transaction across scan awaits. */
++export interface ScanAuditSink {
++  recordFile(entry: LibraryScanFileAuditEntry): void
++  readFileNfo(filePath: string): { nfo?: LibraryScanNfoAudit } | undefined
++  patchNfo(filePath: string, nfo: LibraryScanNfoAudit): boolean
++}
++
+ export interface ScanOptions {
++  /** Summary requires a durable audit sink and omits per-file result arrays. */
++  resultMode?: 'detailed' | 'summary'
+   yieldEvery?: number
+   signal?: AbortSignal
+   /** Override duration probe (tests). Defaults to reading container metadata. */
+@@ -147,23 +165,22 @@ export interface ScanOptions {
+   localNfoService?: LocalNfoScanService
+   /** Receives exactly one final audit outcome for every processed file. */
+   onFileResult?: (entry: LibraryScanFileAuditEntry) => void
++  /** Incremental storage instead of the legacy in-memory final callback collection. */
++  auditSink?: ScanAuditSink
+ }
+ 
+-const DEFAULT_YIELD_EVERY = 50
+-
+-interface LocalNfoPreflight {
+-  anchor: LocalNfoAnchor
+-  filenameCode: string | null
+-  nfoCode: string | null
+-  effectiveCode: string | null
+-  identityConflict: boolean
+-  inspection: LocalNfoIdentityInspection
++function synchronousAuditResult<T>(value: T): T {
++  if (value != null && (typeof value === 'object' || typeof value === 'function')
++    && typeof (value as { then?: unknown }).then === 'function') {
++    // A caller may accidentally pass an async function to a void callback.
++    // Observe rejection, but never pretend an in-flight write has completed.
++    void Promise.resolve(value).catch(() => {})
++    throw new Error('Audit sink methods must be synchronous')
++  }
++  return value
+ }
+ 
+-interface LocalNfoVideoBatch {
+-  code: string
+-  anchors: LocalNfoAnchor[]
+-}
++const DEFAULT_YIELD_EVERY = 50
+ 
+ function safeNfoWarnings(warnings: readonly string[]): NonNullable<LibraryScanNfoAudit['warnings']> {
+   const seen = new Set<string>()
+@@ -200,7 +217,7 @@ async function maybeYield(count: number, yieldEvery: number): Promise<void> {
+ /** Recursively collect local video and STRM source paths under a directory. */
+ async function collectScannableFiles(
+   dir: string,
+-  acc: string[],
++  append: (filePath: string) => boolean,
+   signal: AbortSignal | undefined,
+   readDirectory: (dir: string) => Promise<fs.Dirent[]>
+ ): Promise<void> {
+@@ -209,22 +226,23 @@ async function collectScannableFiles(
+   try {
+     entries = await readDirectory(dir)
+   } catch (error) {
+-    throw new Error(`无法读取媒体目录 ${dir}：${(error as Error).message}`)
++    throw new Error(`无法读取媒体目录 ${dir}：${(error as Error).message}`, { cause: error })
+   }
+   for (const entry of entries) {
+     if (signal?.aborted) return
+     const full = path.join(dir, entry.name)
+     if (entry.isDirectory()) {
+-      await collectScannableFiles(full, acc, signal, readDirectory)
++      await collectScannableFiles(full, append, signal, readDirectory)
+     } else if (entry.isFile() && (isVideoFile(full) || isStrmFile(full))) {
+-      acc.push(full)
++      if (append(full)) await yieldToEventLoop()
+     } else if (entry.isSymbolicLink() && (isVideoFile(full) || isStrmFile(full))) {
++      let isFile = false
+       try {
+-        const target = await fs.promises.stat(full)
+-        if (target.isFile()) acc.push(full)
++        isFile = (await fs.promises.stat(full)).isFile()
+       } catch {
+-        // Broken or inaccessible symbolic link — skip.
++        // Broken or inaccessible symbolic link — skip only the filesystem failure.
+       }
++      if (isFile && append(full)) await yieldToEventLoop()
+     }
+   }
+ }
+@@ -250,34 +268,6 @@ function readStrmTarget(sourcePath: string): PreparedStrm {
+   }
+ }
+ 
+-function targetKeyForStrmResource(resource: StrmVideoResourceRef): string | null {
+-  try {
+-    return normalizeExternalVideoResource(resource.locator, resource.kind).resourceKey
+-  } catch {
+-    return null
+-  }
+-}
+-
+-function findStrmRelocationCandidate(
+-  libraryId: number,
+-  sourcePath: string,
+-  targetKey: string,
+-  unavailableRootIds: ReadonlySet<number>,
+-  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+-): StrmVideoResourceRef | null {
+-  const sourceName = path.basename(sourcePath)
+-  const candidates = listStrmVideoResourceRefs(libraryId)
+-    .filter((resource) => {
+-      const oldSourcePath = resource.source_path
+-      if (path.basename(oldSourcePath) !== sourceName) return false
+-      const record = getVideoResourceInLibrary(libraryId, resource.resource_id)
+-      if (!record?.root_id || unavailableRootIds.has(record.root_id)) return false
+-      if (inspectPath(oldSourcePath) !== 'missing') return false
+-      return targetKeyForStrmResource(resource) === targetKey
+-    })
+-  return candidates.length === 1 ? candidates[0] : null
+-}
+-
+ function samePath(a: string, b: string): boolean {
+   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+ }
+@@ -368,47 +358,53 @@ function resolveRefreshTarget(libraryId: number, file: string): LocalVideoResour
+   return null
+ }
+ 
+-async function refreshScannedFileDuration(
++/** Probe first; the caller authorizes and commits the returned mutation with its audit. */
++async function prepareScannedFileRefresh(
+   libraryId: number,
+   file: string,
+   readDurationSeconds: DurationReader,
+   authorizeWrite: () => void
+-): Promise<boolean> {
++): Promise<(() => boolean) | null> {
+   const fingerprint = statFileFingerprint(file)
+-  if (!fingerprint) return false
+-
++  if (!fingerprint) return null
+   const record = resolveRefreshTarget(libraryId, file)
+-  if (!record) return false
+-
++  if (!record) return null
+   if (!shouldProbeLocalVideoResourceDuration(record, fingerprint)) {
+     if (record.file_mtime_ms == null) {
+-      authorizeWrite()
+-      backfillLocalVideoResourceFingerprint(record.id, {
+-        sizeBytes: fingerprint.file_size,
+-        fileMtimeMs: fingerprint.file_mtime_ms
+-      })
+-      return true
++      return () => {
++        backfillLocalVideoResourceFingerprint(record.id, {
++          sizeBytes: fingerprint.file_size,
++          fileMtimeMs: fingerprint.file_mtime_ms
++        })
++        return true
++      }
+     }
+-    return false
++    return null
+   }
+-
+   const fileDurationSeconds = await readDurationSeconds(file)
+-  authorizeWrite()
+-  if (fileDurationSeconds == null || fileDurationSeconds <= 0) return false
+-
+-  const nextDuration = shouldRefreshLocalVideoResourceDuration(
+-    record.duration_seconds,
+-    fileDurationSeconds
+-  )
+-    ? fileDurationSeconds
+-    : record.duration_seconds
++  if (fileDurationSeconds == null || fileDurationSeconds <= 0) {
++    // Preserve the old authorization check even when the probe has no usable result.
++    authorizeWrite()
++    return null
++  }
++  const nextDuration = shouldRefreshLocalVideoResourceDuration(record.duration_seconds, fileDurationSeconds)
++    ? fileDurationSeconds : record.duration_seconds
++  return () => {
++    updateLocalVideoResourceAfterProbe(record.id, {
++      durationSeconds: nextDuration,
++      sizeBytes: fingerprint.file_size,
++      fileMtimeMs: fingerprint.file_mtime_ms
++    })
++    return true
++  }
++}
+ 
+-  updateLocalVideoResourceAfterProbe(record.id, {
+-    durationSeconds: nextDuration,
+-    sizeBytes: fingerprint.file_size,
+-    fileMtimeMs: fingerprint.file_mtime_ms
+-  })
+-  return true
++/** Transfers the stopped scanner's result without copying its potentially large arrays. */
++export class ScanFoldersFailure extends Error {
++  constructor(readonly partialResult: ScanExecutionResult, cause: unknown) {
++    super(cause instanceof Error ? cause.message : String(cause), { cause })
++    this.name = 'ScanFoldersFailure'
++  }
+ }
+ 
+ /**
+@@ -416,15 +412,29 @@ async function refreshScannedFileDuration(
+  * Missing-resource reconciliation is owned by the scan coordinator so it can
+  * distinguish accessible folders from offline folders.
+  */
++export function scanFolders(
++  request: ScanFoldersRequest, onProgress: ScanProgressFn | undefined,
++  options: ScanOptions & { resultMode: 'summary' }
++): Promise<ScanCompletionResult>
++export function scanFolders(
++  request: ScanFoldersRequest, onProgress?: ScanProgressFn,
++  options?: ScanOptions & { resultMode?: 'detailed' }
++): Promise<ScanResult>
++export function scanFolders(
++  request: ScanFoldersRequest, onProgress?: ScanProgressFn, options?: ScanOptions
++): Promise<ScanExecutionResult>
+ export async function scanFolders(
+   request: ScanFoldersRequest,
+   onProgress?: ScanProgressFn,
+   options: ScanOptions = {}
+-): Promise<ScanResult> {
++): Promise<ScanExecutionResult> {
+   if (!Number.isSafeInteger(request.libraryId) || request.libraryId <= 0) {
+     throw new Error('媒体库 ID 无效')
+   }
+   if (!request.runId.trim()) throw new Error('扫描运行 ID 不能为空')
++  if (options.resultMode === 'summary' && !options.auditSink) throw new Error('Summary scan results require an audit sink')
++  if (options.auditSink && options.onFileResult) throw new Error('Audit sink and final callback are mutually exclusive')
++  const auditSink = options.auditSink
+   const roots = request.roots.map((root) => ({ ...root }))
+   if (
+     roots.some(
+@@ -443,8 +453,7 @@ export async function scanFolders(
+   for (const root of roots) {
+     authorizeMediaLibraryRoot(libraryId, root.id, root)
+   }
+-  const unavailableRootIds = new Set(options.unavailableRootIds ?? [])
+-  const result: ScanResult = {
++  const result: ScanExecutionResult = {
+     libraryId,
+     runId: request.runId,
+     scannedFiles: 0,
+@@ -460,32 +469,117 @@ export async function scanFolders(
+     promoted: 0,
+     deletedVideos: 0,
+     offlineFolders: [],
+-    newCodes: [],
+-    unrecognizedFiles: [],
++    ...(options.resultMode === 'summary' ? { unrecognizedCount: 0 } : { newCodes: [], unrecognizedFiles: [] }),
+     strmFailures: [],
+     omittedStrmFailures: 0
+   }
+ 
+-  const files: Array<{ filePath: string; root: Readonly<MediaLibraryRoot> }> = []
+-  const directorySidecars = new Map<string, ReadonlyMap<string, string>>()
+-  const directoryVideoCodes = new Map<string, Array<string | null>>()
++  const pendingGroupIds = new Set<number>()
++  try {
++    const inventory = options.resultMode === 'summary'
++      ? createScanFileSpool(getDb(), roots)
++      : createMemoryScanFileInventory(roots)
++    let failed = false
++    let failure: unknown
++    let completedResult = result
++    let codeCounts: ScanCodeCounts | undefined
++    let nfoWorkset: ScanNfoWorkset | undefined
++    try {
++      codeCounts = options.resultMode !== 'summary' ? createMemoryScanCodeCounts()
++        : options.autoMergeSameCodeResources ? undefined : createScanCodeCounts(getDb())
++      if (options.autoImportLocalNfo) {
++        nfoWorkset = options.resultMode === 'summary'
++          ? createScanNfoWorkset(getDb(), roots) : createMemoryScanNfoWorkset(roots)
++      }
++      completedResult = await scanPreparedFolders(request, onProgress, options, roots, result, pendingGroupIds, inventory, codeCounts, nfoWorkset)
++    } catch (error) {
++      failed = true
++      failure = error
++    } finally {
++      try { disposeScanPreparation([inventory, ...(codeCounts ? [codeCounts] : []), ...(nfoWorkset ? [nfoWorkset] : [])]) } catch (error) {
++        // Preserve the triggering scan failure; a cleanup-only failure is still fatal.
++        if (!failed) { failed = true; failure = error }
++      }
++    }
++    if (failed) throw failure
++    return completedResult
++  } catch (error) {
++    if (!auditSink) throw error
++    result.pendingGroups = pendingGroupIds.size
++    throw new ScanFoldersFailure(result, error)
++  }
++}
++
++/** Try every scratch cleanup even if another fails; retain the first cleanup error. */
++function disposeScanPreparation(resources: readonly { dispose(): void }[]): void {
++  let failed = false
++  let failure: unknown
++  for (const resource of resources) {
++    try { resource.dispose() } catch (error) {
++      if (!failed) { failed = true; failure = error }
++    }
++  }
++  if (failed) throw failure
++}
++
++async function scanPreparedFolders(
++  request: ScanFoldersRequest,
++  onProgress: ScanProgressFn | undefined,
++  options: ScanOptions,
++  roots: readonly Readonly<MediaLibraryRoot>[],
++  result: ScanExecutionResult,
++  pendingGroupIds: Set<number>,
++  files: ReturnType<typeof createMemoryScanFileInventory>,
++  newFileCounts: ScanCodeCounts | undefined,
++  nfoWorkset: ScanNfoWorkset | undefined
++): Promise<ScanExecutionResult> {
++  const libraryId = request.libraryId
++  const auditSink = options.auditSink
++  const autoImportLocalNfo = options.autoImportLocalNfo ?? false
++  const unavailableRootIds = new Set(options.unavailableRootIds ?? [])
+   const readDirectory =
+     options.readDirectory ??
+     ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
+   const inspectPath = options.inspectPath ?? inspectScannedResourcePath
++  const asStrmRef = (resource: VideoResource | null) =>
++    resource?.strm_source_path && resource.kind !== 'local'
++      ? {
++          library_id: resource.library_id,
++          video_id: resource.video_id,
++          resource_id: resource.id,
++          source_path: resource.strm_source_path,
++          kind: resource.kind,
++          locator: resource.locator,
++          root_id: resource.root_id
++        }
++      : null
++  const strmRelocations = new StrmRelocationIndex({
++    revision: getDatabaseReadRevision,
++    list: () => listStrmVideoResourceRefs(libraryId),
++    get: (id) => asStrmRef(getVideoResourceInLibrary(libraryId, id)),
++    getByPath: (sourcePath) => asStrmRef(strmResourceInLibrary(libraryId, sourcePath)),
++    inspect: inspectPath,
++    unavailableRootIds
++  })
+   for (const root of roots) {
+     if (options.signal?.aborted) {
+       result.cancelled = true
+       return result
+     }
+-    const rootFiles: string[] = []
++    const appendFile = (filePath: string): boolean => files.append(filePath, root.id)
+     const readIndexedDirectory = async (directory: string): Promise<fs.Dirent[]> => {
+       const entries = await readDirectory(directory)
+-      directorySidecars.set(directory, indexNfoSidecars(entries.map((entry) => entry.name)))
+-      if (request.filePaths) {
+-        directoryVideoCodes.set(directory, entries
+-          .filter((entry) => entry.isFile() && (isVideoFile(entry.name) || isStrmFile(entry.name)))
+-          .map((entry) => parseCode(path.basename(entry.name, path.extname(entry.name)))))
++      if (autoImportLocalNfo) {
++        nfoWorkset!.setSidecars(directory, indexNfoSidecars(entries.map((entry) => entry.name)))
++        if (request.filePaths) {
++          nfoWorkset!.setDirectoryIdentity(directory, summarizeDirectoryVideoCodes((function* () {
++            for (const entry of entries) {
++              if (entry.isFile() && (isVideoFile(entry.name) || isStrmFile(entry.name))) {
++                yield parseCode(path.basename(entry.name, path.extname(entry.name)))
++              }
++            }
++          })()))
++        }
+       }
+       return entries
+     }
+@@ -494,33 +588,44 @@ export async function scanFolders(
+       if (roots.length !== 1) throw new Error('单文件重新识别必须指定唯一根目录')
+       for (const filePath of request.filePaths) {
+         authorizeMediaLibraryRootFile(libraryId, root.id, filePath, root)
+-        rootFiles.push(filePath)
++        if (appendFile(filePath)) await yieldToEventLoop()
++        if (options.signal?.aborted) break
+         const directory = path.dirname(filePath)
+-        if (!directorySidecars.has(directory)) await readIndexedDirectory(directory)
++        if (autoImportLocalNfo && !nfoWorkset!.hasSidecars(directory)) await readIndexedDirectory(directory)
+       }
+     } else {
+-      await collectScannableFiles(root.path, rootFiles, options.signal, readIndexedDirectory)
++      await collectScannableFiles(root.path, appendFile, options.signal, readIndexedDirectory)
+     }
+-    files.push(...rootFiles.map((filePath) => ({ filePath, root })))
+   }
++  if (options.signal?.aborted) {
++    result.cancelled = true
++    return result
++  }
++  files.seal()
+   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
+   const readDurationSeconds = options.readDurationSeconds ?? readLocalVideoDurationSeconds
+   const minImportDurationSeconds =
+     options.minImportDurationSeconds !== undefined ? options.minImportDurationSeconds : null
+   const autoMergeSameCodeResources = options.autoMergeSameCodeResources ?? false
+-  const autoImportLocalNfo = options.autoImportLocalNfo ?? false
+   const nfoService = options.localNfoService ?? localNfoScanService
++  let indexedFiles = 0
+   for (const { filePath } of files) {
+-    if (request.filePaths) break
++    if (!autoImportLocalNfo || request.filePaths) break
++    await maybeYield(++indexedFiles, yieldEvery)
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      return result
++    }
+     const directory = path.dirname(filePath)
+-    const codes = directoryVideoCodes.get(directory) ?? []
+-    codes.push(parseCode(path.basename(filePath, path.extname(filePath))))
+-    directoryVideoCodes.set(directory, codes)
++    nfoWorkset!.setDirectoryIdentity(directory, appendDirectoryVideoCode(
++      nfoWorkset!.getDirectoryIdentity(directory), parseCode(path.basename(filePath, path.extname(filePath)))
++    ))
+   }
+-  const nfoPreflightByFile = new Map<string, LocalNfoPreflight>()
++  nfoWorkset?.sealDirectories()
+   if (autoImportLocalNfo) {
+     let inspectedNfoFiles = 0
+     for (const { filePath, root } of files) {
++      await maybeYield(++inspectedNfoFiles, Math.min(yieldEvery, 10))
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+@@ -537,20 +642,20 @@ export async function scanFolders(
+       const anchor: LocalNfoAnchor = {
+         root,
+         anchorPath: filePath,
+-        directoryVideoCodes: directoryVideoCodes.get(path.dirname(filePath)) ?? [],
+-        directorySidecars: directorySidecars.get(path.dirname(filePath))
++        directoryVideoCodes: nfoWorkset!.getDirectoryIdentity(path.dirname(filePath)) ?? summarizeDirectoryVideoCodes([]),
++        directorySidecars: nfoWorkset!.getSidecars(path.dirname(filePath))
+       }
+       let inspection: LocalNfoIdentityInspection
+       try {
+         inspection = nfoService.inspectIdentity(anchor)
+       } catch (error) {
++        if (error instanceof ScanNfoWorksetError) throw error
+         inspection = {
+           status: 'warning',
+           code: null,
+           warnings: [sanitizeLibraryScanError(error)]
+         }
+       }
+-      inspectedNfoFiles += 1
+       if (inspection.status !== 'missing') {
+         let nfoCode: string | null = null
+         try {
+@@ -565,7 +670,7 @@ export async function scanFolders(
+         const identityConflict = Boolean(
+           filenameCode && nfoCode && normalizeVideoCode(filenameCode) !== nfoCode
+         )
+-        nfoPreflightByFile.set(filePath, {
++        nfoWorkset!.setPreflight(filePath, {
+           anchor,
+           filenameCode,
+           nfoCode,
+@@ -574,63 +679,76 @@ export async function scanFolders(
+           inspection
+         })
+       }
+-      await maybeYield(inspectedNfoFiles, Math.min(yieldEvery, 10))
+     }
+   }
++  nfoWorkset?.sealPreflights()
+   const codeForNewFile = (filePath: string): string | null => {
+-    const preflight = nfoPreflightByFile.get(filePath)
++    const preflight = nfoWorkset?.getEffectiveCode(filePath)
+     return preflight ? preflight.effectiveCode : parseCode(path.basename(filePath, path.extname(filePath)))
+   }
+-  const newFileCounts = new Map<string, number>()
+-  for (const { filePath: file } of files) {
+-    if (
+-      getLocalVideoResourceByLocator(libraryId, file) ||
+-      getStrmVideoResourceBySourcePath(libraryId, file) ||
+-      pendingScanResourceExists(libraryId, file) ||
+-      pendingResourceIdentityExists(libraryId, file)
+-    ) {
+-      continue
+-    }
+-    const code = codeForNewFile(file)
+-    if (!code) continue
+-    newFileCounts.set(code, (newFileCounts.get(code) ?? 0) + 1)
+-  }
+-  if (!autoMergeSameCodeResources) {
+-    let checkedStrmFiles = 0
++  if (newFileCounts) {
++    let countedFiles = 0
+     for (const { filePath: file } of files) {
++      await maybeYield(++countedFiles, yieldEvery)
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+       }
+-      if (!isStrmFile(file)) continue
+-      const code = codeForNewFile(file)
+-      if (!code || (newFileCounts.get(code) ?? 0) <= 1) continue
+       if (
+         getLocalVideoResourceByLocator(libraryId, file) ||
+         getStrmVideoResourceBySourcePath(libraryId, file) ||
+         pendingScanResourceExists(libraryId, file) ||
+-        pendingResourceIdentityExists(libraryId, file) ||
+-        listVideosByCode(code).length > 0
++        pendingResourceIdentityExists(libraryId, file)
+       ) {
+         continue
+       }
+-      checkedStrmFiles += 1
+-      if (!readStrmTarget(file).ok) {
+-        newFileCounts.set(code, Math.max(0, (newFileCounts.get(code) ?? 0) - 1))
++      const code = codeForNewFile(file)
++      if (!code) continue
++      if (newFileCounts.add(code)) {
++        await yieldToEventLoop()
++        if (options.signal?.aborted) { result.cancelled = true; return result }
+       }
+-      await maybeYield(checkedStrmFiles, Math.min(yieldEvery, 10))
+     }
++    newFileCounts.finishCounting()
++    if (!autoMergeSameCodeResources) {
++      let checkedStrmFiles = 0
++      for (const { filePath: file } of files) {
++        await maybeYield(++checkedStrmFiles, Math.min(yieldEvery, 10))
++        if (options.signal?.aborted) {
++          result.cancelled = true
++          return result
++        }
++        if (!isStrmFile(file)) continue
++        const code = codeForNewFile(file)
++        if (!code || newFileCounts.get(code) <= 1) continue
++        if (
++          getLocalVideoResourceByLocator(libraryId, file) ||
++          getStrmVideoResourceBySourcePath(libraryId, file) ||
++          pendingScanResourceExists(libraryId, file) ||
++          pendingResourceIdentityExists(libraryId, file) ||
++          listVideosByCode(code).length > 0
++        ) {
++          continue
++        }
++        if (!readStrmTarget(file).ok) {
++          newFileCounts.decrement(code)
++        }
++      }
++    }
++    newFileCounts.freeze()
++  } else {
++    // The default summary path needs no counts, but still admits cancellation before its first write.
++    await yieldToEventLoop()
++    if (options.signal?.aborted) { result.cancelled = true; return result }
+   }
+-  const pendingGroupIds = new Set<number>()
+   const primarySelectionVideoIds = new Set<number>()
+-  const auditEntriesByFile = new Map<string, LibraryScanFileAuditEntry>()
+-  const nfoBatchesByVideo = new Map<number, LocalNfoVideoBatch>()
++  const auditEntriesByFile = !auditSink && options.onFileResult ? new Map<string, LibraryScanFileAuditEntry>() : undefined
++  let auditWriteFailed = false
++  const queueNfoInsideCommit = options.resultMode === 'summary'
+   const queueNfoCandidate = (videoId: number, code: string, filePath: string): void => {
+-    const preflight = nfoPreflightByFile.get(filePath)
++    const preflight = nfoWorkset?.getPreflight(filePath)
+     if (!preflight || preflight.identityConflict || preflight.inspection.status !== 'found') return
+-    const batch = nfoBatchesByVideo.get(videoId)
+-    if (batch) batch.anchors.push(preflight.anchor)
+-    else nfoBatchesByVideo.set(videoId, { code, anchors: [preflight.anchor] })
++    strmRelocations.mutateWithoutResourceChanges(() => nfoWorkset!.enqueue(videoId, code, filePath))
+   }
+   const videoIdentity = (videoId: number): { videoId: number; videoCode: string } => ({
+     videoId,
+@@ -648,9 +766,12 @@ export async function scanFolders(
+     const authorizeFileWrite = (): void => {
+       authorizeMediaLibraryRootFile(libraryId, rootId, file, root)
+     }
++    // Only synchronous business + audit segments belong here, never probes/progress/yields.
++    const commitFileAudit = <T>(write: () => T): T => auditSink ? getDb().transaction(write)() : write()
+     const recordFile = (entry: ScanFileAuditWithoutRoot): void => {
++      if (!auditSink && !auditEntriesByFile) return
+       const fullEntry = { ...entry, rootId } as LibraryScanFileAuditEntry
+-      const preflight = nfoPreflightByFile.get(file)
++      const preflight = nfoWorkset?.getPreflight(file)
+       if (
+         preflight &&
+         !preflight.identityConflict &&
+@@ -661,7 +782,12 @@ export async function scanFolders(
+           warnings: safeNfoWarnings(preflight.inspection.warnings)
+         }
+       }
+-      auditEntriesByFile.set(file, fullEntry)
++      if (auditSink) {
++        try {
++          strmRelocations.mutateWithoutResourceChanges(() => synchronousAuditResult(auditSink.recordFile(fullEntry)))
++        }
++        catch (error) { auditWriteFailed = true; throw error }
++      } else auditEntriesByFile!.set(file, fullEntry)
+     }
+     if (options.signal?.aborted) {
+       result.cancelled = true
+@@ -679,15 +805,17 @@ export async function scanFolders(
+         }
+         if (!prepared.ok) {
+           authorizeFileWrite()
+-          removePendingScanResource(libraryId, file)
++          strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            removePendingScanResource(libraryId, file)
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'strm_failure',
++              failureCode: prepared.failure.code,
++              message: prepared.failure.message
++            })
++          }))
+           recordStrmFailure(prepared.failure)
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'strm_failure',
+-            failureCode: prepared.failure.code,
+-            message: prepared.failure.message
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+@@ -697,14 +825,12 @@ export async function scanFolders(
+         const existingResource = strmResourceInLibrary(libraryId, file)
+         if (existingResource) {
+           authorizeFileWrite()
+-          if (
+-            updateStrmVideoResourceTarget(existingResource.id, {
++          const refreshed = strmRelocations.mutate(file, () => commitFileAudit(() => {
++            const changed = updateStrmVideoResourceTarget(existingResource.id, {
+               kind: target.kind,
+               locator: target.locator
+             })
+-          ) {
+-            result.refreshed += 1
+-            recordFile({
++            recordFile(changed ? {
+               filePath: file,
+               sourceKind: 'strm',
+               outcome: 'updated',
+@@ -712,10 +838,7 @@ export async function scanFolders(
+               ...videoIdentity(existingResource.video_id),
+               resourceId: existingResource.id,
+               resourceKind: target.kind
+-            })
+-          } else {
+-            result.skipped += 1
+-            recordFile({
++            } : {
+               filePath: file,
+               sourceKind: 'strm',
+               outcome: 'skipped',
+@@ -724,132 +847,142 @@ export async function scanFolders(
+               resourceId: existingResource.id,
+               resourceKind: existingResource.kind
+             })
+-          }
++            return changed
++          }))
++          if (refreshed) result.refreshed += 1
++          else result.skipped += 1
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+ 
+         const code = codeForNewFile(file)
+-        if (refreshPendingIdentity(libraryId, root, file, target)) {
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: null,
+-            groupId: null,
+-            addedToQueue: false,
+-            nfo: { disposition: 'identity-conflict' }
+-          })
++        const refreshIdentity = preparePendingIdentityRefresh(libraryId, root, file, target)
++        if (refreshIdentity) {
++          strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            refreshIdentity()
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'pending',
++              normalizedCode: null,
++              groupId: null,
++              addedToQueue: false,
++              nfo: { disposition: 'identity-conflict' }
++            })
++          }))
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+-        const nfoPreflight = nfoPreflightByFile.get(file)
++        const nfoPreflight = nfoWorkset?.getPreflight(file)
+         if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++          const { filenameCode, nfoCode } = nfoPreflight
+           authorizeFileWrite()
+           const fingerprint = statFileFingerprint(file)
+-          const pendingIdentity = upsertPendingResourceIdentity({
+-            libraryId,
+-            rootId,
+-            filePath: file,
+-            sourceKind: 'strm',
+-            targetKind: target.kind,
+-            targetLocator: target.locator,
+-            targetKey: target.targetKey,
+-            filenameCode: nfoPreflight.filenameCode,
+-            nfoCode: nfoPreflight.nfoCode,
+-            sizeBytes: fingerprint?.file_size ?? null,
+-            fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-          })
++          strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            const pendingIdentity = upsertPendingResourceIdentity({
++              libraryId,
++              rootId,
++              filePath: file,
++              sourceKind: 'strm',
++              targetKind: target.kind,
++              targetLocator: target.locator,
++              targetKey: target.targetKey,
++              filenameCode,
++              nfoCode,
++              sizeBytes: fingerprint?.file_size ?? null,
++              fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++            })
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'pending',
++              normalizedCode: null,
++              groupId: null,
++              addedToQueue: true,
++              nfo: {
++                disposition: 'identity-conflict',
++                pendingIdentityId: pendingIdentity.id,
++                ...(nfoPreflight.inspection.warnings.length > 0
++                  ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
++                  : {})
++              }
++            })
++          }))
+           result.pendingResources += 1
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: null,
+-            groupId: null,
+-            addedToQueue: true,
+-            nfo: {
+-              disposition: 'identity-conflict',
+-              pendingIdentityId: pendingIdentity.id,
+-              ...(nfoPreflight.inspection.warnings.length > 0
+-                ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
+-                : {})
+-            }
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+         if (pendingScanResourceExists(libraryId, file)) {
+-          let groupId: number | null = null
+-          if (code) {
+-            authorizeFileWrite()
+-            const pending = upsertPendingScanResources(libraryId, code, [
+-              {
+-                rootId,
+-                filePath: file,
+-                sourceKind: 'strm',
+-                targetKind: target.kind,
+-                targetLocator: target.locator,
+-                targetKey: target.targetKey,
+-                sizeBytes: null,
+-                durationSeconds: null,
+-                fileMtimeMs: null,
+-                displayName: path.basename(file)
+-              }
+-            ])
+-            pendingGroupIds.add(pending.groupId)
+-            groupId = pending.groupId
+-          }
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: code ? normalizeVideoCode(code) : null,
+-            groupId,
+-            addedToQueue: false
+-          })
++          if (code) authorizeFileWrite()
++          const groupId = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            let groupId: number | null = null
++            if (code) {
++              const pending = upsertPendingScanResources(libraryId, code, [
++                {
++                  rootId,
++                  filePath: file,
++                  sourceKind: 'strm',
++                  targetKind: target.kind,
++                  targetLocator: target.locator,
++                  targetKey: target.targetKey,
++                  sizeBytes: null,
++                  durationSeconds: null,
++                  fileMtimeMs: null,
++                  displayName: path.basename(file)
++                }
++              ])
++              groupId = pending.groupId
++            }
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'pending',
++              normalizedCode: code ? normalizeVideoCode(code) : null,
++              groupId,
++              addedToQueue: false
++            })
++            return groupId
++          }))
++          if (groupId != null) pendingGroupIds.add(groupId)
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+ 
+-        const relocation = findStrmRelocationCandidate(
+-          libraryId,
+-          file,
+-          target.targetKey,
+-          unavailableRootIds,
+-          inspectPath
+-        )
++        const relocation = strmRelocations.find(file, target.targetKey)
+         if (relocation) {
+           authorizeFileWrite()
+-          relocateStrmVideoResource(libraryId, relocation.resource_id, {
+-            rootId,
+-            sourcePath: file,
+-            kind: target.kind,
+-            locator: target.locator
+-          })
++          strmRelocations.mutate(file, () => commitFileAudit(() => {
++            relocateStrmVideoResource(libraryId, relocation.resource_id, {
++              rootId,
++              sourcePath: file,
++              kind: target.kind,
++              locator: target.locator
++            })
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'updated',
++              updateKind: 'relocated',
++              ...videoIdentity(relocation.video_id),
++              resourceId: relocation.resource_id,
++              resourceKind: target.kind
++            })
++          }))
+           result.relocated += 1
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'updated',
+-            updateKind: 'relocated',
+-            ...videoIdentity(relocation.video_id),
+-            resourceId: relocation.resource_id,
+-            resourceKind: target.kind
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+ 
+         if (!code) {
+-          result.failed += 1
+-          result.unrecognizedFiles.push(file)
+           recordFile({ filePath: file, sourceKind: 'strm', outcome: 'unrecognized' })
++          result.failed += 1
++          if ('unrecognizedFiles' in result) result.unrecognizedFiles.push(file)
++          if ('unrecognizedCount' in result) result.unrecognizedCount++
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+@@ -859,33 +992,36 @@ export async function scanFolders(
+ 
+         const mustConfirm = autoMergeSameCodeResources
+           ? existingVideos.length > 1
+-          : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
++          : existingVideos.length > 0 || newFileCounts!.get(code) > 1
+         if (mustConfirm) {
+           authorizeFileWrite()
+-          const pending = upsertPendingScanResources(libraryId, code, [
+-            {
+-              rootId,
++          const pending = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            const pending = upsertPendingScanResources(libraryId, code, [
++              {
++                rootId,
++                filePath: file,
++                sourceKind: 'strm',
++                targetKind: target.kind,
++                targetLocator: target.locator,
++                targetKey: target.targetKey,
++                sizeBytes: null,
++                durationSeconds: null,
++                fileMtimeMs: null,
++                displayName: path.basename(file)
++              }
++            ])
++            recordFile({
+               filePath: file,
+               sourceKind: 'strm',
+-              targetKind: target.kind,
+-              targetLocator: target.locator,
+-              targetKey: target.targetKey,
+-              sizeBytes: null,
+-              durationSeconds: null,
+-              fileMtimeMs: null,
+-              displayName: path.basename(file)
+-            }
+-          ])
++              outcome: 'pending',
++              normalizedCode: normalizeVideoCode(code),
++              groupId: pending.groupId,
++              addedToQueue: pending.addedResources > 0
++            })
++            return pending
++          }))
+           pendingGroupIds.add(pending.groupId)
+           result.pendingResources += pending.addedResources
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: normalizeVideoCode(code),
+-            groupId: pending.groupId,
+-            addedToQueue: pending.addedResources > 0
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+@@ -895,78 +1031,87 @@ export async function scanFolders(
+           const needsPrimarySelection =
+             listVideoResources(libraryId, existingVideos[0].id).length === 0
+           authorizeFileWrite()
+-          const resourceId = insertStrmVideoResource({
+-            libraryId,
+-            videoId: existingVideos[0].id,
+-            rootId,
+-            sourcePath: file,
+-            kind: target.kind,
+-            locator: target.locator,
+-            displayName: path.basename(file)
+-          })
++          const resourceId = strmRelocations.mutate(file, () => commitFileAudit(() => {
++            const resourceId = insertStrmVideoResource({
++              libraryId,
++              videoId: existingVideos[0].id,
++              rootId,
++              sourcePath: file,
++              kind: target.kind,
++              locator: target.locator,
++              displayName: path.basename(file)
++            })
++            recordFile(
++              resourceId == null
++                ? {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'skipped',
++                    skipReason: 'duplicate'
++                  }
++                : {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'added',
++                    videoId: existingVideos[0].id,
++                    videoCode: existingVideos[0].code,
++                    resourceId,
++                    resourceKind: target.kind,
++                    createdVideo: false
++                  }
++            )
++            if (resourceId != null && queueNfoInsideCommit) queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
++            return resourceId
++          }))
+           if (resourceId == null) result.skipped += 1
+           else {
+             result.imported += 1
+             if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+-            queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
++            if (!queueNfoInsideCommit) queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
+           }
+-          recordFile(
+-            resourceId == null
+-              ? {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'skipped',
+-                  skipReason: 'duplicate'
+-                }
+-              : {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'added',
+-                  videoId: existingVideos[0].id,
+-                  videoCode: existingVideos[0].code,
+-                  resourceId,
+-                  resourceKind: target.kind,
+-                  createdVideo: false
+-                }
+-          )
+         } else {
+           authorizeFileWrite()
+-          const videoId = insertNewScannedStrmVideo({
+-            libraryId,
+-            rootId,
+-            code,
+-            sourcePath: file,
+-            kind: target.kind,
+-            locator: target.locator,
+-            displayName: path.basename(file)
+-          })
++          const videoId = strmRelocations.mutate(file, () => commitFileAudit(() => {
++            const videoId = insertNewScannedStrmVideo({
++              libraryId,
++              rootId,
++              code,
++              sourcePath: file,
++              kind: target.kind,
++              locator: target.locator,
++              displayName: path.basename(file)
++            })
++            const resource = videoId == null ? null : strmResourceInLibrary(libraryId, file)
++            if (auditSink && videoId != null && !resource) throw new Error('Imported STRM resource missing before audit commit')
++            recordFile(
++              videoId == null || !resource
++                ? {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'skipped',
++                    skipReason: 'duplicate'
++                  }
++                : {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'added',
++                    videoId,
++                    videoCode: code,
++                    resourceId: resource.id,
++                    resourceKind: resource.kind,
++                    createdVideo: true
++                  }
++            )
++            if (videoId != null && queueNfoInsideCommit) queueNfoCandidate(videoId, code, file)
++            return videoId
++          }))
+           if (videoId == null) result.skipped += 1
+           else {
+             result.imported += 1
+-            result.newCodes.push(code)
++            if ('newCodes' in result) result.newCodes.push(code)
+             primarySelectionVideoIds.add(videoId)
+-            queueNfoCandidate(videoId, code, file)
++            if (!queueNfoInsideCommit) queueNfoCandidate(videoId, code, file)
+           }
+-          const resource = videoId == null ? null : strmResourceInLibrary(libraryId, file)
+-          recordFile(
+-            videoId == null || !resource
+-              ? {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'skipped',
+-                  skipReason: 'duplicate'
+-                }
+-              : {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'added',
+-                  videoId,
+-                  videoCode: code,
+-                  resourceId: resource.id,
+-                  resourceKind: resource.kind,
+-                  createdVideo: true
+-                }
+-          )
+         }
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+@@ -976,17 +1121,13 @@ export async function scanFolders(
+       const registeredResource = getLocalVideoResourceByLocator(libraryId, file)
+       if (registeredResource) {
+         const existingResource = localResourceInLibrary(libraryId, file)
+-        const refreshed = existingResource
+-          ? await refreshScannedFileDuration(
+-              libraryId,
+-              file,
+-              readDurationSeconds,
+-              authorizeFileWrite
+-            )
+-          : false
+-        if (refreshed) {
+-          result.refreshed += 1
+-          if (existingResource) {
++        const refresh = existingResource
++          ? await prepareScannedFileRefresh(libraryId, file, readDurationSeconds, authorizeFileWrite)
++          : null
++        if (refresh) authorizeFileWrite()
++        const refreshed = commitFileAudit(() => {
++          const changed = refresh?.() ?? false
++          if (changed && existingResource) {
+             recordFile({
+               filePath: file,
+               sourceKind: 'local',
+@@ -996,38 +1137,44 @@ export async function scanFolders(
+               resourceId: existingResource.id,
+               resourceKind: 'local'
+             })
++          } else {
++            recordFile({
++              filePath: file,
++              sourceKind: 'local',
++              outcome: 'skipped',
++              skipReason: 'unchanged',
++              ...(existingResource
++                ? {
++                    ...videoIdentity(existingResource.video_id),
++                    resourceId: existingResource.id,
++                    resourceKind: 'local' as const
++                  }
++                : {})
++            })
+           }
+-        } else {
+-          result.skipped += 1
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'local',
+-            outcome: 'skipped',
+-            skipReason: 'unchanged',
+-            ...(existingResource
+-              ? {
+-                  ...videoIdentity(existingResource.video_id),
+-                  resourceId: existingResource.id,
+-                  resourceKind: 'local' as const
+-                }
+-              : {})
+-          })
+-        }
++          return changed
++        })
++        if (refreshed) result.refreshed += 1
++        else result.skipped += 1
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+       }
+ 
+-      if (refreshPendingIdentity(libraryId, root, file)) {
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: null,
+-          groupId: null,
+-          addedToQueue: false,
+-          nfo: { disposition: 'identity-conflict' }
+-        })
++      const refreshIdentity = preparePendingIdentityRefresh(libraryId, root, file)
++      if (refreshIdentity) {
++        strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          refreshIdentity()
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: null,
++            groupId: null,
++            addedToQueue: false,
++            nfo: { disposition: 'identity-conflict' }
++          })
++        }))
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1035,32 +1182,38 @@ export async function scanFolders(
+ 
+       if (pendingScanResourceExists(libraryId, file)) {
+         const code = parseCode(path.basename(file, path.extname(file)))
+-        let groupId: number | null = null
++        const fileDurationSeconds = code ? await readDurationSeconds(file) : null
++        let fingerprint: VideoFileFingerprint | null = null
+         if (code) {
+-          const fileDurationSeconds = await readDurationSeconds(file)
+           authorizeFileWrite()
+-          const fingerprint = statFileFingerprint(file)
+-          const pending = upsertPendingScanResources(libraryId, code, [
+-            {
+-              rootId,
+-              filePath: file,
+-              sizeBytes: fingerprint?.file_size ?? null,
+-              durationSeconds: fileDurationSeconds,
+-              fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+-              displayName: path.basename(file)
+-            }
+-          ])
+-          pendingGroupIds.add(pending.groupId)
+-          groupId = pending.groupId
++          fingerprint = statFileFingerprint(file)
+         }
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: code ? normalizeVideoCode(code) : null,
+-          groupId,
+-          addedToQueue: false
+-        })
++        const groupId = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          let groupId: number | null = null
++          if (code) {
++            const pending = upsertPendingScanResources(libraryId, code, [
++              {
++                rootId,
++                filePath: file,
++                sizeBytes: fingerprint?.file_size ?? null,
++                durationSeconds: fileDurationSeconds,
++                fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
++                displayName: path.basename(file)
++              }
++            ])
++            groupId = pending.groupId
++          }
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: code ? normalizeVideoCode(code) : null,
++            groupId,
++            addedToQueue: false
++          })
++          return groupId
++        }))
++        if (groupId != null) pendingGroupIds.add(groupId)
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1085,36 +1238,39 @@ export async function scanFolders(
+         }
+       }
+ 
+-      const nfoPreflight = nfoPreflightByFile.get(file)
++      const nfoPreflight = nfoWorkset?.getPreflight(file)
+       if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++        const { filenameCode, nfoCode } = nfoPreflight
+         authorizeFileWrite()
+         const fingerprint = statFileFingerprint(file)
+-        const pendingIdentity = upsertPendingResourceIdentity({
+-          libraryId,
+-          rootId,
+-          filePath: file,
+-          sourceKind: 'local',
+-          filenameCode: nfoPreflight.filenameCode,
+-          nfoCode: nfoPreflight.nfoCode,
+-          sizeBytes: fingerprint?.file_size ?? null,
+-          fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-        })
++        strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          const pendingIdentity = upsertPendingResourceIdentity({
++            libraryId,
++            rootId,
++            filePath: file,
++            sourceKind: 'local',
++            filenameCode,
++            nfoCode,
++            sizeBytes: fingerprint?.file_size ?? null,
++            fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++          })
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: null,
++            groupId: null,
++            addedToQueue: true,
++            nfo: {
++              disposition: 'identity-conflict',
++              pendingIdentityId: pendingIdentity.id,
++              ...(nfoPreflight.inspection.warnings.length > 0
++                ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
++                : {})
++            }
++          })
++        }))
+         result.pendingResources += 1
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: null,
+-          groupId: null,
+-          addedToQueue: true,
+-          nfo: {
+-            disposition: 'identity-conflict',
+-            pendingIdentityId: pendingIdentity.id,
+-            ...(nfoPreflight.inspection.warnings.length > 0
+-              ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
+-              : {})
+-          }
+-        })
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1122,9 +1278,10 @@ export async function scanFolders(
+ 
+       const code = codeForNewFile(file)
+       if (!code) {
+-        result.failed += 1
+-        result.unrecognizedFiles.push(file)
+         recordFile({ filePath: file, sourceKind: 'local', outcome: 'unrecognized' })
++        result.failed += 1
++        if ('unrecognizedFiles' in result) result.unrecognizedFiles.push(file)
++        if ('unrecognizedCount' in result) result.unrecognizedCount++
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1148,25 +1305,27 @@ export async function scanFolders(
+       )
+       if (relocation) {
+         authorizeFileWrite()
+-        relocateLocalVideoResourceById(
+-          libraryId,
+-          relocation.id,
+-          rootId,
+-          file,
+-          fingerprint?.file_size ?? null,
+-          fileDurationSeconds,
+-          fingerprint?.file_mtime_ms ?? null
+-        )
+-        result.relocated += 1
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'updated',
+-          updateKind: 'relocated',
+-          ...videoIdentity(relocation.video_id),
+-          resourceId: relocation.id,
+-          resourceKind: 'local'
++        commitFileAudit(() => {
++          relocateLocalVideoResourceById(
++            libraryId,
++            relocation.id,
++            rootId,
++            file,
++            fingerprint?.file_size ?? null,
++            fileDurationSeconds,
++            fingerprint?.file_mtime_ms ?? null
++          )
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'updated',
++            updateKind: 'relocated',
++            ...videoIdentity(relocation.video_id),
++            resourceId: relocation.id,
++            resourceKind: 'local'
++          })
+         })
++        result.relocated += 1
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1174,29 +1333,32 @@ export async function scanFolders(
+ 
+       const mustConfirm = autoMergeSameCodeResources
+         ? existingVideos.length > 1
+-        : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
++        : existingVideos.length > 0 || newFileCounts!.get(code) > 1
+       if (mustConfirm) {
+         authorizeFileWrite()
+-        const pending = upsertPendingScanResources(libraryId, code, [
+-          {
+-            rootId,
++        const pending = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          const pending = upsertPendingScanResources(libraryId, code, [
++            {
++              rootId,
++              filePath: file,
++              sizeBytes: fingerprint?.file_size ?? null,
++              durationSeconds: fileDurationSeconds,
++              fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
++              displayName: path.basename(file)
++            }
++          ])
++          recordFile({
+             filePath: file,
+-            sizeBytes: fingerprint?.file_size ?? null,
+-            durationSeconds: fileDurationSeconds,
+-            fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+-            displayName: path.basename(file)
+-          }
+-        ])
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: normalizeVideoCode(code),
++            groupId: pending.groupId,
++            addedToQueue: pending.addedResources > 0
++          })
++          return pending
++        }))
+         pendingGroupIds.add(pending.groupId)
+         result.pendingResources += pending.addedResources
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: normalizeVideoCode(code),
+-          groupId: pending.groupId,
+-          addedToQueue: pending.addedResources > 0
+-        })
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1206,76 +1368,88 @@ export async function scanFolders(
+         const needsPrimarySelection =
+           listVideoResources(libraryId, existingVideos[0].id).length === 0
+         authorizeFileWrite()
+-        const resourceId = insertLocalVideoResource({
+-          libraryId,
+-          videoId: existingVideos[0].id,
+-          rootId,
+-          locator: file,
+-          sizeBytes: fingerprint?.file_size ?? null,
+-          durationSeconds: fileDurationSeconds,
+-          fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++        const resourceId = commitFileAudit(() => {
++          const resourceId = insertLocalVideoResource({
++            libraryId,
++            videoId: existingVideos[0].id,
++            rootId,
++            locator: file,
++            sizeBytes: fingerprint?.file_size ?? null,
++            durationSeconds: fileDurationSeconds,
++            fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++          })
++          recordFile(
++            resourceId == null
++              ? {
++                  filePath: file,
++                  sourceKind: 'local',
++                  outcome: 'skipped',
++                  skipReason: 'duplicate'
++                }
++              : {
++                  filePath: file,
++                  sourceKind: 'local',
++                  outcome: 'added',
++                  videoId: existingVideos[0].id,
++                  videoCode: existingVideos[0].code,
++                  resourceId,
++                  resourceKind: 'local',
++                  createdVideo: false
++                }
++          )
++          if (resourceId != null && queueNfoInsideCommit) queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
++          return resourceId
+         })
+         if (resourceId != null) {
+           result.imported += 1
+           if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+-          queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
++          if (!queueNfoInsideCommit) queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
+         } else result.skipped += 1
+-        recordFile(
+-          resourceId == null
+-            ? {
+-                filePath: file,
+-                sourceKind: 'local',
+-                outcome: 'skipped',
+-                skipReason: 'duplicate'
+-              }
+-            : {
+-                filePath: file,
+-                sourceKind: 'local',
+-                outcome: 'added',
+-                videoId: existingVideos[0].id,
+-                videoCode: existingVideos[0].code,
+-                resourceId,
+-                resourceKind: 'local',
+-                createdVideo: false
+-              }
+-        )
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+       }
+ 
+       authorizeFileWrite()
+-      const id = insertScannedVideo(
+-        buildScannedVideoImport(libraryId, rootId, code, file, fileDurationSeconds, fingerprint)
+-      )
+-      if (id !== null) {
+-        result.imported += 1
+-        result.newCodes.push(code)
+-        primarySelectionVideoIds.add(id)
+-        queueNfoCandidate(id, code, file)
+-        const resource = localResourceInLibrary(libraryId, file)
+-        if (resource) {
++      const id = commitFileAudit(() => {
++        const id = insertScannedVideo(
++          buildScannedVideoImport(libraryId, rootId, code, file, fileDurationSeconds, fingerprint)
++        )
++        if (id !== null) {
++          const resource = localResourceInLibrary(libraryId, file)
++          if (resource) {
++            recordFile({
++              filePath: file,
++              sourceKind: 'local',
++              outcome: 'added',
++              videoId: id,
++              videoCode: code,
++              resourceId: resource.id,
++              resourceKind: 'local',
++              createdVideo: true
++            })
++          } else if (auditSink) throw new Error('Imported local resource missing before audit commit')
++        } else {
+           recordFile({
+             filePath: file,
+             sourceKind: 'local',
+-            outcome: 'added',
+-            videoId: id,
+-            videoCode: code,
+-            resourceId: resource.id,
+-            resourceKind: 'local',
+-            createdVideo: true
++            outcome: 'skipped',
++            skipReason: 'duplicate'
+           })
+         }
+-      } else {
+-        result.skipped += 1
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'skipped',
+-          skipReason: 'duplicate'
+-        })
+-      }
++        if (id !== null && queueNfoInsideCommit) queueNfoCandidate(id, code, file)
++        return id
++      })
++      if (id !== null) {
++        result.imported += 1
++        if ('newCodes' in result) result.newCodes.push(code)
++        primarySelectionVideoIds.add(id)
++        if (!queueNfoInsideCommit) queueNfoCandidate(id, code, file)
++      } else result.skipped += 1
+     } catch (err) {
++      // Storage failures must abort the run; converting them into a normal file
++      // failure would conceal a missing durable audit after business writes.
++      if (auditWriteFailed || err instanceof ScanCodeCountsError || err instanceof ScanNfoWorksetError) throw err
+       console.error('Scan error for', file, err)
+       result.failed += 1
+       recordFile({
+@@ -1290,39 +1464,86 @@ export async function scanFolders(
+     await maybeYield(result.scannedFiles, yieldEvery)
+   }
+ 
+-  for (const [videoId, batch] of nfoBatchesByVideo) {
+-    let nfo: LibraryScanNfoAudit
+-    try {
+-      const applied = await nfoService.apply(videoId, batch.code, batch.anchors)
+-      nfo = {
++  // File inventory and counts are finished. Keep the NFO workset alive through
++  // apply and final audit revision; one video may still hydrate all of its anchors.
++  disposeScanPreparation([files, ...(newFileCounts ? [newFileCounts] : [])])
++  nfoWorkset?.sealQueue()
++
++  let appliedNfoBatches = 0
++  let updatedNfoAnchors = 0
++  const nfoBatches = nfoWorkset?.batches()[Symbol.iterator]()
++  try {
++    while (nfoBatches) {
++      if (options.signal?.aborted) { result.cancelled = true; break }
++      const nextBatch = nfoBatches.next()
++      if (nextBatch.done) break
++      const [videoId, batch] = nextBatch.value
++      const toNfoAudit = (applied: LocalNfoScanApplyResult): LibraryScanNfoAudit => ({
+         disposition: applied.disposition === 'none' ? 'skipped' : applied.disposition,
+         ...(applied.warnings.length > 0 ? { warnings: safeNfoWarnings(applied.warnings) } : {}),
+-        ...(applied.pendingScrapeId != null
+-          ? { pendingScrapeId: applied.pendingScrapeId }
+-          : {})
++        ...(applied.pendingScrapeId != null ? { pendingScrapeId: applied.pendingScrapeId } : {})
++      })
++      const reviseAnchor = (anchorPath: string, nfo: LibraryScanNfoAudit): void => {
++        const auditEntry = auditSink
++          ? synchronousAuditResult(auditSink.readFileNfo(anchorPath))
++          : auditEntriesByFile?.get(anchorPath)
++        if (!auditEntry) return
++        const warnings = safeNfoWarnings([
++          ...(auditEntry.nfo?.warnings?.map((warning) => warning.message) ?? []),
++          ...(nfo.warnings?.map((warning) => warning.message) ?? [])
++        ])
++        const mergedNfo = { ...nfo, ...(warnings.length > 0 ? { warnings } : {}) }
++        if (auditSink) {
++          if (!synchronousAuditResult(auditSink.patchNfo(anchorPath, mergedNfo))) {
++            throw new Error('Audit anchor disappeared during NFO revision')
++          }
++        } else auditEntry.nfo = mergedNfo
+       }
+-    } catch (error) {
+-      nfo = {
+-        disposition: 'warning',
+-        warnings: safeNfoWarnings([sanitizeLibraryScanError(error)])
++      let nfo: LibraryScanNfoAudit
++      let nfoAuditFailed = false
++      let committedNfoJson: string | undefined
++      try {
++        const applied = await nfoService.apply(
++          videoId, batch.code, batch.anchors,
++          auditSink ? (committed) => {
++            try {
++              // The built-in NFO service calls this in its business write transaction.
++              // Do not yield between anchors: a failed revision must roll back the batch.
++              const committedNfo = toNfoAudit(committed)
++              for (const anchor of batch.anchors) reviseAnchor(anchor.anchorPath, committedNfo)
++              committedNfoJson = JSON.stringify(committedNfo)
++            } catch (error) {
++              nfoAuditFailed = true
++              throw error
++            }
++          } : undefined
++        )
++        nfo = toNfoAudit(applied)
++      } catch (error) {
++        if (nfoAuditFailed || error instanceof ScanNfoWorksetError) throw error
++        nfo = {
++          disposition: 'warning',
++          warnings: safeNfoWarnings([sanitizeLibraryScanError(error)])
++        }
+       }
+-    }
+-    for (const anchor of batch.anchors) {
+-      const auditEntry = auditEntriesByFile.get(anchor.anchorPath)
+-      if (!auditEntry) continue
+-      const warnings = safeNfoWarnings([
+-        ...(auditEntry.nfo?.warnings?.map((warning) => warning.message) ?? []),
+-        ...(nfo.warnings?.map((warning) => warning.message) ?? [])
+-      ])
+-      auditEntry.nfo = {
+-        ...nfo,
+-        ...(warnings.length > 0 ? { warnings } : {})
++      const needsFinalRevision = committedNfoJson !== JSON.stringify(nfo)
++      for (const anchor of batch.anchors) {
++        // Include post-commit asset warnings and support injected legacy NFO services.
++        // Finish the committed batch's audit even when cancellation arrives while yielding.
++        await maybeYield(++updatedNfoAnchors, yieldEvery)
++        if (needsFinalRevision) reviseAnchor(anchor.anchorPath, nfo)
+       }
++      // An immediately resolved apply promise alone does not let timers or cancellation run.
++      await maybeYield(++appliedNfoBatches, Math.min(yieldEvery, 10))
+     }
++  } finally {
++    nfoBatches?.return?.()
+   }
+ 
++  if (options.signal?.aborted) result.cancelled = true
+   result.pendingGroups = pendingGroupIds.size
+ 
++  let selectedPrimaries = 0
+   for (const videoId of primarySelectionVideoIds) {
+     const candidates = listVideoResources(libraryId, videoId).map((resource) => ({
+       resource,
+@@ -1346,11 +1567,16 @@ export async function scanFolders(
+       }
+       setPrimaryVideoResource(libraryId, videoId, primary.resource.id)
+     }
++    // Keep read/select/authorize/write synchronous; settle already committed resources on cancel.
++    await maybeYield(++selectedPrimaries, yieldEvery)
+   }
+ 
+-  for (const entry of auditEntriesByFile.values()) {
++  let deliveredAudits = 0
++  for (const entry of auditEntriesByFile?.values() ?? []) {
+     options.onFileResult?.(entry)
++    await maybeYield(++deliveredAudits, yieldEvery)
+   }
++  if (options.signal?.aborted) result.cancelled = true
+ 
+   return result
+ }
+@@ -1437,6 +1663,8 @@ export async function renameAndImport(
+       libraryId, runId: `rename:${rootId}`, roots: [expectedRoot], filePaths: [newPath]
+     }, undefined, {
+       ...options,
++      resultMode: 'detailed',
++      auditSink: undefined,
+       autoMergeSameCodeResources: config.autoMergeSameCodeResources,
+       autoImportLocalNfo: config.autoImportLocalNfo,
+       minImportDurationSeconds: config.minImportDurationMinutes * 60,
+diff --git a/src/main/scanner/scanCodeCounts.ts b/src/main/scanner/scanCodeCounts.ts
+new file mode 100644
+index 0000000..6488f50
+--- /dev/null
++++ b/src/main/scanner/scanCodeCounts.ts
+@@ -0,0 +1,148 @@
++import { randomUUID } from 'node:crypto'
++import type Database from 'better-sqlite3'
++
++export const SCAN_CODE_COUNTS_MAX_OCCURRENCES = 256
++export const SCAN_CODE_COUNTS_MAX_BYTES = 1024 * 1024
++
++export class ScanCodeCountsError extends Error {
++  constructor(cause: unknown) {
++    super(cause instanceof Error ? cause.message : 'Scan code counts failed', { cause })
++    this.name = 'ScanCodeCountsError'
++  }
++}
++
++export interface ScanCodeCounts {
++  add(code: string): boolean
++  finishCounting(): void
++  get(code: string): number
++  decrement(code: string): void
++  freeze(): void
++  dispose(): void
++}
++
++function checked<T>(operation: () => T): T {
++  try { return operation() } catch (error) {
++    if (error instanceof ScanCodeCountsError) throw error
++    throw new ScanCodeCountsError(error)
++  }
++}
++
++// Well-formed JSON escapes lone surrogates and NUL while retaining exact JS string identity.
++// SQLite sees only valid UTF-8, using BINARY comparison without normalization.
++function encode(code: string): string {
++  if (typeof code !== 'string') throw new Error('Invalid scan code')
++  // Encoded JSON is never shorter than the UTF-16 code-unit count. Reject huge
++  // inputs before allocation; accepted raw input may still expand to ~6x + quotes.
++  if (code.length > SCAN_CODE_COUNTS_MAX_BYTES) throw new Error('Scan code exceeds 1 MiB encoded key limit')
++  const key = JSON.stringify(code)
++  if (Buffer.byteLength(key, 'utf8') > SCAN_CODE_COUNTS_MAX_BYTES) throw new Error('Scan code exceeds 1 MiB encoded key limit')
++  return key
++}
++
++type State = 'counting' | 'adjusting' | 'frozen' | 'closing' | 'disposed'
++
++/** Request-local scratch counts. Encoded-key budget excludes transient encoding allocation.
++ * No mutation may run in a caller transaction; reads may. Failed add does not accept its occurrence.
++ */
++export function createScanCodeCounts(database: Database.Database): ScanCodeCounts {
++  return checked(() => {
++    if (database.inTransaction) throw new Error('Scan code counts cannot be created inside a caller transaction')
++    const table = `scan_code_counts_${randomUUID().replaceAll('-', '')}`
++    const statements = database.transaction(() => {
++      database.exec(`CREATE TEMP TABLE ${table} (
++        code TEXT COLLATE BINARY PRIMARY KEY, count INTEGER NOT NULL
++        CHECK(typeof(count)='integer' AND count>=0 AND count<=9007199254740991)
++      ) WITHOUT ROWID`)
++      return {
++        insert: database.prepare(`INSERT INTO temp.${table}(code,count) VALUES(?,1)
++          ON CONFLICT(code) DO UPDATE SET count=count+1`),
++        get: database.prepare(`SELECT count FROM temp.${table} WHERE code=?`),
++        decrement: database.prepare(`UPDATE temp.${table} SET count=count-1 WHERE code=? AND count>0`)
++      }
++    })()
++    let state: State = 'counting'
++    let keys: string[] = [], bytes = 0
++    const open = () => {
++      if (state === 'closing' || state === 'disposed' || !database.open) throw new Error('Scan code counts are closed')
++    }
++    const outside = () => {
++      if (database.inTransaction) throw new Error('Scan code counts mutation inside a caller transaction')
++    }
++    const requireState = (expected: State) => {
++      open()
++      if (state !== expected) throw new Error(`Scan code counts must be ${expected}`)
++    }
++    const writeBatch = database.transaction(() => {
++      for (const key of keys) statements.insert.run(key)
++    })
++    const decrement = database.transaction((key: string) => statements.decrement.run(key))
++    const flush = () => {
++      if (!keys.length) return
++      writeBatch()
++      keys = []
++      bytes = 0
++    }
++    return {
++      add(code) { return checked(() => {
++        outside(); requireState('counting')
++        const key = encode(code), size = Buffer.byteLength(key, 'utf8')
++        let flushed = false
++        if (bytes + size > SCAN_CODE_COUNTS_MAX_BYTES) { flush(); flushed = true }
++        keys.push(key); bytes += size
++        if (keys.length === SCAN_CODE_COUNTS_MAX_OCCURRENCES || bytes === SCAN_CODE_COUNTS_MAX_BYTES) {
++          try { flush(); flushed = true } catch (error) { keys.pop(); bytes -= size; throw error }
++        }
++        return flushed
++      }) },
++      finishCounting() { checked(() => { outside(); requireState('counting'); flush(); state = 'adjusting' }) },
++      get(code) { return checked(() => {
++        open()
++        if (state === 'counting') throw new Error('Scan code counts have not finished counting')
++        const row = statements.get.get(encode(code)) as { count: number } | undefined
++        return row?.count ?? 0
++      }) },
++      decrement(code) { checked(() => {
++        outside(); requireState('adjusting')
++        const key = encode(code)
++        decrement(key)
++      }) },
++      freeze() { checked(() => { outside(); requireState('adjusting'); state = 'frozen' }) },
++      dispose() { checked(() => {
++        if (state === 'disposed') return
++        if (database.open) outside()
++        state = 'closing'
++        if (database.open) database.exec(`DROP TABLE IF EXISTS temp.${table}`)
++        keys = []; bytes = 0; state = 'disposed'
++      }) }
++    }
++  })
++}
++
++/** Legacy oracle: intentionally stores all distinct keys in memory. */
++export function createMemoryScanCodeCounts(): ScanCodeCounts {
++  const counts = new Map<string, number>()
++  let state: State = 'counting'
++  const requireState = (expected: State) => {
++    if (state !== expected) throw new Error(`Scan code counts must be ${expected}`)
++  }
++  return {
++    add(code) { return checked(() => {
++      requireState('counting'); encode(code)
++      const next = (counts.get(code) ?? 0) + 1
++      if (!Number.isSafeInteger(next)) throw new Error('Scan code count exceeds safe integer limit')
++      counts.set(code, next)
++      return false
++    }) },
++    finishCounting() { checked(() => { requireState('counting'); state = 'adjusting' }) },
++    get(code) { return checked(() => {
++      if (state !== 'adjusting' && state !== 'frozen') throw new Error('Scan code counts are not readable')
++      encode(code); return counts.get(code) ?? 0
++    }) },
++    decrement(code) { checked(() => {
++      requireState('adjusting'); encode(code)
++      if (counts.has(code)) counts.set(code, Math.max(0, counts.get(code)! - 1))
++    }) },
++    freeze() { checked(() => { requireState('adjusting'); state = 'frozen' }) },
++    dispose() { checked(() => { counts.clear(); state = 'disposed' }) }
++  }
++}
+diff --git a/src/main/scanner/scanCodeCounts.test.ts b/src/main/scanner/scanCodeCounts.test.ts
+new file mode 100644
+index 0000000..036a8e0
+--- /dev/null
++++ b/src/main/scanner/scanCodeCounts.test.ts
+@@ -0,0 +1,272 @@
++import assert from 'node:assert/strict'
++import { afterEach, beforeEach, it } from 'node:test'
++import Database from 'better-sqlite3'
++import { createScanCodeCounts, createMemoryScanCodeCounts, ScanCodeCountsError,
++  SCAN_CODE_COUNTS_MAX_BYTES } from './scanCodeCounts'
++
++let db: Database.Database
++beforeEach(() => { db = new Database(':memory:') })
++afterEach(() => { if (db.open) db.close() })
++function table(): string {
++  return (db.prepare("SELECT name FROM sqlite_temp_master WHERE type='table' AND name LIKE 'scan_code_counts_%'").get() as { name: string }).name
++}
++function noTables() {
++  assert.deepEqual(db.prepare("SELECT name FROM sqlite_temp_master WHERE type='table' AND name LIKE 'scan_code_counts_%'").all(), [])
++}
++function failure(operation: () => unknown, message: RegExp): ScanCodeCountsError {
++  let caught: ScanCodeCountsError | undefined
++  assert.throws(operation, (error: unknown) => {
++    assert.ok(error instanceof ScanCodeCountsError)
++    assert.ok(error.cause instanceof Error)
++    assert.match(error.cause.message, message)
++    caught = error
++    return true
++  })
++  return caught!
++}
++
++it('matches exact JS Map keys and occurrence counts across multiple flushes', () => {
++  const sql = createScanCodeCounts(db), memory = createMemoryScanCodeCounts()
++  const codes = ['', 'abc', 'ABC', ' abc ', '\0', 'a\0b', '\ud800', '\ud801', '\udc00', '�', '😀', 'é', 'é', '"', '\\']
++  let flushes = 0
++  for (let index = 0; index < 900; index++) {
++    if (sql.add(codes[index % codes.length])) flushes++
++    memory.add(codes[index % codes.length])
++  }
++  assert.equal(flushes, 3)
++  sql.finishCounting(); memory.finishCounting()
++  for (const code of codes) assert.equal(sql.get(code), memory.get(code))
++  for (const counter of [sql, memory]) {
++    for (let index = 0; index < 100; index++) counter.decrement('\ud800')
++    counter.decrement('missing')
++    assert.equal(counter.get('\ud800'), 0)
++    assert.equal(counter.get('missing'), 0)
++    assert.equal(counter.get('\ud801'), 60)
++    counter.freeze()
++    assert.equal(counter.get('a\0b'), 60)
++    counter.dispose(); counter.dispose()
++  }
++  noTables()
++})
++
++it('bounds occurrence batches and encoded key bytes including escaped surrogates', () => {
++  const original = db.prepare, prepare = db.prepare.bind(db)
++  let inserts = 0, bytes = 0
++  db.prepare = ((sql: string) => {
++    const statement = prepare(sql)
++    if (sql.startsWith('INSERT INTO temp.scan_code_counts_')) {
++      inserts = 0; bytes = 0
++      const run = statement.run.bind(statement)
++      statement.run = ((key: string) => {
++        inserts++; bytes += Buffer.byteLength(key)
++        assert.ok(inserts <= 256)
++        assert.ok(bytes <= SCAN_CODE_COUNTS_MAX_BYTES)
++        return run(key)
++      }) as typeof statement.run
++    }
++    return statement
++  }) as typeof db.prepare
++  const counter = createScanCodeCounts(db)
++  try {
++    const code = '\ud800'.repeat(100000)
++    assert.equal(counter.add(code), false)
++    assert.equal(counter.add(code), true)
++    assert.equal(inserts, 1)
++    inserts = 0; bytes = 0
++    counter.finishCounting()
++    assert.equal(inserts, 1)
++    assert.equal(counter.get(code), 2)
++    failure(() => counter.get('x'.repeat(SCAN_CODE_COUNTS_MAX_BYTES)), /1 MiB/)
++  } finally { db.prepare = original }
++  counter.dispose()
++})
++
++it('rejects oversized add without accepting it and accepts the exact byte boundary', () => {
++  const counter = createScanCodeCounts(db), code = 'x'.repeat(SCAN_CODE_COUNTS_MAX_BYTES - 2)
++  failure(() => counter.add(code + 'x'), /1 MiB/)
++  assert.equal(counter.add(code), true)
++  counter.finishCounting()
++  assert.equal(counter.get(code), 1)
++  counter.dispose()
++})
++
++it('native INSERT failure rolls back the batch and failed add retries exactly once', () => {
++  const counter = createScanCodeCounts(db), name = table()
++  db.exec(`CREATE TEMP TRIGGER fail_counts BEFORE INSERT ON ${name}
++    WHEN NEW.code='"last"' BEGIN SELECT RAISE(ABORT,'insert fault'); END`)
++  for (let index = 0; index < 255; index++) counter.add('same')
++  failure(() => counter.add('last'), /insert fault/)
++  assert.deepEqual(db.prepare(`SELECT * FROM ${name}`).all(), [])
++  db.exec('DROP TRIGGER fail_counts')
++  assert.equal(counter.add('last'), true)
++  counter.finishCounting()
++  assert.equal(counter.get('same'), 255)
++  assert.equal(counter.get('last'), 1)
++  counter.dispose()
++})
++
++it('native UPDATE failure during flush preserves buffer and counting state for finish retry', () => {
++  const counter = createScanCodeCounts(db), name = table()
++  counter.add('same'); counter.add('same')
++  db.exec(`CREATE TEMP TRIGGER fail_counts BEFORE UPDATE ON ${name}
++    BEGIN SELECT RAISE(ABORT,'update fault'); END`)
++  failure(() => counter.finishCounting(), /update fault/)
++  assert.deepEqual(db.prepare(`SELECT * FROM ${name}`).all(), [])
++  db.exec('DROP TRIGGER fail_counts')
++  counter.finishCounting()
++  assert.equal(counter.get('same'), 2)
++  db.exec(`CREATE TEMP TRIGGER fail_counts AFTER UPDATE ON ${name}
++    BEGIN SELECT RAISE(ABORT,'decrement fault'); END`)
++  failure(() => counter.decrement('same'), /decrement fault/)
++  assert.equal(counter.get('same'), 2)
++  db.exec('DROP TRIGGER fail_counts')
++  counter.decrement('same')
++  assert.equal(counter.get('same'), 1)
++  counter.dispose()
++})
++
++it('preserves native SELECT cause and remains readable after the fault is removed', () => {
++  const counter = createScanCodeCounts(db), name = table()
++  counter.add('code'); counter.finishCounting()
++  db.exec(`ALTER TABLE ${name} RENAME TO hidden_counts`)
++  const error = failure(() => counter.get('code'), /no such table/)
++  assert.equal((error.cause as { code?: string }).code, 'SQLITE_ERROR')
++  db.exec(`ALTER TABLE hidden_counts RENAME TO ${name}`)
++  assert.equal(counter.get('code'), 1)
++  counter.dispose()
++})
++
++it('native DROP lock failure can be retried and closed database disposal is safe', () => {
++  const counter = createScanCodeCounts(db)
++  counter.add('a'); counter.finishCounting()
++  db.exec('CREATE TEMP TABLE lock_source(value); INSERT INTO lock_source VALUES(1),(2)')
++  const cursor = db.prepare('SELECT * FROM lock_source').iterate()
++  cursor.next()
++  failure(() => counter.dispose(), /locked|busy/)
++  cursor.return?.()
++  counter.dispose(); counter.dispose(); noTables()
++  const closed = createScanCodeCounts(db)
++  db.close()
++  failure(() => closed.add('x'), /closed/)
++  closed.dispose(); closed.dispose()
++})
++
++it('guards lifecycle for both implementations', () => {
++  for (const counter of [createScanCodeCounts(db), createMemoryScanCodeCounts()]) {
++    failure(() => counter.get('x'), /counting|readable/)
++    failure(() => counter.decrement('x'), /adjusting/)
++    failure(() => counter.freeze(), /adjusting/)
++    counter.add('x'); counter.finishCounting()
++    failure(() => counter.add('x'), /counting/)
++    failure(() => counter.finishCounting(), /counting/)
++    counter.freeze()
++    failure(() => counter.decrement('x'), /adjusting/)
++    assert.equal(counter.get('x'), 1)
++    counter.dispose()
++    failure(() => counter.get('x'), /closed|readable/)
++  }
++})
++
++it('rejects caller transaction mutations before state changes while permitting reads', () => {
++  db.transaction(() => failure(() => createScanCodeCounts(db), /caller transaction/))()
++  noTables()
++  const counter = createScanCodeCounts(db)
++  counter.add('original')
++  for (const operation of [() => counter.add('rejected'), () => counter.finishCounting(), () => counter.dispose()]) {
++    assert.throws(() => db.transaction(() => {
++      failure(operation, /caller transaction/)
++      throw new Error('outer rollback')
++    })(), /outer rollback/)
++  }
++  counter.finishCounting()
++  db.transaction(() => {
++    assert.equal(counter.get('original'), 1)
++    for (const operation of [() => counter.decrement('original'), () => counter.freeze(), () => counter.dispose()]) {
++      failure(operation, /caller transaction/)
++    }
++  })()
++  counter.decrement('original'); counter.freeze()
++  assert.equal(counter.get('original'), 0)
++  assert.equal(counter.get('rejected'), 0)
++  counter.dispose(); noTables()
++})
++
++it('never silently saturates counts beyond the exact safe integer range', () => {
++  const counter = createScanCodeCounts(db), name = table()
++  db.prepare(`INSERT INTO ${name} VALUES(?,?)`).run(JSON.stringify('max'), Number.MAX_SAFE_INTEGER)
++  counter.add('max')
++  failure(() => counter.finishCounting(), /CHECK constraint/)
++  db.prepare(`UPDATE ${name} SET count=?`).run(Number.MAX_SAFE_INTEGER - 1)
++  counter.finishCounting()
++  assert.equal(counter.get('max'), Number.MAX_SAFE_INTEGER)
++  counter.decrement('max')
++  assert.equal(counter.get('max'), Number.MAX_SAFE_INTEGER - 1)
++  counter.dispose()
++})
++
++
++it('rejects huge raw input before JSON encoding and leaves the counter usable', (t) => {
++  const counter = createScanCodeCounts(db), oversized = 'x'.repeat(SCAN_CODE_COUNTS_MAX_BYTES + 1)
++  const original = JSON.stringify
++  let encoded = false
++  t.mock.method(JSON, 'stringify', (...args: Parameters<typeof JSON.stringify>) => {
++    if (args[0] === oversized) encoded = true
++    return Reflect.apply(original, JSON, args)
++  })
++  try {
++    failure(() => counter.add(oversized), /1 MiB/)
++    assert.equal(encoded, false)
++    counter.add('valid'); counter.finishCounting()
++    assert.equal(counter.get('valid'), 1)
++  } finally { t.mock.restoreAll(); counter.dispose() }
++})
++
++it('wraps factory failure with its original cause and rolls back already-created DDL', () => {
++  const original = db.exec, exec = db.exec.bind(db), fault = new Error('factory fault')
++  db.exec = ((sql: string) => {
++    const result = exec(sql)
++    if (sql.startsWith('CREATE TEMP TABLE scan_code_counts_')) throw fault
++    return result
++  }) as typeof db.exec
++  try { assert.equal(failure(() => createScanCodeCounts(db), /factory fault/).cause, fault) }
++  finally { db.exec = original }
++  noTables()
++  assert.equal(db.inTransaction, false)
++})
++
++
++it('prepares three statements once for many flushes, reads and corrections', () => {
++  const original = db.prepare, prepare = db.prepare.bind(db)
++  const prepared: string[] = []
++  db.prepare = ((sql: string) => { prepared.push(sql); return prepare(sql) }) as typeof db.prepare
++  try {
++    const counter = createScanCodeCounts(db)
++    assert.equal(prepared.length, 3)
++    for (let index = 0; index < 800; index++) counter.add(String(index % 20))
++    counter.finishCounting()
++    for (let index = 0; index < 600; index++) {
++      counter.decrement(String(index % 20))
++      assert.ok(counter.get(String(index % 20)) >= 10)
++    }
++    counter.freeze()
++    assert.equal(counter.get('0'), 10)
++    counter.dispose()
++    assert.equal(prepared.length, 3)
++  } finally { db.prepare = original }
++})
++
++it('rolls back TEMP creation if statement preparation fails', () => {
++  const original = db.prepare, prepare = db.prepare.bind(db), fault = new Error('prepare fault')
++  db.prepare = ((sql: string) => {
++    if (sql.startsWith('SELECT count FROM temp.scan_code_counts_')) throw fault
++    return prepare(sql)
++  }) as typeof db.prepare
++  try { assert.equal(failure(() => createScanCodeCounts(db), /prepare fault/).cause, fault) }
++  finally { db.prepare = original }
++  noTables()
++  assert.equal(db.inTransaction, false)
++  const retry = createScanCodeCounts(db)
++  retry.add('a'); retry.finishCounting()
++  assert.equal(retry.get('a'), 1)
++  retry.dispose()
++})
+diff --git a/src/main/scanner/scannerCodeCounts.test.ts b/src/main/scanner/scannerCodeCounts.test.ts
+new file mode 100644
+index 0000000..6309a1e
+--- /dev/null
++++ b/src/main/scanner/scannerCodeCounts.test.ts
+@@ -0,0 +1,246 @@
++import { afterEach, beforeEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { toScanCompletionResult } from '@shared/scanResult'
++import { closeDatabase, initDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { beginLibraryScanRun } from '../db/libraryScanRepo'
++import { createScanAuditWriter } from '../db/scanAuditWriter'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import { scanFolders, ScanFoldersFailure, type ScanOptions } from './scanner'
++
++let directory: string, media: string, previous: string | undefined, sequence = 0
++beforeEach(() => {
++  previous = process.env.JAVDEX_TEST_USER_DATA
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-code-counts-'))
++  media = path.join(directory, 'media'); fs.mkdirSync(media)
++  process.env.JAVDEX_TEST_USER_DATA = directory
++})
++afterEach(() => {
++  closeDatabase(); resetSettingsCacheForTests()
++  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = previous
++  fs.rmSync(directory, { recursive: true, force: true })
++})
++function setup(names: string[], multipleRoots = false) {
++  closeDatabase(); resetSettingsCacheForTests()
++  for (const name of names) {
++    const file = path.join(media, name)
++    fs.mkdirSync(path.dirname(file), { recursive: true })
++    fs.writeFileSync(file, name.endsWith('.strm') ? `https://example.test/${name}` : 'synthetic video')
++  }
++  const db = initDatabaseAtPath(path.join(directory, `catalog-${++sequence}.db`))
++  const library = createMediaLibrary({ name: 'Inventory', roots: multipleRoots ? [{ path: path.join(media, 'r2') }, { path: path.join(media, 'r1') }] : [{ path: media }] })
++  const request = { libraryId: library.id, runId: 'code-counts', roots: library.roots }
++  beginLibraryScanRun({ ...request, configRevision: 1, trigger: 'manual', startedAt: 'start' })
++  const writer = createScanAuditWriter(db, request)
++  writer.start({ schemaVersion: 2, ...request, configRevision: 1, trigger: 'manual', startedAt: 'start', finishedAt: 'pending', status: 'success' })
++  const sink: NonNullable<ScanOptions['auditSink']> = {
++    recordFile: entry => writer.writeBatch('files', [entry]),
++    readFileNfo: filePath => writer.readFileNfo(filePath), patchNfo: (filePath, nfo) => writer.patchNfo(filePath, nfo)
++  }
++  const options: ScanOptions = { auditSink: sink, autoMergeSameCodeResources: false, minImportDurationSeconds: 1,
++    readDurationSeconds: async () => 120,
++    readDirectory: async dir => (await fs.promises.readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name)) }
++  const tempTables = () => db.prepare("SELECT name FROM sqlite_temp_master WHERE type='table' ORDER BY name").all() as { name: string }[]
++  const audits = () => db.prepare("SELECT ordinal,entry_key,entry_json FROM library_scan_audit_entries WHERE run_id='code-counts' AND section='files' ORDER BY ordinal").all()
++  return { db, request, options, tempTables, audits }
++}
++
++it('uses a TEMP code count table in actual summary scanning and releases it', async () => {
++  const current = setup(['ABC-001.mp4'])
++  const before = current.tempTables()
++  let seen = false
++  const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    readDirectory: async dir => {
++      seen = current.tempTables().some(row => row.name.startsWith('scan_code_counts_'))
++      return current.options.readDirectory!(dir)
++    }
++  })
++  assert.equal(result.imported, 1)
++  assert.equal(seen, true)
++  assert.deepEqual(current.tempTables(), before)
++})
++
++it('skips count storage entirely for summary automatic merging while preserving detailed results and audit', async context => {
++  const names = ['ABC-001-CD1.mp4', 'ABC-001-CD2.mp4', 'DEF-002.strm', 'unknown.mp4']
++  const legacy = setup(names)
++  const detailed = await scanFolders(legacy.request, undefined, { ...legacy.options, autoMergeSameCodeResources: true })
++  const audits = legacy.audits()
++  const current = setup(names), prepare = current.db.prepare, exec = current.db.exec
++  let countSql = 0
++  context.mock.method(current.db, 'prepare', (sql: string) => { if (sql.includes('scan_code_counts_')) countSql++; return prepare.call(current.db, sql) })
++  context.mock.method(current.db, 'exec', (sql: string) => { if (sql.includes('scan_code_counts_')) countSql++; return exec.call(current.db, sql) })
++  const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', autoMergeSameCodeResources: true })
++  assert.equal(countSql, 0)
++  assert.deepEqual(result, toScanCompletionResult(detailed))
++  assert.deepEqual(current.audits(), audits)
++})
++
++it('allows cancellation before the first write in a small summary auto-merge scan with no count loop', async () => {
++  const current = setup(['ABC-001.mp4']), controller = new AbortController()
++  let timer: ReturnType<typeof setImmediate> | undefined, probes = 0
++  const before = current.tempTables()
++  try {
++    const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', autoMergeSameCodeResources: true,
++      signal: controller.signal, yieldEvery: 10000,
++      readDirectory: async dir => { const entries = await current.options.readDirectory!(dir); timer = setImmediate(() => controller.abort()); return entries },
++      readDurationSeconds: async () => { probes++; return 120 }
++    })
++    assert.equal(result.cancelled, true); assert.equal(result.scannedFiles, 0); assert.equal(result.imported, 0)
++    assert.equal(probes, 0); assert.deepEqual(current.audits(), [])
++    assert.deepEqual(current.db.prepare('SELECT id FROM videos').all(), [])
++    assert.deepEqual(current.tempTables(), before)
++  } finally { if (timer) clearImmediate(timer) }
++})
++
++it('matches memory counts and audits across pages, roots, duplicates, invalid STRMs and NFO identities', async () => {
++  const names = ['r1/ABC-001.mp4', 'r2/ABC-001-CD2.mp4', 'r1/VALID-002.mp4',
++    'r1/VALID-002-CD2.strm', 'r2/VALID-002-CD3.strm', 'r1/unknown.mp4', 'r2/CON-004.mp4',
++    ...Array.from({ length: 260 }, (_, index) => `r${index % 2 + 1}/ITEM-${1000 + index}.mp4`)]
++  async function run(resultMode: 'detailed' | 'summary') {
++    const current = setup(names, true)
++    for (const name of names.filter(name => name.endsWith('.strm'))) fs.writeFileSync(path.join(media, name), 'invalid STRM')
++    const result = await scanFolders(current.request, undefined, { ...current.options, resultMode, autoImportLocalNfo: true,
++      readDirectory: async dir => { const entries = await current.options.readDirectory!(dir); return [...entries, entries[0]] },
++      localNfoService: {
++        inspectIdentity: anchor => ({ status: path.basename(anchor.anchorPath) === 'unknown.mp4' || anchor.anchorPath.endsWith('CON-004.mp4') ? 'found' : 'missing',
++          code: anchor.anchorPath.endsWith('CON-004.mp4') ? 'OTHER-005' : path.basename(anchor.anchorPath) === 'unknown.mp4' ? 'NFO-003' : null, warnings: [] }),
++        apply: async () => ({ disposition: 'imported', warnings: [] })
++      }
++    })
++    assert.deepEqual(current.tempTables(), [])
++    assert.ok(current.db.prepare("SELECT id FROM videos WHERE code='VALID-002'").get(), 'multiple invalid STRMs must not force valid local confirmation')
++    assert.ok(current.db.prepare("SELECT id FROM videos WHERE code='NFO-003'").get())
++    assert.equal(current.db.prepare("SELECT id FROM videos WHERE code='CON-004'").get(), undefined)
++    return { result: toScanCompletionResult(result), audits: current.audits() }
++  }
++  assert.deepEqual(await run('summary'), await run('detailed'))
++})
++
++for (const phase of ['flush', 'adjustment'] as const) it(`cancels during code ${phase} before importing with all TEMP resources removed`, async () => {
++  const names = phase === 'flush' ? Array.from({ length: 300 }, (_, index) => `CODE-${1000 + index}.mp4`)
++    : ['ABC-001.mp4', ...Array.from({ length: 12 }, (_, index) => `ABC-001-CD${index + 2}.strm`)]
++  const current = setup(names), controller = new AbortController()
++  if (phase === 'adjustment') for (const name of names.filter(name => name.endsWith('.strm'))) fs.writeFileSync(path.join(media, name), 'invalid')
++  let timer: ReturnType<typeof setImmediate> | undefined, fired = false, outside = false
++  current.db.function('schedule_count_cancel', () => {
++    if (!timer) timer = setImmediate(() => { outside = !current.db.inTransaction; fired = true; controller.abort() })
++    return 0
++  })
++  try {
++    const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', signal: controller.signal, yieldEvery: 10000,
++      readDirectory: async dir => {
++        const table = current.tempTables().find(row => row.name.startsWith('scan_code_counts_'))!.name
++        current.db.exec(`CREATE TEMP TRIGGER cancel_counts AFTER ${phase === 'flush' ? 'INSERT' : 'UPDATE'} ON "${table}" BEGIN SELECT schedule_count_cancel(); END`)
++        return current.options.readDirectory!(dir)
++      }
++    })
++    assert.equal(fired, true); assert.equal(outside, true); assert.equal(result.cancelled, true)
++    assert.equal(result.scannedFiles, 0); assert.equal(result.imported, 0)
++    assert.deepEqual(current.audits(), []); assert.deepEqual(current.tempTables(), [])
++  } finally { if (timer) clearImmediate(timer) }
++})
++
++for (const operation of ['INSERT', 'UPDATE'] as const) it(`treats native count ${operation} failure as fatal before any imports`, async () => {
++  const current = setup(operation === 'INSERT' ? ['AAA-001.mp4', 'BBB-002.mp4'] : ['ABC-001.mp4', 'ABC-001-CD2.strm'])
++  if (operation === 'UPDATE') fs.writeFileSync(path.join(media, 'ABC-001-CD2.strm'), 'invalid')
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    readDirectory: async dir => {
++      const table = current.tempTables().find(row => row.name.startsWith('scan_code_counts_'))!.name
++      current.db.exec(`CREATE TEMP TRIGGER fault_counts BEFORE ${operation} ON "${table}" BEGIN SELECT RAISE(ABORT,'count ${operation} fault'); END`)
++      return current.options.readDirectory!(dir)
++    }
++  }), error => {
++    assert.ok(error instanceof ScanFoldersFailure); assert.match(error.message, /count .* fault/)
++    assert.equal(error.partialResult.imported, 0); assert.equal(error.partialResult.failed, 0)
++    return true
++  })
++  assert.deepEqual(current.audits(), []); assert.deepEqual(current.tempTables(), [])
++})
++
++it('does not downgrade a native main-loop count SELECT failure to processing_failure and preserves prior imports', async () => {
++  const current = setup(['AAA-001.mp4', 'BBB-002.mp4'])
++  let probes = 0
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    readDurationSeconds: async () => {
++      probes++
++      if (probes === 2) {
++        const table = current.tempTables().find(row => row.name.startsWith('scan_code_counts_'))!.name
++        current.db.exec(`DROP TABLE temp."${table}"`)
++      }
++      return 120
++    }
++  }), error => {
++    assert.ok(error instanceof ScanFoldersFailure); assert.match(error.message, /no such table/)
++    assert.equal(error.partialResult.imported, 1); assert.equal(error.partialResult.scannedFiles, 2)
++    assert.equal(error.partialResult.failed, 0)
++    return true
++  })
++  assert.equal(probes, 2)
++  assert.equal(current.audits().length, 1); assert.deepEqual(current.tempTables(), [])
++})
++
++it('cleans the first inventory if the second factory fails after creating its table', async context => {
++  const current = setup(['AAA-001.mp4']), exec = current.db.exec
++  let inventoryDrops = 0, directoryReads = 0
++  context.mock.method(current.db, 'exec', (sql: string) => {
++    if (sql.includes('DROP TABLE IF EXISTS temp.scan_file_inventory_')) inventoryDrops++
++    const result = exec.call(current.db, sql)
++    if (sql.includes('CREATE TEMP TABLE scan_code_counts_')) throw new Error('second factory fault')
++    return result
++  })
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    readDirectory: async () => { directoryReads++; return [] }
++  }), /second factory fault/)
++  assert.equal(inventoryDrops, 1); assert.equal(directoryReads, 0)
++  assert.deepEqual(current.tempTables(), [])
++})
++
++it('attempts both disposers, preserves the first cleanup error and retries both after early-tail faults', async context => {
++  const current = setup(['AAA-001.mp4']), exec = current.db.exec
++  const drops = { inventory: 0, counts: 0 }
++  context.mock.method(current.db, 'exec', (sql: string) => {
++    if (sql.includes('DROP TABLE IF EXISTS temp.scan_file_inventory_') && ++drops.inventory === 1) throw new Error('first inventory DROP fault')
++    if (sql.includes('DROP TABLE IF EXISTS temp.scan_code_counts_') && ++drops.counts === 1) throw new Error('second counts DROP fault')
++    return exec.call(current.db, sql)
++  })
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary' }), error => {
++    assert.ok(error instanceof ScanFoldersFailure); assert.match(error.message, /first inventory DROP fault/)
++    assert.equal(error.partialResult.imported, 1); assert.equal(error.partialResult.failed, 0)
++    return true
++  })
++  assert.deepEqual(drops, { inventory: 2, counts: 2 })
++  assert.equal(current.audits().length, 1); assert.deepEqual(current.tempTables(), [])
++})
++
++it('preserves an original scan error while still attempting both failing disposers', async context => {
++  const current = setup(['AAA-001.mp4']), exec = current.db.exec
++  let drops = 0
++  context.mock.method(current.db, 'exec', (sql: string) => {
++    if (/DROP TABLE IF EXISTS temp.scan_(file_inventory|code_counts)_/.test(sql)) { drops++; throw new Error('secondary cleanup') }
++    return exec.call(current.db, sql)
++  })
++  try {
++    await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', readDirectory: async () => { throw new Error('original discovery') } }), /original discovery/)
++    assert.equal(drops, 2)
++  } finally {
++    context.mock.restoreAll()
++    for (const row of current.tempTables()) exec.call(current.db, `DROP TABLE "${row.name}"`)
++  }
++})
++
++it('keeps STRM relocation revision stable after count preparation and resource-free audit writes', async context => {
++  const current = setup(['AAA-001.strm', 'BBB-002.strm', 'CCC-003.strm', 'unknown.strm']), prepare = current.db.prepare
++  let rebuilds = 0
++  context.mock.method(current.db, 'prepare', (sql: string) => {
++    if (sql.includes('strm_source_path AS source_path') && sql.includes('ORDER BY id')) rebuilds++
++    return prepare.call(current.db, sql)
++  })
++  const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary' })
++  assert.equal(result.imported, 3); assert.equal(result.unrecognizedCount, 1)
++  assert.equal(rebuilds, 1)
++  assert.equal(current.audits().length, 4)
++})
+diff --git a/src/main/scanner/scanNfoWorkset.ts b/src/main/scanner/scanNfoWorkset.ts
+new file mode 100644
+index 0000000..428e34b
+--- /dev/null
++++ b/src/main/scanner/scanNfoWorkset.ts
+@@ -0,0 +1,341 @@
++import { randomUUID } from 'node:crypto'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
++import type { LocalNfoAnchor, LocalNfoIdentityInspection } from '../metadata-sources'
++import type { DirectoryVideoIdentitySummary } from '../nfo/directoryVideoIdentity'
++
++export interface ScanNfoPreflight {
++  anchor: LocalNfoAnchor
++  filenameCode: string | null
++  nfoCode: string | null
++  effectiveCode: string | null
++  identityConflict: boolean
++  inspection: LocalNfoIdentityInspection
++}
++export interface ScanNfoVideoBatch { code: string; anchors: LocalNfoAnchor[] }
++export interface ScanNfoWorkset {
++  setSidecars(dir: string, map: ReadonlyMap<string, string>): void
++  hasSidecars(dir: string): boolean
++  getSidecars(dir: string): ReadonlyMap<string, string> | undefined
++  getDirectoryIdentity(dir: string): DirectoryVideoIdentitySummary | undefined
++  setDirectoryIdentity(dir: string, summary: DirectoryVideoIdentitySummary): void
++  sealDirectories(): void
++  setPreflight(path: string, value: ScanNfoPreflight): void
++  getPreflight(path: string): ScanNfoPreflight | undefined
++  getEffectiveCode(path: string): { effectiveCode: string | null } | undefined
++  sealPreflights(): void
++  enqueue(videoId: number, code: string, filePath: string): void
++  sealQueue(): void
++  batches(): Iterable<[number, ScanNfoVideoBatch]>
++  dispose(): void
++}
++export class ScanNfoWorksetError extends Error {
++  constructor(cause: unknown) {
++    super(cause instanceof Error ? cause.message : 'Scan NFO workset failed', { cause })
++    this.name = 'ScanNfoWorksetError'
++  }
++}
++export const SCAN_NFO_WORKSET_MAX_BYTES = 1024 * 1024
++function checked<T>(fn: () => T): T {
++  try { return fn() } catch (error) {
++    if (error instanceof ScanNfoWorksetError) throw error
++    throw new ScanNfoWorksetError(error)
++  }
++}
++function json(value: unknown): string {
++  if (typeof value === 'string' && value.length > SCAN_NFO_WORKSET_MAX_BYTES) throw new Error('NFO workset record exceeds 1 MiB')
++  const encoded = JSON.stringify(value)
++  if (encoded === undefined || Buffer.byteLength(encoded) > SCAN_NFO_WORKSET_MAX_BYTES) throw new Error('NFO workset record exceeds 1 MiB')
++  return encoded
++}
++function budget(...values: string[]): void {
++  if (values.reduce((sum, value) => sum + Buffer.byteLength(value), 0) > SCAN_NFO_WORKSET_MAX_BYTES) throw new Error('NFO workset record exceeds 1 MiB')
++}
++interface Directory { sidecars?: string; identity?: string }
++interface PreflightRow { body: string; effective: string }
++interface VideoRow { ordinal: number; videoId: number; code: string }
++interface QueueRow { ordinal: number; body: string }
++interface Storage {
++  transaction<T>(fn: () => T): T
++  outside(): void
++  open(): void
++  directory(key: string): Directory | undefined
++  sidecars(key: string, snapshot: string): void
++  identity(key: string, body: string): void
++  pair(snapshot: string, ordinal: number, key: string, value: string): void
++  pairGet(snapshot: string, key: string): string | undefined
++  pairNext(snapshot: string, ordinal: number): { ordinal: number; key: string; value: string } | undefined
++  pairCount(snapshot: string): number
++  preflight(key: string, row: PreflightRow): void
++  preflightGet(key: string): PreflightRow | undefined
++  effective(key: string): string | undefined
++  enqueue(videoId: number, code: string, key: string): void
++  videoNext(ordinal: number): VideoRow | undefined
++  queueNext(videoId: number, ordinal: number): QueueRow | undefined
++  dispose(): void
++}
++
++function workset(storage: Storage, roots: readonly Readonly<MediaLibraryRoot>[], materializeSidecarMaps = false): ScanNfoWorkset {
++  const snapshots = new Map<number, Readonly<MediaLibraryRoot>>()
++  for (const root of roots) {
++    if (!Number.isSafeInteger(root.id) || root.id <= 0 || snapshots.has(root.id)) throw new Error('Invalid NFO workset root')
++    snapshots.set(root.id, Object.isFrozen(root) ? root : Object.freeze({ ...root }))
++  }
++  let state: 'directories' | 'preflights' | 'queue' | 'sealed' | 'closing' | 'disposed' = 'directories'
++  const open = () => {
++    if (state === 'closing' || state === 'disposed') throw new Error('NFO workset is closed')
++    storage.open()
++  }
++  const mutate = (expected: typeof state) => {
++    open(); storage.outside()
++    if (state !== expected) throw new Error(`NFO workset must be ${expected}`)
++  }
++  // Weak keys do not retain wrappers or directory contexts across the complete scan.
++  const mapSnapshots = new WeakMap<ReadonlyMap<string, string>, string>()
++  let lastMap: { snapshot: string; value: ReadonlyMap<string, string> } | undefined
++  let lastIdentity: { dir: string; body: string; value: LocalNfoAnchor['directoryVideoCodes'] } | undefined
++  const identityFor = (dir: string, body: string): LocalNfoAnchor['directoryVideoCodes'] => {
++    if (lastIdentity?.dir === dir && lastIdentity.body === body) return lastIdentity.value
++    const value = Object.freeze(JSON.parse(body)) as LocalNfoAnchor['directoryVideoCodes']
++    lastIdentity = { dir, body, value }
++    return value
++  }
++  const mapFor = (snapshot: string): ReadonlyMap<string, string> => {
++    if (lastMap?.snapshot === snapshot) return lastMap.value
++    const entries = function* (): MapIterator<[string, string]> {
++      let after = 0
++      while (true) {
++        const row = checked(() => { open(); return storage.pairNext(snapshot, after) })
++        if (!row) return
++        after = row.ordinal
++        yield checked(() => [JSON.parse(row.key), JSON.parse(row.value)] as [string, string])
++      }
++    }
++    if (materializeSidecarMaps) {
++      // Detailed callers historically retain anchors after the scan has returned.
++      const value = new Map(entries())
++      mapSnapshots.set(value, snapshot)
++      lastMap = { snapshot, value }
++      return value
++    }
++    const result: ReadonlyMap<string, string> = {
++      get size() { return checked(() => { open(); return storage.pairCount(snapshot) }) },
++      get(key) { return checked(() => { open(); const value = storage.pairGet(snapshot, json(key)); return value === undefined ? undefined : JSON.parse(value) }) },
++      has(key) { return checked(() => { open(); return storage.pairGet(snapshot, json(key)) !== undefined }) },
++      entries,
++      *keys(): MapIterator<string> { for (const [key] of entries()) yield key },
++      *values(): MapIterator<string> { for (const [, value] of entries()) yield value },
++      [Symbol.iterator]: entries,
++      forEach(callback, thisArg) { checked(() => { for (const [key, value] of entries()) callback.call(thisArg, value, key, result) }) }
++    }
++    mapSnapshots.set(result, snapshot)
++    lastMap = { snapshot, value: Object.freeze(result) }
++    return lastMap.value
++  }
++  type Body = Omit<ScanNfoPreflight, 'anchor'> & {
++    anchor: { rootId: number; anchorPath: string; directoryVideoCodes: LocalNfoAnchor['directoryVideoCodes']; sidecars?: string }
++  }
++  const hydrate = (body: string): ScanNfoPreflight => {
++    const value = JSON.parse(body) as Body
++    const root = snapshots.get(value.anchor.rootId)
++    if (!root) throw new Error('Unknown NFO workset root')
++    return { ...value, anchor: { root, anchorPath: value.anchor.anchorPath,
++      directoryVideoCodes: identityFor(path.dirname(value.anchor.anchorPath), JSON.stringify(value.anchor.directoryVideoCodes)),
++      ...(value.anchor.sidecars === undefined ? {} : { directorySidecars: mapFor(value.anchor.sidecars) }) } }
++  }
++  return {
++    setSidecars(dir, map) { checked(() => {
++      mutate('directories')
++      const key = json(dir), snapshot = randomUUID()
++      storage.transaction(() => {
++        let ordinal = 0
++        for (const [name, value] of map) {
++          const encodedKey = json(name), encodedValue = json(value)
++          budget(encodedKey, encodedValue)
++          storage.pair(snapshot, ++ordinal, encodedKey, encodedValue)
++        }
++        storage.sidecars(key, snapshot)
++      })
++    }) },
++    hasSidecars(dir) { return checked(() => { open(); return storage.directory(json(dir))?.sidecars !== undefined }) },
++    getSidecars(dir) { return checked(() => {
++      open(); const snapshot = storage.directory(json(dir))?.sidecars
++      return snapshot === undefined ? undefined : mapFor(snapshot)
++    }) },
++    getDirectoryIdentity(dir) { return checked(() => {
++      open(); const identity = storage.directory(json(dir))?.identity
++      return identity === undefined ? undefined : identityFor(dir, identity) as DirectoryVideoIdentitySummary
++    }) },
++    setDirectoryIdentity(dir, summary) { checked(() => {
++      mutate('directories'); const key = json(dir), body = json(summary); budget(key, body)
++      storage.transaction(() => storage.identity(key, body))
++    }) },
++    sealDirectories() { checked(() => { mutate('directories'); state = 'preflights' }) },
++    setPreflight(path, value) { checked(() => {
++      mutate('preflights')
++      if (value.inspection.status === 'missing') return
++      if (!snapshots.has(value.anchor.root.id)) throw new Error('Unknown NFO workset root')
++      const sidecars = value.anchor.directorySidecars === undefined ? undefined : mapSnapshots.get(value.anchor.directorySidecars)
++      if (value.anchor.directorySidecars !== undefined && sidecars === undefined) throw new Error('NFO sidecars must belong to this workset')
++      const body = json({ ...value, anchor: { rootId: value.anchor.root.id, anchorPath: value.anchor.anchorPath,
++        directoryVideoCodes: value.anchor.directoryVideoCodes, ...(sidecars === undefined ? {} : { sidecars }) } })
++      const key = json(path), effective = json(value.effectiveCode)
++      budget(key, body, effective)
++      storage.transaction(() => storage.preflight(key, { body, effective }))
++    }) },
++    getPreflight(path) { return checked(() => { open(); const row = storage.preflightGet(json(path)); return row && hydrate(row.body) }) },
++    getEffectiveCode(path) { return checked(() => {
++      open(); const value = storage.effective(json(path)); return value === undefined ? undefined : { effectiveCode: JSON.parse(value) }
++    }) },
++    sealPreflights() { checked(() => { mutate('preflights'); state = 'queue' }) },
++    enqueue(videoId, code, filePath) { checked(() => {
++      // Deliberate exception: summary enqueue shares the file's business transaction.
++      // Ordinals and first-code selection are DB-owned, so outer rollback is complete.
++      open(); if (state !== 'queue') throw new Error('NFO workset must be queue')
++      if (!Number.isSafeInteger(videoId) || videoId <= 0) throw new Error('Invalid NFO video id')
++      const key = json(filePath), encodedCode = json(code); budget(key, encodedCode)
++      const row = storage.preflightGet(key)
++      if (!row) return
++      const value = JSON.parse(row.body) as Body
++      if (value.identityConflict || value.inspection.status !== 'found') return
++      storage.transaction(() => storage.enqueue(videoId, encodedCode, key))
++    }) },
++    sealQueue() { checked(() => { mutate('queue'); state = 'sealed' }) },
++    batches() { return checked(() => {
++      open(); if (state !== 'sealed') throw new Error('NFO queue must be sealed')
++      return { *[Symbol.iterator]() {
++        let after = 0
++        while (true) {
++          const video = checked(() => { open(); return storage.videoNext(after) })
++          if (!video) return
++          const anchors: LocalNfoAnchor[] = []
++          let anchorAfter = 0
++          while (true) {
++            const row = checked(() => { open(); return storage.queueNext(video.videoId, anchorAfter) })
++            if (!row) break
++            anchors.push(checked(() => hydrate(row.body)).anchor)
++            anchorAfter = row.ordinal
++          }
++          after = video.ordinal
++          yield checked(() => [video.videoId, { code: JSON.parse(video.code), anchors }] as [number, ScanNfoVideoBatch])
++        }
++      } }
++    }) },
++    dispose() { checked(() => {
++      if (state === 'disposed') return
++      storage.outside(); state = 'closing'
++      storage.dispose(); lastMap = undefined; lastIdentity = undefined; state = 'disposed'
++    }) }
++  }
++}
++
++/** Request-private TEMP storage. Sidecars are rowwise SQL maps; every read completes
++ * before yielding. A directory write remains one synchronous transaction, not a
++ * whole-phase latency guarantee. Incoming readdir/maps and one video's complete
++ * anchor array remain unbounded; this preserves the existing atomic apply contract.
++ */
++export function createScanNfoWorkset(db: Database.Database, roots: readonly Readonly<MediaLibraryRoot>[]): ScanNfoWorkset {
++  return checked(() => {
++    if (db.inTransaction) throw new Error('NFO workset cannot be created inside a caller transaction')
++    const prefix = `scan_nfo_workset_${randomUUID().replaceAll('-', '')}`
++    const d = `${prefix}_directories`, s = `${prefix}_sidecars`, p = `${prefix}_preflights`, v = `${prefix}_videos`, q = `${prefix}_queue`
++    return db.transaction(() => {
++      db.exec(`CREATE TEMP TABLE ${d}(key TEXT COLLATE BINARY PRIMARY KEY, sidecars TEXT, identity TEXT) WITHOUT ROWID;
++        CREATE TEMP TABLE ${s}(snapshot TEXT, ordinal INTEGER, key TEXT COLLATE BINARY, value TEXT NOT NULL,
++          PRIMARY KEY(snapshot,ordinal), UNIQUE(snapshot,key)) WITHOUT ROWID;
++        CREATE TEMP TABLE ${p}(key TEXT COLLATE BINARY PRIMARY KEY, body TEXT NOT NULL, effective TEXT NOT NULL) WITHOUT ROWID;
++        CREATE TEMP TABLE ${v}(ordinal INTEGER PRIMARY KEY, video_id INTEGER UNIQUE NOT NULL, code TEXT NOT NULL);
++        CREATE TEMP TABLE ${q}(ordinal INTEGER PRIMARY KEY, video_id INTEGER NOT NULL, path TEXT COLLATE BINARY NOT NULL);
++        CREATE INDEX ${prefix}_queue_video ON ${q}(video_id,ordinal);`)
++      const statements = {
++        directory: db.prepare(`SELECT sidecars,identity FROM ${d} WHERE key=?`),
++        sidecars: db.prepare(`INSERT INTO ${d}(key,sidecars) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET sidecars=excluded.sidecars`),
++        identity: db.prepare(`INSERT INTO ${d}(key,identity) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET identity=excluded.identity`),
++        pair: db.prepare(`INSERT INTO ${s}(snapshot,ordinal,key,value) VALUES(?,?,?,?)`),
++        pairGet: db.prepare(`SELECT value FROM ${s} WHERE snapshot=? AND key=?`),
++        pairNext: db.prepare(`SELECT ordinal,key,value FROM ${s} WHERE snapshot=? AND ordinal>? ORDER BY ordinal LIMIT 1`),
++        pairCount: db.prepare(`SELECT COUNT(*) AS count FROM ${s} WHERE snapshot=?`),
++        preflight: db.prepare(`INSERT INTO ${p}(key,body,effective) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET body=excluded.body,effective=excluded.effective`),
++        preflightGet: db.prepare(`SELECT body,effective FROM ${p} WHERE key=?`),
++        effective: db.prepare(`SELECT effective FROM ${p} WHERE key=?`),
++        video: db.prepare(`INSERT INTO ${v}(video_id,code) VALUES(?,?) ON CONFLICT(video_id) DO NOTHING`),
++        queue: db.prepare(`INSERT INTO ${q}(video_id,path) VALUES(?,?)`),
++        videoNext: db.prepare(`SELECT ordinal,video_id AS videoId,code FROM ${v} WHERE ordinal>? ORDER BY ordinal LIMIT 1`),
++        queueNext: db.prepare(`SELECT q.ordinal,p.body FROM ${q} q JOIN ${p} p ON p.key=q.path
++          WHERE q.video_id=? AND q.ordinal>? ORDER BY q.ordinal LIMIT 1`)
++      }
++      const transaction = db.transaction((fn: () => unknown) => fn())
++      const storage: Storage = {
++        transaction: <T>(fn: () => T): T => transaction(fn) as T,
++        outside() { if (db.open && db.inTransaction) throw new Error('NFO workset mutation inside a caller transaction') },
++        open() { if (!db.open) throw new Error('NFO workset database is closed') },
++        directory(key) {
++          const row = statements.directory.get(key) as {sidecars: string | null; identity: string | null} | undefined
++          return row && { ...(row.sidecars === null ? {} : { sidecars: row.sidecars }), ...(row.identity === null ? {} : { identity: row.identity }) }
++        },
++        sidecars(key, snapshot) { statements.sidecars.run(key, snapshot) },
++        identity(key, body) { statements.identity.run(key, body) },
++        pair(snapshot, ordinal, key, value) { statements.pair.run(snapshot, ordinal, key, value) },
++        pairGet(snapshot, key) { return (statements.pairGet.get(snapshot, key) as {value: string} | undefined)?.value },
++        pairNext(snapshot, ordinal) { return statements.pairNext.get(snapshot, ordinal) as ReturnType<Storage['pairNext']> },
++        pairCount(snapshot) { return (statements.pairCount.get(snapshot) as {count: number}).count },
++        preflight(key, row) { statements.preflight.run(key, row.body, row.effective) },
++        preflightGet(key) { return statements.preflightGet.get(key) as PreflightRow | undefined },
++        effective(key) { return (statements.effective.get(key) as {effective: string} | undefined)?.effective },
++        enqueue(videoId, code, key) { statements.video.run(videoId, code); statements.queue.run(videoId, key) },
++        videoNext(ordinal) { return statements.videoNext.get(ordinal) as VideoRow | undefined },
++        queueNext(videoId, ordinal) { return statements.queueNext.get(videoId, ordinal) as QueueRow | undefined },
++        dispose() {
++          if (!db.open) return
++          transaction(() => { for (const table of [q, v, p, s, d]) db.exec(`DROP TABLE IF EXISTS temp.${table}`) })
++        }
++      }
++      return workset(storage, roots)
++    })()
++  })
++}
++
++/** Detailed oracle intentionally retains the full workset in memory. */
++export function createMemoryScanNfoWorkset(roots: readonly Readonly<MediaLibraryRoot>[]): ScanNfoWorkset {
++  return checked(() => {
++    const directories = new Map<string, Directory>()
++    const sidecars = new Map<string, { byKey: Map<string, string>; rows: Array<{ordinal: number; key: string; value: string}> }>()
++    const preflights = new Map<string, PreflightRow>(), videos = new Map<number, VideoRow>()
++    const videoRows: VideoRow[] = []
++    const queue = new Map<number, Array<{ordinal: number; key: string}>>()
++    const storage: Storage = {
++      transaction: fn => fn(), outside() {}, open() {},
++      directory: key => directories.get(key),
++      sidecars(key, snapshot) { directories.set(key, { ...directories.get(key), sidecars: snapshot }) },
++      identity(key, body) { directories.set(key, { ...directories.get(key), identity: body }) },
++      pair(snapshot, ordinal, key, value) {
++        let entries = sidecars.get(snapshot)
++        if (!entries) { entries = { byKey: new Map(), rows: [] }; sidecars.set(snapshot, entries) }
++        entries.byKey.set(key, value)
++        entries.rows.push({ ordinal, key, value })
++      },
++      pairGet: (snapshot, key) => sidecars.get(snapshot)?.byKey.get(key),
++      pairNext: (snapshot, after) => sidecars.get(snapshot)?.rows[after],
++      pairCount: snapshot => sidecars.get(snapshot)?.rows.length ?? 0,
++      preflight(key, row) { preflights.set(key, row) },
++      preflightGet: key => preflights.get(key), effective: key => preflights.get(key)?.effective,
++      enqueue(videoId, code, key) {
++        if (!videos.has(videoId)) {
++          const video = { ordinal: videoRows.length + 1, videoId, code }
++          videos.set(videoId, video); videoRows.push(video)
++        }
++        let rows = queue.get(videoId)
++        if (!rows) { rows = []; queue.set(videoId, rows) }
++        rows.push({ ordinal: rows.length + 1, key })
++      },
++      videoNext: after => videoRows[after],
++      queueNext(videoId, after) {
++        const row = queue.get(videoId)?.[after]
++        return row && { ordinal: row.ordinal, body: preflights.get(row.key)!.body }
++      },
++      dispose() { directories.clear(); sidecars.clear(); preflights.clear(); videos.clear(); videoRows.length = 0; queue.clear() }
++    }
++    return workset(storage, roots, true)
++  })
++}
+diff --git a/src/main/scanner/scanNfoWorkset.test.ts b/src/main/scanner/scanNfoWorkset.test.ts
+new file mode 100644
+index 0000000..7abbc89
+--- /dev/null
++++ b/src/main/scanner/scanNfoWorkset.test.ts
+@@ -0,0 +1,282 @@
++import assert from 'node:assert/strict'
++import { afterEach, beforeEach, it } from 'node:test'
++import Database from 'better-sqlite3'
++import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
++import { summarizeDirectoryVideoCodes } from '../nfo/directoryVideoIdentity'
++import { createScanNfoWorkset, createMemoryScanNfoWorkset, ScanNfoWorksetError,
++  SCAN_NFO_WORKSET_MAX_BYTES, type ScanNfoWorkset, type ScanNfoPreflight } from './scanNfoWorkset'
++
++let db: Database.Database
++beforeEach(() => { db = new Database(':memory:') })
++afterEach(() => { if (db.open) db.close() })
++function root(id = 1): MediaLibraryRoot {
++  return { id, libraryId: 1, path: '/dir', normalizedPath: '/dir', realPath: null,
++    normalizedRealPath: null, deviceId: null, inode: null, position: id, state: 'active', createdAt: '', updatedAt: '' }
++}
++function table(suffix: string) {
++  return (db.prepare("SELECT name FROM sqlite_temp_master WHERE type='table' AND name LIKE ?").get(`scan_nfo_workset_%_${suffix}`) as {name: string}).name
++}
++function noTables() {
++  assert.deepEqual(db.prepare("SELECT name FROM sqlite_temp_master WHERE name LIKE 'scan_nfo_workset_%'").all(), [])
++}
++function fails(fn: () => unknown, message: RegExp) {
++  assert.throws(fn, (error: unknown) => {
++    assert.ok(error instanceof ScanNfoWorksetError)
++    assert.ok(error.cause instanceof Error)
++    assert.match(error.cause.message, message)
++    return true
++  })
++}
++function preflight(store: ScanNfoWorkset, file = '/dir/a', rootId = 1): ScanNfoPreflight {
++  return { anchor: { root: root(rootId), anchorPath: file, directoryVideoCodes: store.getDirectoryIdentity('/dir')!, directorySidecars: store.getSidecars('/dir') },
++    filenameCode: 'abc', nfoCode: 'ABC', effectiveCode: 'ABC', identityConflict: false,
++    inspection: { status: 'found', code: ' ABC ', warnings: ['warning\0\ud800', 'x'.repeat(3000)] } }
++}
++function directories(store: ScanNfoWorkset) {
++  store.setSidecars('/dir', new Map([['A.NFO', 'A.NFO'], ['a.nfo', 'A.NFO'], ['movie.nfo', 'movie.nfo']]))
++  store.setDirectoryIdentity('/dir', summarizeDirectoryVideoCodes(['abc', 'ABC']))
++  store.sealDirectories()
++}
++
++it('matches the memory oracle for exact strings, ordered maps, overwrites and first-video/duplicate-anchor order', () => {
++  const sql = createScanNfoWorkset(db, [root(), root(2)]), memory = createMemoryScanNfoWorkset([root(), root(2)])
++  const outputs = []
++  for (const store of [sql, memory]) {
++    const names = new Map([['\ud800', '\0'], ['\ud801', '�'], ['a\0b', '"\\'], ['ABC', 'abc']])
++    store.setSidecars('dir\ud800', names)
++    assert.equal(store.hasSidecars('dir\ud801'), false)
++    const old = store.getSidecars('dir\ud800')!
++    assert.deepEqual([...old], [...names])
++    assert.deepEqual([...old.keys()], [...names.keys()])
++    assert.deepEqual([...old.values()], [...names.values()])
++    assert.equal(old.size, 4)
++    assert.equal(old.get('\ud800'), '\0')
++    assert.equal(old.has('missing'), false)
++    const visited: string[] = []
++    old.forEach(function (this: string[], value, key, map) { assert.equal(map, old); this.push(key + value) }, visited)
++    assert.deepEqual(visited, [...names].map(([key, value]) => key + value))
++    store.setSidecars('dir\ud800', new Map())
++    assert.equal(store.getSidecars('dir\ud800')!.size, 0)
++    assert.deepEqual([...old], [...names])
++    directories(store)
++    const first = preflight(store)
++    store.setPreflight('key\ud800', first)
++    store.setPreflight('key\ud800', { ...first, anchor: { ...first.anchor, root: root(2), anchorPath: '/dir/changed' }, effectiveCode: null })
++    store.setPreflight('key\ud800', { ...first, inspection: { status: 'missing', code: null, warnings: [] } })
++    assert.deepEqual(store.getEffectiveCode('key\ud800'), { effectiveCode: null })
++    assert.equal(store.getEffectiveCode('key\ud801'), undefined)
++    const fetched = store.getPreflight('key\ud800')!
++    assert.equal(fetched.anchor.root.id, 2)
++    assert.equal(fetched.anchor.anchorPath, '/dir/changed')
++    fetched.inspection.warnings.length = 0
++    assert.equal(store.getPreflight('key\ud800')!.inspection.warnings.length, 2)
++    store.setPreflight('second', preflight(store, '/dir/b'))
++    store.setPreflight('conflict', { ...first, identityConflict: true })
++    store.sealPreflights()
++    store.enqueue(8, 'first', 'key\ud800'); store.enqueue(2, 'second', 'second')
++    store.enqueue(8, 'ignored later code', 'key\ud800'); store.enqueue(9, 'x', 'missing'); store.enqueue(9, 'x', 'conflict')
++    store.sealQueue()
++    const batches = [...store.batches()]
++    assert.deepEqual(batches.map(([id, batch]) => [id, batch.code, batch.anchors.length]), [[8, 'first', 2], [2, 'second', 1]])
++    assert.equal(batches[0][1].anchors[0].directoryVideoCodes, batches[0][1].anchors[1].directoryVideoCodes)
++    assert.equal(batches[0][1].anchors[0].directorySidecars, batches[0][1].anchors[1].directorySidecars)
++    outputs.push(batches.map(([id, batch]) => [id, batch.code, batch.anchors.map(anchor => ({ ...anchor, directorySidecars: [...anchor.directorySidecars!] }))]))
++    assert.equal([...store.batches()].length, 2)
++    store.dispose(); store.dispose()
++  }
++  assert.deepEqual(outputs[0], outputs[1]); noTables()
++})
++
++it('keeps only a last-directory identity snapshot and preserves frozen roots against external mutation', () => {
++  const mutable = root(), store = createScanNfoWorkset(db, [mutable])
++  const summary = summarizeDirectoryVideoCodes(['ABC'])
++  store.setDirectoryIdentity('/dir', summary)
++  const first = store.getDirectoryIdentity('/dir')!
++  assert.equal(first, store.getDirectoryIdentity('/dir'))
++  store.setDirectoryIdentity('/dir', summarizeDirectoryVideoCodes(['ABC', null]))
++  assert.equal(first.count, 1)
++  assert.notEqual(first, store.getDirectoryIdentity('/dir'))
++  store.sealDirectories()
++  store.setPreflight('a', preflight(store))
++  mutable.path = '/changed'
++  assert.equal(store.getPreflight('a')!.anchor.root.path, '/dir')
++  assert.ok(Object.isFrozen(store.getPreflight('a')!.anchor.root))
++  store.dispose()
++})
++
++it('supports paused sidecar/batch iterators and nested writes, without all-row queries or active cursors', () => {
++  const original = db.prepare, prepare = db.prepare.bind(db)
++  db.prepare = ((sql: string) => {
++    const statement = prepare(sql)
++    statement.all = (() => { throw new Error('unbounded all forbidden') }) as typeof statement.all
++    statement.iterate = (() => { throw new Error('active iterator forbidden') }) as typeof statement.iterate
++    return statement
++  }) as typeof db.prepare
++  try {
++    const store = createScanNfoWorkset(db, [root()])
++    directories(store)
++    const cursor = store.getSidecars('/dir')!.entries()
++    assert.equal(cursor.next().value?.[0], 'A.NFO')
++    db.exec('CREATE TABLE business(value INTEGER)')
++    db.transaction(() => db.transaction(() => db.prepare('INSERT INTO business VALUES(1)').run())())()
++    assert.equal(cursor.next().value?.[0], 'a.nfo')
++    store.setPreflight('a', preflight(store)); store.sealPreflights()
++    store.enqueue(1, 'a', 'a'); store.enqueue(2, 'b', 'a'); store.sealQueue()
++    const batches = store.batches()[Symbol.iterator]()
++    assert.equal(batches.next().value?.[0], 1)
++    db.transaction(() => {
++      assert.equal(store.getPreflight('a')!.anchor.directorySidecars!.get('movie.nfo'), 'movie.nfo')
++      db.prepare('INSERT INTO business VALUES(2)').run()
++    })()
++    assert.equal(batches.next().value?.[0], 2)
++    store.dispose()
++  } finally { db.prepare = original }
++})
++
++it('native sidecar and preflight writes roll back and retry without losing the old snapshot', () => {
++  const store = createScanNfoWorkset(db, [root()])
++  store.setSidecars('/dir', new Map([['old', 'old']]))
++  const s = table('sidecars')
++  db.exec(`CREATE TEMP TRIGGER sidecar_fault BEFORE INSERT ON ${s} WHEN NEW.ordinal=2 BEGIN SELECT RAISE(ABORT,'sidecar fault'); END`)
++  fails(() => store.setSidecars('/dir', new Map([['a', 'a'], ['b', 'b']])), /sidecar fault/)
++  assert.deepEqual([...store.getSidecars('/dir')!], [['old', 'old']])
++  db.exec('DROP TRIGGER sidecar_fault')
++  directories(store)
++  store.setPreflight('a', preflight(store))
++  const p = table('preflights')
++  db.exec(`CREATE TEMP TRIGGER preflight_fault AFTER UPDATE ON ${p} BEGIN SELECT RAISE(ABORT,'preflight fault'); END`)
++  fails(() => store.setPreflight('a', { ...preflight(store), effectiveCode: 'changed' }), /preflight fault/)
++  assert.deepEqual(store.getEffectiveCode('a'), { effectiveCode: 'ABC' })
++  db.exec('DROP TRIGGER preflight_fault')
++  store.setPreflight('a', { ...preflight(store), effectiveCode: 'changed' })
++  assert.deepEqual(store.getEffectiveCode('a'), { effectiveCode: 'changed' })
++  store.dispose()
++})
++
++it('native queue failure rolls back first-video insertion and duplicate retry order', () => {
++  const store = createScanNfoWorkset(db, [root()]); directories(store)
++  store.setPreflight('a', preflight(store)); store.sealPreflights()
++  const q = table('queue')
++  db.exec(`CREATE TEMP TRIGGER queue_fault BEFORE INSERT ON ${q} BEGIN SELECT RAISE(ABORT,'queue fault'); END`)
++  fails(() => store.enqueue(3, 'failed', 'a'), /queue fault/)
++  db.exec('DROP TRIGGER queue_fault')
++  store.enqueue(2, 'first', 'a'); store.enqueue(3, 'retry', 'a'); store.sealQueue()
++  assert.deepEqual([...store.batches()].map(([id, batch]) => [id, batch.code]), [[2, 'first'], [3, 'retry']])
++  store.dispose()
++})
++
++it('enforces budgets without truncation, lifecycle and external transaction guards', () => {
++  fails(() => db.transaction(() => createScanNfoWorkset(db, [root()]))(), /caller transaction/)
++  const store = createScanNfoWorkset(db, [root()])
++  fails(() => store.setSidecars('/dir', new Map([['a', 'x'.repeat(SCAN_NFO_WORKSET_MAX_BYTES)]])), /1 MiB/)
++  assert.equal(store.hasSidecars('/dir'), false)
++  db.transaction(() => {
++    fails(() => store.setSidecars('/dir', new Map()), /caller transaction/)
++    fails(() => store.sealDirectories(), /caller transaction/)
++    fails(() => store.dispose(), /caller transaction/)
++  })()
++  directories(store)
++  fails(() => store.setSidecars('/dir', new Map()), /directories/)
++  fails(() => store.setPreflight('a', { ...preflight(store), inspection: { status: 'found', code: 'ABC', warnings: ['x'.repeat(SCAN_NFO_WORKSET_MAX_BYTES)] } }), /1 MiB/)
++  assert.equal(store.getPreflight('a'), undefined)
++  store.setPreflight('a', preflight(store)); store.sealPreflights()
++  fails(() => store.setPreflight('a', preflight(store)), /preflights/)
++  fails(() => store.batches(), /sealed/)
++  store.sealQueue(); fails(() => store.enqueue(1, 'x', 'a'), /queue/)
++  store.dispose(); fails(() => store.hasSidecars('/dir'), /closed/)
++})
++
++it('wraps native reads and rolls all-table cleanup back for retry; closed database is safe', () => {
++  const store = createScanNfoWorkset(db, [root()]); directories(store)
++  const s = table('sidecars'), map = store.getSidecars('/dir')!
++  db.exec(`ALTER TABLE ${s} RENAME TO hidden_sidecars`)
++  fails(() => map.get('a'), /no such table/)
++  db.exec(`ALTER TABLE hidden_sidecars RENAME TO ${s}`)
++  assert.equal(map.size, 3)
++  const original = db.exec, exec = db.exec.bind(db)
++  let drops = 0
++  db.exec = ((sql: string) => { if (sql.startsWith('DROP TABLE') && ++drops === 2) throw new Error('drop fault'); return exec(sql) }) as typeof db.exec
++  try { fails(() => store.dispose(), /drop fault/) } finally { db.exec = original }
++  assert.equal(drops, 2)
++  assert.deepEqual(db.prepare("SELECT count(*) AS count FROM sqlite_temp_master WHERE type='table' AND name LIKE 'scan_nfo_workset_%'").get(), { count: 5 })
++  store.dispose(); noTables()
++  const closed = createScanNfoWorkset(db, [root()]); db.close(); closed.dispose()
++})
++
++it('factory invalid roots and prepare failures leave no TEMP objects', () => {
++  fails(() => createScanNfoWorkset(db, [root(), root()]), /Invalid/); noTables()
++  const original = db.prepare, prepare = db.prepare.bind(db)
++  db.prepare = ((sql: string) => { if (sql.includes('SELECT body,effective')) throw new Error('prepare fault'); return prepare(sql) }) as typeof db.prepare
++  try { fails(() => createScanNfoWorkset(db, [root()]), /prepare fault/) } finally { db.prepare = original }
++  noTables()
++})
++
++
++it('summary enqueue joins the outer business transaction and retries with fresh first-code/order', () => {
++  const store = createScanNfoWorkset(db, [root()]); directories(store)
++  store.setPreflight('a', preflight(store)); store.sealPreflights()
++  db.exec('CREATE TABLE business(value INTEGER)')
++  assert.throws(() => db.transaction(() => {
++    db.prepare('INSERT INTO business VALUES(1)').run()
++    store.enqueue(9, 'rolled back', 'a')
++    store.enqueue(9, 'duplicate', 'a')
++    throw new Error('business rollback')
++  })(), /business rollback/)
++  assert.deepEqual(db.prepare('SELECT * FROM business').all(), [])
++  db.transaction(() => {
++    db.prepare('INSERT INTO business VALUES(2)').run()
++    store.enqueue(2, 'first', 'a')
++    store.enqueue(9, 'retry', 'a')
++    store.enqueue(9, 'ignored later code', 'a')
++  })()
++  store.sealQueue()
++  assert.deepEqual([...store.batches()].map(([id, batch]) => [id, batch.code, batch.anchors.length]), [[2, 'first', 1], [9, 'retry', 2]])
++  store.dispose()
++})
++
++it('detailed materialized sidecar snapshots remain usable on returned anchors after disposal', () => {
++  const store = createMemoryScanNfoWorkset([root()]); directories(store)
++  store.setPreflight('a', preflight(store)); store.sealPreflights()
++  store.enqueue(1, 'ABC', 'a'); store.sealQueue()
++  const anchor = [...store.batches()][0][1].anchors[0]
++  assert.ok(anchor.directorySidecars instanceof Map)
++  store.dispose()
++  assert.equal(anchor.directorySidecars.get('movie.nfo'), 'movie.nfo')
++  assert.deepEqual([...anchor.directorySidecars], [['A.NFO', 'A.NFO'], ['a.nfo', 'A.NFO'], ['movie.nfo', 'movie.nfo']])
++})
++
++
++it('wraps lazy iterator decoding failures and permits reads to recover after raw storage repair', () => {
++  const store = createScanNfoWorkset(db, [root()]); directories(store)
++  const s = table('sidecars')
++  db.prepare(`UPDATE ${s} SET value='invalid JSON' WHERE ordinal=1`).run()
++  const map = store.getSidecars('/dir')!
++  fails(() => map.entries().next(), /JSON|Unexpected/)
++  db.prepare(`UPDATE ${s} SET value=? WHERE ordinal=1`).run(JSON.stringify('A.NFO'))
++  assert.equal(map.entries().next().value?.[1], 'A.NFO')
++  store.dispose()
++})
++
++it('memory oracle traverses large sidecar snapshots and many duplicate video queues in exact order', () => {
++  const store = createMemoryScanNfoWorkset([root()])
++  const pairs = Array.from({ length: 5000 }, (_, index) => [`${index}.nfo`, `file-${index}.nfo`] as [string, string])
++  store.setSidecars('/dir', new Map(pairs))
++  store.setDirectoryIdentity('/dir', summarizeDirectoryVideoCodes(['ABC']))
++  assert.deepEqual([...store.getSidecars('/dir')!], pairs)
++  store.sealDirectories()
++  store.setPreflight('a', preflight(store)); store.sealPreflights()
++  for (let repeat = 0; repeat < 3; repeat++) {
++    for (let video = 600; video > 0; video--) store.enqueue(video, `code-${video}`, 'a')
++  }
++  store.sealQueue()
++  let expected = 600
++  for (const [video, batch] of store.batches()) {
++    assert.equal(video, expected--)
++    assert.equal(batch.code, `code-${video}`)
++    assert.equal(batch.anchors.length, 3)
++    assert.equal(batch.anchors[0].directorySidecars!.get('4999.nfo'), 'file-4999.nfo')
++    assert.equal(batch.anchors[0].directorySidecars, batch.anchors[2].directorySidecars)
++  }
++  assert.equal(expected, 0)
++  store.dispose()
++})
+diff --git a/src/main/scanner/scannerNfoWorkset.test.ts b/src/main/scanner/scannerNfoWorkset.test.ts
+new file mode 100644
+index 0000000..ca25ea3
+--- /dev/null
++++ b/src/main/scanner/scannerNfoWorkset.test.ts
+@@ -0,0 +1,349 @@
++import { afterEach, beforeEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { toScanCompletionResult } from '@shared/scanResult'
++import { closeDatabase, initDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { beginLibraryScanRun } from '../db/libraryScanRepo'
++import { createScanAuditWriter } from '../db/scanAuditWriter'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import { localNfoScanService } from '../services/localNfoScanService'
++import { scanFolders, ScanFoldersFailure, type ScanOptions } from './scanner'
++
++let directory: string, media: string, previous: string | undefined, sequence = 0
++beforeEach(() => {
++  previous = process.env.JAVDEX_TEST_USER_DATA
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-workset-'))
++  media = path.join(directory, 'media'); fs.mkdirSync(media)
++  process.env.JAVDEX_TEST_USER_DATA = directory
++})
++afterEach(() => {
++  closeDatabase(); resetSettingsCacheForTests()
++  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = previous
++  fs.rmSync(directory, { recursive: true, force: true })
++})
++function setup(names: string[], multipleRoots = false) {
++  closeDatabase(); resetSettingsCacheForTests()
++  for (const name of names) {
++    const file = path.join(media, name)
++    fs.mkdirSync(path.dirname(file), { recursive: true })
++    fs.writeFileSync(file, name.endsWith('.strm') ? `https://example.test/${name}` : 'synthetic video')
++  }
++  const db = initDatabaseAtPath(path.join(directory, `catalog-${++sequence}.db`))
++  const library = createMediaLibrary({ name: 'Inventory', roots: multipleRoots ? [{ path: path.join(media, 'r2') }, { path: path.join(media, 'r1') }] : [{ path: media }] })
++  const request = { libraryId: library.id, runId: 'nfo-workset', roots: library.roots }
++  beginLibraryScanRun({ ...request, configRevision: 1, trigger: 'manual', startedAt: 'start' })
++  const writer = createScanAuditWriter(db, request)
++  writer.start({ schemaVersion: 2, ...request, configRevision: 1, trigger: 'manual', startedAt: 'start', finishedAt: 'pending', status: 'success' })
++  const sink: NonNullable<ScanOptions['auditSink']> = {
++    recordFile: entry => writer.writeBatch('files', [entry]),
++    readFileNfo: filePath => writer.readFileNfo(filePath), patchNfo: (filePath, nfo) => writer.patchNfo(filePath, nfo)
++  }
++  const options: ScanOptions = { auditSink: sink, autoMergeSameCodeResources: true, autoImportLocalNfo: true, minImportDurationSeconds: 1,
++    readDurationSeconds: async () => 120,
++    readDirectory: async dir => (await fs.promises.readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name)) }
++  const tempTables = () => db.prepare("SELECT name FROM sqlite_temp_master WHERE type='table' ORDER BY name").all() as { name: string }[]
++  const audits = () => db.prepare("SELECT ordinal,entry_key,entry_json FROM library_scan_audit_entries WHERE run_id='nfo-workset' AND section='files' ORDER BY ordinal").all()
++  return { db, request, options, tempTables, audits }
++}
++
++
++function writeMovie(folder: string, code: string, title: string) {
++  fs.writeFileSync(path.join(folder, 'movie.nfo'), `<movie><num>${code}</num><title>${title}</title><plot>Actual local metadata</plot></movie>`)
++}
++
++it('matches detailed real NFO results and audits for several videos and many anchors while TEMP remains alive through apply', async () => {
++  const names = [...Array.from({ length: 24 }, (_, index) => `r1/ABC-001-CD${index + 1}.mp4`),
++    ...Array.from({ length: 12 }, (_, index) => `r2/DEF-002-CD${index + 1}.strm`)]
++  async function run(resultMode: 'summary' | 'detailed') {
++    const current = setup(names, true)
++    writeMovie(path.join(media, 'r1'), 'ABC-001', 'Actual ABC title')
++    writeMovie(path.join(media, 'r2'), 'DEF-002', 'Actual DEF title')
++    const alive: boolean[] = [], scratchReleased: boolean[] = [], counts: number[] = []
++    const result = await scanFolders(current.request, undefined, { ...current.options, resultMode,
++      localNfoService: {
++        inspectIdentity: anchor => localNfoScanService.inspectIdentity(anchor),
++        apply: async (videoId, code, anchors, beforeCommit) => {
++          counts.push(anchors.length)
++          alive.push(current.tempTables().some(row => row.name.includes('nfo')))
++          scratchReleased.push(current.tempTables().every(row => !/scan_file_inventory_|scan_code_counts_/.test(row.name)))
++          return localNfoScanService.apply(videoId, code, anchors, beforeCommit)
++        }
++      }
++    })
++    assert.deepEqual(counts, [12, 24])
++    assert.deepEqual(alive, [resultMode === 'summary', resultMode === 'summary'])
++    assert.deepEqual(scratchReleased, [true, true])
++    assert.deepEqual(current.db.prepare('SELECT code,title,scraped_status FROM videos ORDER BY code').all(), [
++      { code: 'ABC-001', title: 'Actual ABC title', scraped_status: 1 },
++      { code: 'DEF-002', title: 'Actual DEF title', scraped_status: 1 }
++    ])
++    assert.deepEqual(current.tempTables(), [])
++    return { result: toScanCompletionResult(result), audits: current.audits() }
++  }
++  assert.deepEqual(await run('summary'), await run('detailed'))
++})
++
++it('retains the discovered sidecar and directory identity snapshot across filesystem changes before apply', async () => {
++  const current = setup(['ABC-001-CD1.mp4', 'ABC-001-CD2.mp4'])
++  writeMovie(media, 'ABC-001', 'Snapshot movie title')
++  let changed = false
++  const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    localNfoService: {
++      inspectIdentity: anchor => {
++        const result = localNfoScanService.inspectIdentity(anchor)
++        if (!changed) {
++          changed = true
++          fs.writeFileSync(path.join(media, 'ABC-001-CD1.nfo'), '<movie><num>ABC-001</num><title>Late exact title</title></movie>')
++          fs.writeFileSync(path.join(media, 'OTHER-999.mp4'), 'late sibling')
++        }
++        return result
++      },
++      apply: (videoId, code, anchors, beforeCommit) => localNfoScanService.apply(videoId, code, anchors, beforeCommit)
++    }
++  })
++  assert.equal(result.scannedFiles, 2)
++  assert.equal(changed, true)
++  assert.deepEqual(current.db.prepare('SELECT code,title FROM videos').all(), [{ code: 'ABC-001', title: 'Snapshot movie title' }])
++  assert.deepEqual(current.tempTables(), [])
++})
++
++it('preserves duplicate-path preflight overwrite and final warning audit semantics', async () => {
++  async function run(resultMode: 'summary' | 'detailed') {
++    const current = setup(['ABC-001.mp4']), file = path.join(media, 'ABC-001.mp4')
++    let inspected = 0
++    const result = await scanFolders({ ...current.request, filePaths: [file, file] }, undefined, { ...current.options, resultMode,
++      localNfoService: {
++        inspectIdentity: () => ({ status: 'found', code: 'ABC-001', warnings: [++inspected === 1 ? 'old preflight' : 'latest preflight'] }),
++        apply: async () => ({ disposition: 'imported', warnings: ['apply warning'] })
++      }
++    })
++    assert.equal(inspected, 2); assert.equal(result.scannedFiles, 2)
++    const audits = current.audits()
++    assert.equal(audits.length, 1)
++    assert.match(JSON.stringify(audits), /latest preflight/)
++    assert.doesNotMatch(JSON.stringify(audits), /old preflight/)
++    assert.deepEqual(current.tempTables(), [])
++    return { result: toScanCompletionResult(result), audits }
++  }
++  assert.deepEqual(await run('summary'), await run('detailed'))
++})
++
++it('does not create or query any NFO workset with summary NFO disabled', async context => {
++  const current = setup(['ABC-001.mp4']), prepare = current.db.prepare, exec = current.db.exec
++  let nfoSql = 0, inspected = 0, applied = 0
++  context.mock.method(current.db, 'prepare', (sql: string) => { if (/scan_nfo/.test(sql)) nfoSql++; return prepare.call(current.db, sql) })
++  context.mock.method(current.db, 'exec', (sql: string) => { if (/scan_nfo/.test(sql)) nfoSql++; return exec.call(current.db, sql) })
++  const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', autoImportLocalNfo: false,
++    localNfoService: {
++      inspectIdentity: () => { inspected++; return { status: 'missing', code: null, warnings: [] } },
++      apply: async () => { applied++; return { disposition: 'none', warnings: [] } }
++    }
++  })
++  assert.equal(result.imported, 1)
++  assert.equal(nfoSql, 0); assert.equal(inspected, 0); assert.equal(applied, 0)
++})
++
++for (const phase of ['inspect', 'apply'] as const) it(`keeps an actual SQL sidecar lookup failure fatal during ${phase}`, async () => {
++  const current = setup(['ABC-001.mp4'])
++  writeMovie(media, 'ABC-001', 'Original title')
++  const breakSidecars = () => {
++    const table = current.tempTables().find(row => row.name.includes('scan_nfo_workset_') && row.name.endsWith('_sidecars'))!.name
++    current.db.exec(`DROP TABLE temp."${table}"`)
++  }
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    localNfoService: {
++      inspectIdentity: anchor => { if (phase === 'inspect') breakSidecars(); return localNfoScanService.inspectIdentity(anchor) },
++      apply: (videoId, code, anchors, beforeCommit) => { if (phase === 'apply') breakSidecars(); return localNfoScanService.apply(videoId, code, anchors, beforeCommit) }
++    }
++  }), error => {
++    assert.ok(error instanceof ScanFoldersFailure); assert.match(error.message, /no such table/)
++    assert.equal(error.partialResult.failed, 0)
++    assert.equal(error.partialResult.imported, phase === 'apply' ? 1 : 0)
++    return true
++  })
++  assert.equal(current.audits().length, phase === 'apply' ? 1 : 0)
++  if (phase === 'apply') assert.deepEqual(current.db.prepare('SELECT scraped_status FROM videos').all(), [{ scraped_status: 0 }])
++  assert.deepEqual(current.tempTables(), [])
++})
++
++for (const extension of ['mp4', 'strm']) for (const existingVideo of [false, true]) it(`rolls queue INSERT failure back with the ${extension} ${existingVideo ? 'existing-video resource' : 'new video'} and retries actual NFO`, async () => {
++  const current = setup(['AAA-001.mp4', `BBB-002.${extension}`])
++  fs.writeFileSync(path.join(media, 'BBB-002.nfo'), '<movie><num>BBB-002</num><title>Retried actual NFO</title></movie>')
++  if (existingVideo) {
++    current.db.prepare("INSERT INTO videos(code) VALUES('BBB-002')").run()
++    current.db.prepare("INSERT INTO library_video_memberships(library_id,video_id,discovery_key) SELECT ?,id,1 FROM videos WHERE code='BBB-002'").run(current.request.libraryId)
++  }
++  let observed: unknown[] | undefined
++  current.db.function('observe_queue_mutation', (resources, audits) => { observed = [resources, audits]; return 0 })
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    readDirectory: async dir => {
++      const table = current.tempTables().find(row => row.name.includes('scan_nfo_workset_') && row.name.endsWith('_queue'))!.name
++      current.db.exec(`CREATE TEMP TRIGGER fail_nfo_queue AFTER INSERT ON "${table}" BEGIN
++        SELECT observe_queue_mutation(
++          (SELECT COUNT(*) FROM video_resources WHERE video_id=(SELECT id FROM videos WHERE code='BBB-002')),
++          (SELECT COUNT(*) FROM library_scan_audit_entries WHERE section='files' AND entry_key LIKE '%BBB-002%'));
++        SELECT RAISE(ABORT,'NFO queue INSERT fault'); END`)
++      return current.options.readDirectory!(dir)
++    }
++  }), error => {
++    assert.ok(error instanceof ScanFoldersFailure); assert.match(error.message, /NFO queue INSERT fault/)
++    assert.equal(error.partialResult.imported, 1); assert.equal(error.partialResult.scannedFiles, 2)
++    assert.equal(error.partialResult.failed, 0)
++    return true
++  })
++  assert.deepEqual(observed, [1, 1], 'native fault occurs after current resource and file audit writes')
++  assert.deepEqual(current.db.prepare("SELECT COUNT(*) AS n FROM video_resources WHERE video_id=(SELECT id FROM videos WHERE code='BBB-002')").get(), { n: 0 })
++  assert.equal(Boolean(current.db.prepare("SELECT id FROM videos WHERE code='BBB-002'").get()), existingVideo)
++  assert.equal(current.audits().length, 1, 'previous committed file audit survives; current file audit rolls back')
++  assert.deepEqual(current.tempTables(), [])
++  // TEMP trigger was dropped with its workset table. Rediscovery must still import the rolled-back file.
++  const retry = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary' })
++  assert.equal(retry.imported, 1)
++  assert.deepEqual(current.db.prepare("SELECT title,scraped_status FROM videos WHERE code='BBB-002'").get(), { title: 'Retried actual NFO', scraped_status: 1 })
++  assert.equal(current.audits().length, 2)
++  assert.deepEqual(current.tempTables(), [])
++})
++
++it('keeps the workset alive while draining committed NFO audit warnings on cancellation and skips the next batch', async context => {
++  const current = setup(['AAA-001-CD1.mp4', 'AAA-001-CD2.mp4', 'BBB-002.mp4']), controller = new AbortController()
++  let applies = 0, aliveDuringCommit = false, queueReadsAfterCancel = 0
++  const prepare = current.db.prepare
++  context.mock.method(current.db, 'prepare', (sql: string) => {
++    const statement = prepare.call(current.db, sql)
++    if (sql.startsWith('SELECT q.ordinal,p.body') && sql.includes('_queue')) {
++      const get = statement.get
++      context.mock.method(statement, 'get', (...args: unknown[]) => {
++        if (controller.signal.aborted) queueReadsAfterCancel++
++        return Reflect.apply(get, statement, args)
++      })
++    }
++    return statement
++  })
++  const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', signal: controller.signal, yieldEvery: 1,
++    localNfoService: {
++      inspectIdentity: anchor => ({ status: 'found', code: path.basename(anchor.anchorPath).startsWith('AAA') ? 'AAA-001' : 'BBB-002', warnings: ['preflight'] }),
++      apply: async (videoId, _code, _anchors, beforeCommit) => {
++        applies++
++        current.db.transaction(() => {
++          current.db.prepare('UPDATE videos SET title=? WHERE id=?').run('Committed NFO title', videoId)
++          beforeCommit?.({ disposition: 'imported', warnings: ['committed'] })
++          aliveDuringCommit = current.tempTables().some(row => row.name.includes('scan_nfo_workset_'))
++        })()
++        controller.abort()
++        // Any attempted hydration of the next batch now fails natively. Current audit drain must still finish.
++        const queue = current.tempTables().find(row => row.name.includes('scan_nfo_workset_') && row.name.endsWith('_queue'))!.name
++        current.db.exec(`DROP TABLE temp."${queue}"`)
++        return { disposition: 'imported', warnings: ['committed', 'postcommit'] }
++      }
++    }
++  })
++  assert.equal(result.cancelled, true); assert.equal(result.imported, 3)
++  assert.equal(applies, 1); assert.equal(aliveDuringCommit, true)
++  assert.equal(queueReadsAfterCancel, 0, 'no next-video queue/body SELECT executes after cancellation')
++  const audits = JSON.stringify(current.audits())
++  assert.equal((audits.match(/postcommit/g) ?? []).length, 2, 'both committed anchors retain returned postcommit warnings')
++  assert.deepEqual(current.tempTables(), [])
++})
++
++it('rolls real NFO business updates back with a native audit revision fault while disposing the workset', async () => {
++  const current = setup(['ABC-001.mp4'])
++  writeMovie(media, 'ABC-001', 'Must roll back')
++  current.db.exec("CREATE TEMP TRIGGER fail_nfo_audit BEFORE UPDATE OF entry_json ON library_scan_audit_entries BEGIN SELECT RAISE(ABORT,'NFO audit revision fault'); END")
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary' }), error => {
++    assert.ok(error instanceof ScanFoldersFailure); assert.match(error.message, /NFO audit revision fault/)
++    assert.equal(error.partialResult.imported, 1); assert.equal(error.partialResult.failed, 0)
++    return true
++  })
++  assert.deepEqual(current.db.prepare('SELECT title,scraped_status FROM videos').all(), [{ title: null, scraped_status: 0 }])
++  assert.equal(current.audits().length, 1)
++  assert.deepEqual(current.tempTables(), [])
++})
++
++it('disposes earlier scratch stores if creating the NFO workset fails', async context => {
++  const current = setup(['ABC-001.mp4']), exec = current.db.exec
++  const drops: string[] = []
++  context.mock.method(current.db, 'exec', (sql: string) => {
++    if (sql.includes('DROP TABLE')) drops.push(sql)
++    const result = exec.call(current.db, sql)
++    if (/CREATE TEMP TABLE .*scan_nfo_workset_/.test(sql)) throw new Error('NFO workset factory fault')
++    return result
++  })
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', autoMergeSameCodeResources: false }), /NFO workset factory fault/)
++  assert.ok(drops.some(sql => sql.includes('scan_file_inventory_')))
++  assert.ok(drops.some(sql => sql.includes('scan_code_counts_')))
++  assert.deepEqual(current.tempTables(), [])
++})
++
++it('tracks queue writes without rebuilding the STRM relocation index on each NFO candidate', async context => {
++  const names = ['AAA-001.strm', 'BBB-002.strm', 'CCC-003.strm']
++  const current = setup(names), prepare = current.db.prepare
++  for (const name of names) fs.writeFileSync(path.join(media, name.replace('.strm', '.nfo')), `<movie><num>${name.replace('.strm', '')}</num><title>NFO title</title></movie>`)
++  let rebuilds = 0
++  context.mock.method(current.db, 'prepare', (sql: string) => {
++    if (sql.includes('strm_source_path AS source_path') && sql.includes('ORDER BY id')) rebuilds++
++    return prepare.call(current.db, sql)
++  })
++  const result = await scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary' })
++  assert.equal(result.imported, 3); assert.equal(rebuilds, 1)
++  assert.deepEqual(current.tempTables(), [])
++})
++
++it('attempts all three scratch cleanups without replacing an original discovery failure', async context => {
++  const current = setup(['ABC-001.mp4']), exec = current.db.exec
++  const attempted = new Set<string>()
++  context.mock.method(current.db, 'exec', (sql: string) => {
++    if (sql.includes('DROP TABLE')) {
++      const kind = sql.includes('scan_file_inventory_') ? 'inventory' : sql.includes('scan_code_counts_') ? 'counts' : sql.includes('scan_nfo_workset_') ? 'nfo' : null
++      if (kind) { attempted.add(kind); throw new Error(`secondary ${kind} cleanup fault`) }
++    }
++    return exec.call(current.db, sql)
++  })
++  try {
++    await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary', autoMergeSameCodeResources: false,
++      readDirectory: async () => { throw new Error('original NFO discovery fault') }
++    }), error => {
++      assert.ok(error instanceof ScanFoldersFailure)
++      assert.match(error.message, /original NFO discovery fault/)
++      assert.doesNotMatch(error.message, /secondary/)
++      assert.equal(error.partialResult.imported, 0)
++      return true
++    })
++    assert.deepEqual([...attempted].sort(), ['counts', 'inventory', 'nfo'])
++    assert.deepEqual(current.audits(), [])
++  } finally {
++    context.mock.restoreAll()
++    for (const row of current.tempTables().reverse()) exec.call(current.db, `DROP TABLE IF EXISTS temp."${row.name}"`)
++  }
++  assert.deepEqual(current.tempTables(), [])
++})
++
++
++it('preserves the native sidecar INSERT cause through directory discovery wrapping', async () => {
++  const current = setup(['ABC-001.mp4'])
++  writeMovie(media, 'ABC-001', 'NFO title')
++  await assert.rejects(scanFolders(current.request, undefined, { ...current.options, resultMode: 'summary',
++    readDirectory: async dir => {
++      const table = current.tempTables().find(row => row.name.includes('scan_nfo_workset_') && row.name.endsWith('_sidecars'))!.name
++      current.db.exec(`CREATE TEMP TRIGGER fail_sidecar_discovery BEFORE INSERT ON "${table}" BEGIN SELECT RAISE(ABORT,'native sidecar INSERT fault'); END`)
++      return current.options.readDirectory!(dir)
++    }
++  }), error => {
++    assert.ok(error instanceof ScanFoldersFailure)
++    assert.ok(error.cause instanceof Error)
++    assert.match(error.cause.message, /无法读取媒体目录/)
++    const worksetError = error.cause.cause
++    assert.ok(worksetError instanceof Error)
++    assert.equal(worksetError.name, 'ScanNfoWorksetError')
++    assert.ok(worksetError.cause instanceof Error)
++    assert.match(worksetError.cause.message, /native sidecar INSERT fault/)
++    assert.equal(Reflect.get(worksetError.cause, 'code'), 'SQLITE_CONSTRAINT_TRIGGER')
++    assert.equal(error.partialResult.imported, 0); assert.equal(error.partialResult.failed, 0)
++    return true
++  })
++  assert.deepEqual(current.audits(), [])
++  assert.deepEqual(current.tempTables(), [])
++})
+diff --git a/scripts/performance/scan-code-counts-benchmark.ts b/scripts/performance/scan-code-counts-benchmark.ts
+new file mode 100644
+index 0000000..9b3a458
+--- /dev/null
++++ b/scripts/performance/scan-code-counts-benchmark.ts
+@@ -0,0 +1,48 @@
++/** Synthetic counter lifecycle only; no user data, resource queries, NFO or filesystem work. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { performance } from 'node:perf_hooks'
++import { createMemoryScanCodeCounts, createScanCodeCounts } from '../../src/main/scanner/scanCodeCounts'
++
++it('compares exact repeated-code counting, correction and frozen reads', () => {
++  const results: unknown[] = []
++  for (const uniqueCodes of [10000, 100000]) {
++    for (const mode of ['memory', 'temp'] as const) {
++      const samples: unknown[] = []
++      for (let sample = -1; sample < 3; sample++) {
++        const db = new Database(':memory:')
++        const counts = mode === 'temp' ? createScanCodeCounts(db) : createMemoryScanCodeCounts()
++        const code = (index: number) => `ABC-${String(index).padStart(8, '0')}`
++        let flushes = 0, checksum = 0
++        const started = performance.now()
++        try {
++          for (let repeat = 0; repeat < 3; repeat++) {
++            for (let index = 0; index < uniqueCodes; index++) if (counts.add(code(index))) flushes++
++          }
++          counts.finishCounting()
++          const counted = performance.now()
++          for (let index = 0; index < uniqueCodes; index++) counts.decrement(code(index))
++          counts.freeze()
++          const corrected = performance.now()
++          const beforeReads = db.prepare('SELECT total_changes() AS n').get() as { n: number }
++          for (let repeat = 0; repeat < 3; repeat++) {
++            for (let index = 0; index < uniqueCodes; index++) checksum += counts.get(code(index))
++          }
++          const finished = performance.now()
++          assert.equal(checksum, uniqueCodes * 2 * 3)
++          assert.deepEqual(db.prepare('SELECT total_changes() AS n').get(), beforeReads)
++          if (sample >= 0) samples.push({ countMs: counted - started, correctionMs: corrected - counted,
++            frozenReadsMs: finished - corrected, totalMs: finished - started, flushes, checksum })
++        } finally { counts.dispose(); db.close() }
++      }
++      results.push({ uniqueCodes, occurrences: uniqueCodes * 3, mode, samples })
++    }
++  }
++  console.log(JSON.stringify({ runtime: process.versions, results, notes: [
++    'One warmup plus3 samples, memory then TEMP at each scale; in-memory synthetic database, no concurrent tests or builds.',
++    'Three occurrences per code, one decrement per code, then three reads per code. Frozen reads verified not to change total_changes.',
++    'Includes code construction; excludes DB/factory setup and disposal. Not a scanner throughput, cancellation latency, p95, heap/RSS or Windows/HDD measurement.',
++    'TEMP trades read/write overhead for bounded JavaScript counter buffering. Total SQLite storage still grows with unique codes.'
++  ] }, null, 2))
++})

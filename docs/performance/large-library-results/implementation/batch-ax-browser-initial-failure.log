@@ -1,0 +1,62 @@
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+locator.check: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('radio', { name: /使用对方主名/ })[22m
+[2m    - locator resolved to <input type="radio" name="merge-main-name"/>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <span class="merge-name-option-label">使用对方主名</span> from <span class="merge-name-option-copy">…</span> subtree intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <span class="merge-name-option-label">使用对方主名</span> from <span class="merge-name-option-copy">…</span> subtree intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    58 × waiting for element to be visible, enabled and stable[22m
+[2m       - element is visible, enabled and stable[22m
+[2m       - scrolling into view if needed[22m
+[2m       - done scrolling[22m
+[2m       - <span class="merge-name-option-label">使用对方主名</span> from <span class="merge-name-option-copy">…</span> subtree intercepts pointer events[22m
+[2m     - retrying click action[22m
+[2m       - waiting 500ms[22m
+
+    at /Users/nut/Project/JavdexLabs/Javdex/scripts/performance/merge-actress-ui.mjs:39:49 {
+  log: [
+    "  - waiting for getByRole('radio', { name: /使用对方主名/ })",
+    '    - locator resolved to <input type="radio" name="merge-main-name"/>',
+    '  - attempting click action',
+    '    2 × waiting for element to be visible, enabled and stable',
+    '      - element is visible, enabled and stable',
+    '      - scrolling into view if needed',
+    '      - done scrolling',
+    '      - <span class="merge-name-option-label">使用对方主名</span> from <span class="merge-name-option-copy">…</span> subtree intercepts pointer events',
+    '    - retrying click action',
+    '    - waiting 20ms',
+    '    2 × waiting for element to be visible, enabled and stable',
+    '      - element is visible, enabled and stable',
+    '      - scrolling into view if needed',
+    '      - done scrolling',
+    '      - <span class="merge-name-option-label">使用对方主名</span> from <span class="merge-name-option-copy">…</span> subtree intercepts pointer events',
+    '    - retrying click action',
+    '      - waiting 100ms',
+    '    58 × waiting for element to be visible, enabled and stable',
+    '       - element is visible, enabled and stable',
+    '       - scrolling into view if needed',
+    '       - done scrolling',
+    '       - <span class="merge-name-option-label">使用对方主名</span> from <span class="merge-name-option-copy">…</span> subtree intercepts pointer events',
+    '     - retrying click action',
+    '       - waiting 500ms'
+  ],
+  name: 'TimeoutError'
+}
+
+Node.js v22.23.2

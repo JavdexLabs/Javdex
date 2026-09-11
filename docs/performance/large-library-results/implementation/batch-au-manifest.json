@@ -1,0 +1,21 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-au-benchmark.json": "d8e3e2dedec74b183649645956f145df1c9a75d40b6feec808222f12f574665b",
+    "batch-au-benchmark.log": "d5a9c0f43f9882a59161ff8ae7d8ee3d8c3cae9c438a632c6d34e1a1925d3138",
+    "batch-au-build.log": "eb2f14732dc36de7e8cc386770a0432b0a5d8fc2a0a7b305b59a48f1fd2af6d2",
+    "batch-au-full.log": "dd47b8cf7d0b289123a45480e58bf263982d2bb207974e9410e26fabde6ebe63",
+    "batch-au-nul-red.log": "c639563bfe873db5884a71b0ee4982652f872995e48f8f8a98919fef8dce0854",
+    "batch-au-picker-api.patch": "ba87072dab8ca9948d034b946e74456d16659f470d41faaf572ef08afc65e617",
+    "batch-au-review.md": "d07af896533497f4f949cc2f21fc6ff792ab4f2ebf79cb2a8ad1c7d6669e6995",
+    "batch-au-target.log": "adc62fb428f5c5aa0cdf7c6de5d939f62906651a40a2014de2c5ffaf0fa44fc8"
+  },
+  "notes": [
+    "Cumulative selected diff vs HEAD plus full new test and benchmark; depends on B-AT, not standalone.",
+    "Final full2245pass1skip0fail; build passed. Focused30 predates last byte-budget test, which is covered by final full.",
+    "NUL regression600002vs129 failed before BLOB-prefix fix. Final worst-case100-item JSON<512KiB regression passed.",
+    "10k/no-video/4KiB-profile fixture3warm samples afterANALYZE; name and legacy counts ordering coincide only for this fixture.",
+    "Backend only, renderer full candidate read remains until next batch. No global O(page), p95 or UI improvement claim.",
+    "No user data/schema/commit/push/release. Full15packages/42risks remain in scope."
+  ]
+}

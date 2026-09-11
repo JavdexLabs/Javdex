@@ -1,0 +1,44 @@
+✔ matches merge gender and owned search semantics while paging by full name (20.680042ms)
+✔ counts each visible video once across overlapping libraries and excludes hidden/archived/orphaned videos (12.871083ms)
+✔ counts only returned candidates, excluding lookahead, and skips counts for an empty page (8.568ms)
+✔ keeps candidate rows and counts on the same snapshot when another connection writes (9.322542ms)
+✔ bounds labels/avatars and validates inputs and missing keep actors (12.863291ms)
+✔ pages narrow labels from 10000 actors without catalog statistics or profile data (123.844792ms)
+✔ preserves owned-name search matching and includes all genders (8.883166ms)
+✔ sorts full names before shortening labels and bounds escaped JSON payloads (11.882084ms)
+✔ rejects invalid limits, offsets and overlong search before reading (5.856042ms)
+✔ bounds labels containing embedded NUL without losing the valid prefix (8.749375ms)
+✔ keeps a full page below512KiB even with worst-case JSON escaping (8.647625ms)
+✔ reads current picker identity by ID without hydrating actor works or profile (11.233083ms)
+✔ validates manual tag candidate bounds and existing-tag identities (2.131125ms)
+✔ bounds selected tag label IPC requests before repository access (0.280125ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.1795ms)
+  ✔ forwards command arguments and returns the application result (0.113125ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.177166ms)
+  ✔ accepts link-resource updates without an import-only target (0.242167ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.065083ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.21825ms)
+  ✔ accepts only explicit plugin continuation kinds (0.069625ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.56875ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.046542ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.035916ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.25575ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (0.413ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.098792ms)
+  ✔ accepts only the structured model-management command vocabulary (0.401083ms)
+  ✔ serializes successful results and thrown errors (0.55575ms)
+  ✔ sends the contracted event payload unchanged (0.048541ms)
+✔ typed IPC adapter (3.728958ms)
+✔ bounds actress conflict summary pages and keeps detail identities exact (0.168792ms)
+✔ validates bounded actress picker requests (0.133708ms)
+✔ validates narrow actress identity IDs (0.063167ms)
+✔ validates merge candidate paging and keep identity (0.150042ms)
+ℹ tests 34
+ℹ suites 1
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 505.869333

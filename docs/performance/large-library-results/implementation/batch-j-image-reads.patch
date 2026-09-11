@@ -1,0 +1,406 @@
+diff --git a/src/main/appMain.ts b/src/main/appMain.ts
+index 5c6f461..832c97b 100644
+--- a/src/main/appMain.ts
++++ b/src/main/appMain.ts
+@@ -13,7 +13,7 @@ import { mediaAssetStore } from './services/mediaAssetStore'
+ import { registerIpcHandlers } from './ipc'
+ import { scrapeBrowser } from './scrapers/scrapeBrowser'
+ import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
+-import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
++import { serveMediaAssetRequest } from './services/mediaProtocol'
+ import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
+ import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
+ import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
+@@ -133,31 +133,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
+ 
+ /** Serve files from the media_assets directory through the media:// scheme. */
+ function registerAssetProtocol(): void {
+-  protocol.handle('media', (request) => {
+-    const root = mediaAssetStore.rootPath()
+-    const abs = resolveMediaAssetPath(request.url, root)
+-
+-    const corsHeaders = {
+-      'Access-Control-Allow-Origin': '*',
+-      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+-      'Access-Control-Allow-Headers': '*'
+-    }
+-    if (request.method === 'OPTIONS') {
+-      return new Response(null, { status: 204, headers: corsHeaders })
+-    }
+-    if (!abs) {
+-      return new Response('Forbidden', { status: 403, headers: corsHeaders })
+-    }
+-    try {
+-      const relPosix = toStoredAssetPath(abs, root)
+-      const { body, mime } = mediaAssetStore.readForServe(relPosix)
+-      return new Response(body, {
+-        headers: { 'Content-Type': mime, ...corsHeaders }
+-      })
+-    } catch {
+-      return new Response('Not Found', { status: 404, headers: corsHeaders })
+-    }
+-  })
++  protocol.handle('media', (request) => serveMediaAssetRequest(request, mediaAssetStore))
+ }
+ 
+ if (gotSingleInstanceLock) {
+diff --git a/src/main/services/mediaAssetStore.test.ts b/src/main/services/mediaAssetStore.test.ts
+index 01ed552..54c96fa 100644
+--- a/src/main/services/mediaAssetStore.test.ts
++++ b/src/main/services/mediaAssetStore.test.ts
+@@ -29,6 +29,56 @@ afterEach(() => {
+ })
+ 
+ describe('MediaAssetStore', () => {
++  it('cancels queued reads before opening files and keeps active slots until reads settle', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Queued', 1, JPEG_1X1)
++    let release!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.readFile
++    let reads = 0
++    t.mock.method(fs.promises, 'readFile', async (...args: unknown[]) => {
++      reads++
++      await gate
++      return Reflect.apply(original, fs.promises, args)
++    })
++    const activeAbort = new AbortController()
++    const active = Array.from({ length: 4 }, (_, i) => mediaAssetStore.readForServeAsync(rel, i === 0 ? activeAbort.signal : undefined))
++    const activeRejected = assert.rejects(active.shift()!, { name: 'AbortError' })
++    const queuedAbort = new AbortController()
++    const queued = mediaAssetStore.readForServeAsync(rel, queuedAbort.signal)
++    const queuedRejected = assert.rejects(queued, { name: 'AbortError' })
++    await Promise.resolve()
++    assert.equal(reads, 4)
++    activeAbort.abort()
++    queuedAbort.abort()
++    await queuedRejected
++    const next = mediaAssetStore.readForServeAsync(rel)
++    await Promise.resolve()
++    assert.equal(reads, 4, 'active cancellation must wait for the reader to settle')
++    release()
++    await activeRejected
++    await Promise.all(active)
++    assert.deepEqual((await next).body, JPEG_1X1)
++    assert.equal(reads, 5, 'the cancelled queued request never opened a file')
++  })
++
++  it('serves plain and encrypted images asynchronously without synchronous file reads', async (t) => {
++    const testRoot = setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Async', 1, JPEG_1X1)
++    const enc = 'avatars/async.enc'
++    fs.writeFileSync(path.join(testRoot, 'media_assets', enc), encryptPlain(JPEG_1X1, '.jpg'))
++    t.mock.method(fs, 'readFileSync', () => { throw Error('synchronous file read forbidden') })
++    const plain = await mediaAssetStore.readForServeAsync(rel)
++    const encrypted = await mediaAssetStore.readForServeAsync(enc)
++    assert.deepEqual(plain.body, JPEG_1X1)
++    assert.deepEqual(encrypted, { body: JPEG_1X1, mime: 'image/jpeg' })
++    await assert.rejects(mediaAssetStore.readForServeAsync('../outside.jpg'), /escapes media root/)
++    await assert.rejects(mediaAssetStore.readForServeAsync('avatars/missing.jpg'), { code: 'ENOENT' })
++    const abort = new AbortController()
++    abort.abort()
++    await assert.rejects(mediaAssetStore.readForServeAsync(rel, abort.signal), { name: 'AbortError' })
++  })
++
+   it('reads plain and encrypted images and reports a stable plaintext fingerprint', () => {
+     const testRoot = setup()
+     const plainPath = mediaAssetStore.importAvatarDisplay('Plain', 1, JPEG_1X1)
+diff --git a/src/main/services/mediaAssetStore.ts b/src/main/services/mediaAssetStore.ts
+index 64f1c1c..a5b8fda 100644
+--- a/src/main/services/mediaAssetStore.ts
++++ b/src/main/services/mediaAssetStore.ts
+@@ -1,6 +1,7 @@
+ import { AsyncLocalStorage } from 'node:async_hooks'
+ import fs from 'node:fs'
+ import path from 'node:path'
++export { AssetReadQueueFullError } from './mediaAssetStore/readQueue'
+ import {
+   assetsRoot,
+   deleteAssetOrThrow,
+@@ -15,6 +16,7 @@ import {
+   importSampleFromFile,
+   readAssetBytes,
+   readAssetForServe,
++  readAssetForServeAsync,
+   resolveAssetPath
+ } from './mediaAssetStore/filesystem'
+ import {
+@@ -191,6 +193,10 @@ export class MediaAssetStore {
+     return readAssetForServe(relPath)
+   }
+ 
++  readForServeAsync(relPath: string, signal?: AbortSignal): Promise<{ body: Buffer; mime: string }> {
++    return readAssetForServeAsync(relPath, signal)
++  }
++
+   fingerprint(data: Buffer): string {
+     return avatarSourceFingerprint(data)
+   }
+diff --git a/src/main/services/mediaAssetStore/filesystem.ts b/src/main/services/mediaAssetStore/filesystem.ts
+index 4adb962..dec703a 100644
+--- a/src/main/services/mediaAssetStore/filesystem.ts
++++ b/src/main/services/mediaAssetStore/filesystem.ts
+@@ -17,8 +17,10 @@ import {
+   isUsableImageBuffer
+ } from './imageBytes'
+ import type { ImageAssetSubdir } from './types'
++import { AssetReadQueue } from './readQueue'
+ 
+ const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']
++const serveReads = new AssetReadQueue()
+ 
+ /** Root directory for downloaded media assets. */
+ export function assetsRoot(): string {
+@@ -70,6 +72,24 @@ export function readAssetForServe(relPath: string): { body: Buffer; mime: string
+   const abs = resolveAssetPath(relPath)
+   if (!fs.existsSync(abs)) throw new Error('Asset not found')
+   const raw = fs.readFileSync(abs)
++  return decodeAssetForServe(relPath, raw)
++}
++
++/** Asynchronous disk read for request handlers; synchronous business readers remain explicit. */
++export async function readAssetForServeAsync(
++  relPath: string,
++  signal?: AbortSignal
++): Promise<{ body: Buffer; mime: string }> {
++  signal?.throwIfAborted()
++  const abs = resolveAssetPath(relPath)
++  return serveReads.run(async () => {
++    const raw = await fs.promises.readFile(abs, { signal })
++    signal?.throwIfAborted()
++    return decodeAssetForServe(relPath, raw)
++  }, signal)
++}
++
++function decodeAssetForServe(relPath: string, raw: Buffer): { body: Buffer; mime: string } {
+   if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
+     const { data, ext } = decryptBlob(raw)
+     return { body: data, mime: mimeFromExt(ext) }
+diff --git a/src/main/services/mediaProtocol.test.ts b/src/main/services/mediaProtocol.test.ts
+index b8b7a9c..3feb770 100644
+--- a/src/main/services/mediaProtocol.test.ts
++++ b/src/main/services/mediaProtocol.test.ts
+@@ -1,9 +1,64 @@
+ import { describe, it } from 'node:test'
+ import assert from 'node:assert/strict'
+ import path from 'node:path'
+-import { resolveMediaAssetPath, toStoredAssetPath } from './mediaProtocol'
++import { resolveMediaAssetPath, toStoredAssetPath, serveMediaAssetRequest } from './mediaProtocol'
++import { AssetReadQueueFullError } from './mediaAssetStore'
+ 
+ describe('mediaProtocol', () => {
++  it('awaits the image reader and forwards cancellation while serving GET and HEAD', async () => {
++    const request = new Request('media://covers/test.jpg')
++    let release!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    let finished = false
++    const reader = {
++      rootPath: () => path.resolve('tmp-assets'),
++      readForServeAsync: async (rel: string, signal?: AbortSignal) => {
++        assert.equal(rel, 'covers/test.jpg')
++        assert.equal(signal, request.signal)
++        await gate
++        return { body: Buffer.from('image'), mime: 'image/jpeg' }
++      }
++    }
++    const response = serveMediaAssetRequest(request, reader).then((value) => { finished = true; return value })
++    await Promise.resolve()
++    assert.equal(finished, false)
++    release()
++    const get = await response
++    assert.equal(await get.text(), 'image')
++    assert.equal(get.headers.get('Content-Type'), 'image/jpeg')
++    const head = await serveMediaAssetRequest(new Request(request.url, { method: 'HEAD' }), {
++      ...reader, readForServeAsync: async () => ({ body: Buffer.from('image'), mime: 'image/jpeg' })
++    })
++    assert.equal(await head.text(), '')
++    assert.equal(head.headers.get('Content-Length'), '5')
++  })
++
++  it('skips reads for preflight and forbidden paths, and distinguishes busy from missing', async () => {
++    let reads = 0
++    let busy = true
++    const reader = {
++      rootPath: () => path.resolve('tmp-assets'),
++      readForServeAsync: async () => {
++        reads++
++        if (busy) throw new AssetReadQueueFullError()
++        throw Error('missing')
++      }
++    }
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/a.jpg', { method: 'OPTIONS' }), reader)).status, 204)
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/%2E%2E%2F%2E%2E%2Fsecret'), reader)).status, 403)
++    assert.equal(reads, 0)
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/a.jpg'), reader)).status, 503)
++    busy = false
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/a.jpg'), reader)).status, 404)
++    for (const status of [403, 404, 503]) {
++      busy = status === 503
++      const url = status === 403 ? 'media://covers/%2E%2E%2F%2E%2E%2Fsecret' : 'media://covers/a.jpg'
++      const response = await serveMediaAssetRequest(new Request(url, { method: 'HEAD' }), reader)
++      assert.equal(response.status, status)
++      assert.equal(await response.text(), '')
++    }
++  })
++
+   it('resolves media URLs under the asset root', () => {
+     const root = path.resolve('tmp-assets')
+     const abs = resolveMediaAssetPath('media://covers/IPX-535.jpg', root)
+diff --git a/src/main/services/mediaProtocol.ts b/src/main/services/mediaProtocol.ts
+index 4397ee5..778e7bd 100644
+--- a/src/main/services/mediaProtocol.ts
++++ b/src/main/services/mediaProtocol.ts
+@@ -1,4 +1,33 @@
+ import path from 'node:path'
++import { AssetReadQueueFullError } from './mediaAssetStore'
++
++interface AssetReader {
++  rootPath(): string
++  readForServeAsync(relPath: string, signal?: AbortSignal): Promise<{ body: Buffer; mime: string }>
++}
++
++export async function serveMediaAssetRequest(request: Request, reader: AssetReader): Promise<Response> {
++  const headers = {
++    'Access-Control-Allow-Origin': '*',
++    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
++    'Access-Control-Allow-Headers': '*'
++  }
++  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
++  try {
++    const root = reader.rootPath()
++    const abs = resolveMediaAssetPath(request.url, root)
++    if (!abs) return new Response(request.method === 'HEAD' ? null : 'Forbidden', { status: 403, headers })
++    const { body, mime } = await reader.readForServeAsync(toStoredAssetPath(abs, root), request.signal)
++    return new Response(request.method === 'HEAD' ? null : body, {
++      headers: { ...headers, 'Content-Type': mime, 'Content-Length': String(body.length) }
++    })
++  } catch (error) {
++    const body = request.method === 'HEAD' ? null : error instanceof AssetReadQueueFullError ? 'Busy' : 'Not Found'
++    return new Response(body, {
++      status: error instanceof AssetReadQueueFullError ? 503 : 404, headers
++    })
++  }
++}
+ 
+ const DOT_DOT_SEGMENT = /(?:^|[\\/])(?:\.|%2e)(?:\.|%2e)(?=$|[\\/])/i
+ 
+diff --git a/src/main/services/mediaAssetStore/readQueue.ts b/src/main/services/mediaAssetStore/readQueue.ts
+new file mode 100644
+index 0000000..fdc6fb8
+--- /dev/null
++++ b/src/main/services/mediaAssetStore/readQueue.ts
+@@ -0,0 +1,44 @@
++export class AssetReadQueueFullError extends Error {
++  constructor() { super('图片读取队列已满') }
++}
++
++/** Bounds active reads and waiting request closures; cancelled queued work never opens a file. */
++export class AssetReadQueue {
++  private active = 0
++  private readonly pending: Array<() => void> = []
++
++  constructor(private readonly concurrency = 4, private readonly maxPending = 256) {}
++
++  run<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
++    if (signal?.aborted) return Promise.reject(signal.reason)
++    if (this.active >= this.concurrency && this.pending.length >= this.maxPending) {
++      return Promise.reject(new AssetReadQueueFullError())
++    }
++    return new Promise<T>((resolve, reject) => {
++      const abort = (): void => {
++        const index = this.pending.indexOf(start)
++        if (index !== -1) {
++          this.pending.splice(index, 1)
++          reject(signal?.reason)
++        }
++      }
++      const start = (): void => {
++        signal?.removeEventListener('abort', abort)
++        if (signal?.aborted) {
++          reject(signal.reason)
++          return
++        }
++        this.active++
++        void Promise.resolve().then(read).then(resolve, reject).finally(() => {
++          this.active--
++          this.pending.shift()?.()
++        })
++      }
++      if (this.active < this.concurrency) start()
++      else {
++        this.pending.push(start)
++        signal?.addEventListener('abort', abort, { once: true })
++      }
++    })
++  }
++}
+diff --git a/src/main/services/mediaAssetStore/readQueue.test.ts b/src/main/services/mediaAssetStore/readQueue.test.ts
+new file mode 100644
+index 0000000..301fd3c
+--- /dev/null
++++ b/src/main/services/mediaAssetStore/readQueue.test.ts
+@@ -0,0 +1,64 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import { AssetReadQueue, AssetReadQueueFullError } from './readQueue'
++
++it('defaults to four active reads and 256 queued requests with reusable cancellation capacity', async () => {
++  const queue = new AssetReadQueue()
++  let release!: () => void
++  const gate = new Promise<void>((resolve) => { release = resolve })
++  let active = 0
++  let peak = 0
++  const read = async () => { active++; peak = Math.max(peak, active); await gate; active-- }
++  const abort = new AbortController()
++  const requests = Array.from({ length: 260 }, (_, i) => queue.run(read, i === 259 ? abort.signal : undefined))
++  const cancelled = assert.rejects(requests.pop()!, { name: 'AbortError' })
++  await assert.rejects(queue.run(read), AssetReadQueueFullError)
++  assert.equal(active, 4)
++  abort.abort()
++  await cancelled
++  requests.push(queue.run(read))
++  release()
++  await Promise.all(requests)
++  assert.equal(peak, 4)
++})
++
++it('bounds active and queued reads, removes cancelled work and releases capacity after failures', async () => {
++  const queue = new AssetReadQueue(1, 1)
++  let release!: () => void
++  const gate = new Promise<void>((resolve) => { release = resolve })
++  let opened = 0
++  const first = queue.run(async () => { opened++; await gate; return 1 })
++  const abort = new AbortController()
++  const cancelled = queue.run(async () => { opened++; return 2 }, abort.signal)
++  const rejected = assert.rejects(cancelled, { name: 'AbortError' })
++  await assert.rejects(queue.run(async () => 3), AssetReadQueueFullError)
++  abort.abort()
++  await rejected
++  const next = queue.run(async () => { opened++; throw Error('read failed') })
++  const failed = assert.rejects(next, /read failed/)
++  assert.equal(opened, 1)
++  release()
++  assert.equal(await first, 1)
++  await failed
++  assert.equal(await queue.run(async () => 4), 4)
++  assert.equal(opened, 2)
++})
++
++it('does not free an active slot before an aborted reader actually settles', async () => {
++  const queue = new AssetReadQueue(1, 1)
++  const abort = new AbortController()
++  let release!: () => void
++  const gate = new Promise<void>((resolve) => { release = resolve })
++  const active = queue.run(async () => { await gate; abort.signal.throwIfAborted() }, abort.signal)
++  const rejected = assert.rejects(active, { name: 'AbortError' })
++  let opened = false
++  const next = queue.run(async () => { opened = true })
++  abort.abort()
++  await Promise.resolve()
++  assert.equal(opened, false)
++  release()
++  await rejected
++  await next
++  assert.equal(opened, true)
++  await assert.rejects(queue.run(async () => { throw Error('must not open') }, abort.signal), { name: 'AbortError' })
++})

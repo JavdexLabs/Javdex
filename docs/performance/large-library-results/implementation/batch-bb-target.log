@@ -1,0 +1,13 @@
+✔ keeps only recent log previews after 100000 entries while counting omissions (25.912625ms)
+✔ bounds oversized fields without splitting surrogate pairs or mutating prior state (0.116042ms)
+✔ shows bounded log preview with explicit omission notice and full task counters (12.355833ms)
+✔ counts avatars through the scalar API without loading targets and propagates failures (35.865125ms)
+✔ serializes startup before target loading and releases ownership on empty, failed or unmounted startup (39.969167ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 340.962959

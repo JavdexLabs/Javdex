@@ -1,0 +1,1828 @@
+diff --git a/src/renderer/src/hooks/useMediaLibraryScanController.ts b/src/renderer/src/hooks/useMediaLibraryScanController.ts
+index 2d73f45..fdbdfee 100644
+--- a/src/renderer/src/hooks/useMediaLibraryScanController.ts
++++ b/src/renderer/src/hooks/useMediaLibraryScanController.ts
+@@ -1,8 +1,8 @@
++import type { ScanAuditReadHeader } from '@shared/scanAuditReadTypes'
+ import { useCallback, useEffect, useRef, useState } from 'react'
+ import { useQuery, useQueryClient } from '@tanstack/react-query'
+ import type {
+   LibraryScanEvent,
+-  LibraryScanLatestSnapshot,
+   ScanProgress,
+   ScanResult
+ } from '@shared/libraryTypes'
+@@ -11,11 +11,13 @@ import { matchesMediaLibraryScanRun } from '../mediaLibraryScanState'
+ import { invalidateAllLibraryQueries } from '../query/invalidateLibraryQueries'
+ 
+ export const mediaLibraryScanLatestKey = (libraryId: number): readonly unknown[] =>
+-  ['media-library-scan-latest', libraryId] as const
++  ['media-library-scan-header', libraryId] as const
+ 
+ export interface MediaLibraryScanController {
+-  latest: LibraryScanLatestSnapshot | null
++  latest: ScanAuditReadHeader | null
++  latestRevision: number
+   latestLoading: boolean
++  latestError: string | null
+   running: boolean
+   cancelling: boolean
+   activeRunId: string | null
+@@ -29,7 +31,7 @@ export interface MediaLibraryScanController {
+ 
+ export function useMediaLibraryScanController(
+   libraryId: number,
+-  options?: { onSettled?: () => void | Promise<void> }
++  options?: { onSettled?: () => void | Promise<void>; loadLatest?: boolean }
+ ): MediaLibraryScanController {
+   const queryClient = useQueryClient()
+   const activeRunIdRef = useRef<string | null>(null)
+@@ -42,9 +44,19 @@ export function useMediaLibraryScanController(
+   const [progress, setProgress] = useState<ScanProgress | null>(null)
+   const [result, setResult] = useState<ScanResult | null>(null)
+   const [error, setError] = useState<string | null>(null)
++  const loadLatest = options?.loadLatest ?? true
++  const latestContextRef = useRef({ libraryId, loadLatest })
++  latestContextRef.current = { libraryId, loadLatest }
++  const latestRevisionRef = useRef(0)
+   const latestQuery = useQuery({
+-    queryKey: mediaLibraryScanLatestKey(libraryId),
+-    queryFn: () => api.scan.getLatest(libraryId)
++    queryKey: loadLatest ? mediaLibraryScanLatestKey(libraryId) : ['media-library-scan-inactive', libraryId],
++    enabled: loadLatest,
++    gcTime: 0,
++    queryFn: async ({ signal }) => {
++      const latest = await api.scan.getAuditHeader(libraryId)
++      signal.throwIfAborted()
++      return { header: latest, revision: ++latestRevisionRef.current }
++    }
+   })
+ 
+   const setRunId = useCallback((runId: string | null): void => {
+@@ -160,12 +172,15 @@ export function useMediaLibraryScanController(
+   }
+ 
+   const refreshLatest = async (): Promise<void> => {
+-    await latestQuery.refetch()
++    if (latestContextRef.current.libraryId === libraryId && latestContextRef.current.loadLatest) await latestQuery.refetch()
++    else await queryClient.invalidateQueries({queryKey: mediaLibraryScanLatestKey(libraryId), exact: true, refetchType: 'none'})
+   }
+ 
+   return {
+-    latest: latestQuery.data ?? null,
+-    latestLoading: latestQuery.isLoading,
++    latest: loadLatest ? latestQuery.data?.header ?? null : null,
++    latestRevision: loadLatest ? latestQuery.data?.revision ?? 0 : 0,
++    latestLoading: loadLatest && latestQuery.isLoading,
++    latestError: loadLatest && latestQuery.error ? latestQuery.error.message : null,
+     running,
+     cancelling,
+     activeRunId,
+diff --git a/src/renderer/src/hooks/useMediaLibraryScanController.interaction.test.tsx b/src/renderer/src/hooks/useMediaLibraryScanController.interaction.test.tsx
+new file mode 100644
+index 0000000..a538b88
+--- /dev/null
++++ b/src/renderer/src/hooks/useMediaLibraryScanController.interaction.test.tsx
+@@ -0,0 +1,90 @@
++import assert from 'node:assert/strict'
++import {afterEach,it} from 'node:test'
++import React from 'react'
++import TestRenderer,{act} from 'react-test-renderer'
++import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
++import type {ScanAuditReadHeader} from '@shared/scanAuditReadTypes'
++
++type Request={id:number;resolve:(value:ScanAuditReadHeader)=>void;reject:(error:Error)=>void}
++const requests:Request[]=[]
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{scan:{
++ getLatest:()=>{throw new Error('Full scan snapshot forbidden')},
++ getAuditHeader:(id:number)=>new Promise<ScanAuditReadHeader>((resolve,reject)=>requests.push({id,resolve,reject})),
++ onProgress:()=>()=>undefined,onStateChanged:()=>()=>undefined
++}}}})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let client:QueryClient
++let current:ReturnType<typeof import('./useMediaLibraryScanController').useMediaLibraryScanController>
++let hook:typeof import('./useMediaLibraryScanController').useMediaLibraryScanController
++function Probe({id,enabled}:{id:number;enabled:boolean}):null{current=hook(id,{loadLatest:enabled});return null}
++async function show(id:number,enabled:boolean){
++ hook=(await import('./useMediaLibraryScanController')).useMediaLibraryScanController
++ client??=new QueryClient({defaultOptions:{queries:{retry:false}}})
++ await act(async()=>{const node=<QueryClientProvider client={client}><Probe id={id} enabled={enabled}/></QueryClientProvider>
++  if(renderer)renderer.update(node);else renderer=TestRenderer.create(node)
++ })
++}
++async function flush(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10))})}
++function currentRun(){return current.latest?.snapshot?.runId}
++function snapshot(runId:string):ScanAuditReadHeader{return {summary:null,snapshot:{libraryId:1,runId,finishedAt:'now'},unrecognizedCount:1}}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;client?.clear();requests.length=0})
++it('does not load hidden scan history, including manual refresh and invalidation, and releases completed data',async()=>{
++ await show(1,false);assert.equal(requests.length,0);assert.equal(current.latestLoading,false)
++ await act(async()=>{await current.refreshLatest();await client.invalidateQueries()});assert.equal(requests.length,0)
++ await show(1,true);assert.equal(requests.length,1);assert.equal(current.latestLoading,true)
++ requests[0].resolve(snapshot('first'));await flush();assert.equal(currentRun(),'first')
++ const oldRefresh = current.refreshLatest
++ await show(1,false);await flush();assert.equal(current.latest,null)
++ await act(async()=>{void oldRefresh()});assert.equal(requests.length,1)
++ assert.equal(client.getQueryCache().find({queryKey:['media-library-scan-header',1],exact:true}),undefined)
++ await show(1,true);assert.equal(requests.length,2);assert.equal(current.latest,null)
++ requests[1].resolve(snapshot('fresh'));await flush();assert.equal(currentRun(),'fresh')
++})
++it('discards pending results after leaving and re-entering or switching libraries',async()=>{
++ await show(1,true);await show(1,false);await show(1,true)
++ assert.equal(requests.length,2)
++ requests[0].resolve(snapshot('stale'));await flush();assert.equal(current.latest,null)
++ await show(2,true);assert.equal(requests[2].id,2)
++ requests[1].resolve(snapshot('old-library'));await flush();assert.equal(current.latest,null)
++ requests[2].resolve(snapshot('library-two'));await flush();assert.equal(currentRun(),'library-two')
++})
++it('exposes history load errors and retries without treating failure as an empty history',async()=>{
++ await show(1,true);requests[0].reject(new Error('injected'));await flush()
++ assert.equal(current.latestError,'injected');assert.equal(current.latestLoading,false)
++ let retry:Promise<void>|undefined
++ await act(async()=>{retry=current.refreshLatest()});assert.equal(requests.length,2)
++ requests[1].resolve(snapshot('recovered'));await act(async()=>retry);await flush()
++ assert.equal(current.latestError,null);assert.equal(currentRun(),'recovered')
++})
++it('advances page refresh revision even when the returned header is unchanged',async()=>{
++ await show(1,true);const value=snapshot('same')
++ requests[0].resolve(value);await flush();const first=current.latestRevision
++ assert.ok(first>0)
++ let refreshing:Promise<void>|undefined
++ await act(async()=>{refreshing=current.refreshLatest()})
++ requests[1].resolve(value);await act(async()=>refreshing);await flush()
++ assert.ok(current.latestRevision>first)
++ assert.equal(currentRun(),'same')
++})
++it('retries a failed page through the real header controller without issuing the old run again',async()=>{
++ hook=(await import('./useMediaLibraryScanController')).useMediaLibraryScanController
++ const Panel=(await import('../components/settings/LibraryScanAuditPanel')).default
++ const summary:import('@shared/libraryTypes').LibraryScanSummary={libraryId:1,runId:'old',configRevision:1,trigger:'manual',startedAt:'2026-09-11T00:00:00Z',finishedAt:'2026-09-11T00:01:00Z',status:'success',scannedFiles:0,resourcesAdded:0,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,skippedFiles:0,failedFiles:0,pendingScanGroups:0,pendingScanResources:0,offlineFolders:[],errorSummary:null}
++ const views:string[]=[]
++ window.api.scan.getAuditViewPage=async(identity)=>{views.push(identity.runId);if(views.length===1)throw new Error('page failed');return{snapshot:identity,auditAvailable:true,items:[],total:0,attentionBadgeCount:0,limit:100,offset:0,anchorOffset:null}}
++ window.api.scan.pendingAuditPresence=async(_id,ids)=>ids
++ window.requestAnimationFrame=callback=>setTimeout(()=>callback(0),0) as unknown as number
++ window.cancelAnimationFrame=id=>clearTimeout(id)
++ const noSelect=()=>undefined
++ function Integrated(){current=hook(1,{loadLatest:true});return current.latest?.summary?<Panel summary={current.latest.summary} revision={current.latestRevision} onRefreshHistory={current.refreshLatest} selected={null} onSelect={noSelect} onOpenVideo={noSelect} onOpenPending={noSelect}/>:null}
++ client=new QueryClient({defaultOptions:{queries:{retry:false}}})
++ await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client}><Integrated/></QueryClientProvider>)})
++ requests[0].resolve({summary,snapshot:{libraryId:1,runId:'old',finishedAt:summary.finishedAt},unrecognizedCount:0});await flush()
++ assert.deepEqual(views,['old'])
++ const retry=renderer!.root.findAllByType('button').find(node=>node.children.includes('重试'))
++ assert.ok(retry)
++ await act(async()=>retry.props.onClick());assert.equal(requests.length,2)
++ requests[1].resolve({summary:{...summary,runId:'next'},snapshot:{libraryId:1,runId:'next',finishedAt:summary.finishedAt},unrecognizedCount:0});await flush()
++ assert.deepEqual(views,['old','next'])
++})
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+index 9b00afc..08c481b 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+@@ -14,7 +14,6 @@ import {
+ } from 'lucide-react'
+ import { AUTO_SCAN_INTERVAL_MINUTES } from '@shared/settingsTypes'
+ import type {
+-  LibraryScanLatestSnapshot,
+   LibraryScanMetricKey,
+   LibraryScanSummary
+ } from '@shared/libraryTypes'
+@@ -130,26 +129,18 @@ export function scanAuditPendingCenterPath(
+ 
+ function ScanHistorySummary({
+   summary,
+-  audit,
++  revision,
++  onRefreshHistory,
+   selected,
+-  unrecognized,
+-  currentPendingGroupIds,
+-  currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+-  onResolvedUnrecognized,
+   onOpenPending,
+   onOpenVideo
+ }: {
+   summary: LibraryScanSummary
+-  audit: LibraryScanLatestSnapshot['audit']
++  revision: number
++  onRefreshHistory: () => Promise<void>
+   selected: LibraryScanMetricKey | null
+-  unrecognized: LibraryScanLatestSnapshot['unrecognized']
+-  currentPendingGroupIds: Set<number>
+-  currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+-  onResolvedUnrecognized: (path: string) => void
+   onOpenPending: (target: PendingItemKey) => void
+   onOpenVideo: (videoId: number) => void
+ }): JSX.Element {
+@@ -175,14 +166,10 @@ function ScanHistorySummary({
+       </div>
+       <LibraryScanAuditPanel
+         summary={summary}
+-        audit={audit}
++        revision={revision}
++        onRefreshHistory={onRefreshHistory}
+         selected={selected}
+-        unrecognized={unrecognized}
+-        currentPendingGroupIds={currentPendingGroupIds}
+-        currentPendingIdentityIds={currentPendingIdentityIds}
+-        currentPendingScrapeIds={currentPendingScrapeIds}
+         onSelect={onSelect}
+-        onResolvedUnrecognized={onResolvedUnrecognized}
+         onOpenPending={onOpenPending}
+         onOpenVideo={onOpenVideo}
+       />
+@@ -470,9 +457,6 @@ export function ScanSettingsTab({
+   library,
+   scan,
+   latestScanSummary,
+-  pendingScanGroupIds,
+-  pendingResourceIdentityIds,
+-  pendingVideoScrapeIds,
+   selectedScanMetric,
+   setSelectedScanMetric,
+   configDraft,
+@@ -484,9 +468,6 @@ export function ScanSettingsTab({
+   library: MediaLibraryDetail
+   scan: ScanController
+   latestScanSummary: LibraryScanSummary | null
+-  pendingScanGroupIds: Set<number>
+-  pendingResourceIdentityIds: Set<number>
+-  pendingVideoScrapeIds: Set<number>
+   selectedScanMetric: LibraryScanMetricKey | null
+   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
+   configDraft: MediaLibraryConfigValues
+@@ -593,19 +574,20 @@ export function ScanSettingsTab({
+             <h5 id="library-last-scan-title">最近一次扫描</h5>
+             <span>只保留最近一次手动或后台扫描的审计摘要。</span>
+           </div>
+-          {latestScanSummary ? (
++          {scan.latestLoading ? (
++            <SettingsEmptyPanel variant="compact">正在加载扫描记录…</SettingsEmptyPanel>
++          ) : scan.latestError ? (
++            <SettingsEmptyPanel variant="compact">
++              <span role="alert">扫描记录加载失败：{scan.latestError}</span>
++              <Button size="sm" onClick={() => void scan.refreshLatest()}>重试</Button>
++            </SettingsEmptyPanel>
++          ) : latestScanSummary ? (
+             <ScanHistorySummary
+               summary={latestScanSummary}
+-              audit={scan.latest?.audit ?? null}
++              revision={scan.latestRevision}
++              onRefreshHistory={scan.refreshLatest}
+               selected={selectedScanMetric}
+-              unrecognized={scan.latest?.unrecognized ?? []}
+-              currentPendingGroupIds={pendingScanGroupIds}
+-              currentPendingIdentityIds={pendingResourceIdentityIds}
+-              currentPendingScrapeIds={pendingVideoScrapeIds}
+               onSelect={setSelectedScanMetric}
+-              onResolvedUnrecognized={() => {
+-                void scan.refreshLatest()
+-              }}
+               onOpenVideo={(videoId) =>
+                 navigate(mediaLibraryVideoDetailPath(libraryId, videoId))
+               }
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+index 0e8b80d..a7f054f 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+@@ -81,9 +81,6 @@ describe('ScanSettingsTab', () => {
+             refreshLatest: async () => undefined
+           } as never}
+           latestScanSummary={null}
+-          pendingScanGroupIds={new Set()}
+-          pendingResourceIdentityIds={new Set()}
+-          pendingVideoScrapeIds={new Set()}
+           selectedScanMetric={null}
+           setSelectedScanMetric={() => undefined}
+           configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG}
+@@ -111,3 +108,50 @@ describe('ScanSettingsTab', () => {
+     assert.deepEqual(updates, [['autoImportLocalNfo', false]])
+   })
+ })
++
++it('distinguishes scan history loading, failure with retry and an empty result', async () => {
++  const { ScanSettingsTab } = await import('./MediaLibrarySettingsTabs')
++  let retries = 0
++  const render = (latestLoading: boolean, latestError: string | null) => (
++    <ScanSettingsTab libraryId={library.id} library={library}
++      scan={{running:false,cancelling:false,activeRunId:null,progress:null,error:null,latest:null,
++        latestLoading,latestError,start:async()=>undefined,cancel:async()=>undefined,
++        refreshLatest:async()=>{retries++}} as never}
++      latestScanSummary={null} selectedScanMetric={null} setSelectedScanMetric={()=>undefined}
++      configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG} updateConfigImmediately={async()=>undefined}
++      formDisabled={false} navigate={()=>undefined}/>
++  )
++  await act(async()=>{renderer=TestRenderer.create(render(true,null))})
++  assert.match(nodeText(renderer!.root),/正在加载扫描记录/)
++  assert.doesNotMatch(nodeText(renderer!.root),/尚无扫描记录/)
++  await act(async()=>renderer!.update(render(false,'injected')))
++  assert.match(nodeText(renderer!.root),/扫描记录加载失败：injected/)
++  const retry=renderer!.root.findAllByType('button').find(node=>nodeText(node)==='重试')
++  assert.ok(retry)
++  await act(async()=>retry.props.onClick());assert.equal(retries,1)
++  await act(async()=>renderer!.update(render(false,null)))
++  assert.match(nodeText(renderer!.root),/尚无扫描记录/)
++})
++it('feeds summary-only history into the paged panel and refreshes pages when the header revision advances',async()=>{
++ const {ScanSettingsTab}=await import('./MediaLibrarySettingsTabs')
++ const summary:import('@shared/libraryTypes').LibraryScanSummary={libraryId:1,runId:'header-only',configRevision:1,trigger:'manual',startedAt:'2026-09-11T00:00:00Z',finishedAt:'2026-09-11T00:01:00Z',status:'success',scannedFiles:0,resourcesAdded:0,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,skippedFiles:0,failedFiles:0,pendingScanGroups:0,pendingScanResources:0,offlineFolders:[],errorSummary:null}
++ const calls:unknown[]=[]
++ window.api.scan.getLatest=async()=>{throw new Error('Full snapshot forbidden')}
++ window.api.scan.getAuditViewPage=async(snapshot,query)=>{calls.push({snapshot,query});return{snapshot,auditAvailable:false,items:[],total:0,attentionBadgeCount:0,limit:100,offset:0,anchorOffset:null}}
++ window.api.scan.pendingAuditPresence=async(_libraryId,ids)=>ids
++ window.setTimeout=setTimeout as unknown as typeof window.setTimeout
++ window.clearTimeout=clearTimeout as unknown as typeof window.clearTimeout
++ window.requestAnimationFrame=callback=>setTimeout(()=>callback(0),0) as unknown as number
++ window.cancelAnimationFrame=id=>clearTimeout(id)
++ const render=(revision:number)=><ScanSettingsTab libraryId={1} library={library}
++  scan={{running:false,cancelling:false,activeRunId:null,progress:null,error:null,latest:{summary,snapshot:null,unrecognizedCount:0},latestRevision:revision,latestLoading:false,latestError:null,result:null,start:async()=>undefined,cancel:async()=>undefined,refreshLatest:async()=>undefined}}
++  latestScanSummary={summary} selectedScanMetric={null} setSelectedScanMetric={()=>undefined}
++  configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG} updateConfigImmediately={async()=>undefined} formDisabled={false} navigate={()=>undefined}/>
++ await act(async()=>{renderer=TestRenderer.create(render(1));await new Promise(resolve=>setTimeout(resolve,20))})
++ assert.ok(calls.length>0)
++ const first=calls.length
++ await act(async()=>{renderer!.update(render(2));await new Promise(resolve=>setTimeout(resolve,20))})
++ assert.ok(calls.length>first)
++ for(const call of calls){const request=call as {snapshot:{runId:string};query:{limit:number}};assert.equal(request.snapshot.runId,'header-only');assert.equal(request.query.limit,100)}
++ assert.match(nodeText(renderer!.root),/审计|明细/)
++})
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+index 89a1174..b7cf09c 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+@@ -108,37 +108,11 @@ export function MediaLibrarySettingsContent({
+     queryKey: ['media-libraries', 'list', 'active'],
+     queryFn: () => api.mediaLibraries.list()
+   })
+-  const pendingGroupsQuery = useQuery({
+-    queryKey: ['pending-scan-groups', libraryId],
+-    queryFn: () => api.scan.listPending(libraryId)
+-  })
+-  const pendingScanGroupIds = useMemo(
+-    () => new Set((pendingGroupsQuery.data ?? []).map((group) => group.id)),
+-    [pendingGroupsQuery.data]
+-  )
+-  const pendingIdentitiesQuery = useQuery({
+-    queryKey: ['pending-resource-identities', libraryId],
+-    queryFn: () => api.scan.listPendingResourceIdentities(libraryId)
+-  })
+-  const pendingResourceIdentityIds = useMemo(
+-    () => new Set((pendingIdentitiesQuery.data ?? []).map((identity) => identity.id)),
+-    [pendingIdentitiesQuery.data]
+-  )
+-  const pendingScrapesQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending()
+-  })
+-  const pendingVideoScrapeIds = useMemo(
+-    () => new Set((pendingScrapesQuery.data ?? []).map((pending) => pending.id)),
+-    [pendingScrapesQuery.data]
+-  )
+   const scan = useMediaLibraryScanController(libraryId, {
++    loadLatest: tab === 'sources',
+     onSettled: () =>
+       Promise.all([
+-        libraryQuery.refetch(),
+-        pendingGroupsQuery.refetch(),
+-        pendingIdentitiesQuery.refetch(),
+-        pendingScrapesQuery.refetch()
++        libraryQuery.refetch()
+       ]).then(() => undefined)
+   })
+   const library = libraryQuery.data ?? null
+@@ -445,11 +419,11 @@ export function MediaLibrarySettingsContent({
+         await Promise.all([
+           queryClient.invalidateQueries({ queryKey: ['pending-scan-groups'] }),
+           queryClient.invalidateQueries({
+-            queryKey: ['media-library-scan-latest', libraryId],
++            queryKey: ['media-library-scan-header', libraryId],
+             exact: true
+           }),
+           queryClient.invalidateQueries({
+-            queryKey: ['media-library-scan-latest', requested.targetLibraryId],
++            queryKey: ['media-library-scan-header', requested.targetLibraryId],
+             exact: true
+           })
+         ])
+@@ -693,9 +667,6 @@ export function MediaLibrarySettingsContent({
+               library={library}
+               scan={scan}
+               latestScanSummary={latestScanSummary}
+-              pendingScanGroupIds={pendingScanGroupIds}
+-              pendingResourceIdentityIds={pendingResourceIdentityIds}
+-              pendingVideoScrapeIds={pendingVideoScrapeIds}
+               selectedScanMetric={selectedScanMetric}
+               setSelectedScanMetric={setSelectedScanMetric}
+               configDraft={configDraft}
+diff --git a/src/renderer/src/hooks/useScanAuditViewPage.ts b/src/renderer/src/hooks/useScanAuditViewPage.ts
+new file mode 100644
+index 0000000..004e247
+--- /dev/null
++++ b/src/renderer/src/hooks/useScanAuditViewPage.ts
+@@ -0,0 +1,66 @@
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
++import type { ScanAuditSnapshotIdentity, ScanAuditViewPage, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
++import { api } from '../api'
++
++/** A new request object is a generation, including A → B → A; only one page is retained. */
++export function useScanAuditViewPage(
++  snapshot: ScanAuditSnapshotIdentity,
++  query: ScanAuditViewQuery,
++  revision: number,
++  onRefreshHistory: () => Promise<void>,
++  enabled = true
++) {
++  const identity = JSON.stringify(snapshot)
++  const session = useMemo(() => ({ identity }), [identity])
++  const currentSession = useRef(session)
++  currentSession.current = session
++  const serial = useRef(0)
++  const [refresh, setRefresh] = useState<{
++    session: object; token: number; revision: number; state: 'waiting' | 'pending' | 'error'; error?: string
++  }>()
++  const ownRefresh = refresh?.session === session ? refresh : undefined
++  const refreshing = ownRefresh?.state === 'pending' ||
++    (ownRefresh?.state === 'waiting' && ownRefresh.revision === revision)
++  const refreshError = ownRefresh?.state === 'error' && ownRefresh.revision === revision ? ownRefresh.error : undefined
++  const key = JSON.stringify([snapshot, query, revision, ownRefresh?.token, refreshing, refreshError, enabled])
++  const request = useMemo(() => ({ key, session }), [key, session])
++  const [result, setResult] = useState<{ request: object; page?: ScanAuditViewPage; error?: string }>()
++
++  useEffect(() => {
++    let active = true
++    // Drop the previous page, including its arrays, while the next request is in flight.
++    setResult(undefined)
++    if (!enabled || refreshing || refreshError) return
++    const [requestedSnapshot, requestedQuery] = JSON.parse(request.key) as [ScanAuditSnapshotIdentity, ScanAuditViewQuery]
++    void Promise.resolve().then(async () => {
++      if (!active) return
++      try {
++        const page = await api.scan.getAuditViewPage(requestedSnapshot, requestedQuery)
++        if (active) setResult({ request, page })
++      } catch (error) {
++        if (active) setResult({ request, error: String((error as Error).message ?? error) })
++      }
++    })
++    return () => { active = false }
++  }, [request, refreshing, refreshError, enabled])
++
++  const retry = useCallback(async (): Promise<void> => {
++    const token = ++serial.current
++    setRefresh({ session, token, revision, state: 'pending' })
++    try {
++      await onRefreshHistory()
++      // Header observers may notify after refetch resolves: wait for a new revision too.
++      // Completion from an abandoned session cannot alter B or a new A session.
++      if (currentSession.current !== session) return
++      setRefresh(previous => previous?.session === session && previous.token === token
++        ? { session, token, revision, state: 'waiting' } : previous)
++    } catch (error) {
++      if (currentSession.current !== session) return
++      setRefresh(previous => previous?.session === session && previous.token === token
++        ? { session, token, revision, state: 'error', error: String((error as Error).message ?? error) } : previous)
++    }
++  }, [session, revision, onRefreshHistory])
++  const current = result?.request === request ? result : undefined
++  const error = refreshError ?? current?.error
++  return { page: current?.page, error, loading: !error && !current?.page, retry, request }
++}
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+index a301be8..a30c605 100644
+--- a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+@@ -1,13 +1,13 @@
+-import { useEffect, useMemo, useRef, useState } from 'react'
++import { useCallback, useEffect, useRef, useState } from 'react'
+ import { FixedSizeList, type ListChildComponentProps } from 'react-window'
+ import type {
+-  LibraryScanAudit,
+   LibraryScanFileAuditEntry,
+   LibraryScanMetricKey,
+-  LibraryScanResourceAuditEntry,
+-  LibraryScanSummary,
+-  LibraryScanLatestSnapshot
++  LibraryScanSummary
+ } from '@shared/libraryTypes'
++import type { ViewItem } from '@shared/scanAuditView'
++import type { ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
++import { useScanAuditViewPage } from '../../hooks/useScanAuditViewPage'
+ import { Copy, FolderOpen, AlertTriangle, CheckCircle2, RefreshCw, FileText, Trash2 } from 'lucide-react'
+ import Button from '../Button'
+ import IconButton from '../IconButton'
+@@ -15,7 +15,8 @@ import SelectControl from '../SelectControl'
+ import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
+ import UnrecognizedRow from './UnrecognizedRow'
+ import { api } from '../../api'
+-import { pendingItemKey, type PendingItemKey } from '../../listView/pendingRoutes'
++import { usePendingAuditPresence } from '../../hooks/usePendingAuditPresence'
++import type { PendingItemKey } from '../../listView/pendingRoutes'
+ import { useToast } from '../Toast'
+ import styles from './LibraryScanAuditPanel.module.css'
+ import {
+@@ -35,127 +36,12 @@ const OUTCOME_LABEL: Record<LibraryScanFileAuditEntry['outcome'], string> = {
+   processing_failure: '处理失败'
+ }
+ 
+-type ViewItem = {
+-  key: string
+-  title: string
+-  detail: string
+-  outcome?: LibraryScanFileAuditEntry['outcome']
+-  path?: string
+-  rootId?: number
+-  videoId?: number
+-  groupId?: number
+-  status?: string
+-  requiresAttention?: boolean
+-  pendingTarget?: PendingItemKey
+-  isUnrecognizedPending?: boolean
+-}
+-
+ function auditItemAnchor(item: ViewItem): string {
+   if (item.groupId) return `group:${item.groupId}`
+   if (item.path) return `path:${encodeURIComponent(item.path)}`
+   return `item:${encodeURIComponent(item.key)}`
+ }
+ 
+-function fileDetail(entry: LibraryScanFileAuditEntry): string {
+-  const primary = (() => {
+-    switch (entry.outcome) {
+-      case 'added':
+-        return entry.createdVideo ? '新建影片并添加资源' : '挂载到已有影片'
+-      case 'updated':
+-        return {
+-          relocated: '路径已重定位',
+-          metadata_refreshed: '文件信息已刷新',
+-          strm_target_synced: 'STRM 目标已同步'
+-        }[entry.updateKind]
+-      case 'pending':
+-        return `${entry.normalizedCode || '番号未知'} · ${
+-          entry.sourceKind === 'strm' ? 'STRM' : '本地文件'
+-        } · ${entry.addedToQueue ? '已加入待确认队列' : '仍在待确认队列'}`
+-      case 'skipped':
+-        return {
+-          unchanged: '未变化',
+-          below_min_duration: '低于最短时长',
+-          duplicate: '重复资源'
+-        }[entry.skipReason]
+-      case 'unrecognized':
+-        return '文件名未识别出番号'
+-      case 'strm_failure':
+-        return entry.message
+-      case 'processing_failure':
+-        return entry.message
+-    }
+-  })()
+-  if (!entry.nfo) return primary
+-  const nfoLabel = {
+-    imported: 'NFO 已导入',
+-    skipped: 'NFO 已跳过',
+-    warning: 'NFO 警告',
+-    'pending-candidate': 'NFO 候选待确认',
+-    'identity-conflict': 'NFO 身份冲突'
+-  }[entry.nfo.disposition]
+-  const warnings = entry.nfo.warnings?.map((warning) => warning.message).join('；')
+-  return `${primary} · ${nfoLabel}${warnings ? ` · ${warnings}` : ''}`
+-}
+-
+-function fileView(entry: LibraryScanFileAuditEntry, index: number): ViewItem {
+-  return {
+-    key: `file:${index}:${entry.filePath}`,
+-    title: entry.filePath.split(/[\\/]/).pop() || entry.filePath,
+-    detail: fileDetail(entry),
+-    outcome: entry.outcome,
+-    path: entry.filePath,
+-    rootId: entry.rootId,
+-    videoId: 'videoId' in entry ? entry.videoId : undefined,
+-    groupId: entry.outcome === 'pending' ? entry.groupId ?? undefined : undefined
+-  }
+-}
+-
+-function isAttentionFile(entry: LibraryScanFileAuditEntry): boolean {
+-  return (
+-    ['unrecognized', 'strm_failure', 'processing_failure'].includes(entry.outcome) ||
+-    entry.nfo?.disposition === 'warning' ||
+-    entry.nfo?.disposition === 'identity-conflict' ||
+-    entry.nfo?.disposition === 'pending-candidate'
+-  )
+-}
+-
+-function isCurrentNfoPending(
+-  entry: LibraryScanFileAuditEntry,
+-  currentPendingIdentityIds: ReadonlySet<number>,
+-  currentPendingScrapeIds: ReadonlySet<number>
+-): boolean {
+-  if (entry.nfo?.disposition === 'identity-conflict') {
+-    return (
+-      entry.nfo.pendingIdentityId != null &&
+-      currentPendingIdentityIds.has(entry.nfo.pendingIdentityId)
+-    )
+-  }
+-  if (entry.nfo?.disposition === 'pending-candidate') {
+-    return (
+-      entry.nfo.pendingScrapeId != null &&
+-      currentPendingScrapeIds.has(entry.nfo.pendingScrapeId)
+-    )
+-  }
+-  return false
+-}
+-
+-function resourceView(entry: LibraryScanResourceAuditEntry, index: number): ViewItem {
+-  const reason = {
+-    missing: '源文件缺失',
+-    removed_library_path: '媒体库路径已移除',
+-    promoted_after_removal: '原主资源移除后提升'
+-  }[entry.reason]
+-  return {
+-    key: `resource:${index}:${entry.resourceId}`,
+-    title: `${entry.videoCode}${entry.videoTitle ? ` · ${entry.videoTitle}` : ''}`,
+-    detail: `${entry.resourceKind.toUpperCase()} · ${reason} · ${
+-      entry.displayName || entry.sourcePath || '外部目标已隐藏'
+-    }`,
+-    path: entry.sourcePath ?? undefined,
+-    videoId: entry.videoId
+-  }
+-}
+-
+ function getOutcomeClass(outcome?: LibraryScanFileAuditEntry['outcome']): string {
+   switch (outcome) {
+     case 'added':
+@@ -326,66 +212,30 @@ function AuditRow({
+ 
+ export default function LibraryScanAuditPanel({
+   summary,
+-  audit,
+   selected,
+-  unrecognized,
+-  currentPendingGroupIds,
+-  currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+-  onResolvedUnrecognized,
+   onOpenVideo,
+-  onOpenPending
++  onOpenPending,
++  onRefreshHistory,
++  revision
+ }: {
+   summary: LibraryScanSummary
+-  audit: LibraryScanAudit | null
++  onRefreshHistory: () => Promise<void>
++  revision: number
+   selected: LibraryScanMetricKey | null
+-  unrecognized: LibraryScanLatestSnapshot['unrecognized']
+-  currentPendingGroupIds: Set<number>
+-  currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+-  onResolvedUnrecognized: (path: string) => void
+   onOpenVideo: (videoId: number) => void
+   onOpenPending: (target: PendingItemKey) => void
+ }): JSX.Element {
+   const [activeTab, setActiveTab] = useState<ScanAuditTab>('failed')
+   const [search, setSearch] = useState('')
++  const [debouncedSearch, setDebouncedSearch] = useState('')
+   const [outcome, setOutcome] = useState<LibraryScanFileAuditEntry['outcome'] | 'all'>('all')
+   const [changesFilter, setChangesFilter] = useState<'all' | 'removed' | 'promoted' | 'deleted'>('all')
+-  const [attentionTarget, setAttentionTarget] = useState<string | null>(null)
++  const focusedPage = useRef<object | null>(null)
+   const listContainerRef = useRef<HTMLDivElement | null>(null)
+   const virtualListRef = useRef<FixedSizeList | null>(null)
+ 
+-  const matchedAudit =
+-    audit?.libraryId === summary.libraryId &&
+-    audit.runId === summary.runId &&
+-    audit.finishedAt === summary.finishedAt
+-      ? audit
+-      : null
+-  const cachedUnrecognizedPaths = useMemo(
+-    () => new Set(unrecognized.map((item) => item.filePath)),
+-    [unrecognized]
+-  )
+-  const auditedUnrecognizedPaths = useMemo(
+-    () =>
+-      new Set(
+-        matchedAudit?.files
+-          .filter((entry) => entry.outcome === 'unrecognized')
+-          .map((entry) => entry.filePath) ?? []
+-      ),
+-    [matchedAudit]
+-  )
+-  const extraCachedUnrecognizedCount = unrecognized.filter(
+-    (item, index) =>
+-      unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-      !auditedUnrecognizedPaths.has(item.filePath)
+-  ).length
+-
+-  const totalFailed =
+-    (matchedAudit?.files.filter(isAttentionFile).length ?? 0) +
+-    (matchedAudit?.pendingGroups.length ?? 0) +
+-    extraCachedUnrecognizedCount
+   const totalAddedUpdated = summary.resourcesAdded + summary.resourcesUpdated
+   const totalChanges =
+     summary.resourcesRemoved + summary.primaryResourcesPromoted + summary.videosDeleted
+@@ -412,195 +262,84 @@ export default function LibraryScanAuditPanel({
+ 
+   useEffect(() => {
+     setActiveTab('failed')
++    setPageState({ scope: '', offset: 0 })
+     setSearch('')
++    setDebouncedSearch('')
+     setOutcome('all')
+     setChangesFilter('all')
+     onSelect('failedFiles')
+   }, [onSelect, summary.libraryId, summary.runId])
+ 
+-  const items = useMemo((): ViewItem[] => {
+-    if (activeTab === 'failed') {
+-      const failedFileEntries =
+-        matchedAudit?.files.filter(isAttentionFile) ?? []
+-      const fileItems: ViewItem[] = failedFileEntries.map((entry, index) => {
+-        const item = fileView(entry, index)
+-        if (entry.outcome === 'unrecognized') {
+-          const isPending = cachedUnrecognizedPaths.has(entry.filePath)
+-          item.isUnrecognizedPending = isPending
+-          item.status = isPending ? '待处理' : '已处理'
+-          item.requiresAttention = isPending
+-        }
+-        if (
+-          entry.nfo?.disposition === 'identity-conflict' ||
+-          entry.nfo?.disposition === 'pending-candidate'
+-        ) {
+-          const pending = isCurrentNfoPending(
+-            entry,
+-            currentPendingIdentityIds,
+-            currentPendingScrapeIds
+-          )
+-          item.status = pending ? '待处理' : '已处理'
+-          item.requiresAttention = pending
+-          if (pending) {
+-            item.pendingTarget =
+-              entry.nfo.disposition === 'identity-conflict'
+-                ? pendingItemKey('scan', `identity-${entry.nfo.pendingIdentityId}`)
+-                : pendingItemKey('scrape', entry.nfo.pendingScrapeId!)
+-          }
+-        }
+-        return item
+-      })
+-
+-      const groupItems: ViewItem[] = (matchedAudit?.pendingGroups ?? []).map((entry) => ({
+-        key: `pending-group:${entry.groupId}`,
+-        title: `待确认归属 · ${entry.normalizedCode}`,
+-        detail: `${entry.resourceCount} 个扫描资源`,
+-        groupId: currentPendingGroupIds.has(entry.groupId) ? entry.groupId : undefined,
+-        pendingTarget: currentPendingGroupIds.has(entry.groupId)
+-          ? pendingItemKey('scan', entry.groupId)
+-          : undefined,
+-        status: currentPendingGroupIds.has(entry.groupId) ? '待处理' : '已处理',
+-        requiresAttention: currentPendingGroupIds.has(entry.groupId)
+-      }))
+-
+-      // Unrecognized files that might not be in file list (e.g. persistent across scans)
+-      const listedPaths = new Set(failedFileEntries.map((f) => f.filePath))
+-      const extraUnrecItems: ViewItem[] = unrecognized
+-        .filter(
+-          (item, index) =>
+-            unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-            !listedPaths.has(item.filePath)
+-        )
+-        .map((item, idx) => ({
+-          key: `extra-unrec:${idx}:${item.filePath}`,
+-          title: item.filePath.split(/[\\/]/).pop() || item.filePath,
+-          detail: '未识别番号文件',
+-          outcome: 'unrecognized',
+-          path: item.filePath,
+-          rootId: item.rootId,
+-          isUnrecognizedPending: true,
+-          status: '待处理',
+-          requiresAttention: true
+-        }))
+-
+-      return [...extraUnrecItems, ...fileItems, ...groupItems]
+-    }
+-
+-    if (!matchedAudit) return []
+-
+-    if (activeTab === 'added_updated') {
+-      return matchedAudit.files
+-        .filter((entry) => entry.outcome === 'added' || entry.outcome === 'updated')
+-        .map(fileView)
+-    }
+-
+-    if (activeTab === 'skipped') {
+-      return matchedAudit.files
+-        .filter((entry) => entry.outcome === 'skipped')
+-        .map(fileView)
+-    }
+-
+-    if (activeTab === 'changes') {
+-      const deletedVideoIds = new Set(matchedAudit.deletedVideos.map((entry) => entry.videoId))
+-      const removed = matchedAudit.removedResources.map((entry, index) => {
+-        const item = resourceView(entry, index)
+-        if (deletedVideoIds.has(entry.videoId)) item.videoId = undefined
+-        return item
+-      })
+-      const promoted = matchedAudit.promotedResources.map(resourceView)
+-      const deleted: ViewItem[] = matchedAudit.deletedVideos.map((entry, index) => ({
+-        key: `deleted:${index}:${entry.videoId}`,
+-        title: `${entry.videoCode}${entry.videoTitle ? ` · ${entry.videoTitle}` : ''}`,
+-        detail: '扫描后移出的无资源成员'
+-      }))
+-
+-      if (changesFilter === 'removed') return removed
+-      if (changesFilter === 'promoted') return promoted
+-      if (changesFilter === 'deleted') return deleted
+-      return [...removed, ...promoted, ...deleted]
+-    }
+-
+-    // Default 'all'
+-    let allFiles = matchedAudit.files
+-    if (outcome !== 'all') {
+-      allFiles = allFiles.filter((entry) => entry.outcome === outcome)
+-    }
+-    return allFiles.map((entry, index) => {
+-      const item = fileView(entry, index)
+-      if (
+-        entry.nfo?.disposition === 'identity-conflict' ||
+-        entry.nfo?.disposition === 'pending-candidate'
+-      ) {
+-        const pending = isCurrentNfoPending(
+-          entry,
+-          currentPendingIdentityIds,
+-          currentPendingScrapeIds
+-        )
+-        item.status = pending ? '待处理' : '已处理'
+-        item.requiresAttention = pending
+-        if (pending) {
+-          item.pendingTarget =
+-            entry.nfo.disposition === 'identity-conflict'
+-              ? pendingItemKey('scan', `identity-${entry.nfo.pendingIdentityId}`)
+-              : pendingItemKey('scrape', entry.nfo.pendingScrapeId!)
+-        }
+-        if (!pending) item.groupId = undefined
+-      } else if (entry.outcome === 'pending') {
+-        const pending =
+-          entry.groupId != null && currentPendingGroupIds.has(entry.groupId)
+-        item.status = pending ? '待处理' : '已处理'
+-        item.requiresAttention = pending
+-        if (pending) item.pendingTarget = pendingItemKey('scan', entry.groupId!)
+-        if (!pending) item.groupId = undefined
+-      } else if (entry.outcome === 'unrecognized') {
+-        const pending = cachedUnrecognizedPaths.has(entry.filePath)
+-        item.status = pending ? '待处理' : '已处理'
+-        item.requiresAttention = pending
+-      }
+-      return item
+-    })
+-  }, [
+-    activeTab,
+-    cachedUnrecognizedPaths,
+-    changesFilter,
+-    currentPendingGroupIds,
+-    currentPendingIdentityIds,
+-    currentPendingScrapeIds,
+-    matchedAudit,
+-    outcome,
+-    unrecognized
+-  ])
+-
+-  const filtered = useMemo(() => {
+-    const query = activeTab === 'all' ? search.trim().toLocaleLowerCase() : ''
+-    return query
+-      ? items.filter((item) =>
+-          `${item.title} ${item.detail} ${item.path ?? ''}`.toLocaleLowerCase().includes(query)
+-        )
+-      : items
+-  }, [activeTab, items, search])
++  useEffect(() => {
++    const timer = setTimeout(() => setDebouncedSearch(search), 200)
++    return () => clearTimeout(timer)
++  }, [search, summary.libraryId, summary.runId, summary.finishedAt])
++
++  const snapshot = { libraryId: summary.libraryId, runId: summary.runId, finishedAt: summary.finishedAt }
++  const locale = navigator.language || Intl.DateTimeFormat().resolvedOptions().locale
++  const pageScope = JSON.stringify([snapshot, activeTab, search, outcome, changesFilter, locale])
++  const [pageState, setPageState] = useState<{
++    scope: string; offset: number; anchor?: ScanAuditViewQuery['anchor']; focusKey?: string; focusOrigin?: Element | null
++  }>({ scope: '', offset: 0 })
++  const currentPage = pageState.scope === pageScope ? pageState : undefined
++  const { page, error, loading, retry, request } = useScanAuditViewPage(snapshot, {
++    tab: activeTab, search: activeTab === 'all' ? debouncedSearch : '', outcome, changesFilter,
++    locale, limit: 100, offset: currentPage?.offset ?? 0, anchor: currentPage?.anchor
++  }, revision, onRefreshHistory, activeTab !== 'all' || search === debouncedSearch)
++  const pageItems = page?.items ?? []
++  const total = page?.total
++  const totalFailed = page?.attentionBadgeCount
++  const pageIndex = Math.floor((page?.offset ?? currentPage?.offset ?? 0) / 100)
++  const setPage = (index: number): void => setPageState({ scope: pageScope, offset: index * 100 })
++  const resetPage = (): void => setPageState({ scope: '', offset: 0 })
++  const handleResolvedUnrecognized = useCallback((): void => {
++    // The resolved anchor may disappear; retain the server's actual page for the refresh.
++    setPageState(previous => currentPage && previous === currentPage
++      ? { scope: pageScope, offset: page?.offset ?? 0 } : previous)
++    void retry()
++  }, [currentPage, pageScope, page?.offset, retry])
++  const targets = {groupIds:[] as number[],identityIds:[] as number[],scrapeIds:[] as number[]}
++  for (const item of pageItems) {
++    const target=item.pendingTarget
++    if (!target) continue
++    if (target.domain==='scrape') targets.scrapeIds.push(Number(target.id))
++    else if (target.id.startsWith('identity-')) targets.identityIds.push(Number(target.id.slice('identity-'.length)))
++    else targets.groupIds.push(Number(target.id))
++  }
++  const presence = usePendingAuditPresence(summary.libraryId, targets, `${pageScope}:${revision}:${request.key}`)
++  const displayedItems = pageItems.map(item => {
++    if (!item.pendingTarget) return item
++    const known = presence.state === 'ready'
++    const pending = known && presence.ids.has(`${item.pendingTarget.domain}:${item.pendingTarget.id}`)
++    return { ...item, status: !known ? presence.state === 'error' ? '状态未知' : '读取中…' : pending ? '待处理' : '已处理',
++      requiresAttention: pending, pendingTarget: pending ? item.pendingTarget : undefined }
++  })
+ 
+   const rowHeight = auditRowHeight(activeTab)
+-  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, filtered.length)
++  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, displayedItems.length)
+ 
+   useEffect(() => {
+     virtualListRef.current?.scrollTo(0)
+-  }, [activeTab, changesFilter, outcome, search, summary.finishedAt])
++  }, [activeTab, changesFilter, outcome, search, summary.finishedAt, pageIndex])
+ 
+   useEffect(() => {
+-    if (activeTab !== 'failed' || !attentionTarget) return
++    if (activeTab !== 'failed' || !page || !currentPage?.focusKey || focusedPage.current === currentPage) return
+     const frame = window.requestAnimationFrame(() => {
+-      const target = listContainerRef.current?.querySelector<HTMLElement>(
+-        `[data-audit-anchor="${attentionTarget}"]`
+-      )
++      focusedPage.current = currentPage
++      const activeElement = document.activeElement
++      if (activeElement !== currentPage.focusOrigin && activeElement !== document.body &&
++          activeElement !== document.documentElement) return
++      // Paths never enter selector syntax: compare the exact encoded anchor on each current row.
++      const rows = listContainerRef.current?.querySelectorAll<HTMLElement>('[data-audit-anchor]')
++      const target = Array.from(rows ?? []).find(row => row.dataset.auditAnchor === currentPage.focusKey)
+       target?.scrollIntoView({ block: 'center' })
+       target?.focus({ preventScroll: true })
+-      setAttentionTarget(null)
+     })
+     return () => window.cancelAnimationFrame(frame)
+-  }, [activeTab, attentionTarget, filtered])
++  }, [activeTab, currentPage, page])
+ 
+   const handleTabChange = (tab: ScanAuditTab): void => {
++    resetPage()
+     setActiveTab(tab)
+     if (tab === 'failed') onSelect('failedFiles')
+     else if (tab === 'all') onSelect('scannedFiles')
+@@ -610,8 +349,15 @@ export default function LibraryScanAuditPanel({
+   }
+ 
+   const handleOpenAttention = (item: ViewItem): void => {
+-    setAttentionTarget(auditItemAnchor(item))
++    const focusOrigin = document.activeElement
+     handleTabChange('failed')
++    const anchor: ScanAuditViewQuery['anchor'] = item.groupId
++      ? { kind: 'group', id: item.groupId }
++      : item.path ? { kind: 'path', value: item.path } : undefined
++    setPageState({
++      scope: JSON.stringify([snapshot, 'failed', search, outcome, changesFilter, locale]),
++      offset: 0, anchor, focusKey: auditItemAnchor(item), focusOrigin
++    })
+   }
+ 
+   return (
+@@ -626,9 +372,9 @@ export default function LibraryScanAuditPanel({
+           <AlertTriangle size={13} aria-hidden />
+           <span>异常与待办</span>
+           <span
+-            className={`${styles.tabBadge}${totalFailed > 0 ? ` ${styles.tabBadgeWarning}` : ''}`}
++            className={`${styles.tabBadge}${(totalFailed ?? 0) > 0 ? ` ${styles.tabBadgeWarning}` : ''}`}
+           >
+-            {totalFailed}
++            {totalFailed ?? '…'}
+           </span>
+         </button>
+ 
+@@ -692,57 +438,66 @@ export default function LibraryScanAuditPanel({
+               {activeTab === 'changes' && '源文件缺失清理、主资源替补提升及无资源成员移出。'}
+             </span>
+           </div>
+-          <SettingsStatusPill status="muted">{filtered.length} 项</SettingsStatusPill>
++          <SettingsStatusPill status="muted">{total ?? '…'} 项</SettingsStatusPill>
+         </div>
+ 
++        {presence.state === 'error' ? <div role="status" className={styles.subFilters}>
++          <span>待办状态读取失败</span><Button size="sm" onClick={presence.retry}>重试状态</Button>
++        </div> : null}
++        {total !== undefined && total > 100 ? <nav aria-label="扫描审计分页" className={styles.subFilters}>
++          <Button size="sm" disabled={pageIndex === 0} onClick={() => setPage(pageIndex-1)}>上一页</Button>
++          <span>{pageIndex+1} / {Math.ceil(total/100)}</span>
++          <Button size="sm" disabled={(pageIndex+1)*100 >= total} onClick={() => setPage(pageIndex+1)}>下一页</Button>
++        </nav> : null}
++
+         {/* 资源清理分类下的子标签 */}
+         {activeTab === 'changes' ? (
+           <div className={styles.subFilters}>
+             <button
+               type="button"
+               className={`${styles.subFilterChip}${changesFilter === 'all' ? ` ${styles.subFilterChipActive}` : ''}`}
+-              onClick={() => setChangesFilter('all')}
++              onClick={() => { resetPage(); setChangesFilter('all') }}
+             >
+               全部 ({totalChanges})
+             </button>
+             <button
+               type="button"
+               className={`${styles.subFilterChip}${changesFilter === 'removed' ? ` ${styles.subFilterChipActive}` : ''}`}
+-              onClick={() => setChangesFilter('removed')}
++              onClick={() => { resetPage(); setChangesFilter('removed') }}
+             >
+               移除资源 ({summary.resourcesRemoved})
+             </button>
+             <button
+               type="button"
+               className={`${styles.subFilterChip}${changesFilter === 'promoted' ? ` ${styles.subFilterChipActive}` : ''}`}
+-              onClick={() => setChangesFilter('promoted')}
++              onClick={() => { resetPage(); setChangesFilter('promoted') }}
+             >
+               提升主资源 ({summary.primaryResourcesPromoted})
+             </button>
+             <button
+               type="button"
+               className={`${styles.subFilterChip}${changesFilter === 'deleted' ? ` ${styles.subFilterChipActive}` : ''}`}
+-              onClick={() => setChangesFilter('deleted')}
++              onClick={() => { resetPage(); setChangesFilter('deleted') }}
+             >
+               移出无资源成员 ({summary.videosDeleted})
+             </button>
+           </div>
+         ) : null}
+ 
+-        {matchedAudit || (activeTab === 'failed' && unrecognized.length > 0) ? (
+-          <>
++        <>
+             {activeTab === 'all' ? (
+               <div className={styles.toolbar}>
+                 <input
+                   className="text-input"
+                   value={search}
+-                  onChange={(event) => setSearch(event.target.value)}
++                  maxLength={500}
++                  onChange={(event) => { resetPage(); setSearch(event.target.value) }}
+                   placeholder="搜索番号、文件名或路径…"
+                   aria-label="搜索扫描明细"
+                 />
+                 <SelectControl
+                   value={outcome}
+-                  onChange={(event) => setOutcome(event.target.value as typeof outcome)}
++                  onChange={(event) => { resetPage(); setOutcome(event.target.value as typeof outcome) }}
+                   aria-label="筛选扫描结果"
+                 >
+                   <option value="all">全部结果</option>
+@@ -755,7 +510,14 @@ export default function LibraryScanAuditPanel({
+               </div>
+             ) : null}
+ 
+-            {filtered.length > 0 ? (
++            {loading ? (
++              <SettingsEmptyPanel variant="compact">正在读取扫描明细…</SettingsEmptyPanel>
++            ) : error ? (
++              <SettingsEmptyPanel variant="compact">
++                <span role="alert">扫描明细读取失败：{error}</span>
++                <Button onClick={() => void retry()}>重试</Button>
++              </SettingsEmptyPanel>
++            ) : pageItems.length > 0 ? (
+               <div
+                 ref={listContainerRef}
+                 className={styles.list}
+@@ -772,23 +534,23 @@ export default function LibraryScanAuditPanel({
+                   <FixedSizeList
+                     ref={virtualListRef}
+                     className={styles.virtualList}
+-                    height={Math.min(480, filtered.length * rowHeight)}
++                    height={Math.min(480, displayedItems.length * rowHeight)}
+                     width="100%"
+-                    itemCount={filtered.length}
++                    itemCount={displayedItems.length}
+                     itemSize={rowHeight}
+                     itemData={{
+                       libraryId: summary.libraryId,
+-                      items: filtered,
++                      items: displayedItems,
+                       activeTab,
+                       onOpenAttention: handleOpenAttention,
+                       onOpenPending,
+-                      onResolvedUnrecognized
++                      onResolvedUnrecognized: handleResolvedUnrecognized
+                     }}
+                   >
+                     {AuditRow}
+                   </FixedSizeList>
+                 ) : (
+-                  filtered.map((item) => (
++                  displayedItems.map((item) => (
+                     <AuditRowContent
+                       key={item.key}
+                       libraryId={summary.libraryId}
+@@ -796,20 +558,20 @@ export default function LibraryScanAuditPanel({
+                       activeTab={activeTab}
+                       onOpenAttention={handleOpenAttention}
+                       onOpenPending={onOpenPending}
+-                      onResolvedUnrecognized={onResolvedUnrecognized}
++                      onResolvedUnrecognized={handleResolvedUnrecognized}
+                     />
+                   ))
+                 )}
+               </div>
+-            ) : (
++            ) : page?.auditAvailable ? (
+               <SettingsEmptyPanel variant="compact">没有符合条件的明细</SettingsEmptyPanel>
+-            )}
++            ) : null}
++            {!loading && !error && page?.auditAvailable === false ? (
++              <SettingsEmptyPanel variant="compact">
++                此扫描仅保留了摘要，下一次扫描后会生成完整明细。
++              </SettingsEmptyPanel>
++            ) : null}
+           </>
+-        ) : (
+-          <SettingsEmptyPanel variant="compact">
+-            此扫描仅保留了摘要，下一次扫描后会生成完整明细。
+-          </SettingsEmptyPanel>
+-        )}
+       </section>
+     </div>
+   )
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
+index 10a8958..d56f6a4 100644
+--- a/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
+@@ -7,14 +7,36 @@ import type {
+   LibraryScanLatestSnapshot,
+   LibraryScanSummary
+ } from '@shared/libraryTypes'
++import { buildScanAuditViewItems } from '@shared/scanAuditView'
++import type { ScanAuditSnapshotIdentity, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
+ import type { PendingItemKey } from '../../listView/pendingRoutes'
+ 
++let fixtureAudit: LibraryScanAudit | null = null
++let fixtureUnrecognized: LibraryScanLatestSnapshot['unrecognized'] = []
++function getAuditViewPage(snapshot: ScanAuditSnapshotIdentity, query: ScanAuditViewQuery) {
++  const items = buildScanAuditViewItems({ audit: fixtureAudit, unrecognized: fixtureUnrecognized,
++    activeTab: query.tab, outcome: query.outcome ?? 'all', changesFilter: query.changesFilter ?? 'all' })
++  const offset = query.offset ?? 0
++  return Promise.resolve({ snapshot, items: items.slice(offset, offset + 100), total: items.length,
++    limit: 100, offset, anchorOffset: null, auditAvailable: fixtureAudit !== null,
++    attentionBadgeCount: buildScanAuditViewItems({ audit: fixtureAudit, unrecognized: fixtureUnrecognized,
++      activeTab: 'failed', outcome: 'all', changesFilter: 'all' }).length })
++}
++
++let presentIds = new Set<number>()
++let presentIdentities = new Set<number>()
++let presentGroups = new Set<number>()
++const presenceRequests: number[][] = []
++
+ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+ Object.defineProperty(globalThis, 'window', {
+   configurable: true,
+   value: {
+     api: {
+-      scan: { revealAuditFile: async () => ({ ok: true }) },
++      scan: { getAuditViewPage, pendingAuditPresence: async (_libraryId:number, ids:{groupIds:number[];identityIds:number[];scrapeIds:number[]}) => {
++        presenceRequests.push([...ids.groupIds,...ids.identityIds,...ids.scrapeIds]);
++        return {groupIds:ids.groupIds.filter(id=>presentGroups.has(id)),identityIds:ids.identityIds.filter(id=>presentIdentities.has(id)),scrapeIds:ids.scrapeIds.filter(id=>presentIds.has(id))}
++      }, revealAuditFile: async () => ({ ok: true }) },
+       videos: { list: async () => ({ items: [], total: 0 }) }
+     },
+     setTimeout,
+@@ -29,6 +51,8 @@ let renderer: TestRenderer.ReactTestRenderer | null = null
+ afterEach(() => {
+   renderer?.unmount()
+   renderer = null
++  presenceRequests.length = 0
++  presentIds = new Set()
+ })
+ 
+ function summary(overrides: Partial<LibraryScanSummary> = {}): LibraryScanSummary {
+@@ -78,6 +102,7 @@ async function renderPanel({
+   scanSummary,
+   scanAudit,
+   unrecognized = [],
++  currentPendingGroupIds = new Set(),
+   currentPendingIdentityIds = new Set(),
+   currentPendingScrapeIds = new Set(),
+   onOpenPending = () => undefined
+@@ -85,23 +110,25 @@ async function renderPanel({
+   scanSummary: LibraryScanSummary
+   scanAudit: LibraryScanAudit | null
+   unrecognized?: LibraryScanLatestSnapshot['unrecognized']
++  currentPendingGroupIds?: Set<number>
+   currentPendingIdentityIds?: Set<number>
+   currentPendingScrapeIds?: Set<number>
+   onOpenPending?: (target: PendingItemKey) => void
+ }): Promise<void> {
++  fixtureAudit = scanAudit
++  fixtureUnrecognized = unrecognized
++  presentIds = currentPendingScrapeIds
++  presentIdentities = currentPendingIdentityIds
++  presentGroups = currentPendingGroupIds
+   const { default: LibraryScanAuditPanel } = await import('./LibraryScanAuditPanel')
+-  act(() => {
++  await act(async () => {
+     renderer = TestRenderer.create(
+       <LibraryScanAuditPanel
+         summary={scanSummary}
+-        audit={scanAudit}
++        revision={1}
++        onRefreshHistory={async () => undefined}
+         selected={null}
+-        unrecognized={unrecognized}
+-        currentPendingGroupIds={new Set()}
+-        currentPendingIdentityIds={currentPendingIdentityIds}
+-        currentPendingScrapeIds={currentPendingScrapeIds}
+         onSelect={() => undefined}
+-        onResolvedUnrecognized={() => undefined}
+         onOpenVideo={() => undefined}
+         onOpenPending={onOpenPending}
+       />
+@@ -175,7 +202,7 @@ describe('LibraryScanAuditPanel', () => {
+         button.findAllByType('span').some((span) => span.children.includes('全部文件'))
+       )
+     assert.ok(allFilesTab)
+-    act(() => allFilesTab.props.onClick())
++    await act(async () => allFilesTab.props.onClick())
+ 
+     const output = JSON.stringify(renderer?.toJSON())
+     assert.match(output, /处理/)
+@@ -329,3 +356,44 @@ describe('LibraryScanAuditPanel', () => {
+     assert.match(output, /远程图片已忽略/)
+   })
+ })
++
++
++it('limits a large failed audit to100 visible rows and queries only their pending IDs',async()=>{
++  const files: LibraryScanAudit['files']=Array.from({length:201},(_,i)=>({
++    outcome:'added',rootId:1,sourceKind:'local',filePath:`/synthetic/FILE-${i+1}.mp4`,videoId:i+1,videoCode:`FILE-${i+1}`,
++    resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}
++  }))
++  await renderPanel({scanSummary:summary({scannedFiles:201}),scanAudit:{...audit(files),schemaVersion:2},currentPendingScrapeIds:new Set([1,101,201])})
++  assert.deepEqual(presenceRequests[0],Array.from({length:100},(_,i)=>i+1))
++  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,100)
++  const next=()=>renderer!.root.findAllByType('button').find(node=>node.children.includes('下一页'))!
++  await act(async()=>next().props.onClick())
++  assert.deepEqual(presenceRequests.at(-1),Array.from({length:100},(_,i)=>101+i))
++  await act(async()=>next().props.onClick())
++  assert.deepEqual(presenceRequests.at(-1),[201])
++  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,1)
++  assert.ok(presenceRequests.every(ids=>ids.length<=100))
++})
++
++
++it('routes all three kinds from one mixed pending presence response',async()=>{
++  const opened:PendingItemKey[]=[]
++  const files:LibraryScanAudit['files']=[
++    {outcome:'added',rootId:1,sourceKind:'local',filePath:'/identity.mp4',videoId:1,videoCode:'IDENTITY',resourceId:1,resourceKind:'local',createdVideo:true,nfo:{disposition:'identity-conflict',pendingIdentityId:7}},
++    {outcome:'added',rootId:1,sourceKind:'local',filePath:'/scrape.mp4',videoId:2,videoCode:'SCRAPE',resourceId:2,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:8}}
++  ]
++  await renderPanel({scanSummary:summary(),scanAudit:{...audit(files),schemaVersion:2,pendingGroups:[{groupId:9,normalizedCode:'GROUP',resourceCount:1}]},currentPendingGroupIds:new Set([9]),currentPendingIdentityIds:new Set([7]),currentPendingScrapeIds:new Set([8]),onOpenPending:target=>opened.push(target)})
++  assert.deepEqual(presenceRequests,[ [9,7,8] ])
++  const buttons=renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办'))
++  assert.equal(buttons.length,3)
++  act(()=>buttons.forEach(button=>button.props.onClick()))
++  assert.deepEqual(opened,[{domain:'scan',id:'identity-7'},{domain:'scrape',id:'8'},{domain:'scan',id:'9'}])
++})
++
++
++it('keeps a stable audit anchor when a historical group is no longer pending',async()=>{
++ await renderPanel({scanSummary:summary(),scanAudit:{...audit([]),pendingGroups:[{groupId:9,normalizedCode:'GONE',resourceCount:1}]}})
++ assert.equal(renderer!.root.findAllByProps({'data-audit-anchor':'group:9'}).length,1)
++ assert.equal(renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办')).length,0)
++ assert.match(JSON.stringify(renderer!.toJSON()),/已处理/)
++})
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.interaction.test.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.interaction.test.tsx
+new file mode 100644
+index 0000000..6e573bc
+--- /dev/null
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.interaction.test.tsx
+@@ -0,0 +1,395 @@
++import assert from 'node:assert/strict'
++import { afterEach, before, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { FixedSizeList } from 'react-window'
++import type { LibraryScanSummary } from '@shared/libraryTypes'
++import type { ScanAuditSnapshotIdentity, ScanAuditViewQuery, ScanAuditViewPage } from '@shared/scanAuditReadTypes'
++import type { ViewItem } from '@shared/scanAuditView'
++import styles from './LibraryScanAuditPanel.module.css'
++
++type Request = { snapshot: ScanAuditSnapshotIdentity; query: ScanAuditViewQuery }
++const requests: Request[] = []
++const presence: number[][] = []
++let read: (request: Request) => Promise<ScanAuditViewPage>
++let refresh: () => Promise<void>
++const refreshHistory = (): Promise<void> => refresh()
++let refreshCount = 0
++let focused: string[] = []
++let openedVideo: number[] = []
++const noSelect = (): void => undefined
++const focusDocument = { body: {}, documentElement: {}, activeElement: {} }
++Object.defineProperty(globalThis, 'document', { configurable: true, value: focusDocument })
++Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { language: 'tr-TR', platform: 'Win32' } })
++Object.defineProperty(globalThis, 'window', { configurable: true, value: {
++  api: { scan: {
++    getAuditViewPage: (snapshot: ScanAuditSnapshotIdentity, query: ScanAuditViewQuery) => {
++      const request = { snapshot, query }; requests.push(request); return read(request)
++    },
++    pendingAuditPresence: async (_libraryId: number, ids: { groupIds: number[]; identityIds: number[]; scrapeIds: number[] }) => {
++      presence.push([...ids.groupIds, ...ids.identityIds, ...ids.scrapeIds]); return ids
++    },
++    revealAuditFile: async () => ({ ok: true })
++  } },
++  requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0), cancelAnimationFrame: clearTimeout,
++  setTimeout, clearTimeout
++} })
++let Panel: typeof import('./LibraryScanAuditPanel').default
++let UnrecognizedRow: typeof import('./UnrecognizedRow').default
++before(async () => {
++  Panel = (await import('./LibraryScanAuditPanel')).default
++  UnrecognizedRow = (await import('./UnrecognizedRow')).default
++})
++let renderer: TestRenderer.ReactTestRenderer | undefined
++let props: React.ComponentProps<typeof Panel>
++function summary(libraryId = 1, runId = 'run'): LibraryScanSummary {
++  return { libraryId, runId, configRevision: 1, trigger: 'manual', startedAt: 'start', finishedAt: 'finish',
++    status: 'success', scannedFiles: 205, resourcesAdded: 205, resourcesUpdated: 0, resourcesRemoved: 1,
++    primaryResourcesPromoted: 1, videosDeleted: 1, skippedFiles: 0, failedFiles: 0, pendingScanGroups: 0,
++    pendingScanResources: 0, offlineFolders: [], errorSummary: null }
++}
++function row(id: number, label = `row-${id}`): ViewItem {
++  return { key: `file:${id}`, title: label, detail: 'server detail', path: `/file-${id}`, videoId: id }
++}
++function page(request: Request, items: ViewItem[] = [row(1)], extra: Partial<ScanAuditViewPage> = {}): ScanAuditViewPage {
++  return { snapshot: request.snapshot, items, total: items.length, limit: 100, offset: request.query.offset ?? 0,
++    anchorOffset: null, attentionBadgeCount: 777, auditAvailable: true, ...extra }
++}
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++async function mount(reader: typeof read = async request => page(request)): Promise<void> {
++  requests.length = 0; presence.length = 0; focused = []; openedVideo = []; refreshCount = 0
++  focusDocument.activeElement = focusDocument.body
++  read = reader; refresh = async () => { refreshCount++ }
++  props = { summary: summary(), selected: null, revision: 1, onRefreshHistory: refreshHistory,
++    onSelect: noSelect, onOpenPending: () => undefined, onOpenVideo: id => openedVideo.push(id) }
++  await act(async () => {
++    renderer = TestRenderer.create(<Panel {...props} />, { createNodeMock: element => {
++      if (element.props.className !== styles.list) return null
++      return { querySelectorAll: (selector: string) => {
++        assert.equal(selector, '[data-audit-anchor]')
++        return rows().map(node => ({ dataset: { auditAnchor: node.props['data-audit-anchor'] },
++          scrollIntoView: () => undefined, focus: () => focused.push(node.props['data-audit-anchor']) }))
++      } }
++    } })
++  })
++}
++async function update(next: Partial<typeof props>): Promise<void> {
++  props = { ...props, ...next }
++  await act(async () => renderer!.update(<Panel {...props} />))
++}
++function text(node: TestRenderer.ReactTestInstance | string): string {
++  return typeof node === 'string' ? node : node.children.map(text).join('')
++}
++function rows(): TestRenderer.ReactTestInstance[] {
++  return renderer!.root.findAll(node => node.type === 'div' && node.props['data-audit-anchor'] !== undefined)
++}
++function button(label: string): TestRenderer.ReactTestInstance {
++  return renderer!.root.findAllByType('button').find(node => text(node) === label)!
++}
++async function click(label: string): Promise<void> { await act(async () => button(label).props.onClick()) }
++async function tab(label: string): Promise<void> {
++  const nav = renderer!.root.findByProps({ 'aria-label': '扫描审计分类' })
++  const target = nav.findAllByType('button').find(node => node.findAllByType('span').some(span => text(span) === label))!
++  await act(async () => target.props.onClick())
++}
++async function type(value: string): Promise<void> {
++  await act(async () => renderer!.root.findByProps({ 'aria-label': '搜索扫描明细' }).props.onChange({ target: { value } }))
++}
++async function tick(ms = 10): Promise<void> { await act(async () => { await new Promise(resolve => setTimeout(resolve, ms)) }) }
++async function wait(check: () => boolean): Promise<void> {
++  for (let i = 0; i < 100 && !check(); i++) await tick()
++  assert.ok(check(), 'condition did not settle')
++}
++afterEach(async () => { if (renderer) await act(async () => renderer!.unmount()); renderer = undefined })
++
++it('uses server totals/offset, 100/100/5 rows, browser locale and current-page presence', async () => {
++  await mount(async request => {
++    const offset = request.query.offset ?? 0
++    return page(request, Array.from({ length: Math.min(100, 205 - offset) }, (_, i) => ({ ...row(offset + i + 1),
++      pendingTarget: { domain: 'scrape', id: String(offset + i + 1) } })), { total: 205 })
++  })
++  assert.equal(rows().length, 100)
++  assert.match(text(renderer!.root), /异常与待办777/)
++  assert.match(text(renderer!.root), /205 项/)
++  assert.equal(requests[0].query.locale, 'tr-TR')
++  await click('下一页'); assert.equal(rows().length, 100)
++  await click('下一页'); assert.equal(rows().length, 5)
++  assert.deepEqual(requests.map(request => request.query.offset), [0, 100, 200])
++  assert.deepEqual(presence.map(ids => ids.length), [100, 100, 5])
++  assert.ok(presence.every(ids => ids.length <= 100))
++  assert.equal(button('下一页').props.disabled, true)
++  // The service clamps after shrink; its returned offset drives the pager.
++  read = async request => page(request, [row(101)], { total: 101, offset: 100 })
++  await update({ revision: 2 })
++  assert.match(text(renderer!.root), /2 \/ 2/)
++  assert.equal(rows().length, 1)
++})
++
++it('hides rows during loading/error and waits for refreshed header before retrying current props', async () => {
++  const initial = deferred<ScanAuditViewPage>()
++  await mount(() => initial.promise)
++  assert.equal(rows().length, 0)
++  assert.match(text(renderer!.root), /正在读取/)
++  assert.doesNotMatch(text(renderer!.root), /没有符合/)
++  await act(async () => initial.reject(Error('expired')))
++  assert.match(text(renderer!.root), /读取失败：expired/)
++  const header = deferred<void>()
++  refresh = () => { refreshCount++; return header.promise }
++  await click('重试')
++  await update({ revision: 2 })
++  assert.equal(requests.length, 1, 'same-summary revision must wait for header completion')
++  read = async request => page(request, [row(2, 'refreshed')])
++  await act(async () => header.resolve())
++  assert.equal(requests.length, 2)
++  assert.equal(refreshCount, 1)
++  assert.match(text(renderer!.root), /refreshed/)
++  read = async () => { throw Error('expired again') }
++  await update({ revision: 3 })
++  const nextHeader = deferred<void>()
++  refresh = () => nextHeader.promise
++  await click('重试')
++  read = async request => page(request, [row(3, 'new snapshot')])
++  await act(async () => { props = { ...props, summary: summary(1, 'new-run'), revision: 4 }; renderer!.update(<Panel {...props} />); nextHeader.resolve() })
++  assert.equal(requests.at(-1)?.snapshot.runId, 'new-run')
++  assert.equal(requests.filter(request => request.snapshot.runId === 'run').length, 3)
++})
++
++for (const finish of ['resolve', 'reject'] as const) it(`isolates old retry ${finish} across library A → B → A`, async () => {
++  await mount(async () => { throw Error('A error') })
++  const headerA = deferred<void>()
++  refresh = () => headerA.promise
++  await click('重试')
++  read = async request => page(request, [row(1, `library-${request.snapshot.libraryId}`)])
++  await update({ summary: summary(2) })
++  assert.match(text(renderer!.root), /library-2/)
++  assert.doesNotMatch(text(renderer!.root), /正在读取|A error/)
++  await update({ summary: summary(1) })
++  assert.match(text(renderer!.root), /library-1/)
++  const count = requests.length
++  await act(async () => { if (finish === 'resolve') headerA.resolve(); else headerA.reject(Error('late A header error')) })
++  assert.equal(requests.length, count)
++  assert.match(text(renderer!.root), /library-1/)
++  assert.doesNotMatch(text(renderer!.root), /late A header error|正在读取/)
++})
++
++it('debounces 200ms, hides rows immediately, and rejects search ABA and library ABA responses', async () => {
++  await mount()
++  await tab('全部文件')
++  const pending: Array<{ request: Request; gate: ReturnType<typeof deferred<ScanAuditViewPage>> }> = []
++  read = request => { const gate = deferred<ScanAuditViewPage>(); pending.push({ request, gate }); return gate.promise }
++  const count = requests.length
++  await type('a'); await type('ab'); await type('abc')
++  assert.equal(rows().length, 0)
++  await tick(100)
++  assert.equal(requests.length, count)
++  await wait(() => pending.length === 1)
++  assert.equal(pending[0].request.query.search, 'abc')
++  await type('b'); await wait(() => pending.length === 2)
++  await type('abc'); await wait(() => pending.length === 3)
++  await act(async () => pending[2].gate.resolve(page(pending[2].request, [row(3, 'new A')])) )
++  await act(async () => { pending[0].gate.resolve(page(pending[0].request, [row(1, 'old A')])); pending[1].gate.reject(Error('old B')) })
++  assert.match(text(renderer!.root), /new A/)
++  assert.doesNotMatch(text(renderer!.root), /old A|old B/)
++  await update({ revision: 2 }); await wait(() => pending.length === 4)
++  await update({ summary: summary(2) }); await wait(() => pending.some(entry => entry.request.snapshot.libraryId === 2))
++  await update({ summary: summary(1) }); await wait(() => pending.at(-1)?.request.snapshot.libraryId === 1)
++  const last = pending.at(-1)!
++  await act(async () => last.gate.resolve(page(last.request, [row(4, 'new library A')])))
++  await act(async () => pending[3].gate.resolve(page(pending[3].request, [row(5, 'old library A')])))
++  assert.match(text(renderer!.root), /new library A/)
++  assert.doesNotMatch(text(renderer!.root), /old library A/)
++})
++
++it('cancels a search timer on library change and unmount; filters reset offset and use the server', async () => {
++  await mount(async request => page(request, Array.from({ length: 100 }, (_, i) => row(i + 1)), { total: 205 }))
++  await tab('全部文件'); await click('下一页')
++  await type('queued')
++  await update({ summary: summary(2) })
++  await tick(250)
++  assert.ok(requests.every(request => request.query.search !== 'queued'))
++  await tab('全部文件'); await click('下一页')
++  await act(async () => renderer!.root.findByProps({ 'aria-label': '筛选扫描结果' }).props.onChange({ target: { value: 'skipped' } }))
++  assert.equal(requests.at(-1)?.query.offset, 0)
++  assert.equal(requests.at(-1)?.query.outcome, 'skipped')
++  await tab('已跳过')
++  assert.equal(renderer!.root.findByType(FixedSizeList).props.itemSize, 48)
++  await tab('新增与更新')
++  assert.equal(renderer!.root.findByType(FixedSizeList).props.itemSize, 72)
++  await tab('资源清理'); await click('移除资源 (1)')
++  assert.equal(requests.at(-1)?.query.changesFilter, 'removed')
++  await tab('全部文件'); await type('unmounted')
++  const count = requests.length
++  await act(async () => renderer!.unmount()); renderer = undefined
++  await tick(250)
++  assert.equal(requests.length, count)
++})
++
++it('resolves unrecognized once through header refresh and refetches the current page', async () => {
++  await mount(async request => page(request, [{ ...row(101), rootId: 7, isUnrecognizedPending: true }], { total: 201 }))
++  await click('下一页')
++  const header = deferred<void>()
++  refresh = () => { refreshCount++; return header.promise }
++  await act(async () => renderer!.root.findByType(UnrecognizedRow).props.onResolved('/file-101'))
++  assert.equal(refreshCount, 1)
++  const count = requests.length
++  await update({ revision: 2 })
++  assert.equal(requests.length, count)
++  read = async request => page(request, [row(102, 'resolved refresh')], { total: 201 })
++  await act(async () => header.resolve())
++  assert.equal(requests.at(-1)?.query.offset, 100)
++  assert.equal(requests.length, count + 1)
++  assert.match(text(renderer!.root), /resolved refresh/)
++})
++
++it('renders missing-body notice alongside cached rows and never calls it a filtered empty page', async () => {
++  await mount(async request => page(request, request.query.tab === 'failed' ? [row(1, 'cached')] : [], { auditAvailable: false }))
++  assert.match(text(renderer!.root), /cached/)
++  assert.match(text(renderer!.root), /仅保留了摘要/)
++  await tab('全部文件')
++  assert.match(text(renderer!.root), /仅保留了摘要/)
++  assert.doesNotMatch(text(renderer!.root), /没有符合条件/)
++})
++
++for (const kind of ['path', 'group'] as const) it(`anchors all → failed by ${kind}, honors returned page and safely focuses exact DOM anchor`, async () => {
++  const path = '/odd/" ] [data-evil="yes]\\文件.mp4'
++  const target: ViewItem = { ...row(1, 'target'), path, requiresAttention: true, ...(kind === 'group' ? { groupId: 73 } : {}) }
++  await mount(async request => page(request, [target], request.query.anchor ? { offset: 100, anchorOffset: 100, total: 201 } : {}))
++  await tab('全部文件')
++  await click('处理')
++  assert.deepEqual(requests.at(-1)?.query.anchor, kind === 'group' ? { kind: 'group', id: 73 } : { kind: 'path', value: path })
++  assert.equal(requests.at(-1)?.query.tab, 'failed')
++  await wait(() => focused.length === 1)
++  assert.equal(focused[0], kind === 'group' ? 'group:73' : `path:${encodeURIComponent(path)}`)
++  assert.match(text(renderer!.root), /2 \/ 3/)
++  const list = renderer!.root.findByProps({ className: styles.list })
++  await act(async () => list.props.onClick({ target: { closest: () => ({ dataset: { videoId: '1' } }) } }))
++  assert.deepEqual(openedVideo, [1])
++  await click('下一页')
++  assert.equal(requests.at(-1)?.query.offset, 200)
++  assert.equal(requests.at(-1)?.query.anchor, undefined)
++})
++
++for (const nextRun of ['run', 'next'] as const) it(`waits for delayed header props after refresh promise resolves (${nextRun})`, async () => {
++  await mount(async () => { throw Error('retry required') })
++  refresh = async () => { refreshCount++ }
++  await click('重试')
++  await tick(30)
++  assert.equal(refreshCount, 1)
++  assert.equal(requests.length, 1, 'resolved callback alone cannot refetch the old snapshot')
++  assert.match(text(renderer!.root), /正在读取/)
++  read = async request => page(request, [row(1, 'header observed')])
++  await update({ summary: summary(1, nextRun), revision: 2 })
++  assert.equal(requests.length, 2)
++  assert.equal(requests.at(-1)?.snapshot.runId, nextRun)
++  assert.match(text(renderer!.root), /header observed/)
++})
++
++it('shows refresh errors with retry and allows a new library to proceed', async () => {
++  await mount(async () => { throw Error('page failed') })
++  refresh = async () => { throw Error('header failed') }
++  await click('重试')
++  assert.match(text(renderer!.root), /header failed/)
++  assert.equal(requests.length, 1)
++  assert.ok(button('重试'))
++  read = async request => page(request, [row(1, 'new library')])
++  await update({ summary: summary(2) })
++  assert.match(text(renderer!.root), /new library/)
++  assert.doesNotMatch(text(renderer!.root), /header failed/)
++})
++
++for (const destination of ['origin', 'body', 'documentElement', 'input', 'toolbar'] as const) {
++  it(`held anchor response respects user focus: ${destination}`, async () => {
++    const target = { ...row(1, 'held target'), requiresAttention: true }
++    const held = deferred<ScanAuditViewPage>()
++    await mount(async request => request.query.anchor ? held.promise : page(request, [target]))
++    await tab('全部文件')
++    const origin = { name: 'processing button' }
++    focusDocument.activeElement = origin
++    await click('处理')
++    const currentFocus = destination === 'origin' ? origin
++      : destination === 'body' ? focusDocument.body
++      : destination === 'documentElement' ? focusDocument.documentElement
++      : { name: destination }
++    focusDocument.activeElement = currentFocus
++    assert.equal(focused.length, 0)
++    await act(async () => held.resolve(page(requests.at(-1)!, [target], { offset: 100, anchorOffset: 100, total: 201 })))
++    await tick(20)
++    if (destination === 'input' || destination === 'toolbar') {
++      assert.deepEqual(focused, [])
++      assert.strictEqual(focusDocument.activeElement, currentFocus)
++      // Subsequent rerenders must not revive the skipped automatic focus.
++      await update({ revision: 2 })
++      await tick(20)
++      assert.deepEqual(focused, [])
++    } else {
++      assert.deepEqual(focused, ['path:%2Ffile-1'])
++    }
++  })
++}
++
++it('keeps the actual anchored page when resolving its target, clears anchor and accepts server clamp', async () => {
++  const target: ViewItem = { ...row(201, 'anchor target'), rootId: 7, requiresAttention: true }
++  await mount(async request => page(request,
++    [{ ...target, ...(request.query.tab === 'failed' ? { isUnrecognizedPending: true } : {}) }],
++    request.query.anchor ? { offset: 200, anchorOffset: 200, total: 201 } : {}))
++  await tab('全部文件')
++  await click('处理')
++  assert.deepEqual(requests.at(-1)?.query.anchor, { kind: 'path', value: '/file-201' })
++  assert.match(text(renderer!.root), /3 \/ 3/)
++  const header = deferred<void>()
++  refresh = () => { refreshCount++; return header.promise }
++  const count = requests.length
++  await act(async () => renderer!.root.findByType(UnrecognizedRow).props.onResolved('/file-201'))
++  assert.equal(refreshCount, 1)
++  assert.equal(requests.length, count)
++  read = async request => page(request, [row(101, 'remaining last page')], { total: 101, offset: 100 })
++  await update({ revision: 2 })
++  assert.equal(requests.length, count)
++  await act(async () => header.resolve())
++  assert.equal(refreshCount, 1)
++  assert.equal(requests.length, count + 1)
++  assert.equal(requests.at(-1)?.query.anchor, undefined)
++  assert.equal(requests.at(-1)?.query.offset, 200)
++  assert.match(text(renderer!.root), /2 \/ 2/)
++  assert.match(text(renderer!.root), /remaining last page/)
++})
++
++it('late resolution from an old row cannot reset the user’s newer page', async () => {
++  await mount(async request => page(request,
++    [{ ...row((request.query.offset ?? 0) + 1), rootId: 7, isUnrecognizedPending: true }], { total: 301 }))
++  await click('下一页')
++  const oldResolved = renderer!.root.findByType(UnrecognizedRow).props.onResolved
++  await click('下一页')
++  assert.equal(requests.at(-1)?.query.offset, 200)
++  const header = deferred<void>()
++  refresh = () => { refreshCount++; return header.promise }
++  await act(async () => oldResolved('/file-101'))
++  await update({ revision: 2 })
++  await act(async () => header.resolve())
++  assert.equal(refreshCount, 1)
++  assert.equal(requests.at(-1)?.query.offset, 200)
++  assert.match(text(renderer!.root), /3 \/ 4/)
++})
++
++it('late resolution from library A cannot replace B or a new A page state', async () => {
++  await mount(async request => page(request,
++    [{ ...row((request.query.offset ?? 0) + 1), rootId: 7, isUnrecognizedPending: true }], { total: 301 }))
++  await click('下一页')
++  const oldResolved = renderer!.root.findByType(UnrecognizedRow).props.onResolved
++  await update({ summary: summary(2) })
++  await click('下一页'); await click('下一页')
++  await act(async () => oldResolved('/file-101'))
++  assert.match(text(renderer!.root), /3 \/ 4/)
++  assert.equal(requests.at(-1)?.snapshot.libraryId, 2)
++  await update({ summary: summary(1) })
++  await click('下一页'); await click('下一页')
++  await act(async () => oldResolved('/file-101'))
++  assert.match(text(renderer!.root), /3 \/ 4/)
++  assert.equal(requests.at(-1)?.query.offset, 200)
++})
+diff --git a/scripts/performance/audit-presence-ui.mjs b/scripts/performance/audit-presence-ui.mjs
+new file mode 100644
+index 0000000..417132b
+--- /dev/null
++++ b/scripts/performance/audit-presence-ui.mjs
+@@ -0,0 +1,116 @@
++/** Actual remote-page audit component with synthetic paged API and visible-page presence. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-presence-'))
++const output=path.resolve(process.env.JAVDEX_AUDIT_UI_OUTPUT??path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import{createRoot}from'react-dom/client';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__requests=[];window.__fail=false;window.__opened=[];window.__hold=false;window.__releases=[];window.__pages=[];window.__anchorHold=false;window.__anchorRelease=null;
++window.api={scan:{pendingAuditPresence:async(libraryId,input)=>{const ids=[...input.groupIds,...input.identityIds,...input.scrapeIds];window.__requests.push(ids);if(window.__fail){window.__fail=false;throw new Error('fixture')};if(window.__hold)await new Promise(resolve=>window.__releases.push(resolve));return {groupIds:input.groupIds.filter(id=>id===1||id===101||id===201),identityIds:[],scrapeIds:input.scrapeIds.filter(id=>id===1||id===101||id===201)};},revealAuditFile:async()=>({ok:true})}};
++const summary={libraryId:1,runId:'run',configRevision:1,trigger:'manual',startedAt:'2026-09-10T00:00:00Z',finishedAt:'2026-09-10T00:01:00Z',status:'success',scannedFiles:201,resourcesAdded:201,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,skippedFiles:0,failedFiles:0,pendingScanGroups:0,pendingScanResources:201,offlineFolders:[],errorSummary:null};
++const audit={...summary,schemaVersion:2,files:Array.from({length:201},(_,i)=>({outcome:'added',rootId:1,sourceKind:'local',filePath:'/synthetic/FILE-'+(i+1)+'.mp4',videoId:i+1,videoCode:'FILE-'+(i+1),resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}})),removedResources:[],promotedResources:[],deletedVideos:[],pendingGroups:[]};
++if(location.search.includes('groups')){audit.files=audit.files.map(entry=>({...entry,nfo:undefined,outcome:'pending',groupId:entry.resourceId,normalizedCode:entry.videoCode,addedToQueue:true}));audit.pendingGroups=audit.files.map(entry=>({groupId:entry.groupId,normalizedCode:entry.normalizedCode,resourceCount:1}));}
++const {buildScanAuditViewItems}=await import(${JSON.stringify('/@fs'+path.join(repo,'src/shared/scanAuditView.ts'))});
++window.api.scan.getLatest=()=>{throw new Error('Full snapshot forbidden')};
++window.api.scan.getAuditViewPage=async(snapshot,query)=>{
++window.__pages.push(structuredClone({snapshot,query}));
++if(query.anchor&&window.__anchorHold)await new Promise(resolve=>window.__anchorRelease=resolve);
++let items=buildScanAuditViewItems({audit,unrecognized:[],activeTab:query.tab,outcome:query.outcome??'all',changesFilter:query.changesFilter??'all'});
++const needle=query.tab==='all'?(query.search??'').trim().toLocaleLowerCase(query.locale):'';
++if(needle)items=items.filter(item=>(item.title+' '+item.detail+' '+(item.path??'')).toLocaleLowerCase(query.locale).includes(needle));
++const total=items.length,limit=query.limit??100;let offset=Math.min(query.offset??0,Math.max(0,Math.floor((total-1)/limit)*limit)),anchorOffset=null;
++if(query.anchor){const position=items.findIndex(item=>item.groupId?query.anchor.kind==='group'&&item.groupId===query.anchor.id:query.anchor.kind==='path'&&item.path===query.anchor.value);if(position>=0){anchorOffset=Math.floor(position/limit)*limit;offset=anchorOffset;}}
++return {snapshot,auditAvailable:true,items:items.slice(offset,offset+limit),total,attentionBadgeCount:201,limit,offset,anchorOffset};};
++const Panel=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/settings/LibraryScanAuditPanel.tsx'))})).default;
++function Host(){const[selected,setSelected]=React.useState(null);return <div style={{padding:16}}><Panel summary={summary} revision={1} onRefreshHistory={async()=>{}} selected={selected} onSelect={setSelected} onOpenVideo={()=>{}} onOpenPending={target=>window.__opened.push(target)}/></div>}
++createRoot(document.getElementById('root')).render(<Host/>);
++`)
++let server,browser
++const results=[]
++try{
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]){
++  const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',e=>errors.push(e.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  assert.equal(await page.locator('[data-audit-anchor]').count(),100)
++  await page.evaluate(()=>window.__fail=true)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('待办状态读取失败',{exact:true}).waitFor()
++  assert.equal(await page.getByRole('button',{name:'处理待办',exact:true}).count(),0)
++  await page.getByRole('button',{name:'重试状态',exact:true}).click()
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.waitForFunction(()=>window.__requests.at(-1)?.[0]===201)
++  await page.getByRole('button',{name:'处理待办',exact:true}).click()
++  assert.deepEqual(await page.evaluate(()=>window.__opened),[{domain:'scrape',id:'201'}])
++  await page.getByRole('button',{name:/全部文件/}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'处理',exact:true}).click()
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  const rows=await page.locator('[data-audit-anchor]').count();assert.equal(rows,1)
++  await page.waitForFunction(()=>document.activeElement?.getAttribute('data-audit-anchor')?.includes('FILE-201'))
++  const focused=await page.evaluate(()=>document.activeElement.getAttribute('data-audit-anchor'));assert.ok(focused.includes('FILE-201'))
++  const focusedBox=await page.locator('[data-audit-anchor]').boundingBox();assert.ok(focusedBox && focusedBox.y>=0 && focusedBox.y+focusedBox.height<=viewport.height+1)
++  const geometry=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1);assert.deepEqual(errors,[])
++  assert.ok((await page.evaluate(()=>window.__requests)).every(ids=>ids.length<=100))
++  assert.ok((await page.evaluate(()=>window.__pages)).every(({query})=>query.limit<=100));
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,mode:'scrape',rows,focused,geometry,requests:await page.evaluate(()=>window.__requests),pages:await page.evaluate(()=>window.__pages),errors});
++  await page.getByRole('button',{name:/全部文件/}).click()
++  await page.getByPlaceholder('搜索番号、文件名或路径…').fill('FILE-201')
++  await page.waitForFunction(()=>window.__pages.at(-1)?.query.search==='FILE-201' && document.querySelectorAll('[data-audit-anchor]').length===1)
++  assert.equal(await page.locator('[data-audit-anchor]').count(),1)
++  assert.ok((await page.locator('[data-audit-anchor]').getAttribute('data-audit-anchor')).includes('FILE-201'))
++  assert.deepEqual(errors,[])
++  results.push({viewport,mode:'search',pages:await page.evaluate(()=>window.__pages),errors})
++
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port+'/?groups')
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  await page.getByRole('button',{name:/全部文件/}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'处理',exact:true}).waitFor()
++  await page.evaluate(()=>window.__hold=true)
++  await page.getByRole('button',{name:'处理',exact:true}).click()
++  await page.waitForFunction(()=>document.activeElement?.getAttribute('data-audit-anchor')==='group:201' && window.__releases.length>0)
++  assert.equal(await page.getByRole('button',{name:'处理待办',exact:true}).count(),0)
++  assert.equal(await page.getByText('读取中…',{exact:true}).count(),1)
++  const heldFocus=await page.evaluate(()=>document.activeElement.getAttribute('data-audit-anchor'))
++  await page.evaluate(()=>{window.__hold=false;window.__releases.splice(0).forEach(resolve=>resolve())})
++  await page.getByRole('button',{name:'处理待办',exact:true}).click()
++  assert.deepEqual(await page.evaluate(()=>window.__opened),[{domain:'scan',id:'201'}])
++  const finalAnchor=await page.locator('[data-audit-anchor]').getAttribute('data-audit-anchor');assert.equal(finalAnchor,'group:201')
++  await page.screenshot({path:path.join(output,`groups-${viewport.width}x${viewport.height}.png`)})
++  assert.deepEqual(errors,[])
++  results.push({viewport,mode:'group-delayed',heldFocus,finalAnchor,requests:await page.evaluate(()=>window.__requests),pages:await page.evaluate(()=>window.__pages),errors});
++  await page.getByRole('button',{name:/全部文件/}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'处理',exact:true}).waitFor()
++  await page.evaluate(()=>window.__anchorHold=true)
++  await page.getByRole('button',{name:'处理',exact:true}).click()
++  await page.waitForFunction(()=>window.__anchorRelease!==null)
++  await page.getByRole('button',{name:/异常与待办/}).focus()
++  await page.evaluate(()=>{window.__anchorHold=false;window.__anchorRelease()})
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  await page.waitForTimeout(50)
++  const userFocus=await page.evaluate(()=>document.activeElement?.textContent)
++  assert.match(userFocus,/异常与待办/)
++  assert.deepEqual(errors,[])
++  results.push({viewport,mode:'anchor-user-focus',userFocus,pages:await page.evaluate(()=>window.__pages),errors});await page.close()
++
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n');console.log(JSON.stringify(results.map(({viewport,mode,errors})=>({viewport,mode,errors}))))
++}finally{await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}

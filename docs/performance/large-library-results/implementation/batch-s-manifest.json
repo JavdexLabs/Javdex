@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "f21cd9efce66b9776997056257173d6c8798d4b5e9074acc303640af48b58232",
+  "notes": [
+    "Cumulative againstHEAD. scrapeJobController includes earlier progress-publisher batch; not standalone incremental patch.",
+    "Version2 checkpoint references digest-verified immutable request+target definition. Progress-only API does not rewrite definition; fullsave used for scope changes. Legacy read then migration on save.",
+    "Temp filefsync/rename/POSIXdirsync; pointer failure invalidatescache and retainsmanifests. Clearuncertainty invalidatescache, cleanup failures logged separately.",
+    "Full npm test2087passed/1skipped, build passed; Standards/Spec fault-review findings fixed and re-reviewed.",
+    "Fault cases: write/fsync/rename, afterrename directorysync, afterunlink directorysync, cleanup enumeration, missing/tampered manifest, invalidcursor, queue stops and atleastonce replay.",
+    "Remaining: real processkill/powerloss/Windows/HDD,10k/20k/100k, logbytebudget and streamingtargets, otherPERF09 stores. No exactlyonce claim."
+  ]
+}

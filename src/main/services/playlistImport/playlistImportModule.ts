@@ -292,8 +292,8 @@ function provisionalSnapshot(
 
 export async function createPlaylistImportModule(): Promise<PlaylistImportModule> {
   const { playlistImportRunDriver } = await import('./playlistImportRunDriver')
-  for (const run of agentRunStore.listRecoverableRuns()) {
-    if (run.useCase === 'playlist-importer') agentRunStore.closeRun(run.id)
+  for (const id of agentRunStore.iterateRecoverableRunIds('playlist-importer')) {
+    agentRunStore.closeRun(id)
   }
   return new PlaylistImportModuleImpl(getDb, playlistImportRunDriver)
 }

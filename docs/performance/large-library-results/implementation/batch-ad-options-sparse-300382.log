@@ -1,0 +1,73 @@
+BEGIN startup.current_schema
+{"name":"startup.current_schema","firstMs":259.03108300000076,"warmMedianMs":250.60300000000007,"warmMaxMs":251.13724999999977,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":176128000}
+BEGIN legacy.first
+{"name":"legacy.first","firstMs":3.811124999999265,"warmMedianMs":2.8963340000000244,"warmMaxMs":2.97137500000008,"samples":3,"sqlCalls":2,"sqlMsLast":2.8783749999993233,"serializedBytes":41393,"rssBytesAfter":176291840}
+BEGIN legacy.deep
+{"name":"legacy.deep","firstMs":564.8222500000002,"warmMedianMs":566.5414170000004,"warmMaxMs":569.3069999999998,"samples":3,"sqlCalls":2,"sqlMsLast":566.3374160000003,"serializedBytes":40895,"rssBytesAfter":176324608}
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":571.4686250000013,"warmMedianMs":572.8057079999999,"warmMaxMs":573.5141660000008,"samples":3,"sqlCalls":2,"sqlMsLast":573.3028759999997,"serializedBytes":41452,"rssBytesAfter":176406528}
+BEGIN legacy.search_code
+{"name":"legacy.search_code","firstMs":96.85541700000067,"warmMedianMs":95.82983299999978,"warmMaxMs":96.31999999999971,"samples":3,"sqlCalls":2,"sqlMsLast":96.09329200000138,"serializedBytes":708,"rssBytesAfter":176537600}
+BEGIN scoped.library
+{"name":"scoped.library","firstMs":66.75887499999953,"warmMedianMs":66.02929099999892,"warmMaxMs":66.26133300000038,"samples":3,"sqlCalls":2,"sqlMsLast":65.9661670000005,"serializedBytes":50573,"rssBytesAfter":176750592}
+BEGIN scoped.all_single_active
+{"name":"scoped.all_single_active","firstMs":65.97516699999869,"warmMedianMs":66.46812499999942,"warmMaxMs":67.97666600000048,"samples":3,"sqlCalls":3,"sqlMsLast":67.71537600000192,"serializedBytes":50573,"rssBytesAfter":176865280}
+BEGIN scoped.all_selected_one
+{"name":"scoped.all_selected_one","firstMs":66.05983399999968,"warmMedianMs":65.96166599999924,"warmMaxMs":66.35016699999869,"samples":3,"sqlCalls":3,"sqlMsLast":66.06491599999936,"serializedBytes":50573,"rssBytesAfter":177061888}
+BEGIN scoped.release
+{"name":"scoped.release","firstMs":81.93762500000048,"warmMedianMs":81.9897920000003,"warmMaxMs":82.07200000000012,"samples":3,"sqlCalls":2,"sqlMsLast":81.7664990000012,"serializedBytes":50632,"rssBytesAfter":177291264}
+BEGIN scoped.search_code
+{"name":"scoped.search_code","firstMs":371.6030830000018,"warmMedianMs":370.57733299999927,"warmMaxMs":371.4539590000004,"samples":3,"sqlCalls":3,"sqlMsLast":371.1209579999995,"serializedBytes":861,"rssBytesAfter":177799168}
+BEGIN tags.all
+{"name":"tags.all","firstMs":568.5244170000005,"warmMedianMs":568.4421249999996,"warmMaxMs":570.4843330000003,"samples":3,"sqlCalls":1,"sqlMsLast":567.7694589999992,"serializedBytes":46787,"rssBytesAfter":186171392}
+BEGIN tags.manual
+{"name":"tags.manual","firstMs":221.76416700000118,"warmMedianMs":222.8582920000008,"warmMaxMs":223.26833400000032,"samples":3,"sqlCalls":1,"sqlMsLast":223.16787500000282,"serializedBytes":2281,"rssBytesAfter":191250432}
+BEGIN tags.selected_labels
+{"name":"tags.selected_labels","firstMs":0.14275000000270666,"warmMedianMs":0.017457999998441665,"warmMaxMs":0.020333999997092178,"samples":3,"sqlCalls":1,"sqlMsLast":0.006708000000799075,"serializedBytes":76,"rssBytesAfter":191266816}
+BEGIN tags.selected_labels_100
+{"name":"tags.selected_labels_100","firstMs":0.06974999999874854,"warmMedianMs":0.054874999997991836,"warmMaxMs":0.05891600000177277,"samples":3,"sqlCalls":1,"sqlMsLast":0.02491599999848404,"serializedBytes":2685,"rssBytesAfter":191315968}
+BEGIN tags.manual_options
+{"name":"tags.manual_options","firstMs":236.00466699999743,"warmMedianMs":232.74137500000143,"warmMaxMs":235.41533300000083,"samples":3,"sqlCalls":1,"sqlMsLast":232.65504200000214,"serializedBytes":1457,"rssBytesAfter":191332352}
+BEGIN tags.manual_options_search
+{"name":"tags.manual_options_search","firstMs":2.582833999997092,"warmMedianMs":2.619416999998066,"warmMaxMs":2.9922499999993306,"samples":3,"sqlCalls":1,"sqlMsLast":2.417583000002196,"serializedBytes":28,"rssBytesAfter":191397888}
+BEGIN tags.manual_options_deep
+{"name":"tags.manual_options_deep","firstMs":232.726375000002,"warmMedianMs":232.2770419999979,"warmMaxMs":233.90008300000045,"samples":3,"sqlCalls":1,"sqlMsLast":231.4618330000012,"serializedBytes":28,"rssBytesAfter":191414272}
+BEGIN actors.first
+{"name":"actors.first","firstMs":429.4870410000003,"warmMedianMs":428.94358400000056,"warmMaxMs":430.19624999999724,"samples":3,"sqlCalls":3,"sqlMsLast":428.7699169999978,"serializedBytes":104927,"rssBytesAfter":192446464}
+BEGIN overview
+{"name":"overview","firstMs":7.274583000002167,"warmMedianMs":6.838915999996971,"warmMaxMs":6.868582999999489,"samples":3,"sqlCalls":6,"sqlMsLast":6.814793000005011,"serializedBytes":268,"rssBytesAfter":192577536}
+BEGIN home.single
+{"name":"home.single","firstMs":77.49083299999984,"warmMedianMs":76.91316599999845,"warmMaxMs":77.01512500000172,"samples":3,"sqlCalls":7,"sqlMsLast":75.46345699999802,"serializedBytes":21173,"rssBytesAfter":193347584}
+BEGIN web.first
+{"name":"web.first","firstMs":81.52416700000322,"warmMedianMs":81.11999999999898,"warmMaxMs":81.62195900000006,"samples":3,"sqlCalls":2,"sqlMsLast":80.63550000000032,"serializedBytes":4919,"rssBytesAfter":193429504}
+BEGIN web.search
+{"name":"web.search","firstMs":442.6672499999986,"warmMedianMs":443.7350409999999,"warmMaxMs":444.14179100000183,"samples":3,"sqlCalls":2,"sqlMsLast":443.9432500000039,"serializedBytes":177,"rssBytesAfter":193560576}
+BEGIN web.collections
+{"name":"web.collections","firstMs":38.51137500000186,"warmMedianMs":37.43779200000063,"warmMaxMs":37.71729200000118,"samples":3,"sqlCalls":2,"sqlMsLast":36.81912500000544,"serializedBytes":135,"rssBytesAfter":193675264}
+BEGIN playlist.full
+{"name":"playlist.full","firstMs":95.23945800000001,"warmMedianMs":95.44075000000157,"warmMaxMs":100.75516699999935,"samples":3,"sqlCalls":3,"sqlMsLast":78.79100000000471,"serializedBytes":20601442,"rssBytesAfter":351977472}
+BEGIN playlist.page
+{"name":"playlist.page","firstMs":9.471833000003244,"warmMedianMs":7.677999999999884,"warmMaxMs":8.22099999999773,"samples":3,"sqlCalls":6,"sqlMsLast":7.515123999997741,"serializedBytes":9718,"rssBytesAfter":352043008}
+BEGIN playlist.metadata
+{"name":"playlist.metadata","firstMs":1.3347500000018044,"warmMedianMs":1.1329159999986587,"warmMaxMs":1.1742080000003625,"samples":3,"sqlCalls":3,"sqlMsLast":1.1061239999980899,"serializedBytes":169,"rssBytesAfter":352108544}
+BEGIN playlist.video_page
+{"name":"playlist.video_page","firstMs":6.273375000000669,"warmMedianMs":6.306209000002127,"warmMaxMs":6.576791999999841,"samples":3,"sqlCalls":3,"sqlMsLast":6.150792000000365,"serializedBytes":9550,"rssBytesAfter":352190464}
+BEGIN playlist.deep_page
+{"name":"playlist.deep_page","firstMs":13.75708300000042,"warmMedianMs":13.880165999999008,"warmMaxMs":13.953374999997322,"samples":3,"sqlCalls":6,"sqlMsLast":13.684833999999682,"serializedBytes":9344,"rssBytesAfter":352387072}
+BEGIN experiment.no_distinct.0
+{"name":"experiment.no_distinct.0","firstMs":0.03633300000001327,"warmMedianMs":0.023457999999664025,"warmMaxMs":0.025915999998687766,"samples":3,"sqlCalls":1,"sqlMsLast":0.018917000001238193,"serializedBytes":12,"rssBytesAfter":352436224}
+BEGIN experiment.no_distinct.1
+{"name":"experiment.no_distinct.1","firstMs":0.23937500000101863,"warmMedianMs":0.19391600000017206,"warmMaxMs":0.2063750000015716,"samples":3,"sqlCalls":1,"sqlMsLast":0.17699999999967986,"serializedBytes":41248,"rssBytesAfter":352550912}
+BEGIN scoped.all_overlap
+{"name":"scoped.all_overlap","firstMs":500.32720800000243,"warmMedianMs":496.5899590000008,"warmMaxMs":497.9097079999992,"samples":3,"sqlCalls":3,"sqlMsLast":497.5051249999997,"serializedBytes":51893,"rssBytesAfter":352862208}
+BEGIN home.overlap
+{"name":"home.overlap","firstMs":712.9964159999981,"warmMedianMs":710.0881669999981,"warmMaxMs":714.6295830000017,"samples":3,"sqlCalls":7,"sqlMsLast":709.1932910000032,"serializedBytes":22552,"rssBytesAfter":354648064}
+✔ scripts/performance/large-library-benchmark.ts (30318.358625ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30321.696667

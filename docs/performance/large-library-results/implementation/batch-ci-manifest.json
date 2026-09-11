@@ -1,0 +1,16 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ci-build.log": "5e0fbe14002389492517abb3590df66eeae8e4ccc30ceafce5352ee5924925d4",
+    "batch-ci-full.log": "01d814c2b4776319b83698c395930e9bd2887ddf467a8c69295c56091ba4dff2",
+    "batch-ci-red.log": "68f5ac120bfb4a1724b95e8d1bb0eec430c803a9d337a0a4eea87c15042b3f73",
+    "batch-ci-review.md": "655dbc31f1f630ba685b158c5ef6f500c30b92ec85f482782bf82de846cd7fd5",
+    "batch-ci-scan-tail.patch": "60da17aa46f2b9aef86fc3f6e86bed4a864ab51da45eb9abcd7a9e898cd6890c",
+    "batch-ci-target.log": "0ff87d950e733c127912dea05cd47c7f993e43d07b25a7922455fca7197e3ffa"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "108 focused; full2508pass1skip0fail; build terminal0.",
+    "Cooperative tail scheduling preserves committed drain on cancellation; full15/42 incomplete."
+  ]
+}

@@ -16,7 +16,7 @@ import {
 import { parseAvatarCrop, type ActressAvatarCommit } from '@shared/avatarCrop'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
 import type { ActressEditInput, ActressGender } from '@shared/actressTypes'
-import type { ActressDetail } from '@shared/actressTypes'
+import type { ActressMetadata } from '@shared/actressTypes'
 import { assetUrl } from '../api'
 import ActressAvatarEditor from './ActressAvatarEditor'
 import AliasTagEditor from './AliasTagEditor'
@@ -29,7 +29,7 @@ import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
 import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 
 interface Props {
-  actress: ActressDetail
+  actress: Omit<ActressMetadata, 'gallery'>
   onCancel: () => void
   onSave: (input: ActressEditInput) => Promise<void>
 }
@@ -175,12 +175,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
             {!mediaEditorsHidden ? (
               <EditFormSection title="头像" className="entity-edit-section--media">
                 <ActressAvatarEditor
-                  key={avatarRevisionKey}
+                  key={`${actress.id}:${avatarRevisionKey}`}
                   displayUrl={assetUrl(actress.avatar_path)}
                   sourceUrl={assetUrl(actress.avatar_source_path)}
                   savedCrop={savedCrop}
-                  videos={actress.videos}
-                  gallery={actress.gallery}
+                  actressId={actress.id}
                   onAvatarChange={handleAvatarChange}
                 />
               </EditFormSection>

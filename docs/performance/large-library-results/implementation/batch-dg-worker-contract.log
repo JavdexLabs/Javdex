@@ -1,0 +1,10 @@
+✔ routes actual desktop IPC registration and Web catalog queries through the native reader (69.204583ms)
+✔ preserves Web search/sort/filter/page semantics and observes committed membership changes (62.383459ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 621.738833

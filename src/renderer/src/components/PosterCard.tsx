@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { navigateToVideoDetail } from '../listView/listNavigation'
-import type { Video } from '@shared/videoTypes'
+import type { Video, VideoCard } from '@shared/videoTypes'
 import { assetUrl } from '../api'
 import { useDisplayMode } from './DisplayModeContext'
 import { useEscapeKey } from '../hooks/useEscapeKey'
@@ -18,8 +18,8 @@ const STATUS_BADGE: Record<number, { text: string; cls: string } | null> = {
   2: { text: '刮削失败', cls: 'failed' }
 }
 
-export interface PosterCardProps {
-  video: Video
+export interface PosterCardProps<TVideo extends VideoCard = Video> {
+  video: TVideo
   className?: string
   /** Active library for a card on home/search/global surfaces. */
   detailLibraryId?: number
@@ -27,19 +27,19 @@ export interface PosterCardProps {
   thumbHeight?: number
   selected?: boolean
   selectionMode?: boolean
-  onToggleSelect?: (video: Video, event?: React.MouseEvent) => void
-  onEdit?: (video: Video) => void
-  onAddToPlaylist?: (video: Video) => void
-  onScrape?: (video: Video) => void
-  onMarkScrapeSuccess?: (video: Video) => void
-  onDelete?: (video: Video) => void
+  onToggleSelect?: (video: TVideo, event?: React.MouseEvent) => void
+  onEdit?: (video: TVideo) => void
+  onAddToPlaylist?: (video: TVideo) => void
+  onScrape?: (video: TVideo) => void
+  onMarkScrapeSuccess?: (video: TVideo) => void
+  onDelete?: (video: TVideo) => void
   deleteLabel?: string
-  onRemoveFromLibrary?: (video: Video) => void
-  onRemove?: (video: Video) => void
+  onRemoveFromLibrary?: (video: TVideo) => void
+  onRemove?: (video: TVideo) => void
   removeDisabled?: boolean
 }
 
-export default function PosterCard({
+export default function PosterCard<TVideo extends VideoCard = Video>({
   video,
   className = '',
   detailLibraryId,
@@ -56,11 +56,11 @@ export default function PosterCard({
   onRemoveFromLibrary,
   onRemove,
   removeDisabled = false
-}: PosterCardProps): JSX.Element {
+}: PosterCardProps<TVideo>): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const { mode, showResourceTypeBadges } = useDisplayMode()
-  const cover = assetUrl(video.cover_path)
+  const cover = assetUrl(video.cover_path, 640)
   const badge = STATUS_BADGE[video.scraped_status]
   const [tallCover, setTallCover] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -115,7 +115,7 @@ export default function PosterCard({
 
   const stopAndRun = (
     e: React.MouseEvent,
-    action: ((video: Video) => void) | undefined
+    action: ((video: TVideo) => void) | undefined
   ): void => {
     e.stopPropagation()
     setMenuOpen(false)

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { SequentialBatchQueue } from './sequentialBatchQueue'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import {
   createDefaultScrapeJobController,
   createScrapeJobController,
@@ -67,6 +69,10 @@ function dependencies(
     countActresses: () => 0,
     resolveVideoFieldSources: () => ({}),
     pendingVideoScrapes: {
+      count: () => 0,
+      existingIds: () => [],
+      page: () => ({ items: [], total: 0, offset: 0 }),
+      get: () => null,
       list: () => [],
       confirm: () => ({ status: 'applied', applied: true, warnings: [] }),
       discard: () => true
@@ -102,6 +108,127 @@ function dependencies(
 }
 
 describe('ScrapeJobController', () => {
+  it('flushes and detaches UI progress on rejection before accepting another batch', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    t.mock.method(console, 'error', () => undefined)
+    const base = dependencies()
+    let listener: ((progress: BatchProgress) => void) | null = null
+    let stale: ((progress: BatchProgress) => void) | null = null
+    const progress = (current: number): BatchProgress => ({
+      total: 2, current, success: 0, pending: 0, failed: 0,
+      currentCode: String(current), status: 'running', logs: []
+    })
+    const events: BatchProgress[] = []
+    let starts = 0
+    let cleanedBeforeUnlock = 0
+    const controller = createScrapeJobController(dependencies({
+      coordinator: {
+        ...base.coordinator,
+        runExclusive: <T>(label: string, run: () => Promise<T>) => base.coordinator.runExclusive(label, async () => {
+          try {
+            return await run()
+          } finally {
+            assert.equal(listener, null, 'listener is removed before the coordinator unlocks')
+            cleanedBeforeUnlock++
+          }
+        })
+      },
+      videoQueue: {
+        ...base.videoQueue,
+        setListener: (next) => { listener = next },
+        start: async () => {
+          starts++
+          stale = listener
+          listener?.(progress(1))
+          listener?.(progress(2))
+          throw Error('checkpoint failed')
+        }
+      },
+      emit: (_channel, value) => events.push(value as BatchProgress)
+    }))
+    controller.startLegacyVideoBatch()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(listener, null)
+    assert.equal(events.at(-1)?.current, 2)
+    const delivered = events.length
+    const oldListener = stale as ((value: BatchProgress) => void) | null
+    controller.startLegacyVideoBatch()
+    oldListener?.(progress(999))
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(starts, 2)
+    assert.equal(cleanedBeforeUnlock, 2)
+    assert.equal(events.length, delivered * 2)
+    assert.ok(events.every((value) => value.current !== 999))
+    t.mock.timers.tick(1000)
+    assert.equal(events.length, delivered * 2)
+  })
+
+  for (const kind of ['video', 'actress'] as const) {
+    for (const terminal of ['done', 'paused', 'cancelled'] as const) {
+      it(`coalesces ${kind} UI progress while preserving checkpoints and ${terminal} delivery`, async (t) => {
+        t.mock.timers.enable({ apis: ['setTimeout'] })
+        const queue = new SequentialBatchQueue<number>()
+        const events: Array<{ channel: string; progress: BatchProgress }> = []
+        const checkpoints: number[] = []
+        const run = async () => {
+          await queue.start({
+            targets: Array.from({ length: 10000 }, (_, id) => id),
+            startMessage: () => 'start', pausedMessage: 'paused', cancelledMessage: 'cancelled',
+            doneMessage: () => 'done', getCode: String, exceptionMessage: () => 'error',
+            delayAfterTarget: false,
+            onCheckpoint: (_progress, next) => checkpoints.push(next),
+            runTarget: async (id) => {
+              if (id === 101) assert.equal(events.at(-1)?.progress.failed, 1, 'failures reach UI immediately')
+              if (id === 9998 && terminal === 'paused') queue.pause()
+              if (id === 9998 && terminal === 'cancelled') queue.cancel()
+              return id === 100
+                ? { status: 'failure', level: 'error', message: 'failed' }
+                : { status: 'success', level: 'success', message: 'ok' }
+            }
+          })
+          if (terminal === 'cancelled') queue.resetToIdle()
+        }
+        const base = dependencies()
+        let starts = 0
+        let resumes = 0
+        const queuePort = {
+          ...base[kind === 'video' ? 'videoQueue' : 'actressQueue'],
+          isRunning: () => queue.isRunning(),
+          setListener: (listener: ((progress: BatchProgress) => void) | null) => queue.setListener(listener),
+          start: async () => { starts++; await run() },
+          resume: async () => { resumes++; await run() }
+        }
+        const controller = createScrapeJobController(dependencies({
+          ...(kind === 'video' ? { videoQueue: queuePort } : {
+            actressQueue: { ...base.actressQueue, ...queuePort }
+          }),
+          checkpoints: { ...base.checkpoints, load: () => terminal === 'done' ? null : { kind, status: 'paused' } as never },
+          emit: (channel, progress) => events.push({ channel, progress: progress as BatchProgress })
+        }))
+        if (terminal !== 'done') controller.resumeActiveBatch()
+        else if (kind === 'video') controller.startVideoBatch('scrape:videoBatchProgress', { status: 'all', fields: ['title'], mode: 'replace' })
+        else controller.startActressBatch({ scope: 'all', fields: ['avatar'], mode: 'replace' })
+        await new Promise((resolve) => setImmediate(resolve))
+        const processed = terminal === 'done' ? 10000 : 9999
+        assert.deepEqual(checkpoints.slice(0, processed), Array.from({ length: processed }, (_, id) => id + 1))
+        assert.ok(events.length < 100, 'UI delivery is bounded independently of per-item persistence')
+        assert.equal(events[0].progress.status, 'running')
+        const final = events.filter((event) => event.progress.status === terminal).at(-1)
+        assert.equal(final?.progress.success, processed - 1)
+        assert.equal(final?.progress.failed, 1)
+        assert.equal(final?.progress.currentCode, null)
+        assert.equal(events.at(-1)?.progress.status, terminal === 'cancelled' ? 'idle' : terminal)
+        assert.ok(events.every((event) => event.channel === (kind === 'video' ? 'scrape:videoBatchProgress' : 'actressScrape:batchProgress')))
+        const delivered = events.length
+        t.mock.timers.tick(1000)
+        assert.equal(events.length, delivered)
+        assert.equal(queue.isRunning(), false)
+        assert.equal(starts, terminal === 'done' ? 1 : 0)
+        assert.equal(resumes, terminal === 'done' ? 0 : 1)
+      })
+    }
+  }
+
   it('preserves media-library scope through batch count and start orchestration', async () => {
     let countedFilter: unknown
     let startedRequest: unknown
@@ -303,6 +430,7 @@ describe('ScrapeJobController', () => {
 
   it('publishes progress and supports pause, resume, and discard for persisted batches', async () => {
     let listener: ((progress: never) => void) | undefined
+    let finishRun: (() => void) | undefined
     let running = false
     let paused = 0
     let resumed = 0
@@ -322,13 +450,17 @@ describe('ScrapeJobController', () => {
           },
           start: async () => {
             running = true
+            await new Promise<void>((resolve) => { finishRun = resolve })
           },
           resume: async () => {
             resumed += 1
+            running = true
+            await new Promise<void>((resolve) => { finishRun = resolve })
           },
           pause: () => {
             paused += 1
             running = false
+            finishRun?.()
           },
           discard: () => {
             discarded += 1
@@ -350,6 +482,7 @@ describe('ScrapeJobController', () => {
     await new Promise((resolve) => setImmediate(resolve))
     assert.equal(controller.pauseActiveBatch(), true)
     assert.equal(paused, 1)
+    await new Promise((resolve) => setImmediate(resolve))
     assert.equal(controller.resumeActiveBatch(), true)
     await new Promise((resolve) => setImmediate(resolve))
     assert.equal(resumed, 1)
@@ -360,10 +493,13 @@ describe('ScrapeJobController', () => {
       pending: 0,
       failed: 0,
       currentCode: null,
-      status: 'completed',
+      status: 'done',
       logs: []
     } as never)
     assert.equal(events.at(-1)?.channel, 'scrape:videoBatchProgress')
+    running = false
+    finishRun?.()
+    await new Promise((resolve) => setImmediate(resolve))
     assert.equal(controller.discardActiveBatch(), true)
     assert.equal(discarded, 1)
   })

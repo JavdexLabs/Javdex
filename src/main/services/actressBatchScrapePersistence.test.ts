@@ -44,7 +44,10 @@ function jobFilePath(): string {
 }
 
 function readJobFile(): PersistedBatchScrapeJob {
-  return JSON.parse(fs.readFileSync(jobFilePath(), 'utf-8')) as PersistedBatchScrapeJob
+  resetBatchScrapeJobCache()
+  const job = loadBatchScrapeJob()
+  assert.ok(job)
+  return job
 }
 
 function writePausedActressJob(

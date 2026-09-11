@@ -1044,6 +1044,8 @@ export interface VideoScrapeDeliverInput {
   classificationOptions?: VideoClassificationResolutionOptions
   /** Runs in the same database transaction after a successful application. */
   afterSuccessfulApply?: () => void
+  /** Before commit/asset deletion, not confirmation of commit. Later avatar adoption may add warnings. */
+  beforeCommit?: (result: VideoScrapeDeliverOutcome) => void
 }
 
 export interface VideoScrapeDeliverOutcome {
@@ -1158,6 +1160,18 @@ export function createVideoScrapeApplyService(
               input.classificationOptions
             )
             if (applied.applied) input.afterSuccessfulApply?.()
+            const callbackResult: unknown = input.beforeCommit?.({
+              applied: applied.applied,
+              warnings: [...applied.warnings],
+              classifications: applied.classifications,
+              directorChoice: applied.directorChoice
+            })
+            if (callbackResult != null &&
+                (typeof callbackResult === 'object' || typeof callbackResult === 'function') &&
+                typeof (callbackResult as { then?: unknown }).then === 'function') {
+              void Promise.resolve(callbackResult).catch(() => {})
+              throw new Error('NFO commit callback must be synchronous')
+            }
             for (const assetPath of applied.obsoleteAssetPaths) {
               deleteBestEffort(assetPath)
             }
@@ -1174,12 +1188,12 @@ export function createVideoScrapeApplyService(
       } else {
         for (const [name, avatarPath] of downloads.avatarMap) {
           if (!avatarPath) continue
-          const actressId = findActress(name)
-          if (actressId == null) {
-            deleteBestEffort(avatarPath)
-            continue
-          }
           try {
+            const actressId = findActress(name)
+            if (actressId == null) {
+              deleteBestEffort(avatarPath)
+              continue
+            }
             adoptAvatar(actressId, avatarPath)
           } catch (error) {
             deleteBestEffort(avatarPath)

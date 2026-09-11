@@ -1,3 +1,4 @@
+import { catalogReadService } from '../services/catalogReadService'
 import { IPC } from '@shared/ipc-channels'
 import { homeDiscoveryRepo } from '../db/homeDiscoveryRepo'
 import {
@@ -24,8 +25,8 @@ export interface MediaLibraryHandlerDependencies {
   restore: typeof mediaLibraryService.restore
   previewRemoval: typeof mediaLibraryService.previewRemoval
   remove: typeof mediaLibraryService.remove
-  loadHome: typeof homeDiscoveryRepo.load
-  search: typeof homeDiscoveryRepo.search
+  loadHome: (input: Parameters<typeof homeDiscoveryRepo.load>[0]) => ReturnType<typeof homeDiscoveryRepo.load> | Promise<ReturnType<typeof homeDiscoveryRepo.load>>
+  search: (input: Parameters<typeof homeDiscoveryRepo.search>[0]) => ReturnType<typeof homeDiscoveryRepo.search> | Promise<ReturnType<typeof homeDiscoveryRepo.search>>
   previewRootMigration: typeof mediaLibraryService.previewRootMigration
   migrateRoot: typeof mediaLibraryService.migrateRoot
 }
@@ -44,8 +45,8 @@ const defaultDependencies: MediaLibraryHandlerDependencies = {
   restore: mediaLibraryService.restore,
   previewRemoval: mediaLibraryService.previewRemoval,
   remove: mediaLibraryService.remove,
-  loadHome: (input) => homeDiscoveryRepo.load(input),
-  search: (input) => homeDiscoveryRepo.search(input),
+  loadHome: (input) => catalogReadService.readHome(input),
+  search: (input) => catalogReadService.searchHome(input),
   previewRootMigration: (input) => mediaLibraryService.previewRootMigration(input),
   migrateRoot: (input) => mediaLibraryService.migrateRoot(input)
 }

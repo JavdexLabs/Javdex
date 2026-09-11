@@ -1,0 +1,551 @@
+diff --git a/src/main/services/assetCache.test.ts b/src/main/services/assetCache.test.ts
+index d658903..27393b0 100644
+--- a/src/main/services/assetCache.test.ts
++++ b/src/main/services/assetCache.test.ts
+@@ -2,6 +2,8 @@ import { afterEach, describe, it } from 'node:test'
+ import assert from 'node:assert/strict'
+ import {
+   getOrLoadImageInspection,
++  getCachedAsset,
++  setCachedAsset,
+   invalidateAssetCache,
+   type ImageAssetSignature
+ } from './assetCache'
+@@ -15,6 +17,48 @@ const signature: ImageAssetSignature = {
+ 
+ afterEach(() => invalidateAssetCache())
+ 
++const byteSignature = { ...signature, device: 1, inode: 2 }
++
++describe('asset byte cache', () => {
++  it('checks every file identity field and isolates callers from cached mutable buffers', () => {
++    const body = Buffer.from('image')
++    setCachedAsset('image', byteSignature, body, 'image/png')
++    body.fill(0)
++    const first = getCachedAsset('image', byteSignature)!
++    assert.equal(first.body.toString(), 'image')
++    first.body.fill(0)
++    assert.equal(getCachedAsset('image', byteSignature)?.body.toString(), 'image')
++    for (const changed of [
++      { resolvedPath: 'another-root/image' }, { mtimeMs: 101 }, { ctimeMs: 91 },
++      { size: 2049 }, { device: 2 }, { inode: 3 }
++    ]) assert.equal(getCachedAsset('image', { ...byteSignature, ...changed }), null)
++    invalidateAssetCache('image')
++    assert.equal(getCachedAsset('image', byteSignature), null)
++  })
++
++  it('enforces the entry cap while retaining recently read and replaced entries', () => {
++    for (let i = 0; i < 256; i++) setCachedAsset(String(i), byteSignature, Buffer.from('a'), 'image/png')
++    getCachedAsset('0', byteSignature)
++    setCachedAsset('1', byteSignature, Buffer.from('b'), 'image/png')
++    setCachedAsset('new', byteSignature, Buffer.from('c'), 'image/png')
++    assert.ok(getCachedAsset('0', byteSignature))
++    assert.equal(getCachedAsset('1', byteSignature)?.body.toString(), 'b')
++    assert.equal(getCachedAsset('2', byteSignature), null)
++  })
++
++  it('enforces the 96MiB byte cap and skips oversized entries without flushing other images', () => {
++    const chunk = Buffer.alloc(32 * 1024 * 1024)
++    for (let i = 0; i < 4; i++) setCachedAsset(String(i), byteSignature, chunk, 'image/png')
++    assert.equal(getCachedAsset('0', byteSignature), null)
++    assert.ok(getCachedAsset('1', byteSignature))
++    setCachedAsset('huge', byteSignature, Buffer.alloc(96 * 1024 * 1024 + 1), 'image/png')
++    assert.equal(getCachedAsset('huge', byteSignature), null)
++    assert.ok(getCachedAsset('1', byteSignature))
++    invalidateAssetCache()
++    assert.equal(getCachedAsset('1', byteSignature), null)
++  })
++})
++
+ describe('image asset inspection cache', () => {
+   it('loads an unchanged image once and reloads it when its file signature changes', () => {
+     let loads = 0
+diff --git a/src/main/services/assetCache.ts b/src/main/services/assetCache.ts
+index 68c7d10..44e9c14 100644
+--- a/src/main/services/assetCache.ts
++++ b/src/main/services/assetCache.ts
+@@ -3,10 +3,20 @@
+ interface CacheEntry {
+   body: Buffer
+   mime: string
+-  mtimeMs: number
++  signature: AssetByteSignature
+   bytes: number
+ }
+ 
++export interface AssetByteSignature extends ImageAssetSignature {
++  device: number
++  inode: number
++}
++
++export function sameAssetByteSignature(a: AssetByteSignature, b: AssetByteSignature): boolean {
++  return a.resolvedPath === b.resolvedPath && a.mtimeMs === b.mtimeMs &&
++    a.ctimeMs === b.ctimeMs && a.size === b.size && a.device === b.device && a.inode === b.inode
++}
++
+ export interface ImageAssetSignature {
+   resolvedPath: string
+   mtimeMs: number
+@@ -29,6 +39,9 @@ const MAX_BYTES = 96 * 1024 * 1024
+ const cache = new Map<string, CacheEntry>()
+ const imageInspectionCache = new Map<string, ImageInspectionCacheEntry>()
+ let totalBytes = 0
++let revision = 0
++
++export function getAssetCacheRevision(): number { return revision }
+ 
+ function evictOne(): void {
+   const oldest = cache.keys().next().value as string | undefined
+@@ -47,25 +60,26 @@ function trim(): void {
+ 
+ export function getCachedAsset(
+   relPath: string,
+-  mtimeMs: number
++  signature: AssetByteSignature
+ ): { body: Buffer; mime: string } | null {
+   const entry = cache.get(relPath)
+-  if (!entry || entry.mtimeMs !== mtimeMs) return null
++  if (!entry || !sameAssetByteSignature(entry.signature, signature)) return null
+   cache.delete(relPath)
+   cache.set(relPath, entry)
+-  return { body: entry.body, mime: entry.mime }
++  return { body: Buffer.from(entry.body), mime: entry.mime }
+ }
+ 
+ export function setCachedAsset(
+   relPath: string,
+-  mtimeMs: number,
++  signature: AssetByteSignature,
+   body: Buffer,
+   mime: string
+ ): void {
+   const prev = cache.get(relPath)
+   if (prev) totalBytes -= prev.bytes
+-
+-  cache.set(relPath, { body, mime, mtimeMs, bytes: body.byteLength })
++  cache.delete(relPath)
++  if (body.byteLength > MAX_BYTES) return
++  cache.set(relPath, { body: Buffer.from(body), mime, signature: { ...signature }, bytes: body.byteLength })
+   totalBytes += body.byteLength
+   trim()
+ }
+@@ -100,6 +114,7 @@ export function getOrLoadImageInspection(
+ }
+ 
+ export function invalidateAssetCache(relPath?: string): void {
++  revision++
+   if (!relPath) {
+     cache.clear()
+     imageInspectionCache.clear()
+diff --git a/src/main/services/mediaAssetStore.test.ts b/src/main/services/mediaAssetStore.test.ts
+index 01ed552..2eb5e32 100644
+--- a/src/main/services/mediaAssetStore.test.ts
++++ b/src/main/services/mediaAssetStore.test.ts
+@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
++import crypto from 'node:crypto'
++import { invalidateAssetCache } from './assetCache'
+ import { getPathAlias } from './assetPathAliases'
+ import { isOpaqueEncFilename } from './assetPathNaming'
+ import { MediaAssetStore, mediaAssetStore } from './mediaAssetStore'
+@@ -22,6 +24,7 @@ function setup(): string {
+ }
+ 
+ afterEach(() => {
++  invalidateAssetCache()
+   resetAssetKeyCacheForTests()
+   if (root) fs.rmSync(root, { recursive: true, force: true })
+   root = null
+@@ -29,6 +32,237 @@ afterEach(() => {
+ })
+ 
+ describe('MediaAssetStore', () => {
++  it('does not return cached bytes when cancelled while the hot-path stat is pending', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('HotCancel', 1, JPEG_1X1)
++    await mediaAssetStore.readForServeAsync(rel)
++    let entered!: () => void
++    let release!: () => void
++    const started = new Promise<void>((resolve) => { entered = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.stat
++    t.mock.method(fs.promises, 'stat', async (...args: unknown[]) => {
++      const stat = await Reflect.apply(original, fs.promises, args)
++      entered()
++      await gate
++      return stat
++    })
++    const reads = t.mock.method(fs.promises, 'readFile')
++    const abort = new AbortController()
++    const pending = mediaAssetStore.readForServeAsync(rel, abort.signal)
++    const rejected = assert.rejects(pending, { name: 'AbortError' })
++    await started
++    abort.abort()
++    release()
++    await rejected
++    assert.equal(reads.mock.callCount(), 0)
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, JPEG_1X1)
++    assert.equal(reads.mock.callCount(), 0)
++  })
++
++  it('does not reuse the same relative cache key after the asset root changes', async () => {
++    const firstRoot = setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Root', 1, JPEG_1X1)
++    await mediaAssetStore.readForServeAsync(rel)
++    const secondRoot = path.join(firstRoot, 'other-user')
++    const secondFile = path.join(secondRoot, 'media_assets', rel)
++    fs.mkdirSync(path.dirname(secondFile), { recursive: true })
++    const updated = Buffer.from('different root')
++    fs.writeFileSync(secondFile, updated)
++    process.env.JAVDEX_TEST_USER_DATA = secondRoot
++    try { assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, updated) }
++    finally { process.env.JAVDEX_TEST_USER_DATA = firstRoot }
++  })
++
++  it('rejects a changed file during reading without caching its old bytes', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('DuringRead', 1, JPEG_1X1)
++    let entered!: () => void
++    let release!: () => void
++    const started = new Promise<void>((resolve) => { entered = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.readFile
++    const reads = t.mock.method(fs.promises, 'readFile', async (...args: unknown[]) => {
++      const raw = await Reflect.apply(original, fs.promises, args)
++      entered()
++      await gate
++      return raw
++    })
++    const pending = mediaAssetStore.readForServeAsync(rel)
++    const rejected = assert.rejects(pending, /changed while reading/)
++    await started
++    const changed = Buffer.from('updated image')
++    fs.writeFileSync(mediaAssetStore.resolve(rel), changed)
++    release()
++    await rejected
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, changed)
++    await mediaAssetStore.readForServeAsync(rel)
++    assert.equal(reads.mock.callCount(), 2)
++  })
++
++  it('serves hot plaintext and encrypted images without rereading or decrypting their bytes', async (t) => {
++    const testRoot = setup()
++    const plain = mediaAssetStore.importAvatarDisplay('Cached', 1, JPEG_1X1)
++    const enc = 'avatars/cached.enc'
++    fs.writeFileSync(path.join(testRoot, 'media_assets', enc), encryptPlain(JPEG_1X1, '.jpg'))
++    const reads = t.mock.method(fs.promises, 'readFile')
++    const decrypts = t.mock.method(crypto.webcrypto.subtle, 'decrypt')
++    for (const rel of [plain, enc]) {
++      const first = await mediaAssetStore.readForServeAsync(rel)
++      first.body.fill(0)
++      assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, JPEG_1X1)
++    }
++    assert.equal(reads.mock.callCount(), 2)
++    assert.equal(decrypts.mock.callCount(), 1)
++    invalidateAssetCache(enc)
++    await mediaAssetStore.readForServeAsync(enc)
++    assert.equal(reads.mock.callCount(), 3)
++    assert.equal(decrypts.mock.callCount(), 2)
++  })
++
++  it('reloads replaced files even with restored mtime and rejects deleted files before using cache', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Replaced', 1, JPEG_1X1)
++    const abs = mediaAssetStore.resolve(rel)
++    const originalStat = fs.statSync(abs)
++    const reads = t.mock.method(fs.promises, 'readFile')
++    await mediaAssetStore.readForServeAsync(rel)
++    const updated = Buffer.alloc(JPEG_1X1.length, 7)
++    fs.writeFileSync(abs + '.replacement', updated)
++    fs.utimesSync(abs + '.replacement', originalStat.atime, originalStat.mtime)
++    fs.renameSync(abs + '.replacement', abs)
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, updated)
++    assert.equal(reads.mock.callCount(), 2)
++    fs.unlinkSync(abs)
++    await assert.rejects(mediaAssetStore.readForServeAsync(rel), { code: 'ENOENT' })
++    fs.writeFileSync(abs, JPEG_1X1)
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, JPEG_1X1)
++    assert.equal(reads.mock.callCount(), 3)
++  })
++
++  it('does not repopulate explicitly invalidated cache from a pending read', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Invalidated', 1, JPEG_1X1)
++    let entered!: () => void
++    let release!: () => void
++    const started = new Promise<void>((resolve) => { entered = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.readFile
++    const reads = t.mock.method(fs.promises, 'readFile', async (...args: unknown[]) => {
++      const raw = await Reflect.apply(original, fs.promises, args)
++      entered()
++      await gate
++      return raw
++    })
++    const pending = mediaAssetStore.readForServeAsync(rel)
++    await started
++    invalidateAssetCache(rel)
++    release()
++    await pending
++    await mediaAssetStore.readForServeAsync(rel)
++    assert.equal(reads.mock.callCount(), 2)
++  })
++
++  it('retains read slots while cancelled encrypted requests wait for native crypto completion', async (t) => {
++    const testRoot = setup()
++    const rel = 'avatars/crypto-queue.enc'
++    fs.mkdirSync(path.join(testRoot, 'media_assets', 'avatars'), { recursive: true })
++    fs.writeFileSync(path.join(testRoot, 'media_assets', rel), encryptPlain(JPEG_1X1, '.jpg'))
++    const nextRel = 'avatars/crypto-queue-next.enc'
++    fs.copyFileSync(path.join(testRoot, 'media_assets', rel), path.join(testRoot, 'media_assets', nextRel))
++    const stats = t.mock.method(fs.promises, 'stat')
++    let release!: () => void
++    let allStarted!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const started = new Promise<void>((resolve) => { allStarted = resolve })
++    const subtle = crypto.webcrypto.subtle
++    const decrypt = subtle.decrypt
++    const reads = t.mock.method(fs.promises, 'readFile')
++    let jobs = 0
++    t.mock.method(subtle, 'decrypt', async (...args: unknown[]) => {
++      if (++jobs === 4) allStarted()
++      await gate
++      return Reflect.apply(decrypt, subtle, args)
++    })
++    const abort = new AbortController()
++    const requests = Array.from({ length: 4 }, (_, i) => mediaAssetStore.readForServeAsync(rel, i === 0 ? abort.signal : undefined))
++    const rejected = assert.rejects(requests.shift()!, { name: 'AbortError' })
++    await started
++    abort.abort()
++    const next = mediaAssetStore.readForServeAsync(nextRel)
++    await new Promise((resolve) => setImmediate(resolve))
++    assert.equal(jobs, 4)
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 0)
++    assert.equal(reads.mock.callCount(), 4, 'the fifth request must not start reading before a crypto slot is released')
++    release()
++    await rejected
++    await Promise.all(requests)
++    assert.deepEqual((await next).body, JPEG_1X1)
++    assert.equal(jobs, 5)
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 2)
++    assert.equal(reads.mock.callCount(), 5)
++  })
++
++  it('cancels queued reads before opening files and keeps active slots until reads settle', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Queued', 1, JPEG_1X1)
++    const nextRel = mediaAssetStore.importAvatarDisplay('Next', 2, JPEG_1X1)
++    const stats = t.mock.method(fs.promises, 'stat')
++    let release!: () => void
++    let allStarted!: () => void
++    const started = new Promise<void>((resolve) => { allStarted = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.readFile
++    let reads = 0
++    t.mock.method(fs.promises, 'readFile', async (...args: unknown[]) => {
++      reads++
++      if (reads === 4) allStarted()
++      await gate
++      return Reflect.apply(original, fs.promises, args)
++    })
++    const activeAbort = new AbortController()
++    const active = Array.from({ length: 4 }, (_, i) => mediaAssetStore.readForServeAsync(rel, i === 0 ? activeAbort.signal : undefined))
++    const activeRejected = assert.rejects(active.shift()!, { name: 'AbortError' })
++    const queuedAbort = new AbortController()
++    const queued = mediaAssetStore.readForServeAsync(rel, queuedAbort.signal)
++    const queuedRejected = assert.rejects(queued, { name: 'AbortError' })
++    await started
++    assert.equal(reads, 4)
++    activeAbort.abort()
++    queuedAbort.abort()
++    await queuedRejected
++    const next = mediaAssetStore.readForServeAsync(nextRel)
++    await Promise.resolve()
++    assert.equal(reads, 4, 'active cancellation must wait for the reader to settle')
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 0)
++    release()
++    await activeRejected
++    await Promise.all(active)
++    assert.deepEqual((await next).body, JPEG_1X1)
++    assert.equal(reads, 5, 'the cancelled queued request never opened a file')
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 2)
++  })
++
++  it('serves plain and encrypted images asynchronously without synchronous file reads', async (t) => {
++    const testRoot = setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Async', 1, JPEG_1X1)
++    const enc = 'avatars/async.enc'
++    fs.writeFileSync(path.join(testRoot, 'media_assets', enc), encryptPlain(JPEG_1X1, '.jpg'))
++    resetAssetKeyCacheForTests()
++    t.mock.method(fs, 'readFileSync', () => { throw Error('synchronous file read forbidden') })
++    t.mock.method(crypto, 'scryptSync', () => { throw Error('synchronous key derivation forbidden') })
++    t.mock.method(crypto, 'createDecipheriv', () => { throw Error('synchronous decryption forbidden') })
++    const plain = await mediaAssetStore.readForServeAsync(rel)
++    const encrypted = await mediaAssetStore.readForServeAsync(enc)
++    assert.deepEqual(plain.body, JPEG_1X1)
++    assert.deepEqual(encrypted, { body: JPEG_1X1, mime: 'image/jpeg' })
++    await assert.rejects(mediaAssetStore.readForServeAsync('../outside.jpg'), /escapes media root/)
++    await assert.rejects(mediaAssetStore.readForServeAsync('avatars/missing.jpg'), { code: 'ENOENT' })
++    const abort = new AbortController()
++    abort.abort()
++    await assert.rejects(mediaAssetStore.readForServeAsync(rel, abort.signal), { name: 'AbortError' })
++  })
++
+   it('reads plain and encrypted images and reports a stable plaintext fingerprint', () => {
+     const testRoot = setup()
+     const plainPath = mediaAssetStore.importAvatarDisplay('Plain', 1, JPEG_1X1)
+diff --git a/src/main/services/mediaAssetStore/filesystem.ts b/src/main/services/mediaAssetStore/filesystem.ts
+index 4adb962..d46758d 100644
+--- a/src/main/services/mediaAssetStore/filesystem.ts
++++ b/src/main/services/mediaAssetStore/filesystem.ts
+@@ -2,8 +2,11 @@ import path from 'node:path'
+ import fs from 'node:fs'
+ import { randomUUID } from 'node:crypto'
+ import { getSettings } from '../../settings/settingsStore'
+-import { encryptPlain, decryptBlob, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
+-import { invalidateAssetCache } from '../assetCache'
++import { encryptPlain, decryptBlob, decryptBlobAsync, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
++import {
++  getAssetCacheRevision, getCachedAsset, setCachedAsset, sameAssetByteSignature,
++  invalidateAssetCache, type AssetByteSignature
++} from '../assetCache'
+ import { ensureMediaAssetDirsAt, resolveMediaAssetsRoot } from '../assetStoragePaths'
+ import {
+   buildActressAssetSeed,
+@@ -17,8 +20,10 @@ import {
+   isUsableImageBuffer
+ } from './imageBytes'
+ import type { ImageAssetSubdir } from './types'
++import { AssetReadQueue } from './readQueue'
+ 
+ const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']
++const serveReads = new AssetReadQueue()
+ 
+ /** Root directory for downloaded media assets. */
+ export function assetsRoot(): string {
+@@ -65,11 +70,53 @@ export function writeAtomic(abs: string, data: Buffer): void {
+   fs.renameSync(tmp, abs)
+ }
+ 
++async function readAssetSignature(filePath: string): Promise<AssetByteSignature> {
++  const stat = await fs.promises.stat(filePath)
++  return { resolvedPath: filePath, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs,
++    size: stat.size, device: stat.dev, inode: stat.ino }
++}
++
+ /** Read an asset for media:// serving; decrypts .enc blobs when needed. */
+ export function readAssetForServe(relPath: string): { body: Buffer; mime: string } {
+   const abs = resolveAssetPath(relPath)
+   if (!fs.existsSync(abs)) throw new Error('Asset not found')
+   const raw = fs.readFileSync(abs)
++  return decodeAssetForServe(relPath, raw)
++}
++
++/** Asynchronous disk read for request handlers; synchronous business readers remain explicit. */
++export async function readAssetForServeAsync(
++  relPath: string,
++  signal?: AbortSignal
++): Promise<{ body: Buffer; mime: string }> {
++  signal?.throwIfAborted()
++  const abs = resolveAssetPath(relPath)
++  return serveReads.run(async () => {
++    const revision = getAssetCacheRevision()
++    let before: AssetByteSignature
++    try { before = await readAssetSignature(abs) } catch (error) {
++      invalidateAssetCache(relPath)
++      throw error
++    }
++    signal?.throwIfAborted()
++    const cached = getCachedAsset(relPath, before)
++    if (cached) return cached
++    const raw = await fs.promises.readFile(abs, { signal })
++    signal?.throwIfAborted()
++    let image: { body: Buffer; mime: string }
++    if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
++      const { data, ext } = await decryptBlobAsync(raw, signal)
++      image = { body: data, mime: mimeFromExt(ext) }
++    } else image = decodeAssetForServe(relPath, raw)
++    const after = await readAssetSignature(abs)
++    signal?.throwIfAborted()
++    if (!sameAssetByteSignature(before, after)) throw new Error('Asset changed while reading')
++    if (getAssetCacheRevision() === revision) setCachedAsset(relPath, after, image.body, image.mime)
++    return image
++  }, signal)
++}
++
++function decodeAssetForServe(relPath: string, raw: Buffer): { body: Buffer; mime: string } {
+   if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
+     const { data, ext } = decryptBlob(raw)
+     return { body: data, mime: mimeFromExt(ext) }
+diff --git a/scripts/performance/asset-cache-benchmark.ts b/scripts/performance/asset-cache-benchmark.ts
+new file mode 100644
+index 0000000..c1f14ed
+--- /dev/null
++++ b/scripts/performance/asset-cache-benchmark.ts
+@@ -0,0 +1,64 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import crypto from 'node:crypto'
++import { performance } from 'node:perf_hooks'
++import { mediaAssetStore } from '../../src/main/services/mediaAssetStore'
++import { invalidateAssetCache } from '../../src/main/services/assetCache'
++import { encryptPlain, resetAssetKeyCacheForTests } from '../../src/main/services/assetCrypto'
++
++it('measures cold and hot transport-byte cache reads with synthetic assets', async (t) => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-cache-bench-'))
++  const previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = root
++  const results: object[] = []
++  try {
++    fs.mkdirSync(path.join(root, 'media_assets', 'covers'), { recursive: true })
++    const reads = t.mock.method(fs.promises, 'readFile')
++    const stats = t.mock.method(fs.promises, 'stat')
++    const decrypts = t.mock.method(crypto.webcrypto.subtle, 'decrypt')
++    for (const bytes of [1024 * 1024, 16 * 1024 * 1024]) {
++      const plain = Buffer.alloc(bytes, 19)
++      for (const encrypted of [false, true]) {
++        const rel = `covers/sample-${bytes}.${encrypted ? 'enc' : 'jpg'}`
++        fs.writeFileSync(path.join(root, 'media_assets', rel), encrypted ? encryptPlain(plain, '.jpg') : plain)
++        await mediaAssetStore.readForServeAsync(rel)
++        for (const state of ['cold-byte-cache', 'hot-byte-cache']) {
++          const readBefore = reads.mock.callCount()
++          const statBefore = stats.mock.callCount()
++          const decryptBefore = decrypts.mock.callCount()
++          let result: { body: Buffer; mime: string } | undefined
++          const start = performance.now()
++          for (let i = 0; i < 5; i++) {
++            if (state === 'cold-byte-cache') invalidateAssetCache(rel)
++            result = await mediaAssetStore.readForServeAsync(rel)
++          }
++          const elapsedMs = performance.now() - start
++          assert.deepEqual(result?.body, plain)
++          const readCalls = reads.mock.callCount() - readBefore
++          const decryptCalls = decrypts.mock.callCount() - decryptBefore
++          assert.equal(readCalls, state === 'hot-byte-cache' ? 0 : 5)
++          assert.equal(decryptCalls, state === 'hot-byte-cache' || !encrypted ? 0 : 5)
++          results.push({ bytes, encrypted, state, iterations: 5, elapsedMs,
++            readCalls, decryptCalls, statCalls: stats.mock.callCount() - statBefore })
++        }
++      }
++    }
++    const report = { measuredAt: new Date().toISOString(), runtime: process.versions,
++      notes: ['Synthetic transport bytes, not valid pixel images; no pixel decoding, browser or network measured.',
++        'OS file cache and crypto key are warm in both cases. Cold refers only to the application byte cache.',
++        'Five sequential reads, instrumented read/decrypt/stat calls, no p95 or Windows/HDD conclusion.',
++        'The hot path still stats the file and copies response bytes; cache limits do not bound active or response-buffer bytes.'], results }
++    const output = process.env.JAVDEX_ASSET_CACHE_BENCH_OUTPUT
++    if (output) fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n')
++    else process.stdout.write(JSON.stringify(report, null, 2) + '\n')
++  } finally {
++    invalidateAssetCache()
++    resetAssetKeyCacheForTests()
++    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++    else process.env.JAVDEX_TEST_USER_DATA = previous
++    fs.rmSync(root, { recursive: true, force: true })
++  }
++})

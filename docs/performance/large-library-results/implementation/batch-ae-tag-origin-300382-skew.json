@@ -1,0 +1,1788 @@
+{
+  "generatedAt": "2026-09-10T10:32:09.844Z",
+  "videos": 300382,
+  "samples": 3,
+  "distribution": "skew",
+  "candidate": "tag-origin",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "sqlite": {
+      "version": "3.53.4"
+    }
+  },
+  "baselineBytes": 200761344,
+  "indexedBytes": 208621568,
+  "baselineLiveBytes": 200822784,
+  "indexedLiveBytes": 208621568,
+  "indexBuildMs": 311.7153330000001,
+  "results": [
+    {
+      "name": "baseline.no_stats.all",
+      "firstTimedMs": 208.92508299999963,
+      "warmMedianMs": 209.36550000000034,
+      "times": [
+        208.92508299999963,
+        209.52204200000006,
+        209.0428750000001,
+        209.36550000000034
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 55,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_recent (is_hidden=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 45,
+              "detail": "SEARCH library USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 28,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 38,
+              "parent": 3,
+              "notused": 18,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 40,
+              "parent": 3,
+              "notused": 53,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 46,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 88,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 94,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 104,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 123,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.manual",
+      "firstTimedMs": 272.4469170000002,
+      "warmMedianMs": 273.0425410000007,
+      "times": [
+        272.4469170000002,
+        273.6408329999995,
+        273.0425410000007,
+        270.6208749999996
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 55,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_recent (is_hidden=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 45,
+              "detail": "SEARCH library USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 28,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 18,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 50,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 92,
+              "parent": 0,
+              "notused": 91,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 96,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 99,
+              "parent": 96,
+              "notused": 62,
+              "detail": "SEARCH manual_link USING INDEX idx_video_tag_origin (origin=?)"
+            },
+            {
+              "id": 118,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 128,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 147,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.options.first",
+      "firstTimedMs": 0.1172919999999067,
+      "warmMedianMs": 0.11454200000025594,
+      "times": [
+        0.1172919999999067,
+        0.11454200000025594,
+        0.11516699999992852,
+        0.11375000000043656
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 17,
+              "parent": 12,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.options.search",
+      "firstTimedMs": 0.15804100000059407,
+      "warmMedianMs": 0.14000000000032742,
+      "times": [
+        0.15804100000059407,
+        0.13245800000004238,
+        0.14000000000032742,
+        0.1482079999996131
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 99",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 20,
+              "parent": 15,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.options.search_hit",
+      "firstTimedMs": 0.1535840000005919,
+      "warmMedianMs": 0.15029199999935372,
+      "times": [
+        0.1535840000005919,
+        0.15029199999935372,
+        0.1505829999996422,
+        0.1499999999996362
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 1",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 20,
+              "parent": 15,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.options.page_hit",
+      "firstTimedMs": 0.052999999999883585,
+      "warmMedianMs": 0.05258299999968585,
+      "times": [
+        0.052999999999883585,
+        0.05258299999968585,
+        0.052290999999968335,
+        0.05295899999964604
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            2,
+            2
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 17,
+              "parent": 12,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.options.deep",
+      "firstTimedMs": 0.11487499999930151,
+      "warmMedianMs": 0.11274999999932334,
+      "times": [
+        0.11487499999930151,
+        0.1132499999994252,
+        0.11274999999932334,
+        0.10858400000051915
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            900
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 17,
+              "parent": 12,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.no_stats.options.missing",
+      "firstTimedMs": 0.4269169999997757,
+      "warmMedianMs": 0.12833299999965675,
+      "times": [
+        0.4269169999997757,
+        0.1266670000004524,
+        0.12833299999965675,
+        0.13266600000042672
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "absent",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 20,
+              "parent": 15,
+              "notused": 61,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.all",
+      "firstTimedMs": 209.15041699999983,
+      "warmMedianMs": 207.6152919999995,
+      "times": [
+        209.15041699999983,
+        208.25087499999972,
+        207.6152919999995,
+        205.8031659999997
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 179,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 164,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 48,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 47,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 89,
+              "parent": 0,
+              "notused": 113,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 95,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 105,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 124,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.manual",
+      "firstTimedMs": 273.02154100000007,
+      "warmMedianMs": 273.1843749999998,
+      "times": [
+        273.02154100000007,
+        274.4210830000002,
+        272.28791700000056,
+        273.1843749999998
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 179,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 40,
+              "parent": 3,
+              "notused": 164,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 42,
+              "parent": 3,
+              "notused": 53,
+              "detail": "SEARCH vt USING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 51,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 93,
+              "parent": 0,
+              "notused": 83,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 97,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 100,
+              "parent": 97,
+              "notused": 197,
+              "detail": "SEARCH manual_link USING INDEX idx_video_tag_origin (origin=?)"
+            },
+            {
+              "id": 119,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 129,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 148,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.options.first",
+      "firstTimedMs": 0.12241600000015751,
+      "warmMedianMs": 0.11825000000044383,
+      "times": [
+        0.12241600000015751,
+        0.11424999999962893,
+        0.120375000000422,
+        0.11825000000044383
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 17,
+              "parent": 12,
+              "notused": 205,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.options.search",
+      "firstTimedMs": 0.12616700000035053,
+      "warmMedianMs": 0.15216700000019046,
+      "times": [
+        0.12616700000035053,
+        0.15270799999962037,
+        0.15216700000019046,
+        0.13029199999982666
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 99",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 20,
+              "parent": 15,
+              "notused": 205,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.options.search_hit",
+      "firstTimedMs": 0.1428330000007918,
+      "warmMedianMs": 0.14570800000001327,
+      "times": [
+        0.1428330000007918,
+        0.1386659999998301,
+        0.14570800000001327,
+        0.14766599999984464
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 1",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 20,
+              "parent": 15,
+              "notused": 205,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.options.page_hit",
+      "firstTimedMs": 0.05654099999992468,
+      "warmMedianMs": 0.05274999999983265,
+      "times": [
+        0.05654099999992468,
+        0.054082999999991443,
+        0.04787499999929423,
+        0.05274999999983265
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            2,
+            2
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 17,
+              "parent": 12,
+              "notused": 205,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.options.deep",
+      "firstTimedMs": 0.11733399999957328,
+      "warmMedianMs": 0.11633299999994051,
+      "times": [
+        0.11733399999957328,
+        0.11633299999994051,
+        0.11008299999957671,
+        0.11787499999991269
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            900
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 17,
+              "parent": 12,
+              "notused": 205,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.analyzed.options.missing",
+      "firstTimedMs": 0.12645900000006804,
+      "warmMedianMs": 0.12858400000004622,
+      "times": [
+        0.12645900000006804,
+        0.12845800000013696,
+        0.12858400000004622,
+        0.12870900000052643
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "absent",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 20,
+              "parent": 15,
+              "notused": 205,
+              "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "baseline.writes",
+      "rowsPerOperation": 1000,
+      "elapsedMs": 3.445708000000195,
+      "walBytes": 399672
+    },
+    {
+      "name": "candidate.before_analyze.all",
+      "firstTimedMs": 206.19545800000014,
+      "warmMedianMs": 205.62970900000073,
+      "times": [
+        206.19545800000014,
+        205.04320899999948,
+        206.9036670000005,
+        205.62970900000073
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 179,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 164,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 48,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 47,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 89,
+              "parent": 0,
+              "notused": 113,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 95,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 105,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 124,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.manual",
+      "firstTimedMs": 274.5609170000007,
+      "warmMedianMs": 280.13045799999963,
+      "times": [
+        274.5609170000007,
+        275.0982500000009,
+        280.13045799999963,
+        281.244917
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 179,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 40,
+              "parent": 3,
+              "notused": 164,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 42,
+              "parent": 3,
+              "notused": 53,
+              "detail": "SEARCH vt USING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 51,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 93,
+              "parent": 0,
+              "notused": 83,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 97,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 100,
+              "parent": 97,
+              "notused": 197,
+              "detail": "SEARCH manual_link USING INDEX idx_video_tag_origin (origin=?)"
+            },
+            {
+              "id": 119,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 129,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 148,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.options.first",
+      "firstTimedMs": 0.11574999999902502,
+      "warmMedianMs": 0.12254200000097626,
+      "times": [
+        0.11574999999902502,
+        0.11525000000074215,
+        0.12254200000097626,
+        0.12287499999911233
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 16,
+              "parent": 12,
+              "notused": 54,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.options.search",
+      "firstTimedMs": 0.13916600000084145,
+      "warmMedianMs": 0.13508400000137044,
+      "times": [
+        0.13916600000084145,
+        0.13724999999976717,
+        0.13412499999867578,
+        0.13508400000137044
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 99",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 19,
+              "parent": 15,
+              "notused": 54,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.options.search_hit",
+      "firstTimedMs": 0.15158399999927497,
+      "warmMedianMs": 0.151625000000422,
+      "times": [
+        0.15158399999927497,
+        0.1483750000006694,
+        0.151625000000422,
+        0.1538749999999709
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 1",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 19,
+              "parent": 15,
+              "notused": 54,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.options.page_hit",
+      "firstTimedMs": 0.05329199999869161,
+      "warmMedianMs": 0.050750000000334694,
+      "times": [
+        0.05329199999869161,
+        0.050750000000334694,
+        0.053750000000945874,
+        0.04799999999886495
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            2,
+            2
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 16,
+              "parent": 12,
+              "notused": 54,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.options.deep",
+      "firstTimedMs": 0.10462499999994179,
+      "warmMedianMs": 0.10874999999941792,
+      "times": [
+        0.10462499999994179,
+        0.10874999999941792,
+        0.11012500000106229,
+        0.10508300000037707
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            900
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 16,
+              "parent": 12,
+              "notused": 54,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.before_analyze.options.missing",
+      "firstTimedMs": 0.1275420000001759,
+      "warmMedianMs": 0.12866699999904085,
+      "times": [
+        0.1275420000001759,
+        0.12866699999904085,
+        0.12845799999922747,
+        0.13158300000031886
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "absent",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 19,
+              "parent": 15,
+              "notused": 54,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.all",
+      "firstTimedMs": 206.21637499999997,
+      "warmMedianMs": 206.06237500000134,
+      "times": [
+        206.21637499999997,
+        206.06237500000134,
+        207.57745799999975,
+        205.8182080000006
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       \n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     \n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 179,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 39,
+              "parent": 3,
+              "notused": 164,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 41,
+              "parent": 3,
+              "notused": 48,
+              "detail": "SEARCH vt USING COVERING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 47,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 89,
+              "parent": 0,
+              "notused": 113,
+              "detail": "SCAN t"
+            },
+            {
+              "id": 95,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 105,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 124,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.manual",
+      "firstTimedMs": 273.51187500000015,
+      "warmMedianMs": 274.149625,
+      "times": [
+        273.51187500000015,
+        273.87604099999953,
+        274.149625,
+        275.1905830000014
+      ],
+      "plans": [
+        {
+          "sql": "WITH members AS MATERIALIZED (\n       SELECT DISTINCT membership.video_id\n       FROM library_video_memberships membership\n       JOIN media_libraries library ON library.id = membership.library_id\n       WHERE membership.is_hidden = 0 AND library.status = 'active'\n     ), counts AS (\n       SELECT vt.tag_id, COUNT(members.video_id) AS video_count\n       FROM video_tag vt JOIN members ON members.video_id = vt.video_id\n       WHERE vt.origin = 'manual'\n       GROUP BY vt.tag_id\n     )\n     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count\n     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id\n     WHERE t.id IN (\n       SELECT manual_link.tag_id FROM video_tag manual_link\n       WHERE manual_link.origin = 'manual'\n     )\n     ORDER BY video_count DESC, t.name",
+          "params": [],
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 0,
+              "detail": "MATERIALIZE counts"
+            },
+            {
+              "id": 6,
+              "parent": 3,
+              "notused": 0,
+              "detail": "MATERIALIZE members"
+            },
+            {
+              "id": 11,
+              "parent": 6,
+              "notused": 26,
+              "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+            },
+            {
+              "id": 15,
+              "parent": 6,
+              "notused": 179,
+              "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+            },
+            {
+              "id": 29,
+              "parent": 6,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR DISTINCT"
+            },
+            {
+              "id": 40,
+              "parent": 3,
+              "notused": 164,
+              "detail": "SCAN members"
+            },
+            {
+              "id": 42,
+              "parent": 3,
+              "notused": 53,
+              "detail": "SEARCH vt USING INDEX sqlite_autoindex_video_tag_1 (video_id=?)"
+            },
+            {
+              "id": 51,
+              "parent": 3,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR GROUP BY"
+            },
+            {
+              "id": 93,
+              "parent": 0,
+              "notused": 83,
+              "detail": "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 97,
+              "parent": 0,
+              "notused": 0,
+              "detail": "LIST SUBQUERY 3"
+            },
+            {
+              "id": 100,
+              "parent": 97,
+              "notused": 197,
+              "detail": "SEARCH manual_link USING INDEX idx_video_tag_origin (origin=?)"
+            },
+            {
+              "id": 119,
+              "parent": 0,
+              "notused": 0,
+              "detail": "BLOOM FILTER ON counts (tag_id=?)"
+            },
+            {
+              "id": 129,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH counts USING AUTOMATIC COVERING INDEX (tag_id=?) LEFT-JOIN"
+            },
+            {
+              "id": 148,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.options.first",
+      "firstTimedMs": 0.10954099999980826,
+      "warmMedianMs": 0.10395900000003166,
+      "times": [
+        0.10954099999980826,
+        0.10620799999924202,
+        0.10395900000003166,
+        0.10300000000097498
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 16,
+              "parent": 12,
+              "notused": 184,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.options.search",
+      "firstTimedMs": 0.1314589999983582,
+      "warmMedianMs": 0.13041700000030687,
+      "times": [
+        0.1314589999983582,
+        0.12970900000073016,
+        0.13041700000030687,
+        0.13570800000161398
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 99",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 19,
+              "parent": 15,
+              "notused": 184,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.options.search_hit",
+      "firstTimedMs": 0.1419160000004922,
+      "warmMedianMs": 0.14525000000139698,
+      "times": [
+        0.1419160000004922,
+        0.14204199999949196,
+        0.14899999999943248,
+        0.14525000000139698
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "tag 1",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 19,
+              "parent": 15,
+              "notused": 184,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.options.page_hit",
+      "firstTimedMs": 0.04970799999864539,
+      "warmMedianMs": 0.048209000000497326,
+      "times": [
+        0.04970799999864539,
+        0.049250000000029104,
+        0.048209000000497326,
+        0.047040999999808264
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            2,
+            2
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 16,
+              "parent": 12,
+              "notused": 184,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.options.deep",
+      "firstTimedMs": 0.10124999999970896,
+      "warmMedianMs": 0.10587499999928696,
+      "times": [
+        0.10124999999970896,
+        0.10179199999947741,
+        0.10720799999944575,
+        0.10587499999928696
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE  EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            101,
+            900
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 12,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 16,
+              "parent": 12,
+              "notused": 184,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.analyzed.options.missing",
+      "firstTimedMs": 0.131375000000844,
+      "warmMedianMs": 0.13487499999973807,
+      "times": [
+        0.131375000000844,
+        0.13845800000126474,
+        0.13487499999973807,
+        0.13012499999967986
+      ],
+      "plans": [
+        {
+          "sql": "SELECT t.id,\n      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label\n    FROM tags t\n    WHERE tag_name_contains_folded(t.name, ?) AND EXISTS (\n      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id\n      WHERE vt.tag_id = t.id AND vt.origin = 'manual'\n    )\n    ORDER BY t.name LIMIT ? OFFSET ?",
+          "params": [
+            "absent",
+            101,
+            0
+          ],
+          "plan": [
+            {
+              "id": 9,
+              "parent": 0,
+              "notused": 115,
+              "detail": "SCAN t USING COVERING INDEX sqlite_autoindex_tags_1"
+            },
+            {
+              "id": 15,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 19,
+              "parent": 15,
+              "notused": 184,
+              "detail": "SEARCH vt USING COVERING INDEX idx_video_tag_tag_id (tag_id=? AND origin=?)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "candidate.writes",
+      "rowsPerOperation": 1000,
+      "elapsedMs": 3.967416999999841,
+      "walBytes": 436752
+    }
+  ],
+  "caveats": [
+    "Synthetic local file, warm OS cache; three warm samples by default, not p95 or Windows/HDD.",
+    "Full-result equality checks are outside timing; firstTimedMs follows an untimed EQP/result capture, not cold access.",
+    "Candidate-before-analyze retains baseline statistics; this is not a wholly un-analyzed fixture.",
+    "File sizes include freelist pages and prior write allocations; not isolated index live bytes. WAL bytes are file length, not device write volume.",
+    "Write probe commits 1000 inserts, origin updates, deletes in three transactions; does not model full scan/import."
+  ]
+}

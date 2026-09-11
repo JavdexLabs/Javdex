@@ -1,0 +1,1174 @@
+{
+  "results": [
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        2.1441659999999843,
+        1.7607920000000092,
+        1.7541249999999877
+      ],
+      "medianMs": 1.7607920000000092,
+      "pageBytes": 27215
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.0007920000000183336,
+        0.0004589999999780048,
+        0.0003749999999911324
+      ],
+      "medianMs": 0.0004589999999780048,
+      "pageBytes": 27215
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        2.938416999999987,
+        3.0160000000000196,
+        3.3109170000000177
+      ],
+      "medianMs": 3.0160000000000196,
+      "pageBytes": 27215
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        0.12887499999999363,
+        0.0882919999999956,
+        0.07941700000000651
+      ],
+      "medianMs": 0.0882919999999956,
+      "pageBytes": 27215
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 9900,
+      "mode": "whole-json",
+      "samples": [
+        2.4188749999999857,
+        1.8094999999999857,
+        1.643665999999996
+      ],
+      "medianMs": 1.8094999999999857,
+      "pageBytes": 27183
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 9900,
+      "mode": "cached-view",
+      "samples": [
+        0.000916999999986956,
+        0.00020799999998644125,
+        0.00012500000002546585
+      ],
+      "medianMs": 0.00020799999998644125,
+      "pageBytes": 27183
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 9900,
+      "mode": "json-page",
+      "samples": [
+        5.574124999999981,
+        5.560457999999983,
+        5.590749999999986
+      ],
+      "medianMs": 5.574124999999981,
+      "pageBytes": 27183
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "all",
+      "offset": 9900,
+      "mode": "indexed-page",
+      "samples": [
+        0.1304580000000044,
+        0.11462499999998954,
+        0.11070800000001668
+      ],
+      "medianMs": 0.11462499999998954,
+      "pageBytes": 27183
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        1.6919579999999996,
+        1.6748330000000067,
+        2.009707999999989
+      ],
+      "medianMs": 1.6919579999999996,
+      "pageBytes": 27932
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00016699999997626946,
+        0.00016700000000469117,
+        0.0010839999999916472
+      ],
+      "medianMs": 0.00016700000000469117,
+      "pageBytes": 27932
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        10.736124999999987,
+        10.901125000000008,
+        10.434916999999984
+      ],
+      "medianMs": 10.736124999999987,
+      "pageBytes": 27932
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        0.12691699999999173,
+        0.1027080000000069,
+        0.10591599999997925
+      ],
+      "medianMs": 0.10591599999997925,
+      "pageBytes": 27932
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 4800,
+      "mode": "whole-json",
+      "samples": [
+        1.7402079999999955,
+        1.8787910000000352,
+        1.7653339999999957
+      ],
+      "medianMs": 1.7653339999999957,
+      "pageBytes": 16201
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 4800,
+      "mode": "cached-view",
+      "samples": [
+        0.001334000000042579,
+        0.00012500000002546585,
+        0.00008300000001781882
+      ],
+      "medianMs": 0.00012500000002546585,
+      "pageBytes": 16201
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 4800,
+      "mode": "json-page",
+      "samples": [
+        12.073791999999969,
+        11.875540999999998,
+        12.211667000000034
+      ],
+      "medianMs": 12.073791999999969,
+      "pageBytes": 16201
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "attention",
+      "offset": 4800,
+      "mode": "indexed-page",
+      "samples": [
+        0.14837499999998727,
+        0.1426249999999527,
+        0.13929200000001174
+      ],
+      "medianMs": 0.1426249999999527,
+      "pageBytes": 16201
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        1.6875840000000153,
+        1.7355000000000018,
+        2.0637910000000375
+      ],
+      "medianMs": 1.7355000000000018,
+      "pageBytes": 27054
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00012500000002546585,
+        0.00008300000001781882,
+        0.0000829999999609754
+      ],
+      "medianMs": 0.00008300000001781882,
+      "pageBytes": 27054
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        8.284167000000025,
+        8.306666000000007,
+        8.293166000000042
+      ],
+      "medianMs": 8.293166000000042,
+      "pageBytes": 27054
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        0.07920799999999417,
+        0.08416599999998198,
+        0.07349999999996726
+      ],
+      "medianMs": 0.07920799999999417,
+      "pageBytes": 27054
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 1900,
+      "mode": "whole-json",
+      "samples": [
+        1.7100829999999974,
+        1.7369589999999562,
+        1.4705840000000308
+      ],
+      "medianMs": 1.7100829999999974,
+      "pageBytes": 27022
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 1900,
+      "mode": "cached-view",
+      "samples": [
+        0.00012499999996862243,
+        0.00008400000001529406,
+        0.0000829999999609754
+      ],
+      "medianMs": 0.00008400000001529406,
+      "pageBytes": 27022
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 1900,
+      "mode": "json-page",
+      "samples": [
+        8.49370799999997,
+        8.483374999999967,
+        8.497375000000034
+      ],
+      "medianMs": 8.49370799999997,
+      "pageBytes": 27022
+    },
+    {
+      "count": 10000,
+      "rawBytes": 2716870,
+      "materializeMs": 13.217542000000009,
+      "tempAllocatedBytes": 3260416,
+      "filter": "skipped",
+      "offset": 1900,
+      "mode": "indexed-page",
+      "samples": [
+        0.1372079999999869,
+        0.10270799999995006,
+        0.09604199999995444
+      ],
+      "medianMs": 0.10270799999995006,
+      "pageBytes": 27022
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        18.693374999999946,
+        18.443957999999952,
+        18.589166999999975
+      ],
+      "medianMs": 18.589166999999975,
+      "pageBytes": 27216
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00020900000004075991,
+        0.00008300000001781882,
+        0.00008400000001529406
+      ],
+      "medianMs": 0.00008400000001529406,
+      "pageBytes": 27216
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        36.231874999999945,
+        35.26125000000002,
+        35.520666000000006
+      ],
+      "medianMs": 35.520666000000006,
+      "pageBytes": 27216
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        0.43508299999996325,
+        0.4175000000000182,
+        0.43587500000001
+      ],
+      "medianMs": 0.43508299999996325,
+      "pageBytes": 27216
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 99900,
+      "mode": "whole-json",
+      "samples": [
+        18.574833000000012,
+        18.827957999999967,
+        18.304000000000087
+      ],
+      "medianMs": 18.574833000000012,
+      "pageBytes": 27184
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 99900,
+      "mode": "cached-view",
+      "samples": [
+        0.00012500000002546585,
+        0.00008299999990413198,
+        0.00012499999991177901
+      ],
+      "medianMs": 0.00012499999991177901,
+      "pageBytes": 27184
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 99900,
+      "mode": "json-page",
+      "samples": [
+        78.46520899999996,
+        76.57974999999988,
+        79.81154100000003
+      ],
+      "medianMs": 78.46520899999996,
+      "pageBytes": 27184
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "all",
+      "offset": 99900,
+      "mode": "indexed-page",
+      "samples": [
+        6.700874999999996,
+        6.350040999999919,
+        6.5007080000000315
+      ],
+      "medianMs": 6.5007080000000315,
+      "pageBytes": 27184
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        20.762416999999914,
+        19.89079199999992,
+        20.202291999999943
+      ],
+      "medianMs": 20.202291999999943,
+      "pageBytes": 27933
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00012500000002546585,
+        0.00008400000001529406,
+        0.00012500000002546585
+      ],
+      "medianMs": 0.00012500000002546585,
+      "pageBytes": 27933
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        109.75920800000017,
+        109.53224999999998,
+        109.0815
+      ],
+      "medianMs": 109.53224999999998,
+      "pageBytes": 27933
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        0.46833300000002964,
+        0.4952920000000631,
+        0.48529100000018843
+      ],
+      "medianMs": 0.48529100000018843,
+      "pageBytes": 27933
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 48500,
+      "mode": "whole-json",
+      "samples": [
+        19.764124999999922,
+        20.163499999999885,
+        20.52475000000004
+      ],
+      "medianMs": 20.163499999999885,
+      "pageBytes": 20098
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 48500,
+      "mode": "cached-view",
+      "samples": [
+        0.00012500000002546585,
+        0.00012499999979809218,
+        0.00008299999990413198
+      ],
+      "medianMs": 0.00012499999979809218,
+      "pageBytes": 20098
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 48500,
+      "mode": "json-page",
+      "samples": [
+        125.20524999999998,
+        135.0737909999998,
+        126.33054200000015
+      ],
+      "medianMs": 126.33054200000015,
+      "pageBytes": 20098
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "attention",
+      "offset": 48500,
+      "mode": "indexed-page",
+      "samples": [
+        1.0356670000001031,
+        1.0265000000003965,
+        1.0223340000002281
+      ],
+      "medianMs": 1.0265000000003965,
+      "pageBytes": 20098
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        19.348250000000007,
+        19.286959000000024,
+        20.086917000000085
+      ],
+      "medianMs": 19.348250000000007,
+      "pageBytes": 27055
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00012500000002546585,
+        0.00008300000035887933,
+        0.00008400000024266774
+      ],
+      "medianMs": 0.00008400000024266774,
+      "pageBytes": 27055
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        84.05866699999979,
+        84.09783299999981,
+        84.02191700000003
+      ],
+      "medianMs": 84.05866699999979,
+      "pageBytes": 27055
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        0.2956669999998667,
+        0.2894579999997404,
+        0.30470900000000256
+      ],
+      "medianMs": 0.2956669999998667,
+      "pageBytes": 27055
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 19900,
+      "mode": "whole-json",
+      "samples": [
+        19.439792000000125,
+        19.234292000000096,
+        19.74420800000007
+      ],
+      "medianMs": 19.439792000000125,
+      "pageBytes": 27023
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 19900,
+      "mode": "cached-view",
+      "samples": [
+        0.00012500000002546585,
+        0.00008400000024266774,
+        0.00008299999990413198
+      ],
+      "medianMs": 0.00008400000024266774,
+      "pageBytes": 27023
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 19900,
+      "mode": "json-page",
+      "samples": [
+        88.49612500000012,
+        88.22995899999978,
+        89.03316700000005
+      ],
+      "medianMs": 88.49612500000012,
+      "pageBytes": 27023
+    },
+    {
+      "count": 100000,
+      "rawBytes": 27167294,
+      "materializeMs": 161.16708300000005,
+      "tempAllocatedBytes": 33927168,
+      "filter": "skipped",
+      "offset": 19900,
+      "mode": "indexed-page",
+      "samples": [
+        0.5909590000001117,
+        0.5838749999998072,
+        0.575083000000177
+      ],
+      "medianMs": 0.5838749999998072,
+      "pageBytes": 27023
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        83.39229200000045,
+        72.17120800000066,
+        71.10329200000069
+      ],
+      "medianMs": 72.17120800000066,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00020899999981338624,
+        0.0001250000004802132,
+        0.00008299999990413198
+      ],
+      "medianMs": 0.0001250000004802132,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        107.59958300000017,
+        107.19166599999971,
+        108.28458299999966
+      ],
+      "medianMs": 107.59958300000017,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        1.2057919999997466,
+        1.1852499999995416,
+        1.2573750000001382
+      ],
+      "medianMs": 1.2057919999997466,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 299900,
+      "mode": "whole-json",
+      "samples": [
+        70.2139159999997,
+        73.36604200000056,
+        74.69100000000071
+      ],
+      "medianMs": 73.36604200000056,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 299900,
+      "mode": "cached-view",
+      "samples": [
+        0.00020799999947485048,
+        0.0001249999995707185,
+        0.00008299999990413198
+      ],
+      "medianMs": 0.0001249999995707185,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 299900,
+      "mode": "json-page",
+      "samples": [
+        270.22329099999934,
+        258.94425000000047,
+        257.5298330000005
+      ],
+      "medianMs": 258.94425000000047,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "all",
+      "offset": 299900,
+      "mode": "indexed-page",
+      "samples": [
+        16.481290999999146,
+        16.601958000000195,
+        16.541541999999936
+      ],
+      "medianMs": 16.541541999999936,
+      "pageBytes": 27216
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        80.82112499999948,
+        78.69887500000004,
+        77.22762500000044
+      ],
+      "medianMs": 78.69887500000004,
+      "pageBytes": 27934
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00016699999923730502,
+        0.0001249999995707185,
+        0.00008399999933317304
+      ],
+      "medianMs": 0.0001249999995707185,
+      "pageBytes": 27934
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        327.00820900000053,
+        327.5906249999998,
+        328.97120799999993
+      ],
+      "medianMs": 327.5906249999998,
+      "pageBytes": 27934
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        1.4669590000003154,
+        1.5180830000008427,
+        1.3577079999995476
+      ],
+      "medianMs": 1.4669590000003154,
+      "pageBytes": 27934
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 145700,
+      "mode": "whole-json",
+      "samples": [
+        77.83049999999912,
+        76.40449999999964,
+        108.44666599999982
+      ],
+      "medianMs": 77.83049999999912,
+      "pageBytes": 4227
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 145700,
+      "mode": "cached-view",
+      "samples": [
+        0.0001249999986612238,
+        0.00008300000081362668,
+        0.00008300000081362668
+      ],
+      "medianMs": 0.00008300000081362668,
+      "pageBytes": 4227
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 145700,
+      "mode": "json-page",
+      "samples": [
+        401.7173750000002,
+        414.5184590000008,
+        404.7102500000001
+      ],
+      "medianMs": 404.7102500000001,
+      "pageBytes": 4227
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "attention",
+      "offset": 145700,
+      "mode": "indexed-page",
+      "samples": [
+        3.291917000000467,
+        3.0930000000007567,
+        3.2492920000004233
+      ],
+      "medianMs": 3.2492920000004233,
+      "pageBytes": 4227
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "whole-json",
+      "samples": [
+        74.09566599999926,
+        75.67399999999907,
+        73.50829200000044
+      ],
+      "medianMs": 74.09566599999926,
+      "pageBytes": 27055
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "cached-view",
+      "samples": [
+        0.00020799999947485048,
+        0.0001249999986612238,
+        0.0001250000004802132
+      ],
+      "medianMs": 0.0001250000004802132,
+      "pageBytes": 27055
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "json-page",
+      "samples": [
+        258.8557500000006,
+        254.25983300000007,
+        252.62099999999919
+      ],
+      "medianMs": 254.25983300000007,
+      "pageBytes": 27055
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 0,
+      "mode": "indexed-page",
+      "samples": [
+        0.7813750000004802,
+        0.9332919999997102,
+        0.8585419999999431
+      ],
+      "medianMs": 0.8585419999999431,
+      "pageBytes": 27055
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 59900,
+      "mode": "whole-json",
+      "samples": [
+        73.65325000000121,
+        98.40858399999888,
+        75.45687499999985
+      ],
+      "medianMs": 75.45687499999985,
+      "pageBytes": 27055
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 59900,
+      "mode": "cached-view",
+      "samples": [
+        0.00020899999981338624,
+        0.00008399999933317304,
+        0.00008300000081362668
+      ],
+      "medianMs": 0.00008399999933317304,
+      "pageBytes": 27055
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 59900,
+      "mode": "json-page",
+      "samples": [
+        276.02225,
+        274.57116700000006,
+        275.59166600000026
+      ],
+      "medianMs": 275.59166600000026,
+      "pageBytes": 27055
+    },
+    {
+      "count": 300000,
+      "rawBytes": 81501598,
+      "materializeMs": 504.67416699999967,
+      "tempAllocatedBytes": 102473728,
+      "filter": "skipped",
+      "offset": 59900,
+      "mode": "indexed-page",
+      "samples": [
+        1.6103339999990567,
+        1.6769580000000133,
+        1.686582999998791
+      ],
+      "medianMs": 1.6769580000000133,
+      "pageBytes": 27055
+    }
+  ],
+  "notes": [
+    "Synthetic files only; full oracle and raw JSON retained. Count/page within one transaction; exact fields/order checked.",
+    "One warmup +3 samples per variant; whole-json/cached-view/direct-json/TEMP-index, construction before all samples. Indexed timings exclude construction; cached-view uses already filtered retained oracle (no filter/map initialization included).",
+    "TEMP allocated bytes are SQLite page allocation, not RSS/peak or disk I/O; storage may use memory depending on runtime configuration.",
+    "Not production, not a migration: actual readonly worker query_only forbids TEMP writes. Worker/index ownership and recovery must be designed before adoption.",
+    "No UI-search/localization, extra unrecognized merge, groups/changes, real IPC, cancellation, cold disk, Windows/HDD, p95 or mixed load claims."
+  ]
+}
+✔ compares audit pagination costs and validates ordered full-field results (12624.459292ms)
+{"nativeReadonlyPreserved":true,"tempBuildWithQueryOnlyOff":true,"tempReadWithQueryOnlyOn":true,"tempRemovedOnClose":true,"productionConfigurationChanged":false}
+✔ verifies native readonly protection while building connection-local TEMP data (11.085667ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12810.4105

@@ -1,0 +1,536 @@
+diff --git a/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx b/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
+index c1ea90e..df63ccd 100644
+--- a/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
++++ b/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
+@@ -1,3 +1,4 @@
++import { appendAvatarLog, type AvatarLogState } from '../avatarAutoCrop/logs'
+ import { useQueryClient } from '@tanstack/react-query'
+ import {
+   createContext,
+@@ -10,8 +11,7 @@ import {
+   type ReactNode
+ } from 'react'
+ import { createAvatarCropV1, type ActressAvatarCommit } from '@shared/avatarCrop'
+-import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
+-import type { ActressListItem } from '@shared/actressTypes'
++import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget, ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
+ import type { BatchLogEntry } from '@shared/batchScrapeTypes'
+ import { api, assetUrl } from '../api'
+ import { createAvatarAnalysisBitmap, loadAvatarAnalysisImage } from '../avatarAutoCrop/image'
+@@ -28,7 +28,7 @@ import {
+ export type AvatarAutoCropBatchStatus = 'idle' | 'running' | 'cancelling' | 'done'
+ export type AvatarAutoCropBatchSource = 'manual'
+ 
+-export interface AvatarAutoCropBatchState {
++export interface AvatarAutoCropBatchState extends AvatarLogState {
+   status: AvatarAutoCropBatchStatus
+   source: AvatarAutoCropBatchSource | null
+   total: number
+@@ -38,7 +38,6 @@ export interface AvatarAutoCropBatchState {
+   skipped: number
+   currentName: string | null
+   cancelled: boolean
+-  logs: BatchLogEntry[]
+ }
+ 
+ interface AvatarAutoCropBatchContextValue {
+@@ -58,7 +57,9 @@ const INITIAL_STATE: AvatarAutoCropBatchState = {
+   skipped: 0,
+   currentName: null,
+   cancelled: false,
+-  logs: []
++  logs: [],
++  totalLogCount: 0,
++  shortenedLogCount: 0
+ }
+ 
+ const Context = createContext<AvatarAutoCropBatchContextValue | null>(null)
+@@ -76,13 +77,6 @@ function batchLog(
+   }
+ }
+ 
+-function avatarTargets(items: ActressListItem[]): ActressAvatarAutoCropTarget[] {
+-  return items
+-    .filter((item) => Boolean(item.avatar_source_path || item.avatar_path))
+-    .map((item) => ({ actressId: item.id, mainName: item.main_name }))
+-}
+-
+-
+ async function smartCropAvatar(
+   target: ActressAvatarAutoCropTarget,
+   settings: Awaited<ReturnType<typeof api.settings.get>>
+@@ -140,8 +134,11 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+   const toast = useToast()
+   const [state, setState] = useState<AvatarAutoCropBatchState>(INITIAL_STATE)
+   const pendingRef = useRef<ActressAvatarAutoCropTarget[]>([])
+-  const queuedIdsRef = useRef(new Set<number>())
++  const nextAfterIdRef = useRef<number | null>(null)
+   const runningRef = useRef(false)
++  const startingRef = useRef(false)
++  const mountedRef = useRef(true)
++  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+   const scrapeCropRunningRef = useRef(false)
+   const batchLockTokenRef = useRef<string | null>(null)
+   const cancelRequestedRef = useRef(false)
+@@ -154,7 +151,15 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+     try {
+       settings = await api.settings.get()
+       while (!cancelRequestedRef.current) {
+-        const target = pendingRef.current.shift()
++        if (pendingRef.current.length === 0 && nextAfterIdRef.current !== null) {
++          const token = batchLockTokenRef.current
++          if (!token) throw new Error('头像任务令牌已失效')
++          const page = await api.avatarAutoCropBatch.targets(token, nextAfterIdRef.current)
++          if (cancelRequestedRef.current) break
++          pendingRef.current = page.items.slice().reverse()
++          nextAfterIdRef.current = page.nextAfterId
++        }
++        const target = pendingRef.current.pop()
+         if (!target) break
+ 
+         setState((current) => ({
+@@ -170,16 +175,13 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+             notifyAvatarAutoCropSaved(target.actressId)
+             setState((current) => ({
+               ...current,
+-              logs: [...current.logs, batchLog(target.mainName, 'success', '智能构图完成')]
++              ...appendAvatarLog(current, batchLog(target.mainName, 'success', '智能构图完成'))
+             }))
+           } else {
+             totalsRef.current.skipped += 1
+             setState((current) => ({
+               ...current,
+-              logs: [
+-                ...current.logs,
+-                batchLog(target.mainName, 'info', '没有可用的头像原图，已跳过')
+-              ]
++              ...appendAvatarLog(current, batchLog(target.mainName, 'info', '没有可用的头像原图，已跳过'))
+             }))
+           }
+         } catch (error) {
+@@ -187,11 +189,10 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+           totalsRef.current.failed += 1
+           setState((current) => ({
+             ...current,
+-            logs: [...current.logs, batchLog(target.mainName, 'error', errorMessage)]
++            ...appendAvatarLog(current, batchLog(target.mainName, 'error', errorMessage))
+           }))
+         } finally {
+           totalsRef.current.current += 1
+-          queuedIdsRef.current.delete(target.actressId)
+           setState((current) => ({
+             ...current,
+             current: totalsRef.current.current,
+@@ -202,18 +203,16 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+         }
+       }
+     } catch (error) {
+-      const unprocessed = pendingRef.current.length
+-      totalsRef.current.failed += unprocessed
+-      totalsRef.current.current += unprocessed
++      if (!cancelRequestedRef.current) {
++        const unprocessed = totalsRef.current.total - totalsRef.current.current
++        totalsRef.current.failed += unprocessed
++        totalsRef.current.current += unprocessed
++        setState((current) => ({
++          ...current,
++          ...appendAvatarLog(current, batchLog('-', 'error', `批量构图中断：${(error as Error).message}；${unprocessed} 项未处理，计入失败`))
++        }))
++      }
+       pendingRef.current = []
+-      queuedIdsRef.current.clear()
+-      setState((current) => ({
+-        ...current,
+-        logs: [
+-          ...current.logs,
+-          batchLog('-', 'error', `批量构图中断：${(error as Error).message}`)
+-        ]
+-      }))
+     } finally {
+       const cancelled = cancelRequestedRef.current
+       const batchLockToken = batchLockTokenRef.current
+@@ -227,7 +226,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+         }
+       }
+       pendingRef.current = []
+-      queuedIdsRef.current.clear()
++      nextAfterIdRef.current = null
+       runningRef.current = false
+       cancelRequestedRef.current = false
+       sourceRef.current = null
+@@ -241,14 +240,11 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+         skipped: totalsRef.current.skipped,
+         currentName: null,
+         cancelled,
+-        logs: [
+-          ...current.logs,
+-          batchLog(
++        ...appendAvatarLog(current, batchLog(
+             '-',
+             cancelled ? 'info' : totalsRef.current.failed > 0 ? 'error' : 'success',
+             `${cancelled ? '批量构图已停止' : '批量构图已完成'}：成功 ${totalsRef.current.success}，失败 ${totalsRef.current.failed}，跳过 ${totalsRef.current.skipped}`
+-          )
+-        ]
++          ))
+       }))
+ 
+       const result = totalsRef.current
+@@ -262,14 +258,15 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+   }, [queryClient, toast])
+ 
+   const startQueue = useCallback(
+-    (targets: ActressAvatarAutoCropTarget[]): void => {
+-      pendingRef.current = targets
+-      queuedIdsRef.current = new Set(targets.map((target) => target.actressId))
++    (page: ActressAvatarCropTargetPage): void => {
++      // Only one page is retained; pop preserves the server's processing order.
++      pendingRef.current = page.items.slice().reverse()
++      nextAfterIdRef.current = page.nextAfterId
+       runningRef.current = true
+       cancelRequestedRef.current = false
+       sourceRef.current = 'manual'
+       totalsRef.current = {
+-        total: targets.length,
++        total: page.total,
+         current: 0,
+         success: 0,
+         failed: 0,
+@@ -278,20 +275,18 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+       setState({
+         status: 'running',
+         source: 'manual',
+-        total: targets.length,
++        total: page.total,
+         current: 0,
+         success: 0,
+         failed: 0,
+         skipped: 0,
+         currentName: null,
+         cancelled: false,
+-        logs: [
+-          batchLog(
++        ...appendAvatarLog(INITIAL_STATE, batchLog(
+             '-',
+             'info',
+-            `开始批量智能构图，共 ${targets.length} 张头像`
+-          )
+-        ]
++            `开始批量智能构图，共 ${page.total} 张头像`
++          ))
+       })
+       void drainQueue()
+     },
+@@ -300,7 +295,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+ 
+   const cropScrapedAvatar = useCallback(
+     async (request: ActressAvatarAutoCropRequest): Promise<ActressAvatarAutoCropOutcome> => {
+-      if (runningRef.current) {
++      if (runningRef.current || startingRef.current) {
+         return { status: 'failed', message: '正在执行“构图全部头像”，请稍后重试' }
+       }
+       if (scrapeCropRunningRef.current) {
+@@ -335,6 +330,12 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+ 
+   useEffect(
+     () => () => {
++      if (runningRef.current) {
++        cancelRequestedRef.current = true
++        pendingRef.current = []
++        // The in-flight operation owns the lock until drainQueue finally settles.
++        return
++      }
+       const batchLockToken = batchLockTokenRef.current
+       if (!batchLockToken) return
+       batchLockTokenRef.current = null
+@@ -343,31 +344,36 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+     []
+   )
+ 
+-  const listAllAvatarTargets = useCallback(async (): Promise<ActressAvatarAutoCropTarget[]> => {
+-    return avatarTargets(await api.actresses.list(undefined, 'all'))
+-  }, [])
+-
+   const countAllAvatars = useCallback(async (): Promise<number> => {
+-    return (await listAllAvatarTargets()).length
+-  }, [listAllAvatarTargets])
++    return api.actresses.countAvatarCropTargets()
++  }, [])
+ 
+   const startAllAvatars = useCallback(async (): Promise<number> => {
+-    if (runningRef.current) throw new Error('已有头像智能构图任务正在进行')
++    if (runningRef.current || startingRef.current) throw new Error('已有头像智能构图任务正在进行')
+     if (scrapeCropRunningRef.current) throw new Error('请等待当前演员头像智能构图完成')
+-    const targets = await listAllAvatarTargets()
+-    if (targets.length === 0) return 0
+-
+-    const batchLockToken = await api.avatarAutoCropBatch.begin()
+-    batchLockTokenRef.current = batchLockToken
++    startingRef.current = true
++    let token: string | null = null
++    let handedOff = false
+     try {
+-      startQueue(targets)
+-    } catch (error) {
+-      batchLockTokenRef.current = null
+-      await api.avatarAutoCropBatch.end(batchLockToken).catch(() => undefined)
+-      throw error
++      token = await api.avatarAutoCropBatch.begin()
++      if (!mountedRef.current) {
++        await api.avatarAutoCropBatch.end(token)
++        return 0
++      }
++      batchLockTokenRef.current = token
++      const page = await api.avatarAutoCropBatch.targets(token, 0)
++      if (!mountedRef.current || page.total === 0) return 0
++      startQueue(page)
++      handedOff = true
++      return page.total
++    } finally {
++      startingRef.current = false
++      if (!handedOff && token && batchLockTokenRef.current === token) {
++        batchLockTokenRef.current = null
++        await api.avatarAutoCropBatch.end(token)
++      }
+     }
+-    return targets.length
+-  }, [listAllAvatarTargets, startQueue])
++  }, [startQueue])
+ 
+   const cancel = useCallback((): void => {
+     if (!runningRef.current || sourceRef.current !== 'manual') return
+@@ -376,7 +382,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+     setState((current) => ({
+       ...current,
+       status: 'cancelling',
+-      logs: [...current.logs, batchLog('-', 'info', '已请求停止，将在当前头像处理完成后结束')]
++      ...appendAvatarLog(current, batchLog('-', 'info', '已请求停止，将在当前头像处理完成后结束'))
+     }))
+   }, [])
+ 
+diff --git a/src/renderer/src/contexts/AvatarAutoCropBatchPaging.test.tsx b/src/renderer/src/contexts/AvatarAutoCropBatchPaging.test.tsx
+new file mode 100644
+index 0000000..fa961fb
+--- /dev/null
++++ b/src/renderer/src/contexts/AvatarAutoCropBatchPaging.test.tsx
+@@ -0,0 +1,69 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ElectronApi } from '../../../preload/index'
++import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
++function deferred<T>() {
++  let resolve!: (value:T)=>void, reject!: (error:Error)=>void
++  const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no})
++  return {promise,resolve,reject}
++}
++
++it('consumes pages on demand and stops safely across page failure, cancellation and unmount', async () => {
++  const items=Array.from({length:230},(_,i)=>({actressId:i+1,mainName:`Actor-${i+1}`}))
++  const page=(afterId:number):ActressAvatarCropTargetPage=>({items:items.slice(afterId,afterId+100),total:230,nextAfterId:afterId+100<230?afterId+100:null})
++  let mode='normal',tokenId=0
++  let held=deferred<ActressAvatarCropTargetPage>()
++  let calls:number[]=[],processed:number[]=[],ended:string[]=[]
++  const fake={
++    actresses:{avatarCropTargets:()=>{throw new Error('Full targets forbidden')},list:()=>{throw new Error('Wide list forbidden')},getAvatarSourceInfo:async(id:number)=>{processed.push(id);return null}},
++    settings:{get:async()=>({})},
++    actressScrape:{onAvatarAutoCropRequest:()=>()=>{}},
++    avatarAutoCropBatch:{begin:async()=>String(++tokenId),end:async(token:string)=>{ended.push(token);return true},targets:async(_token:string,afterId:number)=>{
++      calls.push(afterId)
++      if(afterId===100&&mode==='failure')throw new Error('Page failed')
++      if(afterId===100&&mode!=='normal')return held.promise
++      return page(afterId)
++    }}
++  } as unknown as ElectronApi
++  Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++  Object.defineProperty(globalThis,'window',{configurable:true,value:{api:fake}})
++  const {AvatarAutoCropBatchProvider,useAvatarAutoCropBatch}=await import('./AvatarAutoCropBatchContext')
++  let current!:ReturnType<typeof useAvatarAutoCropBatch>
++  function Probe(){current=useAvatarAutoCropBatch();return null}
++  const client=new QueryClient()
++  let renderer!:TestRenderer.ReactTestRenderer
++  const settle=async()=>{await act(async()=>{await new Promise(resolve=>setImmediate(resolve))})}
++  const mount=async()=>{calls=[];processed=[];ended=[];held=deferred();await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client}><AvatarAutoCropBatchProvider><Probe/></AvatarAutoCropBatchProvider></QueryClientProvider>)})}
++  const unmount=async()=>{await act(async()=>renderer.unmount())}
++  const start=async()=>{await act(async()=>{assert.equal(await current.startAllAvatars(),230);await new Promise(resolve=>setImmediate(resolve))})}
++  try {
++    await mount();await start()
++    assert.deepEqual(calls,[0,100,200]);assert.deepEqual(processed,items.map(item=>item.actressId))
++    assert.equal(current.state.current,230);assert.equal(current.state.skipped,230)
++    assert.equal(current.state.logs.length,200);assert.deepEqual(ended,['1'])
++    await unmount();mode='failure';await mount();await start()
++    assert.deepEqual(calls,[0,100]);assert.equal(processed.length,100)
++    assert.equal(current.state.current,230);assert.equal(current.state.failed,130)
++    assert.ok(current.state.logs.some(log=>log.message.includes('130 项未处理')))
++    assert.deepEqual(ended,['2'])
++    await unmount()
++    for(const action of ['cancel','unmount','cancel-reject']) {
++      mode=action;await mount();await start()
++      assert.deepEqual(calls,[0,100]);assert.equal(processed.length,100)
++      assert.equal(ended.length,0,'page in flight retains token')
++      if(action==='unmount')await unmount();else await act(async()=>current.cancel())
++      assert.equal(ended.length,0)
++      if(action==='cancel-reject')held.reject(new Error('Late page error'));else held.resolve(page(100))
++      await settle()
++      assert.deepEqual(calls,[0,100]);assert.equal(processed.length,100)
++      assert.equal(ended.length,1)
++      if(action!=='unmount'){
++        assert.equal(current.state.current,100);assert.equal(current.state.failed,0)
++        assert.equal(current.state.cancelled,true);await unmount()
++      }
++    }
++  }finally{await unmount();client.clear()}
++})
+diff --git a/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx b/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx
+new file mode 100644
+index 0000000..5ed85e5
+--- /dev/null
++++ b/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx
+@@ -0,0 +1,146 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ElectronApi } from '../../../preload/index'
++import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++
++it('serializes startup before target loading and releases ownership on empty, failed or unmounted startup', async () => {
++  let begin = deferred<string>()
++  let targets = deferred<ActressAvatarAutoCropTarget[]>()
++  let begins = 0, reads = 0
++  const ended: string[] = []
++  const processed: number[] = []
++  let heldSource: ReturnType<typeof deferred<null>> | null = null
++  const fake = {
++    actresses: {
++      list: () => { throw new Error('Wide list forbidden') },
++      avatarCropTargets: () => { throw new Error('Full target list forbidden') },
++      getAvatarSourceInfo: async (id: number) => { processed.push(id); return heldSource ? heldSource.promise : null }
++    },
++    settings: { get: async () => ({}) },
++    avatarAutoCropBatch: {
++      targets: async (_token: string, afterId: number) => {
++        reads++
++        const all = await targets.promise
++        const remaining = afterId === 0 ? all : all.filter(item => item.actressId > afterId)
++        const items = remaining.slice(0,100)
++        return {items,total:all.length,nextAfterId:remaining.length>100?items[items.length-1].actressId:null}
++      },
++      begin: () => { begins++; return begin.promise },
++      end: async (token: string) => { ended.push(token); return true }
++    },
++    actressScrape: { onAvatarAutoCropRequest: () => () => {} }
++  } as unknown as ElectronApi
++  Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++  Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: fake } })
++  const { AvatarAutoCropBatchProvider, useAvatarAutoCropBatch } = await import('./AvatarAutoCropBatchContext')
++  let current!: ReturnType<typeof useAvatarAutoCropBatch>
++  function Probe() { current = useAvatarAutoCropBatch(); return null }
++  const client = new QueryClient()
++  let renderer!: TestRenderer.ReactTestRenderer
++  const mount = async () => { await act(async () => { renderer = TestRenderer.create(
++    <QueryClientProvider client={client}><AvatarAutoCropBatchProvider><Probe /></AvatarAutoCropBatchProvider></QueryClientProvider>
++  ) }) }
++  const unmount = async () => { await act(async () => renderer.unmount()) }
++  try {
++    await mount()
++    const first = current.startAllAvatars()
++    await assert.rejects(current.startAllAvatars(), /已有头像/)
++    assert.equal(begins, 1); assert.equal(reads, 0)
++    begin.resolve('failure')
++    await new Promise(resolve => setImmediate(resolve))
++    assert.equal(reads, 1)
++    const rejected = assert.rejects(first, /Target failed/)
++    targets.reject(new Error('Target failed')); await rejected
++    assert.deepEqual(ended, ['failure'])
++    begin = deferred(); targets = deferred()
++    const empty = current.startAllAvatars(); begin.resolve('empty'); targets.resolve([])
++    assert.equal(await empty, 0)
++    assert.deepEqual(ended, ['failure', 'empty'])
++    begin = deferred(); targets = deferred()
++    const pendingLock = current.startAllAvatars()
++    await unmount(); begin.resolve('late-lock')
++    assert.equal(await pendingLock, 0)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock'])
++    assert.equal(reads, 2)
++    await mount(); begin = deferred(); targets = deferred()
++    const pendingTargets = current.startAllAvatars(); begin.resolve('late-targets')
++    await new Promise(resolve => setImmediate(resolve))
++    await unmount()
++    targets.resolve([{actressId: 1, mainName: 'Never starts'}])
++    assert.equal(await pendingTargets, 0)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock', 'late-targets'])
++    await mount(); begin = deferred(); targets = deferred()
++    let completed!: Promise<number>
++    await act(async () => {
++      completed = current.startAllAvatars(); begin.resolve('normal')
++      targets.resolve([{actressId: 7, mainName: 'First'}, {actressId: 2, mainName: 'Second'}])
++      assert.equal(await completed, 2)
++      await new Promise(resolve => setImmediate(resolve))
++    })
++    assert.deepEqual(processed, [7, 2])
++    assert.equal(current.state.status, 'done')
++    assert.equal(current.state.current, 2)
++    assert.equal(current.state.skipped, 2)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock', 'late-targets', 'normal'])
++    await unmount(); await mount(); begin = deferred(); targets = deferred(); heldSource = deferred()
++    await act(async () => {
++      const running = current.startAllAvatars(); begin.resolve('active-unmount')
++      targets.resolve([{actressId: 11, mainName: 'In flight'}, {actressId: 12, mainName: 'Must not start'}])
++      assert.equal(await running, 2)
++      await new Promise(resolve => setImmediate(resolve))
++    })
++    assert.deepEqual(processed, [7, 2, 11])
++    await unmount()
++    assert.equal(ended.includes('active-unmount'), false, 'active crop must retain the lock until it settles')
++    heldSource.resolve(null)
++    await act(async () => { await new Promise(resolve => setImmediate(resolve)) })
++    assert.deepEqual(processed, [7, 2, 11], 'unmount must discard waiting targets')
++    assert.equal(ended.filter(token => token === 'active-unmount').length, 1)
++    await mount(); begin = deferred(); targets = deferred(); heldSource = deferred()
++    const originalTargets = [{actressId: 21, mainName: 'Stop current'}, {actressId: 22, mainName: 'Skip waiting'}]
++    await act(async () => {
++      const running = current.startAllAvatars(); begin.resolve('cancel')
++      targets.resolve(originalTargets)
++      assert.equal(await running, 2)
++      await new Promise(resolve => setImmediate(resolve))
++      current.cancel()
++    })
++    assert.equal(current.state.status, 'cancelling')
++    assert.equal(ended.includes('cancel'), false)
++    assert.deepEqual(originalTargets.map(target => target.actressId), [21, 22])
++    heldSource.resolve(null)
++    await act(async () => { await new Promise(resolve => setImmediate(resolve)) })
++    assert.deepEqual(processed, [7, 2, 11, 21])
++    assert.equal(current.state.status, 'done')
++    assert.equal(current.state.cancelled, true)
++    assert.equal(current.state.current, 1)
++    assert.equal(current.state.total, 2)
++    assert.equal(ended.filter(token => token === 'cancel').length, 1)
++    begin = deferred(); targets = deferred(); heldSource = null
++    await act(async () => {
++      const many = current.startAllAvatars(); begin.resolve('bounded-logs')
++      targets.resolve(Array.from({length:230},(_,i)=>({actressId:100+i,mainName:'Actor-'+i})))
++      assert.equal(await many,230)
++      await new Promise(resolve=>setImmediate(resolve))
++    })
++    assert.equal(current.state.current,230)
++    assert.equal(current.state.skipped,230)
++    assert.equal(current.state.logs.length,200)
++    assert.equal(current.state.totalLogCount,232)
++    assert.equal(current.state.shortenedLogCount,0)
++    assert.match(current.state.logs.at(-1)!.message,/批量构图已完成/)
++
++
++
++
++  } finally { await unmount(); client.clear() }
++})

@@ -1,4 +1,5 @@
 import path from 'node:path'
+import type { ImageThumbnailSize } from '@shared/imageVariants'
 import type Database from 'better-sqlite3'
 import type {
   WebBrowse,
@@ -225,17 +226,32 @@ export class WebCatalog {
       })
     }
   }
-  image(id: number, key: string): { body: Buffer; mime: string } {
-    const video = this.visibleDetail(id)
-    const rel =
-      key === 'cover'
-        ? video.cover_path
-        : key.startsWith('actress-')
-          ? video.actresses.find((a) => `actress-${a.id}` === key)?.avatar_path
-          : video.assets.find((a) => String(a.id) === key && a.type === 'sample')
-            ?.local_path
-    if (!rel) throw new WebError(404, '图片不存在')
-    const image = mediaAssetStore.readForServe(rel)
+  private imagePath(id: number, key: string): string {
+    let column: string
+    let join = ''
+    const params: number[] = [id]
+    if (key === 'cover') column = 'v.cover_path'
+    else if (/^actress-[1-9]\d*$/.test(key)) {
+      column = 'a.avatar_path'
+      join = 'JOIN video_actress va ON va.video_id = v.id JOIN actresses a ON a.id = va.actress_id AND a.id = ?'
+      params.unshift(Number(key.slice(8)))
+    } else if (/^[1-9]\d*$/.test(key)) {
+      column = 'a.local_path'
+      join = "JOIN video_assets a ON a.video_id = v.id AND a.type = 'sample' AND a.id = ?"
+      params.unshift(Number(key))
+    } else throw new WebError(404, '图片不存在')
+    const row = this.db.prepare(`SELECT ${column} AS path FROM videos v ${join} WHERE v.id = ? AND ${VISIBLE}`)
+      .get(...params) as { path: string | null } | undefined
+    if (!row?.path) throw new WebError(404, '图片不存在或未开放浏览')
+    return row.path
+  }
+  async image(id: number, key: string, signal?: AbortSignal, size?: ImageThumbnailSize): Promise<{ body: Buffer; mime: string }> {
+    signal?.throwIfAborted()
+    const rel = this.imagePath(id, key)
+    const image = await mediaAssetStore.readForServeAsync(rel, signal, size)
+    signal?.throwIfAborted()
+    // Visibility, cast/sample membership or the stored image may change during disk/crypto work.
+    if (this.imagePath(id, key) !== rel) throw new WebError(404, '图片已更新，请重试')
     if (!/^image\/(jpeg|png|webp|gif|avif)$/.test(image.mime))
       throw new WebError(404, '图片格式不可用')
     return image
@@ -263,5 +279,9 @@ export class WebCatalog {
 }
 export type WebCatalogReader = Pick<
   WebCatalog,
-  'collections' | 'browse' | 'detail' | 'image' | 'media' | 'home'
->
+  'detail' | 'image' | 'media'
+> & {
+  collections(signal?: AbortSignal): ReturnType<WebCatalog['collections']> | Promise<ReturnType<WebCatalog['collections']>>
+  browse(query: URLSearchParams, signal?: AbortSignal): ReturnType<WebCatalog['browse']> | Promise<ReturnType<WebCatalog['browse']>>
+  home(seed: string, signal?: AbortSignal): ReturnType<WebCatalog['home']> | Promise<ReturnType<WebCatalog['home']>>
+}

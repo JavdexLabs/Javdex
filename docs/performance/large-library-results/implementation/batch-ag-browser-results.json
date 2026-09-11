@@ -1,0 +1,98 @@
+{
+  "results": [
+    {
+      "viewport": {
+        "width": 1000,
+        "height": 640
+      },
+      "geometry": {
+        "clientWidth": 322,
+        "scrollWidth": 322
+      },
+      "box": {
+        "x": 200,
+        "y": 53,
+        "width": 380,
+        "height": 544
+      },
+      "requests": [
+        {
+          "search": "",
+          "offset": 0,
+          "limit": 100
+        },
+        {
+          "search": "",
+          "offset": 100,
+          "limit": 100
+        },
+        {
+          "search": "",
+          "offset": 0,
+          "limit": 100
+        },
+        {
+          "search": "",
+          "offset": 0,
+          "limit": 100
+        },
+        {
+          "search": "标签21",
+          "offset": 0,
+          "limit": 100
+        }
+      ],
+      "selectedTagId": 101,
+      "pageErrors": []
+    },
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "geometry": {
+        "clientWidth": 322,
+        "scrollWidth": 322
+      },
+      "box": {
+        "x": 420,
+        "y": 53,
+        "width": 380,
+        "height": 791
+      },
+      "requests": [
+        {
+          "search": "",
+          "offset": 0,
+          "limit": 100
+        },
+        {
+          "search": "",
+          "offset": 100,
+          "limit": 100
+        },
+        {
+          "search": "",
+          "offset": 0,
+          "limit": 100
+        },
+        {
+          "search": "",
+          "offset": 0,
+          "limit": 100
+        },
+        {
+          "search": "标签21",
+          "offset": 0,
+          "limit": 100
+        }
+      ],
+      "selectedTagId": 101,
+      "pageErrors": []
+    }
+  ],
+  "caveats": [
+    "Actual React component and stylesheet, mocked IPC and synthetic names.",
+    "Headless Chrome at supported minimum and larger desktop sizes; not native Electron, customer data, timing benchmark, or complete keyboard journey."
+  ]
+}

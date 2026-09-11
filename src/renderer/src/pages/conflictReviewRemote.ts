@@ -1,4 +1,4 @@
-import type { ActressListItem } from '@shared/actressTypes'
+import type { ActressPickerItem, ActressPickerQuery, ActressPickerPage } from '@shared/actressTypes'
 import type {
   ActressNameConflictGroup,
   PendingActressNameClaim,
@@ -18,8 +18,8 @@ import type { ConflictReviewProposedOwner } from './actressConflictReviewState'
 export type ToastTone = 'success' | 'error' | 'info'
 
 export interface ConflictReviewRemoteApi {
-  listActresses(search: string): Promise<ActressListItem[]>
-  getActress(id: number): Promise<{ revision?: number } | null>
+  pageActresses(query: ActressPickerQuery): Promise<ActressPickerPage>
+  getActressIdentity(id: number): Promise<{ revision?: number; main_name: string } | null>
   inspectConflictName(input: {
     actressId: number
     name: string
@@ -45,7 +45,7 @@ export interface ConflictReviewRemoteDeps {
   api: ConflictReviewRemoteApi
   toast: { show(message: string, tone: ToastTone): void }
   invalidateLibrary(): Promise<void>
-  refetchGroups(): Promise<ActressNameConflictGroup[]>
+  refetchGroups(selectedName?: string | null): Promise<ActressNameConflictGroup[]>
 }
 
 export type SessionPatch = Partial<ConflictReviewSessionState>
@@ -56,33 +56,25 @@ export function runOwnerSearch(options: {
   open: boolean
   search: string
   ownerOptions: ConflictReviewOwnerOption[]
-  selectedOtherOwner: ActressListItem | null
+  offset: number
+  ready: boolean
   apply: (patch: SessionPatch) => void
 }): () => void {
   const requestId = options.gate.next()
   if (!options.open) return () => options.gate.invalidate(requestId)
-  options.apply({ otherOwnerLoading: true })
+  options.apply({ otherOwnerLoading: true, otherOwnerError: null, otherOwnerOptions: [], otherOwnerHasMore: false })
+  if (!options.ready) return () => options.gate.invalidate(requestId)
   void options.deps.api
-    .listActresses(options.search.trim())
-    .then((items) => {
+    .pageActresses({ search: options.search.trim(), limit: 40, offset: options.offset })
+    .then((page) => {
       if (!options.gate.isLatest(requestId)) return
-      const visibleItems = items
-        .filter((item) => options.ownerOptions.every((owner) => owner.actressId !== item.id))
-        .slice(0, 40)
-      const keepSelected =
-        options.search.trim() === '' &&
-        options.selectedOtherOwner != null &&
-        !visibleItems.some((item) => item.id === options.selectedOtherOwner?.id)
       options.apply({
-        otherOwnerOptions: keepSelected
-          ? [options.selectedOtherOwner!, ...visibleItems].slice(0, 40)
-          : visibleItems
+        otherOwnerOptions: page.items.filter(item => options.ownerOptions.every(owner => owner.actressId !== item.id)),
+        otherOwnerHasMore: page.hasMore
       })
     })
     .catch((error) => {
-      if (options.gate.isLatest(requestId)) {
-        options.deps.toast.show(String((error as Error).message), 'error')
-      }
+      if (options.gate.isLatest(requestId)) options.apply({ otherOwnerError: String((error as Error).message) })
     })
     .finally(() => {
       if (options.gate.isLatest(requestId)) options.apply({ otherOwnerLoading: false })
@@ -230,7 +222,7 @@ export async function resolveConflictDecision(options: {
   try {
     const outcome = await options.deps.api.resolveConflict(options.input)
     await options.deps.invalidateLibrary()
-    const refreshed = await options.deps.refetchGroups()
+    const refreshed = await options.deps.refetchGroups(previousSelectedName)
     if (outcome.status === 'stale') {
       options.apply({ replacementDialog: null })
       options.deps.toast.show(outcome.message, 'info')
@@ -276,7 +268,7 @@ export async function discardConflictCandidate(options: {
     })
     options.apply({ discardCandidate: null })
     await options.deps.invalidateLibrary()
-    const refreshed = await options.deps.refetchGroups()
+    const refreshed = await options.deps.refetchGroups(previousSelectedName)
     options.applyRefresh({
       previousGroups,
       refreshedGroups: refreshed,
@@ -287,7 +279,7 @@ export async function discardConflictCandidate(options: {
   } catch (error) {
     const message = String((error as Error).message)
     await options.deps.invalidateLibrary()
-    const refreshed = await options.deps.refetchGroups()
+    const refreshed = await options.deps.refetchGroups(previousSelectedName)
     options.apply({ discardCandidate: null })
     options.applyRefresh({
       previousGroups,
@@ -303,17 +295,16 @@ export async function discardConflictCandidate(options: {
 
 export async function chooseOtherOwnerRemote(options: {
   deps: ConflictReviewRemoteDeps
-  item: ActressListItem
-  onChosen: (item: ActressListItem, revision: number) => void
+  item: ActressPickerItem
+  isCurrent: () => boolean
+  onChosen: (item: ActressPickerItem, revision: number) => void
 }): Promise<void> {
   try {
-    const detail = options.item.revision == null
-      ? await options.deps.api.getActress(options.item.id)
-      : null
-    const revision = options.item.revision ?? detail?.revision
-    if (revision == null) throw new Error('无法读取演员当前版本，请刷新后重试')
-    options.onChosen(options.item, revision)
+    const detail = await options.deps.api.getActressIdentity(options.item.id)
+    if (!options.isCurrent()) return
+    if (detail?.revision == null) throw new Error('无法读取演员当前版本，请刷新后重试')
+    options.onChosen({ ...options.item, main_name: detail.main_name }, detail.revision)
   } catch (error) {
-    options.deps.toast.show(String((error as Error).message), 'error')
+    if (options.isCurrent()) options.deps.toast.show(String((error as Error).message), 'error')
   }
 }

@@ -1,0 +1,46 @@
+{"mode":"list","actualAggregateExecutions":1,"expected":1}
+{"mode":"home","actualAggregateExecutions":1,"expected":1}
+✔ unchanged list calls must reuse aggregate work (10.855125ms)
+✔ unchanged home calls must reuse aggregate work (8.545667ms)
+▶ home discovery repo
+  ✔ returns one bounded status summary for every visible media library (7.742208ms)
+  ✔ uses membership time for recent additions and deduplicates shared videos (4.012916ms)
+  ✔ keeps a discovery batch stable until the seed changes (5.116167ms)
+  ✔ does not recommend a membership that has no playable resource in an eligible library (4.0605ms)
+  ✔ does not recommend a local-only membership whose media-library root is disabled (3.8865ms)
+  ✔ excludes managed resources owned by pending-removal or archived roots (3.567083ms)
+  ✔ keeps rootless external links and active-root local or STRM resources eligible (3.341417ms)
+  ✔ does not accept a managed resource whose root belongs to another library (4.455667ms)
+  ✔ binds a shared recommendation to the source membership that has its playable resource (3.67525ms)
+  ✔ searches globally without duplicates and honors an explicit library filter (3.5405ms)
+  ✔ excludes libraries disabled for home discovery (3.264958ms)
+  ✔ matches global ranking across cursor wrap, equal keys and hidden shared memberships (4071.9925ms)
+  ✔ keeps large recent and discovery loads bounded and index-backed (24.299125ms)
+  ✔ paginates a large global search without duplicates or per-row queries (25.650625ms)
+✔ home discovery repo (4169.346333ms)
+✔ uses only the supplied native connection and reuses home/status work across repeated seeds (7.921542ms)
+✔ keeps a retained default home reader bound to its original connection after a database switch (12.503958ms)
+✔ bounds entries and encoded bytes, rejects oversize without truncation and isolates mutation (3.048458ms)
+✔ bypasses outer transactions and never publishes failed or rolled-back reads (0.518625ms)
+✔ invalidates external writes/schema and pins cached count with fresh page to one WAL snapshot (1.995ms)
+✔ preserves own undefined fields and other non-JSON shapes by bypassing admission (0.415084ms)
+▶ scoped video catalog repo
+  ✔ keeps list resources and membership time inside one library (6.545375ms)
+  ✔ loads detail from the injected database and projects only the active library resources (3.888083ms)
+  ✔ deduplicates global results and selects the newest eligible membership (3.596208ms)
+  ✔ interprets the none resource filter within the selected scope (3.37325ms)
+  ✔ treats an archived media-library scope as unavailable (3.159ms)
+  ✔ rejects invalid scope ids before building SQL (2.869042ms)
+  ✔ keeps fixed actor and tag filters unique across shared and hidden memberships (5.218625ms)
+  ✔ normalizes a single active library and serves no-count pages with identical ordering (5.0385ms)
+  ✔ uses bounded indexed queries for a large scoped page (15.164875ms)
+✔ scoped video catalog repo (49.364875ms)
+✔ reuses count across pages and sort while isolating scope/filter/page and caller mutations (4.046166ms)
+ℹ tests 32
+ℹ suites 2
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4444.50875

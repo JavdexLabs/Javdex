@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-az-avatar-targets.patch": "8940f405cbf0846b62132e76008794e05c9cc5ad0ac74617013001029480f7d2",
+    "batch-az-benchmark.log": "c51f665a2314f4a127d4207c8b5bcc5d4f59028a9bb6f403d6e7a469161b8049",
+    "batch-az-build.log": "aed4a731a9e5e174eef945e7271f66118cf3e47eb1f583bd4862697cd6003b14",
+    "batch-az-full.log": "1d3f442a0390f80d4f5ac9dd6cffd3bc2b2ebce8051d14459343734175bd8b43",
+    "batch-az-review.md": "1276d7c22ed79ec1bca4c2b549d9cadb43a1455410fa0b61786008546b39c466",
+    "batch-az-target.log": "9e16f5c972186e9179bfee8a09204605708c139e1700156ddca1a0947eb8626b"
+  },
+  "notes": [
+    "Selected cumulative diff vsHEAD plus new files, depends on earlier batches.",
+    "User explicitly approved removing work-count ordering; avatar queue now ID order.",
+    "28focused, full2273pass1skip0fail, build successful.",
+    "No user-data/schema/commit/push/release. Full15/42 scope remains active."
+  ]
+}

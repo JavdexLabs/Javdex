@@ -17,7 +17,9 @@ import { isStrmFile } from '../scanner/strmParser'
 import { authorizeMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
 import { createNfoFileStore, type NfoFileStore } from '../nfo/nfoFileStore'
 import { parseNfoArtifact, type NormalizedNfoArtifact } from '../nfo/nfoArtifactCodec'
-import { locateNfoSidecar, sameLogicalCode } from '../nfo/nfoSidecarLocator'
+import { summarizeDirectoryVideoCodes, type DirectoryVideoIdentityInput } from '../nfo/directoryVideoIdentity'
+import { NfoDirectoryCache } from './nfoDirectoryCache'
+import { indexNfoSidecars, locateNfoSidecar, sameLogicalCode } from '../nfo/nfoSidecarLocator'
 import { projectVideoScrapeResult } from '../scrapers/videoScrapeFieldProjection'
 import type {
   MetadataAssetRef,
@@ -48,7 +50,7 @@ export const LOCAL_NFO_SUPPORTED_FIELDS = [
 export interface LocalNfoAnchor {
   root: Readonly<MediaLibraryRoot>
   anchorPath: string
-  directoryVideoCodes: readonly (string | null)[]
+  directoryVideoCodes: DirectoryVideoIdentityInput
   directorySidecars?: ReadonlyMap<string, string>
 }
 
@@ -67,17 +69,8 @@ export interface LocalNfoIdentityInspection {
 const naturalOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
 
-function directoryVideoCodes(anchorPath: string): Array<string | null> {
-  let names: string[]
-  try {
-    names = fs.readdirSync(path.dirname(anchorPath))
-  } catch {
-    return [parseCode(path.basename(anchorPath, path.extname(anchorPath)))]
-  }
-  return names
-    .filter((name) => isVideoFile(name) || isStrmFile(name))
-    .sort(naturalOrder.compare)
-    .map((name) => parseCode(path.basename(name, path.extname(name))))
+function directoryScopeKey(root: Readonly<MediaLibraryRoot>, anchorPath: string): string {
+  return JSON.stringify([root.libraryId, root.id, path.dirname(anchorPath)])
 }
 
 function listProductionAnchors(videoId: number): LocalNfoAnchor[] {
@@ -92,14 +85,39 @@ function listProductionAnchors(videoId: number): LocalNfoAnchor[] {
     `)
     .all(videoId) as Array<{ library_id: number; root_id: number; anchor_path: string | null }>
   const anchors: LocalNfoAnchor[] = []
+  const directories = new NfoDirectoryCache<{
+    directoryVideoCodes: DirectoryVideoIdentityInput
+    directorySidecars?: ReadonlyMap<string, string>
+  }>()
   for (const row of rows) {
     if (!row.anchor_path) continue
     const root = getMediaLibraryRoot(row.library_id, row.root_id)
     if (!root || root.state !== 'active') continue
+    const key = directoryScopeKey(root, row.anchor_path)
+    let context = directories.get(key)
+    if (!context) {
+      try {
+        const names = fs.readdirSync(path.dirname(row.anchor_path))
+        const summary = summarizeDirectoryVideoCodes((function* () {
+          // Preserve the manual helper's name-only filter, including directory names.
+          for (const name of names) {
+            if (isVideoFile(name) || isStrmFile(name)) yield parseCode(path.basename(name, path.extname(name)))
+          }
+        })())
+        const sidecars = indexNfoSidecars(names)
+        const snapshot = { directoryVideoCodes: summary, directorySidecars: sidecars }
+        context = directories.admit(key, snapshot, sidecars, summary.normalizedCode)
+          ? snapshot
+          : { directoryVideoCodes: summary }
+        // Rejected maps must not escape through anchors and defeat the aggregate budget.
+      } catch {
+        // Failed reads are not snapshots: the next anchor and collect may retry.
+      }
+    }
     anchors.push({
       root,
       anchorPath: row.anchor_path,
-      directoryVideoCodes: directoryVideoCodes(row.anchor_path)
+      ...(context ?? { directoryVideoCodes: [parseCode(path.basename(row.anchor_path, path.extname(row.anchor_path)))] })
     })
   }
   return anchors
@@ -191,7 +209,7 @@ function collectLocalAssets(input: {
   actors: NormalizedNfoArtifact['actors']
   anchorPath: string
   root: Readonly<MediaLibraryRoot>
-  directoryVideoCodes: readonly (string | null)[]
+  directoryVideoCodes: DirectoryVideoIdentityInput
   fileStore: NfoFileStore
   selectedFields: ReadonlySet<VideoScrapeField>
 }): { assets: MetadataAssetRef[]; warnings: string[] } {
@@ -343,13 +361,28 @@ export class LocalNfoSourceAdapter implements VideoMetadataSource {
     const warnings: string[] = []
     const candidates: VideoMetadataCandidate[] = []
     const seenPhysicalNfo = new Set<string>()
+    const directorySidecarsByScope = new NfoDirectoryCache<ReadonlyMap<string, string>>()
 
     for (const anchor of anchors) {
+      let directorySidecars = anchor.directorySidecars
+      if (directorySidecars === undefined) {
+        const key = directoryScopeKey(anchor.root, anchor.anchorPath)
+        directorySidecars = directorySidecarsByScope.get(key)
+        if (directorySidecars === undefined) {
+          try {
+            directorySidecars = indexNfoSidecars(fs.readdirSync(path.dirname(anchor.anchorPath)))
+            directorySidecarsByScope.admit(key, directorySidecars, directorySidecars)
+          } catch {
+            // Avoid a second read by the locator for this anchor, but retry the next.
+            directorySidecars = new Map()
+          }
+        }
+      }
       const located = locateNfoSidecar({
         anchorPath: anchor.anchorPath,
         root: anchor.root,
         directoryVideoCodes: anchor.directoryVideoCodes,
-        directorySidecars: anchor.directorySidecars,
+        directorySidecars,
         fileStore: this.options.fileStore
       })
       warnings.push(...located.warnings.map((warning) => warning.message))

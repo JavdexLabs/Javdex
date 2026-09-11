@@ -1,10 +1,12 @@
+import { useWindowedCatalog } from '../query/useWindowedCatalog'
+import { toScopedVideoCardPage, type ScopedVideoCard, type ScopedVideoCardPage } from '@shared/cardProjection'
 import {
   useEffect,
   useMemo,
   useRef,
   useState
 } from 'react'
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { LibraryBig, RefreshCw, SearchX } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
@@ -111,32 +113,18 @@ export default function HomePage(): JSX.Element {
   const homeQuery = useQuery({
     queryKey: homeKeys.snapshot(seed),
     queryFn: () => loadHomeSnapshot(seed),
-    staleTime: 30_000
+    staleTime: 30_000,
+    gcTime: 0
   })
   const normalizedSearch = search.trim()
   const settledSearch = debouncedSearch.trim()
   const searchSettled = normalizedSearch === settledSearch
-  const searchQuery = useInfiniteQuery({
-    queryKey: homeKeys.search(`home:${settledSearch}`),
-    enabled: settledSearch.length > 0,
-    initialPageParam: 0,
-    queryFn: ({ pageParam }) =>
-      api.home.search({
-        search: settledSearch,
-        limit: HOME_SEARCH_PAGE_SIZE,
-        offset: typeof pageParam === 'number' ? pageParam : 0
-      }),
-    getNextPageParam: (lastPage, pages) => {
-      const loaded = pages.reduce((total, page) => total + page.items.length, 0)
-      return loaded < lastPage.total ? loaded : undefined
-    },
-    staleTime: 15_000
-  })
-  const searchVideos = useMemo(
-    () => searchQuery.data?.pages.flatMap((page) => page.items) ?? [],
-    [searchQuery.data]
+  const searchQuery = useWindowedCatalog<ScopedVideoCard, ScopedVideoCardPage>(
+    homeKeys.search(`home:${settledSearch}`), HOME_SEARCH_PAGE_SIZE,
+    async offset => toScopedVideoCardPage(await api.home.search({ search: settledSearch, limit: HOME_SEARCH_PAGE_SIZE, offset })), settledSearch.length > 0
   )
-  const searchTotal = searchQuery.data?.pages[0]?.total ?? 0
+  const searchVideos = searchQuery.items
+  const searchTotal = searchQuery.total
   const detailLibraryIds = useMemo(
     () => new Map(searchVideos.map((video) => [video.id, video.preferredLibraryId])),
     [searchVideos]
@@ -145,8 +133,8 @@ export default function HomePage(): JSX.Element {
   const searchLoading =
     hasSearch &&
     (!searchSettled ||
-      searchQuery.isLoading ||
-      (searchQuery.isFetching && searchVideos.length === 0))
+      searchQuery.loading ||
+      (searchQuery.isFetching && searchTotal === 0))
 
   const refreshDiscovery = (): void => {
     activeDiscovery = { seed: createDiscoverySeed(), videos: null }
@@ -195,19 +183,19 @@ export default function HomePage(): JSX.Element {
             <div className="scroll-body-inner">
               <EmptyState loading title="搜索中…" />
             </div>
-          ) : searchQuery.isError ? (
+          ) : Boolean(searchQuery.error) && searchTotal === 0 ? (
             <div className="scroll-body-inner">
               <EmptyState
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
                 title="搜索失败"
                 description="读取跨媒体库结果时发生错误。"
               >
-                <Button size="sm" onClick={() => void searchQuery.refetch()}>
+                <Button size="sm" onClick={() => void searchQuery.retry()}>
                   重新搜索
                 </Button>
               </EmptyState>
             </div>
-          ) : searchVideos.length === 0 ? (
+          ) : searchTotal === 0 ? (
             <div className="scroll-body-inner">
               <EmptyState
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
@@ -219,11 +207,7 @@ export default function HomePage(): JSX.Element {
             <VirtualPosterGrid
               videos={searchVideos}
               detailLibraryIds={detailLibraryIds}
-              hasMore={Boolean(searchQuery.hasNextPage)}
-              loadingMore={searchQuery.isFetchingNextPage}
-              onLoadMore={() => {
-                if (!searchQuery.isFetchingNextPage) void searchQuery.fetchNextPage()
-              }}
+              catalogWindow={searchQuery.window}
               scrollMemoryKey={`home-search:${settledSearch}`}
             />
           )}

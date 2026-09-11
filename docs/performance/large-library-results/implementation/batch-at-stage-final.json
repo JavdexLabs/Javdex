@@ -1,0 +1,51 @@
+{
+  "count": 1000,
+  "records": [
+    {
+      "stage": "database.init",
+      "ms": 6.033665999999982
+    },
+    {
+      "stage": "fixture",
+      "ms": 24.947625000000016
+    },
+    {
+      "stage": "analyze",
+      "ms": 1.4455829999999992
+    },
+    {
+      "stage": "maintenance.cold",
+      "ms": 26.34899999999999
+    },
+    {
+      "stage": "maintenance.warm",
+      "ms": 0.6577499999999645
+    },
+    {
+      "stage": "page.first",
+      "ms": 5.08479200000005
+    },
+    {
+      "stage": "detail.selected",
+      "ms": 4.00629200000003
+    },
+    {
+      "stage": "detail.selected.legacy-sql",
+      "ms": 151.78449999999998
+    },
+    {
+      "stage": "legacy.no-field-plans",
+      "ms": 2270.3255
+    },
+    {
+      "stage": "legacy.full",
+      "ms": 2335.6956249999994
+    }
+  ],
+  "legacySqlReplacements": 1,
+  "platform": "darwin",
+  "arch": "arm64",
+  "notes": [
+    "Single stage sample, synthetic shared owner with count aliases, 4KiB result JSON; not p95 or user-data benchmark."
+  ]
+}

@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Bot, Database, ExternalLink } from 'lucide-react'
 import type { MediaLibrarySummary } from '@shared/mediaLibraryTypes'
-import type { PlaylistListItem } from '@shared/playlistTypes'
+import PlaylistDestinationPicker from '../PlaylistDestinationPicker'
 import type {
   PlaylistImportPreviewItem,
   PlaylistImportSnapshot
@@ -112,12 +112,14 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
   const [destinationKind, setDestinationKind] = useState<'create' | 'append'>('create')
   const [requestedName, setRequestedName] = useState('')
   const [playlistId, setPlaylistId] = useState('')
+  const [playlistLabel,setPlaylistLabel] = useState('')
+  const optionsGeneration = useRef(0)
+  useEffect(()=>{if(!visible)optionsGeneration.current++},[visible])
   const [targetLibraryId, setTargetLibraryId] = useState('')
   const [autoCreateUnmatchedVideos, setAutoCreateUnmatchedVideos] = useState(true)
   const [saveDetailLinks, setSaveDetailLinks] = useState(true)
   const [saveSourcePlaylistLink, setSaveSourcePlaylistLink] = useState(false)
   const [libraries, setLibraries] = useState<MediaLibrarySummary[]>([])
-  const [playlists, setPlaylists] = useState<PlaylistListItem[]>([])
   const [snapshot, setSnapshot] = useState<PlaylistImportSnapshot | null>(null)
   const [choices, setChoices] = useState<Record<number, PlaylistImportIdentityChoice>>({})
   const [busy, setBusy] = useState(false)
@@ -182,6 +184,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
     setSaveSourcePlaylistLink(false)
     setDestinationKind(input?.destination?.kind ?? 'create')
     setPlaylistId(input?.destination?.kind === 'append' ? String(input.destination.playlistId) : '')
+    setPlaylistLabel(input?.destination?.kind === 'append' ? input.destination.playlistName : '')
     setSnapshot(null)
     setChoices({})
     setBusy(true)
@@ -189,17 +192,18 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
     setCancelConfirmation(false)
     currentRunId.current = null
     completionSeen.current = null
-    void Promise.all([api.mediaLibraries.list(), api.playlists.list()])
-      .then(([nextLibraries, nextPlaylists]) => {
+    const generation=++optionsGeneration.current
+    void api.mediaLibraries.list()
+      .then((nextLibraries) => {
+        if(generation!==optionsGeneration.current)return
         const activeLibraries = nextLibraries.filter((library) => library.status === 'active')
         setLibraries(activeLibraries)
         setTargetLibraryId(
           activeLibraries.find((library) => library.isDefault)?.id.toString() ?? ''
         )
-        setPlaylists(nextPlaylists)
       })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : String(loadError)))
-      .finally(() => setBusy(false))
+      .catch((loadError) => { if(generation===optionsGeneration.current)setError(loadError instanceof Error ? loadError.message : String(loadError)) })
+      .finally(() => { if(generation===optionsGeneration.current)setBusy(false) })
   }, [snapshot])
 
   const start = async (): Promise<void> => {
@@ -435,10 +439,8 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                             </EditFormField>
                           ) : (
                             <EditFormField label="目标清单">
-                              <SelectControl value={playlistId} onChange={(event) => setPlaylistId(event.target.value)}>
-                                <option value="" disabled>请选择清单</option>
-                                {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
-                              </SelectControl>
+                              <PlaylistDestinationPicker value={playlistId} label={playlistLabel} disabled={busy}
+                                onChange={(id,label)=>{setPlaylistId(id);setPlaylistLabel(label)}}/>
                             </EditFormField>
                           )}
                           <EditFormField label="目标媒体库" span={2} hint="只决定新影片写入位置及重复候选优先级；清单可以跨媒体库。">

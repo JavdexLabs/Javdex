@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cy-benchmark.log": "fe19f977cc04ff335d560565ec89f52f6521bca6089601b36aa969b6484e91e7",
+    "batch-cy-build.log": "af3aa75515fb9c476756314d3a6d65ac057b597b3219a8dae45a6fc97ac75d03",
+    "batch-cy-full.log": "b51bdd9acd21acb22add2402506c22f1e026f345e5ea8a2b81011b74acac19b5",
+    "batch-cy-membership-cleanup.patch": "f330a5a8fd10b95f6c688611c8886800f15dfe6cabfe74b45f480fcd148d6a48",
+    "batch-cy-review.md": "247f222f058f2ee894be426f4f10d8a918a0582d9a1686ef5fc9df0ca184cce2",
+    "batch-cy-target.log": "4841708bd4190726f98fd21145a29dac73cae372fdc246dfe7869ae3138fd805"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches, not a standalone sequential patch.",
+    "107 focused pass; full test and build processes both observed terminal exit0. Full count in archived log.",
+    "Production default entries membership cleanup now pages <=256 rows and streams audit inside its cleanup transaction.",
+    "Synthetic in-memory probe 100k:304-357ms excluding audit writes/durable commit; sync latency remains above250ms candidate target.",
+    "No RSS/byte bound or full15/42 acceptance claim. No user database/media touched; no commit/push/release."
+  ]
+}

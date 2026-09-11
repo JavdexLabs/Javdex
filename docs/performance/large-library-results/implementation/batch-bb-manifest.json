@@ -1,0 +1,20 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bb-1000x640.png": "759043989534f05ecde4d3467250333b482e03c44c924f661f8a1d0eb5db40f9",
+    "batch-bb-1440x900.png": "a70a38405651aa2db3dedff15951c550edc6c96737571dfa38fe4128b63c04a3",
+    "batch-bb-avatar-logs.patch": "1596fc4c4531171a854c7a050089823ce676c8889b17a01b75cc69600cd23855",
+    "batch-bb-browser.json": "5df1f7d0e7eac0998c82c1865a815ee69fbc644329709f08ee958c6815588ef4",
+    "batch-bb-browser.log": "99d4a4a90b5b2550539d5eac7e0ebd07ce0666a2ef528ba8e25ec7792203e532",
+    "batch-bb-build.log": "84a4b6d2e711f7de80655db4e8cc0daa412aa15bad4b0d9c3a62af841435bde1",
+    "batch-bb-full.log": "f31d0bf241683861491d390b23c537e9320a0597622e2e55b2b17b6bae4d6277",
+    "batch-bb-review.md": "2643f342e4ac03445f2e5abb9809d0d75cf3bc88dc082d5de3f3405d7d0c5761",
+    "batch-bb-target.log": "b6c04cb65f236a409c6e0f997a4effd774e1efbc097a1b7c9ce3d87f33608bba"
+  },
+  "notes": [
+    "Cumulative selected source diff plus new files; depends on prior batches.",
+    "Fivefocused; full2276pass1skip0fail; build passed.",
+    "Actual Modal/Panel browser two sizes passed, screenshots inspected.",
+    "Ephemeral preview retention200 with visible omissions; not full logs or a global heap bound. Full15/42scope remains active."
+  ]
+}

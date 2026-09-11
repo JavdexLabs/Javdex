@@ -1,0 +1,160 @@
+{
+  "scales": [
+    {
+      "rows": 10000,
+      "visible": 8000,
+      "metrics": [
+        {
+          "name": "legacy.metadata+prepareGallery",
+          "samples": [
+            5.111041999999998,
+            4.53725,
+            5.77404199999998
+          ],
+          "medianMs": 5.111041999999998,
+          "jsonBytes": 3253425
+        },
+        {
+          "name": "legacy.metadata",
+          "samples": [
+            4.52433400000001,
+            4.137708000000032,
+            4.4616660000000365
+          ],
+          "medianMs": 4.4616660000000365,
+          "jsonBytes": 3525474
+        },
+        {
+          "name": "profile.header",
+          "samples": [
+            4.8827080000000365,
+            4.983415999999977,
+            4.511209000000008
+          ],
+          "medianMs": 4.8827080000000365,
+          "jsonBytes": 923
+        },
+        {
+          "name": "gallery.offset-0",
+          "samples": [
+            4.611540999999988,
+            4.783374999999978,
+            4.713292000000024
+          ],
+          "medianMs": 4.713292000000024,
+          "jsonBytes": 24382
+        },
+        {
+          "name": "gallery.offset-7940",
+          "samples": [
+            9.317499999999995,
+            9.49870900000002,
+            9.029708000000028
+          ],
+          "medianMs": 9.317499999999995,
+          "jsonBytes": 24469
+        }
+      ],
+      "pagePlan": [
+        {
+          "id": 10,
+          "parent": 0,
+          "notused": 145,
+          "detail": "SEARCH actress_gallery_assets USING INDEX idx_actress_gallery_assets_actress_id (actress_id=?)"
+        },
+        {
+          "id": 118,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "rows": 50000,
+      "visible": 40000,
+      "metrics": [
+        {
+          "name": "legacy.metadata+prepareGallery",
+          "samples": [
+            35.377917000000025,
+            27.228207999999995,
+            25.115750000000048
+          ],
+          "medianMs": 27.228207999999995,
+          "jsonBytes": 16338225
+        },
+        {
+          "name": "legacy.metadata",
+          "samples": [
+            24.205541999999923,
+            25.74133299999994,
+            27.394000000000005
+          ],
+          "medianMs": 25.74133299999994,
+          "jsonBytes": 17705474
+        },
+        {
+          "name": "profile.header",
+          "samples": [
+            24.150040999999987,
+            23.48766599999999,
+            23.986625000000004
+          ],
+          "medianMs": 23.986625000000004,
+          "jsonBytes": 924
+        },
+        {
+          "name": "gallery.offset-0",
+          "samples": [
+            23.459874999999897,
+            23.594040999999947,
+            23.304209000000014
+          ],
+          "medianMs": 23.459874999999897,
+          "jsonBytes": 24383
+        },
+        {
+          "name": "gallery.offset-39940",
+          "samples": [
+            48.189790999999786,
+            47.74274999999989,
+            47.94158300000004
+          ],
+          "medianMs": 47.94158300000004,
+          "jsonBytes": 24591
+        }
+      ],
+      "pagePlan": [
+        {
+          "id": 10,
+          "parent": 0,
+          "notused": 169,
+          "detail": "SEARCH actress_gallery_assets USING INDEX idx_actress_gallery_assets_actress_id (actress_id=?)"
+        },
+        {
+          "id": 118,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "ANALYZE, one warmup, three warm samples, median middle sample. Fixed legacy-first order.",
+    "Old read includes metadata fetch and JS display preparation; returned JSON is prepared gallery only. New page includes total/limit/offset.",
+    "Checks and JSON serialization excluded from timing. Oracle retained; no heap/RSS, p95, cold, Windows/HDD or IPC measurement.",
+    "metadata and profile.header JSON measure complete returned objects; header adds two count scopes and the first visible picture instead of the full gallery.",
+    "Sorting/count still scale with gallery size. Raw path strings are retained, so row cap is not a byte cap."
+  ]
+}
+✔ measures complete gallery display preparation versus first and last pages (1012.188792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1237.286292

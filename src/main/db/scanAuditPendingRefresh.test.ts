@@ -24,12 +24,13 @@ beforeEach(()=>{
   groupB=upsertPendingScanResources(1,'GROUP-002',[resource('/fixture/b.mp4')]).groupId
   db.prepare("UPDATE pending_scan_groups SET updated_at=CASE WHEN id=? THEN 'b' ELSE 'a' END").run(groupA)
   writer=createScanAuditWriter(db,scope);writer.start(meta)
+  // Match the platform-native paths stored by upsertPendingScanResources.
   // Each referenced path belongs to the other group: count must use the global
   // pending path set, including a path from a null-group pending file.
   writer.writeBatch('files',[
-    {rootId:1,filePath:'/fixture/b.mp4',sourceKind:'local',outcome:'pending',normalizedCode:'GROUP-001',groupId:groupA,addedToQueue:false},
-    {rootId:1,filePath:'/fixture/a.mp4',sourceKind:'local',outcome:'pending',normalizedCode:'GROUP-002',groupId:groupB,addedToQueue:false},
-    {rootId:1,filePath:'/fixture/global.mp4',sourceKind:'local',outcome:'pending',normalizedCode:null,groupId:null,addedToQueue:false}
+    {rootId:1,filePath:path.resolve('/fixture/b.mp4'),sourceKind:'local',outcome:'pending',normalizedCode:'GROUP-001',groupId:groupA,addedToQueue:false},
+    {rootId:1,filePath:path.resolve('/fixture/a.mp4'),sourceKind:'local',outcome:'pending',normalizedCode:'GROUP-002',groupId:groupB,addedToQueue:false},
+    {rootId:1,filePath:path.resolve('/fixture/global.mp4'),sourceKind:'local',outcome:'pending',normalizedCode:null,groupId:null,addedToQueue:false}
   ])
   const entry={resourceId:1,videoId:1,videoCode:'OLD-001',videoTitle:null,resourceKind:'local' as const,sourcePath:'/old',displayName:null}
   writer.writeBatch('removedResources',[{...entry,reason:'missing'}])
@@ -65,7 +66,7 @@ it('rebuilds ordered pendingGroups repeatedly without duplicates and preserves a
   const first=pending();writer.refreshPendingGroups();assert.deepEqual(pending(),first);assert.deepEqual(others(),untouched)
   db.transaction(()=>{
     db.prepare("UPDATE pending_scan_groups SET normalized_code='RENAMED',updated_at='0',revision=revision+1 WHERE id=?").run(groupA)
-    db.prepare("DELETE FROM pending_scan_resources WHERE file_path='/fixture/global.mp4'").run()
+    db.prepare("DELETE FROM pending_scan_resources WHERE file_path=?").run(path.resolve('/fixture/global.mp4'))
   })()
   writer.refreshPendingGroups();assertCurrent();assert.deepEqual(others(),untouched)
   assert.deepEqual(pending().map(row=>JSON.parse(row.entry_json)),[
@@ -84,7 +85,7 @@ it('restores the previous section and outer business mutation after native secon
       SELECT observe_second_pending();SELECT RAISE(ABORT,'second group INSERT fault');END;`)
   const refreshWithBusinessChange=()=>db.transaction(()=>{
     db.prepare("UPDATE pending_scan_groups SET normalized_code='TRANSACTION',revision=revision+1 WHERE id=?").run(groupA)
-    db.prepare("DELETE FROM pending_scan_resources WHERE file_path='/fixture/global.mp4'").run()
+    db.prepare("DELETE FROM pending_scan_resources WHERE file_path=?").run(path.resolve('/fixture/global.mp4'))
     writer.refreshPendingGroups()
   })()
   assert.throws(refreshWithBusinessChange,/second group INSERT fault/)

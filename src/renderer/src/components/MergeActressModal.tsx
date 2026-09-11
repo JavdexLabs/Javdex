@@ -1,3 +1,5 @@
+import ContinuousGrid from './ContinuousGrid'
+import { useContinuousPage } from '../hooks/useContinuousPage'
 import { useEffect, useRef, useState } from 'react'
 import { SearchX, UserRound } from 'lucide-react'
 import {
@@ -100,43 +102,19 @@ function MergeActressSession({
 }: Props): JSX.Element {
   const [searchInput, setSearchInput] = useState('')
   const debouncedQ = useDebounce(searchInput, 300)
-  const [items, setItems] = useState<ActressMergeCandidate[]>([])
-  const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<ActressMergeCandidate | null>(null)
   const [mainNameFrom, setMainNameFrom] = useState<ActressMergeMainNameFrom>('keep')
   const [merging, setMerging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const errorRef = useRef<HTMLParagraphElement>(null)
   useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'nearest' }) }, [error])
-  const [pageError, setPageError] = useState<string | null>(null)
-  const [offset, setOffset] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const [retry, setRetry] = useState(0)
+  const candidates = useContinuousPage(`merge:${keepActress.id}:${debouncedQ}`, 40,
+    offset => api.actresses.mergeCandidates({ keepId: keepActress.id, search: debouncedQ.trim(), limit: 40, offset }))
+  const { items, loading, error: pageError } = candidates
   const mergeInFlight = useRef(false)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setItems([])
-    setHasMore(false)
-    setPageError(null)
-    if (searchInput !== debouncedQ) return () => { cancelled = true }
-    void api.actresses.mergeCandidates({ keepId: keepActress.id, search: debouncedQ.trim(), limit: 40, offset })
-      .then(page => {
-        if (!cancelled) { setItems(page.items); setHasMore(page.hasMore) }
-      })
-      .catch(e => { if (!cancelled) setPageError(String((e as Error).message ?? e)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [debouncedQ, searchInput, keepActress.id, offset, retry])
-
-  const changePage = (nextOffset: number): void => {
-    if (merging || loading) return
-    setItems([]); setLoading(true); setPageError(null); setOffset(nextOffset)
-  }
 
   const doMerge = async (): Promise<void> => {
     if (!selected || mergeInFlight.current) return
@@ -235,7 +213,7 @@ function MergeActressSession({
           <div className="merge-actress-section-head">
             <span className="merge-actress-section-title">选择要合并的演员</span>
             {!loading && items.length > 0 && (
-              <span className="merge-actress-section-meta">本页 {items.length} 名候选</span>
+              <span className="merge-actress-section-meta">可按名称搜索</span>
             )}
           </div>
           <input
@@ -246,32 +224,31 @@ function MergeActressSession({
             maxLength={256}
             disabled={merging}
             value={searchInput}
-            onChange={(e) => { setItems([]); setLoading(true); setOffset(0); setSearchInput(e.target.value) }}
+            onChange={(e) => setSearchInput(e.target.value)}
             autoFocus
           />
 
           <div className="merge-actress-pick-panel">
             {loading ? (
               <EmptyState variant="modal" loading />
-            ) : pageError ? (
+            ) : pageError && !candidates.total ? (
               <div role="alert" className="merge-actress-page-error">
                 <p>合并候选读取失败</p>
-                <Button size="sm" disabled={merging} onClick={() => setRetry(value => value + 1)}>重试</Button>
+                <Button size="sm" disabled={merging} onClick={candidates.reload}>重试</Button>
               </div>
             ) : items.length === 0 ? (
               <EmptyState
                 variant="modal"
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
-                title={offset > 0 ? '本页没有候选演员' : debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
+                title={debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
                 description={
-                  offset > 0 ? '返回上一页或调整搜索关键词。' : debouncedQ.trim()
+                  debouncedQ.trim()
                     ? '调整搜索关键词后再试。'
                     : '当前演员没有同组可合并候选。'
                 }
               />
             ) : (
-              <div className="merge-actress-pick-list" role="listbox" aria-label="演员列表">
-                {items.map((item) => {
+              <ContinuousGrid role="listbox" contained window={candidates.window} scope={`merge:${keepActress.id}:${debouncedQ}`} label="演员列表" itemHeight={68} itemKey={item => item.id} renderItem={item => {
                   const isSelected = selected?.id === item.id
                   return (
                     <button
@@ -300,15 +277,10 @@ function MergeActressSession({
                       </span>
                     </button>
                   )
-                })}
-              </div>
+                }} />
             )}
           </div>
-          <div className="merge-actress-pagination" aria-label="合并候选分页">
-            <Button size="sm" disabled={merging || loading || offset === 0} onClick={() => changePage(Math.max(0, offset - 40))}>上一页</Button>
-            <span aria-live="polite">第 {Math.floor(offset / 40) + 1} 页</span>
-            <Button size="sm" disabled={merging || loading || !hasMore} onClick={() => changePage(offset + 40)}>下一页</Button>
-          </div>
+
         </section>
 
         <section

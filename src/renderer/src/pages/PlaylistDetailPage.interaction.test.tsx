@@ -1,8 +1,9 @@
+import { continuousViewport } from '../test/continuousViewport'
 import assert from 'node:assert/strict'
 import { afterEach, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { PlaylistPage, PlaylistMetadata, PlaylistVideosPage, PlaylistPageQuery } from '@shared/playlistTypes'
 import type { Video } from '@shared/videoTypes'
@@ -44,10 +45,12 @@ Object.defineProperty(globalThis, 'document', {
   configurable: true, value: { body: { style: { overflow: '' } }, activeElement: null }
 })
 
+let viewport = continuousViewport()
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let client: QueryClient | undefined
 let navigate: NavigateFunction
-function NavigationProbe(): null { navigate = useNavigate(); return null }
+let url = ''
+function NavigationProbe(): null { navigate = useNavigate(); url = useLocation().pathname + useLocation().search; return null }
 
 function page(id: number, offset = 0, total = 120): PlaylistPage {
   return {
@@ -60,6 +63,7 @@ function page(id: number, offset = 0, total = 120): PlaylistPage {
   }
 }
 async function mount(): Promise<void> {
+  viewport = continuousViewport()
   const PlaylistDetailPage = (await import('./PlaylistDetailPage')).default
   const { PlaylistImportProvider } = await import('../components/playlistImport/PlaylistImportContext')
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -76,7 +80,7 @@ async function mount(): Promise<void> {
             </Routes>
           </PlaylistImportProvider>
         </MemoryRouter>
-      </QueryClientProvider>
+      </QueryClientProvider>, { createNodeMock: viewport.createNodeMock }
     )
   })
 }
@@ -87,6 +91,7 @@ async function resolveRequest(index: number, value: PlaylistPage): Promise<void>
   await act(async () => { requests[index].resolve({videos: value.videos, total: value.total, filteredTotal: value.filteredTotal, limit: value.limit, offset: value.offset}); await Promise.resolve() })
 }
 async function click(label: string): Promise<void> {
+  if (label === '下一页') { await viewport.scroll(renderer!, 60); return }
   await act(async () => {
     const button = renderer!.root.findAllByType('button').find(node => text(node) === label)
     assert.ok(button, label)
@@ -108,6 +113,7 @@ afterEach(async () => {
   metadataRequests.length = 0
   metadataResponse = undefined
   removal = deferred<boolean>()
+  url = ''
 })
 
 it('ignores an old playlist response arriving after navigation', async () => {
@@ -145,25 +151,27 @@ it('returns to the previous page when deleting the only item on the last page', 
   await resolveRequest(0, page(1, 0, 61))
   await click('下一页')
   assert.equal(requests[1].query.offset, 60)
+  assert.match(url, /relatedVideoOffset=60/)
   await resolveRequest(1, page(1, 60, 61))
   await startRemoval()
   await act(async () => { removal.resolve(true); await Promise.resolve() })
-  await resolveRequest(2, page(1, 60, 60))
-  assert.equal(requests[3].query.offset, 0)
-  await resolveRequest(3, page(1, 0, 60))
-  assert.match(text(renderer!.root), /1 \/ 1/)
+  await resolveRequest(2, page(1, requests[2].query.offset, 60))
+  if (requests[3]) await resolveRequest(3, page(1, requests[3].query.offset, 60))
+  const ContinuousGrid = (await import('../components/ContinuousGrid')).default
+  assert.equal(renderer!.root.findByType(ContinuousGrid).props.window.total, 60)
+  assert.doesNotMatch(url, /relatedVideoOffset/)
 })
 
 it('keeps the existing grid mounted during refresh after closing a nested video', async () => {
   await mount()
   await resolveRequest(0, page(1))
-  const grid = renderer!.root.findByProps({ className: 'playlist-video-grid' })
+  const grid = renderer!.root.findByProps({ role: 'group', 'aria-label': '影片' })
   await act(async () => navigate('/playlists/1/1000'))
   await act(async () => navigate('/playlists/1'))
   assert.equal(requests.length, 2)
-  assert.equal(renderer!.root.findByProps({ className: 'playlist-video-grid' }), grid)
+  assert.equal(renderer!.root.findByProps({ role: 'group', 'aria-label': '影片' }), grid)
   await resolveRequest(1, page(1))
-  assert.equal(renderer!.root.findByProps({ className: 'playlist-video-grid' }), grid)
+  assert.equal(renderer!.root.findByProps({ role: 'group', 'aria-label': '影片' }), grid)
 })
 
 it('keeps the latest sort response when requests for the same playlist finish out of order', async () => {
@@ -186,13 +194,14 @@ it('reuses metadata while paging but refreshes it after a playlist mutation', as
   await resolveRequest(0, page(1, 0, 61))
   assert.equal(metadataRequests.length, 1)
   await click('下一页')
+  assert.match(url, /relatedVideoOffset=60/)
   await resolveRequest(1, page(1, 60, 61))
   assert.equal(metadataRequests.length, 1)
   await startRemoval()
   await act(async () => { removal.resolve(true); await Promise.resolve() })
   assert.equal(metadataRequests.length, 2)
-  await resolveRequest(2, page(1, 60, 60))
-  await resolveRequest(3, page(1, 0, 60))
+  await resolveRequest(2, page(1, requests[2].query.offset, 60))
+  if (requests[3]) await resolveRequest(3, page(1, requests[3].query.offset, 60))
   assert.equal(metadataRequests.length, 2)
 })
 
@@ -210,11 +219,10 @@ it('does not reuse stale metadata when filtering interrupts a forced refresh', a
   assert.equal(metadataRequests.length, 3, 'filtering must fetch fresh metadata after invalidation')
   await act(async () => {
     filtered.resolve({ ...page(1), name: 'Fresh metadata' })
-    requests[2].resolve({ videos: page(1).videos, total: 120, filteredTotal: 120, limit: 60, offset: 0 })
+    requests[1].resolve({ videos: page(1).videos, total: 120, filteredTotal: 120, limit: 60, offset: 0 })
   })
   await act(async () => {
     forced.resolve({ ...page(1), name: 'Obsolete metadata' })
-    requests[1].resolve({ videos: page(1).videos, total: 120, filteredTotal: 120, limit: 60, offset: 0 })
   })
   assert.match(text(renderer!.root), /Fresh metadata/)
   assert.doesNotMatch(text(renderer!.root), /Obsolete metadata/)
@@ -226,7 +234,7 @@ it('shows not found when a refreshed metadata read reports a deleted playlist', 
   await resolveRequest(0, page(1))
   assert.match(text(renderer!.root), /未找到该清单/)
   assert.doesNotMatch(text(renderer!.root), /Playlist 1/)
-  assert.equal(renderer!.root.findAllByProps({ className: 'playlist-video-grid' }).length, 0)
+  assert.equal(renderer!.root.findAllByProps({ role: 'group', 'aria-label': '影片' }).length, 0)
 })
 
 

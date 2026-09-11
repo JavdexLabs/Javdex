@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { Check, X, LoaderCircle } from "lucide-react";
+import { UI_ICON_SM } from "../iconDefaults";
 import type { WebAccessStatus } from "@shared/webTypes";
 import { api } from "../../api";
 import Button from "../Button";
+import { WEB_ACCESS_LABEL } from "../../settings/settingsRoutes";
 import { SettingsCard } from "./SettingsPrimitives";
 import ConfirmModal from "../ConfirmModal";
 import styles from "./WebAccessPanel.module.css";
@@ -45,6 +48,8 @@ export default function WebDevices({
   onChange: (value: WebAccessStatus) => void;
 }): JSX.Element {
   const [code, setCode] = useState("");
+  const [decision, setDecision] = useState<"allow" | "deny" | null>(null);
+  const [decisionFeedback, setDecisionFeedback] = useState("");
   const [confirm, setConfirm] = useState<{
     kind: "revoke" | "rename" | "reset" | "all";
     id?: string;
@@ -63,7 +68,7 @@ export default function WebDevices({
   const previousCandidate = useRef(candidate);
   useEffect(() => {
     if (previousCandidate.current !== candidate) {
-      pairSlot.current?.querySelector<HTMLElement>(candidate ? 'button:not(:disabled)' : 'input:not(:disabled)')?.focus({ preventScroll: true });
+      pairSlot.current?.querySelector<HTMLElement>(candidate ? '[data-pair-identity]' : 'input:not(:disabled)')?.focus({ preventScroll: true });
       previousCandidate.current = candidate;
     }
   }, [candidate]);
@@ -80,11 +85,13 @@ export default function WebDevices({
     revision.current++;
     setBusy(true);
     setError("");
+    setDecisionFeedback("");
     try {
       await action();
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
+      setDecision(null);
       setBusy(false);
       lock.current = false;
     }
@@ -124,18 +131,18 @@ export default function WebDevices({
       >
         <div className={styles.pairBody}>
           <div className={styles.stableRow}>
-            <span className={styles.singleLine}>{!status.running ? '启用 Web 服务后可配对新设备' : pairing ? `配对已开启 · 剩余 ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}` : '允许新设备发起配对，有效期 5 分钟'}</span>
+            <span className={styles.singleLine}>{!status.running ? `开启${WEB_ACCESS_LABEL}后可配对新设备` : pairing ? `配对已开启 · 剩余 ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}` : '允许新设备发起配对，有效期 5 分钟'}</span>
             <Button disabled={busy || !status.running} onClick={() => void run(async () => { onChange(await api.webAccess.pairOpen()); setCandidate(null) })}>{pairing ? '延长配对' : '开启配对'}</Button>
           </div>
           <div className={styles.pairSlot} data-confirming={Boolean(candidate && pairing && status.running)} ref={pairSlot}>
             {candidate && pairing && status.running ? <>
-              <div className={styles.pairIdentity}>
+              <div className={styles.pairIdentity} data-pair-identity tabIndex={-1}>
                 <strong className={styles.singleLine} title={candidate.name}>{candidate.name}</strong>
                 <span className={styles.singleLine}>配对码 {candidate.code} · {candidate.remember ? '记住此设备' : '临时登录'} · 只读访问</span>
               </div>
               <div className={styles.actions}>
-                <Button disabled={busy || candidate.expires <= now} onClick={() => void run(async () => { onChange(await api.webAccess.pairDecide(candidate.code, true)); setCandidate(null); setCode('') })}>允许登录</Button>
-                <Button disabled={busy} onClick={() => void run(async () => { onChange(await api.webAccess.pairDecide(candidate.code, false)); setCandidate(null) })}>拒绝</Button>
+                <Button variant="primary" className={styles.decisionButton} aria-busy={decision === "allow"} disabled={busy || candidate.expires <= now} onClick={() => void run(async () => { setDecision("allow"); onChange(await api.webAccess.pairDecide(candidate.code, true)); setDecisionFeedback("已允许登录"); setCandidate(null); setCode('') })}>{decision === "allow" ? <LoaderCircle {...UI_ICON_SM} className={styles.spinner} aria-hidden="true" /> : <Check {...UI_ICON_SM} aria-hidden="true" />}允许登录</Button>
+                <Button variant="danger" className={styles.decisionButton} aria-busy={decision === "deny"} disabled={busy} onClick={() => void run(async () => { setDecision("deny"); onChange(await api.webAccess.pairDecide(candidate.code, false)); setDecisionFeedback("已拒绝"); setCandidate(null) })}>{decision === "deny" ? <LoaderCircle {...UI_ICON_SM} className={styles.spinner} aria-hidden="true" /> : <X {...UI_ICON_SM} aria-hidden="true" />}拒绝</Button>
               </div>
             </> : <>
               <label className={styles.field}>新设备显示的配对码
@@ -159,7 +166,7 @@ export default function WebDevices({
             </>}
           </div>
           <div className={styles.inlineFeedback} role="status">
-            {error && !confirm ? error : candidate && candidate.expires <= now ? '配对码已过期，请重新获取' : candidate ? '请核对设备名称和配对码，仅允许你正在操作的设备。' : status.pairingActivity.length ? status.pairingActivity.map(item => `${item.name} · ${item.state === 'connected' ? '已连接' : '已批准，等待连接'}`).join('；') : !status.running ? '启用 Web 服务后即可配对。' : pairing ? '在新设备网页获取六位码，输入后核对设备。' : '开启配对后，在新设备网页获取六位码。'}
+            {error && !confirm ? error : decisionFeedback ? decisionFeedback : candidate && candidate.expires <= now ? '配对码已过期，请重新获取' : candidate ? '请核对设备名称和配对码，仅允许你正在操作的设备。' : status.pairingActivity.length ? status.pairingActivity.map(item => `${item.name} · ${item.state === 'connected' ? '已连接' : '已批准，等待连接'}`).join('；') : !status.running ? `开启${WEB_ACCESS_LABEL}后即可配对。` : pairing ? '在新设备网页获取六位码，输入后核对设备。' : '开启配对后，在新设备网页获取六位码。'}
           </div>
         </div>
       </SettingsCard>

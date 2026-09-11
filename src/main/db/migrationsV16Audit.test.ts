@@ -8,7 +8,9 @@ import { releasedV15Database } from '../testFixtures/releasedV15Database'
 interface SchemaRow { type: string; name: string; tbl_name: string; sql: string | null }
 
 function schema(db: Database.Database): SchemaRow[] {
-  return db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' OR type='index' ORDER BY name").all() as SchemaRow[]
+  const rows = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' OR type='index' ORDER BY name").all() as SchemaRow[]
+  // Git checkout line endings must not change the logical schema comparison.
+  return rows.map(row => ({ ...row, sql: row.sql?.replaceAll('\r\n', '\n') ?? null }))
 }
 
 function quote(name: string): string { return `"${name.replaceAll('"', '""')}"` }

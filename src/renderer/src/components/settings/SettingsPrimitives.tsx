@@ -11,6 +11,7 @@ import styles from './SettingsPrimitives.module.css'
 
 type CardProps = {
   as?: 'div' | 'section'
+  id?: string
   title?: ReactNode
   hint?: ReactNode
   actions?: ReactNode
@@ -31,6 +32,7 @@ const STATUS_CLASSES: Record<string, string> = {
 
 export function SettingsCard({
   as: Component = 'div',
+  id,
   title,
   hint,
   actions,
@@ -40,6 +42,7 @@ export function SettingsCard({
 }: CardProps): JSX.Element {
   return (
     <Component
+      id={id}
       className={`${styles.card} settings-card${className ? ` ${className}` : ''}`}
       {...ariaProps}
     >

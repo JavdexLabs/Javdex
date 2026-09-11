@@ -9,26 +9,26 @@ export interface ScrollContainerMemory {
 }
 
 /** Restore / persist scrollTop for non-virtual scroll containers. */
-export function useScrollContainerMemory(memoryKey: string): ScrollContainerMemory {
+export function useScrollContainerMemory(memoryKey: string, restore = true): ScrollContainerMemory {
   const ref = useRef<HTMLDivElement>(null)
   const prevMemoryKeyRef = useRef<string | undefined>(undefined)
   const [showScrollToTop, setShowScrollToTop] = useState(false)
 
   useLayoutEffect(() => {
     const el = ref.current
-    if (!el || !memoryKey) return
+    if (!el || !memoryKey || !restore) return
     const scrollTop = resolveScrollTopForKey(prevMemoryKeyRef.current, memoryKey)
     prevMemoryKeyRef.current = memoryKey
     el.scrollTop = scrollTop
     setShowScrollToTop(scrollTop > SCROLL_TO_TOP_THRESHOLD)
-  }, [memoryKey])
+  }, [memoryKey, restore])
 
   useEffect(() => {
     const el = ref.current
     if (!el || !memoryKey) return
     const onScroll = (): void => {
       const { scrollTop } = el
-      setListScroll(memoryKey, { scrollTop })
+      if (restore) setListScroll(memoryKey, { scrollTop })
       setShowScrollToTop((prev) => {
         const next = scrollTop > SCROLL_TO_TOP_THRESHOLD
         return prev === next ? prev : next
@@ -36,17 +36,17 @@ export function useScrollContainerMemory(memoryKey: string): ScrollContainerMemo
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
-  }, [memoryKey])
+  }, [memoryKey, restore])
 
   const scrollToTop = useCallback((): void => {
     const el = ref.current
     if (!el) return
     el.scrollTo({ top: 0, behavior: 'smooth' })
-    if (memoryKey) {
+    if (memoryKey && restore) {
       setListScroll(memoryKey, { scrollTop: 0, visibleRowIndex: 0 })
     }
     setShowScrollToTop(false)
-  }, [memoryKey])
+  }, [memoryKey, restore])
 
   return { ref, showScrollToTop, scrollToTop }
 }

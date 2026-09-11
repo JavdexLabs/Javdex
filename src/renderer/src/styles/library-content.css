@@ -538,6 +538,9 @@
 }
 .playlist-card-name {
   font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .playlist-card-meta,
 .playlist-detail-meta,
@@ -736,11 +739,20 @@
   grid-template-columns: 68px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+  min-width: 0;
   min-height: 70px;
   padding: 8px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-control);
+}
+button.playlist-pick-row {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 .playlist-pick-cover {
   width: 68px;
@@ -759,6 +771,9 @@
 }
 .playlist-pick-name {
   font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* ---- Actress merge modal ---- */
 .modal.merge-actress-modal {

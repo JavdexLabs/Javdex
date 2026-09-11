@@ -1,5 +1,5 @@
 import { useActressGalleryPage } from '../hooks/useActressGalleryPage'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ActressGalleryAsset } from '@shared/actressTypes'
 import { useActressVideoPage } from '../hooks/useActressVideoPage'
 import { DEFAULT_AVATAR_FACE_RATIO } from '@shared/avatarFaceScale'
@@ -191,11 +191,30 @@ export default function ActressAvatarEditor({
   const previewSeqRef = useRef(0)
   const autoCropSeqRef = useRef(0)
   const initialCropRef = useRef<AvatarCropV1 | null>(null)
-  const coverScroll = useHorizontalDragScroll()
   const galleryScroll = useHorizontalDragScroll()
+  const coverScroll = useHorizontalDragScroll()
 
   const covers = useActressVideoPage(actressId, true)
   const coverVideos = covers.data?.videos ?? []
+  const onCoverRange = covers.window.onVisibleRange
+  const onCoverScroll = (event: { currentTarget: { scrollLeft: number; clientWidth: number; clientHeight: number; scrollWidth: number } }): void => {
+    const { scrollLeft, clientWidth, clientHeight, scrollWidth } = event.currentTarget
+    const stride = Math.max(72, clientHeight) + 8
+    if (scrollWidth > clientWidth + 8 && scrollLeft + clientWidth >= scrollWidth - 32) {
+      onCoverRange(Math.max(coverVideos.length, 1) - 1, coverVideos.length + 59)
+      return
+    }
+    const start = Math.floor(Math.max(0, scrollLeft) / stride)
+    const end = Math.ceil((scrollLeft + clientWidth) / stride)
+    if (end > start) onCoverRange(start, end)
+  }
+  useLayoutEffect(() => {
+    const el = coverScroll.ref.current
+    if (!el || covers.loading || covers.error || coverVideos.length === 0 || coverVideos.length >= covers.total) return
+    if (el.scrollWidth <= el.clientWidth + 8) {
+      onCoverRange(Math.max(coverVideos.length, 1) - 1, coverVideos.length + 59)
+    }
+  }, [coverVideos.length, covers.loading, covers.error, covers.total, onCoverRange, coverScroll.ref])
   const photos = useActressGalleryPage(actressId, true)
   const galleryItems = photos.data?.items ?? []
 
@@ -901,43 +920,49 @@ export default function ActressAvatarEditor({
                 }${coverScroll.isDragging ? ' avatar-source-page--dragging' : ''}`}
                 role="tabpanel"
                 hidden={activeTab !== 'cover'}
+                onScroll={onCoverScroll}
                 onPointerDownCapture={coverScroll.onPointerDownCapture}
                 onPointerMove={coverScroll.onPointerMove}
                 onPointerUp={coverScroll.onPointerUp}
                 onPointerCancel={coverScroll.onPointerCancel}
               >
-                {covers.loading ? <p className="avatar-source-empty">加载中…</p> : covers.error ? (
+                {covers.loading && coverVideos.length === 0 ? <p className="avatar-source-empty">加载中…</p> : covers.error && coverVideos.length === 0 ? (
                   <div role="alert">{covers.error}<Button onClick={covers.reload}>重试</Button></div>
                 ) : coverVideos.length === 0 ? (
                   <p className="avatar-source-empty">暂无关联封面</p>
                 ) : (
-                  coverVideos.map((video) => {
-                    const url = assetUrl(video.cover_path)
-                    if (!url || !video.cover_path) return null
-                    const sourceKey = `cover:${video.id}`
-                    return (
-                      <button
-                        key={video.id}
-                        type="button"
-                        className={`avatar-pick-tile${activeSourceKey === sourceKey ? ' active' : ''}`}
-                        title={video.code}
-                        aria-label={video.code}
-                        aria-busy={openingSourceKey === sourceKey}
-                        onClick={() => {
-                          if (openingSourceKey || coverScroll.shouldSuppressClick()) return
-                          setOpenError(null)
-                          setActiveSourceKey(sourceKey)
-                          void beginEditSource({
-                            url,
-                            sourceKey,
-                            libraryAssetPath: video.cover_path
-                          })
-                        }}
-                      >
-                        <img src={assetUrl(video.cover_path, 320) ?? undefined} alt="" loading="lazy" draggable={false} />
-                      </button>
-                    )
-                  })
+                  <>
+                    {coverVideos.map((video) => {
+                      const url = assetUrl(video.cover_path)
+                      if (!url || !video.cover_path) return null
+                      const sourceKey = `cover:${video.id}`
+                      return (
+                        <button
+                          key={video.id}
+                          type="button"
+                          className={`avatar-pick-tile${activeSourceKey === sourceKey ? ' active' : ''}`}
+                          title={video.code}
+                          aria-label={video.code}
+                          aria-busy={openingSourceKey === sourceKey}
+                          onClick={() => {
+                            if (openingSourceKey || coverScroll.shouldSuppressClick()) return
+                            setOpenError(null)
+                            setActiveSourceKey(sourceKey)
+                            void beginEditSource({
+                              url,
+                              sourceKey,
+                              libraryAssetPath: video.cover_path
+                            })
+                          }}
+                        >
+                          <img src={assetUrl(video.cover_path, 320) ?? undefined} alt="" loading="lazy" draggable={false} />
+                        </button>
+                      )
+                    })}
+                    {covers.error ? (
+                      <div role="alert">{covers.error}<Button onClick={covers.reload}>重试</Button></div>
+                    ) : null}
+                  </>
                 )}
               </div>
 
@@ -996,13 +1021,7 @@ export default function ActressAvatarEditor({
                 </div>
               ) : null}
             </div>
-              {activeTab === 'cover' && covers.data && covers.data.total > 60 ? (
-                <nav className="actress-works-pagination" aria-label="头像封面分页">
-                  <Button size="sm" disabled={covers.offset === 0} onClick={() => covers.move(covers.offset - 60)}>上一页</Button>
-                  <span>第 {Math.floor(covers.offset / 60) + 1} 页</span>
-                  <Button size="sm" disabled={covers.offset + coverVideos.length >= covers.data.total} onClick={() => covers.move(covers.offset + 60)}>下一页</Button>
-                </nav>
-              ) : null}
+
               {activeTab === 'gallery' && photos.data && photos.data.total > 60 ? (
                 <nav className="actress-works-pagination" aria-label="头像写真分页">
                   <Button size="sm" disabled={photos.offset === 0} onClick={() => photos.move(photos.offset - 60)}>上一页</Button>

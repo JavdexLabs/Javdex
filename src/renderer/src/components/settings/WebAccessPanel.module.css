@@ -300,3 +300,20 @@
     flex-basis: 100%;
   }
 }
+
+.decisionButton {
+  gap: var(--form-label-gap);
+  flex-shrink: 0;
+}
+
+.spinner {
+  animation: pairing-spin 1s linear infinite;
+}
+
+@keyframes pairing-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

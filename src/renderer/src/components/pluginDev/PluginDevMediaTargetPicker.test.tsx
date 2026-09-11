@@ -1,3 +1,4 @@
+import { continuousViewport } from '../../test/continuousViewport'
 import assert from 'node:assert/strict'
 import { afterEach, it } from 'node:test'
 import React, { useState } from 'react'
@@ -17,28 +18,30 @@ const fake={actresses:{list:()=>{throw new Error('Full actors forbidden')},get:(
 Object.defineProperty(globalThis,'React',{configurable:true,value:React})
 Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fake})})
 Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}}}})
+let viewport=continuousViewport(), position=0
 let Component:typeof import('./PluginDevMediaTargetPicker')['default'],renderer:TestRenderer.ReactTestRenderer|undefined
 function Harness({kind='actress',initial=[]}:{kind?:'actress'|'video';initial?:string[]}){const[selected,setSelected]=useState(initial);const[open,setOpen]=useState(true);return open?<Component kind={kind} selectedValues={selected} onAdd={value=>{added.push(value);setSelected(previous=>[...previous,value])}} onClose={()=>{closed++;setOpen(false)}}/>:null}
 const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,15))})}
-async function mount(initial:string[]=[]){Component=(await import('./PluginDevMediaTargetPicker')).default;await act(async()=>{renderer=TestRenderer.create(<Harness initial={initial}/>)});await settle()}
+async function mount(initial:string[]=[]){Component=(await import('./PluginDevMediaTargetPicker')).default;await act(async()=>{renderer=TestRenderer.create(<Harness initial={initial}/>, {createNodeMock:viewport.createNodeMock})});await settle()}
 const options=()=>renderer!.root.findAll(node=>node.type==='button'&&String(node.props['aria-label']??'').startsWith('添加测试演员'))
 function label(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:label(child)).join('')}
 const button=(name:string)=>renderer!.root.findAllByType('button').find(node=>label(node)===name)!
 async function click(node:TestRenderer.ReactTestInstance){await act(async()=>node.props.onClick());await settle()}
+async function scroll(step:number){position=Math.max(0,position+step);await viewport.scroll(renderer!,position);await settle()}
 async function search(value:string){await act(async()=>renderer!.root.findByProps({'aria-label':'搜索测试目标'}).props.onChange({target:{value}}))}
-afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;pageHold=null;choiceHold=null;pageFailure=false;pageOverride=null;getFailure=false;choiceValue=undefined;choices=0;closed=0;calls.length=0;added.length=0;videoCalls.length=0})
+afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;viewport=continuousViewport();position=0;pageHold=null;choiceHold=null;pageFailure=false;pageOverride=null;getFailure=false;choiceValue=undefined;choices=0;closed=0;calls.length=0;added.length=0;videoCalls.length=0})
 it('pages40/40/21, resolves full names and retains selected long identities when returning',async()=>{
- await mount();assert.equal(options().length,40)
+ await mount();assert.ok(options().length > 0 && options().length <= 8)
  await click(options()[0]);assert.deepEqual(added,[fullName]);assert.equal(options()[0].props.disabled,true)
- await click(button('下一页'));assert.equal(options().length,40)
- await click(button('下一页'));assert.equal(options().length,21)
- await click(button('上一页'));await click(button('上一页'));assert.equal(options()[0].props.disabled,true)
- assert.deepEqual(calls.map(q=>q.offset),[0,40,80,40,0])
+ await scroll(40);assert.ok(options().length > 0 && options().length <= 8)
+ await scroll(40);assert.ok(options().length > 0 && options().length <= 8)
+ await scroll(-40);await scroll(-40);assert.equal(options()[0].props.disabled,true)
+ assert.deepEqual(calls.map(q=>q.offset),[0,40,80])
 })
 it('retries page failures and isolates a stale page during raw search debounce',async()=>{
- await mount();pageFailure=true;await click(button('下一页'));assert.equal(options().length,0)
- await click(button('重试'));assert.equal(options().length,40)
- pageHold=deferred();await click(button('下一页'));const old=pageHold;pageHold=null
+ await mount();pageFailure=true;await scroll(40);assert.ok(options().length <= 1)
+ await click(button('重试'));assert.ok(options().length > 0 && options().length <= 8)
+ pageHold=deferred();await scroll(40);const old=pageHold;pageHold=null
  await search('Candidate-100');old.resolve(page({offset:80}));await settle();assert.equal(options().length,0)
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,280))});await settle()
  assert.equal(options().length,1);assert.equal(calls.at(-1)!.offset,0)

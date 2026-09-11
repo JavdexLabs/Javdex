@@ -1,3 +1,4 @@
+import ContinuousGrid from '../components/ContinuousGrid'
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { Building2, Plus, SearchX } from 'lucide-react'
@@ -46,7 +47,7 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
   const [createOpen, setCreateOpen] = useState(false)
   const {
     query: listQuery, queryHash, urlQ, searchInput, setSearchInput, sortBy, sortDir,
-    patchSort, items, loading, total, offset, move, canNext
+    patchSort, loading, total, offset, move, window
   } = useClassificationPage(role, hash => organizationKeys.list(role, hash),
     input => api.organizations.page({ ...input, role }))
   const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(
@@ -99,9 +100,6 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
           }}
           controls={
             <>
-              <Button size="sm" disabled={offset === 0} onClick={() => move(offset - CLASSIFICATION_PAGE_SIZE)}>上一页</Button>
-              <span aria-live="polite">第 {offset / CLASSIFICATION_PAGE_SIZE + 1} 页</span>
-              <Button size="sm" disabled={!canNext || loading} onClick={() => move(offset + CLASSIFICATION_PAGE_SIZE)}>下一页</Button>
               <SortSwitch
                 label="排序"
                 options={SORT_OPTIONS}
@@ -136,19 +134,18 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
       >
         {loading ? (
           <EmptyState loading />
-        ) : listQuery.isError ? (
-          <EmptyState title={`${label}加载失败`} description={String(listQuery.error.message)}>
+        ) : listQuery.isError && !total ? (
+          <EmptyState title={`${label}加载失败`} description={String(listQuery.error?.message)}>
             <Button onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}>重试</Button>
           </EmptyState>
-        ) : items.length === 0 ? (
+        ) : !total ? (
           <EmptyState
             icon={urlQ ? <SearchX {...UI_ICON_SM} aria-hidden /> : <Building2 {...UI_ICON_SM} aria-hidden />}
             title={urlQ ? `没有匹配的${label}` : `暂无${label}资料`}
             description={urlQ ? '调整搜索关键词后再试。' : '可手动新增，或在影片编辑时就地创建。'}
           />
         ) : (
-          <div className="facet-grid">
-            {items.map((item) => {
+          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
               const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
               return (
                 <div key={item.id} className="facet-card-wrap">
@@ -172,8 +169,7 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
                   </button>
                 </div>
               )
-            })}
-          </div>
+            }} />
         )}
       </ListSurface>
 

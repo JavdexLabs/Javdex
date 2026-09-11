@@ -348,7 +348,6 @@ h2 {
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
-  justify-content: space-between;
   border-top: 1px solid var(--border-subtle);
   padding: 18px 0;
 }
@@ -368,17 +367,6 @@ h2 {
   background: var(--surface-elevated);
   color: var(--text-primary);
   border-color: var(--border-subtle);
-}
-.year-filter {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.year-filter input {
-  width: 84px;
-  padding: 6px 12px;
 }
 .chips {
   display: flex;
@@ -905,9 +893,6 @@ button.primary:not(:disabled):active {
     padding-inline: 10px;
     font-size: 12px;
   }
-  .year-filter input {
-    min-height: 36px;
-  }
   .detail-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 24px;
@@ -1050,8 +1035,7 @@ html {
 @media (pointer: coarse) {
   button:not([hidden]),
   .search button,
-  .logout,
-  .year-filter input {
+  .logout {
     min-height: 48px;
     min-width: 48px;
   }

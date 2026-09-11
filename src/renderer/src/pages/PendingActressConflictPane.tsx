@@ -1,3 +1,4 @@
+import ContinuousGrid from '../components/ContinuousGrid'
 import type { ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Ban, CircleAlert, GitMerge, Pencil, SquareArrowOutUpRight, Trash2, UserRoundSearch } from 'lucide-react'
@@ -370,15 +371,16 @@ export default function PendingActressConflictPane({
             <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
               {otherOwner.loading ? (
                 <EmptyState loading variant="modal" />
-              ) : otherOwner.error ? (
+              ) : otherOwner.error && otherOwner.window.total === 0 ? (
                 <div role="alert"><p>演员候选读取失败</p><Button size="sm" onClick={otherOwner.retry}>重试</Button></div>
               ) : otherOwner.options.length === 0 ? (
-                <EmptyState title={otherOwner.offset > 0 || otherOwner.hasMore ? '本页没有可选演员' : '没有匹配的演员'} variant="modal" />
+                <EmptyState title="没有匹配的演员" variant="modal" />
               ) : (
-                otherOwner.options.map((item) => (
+                <ContinuousGrid remember={false} window={otherOwner.window} scope={`owner:${otherOwner.search}`} label="其他演员" itemHeight={64} itemKey={item => item.id} renderItem={item => (
                   <button
                     key={item.id}
                     type="button"
+                    disabled={otherOwner.excludedIds.includes(item.id)}
                     aria-pressed={otherOwner.selected?.id === item.id}
                     aria-busy={otherOwner.choosingId === item.id}
                     className={otherOwner.selected?.id === item.id ? 'is-selected' : ''}
@@ -391,14 +393,10 @@ export default function PendingActressConflictPane({
                     />
                     <span><strong>{item.main_name}</strong><small>{otherOwner.choosingId === item.id ? '读取中…' : '选择为拟定归属'}</small></span>
                   </button>
-                ))
+                )} />
               )}
             </div>
-            <div className="conflict-workbench-owner-pagination" aria-label="演员候选分页">
-              <Button size="sm" disabled={otherOwner.loading || otherOwner.offset === 0} onClick={otherOwner.previousPage}>上一页</Button>
-              <span aria-live="polite">第 {Math.floor(otherOwner.offset / 40) + 1} 页</span>
-              <Button size="sm" disabled={otherOwner.loading || !otherOwner.hasMore} onClick={otherOwner.nextPage}>下一页</Button>
-            </div>
+
           </div>
         </ConfirmModal>
       ) : null}

@@ -589,7 +589,7 @@ export default function SettingsPage(): JSX.Element {
     }
   }
 
-  const navigateSettings = (group: SettingsGroup, tab?: SettingsTab): void => {
+  const navigateSettings = (group: SettingsGroup, tab?: SettingsTab, hash?: string): void => {
     if (group === 'library' && selectedSettingsLibrary) {
       navigate(
         mediaLibrarySettingsPath(
@@ -599,7 +599,8 @@ export default function SettingsPage(): JSX.Element {
       )
       return
     }
-    navigate(settingsPath(group, tab))
+    const pathname = settingsPath(group, tab)
+    navigate(hash ? { pathname, hash: hash.startsWith('#') ? hash : `#${hash}` } : pathname)
   }
 
   const openActressConflicts = (): void => {

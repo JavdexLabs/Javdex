@@ -68,14 +68,22 @@ export const CLASSIFICATION_LIST_DEFAULTS = {
 }
 
 export const CLASSIFICATION_PAGE_SIZE = 60
+export const PLAYLIST_PAGE_SIZE = 60
+
+function parseAlignedOffset(raw: string | null, pageSize: number): number {
+  if (!raw || !/^\d+$/.test(raw)) return 0
+  const value = Number(raw)
+  return Number.isSafeInteger(value) ? Math.floor(value / pageSize) * pageSize : 0
+}
 
 /** Reject unsafe URL numbers and align valid offsets to complete classification pages. */
 export function parseFacetOffset(raw: string | null): number {
-  if (!raw || !/^\d+$/.test(raw)) return 0
-  const value = Number(raw)
-  return Number.isSafeInteger(value)
-    ? Math.floor(value / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE
-    : 0
+  return parseAlignedOffset(raw, CLASSIFICATION_PAGE_SIZE)
+}
+
+/** Align playlist list offsets to complete 60-item pages. */
+export function parsePlaylistOffset(raw: string | null): number {
+  return parseAlignedOffset(raw, PLAYLIST_PAGE_SIZE)
 }
 
 export function parseClassificationSort(

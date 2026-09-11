@@ -140,13 +140,15 @@
 
 需要响应系统后退、鼠标返回键或 macOS 返回手势的全屏 overlay，不能在组件 Effect cleanup 中直接调用 `history.back()`。History 所有权、实例 token、关闭来源和跨平台测试规范见 [`IMAGE_PREVIEW_HISTORY_DESIGN.md`](IMAGE_PREVIEW_HISTORY_DESIGN.md)。
 
-### 系列与厂商分类分页
+### 清单、分类与关联影片连续浏览
 
-`SeriesListPage`、`OrganizationListPage` 使用 `page` API，每页固定 60 项，计数来自服务端 `total`。URL 参数 `facetOffset` 表示分类列表偏移，与详情内影片分页参数独立；只接受非负安全整数并向下对齐 60，非法值归零，零偏移从 URL 删除。搜索提交、排序及分类 role 切换重置偏移；搜索草稿绑定当前 navigation key、pathname 和 query，离开时清除（包括返回同一历史 key 的 A→B→A）；导航后未提交的 debounce 不得覆盖新 URL 或详情 URL。
+清单、导演、系列和机构主列表使用后端分页与 `ContinuousGrid`。清单影片、分类关联影片和演员作品使用 `ContinuousPosterGrid`，在详情已有的滚动容器中计算可见区域，不再设置第二层影片滚动条。接口仍按现有页大小读取；每个挂载列表只留最近需要的三页。
 
-分页 query key 包含规范化偏移，并与旧全量 list 缓存隔离。不使用跨页 placeholder，加载和错误时不展示上一页卡片；错误支持当前页重试。服务端总量缩小时，越界页自动 replace 到最后有效页（空库归零）。查询设置 `gcTime: 0` 回收不活跃页，已发出的 IPC 请求不能取消时，其结果仍只属于原 query key。
+`playlistOffset`、`facetOffset`、`relatedVideoOffset` 兼容已有链接，作为初始条目位置。滚动同步使用 replace；偏移不参与列表数据会话标识，不能因为位置更新重建窗口。搜索与排序改变时回到列表起点；分类 role 切换同时清空旧搜索。搜索草稿绑定 navigation key、pathname 和 query，导航后旧 debounce 不得改写新 URL。
 
-详情通过现有 `ListDetailShell` 保留列表和 active observer，导航 helper 透传 query；分页偏移同时参与滚动记忆 key。因此进入详情及嵌套影片再返回保留当前页/滚动位置，关闭详情仅刷新当前页。翻页使用 replace，不增加详情返回栈。实际页面交互回归见 `ClassificationListPage.interaction.test.tsx`（60/60/5、100 页缓存边界、重试、总量缩小、搜索迟到响应、role 切换与详情返回）。
+列表在详情返回时按条目位置与行内偏移恢复；窗口列数变化时重新计算位置。读取错误保留列表高度和已加载页，由列表区域提供重试。删除、合并导致总量下降时校正到有效范围并刷新保留页。旧会话请求即使不能取消，也不能写入新列表。
+
+待确认中心的 `scanOffset`、`scrapeOffset`、`actressOffset`、扫描历史、审计明细及演员写真仍使用显式分页。本次不改变 Web 路由或写真跨页预览。验证方法与范围见[连续浏览验证记录](performance/desktop-continuous-browsing.md)。
 
 ### 主网格窗口与跨页选择
 
@@ -154,4 +156,4 @@
 
 卡片数据在进入查询缓存前投影并检查单页1 MiB JSON编码预算；宽详情仍由GET读取。仅选中ID独立于卡片缓存。Shift采用半开绝对范围，逐页获取ID并比较读取修订、总数和端点；取消或结果变化不提交部分范围。只读返回仅刷新活动且过期的查询，不遍历已淘汰历史页。
 
-导演、系列和机构详情的关联影片使用独立 `relatedVideoOffset`（每页60），翻页replace URL，筛选变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。
+导演、系列、机构、演员作品和清单详情的关联影片使用独立 `relatedVideoOffset`（每页60），滚动 replace URL，筛选或排序变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset` 或清单主列表的 `playlistOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。

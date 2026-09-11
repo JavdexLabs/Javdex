@@ -1,4 +1,4 @@
-import RelatedVideoPager from '../components/RelatedVideoPager'
+import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
 import { BadgeMinus, ExternalLink, GitMerge, ImagePlus, Inbox, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
@@ -28,7 +28,6 @@ import OrganizationEditModal from '../components/OrganizationEditModal'
 import OrganizationDeleteModal from '../components/OrganizationDeleteModal'
 import OrganizationMergeModal from '../components/OrganizationMergeModal'
 import { organizationMergeSuccessMessage } from '../components/organizationMergePresentation'
-import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useCatalogVideoPage } from '../query/useCatalogVideoPage'
@@ -108,7 +107,7 @@ export default function OrganizationDetailPage(): JSX.Element {
       handlePageError,
       Boolean(role && validId)
     )
-  const { videos, total, loading, refetchSilent } = videoPage
+  const { total, loading, refetchSilent } = videoPage
 
   useListSurfaceRefetch(videoStackOpen, refetchSilent)
   const dismissEditing = useCallback(() => {
@@ -353,12 +352,7 @@ export default function OrganizationDetailPage(): JSX.Element {
             />
           ) : (
             <>
-              <div className="poster-grid organization-video-grid">
-                {videos.map((video) => (
-                  <PosterCard key={video.id} video={video} />
-                ))}
-              </div>
-              <RelatedVideoPager {...videoPage} />
+              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={videoQueryHash} />
             </>
           )}
         </ListSurface>

@@ -1,3 +1,4 @@
+import { useContinuousPage, type ContinuousWindow } from '../hooks/useContinuousPage'
 import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ActressPickerItem } from '@shared/actressTypes'
@@ -28,7 +29,6 @@ import {
   discardConflictCandidate,
   resolveConflictDecision,
   runNameInspection,
-  runOwnerSearch,
   runReplacementValidation,
   type ConflictReviewRemoteDeps
 } from './conflictReviewRemote'
@@ -89,14 +89,12 @@ export interface ConflictReviewViewModel {
     otherOwner: {
       open: boolean
       search: string
+      excludedIds: number[]
       options: ActressPickerItem[]
+      window: ContinuousWindow<ActressPickerItem>
       loading: boolean
-      offset: number
-      hasMore: boolean
       error: string | null
       choosingId: number | null
-      previousPage(): void
-      nextPage(): void
       retry(): void
       selected: ActressPickerItem | null
       changeSearch(value: string): void
@@ -180,7 +178,6 @@ export function useConflictReviewController({ enabled = true, summaryEnabled = t
   const replacementMainNamesRef = useRef(state.replacementMainNames)
   replacementMainNamesRef.current = state.replacementMainNames
   const editInspectionGate = useRef(createLatestRequestGate())
-  const ownerSearchGate = useRef(createLatestRequestGate())
   const ownerChoiceGate = useRef(createLatestRequestGate())
   useEffect(() => () => { ownerChoiceGate.current.next() }, [])
   const replacementValidationGate = useRef(createLatestRequestGate())
@@ -278,29 +275,9 @@ export function useConflictReviewController({ enabled = true, summaryEnabled = t
     dispatch({ type: 'patch', patch: { otherOwnerChoosingId: null } })
   }, [ownerPickerKey, renderSession])
   const ownerOptionsKey = derived.ownerOptions.map((owner) => owner.actressId).join(',')
-  useEffect(() => {
-    return runOwnerSearch({
-      gate: ownerSearchGate.current,
-      deps: remoteDeps,
-      open: state.otherOwnerOpen && enabled,
-      ready: state.otherOwnerSearch === debouncedOwnerSearch,
-      offset: state.otherOwnerOffset,
-      search: debouncedOwnerSearch,
-      ownerOptions: derived.ownerOptions,
-      apply: applyPatch
-    })
-    // ownerOptions identity changes every derive; key contents instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    debouncedOwnerSearch,
-    ownerOptionsKey,
-    remoteDeps,
-    state.otherOwnerOpen,
-    state.otherOwnerSearch,
-    state.otherOwnerOffset,
-    state.otherOwnerRetry,
-    enabled
-  ])
+  const ownerCandidates = useContinuousPage(JSON.stringify([ownerOptionsKey, derived.selectedGroup?.normalizedName, debouncedOwnerSearch, state.otherOwnerRetry]), 40,
+    offset => remoteDeps.api.pageActresses({ search: debouncedOwnerSearch.trim(), limit: 40, offset }),
+    state.otherOwnerOpen && enabled && state.otherOwnerSearch === debouncedOwnerSearch)
 
   useEffect(() => {
     return runNameInspection({
@@ -492,14 +469,12 @@ export function useConflictReviewController({ enabled = true, summaryEnabled = t
       otherOwner: {
         open: state.otherOwnerOpen,
         search: state.otherOwnerSearch,
-        options: state.otherOwnerOptions,
-        loading: state.otherOwnerLoading,
-        offset: state.otherOwnerOffset,
-        hasMore: state.otherOwnerHasMore,
-        error: state.otherOwnerError,
+        excludedIds: derived.ownerOptions.map(owner => owner.actressId),
+        options: ownerCandidates.items,
+        window: ownerCandidates.window,
+        loading: ownerCandidates.loading,
+        error: ownerCandidates.error,
         choosingId: state.otherOwnerChoosingId,
-        previousPage: () => { if (!state.otherOwnerLoading && state.otherOwnerOffset > 0) dispatch({ type: 'changeOtherOwnerPage', offset: Math.max(0, state.otherOwnerOffset - 40) }) },
-        nextPage: () => { if (!state.otherOwnerLoading && state.otherOwnerHasMore) dispatch({ type: 'changeOtherOwnerPage', offset: state.otherOwnerOffset + 40 }) },
         retry: () => dispatch({ type: 'retryOtherOwner' }),
         selected: state.selectedOtherOwner,
         changeSearch: (value) => dispatch({ type: 'changeOtherOwnerSearch', value }),

@@ -1,4 +1,4 @@
-import RelatedVideoPager from '../components/RelatedVideoPager'
+import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
 import { ExternalLink, GitMerge, ImagePlus, Layers3, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
@@ -23,7 +23,6 @@ import ClassificationDeleteModal from '../components/ClassificationDeleteModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
-import PosterCard from '../components/PosterCard'
 import SeriesEditModal from '../components/SeriesEditModal'
 import SeriesMergeModal from '../components/SeriesMergeModal'
 import SortSwitch from '../components/SortSwitch'
@@ -85,7 +84,7 @@ export default function SeriesDetailPage(): JSX.Element {
   )
   const videoPage =
     useCatalogVideoPage(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
-  const { videos, total, loading, refetchSilent } = videoPage
+  const { total, loading, refetchSilent } = videoPage
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`series-detail:${hash}`)
   const save = async (input: SeriesUpdateInput): Promise<void> => {
@@ -316,12 +315,7 @@ export default function SeriesDetailPage(): JSX.Element {
             />
           ) : (
             <>
-              <div className="poster-grid organization-video-grid">
-                {videos.map((video) => (
-                  <PosterCard key={video.id} video={video} />
-                ))}
-              </div>
-              <RelatedVideoPager {...videoPage} />
+              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={hash} />
             </>
           )}
         </ListSurface>

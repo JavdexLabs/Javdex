@@ -683,7 +683,7 @@ function LibraryApp({
     }
     previousDetail.current = Boolean(detailId)
     if (detailId) return
-    document.title = 'Javdex · 家庭媒体库'
+    document.title = 'Javdex · 本地媒体库'
     // Capture while the list is visible, before hiding it can clamp scrollY.
     const rememberScroll = (): void => {
       lastScroll.current = window.scrollY
@@ -749,7 +749,7 @@ function LibraryApp({
       <header className="topbar" data-navigation-region="header">
         <a className="brand" href={route('/browse')}>
           <img className="brand-mark" src={appIcon} alt="" />
-          Javdex<span className="brand-label">家庭媒体库</span>
+          Javdex<span className="brand-label">本地媒体库</span>
         </a>
         <form
           className="search"
@@ -944,24 +944,6 @@ function LibraryApp({
                 </button>
               ))}
             </div>
-            <label className="year-filter">
-              年份
-              <input
-                aria-label="按发行年份筛选"
-                inputMode="numeric"
-                placeholder="全部"
-                defaultValue={query.get('year') ?? ''}
-                key={query.get('year')}
-                maxLength={4}
-                onBlur={(event) => {
-                  const year = event.target.value.trim()
-                  if (!year || /^\d{4}$/.test(year)) change('year', year)
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') event.currentTarget.blur()
-                }}
-              />
-            </label>
           </div>
           <div className="chips filter-chips" data-navigation-group>
             {['library', 'playlist', 'actress', 'tag', 'year']

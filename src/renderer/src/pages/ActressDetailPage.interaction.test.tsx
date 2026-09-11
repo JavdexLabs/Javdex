@@ -1,8 +1,9 @@
+import { continuousViewport } from '../test/continuousViewport'
 import assert from 'node:assert/strict'
 import { afterEach, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ActressProfile, ActressVideoPageQuery } from '@shared/actressTypes'
 import type { ElectronApi } from '../../../preload/index'
@@ -43,12 +44,15 @@ const fake = {
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), { api: fake, requestAnimationFrame: (fn: () => void) => fn() }) })
 Object.defineProperty(globalThis, 'document', { configurable: true, value: { body: { style: { overflow: '' } }, activeElement: null } })
+let viewport=continuousViewport(), position=0
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let client: QueryClient
 let navigate: NavigateFunction
-function Nav() { navigate = useNavigate(); return null }
+let url = ''
+function Nav() { navigate = useNavigate(); url = useLocation().pathname + useLocation().search; return null }
 const text = (node: TestRenderer.ReactTestInstance): string => node.children.map(child => typeof child === 'string' ? child : text(child)).join('')
 async function click(label: string) {
+  if(label==='下一页'){position+=60;await viewport.scroll(renderer!,position);return}
   await act(async () => {
     const button = renderer!.root.findAllByType('button').find(node => text(node) === label || node.props['aria-label'] === label)!
     assert.ok(button, label)
@@ -63,25 +67,28 @@ async function mount() {
   const { AgentMetadataCollectorProvider } = await import('../components/agentMetadata/AgentMetadataCollectorContext')
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   await act(async () => {
-    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video</div>} /></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>)
+    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video</div>} /></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>, {createNodeMock:viewport.createNodeMock})
   })
 }
-afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined; calls.length = 0; metadataCalls.length = 0; total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
+afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined;viewport=continuousViewport();position=0; url=''; calls.length = 0; metadataCalls.length = 0; total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
 
 it('loads metadata once while paging 60/60/5 works and preserving the full count', async () => {
   await mount()
   const PosterCard = (await import('../components/PosterCard')).default
-  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
+  assert.ok(renderer!.root.findAllByType(PosterCard).length > 0 && renderer!.root.findAllByType(PosterCard).length <= 12)
   assert.ok(text(renderer!.root).includes('125 部'))
   await click('下一页')
-  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
+  assert.ok(renderer!.root.findAllByType(PosterCard).length > 0 && renderer!.root.findAllByType(PosterCard).length <= 12)
   await click('下一页')
-  assert.equal(renderer!.root.findAllByType(PosterCard).length, 5)
+  assert.ok(renderer!.root.findAllByType(PosterCard).length >= 5 && renderer!.root.findAllByType(PosterCard).length <= 12)
   assert.deepEqual(metadataCalls, [1])
   assert.deepEqual(calls.map(call => call.query.offset), [0,60,120])
-  await act(async () => navigate('/actresses/1/1120'))
-  await act(async () => navigate('/actresses/1'))
-  assert.equal(renderer!.root.findAllByType(PosterCard).length, 5)
+  assert.match(url, /relatedVideoOffset=120/)
+  const search = url.includes('?') ? url.slice(url.indexOf('?')) : ''
+  await act(async () => navigate(`/actresses/1/1120${search}`))
+  await act(async () => navigate(-1))
+  assert.match(url, /relatedVideoOffset=120/)
+  assert.ok(renderer!.root.findAllByType(PosterCard).length >= 5 && renderer!.root.findAllByType(PosterCard).length <= 12)
 })
 
 it('retries page errors, clamps a removed last page, and rejects late actor results', async () => {
@@ -93,7 +100,7 @@ it('retries page errors, clamps a removed last page, and rejects late actor resu
   total = 30
   await click('下一页')
   assert.deepEqual(calls.slice(-2).map(call => call.query.offset), [120, 0])
-  assert.ok(text(renderer!.root).includes('共 30 部'))
+  assert.ok(text(renderer!.root).includes('30 部'))
   total = 125
   let resolve!: (value: unknown) => void
   hold = () => new Promise(done => { resolve = done })
@@ -138,7 +145,7 @@ it('retains an open merge plan and its full count while the visible works refres
   const { notifyAvatarAutoCropSaved } = await import('../avatarAutoCrop/events')
   await act(async () => notifyAvatarAutoCropSaved(1))
   const PosterCard = (await import('../components/PosterCard')).default
-  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
+  assert.ok(renderer!.root.findAllByType(PosterCard).length > 0 && renderer!.root.findAllByType(PosterCard).length <= 12)
   const during = renderer!.root.findByType(MergeModal)
   assert.equal(during, modal)
   assert.equal(during.props.keepVideoCount, 125)
@@ -159,5 +166,5 @@ it('does not reuse the prior actor page when an intervening actor request is sti
   await act(async () => finishB(page(2, 0)))
   assert.equal(renderer!.root.findAllByType(PosterCard).length, 0)
   await act(async () => finishA(page(1, 0)))
-  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
+  assert.ok(renderer!.root.findAllByType(PosterCard).length > 0 && renderer!.root.findAllByType(PosterCard).length <= 12)
 })

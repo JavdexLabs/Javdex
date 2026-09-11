@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { ListVideo, SearchX } from 'lucide-react'
 import type { PlaylistCreateInput, PlaylistBrowseItem } from '@shared/playlistTypes'
 import { api, assetUrl } from '../api'
 import { usePlaylistBrowsePage } from '../hooks/usePlaylistBrowsePage'
-import PlaylistBrowsePager from '../components/PlaylistBrowsePager'
-import { LIST_PARAM, patchSearchParams } from '../listView/listQueryParams'
+import ContinuousGrid from '../components/ContinuousGrid'
+import { LIST_PARAM, PLAYLIST_PAGE_SIZE, parsePlaylistOffset, patchSearchParams } from '../listView/listQueryParams'
 import { navigateToPlaylistDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useToast } from '../components/Toast'
 import PlaylistCreateModal from '../components/PlaylistCreateModal'
 import ListToolbar from '../components/ListToolbar'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
@@ -54,36 +55,41 @@ export default function PlaylistsPage(): JSX.Element {
     }),{replace:true}),300)
     return ()=>clearTimeout(timer)
   },[context,draft,urlQ,setSearchParams])
-  const rawOffset=Number(searchParams.get(LIST_PARAM.playlistOffset) ?? 0)
-  const offset=Number.isSafeInteger(rawOffset) && rawOffset>=0 ? rawOffset : 0
-  const ready=searchInput.trim()===urlQ.trim()
-  const page=usePlaylistBrowsePage({search:urlQ,offset,limit:60},!detailOpen && ready)
-  const items=page.data?.items ?? []
-  const filteredItems=items
-  const loading=page.loading || !ready
+  const offset=parsePlaylistOffset(searchParams.get(LIST_PARAM.playlistOffset))
+  const page=usePlaylistBrowsePage({search:urlQ,offset,limit:PLAYLIST_PAGE_SIZE})
+  const loading=page.loading
   const loadList=page.reload
-  const move=useCallback((next:number)=>setSearchParams(previous=>patchSearchParams(previous,{
-    [LIST_PARAM.playlistOffset]:next ? String(next) : null
-  }),{replace:true}),[setSearchParams])
-  useEffect(()=>{ if(page.data && page.data.offset!==offset)move(page.data.offset) },[page.data,offset,move])
-  const session=useMemo(()=>({context}),[context])
-  const current=useRef(session)
-  current.current=session
-  const scrollMemoryKey=`playlists:q=${urlQ}:offset=${offset}`
-  const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(scrollMemoryKey)
+  const move=useCallback((next:number)=>{
+    const normalized=parsePlaylistOffset(String(next))
+    setSearchParams(previous=>patchSearchParams(previous,{
+      [LIST_PARAM.playlistOffset]:normalized ? String(normalized) : null
+    }),{replace:true})
+  },[setSearchParams])
+
+  const generation=useRef(0)
+  useEffect(()=>{
+    const token=generation.current+1
+    generation.current=token
+    return ()=>{ generation.current=token+1 }
+  },[context])
+  const refetchSilent=useCallback(()=>{ void loadList() },[loadList])
+  useListSurfaceRefetch(detailOpen, refetchSilent)
+  const scrollMemoryKey=`playlists:q=${urlQ}`
+  const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(scrollMemoryKey, false)
 
   useEffect(() => onPlaylistImportCompleted(() => {
     void loadList()
   }), [loadList])
 
   const createPlaylist = async (input: PlaylistCreateInput): Promise<void> => {
+    const token=generation.current
     try {
       const newId = await api.playlists.create(input)
-      if(current.current!==session)return
+      if(generation.current!==token)return
       setShowCreate(false)
       toast.show('播放清单已创建', 'success')
       await loadList()
-      if(current.current===session)navigateToPlaylistDetail(navigate, location, newId)
+      if(generation.current===token)navigateToPlaylistDetail(navigate, location, newId)
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -96,8 +102,14 @@ export default function PlaylistsPage(): JSX.Element {
     if (loading) {
       return <EmptyState loading />
     }
-    if (page.error) return <div role="alert">{page.error}<Button onClick={()=>void loadList()}>重试</Button></div>
-    if (items.length === 0 && !urlQ) {
+    if (page.error && !page.total) {
+      return (
+        <EmptyState title="播放清单加载失败" description={page.error}>
+          <Button onClick={() => void loadList()}>重试</Button>
+        </EmptyState>
+      )
+    }
+    if (!page.total && !urlQ) {
       return (
         <EmptyState
           icon={<ListVideo {...UI_ICON_SM} aria-hidden />}
@@ -106,7 +118,7 @@ export default function PlaylistsPage(): JSX.Element {
         />
       )
     }
-    if (filteredItems.length === 0) {
+    if (!page.total) {
       return (
         <EmptyState
           icon={<SearchX {...UI_ICON_SM} aria-hidden />}
@@ -116,8 +128,7 @@ export default function PlaylistsPage(): JSX.Element {
       )
     }
     return (
-      <div className="playlist-grid">
-        {filteredItems.map((item) => {
+      <ContinuousGrid window={page.window} scope={scrollMemoryKey} label="播放清单" minWidth={260} itemHeight={112} pageSize={PLAYLIST_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / PLAYLIST_PAGE_SIZE) * PLAYLIST_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
           const cover = playlistListCover(item)
           return (
             <button
@@ -141,8 +152,7 @@ export default function PlaylistsPage(): JSX.Element {
               </div>
             </button>
           )
-        })}
-      </div>
+        }} />
     )
   }
 
@@ -179,7 +189,7 @@ export default function PlaylistsPage(): JSX.Element {
           }
           resultCount={
             <span className="count-badge count-badge--stable" aria-live="polite">
-              共 {page.data?.total ?? '…'} 个
+              共 {page.known ? page.total : '…'} 个
             </span>
           }
         />
@@ -194,7 +204,7 @@ export default function PlaylistsPage(): JSX.Element {
         {renderList()}
       </ListSurface>
 
-      <PlaylistBrowsePager offset={page.data?.offset ?? offset} limit={60} total={page.data?.total ?? 0} disabled={loading || Boolean(page.error)} onPage={move}/>
+
 
       {showCreate && (
         <PlaylistCreateModal onCancel={() => setShowCreate(false)} onCreate={createPlaylist} />

@@ -1,5 +1,6 @@
 import Button from '../components/Button'
 import { useActressVideoPage } from '../hooks/useActressVideoPage'
+import { useRelatedVideoOffset } from '../hooks/useRelatedVideoOffset'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
@@ -15,7 +16,7 @@ import type { ActressDeleteResult } from '@shared/actressIpcContract'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
-import PosterCard from '../components/PosterCard'
+import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import EditActressModal from '../components/EditActressModal'
 import MergeActressModal from '../components/MergeActressModal'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
@@ -66,7 +67,8 @@ export default function ActressDetailPage(): JSX.Element {
     pendingActressStack
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
   const actressId = Number(actressIdParam ?? id)
-  const works = useActressVideoPage(actressId)
+  const { offset: relatedOffset, move: moveRelated, align: alignRelated } = useRelatedVideoOffset(String(actressId))
+  const works = useActressVideoPage(actressId, false, relatedOffset)
   const knownTotal = useRef<{ id: number; total: number } | null>(null)
   if (works.data) knownTotal.current = { id: actressId, total: works.data.total }
   const videoTotal = knownTotal.current?.id === actressId ? knownTotal.current.total : null
@@ -136,6 +138,8 @@ export default function ActressDetailPage(): JSX.Element {
     void load()
     return () => { metadataSequence.current += 1 }
   }, [actressId, load])
+
+  useEffect(() => { alignRelated(works.known, works.total) }, [alignRelated, works.known, works.total])
 
   useEffect(
     () =>
@@ -457,8 +461,10 @@ export default function ActressDetailPage(): JSX.Element {
       </div>
 
       {activeTab === 'videos' ? (
-        works.loading ? <EmptyState loading /> : works.error ? (
-          <div role="alert">{works.error}<Button onClick={works.reload}>重试</Button></div>
+        works.loading ? <EmptyState loading /> : works.error && works.total === 0 ? (
+          <EmptyState variant="compact" title="关联影片加载失败" description={works.error}>
+            <Button onClick={works.reload}>重试</Button>
+          </EmptyState>
         ) : !works.data || works.data.videos.length === 0 ? (
           <EmptyState
             variant="compact"
@@ -467,16 +473,7 @@ export default function ActressDetailPage(): JSX.Element {
             description="影片刮削后会自动建立关联。"
           />
         ) : (
-          <><div className="poster-grid">
-            {works.data.videos.map((v) => (
-              <PosterCard key={v.id} video={v} />
-            ))}
-          </div>
-          <nav className="actress-works-pagination" aria-label="演员作品分页">
-            <Button disabled={works.offset === 0} onClick={() => works.move(works.offset - 60)}>上一页</Button>
-            <span>第 {Math.floor(works.offset / 60) + 1} 页 · 共 {works.data.total} 部</span>
-            <Button disabled={works.offset + works.data.videos.length >= works.data.total} onClick={() => works.move(works.offset + 60)}>下一页</Button>
-          </nav></>
+          <ContinuousPosterGrid window={works.window} initialIndex={relatedOffset} onAnchor={index => moveRelated(Math.floor(index / 60) * 60)} scope={`actress-works:${actressId}`} />
         )
       ) : (
         <ActressGalleryPanel

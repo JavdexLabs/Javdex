@@ -20,7 +20,17 @@ let Component:typeof import('./ClassificationImageModal').default
 let entity:ClassificationEntityRef={kind:'director',id:1}
 function tree(){return <Component entity={entity} entityLabel="导演" imagePath={null} fallbackCoverPath={null} onCancel={()=>{cancelled++}} onChanged={()=>{changed++}}/>}
 const text=(n:TestRenderer.ReactTestInstance):string=>n.children.map(v=>typeof v==='string'?v:text(v)).join('')
-async function click(label:string){await act(async()=>{const b=renderer!.root.findAllByType('button').find(b=>b.props['aria-label']===label||text(b)===label)!;assert.ok(b,label);assert.ok(!b.props.disabled,label);b.props.onClick()})}
+async function click(label:string){
+ if(label==='下一页'||label==='上一页'){
+  const scroll=renderer!.root.findAll(node=>typeof node.props.onScroll==='function')[0]
+  assert.ok(scroll?.props.onScroll,label)
+  await act(async()=>scroll.props.onScroll({
+   currentTarget:{scrollLeft:label==='下一页'?9840:0,clientWidth:400,clientHeight:80,scrollWidth:10000}
+  }))
+  return
+ }
+ await act(async()=>{const b=renderer!.root.findAllByType('button').find(b=>b.props['aria-label']===label||text(b)===label)!;assert.ok(b,label);assert.ok(!b.props.disabled,label);b.props.onClick()})
+}
 const candidates=()=>renderer!.root.findAllByType('button').filter(b=>/^CODE-/.test(b.props['aria-label']??''))
 async function mount(){Component=(await import('./ClassificationImageModal')).default;await act(async()=>{renderer=TestRenderer.create(tree())})}
 afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;total=125;fail=false;hold=null;saveHold=null;calls.length=0;saves.length=0;cancelled=0;changed=0;entity={kind:'director',id:1}})
@@ -31,21 +41,25 @@ it('loads only the video source and retains the chosen original across 60/60/5 a
  await click('影片封面');assert.equal(candidates().length,60)
  await click('CODE-1');assert.ok(renderer!.root.findAllByType('img').some(n=>n.props.src==='media://covers/1.jpg'))
  assert.equal(candidates()[0].findByType('img').props.src,'media://covers/1.jpg?size=320')
- await click('下一页');assert.equal(candidates()[0].props['aria-label'],'CODE-61')
- fail=true;await click('下一页');assert.equal(candidates().length,0)
- await click('重试');assert.equal(candidates().length,5)
+ await click('下一页');assert.ok(candidates().some(n=>n.props['aria-label']==='CODE-61'))
+ assert.ok(candidates().length<=180)
+ fail=true;await click('下一页');assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(n=>text(n).includes('关联封面加载失败')))
+ assert.ok(candidates().some(n=>n.props['aria-label']==='CODE-61'))
+ await click('重试');assert.ok(candidates().some(n=>n.props['aria-label']==='CODE-121'))
+ assert.ok(candidates().length<=180)
  assert.ok(renderer!.root.findAllByType('img').some(n=>n.props.src==='media://covers/1.jpg'))
  await click('上一页');await click('上一页');assert.equal(candidates()[0].props['aria-pressed'],true)
  await click('保存主图');assert.deepEqual(saves,[{entity:{kind:'director',id:1},input:{source:'video-cover',videoId:1}}]);assert.equal(changed,1);assert.equal(cancelled,1)
 })
 it('clamps a shrunken last page and ignores a response after an entity switch',async()=>{
  await mount();await click('影片封面');await click('下一页');total=30;await click('下一页')
- assert.equal(candidates().length,30);assert.equal(calls.at(-1)!.offset,0)
+ assert.ok(candidates().length>0 && candidates().length<=30)
  total=125;let finish!:(p:ReturnType<typeof page>)=>void;hold=()=>new Promise(resolve=>{finish=resolve})
- await click('本地图片');await click('影片封面');assert.equal(candidates().length,0)
  entity={kind:'series',id:2};await act(async()=>renderer!.update(tree()))
+ await click('影片封面');assert.equal(candidates().length,0)
+ entity={kind:'director',id:3};await act(async()=>renderer!.update(tree()))
  await act(async()=>finish(page(0)));assert.equal(candidates().length,0)
- await click('影片封面');assert.equal(candidates().length,60);assert.deepEqual(calls.at(-1)!.entity,entity)
+ await click('影片封面');assert.equal(candidates().length,60);assert.deepEqual(calls.at(-1)!.entity,{kind:'director',id:3})
 })
 it('does not close or refresh a new entity editor when an old save settles',async()=>{
  await mount();await click('影片封面');await click('CODE-1')

@@ -1,6 +1,7 @@
+import ContinuousGrid from '../ContinuousGrid'
+import { useContinuousPage } from '../../hooks/useContinuousPage'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SearchX } from 'lucide-react'
-import type { ActressPickerItem } from '@shared/actressTypes'
 import { parseTestTargetList } from '@shared/pluginDevKindProfile'
 import type { Video } from '@shared/videoTypes'
 import { api, resolveMediaSrc } from '../../api'
@@ -51,10 +52,10 @@ function TargetPickerSession({
   const debouncedSearch = useDebounce(search, 250)
   const [videos, setVideos] = useState<Video[]>([])
   const [videoTotal, setVideoTotal] = useState(0)
-  const [actresses, setActresses] = useState<ActressPickerItem[]>([])
+  const candidates = useContinuousPage(`test-actresses:${debouncedSearch}`, ACTRESS_RESULT_LIMIT,
+    offset => api.actresses.testTargetPage({ search: debouncedSearch.trim(), limit: ACTRESS_RESULT_LIMIT, offset }), kind === 'actress' && search === debouncedSearch)
+  const actresses = candidates.items
   const [loading, setLoading] = useState(true)
-  const [offset, setOffset] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
   const [retry, setRetry] = useState(0)
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [resolvingSelection, setResolvingSelection] = useState(false)
@@ -84,9 +85,6 @@ function TargetPickerSession({
     setChoiceError(null)
   }
   const close = (): void => { choiceEpoch.current++; onClose() }
-  const movePage = (nextOffset: number): void => {
-    invalidateChoice(); setActresses([]); setHasMore(false); setLoading(true); setOffset(nextOffset)
-  }
   const chooseActress = async (id: number): Promise<void> => {
     if (choiceBusy.current) return
     choiceBusy.current = true
@@ -112,17 +110,11 @@ function TargetPickerSession({
     let cancelled = false
     setLoading(true)
     setError(null)
-    setActresses([]); setVideos([]); setHasMore(false)
+    setVideos([])
     if (search !== debouncedSearch) return () => { cancelled = true }
 
     const load = async (): Promise<void> => {
-      if (kind === 'actress') {
-        const page = await api.actresses.testTargetPage({search: debouncedSearch.trim(),limit: ACTRESS_RESULT_LIMIT,offset})
-        if (cancelled) return
-        setActresses(page.items)
-        setHasMore(page.hasMore)
-        return
-      }
+      if (kind === 'actress') return
 
       const result = await api.videos.list(ALL_CATALOG_SCOPE, {
         search: debouncedSearch.trim() || undefined,
@@ -134,7 +126,6 @@ function TargetPickerSession({
       if (cancelled) return
       setVideos(result.items)
       setVideoTotal(result.total)
-      setActresses([])
     }
 
     void load()
@@ -148,7 +139,7 @@ function TargetPickerSession({
     return () => {
       cancelled = true
     }
-  }, [debouncedSearch, search, kind, offset, retry])
+  }, [debouncedSearch, search, kind, retry])
 
   useEffect(() => {
     let cancelled = false
@@ -168,12 +159,12 @@ function TargetPickerSession({
     }
     void Promise.all(Array.from({ length: Math.min(4, uncertain.length) }, worker)).then(() => {
       if (cancelled) return
-      setResolvedNames(current => ({ ...Object.fromEntries(Object.entries(current).filter(([key]) => !(key in resolved)).slice(-(100 - uncertain.length))), ...resolved }))
+      setResolvedNames(current => ({ ...Object.fromEntries(Object.entries(current).filter(([key]) => !(key in resolved)).slice(-Math.max(0, 120 - uncertain.length))), ...resolved }))
       setResolvingSelection(false)
       if (failed) setSelectionError('部分长名称的已选状态无法确认，请重试')
     })
     return () => { cancelled = true }
-  }, [actresses, selectedSet])
+  }, [actresses, selectedSet, retry])
 
   const resultCount = kind === 'actress' ? actresses.length : videos.length
 
@@ -198,10 +189,10 @@ function TargetPickerSession({
             maxLength={kind === 'actress' ? 256 : undefined}
             placeholder={kind === 'actress' ? '搜索演员名或别名…' : '搜索番号、标题或演员…'}
             autoFocus
-            onChange={(event) => { invalidateChoice(); setActresses([]); setVideos([]); setLoading(true); setOffset(0); setSearch(event.target.value) }}
+            onChange={(event) => { invalidateChoice(); setVideos([]); setLoading(true); setSearch(event.target.value) }}
           />
           <span className="plugin-dev-target-picker-count">
-            {loading ? '加载中…' : kind === 'actress' ? `本页 ${resultCount} 名候选` : `${resultCount}/${videoTotal}`}
+            {(kind === 'actress' ? candidates.loading || search !== debouncedSearch : loading) ? '加载中…' : kind === 'actress' ? '选择测试演员' : `${resultCount}/${videoTotal}`}
           </span>
         </div>
 
@@ -211,7 +202,7 @@ function TargetPickerSession({
 
         <div className="plugin-dev-target-picker-list" role="list">
           {kind === 'actress'
-            ? actresses.map((actress) => {
+            ? search === debouncedSearch && <ContinuousGrid remember={false} window={candidates.window} scope={`test-actresses:${debouncedSearch}`} label="测试演员" itemHeight={64} itemKey={actress => actress.id} renderItem={actress => {
                 const exactName = resolvedNames[actress.id] ?? (Array.from(actress.main_name).length <= 128 ? actress.main_name : '')
                 const selected = exactName !== '' && selectedSet.has(normalizeTarget(exactName))
                 return (
@@ -241,7 +232,7 @@ function TargetPickerSession({
                     </span>
                   </button>
                 )
-              })
+              }} />
             : videos.map((video) => {
                 const selected = selectedSet.has(normalizeTarget(video.code))
                 const poster = resolveMediaSrc(video.poster_path ?? video.cover_path)
@@ -277,11 +268,7 @@ function TargetPickerSession({
             />
           ) : null}
         </div>
-        {kind === 'actress' ? <div className="plugin-dev-target-picker-pagination" aria-label="测试演员分页">
-          <Button size="sm" disabled={loading || offset === 0} onClick={() => movePage(Math.max(0, offset - ACTRESS_RESULT_LIMIT))}>上一页</Button>
-          <span>第 {Math.floor(offset / ACTRESS_RESULT_LIMIT) + 1} 页</span>
-          <Button size="sm" disabled={loading || !hasMore} onClick={() => movePage(offset + ACTRESS_RESULT_LIMIT)}>下一页</Button>
-        </div> : null}
+
       </div>
     </Modal>
   )

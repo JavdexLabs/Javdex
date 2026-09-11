@@ -38,6 +38,7 @@ import styles from './AppearanceSettingsPanel.module.css'
 import SettingsFormActions from './SettingsFormActions'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
+import { WEB_ACCESS_LABEL } from '../../settings/settingsRoutes'
 
 // Keep in sync with --avatar-composition-preview-size in the panel CSS module.
 const AVATAR_COMPOSITION_PREVIEW_SIZE = 128
@@ -778,7 +779,7 @@ export default function AppearanceSettingsPanel({
         <div className="settings-toggle-list">
           <SettingsSwitchRow
             title="关闭窗口后最小化到系统托盘"
-            description="关闭窗口时继续运行，局域网访问和后台任务不受影响；从托盘菜单选择“退出 Javdex”可完全退出。"
+            description={`关闭窗口时继续运行，${WEB_ACCESS_LABEL}和后台任务不受影响；从托盘菜单选择“退出 Javdex”可完全退出。`}
             checked={settings.closeToTray}
             onChange={(checked) => onPatchSettings({ closeToTray: checked })}
           />

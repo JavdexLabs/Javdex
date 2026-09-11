@@ -181,19 +181,31 @@ it('pages associated covers without loading an actress detail or accumulating ti
   const Component = (await import('./ActressAvatarEditor')).default
   await act(async () => { renderer = TestRenderer.create(<Component actressId={1} displayUrl={null} sourceUrl={null} savedCrop={null} onAvatarChange={() => undefined} />) })
   const tiles = () => renderer!.root.findAllByType('button').filter(node => /^COVER-\d+$/.test(node.props['aria-label'] ?? ''))
-  const click = async (label: string) => { await act(async () => { renderer!.root.findAllByType('button').find(node => nodeText(node) === label)!.props.onClick() }) }
+  const click = async (label: string) => {
+    const scroll = renderer!.root.findAll(node => typeof node.props.onScroll === 'function')[0]
+    assert.ok(scroll?.props.onScroll, label)
+    await act(async () => scroll.props.onScroll({
+      currentTarget: {
+        scrollLeft: label === '下一页' ? 9840 : 0,
+        clientWidth: 400,
+        clientHeight: 80,
+        scrollWidth: 10000
+      }
+    }))
+  }
   assert.equal(tiles().length, 60)
   assert.equal(new URL(tiles()[0].findByType('img').props.src).searchParams.get('size'), '320')
   assert.ok(coverCalls.every(query => query.withCover === true))
   await click('下一页')
-  assert.equal(tiles().length, 60)
-  assert.equal(tiles()[0].props['aria-label'], 'COVER-61')
+  assert.ok(tiles().some(tile=>tile.props['aria-label']==='COVER-61'))
+  assert.ok(tiles().length <= 180)
   await click('下一页')
-  assert.equal(tiles().length, 5)
+  assert.ok(tiles().some(tile=>tile.props['aria-label']==='COVER-121'))
+  assert.ok(tiles().length <= 180)
   await click('上一页')
   await click('上一页')
   assert.equal(tiles()[0].props['aria-label'], 'COVER-1')
-  assert.deepEqual(coverCalls.map(query => query.offset), [0,60,120,60,0])
+  assert.deepEqual(coverCalls.map(query => query.offset), [0,60,120])
 })
 
 it('does not replace a user-selected source tab when the first cover page arrives late', async () => {

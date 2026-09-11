@@ -247,11 +247,3 @@
     justify-items: stretch;
   }
 }
-
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--classification-image-control-gap);
-  flex-wrap: wrap;
-}

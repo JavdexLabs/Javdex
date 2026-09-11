@@ -100,7 +100,7 @@ export default function PairLogin({
   return (
     <div className="pair-login">
       <p className="muted">
-        在桌面「设置 → 网络 → 局域网 Web 访问」开启设备配对，再获取配对码。
+        在桌面「设置 → 网络 → 网页服务」开启设备配对，再获取配对码。
       </p>
       {!pair ? (
         <>

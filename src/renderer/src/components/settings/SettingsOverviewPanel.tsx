@@ -10,8 +10,10 @@ import {
   Play,
   SlidersHorizontal,
   SquareTerminal,
-  UserRound
+  UserRound,
+  Wifi
 } from 'lucide-react'
+import type { WebAccessStatus } from '@shared/webTypes'
 import type { SettingsSnapshot, ThemeId } from '@shared/settingsTypes'
 import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
@@ -19,8 +21,12 @@ import { api } from '../../api'
 import { UI_ICON_SM } from '../iconDefaults'
 import { useToast } from '../Toast'
 import { useLibraryOverviewStats } from '../../hooks/useLibraryOverviewStats'
-import type { SettingsGroup, SettingsTab } from '../../settings/settingsRoutes'
-import { batchStatusLabel, formatCompactPath } from '../../settings/settingsDisplay'
+import { WEB_ACCESS_LABEL, type SettingsGroup, type SettingsTab } from '../../settings/settingsRoutes'
+import {
+  batchStatusLabel,
+  formatCompactPath,
+  webAccessOverviewStatus
+} from '../../settings/settingsDisplay'
 import IconButton from '../IconButton'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
 import Button from '../Button'
@@ -92,7 +98,7 @@ interface SettingsOverviewPanelProps {
   mediaLibrariesLoading: boolean
   mediaLibrariesError: boolean
   statsRefreshKey?: number
-  onNavigate: (group: SettingsGroup, tab?: SettingsTab) => void
+  onNavigate: (group: SettingsGroup, tab?: SettingsTab, hash?: string) => void
   onOpenMediaLibrarySettings: () => void
   onOpenAgentTool: (toolId: SettingsOverviewAgentToolId) => void
   onStartVideoBatchDefault: () => void
@@ -388,6 +394,8 @@ export default function SettingsOverviewPanel({
   const { stats, isLoading: statsLoading } = useLibraryOverviewStats(statsRefreshKey)
   const [modelManagement, setModelManagement] = useState<ModelManagementSnapshot | null>(null)
   const [modelManagementError, setModelManagementError] = useState<string | null>(null)
+  const [webAccess, setWebAccess] = useState<WebAccessStatus | null>(null)
+  const [webAccessError, setWebAccessError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -399,6 +407,16 @@ export default function SettingsOverviewPanel({
       })
       .catch((error: unknown) => {
         if (!cancelled) setModelManagementError((error as Error).message)
+      })
+    void api.webAccess
+      .status()
+      .then((status) => {
+        if (cancelled) return
+        setWebAccess(status)
+        setWebAccessError(null)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setWebAccessError((error as Error).message)
       })
     return () => { cancelled = true }
   }, [])
@@ -427,6 +445,7 @@ export default function SettingsOverviewPanel({
 
   const scrapeProxy = proxyStatus(settings.proxyUrlEnabled, settings.proxyUrl ?? '')
   const llmProxy = proxyStatus(settings.llmProxyUrlEnabled, settings.llmProxyUrl ?? '')
+  const lanAccess = webAccessOverviewStatus({ status: webAccess, error: webAccessError })
 
   const videoDefaultBlockReason = scrapeActionBlockReason({
     anyBatchActive,
@@ -536,13 +555,22 @@ export default function SettingsOverviewPanel({
             onClick={onOpenMediaLibrarySettings}
           />
           <SettingsStatusCard
+            icon={Wifi}
+            label={WEB_ACCESS_LABEL}
+            value={lanAccess.value}
+            detail={lanAccess.detail}
+            hint={lanAccess.hint}
+            attention={lanAccess.attention}
+            onClick={() => onNavigate('network', 'web')}
+          />
+          <SettingsStatusCard
             icon={Clapperboard}
             label="影片刮削"
             value={settings.defaultScraper || '未设置'}
             detail={`${videoPluginCount} 个插件`}
             emphasizeValue
             attention={!settings.defaultScraper}
-            onClick={() => onNavigate('plugins')}
+            onClick={() => onNavigate('plugins', 'video')}
           />
           <SettingsStatusCard
             icon={UserRound}
@@ -551,21 +579,21 @@ export default function SettingsOverviewPanel({
             detail={`${actressPluginCount} 个插件`}
             emphasizeValue
             attention={!settings.defaultActressScraper}
-            onClick={() => onNavigate('plugins')}
+            onClick={() => onNavigate('plugins', 'actress')}
           />
           <SettingsStatusCard
             icon={Globe}
             label="刮削代理"
             value={scrapeProxy.value}
             detail={scrapeProxy.detail}
-            onClick={() => onNavigate('network')}
+            onClick={() => onNavigate('network', 'proxy', 'settings-proxy-scrape')}
           />
           <SettingsStatusCard
             icon={Bot}
             label="模型代理"
             value={llmProxy.value}
             detail={llmProxy.detail}
-            onClick={() => onNavigate('network')}
+            onClick={() => onNavigate('network', 'proxy', 'settings-proxy-llm')}
           />
           <SettingsStatusCard
             icon={Brain}
@@ -574,7 +602,7 @@ export default function SettingsOverviewPanel({
             detail={defaultModel?.modelName ?? modelManagementError ?? defaultModel?.reason ?? '未选择模型'}
             emphasizeValue
             attention={defaultModel?.ready !== true}
-            onClick={() => onNavigate('models')}
+            onClick={() => onNavigate('models', 'usage')}
           />
           <SettingsStatusCard
             icon={Palette}
@@ -586,7 +614,7 @@ export default function SettingsOverviewPanel({
               />
             }
             detail={themeLabel}
-            onClick={() => onNavigate('appearance')}
+            onClick={() => onNavigate('appearance', 'theme')}
           />
           <SettingsStatusCard
             icon={HardDrive}
@@ -594,7 +622,7 @@ export default function SettingsOverviewPanel({
             value={settings.assetEncryption ? '加密' : '明文'}
             detail={mediaAssetsPathLabel}
             hint={mediaAssetsPath || undefined}
-            onClick={() => onNavigate('storage')}
+            onClick={() => onNavigate('storage', 'assets')}
           />
         </div>
       </section>

@@ -63,6 +63,7 @@ import {
 } from './playlistRoutes'
 import {
   SETTINGS_GROUPS,
+  WEB_ACCESS_LABEL,
   resolveSettingsRoute,
   settingsPath,
   settingsPluginDevPath
@@ -780,7 +781,7 @@ describe('settings route contract', () => {
   it('builds canonical settings paths and resolves valid sections', () => {
     assert.equal(settingsPath('overview'), '/settings/overview/status')
     assert.equal(settingsPath('library'), '/settings/library/sources')
-    assert.equal(settingsPath('network'), '/settings/network/proxy')
+    assert.equal(settingsPath('network'), '/settings/network/web')
     assert.equal(settingsPath('network', 'web'), '/settings/network/web')
     assert.equal(resolveSettingsRoute('/settings/network/web').tab, 'web')
     assert.deepEqual(SETTINGS_GROUPS.slice(0, 2).map((group) => group.id), [
@@ -804,9 +805,9 @@ describe('settings route contract', () => {
       group: {
         id: 'network',
         label: '网络',
-        hint: '代理连接',
-        defaultTab: 'proxy',
-        tabs: [{ id: 'proxy', label: '代理' }, { id: 'web', label: '局域网访问' }]
+        hint: `${WEB_ACCESS_LABEL}与代理`,
+        defaultTab: 'web',
+        tabs: [{ id: 'web', label: WEB_ACCESS_LABEL }, { id: 'proxy', label: '代理' }]
       },
       tab: 'proxy'
     })

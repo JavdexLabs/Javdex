@@ -7,6 +7,7 @@ import SettingsSwitchRow from "../SettingsSwitchRow";
 import Button from "../Button";
 import { SettingsCard } from "./SettingsPrimitives";
 import SettingsFormActions from "./SettingsFormActions";
+import { WEB_ACCESS_LABEL } from "../../settings/settingsRoutes";
 import styles from "./WebAccessPanel.module.css";
 import WebDevices, { AddressCode } from "./WebDevices";
 import SelectControl from "../SelectControl";
@@ -25,7 +26,7 @@ export default function WebAccessPanel(): JSX.Element {
   if (!status)
     return (
       <div role="status">
-        {error ?? "正在读取 Web 服务状态…"}
+        {error ?? `正在读取${WEB_ACCESS_LABEL}状态…`}
         {error && <Button onClick={load}>重试</Button>}
       </div>
     );
@@ -113,7 +114,7 @@ function WebAccessForm({
     }
   };
   useSettingsFormGuard({
-    label: "局域网 Web 访问",
+    label: WEB_ACCESS_LABEL,
     dirty: form.dirty,
     busy: saving,
     save,
@@ -142,8 +143,8 @@ function WebAccessForm({
         <div className={styles.form}>
           <div className="settings-toggle-list">
             <SettingsSwitchRow
-              title="启用 Web 服务"
-              description="允许同一局域网内的设备访问媒体库。"
+              title={`开启${WEB_ACCESS_LABEL}`}
+              description="手机、平板、电视和电脑连上同一网络后，可用浏览器打开媒体库。"
               checked={form.draft.enabled}
               disabled={saving}
               onChange={(enabled) => form.setDraft((d) => ({ ...d, enabled }))}
@@ -224,7 +225,7 @@ function WebAccessForm({
             </p>
           )}
           <p className={styles.hint}>
-            使用局域网 HTTP，仅在可信网络使用，请勿将端口映射到公网。
+            仅在自己的网络使用，请勿把端口映射到公网。
           </p>
         </div>
       </SettingsCard>
@@ -243,7 +244,7 @@ function WebAccessForm({
               data-running={status.running}
               role="status"
             >
-              {status.running ? "运行中" : status.error ? "启动失败" : "已关闭"}
+              {status.running ? "可打开" : status.error ? "启动失败" : "未开启"}
             </span>
             <Button
               size="sm"
@@ -276,7 +277,7 @@ function WebAccessForm({
           </div>
           <div className={styles.accessFeedback}>
             <Button size="sm" variant="ghost" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}>{helpOpen ? '收起说明' : '无法连接？'}</Button>
-            <div className={styles.inlineFeedback} role="status">{addressFeedback || (helpOpen ? '其他设备需连接同一局域网，使用非 127.0.0.1 的地址。可切换其他地址尝试，并检查防火墙是否允许此端口。' : status.error || (!status.running ? '请在上方启用并保存服务配置。' : '连接同一局域网后，使用此地址访问。'))}</div>
+            <div className={styles.inlineFeedback} role="status">{addressFeedback || (helpOpen ? '其他设备需连接同一网络（例如同一个 Wi-Fi），不要使用仅本机地址。可切换其他地址尝试，并检查防火墙是否允许此端口。' : status.error || (!status.running ? '请在上方开启并保存。' : '连上同一网络后，用浏览器打开此地址。'))}</div>
             {addressFeedback && <Button size="sm" variant="ghost" onClick={() => setAddressFeedback("")}>关闭提示</Button>}
           </div>
         </div>
@@ -292,7 +293,7 @@ function WebAccessForm({
           <div className={styles.qr}>
             <AddressCode url={url} />
             <p className={styles.hint}>
-              连接同一局域网后扫码；二维码仅打开网页，仍需登录或配对。
+              连上同一网络后扫码；二维码只打开网页，仍需登录或配对。
             </p>
           </div>
         </Modal>

@@ -150,10 +150,9 @@ try {
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     await page.locator('[data-browse-results] .video-card').last().waitFor()
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
-    await checkControlFocus(page.locator('.year-filter input'))
     if (touch) {
-      for (const selector of ['.logout', '.year-filter input', '.search-submit']) {
-        const box = await page.locator(selector).boundingBox()
+      for (const selector of ['.logout', '.sort-tabs button', '.search-submit']) {
+        const box = await page.locator(selector).first().boundingBox()
         assert.ok(box.width >= 48 && box.height >= 48, `${width}: ${selector}`)
       }
       assert.equal(await page.locator('.search input').evaluate(el => getComputedStyle(el).fontSize), '16px')

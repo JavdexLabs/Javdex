@@ -8,7 +8,7 @@ import Modal from './Modal'
 import EmptyState from './EmptyState'
 import { UI_ICON_SM } from './iconDefaults'
 import Button from './Button'
-import PlaylistBrowsePager from './PlaylistBrowsePager'
+import ContinuousGrid from './ContinuousGrid'
 
 export default function PlaylistVideoPicker({ videoIds, single, subtitle, onCancel, onChanged }: {
   videoIds: number[];single?: boolean;subtitle: string;onCancel:()=>void;onChanged?:()=>void
@@ -24,7 +24,7 @@ export default function PlaylistVideoPicker({ videoIds, single, subtitle, onCanc
   useEffect(()=>{ active.current=true;return()=>{ active.current=false } },[])
   const search = useDebounce(query.trim(),250)
   const ready = search === query.trim()
-  const page = usePlaylistBrowsePage({search,offset,limit:60,videoId:single ? videoIds[0] : undefined,locale:Intl.DateTimeFormat().resolvedOptions().locale},ready)
+  const page = usePlaylistBrowsePage({search,offset,limit:60,videoId:single ? videoIds[0] : undefined,locale:Intl.DateTimeFormat().resolvedOptions().locale})
   const canCreate = ready && !page.loading && !page.error && Boolean(page.data) && Boolean(query.trim()) && !page.data?.hasExactName
   async function change(id: number|'create', remove = false): Promise<void> {
     if (gate.current || !ready || page.loading || page.error || (id==='create' && !canCreate)) return
@@ -61,9 +61,9 @@ export default function PlaylistVideoPicker({ videoIds, single, subtitle, onCanc
           {busyId==='create' ? '创建中…' : '创建并加入'}
         </Button>
       </div>
-      {!ready || page.loading ? <EmptyState variant="modal" loading/> : page.error ? <div role="alert">{page.error}<Button onClick={()=>void page.reload()}>重试</Button></div>
-        : !page.data?.items.length ? <EmptyState variant="modal" title={search ? '没有匹配的清单' : '暂无播放清单'}/>
-          : <div className="playlist-pick-list">{page.data.items.map(item=>{
+      {page.loading ? <EmptyState variant="modal" loading/> : page.error && !page.total ? <EmptyState variant="modal" title="清单读取失败" description={page.error}><Button onClick={()=>void page.reload()}>重试</Button></EmptyState>
+        : !page.total ? <EmptyState variant="modal" title={search ? '没有匹配的清单' : '暂无播放清单'}/>
+          : <ContinuousGrid contained fill window={page.window} scope={`playlist-pick:${search}`} label="清单候选" itemHeight={86} gap={8} itemKey={item=>item.id} renderItem={item=>{
             const cover=assetUrl(item.preview_cover_path,320)
             return <div key={item.id} className="playlist-pick-row">
               <div className="playlist-pick-cover">{cover ? <img src={cover} alt={item.name}/> : <span className="playlist-pick-cover-placeholder"><ListVideo {...UI_ICON_SM}/></span>}</div>
@@ -72,8 +72,8 @@ export default function PlaylistVideoPicker({ videoIds, single, subtitle, onCanc
                 {busyId===item.id ? '处理中…' : single && item.contains_video ? '移出' : '加入'}
               </Button>
             </div>
-          })}</div>}
-      <PlaylistBrowsePager offset={page.data?.offset ?? offset} limit={60} total={page.data?.total ?? 0} disabled={disabled || !ready || page.loading || Boolean(page.error)} onPage={setOffset}/>
+          }} />}
+
     </div>
   </Modal>
 }

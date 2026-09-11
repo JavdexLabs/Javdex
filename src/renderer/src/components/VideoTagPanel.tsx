@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { VideoTag } from '@shared/videoTypes'
 import { api } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
@@ -47,6 +47,25 @@ export default function VideoTagPanel({
   const searchPending = search !== debouncedSearch
   const options = useManualTagOptions(addOpen && !searchPending, videoId, debouncedSearch, offset, retry)
   const catalogLoading = searchPending || options.loading
+  const catalogScrollRef = useRef<HTMLDivElement>(null)
+  const onCatalogRange = options.window.onVisibleRange
+  const catalogItems = options.items
+  const catalogHasMore = options.hasMore
+  const onCatalogScroll = (event: { currentTarget: { scrollTop: number; clientHeight: number; scrollHeight: number } }): void => {
+    const { scrollTop, clientHeight, scrollHeight } = event.currentTarget
+    const overflow = scrollHeight > clientHeight + 8
+    if (scrollTop <= 24) onCatalogRange(0, 20)
+    if (overflow && scrollTop + clientHeight >= scrollHeight - 32) {
+      onCatalogRange(Math.max(catalogItems.length, 1) - 1, catalogItems.length + 99)
+    }
+  }
+  useLayoutEffect(() => {
+    const cloud = catalogScrollRef.current
+    if (!cloud || catalogLoading || options.error || !catalogHasMore || catalogItems.length === 0 || catalogItems.length >= 300) return
+    if (cloud.scrollHeight <= cloud.clientHeight + 8) {
+      onCatalogRange(Math.max(catalogItems.length, 1) - 1, catalogItems.length + 99)
+    }
+  }, [catalogItems.length, catalogHasMore, catalogLoading, options.error, onCatalogRange])
 
   const dismissOverlays = useCallback(() => {
     setAddForVideoId(null)
@@ -202,13 +221,13 @@ export default function VideoTagPanel({
               <div className="video-tag-add-modal-catalog-head">
                 <span className="app-form-section-title">已有自定义标签</span>
                 <span className="video-tag-add-modal-catalog-count" aria-live="polite">
-                  {catalogLoading ? '加载中…' : `按名称 · 第 ${offset / 100 + 1} 页 · ${options.items.length} 项`}
+                  {catalogLoading ? '加载中…' : '按名称'}
                 </span>
               </div>
-              <div className="video-tag-add-modal-catalog-scroll">
+              <div ref={catalogScrollRef} className="video-tag-add-modal-catalog-scroll" onScroll={onCatalogScroll}>
                 {catalogLoading ? (
                   <EmptyState variant="modal" loading title="正在加载标签…" />
-                ) : options.error ? (
+                ) : options.error && options.window.total === 0 ? (
                   <EmptyState variant="modal" title="标签加载失败" description={options.error}>
                     <Button size="sm" onClick={() => setRetry(value => value + 1)}>重试</Button>
                   </EmptyState>
@@ -229,34 +248,34 @@ export default function VideoTagPanel({
                     description={'\u8c03\u6574\u5173\u952e\u8bcd\uff0c\u6216\u5728\u4e0a\u65b9\u76f4\u63a5\u521b\u5efa\u65b0\u6807\u7b7e\u3002'}
                   />
                 ) : (
-                  <div className="video-tag-add-modal-catalog-list">
-                    {options.items.map((tag) => {
-                      const onVideo = manualIdsOnVideo.has(tag.id)
-                      return (
-                        <button
-                          key={tag.id}
-                          type="button"
-                          className={`tag-chip tag-chip--custom-pick${onVideo ? ' is-on-video' : ''}`}
-                          disabled={busy || onVideo}
-                          onClick={() => void addTag({ tagId: tag.id })}
-                          title={
-                            onVideo ? `已添加：${tag.label}` : `添加自定义标签：${tag.label}`
-                          }
-                          aria-pressed={onVideo}
-                        >
-                          {tag.label}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  <>
+                    <div className="video-tag-add-modal-catalog-list">
+                      {options.items.map((tag) => {
+                        const onVideo = manualIdsOnVideo.has(tag.id)
+                        return (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            className={`tag-chip tag-chip--custom-pick${onVideo ? ' is-on-video' : ''}`}
+                            disabled={busy || onVideo}
+                            onClick={() => void addTag({ tagId: tag.id })}
+                            title={
+                              onVideo ? `已添加：${tag.label}` : `添加自定义标签：${tag.label}`
+                            }
+                            aria-pressed={onVideo}
+                          >
+                            {tag.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {options.error ? (
+                      <div role="alert">{options.error}<Button size="sm" onClick={options.reload}>重试</Button></div>
+                    ) : null}
+                  </>
                 )}
               </div>
-              <nav className="video-tag-add-modal-catalog-head" aria-label="标签候选分页">
-                <Button size="sm" disabled={busy || catalogLoading || offset === 0}
-                  onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</Button>
-                <Button size="sm" disabled={busy || catalogLoading || !options.hasMore}
-                  onClick={() => setOffset(value => value + 100)}>下一页</Button>
-              </nav>
+
             </section>
           </div>
         </Modal>

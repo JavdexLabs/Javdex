@@ -16,12 +16,9 @@ export function ensureTag(name: string): number {
 
 export type { TagListItem }
 
-function queryTags(manualOnly: boolean): TagListItem[] {
-  // Materialize visibility once; shared membership must not multiply relationship counts.
-  // The uncorrelated manual-tag set also retains invisible-only associations.
-  // A correlated EXISTS can repeatedly scan all manual links under skewed statistics.
-  return getDb().prepare(
-    `WITH members AS MATERIALIZED (
+/** Visible-library membership counts; shared members must not multiply relationships. */
+function tagVisibleCountCte(manualOnly: boolean): string {
+  return `WITH members AS MATERIALIZED (
        SELECT DISTINCT membership.video_id
        FROM library_video_memberships membership
        JOIN media_libraries library ON library.id = membership.library_id
@@ -31,7 +28,14 @@ function queryTags(manualOnly: boolean): TagListItem[] {
        FROM video_tag vt JOIN members ON members.video_id = vt.video_id
        ${manualOnly ? "WHERE vt.origin = 'manual'" : ''}
        GROUP BY vt.tag_id
-     )
+     )`
+}
+
+function queryTags(manualOnly: boolean): TagListItem[] {
+  // The uncorrelated manual-tag set also retains invisible-only associations.
+  // A correlated EXISTS can repeatedly scan all manual links under skewed statistics.
+  return getDb().prepare(
+    `${tagVisibleCountCte(manualOnly)}
      SELECT t.*, COALESCE(counts.video_count, 0) AS video_count
      FROM tags t LEFT JOIN counts ON counts.tag_id = t.id
      ${manualOnly ? `WHERE t.id IN (

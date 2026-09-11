@@ -1,4 +1,4 @@
-import RelatedVideoPager from '../components/RelatedVideoPager'
+import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
 import { Clapperboard, ExternalLink, GitMerge, ImagePlus, Pencil, SearchX, Trash2 } from 'lucide-react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
@@ -18,7 +18,6 @@ import DirectorEditModal from '../components/DirectorEditModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
-import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useCatalogVideoPage } from '../query/useCatalogVideoPage'
@@ -59,7 +58,7 @@ export default function DirectorDetailPage(): JSX.Element {
   )
   const videoPage =
     useCatalogVideoPage(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
-  const { videos, total, loading, refetchSilent } = videoPage
+  const { total, loading, refetchSilent } = videoPage
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`director-detail:${hash}`)
   const save = async (input: DirectorUpdateInput): Promise<void> => {
@@ -260,12 +259,7 @@ export default function DirectorDetailPage(): JSX.Element {
             />
           ) : (
             <>
-              <div className="poster-grid organization-video-grid">
-                {videos.map((video) => (
-                  <PosterCard key={video.id} video={video} />
-                ))}
-              </div>
-              <RelatedVideoPager {...videoPage} />
+              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={hash} />
             </>
           )}
         </ListSurface>

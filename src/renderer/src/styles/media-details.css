@@ -2081,7 +2081,13 @@ button.tag-chip.clickable:focus-visible {
 .video-tag-add-modal-catalog-list {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+}
+
+.video-tag-add-modal-catalog-list .tag-chip--custom-pick {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .video-tag-add-modal-empty {

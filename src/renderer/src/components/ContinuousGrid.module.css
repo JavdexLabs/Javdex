@@ -1,0 +1,61 @@
+.viewport {
+  height: min(360px, 45vh);
+  min-height: 120px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: var(--focus-ring-space);
+}
+
+.grid {
+  position: relative;
+  min-width: 0;
+}
+
+.cell {
+  position: absolute;
+  min-width: 0;
+}
+
+.cell > :first-child {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  max-width: 100%;
+}
+
+.placeholder {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.error {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--form-label-gap);
+  padding: var(--form-label-gap);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+}
+
+.fill {
+  flex: 1 1 0;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+}
+
+.external {
+  flex-shrink: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.cell > button,
+.cell > label {
+  width: 100%;
+  min-width: 0;
+}

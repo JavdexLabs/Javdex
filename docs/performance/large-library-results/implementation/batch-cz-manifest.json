@@ -1,0 +1,19 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cz-build.log": "ec44312fe086b97516d26d1de893b2de1ff7cfeda4727467f7f7c331b21a2122",
+    "batch-cz-compact-results.patch": "bf9d7b7dfeb9510c729cdb3beb2848cf8e256310d3dcd5677dea63f28f36e32b",
+    "batch-cz-full.log": "f9dc7c579e94a770b6187f74df66fd94b68514c0e84dc40d3bc6abdff76011ba",
+    "batch-cz-review.md": "8fa7b632e8138472597d48bd2dce6f874d858a19bd90c0ff1a85e0452051e157",
+    "batch-cz-target.log": "7866d4f557e1eb7f6f2e010525605637bbea1e22d9a8c7a41737584931b289c6",
+    "batch-cz-types.log": "a1499b3bc5addd579ca0b5fbe2dfacab17f004bb6597d0b95b5a9d5039c665bc"
+  },
+  "notes": [
+    "Selected cumulative patch depends on preceding batches, not a standalone sequential patch.",
+    "239 focused pass; full2698pass/1skip/0fail(2699total), typecheck/build/full processes each observed terminal exit0.",
+    "Default entries does not allocate newCodes/unrecognizedFiles; result/event/IPC runtime field allowlist, legacy internal details preserved.",
+    "Native unknown audit failure counters now count only successful persistence; scannedFiles stays attempted files.",
+    "Actual scanner payload1 unknown297B vs300 unknown303B; no total scanner RSS/p95/platform assertion.",
+    "Full15/42 incomplete: remaining discovery/preflight/NFO containers, CY sync cleanup latency and broader matrix."
+  ]
+}

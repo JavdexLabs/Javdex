@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ScanResult } from './libraryTypes'
+import type { ScanCompletionResult } from './libraryTypes'
 import { buildLibraryScanNotification } from './libraryScanNotification'
 
-function result(patch: Partial<ScanResult> = {}): ScanResult {
+function result(patch: Partial<ScanCompletionResult> = {}): ScanCompletionResult {
   return {
     libraryId: 1,
     runId: 'run-1',
@@ -20,8 +20,7 @@ function result(patch: Partial<ScanResult> = {}): ScanResult {
     promoted: 0,
     deletedVideos: 0,
     offlineFolders: [],
-    newCodes: [],
-    unrecognizedFiles: [],
+    unrecognizedCount: 0,
     strmFailures: [],
     omittedStrmFailures: 0,
     ...patch
@@ -72,7 +71,7 @@ describe('buildLibraryScanNotification', () => {
     const notification = buildLibraryScanNotification(
       result({
         failed: 3,
-        unrecognizedFiles: ['/library/UNKNOWN.mp4'],
+        unrecognizedCount: 1,
         strmFailures: [
           { sourcePath: '/library/A.strm', code: 'missing_target', message: 'STRM 中没有可用目标' }
         ],
@@ -105,5 +104,20 @@ describe('buildLibraryScanNotification', () => {
       )?.message ?? '',
       /扫描失败/
     )
+  })
+
+  it('classifies large compact counts without retaining paths or treating unknown files as processing failures', () => {
+    const compact = result({ scannedFiles: 600000, failed: 600000, unrecognizedCount: 600000 })
+    assert.equal(Object.hasOwn(compact, 'newCodes'), false)
+    assert.equal(Object.hasOwn(compact, 'unrecognizedFiles'), false)
+    assert.deepEqual(buildLibraryScanNotification(compact), {
+      message: '扫描完成：600000 个文件无法识别，请查看待处理列表', tone: 'warning'
+    })
+    assert.deepEqual(buildLibraryScanNotification({ ...compact, failed: 600001 }), {
+      message: '扫描失败：1 个文件处理失败，已跳过资源清理', tone: 'warning'
+    })
+    assert.deepEqual(buildLibraryScanNotification({ ...compact, cancelled: true, imported: 2 }), {
+      message: '扫描已取消：已扫描 600000 个文件，新增 2 条资源', tone: 'info'
+    })
   })
 })

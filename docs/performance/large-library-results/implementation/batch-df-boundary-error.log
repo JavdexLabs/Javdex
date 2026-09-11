@@ -1,0 +1,9 @@
+
+> Javdex@0.6.2 pretest
+> npm run check:actress-boundaries && npm run check:media-asset-store-boundaries && npm run check:metadata-source-boundaries && npm run check:classification-entity-boundaries && npm run check:agent-platform-boundaries && npm run lint && npm run check:css-architecture && npm run check:ui-controls
+
+
+> Javdex@0.6.2 check:actress-boundaries
+> node scripts/check-actress-boundaries.mjs
+
+src/main/ipc/videoHandlers.ts: video IPC must delegate through query / maintenance seams

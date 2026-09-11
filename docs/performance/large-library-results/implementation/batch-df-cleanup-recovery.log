@@ -1,0 +1,11 @@
+✔ cancels between deferred multi-video pages, publishes committed audit and retries remaining work (194.676625ms)
+✔ native finish ABORT rolls root/job changes back while preserving all committed resource pages and truthful retry (189.375ms)
+✔ rejects changed root identity before the next deferred page and resumes only after restoring it (186.0525ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 920.717334

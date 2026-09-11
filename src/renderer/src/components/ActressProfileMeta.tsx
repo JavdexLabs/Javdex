@@ -5,7 +5,7 @@ import {
   ZODIAC_OPTIONS
 } from '@shared/actressProfileOptions'
 import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
-import type { ActressDetail } from '@shared/actressTypes'
+import type { ActressMetadata } from '@shared/actressTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/actressTypes'
 import RelatedLinksList from './RelatedLinksList'
@@ -71,7 +71,7 @@ export function canMarkActressScrapeSuccess(status: ScrapedStatus): boolean {
 }
 
 export function buildActressScrapeMetaItems(
-  actress: Pick<ActressDetail, 'scraped_status' | 'last_scraped_at'>
+  actress: Pick<ActressMetadata, 'scraped_status' | 'last_scraped_at'>
 ): MetaItem[] {
   // Successful records are the common case; keep the detail page quiet unless attention is needed.
   if (actress.scraped_status === 1) return []
@@ -91,13 +91,13 @@ export function buildActressScrapeMetaItems(
   return items
 }
 
-function findTypedName(actress: ActressDetail, type: string): string | null {
+function findTypedName(actress: Omit<ActressMetadata, 'gallery'>, type: string): string | null {
   const row = actress.names.find((item) => item.type === type)
   const name = row?.name.trim()
   return name || null
 }
 
-function buildActressMetaSections(actress: ActressDetail): Array<{
+function buildActressMetaSections(actress: Omit<ActressMetadata, 'gallery'>): Array<{
   id: string
   title: string
   items: MetaItem[]
@@ -191,7 +191,7 @@ function buildActressMetaSections(actress: ActressDetail): Array<{
   return sections
 }
 
-export function buildActressProfileSubtitle(actress: ActressDetail): string | null {
+export function buildActressProfileSubtitle(actress: Omit<ActressMetadata, 'gallery'>): string | null {
   const parts = [actress.name_zh, actress.name_en]
     .map((name) => name?.trim())
     .filter((name): name is string => Boolean(name && name !== actress.main_name))
@@ -199,8 +199,8 @@ export function buildActressProfileSubtitle(actress: ActressDetail): string | nu
   return unique.length > 0 ? unique.join(' · ') : null
 }
 
-export function buildActressProfileStats(actress: ActressDetail): string[] {
-  const stats: string[] = [`${actress.videos.length} 部`]
+export function buildActressProfileStats(actress: Omit<ActressMetadata, 'gallery'>, videoCount: number | null): string[] {
+  const stats: string[] = [videoCount === null ? '作品数读取中…' : `${videoCount} 部`]
   if (actress.height_cm != null) stats.push(`${actress.height_cm} cm`)
   if (!isBlank(actress.birth_date)) {
     const age = computeAge(actress.birth_date!.trim())
@@ -215,7 +215,7 @@ export function buildActressProfileStats(actress: ActressDetail): string[] {
 export default function ActressProfileMeta({
   actress
 }: {
-  actress: ActressDetail
+  actress: Omit<ActressMetadata, 'gallery'>
 }): JSX.Element | null {
   const sections = useMemo(() => buildActressMetaSections(actress), [actress])
   const aliases = actress.aliases.filter((alias) => alias.trim().length > 0)

@@ -1,3 +1,5 @@
+import { avatarLogNotice } from '../avatarAutoCrop/logs'
+import WebAccessPanel from '../components/settings/WebAccessPanel'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -286,7 +288,7 @@ export default function SettingsPage(): JSX.Element {
 
   useEffect(() => {
     scrollBatchLogToBottom(avatarBatchLogRef)
-  }, [avatarAutoCropBatch.state.logs.length])
+  }, [avatarAutoCropBatch.state.totalLogCount])
 
   const refreshVideoBatchScopeHint = useCallback(async (
     status: VideoBatchScrapeStatus,
@@ -401,6 +403,7 @@ export default function SettingsPage(): JSX.Element {
         | 'actressDetailUseFirstGalleryBackground'
         | 'showVideoResourceTypeBadges'
         | 'coverDisplayMode'
+        | 'closeToTray'
         | 'privacyModeEnabled'
         | 'privacyModeScopes'
         | 'avatarFaceRatio'
@@ -586,7 +589,7 @@ export default function SettingsPage(): JSX.Element {
     }
   }
 
-  const navigateSettings = (group: SettingsGroup, tab?: SettingsTab): void => {
+  const navigateSettings = (group: SettingsGroup, tab?: SettingsTab, hash?: string): void => {
     if (group === 'library' && selectedSettingsLibrary) {
       navigate(
         mediaLibrarySettingsPath(
@@ -596,7 +599,8 @@ export default function SettingsPage(): JSX.Element {
       )
       return
     }
-    navigate(settingsPath(group, tab))
+    const pathname = settingsPath(group, tab)
+    navigate(hash ? { pathname, hash: hash.startsWith('#') ? hash : `#${hash}` } : pathname)
   }
 
   const openActressConflicts = (): void => {
@@ -904,6 +908,8 @@ export default function SettingsPage(): JSX.Element {
                 />
               )}
 
+              {activeGroup.id === 'network' && activeTab === 'web' && <WebAccessPanel />}
+
               {activeGroup.id === 'about' && activeTab === 'info' && <AboutSettingsPanel />}
       </SettingsWorkspaceShell>
 
@@ -978,6 +984,7 @@ export default function SettingsPage(): JSX.Element {
                   ? avatarBatchLogRef
                   : videoBatchLogRef
             }
+            logNotice={batchDetailScope === 'avatar' ? avatarLogNotice(avatarAutoCropBatch.state) : undefined}
             emptyLog={
               batchDetailScope === 'actress'
                 ? '暂无演员任务日志'

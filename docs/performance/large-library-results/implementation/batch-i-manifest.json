@@ -1,0 +1,11 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "dbda2ed6396221e2c1e41d601974ae65434aefbfea320a188f0e84da533f1668",
+  "notes": [
+    "Patch is against HEAD, not incremental; controller also includes the prior pending count API, and progressPublisher includes batch G scanner publisher.",
+    "Only controller-to-UI delivery is coalesced. SequentialBatchQueue and CheckpointedSequentialBatchQueue match HEAD; internal notifications and checkpoints are not throttled.",
+    "Full npm test: 1996 passed, 1 skipped. Build succeeded. Subsequent final controller/progress/persistence tests: 29 passed, node types and changed-file lint passed.",
+    "Final tests exercise real sequential queues through both controller kinds, start/resume, terminal states, immediate failure delivery, per-item checkpoints, cancelled-to-idle delivery, rejection cleanup before unlock, and stale callback isolation.",
+    "Continuous running updates use 100 ms coalescing; failure count increases and non-running states are intentional immediate exceptions. This is not renderer latency or checkpoint byte-volume acceptance."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "targets": [
+    1000,
+    2000
+  ],
+  "totalWrittenBytes": [
+    409049,
+    822049
+  ],
+  "definitionWritesPerJob": 1,
+  "notes": [
+    "Actual temporary-file writes, fsync and rename on macOS. Empty logs isolate target-definition write amplification; not total real queue log volume.",
+    "1000/2000 targets, definition saved once per job; progress records under1KiB in this fixture. Not10k/20k/100k or Windows/HDD/p95 acceptance."
+  ]
+}

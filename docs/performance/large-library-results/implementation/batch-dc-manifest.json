@@ -1,0 +1,20 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-dc-benchmark.log": "85a245a07032e01150612a292c2325d164adb875a77123cc32a8e42ee3bdbc11",
+    "batch-dc-build.log": "1a1e92f1d2afaa7c089f7c3ffcd069edbb86ddfd59042e83853e6eb3a762978e",
+    "batch-dc-file-inventory.patch": "27def9fbf7d4b930e5f90609407bf7cab77c6097f604980e4208e515d932a045",
+    "batch-dc-full.log": "505fd1e063a1157c67e94d367631b519fb4385185766bc8877a604112e515746",
+    "batch-dc-review.md": "907f5017a73bb04b492f5edd874d4f8a32eac50905fc7661a62fdf17275e1093",
+    "batch-dc-scanner-red.log": "fa423378296c60e793c5372f6859e5dbf816f992d99d70a65e6148cfb76f3bca",
+    "batch-dc-target.log": "9f6ee5b624e2bdea0ef0f66748a4ee60a10127d3c14d143ac2a100fba9a099e5"
+  },
+  "notes": [
+    "Selected patch is cumulative against base HEAD and depends on earlier batches; not a standalone sequential patch.",
+    "175 joint tests passed; full2758pass/1skip/0fail(2759total), full and build observed terminal exit0.",
+    "23 new tests cover production summary spool, legacy oracle, bounds, native failures, duplicate order, cancellation, NFO tail, cleanup and caller transaction rollback guards.",
+    "Isolated synthetic inventory: 600k fixed192B paths with three passes, memory216-223ms vs spool1373-1383ms;1warmup+3samples. No whole scan/heap/RSS/p95/Windows/HDD claim.",
+    "Path buffer/page <=256rows and1MiB UTF8 paths, metadata read before path projection; TEMP total remains O(files).",
+    "Full15/42 remains incomplete; no user database/media access, commit/push/release."
+  ]
+}

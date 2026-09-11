@@ -1,0 +1,1449 @@
+diff --git a/src/main/db/pendingVideoScrapeRepo.ts b/src/main/db/pendingVideoScrapeRepo.ts
+index e619025..4dc681a 100644
+--- a/src/main/db/pendingVideoScrapeRepo.ts
++++ b/src/main/db/pendingVideoScrapeRepo.ts
+@@ -1,5 +1,8 @@
+ import type {
+   PendingVideoScrape,
++  PendingVideoScrapePage,
++  PendingVideoScrapePageQuery,
++  PendingVideoScrapeSummary,
+   ScrapeResult,
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+@@ -357,6 +360,12 @@ export function getPendingVideoScrapeForVideo(videoId: number): PendingVideoScra
+   return row ? getPendingVideoScrapeById(row.id) : null
+ }
+ 
++export function countPendingVideoScrapes(): number {
++  return (getDb().prepare('SELECT COUNT(*) AS count FROM pending_video_scrapes').get() as {
++    count: number
++  }).count
++}
++
+ export function listPendingVideoScrapes(): PendingVideoScrape[] {
+   const rows = getDb()
+     .prepare('SELECT id FROM pending_video_scrapes ORDER BY created_at, id')
+@@ -400,3 +409,59 @@ export function deletePendingVideoScrapeForVideo(
+     .get(videoId) as { id: number } | undefined
+   return row ? deletePendingVideoScrape(row.id) : null
+ }
++
++
++/** Page and summaries share a snapshot; only page-local candidate metadata reaches JS. */
++export function pagePendingVideoScrapes(query: PendingVideoScrapePageQuery): PendingVideoScrapePage {
++  const { limit = 50, offset = 0, anchorId, videoId } = query
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
++      !Number.isSafeInteger(offset) || offset < 0 ||
++      [anchorId, videoId].some(id => id !== undefined && (!Number.isSafeInteger(id) || id < 1)) ||
++      (anchorId !== undefined && videoId !== undefined)) throw new Error('Invalid pending scrape page')
++  const db = getDb()
++  return db.transaction(() => {
++    const total = countPendingVideoScrapes()
++    let pageOffset = Math.min(offset, Math.max(0, Math.floor((total - 1) / limit) * limit))
++    if (anchorId !== undefined || videoId !== undefined) {
++      const anchor = db.prepare(`SELECT id, created_at FROM pending_video_scrapes WHERE ${anchorId !== undefined ? 'id' : 'video_id'} = ?`)
++        .get(anchorId ?? videoId) as { id: number; created_at: string } | undefined
++      if (anchor) {
++        const before = db.prepare(`SELECT COUNT(*) AS n FROM pending_video_scrapes
++          WHERE (created_at, id) < (?, ?)`).get(anchor.created_at, anchor.id) as { n: number }
++        pageOffset = Math.floor(before.n / limit) * limit
++      }
++    }
++    const rows = db.prepare(`SELECT id, video_id AS videoId, revision FROM pending_video_scrapes
++      ORDER BY created_at, id LIMIT ? OFFSET ?`).all(limit, pageOffset) as Array<Pick<PendingVideoScrapeSummary, 'id' | 'videoId' | 'revision'>>
++    const counts = db.prepare(`SELECT COUNT(DISTINCT s.id) AS sourceCount, COUNT(c.id) AS candidateCount
++      FROM pending_video_scrape_sources s LEFT JOIN pending_video_scrape_candidates c ON c.source_id=s.id
++      WHERE s.pending_scrape_id=?`)
++    const first = db.prepare(`SELECT c.id, CASE WHEN json_valid(c.result_json)
++      THEN CASE WHEN json_type(c.result_json, '$.code') = 'text'
++        THEN substr(trim(json_extract(c.result_json, '$.code'), char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)), 1, 129) END END AS code
++      FROM pending_video_scrape_sources s JOIN pending_video_scrape_candidates c ON c.source_id=s.id
++      WHERE s.pending_scrape_id=? ORDER BY s.position,s.id,c.position,c.id LIMIT 1`)
++    const cover = db.prepare(`SELECT CASE WHEN length(staged_path) <= 4096 THEN staged_path END AS staged_path FROM pending_video_scrape_resources
++      WHERE candidate_id=? AND field='cover' ORDER BY position,id LIMIT 1`)
++    const items = rows.map(row => {
++      const summary = counts.get(row.id) as { sourceCount: number; candidateCount: number }
++      const candidate = first.get(row.id) as { id: number; code: string | null } | undefined
++      const resource = candidate ? cover.get(candidate.id) as { staged_path: string | null } | undefined : undefined
++      // SQLite substr counts Unicode code points; preserve full values in the detail snapshot.
++      const label = Array.from(candidate?.code?.trim() ?? '')
++      return { ...row, ...summary, code: label.length > 128 ? label.slice(0,128).join('') + '…' : label.join(''),
++        stagedCoverPath: resource?.staged_path ?? null }
++    })
++    return { items, total, offset: pageOffset }
++  })()
++}
++
++
++/** Existence only, for the currently displayed audit page. No snapshot hydration. */
++export function existingPendingVideoScrapeIds(ids: readonly number[]): number[] {
++  if (ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id < 1)) throw new Error('Invalid pending scrape IDs')
++  const unique = [...new Set(ids)]
++  if (!unique.length) return []
++  return (getDb().prepare(`SELECT id FROM pending_video_scrapes WHERE id IN (${unique.map(() => '?').join(',')}) ORDER BY id`)
++    .all(...unique) as Array<{ id: number }>).map(row => row.id)
++}
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..8391a8d 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -379,6 +386,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -507,6 +515,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -648,6 +664,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +675,17 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/main/ipc/scrapeHandlers.ts b/src/main/ipc/scrapeHandlers.ts
+index 452b108..4a230c8 100644
+--- a/src/main/ipc/scrapeHandlers.ts
++++ b/src/main/ipc/scrapeHandlers.ts
+@@ -87,6 +87,12 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
+   )
+ 
+   registerScrapeHandler(IPC.SCRAPE_ONE, (...args) => jobs.scrapeOneVideo(...args))
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_COUNT, () =>
++    jobs.countPendingVideoScrapes()
++  )
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, (ids) => jobs.existingPendingVideoScrapeIds(ids))
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_PAGE, (query) => jobs.pagePendingVideoScrapes(query))
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_GET, (id) => jobs.getPendingVideoScrape(id))
+   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () =>
+     jobs.listPendingVideoScrapes()
+   )
+diff --git a/src/main/ipc/scrapeIpcSchemas.test.ts b/src/main/ipc/scrapeIpcSchemas.test.ts
+index e031fdd..e2b2914 100644
+--- a/src/main/ipc/scrapeIpcSchemas.test.ts
++++ b/src/main/ipc/scrapeIpcSchemas.test.ts
+@@ -42,3 +42,19 @@ describe('scrape IPC schemas', () => {
+     )
+   })
+ })
++
++
++it('bounds pending scrape pages and details at the IPC boundary', () => {
++  const schema = scrapeIpcSchemas[IPC.PENDING_VIDEO_SCRAPE_PAGE]
++  for (const query of [{}, {limit:100,offset:500}, {videoId:100}, {anchorId:2}]) assert.equal(schema.safeParse([query]).success,true)
++  for (const query of [{limit:101},{offset:-1},{anchorId:1,videoId:2},{videoId:Number.MAX_SAFE_INTEGER+1},{sql:'SELECT 1'}]) assert.equal(schema.safeParse([query]).success,false)
++  assert.equal(scrapeIpcSchemas[IPC.PENDING_VIDEO_SCRAPE_GET].safeParse([0]).success,false)
++})
++
++
++it('bounds audit pending presence lookups', () => {
++  const schema=scrapeIpcSchemas[IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]
++  assert.equal(schema.safeParse([[]]).success,true)
++  assert.equal(schema.safeParse([Array.from({length:100},(_,i)=>i+1)]).success,true)
++  for(const ids of [[0],[-1],[1.5],[Number.MAX_SAFE_INTEGER+1],Array(101).fill(1)]) assert.equal(schema.safeParse([ids]).success,false)
++})
+diff --git a/src/main/services/scrapeJobController.test.ts b/src/main/services/scrapeJobController.test.ts
+index c107ad9..e7dfdd3 100644
+--- a/src/main/services/scrapeJobController.test.ts
++++ b/src/main/services/scrapeJobController.test.ts
+@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
++import { SequentialBatchQueue } from './sequentialBatchQueue'
++import type { BatchProgress } from '@shared/batchScrapeTypes'
+ import {
+   createDefaultScrapeJobController,
+   createScrapeJobController,
+@@ -67,6 +69,10 @@ function dependencies(
+     countActresses: () => 0,
+     resolveVideoFieldSources: () => ({}),
+     pendingVideoScrapes: {
++      count: () => 0,
++      existingIds: () => [],
++      page: () => ({ items: [], total: 0, offset: 0 }),
++      get: () => null,
+       list: () => [],
+       confirm: () => ({ status: 'applied', applied: true, warnings: [] }),
+       discard: () => true
+@@ -102,6 +108,127 @@ function dependencies(
+ }
+ 
+ describe('ScrapeJobController', () => {
++  it('flushes and detaches UI progress on rejection before accepting another batch', async (t) => {
++    t.mock.timers.enable({ apis: ['setTimeout'] })
++    t.mock.method(console, 'error', () => undefined)
++    const base = dependencies()
++    let listener: ((progress: BatchProgress) => void) | null = null
++    let stale: ((progress: BatchProgress) => void) | null = null
++    const progress = (current: number): BatchProgress => ({
++      total: 2, current, success: 0, pending: 0, failed: 0,
++      currentCode: String(current), status: 'running', logs: []
++    })
++    const events: BatchProgress[] = []
++    let starts = 0
++    let cleanedBeforeUnlock = 0
++    const controller = createScrapeJobController(dependencies({
++      coordinator: {
++        ...base.coordinator,
++        runExclusive: <T>(label: string, run: () => Promise<T>) => base.coordinator.runExclusive(label, async () => {
++          try {
++            return await run()
++          } finally {
++            assert.equal(listener, null, 'listener is removed before the coordinator unlocks')
++            cleanedBeforeUnlock++
++          }
++        })
++      },
++      videoQueue: {
++        ...base.videoQueue,
++        setListener: (next) => { listener = next },
++        start: async () => {
++          starts++
++          stale = listener
++          listener?.(progress(1))
++          listener?.(progress(2))
++          throw Error('checkpoint failed')
++        }
++      },
++      emit: (_channel, value) => events.push(value as BatchProgress)
++    }))
++    controller.startLegacyVideoBatch()
++    await new Promise((resolve) => setImmediate(resolve))
++    assert.equal(listener, null)
++    assert.equal(events.at(-1)?.current, 2)
++    const delivered = events.length
++    const oldListener = stale as ((value: BatchProgress) => void) | null
++    controller.startLegacyVideoBatch()
++    oldListener?.(progress(999))
++    await new Promise((resolve) => setImmediate(resolve))
++    assert.equal(starts, 2)
++    assert.equal(cleanedBeforeUnlock, 2)
++    assert.equal(events.length, delivered * 2)
++    assert.ok(events.every((value) => value.current !== 999))
++    t.mock.timers.tick(1000)
++    assert.equal(events.length, delivered * 2)
++  })
++
++  for (const kind of ['video', 'actress'] as const) {
++    for (const terminal of ['done', 'paused', 'cancelled'] as const) {
++      it(`coalesces ${kind} UI progress while preserving checkpoints and ${terminal} delivery`, async (t) => {
++        t.mock.timers.enable({ apis: ['setTimeout'] })
++        const queue = new SequentialBatchQueue<number>()
++        const events: Array<{ channel: string; progress: BatchProgress }> = []
++        const checkpoints: number[] = []
++        const run = async () => {
++          await queue.start({
++            targets: Array.from({ length: 10000 }, (_, id) => id),
++            startMessage: () => 'start', pausedMessage: 'paused', cancelledMessage: 'cancelled',
++            doneMessage: () => 'done', getCode: String, exceptionMessage: () => 'error',
++            delayAfterTarget: false,
++            onCheckpoint: (_progress, next) => checkpoints.push(next),
++            runTarget: async (id) => {
++              if (id === 101) assert.equal(events.at(-1)?.progress.failed, 1, 'failures reach UI immediately')
++              if (id === 9998 && terminal === 'paused') queue.pause()
++              if (id === 9998 && terminal === 'cancelled') queue.cancel()
++              return id === 100
++                ? { status: 'failure', level: 'error', message: 'failed' }
++                : { status: 'success', level: 'success', message: 'ok' }
++            }
++          })
++          if (terminal === 'cancelled') queue.resetToIdle()
++        }
++        const base = dependencies()
++        let starts = 0
++        let resumes = 0
++        const queuePort = {
++          ...base[kind === 'video' ? 'videoQueue' : 'actressQueue'],
++          isRunning: () => queue.isRunning(),
++          setListener: (listener: ((progress: BatchProgress) => void) | null) => queue.setListener(listener),
++          start: async () => { starts++; await run() },
++          resume: async () => { resumes++; await run() }
++        }
++        const controller = createScrapeJobController(dependencies({
++          ...(kind === 'video' ? { videoQueue: queuePort } : {
++            actressQueue: { ...base.actressQueue, ...queuePort }
++          }),
++          checkpoints: { ...base.checkpoints, load: () => terminal === 'done' ? null : { kind, status: 'paused' } as never },
++          emit: (channel, progress) => events.push({ channel, progress: progress as BatchProgress })
++        }))
++        if (terminal !== 'done') controller.resumeActiveBatch()
++        else if (kind === 'video') controller.startVideoBatch('scrape:videoBatchProgress', { status: 'all', fields: ['title'], mode: 'replace' })
++        else controller.startActressBatch({ scope: 'all', fields: ['avatar'], mode: 'replace' })
++        await new Promise((resolve) => setImmediate(resolve))
++        const processed = terminal === 'done' ? 10000 : 9999
++        assert.deepEqual(checkpoints.slice(0, processed), Array.from({ length: processed }, (_, id) => id + 1))
++        assert.ok(events.length < 100, 'UI delivery is bounded independently of per-item persistence')
++        assert.equal(events[0].progress.status, 'running')
++        const final = events.filter((event) => event.progress.status === terminal).at(-1)
++        assert.equal(final?.progress.success, processed - 1)
++        assert.equal(final?.progress.failed, 1)
++        assert.equal(final?.progress.currentCode, null)
++        assert.equal(events.at(-1)?.progress.status, terminal === 'cancelled' ? 'idle' : terminal)
++        assert.ok(events.every((event) => event.channel === (kind === 'video' ? 'scrape:videoBatchProgress' : 'actressScrape:batchProgress')))
++        const delivered = events.length
++        t.mock.timers.tick(1000)
++        assert.equal(events.length, delivered)
++        assert.equal(queue.isRunning(), false)
++        assert.equal(starts, terminal === 'done' ? 1 : 0)
++        assert.equal(resumes, terminal === 'done' ? 0 : 1)
++      })
++    }
++  }
++
+   it('preserves media-library scope through batch count and start orchestration', async () => {
+     let countedFilter: unknown
+     let startedRequest: unknown
+@@ -303,6 +430,7 @@ describe('ScrapeJobController', () => {
+ 
+   it('publishes progress and supports pause, resume, and discard for persisted batches', async () => {
+     let listener: ((progress: never) => void) | undefined
++    let finishRun: (() => void) | undefined
+     let running = false
+     let paused = 0
+     let resumed = 0
+@@ -322,13 +450,17 @@ describe('ScrapeJobController', () => {
+           },
+           start: async () => {
+             running = true
++            await new Promise<void>((resolve) => { finishRun = resolve })
+           },
+           resume: async () => {
+             resumed += 1
++            running = true
++            await new Promise<void>((resolve) => { finishRun = resolve })
+           },
+           pause: () => {
+             paused += 1
+             running = false
++            finishRun?.()
+           },
+           discard: () => {
+             discarded += 1
+@@ -350,6 +482,7 @@ describe('ScrapeJobController', () => {
+     await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(controller.pauseActiveBatch(), true)
+     assert.equal(paused, 1)
++    await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(controller.resumeActiveBatch(), true)
+     await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(resumed, 1)
+@@ -360,10 +493,13 @@ describe('ScrapeJobController', () => {
+       pending: 0,
+       failed: 0,
+       currentCode: null,
+-      status: 'completed',
++      status: 'done',
+       logs: []
+     } as never)
+     assert.equal(events.at(-1)?.channel, 'scrape:videoBatchProgress')
++    running = false
++    finishRun?.()
++    await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(controller.discardActiveBatch(), true)
+     assert.equal(discarded, 1)
+   })
+diff --git a/src/main/services/scrapeJobController.ts b/src/main/services/scrapeJobController.ts
+index 4a7da01..274cedd 100644
+--- a/src/main/services/scrapeJobController.ts
++++ b/src/main/services/scrapeJobController.ts
+@@ -1,4 +1,5 @@
+ import { randomUUID } from 'node:crypto'
++import { createProgressPublisher } from './progressPublisher'
+ import { IPC } from '@shared/ipc-channels'
+ import type { ScrapeIpcEvent, ScrapeIpcEventChannel } from '@shared/scrapeIpcContract'
+ import type {
+@@ -25,6 +26,8 @@ import type {
+ import type { BatchProgress, BatchScrapeState } from '@shared/batchScrapeTypes'
+ import type {
+   PendingVideoScrape,
++  PendingVideoScrapePage,
++  PendingVideoScrapePageQuery,
+   PendingVideoScrapeConfirmInput,
+   PendingVideoScrapeResolutionResult
+ } from '@shared/videoScrapeTypes'
+@@ -66,7 +69,7 @@ type ProgressListener = (progress: BatchProgress) => void
+ 
+ interface BatchQueue<Request> {
+   isRunning(): boolean
+-  setListener(listener: ProgressListener): void
++  setListener(listener: ProgressListener | null): void
+   start(request?: Request | string): Promise<void>
+   resume(): Promise<void>
+   pause(): void
+@@ -137,6 +140,10 @@ export interface ScrapeJobControllerDependencies {
+   rendererAvailable(): boolean
+   checkpoints: BatchScrapeCheckpointPort
+   pendingVideoScrapes: {
++    count(): number
++    existingIds(ids: number[]): number[]
++    page(query: PendingVideoScrapePageQuery): PendingVideoScrapePage
++    get(id: number): PendingVideoScrape | null
+     list(): PendingVideoScrape[]
+     confirm(input: PendingVideoScrapeConfirmInput): PendingVideoScrapeResolutionResult
+     discard(pendingScrapeId: number): boolean
+@@ -164,12 +171,17 @@ export class ScrapeJobController {
+ 
+   initialize(): void {
+     this.avatarAutoCrop.clearBatchToken()
+-    const interrupted = this.dependencies.checkpoints.load()
+-    if (interrupted?.status === 'running') {
+-      this.dependencies.checkpoints.markPaused(
+-        interrupted,
+-        this.dependencies.checkpoints.toProgress(interrupted)
+-      )
++    try {
++      const interrupted = this.dependencies.checkpoints.load()
++      if (interrupted?.status === 'running') {
++        this.dependencies.checkpoints.markPaused(
++          interrupted,
++          this.dependencies.checkpoints.toProgress(interrupted)
++        )
++      }
++    } catch (error) {
++      // Preserve unreadable checkpoints and keep the app available; state/resume still surface the error.
++      console.error('Failed to recover batch scrape checkpoint:', error)
+     }
+     this.dependencies.actressQueue.setAvatarAutoCropListener((target) =>
+       this.avatarAutoCrop.request(target)
+@@ -264,6 +276,22 @@ export class ScrapeJobController {
+     return this.dependencies.getBatchState()
+   }
+ 
++  countPendingVideoScrapes(): number {
++    return this.dependencies.pendingVideoScrapes.count()
++  }
++
++  existingPendingVideoScrapeIds(ids: number[]): number[] {
++    return this.dependencies.pendingVideoScrapes.existingIds(ids)
++  }
++
++  pagePendingVideoScrapes(query: PendingVideoScrapePageQuery): PendingVideoScrapePage {
++    return this.dependencies.pendingVideoScrapes.page(query)
++  }
++
++  getPendingVideoScrape(id: number): PendingVideoScrape | null {
++    return this.dependencies.pendingVideoScrapes.get(id)
++  }
++
+   listPendingVideoScrapes(): PendingVideoScrape[] {
+     return this.dependencies.pendingVideoScrapes.list()
+   }
+@@ -311,12 +339,8 @@ export class ScrapeJobController {
+   ): boolean {
+     this.assertCanStartNewBatch()
+     if (!request.fields?.length) throw new Error('请至少选择一个要更新的字段')
+-    this.dependencies.videoQueue.setListener((progress) =>
+-      this.dependencies.emit(progressChannel, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('影片批量更新', () => this.dependencies.videoQueue.start(request))
+-      .catch((error) => console.error('video batch scrape failed:', error))
++    this.runBatch(this.dependencies.videoQueue, progressChannel, '影片批量更新',
++      () => this.dependencies.videoQueue.start(request), 'video batch scrape failed:')
+     return true
+   }
+ 
+@@ -334,12 +358,8 @@ export class ScrapeJobController {
+     if (typeof request !== 'string' && request && !request.fields?.length) {
+       throw new Error('请至少选择一个要更新的字段')
+     }
+-    this.dependencies.actressQueue.setListener((progress) =>
+-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.start(request))
+-      .catch((error) => console.error('actress scrape batch failed:', error))
++    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
++      () => this.dependencies.actressQueue.start(request), 'actress scrape batch failed:')
+     return true
+   }
+ 
+@@ -366,23 +386,47 @@ export class ScrapeJobController {
+     const job = this.dependencies.checkpoints.load()
+     if (!job) throw new Error('没有可继续的批量刮削任务')
+     if (job.kind === 'video') {
+-      this.dependencies.videoQueue.setListener((progress) =>
+-        this.dependencies.emit(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, progress)
+-      )
+-      void this.dependencies.coordinator
+-        .runExclusive('影片批量更新', () => this.dependencies.videoQueue.resume())
+-        .catch((error) => console.error('video batch scrape resume failed:', error))
++      this.runBatch(this.dependencies.videoQueue, IPC.SCRAPE_VIDEO_BATCH_PROGRESS, '影片批量更新',
++        () => this.dependencies.videoQueue.resume(), 'video batch scrape resume failed:')
+       return true
+     }
+-    this.dependencies.actressQueue.setListener((progress) =>
+-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.resume())
+-      .catch((error) => console.error('actress batch scrape resume failed:', error))
++    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
++      () => this.dependencies.actressQueue.resume(), 'actress batch scrape resume failed:')
+     return true
+   }
+ 
++  private runBatch(
++    queue: Pick<BatchQueue<unknown>, 'setListener'>,
++    channel: typeof IPC.SCRAPE_BATCH_PROGRESS | typeof IPC.SCRAPE_VIDEO_BATCH_PROGRESS |
++      typeof IPC.SCRAPE_REMATCH_BATCH_PROGRESS | typeof IPC.ACTRESS_SCRAPE_BATCH_PROGRESS,
++    label: string,
++    run: () => Promise<void>,
++    errorMessage: string
++  ): void {
++    void this.dependencies.coordinator.runExclusive(label, async () => {
++      const publisher = createProgressPublisher<BatchProgress>((progress) => {
++        try {
++          this.dependencies.emit(channel, progress)
++        } catch (error) {
++          console.error('batch progress delivery failed:', error)
++        }
++      })
++      let failed = 0
++      queue.setListener((progress) => {
++        const immediate = progress.status !== 'running' || progress.failed > failed
++        failed = progress.failed
++        publisher.update(progress, immediate)
++      })
++      try {
++        await run()
++      } finally {
++        // Clear pending delivery before releasing the coordinator's exclusive run.
++        publisher.close()
++        queue.setListener(null)
++      }
++    }).catch((error) => console.error(errorMessage, error))
++  }
++
+   discardActiveBatch(): boolean {
+     const job = this.dependencies.checkpoints.load()
+     if (!job) return false
+diff --git a/src/main/services/videoPendingScrapeService.ts b/src/main/services/videoPendingScrapeService.ts
+index c23ca88..2fa8fe5 100644
+--- a/src/main/services/videoPendingScrapeService.ts
++++ b/src/main/services/videoPendingScrapeService.ts
+@@ -1,6 +1,8 @@
+ import fs from 'node:fs'
+ import type {
+   PendingVideoScrape,
++  PendingVideoScrapePage,
++  PendingVideoScrapePageQuery,
+   PendingVideoScrapeConfirmInput,
+   PendingVideoScrapeResolutionResult,
+   ScrapeResult,
+@@ -9,6 +11,10 @@ import type {
+ } from '@shared/videoScrapeTypes'
+ import { getDb } from '../db/database'
+ import {
++  countPendingVideoScrapes,
++  existingPendingVideoScrapeIds,
++  getPendingVideoScrapeById,
++  pagePendingVideoScrapes,
+   deletePendingVideoScrape,
+   getPendingVideoScrapeResolutionSnapshot,
+   listPendingVideoScrapes,
+@@ -129,6 +135,22 @@ function importCandidateResources(
+ }
+ 
+ export const videoPendingScrapeService = {
++  count(): number {
++    return countPendingVideoScrapes()
++  },
++
++  existingIds(ids: number[]): number[] {
++    return existingPendingVideoScrapeIds(ids)
++  },
++
++  page(query: PendingVideoScrapePageQuery): PendingVideoScrapePage {
++    return pagePendingVideoScrapes(query)
++  },
++
++  get(id: number): PendingVideoScrape | null {
++    return getPendingVideoScrapeById(id)
++  },
++
+   list(): PendingVideoScrape[] {
+     return listPendingVideoScrapes()
+   },
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..d2d7860 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -88,7 +88,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -104,7 +104,7 @@ import type {
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+ import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -381,6 +381,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +450,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -491,6 +499,9 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+@@ -557,6 +568,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
+index 10a8958..b737a7e 100644
+--- a/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
+@@ -9,11 +9,15 @@ import type {
+ } from '@shared/libraryTypes'
+ import type { PendingItemKey } from '../../listView/pendingRoutes'
+ 
++let presentIds = new Set<number>()
++const presenceRequests: number[][] = []
++
+ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+ Object.defineProperty(globalThis, 'window', {
+   configurable: true,
+   value: {
+     api: {
++      scrape: { existingPendingIds: async (ids: number[]) => { presenceRequests.push(ids); return ids.filter(id => presentIds.has(id)) } },
+       scan: { revealAuditFile: async () => ({ ok: true }) },
+       videos: { list: async () => ({ items: [], total: 0 }) }
+     },
+@@ -29,6 +33,8 @@ let renderer: TestRenderer.ReactTestRenderer | null = null
+ afterEach(() => {
+   renderer?.unmount()
+   renderer = null
++  presenceRequests.length = 0
++  presentIds = new Set()
+ })
+ 
+ function summary(overrides: Partial<LibraryScanSummary> = {}): LibraryScanSummary {
+@@ -89,8 +95,9 @@ async function renderPanel({
+   currentPendingScrapeIds?: Set<number>
+   onOpenPending?: (target: PendingItemKey) => void
+ }): Promise<void> {
++  presentIds = currentPendingScrapeIds
+   const { default: LibraryScanAuditPanel } = await import('./LibraryScanAuditPanel')
+-  act(() => {
++  await act(async () => {
+     renderer = TestRenderer.create(
+       <LibraryScanAuditPanel
+         summary={scanSummary}
+@@ -99,7 +106,6 @@ async function renderPanel({
+         unrecognized={unrecognized}
+         currentPendingGroupIds={new Set()}
+         currentPendingIdentityIds={currentPendingIdentityIds}
+-        currentPendingScrapeIds={currentPendingScrapeIds}
+         onSelect={() => undefined}
+         onResolvedUnrecognized={() => undefined}
+         onOpenVideo={() => undefined}
+@@ -329,3 +335,21 @@ describe('LibraryScanAuditPanel', () => {
+     assert.match(output, /远程图片已忽略/)
+   })
+ })
++
++
++it('limits a large failed audit to100 visible rows and queries only their pending IDs',async()=>{
++  const files: LibraryScanAudit['files']=Array.from({length:201},(_,i)=>({
++    outcome:'added',rootId:1,sourceKind:'local',filePath:`/synthetic/FILE-${i+1}.mp4`,videoId:i+1,videoCode:`FILE-${i+1}`,
++    resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}
++  }))
++  await renderPanel({scanSummary:summary({scannedFiles:201}),scanAudit:{...audit(files),schemaVersion:2},currentPendingScrapeIds:new Set([1,101,201])})
++  assert.deepEqual(presenceRequests[0],Array.from({length:100},(_,i)=>i+1))
++  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,100)
++  const next=()=>renderer!.root.findAllByType('button').find(node=>node.children.includes('下一页'))!
++  await act(async()=>next().props.onClick())
++  assert.deepEqual(presenceRequests.at(-1),Array.from({length:100},(_,i)=>101+i))
++  await act(async()=>next().props.onClick())
++  assert.deepEqual(presenceRequests.at(-1),[201])
++  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,1)
++  assert.ok(presenceRequests.every(ids=>ids.length<=100))
++})
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+index a301be8..2da76d6 100644
+--- a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+@@ -1,4 +1,4 @@
+-import { useEffect, useMemo, useRef, useState } from 'react'
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+ import { FixedSizeList, type ListChildComponentProps } from 'react-window'
+ import type {
+   LibraryScanAudit,
+@@ -15,6 +15,7 @@ import SelectControl from '../SelectControl'
+ import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
+ import UnrecognizedRow from './UnrecognizedRow'
+ import { api } from '../../api'
++import { usePendingScrapePresence } from '../../hooks/usePendingScrapePresence'
+ import { pendingItemKey, type PendingItemKey } from '../../listView/pendingRoutes'
+ import { useToast } from '../Toast'
+ import styles from './LibraryScanAuditPanel.module.css'
+@@ -121,8 +122,7 @@ function isAttentionFile(entry: LibraryScanFileAuditEntry): boolean {
+ 
+ function isCurrentNfoPending(
+   entry: LibraryScanFileAuditEntry,
+-  currentPendingIdentityIds: ReadonlySet<number>,
+-  currentPendingScrapeIds: ReadonlySet<number>
++  currentPendingIdentityIds: ReadonlySet<number>
+ ): boolean {
+   if (entry.nfo?.disposition === 'identity-conflict') {
+     return (
+@@ -132,8 +132,7 @@ function isCurrentNfoPending(
+   }
+   if (entry.nfo?.disposition === 'pending-candidate') {
+     return (
+-      entry.nfo.pendingScrapeId != null &&
+-      currentPendingScrapeIds.has(entry.nfo.pendingScrapeId)
++      entry.nfo.pendingScrapeId != null
+     )
+   }
+   return false
+@@ -331,7 +330,6 @@ export default function LibraryScanAuditPanel({
+   unrecognized,
+   currentPendingGroupIds,
+   currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+   onResolvedUnrecognized,
+   onOpenVideo,
+@@ -343,7 +341,6 @@ export default function LibraryScanAuditPanel({
+   unrecognized: LibraryScanLatestSnapshot['unrecognized']
+   currentPendingGroupIds: Set<number>
+   currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+   onResolvedUnrecognized: (path: string) => void
+   onOpenVideo: (videoId: number) => void
+@@ -363,6 +360,14 @@ export default function LibraryScanAuditPanel({
+     audit.finishedAt === summary.finishedAt
+       ? audit
+       : null
++  const uniqueUnrecognized = useMemo(() => {
++    const seen = new Set<string>()
++    return unrecognized.filter(item => {
++      if (seen.has(item.filePath)) return false
++      seen.add(item.filePath)
++      return true
++    })
++  }, [unrecognized])
+   const cachedUnrecognizedPaths = useMemo(
+     () => new Set(unrecognized.map((item) => item.filePath)),
+     [unrecognized]
+@@ -376,11 +381,7 @@ export default function LibraryScanAuditPanel({
+       ),
+     [matchedAudit]
+   )
+-  const extraCachedUnrecognizedCount = unrecognized.filter(
+-    (item, index) =>
+-      unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-      !auditedUnrecognizedPaths.has(item.filePath)
+-  ).length
++  const extraCachedUnrecognizedCount = uniqueUnrecognized.filter(item => !auditedUnrecognizedPaths.has(item.filePath)).length
+ 
+   const totalFailed =
+     (matchedAudit?.files.filter(isAttentionFile).length ?? 0) +
+@@ -436,8 +437,7 @@ export default function LibraryScanAuditPanel({
+         ) {
+           const pending = isCurrentNfoPending(
+             entry,
+-            currentPendingIdentityIds,
+-            currentPendingScrapeIds
++            currentPendingIdentityIds
+           )
+           item.status = pending ? '待处理' : '已处理'
+           item.requiresAttention = pending
+@@ -465,12 +465,8 @@ export default function LibraryScanAuditPanel({
+ 
+       // Unrecognized files that might not be in file list (e.g. persistent across scans)
+       const listedPaths = new Set(failedFileEntries.map((f) => f.filePath))
+-      const extraUnrecItems: ViewItem[] = unrecognized
+-        .filter(
+-          (item, index) =>
+-            unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-            !listedPaths.has(item.filePath)
+-        )
++      const extraUnrecItems: ViewItem[] = uniqueUnrecognized
++        .filter(item => !listedPaths.has(item.filePath))
+         .map((item, idx) => ({
+           key: `extra-unrec:${idx}:${item.filePath}`,
+           title: item.filePath.split(/[\\/]/).pop() || item.filePath,
+@@ -533,8 +529,7 @@ export default function LibraryScanAuditPanel({
+       ) {
+         const pending = isCurrentNfoPending(
+           entry,
+-          currentPendingIdentityIds,
+-          currentPendingScrapeIds
++          currentPendingIdentityIds
+         )
+         item.status = pending ? '待处理' : '已处理'
+         item.requiresAttention = pending
+@@ -565,10 +560,9 @@ export default function LibraryScanAuditPanel({
+     changesFilter,
+     currentPendingGroupIds,
+     currentPendingIdentityIds,
+-    currentPendingScrapeIds,
+-    matchedAudit,
++      matchedAudit,
+     outcome,
+-    unrecognized
++    uniqueUnrecognized
+   ])
+ 
+   const filtered = useMemo(() => {
+@@ -580,15 +574,31 @@ export default function LibraryScanAuditPanel({
+       : items
+   }, [activeTab, items, search])
+ 
++  const pageScope = JSON.stringify([summary.libraryId,summary.runId,summary.finishedAt,activeTab,search,outcome,changesFilter])
++  const [pageState, setPageState] = useState({scope:'',index:0})
++  const pageIndex = Math.min(pageState.scope === pageScope ? pageState.index : 0, Math.max(0,Math.ceil(filtered.length/100)-1))
++  const setPage = useCallback((index:number) => setPageState({scope:pageScope,index}),[pageScope])
++  const pageItems = filtered.slice(pageIndex*100,(pageIndex+1)*100)
++  const presence = usePendingScrapePresence(pageItems.flatMap(item => item.pendingTarget?.domain === 'scrape' ? [Number(item.pendingTarget.id)] : []), pageScope)
++  const displayedItems = pageItems.map(item => {
++    if (item.pendingTarget?.domain !== 'scrape') return item
++    const known = presence.state === 'ready'
++    const pending = known && presence.ids.has(Number(item.pendingTarget.id))
++    return { ...item, status: !known ? presence.state === 'error' ? '状态未知' : '读取中…' : pending ? '待处理' : '已处理',
++      requiresAttention: pending, pendingTarget: pending ? item.pendingTarget : undefined }
++  })
++
+   const rowHeight = auditRowHeight(activeTab)
+-  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, filtered.length)
++  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, displayedItems.length)
+ 
+   useEffect(() => {
+     virtualListRef.current?.scrollTo(0)
+-  }, [activeTab, changesFilter, outcome, search, summary.finishedAt])
++  }, [activeTab, changesFilter, outcome, search, summary.finishedAt, pageIndex])
+ 
+   useEffect(() => {
+     if (activeTab !== 'failed' || !attentionTarget) return
++    const targetIndex = filtered.findIndex(item => auditItemAnchor(item) === attentionTarget)
++    if (targetIndex >= 0 && Math.floor(targetIndex / 100) !== pageIndex) { setPage(Math.floor(targetIndex / 100)); return }
+     const frame = window.requestAnimationFrame(() => {
+       const target = listContainerRef.current?.querySelector<HTMLElement>(
+         `[data-audit-anchor="${attentionTarget}"]`
+@@ -598,7 +608,7 @@ export default function LibraryScanAuditPanel({
+       setAttentionTarget(null)
+     })
+     return () => window.cancelAnimationFrame(frame)
+-  }, [activeTab, attentionTarget, filtered])
++  }, [activeTab, attentionTarget, filtered, pageIndex, setPage])
+ 
+   const handleTabChange = (tab: ScanAuditTab): void => {
+     setActiveTab(tab)
+@@ -695,6 +705,15 @@ export default function LibraryScanAuditPanel({
+           <SettingsStatusPill status="muted">{filtered.length} 项</SettingsStatusPill>
+         </div>
+ 
++        {presence.state === 'error' ? <div role="status" className={styles.subFilters}>
++          <span>待办状态读取失败</span><Button size="sm" onClick={presence.retry}>重试状态</Button>
++        </div> : null}
++        {filtered.length > 100 ? <nav aria-label="扫描审计分页" className={styles.subFilters}>
++          <Button size="sm" disabled={pageIndex === 0} onClick={() => setPage(pageIndex-1)}>上一页</Button>
++          <span>{pageIndex+1} / {Math.ceil(filtered.length/100)}</span>
++          <Button size="sm" disabled={(pageIndex+1)*100 >= filtered.length} onClick={() => setPage(pageIndex+1)}>下一页</Button>
++        </nav> : null}
++
+         {/* 资源清理分类下的子标签 */}
+         {activeTab === 'changes' ? (
+           <div className={styles.subFilters}>
+@@ -772,13 +791,13 @@ export default function LibraryScanAuditPanel({
+                   <FixedSizeList
+                     ref={virtualListRef}
+                     className={styles.virtualList}
+-                    height={Math.min(480, filtered.length * rowHeight)}
++                    height={Math.min(480, displayedItems.length * rowHeight)}
+                     width="100%"
+-                    itemCount={filtered.length}
++                    itemCount={displayedItems.length}
+                     itemSize={rowHeight}
+                     itemData={{
+                       libraryId: summary.libraryId,
+-                      items: filtered,
++                      items: displayedItems,
+                       activeTab,
+                       onOpenAttention: handleOpenAttention,
+                       onOpenPending,
+@@ -788,7 +807,7 @@ export default function LibraryScanAuditPanel({
+                     {AuditRow}
+                   </FixedSizeList>
+                 ) : (
+-                  filtered.map((item) => (
++                  displayedItems.map((item) => (
+                     <AuditRowContent
+                       key={item.key}
+                       libraryId={summary.libraryId}
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+index 89a1174..24e7215 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+@@ -124,21 +124,12 @@ export function MediaLibrarySettingsContent({
+     () => new Set((pendingIdentitiesQuery.data ?? []).map((identity) => identity.id)),
+     [pendingIdentitiesQuery.data]
+   )
+-  const pendingScrapesQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending()
+-  })
+-  const pendingVideoScrapeIds = useMemo(
+-    () => new Set((pendingScrapesQuery.data ?? []).map((pending) => pending.id)),
+-    [pendingScrapesQuery.data]
+-  )
+   const scan = useMediaLibraryScanController(libraryId, {
+     onSettled: () =>
+       Promise.all([
+         libraryQuery.refetch(),
+         pendingGroupsQuery.refetch(),
+-        pendingIdentitiesQuery.refetch(),
+-        pendingScrapesQuery.refetch()
++        pendingIdentitiesQuery.refetch()
+       ]).then(() => undefined)
+   })
+   const library = libraryQuery.data ?? null
+@@ -695,7 +686,6 @@ export function MediaLibrarySettingsContent({
+               latestScanSummary={latestScanSummary}
+               pendingScanGroupIds={pendingScanGroupIds}
+               pendingResourceIdentityIds={pendingResourceIdentityIds}
+-              pendingVideoScrapeIds={pendingVideoScrapeIds}
+               selectedScanMetric={selectedScanMetric}
+               setSelectedScanMetric={setSelectedScanMetric}
+               configDraft={configDraft}
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+index 0e8b80d..53cd81a 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+@@ -83,7 +83,6 @@ describe('ScanSettingsTab', () => {
+           latestScanSummary={null}
+           pendingScanGroupIds={new Set()}
+           pendingResourceIdentityIds={new Set()}
+-          pendingVideoScrapeIds={new Set()}
+           selectedScanMetric={null}
+           setSelectedScanMetric={() => undefined}
+           configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG}
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+index 9b00afc..64bb20c 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+@@ -135,7 +135,6 @@ function ScanHistorySummary({
+   unrecognized,
+   currentPendingGroupIds,
+   currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+   onResolvedUnrecognized,
+   onOpenPending,
+@@ -147,7 +146,6 @@ function ScanHistorySummary({
+   unrecognized: LibraryScanLatestSnapshot['unrecognized']
+   currentPendingGroupIds: Set<number>
+   currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+   onResolvedUnrecognized: (path: string) => void
+   onOpenPending: (target: PendingItemKey) => void
+@@ -180,7 +178,6 @@ function ScanHistorySummary({
+         unrecognized={unrecognized}
+         currentPendingGroupIds={currentPendingGroupIds}
+         currentPendingIdentityIds={currentPendingIdentityIds}
+-        currentPendingScrapeIds={currentPendingScrapeIds}
+         onSelect={onSelect}
+         onResolvedUnrecognized={onResolvedUnrecognized}
+         onOpenPending={onOpenPending}
+@@ -472,7 +469,6 @@ export function ScanSettingsTab({
+   latestScanSummary,
+   pendingScanGroupIds,
+   pendingResourceIdentityIds,
+-  pendingVideoScrapeIds,
+   selectedScanMetric,
+   setSelectedScanMetric,
+   configDraft,
+@@ -486,7 +482,6 @@ export function ScanSettingsTab({
+   latestScanSummary: LibraryScanSummary | null
+   pendingScanGroupIds: Set<number>
+   pendingResourceIdentityIds: Set<number>
+-  pendingVideoScrapeIds: Set<number>
+   selectedScanMetric: LibraryScanMetricKey | null
+   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
+   configDraft: MediaLibraryConfigValues
+@@ -601,7 +596,6 @@ export function ScanSettingsTab({
+               unrecognized={scan.latest?.unrecognized ?? []}
+               currentPendingGroupIds={pendingScanGroupIds}
+               currentPendingIdentityIds={pendingResourceIdentityIds}
+-              currentPendingScrapeIds={pendingVideoScrapeIds}
+               onSelect={setSelectedScanMetric}
+               onResolvedUnrecognized={() => {
+                 void scan.refreshLatest()
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..d4d11d2 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -94,6 +94,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +115,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -148,6 +152,9 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
+@@ -182,6 +189,10 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+diff --git a/src/shared/scrapeIpcContract.ts b/src/shared/scrapeIpcContract.ts
+index 919d8f8..56e4b54 100644
+--- a/src/shared/scrapeIpcContract.ts
++++ b/src/shared/scrapeIpcContract.ts
+@@ -27,6 +27,8 @@ import type {
+ } from './videoScrapeTypes'
+ import type {
+   PendingVideoScrape,
++  PendingVideoScrapePage,
++  PendingVideoScrapePageQuery,
+   PendingVideoScrapeConfirmInput,
+   PendingVideoScrapeResolutionResult
+ } from './videoScrapeTypes'
+@@ -57,6 +59,10 @@ export interface ScrapeIpcContract {
+     ]
+     result: VideoScrapeOneResult
+   }
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: { args: []; result: number }
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: { args: [ids: number[]]; result: number[] }
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: { args: [query: PendingVideoScrapePageQuery]; result: PendingVideoScrapePage }
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: { args: [id: number]; result: PendingVideoScrape | null }
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: { args: []; result: PendingVideoScrape[] }
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: {
+     args: [input: PendingVideoScrapeConfirmInput]
+diff --git a/src/main/db/pendingVideoScrapeRepo.test.ts b/src/main/db/pendingVideoScrapeRepo.test.ts
+new file mode 100644
+index 0000000..7a22ba5
+--- /dev/null
++++ b/src/main/db/pendingVideoScrapeRepo.test.ts
+@@ -0,0 +1,94 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { countPendingVideoScrapes, existingPendingVideoScrapeIds, pagePendingVideoScrapes, getPendingVideoScrapeById } from './pendingVideoScrapeRepo'
++
++it('counts a large pending inbox without decoding its snapshots and follows deletions', () => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pending-count-'))
++  try {
++    const db = initDatabaseAtPath(path.join(directory, 'test.db'))
++    assert.equal(countPendingVideoScrapes(), 0)
++    const video = db.prepare('INSERT INTO videos (id, code) VALUES (?, ?)')
++    const pending = db.prepare(`INSERT INTO pending_video_scrapes (
++      video_id, selected_fields_json, applicable_fields_json, update_mode,
++      request_json, warnings_json, created_at, updated_at
++    ) VALUES (?, 'not-json', 'not-json', 'replace', 'not-json', 'not-json', '2026', '2026')`)
++    db.transaction(() => {
++      for (let id = 1; id <= 10_000; id++) {
++        video.run(id, `COUNT-${id}`)
++        pending.run(id)
++      }
++    })()
++    const trace: string[] = []
++    const prepare = db.prepare.bind(db)
++    db.prepare = ((sql: string) => {
++      trace.push(sql)
++      return prepare(sql)
++    }) as typeof db.prepare
++    assert.equal(countPendingVideoScrapes(), 10_000)
++    assert.deepEqual(trace, ['SELECT COUNT(*) AS count FROM pending_video_scrapes'])
++    assert.deepEqual(existingPendingVideoScrapeIds([10000,1,1,20000]),[1,10000])
++    assert.ok(trace.at(-1)!.startsWith('SELECT id FROM pending_video_scrapes WHERE id IN'))
++    assert.deepEqual(existingPendingVideoScrapeIds([]),[])
++    assert.throws(()=>existingPendingVideoScrapeIds(Array(101).fill(1)),/Invalid/)
++    assert.throws(()=>existingPendingVideoScrapeIds([Number.MAX_SAFE_INTEGER+1]),/Invalid/)
++    db.prepare('DELETE FROM pending_video_scrapes WHERE video_id = ?').run(1)
++    assert.equal(countPendingVideoScrapes(), 9_999)
++    db.prepare('DELETE FROM videos WHERE id = ?').run(2)
++    assert.equal(countPendingVideoScrapes(), 9_998)
++  } finally {
++    closeDatabase()
++    fs.rmSync(directory, { recursive: true, force: true })
++  }
++})
++
++
++it('pages a 10k inbox without materializing snapshots, locates deep links and clamps deleted pages', () => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pending-page-'))
++  try {
++    const db = initDatabaseAtPath(path.join(directory, 'test.db'))
++    db.transaction(() => {
++      db.exec(`WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++        INSERT INTO videos(id,code) SELECT x,'PAGE-'||x FROM n;
++        INSERT INTO pending_video_scrapes(id,video_id,selected_fields_json,applicable_fields_json,update_mode,request_json,warnings_json,created_at,updated_at)
++          SELECT id,id,'not-json','not-json','replace','not-json','not-json','2026','2026' FROM videos;
++        INSERT INTO pending_video_scrape_sources(id,pending_scrape_id,position,plugin_name,plugin_source,source_name,selected_fields_json,plugin_config_json)
++          SELECT id,id,0,'p','builtin','s','not-json','not-json' FROM videos;
++        INSERT INTO pending_video_scrape_candidates(id,source_id,position,result_json)
++          SELECT id,id,0,'not-json' FROM videos;`)
++      db.prepare('UPDATE pending_video_scrape_candidates SET result_json=? WHERE id=1').run(JSON.stringify({ code: '　'.repeat(200) + '😀'.repeat(130), summary: 'x'.repeat(1_000_000) }))
++      db.exec("INSERT INTO pending_video_scrape_sources(id,pending_scrape_id,position,plugin_name,plugin_source,source_name,selected_fields_json,plugin_config_json) VALUES(10001,1,-1,'empty','builtin','empty','[]','{}')")
++      db.exec("INSERT INTO pending_video_scrape_resources(candidate_id,field,position,staged_path) VALUES(1,'cover',0,'cover-one.jpg'),(1,'samples',0,'sample.jpg')")
++    })()
++    const first = pagePendingVideoScrapes({ limit: 50 })
++    assert.equal(first.total, 10000); assert.equal(first.items.length, 50)
++    assert.equal(first.items[0].code, '😀'.repeat(128)+'…')
++    assert.equal(first.items[0].stagedCoverPath, 'cover-one.jpg')
++    assert.equal(first.items[0].candidateCount, 1); assert.equal(first.items[0].sourceCount, 2)
++    assert.ok(Buffer.byteLength(JSON.stringify(first)) < 16*1024)
++    assert.equal('sources' in first.items[0], false)
++    assert.equal(first.items[1].code, '')
++    assert.equal(getPendingVideoScrapeById(1)!.sources.flatMap(source => source.candidates)[0].result.summary!.length, 1_000_000)
++    const deep = pagePendingVideoScrapes({ videoId: 9876 })
++    assert.equal(deep.offset, 9850); assert.ok(deep.items.some(item => item.videoId === 9876))
++    assert.deepEqual(pagePendingVideoScrapes({ anchorId: 9876 }), deep)
++    assert.deepEqual(pagePendingVideoScrapes({ offset: 50 }).items.map(item => item.id), Array.from({length:50},(_,i)=>51+i))
++    const trace: string[]=[]
++    const prepare=db.prepare.bind(db)
++    db.prepare=((sql:string)=>{trace.push(sql);return prepare(sql)}) as typeof db.prepare
++    const last=pagePendingVideoScrapes({ offset: Number.MAX_SAFE_INTEGER })
++    assert.equal(last.offset,9950)
++    assert.equal(trace.length,5, 'fixed prepared statement set, no per-item detail hydration')
++    assert.ok(trace.every(sql => !/SELECT \*|request_json|warnings_json|selected_fields_json/.test(sql)))
++    db.exec('DELETE FROM pending_video_scrapes WHERE id>20')
++    assert.equal(pagePendingVideoScrapes({ offset:9950 }).offset,0)
++    db.exec('DELETE FROM pending_video_scrapes')
++    assert.deepEqual(pagePendingVideoScrapes({ anchorId:9876 }),{items:[],total:0,offset:0})
++    for(const query of [{limit:101},{limit:0},{offset:-1},{offset:1.5},{anchorId:0},{videoId:Number.MAX_SAFE_INTEGER+1},{anchorId:1,videoId:1}]) {
++      assert.throws(()=>pagePendingVideoScrapes(query),/Invalid/)
++    }
++  } finally { closeDatabase(); fs.rmSync(directory,{recursive:true,force:true}) }
++})
+diff --git a/src/renderer/src/hooks/usePendingScrapePresence.ts b/src/renderer/src/hooks/usePendingScrapePresence.ts
+new file mode 100644
+index 0000000..0880c92
+--- /dev/null
++++ b/src/renderer/src/hooks/usePendingScrapePresence.ts
+@@ -0,0 +1,26 @@
++import { useEffect, useMemo, useState } from 'react'
++import { api } from '../api'
++
++/** One displayed page, one result snapshot. Old IPC work is not cancelled, but cannot publish. */
++export function usePendingScrapePresence(ids: readonly number[], scope: string) {
++  const [attempt, setAttempt] = useState(0)
++  const [snapshot, setSnapshot] = useState<{ request: object; state: 'ready' | 'error'; ids: Set<number> }>()
++  const normalized = [...new Set(ids)].sort((a,b) => a-b)
++  const key = JSON.stringify([scope, normalized, attempt])
++  const request = useMemo(() => ({ key }), [key])
++  useEffect(() => {
++    const [, requested] = JSON.parse(request.key) as [string, number[], number]
++    let active = true
++    if (!requested.length) return
++    void Promise.resolve().then(() => api.scrape.existingPendingIds(requested)).then(
++      existing => { if (active) setSnapshot({request, state:'ready', ids:new Set(existing)}) },
++      () => { if (active) setSnapshot({request, state:'error', ids:new Set()}) }
++    )
++    return () => { active = false }
++  }, [request])
++  return {
++    state: !normalized.length ? 'ready' as const : snapshot?.request === request ? snapshot.state : 'loading' as const,
++    ids: snapshot?.request === request ? snapshot.ids : new Set<number>(),
++    retry: () => setAttempt(value => value + 1)
++  }
++}
+diff --git a/src/renderer/src/hooks/usePendingScrapePresence.test.tsx b/src/renderer/src/hooks/usePendingScrapePresence.test.tsx
+new file mode 100644
+index 0000000..374531c
+--- /dev/null
++++ b/src/renderer/src/hooks/usePendingScrapePresence.test.tsx
+@@ -0,0 +1,50 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++function deferred() {
++  let resolve!: (value:number[])=>void, reject!: (error:Error)=>void
++  const promise=new Promise<number[]>((yes,no)=>{resolve=yes;reject=no})
++  return {promise,resolve,reject}
++}
++const requests:Array<{ids:number[]} & ReturnType<typeof deferred>>=[]
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{scrape:{existingPendingIds:(ids:number[])=>{
++  const request={ids,...deferred()};requests.push(request);return request.promise
++}}}}})
++let renderer:TestRenderer.ReactTestRenderer | undefined
++let current:ReturnType<typeof import('./usePendingScrapePresence').usePendingScrapePresence>
++let hook:typeof import('./usePendingScrapePresence').usePendingScrapePresence
++function Probe({ids,scope}:{ids:number[];scope:string}):null {current=hook(ids,scope);return null}
++async function show(ids:number[],scope='one') {
++  hook=(await import('./usePendingScrapePresence')).usePendingScrapePresence
++  await act(async()=>{
++    if(renderer)renderer.update(<Probe ids={ids} scope={scope}/> )
++    else renderer=TestRenderer.create(<Probe ids={ids} scope={scope}/> )
++  })
++}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;requests.length=0})
++it('sends no empty lookup, deduplicates IDs and rejects a stale page response',async()=>{
++  await show([]);assert.equal(requests.length,0);assert.equal(current.state,'ready')
++  await show([3,1,3]);assert.deepEqual(requests[0].ids,[1,3]);assert.equal(current.state,'loading')
++  await show([2]);assert.equal(current.ids.size,0)
++  await act(async()=>requests[1].resolve([2]));assert.equal(current.state,'ready');assert.deepEqual([...current.ids],[2])
++  await act(async()=>requests[0].resolve([1,3]));assert.deepEqual([...current.ids],[2])
++})
++it('distinguishes a failed lookup from processed items and retries the same page',async()=>{
++  await show([1])
++  await act(async()=>requests[0].reject(new Error('injected')))
++  assert.equal(current.state,'error')
++  await act(async()=>current.retry());assert.equal(current.state,'loading')
++  await act(async()=>requests[1].resolve([]));assert.equal(current.state,'ready');assert.equal(current.ids.size,0)
++  await show([1],'next-run');assert.equal(current.state,'loading');assert.equal(requests.length,3)
++})
++
++
++it('does not reuse old ready state when a page is revisited before another lookup finishes',async()=>{
++  await show([1]);await act(async()=>requests[0].resolve([1]));assert.equal(current.state,'ready')
++  await show([2]);await show([1])
++  assert.equal(current.state,'loading');assert.equal(current.ids.size,0)
++  await act(async()=>requests[1].resolve([2]));assert.equal(current.state,'loading')
++  await act(async()=>requests[2].resolve([]));assert.equal(current.state,'ready');assert.equal(current.ids.size,0)
++})
+diff --git a/scripts/performance/audit-presence-ui.mjs b/scripts/performance/audit-presence-ui.mjs
+new file mode 100644
+index 0000000..9a5fa3f
+--- /dev/null
++++ b/scripts/performance/audit-presence-ui.mjs
+@@ -0,0 +1,60 @@
++/** Actual audit component, local pagination and visible-page IPC against synthetic records. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-presence-'))
++const output=path.resolve(process.env.JAVDEX_AUDIT_UI_OUTPUT??path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import{createRoot}from'react-dom/client';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__requests=[];window.__fail=false;window.__opened=[];
++window.api={scrape:{existingPendingIds:async ids=>{window.__requests.push(ids);if(window.__fail){window.__fail=false;throw new Error('fixture')};return ids.filter(id=>id===1||id===101||id===201);}},scan:{revealAuditFile:async()=>({ok:true})}};
++const summary={libraryId:1,runId:'run',configRevision:1,trigger:'manual',startedAt:'2026-09-10T00:00:00Z',finishedAt:'2026-09-10T00:01:00Z',status:'success',scannedFiles:201,resourcesAdded:201,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,skippedFiles:0,failedFiles:0,pendingScanGroups:0,pendingScanResources:201,offlineFolders:[],errorSummary:null};
++const audit={...summary,schemaVersion:2,files:Array.from({length:201},(_,i)=>({outcome:'added',rootId:1,sourceKind:'local',filePath:'/synthetic/FILE-'+(i+1)+'.mp4',videoId:i+1,videoCode:'FILE-'+(i+1),resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}})),removedResources:[],promotedResources:[],deletedVideos:[],pendingGroups:[]};
++const Panel=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/settings/LibraryScanAuditPanel.tsx'))})).default;
++function Host(){const[selected,setSelected]=React.useState(null);return <div style={{padding:16}}><Panel summary={summary} audit={audit} selected={selected} unrecognized={[]} currentPendingGroupIds={new Set()} currentPendingIdentityIds={new Set()} onSelect={setSelected} onResolvedUnrecognized={()=>{}} onOpenVideo={()=>{}} onOpenPending={target=>window.__opened.push(target)}/></div>}
++createRoot(document.getElementById('root')).render(<Host/>);
++`)
++let server,browser
++const results=[]
++try{
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]){
++  const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',e=>errors.push(e.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  assert.equal(await page.locator('[data-audit-anchor]').count(),100)
++  await page.evaluate(()=>window.__fail=true)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('待办状态读取失败',{exact:true}).waitFor()
++  assert.equal(await page.getByRole('button',{name:'处理待办',exact:true}).count(),0)
++  await page.getByRole('button',{name:'重试状态',exact:true}).click()
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.waitForFunction(()=>window.__requests.at(-1)?.[0]===201)
++  await page.getByRole('button',{name:'处理待办',exact:true}).click()
++  assert.deepEqual(await page.evaluate(()=>window.__opened),[{domain:'scrape',id:'201'}])
++  await page.getByRole('button',{name:/全部文件/}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'处理',exact:true}).click()
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  const rows=await page.locator('[data-audit-anchor]').count();assert.equal(rows,1)
++  await page.waitForFunction(()=>document.activeElement?.getAttribute('data-audit-anchor')?.includes('FILE-201'))
++  const focused=await page.evaluate(()=>document.activeElement.getAttribute('data-audit-anchor'));assert.ok(focused.includes('FILE-201'))
++  const focusedBox=await page.locator('[data-audit-anchor]').boundingBox();assert.ok(focusedBox && focusedBox.y>=0 && focusedBox.y+focusedBox.height<=viewport.height+1)
++  const geometry=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1);assert.deepEqual(errors,[])
++  assert.ok((await page.evaluate(()=>window.__requests)).every(ids=>ids.length<=100))
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,rows,focused,geometry,requests:await page.evaluate(()=>window.__requests),errors});await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n');console.log(JSON.stringify(results))
++}finally{await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/pending-scrape-benchmark.ts b/scripts/performance/pending-scrape-benchmark.ts
+new file mode 100644
+index 0000000..664bac9
+--- /dev/null
++++ b/scripts/performance/pending-scrape-benchmark.ts
+@@ -0,0 +1,53 @@
++/** Synthetic inbox only. Compare old full hydration with bounded summary/read-on-select. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { closeDatabase, initDatabaseAtPath } from '../../src/main/db/database'
++import { getPendingVideoScrapeById, existingPendingVideoScrapeIds, listPendingVideoScrapes, pagePendingVideoScrapes } from '../../src/main/db/pendingVideoScrapeRepo'
++
++it('measures 10k pending summaries against full candidate hydration', () => {
++  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-bench-'))
++  try {
++    const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++    db.transaction(()=>{
++      db.exec(`WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++        INSERT INTO videos(id,code) SELECT x,'PENDING-'||x FROM n;
++        INSERT INTO pending_video_scrapes(id,video_id,selected_fields_json,applicable_fields_json,update_mode,request_json,warnings_json,created_at,updated_at)
++          SELECT id,id,'[]','[]','replace','{}','[]','2026','2026' FROM videos;
++        INSERT INTO pending_video_scrape_sources(id,pending_scrape_id,position,plugin_name,plugin_source,source_name,selected_fields_json,plugin_config_json)
++          SELECT id,id,0,'p','builtin','s','[]','{}' FROM videos;`)
++      const insert=db.prepare('INSERT INTO pending_video_scrape_candidates(id,source_id,position,result_json) VALUES(?,?,0,?)')
++      for(let id=1;id<=10000;id++)insert.run(id,id,JSON.stringify({code:`CANDIDATE-${id}`,summary:'x'.repeat(4096),tags:['one','two']}))
++      db.exec(`INSERT INTO pending_video_scrape_resources(candidate_id,field,position,staged_path,size_bytes)
++        SELECT id,'cover',0,'staged/'||id||'.jpg',1000 FROM videos;`)
++    })()
++    db.exec('ANALYZE')
++    const expected=Array.from({length:50},(_,i)=>({id:i+1,videoId:i+1,revision:1,code:`CANDIDATE-${i+1}`,candidateCount:1,sourceCount:1,stagedCoverPath:`staged/${i+1}.jpg`}))
++    const results=[]
++    function measure(name:string,read:()=>unknown,verify:(value:unknown)=>void) {
++      const samples=[];let jsonBytes=0
++      for(let i=0;i<3;i++){
++        const start=performance.now();const value=read();const elapsed=performance.now()-start
++        verify(value);jsonBytes=Buffer.byteLength(JSON.stringify(value));samples.push(elapsed)
++      }
++      results.push({name,samples,medianMs:[...samples].sort((a,b)=>a-b)[1],jsonBytes,rssBytes:process.memoryUsage().rss})
++    }
++    measure('full.list',listPendingVideoScrapes,value=>{const rows=value as ReturnType<typeof listPendingVideoScrapes>;assert.equal(rows.length,10000);assert.equal(rows[9999].sources[0].candidates[0].result.summary!.length,4096)})
++    measure('summary.first',()=>pagePendingVideoScrapes({}),value=>assert.deepEqual(value,{items:expected,total:10000,offset:0}))
++    measure('summary.deep',()=>pagePendingVideoScrapes({anchorId:9876}),value=>{const page=value as ReturnType<typeof pagePendingVideoScrapes>;assert.equal(page.offset,9850);assert.ok(page.items.some(row=>row.id===9876))})
++    measure('detail.selected',()=>getPendingVideoScrapeById(9876),value=>{const item=value as NonNullable<ReturnType<typeof getPendingVideoScrapeById>>;assert.equal(item.videoId,9876);assert.equal(item.sources[0].candidates[0].result.summary!.length,4096)})
++    const auditIds=Array.from({length:100},(_,i)=>9901+i)
++    measure('existing.ids100',()=>existingPendingVideoScrapeIds(auditIds),value=>assert.deepEqual(value,auditIds))
++    const result={count:10000,candidatesPerItem:1,summaryCharacters:4096,results,platform:process.platform,arch:process.arch,
++      sqliteVersion:db.prepare('SELECT sqlite_version() AS version').get(),
++      caveats:['Three sequential local warm samples on synthetic catalog; not p95/Windows/HDD/full renderer IPC.',
++        'Times cover repository calls only; assertions and JSON sizing excluded. Bytes are JSON-equivalent payload, not actual IPC allocations.',
++        'First metadata page reads at most50 item metadata, but candidate counts/first-candidate JSON extraction and OFFSET/rank are not constant SQL work.',
++        'RSS is sampled after each stage, not peak or independent allocation; full hydration runs first. No OS cache reset.']}
++    if(process.env.JAVDEX_PENDING_BENCH_OUTPUT)fs.writeFileSync(path.resolve(process.env.JAVDEX_PENDING_BENCH_OUTPUT),JSON.stringify(result,null,2)+'\n')
++    console.log(JSON.stringify(result))
++  } finally {closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})

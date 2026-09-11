@@ -27,6 +27,7 @@ function clamp(value: number, min: number, max: number): number {
 export interface ImagePreviewItem {
   id: number
   src: string
+  thumbnailSrc?: string
   /** Local asset path used for poster selection; omit when poster actions are disabled. */
   localPath?: string | null
 }
@@ -40,27 +41,39 @@ export interface ImagePreviewLabels {
 
 export interface ImagePreviewLightboxProps {
   items: ImagePreviewItem[]
+  /** A bounded window; onIndexChange may receive -1 or items.length at its edges. */
+  windowOffset?: number
+  total?: number
+  loading?: boolean
   index: number
   onClose: () => void
   onIndexChange: (index: number) => void
   labels: ImagePreviewLabels
   posterPath?: string | null
   onPosterChange?: (posterPath: string | null) => Promise<void>
+  navigationStatus?: ReactNode
   toolbarActions?: ReactNode
 }
 
 export default function ImagePreviewLightbox({
   items,
+  windowOffset = 0,
+  total = items.length,
+  loading = false,
   index,
   onClose,
   onIndexChange,
   labels,
   posterPath = null,
   onPosterChange,
-  toolbarActions
+  toolbarActions,
+  navigationStatus
 }: ImagePreviewLightboxProps): JSX.Element | null {
   const { register } = useImagePreviewOverlay()
   const src = items[index]?.src
+  const assetId = items[index]?.id
+  const canPrev = !loading && windowOffset + index > 0
+  const canNext = !loading && windowOffset + index + 1 < total
   const [scale, setScale] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [savingPoster, setSavingPoster] = useState(false)
@@ -222,7 +235,7 @@ export default function ImagePreviewLightbox({
     setImageReady(false)
     const frame = window.requestAnimationFrame(() => setImageReady(true))
     return () => window.cancelAnimationFrame(frame)
-  }, [clearChromeTimer, clearSwipeAnimation, index, resetChromeOnOpen, resetView])
+  }, [clearChromeTimer, clearSwipeAnimation, index, assetId, resetChromeOnOpen, resetView])
 
   useEffect(() => {
     return () => {
@@ -249,7 +262,7 @@ export default function ImagePreviewLightbox({
 
   useEffect(() => {
     activeThumbRef.current?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
-  }, [index])
+  }, [index, assetId])
 
   const zoomBy = useCallback((delta: number) => {
     setScale((current) => {
@@ -261,22 +274,22 @@ export default function ImagePreviewLightbox({
 
   const goPrev = useCallback(() => {
     if (swipeAnimatingRef.current || swipeClickSuppressedRef.current) return
-    if (index > 0) onIndexChange(index - 1)
-  }, [index, onIndexChange])
+    if (canPrev) onIndexChange(index - 1)
+  }, [canPrev, index, onIndexChange])
 
   const goNext = useCallback(() => {
     if (swipeAnimatingRef.current || swipeClickSuppressedRef.current) return
-    if (index < items.length - 1) onIndexChange(index + 1)
-  }, [index, items.length, onIndexChange])
+    if (canNext) onIndexChange(index + 1)
+  }, [canNext, index, onIndexChange])
 
   const selectThumb = useCallback(
     (thumbIndex: number) => {
-      if (thumbIndex === index || swipeAnimatingRef.current) return
+      if (loading || thumbIndex === index || swipeAnimatingRef.current) return
       thumbSelectRef.current = true
       holdChrome()
       onIndexChange(thumbIndex)
     },
-    [holdChrome, index, onIndexChange]
+    [holdChrome, index, loading, onIndexChange]
   )
 
   useEscapeKey(onClose, true)
@@ -327,7 +340,7 @@ export default function ImagePreviewLightbox({
 
   const onPointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     bumpChrome()
-    if (e.button !== 0 || swipeAnimatingRef.current) return
+    if (loading || e.button !== 0 || swipeAnimatingRef.current) return
     if (Math.round(scale * 100) === 100) {
       e.currentTarget.setPointerCapture(e.pointerId)
       swipeRef.current = {
@@ -365,7 +378,10 @@ export default function ImagePreviewLightbox({
         swipe.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical'
       }
       if (swipe.axis === 'horizontal') {
-        setSwipeOffsetX(deltaX)
+        // Across a page boundary there is no adjacent image to slide into view.
+        const unloadedNeighbor = (deltaX >= 0 && index === 0 && canPrev) ||
+          (deltaX < 0 && index === items.length - 1 && canNext)
+        setSwipeOffsetX(unloadedNeighbor ? 0 : deltaX)
         setSwipeDirection(deltaX >= 0 ? 'prev' : 'next')
       }
       return
@@ -407,7 +423,14 @@ export default function ImagePreviewLightbox({
           : null
       const targetIndex =
         direction === 'prev' ? index - 1 : direction === 'next' ? index + 1 : null
-      const canCommit = targetIndex != null && targetIndex >= 0 && targetIndex < items.length
+      const canCommit = direction === 'prev' ? canPrev : direction === 'next' ? canNext : false
+
+      if (canCommit && targetIndex != null && (targetIndex < 0 || targetIndex >= items.length)) {
+        setSwipeOffsetX(0)
+        setSwipeDirection(null)
+        onIndexChange(targetIndex)
+        return
+      }
 
       if (!canCommit && (swipe.axis !== 'horizontal' || Math.abs(deltaX) < 1)) {
         setSwipeOffsetX(0)
@@ -523,7 +546,7 @@ export default function ImagePreviewLightbox({
   const posterCandidate = items[index]?.localPath ?? null
   const isPoster = Boolean(posterCandidate && posterPath === posterCandidate)
   const showPosterAction = Boolean(onPosterChange)
-  const chromeClass = chromeVisible || savingPoster || chromeHover ? ' is-visible' : ''
+  const chromeClass = chromeVisible || savingPoster || chromeHover || loading || navigationStatus ? ' is-visible' : ''
   const canResetView = Math.round(scale * 100) !== 100
 
   const togglePoster = async (): Promise<void> => {
@@ -544,6 +567,7 @@ export default function ImagePreviewLightbox({
       className="image-preview"
       role="dialog"
       aria-modal
+      aria-busy={loading}
       aria-label={labels.dialog}
       aria-describedby="image-preview-hint"
       onFocusCapture={() => noteChromeActivity(true)}
@@ -563,7 +587,7 @@ export default function ImagePreviewLightbox({
         }}
       >
         <span className="image-preview-counter image-preview-toolbar-pill">
-          {index + 1} / {items.length}
+          {windowOffset + index + 1} / {total}
         </span>
         <div className="image-preview-actions">
           {showPosterAction && (
@@ -577,6 +601,7 @@ export default function ImagePreviewLightbox({
               {savingPoster ? '保存中…' : isPoster ? '背景 ✓' : '设为背景'}
             </button>
           )}
+          {navigationStatus}
           {toolbarActions}
           <div className="image-preview-zoom" aria-label="缩放">
             <IconButton
@@ -619,7 +644,7 @@ export default function ImagePreviewLightbox({
           onPointerMove={canSwipe ? onPointerMove : undefined}
           onPointerUp={canSwipe ? onPointerUp : undefined}
           onPointerCancel={canSwipe ? (event) => onPointerUp(event, false) : undefined}
-          disabled={index === 0}
+          disabled={!canPrev}
           aria-label="上一张"
         />
         <div
@@ -672,7 +697,7 @@ export default function ImagePreviewLightbox({
           onPointerMove={canSwipe ? onPointerMove : undefined}
           onPointerUp={canSwipe ? onPointerUp : undefined}
           onPointerCancel={canSwipe ? (event) => onPointerUp(event, false) : undefined}
-          disabled={index === items.length - 1}
+          disabled={!canNext}
           aria-label="下一张"
         />
       </div>
@@ -713,9 +738,10 @@ export default function ImagePreviewLightbox({
                   thumbIsPoster ? ' image-preview-thumb--poster' : ''
                 }`}
                 onClick={() => handleThumbClick(thumbIndex)}
-                aria-label={labels.thumb(thumbIndex)}
+                disabled={loading}
+                aria-label={labels.thumb(windowOffset + thumbIndex)}
               >
-                <img src={item.src} alt="" loading="lazy" draggable={false} />
+                <img src={item.thumbnailSrc ?? item.src} alt="" loading="lazy" draggable={false} />
               </button>
             )
           })}

@@ -10,7 +10,7 @@ import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
 import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 
 interface Props {
-  playlist?: PlaylistDetail
+  playlist?: Pick<PlaylistDetail, 'name' | 'description' | 'links' | 'cover_path'>
   currentCoverUrl?: string | null
   onCancel: () => void
   onCreate?: (input: PlaylistCreateInput) => Promise<void>

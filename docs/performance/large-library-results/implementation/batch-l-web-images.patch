@@ -1,0 +1,376 @@
+diff --git a/src/main/web/catalog.test.ts b/src/main/web/catalog.test.ts
+index d3fb1d0..fb627f4 100644
+--- a/src/main/web/catalog.test.ts
++++ b/src/main/web/catalog.test.ts
+@@ -25,7 +25,64 @@ describe('Web read-only catalog scope', () => {
+     delete process.env.JAVDEX_TEST_USER_DATA
+     fs.rmSync(directory, { recursive: true, force: true })
+   })
+-  it('filters archived/hidden memberships for lists, details, images, and media', () => {
++  for (const change of ['hidden', 'archived', 'cover', 'cast', 'sample'] as const) {
++    it(`rechecks image authorization after async work when ${change} changes`, async (t) => {
++      const { videoId } = insertTestVideoWithFile(db, { code: 'ASYNC', filePath: '/video/async.mp4' })
++      db.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run('covers/old.png', videoId)
++      const actressId = Number(db.prepare("INSERT INTO actresses (main_name, avatar_path) VALUES ('Async', 'avatars/old.png')").run().lastInsertRowid)
++      db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(videoId, actressId)
++      const assetId = Number(db.prepare("INSERT INTO video_assets (video_id, type, local_path) VALUES (?, 'sample', 'samples/old.png')").run(videoId).lastInsertRowid)
++      let release!: () => void
++      const gate = new Promise<void>((resolve) => { release = resolve })
++      t.mock.method(mediaAssetStore, 'readForServeAsync', async () => {
++        await gate
++        return { body: Buffer.from('old image'), mime: 'image/png' }
++      })
++      const key = change === 'cast' ? `actress-${actressId}` : change === 'sample' ? String(assetId) : 'cover'
++      const result = catalog.image(videoId, key)
++      const rejected = assert.rejects(result, /图片/)
++      if (change === 'hidden') db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?').run(videoId)
++      else if (change === 'archived') db.prepare("UPDATE media_libraries SET status = 'archived'").run()
++      else if (change === 'cover') db.prepare("UPDATE videos SET cover_path = 'covers/new.png' WHERE id = ?").run(videoId)
++      else if (change === 'cast') db.prepare('DELETE FROM video_actress WHERE video_id = ?').run(videoId)
++      else db.prepare('DELETE FROM video_assets WHERE id = ?').run(assetId)
++      release()
++      await rejected
++    })
++  }
++
++  it('reads only the authorized image path before and after serving, without full details', async (t) => {
++    const { videoId } = insertTestVideoWithFile(db, { code: 'SLIM', filePath: '/video/slim.mp4', summary: 'large'.repeat(20000) })
++    db.prepare("UPDATE videos SET cover_path = 'covers/slim.png' WHERE id = ?").run(videoId)
++    const sql: string[] = []
++    const prepare = db.prepare.bind(db)
++    t.mock.method(db, 'prepare', (query: string) => { sql.push(query); return prepare(query) })
++    t.mock.method(mediaAssetStore, 'readForServeAsync', async () => ({ body: Buffer.from('image'), mime: 'image/png' }))
++    assert.equal((await catalog.image(videoId, 'cover')).body.toString(), 'image')
++    assert.equal(sql.length, 2)
++    assert.ok(sql.every((query) => query.startsWith('SELECT v.cover_path AS path')))
++    assert.ok(sql.every((query) => !query.includes('v.*')))
++  })
++
++  it('forwards the caller signal to the async Store and drops a cancelled result', async (t) => {
++    const { videoId } = insertTestVideoWithFile(db, { code: 'CANCEL', filePath: '/video/cancel.mp4' })
++    db.prepare("UPDATE videos SET cover_path = 'covers/cancel.png' WHERE id = ?").run(videoId)
++    const abort = new AbortController()
++    let release!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    t.mock.method(mediaAssetStore, 'readForServeAsync', async (rel: string, signal?: AbortSignal) => {
++      assert.equal(rel, 'covers/cancel.png')
++      assert.equal(signal, abort.signal)
++      await gate
++      return { body: Buffer.from('image'), mime: 'image/png' }
++    })
++    const operation = catalog.image(videoId, 'cover', abort.signal)
++    const rejected = assert.rejects(operation, { name: 'AbortError' })
++    abort.abort()
++    release()
++    await rejected
++  })
++  it('filters archived/hidden memberships for lists, details, images, and media', async () => {
+     const visible = insertTestVideoWithFile(db, {
+       code: 'VISIBLE',
+       filePath: '/private/movie.mp4',
+@@ -54,7 +111,7 @@ describe('Web read-only catalog scope', () => {
+     assert.equal(result.items[0].id, visible.videoId)
+     for (const video of [hidden, archived]) {
+       assert.throws(() => catalog.detail(video.videoId))
+-      assert.throws(() => catalog.image(video.videoId, 'cover'))
++      await assert.rejects(() => catalog.image(video.videoId, 'cover'))
+       assert.throws(() => catalog.media(video.videoId, video.fileId))
+     }
+     assert.equal(catalog.collections().libraries.length, 1)
+@@ -68,7 +125,7 @@ describe('Web read-only catalog scope', () => {
+     assert.equal(detail.resources[0].playable, false)
+     assert.throws(() => catalog.media(visible.videoId, visible.fileId))
+   })
+-  it('describes local resources without exposing their directory', () => {
++  it('describes local resources without exposing their directory', async () => {
+     const { videoId, fileId } = insertTestVideoWithFile(db, {
+       code: 'RESOURCE', filePath: '/private/library/sample-CD1.mp4'
+     })
+@@ -83,7 +140,7 @@ describe('Web read-only catalog scope', () => {
+     db.prepare('UPDATE video_resources SET display_name = ? WHERE id = ?').run('自定义版本', fileId)
+     assert.equal(catalog.detail(videoId).resources[0].name, '自定义版本')
+   })
+-  it('uses the cover rather than the background for browse, detail and image requests', (t) => {
++  it('uses the cover rather than the background for browse, detail and image requests', async (t) => {
+     const { videoId } = insertTestVideoWithFile(db, {
+       code: 'ARTWORK',
+       filePath: '/video/artwork.mp4'
+@@ -91,23 +148,23 @@ describe('Web read-only catalog scope', () => {
+     db.prepare('UPDATE videos SET cover_path = ?, poster_path = ? WHERE id = ?')
+       .run('covers/front.png', 'posters/background.png', videoId)
+     const image = { body: Buffer.from('cover'), mime: 'image/png' }
+-    const read = t.mock.method(mediaAssetStore, 'readForServe', (rel: string) => {
++    const read = t.mock.method(mediaAssetStore, 'readForServeAsync', async (rel: string) => {
+       assert.equal(rel, 'covers/front.png')
+       return image
+     })
+     const coverUrl = `/api/videos/${videoId}/images/cover`
+     assert.equal(catalog.browse(new URLSearchParams()).items[0].cover, coverUrl)
+     assert.equal(catalog.detail(videoId).cover, coverUrl)
+-    assert.deepEqual(catalog.image(videoId, 'cover'), image)
++    assert.deepEqual(await catalog.image(videoId, 'cover'), image)
+     assert.equal(read.mock.callCount(), 1)
+ 
+     db.prepare('UPDATE videos SET cover_path = NULL WHERE id = ?').run(videoId)
+     assert.equal(catalog.browse(new URLSearchParams()).items[0].cover, null)
+     assert.equal(catalog.detail(videoId).cover, null)
+-    assert.throws(() => catalog.image(videoId, 'cover'), /图片不存在/)
++    await assert.rejects(() => catalog.image(videoId, 'cover'), /图片不存在/)
+     assert.equal(read.mock.callCount(), 1)
+   })
+-  it('queries with parameters, paginates stably and filters clear membership scopes', () => {
++  it('queries with parameters, paginates stably and filters clear membership scopes', async () => {
+     for (let index = 0; index < 40; index++)
+       insertTestVideoWithFile(db, {
+         code: `CODE-${index}`,
+@@ -133,7 +190,7 @@ describe('Web read-only catalog scope', () => {
+     assert.throws(() => catalog.browse(new URLSearchParams('sort=constructor')))
+     assert.throws(() => catalog.browse(new URLSearchParams('page=-1')))
+   })
+-  it('uses stable desktop discovery and respects library home participation', () => {
++  it('uses stable desktop discovery and respects library home participation', async () => {
+     const root = addMediaLibraryRoot({ libraryId: 1, expectedRevision: 1, root: { path: directory } })
+     for (let index = 0; index < 20; index++) {
+       insertTestVideoWithFile(db, { code: `HOME-${index}`, filePath: path.join(directory, `${index}.mp4`), rootId: root.id })
+@@ -148,7 +205,7 @@ describe('Web read-only catalog scope', () => {
+     assert.deepEqual(catalog.home('stable-seed'), { discovery: [], recent: [] })
+     assert.throws(() => catalog.home('x'.repeat(101)))
+   })
+-  it('exposes cast display metadata and only serves avatars linked to visible videos', (t) => {
++  it('exposes cast display metadata and only serves avatars linked to visible videos', async (t) => {
+     const { videoId } = insertTestVideoWithFile(db, { code: 'CAST', filePath: '/private/cast.mp4' })
+     const insert = db.prepare('INSERT INTO actresses (main_name, gender, avatar_path) VALUES (?, ?, ?)')
+     const actorId = Number(insert.run('Sample actor', 'male', 'avatars/sample.png').lastInsertRowid)
+@@ -158,17 +215,17 @@ describe('Web read-only catalog scope', () => {
+     assert.deepEqual(cast.map(({ id, name, gender, avatar }) => ({ id, name, gender, avatar })), [{
+       id: actorId, name: 'Sample actor', gender: 'male', avatar: `/api/videos/${videoId}/images/actress-${actorId}`
+     }])
+-    const read = t.mock.method(mediaAssetStore, 'readForServe', (rel: string) => {
++    const read = t.mock.method(mediaAssetStore, 'readForServeAsync', async (rel: string) => {
+       assert.equal(rel, 'avatars/sample.png')
+       return { body: Buffer.from('avatar'), mime: 'image/png' }
+     })
+-    assert.equal(catalog.image(videoId, `actress-${actorId}`).body.toString(), 'avatar')
+-    assert.throws(() => catalog.image(videoId, `actress-${otherId}`))
++    assert.equal((await catalog.image(videoId, `actress-${actorId}`)).body.toString(), 'avatar')
++    await assert.rejects(() => catalog.image(videoId, `actress-${otherId}`))
+     db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?').run(videoId)
+-    assert.throws(() => catalog.image(videoId, `actress-${actorId}`))
++    await assert.rejects(() => catalog.image(videoId, `actress-${actorId}`))
+     assert.equal(read.mock.callCount(), 1)
+   })
+-  it('downloads non-playable files and exposes only supported external links', () => {
++  it('downloads non-playable files and exposes only supported external links', async () => {
+     const root = addMediaLibraryRoot({ libraryId: 1, expectedRevision: 1, root: { path: directory } })
+     const file = path.join(directory, 'sample.avi')
+     fs.writeFileSync(file, 'download bytes')
+@@ -195,7 +252,7 @@ describe('Web read-only catalog scope', () => {
+     db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?').run(record.videoId)
+     assert.throws(() => catalog.media(record.videoId, record.fileId, true))
+   })
+-  it('resolves only authorized files and refuses symlink escapes and disabled roots', () => {
++  it('resolves only authorized files and refuses symlink escapes and disabled roots', async () => {
+     const mediaRoot = path.join(directory, 'media')
+     fs.mkdirSync(mediaRoot)
+     const root = addMediaLibraryRoot({
+diff --git a/src/main/web/catalog.ts b/src/main/web/catalog.ts
+index 316d247..11a8915 100644
+--- a/src/main/web/catalog.ts
++++ b/src/main/web/catalog.ts
+@@ -225,17 +225,32 @@ export class WebCatalog {
+       })
+     }
+   }
+-  image(id: number, key: string): { body: Buffer; mime: string } {
+-    const video = this.visibleDetail(id)
+-    const rel =
+-      key === 'cover'
+-        ? video.cover_path
+-        : key.startsWith('actress-')
+-          ? video.actresses.find((a) => `actress-${a.id}` === key)?.avatar_path
+-          : video.assets.find((a) => String(a.id) === key && a.type === 'sample')
+-            ?.local_path
+-    if (!rel) throw new WebError(404, '图片不存在')
+-    const image = mediaAssetStore.readForServe(rel)
++  private imagePath(id: number, key: string): string {
++    let column: string
++    let join = ''
++    const params: number[] = [id]
++    if (key === 'cover') column = 'v.cover_path'
++    else if (/^actress-[1-9]\d*$/.test(key)) {
++      column = 'a.avatar_path'
++      join = 'JOIN video_actress va ON va.video_id = v.id JOIN actresses a ON a.id = va.actress_id AND a.id = ?'
++      params.unshift(Number(key.slice(8)))
++    } else if (/^[1-9]\d*$/.test(key)) {
++      column = 'a.local_path'
++      join = "JOIN video_assets a ON a.video_id = v.id AND a.type = 'sample' AND a.id = ?"
++      params.unshift(Number(key))
++    } else throw new WebError(404, '图片不存在')
++    const row = this.db.prepare(`SELECT ${column} AS path FROM videos v ${join} WHERE v.id = ? AND ${VISIBLE}`)
++      .get(...params) as { path: string | null } | undefined
++    if (!row?.path) throw new WebError(404, '图片不存在或未开放浏览')
++    return row.path
++  }
++  async image(id: number, key: string, signal?: AbortSignal): Promise<{ body: Buffer; mime: string }> {
++    signal?.throwIfAborted()
++    const rel = this.imagePath(id, key)
++    const image = await mediaAssetStore.readForServeAsync(rel, signal)
++    signal?.throwIfAborted()
++    // Visibility, cast/sample membership or the stored image may change during disk/crypto work.
++    if (this.imagePath(id, key) !== rel) throw new WebError(404, '图片已更新，请重试')
+     if (!/^image\/(jpeg|png|webp|gif|avif)$/.test(image.mime))
+       throw new WebError(404, '图片格式不可用')
+     return image
+diff --git a/src/main/web/server.ts b/src/main/web/server.ts
+index c73ab0a..d0f92f5 100644
+--- a/src/main/web/server.ts
++++ b/src/main/web/server.ts
+@@ -1,3 +1,4 @@
++import { AssetReadQueueFullError } from '../services/mediaAssetStore'
+ import {
+   createServer,
+   type Server,
+@@ -434,10 +435,23 @@ export class WebServer {
+         return
+       }
+       if (match[2] === 'images') {
+-        const image = this.options.catalog.image(id, match[3])
+-        response.setHeader('Content-Type', image.mime)
+-        response.setHeader('Content-Length', image.body.length)
+-        response.end(method === 'HEAD' ? undefined : image.body)
++        const controller = new AbortController()
++        const abort = (): void => controller.abort()
++        response.once('close', abort)
++        try {
++          if (response.destroyed) controller.abort()
++          const image = await this.options.catalog.image(id, match[3], controller.signal)
++          if (response.destroyed || controller.signal.aborted) return
++          if (!this.sessions.check(token(request))) throw new WebError(401, '请先登录')
++          response.setHeader('Content-Type', image.mime)
++          response.setHeader('Content-Length', image.body.length)
++          response.end(method === 'HEAD' ? undefined : image.body)
++        } catch (error) {
++          if (error instanceof AssetReadQueueFullError) throw new WebError(503, '图片读取繁忙，请稍后重试')
++          throw error
++        } finally {
++          response.off('close', abort)
++        }
+         return
+       }
+       const download = url.searchParams.get('download') === '1'
+diff --git a/src/main/web/webServer.test.ts b/src/main/web/webServer.test.ts
+index d65dcca..c3a8d72 100644
+--- a/src/main/web/webServer.test.ts
++++ b/src/main/web/webServer.test.ts
+@@ -8,6 +8,7 @@ import { hashPassword, LoginLimiter, verifyPassword, WebSessions } from './auth'
+ import { parseRange } from './http'
+ import { isLocalPeer, WebServer } from './server'
+ import type { WebCatalogReader } from './catalog'
++import { AssetReadQueueFullError } from '../services/mediaAssetStore'
+ 
+ describe('Web authentication and streaming', () => {
+   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-web-'))
+@@ -24,7 +25,7 @@ describe('Web authentication and streaming', () => {
+     detail: () => {
+       throw new Error('not found')
+     },
+-    image: () => ({ body: Buffer.from('image'), mime: 'image/png' }),
++    image: async () => ({ body: Buffer.from('image'), mime: 'image/png' }),
+     media: () => ({ file: movie, stat: fs.statSync(movie), mime: 'video/mp4' })
+   }
+   const login = (password = 'correct horse battery'): Promise<Response> =>
+@@ -66,6 +67,94 @@ describe('Web authentication and streaming', () => {
+     await server.stop()
+     fs.rmSync(directory, { recursive: true, force: true })
+   })
++  it('keeps image responses private and reports read queue overload as 503', async (t) => {
++    t.mock.method(catalog, 'image', async () => { throw new AssetReadQueueFullError() })
++    for (const method of ['GET', 'HEAD']) {
++      const result = await fetch(base + '/api/videos/1/images/cover', { method, headers: { Cookie: sessionCookie } })
++      assert.equal(result.status, 503)
++      assert.equal(result.headers.get('cache-control'), 'no-store')
++      if (method === 'HEAD') assert.equal(await result.text(), '')
++    }
++  })
++
++  it('rechecks an expired session after image work while the connection remains open', async (t) => {
++    let clock = Date.now()
++    t.mock.method(Date, 'now', () => clock)
++    let started!: () => void
++    let release!: () => void
++    let readSignal: AbortSignal | undefined
++    const began = new Promise<void>((resolve) => { started = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const isolated = new WebServer({
++      username: 'viewer', passwordHash, staticRoot: directory,
++      catalog: { ...catalog, image: async (_id, _key, signal) => {
++        readSignal = signal
++        started()
++        await gate
++        return { body: Buffer.from('private image'), mime: 'image/png' }
++      } }
++    })
++    try {
++      const origin = `http://127.0.0.1:${await isolated.start(0, '127.0.0.1')}`
++      const loginResponse = await fetch(origin + '/api/login', {
++        method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'X-Javdex-Client': 'web' },
++        body: JSON.stringify({ username: 'viewer', password: 'correct horse battery' })
++      })
++      assert.equal(loginResponse.status, 200)
++      const cookie = loginResponse.headers.get('set-cookie')!.split(';')[0]
++      const response = fetch(origin + '/api/videos/1/images/cover', { headers: { Cookie: cookie } })
++      await began
++      clock += 15 * 24 * 60 * 60 * 1000
++      assert.equal(readSignal?.aborted, false)
++      release()
++      const result = await response
++      assert.equal(result.status, 401)
++      assert.doesNotMatch(await result.text(), /private image/)
++    } finally {
++      release()
++      await isolated.stop()
++    }
++  })
++
++  for (const reason of ['logout', 'disconnect'] as const) {
++    it(`cancels pending image work on ${reason} and never sends its completed bytes`, async (t) => {
++      const cookie = (await login()).headers.get('set-cookie')!.split(';')[0]
++      let started!: () => void
++      let cancelled!: () => void
++      let release!: () => void
++      const began = new Promise<void>((resolve) => { started = resolve })
++      const aborted = new Promise<void>((resolve) => { cancelled = resolve })
++      const gate = new Promise<void>((resolve) => { release = resolve })
++      t.mock.method(catalog, 'image', async (_id: number, _key: string, signal?: AbortSignal) => {
++        signal?.addEventListener('abort', cancelled, { once: true })
++        started()
++        await gate
++        return { body: Buffer.from('private image'), mime: 'image/png' }
++      })
++      const controller = new AbortController()
++      const result = fetch(base + '/api/videos/1/images/cover', {
++        headers: { Cookie: cookie }, signal: controller.signal
++      }).then(async (response) => ({ status: response.status, body: await response.text() }), () => ({ status: 0, body: '' }))
++      try {
++        await began
++        if (reason === 'logout') {
++          const loggedOut = await fetch(base + '/api/logout', {
++            method: 'POST', headers: { Cookie: cookie, Origin: base, 'X-Javdex-Client': 'web' }
++          })
++          assert.equal(loggedOut.status, 200)
++        } else controller.abort()
++        await aborted
++        release()
++        const response = await result
++        assert.notEqual(response.status, 200)
++        assert.notEqual(response.body, 'private image')
++      } finally {
++        release()
++        controller.abort()
++        await result
++      }
++    })
++  }
+   it('stores salted password hashes and enforces minimum length', async () => {
+     assert.equal(await verifyPassword('wrong password', passwordHash), false)
+     assert.equal(

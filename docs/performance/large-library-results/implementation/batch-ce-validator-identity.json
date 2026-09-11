@@ -1,0 +1,26 @@
+[
+  {
+    "name": "isRecord",
+    "equal": true
+  },
+  {
+    "name": "hasText",
+    "equal": true
+  },
+  {
+    "name": "isNfoAudit",
+    "equal": true
+  },
+  {
+    "name": "isFileEntry",
+    "equal": true
+  },
+  {
+    "name": "isResourceEntry",
+    "equal": true
+  },
+  {
+    "name": "normalizeAudit",
+    "equal": true
+  }
+]

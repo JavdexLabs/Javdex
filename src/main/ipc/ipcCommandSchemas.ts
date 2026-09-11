@@ -1,3 +1,4 @@
+import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import { z } from 'zod'
 import { IPC } from '@shared/ipc-channels'
 import type { ActressIpcContract } from '@shared/actressIpcContract'
@@ -8,6 +9,27 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
+
+const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
+const scanAuditViewQuery = z.object({
+  tab: z.enum(['failed', 'all', 'added_updated', 'skipped', 'changes']),
+  outcome: z.enum(['all', ...SCAN_AUDIT_OUTCOMES]).optional(),
+  changesFilter: z.enum(['all', 'removed', 'promoted', 'deleted']).optional(),
+  search: z.string().max(500).optional(),
+  locale: z.string().min(1).max(100).refine(value => {
+    try {
+      return Intl.getCanonicalLocales(value).length === 1
+    } catch {
+      return false
+    }
+  }, 'Invalid locale').optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  anchor: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('path'), value: z.string().min(1).max(32768) }).strict(),
+    z.object({ kind: z.literal('group'), id: positiveSafeInteger }).strict()
+  ]).optional()
+}).strict().refine(query => query.anchor === undefined || query.tab === 'failed', 'Only failed supports anchors')
 
 const id = z.number().int().positive()
 const revision = z.number().int().nonnegative()
@@ -22,6 +44,13 @@ const record = z.record(z.string(), z.unknown())
 const object = z.object({}).passthrough()
 const noArgs = z.tuple([])
 const sortDirection = z.enum(['asc', 'desc'])
+const playlistPageQuery = z.object({
+    sortBy: z.enum(['added_at', 'release_date']).optional(),
+    sortDir: sortDirection.optional(),
+    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict()
 const organizationRole = z.enum(['maker', 'publisher'])
 const pluginKind = z.enum(['video', 'actress'])
 const scrapeFields = z.array(text)
@@ -155,6 +184,7 @@ const replacementMainName = z
 
 const settingsPatch = z
   .object({
+    closeToTray: z.boolean().optional(),
     proxyUrl: text.optional(),
     proxyUrlEnabled: z.boolean().optional(),
     llmProxyUrl: text.optional(),
@@ -364,6 +394,14 @@ const pluginPackage = z
   })
   .strict()
 
+const classificationPageQuery = z.object({
+  search: z.string().optional(),
+  sortBy: z.enum(['video_count', 'updated_at']).optional(),
+  sortDir: z.enum(['asc','desc']).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+}).strict()
+
 export const videoIpcSchemas = {
   [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
   [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
@@ -378,6 +416,7 @@ export const videoIpcSchemas = {
   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
+  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
@@ -422,6 +461,26 @@ export const videoIpcSchemas = {
 } satisfies IpcArgsSchemaMap<VideoIpcContract>
 
 export const actressIpcSchemas = {
+  [IPC.ACTRESS_MERGE_CANDIDATES]: z.tuple([z.object({
+    keepId: positiveSafeInteger,
+    search: z.string().max(256).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict()]),
+  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: z.tuple([]),
+  [IPC.ACTRESS_AVATAR_CROP_COUNT]: z.tuple([]),
+  [IPC.ACTRESS_TEST_TARGET_GET]: z.tuple([positiveSafeInteger]),
+  [IPC.ACTRESS_TEST_TARGET_PAGE]: z.tuple([z.object({
+    search: z.string().max(256).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict().optional()]),
+  [IPC.ACTRESS_PICKER_GET]: z.tuple([positiveSafeInteger]),
+  [IPC.ACTRESS_PICKER_PAGE]: z.tuple([z.object({
+    search: z.string().max(256).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict().optional()]),
   [IPC.ACTRESS_LIST]: z.tuple([
     optionalText,
     z.enum(['female', 'male', 'all']).optional(),
@@ -430,6 +489,19 @@ export const actressIpcSchemas = {
   ]),
   [IPC.ACTRESS_LIST_PAGE]: z.tuple([object.optional()]),
   [IPC.ACTRESS_FACE_SCAN_MANIFEST]: noArgs,
+  [IPC.ACTRESS_GALLERY_PAGE]: z.tuple([positiveSafeInteger, z.object({
+    anchorId: positiveSafeInteger.optional(),
+    localOnly: z.boolean().optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict().optional()]),
+  [IPC.ACTRESS_PROFILE]: z.tuple([positiveSafeInteger]),
+  [IPC.ACTRESS_METADATA]: z.tuple([positiveSafeInteger]),
+  [IPC.ACTRESS_VIDEO_PAGE]: z.tuple([positiveSafeInteger, z.object({
+    withCover: z.boolean().optional(),
+    limit: z.number().int().min(1).max(240).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict().optional()]),
   [IPC.ACTRESS_GET]: z.tuple([id]),
   [IPC.ACTRESS_AVATAR_SOURCE_INFO]: z.tuple([id]),
   [IPC.ACTRESS_EDIT]: z.tuple([id, object]),
@@ -449,6 +521,12 @@ export const actressIpcSchemas = {
   ]),
   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
+  [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
+  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    anchorName: nonEmptyText.optional()
+  }).strict()]),
   [IPC.ACTRESS_CONFLICT_COUNT]: noArgs,
   [IPC.ACTRESS_CONFLICT_SUMMARY]: noArgs,
   [IPC.ACTRESS_CONFLICT_INSPECT_NAME]: z.tuple([
@@ -506,6 +584,14 @@ export const scrapeIpcSchemas = {
     id.optional(),
     id.optional()
   ]),
+  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
+  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
+  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
+  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
     z.object({
@@ -529,6 +615,7 @@ export const scrapeIpcSchemas = {
   [IPC.BATCH_SCRAPE_RESUME]: noArgs,
   [IPC.BATCH_SCRAPE_DISCARD]: noArgs,
   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: noArgs,
+  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: z.tuple([nonEmptyText, z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)]),
   [IPC.AVATAR_AUTO_CROP_BATCH_END]: z.tuple([nonEmptyText]),
   [IPC.SCRAPER_LIST]: noArgs,
   [IPC.SCRAPER_PLUGIN_DETAILS]: noArgs,
@@ -573,6 +660,18 @@ const listQuery = object
 const mergeInput = z.object({ sourceId: id, targetId: id }).passthrough()
 
 export const appIpcSchemas = {
+  [IPC.WEB_ACCESS_PAIR_OPEN]: noArgs,
+  [IPC.WEB_ACCESS_PAIR_INSPECT]: z.tuple([z.string().regex(/^\d{6}$/)]),
+  [IPC.WEB_ACCESS_PAIR_DECIDE]: z.tuple([z.string().regex(/^\d{6}$/), z.boolean()]),
+  [IPC.WEB_ACCESS_DEVICE_REMOVE]: z.tuple([z.string().regex(/^[a-f0-9]{32}$/)]),
+  [IPC.WEB_ACCESS_DEVICE_RENAME]: z.tuple([z.string().regex(/^[a-f0-9]{32}$/), z.string().trim().min(1).max(80)]),
+  [IPC.WEB_ACCESS_DEVICE_RESET]: noArgs,
+  [IPC.WEB_ACCESS_STATUS]: noArgs,
+  [IPC.WEB_ACCESS_REVOKE]: noArgs,
+  [IPC.WEB_ACCESS_APPLY]: z.tuple([z.object({
+    enabled: z.boolean(), port: z.number().int().min(1024).max(65535),
+    username: z.string().regex(/^[\w.-]{1,64}$/), password: z.string().min(12).max(128).optional()
+  }).strict()]),
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,
@@ -607,6 +706,14 @@ export const appIpcSchemas = {
   [IPC.SCAN_CANCEL]: z.tuple([nonEmptyText]),
   [IPC.SCAN_LATEST_GET]: z.tuple([id]),
   [IPC.SCAN_AUDIT_GET]: z.tuple([id]),
+  [IPC.SCAN_AUDIT_HEADER]: z.tuple([positiveSafeInteger]),
+  [IPC.SCAN_AUDIT_PAGE]: z.tuple([
+    scanAuditSnapshot,
+    z.object({section:z.enum(SCAN_AUDIT_SECTIONS),outcome:z.enum(SCAN_AUDIT_OUTCOMES).optional(),attention:z.boolean().optional(),
+      limit:z.number().int().min(1).max(100).optional(),offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+    }).strict().refine(query=>query.section==='files'||(query.outcome===undefined&&query.attention===undefined),'Only files support outcome and attention filters')
+  ]),
+  [IPC.SCAN_AUDIT_VIEW_PAGE]: z.tuple([scanAuditSnapshot, scanAuditViewQuery]),
   [IPC.SCAN_AUDIT_REVEAL_FILE]: z.tuple([id, nonEmptyText]),
   [IPC.FILE_RENAME]: z.tuple([
     id,
@@ -621,6 +728,19 @@ export const appIpcSchemas = {
     nonEmptyText,
     videoResourceImportTarget
   ]),
+  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
+    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
+    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
+    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
+  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
+  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
+    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
+    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
+  }).strict()]),
+  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
+  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
@@ -629,12 +749,20 @@ export const appIpcSchemas = {
     id,
     pendingResourceIdentityResolution
   ]),
+  [IPC.PLAYLIST_LIST_PAGE]: z.tuple([z.object({
+    search: z.string().max(500).optional(), limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), videoId: positiveSafeInteger.optional(),
+    locale: z.string().min(1).max(100).refine(value => { try { Intl.getCanonicalLocales(value); return true } catch { return false } }).optional()
+  }).strict()]),
   [IPC.PLAYLIST_LIST]: noArgs,
   [IPC.PLAYLIST_GET]: z.tuple([
     id,
     z.enum(['added_at', 'release_date']).optional(),
     sortDirection.optional()
   ]),
+  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
+  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
+  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
@@ -643,6 +771,19 @@ export const appIpcSchemas = {
   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
   [IPC.TAG_LIST]: noArgs,
   [IPC.TAG_LIST_MANUAL]: noArgs,
+  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
+  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
+    search: z.string().max(500).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    limit: z.number().int().min(1).max(100).optional()
+  }).strict()]),
+  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
+    search: z.string().max(500).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    limit: z.number().int().min(1).max(100).optional()
+  }).strict()]),
+  [IPC.ORGANIZATION_PAGE]: z.tuple([classificationPageQuery.extend({role: z.enum(['maker','publisher'])})]),
+  [IPC.SERIES_PAGE]: z.tuple([classificationPageQuery]),
   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
@@ -654,6 +795,7 @@ export const appIpcSchemas = {
   [IPC.ORGANIZATION_ROLE_REMOVE]: z.tuple([id, organizationRole]),
   [IPC.ORGANIZATION_DELETE_PREVIEW]: z.tuple([id]),
   [IPC.ORGANIZATION_DELETE]: z.tuple([id]),
+  [IPC.DIRECTOR_PAGE]: z.tuple([classificationPageQuery]),
   [IPC.DIRECTOR_LIST]: z.tuple([listQuery]),
   [IPC.DIRECTOR_GET]: z.tuple([id]),
   [IPC.DIRECTOR_OPTIONS]: z.tuple([optionalText]),
@@ -670,6 +812,10 @@ export const appIpcSchemas = {
   [IPC.SERIES_MERGE]: z.tuple([mergeInput]),
   [IPC.SERIES_DELETE_PREVIEW]: z.tuple([id]),
   [IPC.SERIES_DELETE]: z.tuple([id]),
+  [IPC.CLASSIFICATION_IMAGE_PAGE]: z.tuple([classificationEntity.extend({id: positiveSafeInteger}), z.object({
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+  }).strict().optional()]),
   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: z.tuple([classificationEntity]),
   [IPC.CLASSIFICATION_IMAGE_SET]: z.tuple([
     classificationEntity,

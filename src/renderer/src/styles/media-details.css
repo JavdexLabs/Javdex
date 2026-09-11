@@ -1997,7 +1997,7 @@ button.tag-chip.clickable:focus-visible {
   flex-direction: column;
   overflow: hidden;
   margin-bottom: 0;
-  padding-inline-end: 0;
+  padding-inline-end: var(--focus-ring-space);
 }
 
 .video-tag-add-modal-head {
@@ -2081,7 +2081,13 @@ button.tag-chip.clickable:focus-visible {
 .video-tag-add-modal-catalog-list {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+}
+
+.video-tag-add-modal-catalog-list .tag-chip--custom-pick {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .video-tag-add-modal-empty {
@@ -2104,6 +2110,10 @@ button.tag-chip.clickable:focus-visible {
 }
 
 .tag-chip--custom-pick {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-height: 28px;
   padding: 4px 10px;
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));

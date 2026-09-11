@@ -1,0 +1,25 @@
+✖ RED: main event loop runs between first cleanup mutation and final cleanup audit (33.742166ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 419.553625
+
+✖ failing tests:
+
+test at ../../../../../private/tmp/javdex-cleanup-responsiveness-baseline.test.ts:2:3897
+✖ RED: main event loop runs between first cleanup mutation and final cleanup audit (33.742166ms)
+  AssertionError [ERR_ASSERTION]: no main-thread turn during 260 real cleanup/audit writes (beatsAtLast=0)
+      at TestContext.<anonymous> (/private/tmp/javdex-cleanup-responsiveness-baseline.test.ts:62:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

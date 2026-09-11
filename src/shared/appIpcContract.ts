@@ -1,3 +1,6 @@
+import type { ScanAuditSnapshotIdentity, ScanAuditIndexQuery, ScanAuditIndexPage, ScanAuditReadHeader, ScanAuditViewQuery, ScanAuditViewPage } from './scanAuditReadTypes'
+import type { ClassificationPageQuery, ClassificationListPage } from './classificationTypes'
+import type { WebAccessInput, WebAccessStatus } from './webTypes'
 import { IPC } from './ipc-channels'
 import type {
   ModelCandidate,
@@ -19,18 +22,27 @@ import type {
   PendingResourceIdentity,
   PendingResourceIdentityResolution,
   PendingResourceIdentityResolutionResult,
+  PendingAuditIds,
+  PendingScanQueueQuery,
+  PendingScanQueuePage,
   PendingScanGroup,
   PendingScanGroupResolution,
   PendingScanGroupResolutionResult,
   PlayResult,
   RenameImportResult,
-  ScanResult
+  ScanCompletionResult
 } from './libraryTypes'
-import type { TagListItem, SortDir } from './commonTypes'
+import type { TagListItem, TagLabel, TagOptionsQuery, TagOptionsPage, TagFilterOptionsPage, SortDir } from './commonTypes'
 import type {
   PlaylistCreateInput,
   PlaylistDetail,
+  PlaylistPage,
+  PlaylistMetadata,
+  PlaylistVideosPage,
+  PlaylistPageQuery,
   PlaylistListItem,
+  PlaylistListQuery,
+  PlaylistListPage,
   PlaylistUpdateInput,
   PlaylistVideoMembership,
   PlaylistVideoSortBy
@@ -128,6 +140,15 @@ export interface RemoteImagePreviewResult {
 }
 
 export interface AppIpcContract {
+  [IPC.WEB_ACCESS_PAIR_OPEN]: { args: []; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_PAIR_INSPECT]: { args: [string]; result: { name: string; expires: number; remember: boolean } }
+  [IPC.WEB_ACCESS_PAIR_DECIDE]: { args: [string, boolean]; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_DEVICE_REMOVE]: { args: [string]; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_DEVICE_RENAME]: { args: [string, string]; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_DEVICE_RESET]: { args: []; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_STATUS]: { args: []; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_APPLY]: { args: [WebAccessInput]; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_REVOKE]: { args: []; result: WebAccessStatus }
   [IPC.SETTINGS_GET]: { args: []; result: SettingsSnapshot }
   [IPC.SETTINGS_UPDATE]: { args: [patch: RendererSettingsPatch]; result: SettingsSnapshot }
   [IPC.SETTINGS_PICK_FOLDER]: { args: []; result: string[] }
@@ -170,13 +191,16 @@ export interface AppIpcContract {
 
   [IPC.SCAN_RUN]: {
     args: [libraryId: number, rootIds?: number[]]
-    result: ScanResult
+    result: ScanCompletionResult
   }
   [IPC.SCAN_CANCEL]: { args: [runId: string]; result: boolean }
   [IPC.SCAN_LATEST_GET]: {
     args: [libraryId: number]
     result: LibraryScanLatestSnapshot
   }
+  [IPC.SCAN_AUDIT_HEADER]: { args: [libraryId: number]; result: ScanAuditReadHeader }
+  [IPC.SCAN_AUDIT_PAGE]: { args: [snapshot: ScanAuditSnapshotIdentity, query: ScanAuditIndexQuery]; result: ScanAuditIndexPage }
+  [IPC.SCAN_AUDIT_VIEW_PAGE]: { args: [snapshot: ScanAuditSnapshotIdentity, query: ScanAuditViewQuery]; result: ScanAuditViewPage }
   [IPC.SCAN_AUDIT_GET]: {
     args: [libraryId: number]
     result: LibraryScanAudit | null
@@ -204,6 +228,11 @@ export interface AppIpcContract {
     ]
     result: ManualImportResult
   }
+  [IPC.PENDING_AUDIT_PRESENCE]: { args: [libraryId: number, ids: PendingAuditIds]; result: PendingAuditIds }
+  [IPC.PENDING_SCAN_QUEUE_PAGE]: { args: [query: PendingScanQueueQuery]; result: PendingScanQueuePage }
+  [IPC.PENDING_SCAN_QUEUE_COUNT]: { args: [libraryId?: number]; result: number }
+  [IPC.PENDING_SCAN_GET]: { args: [libraryId: number, groupId: number]; result: PendingScanGroup | null }
+  [IPC.PENDING_RESOURCE_IDENTITY_GET]: { args: [libraryId: number, identityId: number]; result: PendingResourceIdentity | null }
   [IPC.PENDING_SCAN_LIST]: {
     args: [libraryId: number]
     result: PendingScanGroup[]
@@ -221,11 +250,15 @@ export interface AppIpcContract {
     result: PendingResourceIdentityResolutionResult
   }
 
+  [IPC.PLAYLIST_LIST_PAGE]: { args: [query: PlaylistListQuery]; result: PlaylistListPage }
   [IPC.PLAYLIST_LIST]: { args: []; result: PlaylistListItem[] }
   [IPC.PLAYLIST_GET]: {
     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
     result: PlaylistDetail | null
   }
+  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
+  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
+  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
@@ -235,6 +268,11 @@ export interface AppIpcContract {
 
   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
+  [IPC.TAG_LABELS]: { args: [ids: number[]]; result: TagLabel[] }
+  [IPC.TAG_FILTER_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagFilterOptionsPage }
+  [IPC.TAG_MANUAL_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagOptionsPage }
+  [IPC.ORGANIZATION_PAGE]: { args: [query: OrganizationListQuery & ClassificationPageQuery]; result: ClassificationListPage<OrganizationListItem> }
+  [IPC.SERIES_PAGE]: { args: [query: SeriesListQuery & ClassificationPageQuery]; result: ClassificationListPage<SeriesListItem> }
   [IPC.ORGANIZATION_LIST]: {
     args: [query: OrganizationListQuery]
     result: OrganizationListItem[]
@@ -276,6 +314,7 @@ export interface AppIpcContract {
     args: [id: number]
     result: OrganizationDeleteResult
   }
+  [IPC.DIRECTOR_PAGE]: { args: [query: DirectorListQuery & ClassificationPageQuery]; result: ClassificationListPage<DirectorListItem> }
   [IPC.DIRECTOR_LIST]: { args: [query: DirectorListQuery]; result: DirectorListItem[] }
   [IPC.DIRECTOR_GET]: { args: [id: number]; result: DirectorDetail | null }
   [IPC.DIRECTOR_OPTIONS]: { args: [search?: string]; result: DirectorOption[] }
@@ -292,6 +331,7 @@ export interface AppIpcContract {
   [IPC.SERIES_MERGE]: { args: [input: SeriesMergeInput]; result: SeriesMergeResult }
   [IPC.SERIES_DELETE_PREVIEW]: { args: [id: number]; result: SeriesDeleteImpact }
   [IPC.SERIES_DELETE]: { args: [id: number]; result: SeriesDeleteResult }
+  [IPC.CLASSIFICATION_IMAGE_PAGE]: { args: [entity: ClassificationEntityRef, query?: ClassificationPageQuery]; result: ClassificationListPage<ClassificationImageCandidate> }
   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: {
     args: [entity: ClassificationEntityRef]
     result: ClassificationImageCandidate[]

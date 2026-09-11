@@ -1,0 +1,10 @@
+{"actresses":10000,"profileCharacters":4096,"results":[{"name":"legacy.full","samples":[108.46770800000002,113.78770799999995,111.507834],"medianMs":111.507834,"jsonBytes":45328895},{"name":"picker.first40","samples":[0.05737499999997908,0.05666700000006131,0.05162499999994452],"medianMs":0.05666700000006131,"jsonBytes":2228},{"name":"picker.deep40","samples":[0.13937499999997272,0.12145800000007512,0.11808300000006966],"medianMs":0.12145800000007512,"jsonBytes":2322},{"name":"picker.search","samples":[4.007957999999917,4.064040999999975,4.050665999999978],"medianMs":4.050665999999978,"jsonBytes":2305}],"platform":"darwin","sqlite":{"version":"3.53.4"},"caveats":["Synthetic actors with4KiB profile text, no video edges/gallery, ANALYZE and warm-up;3warm samples, notp95/cold/Windows/HDD.","All actors have zero video count in this fixture, so full-list and picker order coincide. Picker intentionally sorts by full name/ID, not video count.","Old oracle remains live; no peak RSS claim. Timings exclude assertions and JSON serialization; bytes are JSON result sizes.","Search uses existing owned-name semantics and may scan candidates; deep OFFSET still walks preceding rows. No O(page) or full IPC/frontend improvement claim."]}
+✔ measures narrow actor candidate pages (835.178875ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1066.673

@@ -1,0 +1,15 @@
+✔ uses a 320 thumbnail for actress cards (153.470709ms)
+✔ uses thumbnails for local video gallery tiles and original preview sources (75.798709ms)
+✔ uses thumbnails for local actress gallery tiles and original preview sources (2.188125ms)
+✔ real wrappers cache narrow runtime pages with revision and preserve actress initial-error retry (40.095792ms)
+▶ useInfiniteVideoList
+  ✔ loads a library larger than the IPC page limit in bounded pages (33.482834ms)
+✔ useInfiniteVideoList (34.812875ms)
+ℹ tests 5
+ℹ suites 1
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 418.988583

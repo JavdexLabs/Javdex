@@ -1,0 +1,490 @@
+diff --git a/src/main/services/assetCrypto.ts b/src/main/services/assetCrypto.ts
+index 936dc68..4c91951 100644
+--- a/src/main/services/assetCrypto.ts
++++ b/src/main/services/assetCrypto.ts
+@@ -10,6 +10,9 @@ const TAG_LEN = 16
+ const KEY_LEN = 32
+ 
+ let cachedKey: Buffer | null = null
++let pendingKey: Promise<Buffer> | null = null
++let decryptKey: Promise<crypto.webcrypto.CryptoKey> | null = null
++let keyGeneration = 0
+ 
+ function resolveUserDataPath(): string {
+   const testPath = readTestUserDataPath()
+@@ -35,6 +38,36 @@ export function deriveAssetKey(): Buffer {
+ 
+ export function resetAssetKeyCacheForTests(): void {
+   cachedKey = null
++  pendingKey = null
++  decryptKey = null
++  keyGeneration++
++}
++
++function deriveAssetKeyAsync(): Promise<Buffer> {
++  if (cachedKey) return Promise.resolve(cachedKey)
++  if (pendingKey) return pendingKey
++  const generation = keyGeneration
++  const task = new Promise<Buffer>((resolve, reject) => {
++    crypto.scrypt(buildAssetKeyMaterial(resolveUserDataPath()), 'javdex-asset-salt', KEY_LEN, (error, key) => {
++      if (error) { reject(error); return }
++      if (generation === keyGeneration) cachedKey = key
++      resolve(key)
++    })
++  }).finally(() => {
++    if (pendingKey === task) pendingKey = null
++  })
++  pendingKey = task
++  return task
++}
++
++function getDecryptKey(): Promise<crypto.webcrypto.CryptoKey> {
++  if (decryptKey) return decryptKey
++  const task = deriveAssetKeyAsync().then(key => crypto.webcrypto.subtle.importKey(
++    'raw', new Uint8Array(key), { name: 'AES-GCM' }, false, ['decrypt']
++  ))
++  decryptKey = task
++  void task.catch(() => { if (decryptKey === task) decryptKey = null })
++  return task
+ }
+ 
+ export function isEncryptedBlob(buf: Buffer): boolean {
+@@ -57,6 +90,31 @@ export function encryptPlain(plain: Buffer, ext: string): Buffer {
+ 
+ /** Decrypt an AVPK blob back to raw image bytes + original extension. */
+ export function decryptBlob(blob: Buffer): { data: Buffer; ext: string } {
++  const { ext, nonce, ciphertextAndTag } = parseEncryptedBlob(blob)
++  const tag = ciphertextAndTag.subarray(ciphertextAndTag.length - TAG_LEN)
++  const ciphertext = ciphertextAndTag.subarray(0, ciphertextAndTag.length - TAG_LEN)
++  const decipher = crypto.createDecipheriv('aes-256-gcm', deriveAssetKey(), nonce)
++  decipher.setAuthTag(tag)
++  const data = Buffer.concat([decipher.update(ciphertext), decipher.final()])
++  return { data, ext }
++}
++
++/** Native asynchronous crypto jobs; callers keep their queue slot until completion, even on abort. */
++export async function decryptBlobAsync(blob: Buffer, signal?: AbortSignal): Promise<{ data: Buffer; ext: string }> {
++  signal?.throwIfAborted()
++  const { ext, nonce, ciphertextAndTag } = parseEncryptedBlob(blob)
++  const key = await getDecryptKey()
++  signal?.throwIfAborted()
++  const plain = await crypto.webcrypto.subtle.decrypt(
++    { name: 'AES-GCM', iv: new Uint8Array(nonce), tagLength: TAG_LEN * 8 },
++    key,
++    new Uint8Array(ciphertextAndTag.buffer, ciphertextAndTag.byteOffset, ciphertextAndTag.byteLength)
++  )
++  signal?.throwIfAborted()
++  return { data: Buffer.from(plain), ext }
++}
++
++function parseEncryptedBlob(blob: Buffer): { ext: string; nonce: Buffer; ciphertextAndTag: Buffer } {
+   if (!isEncryptedBlob(blob)) throw new Error('不是有效的加密图片文件')
+ 
+   let off = MAGIC.length
+@@ -66,13 +124,7 @@ export function decryptBlob(blob: Buffer): { data: Buffer; ext: string } {
+   off += extLen
+   const nonce = blob.subarray(off, off + NONCE_LEN)
+   off += NONCE_LEN
+-  const tag = blob.subarray(blob.length - TAG_LEN)
+-  const ciphertext = blob.subarray(off, blob.length - TAG_LEN)
+-
+-  const decipher = crypto.createDecipheriv('aes-256-gcm', deriveAssetKey(), nonce)
+-  decipher.setAuthTag(tag)
+-  const data = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+-  return { data, ext }
++  return { ext, nonce, ciphertextAndTag: blob.subarray(off) }
+ }
+ 
+ export function mimeFromExt(ext: string): string {
+diff --git a/src/main/services/mediaAssetStore.test.ts b/src/main/services/mediaAssetStore.test.ts
+index 01ed552..de0259e 100644
+--- a/src/main/services/mediaAssetStore.test.ts
++++ b/src/main/services/mediaAssetStore.test.ts
+@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
++import crypto from 'node:crypto'
+ import { getPathAlias } from './assetPathAliases'
+ import { isOpaqueEncFilename } from './assetPathNaming'
+ import { MediaAssetStore, mediaAssetStore } from './mediaAssetStore'
+@@ -29,6 +30,94 @@ afterEach(() => {
+ })
+ 
+ describe('MediaAssetStore', () => {
++  it('retains read slots while cancelled encrypted requests wait for native crypto completion', async (t) => {
++    const testRoot = setup()
++    const rel = 'avatars/crypto-queue.enc'
++    fs.mkdirSync(path.join(testRoot, 'media_assets', 'avatars'), { recursive: true })
++    fs.writeFileSync(path.join(testRoot, 'media_assets', rel), encryptPlain(JPEG_1X1, '.jpg'))
++    let release!: () => void
++    let allStarted!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const started = new Promise<void>((resolve) => { allStarted = resolve })
++    const subtle = crypto.webcrypto.subtle
++    const decrypt = subtle.decrypt
++    const reads = t.mock.method(fs.promises, 'readFile')
++    let jobs = 0
++    t.mock.method(subtle, 'decrypt', async (...args: unknown[]) => {
++      if (++jobs === 4) allStarted()
++      await gate
++      return Reflect.apply(decrypt, subtle, args)
++    })
++    const abort = new AbortController()
++    const requests = Array.from({ length: 4 }, (_, i) => mediaAssetStore.readForServeAsync(rel, i === 0 ? abort.signal : undefined))
++    const rejected = assert.rejects(requests.shift()!, { name: 'AbortError' })
++    await started
++    abort.abort()
++    const next = mediaAssetStore.readForServeAsync(rel)
++    await new Promise((resolve) => setImmediate(resolve))
++    assert.equal(jobs, 4)
++    assert.equal(reads.mock.callCount(), 4, 'the fifth request must not start reading before a crypto slot is released')
++    release()
++    await rejected
++    await Promise.all(requests)
++    assert.deepEqual((await next).body, JPEG_1X1)
++    assert.equal(jobs, 5)
++    assert.equal(reads.mock.callCount(), 5)
++  })
++
++  it('cancels queued reads before opening files and keeps active slots until reads settle', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Queued', 1, JPEG_1X1)
++    let release!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.readFile
++    let reads = 0
++    t.mock.method(fs.promises, 'readFile', async (...args: unknown[]) => {
++      reads++
++      await gate
++      return Reflect.apply(original, fs.promises, args)
++    })
++    const activeAbort = new AbortController()
++    const active = Array.from({ length: 4 }, (_, i) => mediaAssetStore.readForServeAsync(rel, i === 0 ? activeAbort.signal : undefined))
++    const activeRejected = assert.rejects(active.shift()!, { name: 'AbortError' })
++    const queuedAbort = new AbortController()
++    const queued = mediaAssetStore.readForServeAsync(rel, queuedAbort.signal)
++    const queuedRejected = assert.rejects(queued, { name: 'AbortError' })
++    await Promise.resolve()
++    assert.equal(reads, 4)
++    activeAbort.abort()
++    queuedAbort.abort()
++    await queuedRejected
++    const next = mediaAssetStore.readForServeAsync(rel)
++    await Promise.resolve()
++    assert.equal(reads, 4, 'active cancellation must wait for the reader to settle')
++    release()
++    await activeRejected
++    await Promise.all(active)
++    assert.deepEqual((await next).body, JPEG_1X1)
++    assert.equal(reads, 5, 'the cancelled queued request never opened a file')
++  })
++
++  it('serves plain and encrypted images asynchronously without synchronous file reads', async (t) => {
++    const testRoot = setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Async', 1, JPEG_1X1)
++    const enc = 'avatars/async.enc'
++    fs.writeFileSync(path.join(testRoot, 'media_assets', enc), encryptPlain(JPEG_1X1, '.jpg'))
++    resetAssetKeyCacheForTests()
++    t.mock.method(fs, 'readFileSync', () => { throw Error('synchronous file read forbidden') })
++    t.mock.method(crypto, 'scryptSync', () => { throw Error('synchronous key derivation forbidden') })
++    t.mock.method(crypto, 'createDecipheriv', () => { throw Error('synchronous decryption forbidden') })
++    const plain = await mediaAssetStore.readForServeAsync(rel)
++    const encrypted = await mediaAssetStore.readForServeAsync(enc)
++    assert.deepEqual(plain.body, JPEG_1X1)
++    assert.deepEqual(encrypted, { body: JPEG_1X1, mime: 'image/jpeg' })
++    await assert.rejects(mediaAssetStore.readForServeAsync('../outside.jpg'), /escapes media root/)
++    await assert.rejects(mediaAssetStore.readForServeAsync('avatars/missing.jpg'), { code: 'ENOENT' })
++    const abort = new AbortController()
++    abort.abort()
++    await assert.rejects(mediaAssetStore.readForServeAsync(rel, abort.signal), { name: 'AbortError' })
++  })
++
+   it('reads plain and encrypted images and reports a stable plaintext fingerprint', () => {
+     const testRoot = setup()
+     const plainPath = mediaAssetStore.importAvatarDisplay('Plain', 1, JPEG_1X1)
+diff --git a/src/main/services/mediaAssetStore/filesystem.ts b/src/main/services/mediaAssetStore/filesystem.ts
+index 4adb962..8bf1705 100644
+--- a/src/main/services/mediaAssetStore/filesystem.ts
++++ b/src/main/services/mediaAssetStore/filesystem.ts
+@@ -2,7 +2,7 @@ import path from 'node:path'
+ import fs from 'node:fs'
+ import { randomUUID } from 'node:crypto'
+ import { getSettings } from '../../settings/settingsStore'
+-import { encryptPlain, decryptBlob, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
++import { encryptPlain, decryptBlob, decryptBlobAsync, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
+ import { invalidateAssetCache } from '../assetCache'
+ import { ensureMediaAssetDirsAt, resolveMediaAssetsRoot } from '../assetStoragePaths'
+ import {
+@@ -17,8 +17,10 @@ import {
+   isUsableImageBuffer
+ } from './imageBytes'
+ import type { ImageAssetSubdir } from './types'
++import { AssetReadQueue } from './readQueue'
+ 
+ const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']
++const serveReads = new AssetReadQueue()
+ 
+ /** Root directory for downloaded media assets. */
+ export function assetsRoot(): string {
+@@ -70,6 +72,28 @@ export function readAssetForServe(relPath: string): { body: Buffer; mime: string
+   const abs = resolveAssetPath(relPath)
+   if (!fs.existsSync(abs)) throw new Error('Asset not found')
+   const raw = fs.readFileSync(abs)
++  return decodeAssetForServe(relPath, raw)
++}
++
++/** Asynchronous disk read for request handlers; synchronous business readers remain explicit. */
++export async function readAssetForServeAsync(
++  relPath: string,
++  signal?: AbortSignal
++): Promise<{ body: Buffer; mime: string }> {
++  signal?.throwIfAborted()
++  const abs = resolveAssetPath(relPath)
++  return serveReads.run(async () => {
++    const raw = await fs.promises.readFile(abs, { signal })
++    signal?.throwIfAborted()
++    if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
++      const { data, ext } = await decryptBlobAsync(raw, signal)
++      return { body: data, mime: mimeFromExt(ext) }
++    }
++    return decodeAssetForServe(relPath, raw)
++  }, signal)
++}
++
++function decodeAssetForServe(relPath: string, raw: Buffer): { body: Buffer; mime: string } {
+   if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
+     const { data, ext } = decryptBlob(raw)
+     return { body: data, mime: mimeFromExt(ext) }
+diff --git a/src/main/services/assetCrypto.test.ts b/src/main/services/assetCrypto.test.ts
+new file mode 100644
+index 0000000..0788bac
+--- /dev/null
++++ b/src/main/services/assetCrypto.test.ts
+@@ -0,0 +1,155 @@
++import { afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import crypto from 'node:crypto'
++import os from 'node:os'
++import path from 'node:path'
++import { decryptBlob, decryptBlobAsync, deriveAssetKey, encryptPlain, resetAssetKeyCacheForTests } from './assetCrypto'
++
++afterEach(() => resetAssetKeyCacheForTests())
++
++for (const phase of ['scrypt', 'importKey'] as const) {
++  it(`retries after the first ${phase} failure`, async (t) => {
++    const blob = encryptPlain(Buffer.from('image'), '.jpg')
++    resetAssetKeyCacheForTests()
++    let calls = 0
++    if (phase === 'scrypt') {
++      const original = crypto.scrypt
++      t.mock.method(crypto, 'scrypt', (...args: unknown[]) => {
++        if (++calls !== 1) return Reflect.apply(original, crypto, args)
++        const callback = args.at(-1) as (error: Error, key: Buffer) => void
++        setImmediate(() => callback(Error('KDF failed'), Buffer.alloc(0)))
++      })
++    } else {
++      const subtle = crypto.webcrypto.subtle
++      const original = subtle.importKey
++      t.mock.method(subtle, 'importKey', (...args: unknown[]) => {
++        if (++calls === 1) return Promise.reject(Error('import failed'))
++        return Reflect.apply(original, subtle, args)
++      })
++    }
++    await assert.rejects(decryptBlobAsync(blob), /failed/)
++    assert.equal((await decryptBlobAsync(blob)).data.toString(), 'image')
++    assert.equal(calls, 2)
++  })
++}
++
++for (const fails of [false, true]) {
++  it(`keeps the new cache when a pre-reset KDF later ${fails ? 'fails' : 'succeeds'}`, async (t) => {
++    const previous = process.env.JAVDEX_TEST_USER_DATA
++    try {
++      process.env.JAVDEX_TEST_USER_DATA = path.join(os.tmpdir(), 'javdex-crypto-key-a')
++      resetAssetKeyCacheForTests()
++      const blobA = encryptPlain(Buffer.from('a'), '.jpg')
++      const keyA = deriveAssetKey()
++      process.env.JAVDEX_TEST_USER_DATA = path.join(os.tmpdir(), 'javdex-crypto-key-b')
++      resetAssetKeyCacheForTests()
++      const blobB = encryptPlain(Buffer.from('b'), '.jpg')
++      const keyB = deriveAssetKey()
++      resetAssetKeyCacheForTests()
++      const callbacks: Array<(error: Error | null, key: Buffer) => void> = []
++      const imports = t.mock.method(crypto.webcrypto.subtle, 'importKey')
++      t.mock.method(crypto, 'scrypt', (...args: unknown[]) => {
++        callbacks.push(args.at(-1) as (error: Error | null, key: Buffer) => void)
++      })
++      process.env.JAVDEX_TEST_USER_DATA = path.join(os.tmpdir(), 'javdex-crypto-key-a')
++      const old = decryptBlobAsync(blobA)
++      const rejected = fails ? assert.rejects(old, /old failed/) : null
++      resetAssetKeyCacheForTests()
++      process.env.JAVDEX_TEST_USER_DATA = path.join(os.tmpdir(), 'javdex-crypto-key-b')
++      const current = decryptBlobAsync(blobB)
++      callbacks[1](null, keyB)
++      assert.equal((await current).data.toString(), 'b')
++      callbacks[0](fails ? Error('old failed') : null, keyA)
++      if (rejected) await rejected
++      else assert.equal((await old).data.toString(), 'a')
++      const importedBeforeReuse = imports.mock.callCount()
++      assert.equal((await decryptBlobAsync(blobB)).data.toString(), 'b')
++      assert.equal(imports.mock.callCount(), importedBeforeReuse, 'old completion must not evict the new CryptoKey')
++      assert.deepEqual(deriveAssetKey(), keyB)
++      assert.equal(callbacks.length, 2)
++    } finally {
++      if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++      else process.env.JAVDEX_TEST_USER_DATA = previous
++    }
++  })
++}
++
++it('waits for cold key derivation on cancellation and never starts decryption', async (t) => {
++  const blob = encryptPlain(Buffer.from('image'), '.jpg')
++  const key = deriveAssetKey()
++  resetAssetKeyCacheForTests()
++  let finish!: (error: Error | null, key: Buffer) => void
++  t.mock.method(crypto, 'scrypt', (...args: unknown[]) => { finish = args.at(-1) as typeof finish })
++  const decrypt = t.mock.method(crypto.webcrypto.subtle, 'decrypt', () => { throw Error('must not decrypt') })
++  const abort = new AbortController()
++  let settled = false
++  const operation = decryptBlobAsync(blob, abort.signal).finally(() => { settled = true })
++  const rejected = assert.rejects(operation, { name: 'AbortError' })
++  abort.abort()
++  await Promise.resolve()
++  assert.equal(settled, false)
++  finish(null, key)
++  await rejected
++  assert.equal(decrypt.mock.callCount(), 0)
++})
++
++it('reads the existing AVPK format through synchronous and asynchronous crypto', async () => {
++  for (const size of [0, 1, 4096, 1024 * 1024]) {
++    const plain = Buffer.alloc(size, 37)
++    for (const ext of ['.jpg', '.png', '.webp', '.gif', '.avif']) {
++      const blob = encryptPlain(plain, ext)
++      assert.deepEqual(await decryptBlobAsync(blob), decryptBlob(blob))
++      assert.deepEqual(await decryptBlobAsync(blob), { data: plain, ext })
++    }
++  }
++})
++
++it('coalesces cold key derivation and never uses synchronous crypto in the async reader', async (t) => {
++  const blob = encryptPlain(Buffer.from('image'), '.jpg')
++  resetAssetKeyCacheForTests()
++  const scrypt = crypto.scrypt
++  const calls = t.mock.method(crypto, 'scrypt', (...args: unknown[]) => Reflect.apply(scrypt, crypto, args))
++  t.mock.method(crypto, 'scryptSync', () => { throw Error('sync KDF forbidden') })
++  t.mock.method(crypto, 'createDecipheriv', () => { throw Error('sync decryption forbidden') })
++  const images = await Promise.all(Array.from({ length: 12 }, () => decryptBlobAsync(blob)))
++  assert.ok(images.every((image) => image.data.toString() === 'image'))
++  assert.equal(calls.mock.callCount(), 1)
++  await decryptBlobAsync(blob)
++  assert.equal(calls.mock.callCount(), 1)
++})
++
++it('rejects invalid or tampered encrypted bodies without returning plaintext', async () => {
++  const blob = encryptPlain(Buffer.from('secret'), '.jpg')
++  const altered = Buffer.from(blob)
++  altered[altered.length - 1] ^= 1
++  for (const invalid of [Buffer.from('not encrypted'), blob.subarray(0, 20), altered]) {
++    assert.throws(() => decryptBlob(invalid))
++    await assert.rejects(decryptBlobAsync(invalid))
++  }
++})
++
++it('waits for an active native job before discarding its cancelled result', async (t) => {
++  const blob = encryptPlain(Buffer.from('image'), '.jpg')
++  let release!: () => void
++  let started!: () => void
++  const gate = new Promise<void>((resolve) => { release = resolve })
++  const entered = new Promise<void>((resolve) => { started = resolve })
++  const subtle = crypto.webcrypto.subtle
++  const decrypt = subtle.decrypt
++  t.mock.method(subtle, 'decrypt', async (...args: unknown[]) => {
++    started()
++    await gate
++    return Reflect.apply(decrypt, subtle, args)
++  })
++  const abort = new AbortController()
++  let settled = false
++  const operation = decryptBlobAsync(blob, abort.signal).finally(() => { settled = true })
++  const rejected = assert.rejects(operation, { name: 'AbortError' })
++  await entered
++  abort.abort()
++  await Promise.resolve()
++  assert.equal(settled, false)
++  release()
++  await rejected
++  await assert.rejects(decryptBlobAsync(blob, abort.signal), { name: 'AbortError' })
++})
+diff --git a/scripts/performance/asset-crypto-benchmark.ts b/scripts/performance/asset-crypto-benchmark.ts
+new file mode 100644
+index 0000000..909977f
+--- /dev/null
++++ b/scripts/performance/asset-crypto-benchmark.ts
+@@ -0,0 +1,65 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { decryptBlob, decryptBlobAsync, encryptPlain, resetAssetKeyCacheForTests } from '../../src/main/services/assetCrypto'
++
++const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
++
++it('measures synthetic synchronous and asynchronous encrypted-asset bursts', async () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-crypto-bench-'))
++  const previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = root
++  const results: object[] = []
++  try {
++    for (const bytes of [1024 * 1024, 16 * 1024 * 1024]) {
++      const plain = Buffer.alloc(bytes, 31)
++      const blob = encryptPlain(plain, '.jpg')
++      for (const mode of ['sync', 'async'] as const) {
++        resetAssetKeyCacheForTests()
++        for (const state of ['cold-key', 'warm-key'] as const) {
++          const iterations = state === 'cold-key' ? 1 : 5
++          let last = performance.now()
++          let maxTimerDelayMs = 0
++          const timer = setInterval(() => {
++            const now = performance.now()
++            maxTimerDelayMs = Math.max(maxTimerDelayMs, now - last - 1)
++            last = now
++          }, 1)
++          let result: { data: Buffer; ext: string } | undefined
++          let elapsedMs: number
++          try {
++            await wait(10)
++            const start = performance.now()
++            for (let i = 0; i < iterations; i++) result = mode === 'sync' ? decryptBlob(blob) : await decryptBlobAsync(blob)
++            elapsedMs = performance.now() - start
++            await wait(10)
++          } finally {
++            clearInterval(timer)
++          }
++          assert.deepEqual(result, { data: plain, ext: '.jpg' })
++          results.push({ bytes, mode, state, iterations, elapsedMs, maxTimerDelayMs })
++        }
++      }
++    }
++    const output = process.env.JAVDEX_CRYPTO_BENCH_OUTPUT
++    const report = {
++      measuredAt: new Date().toISOString(), runtime: process.versions,
++      notes: [
++        'Synthetic 1MiB/16MiB buffers, existing AVPK format. No user assets or database accessed.',
++        'Cold-key includes key derivation, warm-key is five sequential decryptions; not concurrent readers or UI latency.',
++        '1ms interval observed delay is a single burst sample, not p95. OS scheduling, native buffer copies and GC are included.',
++        'Async uses native jobs; cancellation is checked before/after rather than interrupting the native crypto job.'
++      ], results
++    }
++    if (output) fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n')
++    else process.stdout.write(JSON.stringify(report, null, 2) + '\n')
++  } finally {
++    resetAssetKeyCacheForTests()
++    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++    else process.env.JAVDEX_TEST_USER_DATA = previous
++    fs.rmSync(root, { recursive: true, force: true })
++  }
++})

@@ -1,4 +1,5 @@
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import type { SettingsSnapshot } from '@shared/settingsTypes'
 import { api } from '../../api'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
@@ -135,6 +136,7 @@ export function ProxyConfigRow({
   return (
     <>
       <SettingsCard
+        id={`settings-proxy-${kind}`}
         className={styles.card}
         title={label}
         hint={
@@ -253,6 +255,12 @@ export default function NetworkSettingsPanel({
   settings: SettingsSnapshot
   onSaved: (patch: Partial<SettingsSnapshot>) => void
 }): JSX.Element {
+  const { hash } = useLocation()
+  useEffect(() => {
+    const id = hash.replace(/^#/, '')
+    if (!id.startsWith('settings-proxy-')) return
+    document.getElementById(id)?.scrollIntoView({ block: 'nearest' })
+  }, [hash])
   return (
     <>
       <ProxyConfigRow

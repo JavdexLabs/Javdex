@@ -1,0 +1,16 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cf-benchmark.log": "dee2c742b119cc17d3939ae3487053dd478399d493b9625af5ad167ea3215074",
+    "batch-cf-build.log": "165c23da2942032783e7e351ab1dae5b66f2983d95c67dfc4ef867d5e75f0f46",
+    "batch-cf-full.log": "a9edb08e4f21d3014bbe68473313b6e28e72dd30dfaeb4e38c6cdb1f93d63dd7",
+    "batch-cf-pending-audit.patch": "5f2f5808595b6ed64e214b666524a2aabd3991e83d31032d23d6761fdaca6c40",
+    "batch-cf-review.md": "0f5a1a8bd5db2a7015b81a572d95965bf4fd912df82670763b30b9e01576ec25",
+    "batch-cf-target.log": "3b9a825907b136c452baf423f1fae46e23ae6c81dfe40fd8d97145c0ce04481b"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches; not a standalone incremental patch.",
+    "36 focused; final full2478pass1skip0fail; build terminal0.",
+    "Targeted pending audit summary only; full15/42 remains incomplete."
+  ]
+}

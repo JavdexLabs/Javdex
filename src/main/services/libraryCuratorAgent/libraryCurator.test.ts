@@ -52,3 +52,19 @@ describe('LibraryCurator lifecycle', { concurrency: false }, () => {
     }
   })
 })
+
+it('uses the indexed journal cursor for a curator snapshot', async (t) => {
+  const { agentRunStore } = await import('../../agent-platform/agentRunStore')
+  const curator = new LibraryCurator()
+  const active = (curator as unknown as { active: Map<string, unknown> }).active
+  active.set('cursor-run', { state: { status: 'waiting_user', summary: 'waiting', totalTokens: 17 } })
+  const cursor = t.mock.method(agentRunStore, 'getProductJournalCursor', () => 23456)
+  t.mock.method(agentRunStore, 'readProductJournal', () => { throw new Error('snapshot must not load the journal') })
+  try {
+    assert.deepEqual(curator.getSnapshot('cursor-run'), {
+      runId: 'cursor-run', status: 'waiting_user', summary: 'waiting', totalTokens: 17, cursor: 23456
+    })
+    assert.equal(cursor.mock.callCount(), 1)
+    assert.equal(cursor.mock.calls[0].arguments[0], 'cursor-run')
+  } finally { t.mock.restoreAll() }
+})

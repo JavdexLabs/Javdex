@@ -2,8 +2,11 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { getSettings } from '../../settings/settingsStore'
-import { encryptPlain, decryptBlob, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
-import { invalidateAssetCache } from '../assetCache'
+import { encryptPlain, decryptBlob, decryptBlobAsync, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
+import {
+  getAssetCacheRevision, getCachedAsset, setCachedAsset, sameAssetByteSignature,
+  invalidateAssetCache, type AssetByteSignature
+} from '../assetCache'
 import { ensureMediaAssetDirsAt, resolveMediaAssetsRoot } from '../assetStoragePaths'
 import {
   buildActressAssetSeed,
@@ -17,8 +20,16 @@ import {
   isUsableImageBuffer
 } from './imageBytes'
 import type { ImageAssetSubdir } from './types'
+import { AssetReadQueue } from './readQueue'
+import { AssetReadFlights } from './readFlights'
+import { AssetReadTooLargeError, MAX_ASSET_READ_BYTES, readBoundedAssetFile } from './boundedRead'
+import { inspectServedImage } from './pixelBudget'
+import { createAssetThumbnail } from './thumbnail'
+import { parseImageThumbnailSize, type ImageThumbnailSize } from '@shared/imageVariants'
 
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']
+const serveReads = new AssetReadQueue()
+const serveFlights = new AssetReadFlights()
 
 /** Root directory for downloaded media assets. */
 export function assetsRoot(): string {
@@ -65,11 +76,59 @@ export function writeAtomic(abs: string, data: Buffer): void {
   fs.renameSync(tmp, abs)
 }
 
+async function readAssetSignature(filePath: string): Promise<AssetByteSignature> {
+  const stat = await fs.promises.stat(filePath)
+  return { resolvedPath: filePath, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs,
+    size: stat.size, device: stat.dev, inode: stat.ino }
+}
+
 /** Read an asset for media:// serving; decrypts .enc blobs when needed. */
 export function readAssetForServe(relPath: string): { body: Buffer; mime: string } {
   const abs = resolveAssetPath(relPath)
   if (!fs.existsSync(abs)) throw new Error('Asset not found')
   const raw = fs.readFileSync(abs)
+  return decodeAssetForServe(relPath, raw)
+}
+
+/** Asynchronous disk read for request handlers; synchronous business readers remain explicit. */
+export async function readAssetForServeAsync(
+  relPath: string,
+  signal?: AbortSignal,
+  size?: ImageThumbnailSize
+): Promise<{ body: Buffer; mime: string }> {
+  signal?.throwIfAborted()
+  parseImageThumbnailSize(size === undefined ? null : String(size))
+  const variant = size === undefined ? 'original' : `thumbnail-v1-${size}`
+  const abs = resolveAssetPath(relPath)
+  return serveReads.run(() => serveFlights.run(JSON.stringify([abs, variant, getAssetCacheRevision()]), async (signal) => {
+    const revision = getAssetCacheRevision()
+    let before: AssetByteSignature
+    try { before = await readAssetSignature(abs) } catch (error) {
+      invalidateAssetCache(relPath)
+      throw error
+    }
+    signal?.throwIfAborted()
+    if (before.size > MAX_ASSET_READ_BYTES) throw new AssetReadTooLargeError()
+    const cached = getCachedAsset(relPath, before, variant)
+    if (cached) return cached
+    const raw = await readBoundedAssetFile(abs, signal)
+    signal?.throwIfAborted()
+    let image: { body: Buffer; mime: string }
+    if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
+      const { data, ext } = await decryptBlobAsync(raw, signal)
+      image = { body: data, mime: mimeFromExt(ext) }
+    } else image = decodeAssetForServe(relPath, raw)
+    image.mime = await inspectServedImage(image.body, signal)
+    if (size !== undefined) image = { body: await createAssetThumbnail(image.body, size, signal), mime: 'image/webp' }
+    const after = await readAssetSignature(abs)
+    signal?.throwIfAborted()
+    if (!sameAssetByteSignature(before, after)) throw new Error('Asset changed while reading')
+    if (getAssetCacheRevision() === revision) setCachedAsset(relPath, after, image.body, image.mime, variant)
+    return image
+  }, signal), signal)
+}
+
+function decodeAssetForServe(relPath: string, raw: Buffer): { body: Buffer; mime: string } {
   if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
     const { data, ext } = decryptBlob(raw)
     return { body: data, mime: mimeFromExt(ext) }

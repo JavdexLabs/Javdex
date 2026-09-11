@@ -350,6 +350,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     defaultScraper,
     defaultActressScraper,
     theme: normalizeTheme(parsed.theme),
+    closeToTray: normalizeBooleanSetting(parsed.closeToTray, DEFAULT_SETTINGS.closeToTray),
     privacyModeEnabled: normalizeBooleanSetting(
       parsed.privacyModeEnabled,
       DEFAULT_SETTINGS.privacyModeEnabled

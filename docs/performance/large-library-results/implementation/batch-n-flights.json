@@ -1,0 +1,164 @@
+{
+  "measuredAt": "2026-09-10T06:50:02.695Z",
+  "runtime": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "notes": [
+    "Synthetic transport bytes, not valid pixel images; no pixel decoding, browser or network measured.",
+    "OS file cache and crypto key are warm in both cases. Cold refers only to the application byte cache.",
+    "Five sequential or twelve concurrent reads, instrumented read/decrypt/stat calls, no p95 or Windows/HDD conclusion.",
+    "The hot path still stats the file and copies response bytes; cache limits do not bound active or response-buffer bytes."
+  ],
+  "results": [
+    {
+      "bytes": 1048576,
+      "encrypted": false,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 2.5376249999999914,
+      "readCalls": 5,
+      "decryptCalls": 0,
+      "statCalls": 10
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": false,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 0.5807499999999948,
+      "readCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": false,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 1.1324579999999855,
+      "readCalls": 1,
+      "decryptCalls": 0,
+      "statCalls": 4
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": true,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 3.7247079999999926,
+      "readCalls": 5,
+      "decryptCalls": 5,
+      "statCalls": 10
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": true,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 0.4177920000000199,
+      "readCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": true,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 1.7682920000000024,
+      "readCalls": 1,
+      "decryptCalls": 1,
+      "statCalls": 4
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": false,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 15.377584000000013,
+      "readCalls": 5,
+      "decryptCalls": 0,
+      "statCalls": 10
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": false,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 5.238957999999997,
+      "readCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": false,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 15.900666999999999,
+      "readCalls": 1,
+      "decryptCalls": 0,
+      "statCalls": 4
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": true,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 53.304040999999984,
+      "readCalls": 5,
+      "decryptCalls": 5,
+      "statCalls": 10
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": true,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 5.652417000000014,
+      "readCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": true,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 22.900541000000032,
+      "readCalls": 1,
+      "decryptCalls": 1,
+      "statCalls": 4
+    }
+  ]
+}

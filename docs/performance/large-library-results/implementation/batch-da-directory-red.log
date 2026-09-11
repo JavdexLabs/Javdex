@@ -1,0 +1,83 @@
+✖ passes one bounded directory identity for 120 same-code parts, retaining it after other directory anchors (107.707417ms)
+✖ keeps real movie.nfo adoption and generic asset ownership with full directory identities (18.337958ms)
+✖ keeps real movie.nfo adoption and generic asset ownership with targeted sibling identities (15.40875ms)
+✔ does not invoke NFO services when disabled (full) (7.691125ms)
+✖ does not invoke NFO services when disabled (targeted) (7.547042ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 1
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 472.034292
+
+✖ failing tests:
+
+test at src/main/scanner/scannerNfoDirectoryIdentity.test.ts:2:3086
+✖ passes one bounded directory identity for 120 same-code parts, retaining it after other directory anchors (107.707417ms)
+  AssertionError [ERR_ASSERTION]: scanner must supply a summary rather than a per-file code array
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scannerNfoDirectoryIdentity.test.ts:67:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/main/scanner/scannerNfoDirectoryIdentity.test.ts:2:5418
+✖ keeps real movie.nfo adoption and generic asset ownership with full directory identities (18.337958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scannerNfoDirectoryIdentity.test.ts:124:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/main/scanner/scannerNfoDirectoryIdentity.test.ts:2:5418
+✖ keeps real movie.nfo adoption and generic asset ownership with targeted sibling identities (15.40875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scannerNfoDirectoryIdentity.test.ts:124:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/main/scanner/scannerNfoDirectoryIdentity.test.ts:2:9736
+✖ does not invoke NFO services when disabled (targeted) (7.547042ms)
+  AssertionError [ERR_ASSERTION]: explicit targets need no sibling/sidecar directory index when NFO is disabled
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scannerNfoDirectoryIdentity.test.ts:164:24)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

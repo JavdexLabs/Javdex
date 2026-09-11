@@ -1,0 +1,98 @@
+✔ counts a large pending inbox without decoding its snapshots and follows deletions (76.113042ms)
+✔ pages a 10k inbox without materializing snapshots, locates deep links and clamps deleted pages (82.323875ms)
+▶ scrape IPC schemas
+  ✔ strictly validates media-library-scoped video batch scrape commands (3.041375ms)
+  ✔ validates the optional media-library scope on single-video scrape commands (0.162708ms)
+✔ scrape IPC schemas (3.66225ms)
+✔ bounds pending scrape pages and details at the IPC boundary (0.47075ms)
+▶ ScrapeJobController
+  ✔ flushes and detaches UI progress on rejection before accepting another batch (3.985417ms)
+  ✔ coalesces video UI progress while preserving checkpoints and done delivery (25.441417ms)
+  ✔ coalesces video UI progress while preserving checkpoints and paused delivery (15.83925ms)
+  ✔ coalesces video UI progress while preserving checkpoints and cancelled delivery (14.267583ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and done delivery (13.436375ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and paused delivery (12.252958ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and cancelled delivery (12.23925ms)
+  ✔ preserves media-library scope through batch count and start orchestration (0.295708ms)
+  ✔ rejects a single-video scrape outside the requesting active media library (0.2445ms)
+  ✔ forwards an explicit director choice and returns structured classification outcomes (0.091ms)
+  ✔ serializes single video and actress scrape runs (0.076833ms)
+  ✔ pauses an interrupted persisted job during initialization (0.066666ms)
+  ✔ recovers an on-disk running checkpoint as paused after restart (29.720791ms)
+  ✔ publishes progress and supports pause, resume, and discard for persisted batches (0.556542ms)
+  ✔ prevents starting a scrape batch while automatic crop owns the batch lock (0.088791ms)
+✔ ScrapeJobController (129.312584ms)
+▶ route builders and parsers
+  ✔ round-trips library detail stacks (1.176458ms)
+  ✔ round-trips actress detail stacks (0.139416ms)
+  ✔ round-trips playlist and classification entity detail stacks (0.302583ms)
+  ✔ rejects malformed detail ids (0.1795ms)
+  ✔ builds pending-center locations without page-level query concatenation (0.360375ms)
+✔ route builders and parsers (2.549541ms)
+▶ classification list query contract
+  ✔ accepts only video count and update time sorting with video count descending by default (0.060708ms)
+  ✔ includes organization search and sorting in the shareable query identity (0.077834ms)
+  ✔ keeps series release sorting separate from classification-list sorting (0.055041ms)
+✔ classification list query contract (0.261167ms)
+▶ actress avatar filter query contract
+  ✔ normalizes avatar filter values and omits the all default (0.130459ms)
+  ✔ returns to the actress list without losing its query state (0.119708ms)
+  ✔ keeps avatar filters distinct in the actress query hash (0.135708ms)
+✔ actress avatar filter query contract (0.449958ms)
+▶ actress status filter query contract
+  ✔ parses the canonical status values and treats anything else as all (0.081792ms)
+  ✔ omits the param for all and writes the canonical value otherwise (0.113958ms)
+  ✔ includes status in the list query identity and ignores invalid values (0.051584ms)
+  ✔ keeps search, gender and sort identity while only the status changes (0.085708ms)
+  ✔ round-trips the status query through actress detail and back (0.103667ms)
+  ✔ remembers the actress status filter across primary navigation (0.226375ms)
+✔ actress status filter query contract (0.723209ms)
+▶ primary navigation memory
+  ✔ restores query state per list and removes unrelated nested query keys (0.30825ms)
+  ✔ persists search only when leaving a list root (0.127333ms)
+  ✔ forgets a root so cross-nav no longer restores it (0.036458ms)
+  ✔ resolves same-section vs cross-section sidebar targets (0.113375ms)
+  ✔ builds nav link href from current search when active (0.086584ms)
+✔ primary navigation memory (0.708166ms)
+▶ navigation helpers
+  ✔ removes playlist-detail resource filters when returning to the playlist list (0.067458ms)
+  ✔ keeps home, search and media-library detail stacks scoped and reversible (0.793375ms)
+  ✔ closes nested actress details back to their parent video context (0.334083ms)
+  ✔ keeps stable series identity and release direction through its detail stack (0.107291ms)
+  ✔ keeps director identity and query state through its stable detail stack (0.085541ms)
+  ✔ opens an organization by stable id while preserving its role-list query (0.080209ms)
+  ✔ keeps classification query only inside the same classification stack (0.064ms)
+  ✔ keeps video and actress navigation inside the stable organization stack (0.099875ms)
+  ✔ keeps video and actress navigation inside the pending workbench stack (0.079625ms)
+  ✔ opens actress detail from the pending inbox and returns to it (0.051291ms)
+✔ navigation helpers (1.847291ms)
+▶ settings route contract
+  ✔ builds canonical settings paths and resolves valid sections (0.174167ms)
+✔ settings route contract (0.202542ms)
+✔ locates a deep-linked pending item, pages with a bounded cache and ignores a late detail (344.260917ms)
+✔ shows an explicit page error and retries without fetching the full inbox (70.637625ms)
+✔ recovers the last page after deletion and selects the surviving first item (89.200625ms)
+✔ does not block a different queue when scrape count fails or reuse its disabled page total (87.977458ms)
+✔ ignores an old page that resolves after navigation to a newer page (109.599167ms)
+▶ PendingCenterPage scrape resolution
+  ✔ carries an explicit director through merge-and-apply without stacking prompts (262.615125ms)
+  ✔ previews either persisted identity and submits only after explicit confirmation (14.957375ms)
+  ✔ shows the library filter only for scan decisions (14.441166ms)
+  ✔ clears the library filter from the scoped empty state and keeps the scan tab selected (13.873875ms)
+✔ PendingCenterPage scrape resolution (306.400958ms)
+▶ pending center resolution state
+  ✔ requires every scan resource to have an explicit valid target (0.843833ms)
+  ✔ serializes scan targets only at the select-control boundary (1.119ms)
+  ✔ starts scrape candidates unselected and rejects stale candidate ids (0.190708ms)
+  ✔ shows the same deterministic default primary ordering as persisted resolution (0.309167ms)
+  ✔ labels scan decisions with their owning media library (0.228083ms)
+  ✔ shows resource identity conflicts in the scan queue without exposing a local path (0.161084ms)
+✔ pending center resolution state (3.732083ms)
+ℹ tests 68
+ℹ suites 11
+ℹ pass 68
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1076.041834

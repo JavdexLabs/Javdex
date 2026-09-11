@@ -1,0 +1,69 @@
+▶ AgentExecution
+  ✔ runs the persistence hook before the runtime can commit its bootstrap observation (3.579167ms)
+  ✔ opens one runtime session and delegates ten operations without a loop or second queue (3.32625ms)
+  ✔ authorizes and records Pi native tools without persisting their output (0.832416ms)
+  ✔ fails closed when a Pi native tool lacks a frozen capability grant (0.617958ms)
+  ✔ restores a normal checkpoint without reading ExecutionHistory (0.773375ms)
+  ✔ rebuilds only for typed checkpoint corruption and only once per generation (1.115166ms)
+  ✔ releases runtime resources without closing the durable run (0.460167ms)
+  ✔ closes a durable run after its runtime was already released (0.47975ms)
+✔ AgentExecution (11.813042ms)
+✔ preserves newer product log references when aborting after a domain-only state update (0.901583ms)
+▶ AgentRunStore
+  ✔ returns every durable non-closed run so each use case can apply its recovery policy (4.071125ms)
+  ✔ persists a frozen config without serializing credentials or functions (0.627333ms)
+  ✔ encrypts recovery payloads and fails closed on integrity damage (0.905ms)
+  ✔ accepts an idempotent operation once and settles only named command ids (0.849542ms)
+  ✔ keeps repeated product events from the same operation in append order (0.622291ms)
+  ✔ does not overwrite a terminal runtime fault when the runtime subsequently settles (0.491459ms)
+  ✔ allows one rebuild attempt per recovery generation (0.44325ms)
+  ✔ records artifact refs in the product journal and fails closed on damaged refs (0.731542ms)
+✔ AgentRunStore (9.18375ms)
+▶ Agent product journal pagination
+  ✔ reads the last cursor through the run/seq index without parsing any payload in a 100k journal (97.085917ms)
+  ✔ pages with a strict size cap and no cross-run, duplicate or skipped events despite sequence gaps (15.936791ms)
+✔ Agent product journal pagination (113.104792ms)
+▶ PluginDeveloper approval and lifecycle stability
+  ✔ restores a legacy run with newly-invalid field ids as a repairable workspace (5.962917ms)
+  ✔ clears every durable plugin-development history without touching other Agent use cases (1.027084ms)
+  ✔ refuses to clear history while a plugin-development operation is running (0.34875ms)
+  ✔ discards unrecoverable plugin-development history without touching recoverable runs (1.534125ms)
+  ✔ waits for a slow terminal release before an immediate continuation reopens the run (0.780625ms)
+  ✔ materializes a terminal workspace before lazy continuation projects native file tools (3.140125ms)
+  ✔ projects Pi native file tools into the durable product timeline (2.732458ms)
+  ✔ records exactly one domain error when a runtime fault transitions the run to failed (0.151333ms)
+  ✔ surfaces an unpersistable runtime fault and resolves the active operation (0.175166ms)
+  ✔ publishes the reduced active context immediately after Pi compaction (0.161083ms)
+  ✔ keeps a transient invalid workspace recoverable and resyncs after a valid rewrite (3.312042ms)
+  ✔ streams provider reasoning and answer while persisting each only once per completed turn (72.72975ms)
+  ✔ bounds one displayed reasoning block and reports the original character count (1.802791ms)
+  ✔ revokes an approved permit when Pi rejects the approval continuation (0.191375ms)
+  ✔ does not consume an approval while the operation that emitted waiting_user is still settling (0.079834ms)
+  ✔ binds a typed choice to the exact request without treating it as user feedback (10.195875ms)
+  ✔ resumes a typed browser interaction without turning completion into defect feedback (0.094ms)
+  ✔ keeps a mechanically ready artifact waiting for user after Pi settles (2.94525ms)
+  ✔ requires real feedback before continuing a mechanically ready artifact (3.386583ms)
+  ✔ keeps readiness for dev-notes edits but invalidates it for package edits (3.125042ms)
+  ✔ does not run hidden production execution when Pi settles without a current artifact (2.748959ms)
+  ✔ projects a model-turn limit into waiting_user/working without running a hidden check (4.764584ms)
+  ✔ allows installation only for the exact full production execution artifact (0.322834ms)
+  ✔ marks the session completed only after the accepted artifact is installed (0.226625ms)
+  ✔ adopts the installed display name when install renames to avoid a conflict (3.089ms)
+  ✔ persists the renamed installed package onto settled product state (2.917375ms)
+  ✔ releases only PluginDeveloper-owned runs during application disposal (0.114333ms)
+✔ PluginDeveloper approval and lifecycle stability (128.704541ms)
+✔ uses the indexed journal cursor for active and persisted plugin snapshots (0.32175ms)
+✔ persists incremental domain logs and preserves the complete history across snapshot, restore and export (135.783625ms)
+✔ migrates a legacy log once, preserves message/event order, and reads only its committed journal interval (15.355292ms)
+✔ rolls back journal appends when product state commit fails and retries without duplicates (1.16025ms)
+✔ rejects changed legacy prefixes, shrinking histories, missing rows and malformed references without rewriting data (0.680792ms)
+✔ keeps logical state+journal writes linear for 1k, 10k and 100k log entries (3695.729583ms)
+ℹ {"results":[{"entries":1000,"stateBytes":110786,"journalBytes":131780},{"entries":10000,"stateBytes":1127788,"journalBytes":1337780},{"entries":100000,"stateBytes":11477790,"journalBytes":13577780}],"scope":"In-memory SQLite logical JSON bytes; outer transaction amortizes test setup. Not WAL/device bytes, fsync latency, UI or cold recovery memory acceptance."}
+ℹ tests 52
+ℹ suites 4
+ℹ pass 52
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4200.619625

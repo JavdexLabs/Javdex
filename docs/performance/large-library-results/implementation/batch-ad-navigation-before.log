@@ -1,0 +1,33 @@
+✔ loads only on open, renders at most one page, and selects an existing tag by ID (9.331125ms)
+✔ debounces search, resets the page, and discards earlier search responses (549.839208ms)
+✔ shows errors with retry and discards closed-modal results before reopening (5.19875ms)
+✔ creates from the full draft and prevents an old write completion from closing another video modal (4.545042ms)
+✔ refreshes stale candidates after a failed selection without retrying the write (3.035875ms)
+✖ does not inherit an open picker or issue a hidden request when switching videos (2.679334ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 852.757
+
+✖ failing tests:
+
+test at src/renderer/src/components/VideoTagPanel.interaction.test.tsx:2:8199
+✖ does not inherit an open picker or issue a hidden request when switching videos (2.679334ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/components/VideoTagPanel.interaction.test.tsx:155:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

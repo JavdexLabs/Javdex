@@ -1,0 +1,1072 @@
+diff --git a/src/main/db/libraryMembershipRepo.ts b/src/main/db/libraryMembershipRepo.ts
+index 80717ef..1030c05 100644
+--- a/src/main/db/libraryMembershipRepo.ts
++++ b/src/main/db/libraryMembershipRepo.ts
+@@ -1,4 +1,5 @@
+ import type Database from 'better-sqlite3'
++import { randomUUID } from 'node:crypto'
+ import { getDb } from './database'
+ 
+ export type MembershipAddedVia = 'scan' | 'manual' | 'shared'
+@@ -139,31 +140,39 @@ export function removeResourceLessMemberships(
+   libraryId: number,
+   database: Database.Database = getDb()
+ ): RemovedResourceLessMembership[] {
++  const removed: RemovedResourceLessMembership[] = []
++  removeResourceLessMembershipsWithAudit(libraryId, (entry) => { removed.push(entry) }, database)
++  return removed
++}
++
++/**
++ * Snapshot initial eligible IDs/code/title in SQL; deliver only actual deletions.
++ * Each <=256-row keyset page finishes reading before any write/callback. Metadata
++ * remains untruncated, so the row bound is not a byte bound for unusually long names.
++ * Synchronous callbacks run before commit and may use nested writer savepoints.
++ * Failure rolls back both cleanup and callback writes, including the TEMP table.
++ */
++export function removeResourceLessMembershipsWithAudit(
++  libraryId: number,
++  onRemoved: (entry: RemovedResourceLessMembership) => void,
++  database: Database.Database = getDb()
++): number {
+   const scopedLibraryId = positiveId(libraryId, '媒体库 ID')
+   return database.transaction(() => {
+-    const candidates = database
+-      .prepare(
+-        `SELECT video.id AS video_id, video.code AS video_code, video.title AS video_title
+-           FROM library_video_memberships membership
+-           JOIN videos video ON video.id = membership.video_id
+-          WHERE membership.library_id = ?
+-            AND membership.is_pinned = 0
+-            AND NOT EXISTS (
+-              SELECT 1 FROM playlist_video playlist_item
+-               WHERE playlist_item.video_id = membership.video_id
+-            )
+-            AND NOT EXISTS (
+-              SELECT 1 FROM video_resources resource
+-               WHERE resource.library_id = membership.library_id
+-                 AND resource.video_id = membership.video_id
+-            )
+-          ORDER BY video.id`
+-      )
+-      .all(scopedLibraryId) as Array<{
+-      video_id: number
+-      video_code: string
+-      video_title: string | null
+-    }>
++    const table = `membership_cleanup_${randomUUID().replaceAll('-', '')}`
++    database.exec(`CREATE TEMP TABLE ${table} (
++      video_id INTEGER PRIMARY KEY, video_code TEXT NOT NULL, video_title TEXT
++    )`)
++    database.prepare(`INSERT INTO temp.${table}(video_id,video_code,video_title)
++      SELECT video.id, video.code, video.title
++      FROM library_video_memberships membership JOIN videos video ON video.id=membership.video_id
++      WHERE membership.library_id=? AND membership.is_pinned=0
++        AND NOT EXISTS (SELECT 1 FROM playlist_video playlist_item WHERE playlist_item.video_id=membership.video_id)
++        AND NOT EXISTS (SELECT 1 FROM video_resources resource
++          WHERE resource.library_id=membership.library_id AND resource.video_id=membership.video_id)`)
++      .run(scopedLibraryId)
++    const read = database.prepare(`SELECT video_id,video_code,video_title FROM temp.${table}
++      WHERE video_id>? ORDER BY video_id LIMIT 256`)
+     const remove = database.prepare(
+       `DELETE FROM library_video_memberships
+         WHERE library_id = ? AND video_id = ? AND is_pinned = 0
+@@ -177,15 +186,27 @@ export function removeResourceLessMemberships(
+                AND resource.video_id = library_video_memberships.video_id
+           )`
+     )
+-    const removed: RemovedResourceLessMembership[] = []
+-    for (const candidate of candidates) {
+-      if (remove.run(scopedLibraryId, candidate.video_id).changes !== 1) continue
+-      removed.push({
+-        videoId: candidate.video_id,
+-        videoCode: candidate.video_code,
+-        videoTitle: candidate.video_title
+-      })
++    let count = 0, afterId = 0
++    for (;;) {
++      const page = read.all(afterId) as { video_id: number; video_code: string; video_title: string | null }[]
++      if (page.length === 0) break
++      afterId = page[page.length - 1].video_id
++      for (const candidate of page) {
++        // Preserve the legacy recheck/skip behavior if a prior callback protects
++        // another candidate or a DELETE trigger ignores its removal.
++        if (remove.run(scopedLibraryId, candidate.video_id).changes !== 1) continue
++        const returned: unknown = onRemoved({
++          videoId: candidate.video_id, videoCode: candidate.video_code, videoTitle: candidate.video_title
++        })
++        if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
++            typeof (returned as { then?: unknown }).then === 'function') {
++          void Promise.resolve(returned).catch(() => {})
++          throw new Error('Membership cleanup audit callback must be synchronous')
++        }
++        count++
++      }
+     }
+-    return removed
++    database.exec(`DROP TABLE temp.${table}`)
++    return count
+   })()
+ }
+diff --git a/src/main/scanner/scanCoordinator.ts b/src/main/scanner/scanCoordinator.ts
+index 7c08dde..ad6fef6 100644
+--- a/src/main/scanner/scanCoordinator.ts
++++ b/src/main/scanner/scanCoordinator.ts
+@@ -1,10 +1,10 @@
+ import fs from 'node:fs'
++import { createProgressPublisher } from '../services/progressPublisher'
+ import { randomUUID } from 'node:crypto'
+ import type {
+   LibraryScanAudit,
+   LibraryScanEvent,
+-  LibraryScanFileAuditEntry,
+-  LibraryScanPendingGroupAuditEntry,
++  LibraryScanDeletedVideoAuditEntry,
+   LibraryScanResourceAuditEntry,
+   LibraryScanSummary,
+   LibraryScanTrigger,
+@@ -20,7 +20,7 @@ import type { Video, VideoResource } from '@shared/videoTypes'
+ import {
+   getVideoById,
+   getVideoResourceInLibrary,
+-  listSourceManagedVideoResourceRefs,
++  iterateSourceManagedVideoResourceRefs,
+   listVideoResources,
+   removeVideoResourceRecord,
+   setPrimaryVideoResource,
+@@ -34,14 +34,19 @@ import {
+ } from '../db/mediaLibraryRepo'
+ import {
+   removeResourceLessMemberships,
++  removeResourceLessMembershipsWithAudit,
+   type RemovedResourceLessMembership
+ } from '../db/libraryMembershipRepo'
+ import {
+   beginLibraryScanRun,
+   finishLibraryScanRun,
++  finishLibraryScanEntriesRun,
+   type LibraryUnrecognizedFileInput
+ } from '../db/libraryScanRepo'
+-import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { createScanAuditWriter } from '../db/scanAuditWriter'
++import { iterateScanAuditUnrecognizedPaths } from '../db/scanAuditUnrecognizedPaths'
++import { readPendingScanAuditEntries } from '../db/pendingScanAuditRepo'
+ import { reconcilePendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+ import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+ import {
+@@ -55,11 +60,12 @@ import {
+   listPendingLibraryPathCleanupRoots,
+   recoverLegacyLibraryPathCleanups,
+   type RecoverLegacyLibraryPathCleanupResult,
+-  type PendingLibraryPathCleanupResult
++  type LibraryPathCleanupAuditEvent
+ } from '../services/libraryPathCleanupService'
+-import { isPathUnderRoot } from './libraryPathUtils'
++import { createLibraryRootMatcher } from './libraryRootMatcher'
+ import {
+   scanFolders,
++  ScanFoldersFailure,
+   type ScanFoldersRequest,
+   type ScanOptions,
+   type ScanProgressFn
+@@ -87,7 +93,14 @@ interface FinishRunInput {
+   unrecognizedFiles?: readonly LibraryUnrecognizedFileInput[]
+ }
+ 
++export type ScanCleanupAuditEvent = LibraryPathCleanupAuditEvent | {
++  section: 'deletedVideos'
++  entry: LibraryScanDeletedVideoAuditEntry
++}
++
+ export interface ScanCoordinatorDependencies {
++  /** Explicit legacy compatibility for injected fixtures; production defaults to entries. */
++  auditStorage?: 'json' | 'entries'
+   readScanSnapshot: (libraryId: number) => MediaLibraryScanSnapshot
+   bindRootIdentities: typeof bindOnlineMediaLibraryRootIdentities
+   inspectRoot: (root: Readonly<MediaLibraryRoot>) => Promise<boolean>
+@@ -99,7 +112,7 @@ export interface ScanCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions
+   ) => Promise<ScanResult>
+-  listLocalResources: (libraryId: number) => LocalVideoResourceRef[]
++  listLocalResources: (libraryId: number) => Iterable<LocalVideoResourceRef>
+   getResourceById: (libraryId: number, resourceId: number) => VideoResource | null
+   getVideoById: (videoId: number) => Video | null
+   listResources: (libraryId: number, videoId: number) => VideoResource[]
+@@ -110,12 +123,19 @@ export interface ScanCoordinatorDependencies {
+   reconcilePendingResourceIdentities: typeof reconcilePendingResourceIdentities
+   recoverPendingPathCleanups: (libraryId: number) => RecoverLegacyLibraryPathCleanupResult
+   listPendingPathCleanups: (libraryId: number) => PendingLibraryPathCleanup[]
+-  applyPendingPathCleanups: (
+-    cleanups: PendingLibraryPathCleanup[]
+-  ) => PendingLibraryPathCleanupResult
++  applyPendingPathCleanups: typeof applyPendingLibraryPathCleanups
++  /** Synchronous, inside the cleanup transaction; durable sinks must use its database connection. */
++  recordCleanupAudit?: (
++    identity: { libraryId: number; runId: string },
++    event: ScanCleanupAuditEvent
++  ) => void
+   runCleanupTransaction: <T>(operation: () => T) => T
+   removeResourceLessMemberships: (libraryId: number) => RemovedResourceLessMembership[]
+-  listPendingScanGroups: typeof listPendingScanGroups
++  removeResourceLessMembershipsWithAudit: (
++    libraryId: number,
++    onRemoved: Parameters<typeof removeResourceLessMembershipsWithAudit>[1]
++  ) => number
++  readPendingScanAuditEntries: typeof readPendingScanAuditEntries
+   beginRun: typeof beginLibraryScanRun
+   finishRun: (input: FinishRunInput) => void
+   now: () => string
+@@ -200,6 +220,16 @@ export class ScanCoordinator {
+     let snapshot: MediaLibraryScanSnapshot | null = null
+     let selectedRoots: Readonly<MediaLibraryRoot>[] = []
+     let beganRun = false
++    const useEntries = this.dependencies.auditStorage !== 'json'
++    let writer: ReturnType<typeof createScanAuditWriter> | undefined
++    let storageFailed = false
++    let finalizationFailed = false
++    const persist = <T>(operation: () => T): T => {
++      try { return operation() } catch (error) { storageFailed = true; throw error }
++    }
++    const progressPublisher = createProgressPublisher<ScanProgress>((progress) => {
++      this.emit({ phase: 'progress', libraryId: request.libraryId, runId, trigger, progress })
++    })
+     const auditState: Omit<
+       LibraryScanAudit,
+       | 'schemaVersion'
+@@ -218,6 +248,16 @@ export class ScanCoordinator {
+       pendingGroups: []
+     }
+ 
++    const finish = (status: LibraryScanSummary['status'], error: string | null,
++      safeRoots: readonly Readonly<MediaLibraryRoot>[]): void => {
++      try {
++        this.recordSummary(snapshot!, runId, trigger, startedAt, status, result, error, auditState, safeRoots, writer)
++      } catch (failure) {
++        finalizationFailed = true
++        throw failure
++      }
++    }
++
+     try {
+       const legacyCleanupRecovery = !request.rootIds?.length
+         ? this.dependencies.recoverPendingPathCleanups(request.libraryId)
+@@ -245,13 +285,20 @@ export class ScanCoordinator {
+       if (hasNoRunnableWork && legacyCleanupRecovery.waiting === 0) {
+         throw new Error('尚未配置可扫描的媒体库根目录')
+       }
+-      this.dependencies.beginRun({
+-        libraryId: request.libraryId,
+-        runId,
+-        configRevision: snapshot.configRevision,
+-        trigger,
+-        startedAt
+-      })
++      const begin = (): void => {
++        this.dependencies.beginRun({
++          libraryId: request.libraryId, runId, configRevision: snapshot!.configRevision, trigger, startedAt
++        })
++        if (useEntries) {
++          writer = createScanAuditWriter(getDb(), { libraryId: request.libraryId, runId })
++          persist(() => writer!.start({
++            schemaVersion: 2, libraryId: request.libraryId, runId,
++            configRevision: snapshot!.configRevision, trigger, startedAt, finishedAt: startedAt, status: 'success'
++          }))
++        }
++      }
++      if (useEntries) getDb().transaction(begin)()
++      else begin()
+       beganRun = true
+       this.emit({ phase: 'started', libraryId: request.libraryId, runId, trigger })
+       if (hasNoRunnableWork) throw new Error(LEGACY_CLEANUP_WAITING_ERROR)
+@@ -260,17 +307,7 @@ export class ScanCoordinator {
+       for (const root of selectedRoots) {
+         if (controller.signal.aborted) {
+           result = this.cancelledResult(request.libraryId, runId, offlineRoots)
+-          this.recordSummary(
+-            snapshot,
+-            runId,
+-            trigger,
+-            startedAt,
+-            'cancelled',
+-            result,
+-            null,
+-            auditState,
+-            []
+-          )
++          finish('cancelled', null, [])
+           return result
+         }
+         if (await this.dependencies.inspectRoot(root)) accessibleRoots.push(root)
+@@ -285,13 +322,7 @@ export class ScanCoordinator {
+         },
+         (progress) => {
+           request.onProgress?.(progress)
+-          this.emit({
+-            phase: 'progress',
+-            libraryId: request.libraryId,
+-            runId,
+-            trigger,
+-            progress
+-          })
++          progressPublisher.update(progress)
+         },
+         {
+           signal: controller.signal,
+@@ -301,7 +332,13 @@ export class ScanCoordinator {
+           ),
+           autoMergeSameCodeResources: snapshot.config.autoMergeSameCodeResources,
+           autoImportLocalNfo: snapshot.config.autoImportLocalNfo,
+-          onFileResult: (entry) => auditState.files.push(entry)
++          ...(writer ? { auditSink: {
++            recordFile: (entry) => persist(() => writer!.writeBatch('files', [entry])),
++            readFileNfo: (filePath) => persist(() => writer!.readFileNfo(filePath)),
++            patchNfo: (filePath, nfo) => persist(() => writer!.patchNfo(filePath, nfo))
++          } satisfies NonNullable<ScanOptions['auditSink']> } : {
++            onFileResult: (entry: LibraryScanAudit['files'][number]) => { auditState.files.push(entry) }
++          })
+         }
+       )
+ 
+@@ -311,20 +348,10 @@ export class ScanCoordinator {
+         else if (!offlineRoots.some((offline) => offline.id === root.id)) offlineRoots.push(root)
+       }
+       result.offlineFolders = offlineRoots.map((root) => root.path)
+-      this.refreshPendingAudit(request.libraryId, auditState)
++      if (!writer) this.refreshPendingAudit(request.libraryId, auditState)
+       if (controller.signal.aborted || result.cancelled) {
+         result.cancelled = true
+-        this.recordSummary(
+-          snapshot,
+-          runId,
+-          trigger,
+-          startedAt,
+-          'cancelled',
+-          result,
+-          null,
+-          auditState,
+-          []
+-        )
++        finish('cancelled', null, [])
+         return result
+       }
+ 
+@@ -337,17 +364,7 @@ export class ScanCoordinator {
+       )
+       if (processingFailures > 0) {
+         eventFailure = `有 ${processingFailures} 个文件处理失败，已跳过资源清理`
+-        this.recordSummary(
+-          snapshot,
+-          runId,
+-          trigger,
+-          startedAt,
+-          'failed',
+-          result,
+-          eventFailure,
+-          auditState,
+-          []
+-        )
++        finish('failed', eventFailure, [])
+         return result
+       }
+ 
+@@ -357,16 +374,27 @@ export class ScanCoordinator {
+         selectedRoots.every((root) => snapshot?.roots.some((item) => item.id === root.id))
+       const safeRootIds = new Set(safeRoots.map((root) => root.id))
+       const safeRootsById = new Map(safeRoots.map((root) => [root.id, root] as const))
++      const matchPendingRoot = createLibraryRootMatcher(safeRoots, true)
++      const recordCleanupAudit = (event: ScanCleanupAuditEvent): void => {
++        if (writer) persist(() => {
++          if (event.section === 'deletedVideos') writer!.writeBatch('deletedVideos', [event.entry])
++          else writer!.writeBatch(event.section, [event.entry])
++        })
++        const returned: unknown = this.dependencies.recordCleanupAudit?.(
++          { libraryId: request.libraryId, runId }, event
++        )
++        if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
++            typeof (returned as { then?: unknown }).then === 'function') {
++          void Promise.resolve(returned).catch(() => {})
++          throw new Error('Cleanup audit callback must be synchronous')
++        }
++      }
+       const cleanup = this.dependencies.runCleanupTransaction(() => {
+         for (const root of safeRoots) {
+           this.dependencies.authorizeRoot(request.libraryId, root.id, root)
+         }
+         const inspectAuthorizedPendingPath = (filePath: string): LocalPathState => {
+-          const root = safeRoots.find(
+-            (candidate) =>
+-              isPathUnderRoot(filePath, candidate.path) ||
+-              Boolean(candidate.realPath && isPathUnderRoot(filePath, candidate.realPath))
+-          )
++          const root = matchPendingRoot(filePath)
+           if (!root) return 'unknown'
+           const state = this.dependencies.inspectPath(filePath)
+           if (state === 'present') {
+@@ -395,71 +423,102 @@ export class ScanCoordinator {
+         )
+         const missingResources = this.removeMissingAccessibleResources(
+           request.libraryId,
+-          safeRootsById
++          safeRootsById,
++          recordCleanupAudit,
++          !writer
+         )
++        const deferredRemoved: LibraryScanResourceAuditEntry[] = []
++        const deferredPromoted: LibraryScanResourceAuditEntry[] = []
+         const deferredCleanup =
+           isFullScan && pendingPathCleanups.length > 0
+-            ? this.dependencies.applyPendingPathCleanups(pendingPathCleanups)
++            ? this.dependencies.applyPendingPathCleanups(pendingPathCleanups, (event) => {
++                recordCleanupAudit(event)
++                if (!writer) {
++                  if (event.section === 'removedResources') deferredRemoved.push(event.entry)
++                  else deferredPromoted.push(event.entry)
++                }
++              })
+             : { removed: 0, promoted: 0, consumedRoots: [] }
+-        const removedMemberships =
+-          isFullScan && offlineRoots.length === 0 && snapshot?.config.removeResourceLessMemberships
+-            ? this.dependencies.removeResourceLessMemberships(request.libraryId)
+-            : []
+-        return { missingResources, deferredCleanup, removedMemberships }
++        const recordRemovedMembership = (video: RemovedResourceLessMembership): void => {
++          recordCleanupAudit({ section: 'deletedVideos', entry: {
++            videoId: video.videoId, videoCode: video.videoCode,
++            videoTitle: video.videoTitle, reason: 'resource_less'
++          } })
++        }
++        let removedMemberships: RemovedResourceLessMembership[] = []
++        let removedMembershipCount = 0
++        if (isFullScan && offlineRoots.length === 0 && snapshot?.config.removeResourceLessMemberships) {
++          if (writer) {
++            removedMembershipCount = this.dependencies.removeResourceLessMembershipsWithAudit(
++              request.libraryId, recordRemovedMembership
++            )
++          } else {
++            removedMemberships = this.dependencies.removeResourceLessMemberships(request.libraryId)
++            for (const video of removedMemberships) recordRemovedMembership(video)
++            removedMembershipCount = removedMemberships.length
++          }
++        }
++        return { missingResources, deferredCleanup, removedMemberships, removedMembershipCount, deferredRemoved, deferredPromoted }
+       })
+       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+-      result.deletedVideos = cleanup.removedMemberships.length
+-      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+-      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
+-      auditState.deletedVideos.push(
+-        ...cleanup.removedMemberships.map((video) => ({
++      result.deletedVideos = cleanup.removedMembershipCount
++      for (const resource of cleanup.missingResources.removedResources) {
++        auditState.removedResources.push(resource)
++      }
++      for (const resource of cleanup.missingResources.promotedResources) {
++        auditState.promotedResources.push(resource)
++      }
++      for (const resource of cleanup.deferredRemoved) auditState.removedResources.push(resource)
++      for (const resource of cleanup.deferredPromoted) auditState.promotedResources.push(resource)
++      if (!writer) for (const video of cleanup.removedMemberships) {
++        auditState.deletedVideos.push({
+           videoId: video.videoId,
+           videoCode: video.videoCode,
+           videoTitle: video.videoTitle,
+-          reason: 'resource_less' as const
+-        }))
+-      )
++          reason: 'resource_less'
++        })
++      }
+       const status =
+         result.strmFailures.length + result.omittedStrmFailures > 0
+           ? 'completed_with_errors'
+           : 'success'
+-      this.recordSummary(
+-        snapshot,
+-        runId,
+-        trigger,
+-        startedAt,
+-        status,
+-        result,
+-        null,
+-        auditState,
+-        safeRoots
+-      )
++      finish(status, null, safeRoots)
+       return result
+     } catch (error) {
++      if (error instanceof ScanFoldersFailure && error.partialResult.libraryId === request.libraryId &&
++          error.partialResult.runId === runId) {
++        result = error.partialResult
++      }
+       const errorSummary = sanitizeLibraryScanError(error)
+       eventFailure = errorSummary
+       result.offlineFolders = offlineRoots.map((root) => root.path)
+       if (snapshot && beganRun) {
+-        try {
+-          this.refreshPendingAudit(request.libraryId, auditState)
+-        } catch {
+-          // Preserve the original scan failure when pending state is also unavailable.
++        // Storage marks a rolled-back operation, not persistent unavailability.
++        // Finalization wins when both flags are set; never repeat that attempt.
++        const failurePhase = finalizationFailed ? 'finalization' : storageFailed ? 'storage' : 'scan'
++        if (writer && failurePhase === 'finalization') {
++          try { this.failUnpublishedRun(request.libraryId, runId, errorSummary) } catch {
++            // Startup recovery handles unavailable storage; keep the original failure.
++          }
++        } else {
++          try {
++            // File/NFO business and audit writes roll back together. Publish the
++            // remaining committed entries with partial counts when storage permits.
++            if (!writer) this.refreshPendingAudit(request.libraryId, auditState)
++            finish('failed', errorSummary, [])
++          } catch {
++            if (writer) {
++              try { this.failUnpublishedRun(request.libraryId, runId, errorSummary) } catch {
++                // Never replace the triggering error with a secondary finalization error.
++              }
++            }
++          }
+         }
+-        this.recordSummary(
+-          snapshot,
+-          runId,
+-          trigger,
+-          startedAt,
+-          'failed',
+-          result,
+-          errorSummary,
+-          auditState,
+-          []
+-        )
+       }
+       throw new Error(errorSummary)
+     } finally {
++      progressPublisher.close()
+       if (this.activeRun?.controller === controller) this.activeRun = null
+       lease.release()
+       if (beganRun) {
+@@ -484,6 +543,21 @@ export class ScanCoordinator {
+     }
+   }
+ 
++  /** Keep incomplete audit staging hidden; startup recovery will abandon it. */
++  private failUnpublishedRun(libraryId: number, runId: string, error: string): void {
++    const database = getDb(), finishedAt = this.dependencies.now()
++    database.transaction(() => {
++      const changed = database.prepare(`UPDATE library_scan_runs SET status='failed',finished_at=?,error_summary=?
++        WHERE id=? AND library_id=? AND status='running' AND NOT EXISTS (
++          SELECT 1 FROM library_scan_audit_manifests WHERE run_id=? AND state='published'
++        )`).run(finishedAt, error, runId, libraryId, runId)
++      if (changed.changes === 0) return
++      database.prepare(`UPDATE media_library_scan_state SET active_run_id=NULL,last_status='failed',
++        last_finished_at=?,last_error=?,revision=revision+1 WHERE library_id=? AND active_run_id=?`)
++        .run(finishedAt, error, libraryId, runId)
++    })()
++  }
++
+   private selectRoots(
+     snapshot: MediaLibraryScanSnapshot,
+     requestedRootIds: number[] | undefined
+@@ -505,26 +579,16 @@ export class ScanCoordinator {
+     libraryId: number,
+     auditState: Pick<LibraryScanAudit, 'files' | 'pendingGroups'>
+   ): void {
+-    const auditPendingIds = new Set(
+-      auditState.files
+-        .filter(
+-          (entry): entry is Extract<LibraryScanFileAuditEntry, { outcome: 'pending' }> =>
+-            entry.outcome === 'pending' && entry.groupId != null
+-        )
+-        .map((entry) => entry.groupId as number)
+-    )
+-    auditState.pendingGroups = this.dependencies
+-      .listPendingScanGroups(libraryId)
+-      .filter((group) => auditPendingIds.has(group.id))
+-      .map((group): LibraryScanPendingGroupAuditEntry => ({
+-        groupId: group.id,
+-        normalizedCode: group.normalizedCode,
+-        resourceCount: group.resources.filter((resource) =>
+-          auditState.files.some(
+-            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+-          )
+-        ).length
+-      }))
++    const groupIds = new Set<number>()
++    const pendingPaths = new Set<string>()
++    for (const entry of auditState.files) {
++      if (entry.outcome !== 'pending') continue
++      pendingPaths.add(entry.filePath)
++      if (entry.groupId != null) groupIds.add(entry.groupId)
++    }
++    auditState.pendingGroups = groupIds.size === 0
++      ? []
++      : this.dependencies.readPendingScanAuditEntries(libraryId, groupIds, pendingPaths)
+   }
+ 
+   private emit(event: LibraryScanEvent): void {
+@@ -592,7 +656,8 @@ export class ScanCoordinator {
+       | 'finishedAt'
+       | 'status'
+     >,
+-    safeRoots: readonly Readonly<MediaLibraryRoot>[]
++    safeRoots: readonly Readonly<MediaLibraryRoot>[],
++    writer?: ReturnType<typeof createScanAuditWriter>
+   ): void {
+     const completedSafely = status === 'success' || status === 'completed_with_errors'
+     if (completedSafely) {
+@@ -626,6 +691,34 @@ export class ScanCoordinator {
+         : {}),
+       errorSummary
+     }
++    if (writer) {
++      const database = getDb()
++      const matchUnrecognizedRoot = createLibraryRootMatcher(safeRoots)
++      const authorize = this.dependencies.authorizeRootFile
++      // A fresh generator for this attempt; finish does not consume it for failed
++      // or cancelled runs. Each source query completes before authorization/write.
++      function* unrecognizedFiles(): Generator<LibraryUnrecognizedFileInput> {
++        for (const filePath of iterateScanAuditUnrecognizedPaths(database, { libraryId: snapshot.libraryId, runId })) {
++          const root = matchUnrecognizedRoot(filePath)
++          if (!root) continue
++          authorize(snapshot.libraryId, root.id, filePath, root)
++          yield { rootId: root.id, filePath, normalizedPath: normalizeLocalPathIdentity(filePath), reason: 'unrecognized_code' }
++        }
++      }
++      database.transaction(() => {
++        writer.refreshPendingGroups()
++        writer.seal({ schemaVersion: 2, libraryId: snapshot.libraryId, runId,
++          configRevision: snapshot.configRevision, trigger, startedAt, finishedAt, status })
++        finishLibraryScanEntriesRun({
++          libraryId: snapshot.libraryId, runId,
++          status: completedSafely ? 'completed' : status === 'cancelled' ? 'cancelled' : 'failed',
++          summary,
++          ...(completedSafely ? { replaceUnrecognizedRootIds: safeRoots.map((root) => root.id),
++            unrecognizedFiles: unrecognizedFiles() } : {})
++        })
++      })()
++      return
++    }
+     const audit: LibraryScanAudit = {
+       schemaVersion: 2,
+       libraryId: snapshot.libraryId,
+@@ -637,9 +730,10 @@ export class ScanCoordinator {
+       status,
+       ...auditState
+     }
++    const matchUnrecognizedRoot = createLibraryRootMatcher(safeRoots)
+     const unrecognizedFiles: LibraryUnrecognizedFileInput[] = result.unrecognizedFiles.flatMap(
+       (filePath) => {
+-        const root = safeRoots.find((candidate) => isPathUnderRoot(filePath, candidate.path))
++        const root = matchUnrecognizedRoot(filePath)
+         if (!root) return []
+         this.dependencies.authorizeRootFile(snapshot.libraryId, root.id, filePath, root)
+         return [
+@@ -674,7 +768,9 @@ export class ScanCoordinator {
+ 
+   private removeMissingAccessibleResources(
+     libraryId: number,
+-    accessibleRoots: ReadonlyMap<number, Readonly<MediaLibraryRoot>>
++    accessibleRoots: ReadonlyMap<number, Readonly<MediaLibraryRoot>>,
++    recordAudit: (event: LibraryPathCleanupAuditEvent) => void,
++    collectEntries = true
+   ): {
+     removed: number
+     promoted: number
+@@ -703,13 +799,23 @@ export class ScanCoordinator {
+         ref.locator,
+         root
+       )
+-      const remaining = this.dependencies
+-        .listResources(libraryId, ref.video_id)
+-        .filter((item) => item.id !== resource.id)
++      const remaining = resource.is_primary
++        ? this.dependencies.listResources(libraryId, ref.video_id)
++          .filter((item) => item.id !== resource.id)
++        : []
+       const removedAudit = this.resourceAuditEntry(resource, 'missing')
++      if (!removedAudit && (!collectEntries || this.dependencies.recordCleanupAudit)) {
++        throw new Error('Cannot record cleanup audit for a missing video')
++      }
+       this.dependencies.removeResourceRecord(libraryId, resource.id)
++      if ((!collectEntries || this.dependencies.recordCleanupAudit) && this.dependencies.getResourceById(libraryId, resource.id)) {
++        throw new Error('Cleanup resource deletion did not take effect')
++      }
+       removed += 1
+-      if (removedAudit) removedResources.push(removedAudit)
++      if (removedAudit) {
++        recordAudit({ section: 'removedResources', entry: removedAudit })
++        if (collectEntries) removedResources.push(removedAudit)
++      }
+       if (!resource.is_primary) continue
+       const promotedResource = selectPrimaryVideoResourceCandidate(
+         remaining,
+@@ -717,9 +823,21 @@ export class ScanCoordinator {
+       )
+       if (!promotedResource) continue
+       this.dependencies.setPrimaryResource(libraryId, ref.video_id, promotedResource.id)
++      if (!collectEntries || this.dependencies.recordCleanupAudit) {
++        const current = this.dependencies.getResourceById(libraryId, promotedResource.id)
++        if (!current || current.video_id !== ref.video_id || current.is_primary !== 1) {
++          throw new Error('Cleanup primary resource promotion did not take effect')
++        }
++      }
+       promoted += 1
+       const promotedAudit = this.resourceAuditEntry(promotedResource, 'promoted_after_removal')
+-      if (promotedAudit) promotedResources.push(promotedAudit)
++      if (!promotedAudit && (!collectEntries || this.dependencies.recordCleanupAudit)) {
++        throw new Error('Cannot record promotion audit for a missing video')
++      }
++      if (promotedAudit) {
++        recordAudit({ section: 'promotedResources', entry: promotedAudit })
++        if (collectEntries) promotedResources.push(promotedAudit)
++      }
+     }
+     return { removed, promoted, removedResources, promotedResources }
+   }
+@@ -747,6 +865,7 @@ export function createScanCoordinator(
+   dependencies: Partial<ScanCoordinatorDependencies> = {}
+ ): ScanCoordinator {
+   return new ScanCoordinator({
++    auditStorage: dependencies.auditStorage ?? 'entries',
+     readScanSnapshot: dependencies.readScanSnapshot ?? readMediaLibraryScanSnapshot,
+     bindRootIdentities:
+       dependencies.bindRootIdentities ?? bindOnlineMediaLibraryRootIdentities,
+@@ -756,7 +875,7 @@ export function createScanCoordinator(
+     authorizeRootDeletionTarget:
+       dependencies.authorizeRootDeletionTarget ?? authorizeMediaLibraryRootDeletionTarget,
+     scanFolders: dependencies.scanFolders ?? scanFolders,
+-    listLocalResources: dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
++    listLocalResources: dependencies.listLocalResources ?? iterateSourceManagedVideoResourceRefs,
+     getResourceById: dependencies.getResourceById ?? getVideoResourceInLibrary,
+     getVideoById: dependencies.getVideoById ?? getVideoById,
+     listResources: dependencies.listResources ?? listVideoResources,
+@@ -773,10 +892,13 @@ export function createScanCoordinator(
+       dependencies.listPendingPathCleanups ?? listPendingLibraryPathCleanupRoots,
+     applyPendingPathCleanups:
+       dependencies.applyPendingPathCleanups ?? applyPendingLibraryPathCleanups,
++    recordCleanupAudit: dependencies.recordCleanupAudit,
+     runCleanupTransaction: dependencies.runCleanupTransaction ?? runCleanupTransaction,
+     removeResourceLessMemberships:
+       dependencies.removeResourceLessMemberships ?? removeResourceLessMemberships,
+-    listPendingScanGroups: dependencies.listPendingScanGroups ?? listPendingScanGroups,
++    removeResourceLessMembershipsWithAudit:
++      dependencies.removeResourceLessMembershipsWithAudit ?? removeResourceLessMembershipsWithAudit,
++    readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? readPendingScanAuditEntries,
+     beginRun: dependencies.beginRun ?? beginLibraryScanRun,
+     finishRun: dependencies.finishRun ?? finishLibraryScanRun,
+     now: dependencies.now ?? (() => new Date().toISOString()),
+diff --git a/src/main/db/libraryMembershipCleanupStreaming.test.ts b/src/main/db/libraryMembershipCleanupStreaming.test.ts
+new file mode 100644
+index 0000000..9fbb3e0
+--- /dev/null
++++ b/src/main/db/libraryMembershipCleanupStreaming.test.ts
+@@ -0,0 +1,139 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { migrateDatabase } from './migrations'
++import { ensureVideoMembership, removeResourceLessMemberships, removeResourceLessMembershipsWithAudit,
++  type RemovedResourceLessMembership } from './libraryMembershipRepo'
++import { createScanAuditWriter } from './scanAuditWriter'
++
++let db: Database.Database
++beforeEach(() => { db = new Database(':memory:'); db.pragma('foreign_keys = ON'); migrateDatabase(db) })
++afterEach(() => db.close())
++function member(id: number, libraryId = 1, title: string | null = null) {
++  db.prepare('INSERT OR IGNORE INTO videos(id,code,title) VALUES(?,?,?)').run(id, `VIDEO-${id}`, title)
++  ensureVideoMembership({ libraryId, videoId: id, addedVia: 'scan' }, db)
++}
++function remaining() {
++  return db.prepare('SELECT * FROM library_video_memberships ORDER BY library_id,video_id').all()
++}
++function noTemp() {
++  assert.deepEqual(db.prepare("SELECT name FROM sqlite_temp_master WHERE name LIKE 'membership_cleanup_%'").all(), [])
++}
++
++it('preserves scope, pinned, playlist and resource exclusions and leaves catalog videos untouched', () => {
++  db.exec("INSERT INTO media_libraries(id,name) VALUES(2,'Other')")
++  for (let id = 1; id <= 5; id++) member(id)
++  member(1, 2); member(5, 2)
++  db.exec(`UPDATE library_video_memberships SET is_pinned=1 WHERE library_id=1 AND video_id=2;
++    INSERT INTO playlists(id,name) VALUES(1,'Keep');
++    INSERT INTO playlist_video(playlist_id,video_id,position) VALUES(1,3,0);
++    INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,source_identity) VALUES(1,4,'local','/local','local-four','local-four');
++    INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,source_identity) VALUES(2,5,'local','/other','other-five','other-five');`)
++  const events: RemovedResourceLessMembership[] = []
++  assert.equal(removeResourceLessMembershipsWithAudit(1, (entry) => { events.push(entry) }, db), 2)
++  assert.deepEqual(events.map((entry) => entry.videoId), [1, 5])
++  assert.deepEqual(db.prepare('SELECT video_id FROM library_video_memberships WHERE library_id=1 ORDER BY video_id').all(),
++    [{ video_id: 2 }, { video_id: 3 }, { video_id: 4 }])
++  assert.ok(db.prepare('SELECT 1 FROM library_video_memberships WHERE library_id=2 AND video_id=1').get())
++  assert.deepEqual(db.prepare('SELECT COUNT(*) AS count FROM videos').get(), { count: 5 })
++  assert.throws(() => removeResourceLessMembershipsWithAudit(0, () => {}, db))
++  assert.equal(removeResourceLessMembershipsWithAudit(999, () => { throw new Error('unexpected') }, db), 0)
++  noTemp()
++})
++
++it('pages a large initial snapshot with at most 256 rows, ordered IDs and no unbounded JS all', () => {
++  db.transaction(() => { for (let id = 1; id <= 1030; id++) member(id) })()
++  const originalPrepare = db.prepare, prepare = db.prepare.bind(db), lengths: number[] = []
++  db.prepare = ((sql: string) => {
++    const statement = prepare(sql), all = statement.all.bind(statement)
++    statement.all = ((...args: unknown[]) => {
++      assert.match(sql, /FROM temp\.membership_cleanup_.*\s+WHERE video_id>\? ORDER BY video_id LIMIT 256/)
++      const rows = all(...args)
++      assert.ok(rows.length <= 256)
++      lengths.push(rows.length)
++      return rows
++    }) as typeof statement.all
++    return statement
++  }) as typeof db.prepare
++  let expectedId = 1
++  try {
++    assert.equal(removeResourceLessMembershipsWithAudit(1, (entry) => {
++      assert.equal(entry.videoId, expectedId++)
++      assert.equal(db.inTransaction, true)
++      assert.equal(db.prepare('SELECT 1 FROM library_video_memberships WHERE library_id=1 AND video_id=?').get(entry.videoId), undefined)
++    }, db), 1030)
++  } finally { db.prepare = originalPrepare }
++  assert.deepEqual(lengths, [256, 256, 256, 256, 6, 0])
++  noTemp()
++})
++
++it('freezes initial candidate metadata, skips newly protected or ignored deletions, and excludes later candidates', () => {
++  member(1); member(2); member(3); member(4)
++  db.exec(`CREATE TRIGGER ignore_cleanup_test BEFORE DELETE ON library_video_memberships
++    WHEN OLD.video_id=4 BEGIN SELECT RAISE(IGNORE); END`)
++  const events: RemovedResourceLessMembership[] = []
++  assert.equal(removeResourceLessMembershipsWithAudit(1, (entry) => {
++    events.push(entry)
++    if (entry.videoId === 1) {
++      member(5)
++      db.prepare('UPDATE library_video_memberships SET is_pinned=1 WHERE video_id=2').run()
++      db.prepare("UPDATE videos SET code='CHANGED',title='changed' WHERE id=3").run()
++    }
++  }, db), 2)
++  assert.deepEqual(events, [{ videoId: 1, videoCode: 'VIDEO-1', videoTitle: null },
++    { videoId: 3, videoCode: 'VIDEO-3', videoTitle: null }])
++  assert.deepEqual(db.prepare('SELECT video_id FROM library_video_memberships ORDER BY video_id').all(),
++    [{ video_id: 2 }, { video_id: 4 }, { video_id: 5 }])
++  noTemp()
++})
++
++it('rolls back native audit failure and outer business changes with nested writer savepoints, then retries', () => {
++  member(1); member(2); member(3)
++  db.exec("INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at) VALUES('cleanup',1,1,'manual','running','start')")
++  const writer = createScanAuditWriter(db, { libraryId: 1, runId: 'cleanup' })
++  writer.start({ schemaVersion: 2, libraryId: 1, runId: 'cleanup', configRevision: 1,
++    trigger: 'manual', status: 'success', startedAt: 'start', finishedAt: 'finish' })
++  const before = remaining(), oldName = db.prepare('SELECT name FROM media_libraries WHERE id=1').get()
++  db.exec(`CREATE TRIGGER fail_cleanup_audit AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='deletedVideos' AND NEW.ordinal=1 BEGIN SELECT RAISE(ABORT,'native audit fault'); END`)
++  const visit = (entry: RemovedResourceLessMembership) => {
++    writer.writeBatch('deletedVideos', [{ ...entry, reason: 'resource_less' }])
++  }
++  assert.throws(() => db.transaction(() => {
++    db.prepare("UPDATE media_libraries SET name='business' WHERE id=1").run()
++    removeResourceLessMembershipsWithAudit(1, visit, db)
++  })(), /native audit fault/)
++  assert.deepEqual(remaining(), before)
++  assert.deepEqual(db.prepare('SELECT name FROM media_libraries WHERE id=1').get(), oldName)
++  assert.equal(db.prepare('SELECT 1 FROM library_scan_audit_entries').get(), undefined)
++  noTemp()
++  db.exec('DROP TRIGGER fail_cleanup_audit')
++  assert.equal(removeResourceLessMembershipsWithAudit(1, visit, db), 3)
++  assert.deepEqual(db.prepare('SELECT COUNT(*) AS count FROM library_scan_audit_entries').get(), { count: 3 })
++  noTemp()
++})
++
++it('preserves untruncated long metadata through both callback and legacy array wrapper', () => {
++  const title = '很长标题'.repeat(300_000)
++  member(1, 1, title)
++  let delivered: RemovedResourceLessMembership | undefined
++  assert.equal(removeResourceLessMembershipsWithAudit(1, (entry) => { delivered = entry }, db), 1)
++  assert.deepEqual(delivered, { videoId: 1, videoCode: 'VIDEO-1', videoTitle: title })
++  member(1)
++  assert.deepEqual(removeResourceLessMemberships(1, db), [delivered])
++  noTemp()
++})
++
++for (const rejected of [false, true]) {
++  it(`rejects ${rejected ? 'rejected' : 'resolved'} asynchronous callbacks and restores membership state`, async () => {
++    member(1); member(2)
++    const before = remaining()
++    assert.throws(() => removeResourceLessMembershipsWithAudit(1, async () => {
++      if (rejected) throw new Error('async failure')
++    }, db), /must be synchronous/)
++    await new Promise<void>((resolve) => setImmediate(resolve))
++    assert.deepEqual(remaining(), before)
++    assert.equal(db.inTransaction, false)
++    noTemp()
++  })
++}
+diff --git a/src/main/scanner/scanMembershipCleanupEntries.test.ts b/src/main/scanner/scanMembershipCleanupEntries.test.ts
+new file mode 100644
+index 0000000..63788e7
+--- /dev/null
++++ b/src/main/scanner/scanMembershipCleanupEntries.test.ts
+@@ -0,0 +1,105 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type { ScanResult } from '@shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase, openReadOnlyDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { removeResourceLessMemberships, removeResourceLessMembershipsWithAudit } from '../db/libraryMembershipRepo'
++import { readScanAuditSource } from '../db/scanAuditSource'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import { createScanCoordinator } from './scanCoordinator'
++
++let db:Database.Database,directory:string,libraryId:number,previousUserData:string|undefined
++const count=260
++beforeEach(()=>{
++  previousUserData=process.env.JAVDEX_TEST_USER_DATA
++  directory=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-membership-entries-'));process.env.JAVDEX_TEST_USER_DATA=directory
++  db=initDatabaseAtPath(path.join(directory,'catalog.db'))
++  const media=path.join(directory,'media');fs.mkdirSync(media)
++  libraryId=createMediaLibrary({name:'Membership cleanup',roots:[{path:media}]}).id
++  db.prepare('UPDATE media_library_configs SET remove_resource_less_memberships=1 WHERE library_id=?').run(libraryId)
++  const video=db.prepare('INSERT INTO videos(id,code,title) VALUES(?,?,?)')
++  const membership=db.prepare('INSERT INTO library_video_memberships(library_id,video_id,discovery_key,is_pinned) VALUES(?,?,?,?)')
++  db.transaction(()=>{
++    for(let id=1;id<=count+1;id++){
++      video.run(id,`MEM-${id}`,`原始标题 ${id}`)
++      membership.run(libraryId,id,id,id===count+1?1:0)
++      membership.run(1,id,id,0) // Shared global videos retain an independent library membership.
++    }
++  })()
++})
++afterEach(()=>{
++  closeDatabase();resetSettingsCacheForTests()
++  if(previousUserData===undefined)delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA=previousUserData
++  fs.rmSync(directory,{recursive:true,force:true})
++})
++function empty(scope:{libraryId:number;runId:string}):ScanResult{return {...scope,scannedFiles:0,imported:0,skipped:0,skippedShort:0,failed:0,pendingGroups:0,pendingResources:0,
++  relocated:0,refreshed:0,removed:0,promoted:0,deletedVideos:0,offlineFolders:[],newCodes:[],unrecognizedFiles:[],strmFailures:[],omittedStrmFailures:0}}
++function memberships(connection=db){return connection.prepare('SELECT * FROM library_video_memberships ORDER BY library_id,video_id').all()}
++function audit(runId:string){return JSON.parse(readScanAuditSource(db,{libraryId,runId},'body')!.body)}
++function expected(){return Array.from({length:count},(_,index)=>({videoId:index+1,videoCode:`MEM-${index+1}`,videoTitle:`原始标题 ${index+1}`,reason:'resource_less'}))}
++
++it('streams many scoped membership deletions into exact ordered audit rows without using the legacy array API',async()=>{
++  const videos=db.prepare('SELECT * FROM videos ORDER BY id').all(),other=db.prepare('SELECT * FROM library_video_memberships WHERE library_id=1 ORDER BY video_id').all()
++  let callbacks=0
++  const coordinator=createScanCoordinator({createRunId:()=> 'many',scanFolders:async scope=>empty(scope),
++    removeResourceLessMemberships:()=>assert.fail('entries mode must not materialize the legacy membership array'),
++    removeResourceLessMembershipsWithAudit:(id,onRemoved)=>{
++      assert.equal(id,libraryId);assert.equal(db.inTransaction,true)
++      const removed=removeResourceLessMembershipsWithAudit(id,entry=>{callbacks++;assert.equal(db.inTransaction,true);onRemoved(entry)})
++      assert.equal(typeof removed,'number');return removed
++    }})
++  const result=await coordinator.run({libraryId})
++  assert.equal(callbacks,count);assert.equal(result.deletedVideos,count)
++  assert.deepEqual(audit('many').deletedVideos,expected())
++  const entries=db.prepare("SELECT ordinal FROM library_scan_audit_entries WHERE run_id='many' AND section='deletedVideos' ORDER BY ordinal").all()
++  assert.deepEqual(entries,Array.from({length:count},(_,ordinal)=>({ordinal})))
++  assert.deepEqual(db.prepare('SELECT * FROM videos ORDER BY id').all(),videos)
++  assert.deepEqual(db.prepare('SELECT * FROM library_video_memberships WHERE library_id=1 ORDER BY video_id').all(),other)
++  assert.deepEqual(db.prepare('SELECT video_id FROM library_video_memberships WHERE library_id=?').all(libraryId),[{video_id:count+1}])
++  assert.equal(JSON.parse((db.prepare("SELECT summary_json FROM library_scan_runs WHERE id='many'").get() as {summary_json:string}).summary_json).videosDeleted,count)
++  assert.deepEqual(db.pragma('foreign_key_check'),[])
++})
++
++it('rolls back a late native audit failure with all earlier deletions, then retries with exact counts',async()=>{
++  const before=memberships(),videos=db.prepare('SELECT * FROM videos ORDER BY id').all(),reader=openReadOnlyDatabaseAtPath(db.name)
++  let sequence=0,faults=0,callbacks=0
++  db.function('observe_late_membership',(remaining)=>{faults++;assert.equal(remaining,count-202);return 1})
++  db.exec(`CREATE TEMP TRIGGER fail_late_membership AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='deletedVideos' AND NEW.ordinal=201 BEGIN
++      SELECT observe_late_membership((SELECT COUNT(*) FROM library_video_memberships WHERE library_id=${libraryId} AND video_id<=${count}));
++      SELECT RAISE(ABORT,'late membership audit failure');END;`)
++  const coordinator=createScanCoordinator({createRunId:()=>`retry-${++sequence}`,scanFolders:async scope=>empty(scope),
++    removeResourceLessMemberships:()=>assert.fail('legacy array API must not run'),
++    removeResourceLessMembershipsWithAudit:(id,onRemoved)=>removeResourceLessMembershipsWithAudit(id,entry=>{
++      callbacks++;if(callbacks===202)assert.deepEqual(memberships(reader),before)
++      onRemoved(entry)
++    })})
++  try{
++    await assert.rejects(coordinator.run({libraryId}),/late membership audit failure/)
++    assert.equal(faults,1);assert.equal(callbacks,202);assert.deepEqual(memberships(),before);assert.deepEqual(memberships(reader),before)
++    assert.deepEqual(db.prepare('SELECT * FROM videos ORDER BY id').all(),videos)
++    assert.deepEqual(audit('retry-1').deletedVideos,[])
++    const failed=JSON.parse((db.prepare("SELECT summary_json FROM library_scan_runs WHERE id='retry-1'").get() as {summary_json:string}).summary_json)
++    assert.equal(failed.status,'failed');assert.equal(failed.videosDeleted,0)
++    db.exec('DROP TRIGGER fail_late_membership')
++    const result=await coordinator.run({libraryId})
++    assert.equal(result.deletedVideos,count);assert.equal(callbacks,202+count)
++    assert.deepEqual(audit('retry-2').deletedVideos,expected())
++    assert.deepEqual(memberships(reader),memberships());assert.deepEqual(db.pragma('foreign_key_check'),[])
++  }finally{reader.close()}
++})
++
++it('retains the explicit JSON cleanup API and legacy audit array contract',async()=>{
++  let legacyCalls=0
++  const coordinator=createScanCoordinator({auditStorage:'json',createRunId:()=> 'legacy',scanFolders:async scope=>empty(scope),
++    removeResourceLessMemberships:id=>{legacyCalls++;return removeResourceLessMemberships(id)},
++    removeResourceLessMembershipsWithAudit:()=>assert.fail('JSON mode should use its existing array API')})
++  assert.equal((await coordinator.run({libraryId})).deletedVideos,count)
++  assert.equal(legacyCalls,1);assert.deepEqual(audit('legacy').deletedVideos,expected())
++  assert.equal(readScanAuditSource(db,{libraryId,runId:'legacy'},'identity')?.format,'json')
++})
+diff --git a/scripts/performance/membership-cleanup-benchmark.ts b/scripts/performance/membership-cleanup-benchmark.ts
+new file mode 100644
+index 0000000..d3e86cf
+--- /dev/null
++++ b/scripts/performance/membership-cleanup-benchmark.ts
+@@ -0,0 +1,50 @@
++/** Synthetic cleanup probe. Never opens user data; run without concurrent tests/builds. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { performance } from 'node:perf_hooks'
++import { migrateDatabase } from '../../src/main/db/migrations'
++import { removeResourceLessMembershipsWithAudit } from '../../src/main/db/libraryMembershipRepo'
++
++it('measures complete membership cleanup and first callback at increasing scales', () => {
++  const results: unknown[] = []
++  for (const count of [10000, 100000]) {
++    const db = new Database(':memory:')
++    try {
++      db.pragma('foreign_keys = ON')
++      migrateDatabase(db)
++      db.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${count})
++        INSERT INTO videos(id,code,title) SELECT x,printf('MEM-%06d',x),hex(zeroblob(512)) FROM n;
++        INSERT INTO library_video_memberships(library_id,video_id,discovery_key)
++        SELECT 1,id,id FROM videos; ANALYZE;`)
++      const samples: unknown[] = []
++      const rollback = new Error('probe rollback')
++      for (let sample = -1; sample < 3; sample++) {
++        let rows = 0, checksum = 0, firstMs = 0, elapsedMs = 0
++        // Rollback after timing restores the same fixture; measurements exclude commit/durable I/O.
++        assert.throws(() => db.transaction(() => {
++          const start = performance.now()
++          const removed = removeResourceLessMembershipsWithAudit(1, entry => {
++            if (rows === 0) firstMs = performance.now() - start
++            rows++; checksum += entry.videoId
++          }, db)
++          elapsedMs = performance.now() - start
++          assert.equal(removed, count)
++          assert.equal(rows, count)
++          assert.equal(checksum, count * (count + 1) / 2)
++          assert.equal((db.prepare('SELECT COUNT(*) AS n FROM library_video_memberships').get() as { n: number }).n, 0)
++          throw rollback
++        })(), error => error === rollback)
++        assert.equal((db.prepare('SELECT COUNT(*) AS n FROM library_video_memberships').get() as { n: number }).n, count)
++        if (sample >= 0) samples.push({ elapsedMs, firstMs, rows, checksum })
++      }
++      results.push({ count, titleBytes: 1024, samples })
++    } finally { db.close() }
++  }
++  console.log(JSON.stringify({ results, notes: [
++    'Synthetic in-memory SQLite, ANALYZE, 1 warmup + 3 measured samples at each scale.',
++    'Production cleanup with checksum callback; excludes durable commit, actual audit encoding/writes, scanner and filesystem work.',
++    'Reports synchronous elapsed and first callback latency; no event-loop yielding, RSS bound, p95, Windows/HDD or end-to-end claim.',
++    'TEMP snapshot may still grow with candidates; bounded JavaScript pages do not bound SQLite memory or writer lock duration.'
++  ] }, null, 2))
++})

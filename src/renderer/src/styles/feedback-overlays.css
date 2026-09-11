@@ -177,9 +177,8 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  margin: 0;
-  padding: 0;
-  padding-inline-end: 0;
+  margin: calc(-1 * var(--focus-ring-space));
+  padding: var(--focus-ring-space);
   scrollbar-gutter: auto;
 }
 

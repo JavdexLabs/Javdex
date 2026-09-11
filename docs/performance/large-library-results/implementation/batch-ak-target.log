@@ -1,0 +1,31 @@
+✔ executes real read-only tag queries and observes writes through the worker cache (24.907458ms)
+✔ rejects a changed catalog version at worker startup without migration (18.394041ms)
+✔ settles in-flight initialization and queued requests when disposed (18.442ms)
+✔ counts merged subscribers toward capacity, normalizes keys, and clones each successful result (1.937792ms)
+✔ serializes different revisions and keeps a folded expanding query valid in the payload (0.181125ms)
+✔ rejects old generation on identity change and waits for termination (2.545292ms)
+✔ rejects old generation on path change and waits for termination (0.299417ms)
+✔ removes queued aborts but retains an executing slot after all subscribers abort (0.291625ms)
+✔ one subscriber abort does not cancel another or retain its signal listener (0.159083ms)
+✔ rejects all accepted on startup timeout, without retry or overlapping workers (17.714084ms)
+✔ rejects all accepted on query timeout, without retry or overlapping workers (15.7335ms)
+✔ rejects all accepted on exit, without retry or overlapping workers (0.413ms)
+✔ rejects all accepted on error, without retry or overlapping workers (0.376292ms)
+✔ rejects all accepted on protocol error, without retry or overlapping workers (0.250166ms)
+✔ dispose closes admission immediately and waits for a running termination (0.772083ms)
+✔ fails closed if termination rejects and rejects requests waiting for replacement (0.184333ms)
+✔ rejects invalid queries before creating a worker and contains factory/post failures (0.18ms)
+✔ bounds subscribers while termination is pending and supersedes a waiting generation (0.287416ms)
+✔ does not launch work after repeated queued cancellations before ready (0.540167ms)
+✔ contains unexpected messages and dispose drains an already-started replacement barrier (0.035291ms)
+✔ expires waiting subscribers and frees capacity while native termination remains pending (0.607583ms)
+✔ keeps independent waiting deadlines for coalesced subscribers and clears them at execution (0.103583ms)
+✔ never executes a page whose only subscriber expired before ready (0.058042ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 260.537833

@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import ContinuousGrid from '../components/ContinuousGrid'
+import { useCallback, useEffect, useState } from 'react'
+import { useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { Building2, Plus, SearchX } from 'lucide-react'
 import type {
   ClassificationListSortBy,
   OrganizationRole,
   OrganizationUpdateInput
 } from '@shared/classificationTypes'
-import type { SortDir } from '@shared/commonTypes'
 import { api, assetUrl } from '../api'
 import { FACET_LABEL } from '../facet'
-import { useDebounce } from '../hooks/useDebounce'
+import { useClassificationPage } from '../hooks/useClassificationPage'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
@@ -22,12 +21,7 @@ import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import OrganizationEditModal from '../components/OrganizationEditModal'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import {
-  classificationListQueryHash,
-  LIST_PARAM,
-  parseClassificationSort,
-  patchSearchParams
-} from '../listView/listQueryParams'
+import { CLASSIFICATION_PAGE_SIZE } from '../listView/listQueryParams'
 import { navigateToOrganizationDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { organizationKeys } from '../query/queryKeys'
@@ -46,42 +40,16 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
-  const [searchParams, setSearchParams] = useSearchParams()
   const detailOpen = Boolean(
     useMatch({ path: ROUTE_MATCH.organizationDetailOpen, end: false })
   )
   const label = FACET_LABEL[role]
-  const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
-  const [searchInput, setSearchInput] = useState(urlQ)
   const [createOpen, setCreateOpen] = useState(false)
-  const debouncedQ = useDebounce(searchInput, 250)
-  const { sortBy, sortDir } = parseClassificationSort(
-    searchParams.get(LIST_PARAM.sort),
-    searchParams.get(LIST_PARAM.dir)
-  )
-
-  useEffect(() => setSearchInput(urlQ), [urlQ])
-  useEffect(() => {
-    const trimmed = debouncedQ.trim()
-    if (trimmed === urlQ.trim()) return
-    setSearchParams(
-      (previous) => patchSearchParams(previous, { [LIST_PARAM.q]: trimmed || null }),
-      { replace: true }
-    )
-  }, [debouncedQ, setSearchParams, urlQ])
-
-  const queryHash = useMemo(
-    () => classificationListQueryHash(role, searchParams),
-    [role, searchParams]
-  )
-  const listQuery = useQuery({
-    queryKey: organizationKeys.list(role, queryHash),
-    queryFn: () => api.organizations.list({ role, search: urlQ, sortBy, sortDir }),
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[2] === role ? previous : undefined
-  })
-  const items = listQuery.data ?? []
-  const loading = listQuery.isLoading && items.length === 0
+  const {
+    query: listQuery, queryHash, urlQ, searchInput, setSearchInput, sortBy, sortDir,
+    patchSort, loading, total, offset, move, window
+  } = useClassificationPage(role, hash => organizationKeys.list(role, hash),
+    input => api.organizations.page({ ...input, role }))
   const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(
     `facet:${queryHash}`
   )
@@ -97,16 +65,6 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
   useListSurfaceRefetch(detailOpen, refetchSilent)
   useDismissOverlaysOnNavigate(dismissCreate, location.pathname)
 
-  const patchSort = (nextSortBy: ClassificationListSortBy, nextSortDir: SortDir): void => {
-    setSearchParams(
-      (previous) =>
-        patchSearchParams(previous, {
-          [LIST_PARAM.sort]: nextSortBy,
-          [LIST_PARAM.dir]: nextSortDir
-        }),
-      { replace: true }
-    )
-  }
   const sortIsDefault = sortBy === 'video_count' && sortDir === 'desc'
   const appliedFilters: AppliedFilterItem[] = sortIsDefault
     ? []
@@ -158,7 +116,7 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
           }
           resultCount={
             <span className="count-badge count-badge--stable count-badge--facet" aria-live="polite">
-              共 {items.length} 个{label}
+              共 {total ?? '…'} 个{label}
             </span>
           }
         />
@@ -176,16 +134,19 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
       >
         {loading ? (
           <EmptyState loading />
-        ) : items.length === 0 ? (
+        ) : listQuery.isError && !total ? (
+          <EmptyState title={`${label}加载失败`} description={String(listQuery.error?.message)}>
+            <Button onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}>重试</Button>
+          </EmptyState>
+        ) : !total ? (
           <EmptyState
             icon={urlQ ? <SearchX {...UI_ICON_SM} aria-hidden /> : <Building2 {...UI_ICON_SM} aria-hidden />}
             title={urlQ ? `没有匹配的${label}` : `暂无${label}资料`}
             description={urlQ ? '调整搜索关键词后再试。' : '可手动新增，或在影片编辑时就地创建。'}
           />
         ) : (
-          <div className="facet-grid">
-            {items.map((item) => {
-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath)
+          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
+              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
               return (
                 <div key={item.id} className="facet-card-wrap">
                   <button
@@ -208,8 +169,7 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
                   </button>
                 </div>
               )
-            })}
-          </div>
+            }} />
         )}
       </ListSurface>
 

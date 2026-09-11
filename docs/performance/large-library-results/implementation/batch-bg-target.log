@@ -1,0 +1,17 @@
+✔ pages40/40/21, resolves full names and retains selected long identities when returning (220.537041ms)
+✔ retries page failures and isolates a stale page during raw search debounce (392.287791ms)
+✔ ignores choice completion after search or close and suppresses same-tick duplicate clicks (393.810458ms)
+✔ reports missing or unrepresentable names without adding incorrect targets (79.67475ms)
+✔ enforces existing eight-target limit and preserves video query behavior after kind switch (55.397959ms)
+✔ recognizes existing long targets on a fresh mount without confusing a common preview prefix (60.033625ms)
+✔ ignores a held actress choice after switching to video (71.575708ms)
+✔ bounds long-label reconciliation concurrency and stops scheduling after kind switch (38.016333ms)
+✔ retries failed long-label selection reconciliation (46.434ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1524.88975

@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import type {
   PendingVideoScrape,
+  PendingVideoScrapePage,
+  PendingVideoScrapePageQuery,
   PendingVideoScrapeConfirmInput,
   PendingVideoScrapeResolutionResult,
   ScrapeResult,
@@ -9,6 +11,10 @@ import type {
 } from '@shared/videoScrapeTypes'
 import { getDb } from '../db/database'
 import {
+  countPendingVideoScrapes,
+  existingPendingVideoScrapeIds,
+  getPendingVideoScrapeById,
+  pagePendingVideoScrapes,
   deletePendingVideoScrape,
   getPendingVideoScrapeResolutionSnapshot,
   listPendingVideoScrapes,
@@ -129,6 +135,22 @@ function importCandidateResources(
 }
 
 export const videoPendingScrapeService = {
+  count(): number {
+    return countPendingVideoScrapes()
+  },
+
+  existingIds(ids: number[]): number[] {
+    return existingPendingVideoScrapeIds(ids)
+  },
+
+  page(query: PendingVideoScrapePageQuery): PendingVideoScrapePage {
+    return pagePendingVideoScrapes(query)
+  },
+
+  get(id: number): PendingVideoScrape | null {
+    return getPendingVideoScrapeById(id)
+  },
+
   list(): PendingVideoScrape[] {
     return listPendingVideoScrapes()
   },

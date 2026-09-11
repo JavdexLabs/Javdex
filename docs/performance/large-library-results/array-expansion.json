@@ -1,0 +1,30 @@
+{
+  "electron": "43.4.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "scope": "Isolated scanner-style array expansion, not an end-to-end scanner run",
+  "rows": [
+    {
+      "n": 10000,
+      "ok": true,
+      "length": 10000
+    },
+    {
+      "n": 100000,
+      "ok": true,
+      "length": 100000
+    },
+    {
+      "n": 300382,
+      "ok": false,
+      "error": "RangeError",
+      "message": "Maximum call stack size exceeded"
+    },
+    {
+      "n": 600764,
+      "ok": false,
+      "error": "RangeError",
+      "message": "Maximum call stack size exceeded"
+    }
+  ]
+}

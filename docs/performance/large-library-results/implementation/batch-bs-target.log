@@ -1,0 +1,16 @@
+✔ executes real read-only tag queries and observes writes through the worker cache (29.539625ms)
+✔ rejects a changed catalog version at worker startup without migration (19.29675ms)
+✔ settles in-flight initialization and queued requests when disposed (18.97525ms)
+✔ executes all classification cover pages on the readonly worker and observes committed writes (30.663208ms)
+✔ rejects image initialization against an incompatible schema without rewriting it (18.622333ms)
+✔ matches all candidate fields/order and deduplicates dual-role organization links before LIMIT (19.624791ms)
+✔ holds count and candidate rows in the same snapshot across a cover removal (6.563ms)
+✔ rejects unsafe entity IDs, unsupported page flags and excessive pages (7.502333ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 355.570875

@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ContinuousGrid from '../components/ContinuousGrid'
+import { useCallback, useEffect, useState } from 'react'
 import { Layers3, Plus, SearchX } from 'lucide-react'
-import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useLocation, useMatch, useNavigate } from 'react-router-dom'
 import type { ClassificationListSortBy, SeriesUpdateInput } from '@shared/classificationTypes'
-import type { SortDir } from '@shared/commonTypes'
 import { api, assetUrl } from '../api'
 import AppliedFilterBar from '../components/AppliedFilterBar'
 import EmptyState from '../components/EmptyState'
@@ -11,17 +10,12 @@ import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
 import SeriesEditModal from '../components/SeriesEditModal'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
-import { useDebounce } from '../hooks/useDebounce'
+import { useClassificationPage } from '../hooks/useClassificationPage'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import {
-  classificationListQueryHash,
-  LIST_PARAM,
-  parseClassificationSort,
-  patchSearchParams
-} from '../listView/listQueryParams'
+import { CLASSIFICATION_PAGE_SIZE } from '../listView/listQueryParams'
 import { navigateToSeriesDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { seriesKeys } from '../query/queryKeys'
@@ -36,56 +30,20 @@ export default function SeriesListPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
-  const [params, setParams] = useSearchParams()
-  const urlQ = params.get(LIST_PARAM.q) ?? ''
-  const [searchInput, setSearchInput] = useState(urlQ)
-  const syncingSearchFromUrl = useRef(false)
   const [creating, setCreating] = useState(false)
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.seriesDetailOpen, end: false }))
-  const debounced = useDebounce(searchInput, 250)
-  const { sortBy, sortDir } = parseClassificationSort(
-    params.get(LIST_PARAM.sort),
-    params.get(LIST_PARAM.dir)
-  )
-  const queryHash = useMemo(() => classificationListQueryHash('series', params), [params])
-  const query = useQuery({
-    queryKey: seriesKeys.list(queryHash),
-    queryFn: () => api.series.list({ search: urlQ, sortBy, sortDir }),
-    placeholderData: (previous) => previous
-  })
+  const {
+    query, queryHash, searchInput, setSearchInput, sortBy, sortDir, patchSort,
+    loading, total, offset, move, window
+  } = useClassificationPage('series', seriesKeys.list, input => api.series.page(input))
   const refetchSilent = useCallback(() => void query.refetch(), [query])
   useListSurfaceRefetch(detailOpen, refetchSilent)
-  const { ref, showScrollToTop, scrollToTop } = useScrollContainerMemory(`facet:${queryHash}`)
+  const { ref, showScrollToTop, scrollToTop } = useScrollContainerMemory(`facet:${queryHash}`, false)
 
-  useEffect(() => {
-    if (searchInput === urlQ) return
-    syncingSearchFromUrl.current = true
-    setSearchInput(urlQ)
-  }, [searchInput, urlQ])
-  useEffect(() => {
-    const value = debounced.trim()
-    if (syncingSearchFromUrl.current) {
-      if (value === urlQ.trim()) syncingSearchFromUrl.current = false
-      return
-    }
-    if (value === urlQ.trim()) return
-    setParams((previous) => patchSearchParams(previous, { [LIST_PARAM.q]: value || null }), {
-      replace: true
-    })
-  }, [debounced, setParams, urlQ])
   useEffect(() => {
     if (query.isError) toast.show(String(query.error), 'error')
   }, [query.error, query.isError, toast])
 
-  const patchSort = (next: ClassificationListSortBy, dir: SortDir): void =>
-    setParams(
-      (previous) =>
-        patchSearchParams(previous, {
-          [LIST_PARAM.sort]: next,
-          [LIST_PARAM.dir]: dir
-        }),
-      { replace: true }
-    )
   const create = async (input: SeriesUpdateInput): Promise<void> => {
     try {
       const id = await api.series.create(input)
@@ -96,7 +54,6 @@ export default function SeriesListPage(): JSX.Element {
       toast.show(String((error as Error).message), 'error')
     }
   }
-  const items = query.data ?? []
   return (
     <div className="list-page">
       <div className="topbar">
@@ -105,10 +62,7 @@ export default function SeriesListPage(): JSX.Element {
             value: searchInput,
             placeholder: '搜索系列主名或别名…',
             ariaLabel: '搜索系列',
-            onChange: (value) => {
-              syncingSearchFromUrl.current = false
-              setSearchInput(value)
-            }
+            onChange: setSearchInput
           }}
           controls={
             <>
@@ -128,7 +82,7 @@ export default function SeriesListPage(): JSX.Element {
           }
           resultCount={
             <span className="count-badge count-badge--stable count-badge--facet">
-              共 {items.length} 个系列
+              共 {total ?? '…'} 个系列
             </span>
           }
         />
@@ -153,18 +107,21 @@ export default function SeriesListPage(): JSX.Element {
         showScrollToTop={showScrollToTop}
         onScrollToTop={scrollToTop}
       >
-        {query.isLoading ? (
+        {loading ? (
           <EmptyState loading />
-        ) : items.length === 0 ? (
+        ) : query.isError && !total ? (
+          <EmptyState title="系列加载失败" description={String(query.error?.message)}>
+            <Button onClick={() => void query.refetch()} disabled={query.isFetching}>重试</Button>
+          </EmptyState>
+        ) : !total ? (
           <EmptyState
             icon={searchInput ? <SearchX {...UI_ICON_SM} /> : <Layers3 {...UI_ICON_SM} />}
             title={searchInput ? '没有匹配的系列' : '暂无系列资料'}
             description="可手动新增，或在影片编辑时就地创建。"
           />
         ) : (
-          <div className="facet-grid">
-            {items.map((item) => {
-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath)
+          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
+              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
               return (
                 <div className="facet-card-wrap" key={item.id}>
                   <button
@@ -189,8 +146,7 @@ export default function SeriesListPage(): JSX.Element {
                   </button>
                 </div>
               )
-            })}
-          </div>
+            }} />
         )}
       </ListSurface>
       {creating && !detailOpen ? (

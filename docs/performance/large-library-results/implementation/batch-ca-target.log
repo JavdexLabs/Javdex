@@ -1,0 +1,17 @@
+✔ pages every section with stable ordinal, filtered totals and independent results (16.090208ms)
+✔ holds an immutable copied snapshot across writer changes and leaves main schema/data unchanged (9.923083ms)
+✔ rejects source/index/page budget overflows without truncation and can rebuild after failure (13.692541ms)
+✔ rejects wrong scope, mismatched versions/identity, malformed collections and non-object entries (19.680083ms)
+✔ copies all collections from one read snapshot when the writer commits during construction (8.81525ms)
+✔ matches every historical view field/order across combined filters, Unicode search and pages (79.406416ms)
+✔ locates failed-view anchors, clamps shrink/overflow, and keeps copied pending-path state (34.965625ms)
+✔ rejects invalid view inputs and oversized output without mutating the source (15.726791ms)
+✔ reuses one bounded search result across pages and restores read-only mode after TEMP exhaustion (19.123ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 342.010334

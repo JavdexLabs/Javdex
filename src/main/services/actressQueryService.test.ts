@@ -151,3 +151,15 @@ describe('actressQueryService.listFaceScanManifest', () => {
     assert.deepEqual(service.listFaceScanManifest(), manifest)
   })
 })
+
+
+it('delegates avatar count without reading the legacy list or inspecting images', () => {
+  let calls = 0
+  const service = createActressQueryService({
+    countAvatarCropTargets: () => { calls++; return 300382 },
+    listLegacy: () => { throw new Error('Legacy list forbidden') },
+    inspectImage: () => { throw new Error('Image inspection forbidden') }
+  })
+  assert.equal(service.countAvatarCropTargets(), 300382)
+  assert.equal(calls, 1)
+})

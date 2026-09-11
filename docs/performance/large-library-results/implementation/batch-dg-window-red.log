@@ -1,0 +1,29 @@
+▶ useInfiniteVideoList
+  ✖ loads a library larger than the IPC page limit in bounded pages (272.246292ms)
+✖ useInfiniteVideoList (273.572084ms)
+ℹ tests 1
+ℹ suites 1
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 452.841958
+
+✖ failing tests:
+
+test at src/renderer/src/query/window-budget-red.test.tsx:2:2519
+✖ loads a library larger than the IPC page limit in bounded pages (272.246292ms)
+  AssertionError [ERR_ASSERTION]: retained 20000 full cards after 100 pages
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/query/window-budget-red.test.tsx:120:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1794:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

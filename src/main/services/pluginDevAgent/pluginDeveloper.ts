@@ -49,6 +49,7 @@ import {
 } from './sessionStore'
 import { createPluginDeveloperToolHandlers } from './toolPack'
 import type { PluginDevSession } from './types'
+import { appendPluginWorkLog, readPluginWorkLog, type PersistedPluginWorkLog } from './workLogPersistence'
 import { pluginArtifactHash } from './pluginArtifact'
 import { isPluginExecutionUnmatchedTargets } from './pluginExecution'
 import { pluginWorkspace } from './pluginWorkspace'
@@ -61,10 +62,12 @@ import {
   releasePluginDeveloperBrowser
 } from './toolExecutor'
 
-const PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION = 1 as const
+const PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION = 2 as const
+
+function supportsProductStateVersion(version: unknown): boolean { return version === 1 || version === 2 }
 
 interface PluginDeveloperProductState extends Record<string, unknown> {
-  schemaVersion: typeof PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION
+  schemaVersion: 1 | typeof PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION
   input: PluginDevAgentStartInput
   status: PluginDevSession['status']
   phase: PluginDevSession['phase']
@@ -84,7 +87,7 @@ interface PluginDeveloperProductState extends Record<string, unknown> {
   endedAt?: number
   failureMessage?: string
   summary: string
-  workLog: PluginDevAgentWorkLogEntry[]
+  workLog: PersistedPluginWorkLog
   recoveryBlocked?: boolean
 }
 
@@ -173,12 +176,12 @@ function adoptInstalledPackage(
   return installed
 }
 
-function toProductState(
+function persistProductState(
   session: PluginDevSession,
   input: PluginDevAgentStartInput,
   summary: string
 ): PluginDeveloperProductState {
-  return {
+  const state = {
     schemaVersion: PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION,
     input: structuredClone(input),
     status: session.status,
@@ -202,9 +205,15 @@ function toProductState(
       : undefined,
     endedAt: session.endedAt,
     failureMessage: session.failureMessage,
-    summary,
-    workLog: structuredClone(session.workLog ?? [])
+    summary
   }
+  // Before createRun there is no journal owner; the initial (usually single) user
+  // message stays inline. The first committed update migrates it atomically.
+  if (!agentRunStore.getRun(session.id)) return { ...state, workLog: structuredClone(session.workLog ?? []) }
+  return agentRunStore.updateProductStateFrom<PluginDeveloperProductState>(session.id, runStatus(session), (current) => ({
+    ...state,
+    workLog: appendPluginWorkLog(session.id, current.productState.workLog, session.workLog ?? [])
+  }))
 }
 
 function toResult(active: ActivePluginRun): PluginDevAgentSessionResult {
@@ -261,6 +270,8 @@ function isRecoverablePluginDevRunStatus(status: AgentRunStatus): boolean {
 }
 
 export class PluginDeveloper {
+  private cleanupOperation?: Promise<number>
+  private disposing = false
   private readonly active = new Map<string, ActivePluginRun>()
   private readonly releases = new Map<string, {
     active: ActivePluginRun | undefined
@@ -444,11 +455,7 @@ export class PluginDeveloper {
           }
         })
       }
-      agentRunStore.updateProductState(
-        active.session.id,
-        runStatus(active.session),
-        toProductState(active.session, active.input, active.summary)
-      )
+      persistProductState(active.session, active.input, active.summary)
     }
   }
 
@@ -754,7 +761,7 @@ export class PluginDeveloper {
       this.scheduleTerminalRelease(active)
     }
     return {
-      state: toProductState(session, active.input, active.summary),
+      state: persistProductState(session, active.input, active.summary),
       status: runStatus(session)
     }
   }
@@ -884,7 +891,7 @@ export class PluginDeveloper {
     runId: AgentRunId,
     state: PluginDeveloperProductState
   ): PluginDevSession {
-    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || !state.input || !state.package) {
+    if (!supportsProductStateVersion(state.schemaVersion) || !state.input || !state.package) {
       throw new Error('PluginDeveloper 产品快照版本不兼容')
     }
     const session = createSession(state.input, runId)
@@ -908,7 +915,7 @@ export class PluginDeveloper {
       : undefined
     session.endedAt = state.endedAt
     session.failureMessage = state.failureMessage
-    session.workLog = structuredClone(state.workLog ?? [])
+    session.workLog = readPluginWorkLog(runId, state.workLog)
     const acceptance = pluginRunAcceptance.evaluate({
       package: session.package,
       targets: session.runTargets,
@@ -982,7 +989,7 @@ export class PluginDeveloper {
 
   async restoreRecoverableRuns(): Promise<Array<{ runId: string; error: string }>> {
     const failures: Array<{ runId: string; error: string }> = []
-    for (const record of agentRunStore.listRecoverableRuns()) {
+    for (const record of agentRunStore.iterateRecoverableRuns('plugin-developer', [...PLUGIN_DEV_RECOVERABLE_RUN_STATUSES])) {
       if (record.useCase !== 'plugin-developer' || this.active.has(record.id)) continue
       if (!isRecoverablePluginDevRunStatus(record.status)) continue
       let active: ActivePluginRun | undefined
@@ -1017,15 +1024,11 @@ export class PluginDeveloper {
         // Persist restore-time migrations before opening Pi. A healthy restored checkpoint is not
         // required to emit another durable observation, so relying on runtime projection here can
         // leave legacy verification/loop state in the durable product snapshot indefinitely.
-        agentRunStore.updateProductState(
-          record.id,
-          runStatus(session),
-          toProductState(session, state.input, active.summary)
-        )
+        persistProductState(session, state.input, active.summary)
         const opened = await agentExecution.openRun({
           useCase: 'plugin-developer',
           resolved,
-          productState: toProductState(session, state.input, active.summary),
+          productState: persistProductState(session, state.input, active.summary),
           resume: record,
           notify: (event) => this.runtimeNotify(active!, event),
           project: (event) => this.runtimeProject(active!, event)
@@ -1051,7 +1054,7 @@ export class PluginDeveloper {
         this.active.delete(record.id)
         agentRunStore.interruptAcceptedOperations(record.id, message)
         agentRunStore.updateProductState(record.id, 'failed', {
-          ...record.productState,
+          ...(agentRunStore.getRun(record.id)?.productState ?? record.productState),
           recoveryBlocked: true,
           recoveryError: message
         })
@@ -1070,7 +1073,7 @@ export class PluginDeveloper {
       throw new Error('会话不存在')
     }
     const state = record.productState
-    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || state.recoveryBlocked) {
+    if (!supportsProductStateVersion(state.schemaVersion) || state.recoveryBlocked) {
       throw new Error(state.recoveryBlocked ? '会话恢复已被阻止' : '会话快照版本不兼容')
     }
     const session = this.restoreSession(runId, state)
@@ -1106,15 +1109,11 @@ export class PluginDeveloper {
         record.configSnapshot.model.descriptor
       )
       active.tools = resolved.tools
-      agentRunStore.updateProductState(
-        runId,
-        'waiting_user',
-        toProductState(session, state.input, active.summary)
-      )
+      persistProductState(session, state.input, active.summary)
       await agentExecution.openRun({
         useCase: 'plugin-developer',
         resolved,
-        productState: toProductState(session, state.input, active.summary),
+        productState: persistProductState(session, state.input, active.summary),
         resume: { ...record, status: 'waiting_user' },
         notify: (event) => this.runtimeNotify(active, event),
         project: (event) => this.runtimeProject(active, event)
@@ -1133,10 +1132,10 @@ export class PluginDeveloper {
     if (!active) {
       const record = agentRunStore.getRun<PluginDeveloperProductState>(runId)
       const state = record?.productState
-      if (!record || record.useCase !== 'plugin-developer' || state?.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) return null
-      const workLog = structuredClone(state.workLog ?? [])
+      if (!record || record.useCase !== 'plugin-developer' || !state || !supportsProductStateVersion(state.schemaVersion)) return null
+      const workLog = readPluginWorkLog(runId, state.workLog)
       return {
-        cursor: agentRunStore.readProductJournal(runId).at(-1)?.seq ?? 0,
+        cursor: agentRunStore.getProductJournalCursor(runId),
         input: structuredClone(state.input),
         result: {
           sessionId: runId,
@@ -1163,9 +1162,8 @@ export class PluginDeveloper {
           : undefined
       }
     }
-    const journal = agentRunStore.readProductJournal(runId)
     return {
-      cursor: journal.at(-1)?.seq ?? 0,
+      cursor: agentRunStore.getProductJournalCursor(runId),
       input: structuredClone(active.input),
       result: structuredClone(toResult(active)),
       phase: active.session.phase,
@@ -1186,7 +1184,7 @@ export class PluginDeveloper {
   assertReadyArtifact(sessionId: string, packageInput: PluginDevSession['package']): void {
     const active = this.active.get(sessionId)
     const record = active ? undefined : agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
-    if (!active && record?.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
+    if (!active && !supportsProductStateVersion(record?.productState.schemaVersion)) {
       throw new Error('历史插件开发会话只读，不能用于当前安装门禁。')
     }
     const workspaceDraftError = active?.session.workspaceDraftError ?? record?.productState.workspaceDraftError
@@ -1228,7 +1226,7 @@ export class PluginDeveloper {
     }
 
     const record = agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
-    if (!record || record.useCase !== 'plugin-developer' || record.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
+    if (!record || record.useCase !== 'plugin-developer' || !supportsProductStateVersion(record.productState.schemaVersion)) {
       throw new Error('插件开发会话不存在或版本不兼容')
     }
     const gate = pluginRunAcceptance.evaluate({
@@ -1409,7 +1407,7 @@ export class PluginDeveloper {
         runId: session.id,
         useCase: 'plugin-developer',
         resolved,
-        productState: toProductState(session, input, active.summary),
+        productState: persistProductState(session, input, active.summary),
         notify: (event) => this.runtimeNotify(active, event),
         project: (event) => this.runtimeProject(active, event)
       })
@@ -1520,11 +1518,7 @@ ${continuationPrompt}`
         session.incrementalEditOnly = true
         session.phase = 'working'
       }
-      agentRunStore.updateProductState(
-        session.id,
-        'running',
-        toProductState(session, active.input, active.summary)
-      )
+      persistProductState(session, active.input, active.summary)
       this.emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: session.step })
       const settled = this.waitForSettled(active)
       const dispatched = await agentExecution.dispatch({
@@ -1560,11 +1554,7 @@ ${continuationPrompt}`
     try {
       await agentExecution.abort(sessionId, '用户终止插件开发')
     } finally {
-      agentRunStore.updateProductState(
-        sessionId,
-        'cancelled',
-        toProductState(active.session, active.input, active.summary)
-      )
+      persistProductState(active.session, active.input, active.summary)
       const waiter = active.waiter
       active.waiter = undefined
       waiter?.resolve(toResult(active))
@@ -1575,9 +1565,7 @@ ${continuationPrompt}`
   private collectPluginDevRunIds(): Set<string> {
     const ids = new Set(
       agentRunStore
-        .listRecoverableRuns()
-        .filter((record) => record.useCase === 'plugin-developer')
-        .map((record) => record.id)
+        .iterateCleanupRunIds('plugin-developer')
     )
     for (const runId of this.active.keys()) ids.add(runId)
     return ids
@@ -1589,8 +1577,8 @@ ${continuationPrompt}`
     if (active?.session.status === 'running' || active?.session.status === 'waiting_user') {
       return true
     }
-    const record = agentRunStore.getRun(runId)
-    return Boolean(record && isRecoverablePluginDevRunStatus(record.status))
+    const status = agentRunStore.getRunStatus(runId)
+    return Boolean(status && isRecoverablePluginDevRunStatus(status))
   }
 
   private async retirePluginDevRuns(runIds: Iterable<string>): Promise<number> {
@@ -1599,12 +1587,23 @@ ${continuationPrompt}`
       const active = this.active.get(runId)
       toolHost.discardApprovals(runId)
       toolHost.disposeRun(runId)
+      agentRunStore.setResourceCleanupPending(runId, true)
       await agentExecution.closeRun(runId)
       if (!active || this.active.get(runId) === active) this.active.delete(runId)
       deleteSession(runId)
-      pluginWorkspace.remove(agentSessionDirectory(runId))
+      await pluginWorkspace.remove(agentSessionDirectory(runId))
+      agentRunStore.setResourceCleanupPending(runId, false)
     }
     return unique.length
+  }
+
+  private async runCleanup(work: () => Promise<number>): Promise<number> {
+    if (this.disposing) throw new Error('Agent 正在退出，暂时无法清理工作区')
+    if (this.cleanupOperation) throw new Error('正在清理工作区，请等待当前操作完成')
+    const operation = Promise.resolve().then(work)
+    this.cleanupOperation = operation
+    try { return await operation }
+    finally { if (this.cleanupOperation === operation) this.cleanupOperation = undefined }
   }
 
   /**
@@ -1613,14 +1612,16 @@ ${continuationPrompt}`
    * recovery and from the unscoped "latest run" snapshot used by the renderer.
    */
   async clearHistory(): Promise<number> {
-    const initialIds = this.collectPluginDevRunIds()
-    await Promise.all([...initialIds].map((runId) => this.waitForPriorRelease(runId)))
-    const targetIds = this.collectPluginDevRunIds()
-    const running = [...targetIds]
-      .map((runId) => this.active.get(runId))
-      .find((active) => active?.waiter || active?.session.status === 'running')
-    if (running) throw new Error('Agent 正在运行或收尾，请先终止并等待完成后再清除历史会话')
-    return this.retirePluginDevRuns(targetIds)
+    return this.runCleanup(async () => {
+      const initialIds = this.collectPluginDevRunIds()
+      await Promise.all([...initialIds].map((runId) => this.waitForPriorRelease(runId)))
+      const targetIds = this.collectPluginDevRunIds()
+      const running = [...targetIds]
+        .map((runId) => this.active.get(runId))
+        .find((active) => active?.waiter || active?.session.status === 'running')
+      if (running) throw new Error('Agent 正在运行或收尾，请先终止并等待完成后再清除历史会话')
+      return this.retirePluginDevRuns(targetIds)
+    })
   }
 
   /**
@@ -1628,14 +1629,20 @@ ${continuationPrompt}`
    * current workbench will not restore. Keep running / waiting_user sessions.
    */
   async discardUnrecoverableSessions(): Promise<number> {
-    const initialIds = this.collectPluginDevRunIds()
-    await Promise.all([...initialIds].map((runId) => this.waitForPriorRelease(runId)))
-    return this.retirePluginDevRuns(
-      [...this.collectPluginDevRunIds()].filter((runId) => !this.isRecoverablePluginDevRun(runId))
-    )
+    return this.runCleanup(async () => {
+      const initialIds = this.collectPluginDevRunIds()
+      await Promise.all([...initialIds].map((runId) => this.waitForPriorRelease(runId)))
+      return this.retirePluginDevRuns(
+        [...this.collectPluginDevRunIds()].filter((runId) => !this.isRecoverablePluginDevRun(runId))
+      )
+    })
   }
 
   async dispose(): Promise<void> {
+    this.disposing = true
+    // appMain closes the database after disposal. Let cleanup commit/remove its
+    // durable queue entry before that connection is closed, even on failure.
+    if (this.cleanupOperation) await Promise.allSettled([this.cleanupOperation])
     await Promise.allSettled([...this.releases.values()].map((release) => release.promise))
     await Promise.allSettled(
       [...this.active.entries()].map(([runId, active]) => this.releaseRunResources(runId, active))

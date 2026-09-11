@@ -1,0 +1,28 @@
+✖ reads one production directory snapshot per collect and refreshes sidecars and siblings next time (20.190084ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 196.376375
+
+✖ failing tests:
+
+test at src/main/metadata-sources/localNfoProductionDirectory.test.ts:2:1270
+✖ reads one production directory snapshot per collect and refreshes sidecars and siblings next time (20.190084ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  48 !== 1
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/metadata-sources/localNfoProductionDirectory.test.ts:41:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 48,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

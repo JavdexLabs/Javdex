@@ -1,0 +1,859 @@
+diff --git a/src/main/db/database.ts b/src/main/db/database.ts
+index 323e056..f24f2f8 100644
+--- a/src/main/db/database.ts
++++ b/src/main/db/database.ts
+@@ -4,6 +4,20 @@ import { normalizeActressName } from './actressNameNormalization'
+ 
+ let db: Database.Database | null = null
+ 
++/** Invalidates a short-lived read cache after writes on this or another connection. */
++export function getDatabaseReadRevision(): {
++  connection: object
++  changes: number
++  dataVersion: number
++} {
++  const connection = getDb()
++  return {
++    connection,
++    changes: (connection.prepare('SELECT total_changes() AS count').get() as { count: number }).count,
++    dataVersion: connection.pragma('data_version', { simple: true }) as number
++  }
++}
++
+ export function initDatabaseAtPath(dbPath: string): Database.Database {
+   if (db) return db
+   return openDatabase(dbPath)
+diff --git a/src/main/scanner/scanner.test.ts b/src/main/scanner/scanner.test.ts
+index b44963a..f9aa6e6 100644
+--- a/src/main/scanner/scanner.test.ts
++++ b/src/main/scanner/scanner.test.ts
+@@ -974,6 +974,47 @@ describe('scanFolders', () => {
+     assert.equal(listVideoResources(videoId).length, 2)
+   })
+ 
++  it('loads STRM candidates once per scan across imports, moves and pending writes', async (t) => {
++    const root = makeTempRoot()
++    const before = path.join(root, 'before')
++    const after = path.join(root, 'after')
++    fs.mkdirSync(before)
++    fs.mkdirSync(after)
++    const db = initDatabaseAtPath(path.join(root, 'library.db'))
++    for (let i = 1; i <= 40; i++) {
++      fs.writeFileSync(path.join(before, `MOVE-${String(i).padStart(3, '0')}.strm`), `https://example.test/${i}.mp4`)
++    }
++    let candidateLists = 0
++    const prepare = db.prepare.bind(db)
++    t.mock.method(db, 'prepare', (sql: string) => {
++      if (sql.includes('strm_source_path AS source_path')) candidateLists++
++      return prepare(sql)
++    })
++    const imported = await scanFolders([before, after], undefined, { minImportDurationSeconds: null })
++    assert.equal(imported.imported, 40)
++    assert.equal(candidateLists, 1)
++    const ids = (db.prepare('SELECT id FROM video_resources ORDER BY id').all() as Array<{ id: number }>).map((r) => r.id)
++    for (const name of fs.readdirSync(before)) fs.renameSync(path.join(before, name), path.join(after, name))
++    const moved = await scanFolders([before, after], undefined, { minImportDurationSeconds: null })
++    assert.equal(moved.relocated, 40)
++    assert.equal(moved.imported, 0)
++    assert.equal(candidateLists, 2)
++    const resources = db.prepare('SELECT id, strm_source_path FROM video_resources ORDER BY id').all() as Array<{ id: number; strm_source_path: string }>
++    assert.deepEqual(resources.map((r) => r.id), ids)
++    assert.ok(resources.every((r) => path.dirname(r.strm_source_path) === after))
++    for (let i = 1; i <= 40; i++) {
++      const code = String(i).padStart(3, '0')
++      fs.writeFileSync(path.join(after, `MOVE-${code}-extra.strm`), `https://example.test/extra-${i}.mp4`)
++      fs.writeFileSync(path.join(after, `NEW-${code}.strm`), `https://example.test/new-${i}.mp4`)
++    }
++    const mixed = await scanFolders([before, after], undefined, {
++      minImportDurationSeconds: null, autoMergeSameCodeResources: false
++    })
++    assert.equal(mixed.imported, 40)
++    assert.equal(mixed.pendingResources, 40)
++    assert.equal(candidateLists, 3, 'pending-only writes do not reload the resource index')
++  })
++
+   it('relocates a bound STRM after its video code has been corrected', async () => {
+     const root = makeTempRoot()
+     const firstRoot = path.join(root, 'first')
+@@ -1862,6 +1903,44 @@ describe('scanFolders', () => {
+     assert.equal(enabledPath.endsWith('enabled-name.mp4'), true)
+   })
+ 
++  it('handles cancellation during the only or first NFO application and preserves committed file audits', async () => {
++    for (const codes of [['NFO-201'], ['NFO-201', 'NFO-202']]) {
++      const root = makeTempRoot()
++      const library = path.join(root, 'library')
++      fs.mkdirSync(library)
++      for (const code of codes) {
++        fs.writeFileSync(path.join(library, `${code}.mp4`), 'video')
++      }
++      initDatabaseAtPath(path.join(root, 'library.db'))
++      const controller = new AbortController()
++      let applied = 0
++      const audit: LibraryScanFileAuditEntry[] = []
++      const result = await scanFolders([library], undefined, {
++        signal: controller.signal,
++        autoImportLocalNfo: true,
++        minImportDurationSeconds: null,
++        onFileResult: entry => audit.push(entry),
++        localNfoService: fakeLocalNfoService({
++          inspect: anchor => ({
++            status: 'found', code: path.basename(anchor.anchorPath, '.mp4'), warnings: []
++          }),
++          apply: async () => {
++            applied++
++            controller.abort()
++            return { disposition: 'imported', warnings: [] }
++          }
++        })
++      })
++      assert.equal(applied, 1)
++      assert.equal(result.cancelled, true)
++      assert.equal(result.imported, codes.length)
++      assert.equal(audit.length, codes.length)
++      assert.equal(audit.filter(entry => entry.nfo?.disposition === 'imported').length, 1)
++      assert.equal(listVideos({}).total, codes.length)
++      closeDatabase()
++    }
++  })
++
+   it('aggregates first-discovery NFO candidates once per video after all resources are assigned', async () => {
+     const root = makeTempRoot()
+     const library = path.join(root, 'library')
+@@ -2226,6 +2305,33 @@ describe('scanFolders', () => {
+     assert.equal(result.imported, 30)
+   })
+ 
++  it('collects a very large root without overflowing call arguments before cancellation', async () => {
++    for (const size of [300_382, 600_764]) {
++      const root = makeTempRoot()
++      const library = path.join(root, 'library')
++      fs.mkdirSync(library)
++      initDatabaseAtPath(path.join(root, 'library.db'))
++      const controller = new AbortController()
++      const result = await scanFolders([library], undefined, {
++        signal: controller.signal,
++        readDirectory: async () => {
++          // Abort on the last entry, after the whole root has been accumulated.
++          return Array.from({ length: size }, (_, index) => ({
++            name: `TEST-${index}.mp4`,
++            isFile: () => {
++              if (index === size - 1) controller.abort()
++              return true
++            },
++            isDirectory: () => false
++          }) as fs.Dirent)
++        }
++      })
++      assert.equal(result.cancelled, true)
++      assert.equal(result.imported, 0)
++      closeDatabase()
++    }
++  })
++
+   it('stops when cancelled', async () => {
+     const root = makeTempRoot()
+     const library = path.join(root, 'library')
+diff --git a/src/main/scanner/scanner.ts b/src/main/scanner/scanner.ts
+index 79920b9..7e22cb4 100644
+--- a/src/main/scanner/scanner.ts
++++ b/src/main/scanner/scanner.ts
+@@ -33,7 +33,7 @@ import type {
+   ScanResult,
+   StrmScanFailure
+ } from '@shared/libraryTypes'
+-import type { ScannedVideoInput, StrmVideoResourceRef } from '../db/videoRepo'
++import type { ScannedVideoInput } from '../db/videoRepo'
+ import type {
+   LocalVideoResource,
+   VideoResource,
+@@ -59,7 +59,8 @@ import {
+   readStrmFile,
+   type ParsedStrmTarget
+ } from './strmParser'
+-import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
++import { getDatabaseReadRevision } from '../db/database'
++import { StrmRelocationIndex } from './strmRelocationIndex'
+ import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+ import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+ import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
+@@ -250,34 +251,6 @@ function readStrmTarget(sourcePath: string): PreparedStrm {
+   }
+ }
+ 
+-function targetKeyForStrmResource(resource: StrmVideoResourceRef): string | null {
+-  try {
+-    return normalizeExternalVideoResource(resource.locator, resource.kind).resourceKey
+-  } catch {
+-    return null
+-  }
+-}
+-
+-function findStrmRelocationCandidate(
+-  libraryId: number,
+-  sourcePath: string,
+-  targetKey: string,
+-  unavailableRootIds: ReadonlySet<number>,
+-  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+-): StrmVideoResourceRef | null {
+-  const sourceName = path.basename(sourcePath)
+-  const candidates = listStrmVideoResourceRefs(libraryId)
+-    .filter((resource) => {
+-      const oldSourcePath = resource.source_path
+-      if (path.basename(oldSourcePath) !== sourceName) return false
+-      const record = getVideoResourceInLibrary(libraryId, resource.resource_id)
+-      if (!record?.root_id || unavailableRootIds.has(record.root_id)) return false
+-      if (inspectPath(oldSourcePath) !== 'missing') return false
+-      return targetKeyForStrmResource(resource) === targetKey
+-    })
+-  return candidates.length === 1 ? candidates[0] : null
+-}
+-
+ function samePath(a: string, b: string): boolean {
+   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+ }
+@@ -473,6 +446,26 @@ export async function scanFolders(
+     options.readDirectory ??
+     ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
+   const inspectPath = options.inspectPath ?? inspectScannedResourcePath
++  const asStrmRef = (resource: VideoResource | null) =>
++    resource?.strm_source_path && resource.kind !== 'local'
++      ? {
++          library_id: resource.library_id,
++          video_id: resource.video_id,
++          resource_id: resource.id,
++          source_path: resource.strm_source_path,
++          kind: resource.kind,
++          locator: resource.locator,
++          root_id: resource.root_id
++        }
++      : null
++  const strmRelocations = new StrmRelocationIndex({
++    revision: getDatabaseReadRevision,
++    list: () => listStrmVideoResourceRefs(libraryId),
++    get: (id) => asStrmRef(getVideoResourceInLibrary(libraryId, id)),
++    getByPath: (sourcePath) => asStrmRef(strmResourceInLibrary(libraryId, sourcePath)),
++    inspect: inspectPath,
++    unavailableRootIds
++  })
+   for (const root of roots) {
+     if (options.signal?.aborted) {
+       result.cancelled = true
+@@ -501,7 +494,11 @@ export async function scanFolders(
+     } else {
+       await collectScannableFiles(root.path, rootFiles, options.signal, readIndexedDirectory)
+     }
+-    files.push(...rootFiles.map((filePath) => ({ filePath, root })))
++    for (const filePath of rootFiles) files.push({ filePath, root })
++  }
++  if (options.signal?.aborted) {
++    result.cancelled = true
++    return result
+   }
+   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
+   const readDurationSeconds = options.readDurationSeconds ?? readLocalVideoDurationSeconds
+@@ -510,8 +507,14 @@ export async function scanFolders(
+   const autoMergeSameCodeResources = options.autoMergeSameCodeResources ?? false
+   const autoImportLocalNfo = options.autoImportLocalNfo ?? false
+   const nfoService = options.localNfoService ?? localNfoScanService
++  let indexedFiles = 0
+   for (const { filePath } of files) {
+     if (request.filePaths) break
++    await maybeYield(++indexedFiles, yieldEvery)
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      return result
++    }
+     const directory = path.dirname(filePath)
+     const codes = directoryVideoCodes.get(directory) ?? []
+     codes.push(parseCode(path.basename(filePath, path.extname(filePath))))
+@@ -521,6 +524,7 @@ export async function scanFolders(
+   if (autoImportLocalNfo) {
+     let inspectedNfoFiles = 0
+     for (const { filePath, root } of files) {
++      await maybeYield(++inspectedNfoFiles, Math.min(yieldEvery, 10))
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+@@ -550,7 +554,6 @@ export async function scanFolders(
+           warnings: [sanitizeLibraryScanError(error)]
+         }
+       }
+-      inspectedNfoFiles += 1
+       if (inspection.status !== 'missing') {
+         let nfoCode: string | null = null
+         try {
+@@ -574,7 +577,6 @@ export async function scanFolders(
+           inspection
+         })
+       }
+-      await maybeYield(inspectedNfoFiles, Math.min(yieldEvery, 10))
+     }
+   }
+   const codeForNewFile = (filePath: string): string | null => {
+@@ -582,7 +584,13 @@ export async function scanFolders(
+     return preflight ? preflight.effectiveCode : parseCode(path.basename(filePath, path.extname(filePath)))
+   }
+   const newFileCounts = new Map<string, number>()
++  let countedFiles = 0
+   for (const { filePath: file } of files) {
++    await maybeYield(++countedFiles, yieldEvery)
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      return result
++    }
+     if (
+       getLocalVideoResourceByLocator(libraryId, file) ||
+       getStrmVideoResourceBySourcePath(libraryId, file) ||
+@@ -598,6 +606,7 @@ export async function scanFolders(
+   if (!autoMergeSameCodeResources) {
+     let checkedStrmFiles = 0
+     for (const { filePath: file } of files) {
++      await maybeYield(++checkedStrmFiles, Math.min(yieldEvery, 10))
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+@@ -614,11 +623,9 @@ export async function scanFolders(
+       ) {
+         continue
+       }
+-      checkedStrmFiles += 1
+       if (!readStrmTarget(file).ok) {
+         newFileCounts.set(code, Math.max(0, (newFileCounts.get(code) ?? 0) - 1))
+       }
+-      await maybeYield(checkedStrmFiles, Math.min(yieldEvery, 10))
+     }
+   }
+   const pendingGroupIds = new Set<number>()
+@@ -679,7 +686,7 @@ export async function scanFolders(
+         }
+         if (!prepared.ok) {
+           authorizeFileWrite()
+-          removePendingScanResource(libraryId, file)
++          strmRelocations.mutateWithoutResourceChanges(() => removePendingScanResource(libraryId, file))
+           recordStrmFailure(prepared.failure)
+           recordFile({
+             filePath: file,
+@@ -698,10 +705,10 @@ export async function scanFolders(
+         if (existingResource) {
+           authorizeFileWrite()
+           if (
+-            updateStrmVideoResourceTarget(existingResource.id, {
++            strmRelocations.mutate(file, () => updateStrmVideoResourceTarget(existingResource.id, {
+               kind: target.kind,
+               locator: target.locator
+-            })
++            }))
+           ) {
+             result.refreshed += 1
+             recordFile({
+@@ -731,7 +738,7 @@ export async function scanFolders(
+         }
+ 
+         const code = codeForNewFile(file)
+-        if (refreshPendingIdentity(libraryId, root, file, target)) {
++        if (strmRelocations.mutateWithoutResourceChanges(() => refreshPendingIdentity(libraryId, root, file, target))) {
+           recordFile({
+             filePath: file,
+             sourceKind: 'strm',
+@@ -747,9 +754,10 @@ export async function scanFolders(
+         }
+         const nfoPreflight = nfoPreflightByFile.get(file)
+         if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++          const { filenameCode, nfoCode } = nfoPreflight
+           authorizeFileWrite()
+           const fingerprint = statFileFingerprint(file)
+-          const pendingIdentity = upsertPendingResourceIdentity({
++          const pendingIdentity = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingResourceIdentity({
+             libraryId,
+             rootId,
+             filePath: file,
+@@ -757,11 +765,11 @@ export async function scanFolders(
+             targetKind: target.kind,
+             targetLocator: target.locator,
+             targetKey: target.targetKey,
+-            filenameCode: nfoPreflight.filenameCode,
+-            nfoCode: nfoPreflight.nfoCode,
++            filenameCode,
++            nfoCode,
+             sizeBytes: fingerprint?.file_size ?? null,
+             fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-          })
++          }))
+           result.pendingResources += 1
+           recordFile({
+             filePath: file,
+@@ -786,7 +794,7 @@ export async function scanFolders(
+           let groupId: number | null = null
+           if (code) {
+             authorizeFileWrite()
+-            const pending = upsertPendingScanResources(libraryId, code, [
++            const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+               {
+                 rootId,
+                 filePath: file,
+@@ -799,7 +807,7 @@ export async function scanFolders(
+                 fileMtimeMs: null,
+                 displayName: path.basename(file)
+               }
+-            ])
++            ]))
+             pendingGroupIds.add(pending.groupId)
+             groupId = pending.groupId
+           }
+@@ -816,21 +824,15 @@ export async function scanFolders(
+           continue
+         }
+ 
+-        const relocation = findStrmRelocationCandidate(
+-          libraryId,
+-          file,
+-          target.targetKey,
+-          unavailableRootIds,
+-          inspectPath
+-        )
++        const relocation = strmRelocations.find(file, target.targetKey)
+         if (relocation) {
+           authorizeFileWrite()
+-          relocateStrmVideoResource(libraryId, relocation.resource_id, {
++          strmRelocations.mutate(file, () => relocateStrmVideoResource(libraryId, relocation.resource_id, {
+             rootId,
+             sourcePath: file,
+             kind: target.kind,
+             locator: target.locator
+-          })
++          }))
+           result.relocated += 1
+           recordFile({
+             filePath: file,
+@@ -862,7 +864,7 @@ export async function scanFolders(
+           : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+         if (mustConfirm) {
+           authorizeFileWrite()
+-          const pending = upsertPendingScanResources(libraryId, code, [
++          const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+             {
+               rootId,
+               filePath: file,
+@@ -875,7 +877,7 @@ export async function scanFolders(
+               fileMtimeMs: null,
+               displayName: path.basename(file)
+             }
+-          ])
++          ]))
+           pendingGroupIds.add(pending.groupId)
+           result.pendingResources += pending.addedResources
+           recordFile({
+@@ -895,7 +897,7 @@ export async function scanFolders(
+           const needsPrimarySelection =
+             listVideoResources(libraryId, existingVideos[0].id).length === 0
+           authorizeFileWrite()
+-          const resourceId = insertStrmVideoResource({
++          const resourceId = strmRelocations.mutate(file, () => insertStrmVideoResource({
+             libraryId,
+             videoId: existingVideos[0].id,
+             rootId,
+@@ -903,7 +905,7 @@ export async function scanFolders(
+             kind: target.kind,
+             locator: target.locator,
+             displayName: path.basename(file)
+-          })
++          }))
+           if (resourceId == null) result.skipped += 1
+           else {
+             result.imported += 1
+@@ -931,7 +933,7 @@ export async function scanFolders(
+           )
+         } else {
+           authorizeFileWrite()
+-          const videoId = insertNewScannedStrmVideo({
++          const videoId = strmRelocations.mutate(file, () => insertNewScannedStrmVideo({
+             libraryId,
+             rootId,
+             code,
+@@ -939,7 +941,7 @@ export async function scanFolders(
+             kind: target.kind,
+             locator: target.locator,
+             displayName: path.basename(file)
+-          })
++          }))
+           if (videoId == null) result.skipped += 1
+           else {
+             result.imported += 1
+@@ -1018,7 +1020,7 @@ export async function scanFolders(
+         continue
+       }
+ 
+-      if (refreshPendingIdentity(libraryId, root, file)) {
++      if (strmRelocations.mutateWithoutResourceChanges(() => refreshPendingIdentity(libraryId, root, file))) {
+         recordFile({
+           filePath: file,
+           sourceKind: 'local',
+@@ -1040,7 +1042,7 @@ export async function scanFolders(
+           const fileDurationSeconds = await readDurationSeconds(file)
+           authorizeFileWrite()
+           const fingerprint = statFileFingerprint(file)
+-          const pending = upsertPendingScanResources(libraryId, code, [
++          const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+             {
+               rootId,
+               filePath: file,
+@@ -1049,7 +1051,7 @@ export async function scanFolders(
+               fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+               displayName: path.basename(file)
+             }
+-          ])
++          ]))
+           pendingGroupIds.add(pending.groupId)
+           groupId = pending.groupId
+         }
+@@ -1087,18 +1089,19 @@ export async function scanFolders(
+ 
+       const nfoPreflight = nfoPreflightByFile.get(file)
+       if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++        const { filenameCode, nfoCode } = nfoPreflight
+         authorizeFileWrite()
+         const fingerprint = statFileFingerprint(file)
+-        const pendingIdentity = upsertPendingResourceIdentity({
++        const pendingIdentity = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingResourceIdentity({
+           libraryId,
+           rootId,
+           filePath: file,
+           sourceKind: 'local',
+-          filenameCode: nfoPreflight.filenameCode,
+-          nfoCode: nfoPreflight.nfoCode,
++          filenameCode,
++          nfoCode,
+           sizeBytes: fingerprint?.file_size ?? null,
+           fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-        })
++        }))
+         result.pendingResources += 1
+         recordFile({
+           filePath: file,
+@@ -1177,7 +1180,7 @@ export async function scanFolders(
+         : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+       if (mustConfirm) {
+         authorizeFileWrite()
+-        const pending = upsertPendingScanResources(libraryId, code, [
++        const pending = strmRelocations.mutateWithoutResourceChanges(() => upsertPendingScanResources(libraryId, code, [
+           {
+             rootId,
+             filePath: file,
+@@ -1186,7 +1189,7 @@ export async function scanFolders(
+             fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+             displayName: path.basename(file)
+           }
+-        ])
++        ]))
+         pendingGroupIds.add(pending.groupId)
+         result.pendingResources += pending.addedResources
+         recordFile({
+@@ -1291,6 +1294,10 @@ export async function scanFolders(
+   }
+ 
+   for (const [videoId, batch] of nfoBatchesByVideo) {
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      break
++    }
+     let nfo: LibraryScanNfoAudit
+     try {
+       const applied = await nfoService.apply(videoId, batch.code, batch.anchors)
+@@ -1321,6 +1328,7 @@ export async function scanFolders(
+     }
+   }
+ 
++  if (options.signal?.aborted) result.cancelled = true
+   result.pendingGroups = pendingGroupIds.size
+ 
+   for (const videoId of primarySelectionVideoIds) {
+diff --git a/src/main/db/databaseReadRevision.test.ts b/src/main/db/databaseReadRevision.test.ts
+new file mode 100644
+index 0000000..47d60c3
+--- /dev/null
++++ b/src/main/db/databaseReadRevision.test.ts
+@@ -0,0 +1,37 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath } from './database'
++
++it('detects local writes, external commits and connection replacement without changing schema', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-read-revision-'))
++  const dbPath = path.join(root, 'library.db')
++  let other: Database.Database | undefined
++  try {
++    const db = initDatabaseAtPath(dbPath)
++    db.exec('CREATE TABLE revision_probe (id INTEGER PRIMARY KEY, value TEXT)')
++    const before = getDatabaseReadRevision()
++    assert.deepEqual(getDatabaseReadRevision(), before)
++    db.prepare('INSERT INTO revision_probe VALUES (1, ?)').run('local')
++    const local = getDatabaseReadRevision()
++    assert.ok(local.changes > before.changes)
++    assert.equal(local.dataVersion, before.dataVersion)
++    other = new Database(dbPath)
++    other.prepare('UPDATE revision_probe SET value = ?').run('external')
++    const external = getDatabaseReadRevision()
++    assert.equal(external.changes, local.changes)
++    assert.notEqual(external.dataVersion, local.dataVersion)
++    other.close()
++    other = undefined
++    closeDatabase()
++    initDatabaseAtPath(dbPath)
++    assert.notEqual(getDatabaseReadRevision().connection, before.connection)
++  } finally {
++    other?.close()
++    closeDatabase()
++    fs.rmSync(root, { recursive: true, force: true })
++  }
++})
+diff --git a/src/main/scanner/strmRelocationIndex.ts b/src/main/scanner/strmRelocationIndex.ts
+new file mode 100644
+index 0000000..072cff4
+--- /dev/null
++++ b/src/main/scanner/strmRelocationIndex.ts
+@@ -0,0 +1,113 @@
++import path from 'node:path'
++import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
++import type { StrmVideoResourceRef } from '../db/videoRepo'
++import type { getDatabaseReadRevision } from '../db/database'
++
++type Revision = ReturnType<typeof getDatabaseReadRevision>
++type Resource = StrmVideoResourceRef & { root_id: number | null }
++
++interface Ports {
++  revision(): Revision
++  list(): StrmVideoResourceRef[]
++  get(id: number): Resource | null
++  getByPath(sourcePath: string): Resource | null
++  inspect(sourcePath: string): 'present' | 'missing' | 'unknown'
++  unavailableRootIds: ReadonlySet<number>
++}
++
++function sameRevision(a: Revision | null, b: Revision): boolean {
++  return a?.connection === b.connection && a.changes === b.changes && a.dataVersion === b.dataVersion
++}
++
++function key(resource: StrmVideoResourceRef): string | null {
++  try {
++    return JSON.stringify([
++      path.basename(resource.source_path),
++      normalizeExternalVideoResource(resource.locator, resource.kind).resourceKey
++    ])
++  } catch {
++    return null
++  }
++}
++
++/** Scan-local candidate index. Never caches filesystem presence or uniqueness decisions. */
++export class StrmRelocationIndex {
++  private revision: Revision | null = null
++  private readonly buckets = new Map<string, Map<number, StrmVideoResourceRef>>()
++  private readonly keys = new Map<number, string>()
++
++  constructor(private readonly ports: Ports) {}
++
++  find(sourcePath: string, targetKey: string): StrmVideoResourceRef | null {
++    const revision = this.ports.revision()
++    if (!sameRevision(this.revision, revision)) {
++      this.buckets.clear()
++      this.keys.clear()
++      for (const resource of this.ports.list()) this.upsert(resource)
++      this.revision = revision
++    }
++    const bucket = this.buckets.get(JSON.stringify([path.basename(sourcePath), targetKey]))
++    let candidate: StrmVideoResourceRef | null = null
++    for (const ref of bucket?.values() ?? []) {
++      const current = this.ports.get(ref.resource_id)
++      if (!current?.root_id || this.ports.unavailableRootIds.has(current.root_id)) continue
++      if (key(current) !== key(ref) || this.ports.inspect(current.source_path) !== 'missing') continue
++      if (candidate) return null
++      candidate = current
++    }
++    return candidate
++  }
++
++  /** Wrap only a synchronous mutation of this source; unrelated writes force a rebuild. */
++  mutate<T>(sourcePath: string, write: () => T): T {
++    return this.trackWrite(write, () => {
++      const current = this.ports.getByPath(sourcePath)
++      if (!current) return false
++      this.upsert(current)
++      return true
++    })
++  }
++
++  /** Only for known synchronous writes that cannot change video_resources. */
++  mutateWithoutResourceChanges<T>(write: () => T): T {
++    return this.trackWrite(write, () => true)
++  }
++
++  private trackWrite<T>(write: () => T, update: () => boolean): T {
++    if (!this.revision) return write()
++    const before = this.ports.revision()
++    try {
++      const result = write()
++      const after = this.ports.revision()
++      if (sameRevision(this.revision, before) && before.dataVersion === after.dataVersion &&
++          before.connection === after.connection && update()) {
++        this.revision = after
++      } else {
++        this.revision = null
++      }
++      return result
++    } catch (error) {
++      this.revision = null
++      throw error
++    }
++  }
++
++  private upsert(resource: StrmVideoResourceRef): void {
++    const oldKey = this.keys.get(resource.resource_id)
++    if (oldKey !== undefined) {
++      const old = this.buckets.get(oldKey)
++      old?.delete(resource.resource_id)
++      if (!old?.size) this.buckets.delete(oldKey)
++      this.keys.delete(resource.resource_id)
++    }
++    const nextKey = key(resource)
++    if (nextKey === null) return
++    let bucket = this.buckets.get(nextKey)
++    if (!bucket) {
++      bucket = new Map()
++      this.buckets.set(nextKey, bucket)
++    }
++    bucket.set(resource.resource_id, resource)
++    this.keys.set(resource.resource_id, nextKey)
++  }
++}
+diff --git a/src/main/scanner/strmRelocationIndex.test.ts b/src/main/scanner/strmRelocationIndex.test.ts
+new file mode 100644
+index 0000000..e1befaa
+--- /dev/null
++++ b/src/main/scanner/strmRelocationIndex.test.ts
+@@ -0,0 +1,121 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import { StrmRelocationIndex } from './strmRelocationIndex'
++import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
++
++function resource(id: number, name = `MOV-${id}.strm`, locator = `https://example.test/${id}.mp4`) {
++  return { library_id: 1, resource_id: id, video_id: id, root_id: 1 as number | null,
++    source_path: `/old/${name}`, kind: 'direct' as const, locator }
++}
++
++function fixture(rows: ReturnType<typeof resource>[]) {
++  const records = new Map(rows.map((row) => [row.resource_id, row]))
++  let revision = { connection: {}, changes: 0, dataVersion: 1 }
++  let lists = 0
++  let reads = 0
++  const states = new Map<string, 'present' | 'missing' | 'unknown'>()
++  const unavailableRootIds = new Set<number>()
++  const index = new StrmRelocationIndex({
++    revision: () => ({ ...revision }),
++    list: () => { lists++; return [...records.values()] },
++    get: (id) => { reads++; return records.get(id) ?? null },
++    getByPath: (source) => [...records.values()].find((r) => r.source_path === source) ?? null,
++    inspect: (source) => states.get(source) ?? 'missing',
++    unavailableRootIds
++  })
++  return { index, records, states, unavailableRootIds,
++    metrics: () => ({ lists, reads }),
++    write: (external = false) => { revision = { ...revision,
++      changes: revision.changes + (external ? 0 : 1),
++      dataVersion: revision.dataVersion + (external ? 1 : 0) } }
++  }
++}
++
++const target = (locator: string) => normalizeExternalVideoResource(locator, 'direct').resourceKey
++
++it('matches unique missing sources and retains filename, target, root and uncertainty rules', () => {
++  const a = resource(1, 'same.strm')
++  const b = resource(2, 'same.strm', a.locator)
++  b.source_path = '/other/same.strm'
++  const f = fixture([a, b, resource(3, 'different.strm', a.locator)])
++  const find = () => f.index.find('/new/same.strm', target(a.locator))
++  assert.equal(find(), null, 'two missing sources are ambiguous')
++  f.states.set(b.source_path, 'unknown')
++  assert.equal(find()?.resource_id, 1)
++  f.states.set(a.source_path, 'present')
++  assert.equal(find(), null)
++  f.states.set(a.source_path, 'missing')
++  f.unavailableRootIds.add(1)
++  assert.equal(find(), null)
++  f.unavailableRootIds.clear()
++  assert.equal(f.index.find('/new/SAME.strm', target(a.locator)), null)
++  assert.equal(f.index.find('/new/same.strm', target(`${a.locator}?other=1`)), null)
++  assert.equal(f.metrics().lists, 1, 'presence and root availability are not cached')
++})
++
++it('incrementally tracks same-scan insertions and target/path changes, but invalidates unknown writes', () => {
++  const a = resource(1)
++  const f = fixture([a])
++  assert.equal(f.index.find('/new/MOV-1.strm', target(a.locator))?.resource_id, 1)
++  const b = resource(2)
++  f.index.mutate(b.source_path, () => { f.records.set(2, b); f.write() })
++  assert.equal(f.index.find('/new/MOV-2.strm', target(b.locator))?.resource_id, 2)
++  const moved = { ...a, source_path: '/moved/renamed.strm', locator: 'https://example.test/changed.mp4' }
++  f.index.mutate(moved.source_path, () => { f.records.set(1, moved); f.write() })
++  assert.equal(f.index.find('/new/MOV-1.strm', target(a.locator)), null)
++  assert.equal(f.index.find('/new/renamed.strm', target(moved.locator))?.resource_id, 1)
++  assert.equal(f.metrics().lists, 1)
++  f.records.delete(1); f.write()
++  assert.equal(f.index.find('/new/renamed.strm', target(moved.locator)), null)
++  assert.equal(f.metrics().lists, 2)
++  f.records.set(1, moved); f.write(true)
++  assert.equal(f.index.find('/new/renamed.strm', target(moved.locator))?.resource_id, 1)
++  assert.equal(f.metrics().lists, 3)
++})
++
++it('does not acknowledge unrelated writes or a failed mutation as a complete cache update', () => {
++  const a = resource(1)
++  const f = fixture([a])
++  f.index.find(a.source_path, target(a.locator))
++  f.records.set(2, resource(2)); f.write()
++  f.index.mutate(a.source_path, () => f.write())
++  assert.equal(f.index.find('/new/MOV-2.strm', target(resource(2).locator))?.resource_id, 2)
++  assert.equal(f.metrics().lists, 2)
++  assert.throws(() => f.index.mutate(a.source_path, () => { f.records.delete(1); f.write(); throw Error('failed') }))
++  assert.equal(f.index.find(a.source_path, target(a.locator)), null)
++  assert.equal(f.metrics().lists, 3)
++})
++
++it('retains the cache for known pending writes but cannot hide an intervening external write', () => {
++  const a = resource(1)
++  const f = fixture([a])
++  f.index.find(a.source_path, target(a.locator))
++  f.index.mutateWithoutResourceChanges(() => f.write())
++  assert.equal(f.index.find(a.source_path, target(a.locator))?.resource_id, 1)
++  assert.equal(f.metrics().lists, 1)
++  f.records.delete(1); f.write(true)
++  f.index.mutateWithoutResourceChanges(() => f.write())
++  assert.equal(f.index.find(a.source_path, target(a.locator)), null)
++  assert.equal(f.metrics().lists, 2)
++})
++
++for (const size of [10000, 20000, 300382, 600764]) {
++  it(`examines one matching candidate per lookup in a ${size}-resource relocation`, () => {
++    const f = fixture(Array.from({ length: size }, (_, id) => resource(id)))
++    for (let id = 0; id < size; id++) {
++      assert.equal(f.index.find(`/new/MOV-${id}.strm`, target(resource(id).locator))?.resource_id, id)
++    }
++    assert.deepEqual(f.metrics(), { lists: 1, reads: size })
++  })
++}
++
++it('indexes target keys as well as filenames when many directories use the same filename', () => {
++  const size = 20000
++  const f = fixture(Array.from({ length: size }, (_, id) => ({
++    ...resource(id, 'movie.strm'), source_path: `/old/${id}/movie.strm`
++  })))
++  for (let id = 0; id < size; id++) {
++    assert.equal(f.index.find('/new/movie.strm', target(resource(id).locator))?.resource_id, id)
++  }
++  assert.deepEqual(f.metrics(), { lists: 1, reads: size })
++})

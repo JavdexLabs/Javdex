@@ -1,0 +1,38 @@
+✔ counts the same all-gender avatar targets without projecting profiles or joining works (12.58675ms)
+✔ returns only target identity in ID order without counting works with all path and gender semantics (11.016209ms)
+✔ validates manual tag candidate bounds and existing-tag identities (3.002083ms)
+✔ bounds selected tag label IPC requests before repository access (0.293375ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.129375ms)
+  ✔ forwards command arguments and returns the application result (0.110208ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.187041ms)
+  ✔ accepts link-resource updates without an import-only target (0.289333ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.090417ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.236209ms)
+  ✔ accepts only explicit plugin continuation kinds (0.091458ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.481959ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.031875ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.032083ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.26425ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (0.408459ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.101292ms)
+  ✔ accepts only the structured model-management command vocabulary (1.016375ms)
+  ✔ serializes successful results and thrown errors (1.254708ms)
+  ✔ sends the contracted event payload unchanged (0.079292ms)
+✔ typed IPC adapter (5.099959ms)
+✔ bounds actress conflict summary pages and keeps detail identities exact (0.237208ms)
+✔ validates bounded actress picker requests (0.151542ms)
+✔ validates narrow actress identity IDs (0.066041ms)
+✔ validates merge candidate paging and keep identity (0.145583ms)
+✔ accepts only zero arguments for avatar crop count (0.022042ms)
+✔ accepts only zero arguments for avatar crop target enumeration (0.019625ms)
+✔ counts avatars through the scalar API without loading targets and propagates failures (46.149583ms)
+✔ serializes startup before target loading and releases ownership on empty, failed or unmounted startup (52.9615ms)
+ℹ tests 28
+ℹ suites 1
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 309.718375

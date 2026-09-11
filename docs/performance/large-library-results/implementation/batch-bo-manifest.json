@@ -1,0 +1,25 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bo-target.log": "3c4e7ffc4f673df36e2ccc304b6723bc373b319d74c3d214a98f0d1e27a3e77d",
+    "batch-bo-full.log": "70b545be75ee5c07f02eb71615ad9f5f032fefd2a00dd184c15296dc60f8f124",
+    "batch-bo-build.log": "e60a4f8d47fe0658b0ea08606562a098f7843f973d77e9717ba3b039adc47ecc",
+    "batch-bo-browser.log": "24d595187164601a206e704ff0db005daa09d64ea9dc6d3562dcee59c4b8acd1",
+    "batch-bo-benchmark.log": "ae8d6116b582ecd4762e39de9cd73e53d434fd02009e8a81814225fe2928a3da",
+    "batch-bo-empty-search-red.log": "7c3e65055628ef6bc180796883760e2db751528152877d2ad21a6476f38c8d71",
+    "batch-bo-benchmark.json": "7f555641d0147ea0403d2bd599c425f53617670cf66754b8e24b83c4b5183bf8",
+    "batch-bo-ui-maker-1000x640.png": "e80cf8a07964357805c62fecc59be1fb56dc3fb15444effe4b3d80065343f47a",
+    "batch-bo-ui-maker-1440x900.png": "3709dc4de43221feec6a2f74e111f7a9b81e4482ef11a8b07348f309831c5780",
+    "batch-bo-ui-results.json": "9aa4d52d38d6d9e5279ae9e4ad4e8351e8da9cb70a1f6a857a6f140c91a897f1",
+    "batch-bo-ui-series-1000x640.png": "e55e713c20a15595d1b7d2214801e10aa4763453608691f63f4859a939082dfe",
+    "batch-bo-ui-series-1440x900.png": "1a35b44a125bf9eaec80e90229622607c702268860695fb95c6ff6637eecc290",
+    "batch-bo-classification-pages.patch": "43a9d8ddae4d49fa4f8b65645b37322918510d244232045d848ff1ba518f59ac",
+    "batch-bo-review.md": "4cb96c7185fa58fd8db24c38d204131f1f7c6e6be2a7659527b39b2d83a755ec"
+  },
+  "notes": [
+    "Selected cumulative source diff and new files depend on earlier batches.",
+    "53 focused; full2344pass1skip0fail; build and actual browser4scenarios passed.",
+    "100 completed-page traversals per browser scenario leave one query cache entry; no global inflight/peak-memory claim.",
+    "Full15/42goal and director/other full-list consumers remain incomplete."
+  ]
+}

@@ -316,6 +316,15 @@ export function listPendingResourceIdentities(libraryId: number): PendingResourc
   ).map(rowToVisible)
 }
 
+export function getPendingResourceIdentity(libraryId: number, identityId: number): PendingResourceIdentity | null {
+  const database = getDb()
+  requireLibrary(database, libraryId)
+  positiveId(identityId, 'identityId')
+  const row = database.prepare('SELECT * FROM pending_resource_identities WHERE library_id = ? AND id = ?')
+    .get(libraryId, identityId) as Row | undefined
+  return row ? rowToVisible(row) : null
+}
+
 export function getPendingResourceIdentityRecord(
   libraryId: number,
   identityId: number
@@ -361,21 +370,23 @@ export function deletePendingResourceIdentity(
 export function reconcilePendingResourceIdentities(
   libraryId: number,
   accessibleRootIds: number[],
-  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown',
+  candidateIds?: readonly number[]
 ): { removed: number } {
+  if (candidateIds && (candidateIds.length > 128 || candidateIds.some(id => !Number.isSafeInteger(id) || id <= 0))) throw new Error('Invalid cleanup candidate IDs')
   const database = getDb()
   requireLibrary(database, libraryId)
   const rootIds = [...new Set(accessibleRootIds.map((rootId) => positiveId(rootId, 'rootId')))]
   if (rootIds.length === 0) return { removed: 0 }
   return database.transaction(() => {
     for (const rootId of rootIds) requireRoot(database, libraryId, rootId)
-    const placeholders = rootIds.map(() => '?').join(', ')
     const rows = database
       .prepare(
-        `SELECT id, file_path FROM pending_resource_identities
-          WHERE library_id = ? AND root_id IN (${placeholders}) ORDER BY id`
+        `SELECT id, file_path FROM pending_resource_identities ${candidateIds ? 'NOT INDEXED' : ''}
+          WHERE library_id = ? AND root_id IN (SELECT value FROM json_each(?))
+          ${candidateIds ? 'AND id IN (SELECT value FROM json_each(?))' : ''} ORDER BY id`
       )
-      .all(libraryId, ...rootIds) as Array<{ id: number; file_path: string }>
+      .all(libraryId, JSON.stringify(rootIds), ...(candidateIds ? [JSON.stringify(candidateIds)] : [])) as Array<{ id: number; file_path: string }>
     let removed = 0
     const remove = database.prepare(
       'DELETE FROM pending_resource_identities WHERE id = ? AND library_id = ?'

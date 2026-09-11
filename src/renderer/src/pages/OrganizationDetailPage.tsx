@@ -1,3 +1,4 @@
+import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
 import { BadgeMinus, ExternalLink, GitMerge, ImagePlus, Inbox, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
@@ -27,10 +28,9 @@ import OrganizationEditModal from '../components/OrganizationEditModal'
 import OrganizationDeleteModal from '../components/OrganizationDeleteModal'
 import OrganizationMergeModal from '../components/OrganizationMergeModal'
 import { organizationMergeSuccessMessage } from '../components/organizationMergePresentation'
-import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
+import { useCatalogVideoPage } from '../query/useCatalogVideoPage'
 import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
@@ -99,14 +99,15 @@ export default function OrganizationDetailPage(): JSX.Element {
     (error: unknown) => toast.show(String((error as Error).message ?? error), 'error'),
     [toast]
   )
-  const { videos, total, loading, loadingMore, hasMore, loadMore, refetchSilent } =
-    useInfiniteVideoList(
+  const videoPage =
+    useCatalogVideoPage(
       ALL_CATALOG_SCOPE,
       videoQuery,
       videoQueryHash,
       handlePageError,
       Boolean(role && validId)
     )
+  const { total, loading, refetchSilent } = videoPage
 
   useListSurfaceRefetch(videoStackOpen, refetchSilent)
   const dismissEditing = useCallback(() => {
@@ -338,7 +339,11 @@ export default function OrganizationDetailPage(): JSX.Element {
           <div className="organization-video-heading">关联影片</div>
           {loading ? (
             <EmptyState loading variant="compact" />
-          ) : videos.length === 0 ? (
+          ) : videoPage.error && total === 0 ? (
+            <EmptyState variant="compact" title="关联影片加载失败">
+              <Button size="sm" onClick={videoPage.retry}>重试</Button>
+            </EmptyState>
+          ) : total === 0 ? (
             <EmptyState
               variant="compact"
               icon={<Inbox {...UI_ICON_SM} aria-hidden />}
@@ -347,24 +352,7 @@ export default function OrganizationDetailPage(): JSX.Element {
             />
           ) : (
             <>
-              <div className="poster-grid organization-video-grid">
-                {videos.map((video) => (
-                  <PosterCard key={video.id} video={video} />
-                ))}
-              </div>
-              {hasMore ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-
-                  size="sm"
-                  className="organization-load-more"
-                  disabled={loadingMore}
-                  onClick={loadMore}
-                  >
-                  {loadingMore ? '加载中…' : '加载更多'}
-                </Button>
-              ) : null}
+              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={videoQueryHash} />
             </>
           )}
         </ListSurface>

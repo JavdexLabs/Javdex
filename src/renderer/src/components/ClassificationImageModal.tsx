@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContinuousPage } from "../hooks/useContinuousPage";
 import { useHorizontalDragScroll } from "../hooks/useHorizontalDragScroll";
 import {
   Building2,
@@ -17,7 +17,6 @@ import type {
   ClassificationImageUpdateResult,
 } from "@shared/classificationTypes";
 import { api, assetUrl } from "../api";
-import { classificationImageKeys } from "../query/queryKeys";
 import EmptyState from "./EmptyState";
 import Modal from "./Modal";
 import { useTheme } from "./ThemeProvider";
@@ -47,7 +46,11 @@ function remotePreviewUrl(mimeType: string, dataBase64: string): string {
   return `data:${mimeType};base64,${dataBase64}`;
 }
 
-export default function ClassificationImageModal({
+export default function ClassificationImageModal(props: Props): JSX.Element {
+  return <ClassificationImageEditor key={`${props.entity.kind}:${props.entity.id}`} {...props} />;
+}
+
+function ClassificationImageEditor({
   entity,
   entityLabel,
   imagePath,
@@ -58,8 +61,11 @@ export default function ClassificationImageModal({
   const toast = useToast();
   const { privacyMode } = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const coverScroll = useHorizontalDragScroll();
   const objectUrlRef = useRef<string | null>(null);
   const remoteRequestRef = useRef(0);
+  const activeRef = useRef(true);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false } }, []);
   const current = classificationImageDisplayState(imagePath, fallbackCoverPath);
   const [mode, setMode] = useState<SourceMode>("file");
   const [pending, setPending] = useState<
@@ -75,13 +81,64 @@ export default function ClassificationImageModal({
   const mediaEditorsHidden =
     privacyMode.privacyModeEnabled &&
     privacyMode.privacyModeScopes.includes("mediaEditors");
-  const coverScroll = useHorizontalDragScroll();
-  const candidatesQuery = useQuery({
-    queryKey: classificationImageKeys.candidates(entity),
-    queryFn: () => api.classificationImages.candidates(entity),
-    enabled: !mediaEditorsHidden,
-  });
-  const coverCandidates = candidatesQuery.data ?? [];
+  const candidateEnabled = !mediaEditorsHidden && mode === "video";
+  const { kind, id } = entity;
+  const readCandidates = useCallback((offset: number) => candidateEnabled
+    ? api.classificationImages.page({kind, id}, {limit:60, offset})
+    : Promise.resolve(null), [kind, id, candidateEnabled]);
+  const candidatesQuery = useContinuousPage(`${kind}:${id}`, 60, readCandidates, candidateEnabled);
+  const coverCandidates = candidatesQuery.items ?? [];
+  const onCoverRange = candidatesQuery.window.onVisibleRange;
+  const onCoverScroll = (event: {
+    currentTarget: {
+      scrollLeft: number;
+      clientWidth: number;
+      clientHeight: number;
+      scrollWidth: number;
+    };
+  }): void => {
+    const { scrollLeft, clientWidth, clientHeight, scrollWidth } =
+      event.currentTarget;
+    const stride = Math.max(72, clientHeight) + 8;
+    if (
+      scrollWidth > clientWidth + 8 &&
+      scrollLeft + clientWidth >= scrollWidth - 32
+    ) {
+      onCoverRange(
+        Math.max(coverCandidates.length, 1) - 1,
+        coverCandidates.length + 59,
+      );
+      return;
+    }
+    const start = Math.floor(Math.max(0, scrollLeft) / stride);
+    const end = Math.ceil((scrollLeft + clientWidth) / stride);
+    if (end > start) onCoverRange(start, end);
+  };
+  useLayoutEffect(() => {
+    const el = coverScroll.ref.current;
+    if (
+      !el ||
+      candidatesQuery.loading ||
+      candidatesQuery.error ||
+      coverCandidates.length === 0 ||
+      coverCandidates.length >= candidatesQuery.total
+    )
+      return;
+    if (el.scrollWidth <= el.clientWidth + 8) {
+      onCoverRange(
+        Math.max(coverCandidates.length, 1) - 1,
+        coverCandidates.length + 59,
+      );
+    }
+  }, [
+    coverCandidates.length,
+    candidatesQuery.loading,
+    candidatesQuery.error,
+    candidatesQuery.total,
+    onCoverRange,
+    coverScroll.ref,
+  ]);
+
   const placeholder =
     entity.kind === "organization" ? (
       <Building2 {...UI_ICON_SM} aria-hidden />
@@ -154,7 +211,9 @@ export default function ClassificationImageModal({
     setSaving(true);
     try {
       const result = await api.classificationImages.set(entity, pending);
+      if (!activeRef.current) return;
       await onChanged(result);
+      if (!activeRef.current) return;
       if (result.cleanupFailures.length > 0) {
         toast.show("主图已更新，但旧图片清理失败，可稍后重试", "info");
       } else {
@@ -164,7 +223,7 @@ export default function ClassificationImageModal({
     } catch (error) {
       toast.show(String((error as Error).message), "error");
     } finally {
-      setSaving(false);
+      if (activeRef.current) setSaving(false);
     }
   };
 
@@ -331,70 +390,79 @@ export default function ClassificationImageModal({
 
               <div
                 ref={coverScroll.ref}
-                className={`${styles.sourcePage}${
-                  coverCandidates.length > 0
-                    ? ` ${styles.sourcePageScroll}`
-                    : ""
-                }`}
+                className={`${styles.sourcePage} ${styles.sourcePageScroll}`}
                 data-active={mode === "video"}
-                data-dragging={coverScroll.isDragging}
+                data-dragging={coverScroll.isDragging ? true : undefined}
                 role="tabpanel"
                 hidden={mode !== "video"}
+                onScroll={onCoverScroll}
                 onPointerDownCapture={coverScroll.onPointerDownCapture}
                 onPointerMove={coverScroll.onPointerMove}
                 onPointerUp={coverScroll.onPointerUp}
                 onPointerCancel={coverScroll.onPointerCancel}
               >
-                {candidatesQuery.isLoading ? (
+                {candidatesQuery.loading && coverCandidates.length === 0 ? (
                   <p className={styles.sourceEmpty}>加载关联封面…</p>
-                ) : candidatesQuery.isError ? (
-                  <p className={styles.sourceEmpty}>关联封面加载失败</p>
+                ) : candidatesQuery.error && coverCandidates.length === 0 ? (
+                  <div className={styles.sourceEmpty} role="alert">
+                    关联封面加载失败
+                    <Button onClick={candidatesQuery.reload}>重试</Button>
+                  </div>
                 ) : coverCandidates.length === 0 ? (
                   <p className={styles.sourceEmpty}>暂无关联影片封面</p>
                 ) : (
-                  coverCandidates.map((candidate) => {
-                    const selected =
-                      pending?.source === "video-cover" &&
-                      pending.videoId === candidate.videoId;
-                    return (
-                      <button
-                        key={candidate.videoId}
-                        type="button"
-                        className={styles.candidate}
-                        title={candidate.code}
-                        aria-label={candidate.code}
-                        aria-pressed={selected}
-                        onClick={() => {
-                          if (coverScroll.shouldSuppressClick()) return;
-                          clearObjectUrl();
-                          setPending(
-                            videoCoverClassificationImageInput(
-                              candidate.videoId,
-                            ),
-                          );
-                          setPreviewUrl(assetUrl(candidate.coverPath));
-                          setPreviewLabel("待保存主图");
-                        }}
-                      >
-                        <span
-                          className={`${styles.candidateCover} classification-image-candidate-cover`}
+                  <>
+                    {coverCandidates.map((candidate) => {
+                      const selected =
+                        pending?.source === "video-cover" &&
+                        pending.videoId === candidate.videoId;
+                      return (
+                        <button
+                          key={candidate.videoId}
+                          type="button"
+                          className={styles.candidate}
+                          title={candidate.code}
+                          aria-label={candidate.code}
+                          aria-pressed={selected}
+                          onClick={() => {
+                            if (coverScroll.shouldSuppressClick()) return;
+                            clearObjectUrl();
+                            setPending(
+                              videoCoverClassificationImageInput(
+                                candidate.videoId,
+                              ),
+                            );
+                            setPreviewUrl(assetUrl(candidate.coverPath));
+                            setPreviewLabel("待保存主图");
+                          }}
                         >
-                          <img
-                            src={assetUrl(candidate.coverPath) ?? ""}
-                            alt=""
-                            loading="lazy"
-                            draggable={false}
-                          />
-                        </span>
-                        <span className={styles.candidateCode}>
-                          {candidate.code}
-                        </span>
-                      </button>
-                    );
-                  })
+                          <span
+                            className={`${styles.candidateCover} classification-image-candidate-cover`}
+                          >
+                            <img
+                              src={assetUrl(candidate.coverPath, 320) ?? ""}
+                              alt=""
+                              loading="lazy"
+                              draggable={false}
+                            />
+                          </span>
+                          <span className={styles.candidateCode}>
+                            {candidate.code}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {candidatesQuery.error ? (
+                      <div className={styles.sourceEmpty} role="alert">
+                        关联封面加载失败
+                        <Button onClick={candidatesQuery.reload}>重试</Button>
+                      </div>
+                    ) : null}
+                  </>
                 )}
               </div>
             </div>
+
           </div>
         </div>
       )}

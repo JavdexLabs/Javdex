@@ -1,0 +1,16 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bf-build.log": "86e2c55f7ef7716121477f6faca17a8b5f67c06c377d0eedd051f7ab0af6abd0",
+    "batch-bf-full.log": "5aa046132a49128664c02f3bbd8fefdab9980cb2936f07bfbd6122ec92d162e4",
+    "batch-bf-plugin-target-api.patch": "fb4ecd39fc153911199298a6bdcfd8a7c58bc88b7f48a156429f7ba221f7ff35",
+    "batch-bf-review.md": "140ca0132159262a81e330db08633b20f65190673ca7bb41f1714b9f2c0c55b8",
+    "batch-bf-target.log": "08952f3e2a1ea1f4ec089726dfafebce1e5a652c442a7a924ac23e2346ec5e14"
+  },
+  "notes": [
+    "Cumulative selected diff plus new test, depends on earlier batches.",
+    "46focused; full2287pass1skip0fail; build passed.",
+    "Plugin target backend only; renderer still legacy full list until next batch.",
+    "Exact canonical runtime identity uses existing validator; bounded display label never substitutes for input. Full15/42scope active."
+  ]
+}

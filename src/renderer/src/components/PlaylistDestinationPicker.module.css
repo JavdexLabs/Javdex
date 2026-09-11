@@ -1,0 +1,42 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  height: min(320px, 40vh);
+  min-height: 160px;
+  min-width: 0;
+}
+
+.selection {
+  margin-block: var(--form-label-gap);
+  min-height: 1.5em;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.row:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.row[aria-pressed='true'] {
+  background: var(--surface-selected);
+  border-color: var(--border-accent);
+}

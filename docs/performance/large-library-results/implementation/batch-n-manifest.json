@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "60478ca113f6e5ffdedeabc6d63ac5fbee3abd1aca600967f1de8ef17c68d171",
+  "notes": [
+    "Patch is against HEAD, not incremental. Filesystem and Store tests include earlier async read/crypto/cache work; apply J/K/L/M facade/queue/cache/protocol changes for full reproduction.",
+    "Flights run inside the existing 4-active/256-pending read queue. At least one slot is retained per active flight, including after the last consumer cancels.",
+    "Single consumer cancellation does not abort shared readers. All-consumer cancellation aborts underlying work, drains last slot, and permits a new identity-protected flight.",
+    "Full npm test: 2038 passed, 1 skipped. Build succeeded. Later exact invalidation/all-cancel coverage: final 45 targeted tests passed, node types and changed-file lint passed.",
+    "Synthetic 12-request cold-byte-cache bursts for 1MiB/16MiB plaintext/ciphertext use one body read and at most one decrypt. Timing is not Windows/HDD or p95 and may include host scheduling contention.",
+    "No global input/output/native/response byte or pixel-budget acceptance; Buffer copies remain per consumer. This batch does not complete PERF07."
+  ]
+}

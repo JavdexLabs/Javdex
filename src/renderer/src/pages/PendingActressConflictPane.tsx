@@ -1,3 +1,4 @@
+import ContinuousGrid from '../components/ContinuousGrid'
 import type { ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Ban, CircleAlert, GitMerge, Pencil, SquareArrowOutUpRight, Trash2, UserRoundSearch } from 'lucide-react'
@@ -362,34 +363,40 @@ export default function PendingActressConflictPane({
               type="search"
               className="search-input form-control-full"
               placeholder="搜索演员主名或别名…"
+              aria-label="搜索其他演员"
+              maxLength={256}
               value={otherOwner.search}
               onChange={(event) => otherOwner.changeSearch(event.target.value)}
             />
             <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
               {otherOwner.loading ? (
                 <EmptyState loading variant="modal" />
+              ) : otherOwner.error && otherOwner.window.total === 0 ? (
+                <div role="alert"><p>演员候选读取失败</p><Button size="sm" onClick={otherOwner.retry}>重试</Button></div>
               ) : otherOwner.options.length === 0 ? (
                 <EmptyState title="没有匹配的演员" variant="modal" />
               ) : (
-                otherOwner.options.map((item) => (
+                <ContinuousGrid remember={false} window={otherOwner.window} scope={`owner:${otherOwner.search}`} label="其他演员" itemHeight={64} itemKey={item => item.id} renderItem={item => (
                   <button
                     key={item.id}
                     type="button"
+                    disabled={otherOwner.excludedIds.includes(item.id)}
                     aria-pressed={otherOwner.selected?.id === item.id}
+                    aria-busy={otherOwner.choosingId === item.id}
                     className={otherOwner.selected?.id === item.id ? 'is-selected' : ''}
                     onClick={() => otherOwner.choose(item)}
                   >
                     <ActressAvatar
                       src={resolveMediaSrc(item.avatar_path)}
                       name={item.main_name}
-                      gender={item.gender}
                       decorative
                     />
-                    <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
+                    <span><strong>{item.main_name}</strong><small>{otherOwner.choosingId === item.id ? '读取中…' : '选择为拟定归属'}</small></span>
                   </button>
-                ))
+                )} />
               )}
             </div>
+
           </div>
         </ConfirmModal>
       ) : null}
@@ -679,7 +686,6 @@ export default function PendingActressConflictPane({
                   name={otherOwner.selected.main_name}
                   hint="已从演员库选择"
                   avatarSrc={otherOwner.selected.avatar_path}
-                  gender={otherOwner.selected.gender}
                   actressId={otherOwner.selected.id}
                   extraAction={
                     <IconButton

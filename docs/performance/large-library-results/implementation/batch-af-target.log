@@ -1,0 +1,66 @@
+▶ database schema
+  ✔ adds STRM source identity without changing existing resource identity or link deduplication (5.516209ms)
+  ✔ allows duplicate codes while enforcing complete video business identity (2.874875ms)
+  ✔ upgrades video identity without changing ids, resources, or site sources (3.338834ms)
+  ✔ leaves a v10 database untouched when normalized business identities conflict (0.410125ms)
+  ✔ migrates legacy classification text into stable entities and retires legacy storage (5.636834ms)
+  ✔ retires v8 text storage without changing video metadata, entity ids, or child resources (13.273458ms)
+  ✔ stores classification profiles, hierarchy, roles, links, and video references (2.443209ms)
+  ✔ rolls back the complete classification migration when entity creation fails (1.049167ms)
+  ✔ rolls back classification entities when retiring legacy storage fails (1.635292ms)
+  ✔ migrates uncontested names to ownership and preserves cross-actress collisions for review (11.142208ms)
+  ✔ rolls back name ownership data and schema version when migration fails (7.900334ms)
+  ✔ creates the current schema and records user_version (3.147417ms)
+  ✔ migrates v6 video files to local resources without losing data (4.767958ms)
+  ✔ migrates released v1 inline video files and removes the obsolete write constraint (7.979667ms)
+  ✔ rejects databases newer than the supported schema version (0.138334ms)
+  ✔ upgrades v1 actresses table with avatar source columns (3.612041ms)
+  ✔ upgrades v2 actress names to one current primary name without removing visible names (3.587ms)
+  ✔ leaves current-version databases unchanged (0.149083ms)
+  ✔ classifies v3 actresses only when a success time has actual profile evidence (4.148334ms)
+  ✔ keeps the migrated classification unchanged when migration is run again (4.211959ms)
+  ✔ rolls back the whole actress status migration when classification fails (0.511ms)
+✔ database schema (88.047959ms)
+▶ V14 unreleased feature consolidation migration
+  ✔ creates a fresh database with one active default media library (5.653833ms)
+  ✔ upgrades released V13 data while keeping playlist import sessions out of the schema (4.072375ms)
+  ✔ scopes pending path identity to each library in the final V14 schema (3.090042ms)
+  ✔ enforces one primary per membership while archived sources can be adopted by another library (2.729917ms)
+  ✔ rolls back V14 when released source paths normalize to the same identity (0.9375ms)
+✔ V14 unreleased feature consolidation migration (16.964708ms)
+▶ V15 local NFO import migration
+  ✔ creates fresh V15 databases with automatic import enabled and identity constraints (5.752125ms)
+  ✔ upgrades V14 rows, preserves the default, and enforces minimal pending identity snapshots (0.842666ms)
+  ✔ rolls the migration back and leaves user_version at V14 on schema conflict (0.294542ms)
+✔ V15 local NFO import migration (7.279375ms)
+✔ adds the cleanup queue and later indexes when upgrading V15 and preserves old business data and damaged diagnostic state (7.059083ms)
+✔ rolls back both DDL and version when V16 fails after table creation, then upgrades on retry (4.650875ms)
+✔ upgrades V16 without changing any business rows or other schema and matches fresh V17 (11.521375ms)
+✔ rolls back index DDL and version after drop failure, then retries (5.246458ms)
+✔ rolls back index DDL and version after create failure, then retries (5.650292ms)
+▶ tagRepo.pruneUnusedTags
+  ✔ deletes tags with no video links and keeps tags still used by a video (9.90425ms)
+✔ tagRepo.pruneUnusedTags (10.344208ms)
+▶ tagRepo selected labels
+  ✔ looks up only selected IDs through the tag primary key and omits deleted IDs (11.794209ms)
+  ✔ bounds display labels and JSON bytes without changing full stored names (8.867833ms)
+  ✔ rejects invalid or oversized requests and does no SQL work for an empty selection (6.208042ms)
+✔ tagRepo selected labels (27.045333ms)
+▶ tagRepo manual candidates
+  ✔ pages alphabetically without counts and retains hidden/manual-only associations (15.596583ms)
+  ✔ preserves Unicode/literal substring matching and searches beyond display truncation (7.011458ms)
+  ✔ uses tag-key existence checks under skewed statistics and validates its work limits (12.357542ms)
+✔ tagRepo manual candidates (35.0905ms)
+▶ tagRepo active catalog projection
+  ✔ matches manual association and visibility semantics before and after statistics maintenance (23.485833ms)
+  ✔ deduplicates shared memberships and preserves manual origin and zero-count tags (6.265125ms)
+  ✔ counts only videos that can be opened through the active visible catalog (6.431166ms)
+✔ tagRepo active catalog projection (36.259417ms)
+ℹ tests 44
+ℹ suites 7
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 419.996709

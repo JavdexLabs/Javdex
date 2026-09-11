@@ -1,0 +1,19 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ac-selected-tag-labels.patch": "52c05bc0647df869dba9f491498395ef56a5e3e11c0d1c7ac3c3a84918d41703",
+    "batch-ac-target-tests.log": "706b606da3745a2ad8ac65e99d085025de9dca9e91f253d9b3aa94146a8ac2b2",
+    "batch-ac-full-tests.log": "ba63ff2721b9d119ca113c43c33cafd1246050834a3e6ccdf391b9f8f775c135",
+    "batch-ac-build.log": "506123c894ecdca85d1b68ee8d337690245006e9ac1bd80e313d4dda0dd58748",
+    "batch-ac-labels-300382.json": "74994151c09e2486b3a2b4207280ded95eba133b7189871c7479b66dbda55c16"
+  },
+  "notes": [
+    "Cumulative selected source snapshot vs HEAD; includes earlierB-AB changes in shared/IPC/preload/tagRepo and fulluntrackedbenchmark. Depends on priorbatches; not standalone patch.",
+    "tags.labels accepts<=100positive safeIDs, returns id/displaylabel only from tags PK; SQLtruncates128codepoints plusellipsis. Display-only; fullDBnames and tagidentity untouched. JSONworst-controlfixture below96KiB.",
+    "LibraryPage removes fulltag-count lookup sidepath and missingID refetch loop. Hook retains one selectedsnapshot, stale responseguard, negative/error completion withoutautomaticretry, detailreturnrefresh. TagFilter and manualpicker fullcatalog queries remain.",
+    "27target tests passed; fullnpmtest2131pass/1skip/0fail; build passed. Standards/Specstatic reviews no blockers. Hook lifecycle and schema/repo tests are not full LibraryPage visual/interaction tests.",
+    "After fullsuite/build terminal, separate300382analyzed mainbenchmark passed. selected3labels0.01846ms76B; selected100labels0.04883ms2685B; complete tags569.34ms46787B. Three warmsampleslocalmacOS, not IPCend-to-end/p95/customerWindows/HDD.",
+    "Mainbenchmark now includes2selected-label cases; historicalAA/ABprobe25/27counts remainhistorical. AC ran full300382analyzed matrix, not refreshed27/29statisticsprobe.",
+    "No new schema/index, userdatabaseaccess, commits,push,release. Full15packages42risks remainincomplete."
+  ]
+}

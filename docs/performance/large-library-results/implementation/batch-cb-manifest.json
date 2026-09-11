@@ -1,0 +1,16 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cb-build.log": "0d5a16df5531c0fd5d3412e6d1fac1fcf340513d8a5a1b3caca855cd4cf8d7d6",
+    "batch-cb-full.log": "8c59892e33f7e5584217e9b61731c77facfc7e86dcf04799e7c3a955883cec25",
+    "batch-cb-review.md": "b8bc74cd280ccf9021249d9faef1ca6d6620c767208f3287729f50d119e8ffb0",
+    "batch-cb-target.log": "f80ad74a63e1de809dbe10cdabc033552ffcd812dfe667120b3f7764e8e5523c",
+    "batch-cb-view-worker-ipc.patch": "ba67fb0c2467b7cf44f8cccccc5e39ac2c8036bf11afc48e63d6d6bfe2650f54",
+    "batch-cb-worker.log": "1a6b62a81d3e1bd60e430de82cc6bfbf953c45309900f687f0c734c763ff1b85"
+  },
+  "notes": [
+    "Selected cumulative patch depends on CA and earlier batches.",
+    "85 focused; full2429pass1skip0fail; build terminal0.",
+    "Shared worker remains susceptible to search-induced queued-tag delay. Actual UI not cut over; full15/42 incomplete."
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "results": [
+    {
+      "count": 50000,
+      "mode": "full",
+      "samples": [
+        {
+          "elapsedMs": 11.592249999999979,
+          "firstMs": 11.300958999999978,
+          "rows": 50000,
+          "checksum": 1250025000
+        },
+        {
+          "elapsedMs": 9.21670899999998,
+          "firstMs": 8.873334,
+          "rows": 50000,
+          "checksum": 1250025000
+        },
+        {
+          "elapsedMs": 11.692042000000015,
+          "firstMs": 11.394542000000001,
+          "rows": 50000,
+          "checksum": 1250025000
+        }
+      ]
+    },
+    {
+      "count": 50000,
+      "mode": "paged",
+      "samples": [
+        {
+          "elapsedMs": 10.204625000000021,
+          "firstMs": 0.9322920000000181,
+          "rows": 50000,
+          "checksum": 1250025000
+        },
+        {
+          "elapsedMs": 10.069333000000029,
+          "firstMs": 0.9385000000000332,
+          "rows": 50000,
+          "checksum": 1250025000
+        },
+        {
+          "elapsedMs": 10.134791000000007,
+          "firstMs": 0.9110410000000115,
+          "rows": 50000,
+          "checksum": 1250025000
+        }
+      ]
+    },
+    {
+      "count": 300000,
+      "mode": "full",
+      "samples": [
+        {
+          "elapsedMs": 94.5713330000001,
+          "firstMs": 89.05933299999992,
+          "rows": 300000,
+          "checksum": 45000150000
+        },
+        {
+          "elapsedMs": 84.56229200000007,
+          "firstMs": 81.27629200000001,
+          "rows": 300000,
+          "checksum": 45000150000
+        },
+        {
+          "elapsedMs": 84.04537500000015,
+          "firstMs": 82.16012500000011,
+          "rows": 300000,
+          "checksum": 45000150000
+        }
+      ]
+    },
+    {
+      "count": 300000,
+      "mode": "paged",
+      "samples": [
+        {
+          "elapsedMs": 72.07391600000005,
+          "firstMs": 5.884708000000046,
+          "rows": 300000,
+          "checksum": 45000150000
+        },
+        {
+          "elapsedMs": 72.6685,
+          "firstMs": 5.7693329999999605,
+          "rows": 300000,
+          "checksum": 45000150000
+        },
+        {
+          "elapsedMs": 73.10183300000017,
+          "firstMs": 5.7840419999999995,
+          "rows": 300000,
+          "checksum": 45000150000
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Single library, >200-character paths, ANALYZE; one warmup and 3 samples, full first.",
+    "Includes enumeration/checksum loop but excludes assertions; firstMs measures first consumer access.",
+    "Paged reference arrays at most256 (separate correctness test); total cleanup/audit memory, filesystem time, p95, cold I/O and sparse multi-library distributions not measured.",
+    "All enumeration synchronous within original cleanup transaction; no event-loop yielding or shorter writer transaction claimed."
+  ]
+}
+✔ measures bounded cleanup enumeration without claiming bounded audit memory (1939.724959ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2146.166417

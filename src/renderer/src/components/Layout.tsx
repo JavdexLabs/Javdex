@@ -22,7 +22,7 @@ import { ROUTE_PATH } from '../listView/routePaths'
 import { pendingCenterPath } from '../listView/pendingRoutes'
 import { actressKeys, mediaLibraryKeys } from '../query/queryKeys'
 import MediaLibraryNav from './MediaLibraryNav'
-import { pendingInboxCount } from '../pendingInboxState'
+import { pendingInboxBadgeValue, type PendingInboxBadgeValue } from '../pendingInboxState'
 import {
   isGlobalSearchShortcut,
   queueHomeGlobalSearchFocus
@@ -59,7 +59,7 @@ function NavItems({
   badgeTargets = {}
 }: {
   items: NavItem[]
-  badges?: Partial<Record<string, number>>
+  badges?: Partial<Record<string, PendingInboxBadgeValue>>
   badgeTargets?: Partial<Record<string, string>>
 }): JSX.Element {
   const location = useLocation()
@@ -101,9 +101,13 @@ function NavItems({
       {items.map((n) => {
         const badgeCount = badges[n.to] ?? 0
         const badgeTarget = badgeTargets[n.to]
+        const hasBadge = typeof badgeCount !== 'number' || badgeCount > 0
+        const badgeLabel = badgeCount === 'loading' ? '待确认数量加载中，打开待确认项'
+          : badgeCount === 'error' ? '待确认数量加载失败，打开待确认项'
+          : `打开 ${badgeCount} 项待确认`
         return (
           <div
-            className={`nav-item-row${badgeCount > 0 && badgeTarget ? ' nav-item-row--with-badge' : ''}`}
+            className={`nav-item-row${hasBadge && badgeTarget ? ' nav-item-row--with-badge' : ''}`}
             key={n.to}
           >
             <NavLink
@@ -120,16 +124,16 @@ function NavItems({
               </span>
               <span className="nav-label">{n.label}</span>
             </NavLink>
-            {badgeCount > 0 && badgeTarget ? (
+            {hasBadge && badgeTarget ? (
               <button
                 type="button"
                 className="nav-count-badge"
-                aria-label={`打开 ${badgeCount} 项待确认`}
-                title="打开待确认项"
+                aria-label={badgeLabel}
+                title={badgeLabel}
                 onClick={() => handleBadgeClick(n.to, badgeTarget)}
               >
                 <span className="nav-count-badge__value">
-                  {badgeCount > 99 ? '99+' : badgeCount}
+                  {badgeCount === 'loading' ? '…' : badgeCount === 'error' ? '!' : badgeCount > 99 ? '99+' : badgeCount}
                 </span>
               </button>
             ) : null}
@@ -167,16 +171,17 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
     refetchInterval: 3_000
   })
   const pendingVideoQuery = useQuery({
-    queryKey: ['pending-video-scrapes'],
-    queryFn: () => api.scrape.listPending(),
+    queryKey: ['pending-video-scrapes', 'count'],
+    queryFn: () => api.scrape.countPending(),
     refetchInterval: 3_000
   })
   /** One inbox, one badge: scan groups, scrape snapshots and actress name conflicts. */
-  const pendingBadges: Record<string, number> = {
-    [ROUTE_PATH.pending]: pendingInboxCount({
-      libraries: librariesQuery.data ?? [],
-      pendingVideoCount: pendingVideoQuery.data?.length ?? 0,
-      actressConflictGroupCount: conflictSummaryQuery.data?.groupCount ?? 0
+  const pendingBadges: Record<string, PendingInboxBadgeValue> = {
+    [ROUTE_PATH.pending]: pendingInboxBadgeValue({
+      libraries: librariesQuery.data,
+      pendingVideoCount: pendingVideoQuery.data,
+      actressConflictGroupCount: conflictSummaryQuery.data?.groupCount,
+      isError: librariesQuery.isError || pendingVideoQuery.isError || conflictSummaryQuery.isError
     })
   }
 

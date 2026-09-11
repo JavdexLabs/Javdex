@@ -1,0 +1,76 @@
+✔ matches final legacy callbacks on equivalent fresh catalogs including merged NFO and repeated paths (31.663625ms)
+✔ commits singleton audit deliveries while the next duration probe is held, outside a database transaction (10.22525ms)
+✔ timer cancellation preserves already committed entries and stops incremental delivery (11.674958ms)
+✔ rejects mutually exclusive sinks before database, directory, probe or callback work (6.32225ms)
+✔ propagates recordFile sink failure without converting it to processing_failure (7.933458ms)
+✔ propagates readFileNfo sink failure without converting it to processing_failure (7.998292ms)
+✔ propagates patchNfo sink failure without converting it to processing_failure (7.564209ms)
+✔ treats a missing NFO patch target after a successful read as fatal (8.219292ms)
+✔ rejects recordFile resolved thenables without late unhandled rejection (7.749791ms)
+✔ rejects recordFile rejected thenables without late unhandled rejection (7.693625ms)
+✔ rejects readFileNfo resolved thenables without late unhandled rejection (7.882542ms)
+✔ rejects readFileNfo rejected thenables without late unhandled rejection (7.682291ms)
+✔ rejects patchNfo resolved thenables without late unhandled rejection (7.737084ms)
+✔ rejects patchNfo rejected thenables without late unhandled rejection (7.882708ms)
+✔ atomically rolls back STRM target-update on native audit INSERT failure and retries with committed visibility (10.916334ms)
+✔ atomically rolls back STRM relocation on native audit INSERT failure and retries with committed visibility (11.089ms)
+✔ rolls back invalid STRM pending deletion on native audit failure and retries with one committed failure (11.023708ms)
+✔ rolls back local new-video business rows with native audit failure and retries atomically (10.271958ms)
+✔ rolls back local existing-video business rows with native audit failure and retries atomically (10.933875ms)
+✔ rolls back local must-confirm business rows with native audit failure and retries atomically (11.347833ms)
+✔ rolls back local relocation business rows with native audit failure and retries atomically (10.529959ms)
+✔ rolls back strm new-video business rows with native audit failure and retries atomically (9.996791ms)
+✔ rolls back strm existing-video business rows with native audit failure and retries atomically (11.016792ms)
+✔ rolls back strm must-confirm business rows with native audit failure and retries atomically (10.541584ms)
+✔ rolls back local identity-create on native audit failure and commits retry with matching pending state (9.740375ms)
+✔ rolls back local identity-refresh on native audit failure and commits retry with matching pending state (8.908541ms)
+✔ rolls back local pending-refresh on native audit failure and commits retry with matching pending state (9.312542ms)
+✔ rolls back strm identity-create on native audit failure and commits retry with matching pending state (9.30925ms)
+✔ rolls back strm identity-refresh on native audit failure and commits retry with matching pending state (8.622625ms)
+✔ rolls back strm pending-refresh on native audit failure and commits retry with matching pending state (8.779625ms)
+✔ rolls back registered local fingerprint-backfill on audit failure, retries and leaves skipped probes unchanged (10.530458ms)
+✔ rolls back registered local changed-fingerprint on audit failure, retries and leaves skipped probes unchanged (10.6195ms)
+Scan error for /var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-scanner-sink-kYy3rc/media/AUTH-001.mp4 MediaLibraryRepoError: 媒体库根目录不存在、已停用或不属于该媒体库。
+    at requireActivePersistedRoot (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:203:11)
+    at authorizeMediaLibraryRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:229:16)
+    at authorizeFileWrite (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:706:7)
+    at scanPreparedFolders (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:1061:22)
+    at async scanFolders (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:473:12) {
+  code: 'ROOT_NOT_FOUND',
+  conflict: undefined,
+  currentRevision: undefined
+}
+✔ rechecks root authorization after an awaited registered-resource probe before writing business fields (9.433041ms)
+✔ NFO transaction callback fault (10.025583ms)
+✔ NFO transaction callback unchanged (9.385625ms)
+✔ NFO transaction callback postcommit-warnings (10.166709ms)
+✔ links real local NFO parsing and business apply to scanner audit rollback, then retries the captured NFO transaction (13.368583ms)
+✔ transfers stopped partial counts including pending groups when a later NFO audit fails (9.213208ms)
+✖ does not rebuild the STRM relocation index for every audit-only write in a mixed scan (18.49125ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 38
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 755.892208
+
+✖ failing tests:
+
+test at src/main/scanner/scannerAuditSink.test.ts:26:3338
+✖ does not rebuild the STRM relocation index for every audit-only write in a mixed scan (18.49125ms)
+  AssertionError [ERR_ASSERTION]: audit-only writes must not force a full resource-index rebuild
+  
+  10 !== 1
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scannerAuditSink.test.ts:729:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 10,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

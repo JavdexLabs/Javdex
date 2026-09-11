@@ -1,3 +1,11 @@
+import type { ScanAuditSnapshotIdentity, ScanAuditIndexQuery, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
+import type { ClassificationPageQuery } from '@shared/classificationTypes'
+import type { ActressGalleryPageQuery } from '../shared/actressTypes'
+import type { ActressVideoPageQuery } from '../shared/actressTypes'
+import type { ActressMergeCandidateQuery } from '../shared/actressTypes'
+import type { ActressPickerQuery } from '../shared/actressTypes'
+import type { PendingAuditIds, PendingScanQueueQuery } from '../shared/libraryTypes'
+import type { WebAccessInput } from '../shared/webTypes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { UpdateCheckState } from '../shared/updateTypes'
@@ -87,7 +95,7 @@ import type {
   VideoScrapeField,
   VideoScrapeUpdateMode
 } from '../shared/scrapeTypes'
-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
+import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
 import type {
   LibraryScanEvent,
   PendingResourceIdentityResolution,
@@ -102,8 +110,8 @@ import type {
 } from '../shared/libraryTypes'
 import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
 import type { IpcResponse } from '../shared/ipcTypes'
-import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
-import type { SortDir } from '../shared/commonTypes'
+import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
 import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
 import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
 import type {
@@ -266,6 +274,17 @@ const api = {
     onStateChanged: (cb: (state: UpdateCheckState) => void) =>
       onAppEvent(IPC.APP_UPDATE_STATE_CHANGED, cb)
   },
+  webAccess: {
+    deviceReset: () => invokeApp(IPC.WEB_ACCESS_DEVICE_RESET),
+    deviceRename: (id: string, name: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_RENAME, id, name),
+    deviceRemove: (id: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_REMOVE, id),
+    pairDecide: (code: string, approve: boolean) => invokeApp(IPC.WEB_ACCESS_PAIR_DECIDE, code, approve),
+    pairInspect: (code: string) => invokeApp(IPC.WEB_ACCESS_PAIR_INSPECT, code),
+    pairOpen: () => invokeApp(IPC.WEB_ACCESS_PAIR_OPEN),
+    status: () => invokeApp(IPC.WEB_ACCESS_STATUS),
+    apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
+    revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)
+  },
   settings: {
     get: () => invokeApp(IPC.SETTINGS_GET),
     update: (patch: RendererSettingsPatch) => invokeApp(IPC.SETTINGS_UPDATE, patch),
@@ -302,6 +321,10 @@ const api = {
       invokeApp(IPC.SCAN_RUN, libraryId, rootIds),
     cancel: (runId: string) => invokeApp(IPC.SCAN_CANCEL, runId),
     getLatest: (libraryId: number) => invokeApp(IPC.SCAN_LATEST_GET, libraryId),
+    getAuditHeader: (libraryId: number) => invokeApp(IPC.SCAN_AUDIT_HEADER, libraryId),
+    getAuditPage: (snapshot: ScanAuditSnapshotIdentity, query: ScanAuditIndexQuery) => invokeApp(IPC.SCAN_AUDIT_PAGE, snapshot, query),
+    getAuditViewPage: (snapshot: ScanAuditSnapshotIdentity, query: ScanAuditViewQuery) =>
+      invokeApp(IPC.SCAN_AUDIT_VIEW_PAGE, snapshot, query),
     getAudit: (libraryId: number) => invokeApp(IPC.SCAN_AUDIT_GET, libraryId),
     revealAuditFile: (libraryId: number, filePath: string) =>
       invokeApp(IPC.SCAN_AUDIT_REVEAL_FILE, libraryId, filePath),
@@ -325,6 +348,11 @@ const api = {
       code: string,
       target: VideoResourceImportTarget
     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
+    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
+    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
+    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
+    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
+    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
     resolvePending: (
       libraryId: number,
@@ -369,6 +397,8 @@ const api = {
       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
     addManualTag: (id: number, name: string) =>
       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
+    addExistingManualTag: (id: number, tagId: number) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
     removeManualTag: (id: number, tagId: number) =>
       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
     importLinkResource: (input: VideoLinkResourceImportInput) =>
@@ -436,6 +466,13 @@ const api = {
       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
   },
   playlists: {
+    listPage: (query: import('@shared/playlistTypes').PlaylistListQuery) => invokeApp(IPC.PLAYLIST_LIST_PAGE, query),
+    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
+    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
+      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
+    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
+      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
     list: () => invokeApp(IPC.PLAYLIST_LIST),
     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
@@ -451,6 +488,13 @@ const api = {
       invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
   },
   actresses: {
+    mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
+    avatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_TARGETS),
+    countAvatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_COUNT),
+    testTargetPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_TEST_TARGET_PAGE, query),
+    testTargetGet: (id: number) => invokeActress(IPC.ACTRESS_TEST_TARGET_GET, id),
+    pickerGet: (id: number) => invokeActress(IPC.ACTRESS_PICKER_GET, id),
+    pickerPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_PICKER_PAGE, query),
     list: (
       search?: string,
       gender?: ActressGenderFilter,
@@ -459,6 +503,10 @@ const api = {
     ) => invokeActress(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
     listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
     faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),
+    galleryPage: (id: number, query?: ActressGalleryPageQuery) => invokeActress(IPC.ACTRESS_GALLERY_PAGE, id, query),
+    profile: (id: number) => invokeActress(IPC.ACTRESS_PROFILE, id),
+    metadata: (id: number) => invokeActress(IPC.ACTRESS_METADATA, id),
+    videoPage: (id: number, query?: ActressVideoPageQuery) => invokeActress(IPC.ACTRESS_VIDEO_PAGE, id, query),
     get: (id: number) => invokeActress(IPC.ACTRESS_GET, id),
     getAvatarSourceInfo: (id: number) =>
       invokeActress(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
@@ -479,12 +527,16 @@ const api = {
     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
   },
   tags: {
+    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
+    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
+    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
     list: () =>
       invokeApp(IPC.TAG_LIST),
     listManual: () =>
       invokeApp(IPC.TAG_LIST_MANUAL)
   },
   organizations: {
+    page: (query: OrganizationListQuery & ClassificationPageQuery) => invokeApp(IPC.ORGANIZATION_PAGE, query),
     list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),
     get: (id: number, role: OrganizationRole) => invokeApp(IPC.ORGANIZATION_GET, id, role),
     options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
@@ -501,6 +553,7 @@ const api = {
     remove: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE, id)
   },
   directors: {
+    page: (query: DirectorListQuery & ClassificationPageQuery) => invokeApp(IPC.DIRECTOR_PAGE, query),
     list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),
     get: (id: number) => invokeApp(IPC.DIRECTOR_GET, id),
     options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
@@ -512,6 +565,7 @@ const api = {
     remove: (id: number) => invokeApp(IPC.DIRECTOR_DELETE, id)
   },
   series: {
+    page: (query: SeriesListQuery & ClassificationPageQuery) => invokeApp(IPC.SERIES_PAGE, query),
     list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),
     get: (id: number) => invokeApp(IPC.SERIES_GET, id),
     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
@@ -522,6 +576,7 @@ const api = {
     remove: (id: number) => invokeApp(IPC.SERIES_DELETE, id)
   },
   classificationImages: {
+    page: (entity: ClassificationEntityRef, query?: ClassificationPageQuery) => invokeApp(IPC.CLASSIFICATION_IMAGE_PAGE, entity, query),
     candidates: (entity: ClassificationEntityRef) =>
       invokeApp(IPC.CLASSIFICATION_IMAGE_CANDIDATES, entity),
     set: (entity: ClassificationEntityRef, input: ClassificationImageInput | null) =>
@@ -545,6 +600,10 @@ const api = {
         directorSelectionId,
         libraryId
       ),
+    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
+    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
+    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
+    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
@@ -613,6 +672,8 @@ const api = {
         autoCropAvatar
       ),
     listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
+    getConflict: (normalizedName: string) => invokeActress(IPC.ACTRESS_CONFLICT_GET, normalizedName),
+    pageConflicts: (query: ActressConflictQueueQuery) => invokeActress(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, query),
     conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
     conflictSummary: () =>
       invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
@@ -743,6 +804,7 @@ const api = {
   },
   avatarAutoCropBatch: {
     begin: () => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
+    targets: (token: string, afterId: number) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, token, afterId),
     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   player: {

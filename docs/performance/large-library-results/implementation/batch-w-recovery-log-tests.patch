@@ -1,0 +1,110 @@
+diff --git a/src/main/agent-platform/agentExecution.test.ts b/src/main/agent-platform/agentExecution.test.ts
+index 281dc6d..a0a8fac 100644
+--- a/src/main/agent-platform/agentExecution.test.ts
++++ b/src/main/agent-platform/agentExecution.test.ts
+@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto'
+ import Database from 'better-sqlite3'
+ import { AGENT_PLATFORM_SCHEMA_SQL } from '../db/schema'
+ import { AgentExecution } from './agentExecution'
++import type { PluginDevAgentWorkLogEntry } from '@shared/pluginDevTypes'
++import { appendPluginWorkLog, readPluginWorkLog, type PersistedPluginWorkLog } from '../services/pluginDevAgent/workLogPersistence'
+ import { AgentRunStore, setAgentPayloadCipherForTests } from './agentRunStore'
+ import type {
+   AgentRuntimePort,
+@@ -335,3 +337,96 @@ describe('AgentExecution', () => {
+     }
+   })
+ })
++
++it('preserves newer product log references when aborting after a domain-only state update', async () => {
++  const { db, store } = storeHarness()
++  const runtime = new FakeRuntime()
++  const execution = new AgentExecution(store, async () => runtime)
++  try {
++    await execution.openRun({ runId: 'abort-newer-state', useCase: 'test', resolved: resolved(),
++      productState: { summary: 'old', workLog: { count: 1, throughSeq: 1 } } })
++    const latest = { summary: 'new domain event', workLog: { count: 2, throughSeq: 7 } }
++    store.updateProductState('abort-newer-state', 'waiting_user', latest)
++    await execution.abort('abort-newer-state', 'stop')
++    assert.equal(store.getRun('abort-newer-state')?.status, 'cancelled')
++    assert.deepEqual(store.getRun('abort-newer-state')?.productState, latest)
++  } finally {
++    await execution.dispose()
++    db.close()
++  }
++})
++
++
++for (const scenario of ['success', 'hash-failure', 'rebuild-failure', 'unreconciled-tool'] as const) {
++  it(`preserves append-only plugin history during checkpoint recovery: ${scenario}`, async (t) => {
++    const { db, store } = storeHarness()
++    const runtime = new FakeRuntime()
++    runtime.failOpen = new Error('checkpoint-corrupt: test checkpoint')
++    if (scenario === 'rebuild-failure') runtime.failRebuild = new Error('rebuild failed')
++    const execution = new AgentExecution(store, async () => runtime)
++    setAgentPayloadCipherForTests({
++      encrypt: (value) => Buffer.from(`test-cipher:${value}`),
++      decrypt: (value) => {
++        assert.ok(value.toString().startsWith('test-cipher:'))
++        return value.toString().slice('test-cipher:'.length)
++      }
++    })
++    type State = { schemaVersion: number; workLog: PersistedPluginWorkLog }
++    const entries: PluginDevAgentWorkLogEntry[] = Array.from({ length: 1001 }, (_, index) => ({
++      at: '2026-09-10T00:00:00Z', kind: 'user_message', sessionId: 'recovery-log', source: 'continue', text: `message-${index}`
++    }))
++    try {
++      store.createRun({ runId: 'recovery-log', useCase: 'plugin-developer', resolved: resolved(),
++        productState: { schemaVersion: 1, workLog: entries } })
++      const committed = store.updateProductStateFrom<State>('recovery-log', 'waiting_user', (current) => ({
++        schemaVersion: 2, workLog: appendPluginWorkLog('recovery-log', current.productState.workLog, entries, store)
++      }))
++      const payload = JSON.stringify({ kind: 'message', value: { role: 'user', content: 'restore me' } })
++      store.commitRuntimeObservation('recovery-log', {
++        type: 'message.completed', audit: { role: 'user', textPreview: 'restore me', contentHash: 'audit' },
++        recovery: { codecVersion: 1, payload, contentHash: createHash('sha256').update(payload).digest('hex') }
++      })
++      if (scenario === 'hash-failure') db.prepare("UPDATE agent_execution_history SET content_hash = 'wrong'").run()
++      if (scenario === 'unreconciled-tool') store.beginToolCall({
++        runId: 'recovery-log', callId: 'pending-write', toolName: 'write', argsDigest: 'args', effect: 'write'
++      })
++      const historyBefore = db.prepare('SELECT * FROM agent_execution_history').all()
++      const ledgerBefore = db.prepare('SELECT * FROM agent_tool_ledger').all()
++      const rebuild = t.mock.method(runtime, 'rebuild')
++      const open = () => execution.openRun({ useCase: 'plugin-developer', resolved: resolved(),
++        productState: committed, resume: store.getRun('recovery-log')! })
++      if (scenario === 'success') {
++        assert.equal((await open()).source, 'rebuilt')
++        assert.equal(store.getRun('recovery-log')?.recoveryGeneration, 1)
++        assert.equal(rebuild.mock.callCount(), 1)
++        const frames = rebuild.mock.calls[0].arguments[1]
++        assert.equal(frames.length, 1)
++        assert.equal(frames[0].recovery.payload, payload)
++        assert.equal(frames[0].codecVersion, 1)
++      } else {
++        const reason = scenario === 'hash-failure' ? /完整性校验失败/ : scenario === 'rebuild-failure' ? /rebuild failed/ : /未对账/
++        await assert.rejects(open, reason)
++        assert.equal(store.getRun('recovery-log')?.recoveryGeneration, 0)
++        const attempts = rebuild.mock.callCount()
++        assert.equal(attempts, scenario === 'rebuild-failure' ? 1 : 0)
++        await assert.rejects(open, /已尝试过重建/)
++        assert.equal(rebuild.mock.callCount(), attempts)
++      }
++      assert.deepEqual(store.getRun<State>('recovery-log')!.productState, committed)
++      assert.deepEqual(readPluginWorkLog('recovery-log', committed.workLog, store), entries)
++      assert.deepEqual(db.prepare('SELECT * FROM agent_execution_history').all(), historyBefore)
++      assert.deepEqual(db.prepare('SELECT * FROM agent_tool_ledger').all(), ledgerBefore)
++      if (scenario === 'success') {
++        entries.push({ at: '2026-09-10T00:00:01Z', kind: 'user_message', sessionId: 'recovery-log', source: 'continue', text: 'after rebuild' })
++        const next = store.updateProductStateFrom<State>('recovery-log', 'waiting_user', (current) => ({
++          schemaVersion: 2, workLog: appendPluginWorkLog('recovery-log', current.productState.workLog, entries, store)
++        }))
++        assert.deepEqual(readPluginWorkLog('recovery-log', next.workLog, store), entries)
++      }
++    } finally {
++      t.mock.restoreAll()
++      await execution.dispose()
++      db.close()
++    }
++  })
++}

@@ -1085,3 +1085,87 @@ describe('libraryPathCleanupService', () => {
     )
   })
 })
+
+function prepareAuditCleanup() {
+  const library = createLibrary('Audit cleanup', makeDirectory('audit-cleanup'))
+  const filePath = path.join(library.path, 'AUDIT-001.mp4')
+  const videoId = createLocalVideo({ ...library, code: 'AUDIT-001', filePath })
+  const removed = listVideoResources(library.libraryId, videoId)[0]
+  const promotedId = addWebResource(library.libraryId, videoId, 'AUDIT-001')
+  const database = getDb()
+  const groupId = Number(database.prepare('INSERT INTO pending_scan_groups(library_id,normalized_code) VALUES(?,?)')
+    .run(library.libraryId, 'PENDING-AUDIT').lastInsertRowid)
+  database.prepare(`INSERT INTO pending_scan_resources(library_id,group_id,root_id,file_path,normalized_path,source_kind)
+    VALUES(?,?,?,?,?,'local')`).run(library.libraryId, groupId, library.rootId, filePath, filePath)
+  const preview = previewLibraryPathRemoval(library)
+  const cleanup = confirmLibraryPathRemoval({ ...library, expectedRevision: library.revision, expectedImpactRevision: preview.impactRevision })
+  database.exec('CREATE TABLE test_cleanup_audit (section TEXT, entry_json TEXT)')
+  return { library, videoId, removed, promotedId, cleanup, filePath }
+}
+
+function auditCleanupSnapshot() {
+  return ['video_resources', 'library_root_cleanup_jobs', 'media_library_roots', 'pending_scan_resources',
+    'pending_scan_groups', 'pending_resource_identities', 'library_unrecognized_files', 'media_libraries',
+    'library_video_memberships', 'test_cleanup_audit'].map((table) =>
+    getDb().prepare(`SELECT * FROM ${table}`).all())
+}
+
+it('rolls back cleanup and audit writes on a native audit INSERT failure, then retries with safe source entries', () => {
+  const { library, videoId, removed, promotedId, cleanup, filePath } = prepareAuditCleanup()
+  const database = getDb(), before = auditCleanupSnapshot()
+  let calls = 0
+  database.exec(`CREATE TRIGGER fail_cleanup_audit_test AFTER INSERT ON test_cleanup_audit
+    WHEN NEW.section='promotedResources'
+    BEGIN SELECT RAISE(ABORT, 'native cleanup audit failed'); END`)
+  assert.throws(() => applyPendingLibraryPathCleanups([cleanup], (event) => {
+    calls++
+    assert.equal(database.inTransaction, true)
+    assert.deepEqual(listVideoResources(library.libraryId, videoId).map((resource) => [resource.id, resource.is_primary]), [[promotedId, 1]])
+    assert.equal(getMediaLibraryRoot(library.libraryId, library.rootId)?.state, 'disabled')
+    assert.deepEqual(database.prepare('SELECT state FROM library_root_cleanup_jobs WHERE id=?').get(cleanup.jobId), { state: 'completed' })
+    assert.deepEqual(database.prepare('SELECT * FROM pending_scan_resources WHERE root_id=?').all(library.rootId), [])
+    database.prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))
+  }), /native cleanup audit failed/)
+  assert.equal(calls, 2)
+  assert.deepEqual(auditCleanupSnapshot(), before)
+  database.exec('DROP TRIGGER fail_cleanup_audit_test')
+  const events: import('./libraryPathCleanupService').LibraryPathCleanupAuditEvent[] = []
+  const result = applyPendingLibraryPathCleanups([cleanup], (event) => {
+    events.push(event)
+    database.prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))
+  })
+  assert.deepEqual(result, { removed: 1, promoted: 1, consumedRoots: [{ libraryId: library.libraryId, rootId: library.rootId }] })
+  assert.deepEqual(events.map((event) => [event.section, event.entry.resourceId, event.entry.sourcePath, event.entry.reason]), [
+    ['removedResources', removed.id, filePath, 'removed_library_path'],
+    ['promotedResources', promotedId, null, 'promoted_after_removal']
+  ])
+  assert.equal(events[0].entry.videoCode, 'AUDIT-001')
+  assert.equal(JSON.stringify(events).includes('https://'), false)
+  assert.equal(database.prepare('SELECT * FROM test_cleanup_audit').all().length, 2)
+})
+
+for (const rejected of [false, true]) {
+  it(`rejects ${rejected ? 'rejected' : 'resolved'} thenable cleanup callbacks without committing or leaking a rejection`, async () => {
+    const { cleanup } = prepareAuditCleanup()
+    const before = auditCleanupSnapshot()
+    assert.throws(() => applyPendingLibraryPathCleanups([cleanup], async (event) => {
+      getDb().prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))
+      if (rejected) throw new Error('async audit failed')
+    }), /must be synchronous/)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.deepEqual(auditCleanupSnapshot(), before)
+    assert.equal(applyPendingLibraryPathCleanups([cleanup]).removed, 1)
+  })
+}
+
+
+it('does not emit planned audit facts if the batch skips a resource deletion', () => {
+  const { cleanup, removed } = prepareAuditCleanup()
+  const database = getDb(), before = auditCleanupSnapshot()
+  database.exec(`CREATE TRIGGER skip_cleanup_test BEFORE DELETE ON video_resources
+    WHEN OLD.id=${removed.id} BEGIN SELECT RAISE(IGNORE); END`)
+  let notified = false
+  assert.throws(() => applyPendingLibraryPathCleanups([cleanup], () => { notified = true }), /do not match the audit plan/)
+  assert.equal(notified, false)
+  assert.deepEqual(auditCleanupSnapshot(), before)
+})

@@ -1,0 +1,39 @@
+▶ file scan audit presentation
+  ✔ added new video (0.860875ms)
+  ✔ added existing video (0.047792ms)
+  ✔ updated relocated (0.039459ms)
+  ✔ updated metadata (0.038708ms)
+  ✔ updated STRM (0.051541ms)
+  ✔ pending new local (0.044375ms)
+  ✔ pending retained STRM (0.027667ms)
+  ✔ pending empty code and zero group (0.029416ms)
+  ✔ skipped unchanged with video (0.055084ms)
+  ✔ skipped short without video (0.056417ms)
+  ✔ skipped duplicate with zero video (0.035583ms)
+  ✔ unrecognized (0.037625ms)
+  ✔ STRM failure (0.02975ms)
+  ✔ processing failure (0.058375ms)
+  ✔ preserves caller indices, path fallback and explicit undefined fields (0.04875ms)
+✔ file scan audit presentation (1.885084ms)
+▶ NFO secondary presentation
+  ✔ imported: every primary outcome, warnings and attention (0.21825ms)
+  ✔ skipped: every primary outcome, warnings and attention (0.108542ms)
+  ✔ warning: every primary outcome, warnings and attention (0.11325ms)
+  ✔ pending-candidate: every primary outcome, warnings and attention (0.123833ms)
+  ✔ identity-conflict: every primary outcome, warnings and attention (0.107625ms)
+  ✔ uses only the disposition-specific non-null pending id, including zero (0.073417ms)
+✔ NFO secondary presentation (0.813834ms)
+▶ resource scan audit presentation
+  ✔ missing: full fields, source/title/display fallback and kinds (0.306292ms)
+  ✔ removed_library_path: full fields, source/title/display fallback and kinds (0.230042ms)
+  ✔ promoted_after_removal: full fields, source/title/display fallback and kinds (0.217041ms)
+✔ resource scan audit presentation (0.785208ms)
+✔ keeps optional enrichment fields structurally available without enriching raw views (0.02575ms)
+ℹ tests 25
+ℹ suites 3
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 119.506584

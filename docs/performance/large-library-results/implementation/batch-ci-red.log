@@ -1,0 +1,130 @@
+▶ scanFolders
+  ✔ rejects an archived library atomically when manual import resumes after probing (9.86875ms)
+  ✔ rejects manual import when the root is physically replaced while duration probing is suspended (6.692042ms)
+Scan error for /var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-scan-m5ExQl/scan-replaced-root/RACE-003.mp4 Error: 只能操作身份有效的启用媒体库根目录内文件
+    at rejectManagedRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:32:9)
+    at requireCurrentRootIdentity (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:86:5)
+    at assertRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:98:27)
+    at assertMediaLibraryRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:170:3)
+    at authorizeMediaLibraryRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:230:3)
+    at authorizeFileWrite (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:656:7)
+    at scanFolders (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:1142:7)
+    at async TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.test.ts:447:20)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async Suite.processPendingSubtests (node:internal/test_runner/test:911:7)
+  ✔ keeps scan state unchanged when a frozen root is physically replaced during probing (10.985125ms)
+Scan error for /var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-scan-zlsZcI/rename-import-replaced-root/RACE-004.mp4 Error: 只能操作身份有效的启用媒体库根目录内文件
+    at rejectManagedRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:32:9)
+    at requireCurrentRootIdentity (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:86:5)
+    at assertRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:98:27)
+    at assertMediaLibraryRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:170:3)
+    at authorizeMediaLibraryRootFile (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaLibraryRootFileGuard.ts:230:3)
+    at authorizeFileWrite (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:656:7)
+    at scanFolders (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:1074:9)
+    at async renameAndImport (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.ts:1444:20)
+    at async TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.test.ts:536:19)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+  ✔ does not commit or rename a replacement-root file when rename-import resumes after probing (8.706333ms)
+  ✔ rejects a disabled target root at the resource transaction boundary (6.020292ms)
+  ✔ reuses archived local and STRM source paths without crossing library ownership (10.754625ms)
+  ✔ imports mixed local and STRM resources into one video and keeps the local file primary (7.718333ms)
+  ✔ chooses the scan primary independently of directory entry order (6.998167ms)
+  ✔ reselects the primary when scanning into an existing resource-less video (7.436625ms)
+  ✔ keeps mixed local and STRM resources in one masked pending group (8.042916ms)
+  ✔ rejects a stale pending STRM assignment, refreshes its snapshot, then accepts it (8.087083ms)
+  ✔ removes an invalidated STRM snapshot from the pending group on a later scan (6.926542ms)
+  ✔ syncs a changed STRM target in place while preserving primary and user-maintained fields (7.522ms)
+  ✔ isolates invalid STRM files and retries them without replacing a bound target (9.287458ms)
+  ✔ relocates STRM only when the complete filename and target identify one missing source (11.123583ms)
+  ✔ loads STRM candidates once per scan across imports, moves and pending writes (136.391583ms)
+  ✔ relocates a bound STRM after its video code has been corrected (8.6995ms)
+  ✔ holds new resources for confirmation when several videos already use the code (6.828958ms)
+  ✔ keeps an already-pending path out of relocation and refreshes its pending snapshot (6.585042ms)
+  ✔ holds a same-scan multi-file code together when automatic assignment is disabled (6.642334ms)
+  ✔ does not let an invalid STRM force a valid same-code video into confirmation (7.0105ms)
+  ✔ persists a pending scan group across database reopen and assigns it atomically (8.826417ms)
+  ✔ rolls back every scan assignment when final pending-group deletion fails (7.779834ms)
+  ✔ imports one unambiguous file normally when automatic assignment is disabled (7.161417ms)
+  ✔ holds a new resource that matches one existing video when automatic assignment is disabled (6.666375ms)
+  ✔ promotes the available resource when assigning into an existing video without a primary (7.358416ms)
+  ✔ normalizes a manual code and attaches to an existing case-insensitive identity (42.113208ms)
+  ✔ aborts when a nested directory cannot be audited (5.931125ms)
+  ✔ imports a symbolic-link video by its link path and file name (6.976ms)
+  ✔ does not follow symbolic-link directories (5.984167ms)
+  ✔ silently skips a broken symbolic-link video (9.125917ms)
+  ✔ leaves missing-resource cleanup to the high-level scan coordinator (7.674083ms)
+  ✔ keeps distinct symbolic-link paths that point to the same target (7.970167ms)
+  ✔ keeps a resource under an unavailable root when the same code appears online (8.111167ms)
+  ✔ relocates one same-code video by a unique file-size match without requiring the old name (6.489167ms)
+  ✔ uses full file name and size to relocate safely when several videos share a code (6.621208ms)
+  ✔ does not relocate when full file name and size match more than one duplicate-code video (6.526ms)
+  ✔ treats a new file normally when an old same-code path cannot be audited (7.712666ms)
+  ✔ keeps an unrecognized rename and only rediscovers the renamed file (9.027541ms)
+  ✔ uses the scan same-code pending flow when automatic merging is disabled (9.657458ms)
+  ✔ renames and discovers the code without a manual code or target (7.018083ms)
+  ✔ renames and imports an unrecognized STRM as a source-managed link (7.527208ms)
+  ✔ imports recognized videos and reports unrecognized files (7.3695ms)
+  ✔ reuses scanned directory entries when checking a directory without NFO files (34.673166ms)
+  ✔ refreshes a changed local identity snapshot on rescan before user confirmation (8.533167ms)
+  ✔ refreshes a changed strm identity snapshot on rescan before user confirmation (7.503292ms)
+  ✔ uses NFO identity only for newly discovered resources when automatic import is enabled (11.15125ms)
+  ✖ yields between immediately resolved NFO batches so abort runs without losing committed audits or primaries (45.592708ms)
+  ✖ yields while delivering final audits but drains every committed entry and reports cancellation (52.2ms)
+  ✔ handles cancellation during the only or first NFO application and preserves committed file audits (18.103584ms)
+  ✔ aggregates first-discovery NFO candidates once per video after all resources are assigned (9.1085ms)
+  ✔ does not count an existing pending resource identity as a new same-code file (9.199333ms)
+  ✔ keeps distinct local NFO candidates in the existing confirmation workflow (13.102333ms)
+  ✔ persists a filename/NFO identity conflict without creating formal library records (7.712333ms)
+  ✔ persists only a masked STRM target projection for an NFO identity conflict (21.719042ms)
+  ✔ keeps a valid filename import when its NFO is invalid and records only a secondary warning (8.433917ms)
+  ✔ uses NFO identity across libraries but never overwrites a globally scraped-success video (9.566ms)
+  ✔ applies local NFO with fill-empty semantics for new and failed videos (12.653667ms)
+  ✔ reattaches a scanned file to an existing no-resource video without replacing metadata (7.269667ms)
+  ✔ yields while scanning large batches (41.265208ms)
+  ✔ collects a very large root without overflowing call arguments before cancellation (1050.4165ms)
+  ✔ stops when cancelled (27.667458ms)
+  ✔ skips new imports shorter than 30 minutes (7.513541ms)
+  ✔ skips short files before unrecognized handling (6.479292ms)
+  ✔ stores probed duration on import (7.217583ms)
+  ✔ refreshes duration when the file changes on rescan (7.580584ms)
+  ✔ skips duration probe on rescan when file is unchanged (7.500917ms)
+  ✔ emits one final audit outcome for every processed file (6.915291ms)
+✖ scanFolders (1938.959125ms)
+ℹ tests 68
+ℹ suites 1
+ℹ pass 66
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2379.136208
+
+✖ failing tests:
+
+test at src/main/scanner/scanner.test.ts:16:29485
+✖ yields between immediately resolved NFO batches so abort runs without losing committed audits or primaries (45.592708ms)
+  AssertionError [ERR_ASSERTION]: setImmediate abort must run before all 30 immediate NFO applications; observed 30
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.test.ts:1955:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at src/main/scanner/scanner.test.ts:16:32126
+✖ yields while delivering final audits but drains every committed entry and reports cancellation (52.2ms)
+  AssertionError [ERR_ASSERTION]: setImmediate must observe partial audit delivery; observed 30
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanner.test.ts:1996:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bv-build.log": "bd4803645e9cf932de4528280bb2d0e9755ba3d93283d94cc5024696ffe39b41",
+    "batch-bv-full.log": "2cdc282743628bea7608e5a8540e93a2aa497119ca3e5e074897af5c757d4afa",
+    "batch-bv-on-demand-history.patch": "559ea61e69690d534572358f6f668a26ab0fa1f11a876e81e42dc439dc9e8b22",
+    "batch-bv-review.md": "80c8813e6b1e17bdbf9c1815c4142cba0924723d0f8255223cc487d1574c8ae2",
+    "batch-bv-stale-refresh-red.log": "1a547d5f7534f0e50f41dcd516003afa475c6c02d58599f440a99fc2c22bd16a",
+    "batch-bv-target.log": "6d30f7e05fafb9d13d85a5ec3d120b631f41d78d7286a5c38227941db15eb8b1"
+  },
+  "notes": [
+    "Selected cumulative source patch depends on earlier batches.",
+    "7 focused; full2370pass1skip0fail; build terminal0.",
+    "No browser or performance benchmark; actual hook/QueryClient and tab rendering tested.",
+    "Opening sources still reads full audit. Full15/42goal remains incomplete."
+  ]
+}

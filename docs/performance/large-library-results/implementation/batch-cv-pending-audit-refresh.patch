@@ -1,0 +1,696 @@
+diff --git a/src/main/db/pendingScanAuditRepo.ts b/src/main/db/pendingScanAuditRepo.ts
+new file mode 100644
+index 0000000..c6c9690
+--- /dev/null
++++ b/src/main/db/pendingScanAuditRepo.ts
+@@ -0,0 +1,96 @@
++import type { LibraryScanPendingGroupAuditEntry } from '@shared/libraryTypes'
++import type Database from 'better-sqlite3'
++import { randomUUID } from 'node:crypto'
++import { getDb } from './database'
++
++/** Only hydrate audit summary fields for referenced groups; stream their paths for exact Set matching. */
++export function readPendingScanAuditEntries(
++  libraryId: number,
++  groupIds: ReadonlySet<number>,
++  pendingPaths: ReadonlySet<string>
++): LibraryScanPendingGroupAuditEntry[] {
++  if (!Number.isSafeInteger(libraryId) || libraryId <= 0) throw new Error('Invalid scan audit library')
++  const db = getDb()
++  return db.transaction(() => {
++    if (!db.prepare('SELECT 1 FROM media_libraries WHERE id=?').get(libraryId)) throw new Error('媒体库不存在。')
++    if (!groupIds.size) return []
++    // IDs drive primary-key lookups, then SQLite orders only the selected groups.
++    const groups = db.prepare(`SELECT g.id,g.normalized_code FROM json_each(?) selected
++      CROSS JOIN pending_scan_groups g ON g.id=selected.value
++      WHERE g.library_id=? ORDER BY g.updated_at,g.id`)
++    const resources = db.prepare('SELECT file_path FROM pending_scan_resources WHERE library_id=? AND group_id=?')
++    const result: LibraryScanPendingGroupAuditEntry[] = []
++    for (const value of groups.iterate(JSON.stringify([...groupIds]), libraryId)) {
++      const group = value as { id: number; normalized_code: string }
++      let resourceCount = 0
++      for (const entry of resources.iterate(libraryId, group.id)) {
++        if (pendingPaths.has((entry as { file_path: string }).file_path)) resourceCount++
++      }
++      result.push({ groupId: group.id, normalizedCode: group.normalized_code, resourceCount })
++    }
++    return result
++  })()
++}
++
++/**
++ * Read final staged file outcomes without hydrating files or JS path/group sets.
++ * The synchronous visitor shares this transaction (or its caller's outer write
++ * transaction); a callback failure rolls back writes made during the visit.
++ * SQL materializes a narrow TEMP snapshot, then each completed singleton .get
++ * precedes the callback so nested writer savepoints never see a busy iterator.
++ * One normalizedCode can still be large: the visitor/writer owns byte rejection;
++ * this API does not truncate it or claim a byte bound on that singleton string.
++ */
++export function visitPendingScanAuditEntriesForRun(
++  db: Database.Database,
++  scope: { libraryId: number; runId: string },
++  visit: (entry: LibraryScanPendingGroupAuditEntry) => void
++): void {
++  const { libraryId, runId } = scope
++  if (!Number.isSafeInteger(libraryId) || libraryId <= 0 ||
++      typeof runId !== 'string' || !runId || runId.length > 256) throw new Error('Invalid scan audit scope')
++  db.transaction(() => {
++    const run = db.prepare(`SELECT r.library_id, r.status, m.state FROM library_scan_runs r
++      LEFT JOIN library_scan_audit_manifests m ON m.run_id=r.id WHERE r.id=?`).get(runId) as
++      { library_id: number; status: string; state: string | null } | undefined
++    if (!run || run.library_id !== libraryId) throw new Error('Scan audit run does not belong to library')
++    if (run.status !== 'running' || run.state !== 'collecting') throw new Error('Scan audit requires a running collecting run')
++    // Generated SQL identifier, never caller input. CREATE is inside our
++    // transaction/savepoint, so failure rolls it back without masking the error.
++    const table = `pending_scan_audit_visit_${randomUUID().replaceAll('-', '')}`
++    db.exec(`CREATE TEMP TABLE ${table} (
++      ordinal INTEGER PRIMARY KEY, groupId INTEGER NOT NULL,
++      normalizedCode TEXT NOT NULL, resourceCount INTEGER NOT NULL
++    )`)
++    db.prepare(`INSERT INTO temp.${table}(ordinal,groupId,normalizedCode,resourceCount)
++      WITH referenced AS (
++        SELECT DISTINCT json_extract(entry_json, '$.groupId') AS group_id
++        FROM library_scan_audit_entries WHERE run_id=@runId AND section='files'
++          AND json_extract(entry_json, '$.outcome')='pending'
++          AND json_type(entry_json, '$.groupId')='integer'
++          AND json_extract(entry_json, '$.groupId') BETWEEN 1 AND 9007199254740991
++      )
++      SELECT ROW_NUMBER() OVER (ORDER BY g.updated_at,g.id), g.id AS groupId, g.normalized_code AS normalizedCode,
++        (SELECT COUNT(*) FROM pending_scan_resources r
++          WHERE r.library_id=@libraryId AND r.group_id=g.id AND EXISTS (
++            SELECT 1 FROM library_scan_audit_entries f
++            WHERE f.run_id=@runId AND f.section='files'
++              AND f.entry_key=r.file_path COLLATE BINARY
++              AND json_extract(f.entry_json, '$.outcome')='pending'
++          )) AS resourceCount
++      FROM referenced selected CROSS JOIN pending_scan_groups g ON g.id=selected.group_id
++      WHERE g.library_id=@libraryId ORDER BY g.updated_at,g.id`).run({ libraryId, runId })
++    const read = db.prepare(`SELECT groupId,normalizedCode,resourceCount FROM temp.${table} WHERE ordinal=?`)
++    for (let ordinal = 1; ; ordinal++) {
++      const entry = read.get(ordinal) as LibraryScanPendingGroupAuditEntry | undefined
++      if (!entry) break
++      const returned: unknown = visit(entry)
++      if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
++          typeof (returned as { then?: unknown }).then === 'function') {
++        void Promise.resolve(returned).catch(() => {})
++        throw new Error('Pending audit visitor must be synchronous')
++      }
++    }
++    db.exec(`DROP TABLE temp.${table}`)
++  })()
++}
+diff --git a/src/main/db/scanAuditWriter.ts b/src/main/db/scanAuditWriter.ts
+new file mode 100644
+index 0000000..5e07f71
+--- /dev/null
++++ b/src/main/db/scanAuditWriter.ts
+@@ -0,0 +1,222 @@
++import type Database from 'better-sqlite3'
++import type { LibraryScanAudit, LibraryScanNfoAudit } from '@shared/libraryTypes'
++import { SCAN_AUDIT_SECTIONS, type ScanAuditSection } from '@shared/scanAuditReadTypes'
++import { isFileEntry, isResourceEntry, normalizeAudit } from '../scanner/libraryScanAuditValidation'
++import { visitPendingScanAuditEntriesForRun } from './pendingScanAuditRepo'
++
++export type ScanAuditMetadata = Omit<LibraryScanAudit, ScanAuditSection>
++export interface ScanAuditWriterScope { libraryId: number; runId: string }
++export const SCAN_AUDIT_WRITE_MAX_ITEMS = 100
++export const SCAN_AUDIT_WRITE_MAX_BYTES = 1024 * 1024
++export const SCAN_AUDIT_META_MAX_BYTES = 256 * 1024
++
++function encodeObject(value: unknown): { body: string; value: Record<string, unknown> } {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Audit input must be a JSON object')
++  const body = JSON.stringify(value)
++  if (typeof body !== 'string') throw new Error('Audit input is not serializable')
++  const parsed: unknown = JSON.parse(body)
++  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Audit input must serialize to an object')
++  return { body, value: parsed as Record<string, unknown> }
++}
++
++function positiveId(value: unknown): boolean { return Number.isSafeInteger(value) && Number(value) > 0 }
++function text(value: unknown): boolean { return typeof value === 'string' && value.length > 0 }
++
++function validateEntry(section: ScanAuditSection, value: Record<string, unknown>): void {
++  let valid: boolean
++  switch (section) {
++    case 'files': valid = isFileEntry(value); break
++    case 'removedResources':
++    case 'promotedResources': valid = isResourceEntry(value); break
++    case 'deletedVideos':
++      valid = positiveId(value.videoId) && text(value.videoCode) &&
++        (value.videoTitle === null || typeof value.videoTitle === 'string') && value.reason === 'resource_less'
++      break
++    case 'pendingGroups':
++      valid = positiveId(value.groupId) && text(value.normalizedCode) &&
++        Number.isSafeInteger(value.resourceCount) && Number(value.resourceCount) >= 0
++      break
++    default: throw new Error('Unknown audit section')
++  }
++  if (!valid) throw new Error(`Invalid audit entry in ${section}`)
++}
++
++/**
++ * Synchronous, caller-owned connection. Nested transactions are savepoints, so
++ * callers may commit business changes and audit writes in one outer transaction.
++ * This module does not publish, recover, activate scanning, or own the connection.
++ * Budgets apply to each operation, not cumulative retention. Initial finishedAt
++ * may be a nonempty placeholder; seal supplies final metadata before publication.
++ * Encoding precedes byte checks: these limits do not bound caller input memory
++ * or the temporary allocation made by JSON.stringify.
++ */
++export function createScanAuditWriter(db: Database.Database, scope: ScanAuditWriterScope) {
++  const { libraryId, runId } = scope
++  if (!positiveId(libraryId) || typeof runId !== 'string' || !runId || runId.length > 256) throw new Error('Invalid audit writer scope')
++
++  function assertRunning(): void {
++    const run = db.prepare('SELECT library_id, status, audit_json IS NULL AS json_free FROM library_scan_runs WHERE id=?')
++      .get(runId) as { library_id: number; status: string; json_free: number } | undefined
++    if (!run || run.library_id !== libraryId) throw new Error('Audit run does not belong to library')
++    if (run.status !== 'running' || run.json_free !== 1) throw new Error('Audit requires a running JSON-free run')
++  }
++
++  function assertCollecting(): void {
++    assertRunning()
++    const row = db.prepare('SELECT state FROM library_scan_audit_manifests WHERE run_id=?').get(runId) as
++      { state: string } | undefined
++    if (row?.state !== 'collecting') throw new Error('Audit is not collecting')
++  }
++
++  function metadata(meta: ScanAuditMetadata): string {
++    const { body, value } = encodeObject(meta)
++    if (Buffer.byteLength(body) > SCAN_AUDIT_META_MAX_BYTES) throw new Error('Audit metadata exceeds 256 KiB')
++    if (value.libraryId !== libraryId || value.runId !== runId ||
++        typeof value.finishedAt !== 'string' || !value.finishedAt || value.finishedAt.length > 100 ||
++        SCAN_AUDIT_SECTIONS.some((section) => Object.hasOwn(value, section)) ||
++        !normalizeAudit({ ...value, files: [], removedResources: [], promotedResources: [], deletedVideos: [], pendingGroups: [] })) {
++      throw new Error('Invalid audit metadata or scope')
++    }
++    return body
++  }
++
++  function assertPageFits(section: ScanAuditSection, ordinal: number, body: string): void {
++    if (!Number.isSafeInteger(ordinal) || ordinal < 0) throw new Error('Audit ordinal exceeds safe integer range')
++    // Match the raw ScanAuditIndexPage wrapper. Reserve 100 UTF-16 code units at
++    // the worst JSON escape size (6 bytes each), plus safe maximum count/offset
++    // and the largest legal limit. Future final timestamps cannot grow the bound.
++    const wrapper = JSON.stringify({
++      snapshot: { libraryId, runId, finishedAt: '\u0000'.repeat(100) }, section,
++      items: [], total: Number.MAX_SAFE_INTEGER, limit: 100, offset: Number.MAX_SAFE_INTEGER
++    })
++    const itemHead = JSON.stringify({ ordinal })
++    const item = `${itemHead.slice(0, -1)},"entry":${body}}`
++    if (Buffer.byteLength(wrapper) + Buffer.byteLength(item) > SCAN_AUDIT_WRITE_MAX_BYTES) {
++      throw new Error('Single audit entry page exceeds 1 MiB')
++    }
++  }
++
++  function start(meta: ScanAuditMetadata): void {
++    const body = metadata(meta)
++    db.transaction(() => {
++      assertRunning()
++      db.prepare('INSERT INTO library_scan_audit_manifests(run_id,meta_json) VALUES(?,?)').run(runId, body)
++    })()
++  }
++
++  function writeBatch<S extends ScanAuditSection>(section: S, entries: readonly LibraryScanAudit[S][number][]): void {
++    if (!SCAN_AUDIT_SECTIONS.includes(section)) throw new Error('Unknown audit section')
++    if (!Array.isArray(entries) || entries.length > SCAN_AUDIT_WRITE_MAX_ITEMS) throw new Error('Audit batch exceeds 100 items')
++    let bytes = 2
++    const rows = entries.map((entry, index) => {
++      const row = encodeObject(entry)
++      validateEntry(section, row.value)
++      bytes += Buffer.byteLength(row.body) + (index === 0 ? 0 : 1)
++      if (bytes > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('Audit batch exceeds 1 MiB')
++      return { body: row.body, key: section === 'files' ? row.value.filePath as string : null }
++    })
++    db.transaction(() => {
++      assertCollecting()
++      const existing = db.prepare('SELECT ordinal FROM library_scan_audit_entries WHERE run_id=? AND section=? AND entry_key=?')
++      const next = db.prepare('SELECT COALESCE(MAX(ordinal), -1) + 1 AS ordinal FROM library_scan_audit_entries WHERE run_id=? AND section=?')
++      const write = db.prepare(`INSERT INTO library_scan_audit_entries(run_id,section,ordinal,entry_key,entry_json,entry_bytes)
++        VALUES(?,?,?,?,?,?) ON CONFLICT(run_id,section,entry_key) DO UPDATE SET
++        entry_json=excluded.entry_json,entry_bytes=excluded.entry_bytes`)
++      for (const row of rows) {
++        const previous = row.key === null ? undefined : existing.get(runId, section, row.key) as { ordinal: number } | undefined
++        const { ordinal } = previous ?? next.get(runId, section) as { ordinal: number }
++        assertPageFits(section, ordinal, row.body)
++        write.run(runId, section, ordinal, row.key, row.body, Buffer.byteLength(row.body))
++      }
++    })()
++  }
++
++  /** Detached NFO only: undefined means missing file; {} means no NFO field. */
++  function readFileNfo(filePath: string): { nfo?: LibraryScanNfoAudit } | undefined {
++    if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid audit file path')
++    return db.transaction(() => {
++      assertCollecting()
++      const size = db.prepare("SELECT entry_bytes FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?")
++        .get(runId, filePath) as { entry_bytes: number } | undefined
++      if (!size) return undefined
++      if (size.entry_bytes > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('Stored audit entry exceeds 1 MiB before hydration')
++      const row = db.prepare(`SELECT json_type(entry_json, '$.nfo') AS nfo_type,
++        CASE WHEN json_type(entry_json, '$.nfo') = 'object'
++          THEN json_extract(entry_json, '$.nfo') END AS nfo_json
++        FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?`)
++        .get(runId, filePath) as { nfo_type: string | null; nfo_json: string | null }
++      if (row.nfo_type === null || row.nfo_type === 'null') return {}
++      if (row.nfo_type !== 'object' || row.nfo_json === null) throw new Error('Invalid stored audit NFO')
++      const nfo: unknown = JSON.parse(row.nfo_json)
++      const entry = { rootId: 1, filePath, sourceKind: 'local', outcome: 'unrecognized', nfo }
++      if (!isFileEntry(entry)) throw new Error('Invalid stored audit NFO')
++      return { nfo: entry.nfo }
++    })()
++  }
++
++  /** Replaces the whole NFO value; caller supplies final merged warnings/fields. */
++  function patchNfo(filePath: string, nfo: LibraryScanNfoAudit): boolean {
++    if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid audit file path')
++    const patch = encodeObject(nfo)
++    if (Buffer.byteLength(patch.body) > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('NFO patch exceeds 1 MiB')
++    // Reuse the shared NFO validator through its containing file entry, even if
++    // the target is absent; malformed patches must not silently become no-ops.
++    validateEntry('files', { rootId: 1, filePath, sourceKind: 'local', outcome: 'unrecognized', nfo: patch.value })
++    return db.transaction(() => {
++      assertCollecting()
++      const size = db.prepare("SELECT entry_bytes FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?")
++        .get(runId, filePath) as { entry_bytes: number } | undefined
++      if (!size) return false
++      if (size.entry_bytes > SCAN_AUDIT_WRITE_MAX_BYTES) throw new Error('Stored audit entry exceeds 1 MiB before hydration')
++      const row = db.prepare("SELECT ordinal,entry_json FROM library_scan_audit_entries WHERE run_id=? AND section='files' AND entry_key=?")
++        .get(runId, filePath) as { ordinal: number; entry_json: string } | undefined
++      if (!row) return false
++      const updated = encodeObject({ ...JSON.parse(row.entry_json), nfo: patch.value })
++      validateEntry('files', updated.value)
++      if (updated.value.filePath !== filePath) throw new Error('Audit file key mismatch')
++      assertPageFits('files', row.ordinal, updated.body)
++      db.prepare("UPDATE library_scan_audit_entries SET entry_json=?,entry_bytes=? WHERE run_id=? AND section='files' AND entry_key=?")
++        .run(updated.body, Buffer.byteLength(updated.body), runId, filePath)
++      return true
++    })()
++  }
++
++  /** Rebuild the derived section atomically from final file outcomes and current pending rows. */
++  function refreshPendingGroups(): void {
++    db.transaction(() => {
++      assertCollecting()
++      db.prepare("DELETE FROM library_scan_audit_entries WHERE run_id=? AND section='pendingGroups'").run(runId)
++      let batch: LibraryScanAudit['pendingGroups'] = []
++      let batchBytes = 2
++      const flush = (): void => {
++        if (batch.length > 0) writeBatch('pendingGroups', batch)
++        batch = []
++        batchBytes = 2
++      }
++      visitPendingScanAuditEntriesForRun(db, { libraryId, runId }, (entry) => {
++        const entryBytes = Buffer.byteLength(JSON.stringify(entry))
++        if (batch.length > 0 && (batch.length === SCAN_AUDIT_WRITE_MAX_ITEMS ||
++            batchBytes + 1 + entryBytes > SCAN_AUDIT_WRITE_MAX_BYTES)) flush()
++        batchBytes += (batch.length > 0 ? 1 : 0) + entryBytes
++        batch.push(entry)
++        // Oversized singletons fail through the normal writer validation.
++        if (batchBytes > SCAN_AUDIT_WRITE_MAX_BYTES) flush()
++      })
++      flush()
++    })()
++  }
++
++  function seal(meta: ScanAuditMetadata): void {
++    const body = metadata(meta)
++    db.transaction(() => {
++      assertCollecting()
++      const previous = db.prepare('SELECT meta_json = ? AS same FROM library_scan_audit_manifests WHERE run_id=?').get(body, runId) as { same: number }
++      if (previous.same !== 1) {
++        db.prepare('UPDATE library_scan_audit_manifests SET meta_json=? WHERE run_id=?').run(body, runId)
++      }
++      db.prepare("UPDATE library_scan_audit_manifests SET state='sealed',sealed_at=CURRENT_TIMESTAMP WHERE run_id=?").run(runId)
++    })()
++  }
++
++  return { start, writeBatch, readFileNfo, patchNfo, refreshPendingGroups, seal }
++}
+diff --git a/src/main/db/pendingScanAuditEntries.test.ts b/src/main/db/pendingScanAuditEntries.test.ts
+new file mode 100644
+index 0000000..b8cd25f
+--- /dev/null
++++ b/src/main/db/pendingScanAuditEntries.test.ts
+@@ -0,0 +1,193 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type { LibraryScanFileAuditEntry, LibraryScanPendingGroupAuditEntry } from '@shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { createMediaLibrary } from './mediaLibraryRepo'
++import { createScanAuditWriter } from './scanAuditWriter'
++import { readPendingScanAuditEntries, visitPendingScanAuditEntriesForRun } from './pendingScanAuditRepo'
++
++let directory: string, db: Database.Database, scope: { libraryId: number; runId: string }, rootId: number, otherId: number
++let writer: ReturnType<typeof createScanAuditWriter>
++function meta() { return { schemaVersion: 2 as const, ...scope, configRevision: 1,
++  trigger: 'manual' as const, status: 'success' as const, startedAt: 'start', finishedAt: 'pending' } }
++function pending(filePath: string, groupId: number | null): LibraryScanFileAuditEntry {
++  return { rootId, filePath, sourceKind: 'local', outcome: 'pending', normalizedCode: null, groupId, addedToQueue: true }
++}
++beforeEach(() => {
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pending-entries-'))
++  db = initDatabaseAtPath(path.join(directory, 'catalog.db'))
++  const root = path.join(directory, 'media'), otherRoot = path.join(directory, 'other')
++  fs.mkdirSync(root); fs.mkdirSync(otherRoot)
++  const library = createMediaLibrary({ name: 'Pending', roots: [{ path: root }] })
++  const other = createMediaLibrary({ name: 'Other', roots: [{ path: otherRoot }] })
++  scope = { libraryId: library.id, runId: 'pending-run' }; rootId = library.roots[0].id; otherId = other.id
++  db.prepare(`INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at)
++    VALUES(?,?,1,'manual','running','start')`).run(scope.runId, scope.libraryId)
++  writer = createScanAuditWriter(db, scope)
++  writer.start(meta())
++  const group = db.prepare('INSERT INTO pending_scan_groups(id,library_id,normalized_code,updated_at) VALUES(?,?,?,?)')
++  for (const [id, code, updated] of [[10, 'TEN', 'b'], [20, 'TWENTY', 'a'], [30, 'EMPTY', 'a'], [40, 'UNREFERENCED', '0']] as const) {
++    group.run(id, scope.libraryId, code, updated)
++  }
++  group.run(50, otherId, 'OTHER', '0')
++  const resource = db.prepare(`INSERT INTO pending_scan_resources(library_id,group_id,root_id,file_path,normalized_path,source_kind)
++    VALUES(?,?,?,?,?,'local')`)
++  for (const [id, filePath, normalized] of [[10, '/Global', 'one'], [10, '/global', 'two'],
++    [10, '/Global', 'duplicate'], [20, '/Global', 'cross-group'], [20, '/twenty', 'twenty'], [40, '/Global', 'unreferenced']] as const) {
++    resource.run(scope.libraryId, id, rootId, filePath, normalized)
++  }
++  resource.run(otherId, 50, other.roots[0].id, '/Global', 'other')
++})
++afterEach(() => { closeDatabase(); fs.rmSync(directory, { recursive: true, force: true }) })
++function collect() {
++  const result: LibraryScanPendingGroupAuditEntry[] = []
++  visitPendingScanAuditEntriesForRun(db, scope, (entry) => { result.push(entry) })
++  return result
++}
++function fixture() {
++  const files = [pending('/reference-ten', 10), pending('/twenty', 20), pending('/empty', 30),
++    pending('/Global', null), pending('/missing', 999), pending('/other', 50)]
++  writer.writeBatch('files', files)
++  return files
++}
++
++it('matches the legacy oracle with exact global paths, duplicate resources, empty/missing groups and library scope', () => {
++  const files = fixture()
++  const expected = readPendingScanAuditEntries(scope.libraryId,
++    new Set(files.flatMap((entry) => entry.outcome === 'pending' && entry.groupId != null ? [entry.groupId] : [])),
++    new Set(files.map((entry) => entry.filePath)))
++  assert.deepEqual(collect(), expected)
++  assert.deepEqual(expected, [
++    { groupId: 20, normalizedCode: 'TWENTY', resourceCount: 2 },
++    { groupId: 30, normalizedCode: 'EMPTY', resourceCount: 0 },
++    { groupId: 10, normalizedCode: 'TEN', resourceCount: 2 }
++  ])
++})
++
++it('uses final upsert outcomes and current pending metadata, with NFO unrelated to primary pending state', () => {
++  fixture()
++  writer.patchNfo('/Global', { disposition: 'warning', warnings: [{ code: 'nfo', message: 'warn' }] })
++  assert.equal(collect()[0].resourceCount, 2)
++  writer.writeBatch('files', [{ rootId, filePath: '/Global', sourceKind: 'local', outcome: 'unrecognized' }])
++  writer.writeBatch('files', [pending('/twenty', null)])
++  db.prepare("UPDATE pending_scan_groups SET normalized_code='LATEST',updated_at='0' WHERE id=10").run()
++  assert.deepEqual(collect(), [
++    { groupId: 10, normalizedCode: 'LATEST', resourceCount: 0 },
++    { groupId: 30, normalizedCode: 'EMPTY', resourceCount: 0 }
++  ])
++  writer.writeBatch('files', [pending('/global', null)])
++  assert.equal(collect()[0].resourceCount, 1)
++})
++
++it('runs actual writer callbacks under the read transaction without leaving an active iterator', () => {
++  fixture()
++  visitPendingScanAuditEntriesForRun(db, scope, (entry) => {
++    assert.equal(db.inTransaction, true)
++    writer.writeBatch('pendingGroups', [entry])
++  })
++  const saved = db.prepare("SELECT entry_json FROM library_scan_audit_entries WHERE run_id=? AND section='pendingGroups' ORDER BY ordinal")
++    .all(scope.runId) as { entry_json: string }[]
++  assert.deepEqual(saved.map((row) => JSON.parse(row.entry_json)), collect())
++  assert.equal(db.inTransaction, false)
++  db.pragma('journal_mode = DELETE')
++})
++
++it('rolls back outer business and audit writes on callback failure and closes the iterator for retry', () => {
++  fixture()
++  const name = db.prepare('SELECT name FROM media_libraries WHERE id=?').get(scope.libraryId)
++  let calls = 0
++  assert.throws(() => db.transaction(() => {
++    db.prepare("UPDATE media_libraries SET name='changed' WHERE id=?").run(scope.libraryId)
++    visitPendingScanAuditEntriesForRun(db, scope, (entry) => {
++      writer.writeBatch('pendingGroups', [entry])
++      if (++calls === 2) throw new Error('audit callback failed')
++    })
++  })(), /audit callback failed/)
++  assert.equal(calls, 2)
++  assert.deepEqual(db.prepare('SELECT name FROM media_libraries WHERE id=?').get(scope.libraryId), name)
++  assert.equal(db.prepare("SELECT 1 FROM library_scan_audit_entries WHERE section='pendingGroups'").get(), undefined)
++  assert.equal(db.inTransaction, false)
++  db.pragma('journal_mode = DELETE')
++  visitPendingScanAuditEntriesForRun(db, scope, (entry) => { writer.writeBatch('pendingGroups', [entry]) })
++  assert.deepEqual(db.prepare("SELECT COUNT(*) AS count FROM library_scan_audit_entries WHERE section='pendingGroups'").get(), { count: 3 })
++})
++
++it('rejects thenable visitors, observes rejected promises, and rolls back callback writes', async () => {
++  fixture()
++  for (const rejected of [false, true]) {
++    assert.throws(() => visitPendingScanAuditEntriesForRun(db, scope, async (entry) => {
++      writer.writeBatch('pendingGroups', [entry])
++      if (rejected) throw new Error('async rejected')
++    }), /must be synchronous/)
++    await new Promise<void>((resolve) => setImmediate(resolve))
++    assert.equal(db.inTransaction, false)
++    assert.equal(db.prepare("SELECT 1 FROM library_scan_audit_entries WHERE section='pendingGroups'").get(), undefined)
++  }
++})
++
++it('guards scope and manifest lifecycle even with no pending files', () => {
++  assert.deepEqual(collect(), [])
++  for (const invalid of [{ ...scope, libraryId: 0 }, { ...scope, runId: 'x'.repeat(257) },
++    { ...scope, libraryId: otherId }, { ...scope, runId: 'missing' }]) {
++    assert.throws(() => visitPendingScanAuditEntriesForRun(db, invalid, () => {}))
++  }
++  db.prepare(`INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at)
++    VALUES('nostage',?,1,'manual','running','start')`).run(scope.libraryId)
++  assert.throws(() => visitPendingScanAuditEntriesForRun(db, { ...scope, runId: 'nostage' }, () => {}), /collecting/)
++  writer.seal(meta())
++  assert.throws(() => collect(), /collecting/)
++  db.prepare("UPDATE library_scan_audit_manifests SET state='abandoned' WHERE run_id=?").run(scope.runId)
++  assert.throws(() => collect(), /collecting/)
++  db.prepare("UPDATE library_scan_runs SET status='failed' WHERE id=?").run(scope.runId)
++  assert.throws(() => collect(), /running/)
++})
++
++it('projects narrow SQL only and uses the exact file key lookup', () => {
++  fixture()
++  const originalPrepare = db.prepare, prepare = db.prepare.bind(db), statements: string[] = []
++  db.prepare = ((sql: string) => {
++    statements.push(sql)
++    assert.doesNotMatch(sql, /SELECT\s+\*|SELECT\s+entry_json|target_locator|display_name/i)
++    return prepare(sql)
++  }) as typeof db.prepare
++  try { assert.equal(collect().length, 3) } finally { db.prepare = originalPrepare }
++  const insertSql = statements.find((statement) => statement.includes('WITH referenced'))!
++  const sql = insertSql.slice(insertSql.indexOf('WITH referenced'))
++  assert.match(sql, /entry_key=r.file_path COLLATE BINARY/)
++  const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(scope) as { detail: string }[]
++  assert.ok(plan.some((row) => /SEARCH f.*USING.*entry_key=/.test(row.detail)), JSON.stringify(plan))
++})
++
++
++it('snapshots metadata and counts before callbacks mutate live pending rows and cleans its TEMP result', () => {
++  fixture()
++  const expected = collect(), actual: LibraryScanPendingGroupAuditEntry[] = []
++  visitPendingScanAuditEntriesForRun(db, scope, (entry) => {
++    actual.push(entry)
++    db.prepare("UPDATE pending_scan_groups SET normalized_code='CHANGED-'||id,updated_at='z' WHERE library_id=?").run(scope.libraryId)
++    db.prepare('DELETE FROM pending_scan_resources WHERE library_id=?').run(scope.libraryId)
++    writer.writeBatch('pendingGroups', [entry])
++  })
++  assert.deepEqual(actual, expected)
++  assert.notDeepEqual(collect(), expected)
++  assert.deepEqual(db.prepare("SELECT name FROM sqlite_temp_master WHERE name LIKE 'pending_scan_audit_visit_%'").all(), [])
++})
++
++it('delivers an oversized singleton unchanged for writer rejection and rolls back TEMP and callback writes', () => {
++  fixture()
++  const huge = '中'.repeat(400_000)
++  db.prepare('UPDATE pending_scan_groups SET normalized_code=? WHERE id=30').run(huge)
++  let sawHuge = false
++  assert.throws(() => visitPendingScanAuditEntriesForRun(db, scope, (entry) => {
++    if (entry.groupId === 30) { sawHuge = true; assert.equal(entry.normalizedCode, huge) }
++    writer.writeBatch('pendingGroups', [entry])
++  }), /1 MiB/)
++  assert.equal(sawHuge, true)
++  assert.equal(db.inTransaction, false)
++  assert.deepEqual(db.prepare("SELECT name FROM sqlite_temp_master WHERE name LIKE 'pending_scan_audit_visit_%'").all(), [])
++  assert.equal(db.prepare("SELECT 1 FROM library_scan_audit_entries WHERE section='pendingGroups'").get(), undefined)
++})
+diff --git a/src/main/db/scanAuditPendingRefresh.test.ts b/src/main/db/scanAuditPendingRefresh.test.ts
+new file mode 100644
+index 0000000..db110fb
+--- /dev/null
++++ b/src/main/db/scanAuditPendingRefresh.test.ts
+@@ -0,0 +1,161 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type { LibraryScanFileAuditEntry } from '@shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { createScanAuditWriter, type ScanAuditMetadata, SCAN_AUDIT_WRITE_MAX_BYTES } from './scanAuditWriter'
++import { upsertPendingScanResources } from './pendingScanRepo'
++import { readPendingScanAuditEntries } from './pendingScanAuditRepo'
++
++let db:Database.Database,directory:string,writer:ReturnType<typeof createScanAuditWriter>
++let groupA:number,groupB:number
++const scope={libraryId:1,runId:'pending-refresh'}
++const meta:ScanAuditMetadata={schemaVersion:2,...scope,configRevision:1,trigger:'manual',startedAt:'start',finishedAt:'pending',status:'success'}
++beforeEach(()=>{
++  directory=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-refresh-'))
++  db=initDatabaseAtPath(path.join(directory,'catalog.db'))
++  db.exec(`INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES(1,1,'/fixture','/fixture');
++    INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at) VALUES('pending-refresh',1,1,'manual','running','start');`)
++  const resource=(filePath:string)=>({rootId:1,filePath,sizeBytes:1,durationSeconds:1,fileMtimeMs:1})
++  groupA=upsertPendingScanResources(1,'GROUP-001',[resource('/fixture/a.mp4'),resource('/fixture/global.mp4')]).groupId
++  groupB=upsertPendingScanResources(1,'GROUP-002',[resource('/fixture/b.mp4')]).groupId
++  db.prepare("UPDATE pending_scan_groups SET updated_at=CASE WHEN id=? THEN 'b' ELSE 'a' END").run(groupA)
++  writer=createScanAuditWriter(db,scope);writer.start(meta)
++  // Each referenced path belongs to the other group: count must use the global
++  // pending path set, including a path from a null-group pending file.
++  writer.writeBatch('files',[
++    {rootId:1,filePath:'/fixture/b.mp4',sourceKind:'local',outcome:'pending',normalizedCode:'GROUP-001',groupId:groupA,addedToQueue:false},
++    {rootId:1,filePath:'/fixture/a.mp4',sourceKind:'local',outcome:'pending',normalizedCode:'GROUP-002',groupId:groupB,addedToQueue:false},
++    {rootId:1,filePath:'/fixture/global.mp4',sourceKind:'local',outcome:'pending',normalizedCode:null,groupId:null,addedToQueue:false}
++  ])
++  const entry={resourceId:1,videoId:1,videoCode:'OLD-001',videoTitle:null,resourceKind:'local' as const,sourcePath:'/old',displayName:null}
++  writer.writeBatch('removedResources',[{...entry,reason:'missing'}])
++  writer.writeBatch('promotedResources',[{...entry,reason:'promoted_after_removal'}])
++  writer.writeBatch('deletedVideos',[{videoId:1,videoCode:'OLD-001',videoTitle:null,reason:'resource_less'}])
++  writer.writeBatch('pendingGroups',[{groupId:999,normalizedCode:'OLD',resourceCount:9}])
++})
++afterEach(()=>{closeDatabase();fs.rmSync(directory,{recursive:true,force:true})})
++
++function rows(){return db.prepare('SELECT * FROM library_scan_audit_entries ORDER BY section,ordinal').all() as {section:string;ordinal:number;entry_json:string}[]}
++function pending(){return rows().filter(row=>row.section==='pendingGroups')}
++function others(){return rows().filter(row=>row.section!=='pendingGroups')}
++function oracle(){
++  const files=rows().filter(row=>row.section==='files').map(row=>JSON.parse(row.entry_json) as LibraryScanFileAuditEntry)
++  const ids=new Set<number>(),paths=new Set<string>()
++  for(const entry of files)if(entry.outcome==='pending'){paths.add(entry.filePath);if(entry.groupId!=null)ids.add(entry.groupId)}
++  return readPendingScanAuditEntries(1,ids,paths)
++}
++function snapshot(){return {audit:rows(),groups:db.prepare('SELECT * FROM pending_scan_groups ORDER BY id').all(),resources:db.prepare('SELECT * FROM pending_scan_resources ORDER BY id').all()}}
++function assertCurrent(){
++  const actual=pending()
++  assert.deepEqual(actual.map(row=>JSON.parse(row.entry_json)),oracle())
++  assert.deepEqual(actual.map(row=>row.ordinal),actual.map((_,index)=>index))
++}
++
++it('rebuilds ordered pendingGroups repeatedly without duplicates and preserves all other sections',()=>{
++  const untouched=others()
++  writer.refreshPendingGroups();assertCurrent()
++  assert.deepEqual(pending().map(row=>JSON.parse(row.entry_json)),[
++    {groupId:groupB,normalizedCode:'GROUP-002',resourceCount:1},
++    {groupId:groupA,normalizedCode:'GROUP-001',resourceCount:2}
++  ])
++  const first=pending();writer.refreshPendingGroups();assert.deepEqual(pending(),first);assert.deepEqual(others(),untouched)
++  db.transaction(()=>{
++    db.prepare("UPDATE pending_scan_groups SET normalized_code='RENAMED',updated_at='0',revision=revision+1 WHERE id=?").run(groupA)
++    db.prepare("DELETE FROM pending_scan_resources WHERE file_path='/fixture/global.mp4'").run()
++  })()
++  writer.refreshPendingGroups();assertCurrent();assert.deepEqual(others(),untouched)
++  assert.deepEqual(pending().map(row=>JSON.parse(row.entry_json)),[
++    {groupId:groupA,normalizedCode:'RENAMED',resourceCount:1},
++    {groupId:groupB,normalizedCode:'GROUP-002',resourceCount:1}
++  ])
++  db.prepare('DELETE FROM pending_scan_groups WHERE id=?').run(groupB)
++  writer.refreshPendingGroups();assertCurrent();assert.equal(pending().length,1);assert.deepEqual(others(),untouched)
++})
++
++it('restores the previous section and outer business mutation after native second-group INSERT failure, then retries',()=>{
++  writer.refreshPendingGroups();const before=snapshot();let faults=0
++  db.function('observe_second_pending',()=>{faults++;return 1})
++  db.exec(`CREATE TEMP TRIGGER fail_second_pending AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='pendingGroups' AND NEW.ordinal=1 BEGIN
++      SELECT observe_second_pending();SELECT RAISE(ABORT,'second group INSERT fault');END;`)
++  const refreshWithBusinessChange=()=>db.transaction(()=>{
++    db.prepare("UPDATE pending_scan_groups SET normalized_code='TRANSACTION',revision=revision+1 WHERE id=?").run(groupA)
++    db.prepare("DELETE FROM pending_scan_resources WHERE file_path='/fixture/global.mp4'").run()
++    writer.refreshPendingGroups()
++  })()
++  assert.throws(refreshWithBusinessChange,/second group INSERT fault/)
++  assert.equal(faults,1);assert.deepEqual(snapshot(),before);assert.equal(db.inTransaction,false)
++  db.exec('DROP TRIGGER fail_second_pending')
++  refreshWithBusinessChange();assertCurrent();assert.deepEqual(others(),before.audit.filter(row=>row.section!=='pendingGroups'))
++  assert.equal(JSON.parse(pending().find(row=>JSON.parse(row.entry_json).groupId===groupA)!.entry_json).normalizedCode,'TRANSACTION')
++  assert.deepEqual(db.pragma('foreign_key_check'),[])
++})
++
++it('rolls back an oversized single pending group together with its outer metadata change',()=>{
++  writer.refreshPendingGroups();const before=snapshot()
++  assert.throws(()=>db.transaction(()=>{
++    db.prepare('UPDATE pending_scan_groups SET normalized_code=? WHERE id=?').run('X'.repeat(SCAN_AUDIT_WRITE_MAX_BYTES+1),groupA)
++    writer.refreshPendingGroups()
++  })(),/exceeds|MiB|budget/i)
++  assert.deepEqual(snapshot(),before);assert.equal(db.inTransaction,false)
++  writer.refreshPendingGroups();assertCurrent()
++})
++
++for(const state of ['sealed','terminal'] as const)it(`rejects ${state} writer state without deleting prior sections`,()=>{
++  writer.refreshPendingGroups()
++  if(state==='sealed')writer.seal({...meta,finishedAt:'finish'})
++  else db.prepare("UPDATE library_scan_runs SET status='failed',finished_at='finish' WHERE id=?").run(scope.runId)
++  const before=snapshot()
++  assert.throws(()=>writer.refreshPendingGroups(),/collecting|running/i)
++  assert.deepEqual(snapshot(),before);assert.equal(db.inTransaction,false)
++})
++
++it('refreshes more than 100 referenced groups across item-bounded batches with stable global ordinals',()=>{
++  const insert=db.prepare('INSERT INTO pending_scan_groups(library_id,normalized_code,revision,created_at,updated_at) VALUES(1,?,1,?,?)')
++  const files:LibraryScanFileAuditEntry[]=[]
++  db.transaction(()=>{
++    for(let index=0;index<205;index++){
++      const stamp=`extra-${String(205-index).padStart(3,'0')}`
++      const groupId=Number(insert.run(`EXTRA-${index}`,stamp,stamp).lastInsertRowid)
++      files.push({rootId:1,filePath:`/fixture/extra-${index}.mp4`,sourceKind:'local',outcome:'pending',normalizedCode:`EXTRA-${index}`,groupId,addedToQueue:false})
++    }
++  })()
++  for(let offset=0;offset<files.length;offset+=100)writer.writeBatch('files',files.slice(offset,offset+100))
++  const untouched=others()
++  writer.refreshPendingGroups();assertCurrent();assert.equal(pending().length,207)
++  assert.deepEqual(pending().map(row=>row.ordinal),Array.from({length:207},(_,index)=>index))
++  assert.deepEqual(others(),untouched)
++  const first=pending();writer.refreshPendingGroups();assert.deepEqual(pending(),first);assert.deepEqual(others(),untouched)
++})
++
++it('flushes by bytes when moderately large valid singletons together exceed the batch budget',()=>{
++  const update=db.prepare('UPDATE pending_scan_groups SET normalized_code=? WHERE id=?')
++  update.run(`A${'x'.repeat(600*1024)}`,groupA)
++  update.run(`B${'y'.repeat(600*1024)}`,groupB)
++  const expected=oracle(),untouched=others()
++  assert.equal(expected.length,2)
++  for(const entry of expected){
++    assert.ok(Buffer.byteLength(JSON.stringify(entry))+1024<SCAN_AUDIT_WRITE_MAX_BYTES,'each individual page fits with wrapper headroom')
++  }
++  assert.ok(Buffer.byteLength(JSON.stringify(expected))>SCAN_AUDIT_WRITE_MAX_BYTES,'one aggregate writeBatch would fail')
++  writer.refreshPendingGroups();assertCurrent()
++  assert.deepEqual(pending().map(row=>JSON.parse(row.entry_json)),expected)
++  assert.deepEqual(pending().map(row=>row.ordinal),[0,1]);assert.deepEqual(others(),untouched)
++  const first=pending();writer.refreshPendingGroups();assert.deepEqual(pending(),first);assert.deepEqual(others(),untouched)
++  assert.deepEqual(db.pragma('foreign_key_check'),[])
++})
++
++it('refreshes the captured writer identity after the caller mutates its original scope object',()=>{
++  const callerScope={...scope}
++  const capturedWriter=createScanAuditWriter(db,callerScope)
++  const untouched=others()
++  callerScope.libraryId=999
++  callerScope.runId='mutated-missing-run'
++  capturedWriter.refreshPendingGroups()
++  assertCurrent();assert.equal(pending().length,2);assert.deepEqual(others(),untouched)
++  assert.deepEqual(db.prepare('SELECT DISTINCT run_id FROM library_scan_audit_entries').all(),[{run_id:scope.runId}])
++})

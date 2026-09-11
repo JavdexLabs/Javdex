@@ -1,3 +1,5 @@
+import { setCloseToTrayEnabled } from '../appTray'
+import { webAccess } from '../web/webAccess'
 import { dialog, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -57,6 +59,15 @@ function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
 }
 
 export function registerSettingsHandlers(ctx: IpcContext): void {
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, () => webAccess.openPairing())
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, (code) => webAccess.inspectPair(code))
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, (code, approve) => webAccess.decidePair(code, approve))
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, (id) => webAccess.removeDevice(id))
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, (id, name) => webAccess.renameDevice(id, name))
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, () => webAccess.resetDevices())
+  appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, () => webAccess.status())
+  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => webAccess.apply(input))
+  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => webAccess.revoke())
   appCommandAdapter.register(IPC.SETTINGS_GET, (): SettingsSnapshot => toSettingsSnapshot(getSettings()))
 
   appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): LibraryOverviewStats => getLibraryOverviewStats())
@@ -97,7 +108,14 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     ) {
       throw new Error(`演员刮削插件「${safePatch.defaultActressScraper}」不可用`)
     }
-    return toSettingsSnapshot(updateSettings(safePatch))
+    const previousCloseToTray = getSettings().closeToTray
+    if (safePatch.closeToTray !== undefined) setCloseToTrayEnabled(safePatch.closeToTray)
+    try {
+      return toSettingsSnapshot(updateSettings(safePatch))
+    } catch (error) {
+      if (safePatch.closeToTray !== undefined) setCloseToTrayEnabled(previousCloseToTray)
+      throw error
+    }
   })
 
   appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {

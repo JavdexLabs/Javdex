@@ -1,0 +1,2183 @@
+diff --git a/src/shared/actressTypes.ts b/src/shared/actressTypes.ts
+index 43dee54..070cf54 100644
+--- a/src/shared/actressTypes.ts
++++ b/src/shared/actressTypes.ts
+@@ -1,5 +1,5 @@
+ import type { ScrapedStatus, SortDir } from './commonTypes'
+-import type { Video } from './videoTypes'
++import type { Video, VideoCard } from './videoTypes'
+ import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
+ export type { ActressAvatarCommit, AvatarCropV1 } from './avatarCrop'
+ 
+@@ -218,3 +218,82 @@ export interface ActressEditInput {
+   clearAvatar?: boolean
+   links?: RelatedLinkInput[]
+ }
++
++
++/** Narrow identity choices, sorted by full main name then ID; no catalog statistics. */
++export interface ActressPickerItem {
++  id: number
++  /** Display label: at most128 Unicode code points plus ellipsis; fetch detail for edits. */
++  main_name: string
++  /** Omitted when its JSON representation exceeds4096 bytes. */
++  avatar_path: string | null
++}
++export interface ActressPickerQuery {
++  search?: string
++  limit?: number
++  offset?: number
++}
++export interface ActressPickerPage {
++  items: ActressPickerItem[]
++  hasMore: boolean
++  offset: number
++}
++
++
++export interface ActressPickerIdentity extends ActressPickerItem {
++  revision: number
++}
++
++
++export interface ActressMergeCandidate extends ActressPickerItem {
++  gender: ActressGender | null
++  video_count: number
++}
++export interface ActressMergeCandidateQuery extends ActressPickerQuery {
++  keepId: number
++}
++export interface ActressMergeCandidatePage {
++  items: ActressMergeCandidate[]
++  hasMore: boolean
++  offset: number
++}
++
++export type ActressMetadata = Omit<ActressDetail, 'videos'>
++
++/** Associated works only; profile and gallery are separate reads. */
++export interface ActressVideoPageQuery {
++  withCover?: boolean
++  limit?: number
++  offset?: number
++}
++
++export interface ActressVideoPage {
++  videos: VideoCard[]
++  total: number
++  limit: number
++  offset: number
++}
++
++export interface ActressGalleryPageQuery {
++  /** Locate a stable image in the current display order before paging. */
++  anchorId?: number
++  localOnly?: boolean
++  limit?: number
++  offset?: number
++}
++
++export interface ActressGalleryPage {
++  /** Page-local anchor index; null when a requested anchor is absent. */
++  anchorIndex?: number | null
++  items: ActressGalleryAsset[]
++  total: number
++  limit: number
++  offset: number
++}
++
++/** Profile header without complete work/gallery collections. Counts have explicit scopes. */
++export interface ActressProfile extends Omit<ActressMetadata, 'gallery'> {
++  gallery_count: number
++  display_gallery_count: number
++  first_gallery: ActressGalleryAsset | null
++}
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..7adb1e2 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -379,6 +386,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -423,6 +431,26 @@ export const videoIpcSchemas = {
+ } satisfies IpcArgsSchemaMap<VideoIpcContract>
+ 
+ export const actressIpcSchemas = {
++  [IPC.ACTRESS_MERGE_CANDIDATES]: z.tuple([z.object({
++    keepId: positiveSafeInteger,
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()]),
++  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: z.tuple([]),
++  [IPC.ACTRESS_AVATAR_CROP_COUNT]: z.tuple([]),
++  [IPC.ACTRESS_TEST_TARGET_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_TEST_TARGET_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PICKER_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_PICKER_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_LIST]: z.tuple([
+     optionalText,
+     z.enum(['female', 'male', 'all']).optional(),
+@@ -431,6 +459,19 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_LIST_PAGE]: z.tuple([object.optional()]),
+   [IPC.ACTRESS_FACE_SCAN_MANIFEST]: noArgs,
++  [IPC.ACTRESS_GALLERY_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    anchorId: positiveSafeInteger.optional(),
++    localOnly: z.boolean().optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PROFILE]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_METADATA]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_VIDEO_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    withCover: z.boolean().optional(),
++    limit: z.number().int().min(1).max(240).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_GET]: z.tuple([id]),
+   [IPC.ACTRESS_AVATAR_SOURCE_INFO]: z.tuple([id]),
+   [IPC.ACTRESS_EDIT]: z.tuple([id, object]),
+@@ -450,6 +491,12 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
+   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
++  [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
++  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorName: nonEmptyText.optional()
++  }).strict()]),
+   [IPC.ACTRESS_CONFLICT_COUNT]: noArgs,
+   [IPC.ACTRESS_CONFLICT_SUMMARY]: noArgs,
+   [IPC.ACTRESS_CONFLICT_INSPECT_NAME]: z.tuple([
+@@ -507,6 +554,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -530,6 +585,7 @@ export const scrapeIpcSchemas = {
+   [IPC.BATCH_SCRAPE_RESUME]: noArgs,
+   [IPC.BATCH_SCRAPE_DISCARD]: noArgs,
+   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: noArgs,
++  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: z.tuple([nonEmptyText, z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.AVATAR_AUTO_CROP_BATCH_END]: z.tuple([nonEmptyText]),
+   [IPC.SCRAPER_LIST]: noArgs,
+   [IPC.SCRAPER_PLUGIN_DETAILS]: noArgs,
+@@ -634,6 +690,19 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
++    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
++    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
++  }).strict()]),
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
++  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +717,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +728,17 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/main/ipc/typedIpcAdapter.test.ts b/src/main/ipc/typedIpcAdapter.test.ts
+index f98a4d0..b9f70a4 100644
+--- a/src/main/ipc/typedIpcAdapter.test.ts
++++ b/src/main/ipc/typedIpcAdapter.test.ts
+@@ -4,9 +4,33 @@ import { IPC } from '@shared/ipc-channels'
+ import type { VideoIpcContract } from '@shared/videoIpcContract'
+ import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
+ import { executeIpcHandler } from './shared'
+-import { appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
++import { actressIpcSchemas, appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
+ import type { IpcMainInvokeEvent } from 'electron'
+ 
++it('validates manual tag candidate bounds and existing-tag identities', () => {
++  for (const channel of [IPC.TAG_MANUAL_OPTIONS, IPC.TAG_FILTER_OPTIONS] as const) {
++    const options = appIpcSchemas[channel]
++    assert.equal(options.safeParse([{}]).success, true)
++    assert.equal(options.safeParse([{ search: 'École', limit: 100, offset: 100 }]).success, true)
++    for (const query of [{ limit: 101 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 }, { search: 'x'.repeat(501) }, { extra: true }]) {
++      assert.equal(options.safeParse([query]).success, false)
++    }
++  }
++  const attach = videoIpcSchemas[IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]
++  assert.equal(attach.safeParse([1, 2]).success, true)
++  for (const args of [[0, 2], [1, -1], [1, 1.5], [1, Number.MAX_SAFE_INTEGER + 1], [1, 'name']]) {
++    assert.equal(attach.safeParse(args).success, false)
++  }
++})
++
++it('bounds selected tag label IPC requests before repository access', () => {
++  const schema = appIpcSchemas[IPC.TAG_LABELS]
++  assert.equal(schema.safeParse([[]]).success, true)
++  assert.equal(schema.safeParse([Array.from({ length: 100 }, (_, index) => index + 1)]).success, true)
++  for (const args of [[[0]], [[-1]], [[1.5]], [[Number.MAX_SAFE_INTEGER + 1]], [Array(101).fill(1)], [[1], 'extra']]) {
++    assert.equal(schema.safeParse(args).success, false)
++  }
++})
+ describe('typed IPC adapter', () => {
+   it('does not expose the legacy unreviewed video deletion command', () => {
+     assert.equal('VIDEO_DELETE' in IPC, false)
+@@ -295,3 +319,107 @@ describe('typed IPC adapter', () => {
+     assert.deepEqual(sent, [[IPC.SCRAPE_BATCH_PROGRESS, { current: 3 }]])
+   })
+ })
++
++it('bounds actress conflict summary pages and keeps detail identities exact',()=>{
++  const schema=actressIpcSchemas[IPC.ACTRESS_CONFLICT_QUEUE_PAGE]
++  assert.equal(schema.safeParse([{limit:100,offset:100,anchorName:'演员名'}]).success,true)
++  for(const query of [{limit:101},{limit:0},{offset:-1},{offset:Number.MAX_SAFE_INTEGER+1},{anchorName:''},{extra:true}])assert.equal(schema.safeParse([query]).success,false)
++  assert.equal(actressIpcSchemas[IPC.ACTRESS_CONFLICT_GET].safeParse(['Exact Name']).success,true)
++  assert.equal(actressIpcSchemas[IPC.ACTRESS_CONFLICT_GET].safeParse(['']).success,false)
++})
++
++
++it('validates bounded actress picker requests', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_PICKER_PAGE]
++  assert.equal(schema.safeParse([undefined]).success, true)
++  assert.equal(schema.safeParse([{ limit: 100, offset: 40, search: 'name' }]).success, true)
++  for (const query of [{ limit: 101 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 },
++    { offset: Infinity }, { search: 'x'.repeat(257) }, { extra: true }]) {
++    assert.equal(schema.safeParse([query]).success, false)
++  }
++})
++
++
++it('validates narrow actress identity IDs', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_PICKER_GET]
++  assert.equal(schema.safeParse([1]).success, true)
++  for (const args of [[0], [-1], [1.5], [Infinity], [Number.MAX_SAFE_INTEGER+1], ['1'], [1, 2]]) {
++    assert.equal(schema.safeParse(args).success, false)
++  }
++})
++
++
++it('validates merge candidate paging and keep identity', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_MERGE_CANDIDATES]
++  assert.equal(schema.safeParse([{keepId:1,limit:100,offset:40,search:'name'}]).success,true)
++  for (const query of [{},{keepId:0},{keepId:1.5},{keepId:1,limit:101},{keepId:1,offset:-1},{keepId:1,search:'x'.repeat(257)},{keepId:1,gender:'female'}]) {
++    assert.equal(schema.safeParse([query]).success,false)
++  }
++})
++
++
++it('accepts only zero arguments for avatar crop count', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_COUNT]
++  assert.equal(schema.safeParse([]).success, true)
++  assert.equal(schema.safeParse([1]).success, false)
++})
++
++
++it('accepts only zero arguments for avatar crop target enumeration', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_TARGETS]
++  assert.equal(schema.safeParse([]).success, true)
++  assert.equal(schema.safeParse([1]).success, false)
++})
++
++
++it('validates plugin actress test picker bounds and identities', () => {
++  const page=actressIpcSchemas[IPC.ACTRESS_TEST_TARGET_PAGE]
++  assert.equal(page.safeParse([{}]).success,true)
++  for(const q of [{limit:101},{offset:-1},{search:'x'.repeat(257)},{gender:'male'}])assert.equal(page.safeParse([q]).success,false)
++  const get=actressIpcSchemas[IPC.ACTRESS_TEST_TARGET_GET]
++  assert.equal(get.safeParse([1]).success,true)
++  for(const id of [0,-1,1.5,Infinity])assert.equal(get.safeParse([id]).success,false)
++})
++
++it('validates actress works page bounds and rejects unexpected filter fields', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_VIDEO_PAGE]
++  assert.equal(schema.safeParse([1]).success, true)
++  assert.equal(schema.safeParse([1, { limit: 240, offset: 0 }]).success, true)
++  for (const args of [[0], [1, { limit: 241 }], [1, { limit: 0 }], [1, { offset: -1 }], [1, { offset: Infinity }], [1, { offset: Number.MAX_SAFE_INTEGER + 1 }], [1, { gender: 'male' }]]) {
++    assert.equal(schema.safeParse(args).success, false)
++  }
++})
++
++it('validates metadata IDs and the optional cover-only actor works filter', () => {
++  const metadata = actressIpcSchemas[IPC.ACTRESS_METADATA]
++  assert.equal(metadata.safeParse([1]).success, true)
++  for (const id of [0, -1, 1.5, Infinity]) assert.equal(metadata.safeParse([id]).success, false)
++  const page = actressIpcSchemas[IPC.ACTRESS_VIDEO_PAGE]
++  assert.equal(page.safeParse([1, { withCover: true }]).success, true)
++  assert.equal(page.safeParse([1, { withCover: false }]).success, true)
++  assert.equal(page.safeParse([1, { withCover: 'true' }]).success, false)
++})
++
++it('validates bounded actress gallery pages', () => {
++  const page = actressIpcSchemas[IPC.ACTRESS_GALLERY_PAGE]
++  assert.equal(page.safeParse([1]).success, true)
++  assert.equal(page.safeParse([1, { limit: 100, offset: 60 }]).success, true)
++  assert.equal(page.safeParse([1, { anchorId: 77 }]).success, true)
++  for (const anchorId of [0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1, '77']) assert.equal(page.safeParse([1, { anchorId }]).success, false)
++  for (const args of [[0], [1, { limit: 101 }], [1, { offset: -1 }], [1, { offset: Number.MAX_SAFE_INTEGER + 1 }], [1, { sort: 'position' }]]) {
++    assert.equal(page.safeParse(args).success, false)
++  }
++})
++
++it('validates a profile header identity without optional wide-data flags', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_PROFILE]
++  assert.equal(schema.safeParse([1]).success, true)
++  for (const args of [[0], [-1], [1.5], [Infinity], [1, { gallery: true }]]) assert.equal(schema.safeParse(args).success, false)
++})
++
++it('validates the optional local photo source filter', () => {
++  const page = actressIpcSchemas[IPC.ACTRESS_GALLERY_PAGE]
++  assert.equal(page.safeParse([1, { localOnly: true }]).success, true)
++  assert.equal(page.safeParse([1, { localOnly: false }]).success, true)
++  assert.equal(page.safeParse([1, { localOnly: 'true' }]).success, false)
++})
+diff --git a/src/main/db/actressGalleryPageRepo.ts b/src/main/db/actressGalleryPageRepo.ts
+new file mode 100644
+index 0000000..107db1a
+--- /dev/null
++++ b/src/main/db/actressGalleryPageRepo.ts
+@@ -0,0 +1,43 @@
++import type { ActressGalleryAsset, ActressGalleryPage, ActressGalleryPageQuery } from '@shared/actressTypes'
++import { getDb } from './database'
++
++// ECMAScript String.trim whitespace, matching hasActressGalleryDisplaySource exactly.
++const TRIM_CHARACTERS = 'char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)'
++const DISPLAY_SOURCE = `(length(CAST(trim(local_path, ${TRIM_CHARACTERS}) AS BLOB)) > 0
++  OR length(CAST(trim(remote_url, ${TRIM_CHARACTERS}) AS BLOB)) > 0)`
++const DISPLAY_ORDER = `CASE WHEN width > 0 AND height > 0
++  AND (1.0 * width / height) > 1 AND (1.0 * width / height) < 1e999
++  THEN 0 ELSE 1 END, COALESCE(position, 0), id`
++
++/** Global display order precedes LIMIT; no filesystem access or full-gallery JS sort. */
++export function listActressGalleryPage(id: number, query: ActressGalleryPageQuery = {}): ActressGalleryPage | null {
++  if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid actress ID')
++  const limit = query.limit ?? 60
++  let offset = query.offset ?? 0
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid actress gallery page limit')
++  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid actress gallery page offset')
++  if (query.localOnly !== undefined && typeof query.localOnly !== 'boolean') throw new Error('Invalid local source filter')
++  if (query.anchorId !== undefined && (!Number.isSafeInteger(query.anchorId) || query.anchorId <= 0)) throw new Error('Invalid gallery anchor ID')
++  const localFilter = query.localOnly ? ' AND length(CAST(local_path AS BLOB)) > 0' : ''
++  const db = getDb()
++  return db.transaction(() => {
++    if (!db.prepare('SELECT id FROM actresses WHERE id = ?').get(id)) return null
++    const total = (db.prepare(`SELECT COUNT(*) AS n FROM actress_gallery_assets
++      WHERE actress_id = ? AND ${DISPLAY_SOURCE}${localFilter}`).get(id) as { n: number }).n
++    let anchorIndex: number | null = null
++    if (query.anchorId !== undefined) {
++      const anchor = db.prepare(`SELECT ordinal FROM (
++        SELECT id, ROW_NUMBER() OVER (ORDER BY ${DISPLAY_ORDER}) - 1 AS ordinal
++        FROM actress_gallery_assets WHERE actress_id = ? AND ${DISPLAY_SOURCE}${localFilter}
++      ) WHERE id = ?`).get(id, query.anchorId) as { ordinal: number } | undefined
++      if (anchor) {
++        offset = Math.floor(anchor.ordinal / limit) * limit
++        anchorIndex = anchor.ordinal - offset
++      }
++    }
++    const items = db.prepare(`SELECT * FROM actress_gallery_assets
++      WHERE actress_id = ? AND ${DISPLAY_SOURCE}${localFilter} ORDER BY ${DISPLAY_ORDER} LIMIT ? OFFSET ?`)
++      .all(id, limit, offset) as ActressGalleryAsset[]
++    return { items, total, limit, offset, ...(query.anchorId === undefined ? {} : { anchorIndex }) }
++  })()
++}
+diff --git a/src/main/db/actressGalleryPageRepo.test.ts b/src/main/db/actressGalleryPageRepo.test.ts
+new file mode 100644
+index 0000000..9c9123a
+--- /dev/null
++++ b/src/main/db/actressGalleryPageRepo.test.ts
+@@ -0,0 +1,197 @@
++import { getActressMetadata, getActressProfile } from './actressRepo'
++import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
++import { createActressQueryService } from '../services/actressQueryService'
++import assert from 'node:assert/strict'
++import { afterEach, beforeEach, it } from 'node:test'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import type { ActressGalleryAsset } from '@shared/actressTypes'
++import { prepareActressGalleryForDisplay } from '@shared/mediaGalleryDisplay'
++import { closeDatabase, getDb, initDatabaseAtPath } from './database'
++import { listActressGalleryPage } from './actressGalleryPageRepo'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++
++let root: string
++let previous: string | undefined
++beforeEach(() => {
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-gallery-page-'))
++  previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = root
++  resetSettingsCacheForTests()
++  initDatabaseAtPath(path.join(root, 'catalog.db'))
++  getDb().exec("INSERT INTO actresses(id,main_name) VALUES(1,'Actor'),(2,'Empty')")
++})
++afterEach(() => {
++  closeDatabase(); resetSettingsCacheForTests()
++  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = previous
++  fs.rmSync(root, { recursive: true, force: true })
++})
++
++it('matches the complete renderer gallery order across source, ratio and nullable-position boundaries', () => {
++  const db = getDb()
++  const paths = [null, '', ' ', '\t\r\n', '\u00a0\ufeff\u3000', '\u200b', '\0tail', ' \0tail ', 'path.jpg']
++  const dimensions = [[null,null],[0,1],[-1,1],[1,0],[1,2],[2,1],[1,1],[Infinity,1],[1,Infinity],[Infinity,Infinity],[1e308,1e-308]]
++  const insert = db.prepare('INSERT INTO actress_gallery_assets(actress_id,local_path,remote_url,width,height,position) VALUES(1,?,?,?,?,?)')
++  let index = 0
++  db.transaction(() => {
++    for (const local of paths) for (const remote of paths) for (const [width,height] of dimensions) {
++      insert.run(local, remote, width, height, [null, -1, 0, 1, 1][index++ % 5])
++    }
++  })()
++  const all = db.prepare('SELECT * FROM actress_gallery_assets WHERE actress_id=1 ORDER BY position,id').all() as ActressGalleryAsset[]
++  const expected = prepareActressGalleryForDisplay(all)
++  const actual: ActressGalleryAsset[] = []
++  for (let offset = 0; offset < expected.length; offset += 60) {
++    const page = listActressGalleryPage(1, { offset })!
++    assert.equal(page.total, expected.length)
++    assert.ok(page.items.length <= 60)
++    actual.push(...page.items)
++  }
++  assert.deepEqual(actual, expected)
++  const localExpected = expected.filter(asset => Boolean(asset.local_path))
++  const localActual: ActressGalleryAsset[] = []
++  for (let offset = 0; offset < localExpected.length; offset += 60) {
++    const localPage = listActressGalleryPage(1, { offset, localOnly: true })!
++    assert.equal(localPage.total, localExpected.length)
++    localActual.push(...localPage.items)
++  }
++  assert.deepEqual(localActual, localExpected)
++  assert.deepEqual(listActressGalleryPage(1, { limit: 1 })!.items, expected.slice(0, 1))
++  assert.equal(listActressGalleryPage(1, { limit: 100 })!.items.length, 100)
++})
++
++it('returns empty versus missing actors and validates finite safe page bounds', () => {
++  assert.deepEqual(listActressGalleryPage(2), { items: [], total: 0, limit: 60, offset: 0 })
++  assert.equal(listActressGalleryPage(999), null)
++  for (const id of [0,-1,1.5,Infinity]) assert.throws(() => listActressGalleryPage(id), /Invalid/)
++  for (const limit of [0,101,1.5,Infinity,NaN]) assert.throws(() => listActressGalleryPage(1, { limit }), /Invalid/)
++  for (const offset of [-1,1.5,Infinity,NaN,Number.MAX_SAFE_INTEGER+1]) assert.throws(() => listActressGalleryPage(1, { offset }), /Invalid/)
++})
++
++it('keeps count and ordered page together while another connection removes a display source', () => {
++  const db = getDb()
++  db.exec("INSERT INTO actress_gallery_assets(id,actress_id,local_path,width,height) VALUES(1,1,'image.jpg',2,1)")
++  const other = new Database(path.join(root, 'catalog.db'))
++  const prepare = db.prepare.bind(db)
++  let changed = false
++  db.prepare = ((sql: string) => {
++    const statement = prepare(sql)
++    if (sql.includes('SELECT COUNT(*) AS n FROM actress_gallery_assets')) {
++      const get = statement.get.bind(statement)
++      statement.get = ((...args: unknown[]) => {
++        const value = get(...args)
++        if (!changed) { changed = true; other.exec("UPDATE actress_gallery_assets SET local_path='' WHERE id=1") }
++        return value
++      }) as typeof statement.get
++    }
++    return statement
++  }) as typeof db.prepare
++  try {
++    const before = listActressGalleryPage(1)!
++    assert.equal(before.total, 1)
++    assert.equal(before.items[0].local_path, 'image.jpg')
++    const after = listActressGalleryPage(1)!
++    assert.equal(after.total, 0)
++    assert.deepEqual(after.items, [])
++    assert.equal(changed, true)
++  } finally { db.prepare = prepare; other.close() }
++})
++
++it('returns profile counts and the global first picture without loading complete works or gallery rows', () => {
++  const db = getDb()
++  db.exec(`WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10001)
++    INSERT INTO actress_gallery_assets(id,actress_id,position,local_path,width,height)
++    SELECT x,1,x,CASE WHEN x%5=0 THEN ' ' ELSE 'gallery/'||x||'.jpg' END,CASE WHEN x%2=0 THEN 2 ELSE 1 END,1 FROM n;`)
++  const legacy = getActressMetadata(1)!
++  const { gallery, ...fields } = legacy
++  const expected = prepareActressGalleryForDisplay(gallery)
++  const prepare = db.prepare.bind(db)
++  let galleryReads = 0
++  db.prepare = ((sql: string) => {
++    assert.doesNotMatch(sql, /video_actress|video_resources|FROM videos/i)
++    const statement = prepare(sql)
++    if (/SELECT \* FROM actress_gallery_assets/.test(sql)) {
++      assert.match(sql, /LIMIT/)
++      const all = statement.all.bind(statement)
++      statement.all = ((...args: unknown[]) => {
++        const rows = all(...args)
++        galleryReads++
++        assert.ok(rows.length <= 1)
++        return rows
++      }) as typeof statement.all
++    }
++    return statement
++  }) as typeof db.prepare
++  try {
++    const service = createActressQueryService({ getMetadata: () => { throw new Error('Full gallery metadata forbidden') } })
++    const profile = service.getProfile(1)!
++    assert.deepEqual(profile, { ...fields, gallery_count: gallery.length, display_gallery_count: expected.length, first_gallery: expected[0] })
++    assert.equal(galleryReads, 1)
++    assert.ok(!('gallery' in profile) && !('videos' in profile))
++    assert.equal(resolveActressDetailDisplayBackgroundPath(profile, true), resolveActressDetailDisplayBackgroundPath(legacy, true))
++    assert.equal(resolveActressDetailDisplayBackgroundPath(profile, false), null)
++    assert.equal(resolveActressDetailDisplayBackgroundPath({ ...profile, poster_path: ' explicit.jpg ' }, true), 'explicit.jpg')
++    assert.equal(service.getProfile(999), null)
++    const empty = service.getProfile(2)!
++    assert.equal(empty.gallery_count, 0)
++    assert.equal(empty.display_gallery_count, 0)
++    assert.equal(empty.first_gallery, null)
++  } finally { db.prepare = prepare }
++  for (const id of [0,-1,NaN,1.5,Infinity]) assert.throws(() => getActressProfile(id), /Invalid/)
++})
++
++it('keeps profile fields, physical/display counts and first picture on one read snapshot', () => {
++  const db = getDb()
++  db.exec("INSERT INTO actress_gallery_assets(id,actress_id,local_path,width,height) VALUES(1,1,'old.jpg',1,2)")
++  const other = new Database(path.join(root, 'catalog.db'))
++  const prepare = db.prepare.bind(db)
++  let changed = false
++  db.prepare = ((sql: string) => {
++    const statement = prepare(sql)
++    if (sql === 'SELECT * FROM actresses WHERE id = ?') {
++      const get = statement.get.bind(statement)
++      statement.get = ((...args: unknown[]) => {
++        const row = get(...args)
++        if (!changed) { changed = true; other.exec("INSERT INTO actress_gallery_assets(id,actress_id,local_path,width,height) VALUES(2,1,'new.jpg',2,1)") }
++        return row
++      }) as typeof statement.get
++    }
++    return statement
++  }) as typeof db.prepare
++  try {
++    const old = getActressProfile(1)!
++    assert.equal(old.gallery_count, 1)
++    assert.equal(old.display_gallery_count, 1)
++    assert.equal(old.first_gallery!.id, 1)
++    const next = getActressProfile(1)!
++    assert.equal(next.gallery_count, 2)
++    assert.equal(next.display_gallery_count, 2)
++    assert.equal(next.first_gallery!.id, 2)
++    assert.equal(changed, true)
++  } finally { db.prepare = prepare; other.close() }
++})
++
++it('locates a stable photo after reordering, before paging and within the requested actor/source scope', () => {
++  const db = getDb()
++  const insert = db.prepare('INSERT INTO actress_gallery_assets(actress_id,local_path,position) VALUES(1,?,?)')
++  for (let n = 0; n < 125; n++) insert.run(`photo-${n}.jpg`, n)
++  const id = (db.prepare('SELECT id FROM actress_gallery_assets WHERE position=70').get() as {id:number}).id
++  let page = listActressGalleryPage(1, { anchorId: id })!
++  assert.equal(page.offset, 60)
++  assert.equal(page.anchorIndex, 10)
++  assert.equal(page.items[page.anchorIndex!].id, id)
++  db.prepare('UPDATE actress_gallery_assets SET position=-1 WHERE id=?').run(id)
++  page = listActressGalleryPage(1, { offset: 60, anchorId: id })!
++  assert.equal(page.offset, 0)
++  assert.equal(page.anchorIndex, 0)
++  assert.equal(page.items[0].id, id)
++  assert.equal(listActressGalleryPage(2, { anchorId: id })!.anchorIndex, null)
++  db.prepare("UPDATE actress_gallery_assets SET local_path=NULL,remote_url='https://example.test/photo' WHERE id=?").run(id)
++  assert.equal(listActressGalleryPage(1, { anchorId: id, localOnly: true })!.anchorIndex, null)
++  db.prepare('DELETE FROM actress_gallery_assets WHERE id=?').run(id)
++  assert.equal(listActressGalleryPage(1, { anchorId: id })!.anchorIndex, null)
++  for (const anchorId of [0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER+1]) assert.throws(() => listActressGalleryPage(1, { anchorId }))
++})
+diff --git a/src/renderer/src/components/ActressGalleryPanel.tsx b/src/renderer/src/components/ActressGalleryPanel.tsx
+index a28f150..3a8416f 100644
+--- a/src/renderer/src/components/ActressGalleryPanel.tsx
++++ b/src/renderer/src/components/ActressGalleryPanel.tsx
+@@ -1,9 +1,11 @@
+-import { useCallback, useMemo, useState } from 'react'
+-import { useImagePreviewById } from '../hooks/useImagePreviewById'
++import type { ImageThumbnailSize } from '@shared/imageVariants'
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
++import { useActressGalleryPage } from '../hooks/useActressGalleryPage'
++import { useActressGalleryPreview } from '../hooks/useActressGalleryPreview'
++import Button from './Button'
+ import type { ActressGalleryAsset } from '@shared/actressTypes'
+ import {
+-  actressGalleryRatio,
+-  prepareActressGalleryForDisplay
++  actressGalleryRatio
+ } from '@shared/mediaGalleryDisplay'
+ import { api, assetUrl } from '../api'
+ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+@@ -21,8 +23,8 @@ import { UI_ICON } from './iconDefaults'
+ const GALLERY_MASONRY_GAP = 10
+ const GALLERY_MASONRY_MIN_COL_WIDTH = 260
+ 
+-function gallerySrc(asset: ActressGalleryAsset): string | null {
+-  return assetUrl(asset.local_path) ?? asset.remote_url
++function gallerySrc(asset: ActressGalleryAsset, size?: ImageThumbnailSize): string | null {
++  return assetUrl(asset.local_path, size) ?? asset.remote_url
+ }
+ 
+ function galleryRatio(asset: ActressGalleryAsset): number {
+@@ -104,18 +106,18 @@ function toPreviewItems(items: ActressGalleryAsset[]): ImagePreviewItem[] {
+   return items.flatMap((asset) => {
+     const src = gallerySrc(asset)
+     if (!src) return []
+-    return [{ id: asset.id, src, localPath: asset.local_path }]
++    return [{ id: asset.id, src, thumbnailSrc: gallerySrc(asset, 320) ?? src, localPath: asset.local_path }]
+   })
+ }
+ 
+ export default function ActressGalleryPanel({
+   actressId,
+-  gallery,
++  revision,
+   posterPath,
+   onChanged
+ }: {
+   actressId: number
+-  gallery: ActressGalleryAsset[]
++  revision: object
+   posterPath: string | null
+   onChanged: () => void
+ }): JSX.Element {
+@@ -138,18 +140,21 @@ export default function ActressGalleryPanel({
+     [actressId, onChanged, toast]
+   )
+ 
+-  const items = useMemo(() => prepareActressGalleryForDisplay(gallery), [gallery])
+-
+-  const previewItems = useMemo(() => toPreviewItems(items), [items])
+-  const {
+-    previewIndex,
+-    isOpen,
+-    isEnabled: previewEnabled,
+-    openPreview,
+-    closePreview,
+-    closePreviewIf,
+-    setPreviewIndex
+-  } = useImagePreviewById(previewItems)
++  const photos = useActressGalleryPage(actressId)
++  const preview = useActressGalleryPreview(actressId)
++  const reloadPhotos = photos.reload
++  const items = useMemo(() => photos.data?.items ?? [], [photos.data])
++  const previewItems = useMemo(() => toPreviewItems(preview.view?.page.items ?? []), [preview.view])
++  const refreshPreview = useRef(preview.refresh)
++  refreshPreview.current = preview.refresh
++  const previousRevision = useRef(revision)
++  useEffect(() => {
++    if (previousRevision.current === revision) return
++    previousRevision.current = revision
++    reloadPhotos()
++    refreshPreview.current()
++  }, [revision, reloadPhotos])
++  const closePreview = preview.close
+ 
+   const dismissOverlays = useCallback(() => {
+     setShowImport(false)
+@@ -183,7 +188,7 @@ export default function ActressGalleryPanel({
+     try {
+       await api.actresses.deleteGalleryImage(actressId, deleteTarget.id)
+       setDeleteTarget(null)
+-      closePreviewIf(deleteTarget.id)
++      preview.closeIf(deleteTarget.id)
+       toast.show('写真已删除', 'success')
+       onChanged()
+     } catch (e) {
+@@ -196,7 +201,7 @@ export default function ActressGalleryPanel({
+   return (
+     <>
+       <div className="actress-gallery-toolbar">
+-        <div className="actress-gallery-count">{items.length} 张写真</div>
++        <div className="actress-gallery-count">{photos.data ? `${photos.data.total} 张写真` : '写真读取中…'}</div>
+         <IconButton
+           className="detail-icon-action"
+           icon={<ImagePlus {...UI_ICON} />}
+@@ -205,7 +210,9 @@ export default function ActressGalleryPanel({
+         />
+       </div>
+ 
+-      {items.length === 0 ? (
++      {photos.loading ? <p role="status">正在加载写真…</p> : photos.error ? (
++        <div role="alert">{photos.error}<Button onClick={photos.reload}>重试</Button></div>
++      ) : items.length === 0 ? (
+         <EmptyState
+           variant="compact"
+           className="sample-empty"
+@@ -220,7 +227,7 @@ export default function ActressGalleryPanel({
+           style={{ height: masonryLayout.height }}
+         >
+           {masonryLayout.items.map(({ asset, index, x, y, width, height }) => {
+-            const src = gallerySrc(asset)
++            const src = gallerySrc(asset, 640)
+             if (!src) return null
+             return (
+               <div
+@@ -235,9 +242,9 @@ export default function ActressGalleryPanel({
+                 <button
+                   type="button"
+                   className="sample-masonry-btn actress-gallery-masonry-btn"
+-                  disabled={!previewEnabled}
+-                  onClick={() => openPreview(asset.id)}
+-                  aria-label={`写真 ${index + 1}`}
++                  disabled={!preview.enabled}
++                  onClick={() => { if (photos.data) preview.open(photos.data, asset.id) }}
++                  aria-label={`写真 ${photos.offset + index + 1}`}
+                 >
+                   <img
+                     src={src}
+@@ -247,7 +254,7 @@ export default function ActressGalleryPanel({
+                   />
+                 </button>
+                 <MediaTileActionButton
+-                  label={`删除写真 ${index + 1}`}
++                  label={`删除写真 ${photos.offset + index + 1}`}
+                   title="删除写真"
+                   onClick={() => setDeleteTarget(asset)}
+                 />
+@@ -257,14 +264,26 @@ export default function ActressGalleryPanel({
+         </div>
+       )}
+ 
+-      {isOpen && previewIndex != null && (
++      {photos.data && photos.data.total > 60 && (
++        <nav className="actress-works-pagination" aria-label="演员写真分页">
++          <Button disabled={photos.offset === 0} onClick={() => photos.move(photos.offset - 60)}>上一页</Button>
++          <span>第 {Math.floor(photos.offset / 60) + 1} 页 · 共 {photos.data.total} 张</span>
++          <Button disabled={photos.offset + items.length >= photos.data.total} onClick={() => photos.move(photos.offset + 60)}>下一页</Button>
++        </nav>
++      )}
++
++      {preview.view && (
+         <ImagePreviewLightbox
+           items={previewItems}
+-          index={previewIndex}
++          index={preview.view.index}
++          windowOffset={preview.view.page.offset}
++          total={preview.view.page.total}
++          loading={preview.loading}
++          navigationStatus={preview.error ? <span role="alert">写真加载失败<Button onClick={preview.retry}>重试</Button></span> : preview.loading ? <span role="status">正在加载写真…</span> : undefined}
+           labels={GALLERY_PREVIEW_LABELS}
+           posterPath={posterPath}
+           onClose={closePreview}
+-          onIndexChange={setPreviewIndex}
++          onIndexChange={preview.select}
+           onPosterChange={changePoster}
+         />
+       )}
+diff --git a/src/renderer/src/components/ActressGalleryPanel.interaction.test.tsx b/src/renderer/src/components/ActressGalleryPanel.interaction.test.tsx
+new file mode 100644
+index 0000000..e835d76
+--- /dev/null
++++ b/src/renderer/src/components/ActressGalleryPanel.interaction.test.tsx
+@@ -0,0 +1,123 @@
++import assert from 'node:assert/strict'
++import { afterEach, it, type TestContext } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import type { ActressGalleryPage, ActressGalleryPageQuery } from '@shared/actressTypes'
++import type { ElectronApi } from '../../../preload/index'
++import type { ImagePreviewLightboxProps } from './ImagePreviewLightbox'
++
++const calls: ActressGalleryPageQuery[] = []
++let entries = Array.from({length:125}, (_,n) => n+1)
++let hold: ((query: ActressGalleryPageQuery) => Promise<ActressGalleryPage>) | null = null
++let fail = false
++let historyCount = 0
++function page(query: ActressGalleryPageQuery): ActressGalleryPage {
++  const position = query.anchorId === undefined ? -1 : entries.indexOf(query.anchorId)
++  const offset = position >= 0 ? Math.floor(position/60)*60 : query.offset ?? 0
++  return { items: entries.slice(offset,offset+60).map(id => ({id, actress_id:1, type:'photo' as const, local_path:`photos/${id}.jpg`,remote_url:null,position:id,width:400,height:600,created_at:null})), offset,limit:60,total:entries.length,
++    ...(query.anchorId === undefined ? {} : {anchorIndex:position < 0 ? null : position-offset}) }
++}
++const fake = { actresses: {
++  deleteGalleryImage: async (_actor: number, id: number) => { entries=entries.filter(value=>value!==id); return true },
++  importGalleryImage: async () => { entries.push(200); return true },
++  setPoster: async () => true,
++  galleryPage: async (_id: number, query: ActressGalleryPageQuery) => {
++  calls.push(query)
++  if (fail) { fail=false; throw Error('Photo page failed') }
++  if (hold) { const run=hold; hold=null; return run(query) }
++  return page(query)
++} } } as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{
++  api:fake,location:{href:'http://localhost/'},setTimeout,clearTimeout,
++  history:{state:null,pushState(){historyCount++},back(){window.dispatchEvent(new Event('popstate'))}}
++})})
++Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}},activeElement:null}})
++let renderer: TestRenderer.ReactTestRenderer | undefined
++let Component: typeof import('./ActressGalleryPanel').default
++let Provider: typeof import('./ImagePreviewOverlayContext').ImagePreviewOverlayProvider
++let revision = {}
++function tree() { return <Provider><Component key={1} actressId={1} revision={revision} posterPath={null} onChanged={()=>{ revision={}; renderer?.update(tree()) }} /></Provider> }
++async function mount(t: TestContext) {
++  Component=(await import('./ActressGalleryPanel')).default
++  Provider=(await import('./ImagePreviewOverlayContext')).ImagePreviewOverlayProvider
++  const Lightbox=(await import('./ImagePreviewLightbox')).default
++  const create=React.createElement
++  t.mock.method(React,'createElement',(type: unknown, props: unknown,...children:unknown[])=> type===Lightbox ? create('div',{'data-lightbox':props}) : Reflect.apply(create,React,[type,props,...children]))
++  await act(async()=>{renderer=TestRenderer.create(tree())})
++}
++function preview() { return renderer!.root.findAllByType('div').find(n=>n.props['data-lightbox'])?.props['data-lightbox'] as ImagePreviewLightboxProps | undefined }
++const tiles=()=>renderer!.root.findAllByType('button').filter(n=>/^写真 \d+$/.test(n.props['aria-label']??''))
++async function click(label:string) { await act(async()=>{const n=renderer!.root.findAllByType('button').find(n=>n.props['aria-label']===label || n.children.join('')===label)!;assert.ok(n,label);assert.ok(!n.props.disabled);n.props.onClick({stopPropagation(){},preventDefault(){},currentTarget:{blur(){}}})}) }
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;calls.length=0;entries=Array.from({length:125},(_,n)=>n+1);hold=null;fail=false;historyCount=0;revision={}})
++
++it('bounds grid and preview windows, crosses both page edges and preserves one history entry', async t=>{
++  await mount(t)
++  assert.equal(tiles().length,60)
++  await click('下一页');assert.equal(tiles()[0].props['aria-label'],'写真 61')
++  await click('下一页');assert.equal(tiles().length,5)
++  await click('写真 121')
++  assert.equal(preview()!.total,125);assert.equal(preview()!.windowOffset,120)
++  await act(async()=>preview()!.onIndexChange(-1))
++  assert.equal(preview()!.windowOffset,60);assert.equal(preview()!.index,59)
++  assert.equal(preview()!.items[59].id,120)
++  await act(async()=>preview()!.onIndexChange(60))
++  assert.equal(preview()!.windowOffset,120);assert.equal(preview()!.index,0)
++  assert.equal(preview()!.items[0].thumbnailSrc,'media://photos/121.jpg?size=320')
++  assert.equal(preview()!.items[0].src,'media://photos/121.jpg')
++  assert.equal(tiles().length,5)
++  assert.equal(historyCount,1)
++})
++
++it('retains the current photo on page failure, retries, and discards a response after close',async t=>{
++  await mount(t);await click('写真 60');fail=true
++  await act(async()=>preview()!.onIndexChange(60))
++  assert.equal(preview()!.items[preview()!.index].id,60)
++  assert.ok(preview()!.navigationStatus)
++  const action=preview()!.navigationStatus as React.ReactElement
++  const retry=React.Children.toArray(action.props.children).find(v=>React.isValidElement(v)) as React.ReactElement
++  await act(async()=>retry.props.onClick())
++  assert.equal(preview()!.items[preview()!.index].id,61)
++  let finish!: (value:ActressGalleryPage)=>void
++  hold=()=>new Promise(resolve=>{finish=resolve})
++  await act(async()=>preview()!.onIndexChange(-1))
++  assert.equal(preview()!.loading,true)
++  await act(async()=>preview()!.onClose())
++  await act(async()=>finish(page({offset:0})))
++  assert.equal(preview(),undefined)
++})
++
++it('refreshes by stable ID after reorder and closes a removed preview without selecting its replacement',async t=>{
++  await mount(t);await click('写真 60')
++  entries=[60,...entries.filter(id=>id!==60)]
++  revision={};await act(async()=>renderer!.update(tree()))
++  assert.equal(preview()!.items[preview()!.index].id,60)
++  assert.equal(preview()!.index,0)
++  assert.ok(calls.some(q=>q.anchorId===60))
++  entries=entries.filter(id=>id!==60)
++  revision={};await act(async()=>renderer!.update(tree()))
++  assert.equal(preview(),undefined)
++})
++
++
++it('deletes the last photo on a page and refreshes imported photos through the actual panel callbacks',async t=>{
++  entries=entries.slice(0,121)
++  await mount(t)
++  await click('下一页');await click('下一页')
++  assert.equal(tiles().length,1)
++  await click('删除写真 121');await click('删除')
++  assert.equal(entries.length,120)
++  assert.equal(tiles().length,60)
++  assert.equal(tiles()[0].props['aria-label'],'写真 61')
++  await click('导入写真')
++  const Import=(await import('./ImageImportModal')).default
++  const importer=renderer!.root.findByType(Import)
++  await act(async()=>{await importer.props.onImportUrl('https://example.test/new.jpg');importer.props.onChanged()})
++  await act(async()=>importer.props.onCancel())
++  await click('下一页')
++  assert.equal(tiles().length,1)
++  await click('写真 121')
++  assert.equal(preview()!.items[0].id,200)
++  await act(async()=>{await preview()!.onPosterChange!('photos/200.jpg')})
++  assert.equal(preview()!.items[preview()!.index].id,200)
++})
+diff --git a/src/renderer/src/components/ImagePreviewLightbox.tsx b/src/renderer/src/components/ImagePreviewLightbox.tsx
+index cbce6b4..9952de7 100644
+--- a/src/renderer/src/components/ImagePreviewLightbox.tsx
++++ b/src/renderer/src/components/ImagePreviewLightbox.tsx
+@@ -27,6 +27,7 @@ function clamp(value: number, min: number, max: number): number {
+ export interface ImagePreviewItem {
+   id: number
+   src: string
++  thumbnailSrc?: string
+   /** Local asset path used for poster selection; omit when poster actions are disabled. */
+   localPath?: string | null
+ }
+@@ -40,27 +41,39 @@ export interface ImagePreviewLabels {
+ 
+ export interface ImagePreviewLightboxProps {
+   items: ImagePreviewItem[]
++  /** A bounded window; onIndexChange may receive -1 or items.length at its edges. */
++  windowOffset?: number
++  total?: number
++  loading?: boolean
+   index: number
+   onClose: () => void
+   onIndexChange: (index: number) => void
+   labels: ImagePreviewLabels
+   posterPath?: string | null
+   onPosterChange?: (posterPath: string | null) => Promise<void>
++  navigationStatus?: ReactNode
+   toolbarActions?: ReactNode
+ }
+ 
+ export default function ImagePreviewLightbox({
+   items,
++  windowOffset = 0,
++  total = items.length,
++  loading = false,
+   index,
+   onClose,
+   onIndexChange,
+   labels,
+   posterPath = null,
+   onPosterChange,
+-  toolbarActions
++  toolbarActions,
++  navigationStatus
+ }: ImagePreviewLightboxProps): JSX.Element | null {
+   const { register } = useImagePreviewOverlay()
+   const src = items[index]?.src
++  const assetId = items[index]?.id
++  const canPrev = !loading && windowOffset + index > 0
++  const canNext = !loading && windowOffset + index + 1 < total
+   const [scale, setScale] = useState(1)
+   const [pan, setPan] = useState({ x: 0, y: 0 })
+   const [savingPoster, setSavingPoster] = useState(false)
+@@ -222,7 +235,7 @@ export default function ImagePreviewLightbox({
+     setImageReady(false)
+     const frame = window.requestAnimationFrame(() => setImageReady(true))
+     return () => window.cancelAnimationFrame(frame)
+-  }, [clearChromeTimer, clearSwipeAnimation, index, resetChromeOnOpen, resetView])
++  }, [clearChromeTimer, clearSwipeAnimation, index, assetId, resetChromeOnOpen, resetView])
+ 
+   useEffect(() => {
+     return () => {
+@@ -249,7 +262,7 @@ export default function ImagePreviewLightbox({
+ 
+   useEffect(() => {
+     activeThumbRef.current?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+-  }, [index])
++  }, [index, assetId])
+ 
+   const zoomBy = useCallback((delta: number) => {
+     setScale((current) => {
+@@ -261,22 +274,22 @@ export default function ImagePreviewLightbox({
+ 
+   const goPrev = useCallback(() => {
+     if (swipeAnimatingRef.current || swipeClickSuppressedRef.current) return
+-    if (index > 0) onIndexChange(index - 1)
+-  }, [index, onIndexChange])
++    if (canPrev) onIndexChange(index - 1)
++  }, [canPrev, index, onIndexChange])
+ 
+   const goNext = useCallback(() => {
+     if (swipeAnimatingRef.current || swipeClickSuppressedRef.current) return
+-    if (index < items.length - 1) onIndexChange(index + 1)
+-  }, [index, items.length, onIndexChange])
++    if (canNext) onIndexChange(index + 1)
++  }, [canNext, index, onIndexChange])
+ 
+   const selectThumb = useCallback(
+     (thumbIndex: number) => {
+-      if (thumbIndex === index || swipeAnimatingRef.current) return
++      if (loading || thumbIndex === index || swipeAnimatingRef.current) return
+       thumbSelectRef.current = true
+       holdChrome()
+       onIndexChange(thumbIndex)
+     },
+-    [holdChrome, index, onIndexChange]
++    [holdChrome, index, loading, onIndexChange]
+   )
+ 
+   useEscapeKey(onClose, true)
+@@ -327,7 +340,7 @@ export default function ImagePreviewLightbox({
+ 
+   const onPointerDown = (e: React.PointerEvent<HTMLElement>): void => {
+     bumpChrome()
+-    if (e.button !== 0 || swipeAnimatingRef.current) return
++    if (loading || e.button !== 0 || swipeAnimatingRef.current) return
+     if (Math.round(scale * 100) === 100) {
+       e.currentTarget.setPointerCapture(e.pointerId)
+       swipeRef.current = {
+@@ -365,7 +378,10 @@ export default function ImagePreviewLightbox({
+         swipe.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical'
+       }
+       if (swipe.axis === 'horizontal') {
+-        setSwipeOffsetX(deltaX)
++        // Across a page boundary there is no adjacent image to slide into view.
++        const unloadedNeighbor = (deltaX >= 0 && index === 0 && canPrev) ||
++          (deltaX < 0 && index === items.length - 1 && canNext)
++        setSwipeOffsetX(unloadedNeighbor ? 0 : deltaX)
+         setSwipeDirection(deltaX >= 0 ? 'prev' : 'next')
+       }
+       return
+@@ -407,7 +423,14 @@ export default function ImagePreviewLightbox({
+           : null
+       const targetIndex =
+         direction === 'prev' ? index - 1 : direction === 'next' ? index + 1 : null
+-      const canCommit = targetIndex != null && targetIndex >= 0 && targetIndex < items.length
++      const canCommit = direction === 'prev' ? canPrev : direction === 'next' ? canNext : false
++
++      if (canCommit && targetIndex != null && (targetIndex < 0 || targetIndex >= items.length)) {
++        setSwipeOffsetX(0)
++        setSwipeDirection(null)
++        onIndexChange(targetIndex)
++        return
++      }
+ 
+       if (!canCommit && (swipe.axis !== 'horizontal' || Math.abs(deltaX) < 1)) {
+         setSwipeOffsetX(0)
+@@ -523,7 +546,7 @@ export default function ImagePreviewLightbox({
+   const posterCandidate = items[index]?.localPath ?? null
+   const isPoster = Boolean(posterCandidate && posterPath === posterCandidate)
+   const showPosterAction = Boolean(onPosterChange)
+-  const chromeClass = chromeVisible || savingPoster || chromeHover ? ' is-visible' : ''
++  const chromeClass = chromeVisible || savingPoster || chromeHover || loading || navigationStatus ? ' is-visible' : ''
+   const canResetView = Math.round(scale * 100) !== 100
+ 
+   const togglePoster = async (): Promise<void> => {
+@@ -544,6 +567,7 @@ export default function ImagePreviewLightbox({
+       className="image-preview"
+       role="dialog"
+       aria-modal
++      aria-busy={loading}
+       aria-label={labels.dialog}
+       aria-describedby="image-preview-hint"
+       onFocusCapture={() => noteChromeActivity(true)}
+@@ -563,7 +587,7 @@ export default function ImagePreviewLightbox({
+         }}
+       >
+         <span className="image-preview-counter image-preview-toolbar-pill">
+-          {index + 1} / {items.length}
++          {windowOffset + index + 1} / {total}
+         </span>
+         <div className="image-preview-actions">
+           {showPosterAction && (
+@@ -577,6 +601,7 @@ export default function ImagePreviewLightbox({
+               {savingPoster ? '保存中…' : isPoster ? '背景 ✓' : '设为背景'}
+             </button>
+           )}
++          {navigationStatus}
+           {toolbarActions}
+           <div className="image-preview-zoom" aria-label="缩放">
+             <IconButton
+@@ -619,7 +644,7 @@ export default function ImagePreviewLightbox({
+           onPointerMove={canSwipe ? onPointerMove : undefined}
+           onPointerUp={canSwipe ? onPointerUp : undefined}
+           onPointerCancel={canSwipe ? (event) => onPointerUp(event, false) : undefined}
+-          disabled={index === 0}
++          disabled={!canPrev}
+           aria-label="上一张"
+         />
+         <div
+@@ -672,7 +697,7 @@ export default function ImagePreviewLightbox({
+           onPointerMove={canSwipe ? onPointerMove : undefined}
+           onPointerUp={canSwipe ? onPointerUp : undefined}
+           onPointerCancel={canSwipe ? (event) => onPointerUp(event, false) : undefined}
+-          disabled={index === items.length - 1}
++          disabled={!canNext}
+           aria-label="下一张"
+         />
+       </div>
+@@ -713,9 +738,10 @@ export default function ImagePreviewLightbox({
+                   thumbIsPoster ? ' image-preview-thumb--poster' : ''
+                 }`}
+                 onClick={() => handleThumbClick(thumbIndex)}
+-                aria-label={labels.thumb(thumbIndex)}
++                disabled={loading}
++                aria-label={labels.thumb(windowOffset + thumbIndex)}
+               >
+-                <img src={item.src} alt="" loading="lazy" draggable={false} />
++                <img src={item.thumbnailSrc ?? item.src} alt="" loading="lazy" draggable={false} />
+               </button>
+             )
+           })}
+diff --git a/src/renderer/src/components/ImageThumbnailEntrypoints.test.tsx b/src/renderer/src/components/ImageThumbnailEntrypoints.test.tsx
+new file mode 100644
+index 0000000..1c32734
+--- /dev/null
++++ b/src/renderer/src/components/ImageThumbnailEntrypoints.test.tsx
+@@ -0,0 +1,58 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import type { ActressListItem } from '@shared/actressTypes'
++import type { VideoAsset } from '@shared/videoTypes'
++
++Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), {
++  api: {}, location: { href: 'http://localhost/' }, history: { state: null, pushState() {} }
++}) })
++let renderer: TestRenderer.ReactTestRenderer | undefined
++afterEach(async () => { await act(async () => renderer?.unmount()); renderer = undefined })
++
++it('uses a 320 thumbnail for actress cards', async () => {
++  const Card = (await import('./ActressCardTile')).default
++  await act(async () => {
++    renderer = TestRenderer.create(<Card actress={{ id: 1, main_name: 'Example', avatar_path: 'avatars/example.jpg', gender: 'female', video_count: 1, scraped_status: 0 } as ActressListItem}
++      selected={false} selectionMode={false} onToggleSelect={() => {}} onOpen={() => {}} onDelete={() => {}} />)
++  })
++  assert.equal(renderer!.root.findByType('img').props.src, 'media://avatars/example.jpg?size=320')
++})
++
++for (const kind of ['video', 'actress'] as const) {
++  it(`uses thumbnails for local ${kind} gallery tiles and original preview sources`, async (t) => {
++    const { ImagePreviewOverlayProvider } = await import('./ImagePreviewOverlayContext')
++    const sample = { id: 1, video_id: 1, actress_id: 1, type: 'sample', position: 0, local_path: 'samples/local.jpg',
++      remote_url: null, width: 800, height: 600, is_primary: 0, created_at: null }
++    const remote = { ...sample, id: 2, position: 1, local_path: null, remote_url: 'https://example.test/remote.jpg' }
++    Object.assign(window.api, { actresses: { galleryPage: async () => ({ items: [sample, remote], total: 2, limit: 60, offset: 0 }) } })
++    const VideoGallery = (await import('./VideoSampleGallery')).default
++    const ActressGallery = (await import('./ActressGalleryPanel')).default
++    const Lightbox = (await import('./ImagePreviewLightbox')).default
++    const createElement = React.createElement
++    // Keep this a parent interaction test: replace only the portal/gesture boundary.
++    t.mock.method(React, 'createElement', (type: unknown, props: unknown, ...children: unknown[]) => {
++      if (type === Lightbox) return createElement('div', { 'data-preview-items': (props as { items: unknown }).items })
++      return Reflect.apply(createElement, React, [type, props, ...children])
++    })
++    await act(async () => {
++      renderer = TestRenderer.create(<ImagePreviewOverlayProvider>
++        {kind === 'video' ? <VideoGallery videoId={1} assets={[sample, remote] as VideoAsset[]} posterPath={null} onChanged={() => {}} />
++          : <ActressGallery actressId={1} revision={{}} posterPath={null} onChanged={() => {}} />}
++      </ImagePreviewOverlayProvider>)
++    })
++    assert.deepEqual(renderer!.root.findAllByType('img').map(image => image.props.src), [
++      'media://samples/local.jpg?size=640', 'https://example.test/remote.jpg'
++    ])
++    await act(async () => {
++      renderer!.root.findAllByType('button').find(button => button.props['aria-label'] === (kind === 'video' ? '样张 1' : '写真 1'))!.props.onClick()
++    })
++    const preview = renderer!.root.findAllByType('div').find(node => node.props['data-preview-items'])!
++    assert.deepEqual(preview.props['data-preview-items'], [
++      { id: 1, src: 'media://samples/local.jpg', localPath: 'samples/local.jpg', ...(kind === 'actress' ? { thumbnailSrc: 'media://samples/local.jpg?size=320' } : {}) },
++      { id: 2, src: 'https://example.test/remote.jpg', localPath: null, ...(kind === 'actress' ? { thumbnailSrc: 'https://example.test/remote.jpg' } : {}) }
++    ])
++  })
++}
+diff --git a/src/renderer/src/components/EditActressModal.tsx b/src/renderer/src/components/EditActressModal.tsx
+index c001d2c..44835a3 100644
+--- a/src/renderer/src/components/EditActressModal.tsx
++++ b/src/renderer/src/components/EditActressModal.tsx
+@@ -16,7 +16,7 @@ import {
+ import { parseAvatarCrop, type ActressAvatarCommit } from '@shared/avatarCrop'
+ import { normalizeCupSize } from '@shared/cupSizeUtils'
+ import type { ActressEditInput, ActressGender } from '@shared/actressTypes'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressMetadata } from '@shared/actressTypes'
+ import { assetUrl } from '../api'
+ import ActressAvatarEditor from './ActressAvatarEditor'
+ import AliasTagEditor from './AliasTagEditor'
+@@ -29,7 +29,7 @@ import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
+ import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
+ 
+ interface Props {
+-  actress: ActressDetail
++  actress: Omit<ActressMetadata, 'gallery'>
+   onCancel: () => void
+   onSave: (input: ActressEditInput) => Promise<void>
+ }
+@@ -175,12 +175,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props):
+             {!mediaEditorsHidden ? (
+               <EditFormSection title="头像" className="entity-edit-section--media">
+                 <ActressAvatarEditor
+-                  key={avatarRevisionKey}
++                  key={`${actress.id}:${avatarRevisionKey}`}
+                   displayUrl={assetUrl(actress.avatar_path)}
+                   sourceUrl={assetUrl(actress.avatar_source_path)}
+                   savedCrop={savedCrop}
+-                  videos={actress.videos}
+-                  gallery={actress.gallery}
++                  actressId={actress.id}
+                   onAvatarChange={handleAvatarChange}
+                 />
+               </EditFormSection>
+diff --git a/src/renderer/src/components/ActressProfileMeta.tsx b/src/renderer/src/components/ActressProfileMeta.tsx
+index 538142b..1c647c6 100644
+--- a/src/renderer/src/components/ActressProfileMeta.tsx
++++ b/src/renderer/src/components/ActressProfileMeta.tsx
+@@ -5,7 +5,7 @@ import {
+   ZODIAC_OPTIONS
+ } from '@shared/actressProfileOptions'
+ import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressMetadata } from '@shared/actressTypes'
+ import type { ScrapedStatus } from '@shared/commonTypes'
+ import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/actressTypes'
+ import RelatedLinksList from './RelatedLinksList'
+@@ -71,7 +71,7 @@ export function canMarkActressScrapeSuccess(status: ScrapedStatus): boolean {
+ }
+ 
+ export function buildActressScrapeMetaItems(
+-  actress: Pick<ActressDetail, 'scraped_status' | 'last_scraped_at'>
++  actress: Pick<ActressMetadata, 'scraped_status' | 'last_scraped_at'>
+ ): MetaItem[] {
+   // Successful records are the common case; keep the detail page quiet unless attention is needed.
+   if (actress.scraped_status === 1) return []
+@@ -91,13 +91,13 @@ export function buildActressScrapeMetaItems(
+   return items
+ }
+ 
+-function findTypedName(actress: ActressDetail, type: string): string | null {
++function findTypedName(actress: Omit<ActressMetadata, 'gallery'>, type: string): string | null {
+   const row = actress.names.find((item) => item.type === type)
+   const name = row?.name.trim()
+   return name || null
+ }
+ 
+-function buildActressMetaSections(actress: ActressDetail): Array<{
++function buildActressMetaSections(actress: Omit<ActressMetadata, 'gallery'>): Array<{
+   id: string
+   title: string
+   items: MetaItem[]
+@@ -191,7 +191,7 @@ function buildActressMetaSections(actress: ActressDetail): Array<{
+   return sections
+ }
+ 
+-export function buildActressProfileSubtitle(actress: ActressDetail): string | null {
++export function buildActressProfileSubtitle(actress: Omit<ActressMetadata, 'gallery'>): string | null {
+   const parts = [actress.name_zh, actress.name_en]
+     .map((name) => name?.trim())
+     .filter((name): name is string => Boolean(name && name !== actress.main_name))
+@@ -199,8 +199,8 @@ export function buildActressProfileSubtitle(actress: ActressDetail): string | nu
+   return unique.length > 0 ? unique.join(' · ') : null
+ }
+ 
+-export function buildActressProfileStats(actress: ActressDetail): string[] {
+-  const stats: string[] = [`${actress.videos.length} 部`]
++export function buildActressProfileStats(actress: Omit<ActressMetadata, 'gallery'>, videoCount: number | null): string[] {
++  const stats: string[] = [videoCount === null ? '作品数读取中…' : `${videoCount} 部`]
+   if (actress.height_cm != null) stats.push(`${actress.height_cm} cm`)
+   if (!isBlank(actress.birth_date)) {
+     const age = computeAge(actress.birth_date!.trim())
+@@ -215,7 +215,7 @@ export function buildActressProfileStats(actress: ActressDetail): string[] {
+ export default function ActressProfileMeta({
+   actress
+ }: {
+-  actress: ActressDetail
++  actress: Omit<ActressMetadata, 'gallery'>
+ }): JSX.Element | null {
+   const sections = useMemo(() => buildActressMetaSections(actress), [actress])
+   const aliases = actress.aliases.filter((alias) => alias.trim().length > 0)
+diff --git a/src/renderer/src/components/MergeActressModal.tsx b/src/renderer/src/components/MergeActressModal.tsx
+index 6640a48..93297bc 100644
+--- a/src/renderer/src/components/MergeActressModal.tsx
++++ b/src/renderer/src/components/MergeActressModal.tsx
+@@ -1,11 +1,10 @@
+-import { useEffect, useState } from 'react'
++import { useEffect, useRef, useState } from 'react'
+ import { SearchX, UserRound } from 'lucide-react'
+ import {
+-  actressGenderMergeLabel,
+-  canMergeActressGenders
++  actressGenderMergeLabel
+ } from '@shared/actressProfileOptions'
+-import type { ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/actressTypes'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressGender, ActressMergeCandidate, ActressMergeMainNameFrom } from '@shared/actressTypes'
++import type { ActressMetadata } from '@shared/actressTypes'
+ import { api, assetUrl } from '../api'
+ import { useDebounce } from '../hooks/useDebounce'
+ import ActressName from './ActressName'
+@@ -16,7 +15,8 @@ import { UI_ICON_SM } from './iconDefaults'
+ import Button from './Button'
+ 
+ interface Props {
+-  keepActress: ActressDetail
++  keepActress: Omit<ActressMetadata, 'gallery'> & ({ gallery: ActressMetadata['gallery'] } | { gallery_count: number })
++  keepVideoCount: number
+   onCancel: () => void
+   onMerged: () => void
+ }
+@@ -88,54 +88,59 @@ function MergeActressCard({
+   )
+ }
+ 
+-export default function MergeActressModal({
++export default function MergeActressModal(props: Props): JSX.Element {
++  return <MergeActressSession key={`${props.keepActress.id}:${props.keepActress.gender ?? ''}`} {...props} />
++}
++
++function MergeActressSession({
+   keepActress,
++  keepVideoCount,
+   onCancel,
+   onMerged
+ }: Props): JSX.Element {
+   const [searchInput, setSearchInput] = useState('')
+   const debouncedQ = useDebounce(searchInput, 300)
+-  const [items, setItems] = useState<ActressListItem[]>([])
+-  const [loading, setLoading] = useState(false)
+-  const [selected, setSelected] = useState<ActressListItem | null>(null)
++  const [items, setItems] = useState<ActressMergeCandidate[]>([])
++  const [loading, setLoading] = useState(true)
++  const [selected, setSelected] = useState<ActressMergeCandidate | null>(null)
+   const [mainNameFrom, setMainNameFrom] = useState<ActressMergeMainNameFrom>('keep')
+   const [merging, setMerging] = useState(false)
+   const [error, setError] = useState<string | null>(null)
++  const errorRef = useRef<HTMLParagraphElement>(null)
++  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'nearest' }) }, [error])
++  const [pageError, setPageError] = useState<string | null>(null)
++  const [offset, setOffset] = useState(0)
++  const [hasMore, setHasMore] = useState(false)
++  const [retry, setRetry] = useState(0)
++  const mergeInFlight = useRef(false)
++  const mounted = useRef(true)
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
++
+ 
+   useEffect(() => {
+     let cancelled = false
+     setLoading(true)
+-    setError(null)
+-    api.actresses
+-      .list(debouncedQ.trim(), 'all')
+-      .then((list) => {
+-        if (cancelled) return
+-        setItems(
+-          list.filter(
+-            (item) =>
+-              item.id !== keepActress.id &&
+-              canMergeActressGenders(keepActress.gender, item.gender)
+-          )
+-        )
+-      })
+-      .catch((e) => {
+-        if (!cancelled) setError(String((e as Error).message ?? e))
+-      })
+-      .finally(() => {
+-        if (!cancelled) setLoading(false)
++    setItems([])
++    setHasMore(false)
++    setPageError(null)
++    if (searchInput !== debouncedQ) return () => { cancelled = true }
++    void api.actresses.mergeCandidates({ keepId: keepActress.id, search: debouncedQ.trim(), limit: 40, offset })
++      .then(page => {
++        if (!cancelled) { setItems(page.items); setHasMore(page.hasMore) }
+       })
++      .catch(e => { if (!cancelled) setPageError(String((e as Error).message ?? e)) })
++      .finally(() => { if (!cancelled) setLoading(false) })
++    return () => { cancelled = true }
++  }, [debouncedQ, searchInput, keepActress.id, offset, retry])
+ 
+-    return () => {
+-      cancelled = true
+-    }
+-  }, [debouncedQ, keepActress.gender, keepActress.id])
+-
+-  useEffect(() => {
+-    setMainNameFrom('keep')
+-  }, [selected?.id])
++  const changePage = (nextOffset: number): void => {
++    if (merging || loading) return
++    setItems([]); setLoading(true); setPageError(null); setOffset(nextOffset)
++  }
+ 
+   const doMerge = async (): Promise<void> => {
+-    if (!selected || merging) return
++    if (!selected || mergeInFlight.current) return
++    mergeInFlight.current = true
+     setMerging(true)
+     setError(null)
+     try {
+@@ -144,11 +149,12 @@ export default function MergeActressModal({
+         mergeId: selected.id,
+         mainNameFrom
+       })
+-      onMerged()
++      if (mounted.current) onMerged()
+     } catch (e) {
+-      setError(String((e as Error).message ?? e))
++      if (mounted.current) setError(String((e as Error).message ?? e))
+     } finally {
+-      setMerging(false)
++      mergeInFlight.current = false
++      if (mounted.current) setMerging(false)
+     }
+   }
+ 
+@@ -156,8 +162,8 @@ export default function MergeActressModal({
+     main_name: keepActress.main_name,
+     gender: keepActress.gender ?? null,
+     avatar_path: keepActress.avatar_path,
+-    video_count: keepActress.videos.length,
+-    gallery_count: keepActress.gallery.length
++    video_count: keepVideoCount,
++    gallery_count: 'gallery_count' in keepActress ? keepActress.gallery_count : keepActress.gallery.length
+   }
+ 
+   const selectedCard: MergeCardActress | undefined = selected
+@@ -184,7 +190,7 @@ export default function MergeActressModal({
+         : keepActress.main_name
+ 
+   const mergedVideoCount =
+-    selected == null ? keepActress.videos.length : keepActress.videos.length + selected.video_count
++    selected == null ? keepVideoCount : keepVideoCount + selected.video_count
+   return (
+     <Modal
+       title="合并演员"
+@@ -194,6 +200,7 @@ export default function MergeActressModal({
+       className="merge-actress-modal"
+       bodyOverflow="hidden"
+       onCancel={onCancel}
++      closeDisabled={merging}
+       actions={
+         <>
+           <Button type="button" onClick={onCancel} disabled={merging}>
+@@ -228,28 +235,36 @@ export default function MergeActressModal({
+           <div className="merge-actress-section-head">
+             <span className="merge-actress-section-title">选择要合并的演员</span>
+             {!loading && items.length > 0 && (
+-              <span className="merge-actress-section-meta">{items.length} 名候选</span>
++              <span className="merge-actress-section-meta">本页 {items.length} 名候选</span>
+             )}
+           </div>
+           <input
+             className="search-input merge-actress-search"
+             type="search"
+             placeholder="搜索主名或别名…"
++            aria-label="搜索合并候选"
++            maxLength={256}
++            disabled={merging}
+             value={searchInput}
+-            onChange={(e) => setSearchInput(e.target.value)}
++            onChange={(e) => { setItems([]); setLoading(true); setOffset(0); setSearchInput(e.target.value) }}
+             autoFocus
+           />
+ 
+           <div className="merge-actress-pick-panel">
+             {loading ? (
+               <EmptyState variant="modal" loading />
++            ) : pageError ? (
++              <div role="alert" className="merge-actress-page-error">
++                <p>合并候选读取失败</p>
++                <Button size="sm" disabled={merging} onClick={() => setRetry(value => value + 1)}>重试</Button>
++              </div>
+             ) : items.length === 0 ? (
+               <EmptyState
+                 variant="modal"
+                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+-                title={debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
++                title={offset > 0 ? '本页没有候选演员' : debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
+                 description={
+-                  debouncedQ.trim()
++                  offset > 0 ? '返回上一页或调整搜索关键词。' : debouncedQ.trim()
+                     ? '调整搜索关键词后再试。'
+                     : '当前演员没有同组可合并候选。'
+                 }
+@@ -263,9 +278,11 @@ export default function MergeActressModal({
+                       key={item.id}
+                       type="button"
+                       role="option"
++                      aria-label={`选择合并演员 ${item.main_name}`}
+                       aria-selected={isSelected}
+                       className={`merge-actress-pick-item${isSelected ? ' is-selected' : ''}`}
+-                      onClick={() => setSelected(isSelected ? null : item)}
++                      disabled={merging}
++                      onClick={() => { setSelected(isSelected ? null : item); setMainNameFrom('keep') }}
+                     >
+                       <span className="merge-actress-pick-radio" aria-hidden="true" />
+                       <ActressAvatar
+@@ -287,6 +304,11 @@ export default function MergeActressModal({
+               </div>
+             )}
+           </div>
++          <div className="merge-actress-pagination" aria-label="合并候选分页">
++            <Button size="sm" disabled={merging || loading || offset === 0} onClick={() => changePage(Math.max(0, offset - 40))}>上一页</Button>
++            <span aria-live="polite">第 {Math.floor(offset / 40) + 1} 页</span>
++            <Button size="sm" disabled={merging || loading || !hasMore} onClick={() => changePage(offset + 40)}>下一页</Button>
++          </div>
+         </section>
+ 
+         <section
+@@ -305,6 +327,7 @@ export default function MergeActressModal({
+                   <input
+                     type="radio"
+                     name="merge-main-name"
++                    disabled={merging}
+                     checked={mainNameFrom === 'keep'}
+                     onChange={() => setMainNameFrom('keep')}
+                   />
+@@ -319,6 +342,7 @@ export default function MergeActressModal({
+                   <input
+                     type="radio"
+                     name="merge-main-name"
++                    disabled={merging}
+                     checked={mainNameFrom === 'merge'}
+                     onChange={() => setMainNameFrom('merge')}
+                   />
+@@ -334,7 +358,7 @@ export default function MergeActressModal({
+                   当前条目保留为「{finalMainName}」，对方记录将删除
+                 </li>
+                 <li>
+-                  影片合并：{keepActress.videos.length} + {selected.video_count}，约{' '}
++                  影片合并：{keepVideoCount} + {selected.video_count}，约{' '}
+                   <strong>{mergedVideoCount}</strong> 部关联到保留条目
+                 </li>
+                 <li>写真与资料字段将合并到保留条目，已有字段优先保留</li>
+@@ -352,7 +376,7 @@ export default function MergeActressModal({
+           )}
+         </section>
+ 
+-        {error && <p className="merge-actress-error">{error}</p>}
++        {error && <p ref={errorRef} role="alert" className="merge-actress-error">{error}</p>}
+       </div>
+     </Modal>
+   )
+diff --git a/src/renderer/src/pages/ActressDetailPage.tsx b/src/renderer/src/pages/ActressDetailPage.tsx
+index 162ccb0..e694db6 100644
+--- a/src/renderer/src/pages/ActressDetailPage.tsx
++++ b/src/renderer/src/pages/ActressDetailPage.tsx
+@@ -1,3 +1,5 @@
++import Button from '../components/Button'
++import { useActressVideoPage } from '../hooks/useActressVideoPage'
+ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+ import { useQueryClient } from '@tanstack/react-query'
+ import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
+@@ -8,7 +10,7 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+ import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
+ import { ROUTE_MATCH } from '../listView/routePaths'
+ import { buildActressScrapeMatchNameOptions } from '@shared/actressProfileOptions'
+-import type { ActressDetail } from '@shared/actressTypes'
++import type { ActressProfile } from '@shared/actressTypes'
+ import type { ActressDeleteResult } from '@shared/actressIpcContract'
+ import { api, assetUrl } from '../api'
+ import { useToast } from '../components/Toast'
+@@ -64,13 +66,22 @@ export default function ActressDetailPage(): JSX.Element {
+     pendingActressStack
+   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
+   const actressId = Number(actressIdParam ?? id)
++  const works = useActressVideoPage(actressId)
++  const knownTotal = useRef<{ id: number; total: number } | null>(null)
++  if (works.data) knownTotal.current = { id: actressId, total: works.data.total }
++  const videoTotal = knownTotal.current?.id === actressId ? knownTotal.current.total : null
++  const reloadWorks = useRef(works.reload)
++  reloadWorks.current = works.reload
++  const activeActressId = useRef(actressId)
++  activeActressId.current = actressId
++  const metadataSequence = useRef(0)
+ 
+   const toast = useToast()
+   const queryClient = useQueryClient()
+   const toastRef = useRef(toast)
+   toastRef.current = toast
+   const { setBackground, clearBackground } = useAppBackground()
+-  const [actress, setActress] = useState<ActressDetail | null>(null)
++  const [actress, setActress] = useState<ActressProfile | null>(null)
+   const [loading, setLoading] = useState(true)
+   const [confirmDelete, setConfirmDelete] = useState(false)
+   const [confirmClear, setConfirmClear] = useState(false)
+@@ -103,14 +114,18 @@ export default function ActressDetailPage(): JSX.Element {
+ 
+   const load = useCallback(
+     (options?: { silent?: boolean }) => {
++      if (activeActressId.current !== actressId) return Promise.resolve()
+       const silent = options?.silent ?? false
++      const sequence = ++metadataSequence.current
++      const isCurrent = () => sequence === metadataSequence.current && activeActressId.current === actressId
+       if (!silent) setLoading(true)
++      else reloadWorks.current()
+       return api.actresses
+-        .get(actressId)
+-        .then(setActress)
+-        .catch((e) => toastRef.current.show(String(e.message ?? e), 'error'))
++        .profile(actressId)
++        .then(value => { if (isCurrent()) setActress(value) })
++        .catch((e) => { if (isCurrent()) { setActress(null); toastRef.current.show(String(e.message ?? e), 'error') } })
+         .finally(() => {
+-          if (!silent) setLoading(false)
++          if (isCurrent()) setLoading(false)
+         })
+     },
+     [actressId]
+@@ -119,6 +134,7 @@ export default function ActressDetailPage(): JSX.Element {
+ 
+   useEffect(() => {
+     void load()
++    return () => { metadataSequence.current += 1 }
+   }, [actressId, load])
+ 
+   useEffect(
+@@ -143,7 +159,7 @@ export default function ActressDetailPage(): JSX.Element {
+ 
+   useEffect(() => {
+     const scope = `actress:${actressId}`
+-    if (!actress) return
++    if (!actress || actress.id !== actressId) return
+     const path = resolveActressDetailDisplayBackgroundPath(
+       actress,
+       actressDetailUseFirstGalleryBackground
+@@ -269,7 +285,7 @@ export default function ActressDetailPage(): JSX.Element {
+     </div>
+   ) : null
+ 
+-  if (loading) {
++  if (loading || (actress !== null && actress.id !== actressId)) {
+     return (
+       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+         <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
+@@ -294,10 +310,10 @@ export default function ActressDetailPage(): JSX.Element {
+     )
+   }
+ 
+-  const avatar = assetUrl(actress.avatar_path)
+-  const avatarPreview = assetUrl(actress.avatar_source_path) ?? avatar
++  const avatar = assetUrl(actress.avatar_path, 640)
++  const avatarPreview = assetUrl(actress.avatar_source_path) ?? assetUrl(actress.avatar_path)
+   const profileSubtitle = buildActressProfileSubtitle(actress)
+-  const profileStats = buildActressProfileStats(actress)
++  const profileStats = buildActressProfileStats(actress, videoTotal)
+ 
+   const onAvatarKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+     if (!avatarPreview || !avatarPreviewEnabled || e.defaultPrevented) return
+@@ -341,6 +357,7 @@ export default function ActressDetailPage(): JSX.Element {
+         {
+           key: 'merge',
+           label: '合并演员',
++          disabled: !works.data,
+           onClick: () => setShowMerge(true)
+         },
+         {
+@@ -440,7 +457,9 @@ export default function ActressDetailPage(): JSX.Element {
+       </div>
+ 
+       {activeTab === 'videos' ? (
+-        actress.videos.length === 0 ? (
++        works.loading ? <EmptyState loading /> : works.error ? (
++          <div role="alert">{works.error}<Button onClick={works.reload}>重试</Button></div>
++        ) : !works.data || works.data.videos.length === 0 ? (
+           <EmptyState
+             variant="compact"
+             icon={<Inbox {...UI_ICON} aria-hidden />}
+@@ -448,16 +467,22 @@ export default function ActressDetailPage(): JSX.Element {
+             description="影片刮削后会自动建立关联。"
+           />
+         ) : (
+-          <div className="poster-grid">
+-            {actress.videos.map((v) => (
++          <><div className="poster-grid">
++            {works.data.videos.map((v) => (
+               <PosterCard key={v.id} video={v} />
+             ))}
+           </div>
++          <nav className="actress-works-pagination" aria-label="演员作品分页">
++            <Button disabled={works.offset === 0} onClick={() => works.move(works.offset - 60)}>上一页</Button>
++            <span>第 {Math.floor(works.offset / 60) + 1} 页 · 共 {works.data.total} 部</span>
++            <Button disabled={works.offset + works.data.videos.length >= works.data.total} onClick={() => works.move(works.offset + 60)}>下一页</Button>
++          </nav></>
+         )
+       ) : (
+         <ActressGalleryPanel
++          key={actress.id}
+           actressId={actress.id}
+-          gallery={actress.gallery}
++          revision={actress}
+           posterPath={actress.poster_path}
+           onChanged={() => {
+             void load({ silent: true })
+@@ -536,9 +561,10 @@ export default function ActressDetailPage(): JSX.Element {
+         />
+       )}
+ 
+-      {showMerge && (
++      {showMerge && videoTotal !== null && (
+         <MergeActressModal
+           keepActress={actress}
++          keepVideoCount={videoTotal}
+           onCancel={() => setShowMerge(false)}
+           onMerged={() => {
+             setShowMerge(false)
+diff --git a/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx b/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx
+new file mode 100644
+index 0000000..3b57f9e
+--- /dev/null
++++ b/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx
+@@ -0,0 +1,163 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ActressProfile, ActressVideoPageQuery } from '@shared/actressTypes'
++import type { ElectronApi } from '../../../preload/index'
++
++let metadataResponse: ((id: number) => Promise<ActressProfile>) | null = null
++let editResponse: (() => Promise<boolean>) | null = null
++let fail = false
++let hold: (() => Promise<unknown>) | null = null
++let total = 125
++const calls: Array<{ id: number; query: ActressVideoPageQuery }> = []
++const metadataCalls: number[] = []
++function metadata(id: number): ActressProfile {
++  return { id, main_name: `Actor-${id}`, gender: 'female', names: [], aliases: [], gallery_count: 0, display_gallery_count: 0, first_gallery: null, links: [], avatar_path: null, avatar_source_path: null, scraped_status: 0 } as unknown as ActressProfile
++}
++function page(id: number, offset: number) {
++  return { videos: Array.from({ length: Math.min(60, Math.max(0, total - offset)) }, (_, n) => ({ id: id * 1000 + offset + n, code: `WORK-${id}-${offset+n}`, title: null, cover_path: null, scraped_status: 0, resource_kinds: [] })), total, limit: 60, offset }
++}
++const fake = {
++  actresses: {
++    galleryPage: async () => ({ items: [], total: 0, limit: 60, offset: 0 }),
++    get: () => { throw new Error('Full actress detail forbidden') },
++    metadata: () => { throw new Error('Full gallery metadata forbidden') },
++    profile: async (id: number) => { metadataCalls.push(id); return metadataResponse ? metadataResponse(id) : metadata(id) },
++    edit: async () => editResponse ? editResponse() : true,
++    mergeCandidates: async () => ({ items: [], hasMore: false, offset: 0 }),
++    videoPage: async (id: number, query: ActressVideoPageQuery) => {
++      if (query.withCover) return { videos: [], total: 0, limit: 60, offset: 0 }
++      calls.push({ id, query })
++      if (hold) { const run = hold; hold = null; return run() }
++      if (fail) { fail = false; throw new Error('Page failed') }
++      return page(id, query.offset ?? 0)
++    }
++  },
++  settings: { get: async () => ({}) },
++  actressScrape: { listPlugins: async () => [], listPluginDetails: async () => [] },
++  agentMetadata: { onSnapshotChanged: () => () => {} }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), { api: fake, requestAnimationFrame: (fn: () => void) => fn() }) })
++Object.defineProperty(globalThis, 'document', { configurable: true, value: { body: { style: { overflow: '' } }, activeElement: null } })
++let renderer: TestRenderer.ReactTestRenderer | undefined
++let client: QueryClient
++let navigate: NavigateFunction
++function Nav() { navigate = useNavigate(); return null }
++const text = (node: TestRenderer.ReactTestInstance): string => node.children.map(child => typeof child === 'string' ? child : text(child)).join('')
++async function click(label: string) {
++  await act(async () => {
++    const button = renderer!.root.findAllByType('button').find(node => text(node) === label || node.props['aria-label'] === label)!
++    assert.ok(button, label)
++    assert.ok(!button.props.disabled, label)
++    button.props.onClick()
++  })
++}
++async function mount() {
++  const Component = (await import('./ActressDetailPage')).default
++  const { ImagePreviewOverlayProvider } = await import('../components/ImagePreviewOverlayContext')
++  const { AppBackgroundProvider } = await import('../components/AppBackgroundContext')
++  const { AgentMetadataCollectorProvider } = await import('../components/agentMetadata/AgentMetadataCollectorContext')
++  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
++  await act(async () => {
++    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video</div>} /></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>)
++  })
++}
++afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined; calls.length = 0; metadataCalls.length = 0; total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
++
++it('loads metadata once while paging 60/60/5 works and preserving the full count', async () => {
++  await mount()
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++  assert.ok(text(renderer!.root).includes('125 部'))
++  await click('下一页')
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++  await click('下一页')
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 5)
++  assert.deepEqual(metadataCalls, [1])
++  assert.deepEqual(calls.map(call => call.query.offset), [0,60,120])
++  await act(async () => navigate('/actresses/1/1120'))
++  await act(async () => navigate('/actresses/1'))
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 5)
++})
++
++it('retries page errors, clamps a removed last page, and rejects late actor results', async () => {
++  await mount()
++  fail = true
++  await click('下一页')
++  assert.ok(text(renderer!.root).includes('Page failed'))
++  await click('重试')
++  total = 30
++  await click('下一页')
++  assert.deepEqual(calls.slice(-2).map(call => call.query.offset), [120, 0])
++  assert.ok(text(renderer!.root).includes('共 30 部'))
++  total = 125
++  let resolve!: (value: unknown) => void
++  hold = () => new Promise(done => { resolve = done })
++  // Refresh the visible page by navigating to another actor, then leave before it completes.
++  await act(async () => navigate('/actresses/2'))
++  await act(async () => navigate('/actresses/3'))
++  await act(async () => resolve(page(2, 0)))
++  assert.ok(text(renderer!.root).includes('Actor-3'))
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.ok(renderer!.root.findAllByType(PosterCard).every(node => node.props.video.id >= 3000))
++})
++
++it('does not invalidate the new actor metadata when the old editor save settles late', async () => {
++  await mount()
++  await click('编辑')
++  const EditModal = (await import('../components/EditActressModal')).default
++  const save = renderer!.root.findByType(EditModal).props.onSave
++  let finishEdit!: (value: boolean) => void
++  editResponse = () => new Promise(done => { finishEdit = done })
++  let operation!: Promise<void>
++  await act(async () => { operation = save({ main_name: 'Updated A' }); await Promise.resolve() })
++  let finishMetadata!: (value: ActressProfile) => void
++  metadataResponse = id => id === 2 ? new Promise(done => { finishMetadata = done }) : Promise.resolve(metadata(id))
++  await act(async () => navigate('/actresses/2'))
++  await act(async () => { finishEdit(true); await operation })
++  await act(async () => finishMetadata(metadata(2)))
++  assert.ok(text(renderer!.root).includes('Actor-2'))
++  assert.deepEqual(metadataCalls, [1,2])
++})
++
++it('retains an open merge plan and its full count while the visible works refresh', async () => {
++  await mount()
++  await click('更多')
++  await click('合并演员')
++  const MergeModal = (await import('../components/MergeActressModal')).default
++  const modal = renderer!.root.findByType(MergeModal)
++  assert.equal(modal.props.keepVideoCount, 125)
++  const input = modal.findByType('input')
++  await act(async () => input.props.onChange({ target: { value: 'Keep this search' } }))
++  let resolve!: (value: unknown) => void
++  hold = () => new Promise(done => { resolve = done })
++  const { notifyAvatarAutoCropSaved } = await import('../avatarAutoCrop/events')
++  await act(async () => notifyAvatarAutoCropSaved(1))
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++  const during = renderer!.root.findByType(MergeModal)
++  assert.equal(during, modal)
++  assert.equal(during.props.keepVideoCount, 125)
++  assert.equal(during.findByType('input').props.value, 'Keep this search')
++  await act(async () => resolve(page(1, 0)))
++})
++
++it('does not reuse the prior actor page when an intervening actor request is still pending', async () => {
++  await mount()
++  let finishB!: (value: unknown) => void
++  hold = () => new Promise(done => { finishB = done })
++  await act(async () => navigate('/actresses/2'))
++  let finishA!: (value: unknown) => void
++  hold = () => new Promise(done => { finishA = done })
++  await act(async () => navigate('/actresses/1'))
++  const PosterCard = (await import('../components/PosterCard')).default
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 0)
++  await act(async () => finishB(page(2, 0)))
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 0)
++  await act(async () => finishA(page(1, 0)))
++  assert.equal(renderer!.root.findAllByType(PosterCard).length, 60)
++})
+diff --git a/src/renderer/src/hooks/useActressGalleryPreview.ts b/src/renderer/src/hooks/useActressGalleryPreview.ts
+new file mode 100644
+index 0000000..0b515e0
+--- /dev/null
++++ b/src/renderer/src/hooks/useActressGalleryPreview.ts
+@@ -0,0 +1,81 @@
++import { useCallback, useEffect, useRef, useState } from 'react'
++import type { ActressGalleryPage } from '@shared/actressTypes'
++import { api } from '../api'
++import { useImagePreviewOverlay } from '../components/ImagePreviewOverlayContext'
++
++/** Grid and preview each own at most one page. Page + selection commit atomically. */
++export function useActressGalleryPreview(actressId: number) {
++  const { requestHistoryClose, abandonHistoryEntry, previewEnabled, beginHistoryEntry } = useImagePreviewOverlay()
++  const [view, setView] = useState<{ page: ActressGalleryPage; index: number } | null>(null)
++  const [loading, setLoading] = useState(false)
++  const [error, setError] = useState<string | null>(null)
++  const token = useRef<string | null>(null)
++  const request = useRef(0)
++  const pending = useRef<{ offset: number; anchorId?: number; last?: boolean } | null>(null)
++  const finish = useCallback(() => {
++    request.current += 1
++    token.current = null
++    pending.current = null
++    setView(null)
++    setLoading(false)
++    setError(null)
++  }, [])
++  const close = useCallback(() => {
++    request.current += 1
++    pending.current = null
++    if (token.current) requestHistoryClose(token.current, finish)
++    else finish()
++  }, [requestHistoryClose, finish])
++  useEffect(() => () => {
++    request.current += 1
++    if (token.current) abandonHistoryEntry(token.current)
++    token.current = null
++  }, [actressId, abandonHistoryEntry])
++  useEffect(() => { if (!previewEnabled) close() }, [previewEnabled, close])
++
++  const open = (page: ActressGalleryPage, assetId: number) => {
++    const index = page.items.findIndex(item => item.id === assetId)
++    if (!previewEnabled || token.current || index < 0) return
++    token.current = beginHistoryEntry(finish)
++    setView({ page, index })
++  }
++  const read = useCallback(async (query: { offset: number; anchorId?: number; last?: boolean }) => {
++    if (!token.current) return
++    const sequence = ++request.current
++    pending.current = query
++    setLoading(true)
++    setError(null)
++    try {
++      let page = await api.actresses.galleryPage(actressId, { limit: 60, offset: query.offset, anchorId: query.anchorId })
++      if (sequence !== request.current) return
++      if (!page || page.total === 0 || (query.anchorId !== undefined && page.anchorIndex == null)) { close(); return }
++      if (page.items.length === 0) {
++        page = await api.actresses.galleryPage(actressId, { limit: 60, offset: Math.floor((page.total - 1) / 60) * 60 })
++        if (sequence !== request.current) return
++      }
++      if (!page || page.items.length === 0) { close(); return }
++      setView({ page, index: page.anchorIndex ?? (query.last ? page.items.length - 1 : 0) })
++      pending.current = null
++    } catch (cause) {
++      if (sequence === request.current) setError(String((cause as Error).message ?? cause))
++    } finally {
++      if (sequence === request.current) setLoading(false)
++    }
++  }, [actressId, close])
++  const select = (index: number) => {
++    if (!view || loading) return
++    request.current += 1
++    pending.current = null
++    setError(null)
++    if (index >= 0 && index < view.page.items.length) setView({ ...view, index })
++    else if (index < 0 && view.page.offset > 0) void read({ offset: view.page.offset - 60, last: true })
++    else if (index >= view.page.items.length && view.page.offset + view.page.items.length < view.page.total) void read({ offset: view.page.offset + 60 })
++  }
++  const refresh = useCallback(() => {
++    if (view) void read({ offset: view.page.offset, anchorId: view.page.items[view.index].id })
++  }, [read, view])
++  return { view, loading, error, enabled: previewEnabled, open, close, select, refresh,
++    retry: () => { if (pending.current) void read(pending.current) },
++    closeIf: (assetId: number) => { if (view?.page.items[view.index]?.id === assetId) close() }
++  }
++}
+diff --git a/src/renderer/src/hooks/useActressGalleryPage.ts b/src/renderer/src/hooks/useActressGalleryPage.ts
+new file mode 100644
+index 0000000..f144971
+--- /dev/null
++++ b/src/renderer/src/hooks/useActressGalleryPage.ts
+@@ -0,0 +1,8 @@
++import { useCallback } from 'react'
++import { api } from '../api'
++import { useBoundedMediaPage } from './useBoundedMediaPage'
++
++export function useActressGalleryPage(actressId: number, localOnly = false) {
++  const read = useCallback((offset: number) => api.actresses.galleryPage(actressId, { limit: 60, offset, localOnly }), [actressId, localOnly])
++  return useBoundedMediaPage(`gallery:${actressId}:${localOnly}`, read)
++}
+diff --git a/scripts/performance/actress-detail-ui.mjs b/scripts/performance/actress-detail-ui.mjs
+new file mode 100644
+index 0000000..cbb7a1b
+--- /dev/null
++++ b/scripts/performance/actress-detail-ui.mjs
+@@ -0,0 +1,153 @@
++/** Actual actor detail/edit UI with synthetic IPC and a local image standing in for media://. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-actor-detail-ui-'))
++const output=path.resolve(process.env.JAVDEX_ACTOR_DETAIL_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root" style="height:100vh"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'cover.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="160" height="240"><rect width="160" height="240" fill="#334455"/><circle cx="80" cy="80" r="32" fill="#b8c5d6"/><path d="M25 220V160Q80 110 135 160V220" fill="#889aaa"/></svg>')
++const local=p=>JSON.stringify('/@fs'+path.join(repo,p))
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import {createRoot} from 'react-dom/client';import {MemoryRouter,Route,Routes,useNavigate} from 'react-router-dom';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
++import ${local('src/renderer/src/styles/global.css')};
++window.React=React;window.__calls=[];window.__metadata=[];
++window.api={actresses:{galleryPage:async(id,query)=>{window.__calls.push({id,kind:'gallery',query});if(window.__galleryFail){window.__galleryFail=false;throw Error('Synthetic gallery failure')}if(window.__galleryHold){window.__galleryHold=false;await new Promise(resolve=>window.__releaseGallery=resolve)}const offset=query.anchorId?Math.floor((query.anchorId-1)/60)*60:(query.offset??0);return {anchorIndex:query.anchorId?(query.anchorId-1)%60:undefined,items:Array.from({length:Math.min(60,Math.max(0,125-offset))},(_,n)=>({id:offset+n+1,local_path:'photos/'+(offset+n+1)+'.jpg',remote_url:null,width:640,height:480,position:offset+n})),total:125,limit:60,offset}},get:()=>{throw Error('Full detail forbidden')},metadata:()=>{throw Error('Full gallery metadata forbidden')},profile:async id=>{window.__metadata.push(id);return {id,main_name:'Actor-'+id,gender:'female',names:[],aliases:[],links:[],gallery_count:125,display_gallery_count:125,first_gallery:null,avatar_path:null,avatar_source_path:null,scraped_status:0}},videoPage:async(id,query)=>{window.__calls.push({id,query});if(window.__fail){window.__fail=false;throw Error('Page failed')}const total=125,offset=query.offset??0;return {videos:Array.from({length:Math.min(60,Math.max(0,total-offset))},(_,n)=>({id:id*1000+offset+n,code:'WORK-'+(offset+n),title:'Synthetic work '+(offset+n),cover_path:'covers/'+(offset+n)+'.jpg',scraped_status:0,resource_kinds:[]})),total,limit:60,offset}}} ,settings:{get:async()=>({})},actressScrape:{listPlugins:async()=>[],listPluginDetails:async()=>[]},agentMetadata:{onSnapshotChanged:()=>()=>{}},assets:{getPathForFile:()=>null}};
++const Component=(await import(${local('src/renderer/src/pages/ActressDetailPage.tsx')})).default;
++const {AppBackgroundProvider}=await import(${local('src/renderer/src/components/AppBackgroundContext.tsx')});
++const {ImagePreviewOverlayProvider}=await import(${local('src/renderer/src/components/ImagePreviewOverlayContext.tsx')});
++const {AgentMetadataCollectorProvider}=await import(${local('src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx')});
++function Nav(){window.__navigate=useNavigate();return null}
++createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav/><Routes><Route path="/actresses/:id" element={<Component/>}><Route path=":videoId" element={<div>Nested video</div>}/></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>);
++`)
++let server,browser;const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/cover.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport}),errors=[],mediaRequests=[];page.on('request',request=>{if(request.url().includes('/cover.svg?'))mediaRequests.push(request.url())});page.on('pageerror',error=>errors.push(error.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.waitForFunction(()=>document.querySelectorAll('.poster-card').length===60)
++  const works=page.getByRole('navigation',{name:'演员作品分页'})
++  await works.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>window.__calls.filter(c=>!c.query.withCover).at(-1).query.offset===60)
++  await works.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.poster-card').length===5)
++  assert.equal(await page.evaluate(()=>window.__metadata.length),1)
++  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.poster-card img')).every(img=>img.complete))
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-works.png`)})
++  await page.getByRole('tab',{name:'写真',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.actress-gallery-masonry-btn').length===60)
++  const gallery=page.getByRole('navigation',{name:'演员写真分页'})
++  await gallery.getByRole('button',{name:'下一页'}).click()
++  await page.getByRole('button',{name:'写真 61',exact:true}).waitFor()
++  await gallery.getByRole('button',{name:'下一页'}).click()
++  await page.getByRole('button',{name:'写真 121',exact:true}).waitFor()
++  assert.equal(await page.locator('.actress-gallery-masonry-btn').count(),5)
++  await gallery.scrollIntoViewIfNeeded()
++  await page.waitForFunction(()=>{const img=Array.from(document.querySelectorAll('.actress-gallery-masonry-btn img')).at(-1);return img?.complete&&img.naturalWidth>0})
++  const galleryGeometry=await gallery.evaluate(el=>({top:el.getBoundingClientRect().top,bottom:el.getBoundingClientRect().bottom,viewport:innerHeight,horizontal:document.documentElement.scrollWidth>innerWidth}))
++  assert.ok(galleryGeometry.bottom<=galleryGeometry.viewport)
++  assert.equal(galleryGeometry.horizontal,false)
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-gallery.png`)})
++  await page.getByRole('button',{name:'写真 121',exact:true}).click()
++  const lightbox=page.getByRole('dialog',{name:'写真预览'})
++  await lightbox.waitFor()
++  await page.keyboard.press('ArrowLeft')
++  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='120 / 125')
++  assert.equal(await lightbox.getByRole('tab').count(),60)
++  await page.keyboard.press('ArrowRight')
++  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='121 / 125')
++  assert.equal(await lightbox.getByRole('tab').count(),5)
++  await page.evaluate(()=>window.__galleryFail=true)
++  await page.keyboard.press('ArrowLeft')
++  await lightbox.getByRole('alert').waitFor()
++  assert.equal(await page.locator('.image-preview-counter').textContent(),'121 / 125')
++  await page.waitForTimeout(1200)
++  assert.equal(await page.locator('.image-preview-chrome--top').evaluate(el=>getComputedStyle(el).opacity),'1')
++  await lightbox.getByRole('button',{name:'重试',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='120 / 125')
++  await page.keyboard.press('ArrowRight')
++  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='121 / 125')
++  // Cross the same boundary by a real pointer swipe, then advance with a button.
++  await page.evaluate(()=>window.__galleryHold=true)
++  const stage=await page.locator('.image-preview-viewport').boundingBox()
++  await page.mouse.move(stage.x+stage.width*.35,stage.y+stage.height*.5)
++  await page.mouse.down();await page.mouse.move(stage.x+stage.width*.7,stage.y+stage.height*.5,{steps:12});await page.mouse.up()
++  await page.waitForFunction(()=>document.querySelector('[aria-label="写真预览"]')?.getAttribute('aria-busy')==='true')
++  assert.equal(await page.locator('.image-preview-counter').textContent(),'121 / 125')
++  assert.equal(await page.locator('.image-preview-slide').first().evaluate(el=>getComputedStyle(el).transform),'matrix(1, 0, 0, 1, 0, 0)')
++  await page.waitForTimeout(1200)
++  assert.equal(await page.locator('.image-preview-chrome--top').evaluate(el=>getComputedStyle(el).opacity),'1')
++  const slowPreview=await page.evaluate(()=>({counter:document.querySelector('.image-preview-counter').textContent,transform:getComputedStyle(document.querySelector('.image-preview-slide')).transform,chromeOpacity:getComputedStyle(document.querySelector('.image-preview-chrome--top')).opacity,busy:document.querySelector('[aria-label="写真预览"]').getAttribute('aria-busy')}))
++  await page.evaluate(()=>window.__releaseGallery())
++  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='120 / 125')
++  await lightbox.getByRole('button',{name:'下一张',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='121 / 125')
++  await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowRight')
++  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='125 / 125')
++  assert.equal(await lightbox.getByRole('button',{name:'下一张',exact:true}).isDisabled(),true)
++  assert.equal(await lightbox.locator('[role=tab][aria-selected=true]').getAttribute('aria-label'),'写真 125')
++  await page.waitForFunction(()=>{const img=document.querySelector('.image-preview-slide .image-preview-img');return img?.complete&&img.naturalWidth>0&&getComputedStyle(img).opacity==='1'})
++  assert.ok((await page.locator('.image-preview-slide .image-preview-img').first().getAttribute('src')).includes('photos%2F125.jpg'))
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-preview.png`)})
++  await page.keyboard.press('Escape');await lightbox.waitFor({state:'hidden'})
++  assert.equal(await page.locator('.actress-gallery-masonry-btn').count(),5)
++  assert.equal(await page.evaluate(()=>window.__metadata.length),1)
++  await page.getByRole('tab',{name:'出演作品',exact:true}).click()
++  await page.getByRole('button',{name:'编辑',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.avatar-pick-tile[aria-label^=\"WORK-\"]').length===60)
++  const covers=page.getByRole('navigation',{name:'头像封面分页'})
++  await covers.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile[aria-label^=\"WORK-\"]')?.getAttribute('aria-label')==='WORK-60')
++  await covers.getByRole('button',{name:'下一页'}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('.avatar-pick-tile[aria-label^=\"WORK-\"]').length===5)
++  await covers.getByRole('button',{name:'上一页'}).click()
++  await covers.getByRole('button',{name:'上一页'}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile[aria-label^=\"WORK-\"]')?.getAttribute('aria-label')==='WORK-0')
++  await page.getByRole('button',{name:'WORK-0',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-busy')==='false' && document.querySelector('.avatar-editor-edit-bar--visible'))
++  const zoom=page.locator('input[type=range]');await zoom.focus();await zoom.press('ArrowRight');const chosenZoom=await zoom.inputValue();assert.ok(Number(chosenZoom)>1)
++  await covers.getByRole('button',{name:'下一页'}).click()
++  await covers.getByRole('button',{name:'上一页'}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-label')==='WORK-0')
++  assert.equal(await zoom.inputValue(),chosenZoom,'crop zoom must survive cover page changes')
++  await page.getByRole('dialog').getByRole('tab',{name:'写真',exact:true}).click()
++  const photos=page.getByRole('navigation',{name:'头像写真分页'})
++  assert.equal(await page.locator('.avatar-pick-tile[aria-label^="写真 "]').count(),60)
++  await photos.getByRole('button',{name:'下一页'}).click()
++  await page.getByRole('button',{name:'写真 61',exact:true}).waitFor()
++  await photos.getByRole('button',{name:'下一页'}).click()
++  await page.getByRole('button',{name:'写真 121',exact:true}).waitFor()
++  assert.equal(await page.locator('.avatar-pick-tile[aria-label^="写真 "]').count(),5)
++  await photos.getByRole('button',{name:'上一页'}).click()
++  await photos.getByRole('button',{name:'上一页'}).click()
++  await page.getByRole('button',{name:'写真 1',exact:true}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-label')==='写真 1' && document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-busy')==='false')
++  await zoom.focus();await zoom.press('ArrowRight');const photoZoom=await zoom.inputValue();assert.ok(Number(photoZoom)>1)
++  await photos.getByRole('button',{name:'下一页'}).click()
++  await photos.getByRole('button',{name:'上一页'}).click()
++  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-label')==='写真 1')
++  assert.equal(await zoom.inputValue(),photoZoom,'photo crop zoom must survive page changes')
++  await photos.scrollIntoViewIfNeeded()
++  const geometry=await page.evaluate(()=>{const body=document.querySelector('.avatar-source-panel-body').getBoundingClientRect(),pager=document.querySelector('[aria-label="头像写真分页"]').getBoundingClientRect();return {bodyBottom:body.bottom,pagerTop:pager.top,pagerBottom:pager.bottom,viewport:innerHeight,horizontal:document.documentElement.scrollWidth>innerWidth}})
++  assert.ok(geometry.bodyBottom<=geometry.pagerTop,'cover pager must be outside image panel')
++  assert.ok(geometry.pagerBottom<=geometry.viewport,'cover pager must be reachable')
++  assert.equal(geometry.horizontal,false)
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-editor.png`)})
++  for(const asset of ['covers/0.jpg','photos/1.jpg']){
++    assert.ok(mediaRequests.some(value=>{const url=new URL(value);return url.searchParams.get('path')===asset&&url.searchParams.get('size')==='320'}),'candidate uses thumbnail')
++    assert.ok(mediaRequests.some(value=>{const url=new URL(value);return url.searchParams.get('path')===asset&&!url.searchParams.has('size')}),'crop uses original source')
++  }
++  assert.deepEqual(errors,[])
++  results.push({viewport,geometry,galleryGeometry,slowPreview,galleryFailureRetryPassed:true,chosenZoom,photoZoom,mediaRequests,calls:await page.evaluate(()=>window.__calls),errors})
++  await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2));console.log(output)
++} finally {await browser?.close();await server?.close();if(output!==root&&!output.startsWith(root+path.sep))fs.rmSync(root,{recursive:true,force:true})}

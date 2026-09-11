@@ -1,0 +1,176 @@
+{
+  "runtime": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "results": [
+    {
+      "uniqueCodes": 10000,
+      "occurrences": 30000,
+      "mode": "memory",
+      "samples": [
+        {
+          "countMs": 3.9751660000000015,
+          "correctionMs": 1.477917000000005,
+          "frozenReadsMs": 3.5137499999999875,
+          "totalMs": 8.966832999999994,
+          "flushes": 0,
+          "checksum": 60000
+        },
+        {
+          "countMs": 3.4077500000000214,
+          "correctionMs": 1.1769999999999925,
+          "frozenReadsMs": 3.134707999999989,
+          "totalMs": 7.719458000000003,
+          "flushes": 0,
+          "checksum": 60000
+        },
+        {
+          "countMs": 3.33166700000001,
+          "correctionMs": 1.1441670000000101,
+          "frozenReadsMs": 2.886207999999982,
+          "totalMs": 7.362042000000002,
+          "flushes": 0,
+          "checksum": 60000
+        }
+      ]
+    },
+    {
+      "uniqueCodes": 10000,
+      "occurrences": 30000,
+      "mode": "temp",
+      "samples": [
+        {
+          "countMs": 25.492250000000013,
+          "correctionMs": 76.20295800000002,
+          "frozenReadsMs": 124.47983299999993,
+          "totalMs": 226.17504099999996,
+          "flushes": 117,
+          "checksum": 60000
+        },
+        {
+          "countMs": 28.409084000000007,
+          "correctionMs": 77.60537499999998,
+          "frozenReadsMs": 139.4982080000001,
+          "totalMs": 245.51266700000008,
+          "flushes": 117,
+          "checksum": 60000
+        },
+        {
+          "countMs": 26.119499999999903,
+          "correctionMs": 78.47454100000004,
+          "frozenReadsMs": 126.19212500000003,
+          "totalMs": 230.78616599999998,
+          "flushes": 117,
+          "checksum": 60000
+        }
+      ]
+    },
+    {
+      "uniqueCodes": 100000,
+      "occurrences": 300000,
+      "mode": "memory",
+      "samples": [
+        {
+          "countMs": 36.30041700000015,
+          "correctionMs": 11.877874999999904,
+          "frozenReadsMs": 31.54616699999997,
+          "totalMs": 79.72445900000002,
+          "flushes": 0,
+          "checksum": 600000
+        },
+        {
+          "countMs": 36.99375000000009,
+          "correctionMs": 11.61408399999982,
+          "frozenReadsMs": 32.68500000000017,
+          "totalMs": 81.29283400000008,
+          "flushes": 0,
+          "checksum": 600000
+        },
+        {
+          "countMs": 37.443040999999994,
+          "correctionMs": 11.866375000000062,
+          "frozenReadsMs": 31.658500000000004,
+          "totalMs": 80.96791600000006,
+          "flushes": 0,
+          "checksum": 600000
+        }
+      ]
+    },
+    {
+      "uniqueCodes": 100000,
+      "occurrences": 300000,
+      "mode": "temp",
+      "samples": [
+        {
+          "countMs": 319.82654100000036,
+          "correctionMs": 1406.8814589999993,
+          "frozenReadsMs": 1452.1597080000001,
+          "totalMs": 3178.8677079999998,
+          "flushes": 1171,
+          "checksum": 600000
+        },
+        {
+          "countMs": 292.57316700000047,
+          "correctionMs": 1430.3199999999997,
+          "frozenReadsMs": 1541.6456670000007,
+          "totalMs": 3264.538834000001,
+          "flushes": 1171,
+          "checksum": 600000
+        },
+        {
+          "countMs": 277.3992500000004,
+          "correctionMs": 1532.1162499999991,
+          "frozenReadsMs": 1699.2586250000004,
+          "totalMs": 3508.774125,
+          "flushes": 1171,
+          "checksum": 600000
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "One warmup plus3 samples, memory then TEMP at each scale; in-memory synthetic database, no concurrent tests or builds.",
+    "Three occurrences per code, one decrement per code, then three reads per code. Frozen reads verified not to change total_changes.",
+    "Includes code construction; excludes DB/factory setup and disposal. Not a scanner throughput, cancellation latency, p95, heap/RSS or Windows/HDD measurement.",
+    "TEMP trades read/write overhead for bounded JavaScript counter buffering. Total SQLite storage still grows with unique codes."
+  ]
+}
+✔ compares exact repeated-code counting, correction and frozen reads (15098.72725ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16624.717334

@@ -1,0 +1,431 @@
+diff --git a/src/main/services/scrapeJobController.test.ts b/src/main/services/scrapeJobController.test.ts
+index c107ad9..7b371f2 100644
+--- a/src/main/services/scrapeJobController.test.ts
++++ b/src/main/services/scrapeJobController.test.ts
+@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
++import { SequentialBatchQueue } from './sequentialBatchQueue'
++import type { BatchProgress } from '@shared/batchScrapeTypes'
+ import {
+   createDefaultScrapeJobController,
+   createScrapeJobController,
+@@ -67,6 +69,7 @@ function dependencies(
+     countActresses: () => 0,
+     resolveVideoFieldSources: () => ({}),
+     pendingVideoScrapes: {
++      count: () => 0,
+       list: () => [],
+       confirm: () => ({ status: 'applied', applied: true, warnings: [] }),
+       discard: () => true
+@@ -102,6 +105,127 @@ function dependencies(
+ }
+ 
+ describe('ScrapeJobController', () => {
++  it('flushes and detaches UI progress on rejection before accepting another batch', async (t) => {
++    t.mock.timers.enable({ apis: ['setTimeout'] })
++    t.mock.method(console, 'error', () => undefined)
++    const base = dependencies()
++    let listener: ((progress: BatchProgress) => void) | null = null
++    let stale: ((progress: BatchProgress) => void) | null = null
++    const progress = (current: number): BatchProgress => ({
++      total: 2, current, success: 0, pending: 0, failed: 0,
++      currentCode: String(current), status: 'running', logs: []
++    })
++    const events: BatchProgress[] = []
++    let starts = 0
++    let cleanedBeforeUnlock = 0
++    const controller = createScrapeJobController(dependencies({
++      coordinator: {
++        ...base.coordinator,
++        runExclusive: <T>(label: string, run: () => Promise<T>) => base.coordinator.runExclusive(label, async () => {
++          try {
++            return await run()
++          } finally {
++            assert.equal(listener, null, 'listener is removed before the coordinator unlocks')
++            cleanedBeforeUnlock++
++          }
++        })
++      },
++      videoQueue: {
++        ...base.videoQueue,
++        setListener: (next) => { listener = next },
++        start: async () => {
++          starts++
++          stale = listener
++          listener?.(progress(1))
++          listener?.(progress(2))
++          throw Error('checkpoint failed')
++        }
++      },
++      emit: (_channel, value) => events.push(value as BatchProgress)
++    }))
++    controller.startLegacyVideoBatch()
++    await new Promise((resolve) => setImmediate(resolve))
++    assert.equal(listener, null)
++    assert.equal(events.at(-1)?.current, 2)
++    const delivered = events.length
++    const oldListener = stale as ((value: BatchProgress) => void) | null
++    controller.startLegacyVideoBatch()
++    oldListener?.(progress(999))
++    await new Promise((resolve) => setImmediate(resolve))
++    assert.equal(starts, 2)
++    assert.equal(cleanedBeforeUnlock, 2)
++    assert.equal(events.length, delivered * 2)
++    assert.ok(events.every((value) => value.current !== 999))
++    t.mock.timers.tick(1000)
++    assert.equal(events.length, delivered * 2)
++  })
++
++  for (const kind of ['video', 'actress'] as const) {
++    for (const terminal of ['done', 'paused', 'cancelled'] as const) {
++      it(`coalesces ${kind} UI progress while preserving checkpoints and ${terminal} delivery`, async (t) => {
++        t.mock.timers.enable({ apis: ['setTimeout'] })
++        const queue = new SequentialBatchQueue<number>()
++        const events: Array<{ channel: string; progress: BatchProgress }> = []
++        const checkpoints: number[] = []
++        const run = async () => {
++          await queue.start({
++            targets: Array.from({ length: 10000 }, (_, id) => id),
++            startMessage: () => 'start', pausedMessage: 'paused', cancelledMessage: 'cancelled',
++            doneMessage: () => 'done', getCode: String, exceptionMessage: () => 'error',
++            delayAfterTarget: false,
++            onCheckpoint: (_progress, next) => checkpoints.push(next),
++            runTarget: async (id) => {
++              if (id === 101) assert.equal(events.at(-1)?.progress.failed, 1, 'failures reach UI immediately')
++              if (id === 9998 && terminal === 'paused') queue.pause()
++              if (id === 9998 && terminal === 'cancelled') queue.cancel()
++              return id === 100
++                ? { status: 'failure', level: 'error', message: 'failed' }
++                : { status: 'success', level: 'success', message: 'ok' }
++            }
++          })
++          if (terminal === 'cancelled') queue.resetToIdle()
++        }
++        const base = dependencies()
++        let starts = 0
++        let resumes = 0
++        const queuePort = {
++          ...base[kind === 'video' ? 'videoQueue' : 'actressQueue'],
++          isRunning: () => queue.isRunning(),
++          setListener: (listener: ((progress: BatchProgress) => void) | null) => queue.setListener(listener),
++          start: async () => { starts++; await run() },
++          resume: async () => { resumes++; await run() }
++        }
++        const controller = createScrapeJobController(dependencies({
++          ...(kind === 'video' ? { videoQueue: queuePort } : {
++            actressQueue: { ...base.actressQueue, ...queuePort }
++          }),
++          checkpoints: { ...base.checkpoints, load: () => terminal === 'done' ? null : { kind, status: 'paused' } as never },
++          emit: (channel, progress) => events.push({ channel, progress: progress as BatchProgress })
++        }))
++        if (terminal !== 'done') controller.resumeActiveBatch()
++        else if (kind === 'video') controller.startVideoBatch('scrape:videoBatchProgress', { status: 'all', fields: ['title'], mode: 'replace' })
++        else controller.startActressBatch({ scope: 'all', fields: ['avatar'], mode: 'replace' })
++        await new Promise((resolve) => setImmediate(resolve))
++        const processed = terminal === 'done' ? 10000 : 9999
++        assert.deepEqual(checkpoints.slice(0, processed), Array.from({ length: processed }, (_, id) => id + 1))
++        assert.ok(events.length < 100, 'UI delivery is bounded independently of per-item persistence')
++        assert.equal(events[0].progress.status, 'running')
++        const final = events.filter((event) => event.progress.status === terminal).at(-1)
++        assert.equal(final?.progress.success, processed - 1)
++        assert.equal(final?.progress.failed, 1)
++        assert.equal(final?.progress.currentCode, null)
++        assert.equal(events.at(-1)?.progress.status, terminal === 'cancelled' ? 'idle' : terminal)
++        assert.ok(events.every((event) => event.channel === (kind === 'video' ? 'scrape:videoBatchProgress' : 'actressScrape:batchProgress')))
++        const delivered = events.length
++        t.mock.timers.tick(1000)
++        assert.equal(events.length, delivered)
++        assert.equal(queue.isRunning(), false)
++        assert.equal(starts, terminal === 'done' ? 1 : 0)
++        assert.equal(resumes, terminal === 'done' ? 0 : 1)
++      })
++    }
++  }
++
+   it('preserves media-library scope through batch count and start orchestration', async () => {
+     let countedFilter: unknown
+     let startedRequest: unknown
+@@ -303,6 +427,7 @@ describe('ScrapeJobController', () => {
+ 
+   it('publishes progress and supports pause, resume, and discard for persisted batches', async () => {
+     let listener: ((progress: never) => void) | undefined
++    let finishRun: (() => void) | undefined
+     let running = false
+     let paused = 0
+     let resumed = 0
+@@ -322,13 +447,17 @@ describe('ScrapeJobController', () => {
+           },
+           start: async () => {
+             running = true
++            await new Promise<void>((resolve) => { finishRun = resolve })
+           },
+           resume: async () => {
+             resumed += 1
++            running = true
++            await new Promise<void>((resolve) => { finishRun = resolve })
+           },
+           pause: () => {
+             paused += 1
+             running = false
++            finishRun?.()
+           },
+           discard: () => {
+             discarded += 1
+@@ -350,6 +479,7 @@ describe('ScrapeJobController', () => {
+     await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(controller.pauseActiveBatch(), true)
+     assert.equal(paused, 1)
++    await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(controller.resumeActiveBatch(), true)
+     await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(resumed, 1)
+@@ -360,10 +490,13 @@ describe('ScrapeJobController', () => {
+       pending: 0,
+       failed: 0,
+       currentCode: null,
+-      status: 'completed',
++      status: 'done',
+       logs: []
+     } as never)
+     assert.equal(events.at(-1)?.channel, 'scrape:videoBatchProgress')
++    running = false
++    finishRun?.()
++    await new Promise((resolve) => setImmediate(resolve))
+     assert.equal(controller.discardActiveBatch(), true)
+     assert.equal(discarded, 1)
+   })
+diff --git a/src/main/services/scrapeJobController.ts b/src/main/services/scrapeJobController.ts
+index 4a7da01..7b80583 100644
+--- a/src/main/services/scrapeJobController.ts
++++ b/src/main/services/scrapeJobController.ts
+@@ -1,4 +1,5 @@
+ import { randomUUID } from 'node:crypto'
++import { createProgressPublisher } from './progressPublisher'
+ import { IPC } from '@shared/ipc-channels'
+ import type { ScrapeIpcEvent, ScrapeIpcEventChannel } from '@shared/scrapeIpcContract'
+ import type {
+@@ -66,7 +67,7 @@ type ProgressListener = (progress: BatchProgress) => void
+ 
+ interface BatchQueue<Request> {
+   isRunning(): boolean
+-  setListener(listener: ProgressListener): void
++  setListener(listener: ProgressListener | null): void
+   start(request?: Request | string): Promise<void>
+   resume(): Promise<void>
+   pause(): void
+@@ -137,6 +138,7 @@ export interface ScrapeJobControllerDependencies {
+   rendererAvailable(): boolean
+   checkpoints: BatchScrapeCheckpointPort
+   pendingVideoScrapes: {
++    count(): number
+     list(): PendingVideoScrape[]
+     confirm(input: PendingVideoScrapeConfirmInput): PendingVideoScrapeResolutionResult
+     discard(pendingScrapeId: number): boolean
+@@ -264,6 +266,10 @@ export class ScrapeJobController {
+     return this.dependencies.getBatchState()
+   }
+ 
++  countPendingVideoScrapes(): number {
++    return this.dependencies.pendingVideoScrapes.count()
++  }
++
+   listPendingVideoScrapes(): PendingVideoScrape[] {
+     return this.dependencies.pendingVideoScrapes.list()
+   }
+@@ -311,12 +317,8 @@ export class ScrapeJobController {
+   ): boolean {
+     this.assertCanStartNewBatch()
+     if (!request.fields?.length) throw new Error('请至少选择一个要更新的字段')
+-    this.dependencies.videoQueue.setListener((progress) =>
+-      this.dependencies.emit(progressChannel, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('影片批量更新', () => this.dependencies.videoQueue.start(request))
+-      .catch((error) => console.error('video batch scrape failed:', error))
++    this.runBatch(this.dependencies.videoQueue, progressChannel, '影片批量更新',
++      () => this.dependencies.videoQueue.start(request), 'video batch scrape failed:')
+     return true
+   }
+ 
+@@ -334,12 +336,8 @@ export class ScrapeJobController {
+     if (typeof request !== 'string' && request && !request.fields?.length) {
+       throw new Error('请至少选择一个要更新的字段')
+     }
+-    this.dependencies.actressQueue.setListener((progress) =>
+-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.start(request))
+-      .catch((error) => console.error('actress scrape batch failed:', error))
++    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
++      () => this.dependencies.actressQueue.start(request), 'actress scrape batch failed:')
+     return true
+   }
+ 
+@@ -366,23 +364,47 @@ export class ScrapeJobController {
+     const job = this.dependencies.checkpoints.load()
+     if (!job) throw new Error('没有可继续的批量刮削任务')
+     if (job.kind === 'video') {
+-      this.dependencies.videoQueue.setListener((progress) =>
+-        this.dependencies.emit(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, progress)
+-      )
+-      void this.dependencies.coordinator
+-        .runExclusive('影片批量更新', () => this.dependencies.videoQueue.resume())
+-        .catch((error) => console.error('video batch scrape resume failed:', error))
++      this.runBatch(this.dependencies.videoQueue, IPC.SCRAPE_VIDEO_BATCH_PROGRESS, '影片批量更新',
++        () => this.dependencies.videoQueue.resume(), 'video batch scrape resume failed:')
+       return true
+     }
+-    this.dependencies.actressQueue.setListener((progress) =>
+-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.resume())
+-      .catch((error) => console.error('actress batch scrape resume failed:', error))
++    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
++      () => this.dependencies.actressQueue.resume(), 'actress batch scrape resume failed:')
+     return true
+   }
+ 
++  private runBatch(
++    queue: Pick<BatchQueue<unknown>, 'setListener'>,
++    channel: typeof IPC.SCRAPE_BATCH_PROGRESS | typeof IPC.SCRAPE_VIDEO_BATCH_PROGRESS |
++      typeof IPC.SCRAPE_REMATCH_BATCH_PROGRESS | typeof IPC.ACTRESS_SCRAPE_BATCH_PROGRESS,
++    label: string,
++    run: () => Promise<void>,
++    errorMessage: string
++  ): void {
++    void this.dependencies.coordinator.runExclusive(label, async () => {
++      const publisher = createProgressPublisher<BatchProgress>((progress) => {
++        try {
++          this.dependencies.emit(channel, progress)
++        } catch (error) {
++          console.error('batch progress delivery failed:', error)
++        }
++      })
++      let failed = 0
++      queue.setListener((progress) => {
++        const immediate = progress.status !== 'running' || progress.failed > failed
++        failed = progress.failed
++        publisher.update(progress, immediate)
++      })
++      try {
++        await run()
++      } finally {
++        // Clear pending delivery before releasing the coordinator's exclusive run.
++        publisher.close()
++        queue.setListener(null)
++      }
++    }).catch((error) => console.error(errorMessage, error))
++  }
++
+   discardActiveBatch(): boolean {
+     const job = this.dependencies.checkpoints.load()
+     if (!job) return false
+diff --git a/src/main/services/progressPublisher.ts b/src/main/services/progressPublisher.ts
+new file mode 100644
+index 0000000..de71ed8
+--- /dev/null
++++ b/src/main/services/progressPublisher.ts
+@@ -0,0 +1,39 @@
++/** One pending value per task. Progress is lossy; final state must be flushed explicitly. */
++export function createProgressPublisher<T>(
++  publish: (value: T) => void,
++  intervalMs = 100,
++  now: () => number = () => performance.now()
++): { update(value: T, immediate?: boolean): void; close(): void } {
++  let lastPublished = -Infinity
++  let pending: { value: T } | null = null
++  let timer: ReturnType<typeof setTimeout> | undefined
++  let closed = false
++
++  function flush(): void {
++    if (timer !== undefined) clearTimeout(timer)
++    timer = undefined
++    const next = pending
++    pending = null
++    if (!next) return
++    lastPublished = now()
++    publish(next.value)
++  }
++
++  return {
++    update(value, immediate = false) {
++      if (closed) return
++      pending = { value }
++      const delay = Math.max(0, intervalMs - (now() - lastPublished))
++      if (immediate || delay === 0) flush()
++      else if (timer === undefined) {
++        timer = setTimeout(flush, delay)
++        timer.unref?.()
++      }
++    },
++    close() {
++      if (closed) return
++      closed = true
++      flush()
++    }
++  }
++}
+diff --git a/src/main/services/progressPublisher.test.ts b/src/main/services/progressPublisher.test.ts
+new file mode 100644
+index 0000000..5ec9925
+--- /dev/null
++++ b/src/main/services/progressPublisher.test.ts
+@@ -0,0 +1,54 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import { createProgressPublisher } from './progressPublisher'
++
++it('coalesces a large burst and flushes the final value without leaking a timer', t => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  let now = 0
++  const values: number[] = []
++  const publisher = createProgressPublisher<number>(value => values.push(value), 100, () => now)
++  for (let value = 1; value <= 300382; value++) publisher.update(value)
++  assert.deepEqual(values, [1])
++  now = 100
++  t.mock.timers.tick(100)
++  assert.deepEqual(values, [1, 300382])
++  publisher.update(300383)
++  publisher.close()
++  assert.deepEqual(values, [1, 300382, 300383])
++  publisher.update(300384)
++  publisher.close()
++  t.mock.timers.tick(1000)
++  assert.deepEqual(values, [1, 300382, 300383])
++})
++
++it('limits continuous progress to ten updates per second plus the final flush', t => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  let now = 0
++  const values: Array<{ time: number; value: number }> = []
++  const publisher = createProgressPublisher<number>(value => values.push({ time: now, value }), 100, () => now)
++  for (let index = 0; index < 1000; index++) {
++    publisher.update(index)
++    now++
++    t.mock.timers.tick(1)
++  }
++  const periodic = values.slice()
++  assert.ok(periodic.length <= 11)
++  for (let index = 1; index < periodic.length; index++) {
++    assert.ok(periodic[index].time - periodic[index - 1].time >= 100)
++  }
++  publisher.close()
++  assert.equal(values.at(-1)?.value, 999)
++})
++
++it('replaces pending progress with an immediate state and can publish the next state', t => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  const values: string[] = []
++  const publisher = createProgressPublisher<string>(value => values.push(value), 100, () => 0)
++  publisher.update('running')
++  publisher.update('pending')
++  publisher.update('cancelled', true)
++  publisher.update('idle', true)
++  publisher.close()
++  t.mock.timers.tick(1000)
++  assert.deepEqual(values, ['running', 'cancelled', 'idle'])
++})

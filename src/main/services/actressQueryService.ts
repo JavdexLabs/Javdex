@@ -1,8 +1,28 @@
+import { getActressProfile } from '../db/actressRepo'
+import { randomUUID } from 'node:crypto'
+import type { ActressProfile } from '@shared/actressTypes'
+import { listActressGalleryPage } from '../db/actressGalleryPageRepo'
+import type { ActressGalleryPage, ActressGalleryPageQuery } from '@shared/actressTypes'
+import { getActressMetadata } from '../db/actressRepo'
+import type { ActressMetadata } from '@shared/actressTypes'
+import { listActressVideoPage } from '../db/actressVideoPageRepo'
+import type { ActressVideoPage, ActressVideoPageQuery } from '@shared/actressTypes'
+import { normalizeRunTargets } from '@shared/pluginDevKindProfile'
+import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
+import type { ActressMergeCandidatePage, ActressMergeCandidateQuery } from '@shared/actressTypes'
+import type { ActressPickerIdentity, ActressPickerPage, ActressPickerQuery } from '@shared/actressTypes'
 import {
+  listActressTestTargetPage,
+  getActressTestTargetName,
+  listActressAvatarCropTargets,
+  countActressAvatarCropTargets,
   getActressDetail,
+  getActressPickerIdentity,
   listActresses,
   listActressAvatarCandidates,
-  listActressPage
+  listActressPage,
+  listActressPickerPage,
+  listActressMergeCandidates
 } from '../db/actressRepo'
 import { getActressAvatarSourceInfo } from './actressAssetService'
 import { mediaAssetStore } from './mediaAssetStore'
@@ -20,12 +40,23 @@ import { actressStatusFilterOf } from '@shared/actressTypes'
 import type { SortDir } from '@shared/commonTypes'
 
 export interface ActressQueryService {
+  getProfile(id: number): ActressProfile | null
+  listGallery(id: number, query?: ActressGalleryPageQuery): ActressGalleryPage | null
+  getMetadata(id: number): ActressMetadata | null
+  listVideos(id: number, query?: ActressVideoPageQuery): ActressVideoPage | null
+  listTestTargets(query?: ActressPickerQuery): ActressPickerPage
+  getTestTarget(id: number): string | null
+  listAvatarCropTargets(): ActressAvatarAutoCropTarget[]
+  countAvatarCropTargets(): number
   listLegacy(
     search?: string,
     gender?: ActressGenderFilter,
     sortBy?: ActressListSortBy,
     sortDir?: SortDir
   ): ActressListItem[]
+  listMergeCandidates(query: ActressMergeCandidateQuery): ActressMergeCandidatePage
+  getPicker(id: number): ActressPickerIdentity | null
+  listPicker(query?: ActressPickerQuery): ActressPickerPage
   listActresses(query?: ActressListQuery): ActressListPage
   listFaceScanManifest(): ActressFaceScanManifestItem[]
   getActress(id: number): ActressDetail | null
@@ -33,6 +64,17 @@ export interface ActressQueryService {
 }
 
 interface ActressQueryServiceDependencies {
+  getProfile: typeof getActressProfile
+  listGallery: typeof listActressGalleryPage
+  getMetadata: typeof getActressMetadata
+  listVideos: typeof listActressVideoPage
+  listTestTargets: typeof listActressTestTargetPage
+  getTestTargetName: typeof getActressTestTargetName
+  listAvatarCropTargets: typeof listActressAvatarCropTargets
+  countAvatarCropTargets: typeof countActressAvatarCropTargets
+  listMergeCandidates: typeof listActressMergeCandidates
+  getPicker: typeof getActressPickerIdentity
+  listPicker: typeof listActressPickerPage
   listLegacy: typeof listActresses
   listPage: (query?: ActressListQuery) => ActressListPage
   listFaceScanCandidates: typeof listActressAvatarCandidates
@@ -58,6 +100,9 @@ function avatarPageSnapshotKey(query: ActressListQuery): string {
 export function createActressQueryService(
   dependencies: Partial<ActressQueryServiceDependencies> = {}
 ): ActressQueryService {
+  const readMergeCandidates = dependencies.listMergeCandidates ?? listActressMergeCandidates
+  const readPickerIdentity = dependencies.getPicker ?? getActressPickerIdentity
+  const readPicker = dependencies.listPicker ?? listActressPickerPage
   const readLegacyList = dependencies.listLegacy ?? listActresses
   const readListPage = dependencies.listPage ?? listActressPage
   const readFaceScanCandidates =
@@ -68,6 +113,22 @@ export function createActressQueryService(
   const avatarPageSnapshots = new Map<string, ActressListPage>()
 
   return {
+    getProfile: (id) => (dependencies.getProfile ?? getActressProfile)(id),
+    listGallery: (id, query) => (dependencies.listGallery ?? listActressGalleryPage)(id, query),
+    getMetadata: (id) => (dependencies.getMetadata ?? getActressMetadata)(id),
+    listVideos: (id, query) => (dependencies.listVideos ?? listActressVideoPage)(id, query),
+    listTestTargets: (query) => (dependencies.listTestTargets ?? listActressTestTargetPage)(query),
+    getTestTarget(id) {
+      const mainName = (dependencies.getTestTargetName ?? getActressTestTargetName)(id)
+      if (mainName === null) return null
+      const target = normalizeRunTargets([{ kind: 'actress', mainName, aliases: [] }])[0]
+      return target.kind === 'actress' ? target.mainName : null
+    },
+    listAvatarCropTargets: () => (dependencies.listAvatarCropTargets ?? listActressAvatarCropTargets)(),
+    countAvatarCropTargets: () => (dependencies.countAvatarCropTargets ?? countActressAvatarCropTargets)(),
+    listMergeCandidates: (query) => readMergeCandidates(query),
+    getPicker: (id) => readPickerIdentity(id),
+    listPicker: (query) => readPicker(query),
     listLegacy(search, gender, sortBy, sortDir): ActressListItem[] {
       return readLegacyList(search, gender, sortBy, sortDir)
     },
@@ -126,7 +187,12 @@ export function createActressQueryService(
           : avatarFiltered.filter(
               (actress) => actressStatusFilterOf(actress.scraped_status) === requestedStatus
             )
-        snapshot = { items, total: items.length, statusCounts }
+        snapshot = {
+          items, total: items.length, statusCounts,
+          ...(unfiltered.readRevision === undefined ? {} : {
+            readRevision: `${unfiltered.readRevision}:avatar:${randomUUID()}`
+          })
+        }
         avatarPageSnapshots.delete(key)
         avatarPageSnapshots.set(key, snapshot)
         while (avatarPageSnapshots.size > MAX_AVATAR_PAGE_SNAPSHOTS) {

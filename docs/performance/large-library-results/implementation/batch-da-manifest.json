@@ -1,0 +1,21 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-da-build.log": "83e2787db9a48bee42a14b43eba846d484f99f10657357026444ecfddc09734c",
+    "batch-da-directory-identity.patch": "f8f1cab6200fe3603d3bb993b89431fb14a7f9594a652d8f899925e7947857c8",
+    "batch-da-directory-red.log": "e2a694a61d3f2e7b6ed2a43d35f3e7f1aada9b583c0ef647d3e5957f377f28ac",
+    "batch-da-full.log": "25e5ff92a27c32fe9bdf552c172770d15651cd5acbdd973912a9f99e890c953a",
+    "batch-da-identity-comparison.log": "89a5dcbba80728bd99e6b78aaeace09d20d88ae66b93e54f294dd455835cee05",
+    "batch-da-review.md": "efe42de5cfd81d0b279add41b79625cdb9a7a3b9036a78146af708a4aff7b533",
+    "batch-da-target.log": "b3307c07c6aa97fbf1614ac98de301272833fad1d131b55b638e33f7f93b4620",
+    "batch-da-types.log": "a1499b3bc5addd579ca0b5fbe2dfacab17f004bb6597d0b95b5a9d5039c665bc"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches, not standalone sequential patches.",
+    "177 joint tests passed; full2718pass/1skip/0fail(2719total), typecheck/full/build terminal exit0 observed.",
+    "After joint test, newtest import corrected to existing public metadata-source index; boundarycheck and7newtests passed, finalfullgate rerun. Production unchanged after build.",
+    "Scalar immutable directory identity removes default scanner per-directory code arrays and repeated normalization; preflight containers released before NFO tail.",
+    "Exclusive synthetic pure-predicate comparison5kold403.73-406.75ms vsnew0.230-0.268ms, includingnewsummarybuild but excludingFS/NFOapply/audit/RSS.",
+    "Other NFO/discovery memory, manual directory reads, CY sync cleanup latency and full15/42 matrix remain incomplete."
+  ]
+}

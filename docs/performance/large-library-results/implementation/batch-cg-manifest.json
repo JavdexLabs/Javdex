@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cg-after.log": "9fb435d46c37fd146d7970b71e1fab4972636cb23989971749bb3068b4b9a523",
+    "batch-cg-before.log": "2e43896d27b5dbb19685eaaeb11d33e5da212ee6b24604eb67913129f1276b1e",
+    "batch-cg-build.log": "f92258ce33b7271627160504bcc268bb5d0d074dd74a176db87d327713b013a4",
+    "batch-cg-finalization.patch": "fd36e077e3eee8da24907b1b405c6278a1607c11aababc6370c7bcb4a5fd5b6a",
+    "batch-cg-full.log": "64d6686595b93028012c10102a7da0a671707d73c0af9d8b335c4210ae013be4",
+    "batch-cg-red.log": "5676dc3bc0e53f6c89784bc7a64720ebd74f26a591aacfe2e99e3488aecb353b",
+    "batch-cg-review.md": "dfae8552229ed8b6d987121d1b953677851864eda13e1b743ec9a070407e65e0",
+    "batch-cg-target.log": "98bb69793a5b8442cb78a4528b805cf9349dea89e14ce1e71dbd8c6016d444db"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "49 focused; full2488pass1skip0fail; build terminal0.",
+    "Root binding limit fixed; mixed latency results retained; full15/42 incomplete."
+  ]
+}

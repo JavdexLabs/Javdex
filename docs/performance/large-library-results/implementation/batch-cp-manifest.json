@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cp-build.log": "edc228406c4bc62fd8a6f40256addb00f9b6e7b979e3093c73db957fa62c837c",
+    "batch-cp-full.log": "e554f05cf551f1a7d8459bc96203c52bf363cd532a5bb755ba678fd21db88b26",
+    "batch-cp-review.md": "9c55a7bd39e8f8a461586e67e40a5bc94aea777aac6f4e22ea900c1ab1f6e435",
+    "batch-cp-strm-audit-transactions.patch": "ae5c3c6be29e9203626e46b087a8229cd1ea01db0852c7626da4918880beebfc",
+    "batch-cp-target.log": "7ff3e67e7c5c6fbd236e5a9cc465013f5ddba869671d9181a04a965986d67436"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "159 focused; full2582pass1skip0fail; build terminal0.",
+    "Three STRM same-connection transaction segments; remaining writer paths/coordinator/full15/42 incomplete."
+  ]
+}

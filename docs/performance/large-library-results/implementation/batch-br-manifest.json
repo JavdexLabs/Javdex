@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-br-benchmark.json": "dd7189592a28dacdbacb3e94129ebf7fe55383ef3d67d1313cb907e07fc1965f",
+    "batch-br-benchmark.log": "6901f8ec31355fdeaff987d26ccda1c80ab2ec0041ef8daff37b64f6964ca96f",
+    "batch-br-build.log": "2eb1c487847f015b14fe8ddd45b59b9932596cb055dc95324c392f4794d3e842",
+    "batch-br-full.log": "b12e58d84d1efe0ae5fc9614683e7c8d6d8d63281bba0b2b9bda5aacbe7b1cee",
+    "batch-br-image-read-worker.patch": "d6e2f9455eb8b685808b3a1fb0d3894270f1722d8c628c7ac37ae6338fb2b616",
+    "batch-br-review.md": "1cb314ae985f7a81605d8ee243131d9302865ab3c4f04a27d5c1331037205c76",
+    "batch-br-target.log": "cd3d02527fee73cfb182669379aa13a456e238dbfd4c8eb4f28fe17d68605d7d"
+  },
+  "notes": [
+    "Selected cumulative source patch vs HEAD plus complete new files; depends on earlier batches.",
+    "32 focused; full2363pass1skip0fail; build terminal0. Renderer unchanged; no new browser run.",
+    "Responsiveness probe does not prove faster SQL or global latency bounds.",
+    "Full15/42goal remains incomplete."
+  ]
+}

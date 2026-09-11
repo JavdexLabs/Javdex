@@ -1,0 +1,62 @@
+✔ matches full global list order, counts, cover fallback and per-video membership over all pages (16.821916ms)
+✔ searches full Unicode text literally and finds exact names outside the current page (15.020292ms)
+✔ bounds NUL/UTF8 display fields and preserves stored full identity without projecting oversized covers (261.214542ms)
+✔ keeps total, page, membership and exact-name checks on one WAL snapshot (9.11975ms)
+✔ rejects unsafe API bounds before SQL and shares IPC boundaries (8.920291ms)
+▶ playlistRepo
+  ✔ paginates and filters identically to the full playlist without losing zero-resource rows (29.699666ms)
+  ✔ limits a large playlist before returning card details (135.767041ms)
+  ✔ keeps metadata out of subsequent video-page queries (9.924333ms)
+  ✔ creates playlists with required name and optional fields (11.267667ms)
+  ✔ adds videos once per playlist and lists detail videos (11.014625ms)
+  ✔ keeps playlist references visible across hidden, archived and missing memberships (10.323333ms)
+  ✔ updates playlist metadata and custom cover (11.159666ms)
+  ✔ reports video membership and removes videos (9.256959ms)
+  ✔ allows one video in multiple playlists without duplicates in one playlist (9.869959ms)
+  ✔ rejects blank playlist names (9.239041ms)
+  ✔ stores related links on create and update (9.925333ms)
+✔ playlistRepo (258.281083ms)
+▶ playlistService media asset seam
+  ✔ creates a playlist cover through MediaAssetStore and cleans it on delete (18.866166ms)
+  ✔ deletes the previous cover only after a successful cover replacement (10.064334ms)
+✔ playlistService media asset seam (29.33025ms)
+✔ loads only a server page and replaces sixty rows when advancing (32.653208ms)
+✔ does not create from a stale page or an off-page exact match, and retains full create input (573.147709ms)
+✔ clears error on retry and ignores an old page after searching (286.228291ms)
+✔ import destination retains a selected identity across server pages without full options (24.687084ms)
+▶ PlaylistImportProvider workspace
+  ✔ uses the Agent scrape two-pane workspace with live activity and result preview (0.477875ms)
+  ✔ offers one confirmed termination action in running and waiting-user footers (0.152834ms)
+  ✔ closes the import workspace after the host confirms task termination (0.130916ms)
+  ✔ closes only through the actions rendered inside the import dialog (0.109042ms)
+  ✔ closes the import dialog before navigating to the imported playlist (0.163291ms)
+  ✔ offers frozen write options with source-playlist linking disabled by default (0.199ms)
+  ✔ selects the active default media library when opening the importer (0.113458ms)
+  ✔ explains the Agent name and host-date fallback for an empty new-playlist name (0.084417ms)
+  ✔ invalidates global video projections and discards stale identity choices (0.710167ms)
+  ✔ broadcasts completion so recovered imports refresh mounted playlist surfaces (0.30425ms)
+  ✔ renders the complete release summary instead of only aggregate reuse counts (0.782125ms)
+  ✔ keeps preview rows dense and long text truncation stable (2.81275ms)
+  ✔ shows enough candidate identity evidence and opens links through the app shell (0.415708ms)
+✔ PlaylistImportProvider workspace (6.993625ms)
+✔ ignores an old playlist response arriving after navigation (255.9555ms)
+✔ requests a bounded thumbnail for a playlist card (2.991ms)
+✔ does not refresh an old playlist when its removal finishes after navigation (5.525333ms)
+✔ returns to the previous page when deleting the only item on the last page (4.690625ms)
+✔ keeps the existing grid mounted during refresh after closing a nested video (2.822667ms)
+✔ keeps the latest sort response when requests for the same playlist finish out of order (2.6675ms)
+✔ reuses metadata while paging but refreshes it after a playlist mutation (3.507375ms)
+✔ does not reuse stale metadata when filtering interrupts a forced refresh (2.643375ms)
+✔ shows not found when a refreshed metadata read reports a deleted playlist (0.899917ms)
+✔ refreshes the fallback cover with the new sort instead of reusing the old metadata (1.898959ms)
+✔ pages 60/60/5 in URL and restores the same page after nested detail without full reads (261.230791ms)
+✔ does not resurrect a draft when detail navigation interrupts debounce; ignores old pages and retries errors (344.173583ms)
+✔ actual import provider defers playlist options until append mode and keeps them paged (14.02075ms)
+ℹ tests 48
+ℹ suites 3
+ℹ pass 48
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1315.40275

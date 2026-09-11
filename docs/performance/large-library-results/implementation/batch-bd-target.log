@@ -1,0 +1,11 @@
+✔ counts avatars through the scalar API without loading targets and propagates failures (35.614458ms)
+✔ consumes pages on demand and stops safely across page failure, cancellation and unmount (47.171ms)
+✔ serializes startup before target loading and releases ownership on empty, failed or unmounted startup (45.540583ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 255.680916

@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ce-audit-path.patch": "908cfd70eb24ae7ba41e1be36afc2640aabf787f6c09c82af20346ec3c4e89af",
+    "batch-ce-build.log": "ad3f19e3bdf76b0c43b7eee442b39e602481a189375668d7f3116b5c8683d1f9",
+    "batch-ce-full.log": "1af525373cea9b9e6c0d9e594aba39c7c7177e70a292ae2e02a8c563d736edb0",
+    "batch-ce-review.md": "08ed169ca7604cb99a5c511d02363b373c355cdfd564108996fae9566a4581ca",
+    "batch-ce-target.log": "e2f52e5b5b102c4256d3346a9e11f7860880385ca0b58803666373b1c3badbdc",
+    "batch-ce-validator-identity.json": "958ae3030674b346d8c48472890a8aac1604f500ff01a9e682e0d3f3e8bf1440",
+    "batch-ce-worker.log": "986ea0b889d843002c81b35c898b309a6565a3d1e0d1b9b44eba06bfb5655d40"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "60 focused; full2469pass1skip0fail; build terminal0.",
+    "Reveal no longer parses whole audit on main thread; full15/42 remains incomplete."
+  ]
+}

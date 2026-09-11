@@ -1,0 +1,44 @@
+✔ locates a deep actor group and loads only its detail before paging (355.244ms)
+✔ keeps page and detail failures distinct and retries without a full list (200.10175ms)
+✔ ignores a late old detail after selecting another group (163.416625ms)
+✔ preserves an explicit decision across a category switch and detail overlay (240.249334ms)
+✔ applies an ownership decision then clamps a deleted last page (164.037333ms)
+✔ does not let a completed old mutation reset a newer group decision (277.375791ms)
+✔ keeps actor paging in the all-domain view even when a scan item comes first (147.521958ms)
+✔ asks the server about names outside the current page before editing (392.218125ms)
+✔ keeps a stale resolution on the same group and requires a renewed decision (175.118542ms)
+✔ isolates an old completion after navigating A to B and back to A (371.435334ms)
+✔ stays on the deep-linked page after its selected group is resolved (173.605625ms)
+✔ does not close a new discard dialog when an old A-B-A discard fails (300.05575ms)
+✔ pages owner candidates and preserves a selected actor outside the current page (260.168583ms)
+✔ retries picker failures and invalidates old page replies immediately while search debounces (485.838833ms)
+✔ ignores an old actor choice after closing and reopening the same picker (209.284375ms)
+✔ keeps the newest actor choice when earlier detail reads finish later (173.895542ms)
+✖ keeps a direct group-owner decision after an older external-owner detail returns (209.138458ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 16
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4602.939125
+
+✖ failing tests:
+
+test at src/renderer/src/pages/PendingCenterActress.interaction.test.tsx:2:22864
+✖ keeps a direct group-owner decision after an older external-owner detail returns (209.138458ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2001 !== 1001
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/pages/PendingCenterActress.interaction.test.tsx:264:9)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2001,
+    expected: 1001,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

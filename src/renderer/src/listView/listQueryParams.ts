@@ -18,9 +18,16 @@ export const LIST_PARAM = {
   resources: 'resources',
   pending: 'pending',
   releaseDir: 'releaseDir',
+  facetOffset: 'facetOffset',
+  relatedVideoOffset: 'relatedVideoOffset',
+  playlistOffset: 'playlistOffset',
   pendingType: 'type',
   pendingItem: 'item',
   pendingVideoId: 'videoId',
+  pendingScrapeOffset: 'scrapeOffset',
+  pendingScanOffset: 'scanOffset',
+  pendingActressOffset: 'actressOffset',
+  pendingQueueDomain: 'queue',
   pendingLibraryId: 'lib'
 } as const
 
@@ -58,6 +65,25 @@ export const ACTRESS_DEFAULT_AVATAR: ActressAvatarFilter = 'all'
 export const CLASSIFICATION_LIST_DEFAULTS = {
   sortBy: 'video_count' as ClassificationListSortBy,
   sortDir: 'desc' as SortDir
+}
+
+export const CLASSIFICATION_PAGE_SIZE = 60
+export const PLAYLIST_PAGE_SIZE = 60
+
+function parseAlignedOffset(raw: string | null, pageSize: number): number {
+  if (!raw || !/^\d+$/.test(raw)) return 0
+  const value = Number(raw)
+  return Number.isSafeInteger(value) ? Math.floor(value / pageSize) * pageSize : 0
+}
+
+/** Reject unsafe URL numbers and align valid offsets to complete classification pages. */
+export function parseFacetOffset(raw: string | null): number {
+  return parseAlignedOffset(raw, CLASSIFICATION_PAGE_SIZE)
+}
+
+/** Align playlist list offsets to complete 60-item pages. */
+export function parsePlaylistOffset(raw: string | null): number {
+  return parseAlignedOffset(raw, PLAYLIST_PAGE_SIZE)
 }
 
 export function parseClassificationSort(
@@ -257,6 +283,7 @@ export function classificationListQueryHash(type: string, params: URLSearchParam
   )
   return hashListQuery({
     type,
+    offset: parseFacetOffset(params.get(LIST_PARAM.facetOffset)),
     q: (params.get(LIST_PARAM.q) ?? '').trim(),
     sort: sortBy,
     dir: sortDir

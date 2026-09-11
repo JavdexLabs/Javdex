@@ -1,0 +1,73 @@
+BEGIN startup.current_schema
+{"name":"startup.current_schema","firstMs":560.3435420000005,"warmMedianMs":251.97958300000028,"warmMaxMs":254.1068749999995,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":177946624}
+BEGIN legacy.first
+{"name":"legacy.first","firstMs":4.083332999999584,"warmMedianMs":2.991791999999805,"warmMaxMs":3.109042000000045,"samples":3,"sqlCalls":2,"sqlMsLast":2.858249999999316,"serializedBytes":41393,"rssBytesAfter":178192384}
+BEGIN legacy.deep
+{"name":"legacy.deep","firstMs":567.4271659999995,"warmMedianMs":566.3865839999999,"warmMaxMs":569.077209,"samples":3,"sqlCalls":2,"sqlMsLast":566.1866250000003,"serializedBytes":40895,"rssBytesAfter":178290688}
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":578.6478750000006,"warmMedianMs":578.7232080000013,"warmMaxMs":593.2357499999998,"samples":3,"sqlCalls":2,"sqlMsLast":593.0454169999994,"serializedBytes":41452,"rssBytesAfter":178388992}
+BEGIN legacy.search_code
+{"name":"legacy.search_code","firstMs":102.640707999999,"warmMedianMs":105.50870899999973,"warmMaxMs":106.03787499999999,"samples":3,"sqlCalls":2,"sqlMsLast":105.24908299999879,"serializedBytes":708,"rssBytesAfter":178487296}
+BEGIN scoped.library
+{"name":"scoped.library","firstMs":72.40566600000056,"warmMedianMs":71.3784169999999,"warmMaxMs":71.87333399999989,"samples":3,"sqlCalls":2,"sqlMsLast":67.96879199999967,"serializedBytes":50573,"rssBytesAfter":178667520}
+BEGIN scoped.all_single_active
+{"name":"scoped.all_single_active","firstMs":67.58345800000097,"warmMedianMs":67.75379099999918,"warmMaxMs":67.79387499999939,"samples":3,"sqlCalls":3,"sqlMsLast":67.0271249999987,"serializedBytes":50573,"rssBytesAfter":178847744}
+BEGIN scoped.all_selected_one
+{"name":"scoped.all_selected_one","firstMs":66.81529200000114,"warmMedianMs":67.84920899999997,"warmMaxMs":68.06245899999885,"samples":3,"sqlCalls":3,"sqlMsLast":67.76754200000323,"serializedBytes":50573,"rssBytesAfter":178978816}
+BEGIN scoped.release
+{"name":"scoped.release","firstMs":82.97154099999898,"warmMedianMs":82.89129099999991,"warmMaxMs":83.52116700000079,"samples":3,"sqlCalls":2,"sqlMsLast":82.46916800000145,"serializedBytes":50632,"rssBytesAfter":179208192}
+BEGIN scoped.search_code
+{"name":"scoped.search_code","firstMs":388.3896249999998,"warmMedianMs":378.8560830000006,"warmMaxMs":391.0114590000012,"samples":3,"sqlCalls":3,"sqlMsLast":378.4390000000003,"serializedBytes":861,"rssBytesAfter":179699712}
+BEGIN tags.all
+{"name":"tags.all","firstMs":587.2934999999998,"warmMedianMs":578.4837499999994,"warmMaxMs":588.0274170000012,"samples":3,"sqlCalls":1,"sqlMsLast":578.3797500000001,"serializedBytes":46787,"rssBytesAfter":187727872}
+BEGIN tags.manual
+{"name":"tags.manual","firstMs":1436.7360419999986,"warmMedianMs":1441.317708999999,"warmMaxMs":1456.530666999999,"samples":3,"sqlCalls":1,"sqlMsLast":1406.267917000001,"serializedBytes":46787,"rssBytesAfter":188088320}
+BEGIN tags.selected_labels
+{"name":"tags.selected_labels","firstMs":0.1375000000007276,"warmMedianMs":0.01641599999857135,"warmMaxMs":0.019499999998515705,"samples":3,"sqlCalls":1,"sqlMsLast":0.006500000003143214,"serializedBytes":76,"rssBytesAfter":188121088}
+BEGIN tags.selected_labels_100
+{"name":"tags.selected_labels_100","firstMs":0.06558399999994435,"warmMedianMs":0.05183400000169058,"warmMaxMs":0.07895799999823794,"samples":3,"sqlCalls":1,"sqlMsLast":0.03670799999963492,"serializedBytes":2685,"rssBytesAfter":188235776}
+BEGIN tags.manual_options
+{"name":"tags.manual_options","firstMs":0.22016599999915343,"warmMedianMs":0.05349999999816646,"warmMaxMs":0.0742919999975129,"samples":3,"sqlCalls":1,"sqlMsLast":0.04108300000007148,"serializedBytes":2906,"rssBytesAfter":188284928}
+BEGIN tags.manual_options_search
+{"name":"tags.manual_options_search","firstMs":0.20208400000046822,"warmMedianMs":0.16195800000059535,"warmMaxMs":0.1685829999987618,"samples":3,"sqlCalls":1,"sqlMsLast":0.13699999999880674,"serializedBytes":344,"rssBytesAfter":188579840}
+BEGIN tags.manual_options_deep
+{"name":"tags.manual_options_deep","firstMs":1.2703330000003916,"warmMedianMs":0.25329100000089966,"warmMaxMs":0.3328750000000582,"samples":3,"sqlCalls":1,"sqlMsLast":0.24470799999835435,"serializedBytes":2909,"rssBytesAfter":188628992}
+BEGIN actors.first
+{"name":"actors.first","firstMs":433.5538750000014,"warmMedianMs":434.9910830000008,"warmMaxMs":439.4255000000012,"samples":3,"sqlCalls":3,"sqlMsLast":434.80899999999747,"serializedBytes":104927,"rssBytesAfter":194969600}
+BEGIN overview
+{"name":"overview","firstMs":6.982083999999304,"warmMedianMs":6.316957999999431,"warmMaxMs":6.342166999998881,"samples":3,"sqlCalls":6,"sqlMsLast":6.293874999999389,"serializedBytes":268,"rssBytesAfter":195133440}
+BEGIN home.single
+{"name":"home.single","firstMs":77.49308299999757,"warmMedianMs":77.44816600000195,"warmMaxMs":78.0669999999991,"samples":3,"sqlCalls":7,"sqlMsLast":76.799208000004,"serializedBytes":21173,"rssBytesAfter":196493312}
+BEGIN web.first
+{"name":"web.first","firstMs":82.1414999999979,"warmMedianMs":81.74599999999919,"warmMaxMs":82.03429200000028,"samples":3,"sqlCalls":2,"sqlMsLast":81.64833299999736,"serializedBytes":4919,"rssBytesAfter":196689920}
+BEGIN web.search
+{"name":"web.search","firstMs":442.1895420000001,"warmMedianMs":440.62062499999956,"warmMaxMs":442.7200840000005,"samples":3,"sqlCalls":2,"sqlMsLast":442.5592510000024,"serializedBytes":177,"rssBytesAfter":196870144}
+BEGIN web.collections
+{"name":"web.collections","firstMs":38.15024999999878,"warmMedianMs":37.70799999999872,"warmMaxMs":37.82629200000156,"samples":3,"sqlCalls":2,"sqlMsLast":37.72145800000362,"serializedBytes":135,"rssBytesAfter":196968448}
+BEGIN playlist.full
+{"name":"playlist.full","firstMs":94.79079199999978,"warmMedianMs":95.09195900000122,"warmMaxMs":99.48433300000033,"samples":3,"sqlCalls":3,"sqlMsLast":78.72354099999939,"serializedBytes":20601442,"rssBytesAfter":338755584}
+BEGIN playlist.page
+{"name":"playlist.page","firstMs":9.947500000002037,"warmMedianMs":7.675999999999476,"warmMaxMs":7.716874999998254,"samples":3,"sqlCalls":6,"sqlMsLast":7.4221660000002885,"serializedBytes":9718,"rssBytesAfter":338837504}
+BEGIN playlist.metadata
+{"name":"playlist.metadata","firstMs":1.1981659999983094,"warmMedianMs":1.1652909999975236,"warmMaxMs":1.353958000003331,"samples":3,"sqlCalls":3,"sqlMsLast":1.3155000000006112,"serializedBytes":169,"rssBytesAfter":338886656}
+BEGIN playlist.video_page
+{"name":"playlist.video_page","firstMs":6.2271250000012515,"warmMedianMs":6.438874999999825,"warmMaxMs":6.45233300000109,"samples":3,"sqlCalls":3,"sqlMsLast":6.358499000001757,"serializedBytes":9550,"rssBytesAfter":338968576}
+BEGIN playlist.deep_page
+{"name":"playlist.deep_page","firstMs":14.118583999999828,"warmMedianMs":13.780417000001762,"warmMaxMs":14.150167000003421,"samples":3,"sqlCalls":6,"sqlMsLast":13.279875999996875,"serializedBytes":9344,"rssBytesAfter":339181568}
+BEGIN experiment.no_distinct.0
+{"name":"experiment.no_distinct.0","firstMs":0.03912499999933061,"warmMedianMs":0.023874999998952262,"warmMaxMs":0.02454100000250037,"samples":3,"sqlCalls":1,"sqlMsLast":0.019499999998515705,"serializedBytes":12,"rssBytesAfter":339214336}
+BEGIN experiment.no_distinct.1
+{"name":"experiment.no_distinct.1","firstMs":0.25345799999922747,"warmMedianMs":0.2017919999998412,"warmMaxMs":0.20249999999941792,"samples":3,"sqlCalls":1,"sqlMsLast":0.17345900000145775,"serializedBytes":41248,"rssBytesAfter":339312640}
+BEGIN scoped.all_overlap
+{"name":"scoped.all_overlap","firstMs":507.87841599999956,"warmMedianMs":506.8531249999978,"warmMaxMs":507.7692089999982,"samples":3,"sqlCalls":3,"sqlMsLast":506.43654199999946,"serializedBytes":51893,"rssBytesAfter":339673088}
+BEGIN home.overlap
+{"name":"home.overlap","firstMs":712.5635829999992,"warmMedianMs":718.635916999996,"warmMaxMs":719.7799169999998,"samples":3,"sqlCalls":7,"sqlMsLast":717.6596270000082,"serializedBytes":22552,"rssBytesAfter":341426176}
+✔ scripts/performance/large-library-benchmark.ts (36298.790416ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36303.32125

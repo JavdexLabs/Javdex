@@ -1,0 +1,42 @@
+▶ classification IPC contract
+  ✔ registers every command and forwards typed arguments to the public services (1.117584ms)
+✔ classification IPC contract (1.39ms)
+✔ executes real read-only tag queries and observes writes through the worker cache (31.316875ms)
+✔ rejects a changed catalog version at worker startup without migration (21.200709ms)
+✔ settles in-flight initialization and queued requests when disposed (21.4435ms)
+✔ executes all classification cover pages on the readonly worker and observes committed writes (33.734ms)
+✔ rejects image initialization against an incompatible schema without rewriting it (20.411166ms)
+✔ counts merged subscribers toward capacity, normalizes keys, and clones each successful result (2.177583ms)
+✔ serializes different revisions and keeps a folded expanding query valid in the payload (0.173292ms)
+✔ rejects old generation on identity change and waits for termination (4.840458ms)
+✔ rejects old generation on path change and waits for termination (0.511542ms)
+✔ removes queued aborts but retains an executing slot after all subscribers abort (0.510334ms)
+✔ one subscriber abort does not cancel another or retain its signal listener (0.17275ms)
+✔ rejects all accepted on startup timeout, without retry or overlapping workers (18.058041ms)
+✔ rejects all accepted on query timeout, without retry or overlapping workers (16.121458ms)
+✔ rejects all accepted on exit, without retry or overlapping workers (0.380542ms)
+✔ rejects all accepted on error, without retry or overlapping workers (0.415667ms)
+✔ rejects all accepted on protocol error, without retry or overlapping workers (0.203083ms)
+✔ dispose closes admission immediately and waits for a running termination (0.494916ms)
+✔ fails closed if termination rejects and rejects requests waiting for replacement (0.437ms)
+✔ rejects invalid queries before creating a worker and contains factory/post failures (0.191166ms)
+✔ bounds subscribers while termination is pending and supersedes a waiting generation (0.389625ms)
+✔ does not launch work after repeated queued cancellations before ready (0.715791ms)
+✔ contains unexpected messages and dispose drains an already-started replacement barrier (0.127458ms)
+✔ expires waiting subscribers and frees capacity while native termination remains pending (2.028417ms)
+✔ keeps independent waiting deadlines for coalesced subscribers and clears them at execution (0.152958ms)
+✔ never executes a page whose only subscriber expired before ready (0.069458ms)
+✔ shares admission across tag/image requests, keys entity kinds separately and copies caller inputs (0.319292ms)
+✔ retains the executing image slot after cancellation and retires it before switching databases (0.475625ms)
+✔ validates image requests before allocating a reader (0.145041ms)
+✔ matches all candidate fields/order and deduplicates dual-role organization links before LIMIT (20.768084ms)
+✔ holds count and candidate rows in the same snapshot across a cover removal (7.227042ms)
+✔ rejects unsafe entity IDs, unsupported page flags and excessive pages (7.720083ms)
+ℹ tests 32
+ℹ suites 1
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 422.18025

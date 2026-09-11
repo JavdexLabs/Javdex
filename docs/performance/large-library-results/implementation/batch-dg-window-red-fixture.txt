@@ -1,0 +1,123 @@
+import assert from 'node:assert/strict'
+import { afterEach, describe, it } from 'node:test'
+import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import TestRenderer, { act } from 'react-test-renderer'
+import type { ScopedVideo, ScopedVideoListResult } from '/Users/nut/Project/JavdexLabs/Javdex/src/shared/catalogTypes'
+import type { CatalogScope } from '/Users/nut/Project/JavdexLabs/Javdex/src/shared/mediaLibraryTypes'
+import type { VideoQuery } from '/Users/nut/Project/JavdexLabs/Javdex/src/shared/videoTypes'
+import type { ElectronApi } from '/Users/nut/Project/JavdexLabs/Javdex/src/preload/index'
+
+Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+
+const totalVideos = 24000
+const requests: VideoQuery[] = []
+
+function video(id: number): ScopedVideo {
+  return {
+    id,
+    code: `TEST-${id}`,
+    preferredLibraryId: 1,
+    membershipAddedAt: '2026-08-29T00:00:00.000Z',
+    libraries: []
+  } as unknown as ScopedVideo
+}
+
+const fakeApi = {
+  videos: {
+    list: async (_scope: CatalogScope, query: VideoQuery = {}): Promise<ScopedVideoListResult> => {
+      requests.push(query)
+      const limit = query.limit ?? 50
+      if (limit > 200) {
+        throw new Error(
+          '无效的 IPC 请求参数（video:list）：1.limit: Too big: expected number to be <=200'
+        )
+      }
+      const offset = query.offset ?? 0
+      const count = Math.min(limit, Math.max(0, totalVideos - offset))
+      return {
+        items: Array.from({ length: count }, (_, index) => video(offset + index + 1)),
+        total: totalVideos
+      }
+    }
+  }
+} as unknown as ElectronApi
+
+Object.defineProperty(globalThis, 'window', {
+  configurable: true,
+  value: { api: fakeApi }
+})
+
+type VideoListHook = typeof import('/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/query/useInfiniteVideoList')['useInfiniteVideoList']
+type VideoListResult = ReturnType<VideoListHook>
+let renderer: TestRenderer.ReactTestRenderer | null = null
+let hook: VideoListHook | null = null
+
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 2))
+  })
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (predicate()) return
+    await settle()
+  }
+  assert.fail('video list hook did not settle')
+}
+
+afterEach(async () => {
+  await act(async () => renderer?.unmount())
+  renderer = null
+  requests.length = 0
+})
+
+describe('useInfiniteVideoList', () => {
+  it('loads a library larger than the IPC page limit in bounded pages', async () => {
+    hook ??= (await import('/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/query/useInfiniteVideoList')).useInfiniteVideoList
+    const useVideoList = hook
+    const errors: unknown[] = []
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let current: VideoListResult | null = null
+
+    function Harness(): null {
+      current = useVideoList(
+        { kind: 'library', libraryId: 1 },
+        {},
+        'library-entry',
+        (error) => errors.push(error)
+      )
+      return null
+    }
+
+    function result(): VideoListResult {
+      assert.ok(current)
+      return current
+    }
+
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <QueryClientProvider client={client}>
+          <Harness />
+        </QueryClientProvider>
+      )
+      await Promise.resolve()
+    })
+    await waitFor(() => requests.length === 1)
+
+    assert.deepEqual(requests.map(({ limit, offset }) => ({ limit, offset })), [
+      { limit: 200, offset: 0 }
+    ])
+    await waitFor(() => result().videos.length === 200)
+    assert.equal(result().total, totalVideos)
+    assert.equal(result().hasMore, true)
+
+    for (let page=1; page<100; page++) {
+      act(() => result().loadMore())
+      await waitFor(() => result().videos.length === (page+1)*200)
+    }
+    assert.ok(result().videos.length <= 600, `retained ${result().videos.length} full cards after 100 pages`)
+    client.clear()
+  })
+})

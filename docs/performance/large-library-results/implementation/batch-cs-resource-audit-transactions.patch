@@ -1,0 +1,1921 @@
+diff --git a/src/main/scanner/scanner.ts b/src/main/scanner/scanner.ts
+index 79920b9..ac3ee15 100644
+--- a/src/main/scanner/scanner.ts
++++ b/src/main/scanner/scanner.ts
+@@ -33,7 +33,7 @@ import type {
+   ScanResult,
+   StrmScanFailure
+ } from '@shared/libraryTypes'
+-import type { ScannedVideoInput, StrmVideoResourceRef } from '../db/videoRepo'
++import type { ScannedVideoInput } from '../db/videoRepo'
+ import type {
+   LocalVideoResource,
+   VideoResource,
+@@ -59,7 +59,8 @@ import {
+   readStrmFile,
+   type ParsedStrmTarget
+ } from './strmParser'
+-import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
++import { getDb, getDatabaseReadRevision } from '../db/database'
++import { StrmRelocationIndex } from './strmRelocationIndex'
+ import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+ import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+ import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
+@@ -86,29 +87,30 @@ import { getMediaLibraryConfig } from '../db/mediaLibraryRepo'
+ export type ScanProgressFn = (progress: ScanProgress) => void
+ 
+ /** Rescanning refreshes file evidence without choosing either pending identity. */
+-function refreshPendingIdentity(
++function preparePendingIdentityRefresh(
+   libraryId: number,
+   root: Readonly<MediaLibraryRoot>,
+   filePath: string,
+   target?: ParsedStrmTarget
+-): boolean {
++): (() => void) | null {
+   const pending = getPendingResourceIdentityByPath(libraryId, filePath)
+-  if (!pending) return false
++  if (!pending) return null
+   authorizeMediaLibraryRootFile(libraryId, root.id, filePath, root)
+   const fingerprint = statFileFingerprint(filePath)
+   if (!fingerprint) throw new Error('待确认资源无法读取，保留原身份待办。')
+-  if (pending.sizeBytes !== fingerprint.file_size ||
+-    pending.fileMtimeMs !== fingerprint.file_mtime_ms ||
+-    (target && (pending.targetKind !== target.kind || pending.targetLocator !== target.locator ||
+-      pending.targetKey !== target.targetKey))) {
+-    upsertPendingResourceIdentity({
+-      ...pending,
+-      sizeBytes: fingerprint.file_size,
+-      fileMtimeMs: fingerprint.file_mtime_ms,
+-      ...(target ? { targetKind: target.kind, targetLocator: target.locator, targetKey: target.targetKey } : {})
+-    })
++  return () => {
++    if (pending.sizeBytes !== fingerprint.file_size ||
++      pending.fileMtimeMs !== fingerprint.file_mtime_ms ||
++      (target && (pending.targetKind !== target.kind || pending.targetLocator !== target.locator ||
++        pending.targetKey !== target.targetKey))) {
++      upsertPendingResourceIdentity({
++        ...pending,
++        sizeBytes: fingerprint.file_size,
++        fileMtimeMs: fingerprint.file_mtime_ms,
++        ...(target ? { targetKind: target.kind, targetLocator: target.locator, targetKey: target.targetKey } : {})
++      })
++    }
+   }
+-  return true
+ }
+ 
+ type ScanFileAuditWithoutRoot = LibraryScanFileAuditEntry extends infer Entry
+@@ -126,6 +128,13 @@ export interface ScanFoldersRequest {
+   filePaths?: readonly string[]
+ }
+ 
++/** Caller-owned synchronous persistence; never holds a transaction across scan awaits. */
++export interface ScanAuditSink {
++  recordFile(entry: LibraryScanFileAuditEntry): void
++  readFileNfo(filePath: string): { nfo?: LibraryScanNfoAudit } | undefined
++  patchNfo(filePath: string, nfo: LibraryScanNfoAudit): boolean
++}
++
+ export interface ScanOptions {
+   yieldEvery?: number
+   signal?: AbortSignal
+@@ -147,6 +156,19 @@ export interface ScanOptions {
+   localNfoService?: LocalNfoScanService
+   /** Receives exactly one final audit outcome for every processed file. */
+   onFileResult?: (entry: LibraryScanFileAuditEntry) => void
++  /** Incremental storage instead of the legacy in-memory final callback collection. */
++  auditSink?: ScanAuditSink
++}
++
++function synchronousAuditResult<T>(value: T): T {
++  if (value != null && (typeof value === 'object' || typeof value === 'function')
++    && typeof (value as { then?: unknown }).then === 'function') {
++    // A caller may accidentally pass an async function to a void callback.
++    // Observe rejection, but never pretend an in-flight write has completed.
++    void Promise.resolve(value).catch(() => {})
++    throw new Error('Audit sink methods must be synchronous')
++  }
++  return value
+ }
+ 
+ const DEFAULT_YIELD_EVERY = 50
+@@ -250,34 +272,6 @@ function readStrmTarget(sourcePath: string): PreparedStrm {
+   }
+ }
+ 
+-function targetKeyForStrmResource(resource: StrmVideoResourceRef): string | null {
+-  try {
+-    return normalizeExternalVideoResource(resource.locator, resource.kind).resourceKey
+-  } catch {
+-    return null
+-  }
+-}
+-
+-function findStrmRelocationCandidate(
+-  libraryId: number,
+-  sourcePath: string,
+-  targetKey: string,
+-  unavailableRootIds: ReadonlySet<number>,
+-  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+-): StrmVideoResourceRef | null {
+-  const sourceName = path.basename(sourcePath)
+-  const candidates = listStrmVideoResourceRefs(libraryId)
+-    .filter((resource) => {
+-      const oldSourcePath = resource.source_path
+-      if (path.basename(oldSourcePath) !== sourceName) return false
+-      const record = getVideoResourceInLibrary(libraryId, resource.resource_id)
+-      if (!record?.root_id || unavailableRootIds.has(record.root_id)) return false
+-      if (inspectPath(oldSourcePath) !== 'missing') return false
+-      return targetKeyForStrmResource(resource) === targetKey
+-    })
+-  return candidates.length === 1 ? candidates[0] : null
+-}
+-
+ function samePath(a: string, b: string): boolean {
+   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+ }
+@@ -368,47 +362,45 @@ function resolveRefreshTarget(libraryId: number, file: string): LocalVideoResour
+   return null
+ }
+ 
+-async function refreshScannedFileDuration(
++/** Probe first; the caller authorizes and commits the returned mutation with its audit. */
++async function prepareScannedFileRefresh(
+   libraryId: number,
+   file: string,
+   readDurationSeconds: DurationReader,
+   authorizeWrite: () => void
+-): Promise<boolean> {
++): Promise<(() => boolean) | null> {
+   const fingerprint = statFileFingerprint(file)
+-  if (!fingerprint) return false
+-
++  if (!fingerprint) return null
+   const record = resolveRefreshTarget(libraryId, file)
+-  if (!record) return false
+-
++  if (!record) return null
+   if (!shouldProbeLocalVideoResourceDuration(record, fingerprint)) {
+     if (record.file_mtime_ms == null) {
+-      authorizeWrite()
+-      backfillLocalVideoResourceFingerprint(record.id, {
+-        sizeBytes: fingerprint.file_size,
+-        fileMtimeMs: fingerprint.file_mtime_ms
+-      })
+-      return true
++      return () => {
++        backfillLocalVideoResourceFingerprint(record.id, {
++          sizeBytes: fingerprint.file_size,
++          fileMtimeMs: fingerprint.file_mtime_ms
++        })
++        return true
++      }
+     }
+-    return false
++    return null
+   }
+-
+   const fileDurationSeconds = await readDurationSeconds(file)
+-  authorizeWrite()
+-  if (fileDurationSeconds == null || fileDurationSeconds <= 0) return false
+-
+-  const nextDuration = shouldRefreshLocalVideoResourceDuration(
+-    record.duration_seconds,
+-    fileDurationSeconds
+-  )
+-    ? fileDurationSeconds
+-    : record.duration_seconds
+-
+-  updateLocalVideoResourceAfterProbe(record.id, {
+-    durationSeconds: nextDuration,
+-    sizeBytes: fingerprint.file_size,
+-    fileMtimeMs: fingerprint.file_mtime_ms
+-  })
+-  return true
++  if (fileDurationSeconds == null || fileDurationSeconds <= 0) {
++    // Preserve the old authorization check even when the probe has no usable result.
++    authorizeWrite()
++    return null
++  }
++  const nextDuration = shouldRefreshLocalVideoResourceDuration(record.duration_seconds, fileDurationSeconds)
++    ? fileDurationSeconds : record.duration_seconds
++  return () => {
++    updateLocalVideoResourceAfterProbe(record.id, {
++      durationSeconds: nextDuration,
++      sizeBytes: fingerprint.file_size,
++      fileMtimeMs: fingerprint.file_mtime_ms
++    })
++    return true
++  }
+ }
+ 
+ /**
+@@ -425,6 +417,8 @@ export async function scanFolders(
+     throw new Error('媒体库 ID 无效')
+   }
+   if (!request.runId.trim()) throw new Error('扫描运行 ID 不能为空')
++  if (options.auditSink && options.onFileResult) throw new Error('Audit sink and final callback are mutually exclusive')
++  const auditSink = options.auditSink
+   const roots = request.roots.map((root) => ({ ...root }))
+   if (
+     roots.some(
+@@ -473,6 +467,26 @@ export async function scanFolders(
+     options.readDirectory ??
+     ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
+   const inspectPath = options.inspectPath ?? inspectScannedResourcePath
++  const asStrmRef = (resource: VideoResource | null) =>
++    resource?.strm_source_path && resource.kind !== 'local'
++      ? {
++          library_id: resource.library_id,
++          video_id: resource.video_id,
++          resource_id: resource.id,
++          source_path: resource.strm_source_path,
++          kind: resource.kind,
++          locator: resource.locator,
++          root_id: resource.root_id
++        }
++      : null
++  const strmRelocations = new StrmRelocationIndex({
++    revision: getDatabaseReadRevision,
++    list: () => listStrmVideoResourceRefs(libraryId),
++    get: (id) => asStrmRef(getVideoResourceInLibrary(libraryId, id)),
++    getByPath: (sourcePath) => asStrmRef(strmResourceInLibrary(libraryId, sourcePath)),
++    inspect: inspectPath,
++    unavailableRootIds
++  })
+   for (const root of roots) {
+     if (options.signal?.aborted) {
+       result.cancelled = true
+@@ -501,7 +515,11 @@ export async function scanFolders(
+     } else {
+       await collectScannableFiles(root.path, rootFiles, options.signal, readIndexedDirectory)
+     }
+-    files.push(...rootFiles.map((filePath) => ({ filePath, root })))
++    for (const filePath of rootFiles) files.push({ filePath, root })
++  }
++  if (options.signal?.aborted) {
++    result.cancelled = true
++    return result
+   }
+   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
+   const readDurationSeconds = options.readDurationSeconds ?? readLocalVideoDurationSeconds
+@@ -510,8 +528,14 @@ export async function scanFolders(
+   const autoMergeSameCodeResources = options.autoMergeSameCodeResources ?? false
+   const autoImportLocalNfo = options.autoImportLocalNfo ?? false
+   const nfoService = options.localNfoService ?? localNfoScanService
++  let indexedFiles = 0
+   for (const { filePath } of files) {
+     if (request.filePaths) break
++    await maybeYield(++indexedFiles, yieldEvery)
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      return result
++    }
+     const directory = path.dirname(filePath)
+     const codes = directoryVideoCodes.get(directory) ?? []
+     codes.push(parseCode(path.basename(filePath, path.extname(filePath))))
+@@ -521,6 +545,7 @@ export async function scanFolders(
+   if (autoImportLocalNfo) {
+     let inspectedNfoFiles = 0
+     for (const { filePath, root } of files) {
++      await maybeYield(++inspectedNfoFiles, Math.min(yieldEvery, 10))
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+@@ -550,7 +575,6 @@ export async function scanFolders(
+           warnings: [sanitizeLibraryScanError(error)]
+         }
+       }
+-      inspectedNfoFiles += 1
+       if (inspection.status !== 'missing') {
+         let nfoCode: string | null = null
+         try {
+@@ -574,7 +598,6 @@ export async function scanFolders(
+           inspection
+         })
+       }
+-      await maybeYield(inspectedNfoFiles, Math.min(yieldEvery, 10))
+     }
+   }
+   const codeForNewFile = (filePath: string): string | null => {
+@@ -582,7 +605,13 @@ export async function scanFolders(
+     return preflight ? preflight.effectiveCode : parseCode(path.basename(filePath, path.extname(filePath)))
+   }
+   const newFileCounts = new Map<string, number>()
++  let countedFiles = 0
+   for (const { filePath: file } of files) {
++    await maybeYield(++countedFiles, yieldEvery)
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      return result
++    }
+     if (
+       getLocalVideoResourceByLocator(libraryId, file) ||
+       getStrmVideoResourceBySourcePath(libraryId, file) ||
+@@ -598,6 +627,7 @@ export async function scanFolders(
+   if (!autoMergeSameCodeResources) {
+     let checkedStrmFiles = 0
+     for (const { filePath: file } of files) {
++      await maybeYield(++checkedStrmFiles, Math.min(yieldEvery, 10))
+       if (options.signal?.aborted) {
+         result.cancelled = true
+         return result
+@@ -614,16 +644,15 @@ export async function scanFolders(
+       ) {
+         continue
+       }
+-      checkedStrmFiles += 1
+       if (!readStrmTarget(file).ok) {
+         newFileCounts.set(code, Math.max(0, (newFileCounts.get(code) ?? 0) - 1))
+       }
+-      await maybeYield(checkedStrmFiles, Math.min(yieldEvery, 10))
+     }
+   }
+   const pendingGroupIds = new Set<number>()
+   const primarySelectionVideoIds = new Set<number>()
+-  const auditEntriesByFile = new Map<string, LibraryScanFileAuditEntry>()
++  const auditEntriesByFile = !auditSink && options.onFileResult ? new Map<string, LibraryScanFileAuditEntry>() : undefined
++  let auditWriteFailed = false
+   const nfoBatchesByVideo = new Map<number, LocalNfoVideoBatch>()
+   const queueNfoCandidate = (videoId: number, code: string, filePath: string): void => {
+     const preflight = nfoPreflightByFile.get(filePath)
+@@ -648,7 +677,10 @@ export async function scanFolders(
+     const authorizeFileWrite = (): void => {
+       authorizeMediaLibraryRootFile(libraryId, rootId, file, root)
+     }
++    // Only synchronous business + audit segments belong here, never probes/progress/yields.
++    const commitFileAudit = <T>(write: () => T): T => auditSink ? getDb().transaction(write)() : write()
+     const recordFile = (entry: ScanFileAuditWithoutRoot): void => {
++      if (!auditSink && !auditEntriesByFile) return
+       const fullEntry = { ...entry, rootId } as LibraryScanFileAuditEntry
+       const preflight = nfoPreflightByFile.get(file)
+       if (
+@@ -661,7 +693,10 @@ export async function scanFolders(
+           warnings: safeNfoWarnings(preflight.inspection.warnings)
+         }
+       }
+-      auditEntriesByFile.set(file, fullEntry)
++      if (auditSink) {
++        try { synchronousAuditResult(auditSink.recordFile(fullEntry)) }
++        catch (error) { auditWriteFailed = true; throw error }
++      } else auditEntriesByFile!.set(file, fullEntry)
+     }
+     if (options.signal?.aborted) {
+       result.cancelled = true
+@@ -679,15 +714,17 @@ export async function scanFolders(
+         }
+         if (!prepared.ok) {
+           authorizeFileWrite()
+-          removePendingScanResource(libraryId, file)
++          strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            removePendingScanResource(libraryId, file)
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'strm_failure',
++              failureCode: prepared.failure.code,
++              message: prepared.failure.message
++            })
++          }))
+           recordStrmFailure(prepared.failure)
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'strm_failure',
+-            failureCode: prepared.failure.code,
+-            message: prepared.failure.message
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+@@ -697,14 +734,12 @@ export async function scanFolders(
+         const existingResource = strmResourceInLibrary(libraryId, file)
+         if (existingResource) {
+           authorizeFileWrite()
+-          if (
+-            updateStrmVideoResourceTarget(existingResource.id, {
++          const refreshed = strmRelocations.mutate(file, () => commitFileAudit(() => {
++            const changed = updateStrmVideoResourceTarget(existingResource.id, {
+               kind: target.kind,
+               locator: target.locator
+             })
+-          ) {
+-            result.refreshed += 1
+-            recordFile({
++            recordFile(changed ? {
+               filePath: file,
+               sourceKind: 'strm',
+               outcome: 'updated',
+@@ -712,10 +747,7 @@ export async function scanFolders(
+               ...videoIdentity(existingResource.video_id),
+               resourceId: existingResource.id,
+               resourceKind: target.kind
+-            })
+-          } else {
+-            result.skipped += 1
+-            recordFile({
++            } : {
+               filePath: file,
+               sourceKind: 'strm',
+               outcome: 'skipped',
+@@ -724,123 +756,132 @@ export async function scanFolders(
+               resourceId: existingResource.id,
+               resourceKind: existingResource.kind
+             })
+-          }
++            return changed
++          }))
++          if (refreshed) result.refreshed += 1
++          else result.skipped += 1
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+ 
+         const code = codeForNewFile(file)
+-        if (refreshPendingIdentity(libraryId, root, file, target)) {
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: null,
+-            groupId: null,
+-            addedToQueue: false,
+-            nfo: { disposition: 'identity-conflict' }
+-          })
++        const refreshIdentity = preparePendingIdentityRefresh(libraryId, root, file, target)
++        if (refreshIdentity) {
++          strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            refreshIdentity()
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'pending',
++              normalizedCode: null,
++              groupId: null,
++              addedToQueue: false,
++              nfo: { disposition: 'identity-conflict' }
++            })
++          }))
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+         const nfoPreflight = nfoPreflightByFile.get(file)
+         if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++          const { filenameCode, nfoCode } = nfoPreflight
+           authorizeFileWrite()
+           const fingerprint = statFileFingerprint(file)
+-          const pendingIdentity = upsertPendingResourceIdentity({
+-            libraryId,
+-            rootId,
+-            filePath: file,
+-            sourceKind: 'strm',
+-            targetKind: target.kind,
+-            targetLocator: target.locator,
+-            targetKey: target.targetKey,
+-            filenameCode: nfoPreflight.filenameCode,
+-            nfoCode: nfoPreflight.nfoCode,
+-            sizeBytes: fingerprint?.file_size ?? null,
+-            fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-          })
++          strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            const pendingIdentity = upsertPendingResourceIdentity({
++              libraryId,
++              rootId,
++              filePath: file,
++              sourceKind: 'strm',
++              targetKind: target.kind,
++              targetLocator: target.locator,
++              targetKey: target.targetKey,
++              filenameCode,
++              nfoCode,
++              sizeBytes: fingerprint?.file_size ?? null,
++              fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++            })
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'pending',
++              normalizedCode: null,
++              groupId: null,
++              addedToQueue: true,
++              nfo: {
++                disposition: 'identity-conflict',
++                pendingIdentityId: pendingIdentity.id,
++                ...(nfoPreflight.inspection.warnings.length > 0
++                  ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
++                  : {})
++              }
++            })
++          }))
+           result.pendingResources += 1
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: null,
+-            groupId: null,
+-            addedToQueue: true,
+-            nfo: {
+-              disposition: 'identity-conflict',
+-              pendingIdentityId: pendingIdentity.id,
+-              ...(nfoPreflight.inspection.warnings.length > 0
+-                ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
+-                : {})
+-            }
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+         if (pendingScanResourceExists(libraryId, file)) {
+-          let groupId: number | null = null
+-          if (code) {
+-            authorizeFileWrite()
+-            const pending = upsertPendingScanResources(libraryId, code, [
+-              {
+-                rootId,
+-                filePath: file,
+-                sourceKind: 'strm',
+-                targetKind: target.kind,
+-                targetLocator: target.locator,
+-                targetKey: target.targetKey,
+-                sizeBytes: null,
+-                durationSeconds: null,
+-                fileMtimeMs: null,
+-                displayName: path.basename(file)
+-              }
+-            ])
+-            pendingGroupIds.add(pending.groupId)
+-            groupId = pending.groupId
+-          }
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: code ? normalizeVideoCode(code) : null,
+-            groupId,
+-            addedToQueue: false
+-          })
++          if (code) authorizeFileWrite()
++          const groupId = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            let groupId: number | null = null
++            if (code) {
++              const pending = upsertPendingScanResources(libraryId, code, [
++                {
++                  rootId,
++                  filePath: file,
++                  sourceKind: 'strm',
++                  targetKind: target.kind,
++                  targetLocator: target.locator,
++                  targetKey: target.targetKey,
++                  sizeBytes: null,
++                  durationSeconds: null,
++                  fileMtimeMs: null,
++                  displayName: path.basename(file)
++                }
++              ])
++              groupId = pending.groupId
++            }
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'pending',
++              normalizedCode: code ? normalizeVideoCode(code) : null,
++              groupId,
++              addedToQueue: false
++            })
++            return groupId
++          }))
++          if (groupId != null) pendingGroupIds.add(groupId)
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+         }
+ 
+-        const relocation = findStrmRelocationCandidate(
+-          libraryId,
+-          file,
+-          target.targetKey,
+-          unavailableRootIds,
+-          inspectPath
+-        )
++        const relocation = strmRelocations.find(file, target.targetKey)
+         if (relocation) {
+           authorizeFileWrite()
+-          relocateStrmVideoResource(libraryId, relocation.resource_id, {
+-            rootId,
+-            sourcePath: file,
+-            kind: target.kind,
+-            locator: target.locator
+-          })
++          strmRelocations.mutate(file, () => commitFileAudit(() => {
++            relocateStrmVideoResource(libraryId, relocation.resource_id, {
++              rootId,
++              sourcePath: file,
++              kind: target.kind,
++              locator: target.locator
++            })
++            recordFile({
++              filePath: file,
++              sourceKind: 'strm',
++              outcome: 'updated',
++              updateKind: 'relocated',
++              ...videoIdentity(relocation.video_id),
++              resourceId: relocation.resource_id,
++              resourceKind: target.kind
++            })
++          }))
+           result.relocated += 1
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'updated',
+-            updateKind: 'relocated',
+-            ...videoIdentity(relocation.video_id),
+-            resourceId: relocation.resource_id,
+-            resourceKind: target.kind
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+@@ -862,30 +903,33 @@ export async function scanFolders(
+           : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+         if (mustConfirm) {
+           authorizeFileWrite()
+-          const pending = upsertPendingScanResources(libraryId, code, [
+-            {
+-              rootId,
++          const pending = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++            const pending = upsertPendingScanResources(libraryId, code, [
++              {
++                rootId,
++                filePath: file,
++                sourceKind: 'strm',
++                targetKind: target.kind,
++                targetLocator: target.locator,
++                targetKey: target.targetKey,
++                sizeBytes: null,
++                durationSeconds: null,
++                fileMtimeMs: null,
++                displayName: path.basename(file)
++              }
++            ])
++            recordFile({
+               filePath: file,
+               sourceKind: 'strm',
+-              targetKind: target.kind,
+-              targetLocator: target.locator,
+-              targetKey: target.targetKey,
+-              sizeBytes: null,
+-              durationSeconds: null,
+-              fileMtimeMs: null,
+-              displayName: path.basename(file)
+-            }
+-          ])
++              outcome: 'pending',
++              normalizedCode: normalizeVideoCode(code),
++              groupId: pending.groupId,
++              addedToQueue: pending.addedResources > 0
++            })
++            return pending
++          }))
+           pendingGroupIds.add(pending.groupId)
+           result.pendingResources += pending.addedResources
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'strm',
+-            outcome: 'pending',
+-            normalizedCode: normalizeVideoCode(code),
+-            groupId: pending.groupId,
+-            addedToQueue: pending.addedResources > 0
+-          })
+           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+           await maybeYield(result.scannedFiles, yieldEvery)
+           continue
+@@ -895,51 +939,78 @@ export async function scanFolders(
+           const needsPrimarySelection =
+             listVideoResources(libraryId, existingVideos[0].id).length === 0
+           authorizeFileWrite()
+-          const resourceId = insertStrmVideoResource({
+-            libraryId,
+-            videoId: existingVideos[0].id,
+-            rootId,
+-            sourcePath: file,
+-            kind: target.kind,
+-            locator: target.locator,
+-            displayName: path.basename(file)
+-          })
++          const resourceId = strmRelocations.mutate(file, () => commitFileAudit(() => {
++            const resourceId = insertStrmVideoResource({
++              libraryId,
++              videoId: existingVideos[0].id,
++              rootId,
++              sourcePath: file,
++              kind: target.kind,
++              locator: target.locator,
++              displayName: path.basename(file)
++            })
++            recordFile(
++              resourceId == null
++                ? {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'skipped',
++                    skipReason: 'duplicate'
++                  }
++                : {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'added',
++                    videoId: existingVideos[0].id,
++                    videoCode: existingVideos[0].code,
++                    resourceId,
++                    resourceKind: target.kind,
++                    createdVideo: false
++                  }
++            )
++            return resourceId
++          }))
+           if (resourceId == null) result.skipped += 1
+           else {
+             result.imported += 1
+             if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+             queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
+           }
+-          recordFile(
+-            resourceId == null
+-              ? {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'skipped',
+-                  skipReason: 'duplicate'
+-                }
+-              : {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'added',
+-                  videoId: existingVideos[0].id,
+-                  videoCode: existingVideos[0].code,
+-                  resourceId,
+-                  resourceKind: target.kind,
+-                  createdVideo: false
+-                }
+-          )
+         } else {
+           authorizeFileWrite()
+-          const videoId = insertNewScannedStrmVideo({
+-            libraryId,
+-            rootId,
+-            code,
+-            sourcePath: file,
+-            kind: target.kind,
+-            locator: target.locator,
+-            displayName: path.basename(file)
+-          })
++          const videoId = strmRelocations.mutate(file, () => commitFileAudit(() => {
++            const videoId = insertNewScannedStrmVideo({
++              libraryId,
++              rootId,
++              code,
++              sourcePath: file,
++              kind: target.kind,
++              locator: target.locator,
++              displayName: path.basename(file)
++            })
++            const resource = videoId == null ? null : strmResourceInLibrary(libraryId, file)
++            if (auditSink && videoId != null && !resource) throw new Error('Imported STRM resource missing before audit commit')
++            recordFile(
++              videoId == null || !resource
++                ? {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'skipped',
++                    skipReason: 'duplicate'
++                  }
++                : {
++                    filePath: file,
++                    sourceKind: 'strm',
++                    outcome: 'added',
++                    videoId,
++                    videoCode: code,
++                    resourceId: resource.id,
++                    resourceKind: resource.kind,
++                    createdVideo: true
++                  }
++            )
++            return videoId
++          }))
+           if (videoId == null) result.skipped += 1
+           else {
+             result.imported += 1
+@@ -947,26 +1018,6 @@ export async function scanFolders(
+             primarySelectionVideoIds.add(videoId)
+             queueNfoCandidate(videoId, code, file)
+           }
+-          const resource = videoId == null ? null : strmResourceInLibrary(libraryId, file)
+-          recordFile(
+-            videoId == null || !resource
+-              ? {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'skipped',
+-                  skipReason: 'duplicate'
+-                }
+-              : {
+-                  filePath: file,
+-                  sourceKind: 'strm',
+-                  outcome: 'added',
+-                  videoId,
+-                  videoCode: code,
+-                  resourceId: resource.id,
+-                  resourceKind: resource.kind,
+-                  createdVideo: true
+-                }
+-          )
+         }
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+@@ -976,17 +1027,13 @@ export async function scanFolders(
+       const registeredResource = getLocalVideoResourceByLocator(libraryId, file)
+       if (registeredResource) {
+         const existingResource = localResourceInLibrary(libraryId, file)
+-        const refreshed = existingResource
+-          ? await refreshScannedFileDuration(
+-              libraryId,
+-              file,
+-              readDurationSeconds,
+-              authorizeFileWrite
+-            )
+-          : false
+-        if (refreshed) {
+-          result.refreshed += 1
+-          if (existingResource) {
++        const refresh = existingResource
++          ? await prepareScannedFileRefresh(libraryId, file, readDurationSeconds, authorizeFileWrite)
++          : null
++        if (refresh) authorizeFileWrite()
++        const refreshed = commitFileAudit(() => {
++          const changed = refresh?.() ?? false
++          if (changed && existingResource) {
+             recordFile({
+               filePath: file,
+               sourceKind: 'local',
+@@ -996,38 +1043,44 @@ export async function scanFolders(
+               resourceId: existingResource.id,
+               resourceKind: 'local'
+             })
++          } else {
++            recordFile({
++              filePath: file,
++              sourceKind: 'local',
++              outcome: 'skipped',
++              skipReason: 'unchanged',
++              ...(existingResource
++                ? {
++                    ...videoIdentity(existingResource.video_id),
++                    resourceId: existingResource.id,
++                    resourceKind: 'local' as const
++                  }
++                : {})
++            })
+           }
+-        } else {
+-          result.skipped += 1
+-          recordFile({
+-            filePath: file,
+-            sourceKind: 'local',
+-            outcome: 'skipped',
+-            skipReason: 'unchanged',
+-            ...(existingResource
+-              ? {
+-                  ...videoIdentity(existingResource.video_id),
+-                  resourceId: existingResource.id,
+-                  resourceKind: 'local' as const
+-                }
+-              : {})
+-          })
+-        }
++          return changed
++        })
++        if (refreshed) result.refreshed += 1
++        else result.skipped += 1
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+       }
+ 
+-      if (refreshPendingIdentity(libraryId, root, file)) {
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: null,
+-          groupId: null,
+-          addedToQueue: false,
+-          nfo: { disposition: 'identity-conflict' }
+-        })
++      const refreshIdentity = preparePendingIdentityRefresh(libraryId, root, file)
++      if (refreshIdentity) {
++        strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          refreshIdentity()
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: null,
++            groupId: null,
++            addedToQueue: false,
++            nfo: { disposition: 'identity-conflict' }
++          })
++        }))
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1035,32 +1088,38 @@ export async function scanFolders(
+ 
+       if (pendingScanResourceExists(libraryId, file)) {
+         const code = parseCode(path.basename(file, path.extname(file)))
+-        let groupId: number | null = null
++        const fileDurationSeconds = code ? await readDurationSeconds(file) : null
++        let fingerprint: VideoFileFingerprint | null = null
+         if (code) {
+-          const fileDurationSeconds = await readDurationSeconds(file)
+           authorizeFileWrite()
+-          const fingerprint = statFileFingerprint(file)
+-          const pending = upsertPendingScanResources(libraryId, code, [
+-            {
+-              rootId,
+-              filePath: file,
+-              sizeBytes: fingerprint?.file_size ?? null,
+-              durationSeconds: fileDurationSeconds,
+-              fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+-              displayName: path.basename(file)
+-            }
+-          ])
+-          pendingGroupIds.add(pending.groupId)
+-          groupId = pending.groupId
++          fingerprint = statFileFingerprint(file)
+         }
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: code ? normalizeVideoCode(code) : null,
+-          groupId,
+-          addedToQueue: false
+-        })
++        const groupId = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          let groupId: number | null = null
++          if (code) {
++            const pending = upsertPendingScanResources(libraryId, code, [
++              {
++                rootId,
++                filePath: file,
++                sizeBytes: fingerprint?.file_size ?? null,
++                durationSeconds: fileDurationSeconds,
++                fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
++                displayName: path.basename(file)
++              }
++            ])
++            groupId = pending.groupId
++          }
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: code ? normalizeVideoCode(code) : null,
++            groupId,
++            addedToQueue: false
++          })
++          return groupId
++        }))
++        if (groupId != null) pendingGroupIds.add(groupId)
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1087,34 +1146,37 @@ export async function scanFolders(
+ 
+       const nfoPreflight = nfoPreflightByFile.get(file)
+       if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
++        const { filenameCode, nfoCode } = nfoPreflight
+         authorizeFileWrite()
+         const fingerprint = statFileFingerprint(file)
+-        const pendingIdentity = upsertPendingResourceIdentity({
+-          libraryId,
+-          rootId,
+-          filePath: file,
+-          sourceKind: 'local',
+-          filenameCode: nfoPreflight.filenameCode,
+-          nfoCode: nfoPreflight.nfoCode,
+-          sizeBytes: fingerprint?.file_size ?? null,
+-          fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+-        })
++        strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          const pendingIdentity = upsertPendingResourceIdentity({
++            libraryId,
++            rootId,
++            filePath: file,
++            sourceKind: 'local',
++            filenameCode,
++            nfoCode,
++            sizeBytes: fingerprint?.file_size ?? null,
++            fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++          })
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: null,
++            groupId: null,
++            addedToQueue: true,
++            nfo: {
++              disposition: 'identity-conflict',
++              pendingIdentityId: pendingIdentity.id,
++              ...(nfoPreflight.inspection.warnings.length > 0
++                ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
++                : {})
++            }
++          })
++        }))
+         result.pendingResources += 1
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: null,
+-          groupId: null,
+-          addedToQueue: true,
+-          nfo: {
+-            disposition: 'identity-conflict',
+-            pendingIdentityId: pendingIdentity.id,
+-            ...(nfoPreflight.inspection.warnings.length > 0
+-              ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
+-              : {})
+-          }
+-        })
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1148,25 +1210,27 @@ export async function scanFolders(
+       )
+       if (relocation) {
+         authorizeFileWrite()
+-        relocateLocalVideoResourceById(
+-          libraryId,
+-          relocation.id,
+-          rootId,
+-          file,
+-          fingerprint?.file_size ?? null,
+-          fileDurationSeconds,
+-          fingerprint?.file_mtime_ms ?? null
+-        )
+-        result.relocated += 1
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'updated',
+-          updateKind: 'relocated',
+-          ...videoIdentity(relocation.video_id),
+-          resourceId: relocation.id,
+-          resourceKind: 'local'
++        commitFileAudit(() => {
++          relocateLocalVideoResourceById(
++            libraryId,
++            relocation.id,
++            rootId,
++            file,
++            fingerprint?.file_size ?? null,
++            fileDurationSeconds,
++            fingerprint?.file_mtime_ms ?? null
++          )
++          recordFile({
++            filePath: file,
++            sourceKind: 'local',
++            outcome: 'updated',
++            updateKind: 'relocated',
++            ...videoIdentity(relocation.video_id),
++            resourceId: relocation.id,
++            resourceKind: 'local'
++          })
+         })
++        result.relocated += 1
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1177,26 +1241,29 @@ export async function scanFolders(
+         : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+       if (mustConfirm) {
+         authorizeFileWrite()
+-        const pending = upsertPendingScanResources(libraryId, code, [
+-          {
+-            rootId,
++        const pending = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
++          const pending = upsertPendingScanResources(libraryId, code, [
++            {
++              rootId,
++              filePath: file,
++              sizeBytes: fingerprint?.file_size ?? null,
++              durationSeconds: fileDurationSeconds,
++              fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
++              displayName: path.basename(file)
++            }
++          ])
++          recordFile({
+             filePath: file,
+-            sizeBytes: fingerprint?.file_size ?? null,
+-            durationSeconds: fileDurationSeconds,
+-            fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+-            displayName: path.basename(file)
+-          }
+-        ])
++            sourceKind: 'local',
++            outcome: 'pending',
++            normalizedCode: normalizeVideoCode(code),
++            groupId: pending.groupId,
++            addedToQueue: pending.addedResources > 0
++          })
++          return pending
++        }))
+         pendingGroupIds.add(pending.groupId)
+         result.pendingResources += pending.addedResources
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'pending',
+-          normalizedCode: normalizeVideoCode(code),
+-          groupId: pending.groupId,
+-          addedToQueue: pending.addedResources > 0
+-        })
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+@@ -1206,76 +1273,86 @@ export async function scanFolders(
+         const needsPrimarySelection =
+           listVideoResources(libraryId, existingVideos[0].id).length === 0
+         authorizeFileWrite()
+-        const resourceId = insertLocalVideoResource({
+-          libraryId,
+-          videoId: existingVideos[0].id,
+-          rootId,
+-          locator: file,
+-          sizeBytes: fingerprint?.file_size ?? null,
+-          durationSeconds: fileDurationSeconds,
+-          fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++        const resourceId = commitFileAudit(() => {
++          const resourceId = insertLocalVideoResource({
++            libraryId,
++            videoId: existingVideos[0].id,
++            rootId,
++            locator: file,
++            sizeBytes: fingerprint?.file_size ?? null,
++            durationSeconds: fileDurationSeconds,
++            fileMtimeMs: fingerprint?.file_mtime_ms ?? null
++          })
++          recordFile(
++            resourceId == null
++              ? {
++                  filePath: file,
++                  sourceKind: 'local',
++                  outcome: 'skipped',
++                  skipReason: 'duplicate'
++                }
++              : {
++                  filePath: file,
++                  sourceKind: 'local',
++                  outcome: 'added',
++                  videoId: existingVideos[0].id,
++                  videoCode: existingVideos[0].code,
++                  resourceId,
++                  resourceKind: 'local',
++                  createdVideo: false
++                }
++          )
++          return resourceId
+         })
+         if (resourceId != null) {
+           result.imported += 1
+           if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+           queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
+         } else result.skipped += 1
+-        recordFile(
+-          resourceId == null
+-            ? {
+-                filePath: file,
+-                sourceKind: 'local',
+-                outcome: 'skipped',
+-                skipReason: 'duplicate'
+-              }
+-            : {
+-                filePath: file,
+-                sourceKind: 'local',
+-                outcome: 'added',
+-                videoId: existingVideos[0].id,
+-                videoCode: existingVideos[0].code,
+-                resourceId,
+-                resourceKind: 'local',
+-                createdVideo: false
+-              }
+-        )
+         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+         await maybeYield(result.scannedFiles, yieldEvery)
+         continue
+       }
+ 
+       authorizeFileWrite()
+-      const id = insertScannedVideo(
+-        buildScannedVideoImport(libraryId, rootId, code, file, fileDurationSeconds, fingerprint)
+-      )
+-      if (id !== null) {
+-        result.imported += 1
+-        result.newCodes.push(code)
+-        primarySelectionVideoIds.add(id)
+-        queueNfoCandidate(id, code, file)
+-        const resource = localResourceInLibrary(libraryId, file)
+-        if (resource) {
++      const id = commitFileAudit(() => {
++        const id = insertScannedVideo(
++          buildScannedVideoImport(libraryId, rootId, code, file, fileDurationSeconds, fingerprint)
++        )
++        if (id !== null) {
++          const resource = localResourceInLibrary(libraryId, file)
++          if (resource) {
++            recordFile({
++              filePath: file,
++              sourceKind: 'local',
++              outcome: 'added',
++              videoId: id,
++              videoCode: code,
++              resourceId: resource.id,
++              resourceKind: 'local',
++              createdVideo: true
++            })
++          } else if (auditSink) throw new Error('Imported local resource missing before audit commit')
++        } else {
+           recordFile({
+             filePath: file,
+             sourceKind: 'local',
+-            outcome: 'added',
+-            videoId: id,
+-            videoCode: code,
+-            resourceId: resource.id,
+-            resourceKind: 'local',
+-            createdVideo: true
++            outcome: 'skipped',
++            skipReason: 'duplicate'
+           })
+         }
+-      } else {
+-        result.skipped += 1
+-        recordFile({
+-          filePath: file,
+-          sourceKind: 'local',
+-          outcome: 'skipped',
+-          skipReason: 'duplicate'
+-        })
+-      }
++        return id
++      })
++      if (id !== null) {
++        result.imported += 1
++        result.newCodes.push(code)
++        primarySelectionVideoIds.add(id)
++        queueNfoCandidate(id, code, file)
++      } else result.skipped += 1
+     } catch (err) {
++      // Storage failures must abort the run; converting them into a normal file
++      // failure would conceal a missing durable audit after business writes.
++      if (auditWriteFailed) throw err
+       console.error('Scan error for', file, err)
+       result.failed += 1
+       recordFile({
+@@ -1290,7 +1367,13 @@ export async function scanFolders(
+     await maybeYield(result.scannedFiles, yieldEvery)
+   }
+ 
++  let appliedNfoBatches = 0
++  let updatedNfoAnchors = 0
+   for (const [videoId, batch] of nfoBatchesByVideo) {
++    if (options.signal?.aborted) {
++      result.cancelled = true
++      break
++    }
+     let nfo: LibraryScanNfoAudit
+     try {
+       const applied = await nfoService.apply(videoId, batch.code, batch.anchors)
+@@ -1308,21 +1391,30 @@ export async function scanFolders(
+       }
+     }
+     for (const anchor of batch.anchors) {
+-      const auditEntry = auditEntriesByFile.get(anchor.anchorPath)
++      // Finish the committed batch's audit even when cancellation arrives while yielding.
++      await maybeYield(++updatedNfoAnchors, yieldEvery)
++      const auditEntry = auditSink ? synchronousAuditResult(auditSink.readFileNfo(anchor.anchorPath)) : auditEntriesByFile?.get(anchor.anchorPath)
+       if (!auditEntry) continue
+       const warnings = safeNfoWarnings([
+         ...(auditEntry.nfo?.warnings?.map((warning) => warning.message) ?? []),
+         ...(nfo.warnings?.map((warning) => warning.message) ?? [])
+       ])
+-      auditEntry.nfo = {
++      const mergedNfo = {
+         ...nfo,
+         ...(warnings.length > 0 ? { warnings } : {})
+       }
++      if (auditSink) {
++        if (!synchronousAuditResult(auditSink.patchNfo(anchor.anchorPath, mergedNfo))) throw new Error('Audit anchor disappeared during NFO revision')
++      } else auditEntry.nfo = mergedNfo
+     }
++    // An immediately resolved apply promise alone does not let timers or cancellation run.
++    await maybeYield(++appliedNfoBatches, Math.min(yieldEvery, 10))
+   }
+ 
++  if (options.signal?.aborted) result.cancelled = true
+   result.pendingGroups = pendingGroupIds.size
+ 
++  let selectedPrimaries = 0
+   for (const videoId of primarySelectionVideoIds) {
+     const candidates = listVideoResources(libraryId, videoId).map((resource) => ({
+       resource,
+@@ -1346,11 +1438,16 @@ export async function scanFolders(
+       }
+       setPrimaryVideoResource(libraryId, videoId, primary.resource.id)
+     }
++    // Keep read/select/authorize/write synchronous; settle already committed resources on cancel.
++    await maybeYield(++selectedPrimaries, yieldEvery)
+   }
+ 
+-  for (const entry of auditEntriesByFile.values()) {
++  let deliveredAudits = 0
++  for (const entry of auditEntriesByFile?.values() ?? []) {
+     options.onFileResult?.(entry)
++    await maybeYield(++deliveredAudits, yieldEvery)
+   }
++  if (options.signal?.aborted) result.cancelled = true
+ 
+   return result
+ }
+diff --git a/src/main/scanner/scannerAuditSink.test.ts b/src/main/scanner/scannerAuditSink.test.ts
+new file mode 100644
+index 0000000..1b8b066
+--- /dev/null
++++ b/src/main/scanner/scannerAuditSink.test.ts
+@@ -0,0 +1,557 @@
++import { afterEach, beforeEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type { LibraryScanFileAuditEntry } from '@shared/libraryTypes'
++import { closeDatabase, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '../db/database'
++import { createMediaLibrary } from '../db/mediaLibraryRepo'
++import { upsertPendingScanResources } from '../db/pendingScanRepo'
++import { upsertPendingResourceIdentity } from '../db/pendingResourceIdentityRepo'
++import { beginLibraryScanRun } from '../db/libraryScanRepo'
++import { createScanAuditWriter, type ScanAuditMetadata } from '../db/scanAuditWriter'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import type { LocalNfoScanService } from '../services/localNfoScanService'
++import { scanFolders, statFileFingerprint, type ScanOptions } from './scanner'
++
++let directory:string, media:string, sequence=0
++let previousUserData:string|undefined
++beforeEach(()=>{
++  previousUserData=process.env.JAVDEX_TEST_USER_DATA
++  directory=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-scanner-sink-'))
++  media=path.join(directory,'media');fs.mkdirSync(media)
++  process.env.JAVDEX_TEST_USER_DATA=directory
++})
++afterEach(()=>{
++  closeDatabase();resetSettingsCacheForTests()
++  if(previousUserData===undefined)delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA=previousUserData
++  fs.rmSync(directory,{recursive:true,force:true})
++})
++
++function setup(names:string[]) {
++  closeDatabase();resetSettingsCacheForTests()
++  for(const name of names)fs.writeFileSync(path.join(media,name),'synthetic video')
++  const db=initDatabaseAtPath(path.join(directory,`catalog-${++sequence}.db`))
++  const library=createMediaLibrary({name:'Sink',roots:[{path:media}]})
++  const request={libraryId:library.id,runId:'scan',roots:library.roots}
++  beginLibraryScanRun({...request,configRevision:1,trigger:'manual',startedAt:'start'})
++  const meta:ScanAuditMetadata={schemaVersion:2,libraryId:library.id,runId:'scan',configRevision:1,trigger:'manual',startedAt:'start',finishedAt:'pending',status:'success'}
++  const writer=createScanAuditWriter(db,request)
++  const rows=()=>db.prepare("SELECT ordinal,entry_key,entry_json FROM library_scan_audit_entries WHERE run_id='scan' AND section='files' ORDER BY ordinal").all() as {ordinal:number;entry_key:string;entry_json:string}[]
++  const sink:NonNullable<ScanOptions['auditSink']>={
++    recordFile:entry=>writer.writeBatch('files',[entry]),
++    readFileNfo:filePath=>writer.readFileNfo(filePath),
++    patchNfo:(filePath,nfo)=>writer.patchNfo(filePath,nfo)
++  }
++  const options:ScanOptions={yieldEvery:1,minImportDurationSeconds:1,autoMergeSameCodeResources:true,
++    readDurationSeconds:async()=>{assert.equal(db.inTransaction,false);return 120},
++    readDirectory:async dir=>(await fs.promises.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))}
++  return {db,request,meta,writer,rows,sink,options}
++}
++
++function nfoService():LocalNfoScanService {
++  return {
++    inspectIdentity:anchor=>({status:'found',code:path.basename(anchor.anchorPath).replace(/\.[^.]+$/,''),warnings:['preflight warning']}),
++    apply:async()=>({disposition:'imported',warnings:['apply warning']})
++  }
++}
++
++it('matches final legacy callbacks on equivalent fresh catalogs including merged NFO and repeated paths',async()=>{
++  const names=['SINK-001.mp4','SINK-002.mp4','unknown.mp4']
++  const legacy=setup(names),expected:LibraryScanFileAuditEntry[]=[]
++  const withDuplicate=(base:NonNullable<ScanOptions['readDirectory']>)=>async(dir:string)=>{
++    const items=await base(dir);return [...items,items[0]]
++  }
++  const oldResult=await scanFolders(legacy.request,undefined,{...legacy.options,readDirectory:withDuplicate(legacy.options.readDirectory!),
++    autoImportLocalNfo:true,localNfoService:nfoService(),onFileResult:entry=>expected.push(entry)})
++  const current=setup(names);current.writer.start(current.meta)
++  let deliveries=0,patches=0
++  const newResult=await scanFolders(current.request,undefined,{...current.options,readDirectory:withDuplicate(current.options.readDirectory!),
++    autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:{...current.sink,
++      recordFile:entry=>{deliveries++;current.sink.recordFile(entry)},
++      patchNfo:(file,nfo)=>{patches++;return current.sink.patchNfo(file,nfo)}}})
++  const rows=current.rows()
++  assert.deepEqual(newResult,oldResult)
++  assert.deepEqual(rows.map(row=>JSON.parse(row.entry_json)),expected)
++  assert.equal(rows.length,names.length)
++  assert.deepEqual(rows.map(row=>row.ordinal),[0,1,2])
++  assert.equal(new Set(rows.map(row=>row.entry_key)).size,rows.length)
++  assert.ok(deliveries>rows.length,'repeated paths update their original entry rather than append')
++  assert.ok(patches>0)
++  assert.ok(expected.some(entry=>entry.nfo?.warnings?.some(warning=>warning.message==='preflight warning')&&entry.nfo.warnings.some(warning=>warning.message==='apply warning')))
++  const before=deliveries;await new Promise(resolve=>setImmediate(resolve));assert.equal(deliveries,before,'no deferred tail delivery')
++})
++
++it('commits singleton audit deliveries while the next duration probe is held, outside a database transaction',async()=>{
++  const current=setup(['LIVE-001.mp4','LIVE-002.mp4']);current.writer.start(current.meta)
++  let release!:()=>void,entered!:()=>void,calls=0,finished=false
++  const gate=new Promise<void>(resolve=>{release=resolve}),waiting=new Promise<void>(resolve=>{entered=resolve})
++  const scanning=scanFolders(current.request,undefined,{...current.options,auditSink:current.sink,
++    readDurationSeconds:async()=>{assert.equal(current.db.inTransaction,false);if(++calls===2){entered();await gate}return 120}}).then(result=>{finished=true;return result})
++  try{
++    await Promise.race([waiting,scanning.then(()=>{throw new Error('Scan ended before the second duration probe')})])
++    assert.equal(finished,false);assert.equal(current.rows().length,1)
++    const reader=openReadOnlyDatabaseAtPath(current.db.name)
++    try{assert.equal((reader.prepare("SELECT COUNT(*) AS n FROM library_scan_audit_entries WHERE run_id='scan'").get() as {n:number}).n,1)}finally{reader.close()}
++    assert.equal((current.db.prepare("SELECT state FROM library_scan_audit_manifests WHERE run_id='scan'").get() as {state:string}).state,'collecting')
++    assert.equal(current.db.inTransaction,false)
++  }finally{release();await scanning.catch(()=>{})}
++  const result=await scanning
++  assert.equal(result.imported,2);assert.equal(current.rows().length,2)
++})
++
++it('timer cancellation preserves already committed entries and stops incremental delivery',async()=>{
++  const current=setup(Array.from({length:20},(_,i)=>`CANCEL-${String(i+1).padStart(3,'0')}.mp4`));current.writer.start(current.meta)
++  const abort=new AbortController();let delivered=0,timer:ReturnType<typeof setTimeout>|undefined
++  try{
++    const result=await scanFolders(current.request,undefined,{...current.options,signal:abort.signal,auditSink:{...current.sink,
++      recordFile:entry=>{current.sink.recordFile(entry);if(++delivered===1)timer=setTimeout(()=>abort.abort(),0)}}})
++    assert.equal(result.cancelled,true);assert.ok(delivered>0&&delivered<20)
++    assert.equal(current.rows().length,delivered)
++    assert.equal(result.scannedFiles,delivered)
++    assert.ok(current.rows().every(row=>JSON.parse(row.entry_json).outcome==='added'))
++    const before=current.rows();await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(current.rows(),before)
++  }finally{if(timer)clearTimeout(timer)}
++})
++
++it('rejects mutually exclusive sinks before database, directory, probe or callback work',async(t)=>{
++  const current=setup(['EXCLUSIVE-001.mp4']);current.writer.start(current.meta)
++  let work=0
++  const prepare=current.db.prepare
++  const spy=t.mock.method(current.db,'prepare',function(sql:string){work++;return prepare.call(current.db,sql)})
++  try{
++    await assert.rejects(scanFolders(current.request,undefined,{auditSink:current.sink,onFileResult:()=>{work++},
++      readDirectory:async()=>{work++;return []},readDurationSeconds:async()=>{work++;return 120}}))
++    assert.equal(work,0)
++  }finally{spy.mock.restore()}
++})
++
++for(const operation of ['recordFile','readFileNfo','patchNfo'] as const)it(`propagates ${operation} sink failure without converting it to processing_failure`,async()=>{
++  const current=setup(operation==='recordFile'?['FATAL-001.mp4','FATAL-002.mp4']:['FATAL-001.mp4']);current.writer.start(current.meta)
++  const failure=new Error(`fatal ${operation}`);let calls=0,records=0
++  const sink:NonNullable<ScanOptions['auditSink']>={...current.sink,recordFile:entry=>{records++;current.sink.recordFile(entry)}}
++  if(operation==='recordFile')sink.recordFile=()=>{calls++;throw failure}
++  if(operation==='readFileNfo')sink.readFileNfo=()=>{calls++;throw failure}
++  if(operation==='patchNfo')sink.patchNfo=()=>{calls++;throw failure}
++  await assert.rejects(scanFolders(current.request,undefined,{...current.options,autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:sink}),error=>error===failure)
++  assert.equal(calls,1)
++  assert.ok(current.rows().every(row=>JSON.parse(row.entry_json).outcome!=='processing_failure'))
++  assert.equal(records,operation==='recordFile'?0:1)
++  if(operation==='recordFile')assert.equal((current.db.prepare('SELECT COUNT(*) AS n FROM videos').get() as {n:number}).n,0,'failed first file rolls back and next file is not processed')
++})
++
++it('treats a missing NFO patch target after a successful read as fatal',async()=>{
++  const current=setup(['PATCH-001.mp4']);current.writer.start(current.meta)
++  let reads=0,patches=0
++  await assert.rejects(scanFolders(current.request,undefined,{...current.options,autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:{...current.sink,
++    readFileNfo:file=>{reads++;const value=current.sink.readFileNfo(file);assert.ok(value);return value},
++    patchNfo:()=>{patches++;return false}}}),/Audit anchor disappeared/)
++  assert.equal(reads,1);assert.equal(patches,1)
++  assert.equal(current.rows().length,1)
++  assert.equal(JSON.parse(current.rows()[0].entry_json).outcome,'added')
++})
++
++for(const operation of ['recordFile','readFileNfo','patchNfo'] as const)for(const rejected of [false,true])it(`rejects ${operation} ${rejected?'rejected':'resolved'} thenables without late unhandled rejection`,async()=>{
++  const current=setup(operation==='recordFile'?['ASYNC-001.mp4','ASYNC-002.mp4']:['ASYNC-001.mp4']);current.writer.start(current.meta)
++  let calls=0
++  const asyncMethod=()=>{
++    calls++
++    return rejected?Promise.reject(new Error('async sink rejected')):Promise.resolve(operation==='readFileNfo'?{}:operation==='patchNfo'?true:undefined)
++  }
++  // Deliberately invalid caller crosses the TypeScript boundary with a thenable.
++  const sink={...current.sink,[operation]:asyncMethod} as unknown as NonNullable<ScanOptions['auditSink']>
++  await assert.rejects(scanFolders(current.request,undefined,{...current.options,autoImportLocalNfo:true,localNfoService:nfoService(),auditSink:sink}),/synchronous/i)
++  assert.equal(calls,1)
++  assert.ok(current.rows().every(row=>JSON.parse(row.entry_json).outcome!=='processing_failure'))
++  if(operation==='recordFile')assert.equal((current.db.prepare('SELECT COUNT(*) AS n FROM videos').get() as {n:number}).n,0)
++  // The node test runner also fails on unhandledRejection; allow rejection observers to run.
++  await new Promise(resolve=>setImmediate(resolve))
++})
++
++for(const mode of ['target-update','relocation'] as const)it(`atomically rolls back STRM ${mode} on native audit INSERT failure and retries with committed visibility`,async()=>{
++  const current=setup(['ATOMIC-001.strm'])
++  const oldPath=path.join(media,'ATOMIC-001.strm'),oldTarget='https://example.test/old.mp4'
++  fs.writeFileSync(oldPath,oldTarget)
++  let progressCalls=0,probeCalls=0
++  const progress=()=>{progressCalls++;assert.equal(current.db.inTransaction,false)}
++  const options:ScanOptions={...current.options,readDurationSeconds:async()=>{probeCalls++;assert.equal(current.db.inTransaction,false);return 120}}
++  const initial=await scanFolders(current.request,progress,options)
++  assert.equal(initial.imported,1)
++  const resourceSQL='SELECT * FROM video_resources ORDER BY id'
++  const before=current.db.prepare(resourceSQL).all()
++  assert.equal(before.length,1)
++  const resource=before[0] as {id:number;video_id:number;locator:string;strm_source_path:string}
++  assert.equal(resource.locator,oldTarget);assert.equal(resource.strm_source_path,oldPath)
++  const videosBefore=current.db.prepare('SELECT * FROM videos ORDER BY id').all()
++  let newPath=oldPath,newTarget=oldTarget
++  if(mode==='target-update'){
++    newTarget='https://example.test/new.mp4';fs.writeFileSync(oldPath,newTarget)
++  }else{
++    const moved=path.join(media,'moved');fs.mkdirSync(moved)
++    newPath=path.join(moved,'ATOMIC-001.strm');fs.renameSync(oldPath,newPath)
++  }
++  current.writer.start(current.meta)
++  const independent=openReadOnlyDatabaseAtPath(current.db.name)
++  let nativeFaults=0,sinkCalls=0
++  // SQL supplies the already-mutated resource to the UDF; no reentrant database query.
++  current.db.function('observe_strm_audit_fault',(locator,sourcePath)=>{
++    nativeFaults++;assert.equal(locator,newTarget);assert.equal(sourcePath,newPath);return 1
++  })
++  current.db.exec(`CREATE TEMP TRIGGER fail_strm_audit AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='files' BEGIN
++      SELECT observe_strm_audit_fault(
++        (SELECT locator FROM video_resources WHERE id=${resource.id}),
++        (SELECT strm_source_path FROM video_resources WHERE id=${resource.id}));
++      SELECT RAISE(ABORT,'native STRM audit failure');
++    END;`)
++  const sink:NonNullable<ScanOptions['auditSink']>={...current.sink,recordFile:entry=>{
++    sinkCalls++;assert.equal(current.db.inTransaction,true)
++    const changed=current.db.prepare('SELECT locator,strm_source_path FROM video_resources WHERE id=?').get(resource.id)
++    assert.deepEqual(changed,{locator:newTarget,strm_source_path:newPath})
++    assert.deepEqual(independent.prepare(resourceSQL).all(),before,'separate connection sees pre-commit resource')
++    assert.equal(entry.outcome,'updated')
++    current.sink.recordFile(entry)
++  }}
++  try{
++    await assert.rejects(scanFolders(current.request,progress,{...options,auditSink:sink}),/native STRM audit failure/)
++    assert.equal(nativeFaults,1);assert.equal(sinkCalls,1)
++    assert.equal(current.db.inTransaction,false)
++    assert.deepEqual(current.rows(),[])
++    assert.deepEqual(current.db.prepare(resourceSQL).all(),before)
++    assert.deepEqual(independent.prepare(resourceSQL).all(),before)
++    assert.deepEqual(current.db.prepare('SELECT * FROM videos ORDER BY id').all(),videosBefore)
++    current.db.exec('DROP TRIGGER fail_strm_audit')
++    const retry=await scanFolders(current.request,progress,{...options,auditSink:sink})
++    assert.equal(sinkCalls,2);assert.equal(retry.failed,0)
++    assert.equal(retry.refreshed,mode==='target-update'?1:0)
++    assert.equal(retry.relocated,mode==='relocation'?1:0)
++    const committed=current.db.prepare(resourceSQL).all()
++    assert.equal(committed.length,1)
++    assert.deepEqual(independent.prepare(resourceSQL).all(),committed,'separate connection sees committed update after scan')
++    const updated=committed[0] as typeof resource
++    assert.equal(updated.id,resource.id);assert.equal(updated.video_id,resource.video_id)
++    assert.equal(updated.locator,newTarget);assert.equal(updated.strm_source_path,newPath)
++    const auditRows=current.rows();assert.equal(auditRows.length,1);assert.equal(auditRows[0].ordinal,0)
++    const entry=JSON.parse(auditRows[0].entry_json)
++    assert.equal(entry.filePath,newPath);assert.equal(entry.resourceId,resource.id);assert.equal(entry.videoId,resource.video_id)
++    assert.equal(entry.sourceKind,'strm');assert.equal(entry.outcome,'updated')
++    assert.equal(entry.updateKind,mode==='target-update'?'strm_target_synced':'relocated')
++    const unchanged=await scanFolders(current.request,progress,{...options,auditSink:current.sink})
++    assert.equal(unchanged.skipped,1);assert.equal(unchanged.refreshed,0);assert.equal(unchanged.relocated,0)
++    assert.deepEqual(current.db.prepare(resourceSQL).all(),committed)
++    assert.equal(current.rows().length,1);assert.equal(current.rows()[0].ordinal,0)
++    const skipped=JSON.parse(current.rows()[0].entry_json)
++    assert.equal(skipped.outcome,'skipped');assert.equal(skipped.skipReason,'unchanged');assert.equal(skipped.filePath,newPath)
++    assert.ok(progressCalls>0)
++    assert.equal(probeCalls,0,'these remote STRM branches do not invoke duration probes; local probe boundary is covered above')
++    assert.deepEqual(current.db.pragma('foreign_key_check'),[])
++  }finally{independent.close()}
++})
++
++it('rolls back invalid STRM pending deletion on native audit failure and retries with one committed failure',async()=>{
++  const current=setup(['INVALID-001.strm']),file=path.join(media,'INVALID-001.strm')
++  // setup's non-URL text is deliberately an invalid STRM, with a previously valid queued target.
++  upsertPendingScanResources(current.request.libraryId,'INVALID-001',[{
++    rootId:current.request.roots[0].id,filePath:file,sourceKind:'strm',targetKind:'direct',
++    targetLocator:'https://example.test/queued.mp4',targetKey:'direct:https://example.test/queued.mp4',sizeBytes:null,durationSeconds:null,fileMtimeMs:null
++  }])
++  const pending=()=>({
++    resources:current.db.prepare('SELECT * FROM pending_scan_resources ORDER BY id').all(),
++    groups:current.db.prepare('SELECT * FROM pending_scan_groups ORDER BY id').all()
++  })
++  const before=pending();assert.equal(before.resources.length,1);assert.equal(before.groups.length,1)
++  current.writer.start(current.meta)
++  const independent=openReadOnlyDatabaseAtPath(current.db.name)
++  let faultCalls=0,sinkCalls=0,reportedFiles=0
++  current.db.function('observe_pending_audit_fault',(remaining)=>{faultCalls++;assert.equal(remaining,0);return 1})
++  current.db.exec(`CREATE TEMP TRIGGER fail_pending_audit AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='files' BEGIN
++      SELECT observe_pending_audit_fault((SELECT COUNT(*) FROM pending_scan_resources));
++      SELECT RAISE(ABORT,'pending audit INSERT failed');
++    END;`)
++  const sink:NonNullable<ScanOptions['auditSink']>={...current.sink,recordFile:entry=>{
++    sinkCalls++;assert.equal(current.db.inTransaction,true);assert.equal(pending().resources.length,0)
++    assert.deepEqual(independent.prepare('SELECT * FROM pending_scan_resources ORDER BY id').all(),before.resources)
++    assert.deepEqual(independent.prepare('SELECT * FROM pending_scan_groups ORDER BY id').all(),before.groups)
++    assert.equal(entry.outcome,'strm_failure');current.sink.recordFile(entry)
++  }}
++  const progress:Parameters<typeof scanFolders>[1]=value=>{
++    assert.equal(current.db.inTransaction,false)
++    if(value.currentFile===file)reportedFiles++
++  }
++  try{
++    await assert.rejects(scanFolders(current.request,progress,{...current.options,auditSink:sink}),/pending audit INSERT failed/)
++    assert.equal(faultCalls,1);assert.equal(sinkCalls,1);assert.equal(reportedFiles,0,'failed audit commit cannot report a completed file')
++    assert.deepEqual(pending(),before);assert.deepEqual(current.rows(),[]);assert.equal(current.db.inTransaction,false)
++    current.db.exec('DROP TRIGGER fail_pending_audit')
++    const retry=await scanFolders(current.request,progress,{...current.options,auditSink:sink})
++    assert.equal(retry.failed,1);assert.equal(retry.strmFailures.length,1);assert.equal(retry.scannedFiles,1)
++    assert.equal(reportedFiles,1);assert.equal(sinkCalls,2)
++    assert.equal(pending().resources.length,0);assert.equal(pending().groups.length,0)
++    assert.deepEqual(independent.prepare('SELECT * FROM pending_scan_resources').all(),[])
++    assert.deepEqual(independent.prepare('SELECT * FROM pending_scan_groups').all(),[])
++    assert.equal(current.rows().length,1)
++    const entry=JSON.parse(current.rows()[0].entry_json)
++    assert.equal(entry.filePath,file);assert.equal(entry.outcome,'strm_failure');assert.ok(entry.failureCode)
++    assert.deepEqual(current.db.pragma('foreign_key_check'),[])
++  }finally{independent.close()}
++})
++
++for(const sourceKind of ['local','strm'] as const)for(const mode of ['new-video','existing-video','must-confirm','relocation'] as const){
++if(sourceKind==='strm'&&mode==='relocation')continue // Covered by the existing STRM relocation test.
++it(`rolls back ${sourceKind} ${mode} business rows with native audit failure and retries atomically`,async()=>{
++  const name=`LOCAL-001.${sourceKind==='local'?'mp4':'strm'}`
++  const current=setup([name]),oldFile=path.join(media,name)
++  if(sourceKind==='strm')fs.writeFileSync(oldFile,'https://example.test/initial.mp4')
++  if(mode!=='new-video'){
++    const initial=await scanFolders(current.request,undefined,current.options)
++    assert.equal(initial.imported,1)
++  }
++  let file=oldFile
++  if(mode!=='new-video'){
++    const extra=path.join(media,'extra');fs.mkdirSync(extra);file=path.join(extra,name)
++    if(mode==='relocation')fs.renameSync(oldFile,file)
++    else fs.writeFileSync(file,sourceKind==='strm'?'https://example.test/additional.mp4':'second synthetic video')
++  }
++  const snapshot=(connection:typeof current.db)=>({
++    videos:connection.prepare('SELECT * FROM videos ORDER BY id').all(),
++    resources:connection.prepare('SELECT * FROM video_resources ORDER BY id').all(),
++    memberships:connection.prepare('SELECT * FROM library_video_memberships ORDER BY library_id,video_id').all(),
++    groups:connection.prepare('SELECT * FROM pending_scan_groups ORDER BY id').all(),
++    pending:connection.prepare('SELECT * FROM pending_scan_resources ORDER BY id').all()
++  })
++  const before=snapshot(current.db)
++  current.writer.start(current.meta)
++  const reader=openReadOnlyDatabaseAtPath(current.db.name)
++  let faultCalls=0,sinkCalls=0,probes=0,reports=0,nfoApplies=0
++  current.db.function('observe_local_insert',()=>{faultCalls++;return 1})
++  current.db.exec(`CREATE TEMP TRIGGER fail_local_audit AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='files' BEGIN SELECT observe_local_insert();SELECT RAISE(ABORT,'local audit INSERT failed');END;`)
++  const options:ScanOptions={...current.options,autoMergeSameCodeResources:mode!=='must-confirm',autoImportLocalNfo:true,
++    localNfoService:{...nfoService(),apply:async()=>{nfoApplies++;return {disposition:'imported',warnings:[]}}},
++    readDirectory:async dir=>(await current.options.readDirectory!(dir)).filter(entry=>entry.isDirectory()||path.join(dir,entry.name)===file),
++    readDurationSeconds:async()=>{probes++;assert.equal(current.db.inTransaction,false);return 120},
++    auditSink:{...current.sink,recordFile:entry=>{
++      sinkCalls++;assert.equal(current.db.inTransaction,true)
++      const changed=snapshot(current.db)
++      if(mode==='must-confirm'){
++        assert.equal(changed.groups.length,before.groups.length+1);assert.equal(changed.pending.length,before.pending.length+1)
++        assert.equal(entry.outcome,'pending')
++      }else{
++        assert.notDeepEqual(changed.resources,before.resources)
++        assert.equal(changed.resources.length,before.resources.length+(mode==='relocation'?0:1))
++        assert.equal(changed.videos.length,before.videos.length+(mode==='new-video'?1:0))
++        assert.equal(changed.memberships.length,before.memberships.length+(mode==='new-video'?1:0))
++        assert.equal(entry.outcome,mode==='relocation'?'updated':'added')
++      }
++      assert.deepEqual(snapshot(reader),before,'uncommitted business rows stay invisible to independent reader')
++      current.sink.recordFile(entry)
++    }}}
++  const progress:Parameters<typeof scanFolders>[1]=value=>{assert.equal(current.db.inTransaction,false);if(value.currentFile===file)reports++}
++  try{
++    await assert.rejects(scanFolders(current.request,progress,options),/local audit INSERT failed/)
++    assert.equal(faultCalls,1);assert.equal(sinkCalls,1);assert.equal(reports,0);assert.equal(nfoApplies,0)
++    assert.deepEqual(snapshot(current.db),before);assert.deepEqual(snapshot(reader),before);assert.deepEqual(current.rows(),[])
++    assert.equal(current.db.inTransaction,false)
++    current.db.exec('DROP TRIGGER fail_local_audit')
++    const retry=await scanFolders(current.request,progress,options)
++    assert.equal(sinkCalls,2);assert.equal(retry.failed,0);assert.equal(retry.scannedFiles,1)
++    assert.equal(retry.imported,mode==='new-video'||mode==='existing-video'?1:0)
++    assert.equal(retry.relocated,mode==='relocation'?1:0)
++    assert.equal(retry.pendingResources,mode==='must-confirm'?1:0)
++    assert.equal(retry.pendingGroups,mode==='must-confirm'?1:0)
++    assert.equal(nfoApplies,mode==='new-video'||mode==='existing-video'?1:0)
++    if(sourceKind==='local')assert.ok(probes>=2)
++    else assert.equal(probes,0)
++    assert.equal(reports,1)
++    const committed=snapshot(current.db);assert.deepEqual(snapshot(reader),committed)
++    assert.equal(current.rows().length,1);assert.equal(current.rows()[0].ordinal,0)
++    const entry=JSON.parse(current.rows()[0].entry_json)
++    assert.equal(entry.filePath,file)
++    if(mode==='must-confirm'){
++      const pending=committed.pending[0] as {group_id:number;file_path:string}
++      assert.equal(entry.groupId,pending.group_id);assert.equal(pending.file_path,file)
++      assert.deepEqual(committed.videos,before.videos);assert.deepEqual(committed.resources,before.resources);assert.deepEqual(committed.memberships,before.memberships)
++    }else{
++      const resource=current.db.prepare(`SELECT id,video_id FROM video_resources WHERE ${sourceKind==='local'?'locator':'strm_source_path'}=?`).get(file) as {id:number;video_id:number}
++      assert.equal(entry.resourceId,resource.id);assert.equal(entry.videoId,resource.video_id)
++      if(mode==='relocation')assert.equal(entry.updateKind,'relocated')
++      else assert.equal(entry.createdVideo,mode==='new-video')
++      assert.deepEqual(committed.groups,before.groups);assert.deepEqual(committed.pending,before.pending)
++    }
++    assert.deepEqual(current.db.pragma('foreign_key_check'),[])
++  }finally{reader.close()}
++})
++}
++
++for(const kind of ['local','strm'] as const)for(const mode of ['identity-create','identity-refresh','pending-refresh'] as const)it(`rolls back ${kind} ${mode} on native audit failure and commits retry with matching pending state`,async()=>{
++  const name=`IDENT-001.${kind==='local'?'mp4':'strm'}`,current=setup([name]),file=path.join(media,name)
++  const oldTarget='https://example.test/old.mp4',newTarget='https://example.test/changed-longer.mp4'
++  const target=kind==='strm'?{targetKind:'direct' as const,targetLocator:oldTarget,targetKey:`direct:${oldTarget}`} : {}
++  fs.writeFileSync(file,kind==='strm'?oldTarget:'old')
++  fs.utimesSync(file,1000,1000)
++  const original=fs.statSync(file)
++  if(mode==='identity-refresh')upsertPendingResourceIdentity({
++    libraryId:current.request.libraryId,rootId:current.request.roots[0].id,filePath:file,sourceKind:kind,
++    filenameCode:'IDENT-001',nfoCode:'OTHER-999',sizeBytes:original.size,fileMtimeMs:original.mtimeMs,...target
++  })
++  if(mode==='pending-refresh')upsertPendingScanResources(current.request.libraryId,'IDENT-001',[{
++    rootId:current.request.roots[0].id,filePath:file,sourceKind:kind,
++    sizeBytes:original.size,fileMtimeMs:original.mtimeMs,durationSeconds:10,...target
++  }])
++  const snapshot=(connection:typeof current.db)=>({
++    identities:connection.prepare('SELECT * FROM pending_resource_identities ORDER BY id').all() as Record<string,unknown>[],
++    groups:connection.prepare('SELECT * FROM pending_scan_groups ORDER BY id').all() as Record<string,unknown>[],
++    pending:connection.prepare('SELECT * FROM pending_scan_resources ORDER BY id').all() as Record<string,unknown>[],
++    videos:connection.prepare('SELECT * FROM videos ORDER BY id').all(),
++    resources:connection.prepare('SELECT * FROM video_resources ORDER BY id').all(),
++    memberships:connection.prepare('SELECT * FROM library_video_memberships ORDER BY library_id,video_id').all()
++  })
++  const before=snapshot(current.db)
++  fs.writeFileSync(file,kind==='strm'?newTarget:'new larger synthetic local content')
++  fs.utimesSync(file,2000,2000)
++  const fingerprint=fs.statSync(file)
++  assert.notEqual(fingerprint.size,original.size);assert.notEqual(fingerprint.mtimeMs,original.mtimeMs)
++  current.writer.start(current.meta)
++  const reader=openReadOnlyDatabaseAtPath(current.db.name)
++  let faults=0,calls=0,probes=0,reports=0,applies=0
++  const changedState=(state:ReturnType<typeof snapshot>)=>{
++    if(mode==='pending-refresh'){
++      assert.equal(state.pending.length,1)
++      assert.equal(state.pending[0].id,before.pending[0].id)
++      assert.notDeepEqual(state.pending,before.pending)
++      assert.ok(Number(state.groups[0].revision)>Number(before.groups[0].revision))
++      if(kind==='local'){
++        assert.equal(state.pending[0].duration_seconds,180)
++        assert.equal(state.pending[0].size_bytes,fingerprint.size)
++        assert.equal(state.pending[0].file_mtime_ms,fingerprint.mtimeMs)
++      }else assert.equal(state.pending[0].target_locator,newTarget)
++    }else{
++      assert.equal(state.identities.length,1)
++      const identity=state.identities[0]
++      assert.equal(identity.filename_code,'IDENT-001');assert.equal(identity.nfo_code,'OTHER-999')
++      assert.equal(identity.size_bytes,fingerprint.size);assert.equal(identity.file_mtime_ms,fingerprint.mtimeMs)
++      if(kind==='strm')assert.equal(identity.target_locator,newTarget)
++      if(mode==='identity-refresh'){
++        assert.equal(identity.id,before.identities[0].id)
++        assert.equal(identity.revision,Number(before.identities[0].revision)+1)
++      }else assert.equal(identity.revision,1)
++    }
++  }
++  current.db.function('observe_pending_native_fault',()=>{faults++;return 1})
++  current.db.exec(`CREATE TEMP TRIGGER fail_pending_revision AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='files' BEGIN SELECT observe_pending_native_fault();SELECT RAISE(ABORT,'pending revision audit fault');END;`)
++  const options:ScanOptions={...current.options,autoImportLocalNfo:mode==='identity-create',
++    localNfoService:{inspectIdentity:()=>({status:'found',code:'OTHER-999',warnings:[]}),apply:async()=>{applies++;return {disposition:'none',warnings:[]}}},
++    readDurationSeconds:async()=>{probes++;assert.equal(current.db.inTransaction,false);return 180},
++    auditSink:{...current.sink,recordFile:entry=>{
++      calls++;assert.equal(current.db.inTransaction,true)
++      changedState(snapshot(current.db));assert.deepEqual(snapshot(reader),before)
++      assert.equal(entry.filePath,file);assert.equal(entry.outcome,'pending')
++      current.sink.recordFile(entry)
++    }}}
++  const progress:Parameters<typeof scanFolders>[1]=value=>{assert.equal(current.db.inTransaction,false);if(value.currentFile===file)reports++}
++  try{
++    await assert.rejects(scanFolders(current.request,progress,options),/pending revision audit fault/)
++    assert.equal(faults,1);assert.equal(calls,1);assert.equal(reports,0);assert.equal(applies,0)
++    assert.deepEqual(snapshot(current.db),before);assert.deepEqual(snapshot(reader),before);assert.deepEqual(current.rows(),[])
++    assert.equal(current.db.inTransaction,false)
++    current.db.exec('DROP TRIGGER fail_pending_revision')
++    const result=await scanFolders(current.request,progress,options)
++    assert.equal(calls,2);assert.equal(reports,1);assert.equal(result.failed,0);assert.equal(result.scannedFiles,1)
++    assert.equal(result.imported,0);assert.equal(result.pendingResources,mode==='identity-create'?1:0)
++    assert.equal(result.pendingGroups,mode==='pending-refresh'?1:0);assert.equal(applies,0)
++    const committed=snapshot(current.db);changedState(committed);assert.deepEqual(snapshot(reader),committed)
++    assert.deepEqual(committed.videos,before.videos);assert.deepEqual(committed.resources,before.resources);assert.deepEqual(committed.memberships,before.memberships)
++    assert.equal(current.rows().length,1);assert.equal(current.rows()[0].ordinal,0)
++    const entry=JSON.parse(current.rows()[0].entry_json)
++    assert.equal(entry.filePath,file);assert.equal(entry.sourceKind,kind);assert.equal(entry.outcome,'pending')
++    assert.equal(entry.addedToQueue,mode==='identity-create')
++    if(mode==='pending-refresh')assert.equal(entry.groupId,committed.groups[0].id)
++    else {
++      assert.equal(entry.nfo.disposition,'identity-conflict')
++      if(mode==='identity-create')assert.equal(entry.nfo.pendingIdentityId,committed.identities[0].id)
++    }
++    if(kind==='local'&&mode!=='identity-refresh')assert.ok(probes>=2)
++    else assert.equal(probes,0,'this path has no duration await; not evidence of a probe having run')
++    assert.deepEqual(current.db.pragma('foreign_key_check'),[])
++  }finally{reader.close()}
++})
++
++for(const mode of ['fingerprint-backfill','changed-fingerprint'] as const)it(`rolls back registered local ${mode} on audit failure, retries and leaves skipped probes unchanged`,async()=>{
++  const current=setup(['RFSH-001.mp4']),file=path.join(media,'RFSH-001.mp4')
++  assert.equal((await scanFolders(current.request,undefined,current.options)).imported,1)
++  if(mode==='fingerprint-backfill')current.db.prepare("UPDATE video_resources SET file_mtime_ms=NULL WHERE kind='local'").run()
++  else {fs.appendFileSync(file,' changed fingerprint');fs.utimesSync(file,3000,3000)}
++  const fingerprint=fs.statSync(file)
++  const normalizedFingerprint=statFileFingerprint(file)
++  assert.ok(normalizedFingerprint)
++  assert.equal(normalizedFingerprint.file_mtime_ms,Math.round(fingerprint.mtimeMs))
++  const snapshot=(connection:typeof current.db)=>({resources:connection.prepare('SELECT * FROM video_resources ORDER BY id').all(),videos:connection.prepare('SELECT * FROM videos ORDER BY id').all()})
++  const before=snapshot(current.db)
++  current.writer.start(current.meta)
++  const reader=openReadOnlyDatabaseAtPath(current.db.name)
++  let faults=0,calls=0,probes=0,reports=0
++  current.db.function('observe_refresh_audit',()=>{faults++;return 1})
++  current.db.exec(`CREATE TEMP TRIGGER fail_refresh_audit AFTER INSERT ON library_scan_audit_entries
++    WHEN NEW.section='files' BEGIN SELECT observe_refresh_audit();SELECT RAISE(ABORT,'refresh audit fault');END;`)
++  const options:ScanOptions={...current.options,
++    readDurationSeconds:async()=>{probes++;assert.equal(current.db.inTransaction,false);return 240},
++    auditSink:{...current.sink,recordFile:entry=>{
++      calls++;assert.equal(current.db.inTransaction,true)
++      assert.notDeepEqual(snapshot(current.db).resources,before.resources)
++      assert.deepEqual(snapshot(reader),before)
++      assert.equal(entry.outcome,'updated');current.sink.recordFile(entry)
++    }}}
++  const progress:Parameters<typeof scanFolders>[1]=value=>{assert.equal(current.db.inTransaction,false);if(value.currentFile===file)reports++}
++  try{
++    await assert.rejects(scanFolders(current.request,progress,options),/refresh audit fault/)
++    assert.equal(faults,1);assert.equal(calls,1);assert.equal(reports,0)
++    assert.deepEqual(snapshot(current.db),before);assert.deepEqual(snapshot(reader),before);assert.deepEqual(current.rows(),[])
++    current.db.exec('DROP TRIGGER fail_refresh_audit')
++    const result=await scanFolders(current.request,progress,options)
++    assert.equal(result.refreshed,1);assert.equal(result.failed,0);assert.equal(calls,2);assert.equal(reports,1)
++    assert.equal(probes,mode==='changed-fingerprint'?2:0)
++    const committed=snapshot(current.db);assert.deepEqual(snapshot(reader),committed)
++    const resource=committed.resources[0] as {id:number;duration_seconds:number;size_bytes:number;file_mtime_ms:number}
++    assert.equal(resource.size_bytes,normalizedFingerprint.file_size);assert.equal(resource.file_mtime_ms,normalizedFingerprint.file_mtime_ms)
++    assert.equal(resource.duration_seconds,mode==='changed-fingerprint'?240:120)
++    assert.equal(current.rows().length,1)
++    const updated=JSON.parse(current.rows()[0].entry_json)
++    assert.equal(updated.resourceId,resource.id);assert.equal(updated.updateKind,'metadata_refreshed')
++    const unchanged=await scanFolders(current.request,progress,{...options,auditSink:current.sink,
++      readDurationSeconds:async()=>{assert.fail('unchanged fingerprint must not probe');return null}})
++    assert.equal(unchanged.skipped,1);assert.equal(unchanged.refreshed,0);assert.deepEqual(snapshot(current.db),committed)
++    fs.appendFileSync(file,' invalid duration fingerprint')
++    let invalidProbes=0
++    const invalid=await scanFolders(current.request,progress,{...options,auditSink:current.sink,
++      readDurationSeconds:async()=>{invalidProbes++;assert.equal(current.db.inTransaction,false);return null}})
++    assert.equal(invalidProbes,1);assert.equal(invalid.skipped,1);assert.equal(invalid.refreshed,0)
++    assert.deepEqual(snapshot(current.db),committed);assert.deepEqual(snapshot(reader),committed)
++    const skipped=JSON.parse(current.rows()[0].entry_json)
++    assert.equal(skipped.outcome,'skipped');assert.equal(skipped.skipReason,'unchanged');assert.equal(skipped.resourceId,resource.id)
++    assert.deepEqual(current.db.pragma('foreign_key_check'),[])
++  }finally{reader.close()}
++})
++
++it('rechecks root authorization after an awaited registered-resource probe before writing business fields',async()=>{
++  const current=setup(['AUTH-001.mp4']),file=path.join(media,'AUTH-001.mp4')
++  await scanFolders(current.request,undefined,current.options)
++  const before=current.db.prepare('SELECT * FROM video_resources ORDER BY id').all()
++  fs.appendFileSync(file,' changed')
++  current.writer.start(current.meta)
++  let release!:()=>void,entered!:()=>void
++  const gate=new Promise<void>(resolve=>{release=resolve}),waiting=new Promise<void>(resolve=>{entered=resolve})
++  const scanning=scanFolders(current.request,undefined,{...current.options,auditSink:current.sink,
++    readDurationSeconds:async()=>{assert.equal(current.db.inTransaction,false);entered();await gate;return 300}})
++  try{
++    await Promise.race([waiting,scanning.then(()=>{throw new Error('Scan completed before authorization probe gate')})])
++    current.db.prepare("UPDATE media_library_roots SET state='disabled' WHERE id=?").run(current.request.roots[0].id)
++  }finally{release();await scanning.catch(()=>{})}
++  const result=await scanning
++  assert.equal(result.failed,1);assert.equal(result.refreshed,0)
++  assert.deepEqual(current.db.prepare('SELECT * FROM video_resources ORDER BY id').all(),before)
++  assert.equal(current.rows().length,1)
++  assert.equal(JSON.parse(current.rows()[0].entry_json).outcome,'processing_failure')
++})

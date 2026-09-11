@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { ListVideo, SearchX } from 'lucide-react'
-import type { PlaylistCreateInput, PlaylistListItem } from '@shared/playlistTypes'
+import type { PlaylistCreateInput, PlaylistBrowseItem } from '@shared/playlistTypes'
 import { api, assetUrl } from '../api'
-import { useDebounce } from '../hooks/useDebounce'
-import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
-import { LIST_PARAM, patchSearchParams } from '../listView/listQueryParams'
+import { usePlaylistBrowsePage } from '../hooks/usePlaylistBrowsePage'
+import ContinuousGrid from '../components/ContinuousGrid'
+import { LIST_PARAM, PLAYLIST_PAGE_SIZE, parsePlaylistOffset, patchSearchParams } from '../listView/listQueryParams'
 import { navigateToPlaylistDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useToast } from '../components/Toast'
 import PlaylistCreateModal from '../components/PlaylistCreateModal'
 import ListToolbar from '../components/ListToolbar'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
@@ -20,8 +21,8 @@ import Button from '../components/Button'
 import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
 import { onPlaylistImportCompleted } from '../components/playlistImport/events'
 
-function playlistListCover(item: PlaylistListItem): string | null {
-  return assetUrl(item.preview_cover_path)
+function playlistListCover(item: PlaylistBrowseItem): string | null {
+  return assetUrl(item.preview_cover_path, 640)
 }
 
 export default function PlaylistsPage(): JSX.Element {
@@ -33,8 +34,6 @@ export default function PlaylistsPage(): JSX.Element {
   const detailOpen = Boolean(detailMatch)
   const activeId = detailMatch ? Number(detailMatch.params.playlistId) : null
   const [searchParams, setSearchParams] = useSearchParams()
-  const [items, setItems] = useState<PlaylistListItem[]>([])
-  const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
 
   const dismissOverlays = useCallback(() => {
@@ -44,64 +43,53 @@ export default function PlaylistsPage(): JSX.Element {
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
-  const [searchInput, setSearchInput] = useState(urlQ)
-  useEffect(() => {
-    setSearchInput(urlQ)
-  }, [urlQ])
-  const debouncedQ = useDebounce(searchInput.trim(), 300)
+  const context = `${location.key}:${location.pathname}:${location.search}`
+  const [draft,setDraft] = useState<{context:string;value:string}>()
+  const searchInput = draft?.context === context ? draft.value : urlQ
+  const setSearchInput = (value:string):void => setDraft({context,value})
+  useEffect(()=>{ if(draft && draft.context!==context)setDraft(undefined) },[context,draft])
+  useEffect(()=>{
+    if(!draft || draft.context!==context || draft.value.trim()===urlQ.trim())return
+    const timer=setTimeout(()=>setSearchParams(previous=>patchSearchParams(previous,{
+      [LIST_PARAM.q]:draft.value.trim() || null,[LIST_PARAM.playlistOffset]:null
+    }),{replace:true}),300)
+    return ()=>clearTimeout(timer)
+  },[context,draft,urlQ,setSearchParams])
+  const offset=parsePlaylistOffset(searchParams.get(LIST_PARAM.playlistOffset))
+  const page=usePlaylistBrowsePage({search:urlQ,offset,limit:PLAYLIST_PAGE_SIZE})
+  const loading=page.loading
+  const loadList=page.reload
+  const move=useCallback((next:number)=>{
+    const normalized=parsePlaylistOffset(String(next))
+    setSearchParams(previous=>patchSearchParams(previous,{
+      [LIST_PARAM.playlistOffset]:normalized ? String(normalized) : null
+    }),{replace:true})
+  },[setSearchParams])
 
-  useEffect(() => {
-    const trimmed = debouncedQ.trim()
-    if (trimmed === urlQ.trim()) return
-    setSearchParams(
-      (prev) => patchSearchParams(prev, { [LIST_PARAM.q]: trimmed || null }),
-      { replace: true }
-    )
-  }, [debouncedQ, urlQ, setSearchParams])
-
-  const scrollMemoryKey = useMemo(() => `playlists:q=${debouncedQ.trim()}`, [debouncedQ])
-  const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(scrollMemoryKey)
-
-  const filteredItems = useMemo(() => {
-    if (!debouncedQ) return items
-    const q = debouncedQ.toLowerCase()
-    return items.filter(
-      (item) =>
-        item.name.toLowerCase().includes(q) ||
-        (item.description?.toLowerCase().includes(q) ?? false)
-    )
-  }, [debouncedQ, items])
-
-  const loadList = useCallback(async (): Promise<void> => {
-    setLoading(true)
-    try {
-      setItems(await api.playlists.list())
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [toast])
-
-  useEffect(() => {
-    void loadList()
-  }, [loadList])
+  const generation=useRef(0)
+  useEffect(()=>{
+    const token=generation.current+1
+    generation.current=token
+    return ()=>{ generation.current=token+1 }
+  },[context])
+  const refetchSilent=useCallback(()=>{ void loadList() },[loadList])
+  useListSurfaceRefetch(detailOpen, refetchSilent)
+  const scrollMemoryKey=`playlists:q=${urlQ}`
+  const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(scrollMemoryKey, false)
 
   useEffect(() => onPlaylistImportCompleted(() => {
     void loadList()
   }), [loadList])
 
-  useListSurfaceRefetch(detailOpen, () => {
-    void loadList()
-  })
-
   const createPlaylist = async (input: PlaylistCreateInput): Promise<void> => {
+    const token=generation.current
     try {
       const newId = await api.playlists.create(input)
+      if(generation.current!==token)return
       setShowCreate(false)
       toast.show('播放清单已创建', 'success')
       await loadList()
-      navigateToPlaylistDetail(navigate, location, newId)
+      if(generation.current===token)navigateToPlaylistDetail(navigate, location, newId)
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -114,7 +102,14 @@ export default function PlaylistsPage(): JSX.Element {
     if (loading) {
       return <EmptyState loading />
     }
-    if (items.length === 0) {
+    if (page.error && !page.total) {
+      return (
+        <EmptyState title="播放清单加载失败" description={page.error}>
+          <Button onClick={() => void loadList()}>重试</Button>
+        </EmptyState>
+      )
+    }
+    if (!page.total && !urlQ) {
       return (
         <EmptyState
           icon={<ListVideo {...UI_ICON_SM} aria-hidden />}
@@ -123,7 +118,7 @@ export default function PlaylistsPage(): JSX.Element {
         />
       )
     }
-    if (filteredItems.length === 0) {
+    if (!page.total) {
       return (
         <EmptyState
           icon={<SearchX {...UI_ICON_SM} aria-hidden />}
@@ -133,8 +128,7 @@ export default function PlaylistsPage(): JSX.Element {
       )
     }
     return (
-      <div className="playlist-grid">
-        {filteredItems.map((item) => {
+      <ContinuousGrid window={page.window} scope={scrollMemoryKey} label="播放清单" minWidth={260} itemHeight={112} pageSize={PLAYLIST_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / PLAYLIST_PAGE_SIZE) * PLAYLIST_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
           const cover = playlistListCover(item)
           return (
             <button
@@ -158,8 +152,7 @@ export default function PlaylistsPage(): JSX.Element {
               </div>
             </button>
           )
-        })}
-      </div>
+        }} />
     )
   }
 
@@ -196,7 +189,7 @@ export default function PlaylistsPage(): JSX.Element {
           }
           resultCount={
             <span className="count-badge count-badge--stable" aria-live="polite">
-              共 {debouncedQ ? filteredItems.length : items.length} 个
+              共 {page.known ? page.total : '…'} 个
             </span>
           }
         />
@@ -210,6 +203,8 @@ export default function PlaylistsPage(): JSX.Element {
       >
         {renderList()}
       </ListSurface>
+
+
 
       {showCreate && (
         <PlaylistCreateModal onCancel={() => setShowCreate(false)} onCreate={createPlaylist} />

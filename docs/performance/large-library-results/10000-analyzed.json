@@ -1,0 +1,4287 @@
+{
+  "baselineCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "generatedAt": "2026-09-10T03:35:27.598Z",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "totalMemory": 17179869184,
+    "versions": {
+      "node": "24.18.1",
+      "acorn": "8.16.0",
+      "ada": "3.4.4",
+      "amaro": "1.1.9",
+      "ares": "1.34.6",
+      "brotli": "1.2.0",
+      "cldr": "48.0",
+      "icu": "78.2",
+      "llhttp": "9.4.3",
+      "merve": "1.2.2",
+      "modules": "148",
+      "napi": "10",
+      "nbytes": "0.1.4",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.69.0",
+      "nghttp3": "",
+      "ngtcp2": "",
+      "openssl": "0.0.0",
+      "simdjson": "4.6.4",
+      "simdutf": "7.7.0",
+      "sqlite": "3.53.1",
+      "tz": "2025c",
+      "undici": "7.29.0",
+      "unicode": "17.0",
+      "uv": "1.52.1",
+      "uvwasi": "0.0.23",
+      "v8": "15.0.245.28-electron.0",
+      "zlib": "1.3.2.1-motley",
+      "zstd": "1.6.0",
+      "electron": "43.4.1",
+      "chrome": "150.0.7871.224"
+    }
+  },
+  "fixture": {
+    "analyzed": true,
+    "coreOnly": false,
+    "videos": 10000,
+    "actors": 2000,
+    "tags": 1000,
+    "videoTags": {
+      "n": 43333
+    },
+    "summaryBytes": 128,
+    "seedMs": 149.859916,
+    "finalDatabaseBytes": 15335424
+  },
+  "pragmas": {
+    "journal_mode": "wal",
+    "synchronous": 1,
+    "cache_size": -16000,
+    "mmap_size": 0,
+    "temp_store": 0,
+    "busy_timeout": 5000,
+    "user_version": 15
+  },
+  "caveats": [
+    "Synthetic data on local host; not the reporter Windows/HDD database.",
+    "First call is not cold-disk: fixture generation warms OS cache.",
+    "Three warm samples by default; median/max are not p95.",
+    "RSS after each case includes retained fixture/query memory and is not peak RSS.",
+    "SQL interception and timing bookkeeping are included; EQP and JSON byte calculation are outside the measured action.",
+    "Overlap library added only for last two cases. ANALYZE only when fixture.analyzed=true; no performance pragmas changed."
+  ],
+  "results": [
+    {
+      "name": "legacy.first",
+      "firstMs": 0.7177500000000236,
+      "warmMedianMs": 0.3420000000000414,
+      "warmMaxMs": 0.3784580000000233,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 0.27954200000004903,
+      "serializedBytes": 41154,
+      "rssBytesAfter": 171114496
+    },
+    {
+      "name": "legacy.deep",
+      "firstMs": 14.308583999999996,
+      "warmMedianMs": 14.522167000000024,
+      "warmMaxMs": 14.901166999999987,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 14.743666000000019,
+      "serializedBytes": 40894,
+      "rssBytesAfter": 171147264
+    },
+    {
+      "name": "legacy.release",
+      "firstMs": 18.68870899999996,
+      "warmMedianMs": 20.33770800000002,
+      "warmMaxMs": 20.78154100000006,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 20.575084000000118,
+      "serializedBytes": 41239,
+      "rssBytesAfter": 171294720
+    },
+    {
+      "name": "legacy.search_code",
+      "firstMs": 3.633874999999989,
+      "warmMedianMs": 3.3075000000000045,
+      "warmMaxMs": 3.327959000000078,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 3.2200410000000375,
+      "serializedBytes": 708,
+      "rssBytesAfter": 171458560
+    },
+    {
+      "name": "scoped.library",
+      "firstMs": 34.957874999999945,
+      "warmMedianMs": 35.062832999999955,
+      "warmMaxMs": 35.52049999999997,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 34.78166699999997,
+      "serializedBytes": 50334,
+      "rssBytesAfter": 181501952
+    },
+    {
+      "name": "scoped.all_single_active",
+      "firstMs": 46.73508400000003,
+      "warmMedianMs": 47.292417,
+      "warmMaxMs": 47.46966699999996,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 46.62529200000006,
+      "serializedBytes": 50334,
+      "rssBytesAfter": 182894592
+    },
+    {
+      "name": "scoped.all_selected_one",
+      "firstMs": 47.327125000000024,
+      "warmMedianMs": 47.57116700000006,
+      "warmMaxMs": 48.166999999999916,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 47.8605,
+      "serializedBytes": 50334,
+      "rssBytesAfter": 183828480
+    },
+    {
+      "name": "scoped.release",
+      "firstMs": 37.896124999999984,
+      "warmMedianMs": 36.96566699999994,
+      "warmMaxMs": 37.95854099999997,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 35.98316699999987,
+      "serializedBytes": 50419,
+      "rssBytesAfter": 184582144
+    },
+    {
+      "name": "scoped.search_code",
+      "firstMs": 15.0625,
+      "warmMedianMs": 15.015499999999975,
+      "warmMaxMs": 15.118332999999893,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 14.886459000000059,
+      "serializedBytes": 861,
+      "rssBytesAfter": 185122816
+    },
+    {
+      "name": "tags.all",
+      "firstMs": 27.999041000000034,
+      "warmMedianMs": 27.95337500000005,
+      "warmMaxMs": 28.136541999999963,
+      "samples": 3,
+      "sqlCalls": 1,
+      "sqlMsLast": 28.06049999999982,
+      "serializedBytes": 44787,
+      "rssBytesAfter": 187154432
+    },
+    {
+      "name": "tags.manual",
+      "firstMs": 33.978000000000065,
+      "warmMedianMs": 33.75933399999985,
+      "warmMaxMs": 34.03037499999982,
+      "samples": 3,
+      "sqlCalls": 1,
+      "sqlMsLast": 33.516791999999896,
+      "serializedBytes": 44787,
+      "rssBytesAfter": 187187200
+    },
+    {
+      "name": "actors.first",
+      "firstMs": 13.865542000000005,
+      "warmMedianMs": 13.525874999999814,
+      "warmMaxMs": 13.595624999999927,
+      "samples": 3,
+      "sqlCalls": 3,
+      "sqlMsLast": 13.487458999999944,
+      "serializedBytes": 105390,
+      "rssBytesAfter": 187269120
+    },
+    {
+      "name": "overview",
+      "firstMs": 0.6534580000000005,
+      "warmMedianMs": 0.5411249999999654,
+      "warmMaxMs": 0.561040999999932,
+      "samples": 3,
+      "sqlCalls": 6,
+      "sqlMsLast": 0.4730010000002949,
+      "serializedBytes": 263,
+      "rssBytesAfter": 187367424
+    },
+    {
+      "name": "home.single",
+      "firstMs": 54.12291600000003,
+      "warmMedianMs": 55.17145800000003,
+      "warmMaxMs": 56.08458399999995,
+      "samples": 3,
+      "sqlCalls": 7,
+      "sqlMsLast": 55.445374999999785,
+      "serializedBytes": 21120,
+      "rssBytesAfter": 188596224
+    },
+    {
+      "name": "web.first",
+      "firstMs": 2.517124999999851,
+      "warmMedianMs": 2.435833999999886,
+      "warmMaxMs": 2.464416999999912,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 2.4026249999999436,
+      "serializedBytes": 4795,
+      "rssBytesAfter": 188661760
+    },
+    {
+      "name": "web.search",
+      "firstMs": 13.20945800000004,
+      "warmMedianMs": 12.955249999999978,
+      "warmMaxMs": 13.062000000000126,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 12.744334000000208,
+      "serializedBytes": 177,
+      "rssBytesAfter": 188760064
+    },
+    {
+      "name": "web.collections",
+      "firstMs": 4.800334000000021,
+      "warmMedianMs": 4.532958000000008,
+      "warmMaxMs": 4.540457999999944,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 4.5022089999999935,
+      "serializedBytes": 134,
+      "rssBytesAfter": 188841984
+    },
+    {
+      "name": "playlist.full",
+      "firstMs": 31.122333000000026,
+      "warmMedianMs": 30.574041999999963,
+      "warmMaxMs": 33.80512500000009,
+      "samples": 3,
+      "sqlCalls": 3,
+      "sqlMsLast": 25.086748999999827,
+      "serializedBytes": 6852442,
+      "rssBytesAfter": 245776384
+    },
+    {
+      "name": "experiment.no_distinct.0",
+      "firstMs": 0.021457999999938693,
+      "warmMedianMs": 0.00829199999998309,
+      "warmMaxMs": 0.012917000000015832,
+      "samples": 3,
+      "sqlCalls": 1,
+      "sqlMsLast": 0.003167000000075859,
+      "serializedBytes": 11,
+      "rssBytesAfter": 245858304
+    },
+    {
+      "name": "experiment.no_distinct.1",
+      "firstMs": 0.2450420000000122,
+      "warmMedianMs": 0.19670799999994415,
+      "warmMaxMs": 0.19849999999996726,
+      "samples": 3,
+      "sqlCalls": 1,
+      "sqlMsLast": 0.16708399999993162,
+      "serializedBytes": 41010,
+      "rssBytesAfter": 246202368
+    },
+    {
+      "name": "scoped.all_overlap",
+      "firstMs": 51.707124999999905,
+      "warmMedianMs": 51.568083000000115,
+      "warmMaxMs": 51.60354200000029,
+      "samples": 3,
+      "sqlCalls": 2,
+      "sqlMsLast": 50.59850000000006,
+      "serializedBytes": 51654,
+      "rssBytesAfter": 247136256
+    },
+    {
+      "name": "home.overlap",
+      "firstMs": 60.87525000000005,
+      "warmMedianMs": 60.54741700000022,
+      "warmMaxMs": 60.95533299999988,
+      "samples": 3,
+      "sqlCalls": 7,
+      "sqlMsLast": 59.89975199999935,
+      "serializedBytes": 22693,
+      "rssBytesAfter": 249151488
+    }
+  ],
+  "plans": [
+    {
+      "sql": "SELECT COUNT(DISTINCT v.id) AS c FROM videos v  ",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 5,
+          "parent": 0,
+          "notused": 138,
+          "detail": "SCAN v USING COVERING INDEX idx_videos_director_id"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT vr.kind\n     FROM video_resources vr\n     WHERE vr.video_id = v.id AND vr.is_primary = 1\n     ORDER BY vr.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources vr\n     WHERE vr.video_id = v.id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT vr.kind AS resource_kind,\n              MAX(vr.is_primary) AS has_primary,\n              MIN(vr.add_time) AS first_added,\n              MIN(vr.id) AS first_id\n       FROM video_resources vr\n       WHERE vr.video_id = v.id\n       GROUP BY vr.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv FROM videos v  \n       ORDER BY v.add_time DESC\n       LIMIT ? OFFSET ?",
+      "params": [
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 11,
+          "parent": 0,
+          "notused": 154,
+          "detail": "SCAN v USING INDEX idx_videos_add_time"
+        },
+        {
+          "id": 33,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 37,
+          "parent": 33,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 45,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 49,
+          "parent": 45,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 57,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 61,
+          "parent": 57,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 69,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 73,
+          "parent": 69,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 81,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 85,
+          "parent": 81,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 94,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 100,
+          "parent": 94,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 113,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 118,
+          "parent": 113,
+          "notused": 39,
+          "detail": "SEARCH vr USING COVERING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 130,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 133,
+          "parent": 130,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 141,
+          "parent": 133,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 146,
+          "parent": 133,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 194,
+          "parent": 133,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 207,
+          "parent": 130,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT vr.kind\n     FROM video_resources vr\n     WHERE vr.video_id = v.id AND vr.is_primary = 1\n     ORDER BY vr.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources vr\n     WHERE vr.video_id = v.id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT vr.kind AS resource_kind,\n              MAX(vr.is_primary) AS has_primary,\n              MIN(vr.add_time) AS first_added,\n              MIN(vr.id) AS first_id\n       FROM video_resources vr\n       WHERE vr.video_id = v.id\n       GROUP BY vr.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv FROM videos v  \n       ORDER BY (v.release_date IS NULL OR trim(v.release_date) = '') ASC, v.release_date DESC, v.add_time DESC\n       LIMIT ? OFFSET ?",
+      "params": [
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 10,
+          "parent": 0,
+          "notused": 146,
+          "detail": "SCAN v"
+        },
+        {
+          "id": 31,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 35,
+          "parent": 31,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 43,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 47,
+          "parent": 43,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 55,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 59,
+          "parent": 55,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 67,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 71,
+          "parent": 67,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 79,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 83,
+          "parent": 79,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 92,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 98,
+          "parent": 92,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 111,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 116,
+          "parent": 111,
+          "notused": 39,
+          "detail": "SEARCH vr USING COVERING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 128,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 131,
+          "parent": 128,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 139,
+          "parent": 131,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 144,
+          "parent": 131,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 192,
+          "parent": 131,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 205,
+          "parent": 128,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 237,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(DISTINCT v.id) AS c FROM videos v  WHERE (v.code LIKE ? OR v.title LIKE ? OR v.id IN (\n       SELECT va.video_id FROM video_actress va\n         JOIN actresses a ON a.id = va.actress_id\n         WHERE EXISTS (\n    SELECT 1\n    FROM actress_names an\n    JOIN actress_name_ownership ano\n      ON ano.actress_id = an.actress_id\n     AND ano.normalized_name = normalize_actress_name(an.name)\n    WHERE an.actress_id = a.id\n      AND an.type IN ('main', 'alias', 'zh', 'chinese', 'en', 'english', 'romaji')\n      AND an.name LIKE ?\n  )\n       ))",
+      "params": [
+        "%TEST-001234%",
+        "%TEST-001234%",
+        "%TEST-001234%"
+      ],
+      "method": "get",
+      "plan": [
+        {
+          "id": 5,
+          "parent": 0,
+          "notused": 146,
+          "detail": "SCAN v"
+        },
+        {
+          "id": 16,
+          "parent": 0,
+          "notused": 0,
+          "detail": "LIST SUBQUERY 2"
+        },
+        {
+          "id": 21,
+          "parent": 16,
+          "notused": 115,
+          "detail": "SCAN a USING COVERING INDEX idx_actresses_scraped_status"
+        },
+        {
+          "id": 24,
+          "parent": 16,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 30,
+          "parent": 24,
+          "notused": 37,
+          "detail": "SEARCH an USING COVERING INDEX sqlite_autoindex_actress_names_1 (actress_id=?)"
+        },
+        {
+          "id": 66,
+          "parent": 24,
+          "notused": 40,
+          "detail": "SEARCH ano USING INDEX idx_actress_name_ownership_actress_id (actress_id=?)"
+        },
+        {
+          "id": 85,
+          "parent": 16,
+          "notused": 61,
+          "detail": "SEARCH va USING INDEX idx_video_actress_actress_id (actress_id=?)"
+        },
+        {
+          "id": 94,
+          "parent": 16,
+          "notused": 0,
+          "detail": "CREATE BLOOM FILTER"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT vr.kind\n     FROM video_resources vr\n     WHERE vr.video_id = v.id AND vr.is_primary = 1\n     ORDER BY vr.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources vr\n     WHERE vr.video_id = v.id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT vr.kind AS resource_kind,\n              MAX(vr.is_primary) AS has_primary,\n              MIN(vr.add_time) AS first_added,\n              MIN(vr.id) AS first_id\n       FROM video_resources vr\n       WHERE vr.video_id = v.id\n       GROUP BY vr.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv FROM videos v  WHERE (v.code LIKE ? OR v.title LIKE ? OR v.id IN (\n       SELECT va.video_id FROM video_actress va\n         JOIN actresses a ON a.id = va.actress_id\n         WHERE EXISTS (\n    SELECT 1\n    FROM actress_names an\n    JOIN actress_name_ownership ano\n      ON ano.actress_id = an.actress_id\n     AND ano.normalized_name = normalize_actress_name(an.name)\n    WHERE an.actress_id = a.id\n      AND an.type IN ('main', 'alias', 'zh', 'chinese', 'en', 'english', 'romaji')\n      AND an.name LIKE ?\n  )\n       ))\n       ORDER BY v.add_time DESC\n       LIMIT ? OFFSET ?",
+      "params": [
+        "%TEST-001234%",
+        "%TEST-001234%",
+        "%TEST-001234%",
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 11,
+          "parent": 0,
+          "notused": 154,
+          "detail": "SCAN v USING INDEX idx_videos_add_time"
+        },
+        {
+          "id": 23,
+          "parent": 0,
+          "notused": 0,
+          "detail": "LIST SUBQUERY 11"
+        },
+        {
+          "id": 28,
+          "parent": 23,
+          "notused": 115,
+          "detail": "SCAN a USING COVERING INDEX idx_actresses_scraped_status"
+        },
+        {
+          "id": 31,
+          "parent": 23,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 10"
+        },
+        {
+          "id": 37,
+          "parent": 31,
+          "notused": 37,
+          "detail": "SEARCH an USING COVERING INDEX sqlite_autoindex_actress_names_1 (actress_id=?)"
+        },
+        {
+          "id": 73,
+          "parent": 31,
+          "notused": 40,
+          "detail": "SEARCH ano USING INDEX idx_actress_name_ownership_actress_id (actress_id=?)"
+        },
+        {
+          "id": 92,
+          "parent": 23,
+          "notused": 61,
+          "detail": "SEARCH va USING INDEX idx_video_actress_actress_id (actress_id=?)"
+        },
+        {
+          "id": 101,
+          "parent": 23,
+          "notused": 0,
+          "detail": "CREATE BLOOM FILTER"
+        },
+        {
+          "id": 129,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 133,
+          "parent": 129,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 141,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 145,
+          "parent": 141,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 153,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 157,
+          "parent": 153,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 165,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 169,
+          "parent": 165,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 177,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 181,
+          "parent": 177,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 190,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 196,
+          "parent": 190,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 209,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 214,
+          "parent": 209,
+          "notused": 39,
+          "detail": "SEARCH vr USING COVERING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 226,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 229,
+          "parent": 226,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 237,
+          "parent": 229,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 242,
+          "parent": 229,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 290,
+          "parent": 229,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 303,
+          "parent": 226,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(DISTINCT v.id) AS count FROM videos v JOIN (\n        SELECT membership.video_id,\n               membership.library_id AS preferred_library_id,\n               membership.added_at AS membership_added_at\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.library_id = 1\n          AND membership.is_hidden = 0\n          AND scope_library.status = 'active'\n      ) scope_m ON scope_m.video_id = v.id ",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+        },
+        {
+          "id": 8,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 16,
+          "parent": 0,
+          "notused": 143,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 21,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT resource.kind\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id\n       AND resource.is_primary = 1\n     ORDER BY resource.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT resource.kind AS resource_kind,\n              MAX(resource.is_primary) AS has_primary,\n              MIN(resource.add_time) AS first_added,\n              MIN(resource.id) AS first_id\n       FROM video_resources resource\n       WHERE resource.video_id = v.id\n         AND resource.library_id = scope_m.preferred_library_id\n       GROUP BY resource.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv,\n    scope_m.preferred_library_id,\n    scope_m.membership_added_at,\n    COALESCE((\n      SELECT json_group_array(json_object(\n        'libraryId', badge.library_id,\n        'name', badge.name,\n        'icon', badge.icon,\n        'color', badge.color\n      ))\n      FROM (\n        SELECT membership.library_id, library.name, library.icon, library.color\n        FROM library_video_memberships membership\n        JOIN media_libraries library ON library.id = membership.library_id\n        WHERE membership.video_id = v.id AND library.status = 'active'\n        ORDER BY library.position ASC, library.id ASC\n      ) badge\n    ), '[]') AS libraries_json\n           FROM videos v JOIN (\n        SELECT membership.video_id,\n               membership.library_id AS preferred_library_id,\n               membership.added_at AS membership_added_at\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.library_id = 1\n          AND membership.is_hidden = 0\n          AND scope_library.status = 'active'\n      ) scope_m ON scope_m.video_id = v.id \n           ORDER BY scope_m.membership_added_at DESC, v.id DESC\n           LIMIT ? OFFSET ?",
+      "params": [
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 13,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 21,
+          "parent": 0,
+          "notused": 145,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_library_added (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 26,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 48,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 52,
+          "parent": 48,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 60,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 64,
+          "parent": 60,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 72,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 76,
+          "parent": 72,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 84,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 88,
+          "parent": 84,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 96,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 100,
+          "parent": 96,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 109,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 115,
+          "parent": 109,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video (library_id=? AND video_id=? AND is_primary=?)"
+        },
+        {
+          "id": 129,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 134,
+          "parent": 129,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 148,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 151,
+          "parent": 148,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 158,
+          "parent": 151,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 201,
+          "parent": 151,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 214,
+          "parent": 148,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 229,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 11"
+        },
+        {
+          "id": 232,
+          "parent": 229,
+          "notused": 0,
+          "detail": "CO-ROUTINE badge"
+        },
+        {
+          "id": 237,
+          "parent": 232,
+          "notused": 11,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 242,
+          "parent": 232,
+          "notused": 39,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 257,
+          "parent": 229,
+          "notused": 61,
+          "detail": "SCAN badge"
+        },
+        {
+          "id": 288,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR DISTINCT"
+        },
+        {
+          "id": 289,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(DISTINCT v.id) AS count FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active'\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id ",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 10,
+          "parent": 5,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 14,
+          "parent": 5,
+          "notused": 143,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 30,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 49,
+          "parent": 2,
+          "notused": 143,
+          "detail": "SCAN (subquery-4)"
+        },
+        {
+          "id": 99,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+        },
+        {
+          "id": 101,
+          "parent": 0,
+          "notused": 143,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 106,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT resource.kind\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id\n       AND resource.is_primary = 1\n     ORDER BY resource.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT resource.kind AS resource_kind,\n              MAX(resource.is_primary) AS has_primary,\n              MIN(resource.add_time) AS first_added,\n              MIN(resource.id) AS first_id\n       FROM video_resources resource\n       WHERE resource.video_id = v.id\n         AND resource.library_id = scope_m.preferred_library_id\n       GROUP BY resource.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv,\n    scope_m.preferred_library_id,\n    scope_m.membership_added_at,\n    COALESCE((\n      SELECT json_group_array(json_object(\n        'libraryId', badge.library_id,\n        'name', badge.name,\n        'icon', badge.icon,\n        'color', badge.color\n      ))\n      FROM (\n        SELECT membership.library_id, library.name, library.icon, library.color\n        FROM library_video_memberships membership\n        JOIN media_libraries library ON library.id = membership.library_id\n        WHERE membership.video_id = v.id AND library.status = 'active'\n        ORDER BY library.position ASC, library.id ASC\n      ) badge\n    ), '[]') AS libraries_json\n           FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active'\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id \n           ORDER BY scope_m.membership_added_at DESC, v.id DESC\n           LIMIT ? OFFSET ?",
+      "params": [
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-15)"
+        },
+        {
+          "id": 10,
+          "parent": 5,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 14,
+          "parent": 5,
+          "notused": 143,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 30,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 49,
+          "parent": 2,
+          "notused": 143,
+          "detail": "SCAN (subquery-15)"
+        },
+        {
+          "id": 106,
+          "parent": 0,
+          "notused": 143,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 111,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 133,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 137,
+          "parent": 133,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 145,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 149,
+          "parent": 145,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 157,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 161,
+          "parent": 157,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 169,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 173,
+          "parent": 169,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 181,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 185,
+          "parent": 181,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 194,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 200,
+          "parent": 194,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video (library_id=? AND video_id=? AND is_primary=?)"
+        },
+        {
+          "id": 215,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 220,
+          "parent": 215,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 235,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 238,
+          "parent": 235,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 245,
+          "parent": 238,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 289,
+          "parent": 238,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 302,
+          "parent": 235,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 317,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 11"
+        },
+        {
+          "id": 320,
+          "parent": 317,
+          "notused": 0,
+          "detail": "CO-ROUTINE badge"
+        },
+        {
+          "id": 325,
+          "parent": 320,
+          "notused": 11,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 330,
+          "parent": 320,
+          "notused": 39,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 345,
+          "parent": 317,
+          "notused": 61,
+          "detail": "SCAN badge"
+        },
+        {
+          "id": 375,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR DISTINCT"
+        },
+        {
+          "id": 376,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(DISTINCT v.id) AS count FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active' AND scope_library.id IN (1)\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id ",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 10,
+          "parent": 5,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 16,
+          "parent": 5,
+          "notused": 143,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 33,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 52,
+          "parent": 2,
+          "notused": 115,
+          "detail": "SCAN (subquery-4)"
+        },
+        {
+          "id": 102,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+        },
+        {
+          "id": 104,
+          "parent": 0,
+          "notused": 115,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 109,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT resource.kind\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id\n       AND resource.is_primary = 1\n     ORDER BY resource.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT resource.kind AS resource_kind,\n              MAX(resource.is_primary) AS has_primary,\n              MIN(resource.add_time) AS first_added,\n              MIN(resource.id) AS first_id\n       FROM video_resources resource\n       WHERE resource.video_id = v.id\n         AND resource.library_id = scope_m.preferred_library_id\n       GROUP BY resource.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv,\n    scope_m.preferred_library_id,\n    scope_m.membership_added_at,\n    COALESCE((\n      SELECT json_group_array(json_object(\n        'libraryId', badge.library_id,\n        'name', badge.name,\n        'icon', badge.icon,\n        'color', badge.color\n      ))\n      FROM (\n        SELECT membership.library_id, library.name, library.icon, library.color\n        FROM library_video_memberships membership\n        JOIN media_libraries library ON library.id = membership.library_id\n        WHERE membership.video_id = v.id AND library.status = 'active'\n        ORDER BY library.position ASC, library.id ASC\n      ) badge\n    ), '[]') AS libraries_json\n           FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active' AND scope_library.id IN (1)\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id \n           ORDER BY scope_m.membership_added_at DESC, v.id DESC\n           LIMIT ? OFFSET ?",
+      "params": [
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-15)"
+        },
+        {
+          "id": 10,
+          "parent": 5,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 16,
+          "parent": 5,
+          "notused": 143,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 33,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 52,
+          "parent": 2,
+          "notused": 115,
+          "detail": "SCAN (subquery-15)"
+        },
+        {
+          "id": 109,
+          "parent": 0,
+          "notused": 115,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 114,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 136,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 140,
+          "parent": 136,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 148,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 152,
+          "parent": 148,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 160,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 164,
+          "parent": 160,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 172,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 176,
+          "parent": 172,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 184,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 188,
+          "parent": 184,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 197,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 203,
+          "parent": 197,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video (library_id=? AND video_id=? AND is_primary=?)"
+        },
+        {
+          "id": 218,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 223,
+          "parent": 218,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 238,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 241,
+          "parent": 238,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 248,
+          "parent": 241,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 292,
+          "parent": 241,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 305,
+          "parent": 238,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 320,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 11"
+        },
+        {
+          "id": 323,
+          "parent": 320,
+          "notused": 0,
+          "detail": "CO-ROUTINE badge"
+        },
+        {
+          "id": 328,
+          "parent": 323,
+          "notused": 11,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 333,
+          "parent": 323,
+          "notused": 39,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 348,
+          "parent": 320,
+          "notused": 61,
+          "detail": "SCAN badge"
+        },
+        {
+          "id": 378,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR DISTINCT"
+        },
+        {
+          "id": 379,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT resource.kind\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id\n       AND resource.is_primary = 1\n     ORDER BY resource.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT resource.kind AS resource_kind,\n              MAX(resource.is_primary) AS has_primary,\n              MIN(resource.add_time) AS first_added,\n              MIN(resource.id) AS first_id\n       FROM video_resources resource\n       WHERE resource.video_id = v.id\n         AND resource.library_id = scope_m.preferred_library_id\n       GROUP BY resource.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv,\n    scope_m.preferred_library_id,\n    scope_m.membership_added_at,\n    COALESCE((\n      SELECT json_group_array(json_object(\n        'libraryId', badge.library_id,\n        'name', badge.name,\n        'icon', badge.icon,\n        'color', badge.color\n      ))\n      FROM (\n        SELECT membership.library_id, library.name, library.icon, library.color\n        FROM library_video_memberships membership\n        JOIN media_libraries library ON library.id = membership.library_id\n        WHERE membership.video_id = v.id AND library.status = 'active'\n        ORDER BY library.position ASC, library.id ASC\n      ) badge\n    ), '[]') AS libraries_json\n           FROM videos v JOIN (\n        SELECT membership.video_id,\n               membership.library_id AS preferred_library_id,\n               membership.added_at AS membership_added_at\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.library_id = 1\n          AND membership.is_hidden = 0\n          AND scope_library.status = 'active'\n      ) scope_m ON scope_m.video_id = v.id \n           ORDER BY (v.release_date IS NULL OR trim(v.release_date) = '') ASC,\n              v.release_date DESC, scope_m.membership_added_at DESC, v.id ASC\n           LIMIT ? OFFSET ?",
+      "params": [
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 13,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 21,
+          "parent": 0,
+          "notused": 145,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_library_added (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 26,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 48,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 52,
+          "parent": 48,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 60,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 64,
+          "parent": 60,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 72,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 76,
+          "parent": 72,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 84,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 88,
+          "parent": 84,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 96,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 100,
+          "parent": 96,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 109,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 115,
+          "parent": 109,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video (library_id=? AND video_id=? AND is_primary=?)"
+        },
+        {
+          "id": 129,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 134,
+          "parent": 129,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 148,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 151,
+          "parent": 148,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 158,
+          "parent": 151,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 201,
+          "parent": 151,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 214,
+          "parent": 148,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 229,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 11"
+        },
+        {
+          "id": 232,
+          "parent": 229,
+          "notused": 0,
+          "detail": "CO-ROUTINE badge"
+        },
+        {
+          "id": 237,
+          "parent": 232,
+          "notused": 11,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 242,
+          "parent": 232,
+          "notused": 39,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 257,
+          "parent": 229,
+          "notused": 61,
+          "detail": "SCAN badge"
+        },
+        {
+          "id": 299,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR DISTINCT"
+        },
+        {
+          "id": 300,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(DISTINCT v.id) AS count FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active'\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id WHERE (v.code LIKE ? OR v.title LIKE ? OR v.id IN (\n         SELECT va.video_id FROM video_actress va\n         JOIN actresses a ON a.id = va.actress_id\n         WHERE EXISTS (\n    SELECT 1\n    FROM actress_names an\n    JOIN actress_name_ownership ano\n      ON ano.actress_id = an.actress_id\n     AND ano.normalized_name = normalize_actress_name(an.name)\n    WHERE an.actress_id = a.id\n      AND an.type IN ('main', 'alias', 'zh', 'chinese', 'en', 'english', 'romaji')\n      AND an.name LIKE ?\n  )\n       ))",
+      "params": [
+        "%TEST-001234%",
+        "%TEST-001234%",
+        "%TEST-001234%"
+      ],
+      "method": "get",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-6)"
+        },
+        {
+          "id": 10,
+          "parent": 5,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 14,
+          "parent": 5,
+          "notused": 143,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 30,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 49,
+          "parent": 2,
+          "notused": 143,
+          "detail": "SCAN (subquery-6)"
+        },
+        {
+          "id": 99,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+        },
+        {
+          "id": 101,
+          "parent": 0,
+          "notused": 143,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 106,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 118,
+          "parent": 0,
+          "notused": 0,
+          "detail": "LIST SUBQUERY 4"
+        },
+        {
+          "id": 123,
+          "parent": 118,
+          "notused": 115,
+          "detail": "SCAN a USING COVERING INDEX idx_actresses_scraped_status"
+        },
+        {
+          "id": 126,
+          "parent": 118,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 132,
+          "parent": 126,
+          "notused": 37,
+          "detail": "SEARCH an USING COVERING INDEX sqlite_autoindex_actress_names_1 (actress_id=?)"
+        },
+        {
+          "id": 168,
+          "parent": 126,
+          "notused": 40,
+          "detail": "SEARCH ano USING INDEX idx_actress_name_ownership_actress_id (actress_id=?)"
+        },
+        {
+          "id": 187,
+          "parent": 118,
+          "notused": 61,
+          "detail": "SEARCH va USING INDEX idx_video_actress_actress_id (actress_id=?)"
+        },
+        {
+          "id": 196,
+          "parent": 118,
+          "notused": 0,
+          "detail": "CREATE BLOOM FILTER"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT resource.kind\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id\n       AND resource.is_primary = 1\n     ORDER BY resource.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT resource.kind AS resource_kind,\n              MAX(resource.is_primary) AS has_primary,\n              MIN(resource.add_time) AS first_added,\n              MIN(resource.id) AS first_id\n       FROM video_resources resource\n       WHERE resource.video_id = v.id\n         AND resource.library_id = scope_m.preferred_library_id\n       GROUP BY resource.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv,\n    scope_m.preferred_library_id,\n    scope_m.membership_added_at,\n    COALESCE((\n      SELECT json_group_array(json_object(\n        'libraryId', badge.library_id,\n        'name', badge.name,\n        'icon', badge.icon,\n        'color', badge.color\n      ))\n      FROM (\n        SELECT membership.library_id, library.name, library.icon, library.color\n        FROM library_video_memberships membership\n        JOIN media_libraries library ON library.id = membership.library_id\n        WHERE membership.video_id = v.id AND library.status = 'active'\n        ORDER BY library.position ASC, library.id ASC\n      ) badge\n    ), '[]') AS libraries_json\n           FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active'\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id WHERE (v.code LIKE ? OR v.title LIKE ? OR v.id IN (\n         SELECT va.video_id FROM video_actress va\n         JOIN actresses a ON a.id = va.actress_id\n         WHERE EXISTS (\n    SELECT 1\n    FROM actress_names an\n    JOIN actress_name_ownership ano\n      ON ano.actress_id = an.actress_id\n     AND ano.normalized_name = normalize_actress_name(an.name)\n    WHERE an.actress_id = a.id\n      AND an.type IN ('main', 'alias', 'zh', 'chinese', 'en', 'english', 'romaji')\n      AND an.name LIKE ?\n  )\n       ))\n           ORDER BY scope_m.membership_added_at DESC, v.id DESC\n           LIMIT ? OFFSET ?",
+      "params": [
+        "%TEST-001234%",
+        "%TEST-001234%",
+        "%TEST-001234%",
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-17)"
+        },
+        {
+          "id": 10,
+          "parent": 5,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 14,
+          "parent": 5,
+          "notused": 143,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 30,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 49,
+          "parent": 2,
+          "notused": 143,
+          "detail": "SCAN (subquery-17)"
+        },
+        {
+          "id": 106,
+          "parent": 0,
+          "notused": 143,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 111,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 123,
+          "parent": 0,
+          "notused": 0,
+          "detail": "LIST SUBQUERY 15"
+        },
+        {
+          "id": 128,
+          "parent": 123,
+          "notused": 115,
+          "detail": "SCAN a USING COVERING INDEX idx_actresses_scraped_status"
+        },
+        {
+          "id": 131,
+          "parent": 123,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 14"
+        },
+        {
+          "id": 137,
+          "parent": 131,
+          "notused": 37,
+          "detail": "SEARCH an USING COVERING INDEX sqlite_autoindex_actress_names_1 (actress_id=?)"
+        },
+        {
+          "id": 173,
+          "parent": 131,
+          "notused": 40,
+          "detail": "SEARCH ano USING INDEX idx_actress_name_ownership_actress_id (actress_id=?)"
+        },
+        {
+          "id": 192,
+          "parent": 123,
+          "notused": 61,
+          "detail": "SEARCH va USING INDEX idx_video_actress_actress_id (actress_id=?)"
+        },
+        {
+          "id": 201,
+          "parent": 123,
+          "notused": 0,
+          "detail": "CREATE BLOOM FILTER"
+        },
+        {
+          "id": 229,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 233,
+          "parent": 229,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 241,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 245,
+          "parent": 241,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 253,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 257,
+          "parent": 253,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 265,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 269,
+          "parent": 265,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 277,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 281,
+          "parent": 277,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 290,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 296,
+          "parent": 290,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video (library_id=? AND video_id=? AND is_primary=?)"
+        },
+        {
+          "id": 311,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 316,
+          "parent": 311,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 331,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 334,
+          "parent": 331,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 341,
+          "parent": 334,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 385,
+          "parent": 334,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 398,
+          "parent": 331,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 413,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 11"
+        },
+        {
+          "id": 416,
+          "parent": 413,
+          "notused": 0,
+          "detail": "CO-ROUTINE badge"
+        },
+        {
+          "id": 421,
+          "parent": 416,
+          "notused": 11,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 426,
+          "parent": 416,
+          "notused": 39,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 441,
+          "parent": 413,
+          "notused": 61,
+          "detail": "SCAN badge"
+        },
+        {
+          "id": 471,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR DISTINCT"
+        },
+        {
+          "id": 472,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT t.*, COUNT(\n         CASE WHEN EXISTS (\n           SELECT 1\n           FROM library_video_memberships membership\n           JOIN media_libraries library ON library.id = membership.library_id\n           WHERE membership.video_id = vt.video_id\n             AND membership.is_hidden = 0\n             AND library.status = 'active'\n         ) THEN vt.video_id END\n       ) AS video_count\n       FROM tags t\n       LEFT JOIN video_tag vt ON vt.tag_id = t.id\n       GROUP BY t.id\n       ORDER BY video_count DESC, t.name",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 9,
+          "parent": 0,
+          "notused": 113,
+          "detail": "SCAN t"
+        },
+        {
+          "id": 11,
+          "parent": 0,
+          "notused": 79,
+          "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 26,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 32,
+          "parent": 26,
+          "notused": 11,
+          "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 36,
+          "parent": 26,
+          "notused": 42,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 57,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 63,
+          "parent": 57,
+          "notused": 11,
+          "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 67,
+          "parent": 57,
+          "notused": 42,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 114,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT t.*, COUNT(DISTINCT CASE WHEN EXISTS (\n         SELECT 1\n         FROM library_video_memberships membership\n         JOIN media_libraries library ON library.id = membership.library_id\n         WHERE membership.video_id = vt.video_id\n           AND membership.is_hidden = 0\n           AND library.status = 'active'\n       ) THEN vt.video_id END) AS video_count\n       FROM tags t\n       JOIN video_tag vt ON vt.tag_id = t.id AND vt.origin = 'manual'\n       GROUP BY t.id\n       ORDER BY video_count DESC, t.name",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 9,
+          "parent": 0,
+          "notused": 113,
+          "detail": "SCAN t"
+        },
+        {
+          "id": 11,
+          "parent": 0,
+          "notused": 79,
+          "detail": "SEARCH vt USING INDEX idx_video_tag_tag_id (tag_id=?)"
+        },
+        {
+          "id": 26,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 32,
+          "parent": 26,
+          "notused": 11,
+          "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 36,
+          "parent": 26,
+          "notused": 42,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 60,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 66,
+          "parent": 60,
+          "notused": 11,
+          "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 70,
+          "parent": 60,
+          "notused": 42,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 115,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+        },
+        {
+          "id": 117,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+        },
+        {
+          "id": 120,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a.*,\n              COUNT(\n                CASE WHEN EXISTS (\n                  SELECT 1\n                  FROM library_video_memberships membership\n                  JOIN media_libraries library ON library.id = membership.library_id\n                  WHERE membership.video_id = va.video_id\n                    AND membership.is_hidden = 0\n                    AND library.status = 'active'\n                ) THEN va.video_id END\n              ) AS video_count,\n              (SELECT COUNT(*) FROM actress_gallery_assets ag WHERE ag.actress_id = a.id) AS gallery_count\n       FROM actresses a\n       LEFT JOIN video_actress va ON va.actress_id = a.id\n       WHERE a.gender = ?\n       GROUP BY a.id\n       ORDER BY video_count DESC, a.main_name ASC, a.id ASC\n       LIMIT ? OFFSET ?",
+      "params": [
+        "female",
+        240,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 15,
+          "parent": 0,
+          "notused": 123,
+          "detail": "SCAN a"
+        },
+        {
+          "id": 19,
+          "parent": 0,
+          "notused": 61,
+          "detail": "SEARCH va USING INDEX idx_video_actress_actress_id (actress_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 34,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 40,
+          "parent": 34,
+          "notused": 11,
+          "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 44,
+          "parent": 34,
+          "notused": 42,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 65,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 71,
+          "parent": 65,
+          "notused": 11,
+          "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 75,
+          "parent": 65,
+          "notused": 42,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 143,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 148,
+          "parent": 143,
+          "notused": 52,
+          "detail": "SEARCH ag USING COVERING INDEX idx_actress_gallery_assets_actress_id (actress_id=?)"
+        },
+        {
+          "id": 166,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS n FROM actresses a WHERE a.gender = ?",
+      "params": [
+        "female"
+      ],
+      "method": "get",
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 123,
+          "detail": "SCAN a"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a.scraped_status AS status, COUNT(*) AS n\n       FROM actresses a\n       WHERE a.gender = ?\n       GROUP BY a.scraped_status",
+      "params": [
+        "female"
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 7,
+          "parent": 0,
+          "notused": 131,
+          "detail": "SCAN a USING INDEX idx_actresses_scraped_status"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT scraped_status AS status, COUNT(*) AS n FROM videos GROUP BY scraped_status",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 6,
+          "parent": 0,
+          "notused": 138,
+          "detail": "SCAN videos USING COVERING INDEX idx_videos_scraped_status"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS total,\n              SUM(CASE WHEN gender = 'male' THEN 1 ELSE 0 END) AS male,\n              SUM(CASE WHEN gender IS NULL OR gender = 'female' THEN 1 ELSE 0 END) AS female,\n              SUM(\n                CASE\n                  WHEN (gender IS NULL OR gender = 'female') AND scraped_status = 1 THEN 1\n                  ELSE 0\n                END\n              ) AS scraped,\n              SUM(\n                CASE\n                  WHEN (gender IS NULL OR gender = 'female') AND scraped_status = 2 THEN 1\n                  ELSE 0\n                END\n              ) AS failed,\n              SUM(\n                CASE\n                  WHEN (gender IS NULL OR gender = 'female') AND scraped_status = 0 THEN 1\n                  ELSE 0\n                END\n              ) AS unscraped\n       FROM actresses",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 123,
+          "detail": "SCAN actresses"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS n FROM playlists",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN playlists USING COVERING INDEX idx_playlists_created_at"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS n FROM tags",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN tags"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS n FROM actress_gallery_assets",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN actress_gallery_assets USING COVERING INDEX idx_actress_gallery_assets_actress_id"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT\n         (SELECT COUNT(*) FROM directors) AS director,\n         (SELECT COUNT(*) FROM organization_roles WHERE role = 'maker') AS maker,\n         (SELECT COUNT(*) FROM organization_roles WHERE role = 'publisher') AS publisher,\n         (SELECT COUNT(*) FROM series) AS series",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 1,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN CONSTANT ROW"
+        },
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 10,
+          "parent": 4,
+          "notused": 0,
+          "detail": "SCAN directors USING COVERING INDEX idx_directors_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 56,
+          "detail": "SEARCH organization_roles USING COVERING INDEX idx_organization_roles_role (role=?)"
+        },
+        {
+          "id": 35,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 40,
+          "parent": 35,
+          "notused": 56,
+          "detail": "SEARCH organization_roles USING COVERING INDEX idx_organization_roles_role (role=?)"
+        },
+        {
+          "id": 53,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 59,
+          "parent": 53,
+          "notused": 0,
+          "detail": "SCAN series USING COVERING INDEX idx_series_parent"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT library.id\n         FROM media_libraries library\n         JOIN media_library_configs config ON config.library_id = library.id\n         WHERE library.status = 'active'\n           AND config.include_in_home_discovery = 1\n         ORDER BY library.position, library.id",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SEARCH library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 8,
+          "parent": 0,
+          "notused": 16,
+          "detail": "SCAN config"
+        }
+      ]
+    },
+    {
+      "sql": "\n  SELECT\n    library.id,\n    library.name,\n    library.icon,\n    library.color,\n    library.position,\n    library.status,\n    library.is_default,\n    library.revision AS library_revision,\n    library.created_at,\n    library.updated_at,\n    config.auto_scan_enabled,\n    config.auto_scan_interval_minutes,\n    config.min_import_duration_minutes,\n    config.auto_merge_same_code_resources,\n    config.auto_import_local_nfo,\n    config.remove_resource_less_memberships,\n    config.default_video_scraper,\n    config.default_sort_by,\n    config.default_sort_dir,\n    config.include_in_home_discovery,\n    config.revision AS config_revision,\n    COUNT(root.id) AS root_count,\n    COALESCE(SUM(CASE WHEN root.state = 'active' THEN 1 ELSE 0 END), 0) AS active_root_count,\n    COALESCE(SUM(CASE WHEN root.state = 'pending_removal' THEN 1 ELSE 0 END), 0)\n      AS pending_removal_root_count,\n    (SELECT COUNT(*)\n       FROM library_root_cleanup_jobs cleanup\n      WHERE cleanup.library_id = library.id\n        AND (\n          cleanup.state = 'pending' OR (\n            cleanup.state = 'failed'\n            AND cleanup.id LIKE @legacyCleanupJobIdPattern\n            AND cleanup.last_error = @legacyCleanupWaitingError\n          )\n        ))\n      AS pending_cleanup_job_count,\n    (SELECT COUNT(*)\n       FROM pending_scan_groups pending_group\n      WHERE pending_group.library_id = library.id) +\n    (SELECT COUNT(*)\n       FROM pending_resource_identities pending_identity\n      WHERE pending_identity.library_id = library.id)\n      AS pending_scan_group_count,\n    COALESCE(SUM(CASE WHEN root.state = 'disabled' THEN 1 ELSE 0 END), 0)\n      AS disabled_root_count,\n    COALESCE(SUM(CASE WHEN root.state = 'archived' THEN 1 ELSE 0 END), 0)\n      AS archived_root_count\n  FROM media_libraries library\n  JOIN media_library_configs config ON config.library_id = library.id\n  LEFT JOIN media_library_roots root ON root.library_id = library.id\n\n       WHERE library.status = 'active'\n       GROUP BY library.id\n       ORDER BY library.position, library.id",
+      "params": [
+        {
+          "legacyCleanupJobIdPattern": "legacy-settings-cleanup:%",
+          "legacyCleanupWaitingError": "旧版待清理根目录当前不可用；连接恢复后将在下一次完整扫描中继续。"
+        }
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 10,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 15,
+          "parent": 0,
+          "notused": 16,
+          "detail": "SCAN config"
+        },
+        {
+          "id": 20,
+          "parent": 0,
+          "notused": 54,
+          "detail": "SEARCH root USING COVERING INDEX idx_media_library_roots_library_state_position (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 26,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 139,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 146,
+          "parent": 139,
+          "notused": 62,
+          "detail": "SEARCH cleanup USING INDEX idx_library_root_cleanup_jobs_library_state (library_id=?)"
+        },
+        {
+          "id": 169,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 174,
+          "parent": 169,
+          "notused": 54,
+          "detail": "SEARCH pending_group USING COVERING INDEX sqlite_autoindex_pending_scan_groups_1 (library_id=?)"
+        },
+        {
+          "id": 187,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 192,
+          "parent": 187,
+          "notused": 53,
+          "detail": "SEARCH pending_identity USING COVERING INDEX idx_pending_resource_identities_root (library_id=?)"
+        },
+        {
+          "id": 220,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "WITH membership_counts AS (\n         SELECT library_id, COUNT(*) AS membership_count\n         FROM library_video_memberships\n         WHERE library_id IN (1)\n         GROUP BY library_id\n       ), resource_counts AS (\n         SELECT library_id, COUNT(*) AS resource_count\n         FROM video_resources\n         WHERE library_id IN (1)\n         GROUP BY library_id\n       ), pending_group_counts AS (\n         SELECT library_id, COUNT(*) AS pending_scan_group_count FROM (\n           SELECT library_id FROM pending_scan_groups WHERE library_id IN (1)\n           UNION ALL\n           SELECT library_id FROM pending_resource_identities WHERE library_id IN (1)\n         )\n         GROUP BY library_id\n       ), pending_resource_counts AS (\n         SELECT library_id, COUNT(*) AS pending_scan_resource_count FROM (\n           SELECT library_id FROM pending_scan_resources WHERE library_id IN (1)\n           UNION ALL\n           SELECT library_id FROM pending_resource_identities WHERE library_id IN (1)\n         )\n         GROUP BY library_id\n       ), unrecognized_counts AS (\n         SELECT library_id, COUNT(*) AS unrecognized_file_count\n         FROM library_unrecognized_files\n         WHERE library_id IN (1)\n         GROUP BY library_id\n       )\n       SELECT\n         library.id AS library_id,\n         COALESCE(membership.membership_count, 0) AS membership_count,\n         COALESCE(resource.resource_count, 0) AS resource_count,\n         COALESCE(pending_group.pending_scan_group_count, 0) AS pending_scan_group_count,\n         COALESCE(pending_resource.pending_scan_resource_count, 0)\n           AS pending_scan_resource_count,\n         COALESCE(unrecognized.unrecognized_file_count, 0) AS unrecognized_file_count,\n         scan_state.last_status AS last_scan_status,\n         scan_state.last_started_at AS last_scan_started_at,\n         scan_state.last_finished_at AS last_scan_finished_at,\n         scan_state.last_successful_at AS last_successful_scan_at,\n         scan_state.last_summary_json AS last_scan_summary_json\n       FROM media_libraries library\n       LEFT JOIN membership_counts membership ON membership.library_id = library.id\n       LEFT JOIN resource_counts resource ON resource.library_id = library.id\n       LEFT JOIN pending_group_counts pending_group ON pending_group.library_id = library.id\n       LEFT JOIN pending_resource_counts pending_resource\n         ON pending_resource.library_id = library.id\n       LEFT JOIN unrecognized_counts unrecognized ON unrecognized.library_id = library.id\n       LEFT JOIN media_library_scan_state scan_state ON scan_state.library_id = library.id\n       WHERE library.id IN (1)",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE membership_counts"
+        },
+        {
+          "id": 10,
+          "parent": 3,
+          "notused": 141,
+          "detail": "SEARCH library_video_memberships USING COVERING INDEX sqlite_autoindex_library_video_memberships_1 (library_id=?)"
+        },
+        {
+          "id": 45,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE resource_counts"
+        },
+        {
+          "id": 52,
+          "parent": 45,
+          "notused": 141,
+          "detail": "SEARCH video_resources USING COVERING INDEX idx_video_resources_library_video (library_id=?)"
+        },
+        {
+          "id": 87,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE pending_group_counts"
+        },
+        {
+          "id": 89,
+          "parent": 87,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 90,
+          "parent": 89,
+          "notused": 0,
+          "detail": "COMPOUND QUERY"
+        },
+        {
+          "id": 91,
+          "parent": 90,
+          "notused": 0,
+          "detail": "LEFT-MOST SUBQUERY"
+        },
+        {
+          "id": 93,
+          "parent": 91,
+          "notused": 54,
+          "detail": "SEARCH pending_scan_groups USING COVERING INDEX sqlite_autoindex_pending_scan_groups_1 (library_id=?)"
+        },
+        {
+          "id": 100,
+          "parent": 90,
+          "notused": 0,
+          "detail": "UNION ALL"
+        },
+        {
+          "id": 102,
+          "parent": 100,
+          "notused": 53,
+          "detail": "SEARCH pending_resource_identities USING COVERING INDEX idx_pending_resource_identities_root (library_id=?)"
+        },
+        {
+          "id": 115,
+          "parent": 87,
+          "notused": 59,
+          "detail": "SCAN (subquery-4)"
+        },
+        {
+          "id": 118,
+          "parent": 87,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 157,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE pending_resource_counts"
+        },
+        {
+          "id": 159,
+          "parent": 157,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-7)"
+        },
+        {
+          "id": 160,
+          "parent": 159,
+          "notused": 0,
+          "detail": "COMPOUND QUERY"
+        },
+        {
+          "id": 161,
+          "parent": 160,
+          "notused": 0,
+          "detail": "LEFT-MOST SUBQUERY"
+        },
+        {
+          "id": 163,
+          "parent": 161,
+          "notused": 52,
+          "detail": "SEARCH pending_scan_resources USING COVERING INDEX idx_pending_scan_resources_root (library_id=?)"
+        },
+        {
+          "id": 170,
+          "parent": 160,
+          "notused": 0,
+          "detail": "UNION ALL"
+        },
+        {
+          "id": 172,
+          "parent": 170,
+          "notused": 53,
+          "detail": "SEARCH pending_resource_identities USING COVERING INDEX idx_pending_resource_identities_root (library_id=?)"
+        },
+        {
+          "id": 185,
+          "parent": 157,
+          "notused": 59,
+          "detail": "SCAN (subquery-7)"
+        },
+        {
+          "id": 188,
+          "parent": 157,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 227,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE unrecognized_counts"
+        },
+        {
+          "id": 234,
+          "parent": 227,
+          "notused": 54,
+          "detail": "SEARCH library_unrecognized_files USING COVERING INDEX sqlite_autoindex_library_unrecognized_files_1 (library_id=?)"
+        },
+        {
+          "id": 269,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SCAN library USING COVERING INDEX idx_media_libraries_status_position"
+        },
+        {
+          "id": 275,
+          "parent": 0,
+          "notused": 82,
+          "detail": "SCAN membership LEFT-JOIN"
+        },
+        {
+          "id": 286,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON resource (library_id=?)"
+        },
+        {
+          "id": 296,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH resource USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 307,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON pending_group (library_id=?)"
+        },
+        {
+          "id": 317,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH pending_group USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 328,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON pending_resource (library_id=?)"
+        },
+        {
+          "id": 338,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH pending_resource USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 349,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON unrecognized (library_id=?)"
+        },
+        {
+          "id": 359,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH unrecognized USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 366,
+          "parent": 0,
+          "notused": 16,
+          "detail": "SCAN scan_state LEFT-JOIN"
+        }
+      ]
+    },
+    {
+      "sql": "WITH candidate AS (\n             SELECT membership.video_id,\n                    membership.library_id,\n                    membership.discovery_key,\n                    ROW_NUMBER() OVER (\n                      PARTITION BY membership.video_id\n                      ORDER BY membership.discovery_key ASC, membership.library_id ASC\n                    ) AS source_rank\n             FROM library_video_memberships membership\n             WHERE membership.library_id IN (1)\n               AND membership.is_hidden = 0\n               AND EXISTS (\n                 SELECT 1\n                 FROM video_resources resource\n                 LEFT JOIN media_library_roots resource_root\n                   ON resource_root.id = resource.root_id\n                  AND resource_root.library_id = resource.library_id\n                 WHERE resource.library_id = membership.library_id\n                   AND resource.video_id = membership.video_id\n                   AND (\n                     (resource.root_id IS NULL AND resource.source_identity IS NULL)\n                     OR (\n                       resource.root_id IS NOT NULL\n                       AND resource.source_identity IS NOT NULL\n                       AND resource_root.state = 'active'\n                     )\n                   )\n               )\n           )\n           SELECT video_id, library_id, discovery_key\n           FROM candidate\n           WHERE source_rank = 1 AND discovery_key >= ?\n           ORDER BY discovery_key ASC, video_id ASC\n           LIMIT ?",
+      "params": [
+        223978102,
+        12
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE candidate"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 9,
+          "parent": 5,
+          "notused": 146,
+          "detail": "SEARCH membership USING INDEX sqlite_autoindex_library_video_memberships_1 (library_id=?)"
+        },
+        {
+          "id": 17,
+          "parent": 5,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 23,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 31,
+          "parent": 17,
+          "notused": 45,
+          "detail": "SEARCH resource_root USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN"
+        },
+        {
+          "id": 72,
+          "parent": 2,
+          "notused": 144,
+          "detail": "SCAN (subquery-4)"
+        },
+        {
+          "id": 124,
+          "parent": 0,
+          "notused": 144,
+          "detail": "SCAN candidate"
+        },
+        {
+          "id": 142,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "WITH requested(video_id, library_id, position) AS (VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?))\n           SELECT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT resource.kind\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id\n       AND resource.is_primary = 1\n     ORDER BY resource.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT resource.kind AS resource_kind,\n              MAX(resource.is_primary) AS has_primary,\n              MIN(resource.add_time) AS first_added,\n              MIN(resource.id) AS first_id\n       FROM video_resources resource\n       WHERE resource.video_id = v.id\n         AND resource.library_id = scope_m.preferred_library_id\n       GROUP BY resource.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv,\n    scope_m.preferred_library_id,\n    scope_m.membership_added_at,\n    COALESCE((\n      SELECT json_group_array(json_object(\n        'libraryId', badge.library_id,\n        'name', badge.name,\n        'icon', badge.icon,\n        'color', badge.color\n      ))\n      FROM (\n        SELECT membership.library_id, library.name, library.icon, library.color\n        FROM library_video_memberships membership\n        JOIN media_libraries library ON library.id = membership.library_id\n        WHERE membership.video_id = v.id AND library.status = 'active'\n        ORDER BY library.position ASC, library.id ASC\n      ) badge\n    ), '[]') AS libraries_json\n           FROM requested\n           JOIN videos v ON v.id = requested.video_id\n           JOIN (\n             SELECT membership.video_id,\n                    membership.library_id AS preferred_library_id,\n                    membership.added_at AS membership_added_at\n             FROM library_video_memberships membership\n             JOIN media_libraries scope_library\n               ON scope_library.id = membership.library_id\n             WHERE membership.is_hidden = 0\n               AND scope_library.status = 'active'\n           ) scope_m\n             ON scope_m.video_id = requested.video_id\n            AND scope_m.preferred_library_id = requested.library_id\n           ORDER BY requested.position ASC",
+      "params": [
+        837,
+        1,
+        0,
+        2532,
+        1,
+        1,
+        4227,
+        1,
+        2,
+        5922,
+        1,
+        3,
+        7617,
+        1,
+        4,
+        9312,
+        1,
+        5,
+        1378,
+        1,
+        6,
+        3073,
+        1,
+        7,
+        4768,
+        1,
+        8,
+        6463,
+        1,
+        9,
+        8158,
+        1,
+        10,
+        9853,
+        1,
+        11
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE requested"
+        },
+        {
+          "id": 3,
+          "parent": 2,
+          "notused": 0,
+          "detail": "SCAN 12 CONSTANT ROWS"
+        },
+        {
+          "id": 60,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 64,
+          "parent": 0,
+          "notused": 28,
+          "detail": "SCAN requested"
+        },
+        {
+          "id": 67,
+          "parent": 0,
+          "notused": 42,
+          "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 81,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 103,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 13"
+        },
+        {
+          "id": 107,
+          "parent": 103,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 115,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 14"
+        },
+        {
+          "id": 119,
+          "parent": 115,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 127,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 15"
+        },
+        {
+          "id": 131,
+          "parent": 127,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 139,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 16"
+        },
+        {
+          "id": 143,
+          "parent": 139,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 151,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 17"
+        },
+        {
+          "id": 155,
+          "parent": 151,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 164,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 18"
+        },
+        {
+          "id": 170,
+          "parent": 164,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video (library_id=? AND video_id=? AND is_primary=?)"
+        },
+        {
+          "id": 184,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 19"
+        },
+        {
+          "id": 189,
+          "parent": 184,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 203,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 21"
+        },
+        {
+          "id": 206,
+          "parent": 203,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-20)"
+        },
+        {
+          "id": 213,
+          "parent": 206,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 256,
+          "parent": 206,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 269,
+          "parent": 203,
+          "notused": 82,
+          "detail": "SCAN (subquery-20)"
+        },
+        {
+          "id": 284,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 23"
+        },
+        {
+          "id": 287,
+          "parent": 284,
+          "notused": 0,
+          "detail": "CO-ROUTINE badge"
+        },
+        {
+          "id": 292,
+          "parent": 287,
+          "notused": 11,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 297,
+          "parent": 287,
+          "notused": 39,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 312,
+          "parent": 284,
+          "notused": 20,
+          "detail": "SCAN badge"
+        },
+        {
+          "id": 335,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS count FROM videos v WHERE EXISTS (SELECT 1 FROM library_video_memberships m\n  JOIN media_libraries l ON l.id = m.library_id\n  WHERE m.video_id = v.id AND m.is_hidden = 0 AND l.status = 'active')",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 138,
+          "detail": "SCAN v USING COVERING INDEX idx_videos_director_id"
+        },
+        {
+          "id": 6,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 12,
+          "parent": 6,
+          "notused": 11,
+          "detail": "SEARCH l USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 16,
+          "parent": 6,
+          "notused": 42,
+          "detail": "SEARCH m USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v.* FROM videos v WHERE EXISTS (SELECT 1 FROM library_video_memberships m\n  JOIN media_libraries l ON l.id = m.library_id\n  WHERE m.video_id = v.id AND m.is_hidden = 0 AND l.status = 'active') ORDER BY v.add_time DESC, v.id DESC LIMIT ? OFFSET ?",
+      "params": [
+        36,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 10,
+          "parent": 0,
+          "notused": 153,
+          "detail": "SCAN v USING INDEX idx_videos_add_time"
+        },
+        {
+          "id": 14,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 20,
+          "parent": 14,
+          "notused": 11,
+          "detail": "SEARCH l USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 24,
+          "parent": 14,
+          "notused": 42,
+          "detail": "SEARCH m USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS count FROM videos v WHERE EXISTS (SELECT 1 FROM library_video_memberships m\n  JOIN media_libraries l ON l.id = m.library_id\n  WHERE m.video_id = v.id AND m.is_hidden = 0 AND l.status = 'active') AND (v.code LIKE ? ESCAPE '\\' OR v.title LIKE ? ESCAPE '\\' OR EXISTS\n        (SELECT 1 FROM video_actress va JOIN actresses a ON a.id = va.actress_id WHERE va.video_id = v.id AND a.main_name LIKE ? ESCAPE '\\'))",
+      "params": [
+        "%TEST-001234%",
+        "%TEST-001234%",
+        "%TEST-001234%"
+      ],
+      "method": "get",
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 146,
+          "detail": "SCAN v"
+        },
+        {
+          "id": 6,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 12,
+          "parent": 6,
+          "notused": 11,
+          "detail": "SEARCH l USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 16,
+          "parent": 6,
+          "notused": 42,
+          "detail": "SEARCH m USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 37,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 42,
+          "parent": 37,
+          "notused": 43,
+          "detail": "SEARCH va USING COVERING INDEX sqlite_autoindex_video_actress_1 (video_id=?)"
+        },
+        {
+          "id": 46,
+          "parent": 37,
+          "notused": 38,
+          "detail": "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v.* FROM videos v WHERE EXISTS (SELECT 1 FROM library_video_memberships m\n  JOIN media_libraries l ON l.id = m.library_id\n  WHERE m.video_id = v.id AND m.is_hidden = 0 AND l.status = 'active') AND (v.code LIKE ? ESCAPE '\\' OR v.title LIKE ? ESCAPE '\\' OR EXISTS\n        (SELECT 1 FROM video_actress va JOIN actresses a ON a.id = va.actress_id WHERE va.video_id = v.id AND a.main_name LIKE ? ESCAPE '\\')) ORDER BY v.add_time DESC, v.id DESC LIMIT ? OFFSET ?",
+      "params": [
+        "%TEST-001234%",
+        "%TEST-001234%",
+        "%TEST-001234%",
+        36,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 10,
+          "parent": 0,
+          "notused": 153,
+          "detail": "SCAN v USING INDEX idx_videos_add_time"
+        },
+        {
+          "id": 14,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 20,
+          "parent": 14,
+          "notused": 11,
+          "detail": "SEARCH l USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 24,
+          "parent": 14,
+          "notused": 42,
+          "detail": "SEARCH m USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 45,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 50,
+          "parent": 45,
+          "notused": 43,
+          "detail": "SEARCH va USING COVERING INDEX sqlite_autoindex_video_actress_1 (video_id=?)"
+        },
+        {
+          "id": 54,
+          "parent": 45,
+          "notused": 38,
+          "detail": "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT l.id, l.name, COUNT(m.video_id) AS count FROM media_libraries l\n        LEFT JOIN library_video_memberships m ON m.library_id = l.id AND m.is_hidden = 0\n        WHERE l.status = 'active' GROUP BY l.id ORDER BY l.position, l.id",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 9,
+          "parent": 0,
+          "notused": 11,
+          "detail": "SEARCH l USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 14,
+          "parent": 0,
+          "notused": 143,
+          "detail": "SEARCH m USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?) LEFT-JOIN"
+        },
+        {
+          "id": 21,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 68,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT p.id, p.name, COUNT(v.id) AS count FROM playlists p\n        JOIN playlist_video pv ON pv.playlist_id = p.id JOIN videos v ON v.id = pv.video_id\n        WHERE EXISTS (SELECT 1 FROM library_video_memberships m\n  JOIN media_libraries l ON l.id = m.library_id\n  WHERE m.video_id = v.id AND m.is_hidden = 0 AND l.status = 'active') GROUP BY p.id ORDER BY p.name, p.id",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 9,
+          "parent": 0,
+          "notused": 14,
+          "detail": "SCAN p"
+        },
+        {
+          "id": 11,
+          "parent": 0,
+          "notused": 138,
+          "detail": "SCAN v USING COVERING INDEX idx_videos_director_id"
+        },
+        {
+          "id": 14,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 20,
+          "parent": 14,
+          "notused": 11,
+          "detail": "SEARCH l USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 24,
+          "parent": 14,
+          "notused": 42,
+          "detail": "SEARCH m USING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 0,
+          "notused": 39,
+          "detail": "SEARCH pv USING COVERING INDEX sqlite_autoindex_playlist_video_1 (playlist_id=? AND video_id=?)"
+        },
+        {
+          "id": 74,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM playlists WHERE id = ?",
+      "params": [
+        1
+      ],
+      "method": "get",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 33,
+          "detail": "SEARCH playlists USING INTEGER PRIMARY KEY (rowid=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT vr.kind\n     FROM video_resources vr\n     WHERE vr.video_id = v.id AND vr.is_primary = 1\n     ORDER BY vr.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources vr\n     WHERE vr.video_id = v.id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT vr.kind AS resource_kind,\n              MAX(vr.is_primary) AS has_primary,\n              MIN(vr.add_time) AS first_added,\n              MIN(vr.id) AS first_id\n       FROM video_resources vr\n       WHERE vr.video_id = v.id\n       GROUP BY vr.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv\n       FROM playlist_video pv\n       JOIN videos v ON v.id = pv.video_id\n       WHERE pv.playlist_id = ?\n       ORDER BY pv.added_at DESC,\n          pv.position DESC,\n          pv.video_id DESC",
+      "params": [
+        1
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 5,
+          "parent": 0,
+          "notused": 143,
+          "detail": "SEARCH pv USING INDEX sqlite_autoindex_playlist_video_1 (playlist_id=?)"
+        },
+        {
+          "id": 12,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 34,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 38,
+          "parent": 34,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 46,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 50,
+          "parent": 46,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 58,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 62,
+          "parent": 58,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 70,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 74,
+          "parent": 70,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 82,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 86,
+          "parent": 82,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 95,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 101,
+          "parent": 95,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 114,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 119,
+          "parent": 114,
+          "notused": 39,
+          "detail": "SEARCH vr USING COVERING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 131,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 134,
+          "parent": 131,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 142,
+          "parent": 134,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 147,
+          "parent": 134,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 195,
+          "parent": 134,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 208,
+          "parent": 131,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 226,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT label, url, position FROM playlist_links\n       WHERE playlist_id = ?\n       ORDER BY position, id",
+      "params": [
+        1
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 61,
+          "detail": "SEARCH playlist_links USING INDEX idx_playlist_links_playlist (playlist_id=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS c FROM videos v  ",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN videos USING COVERING INDEX idx_videos_director_id"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT vr.kind\n     FROM video_resources vr\n     WHERE vr.video_id = v.id AND vr.is_primary = 1\n     ORDER BY vr.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources vr\n     WHERE vr.video_id = v.id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT vr.kind AS resource_kind,\n              MAX(vr.is_primary) AS has_primary,\n              MIN(vr.add_time) AS first_added,\n              MIN(vr.id) AS first_id\n       FROM video_resources vr\n       WHERE vr.video_id = v.id\n       GROUP BY vr.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv FROM videos v  \n       ORDER BY v.add_time DESC\n       LIMIT ? OFFSET ?",
+      "params": [
+        60,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 10,
+          "parent": 0,
+          "notused": 154,
+          "detail": "SCAN v USING INDEX idx_videos_add_time"
+        },
+        {
+          "id": 33,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 37,
+          "parent": 33,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 45,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 49,
+          "parent": 45,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 57,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 61,
+          "parent": 57,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 69,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 73,
+          "parent": 69,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 81,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 85,
+          "parent": 81,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 94,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 100,
+          "parent": 94,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 113,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 118,
+          "parent": 113,
+          "notused": 39,
+          "detail": "SEARCH vr USING COVERING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 130,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 133,
+          "parent": 130,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 141,
+          "parent": 133,
+          "notused": 42,
+          "detail": "SEARCH vr USING INDEX idx_video_resources_video_id (video_id=?)"
+        },
+        {
+          "id": 146,
+          "parent": 133,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 194,
+          "parent": 133,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 207,
+          "parent": 130,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        }
+      ]
+    },
+    {
+      "sql": "WITH membership_counts AS (\n         SELECT library_id, COUNT(*) AS membership_count\n         FROM library_video_memberships\n         WHERE library_id IN (1,2)\n         GROUP BY library_id\n       ), resource_counts AS (\n         SELECT library_id, COUNT(*) AS resource_count\n         FROM video_resources\n         WHERE library_id IN (1,2)\n         GROUP BY library_id\n       ), pending_group_counts AS (\n         SELECT library_id, COUNT(*) AS pending_scan_group_count FROM (\n           SELECT library_id FROM pending_scan_groups WHERE library_id IN (1,2)\n           UNION ALL\n           SELECT library_id FROM pending_resource_identities WHERE library_id IN (1,2)\n         )\n         GROUP BY library_id\n       ), pending_resource_counts AS (\n         SELECT library_id, COUNT(*) AS pending_scan_resource_count FROM (\n           SELECT library_id FROM pending_scan_resources WHERE library_id IN (1,2)\n           UNION ALL\n           SELECT library_id FROM pending_resource_identities WHERE library_id IN (1,2)\n         )\n         GROUP BY library_id\n       ), unrecognized_counts AS (\n         SELECT library_id, COUNT(*) AS unrecognized_file_count\n         FROM library_unrecognized_files\n         WHERE library_id IN (1,2)\n         GROUP BY library_id\n       )\n       SELECT\n         library.id AS library_id,\n         COALESCE(membership.membership_count, 0) AS membership_count,\n         COALESCE(resource.resource_count, 0) AS resource_count,\n         COALESCE(pending_group.pending_scan_group_count, 0) AS pending_scan_group_count,\n         COALESCE(pending_resource.pending_scan_resource_count, 0)\n           AS pending_scan_resource_count,\n         COALESCE(unrecognized.unrecognized_file_count, 0) AS unrecognized_file_count,\n         scan_state.last_status AS last_scan_status,\n         scan_state.last_started_at AS last_scan_started_at,\n         scan_state.last_finished_at AS last_scan_finished_at,\n         scan_state.last_successful_at AS last_successful_scan_at,\n         scan_state.last_summary_json AS last_scan_summary_json\n       FROM media_libraries library\n       LEFT JOIN membership_counts membership ON membership.library_id = library.id\n       LEFT JOIN resource_counts resource ON resource.library_id = library.id\n       LEFT JOIN pending_group_counts pending_group ON pending_group.library_id = library.id\n       LEFT JOIN pending_resource_counts pending_resource\n         ON pending_resource.library_id = library.id\n       LEFT JOIN unrecognized_counts unrecognized ON unrecognized.library_id = library.id\n       LEFT JOIN media_library_scan_state scan_state ON scan_state.library_id = library.id\n       WHERE library.id IN (1,2)",
+      "params": [],
+      "method": "all",
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE membership_counts"
+        },
+        {
+          "id": 10,
+          "parent": 3,
+          "notused": 146,
+          "detail": "SEARCH library_video_memberships USING COVERING INDEX sqlite_autoindex_library_video_memberships_1 (library_id=?)"
+        },
+        {
+          "id": 60,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE resource_counts"
+        },
+        {
+          "id": 67,
+          "parent": 60,
+          "notused": 146,
+          "detail": "SEARCH video_resources USING COVERING INDEX idx_video_resources_library_video (library_id=?)"
+        },
+        {
+          "id": 117,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE pending_group_counts"
+        },
+        {
+          "id": 119,
+          "parent": 117,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 120,
+          "parent": 119,
+          "notused": 0,
+          "detail": "COMPOUND QUERY"
+        },
+        {
+          "id": 121,
+          "parent": 120,
+          "notused": 0,
+          "detail": "LEFT-MOST SUBQUERY"
+        },
+        {
+          "id": 123,
+          "parent": 121,
+          "notused": 64,
+          "detail": "SEARCH pending_scan_groups USING COVERING INDEX sqlite_autoindex_pending_scan_groups_1 (library_id=?)"
+        },
+        {
+          "id": 145,
+          "parent": 120,
+          "notused": 0,
+          "detail": "UNION ALL"
+        },
+        {
+          "id": 147,
+          "parent": 145,
+          "notused": 63,
+          "detail": "SEARCH pending_resource_identities USING COVERING INDEX idx_pending_resource_identities_root (library_id=?)"
+        },
+        {
+          "id": 175,
+          "parent": 117,
+          "notused": 69,
+          "detail": "SCAN (subquery-4)"
+        },
+        {
+          "id": 178,
+          "parent": 117,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 217,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE pending_resource_counts"
+        },
+        {
+          "id": 219,
+          "parent": 217,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-7)"
+        },
+        {
+          "id": 220,
+          "parent": 219,
+          "notused": 0,
+          "detail": "COMPOUND QUERY"
+        },
+        {
+          "id": 221,
+          "parent": 220,
+          "notused": 0,
+          "detail": "LEFT-MOST SUBQUERY"
+        },
+        {
+          "id": 223,
+          "parent": 221,
+          "notused": 62,
+          "detail": "SEARCH pending_scan_resources USING COVERING INDEX idx_pending_scan_resources_root (library_id=?)"
+        },
+        {
+          "id": 245,
+          "parent": 220,
+          "notused": 0,
+          "detail": "UNION ALL"
+        },
+        {
+          "id": 247,
+          "parent": 245,
+          "notused": 63,
+          "detail": "SEARCH pending_resource_identities USING COVERING INDEX idx_pending_resource_identities_root (library_id=?)"
+        },
+        {
+          "id": 275,
+          "parent": 217,
+          "notused": 69,
+          "detail": "SCAN (subquery-7)"
+        },
+        {
+          "id": 278,
+          "parent": 217,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR GROUP BY"
+        },
+        {
+          "id": 317,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE unrecognized_counts"
+        },
+        {
+          "id": 324,
+          "parent": 317,
+          "notused": 64,
+          "detail": "SEARCH library_unrecognized_files USING COVERING INDEX sqlite_autoindex_library_unrecognized_files_1 (library_id=?)"
+        },
+        {
+          "id": 374,
+          "parent": 0,
+          "notused": 21,
+          "detail": "SCAN library USING COVERING INDEX idx_media_libraries_status_position"
+        },
+        {
+          "id": 383,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON membership (library_id=?)"
+        },
+        {
+          "id": 393,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH membership USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 404,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON resource (library_id=?)"
+        },
+        {
+          "id": 414,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH resource USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 425,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON pending_group (library_id=?)"
+        },
+        {
+          "id": 435,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH pending_group USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 446,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON pending_resource (library_id=?)"
+        },
+        {
+          "id": 456,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH pending_resource USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 467,
+          "parent": 0,
+          "notused": 0,
+          "detail": "BLOOM FILTER ON unrecognized (library_id=?)"
+        },
+        {
+          "id": 477,
+          "parent": 0,
+          "notused": 47,
+          "detail": "SEARCH unrecognized USING AUTOMATIC COVERING INDEX (library_id=?) LEFT-JOIN"
+        },
+        {
+          "id": 484,
+          "parent": 0,
+          "notused": 16,
+          "detail": "SCAN scan_state LEFT-JOIN"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(DISTINCT v.id) AS count FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active' AND scope_library.id IN (1,2)\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id ",
+      "params": [],
+      "method": "get",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 9,
+          "parent": 5,
+          "notused": 21,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 16,
+          "parent": 5,
+          "notused": 140,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_library_added (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 31,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 50,
+          "parent": 2,
+          "notused": 148,
+          "detail": "SCAN (subquery-4)"
+        },
+        {
+          "id": 100,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+        },
+        {
+          "id": 102,
+          "parent": 0,
+          "notused": 148,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 107,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT v.*,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.maker_organization_id) AS maker,\n    (SELECT o.main_name FROM organizations o WHERE o.id = v.publisher_organization_id) AS publisher,\n    (SELECT s.main_name FROM series s WHERE s.id = v.series_id) AS series,\n    (SELECT d.main_name FROM directors d WHERE d.id = v.director_id) AS director,\n    EXISTS (\n      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id\n    ) AS has_pending_scrape,\n    (SELECT resource.kind\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id\n       AND resource.is_primary = 1\n     ORDER BY resource.id ASC\n     LIMIT 1) AS primary_resource_kind,\n    (SELECT COUNT(*)\n     FROM video_resources resource\n     WHERE resource.video_id = v.id\n       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,\n    (SELECT group_concat(resource_kind, ',')\n     FROM (\n       SELECT resource.kind AS resource_kind,\n              MAX(resource.is_primary) AS has_primary,\n              MIN(resource.add_time) AS first_added,\n              MIN(resource.id) AS first_id\n       FROM video_resources resource\n       WHERE resource.video_id = v.id\n         AND resource.library_id = scope_m.preferred_library_id\n       GROUP BY resource.kind\n       ORDER BY has_primary DESC, first_added ASC, first_id ASC\n     )) AS resource_kinds_csv,\n    scope_m.preferred_library_id,\n    scope_m.membership_added_at,\n    COALESCE((\n      SELECT json_group_array(json_object(\n        'libraryId', badge.library_id,\n        'name', badge.name,\n        'icon', badge.icon,\n        'color', badge.color\n      ))\n      FROM (\n        SELECT membership.library_id, library.name, library.icon, library.color\n        FROM library_video_memberships membership\n        JOIN media_libraries library ON library.id = membership.library_id\n        WHERE membership.video_id = v.id AND library.status = 'active'\n        ORDER BY library.position ASC, library.id ASC\n      ) badge\n    ), '[]') AS libraries_json\n           FROM videos v JOIN (\n      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at\n      FROM (\n        SELECT\n          membership.video_id,\n          membership.library_id,\n          membership.added_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY membership.video_id\n            ORDER BY membership.added_at DESC, membership.library_id ASC\n          ) AS row_number\n        FROM library_video_memberships membership\n        JOIN media_libraries scope_library ON scope_library.id = membership.library_id\n        WHERE membership.is_hidden = 0 AND scope_library.status = 'active' AND scope_library.id IN (1,2)\n      ) ranked_membership\n      WHERE row_number = 1\n    ) scope_m ON scope_m.video_id = v.id \n           ORDER BY scope_m.membership_added_at DESC, v.id DESC\n           LIMIT ? OFFSET ?",
+      "params": [
+        12,
+        0
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE ranked_membership"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-15)"
+        },
+        {
+          "id": 9,
+          "parent": 5,
+          "notused": 21,
+          "detail": "SEARCH scope_library USING COVERING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 16,
+          "parent": 5,
+          "notused": 140,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_library_added (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 31,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 50,
+          "parent": 2,
+          "notused": 148,
+          "detail": "SCAN (subquery-15)"
+        },
+        {
+          "id": 107,
+          "parent": 0,
+          "notused": 148,
+          "detail": "SCAN ranked_membership"
+        },
+        {
+          "id": 112,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH v USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 134,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 138,
+          "parent": 134,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 146,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 150,
+          "parent": 146,
+          "notused": 33,
+          "detail": "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 158,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 162,
+          "parent": 158,
+          "notused": 33,
+          "detail": "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 170,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 174,
+          "parent": 170,
+          "notused": 33,
+          "detail": "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 182,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 186,
+          "parent": 182,
+          "notused": 39,
+          "detail": "SEARCH pvs USING COVERING INDEX sqlite_autoindex_pending_video_scrapes_1 (video_id=?)"
+        },
+        {
+          "id": 195,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 6"
+        },
+        {
+          "id": 201,
+          "parent": 195,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video (library_id=? AND video_id=? AND is_primary=?)"
+        },
+        {
+          "id": 216,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 7"
+        },
+        {
+          "id": 221,
+          "parent": 216,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 236,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 9"
+        },
+        {
+          "id": 239,
+          "parent": 236,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-8)"
+        },
+        {
+          "id": 246,
+          "parent": 239,
+          "notused": 39,
+          "detail": "SEARCH resource USING COVERING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 290,
+          "parent": 239,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 303,
+          "parent": 236,
+          "notused": 82,
+          "detail": "SCAN (subquery-8)"
+        },
+        {
+          "id": 318,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 11"
+        },
+        {
+          "id": 321,
+          "parent": 318,
+          "notused": 0,
+          "detail": "CO-ROUTINE badge"
+        },
+        {
+          "id": 326,
+          "parent": 321,
+          "notused": 21,
+          "detail": "SEARCH library USING INDEX idx_media_libraries_status_position (status=?)"
+        },
+        {
+          "id": 331,
+          "parent": 321,
+          "notused": 39,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_video (video_id=? AND library_id=?)"
+        },
+        {
+          "id": 346,
+          "parent": 318,
+          "notused": 72,
+          "detail": "SCAN badge"
+        },
+        {
+          "id": 376,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR DISTINCT"
+        },
+        {
+          "id": 377,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "sql": "WITH candidate AS (\n             SELECT membership.video_id,\n                    membership.library_id,\n                    membership.discovery_key,\n                    ROW_NUMBER() OVER (\n                      PARTITION BY membership.video_id\n                      ORDER BY membership.discovery_key ASC, membership.library_id ASC\n                    ) AS source_rank\n             FROM library_video_memberships membership\n             WHERE membership.library_id IN (1,2)\n               AND membership.is_hidden = 0\n               AND EXISTS (\n                 SELECT 1\n                 FROM video_resources resource\n                 LEFT JOIN media_library_roots resource_root\n                   ON resource_root.id = resource.root_id\n                  AND resource_root.library_id = resource.library_id\n                 WHERE resource.library_id = membership.library_id\n                   AND resource.video_id = membership.video_id\n                   AND (\n                     (resource.root_id IS NULL AND resource.source_identity IS NULL)\n                     OR (\n                       resource.root_id IS NOT NULL\n                       AND resource.source_identity IS NOT NULL\n                       AND resource_root.state = 'active'\n                     )\n                   )\n               )\n           )\n           SELECT video_id, library_id, discovery_key\n           FROM candidate\n           WHERE source_rank = 1 AND discovery_key >= ?\n           ORDER BY discovery_key ASC, video_id ASC\n           LIMIT ?",
+      "params": [
+        223978102,
+        12
+      ],
+      "method": "all",
+      "plan": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE candidate"
+        },
+        {
+          "id": 5,
+          "parent": 2,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-4)"
+        },
+        {
+          "id": 8,
+          "parent": 5,
+          "notused": 148,
+          "detail": "SEARCH membership USING COVERING INDEX idx_library_video_memberships_discovery (library_id=? AND is_hidden=?)"
+        },
+        {
+          "id": 28,
+          "parent": 5,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 34,
+          "parent": 28,
+          "notused": 42,
+          "detail": "SEARCH resource USING INDEX idx_video_resources_library_video_kind (library_id=? AND video_id=?)"
+        },
+        {
+          "id": 41,
+          "parent": 28,
+          "notused": 45,
+          "detail": "SEARCH resource_root USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN"
+        },
+        {
+          "id": 77,
+          "parent": 5,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 96,
+          "parent": 2,
+          "notused": 148,
+          "detail": "SCAN (subquery-4)"
+        },
+        {
+          "id": 148,
+          "parent": 0,
+          "notused": 148,
+          "detail": "SCAN candidate"
+        },
+        {
+          "id": 166,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    }
+  ]
+}

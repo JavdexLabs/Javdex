@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ck-audit-source.patch": "4135cbaa424630341de94f65126dfd91a139825840c480d775cfa8f7b3536c37",
+    "batch-ck-build.log": "c2b2367791b436a511208f460b8bda7dc24c10395947c39f25b9feda3c30a7e3",
+    "batch-ck-full.log": "d533648b99e9aa594ab05bb820bb5069c390ba986ad00c39149132fef3da17d1",
+    "batch-ck-review.md": "00b46346a957762db93c77ee9abcb6c4f90a1525d731bc657fdcad6986e30f25",
+    "batch-ck-target.log": "a1035964932171b0f31d24ab30bd83237187f53f19057f72cad866173188460b"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "68 focused; full2515pass1skip0fail; build terminal0.",
+    "Legacy source selection centralized in production; entries-format dual read not yet implemented; full15/42 incomplete."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ay-avatar-count.patch": "0e4fee0ac9c139bffac35f465f67580912ff6e1c71f37d2505a5322537e798ce",
+    "batch-ay-build.log": "bfc86d2aa5ca9f44d5d5d7c5d82bedbe0a0573c4d450d48ff45a0b2cb364b9a6",
+    "batch-ay-full.log": "b0b323a482ee0c5718d82cf1c3c38111117c135fdb7d42e64629bd31f8d8f453",
+    "batch-ay-provider-red.log": "0d05be189ec860ebe358b31da928116b85d9df5c111f0248bd781c3fa02d6d9a",
+    "batch-ay-review.md": "cd463c82cd98d61d0f1373baa1fedb465b666acd63228c468f58bfafa90bdbb2",
+    "batch-ay-target.log": "2c32dd6468712f7510cf4e804c7543b339d60473726a16e2e13216adfdd6bf15"
+  },
+  "notes": [
+    "Cumulative selected diff vs HEAD plus full new tests; depends on previous batches.",
+    "31focused; full2270pass1skip0fail; build passed.",
+    "Provider old-code replay fails on full list; final scalar path passes. No benchmark timing claims.",
+    "COUNT still scans paths; target enumeration remains open; full15/42 scope remains active."
+  ]
+}

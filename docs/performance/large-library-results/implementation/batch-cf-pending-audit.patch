@@ -1,0 +1,724 @@
+diff --git a/src/main/db/pendingScanAuditRepo.ts b/src/main/db/pendingScanAuditRepo.ts
+new file mode 100644
+index 0000000..9d6a4e2
+--- /dev/null
++++ b/src/main/db/pendingScanAuditRepo.ts
+@@ -0,0 +1,31 @@
++import type { LibraryScanPendingGroupAuditEntry } from '@shared/libraryTypes'
++import { getDb } from './database'
++
++/** Only hydrate audit summary fields for referenced groups; stream their paths for exact Set matching. */
++export function readPendingScanAuditEntries(
++  libraryId: number,
++  groupIds: ReadonlySet<number>,
++  pendingPaths: ReadonlySet<string>
++): LibraryScanPendingGroupAuditEntry[] {
++  if (!Number.isSafeInteger(libraryId) || libraryId <= 0) throw new Error('Invalid scan audit library')
++  const db = getDb()
++  return db.transaction(() => {
++    if (!db.prepare('SELECT 1 FROM media_libraries WHERE id=?').get(libraryId)) throw new Error('媒体库不存在。')
++    if (!groupIds.size) return []
++    // IDs drive primary-key lookups, then SQLite orders only the selected groups.
++    const groups = db.prepare(`SELECT g.id,g.normalized_code FROM json_each(?) selected
++      CROSS JOIN pending_scan_groups g ON g.id=selected.value
++      WHERE g.library_id=? ORDER BY g.updated_at,g.id`)
++    const resources = db.prepare('SELECT file_path FROM pending_scan_resources WHERE library_id=? AND group_id=?')
++    const result: LibraryScanPendingGroupAuditEntry[] = []
++    for (const value of groups.iterate(JSON.stringify([...groupIds]), libraryId)) {
++      const group = value as { id: number; normalized_code: string }
++      let resourceCount = 0
++      for (const entry of resources.iterate(libraryId, group.id)) {
++        if (pendingPaths.has((entry as { file_path: string }).file_path)) resourceCount++
++      }
++      result.push({ groupId: group.id, normalizedCode: group.normalized_code, resourceCount })
++    }
++    return result
++  })()
++}
+diff --git a/src/main/db/pendingScanAuditRepo.test.ts b/src/main/db/pendingScanAuditRepo.test.ts
+new file mode 100644
+index 0000000..4834f50
+--- /dev/null
++++ b/src/main/db/pendingScanAuditRepo.test.ts
+@@ -0,0 +1,81 @@
++import {beforeEach,afterEach,it} from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import {initDatabaseAtPath,closeDatabase,getDb} from './database'
++import {createMediaLibrary} from './mediaLibraryRepo'
++import {listPendingScanGroups} from './pendingScanRepo'
++import {readPendingScanAuditEntries} from './pendingScanAuditRepo'
++let root:string,filename:string,libraryId:number,otherLibraryId:number,paths:Set<string>
++beforeEach(()=>{
++ root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-audit-'));filename=path.join(root,'db.sqlite');const db=initDatabaseAtPath(filename)
++ const media=path.join(root,'media'),other=path.join(root,'other');fs.mkdirSync(media);fs.mkdirSync(other)
++ const lib=createMediaLibrary({name:'Audit',roots:[{path:media}]}),otherLib=createMediaLibrary({name:'Other',roots:[{path:other}]});libraryId=lib.id;otherLibraryId=otherLib.id
++ const group=db.prepare('INSERT INTO pending_scan_groups(id,library_id,normalized_code,updated_at) VALUES(?,?,?,?)')
++ const resource=db.prepare('INSERT INTO pending_scan_resources(library_id,group_id,root_id,file_path,normalized_path,target_kind,target_locator,display_name) VALUES(?,?,?,?,?,?,?,?)')
++ db.transaction(()=>{
++  for(let i=1;i<=25;i++){
++   group.run(i,libraryId,`CODE-${i}`,i%2?'b':'a')
++   for(let j=0;j<5;j++){const filePath=path.join(media,`${i}-${j}.mp4`);resource.run(libraryId,i,lib.roots[0].id,filePath,`${i}-${j}`,'web','https://example.invalid/'+ 'x'.repeat(4096),'y'.repeat(4096))}
++  }
++  group.run(30,libraryId,'EMPTY','a');group.run(50,otherLibraryId,'OTHER','0')
++  resource.run(otherLibraryId,50,otherLib.roots[0].id,path.join(other,'file.mp4'),'other','web','https://example.invalid','other')
++  resource.run(libraryId,2,lib.roots[0].id,path.join(media,'1-0.mp4'),'duplicate-display-path','web','https://example.invalid','duplicate')
++ })()
++ paths=new Set([path.join(media,'1-0.mp4'),path.join(media,'2-1.mp4'),path.join(media,'25-4.mp4'),path.join(media,'CASE.mp4')])
++})
++afterEach(()=>{closeDatabase();fs.rmSync(root,{recursive:true,force:true})})
++function oracle(ids:ReadonlySet<number>){return listPendingScanGroups(libraryId).filter(group=>ids.has(group.id)).map(group=>({groupId:group.id,normalizedCode:group.normalizedCode,resourceCount:group.resources.filter(resource=>paths.has(resource.filePath)).length}))}
++it('matches old group order and global exact path counts without hydrating unrelated groups or resource DTOs',()=>{
++ const ids=new Set([25,50,2,30,1,999]),expected=oracle(ids),db=getDb(),prepare=db.prepare.bind(db),statements:string[]=[],visited:number[]=[]
++ db.prepare=((sql:string)=>{
++  statements.push(sql);const statement=prepare(sql)
++  if(sql.startsWith('SELECT file_path FROM pending_scan_resources')){
++   const iterate=statement.iterate.bind(statement)
++   statement.iterate=((...args:unknown[])=>{visited.push(Number(args[1]));return iterate(...args)}) as typeof statement.iterate
++  }
++  return statement
++ }) as typeof db.prepare
++ try{
++  assert.deepEqual(readPendingScanAuditEntries(libraryId,ids,paths),expected)
++  assert.deepEqual(expected.map(item=>item.groupId),[2,30,1,25]);assert.equal(expected[0].resourceCount,2)
++  assert.deepEqual(visited,[2,30,1,25])
++  for(const sql of statements)assert.doesNotMatch(sql,/SELECT \*|target_locator|display_name|size_bytes/i)
++ }finally{db.prepare=prepare}
++})
++it('handles empty targets and empty paths while preserving zero-resource groups and library isolation',()=>{
++ assert.deepEqual(readPendingScanAuditEntries(libraryId,new Set(),paths),[])
++ assert.deepEqual(readPendingScanAuditEntries(libraryId,new Set([50]),paths),[])
++ assert.deepEqual(readPendingScanAuditEntries(libraryId,new Set([30,2]),new Set()),[{groupId:2,normalizedCode:'CODE-2',resourceCount:0},{groupId:30,normalizedCode:'EMPTY',resourceCount:0}])
++ assert.throws(()=>readPendingScanAuditEntries(0,new Set(),paths),/Invalid/)
++ assert.throws(()=>readPendingScanAuditEntries(999,new Set(),paths),/不存在/)
++})
++it('keeps selected group metadata and path counts in one snapshot across an external write',()=>{
++ const ids=new Set([1,2,25]),expected=oracle(ids),other=new Database(filename),has=paths.has.bind(paths);let changed=false
++ paths.has=(value:string)=>{if(!changed){changed=true;other.transaction(()=>{other.prepare('DELETE FROM pending_scan_resources WHERE library_id=?').run(libraryId);other.prepare("UPDATE pending_scan_groups SET normalized_code='CHANGED-'||id,updated_at='0' WHERE library_id=?").run(libraryId)})()}return has(value)}
++ try{assert.deepEqual(readPendingScanAuditEntries(libraryId,ids,paths),expected);assert.equal(changed,true);assert.notDeepEqual(readPendingScanAuditEntries(libraryId,ids,paths),expected)}finally{other.close();paths.has=has}
++})
++it('drives selected groups by primary key and resources by the scoped group index',()=>{
++ const db=getDb()
++ const groups=db.prepare(`EXPLAIN QUERY PLAN SELECT g.id,g.normalized_code FROM json_each(?) selected CROSS JOIN pending_scan_groups g ON g.id=selected.value WHERE g.library_id=? ORDER BY g.updated_at,g.id`).all('[1,2]',libraryId) as {detail:string}[]
++ assert.ok(groups.some(row=>/SEARCH g USING INTEGER PRIMARY KEY/.test(row.detail)),JSON.stringify(groups))
++ const resources=db.prepare('EXPLAIN QUERY PLAN SELECT file_path FROM pending_scan_resources WHERE library_id=? AND group_id=?').all(libraryId,1) as {detail:string}[]
++ assert.ok(resources.some(row=>/idx_pending_scan_resources_group/.test(row.detail)),JSON.stringify(resources))
++})
++
++it('releases the transaction and connection when resource statement preparation fails', () => {
++ const db = getDb(), prepare = db.prepare.bind(db)
++ db.prepare = ((sql: string) => {
++  if (sql.startsWith('SELECT file_path FROM pending_scan_resources')) throw new Error('injected prepare failure')
++  return prepare(sql)
++ }) as typeof db.prepare
++ try {
++  assert.throws(() => readPendingScanAuditEntries(libraryId, new Set([1]), paths), /injected prepare failure/)
++ } finally { db.prepare = prepare }
++ assert.equal(db.inTransaction, false)
++ db.transaction(() => { db.prepare("UPDATE pending_scan_groups SET normalized_code='RECOVERED' WHERE id=1").run() })()
++ assert.equal((db.prepare('SELECT normalized_code FROM pending_scan_groups WHERE id=1').get() as {normalized_code:string}).normalized_code, 'RECOVERED')
++ db.pragma('journal_mode = DELETE')
++})
+diff --git a/src/main/scanner/scanCoordinator.ts b/src/main/scanner/scanCoordinator.ts
+index 7c08dde..1d787fd 100644
+--- a/src/main/scanner/scanCoordinator.ts
++++ b/src/main/scanner/scanCoordinator.ts
+@@ -1,10 +1,9 @@
+ import fs from 'node:fs'
++import { createProgressPublisher } from '../services/progressPublisher'
+ import { randomUUID } from 'node:crypto'
+ import type {
+   LibraryScanAudit,
+   LibraryScanEvent,
+-  LibraryScanFileAuditEntry,
+-  LibraryScanPendingGroupAuditEntry,
+   LibraryScanResourceAuditEntry,
+   LibraryScanSummary,
+   LibraryScanTrigger,
+@@ -20,7 +19,7 @@ import type { Video, VideoResource } from '@shared/videoTypes'
+ import {
+   getVideoById,
+   getVideoResourceInLibrary,
+-  listSourceManagedVideoResourceRefs,
++  iterateSourceManagedVideoResourceRefs,
+   listVideoResources,
+   removeVideoResourceRecord,
+   setPrimaryVideoResource,
+@@ -41,7 +40,8 @@ import {
+   finishLibraryScanRun,
+   type LibraryUnrecognizedFileInput
+ } from '../db/libraryScanRepo'
+-import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { readPendingScanAuditEntries } from '../db/pendingScanAuditRepo'
+ import { reconcilePendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+ import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+ import {
+@@ -99,7 +99,7 @@ export interface ScanCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions
+   ) => Promise<ScanResult>
+-  listLocalResources: (libraryId: number) => LocalVideoResourceRef[]
++  listLocalResources: (libraryId: number) => Iterable<LocalVideoResourceRef>
+   getResourceById: (libraryId: number, resourceId: number) => VideoResource | null
+   getVideoById: (videoId: number) => Video | null
+   listResources: (libraryId: number, videoId: number) => VideoResource[]
+@@ -115,7 +115,7 @@ export interface ScanCoordinatorDependencies {
+   ) => PendingLibraryPathCleanupResult
+   runCleanupTransaction: <T>(operation: () => T) => T
+   removeResourceLessMemberships: (libraryId: number) => RemovedResourceLessMembership[]
+-  listPendingScanGroups: typeof listPendingScanGroups
++  readPendingScanAuditEntries: typeof readPendingScanAuditEntries
+   beginRun: typeof beginLibraryScanRun
+   finishRun: (input: FinishRunInput) => void
+   now: () => string
+@@ -200,6 +200,9 @@ export class ScanCoordinator {
+     let snapshot: MediaLibraryScanSnapshot | null = null
+     let selectedRoots: Readonly<MediaLibraryRoot>[] = []
+     let beganRun = false
++    const progressPublisher = createProgressPublisher<ScanProgress>((progress) => {
++      this.emit({ phase: 'progress', libraryId: request.libraryId, runId, trigger, progress })
++    })
+     const auditState: Omit<
+       LibraryScanAudit,
+       | 'schemaVersion'
+@@ -285,13 +288,7 @@ export class ScanCoordinator {
+         },
+         (progress) => {
+           request.onProgress?.(progress)
+-          this.emit({
+-            phase: 'progress',
+-            libraryId: request.libraryId,
+-            runId,
+-            trigger,
+-            progress
+-          })
++          progressPublisher.update(progress)
+         },
+         {
+           signal: controller.signal,
+@@ -410,16 +407,20 @@ export class ScanCoordinator {
+       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+       result.deletedVideos = cleanup.removedMemberships.length
+-      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+-      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
+-      auditState.deletedVideos.push(
+-        ...cleanup.removedMemberships.map((video) => ({
++      for (const resource of cleanup.missingResources.removedResources) {
++        auditState.removedResources.push(resource)
++      }
++      for (const resource of cleanup.missingResources.promotedResources) {
++        auditState.promotedResources.push(resource)
++      }
++      for (const video of cleanup.removedMemberships) {
++        auditState.deletedVideos.push({
+           videoId: video.videoId,
+           videoCode: video.videoCode,
+           videoTitle: video.videoTitle,
+-          reason: 'resource_less' as const
+-        }))
+-      )
++          reason: 'resource_less'
++        })
++      }
+       const status =
+         result.strmFailures.length + result.omittedStrmFailures > 0
+           ? 'completed_with_errors'
+@@ -460,6 +461,7 @@ export class ScanCoordinator {
+       }
+       throw new Error(errorSummary)
+     } finally {
++      progressPublisher.close()
+       if (this.activeRun?.controller === controller) this.activeRun = null
+       lease.release()
+       if (beganRun) {
+@@ -505,26 +507,16 @@ export class ScanCoordinator {
+     libraryId: number,
+     auditState: Pick<LibraryScanAudit, 'files' | 'pendingGroups'>
+   ): void {
+-    const auditPendingIds = new Set(
+-      auditState.files
+-        .filter(
+-          (entry): entry is Extract<LibraryScanFileAuditEntry, { outcome: 'pending' }> =>
+-            entry.outcome === 'pending' && entry.groupId != null
+-        )
+-        .map((entry) => entry.groupId as number)
+-    )
+-    auditState.pendingGroups = this.dependencies
+-      .listPendingScanGroups(libraryId)
+-      .filter((group) => auditPendingIds.has(group.id))
+-      .map((group): LibraryScanPendingGroupAuditEntry => ({
+-        groupId: group.id,
+-        normalizedCode: group.normalizedCode,
+-        resourceCount: group.resources.filter((resource) =>
+-          auditState.files.some(
+-            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+-          )
+-        ).length
+-      }))
++    const groupIds = new Set<number>()
++    const pendingPaths = new Set<string>()
++    for (const entry of auditState.files) {
++      if (entry.outcome !== 'pending') continue
++      pendingPaths.add(entry.filePath)
++      if (entry.groupId != null) groupIds.add(entry.groupId)
++    }
++    auditState.pendingGroups = groupIds.size === 0
++      ? []
++      : this.dependencies.readPendingScanAuditEntries(libraryId, groupIds, pendingPaths)
+   }
+ 
+   private emit(event: LibraryScanEvent): void {
+@@ -703,9 +695,10 @@ export class ScanCoordinator {
+         ref.locator,
+         root
+       )
+-      const remaining = this.dependencies
+-        .listResources(libraryId, ref.video_id)
+-        .filter((item) => item.id !== resource.id)
++      const remaining = resource.is_primary
++        ? this.dependencies.listResources(libraryId, ref.video_id)
++          .filter((item) => item.id !== resource.id)
++        : []
+       const removedAudit = this.resourceAuditEntry(resource, 'missing')
+       this.dependencies.removeResourceRecord(libraryId, resource.id)
+       removed += 1
+@@ -756,7 +749,7 @@ export function createScanCoordinator(
+     authorizeRootDeletionTarget:
+       dependencies.authorizeRootDeletionTarget ?? authorizeMediaLibraryRootDeletionTarget,
+     scanFolders: dependencies.scanFolders ?? scanFolders,
+-    listLocalResources: dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
++    listLocalResources: dependencies.listLocalResources ?? iterateSourceManagedVideoResourceRefs,
+     getResourceById: dependencies.getResourceById ?? getVideoResourceInLibrary,
+     getVideoById: dependencies.getVideoById ?? getVideoById,
+     listResources: dependencies.listResources ?? listVideoResources,
+@@ -776,7 +769,7 @@ export function createScanCoordinator(
+     runCleanupTransaction: dependencies.runCleanupTransaction ?? runCleanupTransaction,
+     removeResourceLessMemberships:
+       dependencies.removeResourceLessMemberships ?? removeResourceLessMemberships,
+-    listPendingScanGroups: dependencies.listPendingScanGroups ?? listPendingScanGroups,
++    readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? readPendingScanAuditEntries,
+     beginRun: dependencies.beginRun ?? beginLibraryScanRun,
+     finishRun: dependencies.finishRun ?? finishLibraryScanRun,
+     now: dependencies.now ?? (() => new Date().toISOString()),
+diff --git a/src/main/scanner/scanCoordinator.test.ts b/src/main/scanner/scanCoordinator.test.ts
+index 7a20de4..9ed9230 100644
+--- a/src/main/scanner/scanCoordinator.test.ts
++++ b/src/main/scanner/scanCoordinator.test.ts
+@@ -11,7 +11,7 @@ import type {
+ import type { Video, VideoResource } from '@shared/videoTypes'
+ import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
+ import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+-import { createScanCoordinator } from './scanCoordinator'
++import { createScanCoordinator, type ScanCoordinatorDependencies } from './scanCoordinator'
+ import type { ScanOptions, ScanProgressFn } from './scanner'
+ 
+ interface LegacyCoordinatorDependencies {
+@@ -24,7 +24,7 @@ interface LegacyCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions & { unavailableRoots?: string[] }
+   ) => Promise<ScanResult>
+-  listLocalResources?: () => Array<{ video_id: number; resource_id: number; locator: string }>
++  listLocalResources?: () => Iterable<{ video_id: number; resource_id: number; locator: string }>
+   getResourceById?: (resourceId: number) => VideoResource | null
+   getVideoById?: (videoId: number) => Video | null
+   listResources?: (videoId: number) => VideoResource[]
+@@ -55,6 +55,7 @@ interface LegacyCoordinatorDependencies {
+   deleteResourceLessVideos?: () => number
+   listResourceLessVideos?: () => Array<Pick<Video, 'id' | 'code' | 'title'>>
+   listPendingScanGroups?: () => PendingScanGroup[]
++  readPendingScanAuditEntries?: ScanCoordinatorDependencies['readPendingScanAuditEntries']
+   recordScanSummary?: (
+     summary: LibraryScanSummary,
+     unrecognizedFiles: string[] | undefined,
+@@ -155,11 +156,11 @@ function createTestScanCoordinator(
+       libraryId: request.libraryId,
+       runId: request.runId
+     }),
+-    listLocalResources: () =>
+-      (dependencies.listLocalResources?.() ?? []).map((resource) => ({
+-        library_id: 1,
+-        ...resource
+-      })),
++    listLocalResources: function* () {
++      for (const resource of dependencies.listLocalResources?.() ?? []) {
++        yield { library_id: 1, ...resource }
++      }
++    },
+     getResourceById: (_libraryId, resourceId) =>
+       dependencies.getResourceById?.(resourceId) ?? null,
+     getVideoById: (videoId) => dependencies.getVideoById?.(videoId) ?? null,
+@@ -218,7 +219,14 @@ function createTestScanCoordinator(
+         }
+       })
+     },
+-    listPendingScanGroups: () => dependencies.listPendingScanGroups?.() ?? [],
++    readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? ((_libraryId, groupIds, pendingPaths) =>
++      (dependencies.listPendingScanGroups?.() ?? [])
++        .filter(group => groupIds.has(group.id))
++        .map(group => ({
++          groupId: group.id,
++          normalizedCode: group.normalizedCode,
++          resourceCount: group.resources.filter(resource => pendingPaths.has(resource.filePath)).length
++        }))),
+     beginRun: () => undefined,
+     finishRun: (input) =>
+       dependencies.recordScanSummary?.(
+@@ -296,6 +304,44 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
+ }
+ 
+ describe('ScanCoordinator', () => {
++  it('coalesces display progress while preserving per-file callbacks and the final event', async () => {
++    const size = 300_382
++    const events: LibraryScanEvent[] = []
++    let callbacks = 0
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        for (let scanned = 1; scanned <= size; scanned++) {
++          onProgress?.({ scanned, imported: 0, currentFile: `/online/${scanned}.mp4` })
++        }
++        return { ...emptyScanResult(), scannedFiles: size }
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await coordinator.run({ onProgress: () => { callbacks++ } })
++    assert.equal(callbacks, size)
++    const progress = events.filter(event => event.phase === 'progress')
++    assert.ok(progress.length < size)
++    assert.equal(progress.at(-1)?.progress.scanned, size)
++    assert.equal(events.at(-1)?.phase, 'completed')
++    assert.equal(events.at(-2)?.phase, 'progress')
++  })
++
++  it('flushes pending progress before a failure without delaying the failure event', async () => {
++    const events: LibraryScanEvent[] = []
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        onProgress?.({ scanned: 1, imported: 0, currentFile: '/online/one.mp4' })
++        onProgress?.({ scanned: 2, imported: 0, currentFile: '/online/two.mp4' })
++        throw new Error('scan failed')
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await assert.rejects(coordinator.run(), /scan failed/)
++    assert.equal(events.filter(event => event.phase === 'progress').at(-1)?.progress.scanned, 2)
++    assert.equal(events.at(-1)?.phase, 'failed')
++    assert.equal(coordinator.running, false)
++  })
++
+   it('binds an offline-created root identity and refreshes the frozen snapshot before scanning', async () => {
+     let bindings = 0
+     let scanned = 0
+@@ -867,6 +913,89 @@ describe('ScanCoordinator', () => {
+     assert.equal(result.removed, 2)
+   })
+ 
++  it('removes many non-primary resources without reading sibling resource lists', async () => {
++    const count = 5000
++    let removed = 0, audited = 0
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: function* () {
++        for (let id = 1; id <= count; id++) {
++          yield { video_id: 1, resource_id: id, locator: `/online/${id}.mp4` }
++        }
++      },
++      getResourceById: id => resource({id, video_id:1, kind:'local', locator:`/online/${id}.mp4`, is_primary:0}),
++      getVideoById: () => ({id:1, code:'MANY', title:null}) as Video,
++      listResources: () => { throw new Error('non-primary removal must not load siblings') },
++      removeResourceRecord: () => { removed++ },
++      setPrimaryResource: () => assert.fail('non-primary removal must not promote a resource'),
++      inspectPath: () => 'missing',
++      recordScanSummary: (_summary, _files, audit) => { audited = audit.removedResources.length }
++    })
++    const result = await coordinator.run()
++    assert.equal(result.removed, count)
++    assert.equal(result.promoted, 0)
++    assert.equal(removed, count)
++    assert.equal(audited, count)
++  })
++
++  it('consumes cleanup references lazily and closes iteration on a path failure', async () => {
++    let removed = 0, closed = false
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: function* () {
++        try {
++          yield { video_id: 1, resource_id: 1, locator: '/online/1.mp4' }
++          assert.equal(removed, 1, 'cleanup must process a reference before asking for the next')
++          yield { video_id: 2, resource_id: 2, locator: '/online/2.mp4' }
++          assert.fail('unknown path must stop enumeration')
++        } finally { closed = true }
++      },
++      getResourceById: id => resource({id, video_id:id, kind:'local', locator:`/online/${id}.mp4`, is_primary:0}),
++      removeResourceRecord: () => { removed++ },
++      inspectPath: value => value.endsWith('/1.mp4') ? 'missing' : 'unknown'
++    })
++    await assert.rejects(coordinator.run(), /无法确认本地资源是否存在/)
++    assert.equal(removed, 1)
++    assert.equal(closed, true)
++  })
++
++  it('preserves all three cleanup audit sequences above the argument limit', async () => {
++    const size = 300_382
++    let audited = false
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: () => Array.from({ length: size }, (_, index) => ({
++        video_id: index + 1, resource_id: index + 1, locator: `/online/${index + 1}.mp4`
++      })),
++      getResourceById: id => resource({
++        id, video_id: id, kind: 'local', locator: `/online/${id}.mp4`, is_primary: 1
++      }),
++      getVideoById: id => ({ id, code: `AUDIT-${id}`, title: null }) as Video,
++      listResources: id => [resource({
++        id: size + id, video_id: id, kind: 'web', locator: `https://example.test/${id}`
++      })],
++      inspectPath: () => 'missing',
++      shouldAutoDeleteResourceLessVideos: () => true,
++      deleteResourceLessVideos: () => size,
++      listResourceLessVideos: () => Array.from({ length: size }, (_, index) => ({
++        id: size * 2 + index, code: `EMPTY-${index}`, title: null
++      })),
++      recordScanSummary: (_summary, _files, audit) => {
++        audited = true
++        assert.equal(audit.removedResources.length, size)
++        assert.equal(audit.promotedResources.length, size)
++        assert.equal(audit.deletedVideos.length, size)
++        for (let index = 0; index < size; index++) {
++          assert.equal(audit.removedResources[index].resourceId, index + 1)
++          assert.equal(audit.promotedResources[index].resourceId, size + index + 1)
++          assert.equal(audit.deletedVideos[index].videoId, size * 2 + index)
++        }
++      }
++    })
++    const result = await coordinator.run()
++    assert.equal(result.removed, size)
++    assert.equal(result.promoted, size)
++    assert.equal(result.deletedVideos, size)
++    assert.equal(audited, true)
++  })
++
+   it('removes resource-less memberships after deferred cleanup on a safe full scan', async () => {
+     const order: string[] = []
+     const summaries: LibraryScanSummary[] = []
+@@ -1060,3 +1189,58 @@ describe('ScanCoordinator', () => {
+     await first
+   })
+ })
++
++it('reads pending audit summaries with only referenced groups and all exact pending paths', async () => {
++  const calls: Array<{ libraryId: number; groupIds: number[]; paths: string[] }> = []
++  let recorded: LibraryScanAudit | undefined
++  const expected = [
++    { groupId: 9, normalizedCode: 'OLDER', resourceCount: 3 },
++    { groupId: 2, normalizedCode: 'NEWER', resourceCount: 0 }
++  ]
++  const coordinator = createTestScanCoordinator({
++    scanFolders: async (_folders, _progress, options) => {
++      for (const [groupId, filePath] of [
++        [2, '/online/Case.mp4'], [9, '/online/second.mp4'], [2, '/online/Case.mp4'],
++        [null, '/online/no-group.mp4'], [null, '/online/case.mp4']
++      ] as const) options?.onFileResult?.({ outcome: 'pending', rootId: 1, sourceKind: 'local',
++        groupId, filePath, normalizedCode: null, addedToQueue: true })
++      options?.onFileResult?.({ outcome: 'unrecognized', rootId: 1, sourceKind: 'local', filePath: '/online/not-pending.mp4' })
++      return emptyScanResult()
++    },
++    listPendingScanGroups: () => { throw Error('Full pending DTO listing is forbidden') },
++    readPendingScanAuditEntries: (libraryId, groupIds, pendingPaths) => {
++      calls.push({ libraryId, groupIds: [...groupIds], paths: [...pendingPaths] })
++      return expected
++    },
++    recordScanSummary: (_summary, _unrecognized, audit) => { recorded = audit }
++  })
++  await coordinator.run()
++  assert.deepEqual(calls, [{ libraryId: 1, groupIds: [2, 9], paths: [
++    '/online/Case.mp4', '/online/second.mp4', '/online/no-group.mp4', '/online/case.mp4'
++  ] }])
++  assert.deepEqual(recorded?.pendingGroups, expected, 'preserve reader ordering and counts without regrouping')
++})
++
++for (const mode of ['no-files', 'non-pending', 'pending-without-group'] as const) {
++  it(`skips the pending audit DB reader for ${mode}`, async () => {
++    let calls = 0
++    let recorded: LibraryScanAudit | undefined
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_folders, _progress, options) => {
++        if (mode === 'non-pending') options?.onFileResult?.({
++          outcome: 'unrecognized', rootId: 1, sourceKind: 'local', filePath: '/online/unknown.mp4'
++        })
++        if (mode === 'pending-without-group') options?.onFileResult?.({
++          outcome: 'pending', rootId: 1, sourceKind: 'local', filePath: '/online/pending.mp4',
++          groupId: null, normalizedCode: null, addedToQueue: true
++        })
++        return emptyScanResult()
++      },
++      readPendingScanAuditEntries: () => { calls++; throw Error('Must skip DB') },
++      recordScanSummary: (_summary, _unrecognized, audit) => { recorded = audit }
++    })
++    await coordinator.run()
++    assert.equal(calls, 0)
++    assert.deepEqual(recorded?.pendingGroups, [])
++  })
++}
+diff --git a/scripts/performance/pending-scan-audit-benchmark.ts b/scripts/performance/pending-scan-audit-benchmark.ts
+new file mode 100644
+index 0000000..542eebd
+--- /dev/null
++++ b/scripts/performance/pending-scan-audit-benchmark.ts
+@@ -0,0 +1,154 @@
++/**
++ * Standalone synthetic fixture; never opens a user database or media file.
++ * Run when other tests/benchmarks are idle:
++ * node scripts/run-electron-tests.mjs scripts/performance/pending-scan-audit-benchmark.ts
++ * JSON is emitted to stdout inside the test runner output. Setup, assertions and
++ * output serialization are excluded from timed intervals.
++ */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import type { LibraryScanPendingGroupAuditEntry } from '../../src/shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++import { createMediaLibrary } from '../../src/main/db/mediaLibraryRepo'
++import { listPendingScanGroups } from '../../src/main/db/pendingScanRepo'
++import { readPendingScanAuditEntries } from '../../src/main/db/pendingScanAuditRepo'
++
++type Method = 'legacyFullDtoFilterMap' | 'targetedAuditEntries'
++interface Measurement {
++  warmupMs: number
++  samplesMs: number[]
++  medianMs: number
++  outputRows: number
++  outputJsonBytes: number
++}
++
++it('compares pending scan audit summaries with full pending DTO hydration', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pending-scan-audit-benchmark-'))
++  const results: Array<{
++    resources: number
++    groups: number
++    resourcesPerGroup: number
++    scenario: 'tenGroups' | 'allGroups'
++    selectedGroups: number
++    pendingPaths: number
++    databaseBytes: number
++    oraclePassed: boolean
++    methods: Record<Method, Measurement>
++  }> = []
++  try {
++    for (const resourceCount of [10_000, 50_000]) {
++      const databasePath = path.join(root, `${resourceCount}.sqlite`)
++      const db = initDatabaseAtPath(databasePath)
++      try {
++        const mediaPath = path.join(root, `media-${resourceCount}`)
++        fs.mkdirSync(mediaPath)
++        const library = createMediaLibrary({ name: `Synthetic pending ${resourceCount}`, roots: [{ path: mediaPath }] })
++        const groupCount = resourceCount / 10
++        const targetLocator = 'https://example.invalid/'.padEnd(512, 'x')
++        const displayName = 'd'.repeat(512)
++        const group = db.prepare('INSERT INTO pending_scan_groups(id,library_id,normalized_code,updated_at) VALUES(?,?,?,?)')
++        const resource = db.prepare(`INSERT INTO pending_scan_resources
++          (library_id,group_id,root_id,file_path,normalized_path,source_kind,target_kind,target_locator,display_name)
++          VALUES(?,?,?,?,?,'strm','web',?,?)`)
++        // Global exact-path set: every group contributes three matching resources.
++        // Keep this identical for sparse and all-group queries, like the old coordinator.
++        const pendingPaths = new Set<string>()
++        db.transaction(() => {
++          for (let id = 1; id <= groupCount; id++) {
++            // Deliberately different from ID order, with ties resolved by ID.
++            group.run(id, library.id, `GROUP-${id}`, `2026-01-0${id % 7 + 1}`)
++            for (let item = 0; item < 10; item++) {
++              const filePath = path.join(mediaPath, `Group-${id}-${item}.strm`)
++              resource.run(library.id, id, library.roots[0].id, filePath, filePath, targetLocator, displayName)
++              if (item === 0 || item === 3 || item === 9) pendingPaths.add(filePath)
++            }
++          }
++        })()
++        pendingPaths.add(path.join(mediaPath, 'group-1-1.strm')) // case mismatch must not count
++        pendingPaths.add(path.join(mediaPath, 'not-in-database.strm'))
++        db.exec('ANALYZE; PRAGMA wal_checkpoint(TRUNCATE)')
++        const widths = db.prepare(`SELECT count(*) AS resources,
++          min(length(target_locator)) AS targetMin, max(length(target_locator)) AS targetMax,
++          min(length(display_name)) AS displayMin, max(length(display_name)) AS displayMax
++          FROM pending_scan_resources WHERE library_id=?`).get(library.id)
++        assert.deepEqual(widths, { resources: resourceCount, targetMin: 512, targetMax: 512, displayMin: 512, displayMax: 512 })
++        const databaseBytes = fs.statSync(databasePath).size
++
++        for (const scenario of ['tenGroups', 'allGroups'] as const) {
++          const ids = scenario === 'tenGroups'
++            ? Array.from({ length: 10 }, (_, index) => 1 + Math.floor(index * (groupCount - 1) / 9))
++            : Array.from({ length: groupCount }, (_, index) => index + 1)
++          const groupIds = new Set([...ids].reverse())
++          const readers: Record<Method, () => LibraryScanPendingGroupAuditEntry[]> = {
++            legacyFullDtoFilterMap: () => listPendingScanGroups(library.id)
++              .filter(entry => groupIds.has(entry.id))
++              .map(entry => ({
++                groupId: entry.id,
++                normalizedCode: entry.normalizedCode,
++                resourceCount: entry.resources.filter(item => pendingPaths.has(item.filePath)).length
++              })),
++            targetedAuditEntries: () => readPendingScanAuditEntries(library.id, groupIds, pendingPaths)
++          }
++          // Untimed old implementation oracle plus independently specified counts/order.
++          const oracle = readers.legacyFullDtoFilterMap()
++          assert.deepEqual(oracle, [...ids].sort((a, b) => a % 7 - b % 7 || a - b)
++            .map(id => ({ groupId: id, normalizedCode: `GROUP-${id}`, resourceCount: 3 })))
++          const methods: Record<Method, Measurement> = {
++            legacyFullDtoFilterMap: { warmupMs: 0, samplesMs: [], medianMs: 0, outputRows: 0, outputJsonBytes: 0 },
++            targetedAuditEntries: { warmupMs: 0, samplesMs: [], medianMs: 0, outputRows: 0, outputJsonBytes: 0 }
++          }
++          const measure = (method: Method, warmup: boolean): void => {
++            const start = performance.now()
++            const value = readers[method]()
++            const elapsedMs = performance.now() - start
++            // Do not include correctness checks or JSON serialization in repo timing.
++            assert.deepEqual(value, oracle, `${resourceCount}/${scenario}/${method}`)
++            const jsonBytes = Buffer.byteLength(JSON.stringify(value))
++            const measurement = methods[method]
++            if (warmup) measurement.warmupMs = elapsedMs
++            else measurement.samplesMs.push(elapsedMs)
++            measurement.outputRows = value.length
++            measurement.outputJsonBytes = jsonBytes
++          }
++          for (const method of ['legacyFullDtoFilterMap', 'targetedAuditEntries'] as const) measure(method, true)
++          for (let sample = 0; sample < 3; sample++) {
++            const order: Method[] = sample % 2 === 0
++              ? ['legacyFullDtoFilterMap', 'targetedAuditEntries']
++              : ['targetedAuditEntries', 'legacyFullDtoFilterMap']
++            for (const method of order) measure(method, false)
++          }
++          for (const measurement of Object.values(methods)) {
++            assert.equal(measurement.samplesMs.length, 3)
++            measurement.medianMs = [...measurement.samplesMs].sort((a, b) => a - b)[1]
++          }
++          results.push({ resources: resourceCount, groups: groupCount, resourcesPerGroup: 10,
++            scenario, selectedGroups: groupIds.size, pendingPaths: pendingPaths.size,
++            databaseBytes, oraclePassed: true, methods })
++        }
++      } finally {
++        closeDatabase()
++      }
++    }
++  } finally {
++    fs.rmSync(root, { recursive: true, force: true })
++  }
++  console.log(JSON.stringify({
++    benchmark: 'pending-scan-audit',
++    environment: { platform: process.platform, arch: process.arch, node: process.version, electron: process.versions.electron, sqlite: process.versions.sqlite },
++    warmupRunsPerMethod: 1,
++    hotSamplesPerMethod: 3,
++    results,
++    limitations: [
++      'Synthetic temporary SQLite files only; 10 resources per group, ASCII target_locator/display_name each exactly 512 characters. No user database or media files.',
++      'Untimed legacy oracle reads precede one explicit warmup per method. Three hot rounds alternate method order; warmup and timings are not cold-cache measurements.',
++      'Timing includes each repository call and legacy filter/map, including DTO materialization, path checks and the new repository transaction. Fixture setup, ANALYZE, assertions and JSON serialization are outside timing.',
++      'Output JSON bytes describe final audit summaries only, not transient full DTO allocations. Peak memory, event-loop delay, IPC, filesystem scan/reveal and complete coordinator runtime are not measured.',
++      'A single synthetic library, global pending path set, 1k/5k groups and 10k/50k resources do not establish Windows HDD or production performance. Three samples do not support p95 claims.',
++      'Selecting all groups still visits every group/resource path and builds the full audit summary array. This does not claim constant memory or constant total runtime.'
++    ]
++  }, null, 2))
++})

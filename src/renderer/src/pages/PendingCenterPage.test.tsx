@@ -109,9 +109,13 @@ const fakeApi = {
     list: async () => [{ id: 1, name: '测试媒体库' }]
   },
   scan: {
-    listPending: async () => [],
-    listPendingResourceIdentities: async () =>
-      identityMode && !identityResolved ? [identity] : [],
+    listPending: () => { throw new Error('Unbounded scan queue') },
+    listPendingResourceIdentities: () => { throw new Error('Unbounded identity queue') },
+    countPendingQueue: async () => identityMode && !identityResolved ? 1 : 0,
+    pagePendingQueue: async () => ({total: identityMode && !identityResolved ? 1 : 0, offset: 0,
+      items: identityMode && !identityResolved ? [{kind: 'identity', id: 4, libraryId: 1, revision: 3,
+        label: 'FILE-001 ↔ NFO-002', displayName: identity.displayName}] : []}),
+    getPendingIdentity: async () => identityMode && !identityResolved ? identity : null,
     resolvePendingResourceIdentity: async (
       _libraryId: number,
       _identityId: number,
@@ -123,11 +127,17 @@ const fakeApi = {
     }
   },
   actressScrape: {
-    listConflicts: async () => [],
+    listConflicts: () => { throw new Error('Full actress queue is forbidden') },
+    pageConflicts: async () => ({items:[],total:0,offset:0}),
     conflictSummary: async () => ({ groupCount: 0, conflictGroupCount: 0, applicableGroupCount: 0 })
   },
   scrape: {
-    listPending: async () => (identityMode || resolved ? [] : [pending]),
+    listPending: async () => { throw new Error('Full pending inbox must not be loaded') },
+    countPending: async () => identityMode || resolved ? 0 : 1,
+    pagePending: async () => ({ total: identityMode || resolved ? 0 : 1, offset: 0,
+      items: identityMode || resolved ? [] : [{id:pending.id,videoId:pending.videoId,revision:pending.revision,
+        code:'ABC-123',candidateCount:1,sourceCount:1,stagedCoverPath:null}] }),
+    getPending: async () => identityMode || resolved ? null : pending,
     discardPending: async () => true,
     confirmPending: async (input: PendingVideoScrapeConfirmInput) => {
       confirmationInputs.push(input)
@@ -277,7 +287,7 @@ describe('PendingCenterPage scrape resolution', () => {
       await Promise.resolve()
     })
     await waitFor(() =>
-      Boolean(renderer && nodeText(renderer.root).includes('FILE-001 ↔ NFO-002'))
+      Boolean(renderer && renderer.root.findAllByProps({ name: 'resource-identity' }).some(node => node.type === 'input'))
     )
 
     const choices = renderer!.root.findAllByProps({ name: 'resource-identity' }).filter((node) => node.type === 'input')
@@ -338,7 +348,7 @@ describe('PendingCenterPage scrape resolution', () => {
     })
     await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('此媒体库没有扫描待确认项')))
     await act(async () => button('查看所有媒体库').props.onClick())
-    assert.ok(nodeText(renderer!.root).includes('没有扫描资源待确认项'))
+    await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('没有扫描资源待确认项')))
     assert.equal(button('扫描资源').props['aria-selected'], true)
     assert.equal(renderer!.root.findByProps({ role: 'tabpanel' }).props['aria-labelledby'], 'pending-types-scan')
     assert.equal(button('所有媒体库').props['aria-label'], '按媒体库筛选扫描待确认项')

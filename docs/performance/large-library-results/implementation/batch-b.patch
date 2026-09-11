@@ -1,0 +1,663 @@
+diff --git a/src/main/db/actressRepo.ts b/src/main/db/actressRepo.ts
+index fdb3e87..e8f8dfd 100644
+--- a/src/main/db/actressRepo.ts
++++ b/src/main/db/actressRepo.ts
+@@ -356,22 +356,23 @@ function queryActressListRows(
+   const queryParams = limit == null ? params : [...params, limit, offset]
+   return db
+     .prepare(
+-      `SELECT a.*,
+-              COUNT(
+-                CASE WHEN EXISTS (
+-                  SELECT 1
+-                  FROM library_video_memberships membership
+-                  JOIN media_libraries library ON library.id = membership.library_id
+-                  WHERE membership.video_id = va.video_id
+-                    AND membership.is_hidden = 0
+-                    AND library.status = 'active'
+-                ) THEN va.video_id END
+-              ) AS video_count,
++      `WITH eligible AS MATERIALIZED (
++         SELECT a.* FROM actresses a ${where}
++       ), members AS MATERIALIZED (
++         SELECT DISTINCT membership.video_id
++         FROM library_video_memberships membership
++         JOIN media_libraries library ON library.id = membership.library_id
++         WHERE membership.is_hidden = 0 AND library.status = 'active'
++       ), counts AS (
++         SELECT va.actress_id, COUNT(*) AS video_count
++         FROM video_actress va
++         JOIN eligible ON eligible.id = va.actress_id
++         JOIN members ON members.video_id = va.video_id
++         GROUP BY va.actress_id
++       )
++       SELECT a.*, COALESCE(counts.video_count, 0) AS video_count,
+               (SELECT COUNT(*) FROM actress_gallery_assets ag WHERE ag.actress_id = a.id) AS gallery_count
+-       FROM actresses a
+-       LEFT JOIN video_actress va ON va.actress_id = a.id
+-       ${where}
+-       GROUP BY a.id
++       FROM eligible a LEFT JOIN counts ON counts.actress_id = a.id
+        ORDER BY ${orderBy}
+        ${pagination}`
+     )
+diff --git a/src/main/db/homeDiscoveryRepo.test.ts b/src/main/db/homeDiscoveryRepo.test.ts
+index 7d76db6..5792130 100644
+--- a/src/main/db/homeDiscoveryRepo.test.ts
++++ b/src/main/db/homeDiscoveryRepo.test.ts
+@@ -556,7 +556,7 @@ describe('home discovery repo', () => {
+ 
+       const recent = statements.find(
+         (statement) =>
+-          statement.includes('SELECT DISTINCT v.*') &&
++          statement.includes('WITH page AS MATERIALIZED') &&
+           statement.includes('scope_m.membership_added_at DESC')
+       )
+       const discovery = statements.find((statement) => statement.startsWith('WITH candidate AS'))
+@@ -608,8 +608,8 @@ describe('home discovery repo', () => {
+       assert.equal(second.items.length, 100)
+       const combinedIds = [...first.items, ...second.items].map((video) => video.id)
+       assert.equal(new Set(combinedIds).size, 200)
+-      assert.equal(firstStatements.length, 2)
+-      assert.equal(selectStatements(trace).length, 2)
++      assert.equal(firstStatements.length, 3)
++      assert.equal(selectStatements(trace).length, 3)
+       assert.equal(
+         [...firstStatements, ...selectStatements(trace)].some((statement) =>
+           /ORDER\s+BY\s+RANDOM\s*\(/i.test(statement)
+@@ -618,7 +618,7 @@ describe('home discovery repo', () => {
+       )
+ 
+       const pageStatement = firstStatements.find((statement) =>
+-        statement.includes('SELECT DISTINCT v.*')
++        statement.includes('WITH page AS MATERIALIZED')
+       )
+       assert.ok(pageStatement)
+       const plan = explainPlan(database, pageStatement).join('\n')
+diff --git a/src/main/db/homeDiscoveryRepo.ts b/src/main/db/homeDiscoveryRepo.ts
+index 3ec4714..325d119 100644
+--- a/src/main/db/homeDiscoveryRepo.ts
++++ b/src/main/db/homeDiscoveryRepo.ts
+@@ -214,10 +214,10 @@ function discoveryVideoSelections(
+              SELECT membership.video_id,
+                     membership.library_id,
+                     membership.discovery_key,
+-                    ROW_NUMBER() OVER (
++                    ${libraryIds.length === 1 ? '1' : `ROW_NUMBER() OVER (
+                       PARTITION BY membership.video_id
+                       ORDER BY membership.discovery_key ASC, membership.library_id ASC
+-                    ) AS source_rank
++                    )`} AS source_rank
+              FROM library_video_memberships membership
+              WHERE membership.library_id IN (${ids})
+                AND membership.is_hidden = 0
+@@ -281,11 +281,11 @@ export function createHomeDiscoveryRepo(
+       }
+ 
+       const scope = { kind: 'all' as const, libraryIds: eligibleLibraryIds }
+-      const recent = catalog.list(scope, {
++      const recent = catalog.listPage(scope, {
+         sortBy: 'add_time',
+         sortDir: 'desc',
+         limit: normalizedLimit(input.recentLimit, 12)
+-      }).items
++      })
+       const candidates = discoveryVideoSelections(
+         database,
+         eligibleLibraryIds,
+diff --git a/src/main/db/pendingVideoScrapeRepo.ts b/src/main/db/pendingVideoScrapeRepo.ts
+index e619025..328b07f 100644
+--- a/src/main/db/pendingVideoScrapeRepo.ts
++++ b/src/main/db/pendingVideoScrapeRepo.ts
+@@ -357,6 +357,12 @@ export function getPendingVideoScrapeForVideo(videoId: number): PendingVideoScra
+   return row ? getPendingVideoScrapeById(row.id) : null
+ }
+ 
++export function countPendingVideoScrapes(): number {
++  return (getDb().prepare('SELECT COUNT(*) AS count FROM pending_video_scrapes').get() as {
++    count: number
++  }).count
++}
++
+ export function listPendingVideoScrapes(): PendingVideoScrape[] {
+   const rows = getDb()
+     .prepare('SELECT id FROM pending_video_scrapes ORDER BY created_at, id')
+diff --git a/src/main/db/scopedVideoCatalogRepo.test.ts b/src/main/db/scopedVideoCatalogRepo.test.ts
+index 9b697e9..50d790b 100644
+--- a/src/main/db/scopedVideoCatalogRepo.test.ts
++++ b/src/main/db/scopedVideoCatalogRepo.test.ts
+@@ -192,6 +192,49 @@ describe('scoped video catalog repo', () => {
+     }
+   })
+ 
++  it('keeps fixed actor and tag filters unique across shared and hidden memberships', () => {
++    const database = createFixture()
++    try {
++      database.exec(`
++        INSERT INTO actresses (id, main_name) VALUES (1, 'Example');
++        INSERT INTO tags (id, name) VALUES (1, 'One'), (2, 'Two');
++        INSERT INTO video_actress (video_id, actress_id) VALUES (101, 1), (102, 1);
++        INSERT INTO video_tag (video_id, tag_id) VALUES (101, 1), (101, 2), (102, 1);
++      `)
++      const repo = createScopedVideoCatalogRepo(database)
++      const query = { actressId: 1, tagId: 1, tagIds: [1, 2] }
++      assert.equal(repo.list({ kind: 'all' }, query).total, 1)
++      assert.deepEqual(repo.list({ kind: 'all' }, query).items.map(v => v.id), [101])
++      assert.deepEqual(repo.list({ kind: 'all' }, { ...query, offset: 1 }).items, [])
++      database.exec('UPDATE library_video_memberships SET is_hidden = 1 WHERE library_id = 2 AND video_id = 101')
++      assert.equal(repo.list({ kind: 'all' }, query).items[0].preferredLibraryId, 1)
++      database.exec('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = 101')
++      assert.equal(repo.list({ kind: 'all' }, query).total, 0)
++    } finally {
++      database.close()
++    }
++  })
++
++  it('normalizes a single active library and serves no-count pages with identical ordering', () => {
++    const trace: string[] = []
++    const database = createFixture(sql => trace.push(sql))
++    try {
++      database.exec("UPDATE media_libraries SET status = 'archived' WHERE id = 1")
++      const repo = createScopedVideoCatalogRepo(database)
++      for (const sortBy of ['add_time', 'code', 'rating', 'release_date'] as const) {
++        for (const sortDir of ['asc', 'desc'] as const) {
++          const query = { sortBy, sortDir, limit: 1, offset: 1 }
++          const expected = repo.list({ kind: 'library', libraryId: 2 }, query)
++          trace.length = 0
++          assert.deepEqual(repo.listPage({ kind: 'all' }, query), expected.items)
++          assert.equal(trace.some(sql => /COUNT\(\*\) AS count|ROW_NUMBER/i.test(sql)), false)
++        }
++      }
++    } finally {
++      database.close()
++    }
++  })
++
+   it('uses bounded indexed queries for a large scoped page', () => {
+     const trace: string[] = []
+     const database = createFixture((sql) => trace.push(sql))
+@@ -211,7 +254,7 @@ describe('scoped video catalog repo', () => {
+       assert.equal(statements.length, 2)
+       assert.equal(statements.some((statement) => /ORDER\s+BY\s+RANDOM\s*\(/i.test(statement)), false)
+       const pageStatement = statements.find((statement) =>
+-        statement.includes('SELECT DISTINCT v.*')
++        statement.includes('WITH page AS MATERIALIZED')
+       )
+       assert.ok(pageStatement)
+       const plan = explainPlan(database, pageStatement)
+diff --git a/src/main/db/scopedVideoCatalogRepo.ts b/src/main/db/scopedVideoCatalogRepo.ts
+index 98359a8..fcc3ae1 100644
+--- a/src/main/db/scopedVideoCatalogRepo.ts
++++ b/src/main/db/scopedVideoCatalogRepo.ts
+@@ -26,6 +26,7 @@ export interface ScopedStoredVideoDetail extends StoredVideoDetail {
+ 
+ export interface ScopedVideoCatalogRepo {
+   list(scope: CatalogScope, query?: VideoQuery): ScopedVideoListResult
++  listPage(scope: CatalogScope, query?: VideoQuery): ScopedVideo[]
+   listByIds(scope: CatalogScope, videoIds: number[]): ScopedVideo[]
+   listByLibrarySelections(
+     selections: Array<{ videoId: number; libraryId: number }>
+@@ -35,6 +36,7 @@ export interface ScopedVideoCatalogRepo {
+ }
+ 
+ type ScopeSql = {
++  singleLibraryId?: number
+   membershipJoin: string
+   resourceFilter: (resourceAlias: string) => string
+ }
+@@ -68,6 +70,7 @@ function scopeSql(scope: CatalogScope): ScopeSql {
+   if (scope.kind === 'library') {
+     const libraryId = positiveId(scope.libraryId, '媒体库 ID')
+     return {
++      singleLibraryId: libraryId,
+       membershipJoin: `JOIN (
+         SELECT membership.video_id,
+                membership.library_id AS preferred_library_id,
+@@ -361,24 +364,55 @@ function readBadges(database: Database.Database, videoId: number): MediaLibraryB
+ export function createScopedVideoCatalogRepo(
+   database: Database.Database = getDb()
+ ): ScopedVideoCatalogRepo {
++  function resolvedScope(scope: CatalogScope): ScopeSql {
++    if (scope.kind === 'library') return scopeSql(scope)
++    const ids = normalizedLibraryIds(scope.libraryIds)
++    const active = database.prepare(
++      `SELECT id FROM media_libraries WHERE ${activeLibraryPredicate('media_libraries', ids)} LIMIT 2`
++    ).all() as Array<{ id: number }>
++    return scopeSql(active.length === 1 ? { kind: 'library', libraryId: active[0].id } : scope)
++  }
++
++  function page(scoped: ScopeSql, query: VideoQuery): ScopedVideo[] {
++    const where = buildWhere(query, scoped)
++    const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 60)))
++    const offset = Math.max(0, Math.trunc(query.offset ?? 0))
++    // Membership ranking and fixed actor/tag joins each yield at most one row per video.
++    // Materialize only the ID/member page before evaluating the wide card projection.
++    const rows = database.prepare(
++      `WITH page AS MATERIALIZED (
++         SELECT v.id, scope_m.preferred_library_id, scope_m.membership_added_at
++         FROM videos v ${where.joins} ${where.sql}
++         ORDER BY ${orderBy(query)} LIMIT ? OFFSET ?
++       )
++       SELECT v.*${listProjection()}
++       FROM page scope_m JOIN videos v ON v.id = scope_m.id
++       ORDER BY ${orderBy(query)}`
++    ).all(...where.params, limit, offset) as ScopedVideoListRow[]
++    return hydrateRows(rows)
++  }
++
+   return {
+     list(scope, query = {}) {
+-      const scoped = scopeSql(scope)
+-      const where = buildWhere(query, scoped)
+-      const total = database
+-        .prepare(`SELECT COUNT(DISTINCT v.id) AS count FROM videos v ${where.joins} ${where.sql}`)
+-        .get(...where.params) as { count: number }
+-      const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 60)))
+-      const offset = Math.max(0, Math.trunc(query.offset ?? 0))
+-      const rows = database
+-        .prepare(
+-          `SELECT DISTINCT v.*${listProjection()}
+-           FROM videos v ${where.joins} ${where.sql}
+-           ORDER BY ${orderBy(query)}
+-           LIMIT ? OFFSET ?`
+-        )
+-        .all(...where.params, limit, offset) as ScopedVideoListRow[]
+-      return { items: hydrateRows(rows), total: total.count }
++      return database.transaction(() => {
++        const scoped = resolvedScope(scope)
++        const where = buildWhere(query, scoped)
++        const total = scoped.singleLibraryId && !where.sql
++          ? database.prepare(`
++              SELECT COUNT(*) AS count FROM library_video_memberships membership
++              JOIN media_libraries library ON library.id = membership.library_id
++              WHERE membership.library_id = ? AND membership.is_hidden = 0
++                AND library.status = 'active'
++            `).get(scoped.singleLibraryId) as { count: number }
++          : database.prepare(
++              `SELECT COUNT(*) AS count FROM videos v ${where.joins} ${where.sql}`
++            ).get(...where.params) as { count: number }
++        return { items: page(scoped, query), total: total.count }
++      })()
++    },
++
++    listPage(scope, query = {}) {
++      return database.transaction(() => page(resolvedScope(scope), query))()
+     },
+ 
+     listByIds(scope, videoIds) {
+@@ -474,6 +508,7 @@ export function createScopedVideoCatalogRepo(
+ 
+ export const scopedVideoCatalogRepo: ScopedVideoCatalogRepo = {
+   list: (scope, query) => createScopedVideoCatalogRepo().list(scope, query),
++  listPage: (scope, query) => createScopedVideoCatalogRepo().listPage(scope, query),
+   listByIds: (scope, videoIds) => createScopedVideoCatalogRepo().listByIds(scope, videoIds),
+   listByLibrarySelections: (selections) =>
+     createScopedVideoCatalogRepo().listByLibrarySelections(selections),
+diff --git a/src/main/db/tagRepo.test.ts b/src/main/db/tagRepo.test.ts
+index 85afdcf..f53eac7 100644
+--- a/src/main/db/tagRepo.test.ts
++++ b/src/main/db/tagRepo.test.ts
+@@ -41,6 +41,23 @@ describe('tagRepo.pruneUnusedTags', () => {
+ })
+ 
+ describe('tagRepo active catalog projection', () => {
++  it('deduplicates shared memberships and preserves manual origin and zero-count tags', () => {
++    setupDb()
++    const db = getDb()
++    db.exec(`
++      UPDATE video_tag SET origin = 'scraped' WHERE tag_id = 1;
++      INSERT INTO media_libraries (id, name, status) VALUES (2, 'Shared', 'active');
++      INSERT INTO library_video_memberships (library_id, video_id, added_at, updated_at, added_via, discovery_key) VALUES (2, 1, '2026', '2026', 'shared', 1);
++      INSERT INTO tags (id, name) VALUES (3, 'Manual');
++      INSERT INTO video_tag (video_id, tag_id, origin) VALUES (1, 3, 'manual');
++    `)
++    assert.deepEqual(listTags().map(t => [t.id, t.video_count]), [[1, 1], [3, 1], [2, 0]])
++    assert.deepEqual(listManualTags().map(t => [t.id, t.video_count]), [[3, 1]])
++    db.exec("UPDATE media_libraries SET status = 'archived' WHERE id = 2; UPDATE library_video_memberships SET is_hidden = 1 WHERE library_id = 1")
++    assert.deepEqual(listManualTags().map(t => [t.id, t.video_count]), [[3, 0]])
++    assert.equal(listTags().every(t => t.video_count === 0), true)
++  })
++
+   it('counts only videos that can be opened through the active visible catalog', () => {
+     setupDb()
+     const db = getDb()
+diff --git a/src/main/db/tagRepo.ts b/src/main/db/tagRepo.ts
+index 3382a1e..8a1f9c5 100644
+--- a/src/main/db/tagRepo.ts
++++ b/src/main/db/tagRepo.ts
+@@ -15,47 +15,34 @@ export function ensureTag(name: string): number {
+ 
+ export type { TagListItem }
+ 
++function queryTags(manualOnly: boolean): TagListItem[] {
++  // Materialize visibility once; shared membership must not multiply relationship counts.
++  return getDb().prepare(
++    `WITH members AS MATERIALIZED (
++       SELECT DISTINCT membership.video_id
++       FROM library_video_memberships membership
++       JOIN media_libraries library ON library.id = membership.library_id
++       WHERE membership.is_hidden = 0 AND library.status = 'active'
++     ), counts AS (
++       SELECT vt.tag_id, COUNT(members.video_id) AS video_count
++       FROM video_tag vt ${manualOnly ? 'LEFT JOIN' : 'JOIN'} members ON members.video_id = vt.video_id
++       ${manualOnly ? "WHERE vt.origin = 'manual'" : ''}
++       GROUP BY vt.tag_id
++     )
++     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count
++     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id
++     ${manualOnly ? 'WHERE counts.tag_id IS NOT NULL' : ''}
++     ORDER BY video_count DESC, t.name`
++  ).all() as TagListItem[]
++}
++
+ export function listTags(): TagListItem[] {
+-  const db = getDb()
+-  return db
+-    .prepare(
+-      `SELECT t.*, COUNT(
+-         CASE WHEN EXISTS (
+-           SELECT 1
+-           FROM library_video_memberships membership
+-           JOIN media_libraries library ON library.id = membership.library_id
+-           WHERE membership.video_id = vt.video_id
+-             AND membership.is_hidden = 0
+-             AND library.status = 'active'
+-         ) THEN vt.video_id END
+-       ) AS video_count
+-       FROM tags t
+-       LEFT JOIN video_tag vt ON vt.tag_id = t.id
+-       GROUP BY t.id
+-       ORDER BY video_count DESC, t.name`
+-    )
+-    .all() as TagListItem[]
++  return queryTags(false)
+ }
+ 
+-/** Tags that appear as custom/manual on at least one video. */
++/** Tags with any manual association, including ones with no currently visible videos. */
+ export function listManualTags(): TagListItem[] {
+-  const db = getDb()
+-  return db
+-    .prepare(
+-      `SELECT t.*, COUNT(DISTINCT CASE WHEN EXISTS (
+-         SELECT 1
+-         FROM library_video_memberships membership
+-         JOIN media_libraries library ON library.id = membership.library_id
+-         WHERE membership.video_id = vt.video_id
+-           AND membership.is_hidden = 0
+-           AND library.status = 'active'
+-       ) THEN vt.video_id END) AS video_count
+-       FROM tags t
+-       JOIN video_tag vt ON vt.tag_id = t.id AND vt.origin = 'manual'
+-       GROUP BY t.id
+-       ORDER BY video_count DESC, t.name`
+-    )
+-    .all() as TagListItem[]
++  return queryTags(true)
+ }
+ 
+ /** Drop tag row when it has no video associations left (e.g. last manual link removed). */
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..7747b16 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -507,6 +507,7 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+diff --git a/src/main/ipc/scrapeHandlers.ts b/src/main/ipc/scrapeHandlers.ts
+index 452b108..1cb1381 100644
+--- a/src/main/ipc/scrapeHandlers.ts
++++ b/src/main/ipc/scrapeHandlers.ts
+@@ -87,6 +87,9 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
+   )
+ 
+   registerScrapeHandler(IPC.SCRAPE_ONE, (...args) => jobs.scrapeOneVideo(...args))
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_COUNT, () =>
++    jobs.countPendingVideoScrapes()
++  )
+   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () =>
+     jobs.listPendingVideoScrapes()
+   )
+diff --git a/src/main/scanner/scanCoordinator.ts b/src/main/scanner/scanCoordinator.ts
+index 7c08dde..f85597a 100644
+--- a/src/main/scanner/scanCoordinator.ts
++++ b/src/main/scanner/scanCoordinator.ts
+@@ -410,16 +410,20 @@ export class ScanCoordinator {
+       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+       result.deletedVideos = cleanup.removedMemberships.length
+-      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+-      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
+-      auditState.deletedVideos.push(
+-        ...cleanup.removedMemberships.map((video) => ({
++      for (const resource of cleanup.missingResources.removedResources) {
++        auditState.removedResources.push(resource)
++      }
++      for (const resource of cleanup.missingResources.promotedResources) {
++        auditState.promotedResources.push(resource)
++      }
++      for (const video of cleanup.removedMemberships) {
++        auditState.deletedVideos.push({
+           videoId: video.videoId,
+           videoCode: video.videoCode,
+           videoTitle: video.videoTitle,
+-          reason: 'resource_less' as const
+-        }))
+-      )
++          reason: 'resource_less'
++        })
++      }
+       const status =
+         result.strmFailures.length + result.omittedStrmFailures > 0
+           ? 'completed_with_errors'
+@@ -513,6 +517,9 @@ export class ScanCoordinator {
+         )
+         .map((entry) => entry.groupId as number)
+     )
++    const pendingPaths = new Set(auditState.files
++      .filter((entry) => entry.outcome === 'pending')
++      .map((entry) => entry.filePath))
+     auditState.pendingGroups = this.dependencies
+       .listPendingScanGroups(libraryId)
+       .filter((group) => auditPendingIds.has(group.id))
+@@ -520,9 +527,7 @@ export class ScanCoordinator {
+         groupId: group.id,
+         normalizedCode: group.normalizedCode,
+         resourceCount: group.resources.filter((resource) =>
+-          auditState.files.some(
+-            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+-          )
++          pendingPaths.has(resource.filePath)
+         ).length
+       }))
+   }
+diff --git a/src/main/scanner/scanner.test.ts b/src/main/scanner/scanner.test.ts
+index b44963a..4176596 100644
+--- a/src/main/scanner/scanner.test.ts
++++ b/src/main/scanner/scanner.test.ts
+@@ -2226,6 +2226,33 @@ describe('scanFolders', () => {
+     assert.equal(result.imported, 30)
+   })
+ 
++  it('collects a very large root without overflowing call arguments before cancellation', async () => {
++    for (const size of [300_382, 600_764]) {
++      const root = makeTempRoot()
++      const library = path.join(root, 'library')
++      fs.mkdirSync(library)
++      initDatabaseAtPath(path.join(root, 'library.db'))
++      const controller = new AbortController()
++      const result = await scanFolders([library], undefined, {
++        signal: controller.signal,
++        readDirectory: async () => {
++          // Abort on the last entry, after the whole root has been accumulated.
++          return Array.from({ length: size }, (_, index) => ({
++            name: `TEST-${index}.mp4`,
++            isFile: () => {
++              if (index === size - 1) controller.abort()
++              return true
++            },
++            isDirectory: () => false
++          }) as fs.Dirent)
++        }
++      })
++      assert.equal(result.cancelled, true)
++      assert.equal(result.imported, 0)
++      closeDatabase()
++    }
++  })
++
+   it('stops when cancelled', async () => {
+     const root = makeTempRoot()
+     const library = path.join(root, 'library')
+diff --git a/src/main/scanner/scanner.ts b/src/main/scanner/scanner.ts
+index 79920b9..670fdf7 100644
+--- a/src/main/scanner/scanner.ts
++++ b/src/main/scanner/scanner.ts
+@@ -501,7 +501,11 @@ export async function scanFolders(
+     } else {
+       await collectScannableFiles(root.path, rootFiles, options.signal, readIndexedDirectory)
+     }
+-    files.push(...rootFiles.map((filePath) => ({ filePath, root })))
++    for (const filePath of rootFiles) files.push({ filePath, root })
++  }
++  if (options.signal?.aborted) {
++    result.cancelled = true
++    return result
+   }
+   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
+   const readDurationSeconds = options.readDurationSeconds ?? readLocalVideoDurationSeconds
+diff --git a/src/main/services/scrapeJobController.test.ts b/src/main/services/scrapeJobController.test.ts
+index c107ad9..736cb6e 100644
+--- a/src/main/services/scrapeJobController.test.ts
++++ b/src/main/services/scrapeJobController.test.ts
+@@ -67,6 +67,7 @@ function dependencies(
+     countActresses: () => 0,
+     resolveVideoFieldSources: () => ({}),
+     pendingVideoScrapes: {
++      count: () => 0,
+       list: () => [],
+       confirm: () => ({ status: 'applied', applied: true, warnings: [] }),
+       discard: () => true
+diff --git a/src/main/services/scrapeJobController.ts b/src/main/services/scrapeJobController.ts
+index 4a7da01..5a03161 100644
+--- a/src/main/services/scrapeJobController.ts
++++ b/src/main/services/scrapeJobController.ts
+@@ -137,6 +137,7 @@ export interface ScrapeJobControllerDependencies {
+   rendererAvailable(): boolean
+   checkpoints: BatchScrapeCheckpointPort
+   pendingVideoScrapes: {
++    count(): number
+     list(): PendingVideoScrape[]
+     confirm(input: PendingVideoScrapeConfirmInput): PendingVideoScrapeResolutionResult
+     discard(pendingScrapeId: number): boolean
+@@ -264,6 +265,10 @@ export class ScrapeJobController {
+     return this.dependencies.getBatchState()
+   }
+ 
++  countPendingVideoScrapes(): number {
++    return this.dependencies.pendingVideoScrapes.count()
++  }
++
+   listPendingVideoScrapes(): PendingVideoScrape[] {
+     return this.dependencies.pendingVideoScrapes.list()
+   }
+diff --git a/src/main/services/videoPendingScrapeService.ts b/src/main/services/videoPendingScrapeService.ts
+index c23ca88..c5bed31 100644
+--- a/src/main/services/videoPendingScrapeService.ts
++++ b/src/main/services/videoPendingScrapeService.ts
+@@ -9,6 +9,7 @@ import type {
+ } from '@shared/videoScrapeTypes'
+ import { getDb } from '../db/database'
+ import {
++  countPendingVideoScrapes,
+   deletePendingVideoScrape,
+   getPendingVideoScrapeResolutionSnapshot,
+   listPendingVideoScrapes,
+@@ -129,6 +130,10 @@ function importCandidateResources(
+ }
+ 
+ export const videoPendingScrapeService = {
++  count(): number {
++    return countPendingVideoScrapes()
++  },
++
+   list(): PendingVideoScrape[] {
+     return listPendingVideoScrapes()
+   },
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..84b5732 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -557,6 +557,7 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+diff --git a/src/renderer/src/components/Layout.tsx b/src/renderer/src/components/Layout.tsx
+index ba192a7..63a4f3b 100644
+--- a/src/renderer/src/components/Layout.tsx
++++ b/src/renderer/src/components/Layout.tsx
+@@ -167,15 +167,15 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
+     refetchInterval: 3_000
+   })
+   const pendingVideoQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending(),
++    queryKey: ['pending-video-scrapes', 'count'],
++    queryFn: () => api.scrape.countPending(),
+     refetchInterval: 3_000
+   })
+   /** One inbox, one badge: scan groups, scrape snapshots and actress name conflicts. */
+   const pendingBadges: Record<string, number> = {
+     [ROUTE_PATH.pending]: pendingInboxCount({
+       libraries: librariesQuery.data ?? [],
+-      pendingVideoCount: pendingVideoQuery.data?.length ?? 0,
++      pendingVideoCount: pendingVideoQuery.data ?? 0,
+       actressConflictGroupCount: conflictSummaryQuery.data?.groupCount ?? 0
+     })
+   }
+diff --git a/src/renderer/src/pages/PendingCenterPage.tsx b/src/renderer/src/pages/PendingCenterPage.tsx
+index c6959df..530f5d8 100644
+--- a/src/renderer/src/pages/PendingCenterPage.tsx
++++ b/src/renderer/src/pages/PendingCenterPage.tsx
+@@ -189,7 +189,7 @@ export default function PendingCenterPage(): JSX.Element {
+     void Promise.all([
+       queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: false }),
+       queryClient.refetchQueries({ queryKey: ['pending-resource-identities'], exact: false }),
+-      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true }),
++      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: false }),
+       queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), exact: true }),
+       queryClient.refetchQueries({ queryKey: actressKeys.conflictSummary(), exact: true })
+     ])
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..2fd547c 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -182,6 +182,7 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+diff --git a/src/shared/scrapeIpcContract.ts b/src/shared/scrapeIpcContract.ts
+index 919d8f8..2ac31e4 100644
+--- a/src/shared/scrapeIpcContract.ts
++++ b/src/shared/scrapeIpcContract.ts
+@@ -57,6 +57,7 @@ export interface ScrapeIpcContract {
+     ]
+     result: VideoScrapeOneResult
+   }
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: { args: []; result: number }
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: { args: []; result: PendingVideoScrape[] }
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: {
+     args: [input: PendingVideoScrapeConfirmInput]

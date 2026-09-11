@@ -6,6 +6,9 @@ import {
   type MediaLibrarySettingsTab
 } from '../listView/mediaLibraryRoutes'
 
+/** Overview card, network tab and settings panel share this user-facing name. */
+export const WEB_ACCESS_LABEL = '网页服务'
+
 export type SettingsGroup =
   'overview' | 'library' | 'plugins' | 'models' | 'appearance' | 'storage' | 'network' | 'about'
 
@@ -17,6 +20,7 @@ export type SettingsTab =
   | 'theme'
   | 'assets'
   | 'proxy'
+  | 'web'
   | 'info'
   | 'usage'
   | 'advanced'
@@ -95,9 +99,9 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
   {
     id: 'network',
     label: '网络',
-    hint: '代理连接',
-    defaultTab: 'proxy',
-    tabs: [{ id: 'proxy', label: '代理' }]
+    hint: `${WEB_ACCESS_LABEL}与代理`,
+    defaultTab: 'web',
+    tabs: [{ id: 'web', label: WEB_ACCESS_LABEL }, { id: 'proxy', label: '代理' }]
   },
   {
     id: 'about',

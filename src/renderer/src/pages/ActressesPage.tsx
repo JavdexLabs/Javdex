@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, CircleAlert, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
-import { ACTRESS_LIST_DEFAULTS, type ActressAvatarFilter, type ActressListItem, type ActressListSortBy } from '@shared/actressTypes'
+import { ACTRESS_LIST_DEFAULTS, type ActressAvatarFilter, type ActressListSortBy } from '@shared/actressTypes'
+import type { ActressCard } from '@shared/cardProjection'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, type ActressScrapeField, type ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
 import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
@@ -124,7 +125,7 @@ export default function ActressesPage(): JSX.Element {
     [setSearchParams]
   )
 
-  const [pendingDelete, setPendingDelete] = useState<ActressListItem | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<ActressCard | null>(null)
   const [showBulkScrape, setShowBulkScrape] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const filterBtnRef = useRef<HTMLButtonElement>(null)
@@ -182,7 +183,7 @@ export default function ActressesPage(): JSX.Element {
   const { stats: overviewStats } = useLibraryOverviewStats()
   const refetchActressSurface = useCallback(() => {
     listQuery.refetchSilent()
-    void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'all', stale: true })
+    void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'active', stale: true })
   }, [listQuery, queryClient])
 
   useListSurfaceRefetch(detailOpen, refetchActressSurface)
@@ -205,9 +206,11 @@ export default function ActressesPage(): JSX.Element {
     selectedIds,
     selectedCount,
     selectionMode,
+    selectingRange,
+    selectionError,
     toggleSelection: toggleActressSelection,
     clearSelection
-  } = useRangeSelection(items, queryHash)
+  } = useRangeSelection(items, queryHash, { window: listQuery.window })
 
   const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.actressBanner)
@@ -415,14 +418,14 @@ export default function ActressesPage(): JSX.Element {
       <div className="topbar library-header">
         {selectionMode ? (
           <SelectionToolbar
-            countLabel={`已选择 ${selectedCount} 位演员 · Shift 连选`}
+            countLabel={selectingRange ? `已选择 ${selectedCount} 位演员 · 正在读取范围…` : `已选择 ${selectedCount} 位演员 · Shift 连选`}
             onClear={clearSelection}
             actions={[
               {
                 key: 'scrape',
                 label: '刮削元数据',
                 icon: <SearchCheck {...UI_ICON_SM} aria-hidden />,
-                disabled: anyBatchActive || !defaultScraper,
+                disabled: selectingRange || anyBatchActive || !defaultScraper,
                 title: anyBatchActive
                   ? '请先完成或终止当前批量刮削任务'
                   : !defaultScraper
@@ -435,7 +438,7 @@ export default function ActressesPage(): JSX.Element {
                 label: '删除演员',
                 icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
                 danger: true,
-                disabled: selectedCount === 0,
+                disabled: selectingRange || selectedCount === 0,
                 onClick: () => setConfirmBulkDelete(true)
               }
             ]}
@@ -586,10 +589,15 @@ export default function ActressesPage(): JSX.Element {
         ) : null}
       </div>
 
+      {selectionError && <div role="alert">{selectionError}</div>}
       <ListSurface variant="fill" withInner={false}>
           {loading ? (
             <EmptyState loading variant="page" />
-          ) : items.length === 0 ? (
+          ) : listQuery.error && listQuery.total === 0 ? (
+            <EmptyState title="演员列表加载失败">
+              <Button onClick={listQuery.retry}>重试</Button>
+            </EmptyState>
+          ) : listQuery.total === 0 ? (
             <EmptyState
               icon={
                 emptyDueToFilter ? (
@@ -606,7 +614,7 @@ export default function ActressesPage(): JSX.Element {
               }
             />
           ) : (
-            <VirtualActressGrid
+            <VirtualActressGrid catalogWindow={listQuery.window}
               actresses={items}
               selectedIds={selectedIds}
               selectionMode={selectionMode}

@@ -1,0 +1,73 @@
+BEGIN startup.current_schema
+{"name":"startup.current_schema","firstMs":246.09591600000022,"warmMedianMs":249.4364169999999,"warmMaxMs":251.53479200000038,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":177291264}
+BEGIN legacy.first
+{"name":"legacy.first","firstMs":3.983249999999316,"warmMedianMs":3.1089160000001357,"warmMaxMs":3.1104999999997744,"samples":3,"sqlCalls":2,"sqlMsLast":3.0010000000002037,"serializedBytes":41393,"rssBytesAfter":177422336}
+BEGIN legacy.deep
+{"name":"legacy.deep","firstMs":555.2970420000001,"warmMedianMs":561.2275829999999,"warmMaxMs":562.7816670000002,"samples":3,"sqlCalls":2,"sqlMsLast":562.5799169999991,"serializedBytes":40895,"rssBytesAfter":177487872}
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":569.5717500000001,"warmMedianMs":572.4455409999991,"warmMaxMs":574.4789170000004,"samples":3,"sqlCalls":2,"sqlMsLast":574.2979169999999,"serializedBytes":41452,"rssBytesAfter":177569792}
+BEGIN legacy.search_code
+{"name":"legacy.search_code","firstMs":96.56812499999978,"warmMedianMs":95.56433300000026,"warmMaxMs":95.82279200000085,"samples":3,"sqlCalls":2,"sqlMsLast":95.07099999999991,"serializedBytes":708,"rssBytesAfter":177700864}
+BEGIN scoped.library
+{"name":"scoped.library","firstMs":66.39554099999987,"warmMedianMs":65.64691599999969,"warmMaxMs":65.74387500000012,"samples":3,"sqlCalls":2,"sqlMsLast":65.03666600000179,"serializedBytes":50573,"rssBytesAfter":177864704}
+BEGIN scoped.all_single_active
+{"name":"scoped.all_single_active","firstMs":65.94341700000041,"warmMedianMs":65.64841700000034,"warmMaxMs":65.99058400000104,"samples":3,"sqlCalls":3,"sqlMsLast":65.35825000000114,"serializedBytes":50573,"rssBytesAfter":178012160}
+BEGIN scoped.all_selected_one
+{"name":"scoped.all_selected_one","firstMs":66.15300000000025,"warmMedianMs":65.40812499999993,"warmMaxMs":65.61958300000151,"samples":3,"sqlCalls":3,"sqlMsLast":65.3637920000001,"serializedBytes":50573,"rssBytesAfter":178159616}
+BEGIN scoped.release
+{"name":"scoped.release","firstMs":80.96845800000119,"warmMedianMs":80.59633399999984,"warmMaxMs":80.73187499999949,"samples":3,"sqlCalls":2,"sqlMsLast":80.3343330000007,"serializedBytes":50632,"rssBytesAfter":178536448}
+BEGIN scoped.search_code
+{"name":"scoped.search_code","firstMs":370.52329199999986,"warmMedianMs":369.3662499999991,"warmMaxMs":370.1506669999999,"samples":3,"sqlCalls":3,"sqlMsLast":369.00545799999963,"serializedBytes":861,"rssBytesAfter":179109888}
+BEGIN tags.all
+{"name":"tags.all","firstMs":569.1501660000013,"warmMedianMs":603.5166669999999,"warmMaxMs":647.1115000000009,"samples":3,"sqlCalls":1,"sqlMsLast":577.6837919999998,"serializedBytes":46787,"rssBytesAfter":187777024}
+BEGIN tags.manual
+{"name":"tags.manual","firstMs":1448.121000000001,"warmMedianMs":1451.0021669999987,"warmMaxMs":1470.0025829999977,"samples":3,"sqlCalls":1,"sqlMsLast":1442.0806250000023,"serializedBytes":46787,"rssBytesAfter":188153856}
+BEGIN tags.selected_labels
+{"name":"tags.selected_labels","firstMs":0.15454200000021956,"warmMedianMs":0.023083000000042375,"warmMaxMs":0.025582999998732703,"samples":3,"sqlCalls":1,"sqlMsLast":0.007459000000380911,"serializedBytes":76,"rssBytesAfter":188186624}
+BEGIN tags.selected_labels_100
+{"name":"tags.selected_labels_100","firstMs":0.0779999999977008,"warmMedianMs":0.05091600000014296,"warmMaxMs":0.0915419999982987,"samples":3,"sqlCalls":1,"sqlMsLast":0.042707999997219304,"serializedBytes":2685,"rssBytesAfter":188350464}
+BEGIN tags.manual_options
+{"name":"tags.manual_options","firstMs":0.2642909999995027,"warmMedianMs":0.06941599999845494,"warmMaxMs":0.09487500000250293,"samples":3,"sqlCalls":1,"sqlMsLast":0.054707999999664025,"serializedBytes":2906,"rssBytesAfter":188383232}
+BEGIN tags.manual_options_search
+{"name":"tags.manual_options_search","firstMs":0.21108299999832525,"warmMedianMs":0.15450000000055297,"warmMaxMs":0.16225000000122236,"samples":3,"sqlCalls":1,"sqlMsLast":0.14437499999985448,"serializedBytes":344,"rssBytesAfter":188678144}
+BEGIN tags.manual_options_deep
+{"name":"tags.manual_options_deep","firstMs":1.1698340000002645,"warmMedianMs":0.32699999999749707,"warmMaxMs":0.38383299999986775,"samples":3,"sqlCalls":1,"sqlMsLast":0.3007919999981823,"serializedBytes":2909,"rssBytesAfter":188727296}
+BEGIN actors.first
+{"name":"actors.first","firstMs":429.24887500000114,"warmMedianMs":424.7602910000023,"warmMaxMs":429.0074160000004,"samples":3,"sqlCalls":3,"sqlMsLast":428.80587399999786,"serializedBytes":104927,"rssBytesAfter":195067904}
+BEGIN overview
+{"name":"overview","firstMs":7.65520800000013,"warmMedianMs":6.805334000000585,"warmMaxMs":6.810874999999214,"samples":3,"sqlCalls":6,"sqlMsLast":6.675123999997595,"serializedBytes":268,"rssBytesAfter":195264512}
+BEGIN home.single
+{"name":"home.single","firstMs":80.67212500000096,"warmMedianMs":77.18695799999841,"warmMaxMs":79.07079199999862,"samples":3,"sqlCalls":7,"sqlMsLast":76.48845799999253,"serializedBytes":21173,"rssBytesAfter":196575232}
+BEGIN web.first
+{"name":"web.first","firstMs":80.39216700000179,"warmMedianMs":80.14612500000294,"warmMaxMs":81.26591699999699,"samples":3,"sqlCalls":2,"sqlMsLast":80.03570699999909,"serializedBytes":4919,"rssBytesAfter":196771840}
+BEGIN web.search
+{"name":"web.search","firstMs":432.6990420000002,"warmMedianMs":431.8372080000008,"warmMaxMs":436.51666599999953,"samples":3,"sqlCalls":2,"sqlMsLast":430.9872920000016,"serializedBytes":177,"rssBytesAfter":196919296}
+BEGIN web.collections
+{"name":"web.collections","firstMs":38.40595799999937,"warmMedianMs":36.74337500000183,"warmMaxMs":37.458332999998674,"samples":3,"sqlCalls":2,"sqlMsLast":37.34791699999914,"serializedBytes":135,"rssBytesAfter":197017600}
+BEGIN playlist.full
+{"name":"playlist.full","firstMs":93.42024999999921,"warmMedianMs":98.14954099999886,"warmMaxMs":101.14208299999882,"samples":3,"sqlCalls":3,"sqlMsLast":78.27708399999756,"serializedBytes":20601442,"rssBytesAfter":355745792}
+BEGIN playlist.page
+{"name":"playlist.page","firstMs":9.612667000001238,"warmMedianMs":7.525000000001455,"warmMaxMs":7.809541999999055,"samples":3,"sqlCalls":6,"sqlMsLast":7.279791000004479,"serializedBytes":9718,"rssBytesAfter":355844096}
+BEGIN playlist.metadata
+{"name":"playlist.metadata","firstMs":1.3284999999996217,"warmMedianMs":1.1686250000020664,"warmMaxMs":1.3898330000010901,"samples":3,"sqlCalls":3,"sqlMsLast":1.101542000000336,"serializedBytes":169,"rssBytesAfter":355893248}
+BEGIN playlist.video_page
+{"name":"playlist.video_page","firstMs":6.253082999999606,"warmMedianMs":6.198249999997643,"warmMaxMs":6.37108299999818,"samples":3,"sqlCalls":3,"sqlMsLast":6.05279199999859,"serializedBytes":9550,"rssBytesAfter":355975168}
+BEGIN playlist.deep_page
+{"name":"playlist.deep_page","firstMs":13.9686249999977,"warmMedianMs":13.464874999997846,"warmMaxMs":13.871041000002151,"samples":3,"sqlCalls":6,"sqlMsLast":13.035417999999481,"serializedBytes":9344,"rssBytesAfter":356155392}
+BEGIN experiment.no_distinct.0
+{"name":"experiment.no_distinct.0","firstMs":0.04304099999717437,"warmMedianMs":0.023791999999957625,"warmMaxMs":0.026625000002240995,"samples":3,"sqlCalls":1,"sqlMsLast":0.019250000001193257,"serializedBytes":12,"rssBytesAfter":356188160}
+BEGIN experiment.no_distinct.1
+{"name":"experiment.no_distinct.1","firstMs":0.2349160000012489,"warmMedianMs":0.19633299999986775,"warmMaxMs":0.20245799999975134,"samples":3,"sqlCalls":1,"sqlMsLast":0.16166700000030687,"serializedBytes":41248,"rssBytesAfter":356302848}
+BEGIN scoped.all_overlap
+{"name":"scoped.all_overlap","firstMs":497.77200000000084,"warmMedianMs":495.4185830000024,"warmMaxMs":495.44845799999894,"samples":3,"sqlCalls":3,"sqlMsLast":495.0563750000001,"serializedBytes":51893,"rssBytesAfter":356696064}
+BEGIN home.overlap
+{"name":"home.overlap","firstMs":727.2135000000017,"warmMedianMs":705.2503750000033,"warmMaxMs":731.0432090000031,"samples":3,"sqlCalls":7,"sqlMsLast":730.1486680000016,"serializedBytes":22552,"rssBytesAfter":358400000}
+✔ scripts/performance/large-library-benchmark.ts (32506.70575ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32512.076708

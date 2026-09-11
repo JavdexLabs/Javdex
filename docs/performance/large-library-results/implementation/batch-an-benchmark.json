@@ -1,0 +1,86 @@
+{
+  "count": 10000,
+  "scanGroups": 10000,
+  "resourceIdentities": 10000,
+  "candidatesPerItem": 1,
+  "summaryCharacters": 4096,
+  "results": [
+    {
+      "name": "full.list",
+      "samples": [
+        614.738125,
+        604.4266250000001,
+        589.9435830000002
+      ],
+      "medianMs": 604.4266250000001,
+      "jsonBytes": 46503365,
+      "rssBytes": 1411366912
+    },
+    {
+      "name": "summary.first",
+      "samples": [
+        2.4410830000001624,
+        1.7935419999998885,
+        1.505457999999635
+      ],
+      "medianMs": 1.7935419999998885,
+      "jsonBytes": 6350,
+      "rssBytes": 1411596288
+    },
+    {
+      "name": "summary.deep",
+      "samples": [
+        1.9995829999998023,
+        2.2377080000001115,
+        3.002292000000125
+      ],
+      "medianMs": 2.2377080000001115,
+      "jsonBytes": 6789,
+      "rssBytes": 1411694592
+    },
+    {
+      "name": "detail.selected",
+      "samples": [
+        0.16537500000004002,
+        0.08912499999996726,
+        0.05925000000024738
+      ],
+      "medianMs": 0.08912499999996726,
+      "jsonBytes": 4650,
+      "rssBytes": 1411760128
+    },
+    {
+      "name": "existing.ids100",
+      "samples": [
+        0.13083300000016607,
+        0.0470829999999296,
+        0.03875000000016371
+      ],
+      "medianMs": 0.0470829999999296,
+      "jsonBytes": 502,
+      "rssBytes": 1411792896
+    },
+    {
+      "name": "audit.presence.mixed100",
+      "samples": [
+        0.21795899999960966,
+        0.10945800000035888,
+        0.0873330000003989
+      ],
+      "medianMs": 0.10945800000035888,
+      "jsonBytes": 547,
+      "rssBytes": 1411825664
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "sqliteVersion": {
+    "version": "3.53.4"
+  },
+  "caveats": [
+    "Three sequential local warm samples on synthetic catalog; not p95/Windows/HDD/full renderer IPC.",
+    "Times cover repository calls only; assertions and JSON sizing excluded. Bytes are JSON-equivalent payload, not actual IPC allocations.",
+    "First metadata page reads at most50 item metadata, but candidate counts/first-candidate JSON extraction and OFFSET/rank are not constant SQL work.",
+    "RSS is sampled after each stage, not peak or independent allocation; full hydration runs first. No OS cache reset."
+  ]
+}

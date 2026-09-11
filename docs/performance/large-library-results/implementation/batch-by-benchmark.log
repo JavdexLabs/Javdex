@@ -1,0 +1,26 @@
+{
+  "count": 300000,
+  "startupAndBuildMs": 1293.177375,
+  "callbacksDuringBuild": 502,
+  "maxTimerGapMs": 13.424166999999898,
+  "deepPageSamplesMs": [
+    3.886833000000024,
+    3.6033330000000205,
+    3.384166999999934
+  ],
+  "firstPageBytes": 31133,
+  "notes": [
+    "2ms main-thread timer; one real worker startup/build, warm filesystem; 8ms drain. Diagnostic timing, not p95 or universal latency bound.",
+    "Warm deep page one warmup+3 samples includes client context/message/copy; assertions excluded. Source oracle retained; no peak memory claim.",
+    "No UI/IPC handler integration, mixed fairness, idle expiry timing, forced termination during native SQL, Windows/HDD or cold-disk evidence."
+  ]
+}
+✔ measures responsiveness during real audit worker initialization and paging (1723.355667ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1898.880416

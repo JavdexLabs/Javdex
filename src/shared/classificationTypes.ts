@@ -340,3 +340,7 @@ export interface SeriesMergeResult {
   imagePath: string | null
   cleanupFailures: ClassificationImageCleanupFailure[]
 }
+
+/** Bounded classification browsing; old complete-list contracts remain unchanged. */
+export interface ClassificationPageQuery { limit?: number; offset?: number }
+export interface ClassificationListPage<T> { items: T[]; total: number; limit: number; offset: number }

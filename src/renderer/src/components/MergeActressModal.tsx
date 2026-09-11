@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import ContinuousGrid from './ContinuousGrid'
+import { useContinuousPage } from '../hooks/useContinuousPage'
+import { useEffect, useRef, useState } from 'react'
 import { SearchX, UserRound } from 'lucide-react'
 import {
-  actressGenderMergeLabel,
-  canMergeActressGenders
+  actressGenderMergeLabel
 } from '@shared/actressProfileOptions'
-import type { ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/actressTypes'
-import type { ActressDetail } from '@shared/actressTypes'
+import type { ActressGender, ActressMergeCandidate, ActressMergeMainNameFrom } from '@shared/actressTypes'
+import type { ActressMetadata } from '@shared/actressTypes'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import ActressName from './ActressName'
@@ -16,7 +17,8 @@ import { UI_ICON_SM } from './iconDefaults'
 import Button from './Button'
 
 interface Props {
-  keepActress: ActressDetail
+  keepActress: Omit<ActressMetadata, 'gallery'> & ({ gallery: ActressMetadata['gallery'] } | { gallery_count: number })
+  keepVideoCount: number
   onCancel: () => void
   onMerged: () => void
 }
@@ -88,54 +90,35 @@ function MergeActressCard({
   )
 }
 
-export default function MergeActressModal({
+export default function MergeActressModal(props: Props): JSX.Element {
+  return <MergeActressSession key={`${props.keepActress.id}:${props.keepActress.gender ?? ''}`} {...props} />
+}
+
+function MergeActressSession({
   keepActress,
+  keepVideoCount,
   onCancel,
   onMerged
 }: Props): JSX.Element {
   const [searchInput, setSearchInput] = useState('')
   const debouncedQ = useDebounce(searchInput, 300)
-  const [items, setItems] = useState<ActressListItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [selected, setSelected] = useState<ActressListItem | null>(null)
+  const [selected, setSelected] = useState<ActressMergeCandidate | null>(null)
   const [mainNameFrom, setMainNameFrom] = useState<ActressMergeMainNameFrom>('keep')
   const [merging, setMerging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'nearest' }) }, [error])
+  const candidates = useContinuousPage(`merge:${keepActress.id}:${debouncedQ}`, 40,
+    offset => api.actresses.mergeCandidates({ keepId: keepActress.id, search: debouncedQ.trim(), limit: 40, offset }))
+  const { items, loading, error: pageError } = candidates
+  const mergeInFlight = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    api.actresses
-      .list(debouncedQ.trim(), 'all')
-      .then((list) => {
-        if (cancelled) return
-        setItems(
-          list.filter(
-            (item) =>
-              item.id !== keepActress.id &&
-              canMergeActressGenders(keepActress.gender, item.gender)
-          )
-        )
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String((e as Error).message ?? e))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [debouncedQ, keepActress.gender, keepActress.id])
-
-  useEffect(() => {
-    setMainNameFrom('keep')
-  }, [selected?.id])
 
   const doMerge = async (): Promise<void> => {
-    if (!selected || merging) return
+    if (!selected || mergeInFlight.current) return
+    mergeInFlight.current = true
     setMerging(true)
     setError(null)
     try {
@@ -144,11 +127,12 @@ export default function MergeActressModal({
         mergeId: selected.id,
         mainNameFrom
       })
-      onMerged()
+      if (mounted.current) onMerged()
     } catch (e) {
-      setError(String((e as Error).message ?? e))
+      if (mounted.current) setError(String((e as Error).message ?? e))
     } finally {
-      setMerging(false)
+      mergeInFlight.current = false
+      if (mounted.current) setMerging(false)
     }
   }
 
@@ -156,8 +140,8 @@ export default function MergeActressModal({
     main_name: keepActress.main_name,
     gender: keepActress.gender ?? null,
     avatar_path: keepActress.avatar_path,
-    video_count: keepActress.videos.length,
-    gallery_count: keepActress.gallery.length
+    video_count: keepVideoCount,
+    gallery_count: 'gallery_count' in keepActress ? keepActress.gallery_count : keepActress.gallery.length
   }
 
   const selectedCard: MergeCardActress | undefined = selected
@@ -184,7 +168,7 @@ export default function MergeActressModal({
         : keepActress.main_name
 
   const mergedVideoCount =
-    selected == null ? keepActress.videos.length : keepActress.videos.length + selected.video_count
+    selected == null ? keepVideoCount : keepVideoCount + selected.video_count
   return (
     <Modal
       title="合并演员"
@@ -194,6 +178,7 @@ export default function MergeActressModal({
       className="merge-actress-modal"
       bodyOverflow="hidden"
       onCancel={onCancel}
+      closeDisabled={merging}
       actions={
         <>
           <Button type="button" onClick={onCancel} disabled={merging}>
@@ -228,13 +213,16 @@ export default function MergeActressModal({
           <div className="merge-actress-section-head">
             <span className="merge-actress-section-title">选择要合并的演员</span>
             {!loading && items.length > 0 && (
-              <span className="merge-actress-section-meta">{items.length} 名候选</span>
+              <span className="merge-actress-section-meta">可按名称搜索</span>
             )}
           </div>
           <input
             className="search-input merge-actress-search"
             type="search"
             placeholder="搜索主名或别名…"
+            aria-label="搜索合并候选"
+            maxLength={256}
+            disabled={merging}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             autoFocus
@@ -243,6 +231,11 @@ export default function MergeActressModal({
           <div className="merge-actress-pick-panel">
             {loading ? (
               <EmptyState variant="modal" loading />
+            ) : pageError && !candidates.total ? (
+              <div role="alert" className="merge-actress-page-error">
+                <p>合并候选读取失败</p>
+                <Button size="sm" disabled={merging} onClick={candidates.reload}>重试</Button>
+              </div>
             ) : items.length === 0 ? (
               <EmptyState
                 variant="modal"
@@ -255,17 +248,18 @@ export default function MergeActressModal({
                 }
               />
             ) : (
-              <div className="merge-actress-pick-list" role="listbox" aria-label="演员列表">
-                {items.map((item) => {
+              <ContinuousGrid role="listbox" contained window={candidates.window} scope={`merge:${keepActress.id}:${debouncedQ}`} label="演员列表" itemHeight={68} itemKey={item => item.id} renderItem={item => {
                   const isSelected = selected?.id === item.id
                   return (
                     <button
                       key={item.id}
                       type="button"
                       role="option"
+                      aria-label={`选择合并演员 ${item.main_name}`}
                       aria-selected={isSelected}
                       className={`merge-actress-pick-item${isSelected ? ' is-selected' : ''}`}
-                      onClick={() => setSelected(isSelected ? null : item)}
+                      disabled={merging}
+                      onClick={() => { setSelected(isSelected ? null : item); setMainNameFrom('keep') }}
                     >
                       <span className="merge-actress-pick-radio" aria-hidden="true" />
                       <ActressAvatar
@@ -283,10 +277,10 @@ export default function MergeActressModal({
                       </span>
                     </button>
                   )
-                })}
-              </div>
+                }} />
             )}
           </div>
+
         </section>
 
         <section
@@ -305,6 +299,7 @@ export default function MergeActressModal({
                   <input
                     type="radio"
                     name="merge-main-name"
+                    disabled={merging}
                     checked={mainNameFrom === 'keep'}
                     onChange={() => setMainNameFrom('keep')}
                   />
@@ -319,6 +314,7 @@ export default function MergeActressModal({
                   <input
                     type="radio"
                     name="merge-main-name"
+                    disabled={merging}
                     checked={mainNameFrom === 'merge'}
                     onChange={() => setMainNameFrom('merge')}
                   />
@@ -334,7 +330,7 @@ export default function MergeActressModal({
                   当前条目保留为「{finalMainName}」，对方记录将删除
                 </li>
                 <li>
-                  影片合并：{keepActress.videos.length} + {selected.video_count}，约{' '}
+                  影片合并：{keepVideoCount} + {selected.video_count}，约{' '}
                   <strong>{mergedVideoCount}</strong> 部关联到保留条目
                 </li>
                 <li>写真与资料字段将合并到保留条目，已有字段优先保留</li>
@@ -352,7 +348,7 @@ export default function MergeActressModal({
           )}
         </section>
 
-        {error && <p className="merge-actress-error">{error}</p>}
+        {error && <p ref={errorRef} role="alert" className="merge-actress-error">{error}</p>}
       </div>
     </Modal>
   )

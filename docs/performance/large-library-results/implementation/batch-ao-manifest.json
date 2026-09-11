@@ -1,0 +1,29 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ao-benchmark.json": "e9118d4e101a4fab61aede12fcac256ee20885f48067cbc2fc2621e9af76eaab",
+    "batch-ao-benchmark.log": "6a21c15316258994429007fb5a41b1c818bf0dc808e0d0e921509fbd297e379c",
+    "batch-ao-browser.log": "d1790aff80af0da1dd12aa14dae3a6d31a65f0843f97f9b8b5de350fd79c8f1d",
+    "batch-ao-build.log": "c9b18e4fd3c5963a39de6b7cff0239cfb1bd8fb1de136f1b663669b006ecd0ef",
+    "batch-ao-full.log": "af81fbcd44a210d97932f9acd0351e42c225faba47a1c5e93dbaebef6fe6a4e0",
+    "batch-ao-review.md": "006a3d00865918566be943638ee98566515dc64f4087b04e8afcb398c3fd0890",
+    "batch-ao-scan-queue.patch": "6dd72cc0049c5af08b5c0023dd8812639059831194d8791955329fac913c5128",
+    "batch-ao-scrape-browser.log": "d91a0cc0db064c94e981fc8675f31636658a9c7416c22978c56ebfe3857c349e",
+    "batch-ao-scrape-ui-1000x640.png": "a4952ffb60419eec8972ca04521e96c9cdbe6af83bccb249e269c2a3d97bd443",
+    "batch-ao-scrape-ui-1440x900.png": "66d39e84025a4a8caddb908cccb2ff5f0f706a61d52cbcfdff3923ddbc97143a",
+    "batch-ao-scrape-ui-results.json": "97516c3193ce5325ea5d1aae629bb06242d66482ec21673050435012cdcf2572",
+    "batch-ao-target.log": "4f334b077487715505cd6ae5662510628f8d6236c016a7674e82c62c4e09d900",
+    "batch-ao-ui-1000x640.png": "11195d2559df94562dbc901206f3b24067ff4b2df15d3415118c786fe407b8b1",
+    "batch-ao-ui-1440x900.png": "571f5e949fc40b2111368d99483f88265ae6b50ab6966e6c47b6c7efe85b1eb4",
+    "batch-ao-ui-results.json": "df2b5197cda16ddb22999cb1e155d2e32ebbcc24871c115167e825e49d362736"
+  },
+  "notes": [
+    "Cumulative selected tracked diff plus full new files vs base; depends on B-AN and is not a standalone patch.",
+    "Final59 focused tests passed; full2212pass1skip0fail; build passed; final two-size scan and scrape browser fixtures passed.",
+    "Scan page maximum100/default50; same-read count/anchor/page; group-before-identity/library position order; scoped details. Original name/ownership/schema rules unchanged.",
+    "Synthetic10000groups with2resources each/4KiB display names plus10000identities; 3 warm samples afterANALYZE. Repo timings exclude JSON/assertions, not p95/Windows/HDD/full IPC.",
+    "First and deep identity page exact DTO assertions. COUNT/order/rank/OFFSET still scale; selected group detail unbounded and queries remain on main thread.",
+    "Browser fake IPC details return null; proves paging/error/retry geometry and per-selection calls, not native scan resolution. Identity confirmation has separate actual component regression.",
+    "No user data access, schema change(current17), commit, push or release. Full15/42 goal remains active."
+  ]
+}

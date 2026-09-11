@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cv-build.log": "24ab60713a268a8b4e0fde218d30d595af7b6d36d25b634ff70d014da1dc8945",
+    "batch-cv-full.log": "b2a5d8886754c6873559b8db64a5c9d0d6d3644a547365da738deb411afbdae1",
+    "batch-cv-pending-audit-refresh.patch": "363224d8a868f2fc46fd632d1c7ec4d5788974f59a02cee5296770a0754857e2",
+    "batch-cv-refresh-red.log": "602d8d94690b84bb4b9387ad84a93901b8c12bc525264cd58d5409edf6e182fb",
+    "batch-cv-review.md": "cb1c747d0dc88a1234ab05a41f98c52634b38091a8991567dce4a0a78cc2e304",
+    "batch-cv-target.log": "8f2fe0149c4a73cf1bc5de673437297fa785e60f5ef8058e584826a246b2cfc0"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "Native iterator red5fail retained; final85target/full2641pass1skip0fail/build terminal0.",
+    "TEMP snapshot + JS item/encoded-byte batches; no claim of bounded SQLite temporary space or arbitrary singleton memory.",
+    "Production coordinator not switched; full15/42 remains incomplete."
+  ]
+}

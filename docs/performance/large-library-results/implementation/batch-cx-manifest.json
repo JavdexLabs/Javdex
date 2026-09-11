@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cx-build.log": "8f3b4f42a0ea6b2f9bc069cd1dd495814c6b64bf25ecebb8774f8e7019946180",
+    "batch-cx-full.log": "04e59d916e6f175745e05c5b66d6878090c70dbccc6de8ed72533a28c8c69f4b",
+    "batch-cx-index-red.log": "5ffa0b3e532bcb8e1d934b056ee23ad1fcab65c82110c9b6738162c3ac474c4c",
+    "batch-cx-production-entries.patch": "56de1504f2ea58956c8f8e28b287bff630be6fa35215182ef2b6da0971e34631",
+    "batch-cx-review.md": "ffd26b108c260f9a6143a439830901287201f02a20028cf9c49079ca2504234d",
+    "batch-cx-target.log": "c030d2062afd85aeaa17a62d1ad43cc592ecde6641ef535acb83acc122072231"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "246target/full2673pass1skip0fail/build terminal0.",
+    "Default coordinator entries cutover; real mixedscan index red10 rebuilds ->green1.",
+    "Remaining scanner result/discovery/NFO/cleanup containers and performance/platform matrix mean full15/42 incomplete."
+  ]
+}

@@ -1,0 +1,45 @@
+✔ pages a fixed target set and bounds labels after live insert, delete and rename (121.721084ms)
+✔ handles empty sets and connection closure without recreating a database (6.221959ms)
+✔ rolls back the temporary table if snapshot population fails (5.741041ms)
+▶ scrape IPC schemas
+  ✔ strictly validates media-library-scoped video batch scrape commands (1.480333ms)
+  ✔ validates the optional media-library scope on single-video scrape commands (0.137166ms)
+✔ scrape IPC schemas (1.961583ms)
+✔ bounds pending scrape pages and details at the IPC boundary (0.4205ms)
+✔ bounds audit pending presence lookups (0.28125ms)
+✔ validates token and safe nonnegative avatar snapshot cursor (0.383417ms)
+▶ AvatarAutoCropMediator
+  ✔ resolves automatic crop requests and rejects stale replies (1.108875ms)
+  ✔ fails pending automatic crop requests after renderer disconnects (0.11525ms)
+  ✔ times out automatic crop requests without accepting a late response (1.809333ms)
+  ✔ owns the crop batch token until matching end or disconnect (0.256375ms)
+  ✔ rejects a second begin while a crop batch is active (0.337958ms)
+✔ AvatarAutoCropMediator (4.381292ms)
+✔ creates one lazy snapshot per batch and disposes only its owning token (0.159166ms)
+✔ retries failed snapshot creation without poisoning the batch and clears on reinitialization (0.076ms)
+✔ settles disconnected requests despite cleanup failure and retries before allowing another snapshot (0.177166ms)
+▶ ScrapeJobController
+  ✔ flushes and detaches UI progress on rejection before accepting another batch (3.404084ms)
+  ✔ coalesces video UI progress while preserving checkpoints and done delivery (19.513708ms)
+  ✔ coalesces video UI progress while preserving checkpoints and paused delivery (13.321875ms)
+  ✔ coalesces video UI progress while preserving checkpoints and cancelled delivery (11.812459ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and done delivery (11.604125ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and paused delivery (11.456167ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and cancelled delivery (11.347792ms)
+  ✔ preserves media-library scope through batch count and start orchestration (0.366542ms)
+  ✔ rejects a single-video scrape outside the requesting active media library (0.288375ms)
+  ✔ forwards an explicit director choice and returns structured classification outcomes (0.089292ms)
+  ✔ serializes single video and actress scrape runs (0.072084ms)
+  ✔ pauses an interrupted persisted job during initialization (0.071583ms)
+  ✔ recovers an on-disk running checkpoint as paused after restart (31.2995ms)
+  ✔ publishes progress and supports pause, resume, and discard for persisted batches (0.528542ms)
+  ✔ prevents starting a scrape batch while automatic crop owns the batch lock (0.080334ms)
+✔ ScrapeJobController (115.86825ms)
+ℹ tests 31
+ℹ suites 3
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 656.167167

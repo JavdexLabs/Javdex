@@ -1,0 +1,63 @@
+✔ detects local writes, external commits and connection replacement without changing schema (10.69925ms)
+✔ opens a separate read-only WAL connection with matching SQL functions and no migration (10.917041ms)
+✔ keeps a read snapshot while the writer commits and observes it on the next transaction (8.778666ms)
+✔ rejects missing, old, newer and non-WAL catalogs without initializing or migrating them (3.045542ms)
+✔ does not publish an unsuccessfully initialized writer and permits a subsequent valid initialization (9.455083ms)
+▶ tagRepo.pruneUnusedTags
+  ✔ deletes tags with no video links and keeps tags still used by a video (10.577833ms)
+✔ tagRepo.pruneUnusedTags (11.206333ms)
+▶ tagRepo selected labels
+  ✔ looks up only selected IDs through the tag primary key and omits deleted IDs (12.88375ms)
+  ✔ bounds display labels and JSON bytes without changing full stored names (11.890209ms)
+  ✔ rejects invalid or oversized requests and does no SQL work for an empty selection (9.486375ms)
+✔ tagRepo selected labels (34.424625ms)
+▶ tagRepo manual candidates
+  ✔ pages alphabetically without counts and retains hidden/manual-only associations (19.141458ms)
+  ✔ preserves Unicode/literal substring matching and searches beyond display truncation (7.982958ms)
+  ✔ uses tag-key existence checks under skewed statistics and validates its work limits (14.288375ms)
+✔ tagRepo manual candidates (41.545833ms)
+▶ tagRepo active catalog projection
+  ✔ matches manual association and visibility semantics before and after statistics maintenance (24.0975ms)
+  ✔ deduplicates shared memberships and preserves manual origin and zero-count tags (6.3375ms)
+  ✔ counts only videos that can be opened through the active visible catalog (6.235667ms)
+✔ tagRepo active catalog projection (36.758708ms)
+▶ tagRepo filter candidates
+  ✔ paginates names before counts and matches global visibility counts with shared and archived members (7.834209ms)
+  ✔ keeps Unicode literal search, bounded labels and page-only count parameters (23.145458ms)
+✔ tagRepo filter candidates (31.027708ms)
+✔ executes real read-only tag queries and observes writes through the worker cache (29.493583ms)
+✔ rejects a changed catalog version at worker startup without migration (23.888084ms)
+✔ settles in-flight initialization and queued requests when disposed (21.078625ms)
+✔ counts merged subscribers toward capacity, normalizes keys, and clones each successful result (1.686542ms)
+✔ serializes different revisions and keeps a folded expanding query valid in the payload (0.170375ms)
+✔ rejects old generation on identity change and waits for termination (2.899792ms)
+✔ rejects old generation on path change and waits for termination (1.025375ms)
+✔ removes queued aborts but retains an executing slot after all subscribers abort (0.361208ms)
+✔ one subscriber abort does not cancel another or retain its signal listener (0.175583ms)
+✔ rejects all accepted on startup timeout, without retry or overlapping workers (17.710458ms)
+✔ rejects all accepted on query timeout, without retry or overlapping workers (16.634833ms)
+✔ rejects all accepted on exit, without retry or overlapping workers (0.462167ms)
+✔ rejects all accepted on error, without retry or overlapping workers (0.533167ms)
+✔ rejects all accepted on protocol error, without retry or overlapping workers (0.265416ms)
+✔ dispose closes admission immediately and waits for a running termination (0.256542ms)
+✔ fails closed if termination rejects and rejects requests waiting for replacement (0.174875ms)
+✔ rejects invalid queries before creating a worker and contains factory/post failures (0.163375ms)
+✔ bounds subscribers while termination is pending and supersedes a waiting generation (0.916625ms)
+✔ does not launch work after repeated queued cancellations before ready (1.195375ms)
+✔ contains unexpected messages and dispose drains an already-started replacement barrier (0.12175ms)
+✔ reuses canonical query pages, isolates caller mutations, and invalidates local and external writes (13.101875ms)
+✔ bypasses cached pages inside transactions and never publishes data that is rolled back (7.579583ms)
+✔ evicts least recently used pages and validates raw search before cache lookup (8.784791ms)
+✔ evicts by serialized byte budget before eight large pages accumulate (13.843ms)
+✔ observes an external commit during a read and refreshes on the next call (7.07925ms)
+✔ does not cache a failed read and allows the same query to retry (7.539792ms)
+✔ separates connections even when their revision counters match (14.3115ms)
+✔ binds a separate cache and repository to a readonly connection, without using the writer getter (5.848875ms)
+ℹ tests 45
+ℹ suites 5
+ℹ pass 45
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 368.002292

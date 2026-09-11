@@ -1,0 +1,184 @@
+[
+  {
+    "viewport": {
+      "width": 1000,
+      "height": 640
+    },
+    "geometry": {
+      "width": 1000,
+      "scrollWidth": 1000
+    },
+    "layout": {
+      "flowBottom": 252.390625,
+      "pickerTop": 266.390625,
+      "pickerBottom": 546.390625,
+      "planTop": 560.390625
+    },
+    "firstPager": {
+      "x": 203,
+      "y": 500.390625,
+      "width": 580,
+      "height": 32
+    },
+    "errorBox": {
+      "x": 203,
+      "y": 515.15625,
+      "width": 580,
+      "height": 17.390625
+    },
+    "submitBox": {
+      "x": 711,
+      "y": 559,
+      "width": 86,
+      "height": 36
+    },
+    "queries": [
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 80
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "keepId": 1,
+        "search": "Candidate-100",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      }
+    ],
+    "merges": [
+      {
+        "keepId": 1,
+        "mergeId": 2,
+        "mainNameFrom": "merge"
+      },
+      {
+        "keepId": 1,
+        "mergeId": 2,
+        "mainNameFrom": "merge"
+      }
+    ],
+    "errors": []
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440
+    },
+    "layout": {
+      "flowBottom": 296.1875,
+      "pickerTop": 310.1875,
+      "pickerBottom": 590.1875,
+      "planTop": 604.1875
+    },
+    "firstPager": {
+      "x": 423,
+      "y": 558.1875,
+      "width": 580,
+      "height": 32
+    },
+    "errorBox": {
+      "x": 423,
+      "y": 730.953125,
+      "width": 580,
+      "height": 17.390625
+    },
+    "submitBox": {
+      "x": 931,
+      "y": 775.1875,
+      "width": 86,
+      "height": 36
+    },
+    "queries": [
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 80
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "keepId": 1,
+        "search": "Candidate-100",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "keepId": 1,
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      }
+    ],
+    "merges": [
+      {
+        "keepId": 1,
+        "mergeId": 2,
+        "mainNameFrom": "merge"
+      },
+      {
+        "keepId": 1,
+        "mergeId": 2,
+        "mainNameFrom": "merge"
+      }
+    ],
+    "errors": []
+  }
+]

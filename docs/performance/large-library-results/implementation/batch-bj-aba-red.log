@@ -1,0 +1,32 @@
+✔ loads metadata once while paging 60/60/5 works and preserving the full count (239.177542ms)
+✔ retries page errors, clamps a removed last page, and rejects late actor results (6.824708ms)
+✔ does not invalidate the new actor metadata when the old editor save settles late (6.83775ms)
+✔ retains an open merge plan and its full count while the visible works refresh (7.84925ms)
+✖ does not reuse the prior actor page when an intervening actor request is still pending (3.567917ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 504.964666
+
+✖ failing tests:
+
+test at src/renderer/src/pages/ActressDetailPage.interaction.test.tsx:2:10335
+✖ does not reuse the prior actor page when an intervening actor request is still pending (3.567917ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  60 !== 0
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx:156:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 60,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

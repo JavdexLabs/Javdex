@@ -44,3 +44,18 @@ export function actressOwnedNamePatternSearchSql(alias: string): string {
       AND an.name LIKE ?
   )`
 }
+
+/**
+ * Resolve owned names once per actress, then expand through the relation index.
+ * MATERIALIZED and CROSS JOIN keep the name predicate out of the per-video loop.
+ * Keep the original raw-name LIKE predicate (including its wildcard semantics).
+ */
+export function actressOwnedNameVideoIdsSql(): string {
+  return `WITH matched_actresses AS MATERIALIZED (
+    SELECT a.id FROM actresses a
+    WHERE ${actressOwnedNamePatternSearchSql('a')}
+  )
+  SELECT va.video_id
+  FROM matched_actresses matched
+  CROSS JOIN video_actress va ON va.actress_id = matched.id`
+}

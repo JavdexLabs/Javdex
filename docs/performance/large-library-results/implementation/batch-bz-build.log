@@ -1,0 +1,84 @@
+
+> Javdex@0.6.2 build
+> electron-vite build && node scripts/check-mediapipe-assets.mjs && node scripts/check-built-pi-runtime.mjs && npm run web:build
+
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 2538 modules transformed.
+rendering chunks...
+out/main/chunks/sanitize-unicode-DP0y8cmA.js              0.20 kB
+out/main/chunks/openai-prompt-cache-fUNu9h_M.js           0.39 kB
+out/main/chunks/pi-user-agent-d48m060O.js                 0.41 kB
+out/main/chunks/hash-CF2DclNF.js                          0.51 kB
+out/main/chunks/headers-BRy76f9B.js                       0.54 kB
+out/main/chunks/github-copilot-headers-BdidQVpe.js        0.91 kB
+out/main/chunks/deferred-tools-EqNB4WID.js                1.28 kB
+out/main/chunks/scrapeUaProfile-D_MuRjfo.js               2.15 kB
+out/main/chunks/error-body-BA6aOcVs.js                    2.86 kB
+out/main/chunks/provider-retry-kJ1nzv4c.js                3.08 kB
+out/main/index.js                                         4.40 kB
+out/main/chunks/openrouter-images-DhlCbWjz.js             4.71 kB
+out/main/chunks/scrapeBrowserSmokeEntry-CA5mtngf.js       6.12 kB
+out/main/chunks/scrapeBrowserTypes-kvKWlbhl.js           10.99 kB
+out/main/chunks/pi-messages-C7KMfVyf.js                  11.01 kB
+out/main/chunks/multipart-parser-BoRIYtop.js             11.47 kB
+out/main/chunks/openai-responses-65oeGwN4.js             12.38 kB
+out/main/catalogReadWorker.js                            12.97 kB
+out/main/chunks/azure-openai-responses-DpJQAQuI.js       15.17 kB
+out/main/chunks/google-generative-ai-yS1VZ1G3.js         15.71 kB
+out/main/chunks/google-vertex-C9hkUkXl.js                17.82 kB
+out/main/chunks/transform-messages-AbO6Vl_i.js           20.39 kB
+out/main/chunks/openai-responses-shared-DQ6hjuNh.js      24.68 kB
+out/main/chunks/mistral-conversations-DTPXIfjM.js        27.05 kB
+out/main/chunks/piRuntime-rUIjHA6R.js                    30.59 kB
+out/main/chunks/openai-completions-B-1O5zyq.js           47.08 kB
+out/main/chunks/openai-codex-responses-Bh39ORoN.js       49.61 kB
+out/main/chunks/scrapeBrowser-C_NguGpm.js                49.93 kB
+out/main/chunks/photon_rs-B4aDQXKu.js                    54.27 kB
+out/main/chunks/playlistImportRunDriver-BU-ZOebU.js      58.18 kB
+out/main/chunks/scrapeBrowserHelperEntry-C0YWb4ef.js     72.68 kB
+out/main/chunks/tagQueryService-B1yUmalM.js             112.94 kB
+out/main/chunks/index-CUsLp23R.js                       242.23 kB
+out/main/chunks/anthropic-messages-CxO1inEc.js          249.88 kB
+out/main/chunks/client-Cef9Kcq7.js                      320.53 kB
+out/main/chunks/google-shared-CVgd1jzh.js             1,235.41 kB
+out/main/chunks/appMain-BfqZJ8z6.js                   2,958.30 kB
+out/main/chunks/piSdk-BRoPYwCG.js                     7,799.42 kB
+✓ built in 4.99s
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 2 modules transformed.
+rendering chunks...
+out/preload/index.js  40.45 kB
+✓ built in 15ms
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 2463 modules transformed.
+rendering chunks...
+../../out/renderer/index.html                                           0.80 kB
+../../out/renderer/assets/avatarAutoCrop.worker-BNxuU30k.js           201.99 kB
+../../out/renderer/assets/avatar-composition-longhair-Bdiyi91a.png  1,105.68 kB
+../../out/renderer/assets/index-CL341yDW.css                          496.47 kB
+../../out/renderer/assets/index-CjBCSNdW.js                         2,897.59 kB
+✓ built in 1.81s
+智能构图运行资源：16.31 MiB（5 个文件）
+Built Pi runtime verified: piSdk-BRoPYwCG.js
+(node:19894) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> Javdex@0.6.2 web:build
+> vite build --config vite.web.config.ts
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1792 modules transformed.
+rendering chunks...
+computing gzip size...
+../../out/web/index.html                          0.57 kB │ gzip:  0.38 kB
+../../out/web/assets/icon-32-1q9kROdG.png         2.21 kB
+../../out/web/assets/icon-128-BIZtnoeh.png       16.75 kB
+../../out/web/assets/ImagePreview-4e4dDyRN.css    7.41 kB │ gzip:  1.83 kB
+../../out/web/assets/index-CblWZaql.css          20.29 kB │ gzip:  4.84 kB
+../../out/web/assets/ImagePreview-Duw0am_8.js    42.99 kB │ gzip: 15.98 kB
+../../out/web/assets/index-CPkZmlv_.js          184.19 kB │ gzip: 60.40 kB
+✓ built in 627ms

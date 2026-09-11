@@ -201,6 +201,7 @@
   --form-actions-gap: 16px;
   --choice-control-size: 16px;
   --focus-ring: 0 0 0 3px var(--accent-soft);
+  --focus-ring-space: 4px;
   --privacy-glass-background: color-mix(in srgb, var(--surface-base) 42%, transparent);
   --privacy-image-filter: blur(16px) saturate(0.48);
   --privacy-image-scale: 1.22;

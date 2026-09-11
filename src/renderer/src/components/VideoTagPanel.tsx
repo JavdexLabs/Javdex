@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Tag } from '@shared/commonTypes'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { VideoTag } from '@shared/videoTypes'
 import { api } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import { useDebounce } from '../hooks/useDebounce'
+import { useManualTagOptions } from '../hooks/useManualTagOptions'
 import Modal from './Modal'
 import { AppFormField } from './FormPrimitives'
 import { useToast } from './Toast'
@@ -10,6 +11,7 @@ import { Plus, SearchX, Tags, X } from 'lucide-react'
 import IconButton from './IconButton'
 import { UI_ICON, UI_ICON_SM } from './iconDefaults'
 import EmptyState from './EmptyState'
+import Button from './Button'
 
 interface Props {
   videoId: number
@@ -26,16 +28,51 @@ export default function VideoTagPanel({
 }: Props): JSX.Element {
   const toast = useToast()
   const inputRef = useRef<HTMLInputElement>(null)
-  const [addOpen, setAddOpen] = useState(false)
+  const [addForVideoId, setAddForVideoId] = useState<number | null>(null)
+  const addOpen = addForVideoId === videoId
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  const [removeTarget, setRemoveTarget] = useState<VideoTag | null>(null)
-  const [manualCatalog, setManualCatalog] = useState<Tag[]>([])
+  const [removeSelection, setRemoveSelection] = useState<{ videoId: number; tag: VideoTag } | null>(null)
+  const removeTarget = removeSelection?.videoId === videoId ? removeSelection.tag : null
+  const [offset, setOffset] = useState(0)
+  const [retry, setRetry] = useState(0)
+  const context = useRef(0)
+  useEffect(() => {
+    const generation = context.current + 1
+    context.current = generation
+    return () => { context.current = generation + 1 }
+  }, [videoId])
+  const search = draft.trim()
+  const debouncedSearch = useDebounce(search, 250)
+  const searchPending = search !== debouncedSearch
+  const options = useManualTagOptions(addOpen && !searchPending, videoId, debouncedSearch, offset, retry)
+  const catalogLoading = searchPending || options.loading
+  const catalogScrollRef = useRef<HTMLDivElement>(null)
+  const onCatalogRange = options.window.onVisibleRange
+  const catalogItems = options.items
+  const catalogHasMore = options.hasMore
+  const onCatalogScroll = (event: { currentTarget: { scrollTop: number; clientHeight: number; scrollHeight: number } }): void => {
+    const { scrollTop, clientHeight, scrollHeight } = event.currentTarget
+    const overflow = scrollHeight > clientHeight + 8
+    if (scrollTop <= 24) onCatalogRange(0, 20)
+    if (overflow && scrollTop + clientHeight >= scrollHeight - 32) {
+      onCatalogRange(Math.max(catalogItems.length, 1) - 1, catalogItems.length + 99)
+    }
+  }
+  useLayoutEffect(() => {
+    const cloud = catalogScrollRef.current
+    if (!cloud || catalogLoading || options.error || !catalogHasMore || catalogItems.length === 0 || catalogItems.length >= 300) return
+    if (cloud.scrollHeight <= cloud.clientHeight + 8) {
+      onCatalogRange(Math.max(catalogItems.length, 1) - 1, catalogItems.length + 99)
+    }
+  }, [catalogItems.length, catalogHasMore, catalogLoading, options.error, onCatalogRange])
 
   const dismissOverlays = useCallback(() => {
-    setAddOpen(false)
+    setAddForVideoId(null)
     setDraft('')
-    setRemoveTarget(null)
+    setRemoveSelection(null)
+    setOffset(0)
+    setBusy(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, videoId)
@@ -44,68 +81,57 @@ export default function VideoTagPanel({
   const manualTags = useMemo(() => tags.filter((tag) => tag.origin === 'manual'), [tags])
   const manualIdsOnVideo = useMemo(() => new Set(manualTags.map((tag) => tag.id)), [manualTags])
 
-  const refreshManualCatalog = useCallback(() => {
-    api.tags
-      .listManual()
-      .then(setManualCatalog)
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    refreshManualCatalog()
-  }, [refreshManualCatalog])
-
-  const filteredManualCatalog = useMemo(() => {
-    const query = draft.trim().toLowerCase()
-    if (!query) return manualCatalog
-    return manualCatalog.filter((tag) => tag.name.toLowerCase().includes(query))
-  }, [manualCatalog, draft])
-
   const closeAddModal = useCallback((): void => {
     if (busy) return
-    setAddOpen(false)
+    setAddForVideoId(null)
     setDraft('')
+    setOffset(0)
   }, [busy])
 
   useEffect(() => {
     if (!addOpen) return
-    refreshManualCatalog()
     const t = window.setTimeout(() => inputRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
-  }, [addOpen, refreshManualCatalog])
+  }, [addOpen])
 
-  const addTagByName = async (name: string): Promise<boolean> => {
-    const trimmed = name.trim()
-    if (!trimmed || busy) return false
+  const addTag = async (input: { name: string } | { tagId: number }): Promise<boolean> => {
+    if (busy || ('name' in input && !input.name.trim())) return false
+    const operationContext = context.current
     setBusy(true)
     try {
-      await api.videos.addManualTag(videoId, trimmed)
+      if ('tagId' in input) await api.videos.addExistingManualTag(videoId, input.tagId)
+      else await api.videos.addManualTag(videoId, input.name.trim())
+      if (context.current !== operationContext) return true
+      setAddForVideoId(null)
       setDraft('')
-      refreshManualCatalog()
+      setOffset(0)
       onChanged()
-      setAddOpen(false)
       return true
     } catch (e) {
-      toast.show(String((e as Error).message ?? e), 'error')
+      if (context.current === operationContext) {
+        toast.show(String((e as Error).message ?? e), 'error')
+        if ('tagId' in input) setRetry(value => value + 1)
+      }
       return false
     } finally {
-      setBusy(false)
+      if (context.current === operationContext) setBusy(false)
     }
   }
 
   const removeTag = async (tag: VideoTag): Promise<void> => {
     if (busy) return
+    const operationContext = context.current
     setBusy(true)
     try {
       await api.videos.removeManualTag(videoId, tag.id)
-      setRemoveTarget(null)
-      refreshManualCatalog()
+      if (context.current !== operationContext) return
+      setRemoveSelection(null)
       onChanged()
       toast.show(`已移除自定义标签「${tag.name}」`, 'success')
     } catch (e) {
-      toast.show(String((e as Error).message ?? e), 'error')
+      if (context.current === operationContext) toast.show(String((e as Error).message ?? e), 'error')
     } finally {
-      setBusy(false)
+      if (context.current === operationContext) setBusy(false)
     }
   }
 
@@ -142,7 +168,7 @@ export default function VideoTagPanel({
               className="tag-chip-remove"
               aria-label={`移除自定义标签 ${tag.name}`}
               disabled={busy}
-              onClick={() => setRemoveTarget(tag)}
+              onClick={() => setRemoveSelection({ videoId, tag })}
             >
               <X {...UI_ICON_SM} />
             </button>
@@ -154,7 +180,7 @@ export default function VideoTagPanel({
           label="添加自定义标签"
           title="添加自定义标签"
           disabled={busy}
-          onClick={() => setAddOpen(true)}
+          onClick={() => setAddForVideoId(videoId)}
         />
       </div>
 
@@ -167,7 +193,7 @@ export default function VideoTagPanel({
           confirmText={busy ? '添加中…' : '添加'}
           confirmDisabled={busy || !draft.trim()}
           onCancel={closeAddModal}
-          onConfirm={() => void addTagByName(draft)}
+          onConfirm={() => void addTag({ name: draft })}
         >
           <div className="video-tag-add-modal-body">
             <div className="video-tag-add-modal-field">
@@ -177,13 +203,14 @@ export default function VideoTagPanel({
                   id={`video-tag-add-input-${videoId}`}
                   className="text-input video-tag-add-modal-input"
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => { setDraft(e.target.value); setOffset(0) }}
+                  maxLength={500}
                   placeholder="输入自定义标签名称"
                   disabled={busy}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
-                      void addTagByName(draft)
+                      void addTag({ name: draft })
                     }
                   }}
                 />
@@ -193,14 +220,18 @@ export default function VideoTagPanel({
             <section className="video-tag-add-modal-catalog" aria-label="已有自定义标签">
               <div className="video-tag-add-modal-catalog-head">
                 <span className="app-form-section-title">已有自定义标签</span>
-                <span className="video-tag-add-modal-catalog-count">
-                  {draft.trim()
-                    ? `${filteredManualCatalog.length} / ${manualCatalog.length}`
-                    : manualCatalog.length}
+                <span className="video-tag-add-modal-catalog-count" aria-live="polite">
+                  {catalogLoading ? '加载中…' : '按名称'}
                 </span>
               </div>
-              <div className="video-tag-add-modal-catalog-scroll">
-                {manualCatalog.length === 0 ? (
+              <div ref={catalogScrollRef} className="video-tag-add-modal-catalog-scroll" onScroll={onCatalogScroll}>
+                {catalogLoading ? (
+                  <EmptyState variant="modal" loading title="正在加载标签…" />
+                ) : options.error && options.window.total === 0 ? (
+                  <EmptyState variant="modal" title="标签加载失败" description={options.error}>
+                    <Button size="sm" onClick={() => setRetry(value => value + 1)}>重试</Button>
+                  </EmptyState>
+                ) : options.items.length === 0 && !draft.trim() ? (
                   <EmptyState
                     variant="modal"
                     className="video-tag-add-modal-empty"
@@ -208,7 +239,7 @@ export default function VideoTagPanel({
                     title={'\u6682\u65e0\u5df2\u6709\u6807\u7b7e'}
                     description={'\u53ef\u5728\u4e0a\u65b9\u8f93\u5165\u65b0\u540d\u79f0\u521b\u5efa\u6807\u7b7e\u3002'}
                   />
-                ) : filteredManualCatalog.length === 0 ? (
+                ) : options.items.length === 0 ? (
                   <EmptyState
                     variant="modal"
                     className="video-tag-add-modal-empty"
@@ -217,28 +248,34 @@ export default function VideoTagPanel({
                     description={'\u8c03\u6574\u5173\u952e\u8bcd\uff0c\u6216\u5728\u4e0a\u65b9\u76f4\u63a5\u521b\u5efa\u65b0\u6807\u7b7e\u3002'}
                   />
                 ) : (
-                  <div className="video-tag-add-modal-catalog-list">
-                    {filteredManualCatalog.map((tag) => {
-                      const onVideo = manualIdsOnVideo.has(tag.id)
-                      return (
-                        <button
-                          key={tag.id}
-                          type="button"
-                          className={`tag-chip tag-chip--custom-pick${onVideo ? ' is-on-video' : ''}`}
-                          disabled={busy || onVideo}
-                          onClick={() => void addTagByName(tag.name)}
-                          title={
-                            onVideo ? `已添加：${tag.name}` : `添加自定义标签：${tag.name}`
-                          }
-                          aria-pressed={onVideo}
-                        >
-                          {tag.name}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  <>
+                    <div className="video-tag-add-modal-catalog-list">
+                      {options.items.map((tag) => {
+                        const onVideo = manualIdsOnVideo.has(tag.id)
+                        return (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            className={`tag-chip tag-chip--custom-pick${onVideo ? ' is-on-video' : ''}`}
+                            disabled={busy || onVideo}
+                            onClick={() => void addTag({ tagId: tag.id })}
+                            title={
+                              onVideo ? `已添加：${tag.label}` : `添加自定义标签：${tag.label}`
+                            }
+                            aria-pressed={onVideo}
+                          >
+                            {tag.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {options.error ? (
+                      <div role="alert">{options.error}<Button size="sm" onClick={options.reload}>重试</Button></div>
+                    ) : null}
+                  </>
                 )}
               </div>
+
             </section>
           </div>
         </Modal>
@@ -252,7 +289,7 @@ export default function VideoTagPanel({
           confirmDisabled={busy}
           onConfirm={() => void removeTag(removeTarget)}
           onCancel={() => {
-            if (!busy) setRemoveTarget(null)
+            if (!busy) setRemoveSelection(null)
           }}
         >
           确定从本片移除自定义标签「{removeTarget.name}」？

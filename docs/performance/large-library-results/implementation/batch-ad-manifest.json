@@ -1,0 +1,25 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ad-build.log": "52b843be0be0ec88027b3c1caa382e2f2600ba9c1f4bd4ae54d1d8b6acde1e0e",
+    "batch-ad-full-tests.log": "0cb5e4c0cc300243687d4687f7341616fa151c32b74012ab267b9f164d2853a1",
+    "batch-ad-manual-tag-picker.patch": "24f2d7ac8347b77073128be95b6868ae9730e30c84bf29818825dd9caf67fe16",
+    "batch-ad-navigation-before.log": "cabff3e03bc943df6a8950d2d7f3ef554bccb4e22aa6ffb8fb92eaab2339f176",
+    "batch-ad-options-300382.json": "d31edc7f6af67765afbe3e9e1c5a2e68bec3d7c8006b4928a1151acb4e4ce4dc",
+    "batch-ad-options-300382.log": "b6994781c8f965ac350318f17e0d55ec89fe63eac8db8ff595cff280f27d30b5",
+    "batch-ad-options-sparse-300382.json": "73bb6360519840a79fdae5ed4dd92a96a86566bbe7c52b2b5b1ba8936b10cd89",
+    "batch-ad-options-sparse-300382.log": "85c62dd5423ce5561a92b6d5b698612751fb63ed9466c65ca9d87e985ec04795",
+    "batch-ad-picker-1000x640.png": "98d7cb03b9fedcc5e087d4394673f586d6e2ef1690458de93bb5e9710f047d29",
+    "batch-ad-picker-1440x900.png": "668daae915d8b56aa59acc64fdda617668cd605c24bfd2d207423332fdc51027",
+    "batch-ad-picker-results.json": "b0961509f5762b87f2744010b53a394840e997bed2303394c0b9e34b6bcfec9f",
+    "batch-ad-picker-ui.log": "9da45a50ce713cd125222cfa180bb4986f6ead49d00ef89172996c74410c1bfa",
+    "batch-ad-target-tests.log": "4886db2b94cd6102e70124615e7625dd121ea7012a6f87ced4c0715d7ea35a20"
+  },
+  "notes": [
+    "Cumulative selected diff vs HEAD, includes earlier batch changes and full untracked scripts; not standalone patch.",
+    "94 target tests pass; full suite 2143 pass / 1 skip before final CSS overflow fix; final CSS/control gates, build and two browser viewport checks pass after that fix.",
+    "Synthetic local fixtures only. Dense and sparse analyzed 300382 runs each 32 cases; no updated statistics maintenance probe. Sparse manual candidate first page remains 232.74ms: bounded payload does not bound database work.",
+    "Browser uses actual component/styles with mocked IPC; not native Electron/customer data/p95/Windows/HDD.",
+    "No production index/schema change in AD. Full plan remains incomplete."
+  ]
+}

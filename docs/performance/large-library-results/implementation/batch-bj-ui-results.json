@@ -1,0 +1,196 @@
+[
+  {
+    "viewport": {
+      "width": 1000,
+      "height": 640
+    },
+    "geometry": {
+      "bodyBottom": 199.5,
+      "pagerTop": 199.5,
+      "pagerBottom": 247.5,
+      "viewport": 640,
+      "horizontal": false
+    },
+    "chosenZoom": "1.01",
+    "calls": [
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": false
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": false
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 120,
+          "withCover": false
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 120,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": true
+        }
+      }
+    ],
+    "errors": []
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "geometry": {
+      "bodyBottom": 199.5,
+      "pagerTop": 199.5,
+      "pagerBottom": 247.5,
+      "viewport": 900,
+      "horizontal": false
+    },
+    "chosenZoom": "1.01",
+    "calls": [
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": false
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": false
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 120,
+          "withCover": false
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 120,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 60,
+          "withCover": true
+        }
+      },
+      {
+        "id": 1,
+        "query": {
+          "limit": 60,
+          "offset": 0,
+          "withCover": true
+        }
+      }
+    ],
+    "errors": []
+  }
+]

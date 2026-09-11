@@ -1,27 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ContinuousGrid from '../components/ContinuousGrid'
+import { useCallback, useEffect, useState } from 'react'
 import { Clapperboard, Plus, SearchX } from 'lucide-react'
-import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useLocation, useMatch, useNavigate } from 'react-router-dom'
 import type { ClassificationListSortBy, DirectorUpdateInput } from '@shared/classificationTypes'
-import type { SortDir } from '@shared/commonTypes'
 import { api, assetUrl } from '../api'
 import AppliedFilterBar from '../components/AppliedFilterBar'
-import DirectorEditModal from '../components/DirectorEditModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
+import DirectorEditModal from '../components/DirectorEditModal'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
-import { useDebounce } from '../hooks/useDebounce'
-import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
+import { useClassificationPage } from '../hooks/useClassificationPage'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import {
-  classificationListQueryHash,
-  LIST_PARAM,
-  parseClassificationSort,
-  patchSearchParams,
-} from '../listView/listQueryParams'
+import { CLASSIFICATION_PAGE_SIZE } from '../listView/listQueryParams'
 import { navigateToDirectorDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { directorKeys } from '../query/queryKeys'
@@ -29,66 +23,27 @@ import Button from '../components/Button'
 
 const SORT_OPTIONS: SortSwitchOption<ClassificationListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '关联影片数量' },
-  { value: 'updated_at', label: '更新', title: '最近更新时间' },
+  { value: 'updated_at', label: '更新', title: '最近更新时间' }
 ]
 
 export default function DirectorListPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
-  const [params, setParams] = useSearchParams()
-  const [searchInput, setSearchInput] = useState(params.get(LIST_PARAM.q) ?? '')
-  const syncingSearchFromUrl = useRef(false)
   const [creating, setCreating] = useState(false)
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.directorDetailOpen, end: false }))
-  const debounced = useDebounce(searchInput, 250)
-  const urlQ = params.get(LIST_PARAM.q) ?? ''
-  const { sortBy, sortDir } = parseClassificationSort(
-    params.get(LIST_PARAM.sort),
-    params.get(LIST_PARAM.dir),
-  )
-  const queryHash = useMemo(() => classificationListQueryHash('director', params), [params])
-  const query = useQuery({
-    queryKey: directorKeys.list(queryHash),
-    queryFn: () =>
-      api.directors.list({
-        search: params.get(LIST_PARAM.q) ?? '',
-        sortBy,
-        sortDir,
-      }),
-    placeholderData: (previous) => previous,
-  })
+  const {
+    query, queryHash, searchInput, setSearchInput, sortBy, sortDir, patchSort,
+    loading, total, offset, move, window
+  } = useClassificationPage('director', directorKeys.list, input => api.directors.page(input))
   const refetchSilent = useCallback(() => void query.refetch(), [query])
   useListSurfaceRefetch(detailOpen, refetchSilent)
-  const { ref, showScrollToTop, scrollToTop } = useScrollContainerMemory(`facet:${queryHash}`)
-  useEffect(() => {
-    if (searchInput === urlQ) return
-    syncingSearchFromUrl.current = true
-    setSearchInput(urlQ)
-  }, [searchInput, urlQ])
-  useEffect(() => {
-    const value = debounced.trim()
-    if (syncingSearchFromUrl.current) {
-      if (value === urlQ.trim()) syncingSearchFromUrl.current = false
-      return
-    }
-    if (value === urlQ.trim()) return
-    setParams((previous) => patchSearchParams(previous, { [LIST_PARAM.q]: value || null }), {
-      replace: true,
-    })
-  }, [debounced, setParams, urlQ])
+  const { ref, showScrollToTop, scrollToTop } = useScrollContainerMemory(`facet:${queryHash}`, false)
+
   useEffect(() => {
     if (query.isError) toast.show(String(query.error), 'error')
   }, [query.error, query.isError, toast])
-  const patchSort = (next: ClassificationListSortBy, dir: SortDir): void =>
-    setParams(
-      (previous) =>
-        patchSearchParams(previous, {
-          [LIST_PARAM.sort]: next,
-          [LIST_PARAM.dir]: dir,
-        }),
-      { replace: true },
-    )
+
   const create = async (input: DirectorUpdateInput): Promise<void> => {
     try {
       const id = await api.directors.create(input)
@@ -99,7 +54,6 @@ export default function DirectorListPage(): JSX.Element {
       toast.show(String((error as Error).message), 'error')
     }
   }
-  const items = query.data ?? []
   return (
     <div className="list-page">
       <div className="topbar">
@@ -108,10 +62,7 @@ export default function DirectorListPage(): JSX.Element {
             value: searchInput,
             placeholder: '搜索导演主名或别名…',
             ariaLabel: '搜索导演',
-          onChange: (value) => {
-            syncingSearchFromUrl.current = false
-            setSearchInput(value)
-          },
+            onChange: setSearchInput
           }}
           controls={
             <>
@@ -123,21 +74,15 @@ export default function DirectorListPage(): JSX.Element {
                 compact
                 onChange={patchSort}
               />
-              <Button
-                type="button"
-                variant="primary"
-
-                size="sm"
-                onClick={() => setCreating(true)}
-              >
-                <Plus {...UI_ICON_SM} />
+              <Button type="button" variant="primary" size="sm" onClick={() => setCreating(true)}>
+                <Plus {...UI_ICON_SM} aria-hidden />
                 新增
               </Button>
             </>
           }
           resultCount={
             <span className="count-badge count-badge--stable count-badge--facet">
-              共 {items.length} 位导演
+              共 {total ?? '…'} 位导演
             </span>
           }
         />
@@ -149,8 +94,8 @@ export default function DirectorListPage(): JSX.Element {
                   {
                     key: 'sort',
                     label: `排序：${sortBy === 'video_count' ? '影片数量' : '最近更新'}${sortDir === 'asc' ? '正序' : '倒序'}`,
-                    onRemove: () => patchSort('video_count', 'desc'),
-                  },
+                    onRemove: () => patchSort('video_count', 'desc')
+                  }
                 ]
           }
           onClear={() => patchSort('video_count', 'desc')}
@@ -162,18 +107,21 @@ export default function DirectorListPage(): JSX.Element {
         showScrollToTop={showScrollToTop}
         onScrollToTop={scrollToTop}
       >
-        {query.isLoading ? (
+        {loading ? (
           <EmptyState loading />
-        ) : items.length === 0 ? (
+        ) : query.isError && !total ? (
+          <EmptyState title="导演加载失败" description={String(query.error?.message)}>
+            <Button onClick={() => void query.refetch()} disabled={query.isFetching}>重试</Button>
+          </EmptyState>
+        ) : !total ? (
           <EmptyState
             icon={searchInput ? <SearchX {...UI_ICON_SM} /> : <Clapperboard {...UI_ICON_SM} />}
             title={searchInput ? '没有匹配的导演' : '暂无导演资料'}
             description="可手动新增，或在影片编辑时就地创建。"
           />
         ) : (
-          <div className="facet-grid">
-            {items.map((item) => {
-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath)
+          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
+              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
               return (
                 <div className="facet-card-wrap" key={item.id}>
                   <button
@@ -186,7 +134,7 @@ export default function DirectorListPage(): JSX.Element {
                         <img src={cover} alt="" loading="lazy" />
                       ) : (
                         <span className="facet-thumb-placeholder">
-                          <Clapperboard {...UI_ICON_SM} />
+                          <Clapperboard {...UI_ICON_SM} aria-hidden />
                         </span>
                       )}
                     </div>
@@ -195,8 +143,7 @@ export default function DirectorListPage(): JSX.Element {
                   </button>
                 </div>
               )
-            })}
-          </div>
+            }} />
         )}
       </ListSurface>
       {creating && !detailOpen ? (

@@ -1,0 +1,21 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ah-build.log": "3d4e93e968deb207a8c6372d511c1303eb2531215c41be06b16d9838b6c3c448",
+    "batch-ah-cache-300382.json": "4255b0019eccc6091048604620ad925afe7402c88f155054eb5c57b800e202d3",
+    "batch-ah-cache-300382.log": "24a2c4b4b79e3584fbfee29fe007a4556cb895e0ea467f1ef0bb485def7d6bcb",
+    "batch-ah-filter-page-cache.patch": "d1b7adbf527d45b9c3a33275b8c11d80a22cf82902e9ea423f0502f94da0f7b1",
+    "batch-ah-full.log": "8d069233dbdee14b99160f107a4b796a76aa7034fa964c6bfad70c6f19951341",
+    "batch-ah-target-final.log": "483501cc4ca97819ebce8b032cae43143436d63476d44ae362f2492d03e45fbf",
+    "batch-ah-tests-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "batch-ah-types-final.log": "6d0d17a20e6619cb40e20a31bc9104ddaed43fa0b5274db0b78f737378c77bcc"
+  },
+  "notes": [
+    "Cumulative selected source snapshot vs HEAD, depends on B-AG shared/DB/UI changes, not standalone.",
+    "Filter page cache <=8 entries and512KiB serialized UTF-8 keys/results, not total heap/RSS budget. JSON storage isolates mutations. Normalized query keys validate raw Unicode search before fold.",
+    "Connection identity,total_changes,data_version,schema_version invalidation. Bypass all cache reads/writes inside transactions. Read revision drift prevents publication; observability tests verify snapshot result then fresh next read.",
+    "Full suite2156pass1skip and build passed. Later three test-only additions verify concurrent external commit, retry after failure and same-counter distinct connections; final19 targets/node types/test lint pass.",
+    "300382 analyzed main37 cases. Uncached repo78.055ms, first service miss79.633ms, cache warm0.03325ms, invalidated78.384ms. Timings include revision PRAGMAs/JSON parse, but sqlCalls instrumentation only counts prepare methods, not pragma calls.",
+    "No new schema, user data access, commit,push,release. First/hot-page reads, frequent-write invalidation, read isolation and global budgets remain incomplete."
+  ]
+}

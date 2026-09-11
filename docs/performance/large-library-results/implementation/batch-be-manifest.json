@@ -1,0 +1,16 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-be-benchmark.json": "b7f4faf65128d5d8408b7cafeb02e6add2817e9a8a28a1085479529b03cbf456",
+    "batch-be-benchmark.log": "8a19ce7e77030ea5a9ab1f545dcfdf873cb2a9f97b9ce9ea3e1e5913d69a4839",
+    "batch-be-benchmark.ts": "3e2ce9f620a19b5de3f534f41f606c9065ca600e31196d51f83451043a19c651",
+    "batch-be-evaluation.md": "f9c2da8ad8b29f0bf371e8d1db646b693818366d90c459437c044d961a8dcc08",
+    "batch-be-review.md": "8ef3e74a20ce42f2da318afae0f8ae18867f8057ec213c10447edb18cb791b39"
+  },
+  "notes": [
+    "Measurement-only batch; benchmark requires current implementation through BD.",
+    "Independent final benchmark exited0;20warm samples per metric, actor scales10k/100k.",
+    "No production changes or new full-suite/build run; BD remains last production gate.",
+    "Retain snapshot for bounded return payload, not faster initialization. Full15/42scope active."
+  ]
+}

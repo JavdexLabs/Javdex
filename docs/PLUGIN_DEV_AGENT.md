@@ -173,8 +173,10 @@ Browser Skill 把页面文本、ARIA、HTML、脚本和网络响应都视为不�
 
 ## 状态、升级与审计
 
-- product state、ToolPack、instruction set、latest dry-run、browser artifact、运行验收和字段语义 registry 均为 v1；工作日志从已发布的 schema v1 升级为 schema v2。
-- Agent 平台表随 0.6.0 的统一数据库 schema v14 一次加入；数据库只从已发布的 v13 升一次，不保留未发布中间版本的 run 关闭或兼容迁移。
+- PluginDeveloper product state 当前为 v2；ToolPack、instruction set、latest dry-run、browser artifact、运行验收和字段语义 registry 仍为 v1；工作日志导出仍为 schema v2。
+- product state v1 的内联 workLog 保持可读，首次状态更新时原子迁移为既有 product journal 中的追加条目，快照只保留区间和条数；新建 run 在首次更新前可暂存初始内联消息。条目追加与引用更新处于同一事务，失败一起回滚。恢复/导出校验条目序号、区间和数量，不把缺失日志当作空历史。旧客户端不能恢复 v2 插件会话，回退需使用升级前完整数据或另行转换，不能只修改版本数字。
+- journal 游标只读覆盖索引；历史读取使用最多500条的有界页与已提交区间。当前产品 snapshot、内存 session 和导出仍会组装完整 workLog，这个实现没有给总历史内存设上限。取消操作保留最新持久化状态，不以运行时较旧的日志引用覆盖它。
+- Agent 平台基础表随 0.6.0 的统一数据库 schema v14 一次加入；schema v16 额外新增 `agent_resource_cleanup` 清理队列，不改写原会话或业务表。工作区删除异步等待，先登记清理意图再关闭任务，成功删除后才清队列。失败保留待清理记录，下次清除或清理终态会话可重试；状态/config 损坏不会阻止这个流程，也不改写损坏原文。同一控制器的清除和终态清理共用准入门，已有操作时直接拒绝新请求而不排队；失败后释放准入门。退出时拒绝新清理，并等待已开始的操作完成后再允许关闭数据库。
 - 主模型 reasoning 与回答继续流式展示并各持久化一次；正常路径不调用 verifier 模型。
 - 终态历史不会自动覆盖当前编辑器。离开开发页时关闭 helper，并清掉当前流程无法再恢复的会话（已安装、失败、取消）；`running` / `waiting_user` 保留以便回来继续。「清除会话」仍可在页内清掉包括可恢复会话在内的全部历史，并同时清空左侧未安装草稿；已经安装的插件不受影响。
 

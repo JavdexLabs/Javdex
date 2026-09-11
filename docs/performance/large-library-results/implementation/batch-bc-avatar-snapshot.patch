@@ -1,0 +1,904 @@
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..4ae9f81 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -379,6 +386,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -423,6 +431,20 @@ export const videoIpcSchemas = {
+ } satisfies IpcArgsSchemaMap<VideoIpcContract>
+ 
+ export const actressIpcSchemas = {
++  [IPC.ACTRESS_MERGE_CANDIDATES]: z.tuple([z.object({
++    keepId: positiveSafeInteger,
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()]),
++  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: z.tuple([]),
++  [IPC.ACTRESS_AVATAR_CROP_COUNT]: z.tuple([]),
++  [IPC.ACTRESS_PICKER_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_PICKER_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_LIST]: z.tuple([
+     optionalText,
+     z.enum(['female', 'male', 'all']).optional(),
+@@ -450,6 +472,12 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
+   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
++  [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
++  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorName: nonEmptyText.optional()
++  }).strict()]),
+   [IPC.ACTRESS_CONFLICT_COUNT]: noArgs,
+   [IPC.ACTRESS_CONFLICT_SUMMARY]: noArgs,
+   [IPC.ACTRESS_CONFLICT_INSPECT_NAME]: z.tuple([
+@@ -507,6 +535,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -530,6 +566,7 @@ export const scrapeIpcSchemas = {
+   [IPC.BATCH_SCRAPE_RESUME]: noArgs,
+   [IPC.BATCH_SCRAPE_DISCARD]: noArgs,
+   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: noArgs,
++  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: z.tuple([nonEmptyText, z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.AVATAR_AUTO_CROP_BATCH_END]: z.tuple([nonEmptyText]),
+   [IPC.SCRAPER_LIST]: noArgs,
+   [IPC.SCRAPER_PLUGIN_DETAILS]: noArgs,
+@@ -634,6 +671,19 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
++    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
++    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
++  }).strict()]),
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
++  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +698,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +709,17 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/main/ipc/scrapeHandlers.ts b/src/main/ipc/scrapeHandlers.ts
+index 452b108..e6661da 100644
+--- a/src/main/ipc/scrapeHandlers.ts
++++ b/src/main/ipc/scrapeHandlers.ts
+@@ -87,6 +87,12 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
+   )
+ 
+   registerScrapeHandler(IPC.SCRAPE_ONE, (...args) => jobs.scrapeOneVideo(...args))
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_COUNT, () =>
++    jobs.countPendingVideoScrapes()
++  )
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, (ids) => jobs.existingPendingVideoScrapeIds(ids))
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_PAGE, (query) => jobs.pagePendingVideoScrapes(query))
++  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_GET, (id) => jobs.getPendingVideoScrape(id))
+   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () =>
+     jobs.listPendingVideoScrapes()
+   )
+@@ -125,6 +131,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
+   registerScrapeHandler(IPC.BATCH_SCRAPE_RESUME, () => jobs.resumeActiveBatch())
+   registerScrapeHandler(IPC.BATCH_SCRAPE_DISCARD, () => jobs.discardActiveBatch())
+   registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN, () => jobs.beginAvatarAutoCropBatch())
++  registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, (token, afterId) => jobs.pageAvatarAutoCropTargets(token, afterId))
+   registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_END, (token) =>
+     jobs.endAvatarAutoCropBatch(token)
+   )
+diff --git a/src/main/ipc/scrapeIpcSchemas.test.ts b/src/main/ipc/scrapeIpcSchemas.test.ts
+index e031fdd..2a45d8a 100644
+--- a/src/main/ipc/scrapeIpcSchemas.test.ts
++++ b/src/main/ipc/scrapeIpcSchemas.test.ts
+@@ -42,3 +42,26 @@ describe('scrape IPC schemas', () => {
+     )
+   })
+ })
++
++
++it('bounds pending scrape pages and details at the IPC boundary', () => {
++  const schema = scrapeIpcSchemas[IPC.PENDING_VIDEO_SCRAPE_PAGE]
++  for (const query of [{}, {limit:100,offset:500}, {videoId:100}, {anchorId:2}]) assert.equal(schema.safeParse([query]).success,true)
++  for (const query of [{limit:101},{offset:-1},{anchorId:1,videoId:2},{videoId:Number.MAX_SAFE_INTEGER+1},{sql:'SELECT 1'}]) assert.equal(schema.safeParse([query]).success,false)
++  assert.equal(scrapeIpcSchemas[IPC.PENDING_VIDEO_SCRAPE_GET].safeParse([0]).success,false)
++})
++
++
++it('bounds audit pending presence lookups', () => {
++  const schema=scrapeIpcSchemas[IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]
++  assert.equal(schema.safeParse([[]]).success,true)
++  assert.equal(schema.safeParse([Array.from({length:100},(_,i)=>i+1)]).success,true)
++  for(const ids of [[0],[-1],[1.5],[Number.MAX_SAFE_INTEGER+1],Array(101).fill(1)]) assert.equal(schema.safeParse([ids]).success,false)
++})
++
++
++it('validates token and safe nonnegative avatar snapshot cursor', () => {
++  const schema=scrapeIpcSchemas[IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]
++  assert.equal(schema.safeParse(['token',0]).success,true)
++  for(const args of [['',0],['token',-1],['token',1.5],['token',Infinity],['token',Number.MAX_SAFE_INTEGER+1],['token'],['token',0,1]])assert.equal(schema.safeParse(args).success,false)
++})
+diff --git a/src/main/services/avatarAutoCropMediator.test.ts b/src/main/services/avatarAutoCropMediator.test.ts
+index b171616..04cfd1a 100644
+--- a/src/main/services/avatarAutoCropMediator.test.ts
++++ b/src/main/services/avatarAutoCropMediator.test.ts
+@@ -73,3 +73,66 @@ describe('AvatarAutoCropMediator', () => {
+     assert.throws(() => mediator.beginBatch(), /批量智能构图正在进行中/)
+   })
+ })
++
++
++it('creates one lazy snapshot per batch and disposes only its owning token', () => {
++  let created=0,disposed=0,sequence=0
++  const cursors:number[]=[]
++  const mediator=new AvatarAutoCropMediator(dependencies({
++    randomId:()=>`token-${++sequence}`,
++    createBatchTargets:()=>{created++;return {page:(afterId)=>{cursors.push(afterId);return {items:[],total:20,nextAfterId:null}},dispose:()=>{disposed++}}}
++  }))
++  const first=mediator.beginBatch()
++  assert.equal(created,0)
++  assert.throws(()=>mediator.pageBatchTargets('wrong',0),/令牌/)
++  assert.throws(()=>mediator.pageBatchTargets(first,-1),/游标/)
++  assert.equal(created,0)
++  assert.equal(mediator.pageBatchTargets(first,0).total,20)
++  mediator.pageBatchTargets(first,100)
++  assert.equal(created,1);assert.deepEqual(cursors,[0,100])
++  assert.equal(mediator.endBatch('wrong'),false);assert.equal(disposed,0)
++  assert.equal(mediator.endBatch(first),true);assert.equal(disposed,1)
++  assert.throws(()=>mediator.pageBatchTargets(first,0),/令牌/)
++  const second=mediator.beginBatch();mediator.pageBatchTargets(second,0)
++  assert.equal(mediator.endBatch(first),false)
++  mediator.rendererDisconnected();assert.equal(disposed,2)
++  assert.throws(()=>mediator.pageBatchTargets(second,0),/令牌/)
++})
++it('retries failed snapshot creation without poisoning the batch and clears on reinitialization', () => {
++  let attempts=0,disposed=0
++  const mediator=new AvatarAutoCropMediator(dependencies({createBatchTargets:()=>{
++    if(++attempts===1)throw new Error('Snapshot failed')
++    return {page:()=>({items:[],total:0,nextAfterId:null}),dispose:()=>{disposed++}}
++  }}))
++  const token=mediator.beginBatch()
++  assert.throws(()=>mediator.pageBatchTargets(token,0),/Snapshot failed/)
++  assert.equal(mediator.hasActiveBatch(),true)
++  assert.equal(mediator.pageBatchTargets(token,0).total,0)
++  mediator.clearBatchToken();mediator.clearBatchToken()
++  assert.equal(disposed,1);assert.equal(mediator.hasActiveBatch(),false)
++})
++
++
++it('settles disconnected requests despite cleanup failure and retries before allowing another snapshot', async () => {
++  let fail=true,created=0,disposed=0,id=0
++  const mediator=new AvatarAutoCropMediator(dependencies({randomId:()=>String(++id),createBatchTargets:()=>{
++    created++;return {page:()=>({items:[],total:0,nextAfterId:null}),dispose:()=>{disposed++;if(fail)throw new Error('Drop failed')}}
++  }}))
++  const token=mediator.beginBatch();mediator.pageBatchTargets(token,0)
++  const pending=mediator.request({actressId:1,mainName:'Waiting'})
++  const warn=console.warn;console.warn=()=>{}
++  try {mediator.rendererDisconnected()} finally {console.warn=warn}
++  assert.equal((await pending).status,'failed')
++  assert.equal(mediator.hasActiveBatch(),false)
++  assert.throws(()=>mediator.pageBatchTargets(token,0),/令牌/)
++  assert.throws(()=>mediator.beginBatch(),/Drop failed/)
++  assert.equal(created,1)
++  fail=false
++  const next=mediator.beginBatch();mediator.pageBatchTargets(next,0)
++  assert.equal(created,2)
++  fail=true;console.warn=()=>{}
++  try {assert.equal(mediator.endBatch(next),true)} finally {console.warn=warn}
++  assert.equal(mediator.hasActiveBatch(),false)
++  fail=false;mediator.clearBatchToken()
++  assert.ok(disposed>=5)
++})
+diff --git a/src/main/services/avatarAutoCropMediator.ts b/src/main/services/avatarAutoCropMediator.ts
+index 5c10dd3..43b0c98 100644
+--- a/src/main/services/avatarAutoCropMediator.ts
++++ b/src/main/services/avatarAutoCropMediator.ts
+@@ -1,3 +1,5 @@
++import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
++import type { ActressAvatarCropSnapshot } from '../db/actressAvatarCropSnapshot'
+ import { IPC } from '@shared/ipc-channels'
+ import type { ScrapeIpcEvent, ScrapeIpcEventChannel } from '@shared/scrapeIpcContract'
+ import type {
+@@ -16,10 +18,12 @@ export interface AvatarAutoCropMediatorDependencies {
+   autoCropTimeoutMs: number
+   /** Queue / scrape availability checks; crop token ownership stays inside the mediator. */
+   assertCanBeginBatch(): void
++  createBatchTargets?: () => ActressAvatarCropSnapshot
+ }
+ 
+ export class AvatarAutoCropMediator {
+   private batchToken: string | null = null
++  private batchTargets: ActressAvatarCropSnapshot | null = null
+   private readonly pending = new Map<
+     string,
+     {
+@@ -36,10 +40,17 @@ export class AvatarAutoCropMediator {
+ 
+   clearBatchToken(): void {
+     this.batchToken = null
++    try {
++      this.batchTargets?.dispose()
++      this.batchTargets = null
++    } catch (error) {
++      // Retain the failed resource for retry, without blocking disconnect cleanup.
++      console.warn('头像任务快照清理失败，将在下次任务前重试', error)
++    }
+   }
+ 
+   rendererDisconnected(): void {
+-    this.batchToken = null
++    this.clearBatchToken()
+     for (const [requestId, pending] of this.pending) {
+       clearTimeout(pending.timeout)
+       this.pending.delete(requestId)
+@@ -75,15 +86,28 @@ export class AvatarAutoCropMediator {
+     if (this.batchToken) {
+       throw new Error('批量智能构图正在进行中，请完成或停止后再试')
+     }
++    // Do not accumulate another snapshot while cleanup of the previous one fails.
++    this.batchTargets?.dispose()
++    this.batchTargets = null
+     this.dependencies.assertCanBeginBatch()
+     const token = this.dependencies.randomId()
+     this.batchToken = token
+     return token
+   }
+ 
++  pageBatchTargets(token: string, afterId: number): ActressAvatarCropTargetPage {
++    if (token !== this.batchToken) throw new Error('头像任务令牌已失效')
++    if (!Number.isSafeInteger(afterId) || afterId < 0) throw new Error('无效的头像任务游标')
++    if (!this.batchTargets) {
++      if (!this.dependencies.createBatchTargets) throw new Error('头像任务快照服务不可用')
++      this.batchTargets = this.dependencies.createBatchTargets()
++    }
++    return this.batchTargets.page(afterId)
++  }
++
+   endBatch(token: string): boolean {
+     if (token !== this.batchToken) return false
+-    this.batchToken = null
++    this.clearBatchToken()
+     return true
+   }
+ }
+diff --git a/src/main/services/scrapeJobController.ts b/src/main/services/scrapeJobController.ts
+index 4a7da01..f17260d 100644
+--- a/src/main/services/scrapeJobController.ts
++++ b/src/main/services/scrapeJobController.ts
+@@ -1,4 +1,7 @@
++import { createActressAvatarCropSnapshot } from '../db/actressAvatarCropSnapshot'
++import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
+ import { randomUUID } from 'node:crypto'
++import { createProgressPublisher } from './progressPublisher'
+ import { IPC } from '@shared/ipc-channels'
+ import type { ScrapeIpcEvent, ScrapeIpcEventChannel } from '@shared/scrapeIpcContract'
+ import type {
+@@ -25,6 +28,8 @@ import type {
+ import type { BatchProgress, BatchScrapeState } from '@shared/batchScrapeTypes'
+ import type {
+   PendingVideoScrape,
++  PendingVideoScrapePage,
++  PendingVideoScrapePageQuery,
+   PendingVideoScrapeConfirmInput,
+   PendingVideoScrapeResolutionResult
+ } from '@shared/videoScrapeTypes'
+@@ -66,7 +71,7 @@ type ProgressListener = (progress: BatchProgress) => void
+ 
+ interface BatchQueue<Request> {
+   isRunning(): boolean
+-  setListener(listener: ProgressListener): void
++  setListener(listener: ProgressListener | null): void
+   start(request?: Request | string): Promise<void>
+   resume(): Promise<void>
+   pause(): void
+@@ -137,13 +142,17 @@ export interface ScrapeJobControllerDependencies {
+   rendererAvailable(): boolean
+   checkpoints: BatchScrapeCheckpointPort
+   pendingVideoScrapes: {
++    count(): number
++    existingIds(ids: number[]): number[]
++    page(query: PendingVideoScrapePageQuery): PendingVideoScrapePage
++    get(id: number): PendingVideoScrape | null
+     list(): PendingVideoScrape[]
+     confirm(input: PendingVideoScrapeConfirmInput): PendingVideoScrapeResolutionResult
+     discard(pendingScrapeId: number): boolean
+   }
+   avatarAutoCrop?: AvatarAutoCropMediator
+   avatarAutoCropOptions?: Partial<
+-    Pick<AvatarAutoCropMediatorDependencies, 'randomId' | 'autoCropTimeoutMs'>
++    Pick<AvatarAutoCropMediatorDependencies, 'randomId' | 'autoCropTimeoutMs' | 'createBatchTargets'>
+   >
+ }
+ 
+@@ -158,18 +167,24 @@ export class ScrapeJobController {
+         rendererAvailable: () => this.dependencies.rendererAvailable(),
+         randomId: dependencies.avatarAutoCropOptions?.randomId ?? randomUUID,
+         autoCropTimeoutMs: dependencies.avatarAutoCropOptions?.autoCropTimeoutMs ?? 5_000,
+-        assertCanBeginBatch: () => this.assertQueuesIdleForNewBatch()
++        assertCanBeginBatch: () => this.assertQueuesIdleForNewBatch(),
++        createBatchTargets: dependencies.avatarAutoCropOptions?.createBatchTargets ?? createActressAvatarCropSnapshot
+       })
+   }
+ 
+   initialize(): void {
+     this.avatarAutoCrop.clearBatchToken()
+-    const interrupted = this.dependencies.checkpoints.load()
+-    if (interrupted?.status === 'running') {
+-      this.dependencies.checkpoints.markPaused(
+-        interrupted,
+-        this.dependencies.checkpoints.toProgress(interrupted)
+-      )
++    try {
++      const interrupted = this.dependencies.checkpoints.load()
++      if (interrupted?.status === 'running') {
++        this.dependencies.checkpoints.markPaused(
++          interrupted,
++          this.dependencies.checkpoints.toProgress(interrupted)
++        )
++      }
++    } catch (error) {
++      // Preserve unreadable checkpoints and keep the app available; state/resume still surface the error.
++      console.error('Failed to recover batch scrape checkpoint:', error)
+     }
+     this.dependencies.actressQueue.setAvatarAutoCropListener((target) =>
+       this.avatarAutoCrop.request(target)
+@@ -264,6 +279,22 @@ export class ScrapeJobController {
+     return this.dependencies.getBatchState()
+   }
+ 
++  countPendingVideoScrapes(): number {
++    return this.dependencies.pendingVideoScrapes.count()
++  }
++
++  existingPendingVideoScrapeIds(ids: number[]): number[] {
++    return this.dependencies.pendingVideoScrapes.existingIds(ids)
++  }
++
++  pagePendingVideoScrapes(query: PendingVideoScrapePageQuery): PendingVideoScrapePage {
++    return this.dependencies.pendingVideoScrapes.page(query)
++  }
++
++  getPendingVideoScrape(id: number): PendingVideoScrape | null {
++    return this.dependencies.pendingVideoScrapes.get(id)
++  }
++
+   listPendingVideoScrapes(): PendingVideoScrape[] {
+     return this.dependencies.pendingVideoScrapes.list()
+   }
+@@ -311,12 +342,8 @@ export class ScrapeJobController {
+   ): boolean {
+     this.assertCanStartNewBatch()
+     if (!request.fields?.length) throw new Error('请至少选择一个要更新的字段')
+-    this.dependencies.videoQueue.setListener((progress) =>
+-      this.dependencies.emit(progressChannel, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('影片批量更新', () => this.dependencies.videoQueue.start(request))
+-      .catch((error) => console.error('video batch scrape failed:', error))
++    this.runBatch(this.dependencies.videoQueue, progressChannel, '影片批量更新',
++      () => this.dependencies.videoQueue.start(request), 'video batch scrape failed:')
+     return true
+   }
+ 
+@@ -334,12 +361,8 @@ export class ScrapeJobController {
+     if (typeof request !== 'string' && request && !request.fields?.length) {
+       throw new Error('请至少选择一个要更新的字段')
+     }
+-    this.dependencies.actressQueue.setListener((progress) =>
+-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.start(request))
+-      .catch((error) => console.error('actress scrape batch failed:', error))
++    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
++      () => this.dependencies.actressQueue.start(request), 'actress scrape batch failed:')
+     return true
+   }
+ 
+@@ -366,23 +389,47 @@ export class ScrapeJobController {
+     const job = this.dependencies.checkpoints.load()
+     if (!job) throw new Error('没有可继续的批量刮削任务')
+     if (job.kind === 'video') {
+-      this.dependencies.videoQueue.setListener((progress) =>
+-        this.dependencies.emit(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, progress)
+-      )
+-      void this.dependencies.coordinator
+-        .runExclusive('影片批量更新', () => this.dependencies.videoQueue.resume())
+-        .catch((error) => console.error('video batch scrape resume failed:', error))
++      this.runBatch(this.dependencies.videoQueue, IPC.SCRAPE_VIDEO_BATCH_PROGRESS, '影片批量更新',
++        () => this.dependencies.videoQueue.resume(), 'video batch scrape resume failed:')
+       return true
+     }
+-    this.dependencies.actressQueue.setListener((progress) =>
+-      this.dependencies.emit(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+-    )
+-    void this.dependencies.coordinator
+-      .runExclusive('演员批量刮削', () => this.dependencies.actressQueue.resume())
+-      .catch((error) => console.error('actress batch scrape resume failed:', error))
++    this.runBatch(this.dependencies.actressQueue, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, '演员批量刮削',
++      () => this.dependencies.actressQueue.resume(), 'actress batch scrape resume failed:')
+     return true
+   }
+ 
++  private runBatch(
++    queue: Pick<BatchQueue<unknown>, 'setListener'>,
++    channel: typeof IPC.SCRAPE_BATCH_PROGRESS | typeof IPC.SCRAPE_VIDEO_BATCH_PROGRESS |
++      typeof IPC.SCRAPE_REMATCH_BATCH_PROGRESS | typeof IPC.ACTRESS_SCRAPE_BATCH_PROGRESS,
++    label: string,
++    run: () => Promise<void>,
++    errorMessage: string
++  ): void {
++    void this.dependencies.coordinator.runExclusive(label, async () => {
++      const publisher = createProgressPublisher<BatchProgress>((progress) => {
++        try {
++          this.dependencies.emit(channel, progress)
++        } catch (error) {
++          console.error('batch progress delivery failed:', error)
++        }
++      })
++      let failed = 0
++      queue.setListener((progress) => {
++        const immediate = progress.status !== 'running' || progress.failed > failed
++        failed = progress.failed
++        publisher.update(progress, immediate)
++      })
++      try {
++        await run()
++      } finally {
++        // Clear pending delivery before releasing the coordinator's exclusive run.
++        publisher.close()
++        queue.setListener(null)
++      }
++    }).catch((error) => console.error(errorMessage, error))
++  }
++
+   discardActiveBatch(): boolean {
+     const job = this.dependencies.checkpoints.load()
+     if (!job) return false
+@@ -404,6 +451,10 @@ export class ScrapeJobController {
+     return this.avatarAutoCrop.beginBatch()
+   }
+ 
++  pageAvatarAutoCropTargets(token: string, afterId: number): ActressAvatarCropTargetPage {
++    return this.avatarAutoCrop.pageBatchTargets(token, afterId)
++  }
++
+   endAvatarAutoCropBatch(token: string): boolean {
+     return this.avatarAutoCrop.endBatch(token)
+   }
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..4449aaf 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1,3 +1,6 @@
++import type { ActressMergeCandidateQuery } from '../shared/actressTypes'
++import type { ActressPickerQuery } from '../shared/actressTypes'
++import type { PendingAuditIds, PendingScanQueueQuery } from '../shared/libraryTypes'
+ import type { WebAccessInput } from '../shared/webTypes'
+ import { contextBridge, ipcRenderer, webUtils } from 'electron'
+ import { IPC } from '../shared/ipc-channels'
+@@ -88,7 +91,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -103,8 +106,8 @@ import type {
+ } from '../shared/libraryTypes'
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+-import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -337,6 +340,11 @@ const api = {
+       code: string,
+       target: VideoResourceImportTarget
+     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
++    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
++    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
++    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
++    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
++    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
+     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+     resolvePending: (
+       libraryId: number,
+@@ -381,6 +389,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +458,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -463,6 +479,11 @@ const api = {
+       invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
+   },
+   actresses: {
++    mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
++    avatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_TARGETS),
++    countAvatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_COUNT),
++    pickerGet: (id: number) => invokeActress(IPC.ACTRESS_PICKER_GET, id),
++    pickerPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_PICKER_PAGE, query),
+     list: (
+       search?: string,
+       gender?: ActressGenderFilter,
+@@ -491,6 +512,9 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+@@ -557,6 +581,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+@@ -625,6 +653,8 @@ const api = {
+         autoCropAvatar
+       ),
+     listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
++    getConflict: (normalizedName: string) => invokeActress(IPC.ACTRESS_CONFLICT_GET, normalizedName),
++    pageConflicts: (query: ActressConflictQueueQuery) => invokeActress(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, query),
+     conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
+     conflictSummary: () =>
+       invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
+@@ -755,6 +785,7 @@ const api = {
+   },
+   avatarAutoCropBatch: {
+     begin: () => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
++    targets: (token: string, afterId: number) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, token, afterId),
+     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
+   },
+   player: {
+diff --git a/src/shared/actressAvatarCropTypes.ts b/src/shared/actressAvatarCropTypes.ts
+index 16b5250..59a7683 100644
+--- a/src/shared/actressAvatarCropTypes.ts
++++ b/src/shared/actressAvatarCropTypes.ts
+@@ -17,3 +17,10 @@ export interface ActressAvatarAutoCropRequest extends ActressAvatarAutoCropTarge
+ export interface ActressAvatarAutoCropResponse extends ActressAvatarAutoCropOutcome {
+   requestId: string
+ }
++
++
++export interface ActressAvatarCropTargetPage {
++  items: ActressAvatarAutoCropTarget[]
++  total: number
++  nextAfterId: number | null
++}
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..9ece612 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -75,6 +75,11 @@ export const IPC = {
+   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
+   FILE_RENAME: 'file:rename',
+   FILE_IMPORT_MANUAL: 'file:importManual',
++  PENDING_AUDIT_PRESENCE: 'pendingAudit:presence',
++  PENDING_SCAN_QUEUE_PAGE: 'pendingScanQueue:page',
++  PENDING_SCAN_QUEUE_COUNT: 'pendingScanQueue:count',
++  PENDING_SCAN_GET: 'pendingScan:get',
++  PENDING_RESOURCE_IDENTITY_GET: 'pendingResourceIdentity:get',
+   PENDING_SCAN_LIST: 'pendingScan:list',
+   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+   PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+@@ -94,6 +99,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +120,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -124,6 +133,11 @@ export const IPC = {
+   // Actresses
+   ACTRESS_LIST: 'actress:list',
+   ACTRESS_LIST_PAGE: 'actress:listPage',
++  ACTRESS_PICKER_PAGE: 'actress:pickerPage',
++  ACTRESS_AVATAR_CROP_TARGETS: 'actress:avatarCropTargets',
++  ACTRESS_AVATAR_CROP_COUNT: 'actress:avatarCropCount',
++  ACTRESS_PICKER_GET: 'actress:pickerGet',
++  ACTRESS_MERGE_CANDIDATES: 'actress:mergeCandidates',
+   ACTRESS_FACE_SCAN_MANIFEST: 'actress:faceScanManifest',
+   ACTRESS_GET: 'actress:get',
+   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
+@@ -138,6 +152,8 @@ export const IPC = {
+   ACTRESS_MERGE: 'actress:merge',
+   ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
+   ACTRESS_CONFLICT_LIST: 'actressConflict:list',
++  ACTRESS_CONFLICT_QUEUE_PAGE: 'actressConflict:queuePage',
++  ACTRESS_CONFLICT_GET: 'actressConflict:get',
+   ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+   ACTRESS_CONFLICT_SUMMARY: 'actressConflict:summary',
+   ACTRESS_CONFLICT_INSPECT_NAME: 'actressConflict:inspectName',
+@@ -148,6 +164,9 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
+@@ -182,6 +201,10 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+@@ -201,6 +224,7 @@ export const IPC = {
+   BATCH_SCRAPE_RESUME: 'batchScrape:resume',
+   BATCH_SCRAPE_DISCARD: 'batchScrape:discard',
+   AVATAR_AUTO_CROP_BATCH_BEGIN: 'avatarAutoCropBatch:begin',
++  AVATAR_AUTO_CROP_BATCH_TARGETS: 'avatarAutoCropBatch:targets',
+   AVATAR_AUTO_CROP_BATCH_END: 'avatarAutoCropBatch:end',
+   SCRAPER_LIST: 'scrape:listPlugins',
+   SCRAPER_PLUGIN_DETAILS: 'scrape:pluginDetails',
+diff --git a/src/shared/scrapeIpcContract.ts b/src/shared/scrapeIpcContract.ts
+index 919d8f8..023eee5 100644
+--- a/src/shared/scrapeIpcContract.ts
++++ b/src/shared/scrapeIpcContract.ts
+@@ -1,5 +1,6 @@
+ import { IPC } from './ipc-channels'
+ import type {
++  ActressAvatarCropTargetPage,
+   ActressAvatarAutoCropRequest,
+   ActressAvatarAutoCropResponse
+ } from './actressAvatarCropTypes'
+@@ -27,6 +28,8 @@ import type {
+ } from './videoScrapeTypes'
+ import type {
+   PendingVideoScrape,
++  PendingVideoScrapePage,
++  PendingVideoScrapePageQuery,
+   PendingVideoScrapeConfirmInput,
+   PendingVideoScrapeResolutionResult
+ } from './videoScrapeTypes'
+@@ -57,6 +60,10 @@ export interface ScrapeIpcContract {
+     ]
+     result: VideoScrapeOneResult
+   }
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: { args: []; result: number }
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: { args: [ids: number[]]; result: number[] }
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: { args: [query: PendingVideoScrapePageQuery]; result: PendingVideoScrapePage }
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: { args: [id: number]; result: PendingVideoScrape | null }
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: { args: []; result: PendingVideoScrape[] }
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: {
+     args: [input: PendingVideoScrapeConfirmInput]
+@@ -82,6 +89,7 @@ export interface ScrapeIpcContract {
+   [IPC.BATCH_SCRAPE_RESUME]: { args: []; result: boolean }
+   [IPC.BATCH_SCRAPE_DISCARD]: { args: []; result: boolean }
+   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: { args: []; result: string }
++  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: { args: [token: string, afterId: number]; result: ActressAvatarCropTargetPage }
+   [IPC.AVATAR_AUTO_CROP_BATCH_END]: { args: [token: string]; result: boolean }
+   [IPC.SCRAPER_LIST]: { args: []; result: string[] }
+   [IPC.SCRAPER_PLUGIN_DETAILS]: { args: []; result: ScraperPluginDescriptor[] }
+diff --git a/src/main/db/actressAvatarCropSnapshot.ts b/src/main/db/actressAvatarCropSnapshot.ts
+new file mode 100644
+index 0000000..d47535d
+--- /dev/null
++++ b/src/main/db/actressAvatarCropSnapshot.ts
+@@ -0,0 +1,41 @@
++import { randomUUID } from 'node:crypto'
++import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
++import { getDb } from './database'
++
++export interface ActressAvatarCropSnapshot {
++  page(afterId: number): ActressAvatarCropTargetPage
++  dispose(): void
++}
++
++/** Fixed target identity set; SQLite owns the snapshot instead of renderer arrays. */
++export function createActressAvatarCropSnapshot(): ActressAvatarCropSnapshot {
++  const db = getDb()
++  const table = `avatar_crop_${randomUUID().replaceAll('-', '')}`
++  let disposed = false
++  let total = 0
++  db.transaction(() => {
++    db.exec(`CREATE TEMP TABLE ${table} (actress_id INTEGER PRIMARY KEY, name_prefix BLOB NOT NULL)`)
++    db.exec(`INSERT INTO ${table} SELECT id, substr(CAST(main_name AS BLOB),1,516)
++      FROM actresses WHERE length(CAST(avatar_source_path AS BLOB)) > 0
++      OR length(CAST(avatar_path AS BLOB)) > 0`)
++    total = (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as {count:number}).count
++  })()
++  return {
++    page(afterId) {
++      if (disposed || !db.open) throw new Error('头像任务快照已失效')
++      if (!Number.isSafeInteger(afterId) || afterId < 0) throw new Error('无效的头像任务游标')
++      const rows = db.prepare(`SELECT actress_id, name_prefix FROM ${table}
++        WHERE actress_id > ? ORDER BY actress_id ASC LIMIT 101`).all(afterId) as Array<{actress_id:number;name_prefix:Buffer}>
++      const items = rows.slice(0,100).map(row => {
++        const points = Array.from(row.name_prefix.toString('utf8'))
++        return {actressId:row.actress_id,mainName:points.slice(0,128).join('')+(points.length>128?'…':'')}
++      })
++      return {items,total,nextAfterId:rows.length>100?items[items.length-1].actressId:null}
++    },
++    dispose() {
++      if (disposed) return
++      if (db.open) db.exec(`DROP TABLE IF EXISTS ${table}`)
++      disposed = true
++    }
++  }
++}
+diff --git a/src/main/db/actressAvatarCropSnapshot.test.ts b/src/main/db/actressAvatarCropSnapshot.test.ts
+new file mode 100644
+index 0000000..5af0003
+--- /dev/null
++++ b/src/main/db/actressAvatarCropSnapshot.test.ts
+@@ -0,0 +1,63 @@
++import { afterEach, beforeEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { closeDatabase, getDb, initDatabaseAtPath } from './database'
++import { createActressAvatarCropSnapshot } from './actressAvatarCropSnapshot'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++
++let root: string
++let previous: string | undefined
++beforeEach(() => {
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-picker-'))
++  previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = root
++  resetSettingsCacheForTests()
++  initDatabaseAtPath(path.join(root, 'catalog.db'))
++})
++afterEach(() => {
++  closeDatabase(); resetSettingsCacheForTests()
++  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = previous
++  fs.rmSync(root, { recursive: true, force: true })
++})
++
++it('pages a fixed target set and bounds labels after live insert, delete and rename', () => {
++  const db=getDb()
++  db.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10001)
++    INSERT INTO actresses(id,main_name,avatar_path,profile_summary) SELECT x,printf('Actor-%05d',x),'avatar.jpg',hex(zeroblob(2048)) FROM n`)
++  db.prepare('UPDATE actresses SET main_name=? WHERE id=101').run('😀'.repeat(10000))
++  const snapshot=createActressAvatarCropSnapshot()
++  try {
++    const first=snapshot.page(0)
++    assert.equal(first.total,10001);assert.equal(first.items.length,100);assert.equal(first.nextAfterId,100)
++    db.exec("DELETE FROM actresses WHERE id=101; UPDATE actresses SET main_name='Changed' WHERE id=102; INSERT INTO actresses(id,main_name,avatar_path) VALUES(10002,'New','new.jpg')")
++    const second=snapshot.page(first.nextAfterId!)
++    assert.equal(second.items[0].actressId,101)
++    assert.equal(second.items[0].mainName,'😀'.repeat(128)+'…')
++    assert.equal(second.items[1].mainName,'Actor-00102')
++    const ids=first.items.map(item=>item.actressId)
++    let cursor: number | null=first.nextAfterId
++    while(cursor!==null){const page=snapshot.page(cursor);assert.ok(page.items.length<=100);assert.ok(Buffer.byteLength(JSON.stringify(page))<100000);ids.push(...page.items.map(item=>item.actressId));cursor=page.nextAfterId}
++    assert.deepEqual(ids,Array.from({length:10001},(_,i)=>i+1))
++    assert.equal(snapshot.page(10001).nextAfterId,null)
++    assert.throws(()=>snapshot.page(-1),/游标/)
++    assert.throws(()=>snapshot.page(1.5),/游标/)
++  }finally{snapshot.dispose();snapshot.dispose()}
++  assert.throws(()=>snapshot.page(0),/失效/)
++  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM sqlite_temp_master WHERE name LIKE 'avatar_crop_%'").get() as {count:number}).count,0)
++})
++it('handles empty sets and connection closure without recreating a database', () => {
++  const snapshot=createActressAvatarCropSnapshot()
++  assert.deepEqual(snapshot.page(0),{items:[],total:0,nextAfterId:null})
++  closeDatabase()
++  assert.throws(()=>snapshot.page(0),/失效/)
++  snapshot.dispose()
++})
++it('rolls back the temporary table if snapshot population fails', () => {
++  const db=getDb(),exec=db.exec.bind(db)
++  db.exec=((sql:string)=>{if(sql.startsWith('INSERT INTO avatar_crop_'))throw new Error('Injected snapshot failure');return exec(sql)}) as typeof db.exec
++  try{assert.throws(()=>createActressAvatarCropSnapshot(),/Injected snapshot failure/)}finally{db.exec=exec}
++  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM sqlite_temp_master WHERE name LIKE 'avatar_crop_%'").get() as {count:number}).count,0)
++})

@@ -1,0 +1,23 @@
+✔ resident eviction preserves compact selected identities and absolute cross-page range (5.626625ms)
+✔ failed, truncated, reordered and duplicate ranges never partially commit (1.84225ms)
+✔ ABA navigation cancels held range and does not revive old selection or error (0.617417ms)
+✔ replacement ranges serialize reads, discard queued gestures and commit only latest (0.32925ms)
+✔ clear and single toggle cancel held ranges; detailed arrays remain supported (0.316458ms)
+✔ held range exposes busy, clear cancels it, and current failures expose error (0.692208ms)
+✔ actual Library selection survives window eviction and both bulk commands use original revisions (59.309541ms)
+✔ actual bulk dialog gates held preview, cancels queued IPC on close, and retries failures (21.636333ms)
+✔ initial catalog failure presents actionable retry instead of empty library (13.982584ms)
+✔ actual Shift crosses nonresident pages using half-open window identities (20.245417ms)
+✔ unscraped count query caches only total, never its wide candidate DTO (8.146542ms)
+✔ bulk IPC concurrency is bounded across obsolete jobs and queued work is cancelled (2.980834ms)
+✔ failed preview drains in-flight requests, stops queued calls, and retry succeeds (0.44225ms)
+✔ aborted queued job never starts and rejected obsolete IPC is observed (0.698917ms)
+✔ bulk impact keeps exact revision and counts without retaining wide detail arrays (0.232666ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 619.113292

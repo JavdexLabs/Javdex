@@ -1,0 +1,431 @@
+diff --git a/src/main/db/videoRepo.ts b/src/main/db/videoRepo.ts
+index 69a0223..38c66b2 100644
+--- a/src/main/db/videoRepo.ts
++++ b/src/main/db/videoRepo.ts
+@@ -762,6 +762,30 @@ export function listSourceManagedVideoResourceRefs(libraryId: number): LocalVide
+     .all(libraryId) as LocalVideoResourceRef[]
+ }
+ 
++/** Iterate within the caller's cleanup transaction; each query releases its cursor before deletion. */
++export function* iterateSourceManagedVideoResourceRefs(libraryId: number): IterableIterator<LocalVideoResourceRef> {
++  const db = getDb()
++  if (!db.inTransaction) throw new Error('Source resource iteration requires a transaction')
++  const highWater = (db.prepare('SELECT MAX(id) AS id FROM video_resources WHERE library_id = ?')
++    .get(libraryId) as { id: number | null }).id
++  if (highWater === null) return
++  // The library indexes require sorting each page; retain the rowid range scan instead.
++  const statement = db.prepare(`SELECT library_id, id AS resource_id, video_id,
++      CASE WHEN kind = 'local' THEN locator ELSE strm_source_path END AS locator
++    FROM video_resources NOT INDEXED
++    WHERE library_id = ? AND id > ? AND id <= ?
++      AND (kind = 'local' OR strm_source_path IS NOT NULL)
++    ORDER BY id LIMIT 256`)
++  let afterId = 0
++  while (afterId < highWater) {
++    if (!db.inTransaction) throw new Error('Source resource iteration requires a transaction')
++    const page = statement.all(libraryId, afterId, highWater) as LocalVideoResourceRef[]
++    if (page.length === 0) return
++    afterId = page[page.length - 1].resource_id
++    yield* page
++  }
++}
++
+ export function listStrmVideoResourceRefs(libraryId: number): StrmVideoResourceRef[] {
+   return getDb()
+     .prepare(
+@@ -1450,7 +1474,22 @@ export function addManualVideoTag(videoId: number, name: string): void {
+   const trimmed = name.trim()
+   if (!trimmed) throw new Error('标签名称不能为空')
+   const db = getDb()
+-  const tagId = ensureTag(trimmed)
++  db.transaction(() => setManualVideoTag(videoId, ensureTag(trimmed)))()
++}
++
++/** Attach the exact selected tag even when its display label is truncated. */
++export function addExistingManualVideoTag(videoId: number, tagId: number): void {
++  const db = getDb()
++  db.transaction(() => {
++    const tag = db.prepare('SELECT name FROM tags WHERE id = ?').get(tagId) as { name: string } | undefined
++    if (!tag) throw new Error('标签已不存在，请重新选择')
++    if (!tag.name.trim()) throw new Error('标签名称不能为空')
++    setManualVideoTag(videoId, tagId)
++  })()
++}
++
++function setManualVideoTag(videoId: number, tagId: number): void {
++  const db = getDb()
+   const existing = db
+     .prepare('SELECT origin FROM video_tag WHERE video_id = ? AND tag_id = ?')
+     .get(videoId, tagId) as { origin: string } | undefined
+diff --git a/src/main/scanner/scanCoordinator.ts b/src/main/scanner/scanCoordinator.ts
+index 7c08dde..c516b09 100644
+--- a/src/main/scanner/scanCoordinator.ts
++++ b/src/main/scanner/scanCoordinator.ts
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs'
++import { createProgressPublisher } from '../services/progressPublisher'
+ import { randomUUID } from 'node:crypto'
+ import type {
+   LibraryScanAudit,
+@@ -20,7 +21,7 @@ import type { Video, VideoResource } from '@shared/videoTypes'
+ import {
+   getVideoById,
+   getVideoResourceInLibrary,
+-  listSourceManagedVideoResourceRefs,
++  iterateSourceManagedVideoResourceRefs,
+   listVideoResources,
+   removeVideoResourceRecord,
+   setPrimaryVideoResource,
+@@ -99,7 +100,7 @@ export interface ScanCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions
+   ) => Promise<ScanResult>
+-  listLocalResources: (libraryId: number) => LocalVideoResourceRef[]
++  listLocalResources: (libraryId: number) => Iterable<LocalVideoResourceRef>
+   getResourceById: (libraryId: number, resourceId: number) => VideoResource | null
+   getVideoById: (videoId: number) => Video | null
+   listResources: (libraryId: number, videoId: number) => VideoResource[]
+@@ -200,6 +201,9 @@ export class ScanCoordinator {
+     let snapshot: MediaLibraryScanSnapshot | null = null
+     let selectedRoots: Readonly<MediaLibraryRoot>[] = []
+     let beganRun = false
++    const progressPublisher = createProgressPublisher<ScanProgress>((progress) => {
++      this.emit({ phase: 'progress', libraryId: request.libraryId, runId, trigger, progress })
++    })
+     const auditState: Omit<
+       LibraryScanAudit,
+       | 'schemaVersion'
+@@ -285,13 +289,7 @@ export class ScanCoordinator {
+         },
+         (progress) => {
+           request.onProgress?.(progress)
+-          this.emit({
+-            phase: 'progress',
+-            libraryId: request.libraryId,
+-            runId,
+-            trigger,
+-            progress
+-          })
++          progressPublisher.update(progress)
+         },
+         {
+           signal: controller.signal,
+@@ -410,16 +408,20 @@ export class ScanCoordinator {
+       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+       result.deletedVideos = cleanup.removedMemberships.length
+-      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+-      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
+-      auditState.deletedVideos.push(
+-        ...cleanup.removedMemberships.map((video) => ({
++      for (const resource of cleanup.missingResources.removedResources) {
++        auditState.removedResources.push(resource)
++      }
++      for (const resource of cleanup.missingResources.promotedResources) {
++        auditState.promotedResources.push(resource)
++      }
++      for (const video of cleanup.removedMemberships) {
++        auditState.deletedVideos.push({
+           videoId: video.videoId,
+           videoCode: video.videoCode,
+           videoTitle: video.videoTitle,
+-          reason: 'resource_less' as const
+-        }))
+-      )
++          reason: 'resource_less'
++        })
++      }
+       const status =
+         result.strmFailures.length + result.omittedStrmFailures > 0
+           ? 'completed_with_errors'
+@@ -460,6 +462,7 @@ export class ScanCoordinator {
+       }
+       throw new Error(errorSummary)
+     } finally {
++      progressPublisher.close()
+       if (this.activeRun?.controller === controller) this.activeRun = null
+       lease.release()
+       if (beganRun) {
+@@ -513,6 +516,9 @@ export class ScanCoordinator {
+         )
+         .map((entry) => entry.groupId as number)
+     )
++    const pendingPaths = new Set(auditState.files
++      .filter((entry) => entry.outcome === 'pending')
++      .map((entry) => entry.filePath))
+     auditState.pendingGroups = this.dependencies
+       .listPendingScanGroups(libraryId)
+       .filter((group) => auditPendingIds.has(group.id))
+@@ -520,9 +526,7 @@ export class ScanCoordinator {
+         groupId: group.id,
+         normalizedCode: group.normalizedCode,
+         resourceCount: group.resources.filter((resource) =>
+-          auditState.files.some(
+-            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+-          )
++          pendingPaths.has(resource.filePath)
+         ).length
+       }))
+   }
+@@ -756,7 +760,7 @@ export function createScanCoordinator(
+     authorizeRootDeletionTarget:
+       dependencies.authorizeRootDeletionTarget ?? authorizeMediaLibraryRootDeletionTarget,
+     scanFolders: dependencies.scanFolders ?? scanFolders,
+-    listLocalResources: dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
++    listLocalResources: dependencies.listLocalResources ?? iterateSourceManagedVideoResourceRefs,
+     getResourceById: dependencies.getResourceById ?? getVideoResourceInLibrary,
+     getVideoById: dependencies.getVideoById ?? getVideoById,
+     listResources: dependencies.listResources ?? listVideoResources,
+diff --git a/src/main/scanner/scanCoordinator.test.ts b/src/main/scanner/scanCoordinator.test.ts
+index 7a20de4..fb11812 100644
+--- a/src/main/scanner/scanCoordinator.test.ts
++++ b/src/main/scanner/scanCoordinator.test.ts
+@@ -24,7 +24,7 @@ interface LegacyCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions & { unavailableRoots?: string[] }
+   ) => Promise<ScanResult>
+-  listLocalResources?: () => Array<{ video_id: number; resource_id: number; locator: string }>
++  listLocalResources?: () => Iterable<{ video_id: number; resource_id: number; locator: string }>
+   getResourceById?: (resourceId: number) => VideoResource | null
+   getVideoById?: (videoId: number) => Video | null
+   listResources?: (videoId: number) => VideoResource[]
+@@ -155,11 +155,11 @@ function createTestScanCoordinator(
+       libraryId: request.libraryId,
+       runId: request.runId
+     }),
+-    listLocalResources: () =>
+-      (dependencies.listLocalResources?.() ?? []).map((resource) => ({
+-        library_id: 1,
+-        ...resource
+-      })),
++    listLocalResources: function* () {
++      for (const resource of dependencies.listLocalResources?.() ?? []) {
++        yield { library_id: 1, ...resource }
++      }
++    },
+     getResourceById: (_libraryId, resourceId) =>
+       dependencies.getResourceById?.(resourceId) ?? null,
+     getVideoById: (videoId) => dependencies.getVideoById?.(videoId) ?? null,
+@@ -296,6 +296,44 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
+ }
+ 
+ describe('ScanCoordinator', () => {
++  it('coalesces display progress while preserving per-file callbacks and the final event', async () => {
++    const size = 300_382
++    const events: LibraryScanEvent[] = []
++    let callbacks = 0
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        for (let scanned = 1; scanned <= size; scanned++) {
++          onProgress?.({ scanned, imported: 0, currentFile: `/online/${scanned}.mp4` })
++        }
++        return { ...emptyScanResult(), scannedFiles: size }
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await coordinator.run({ onProgress: () => { callbacks++ } })
++    assert.equal(callbacks, size)
++    const progress = events.filter(event => event.phase === 'progress')
++    assert.ok(progress.length < size)
++    assert.equal(progress.at(-1)?.progress.scanned, size)
++    assert.equal(events.at(-1)?.phase, 'completed')
++    assert.equal(events.at(-2)?.phase, 'progress')
++  })
++
++  it('flushes pending progress before a failure without delaying the failure event', async () => {
++    const events: LibraryScanEvent[] = []
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        onProgress?.({ scanned: 1, imported: 0, currentFile: '/online/one.mp4' })
++        onProgress?.({ scanned: 2, imported: 0, currentFile: '/online/two.mp4' })
++        throw new Error('scan failed')
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await assert.rejects(coordinator.run(), /scan failed/)
++    assert.equal(events.filter(event => event.phase === 'progress').at(-1)?.progress.scanned, 2)
++    assert.equal(events.at(-1)?.phase, 'failed')
++    assert.equal(coordinator.running, false)
++  })
++
+   it('binds an offline-created root identity and refreshes the frozen snapshot before scanning', async () => {
+     let bindings = 0
+     let scanned = 0
+@@ -867,6 +905,65 @@ describe('ScanCoordinator', () => {
+     assert.equal(result.removed, 2)
+   })
+ 
++  it('consumes cleanup references lazily and closes iteration on a path failure', async () => {
++    let removed = 0, closed = false
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: function* () {
++        try {
++          yield { video_id: 1, resource_id: 1, locator: '/online/1.mp4' }
++          assert.equal(removed, 1, 'cleanup must process a reference before asking for the next')
++          yield { video_id: 2, resource_id: 2, locator: '/online/2.mp4' }
++          assert.fail('unknown path must stop enumeration')
++        } finally { closed = true }
++      },
++      getResourceById: id => resource({id, video_id:id, kind:'local', locator:`/online/${id}.mp4`, is_primary:0}),
++      removeResourceRecord: () => { removed++ },
++      inspectPath: value => value.endsWith('/1.mp4') ? 'missing' : 'unknown'
++    })
++    await assert.rejects(coordinator.run(), /无法确认本地资源是否存在/)
++    assert.equal(removed, 1)
++    assert.equal(closed, true)
++  })
++
++  it('preserves all three cleanup audit sequences above the argument limit', async () => {
++    const size = 300_382
++    let audited = false
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: () => Array.from({ length: size }, (_, index) => ({
++        video_id: index + 1, resource_id: index + 1, locator: `/online/${index + 1}.mp4`
++      })),
++      getResourceById: id => resource({
++        id, video_id: id, kind: 'local', locator: `/online/${id}.mp4`, is_primary: 1
++      }),
++      getVideoById: id => ({ id, code: `AUDIT-${id}`, title: null }) as Video,
++      listResources: id => [resource({
++        id: size + id, video_id: id, kind: 'web', locator: `https://example.test/${id}`
++      })],
++      inspectPath: () => 'missing',
++      shouldAutoDeleteResourceLessVideos: () => true,
++      deleteResourceLessVideos: () => size,
++      listResourceLessVideos: () => Array.from({ length: size }, (_, index) => ({
++        id: size * 2 + index, code: `EMPTY-${index}`, title: null
++      })),
++      recordScanSummary: (_summary, _files, audit) => {
++        audited = true
++        assert.equal(audit.removedResources.length, size)
++        assert.equal(audit.promotedResources.length, size)
++        assert.equal(audit.deletedVideos.length, size)
++        for (let index = 0; index < size; index++) {
++          assert.equal(audit.removedResources[index].resourceId, index + 1)
++          assert.equal(audit.promotedResources[index].resourceId, size + index + 1)
++          assert.equal(audit.deletedVideos[index].videoId, size * 2 + index)
++        }
++      }
++    })
++    const result = await coordinator.run()
++    assert.equal(result.removed, size)
++    assert.equal(result.promoted, size)
++    assert.equal(result.deletedVideos, size)
++    assert.equal(audited, true)
++  })
++
+   it('removes resource-less memberships after deferred cleanup on a safe full scan', async () => {
+     const order: string[] = []
+     const summaries: LibraryScanSummary[] = []
+diff --git a/src/main/db/sourceManagedResourceIteration.test.ts b/src/main/db/sourceManagedResourceIteration.test.ts
+new file mode 100644
+index 0000000..5a5a75f
+--- /dev/null
++++ b/src/main/db/sourceManagedResourceIteration.test.ts
+@@ -0,0 +1,64 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { closeDatabase, initDatabaseAtPath } from './database'
++import { iterateSourceManagedVideoResourceRefs, listSourceManagedVideoResourceRefs } from './videoRepo'
++
++it('iterates source-managed resources in order while deleting, with bounded reads and rollback', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-source-iteration-'))
++  try {
++    const db = initDatabaseAtPath(path.join(root, 'catalog.db'))
++    db.exec(`INSERT INTO videos(id,code) VALUES(1,'ITERATION');
++      INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(1,1,1);
++      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1100)
++      INSERT INTO video_resources(id,library_id,video_id,kind,locator,resource_key,source_identity,strm_source_path)
++      SELECT x,1,1,CASE WHEN x%3=0 THEN 'local' ELSE 'web' END,'path/'||x,'key/'||x,
++        CASE WHEN x%3!=1 THEN 'identity/'||x END, CASE WHEN x%3=2 THEN 'strm/'||x END FROM n;`)
++    db.exec(`INSERT INTO media_libraries(id,name) VALUES(2,'Other');
++      INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(2,1,2);
++      UPDATE video_resources SET library_id=2 WHERE id%10=0;`)
++    const expected = listSourceManagedVideoResourceRefs(1)
++    assert.throws(() => [...iterateSourceManagedVideoResourceRefs(1)], /requires a transaction/)
++    const prepare = db.prepare.bind(db), sizes: number[] = [], plans: unknown[] = []
++    db.prepare = ((sql: string) => {
++      const statement = prepare(sql)
++      if (sql.includes('ORDER BY id LIMIT 256')) {
++        plans.push(prepare('EXPLAIN QUERY PLAN '+sql).all(1,0,1100))
++        const all = statement.all.bind(statement)
++        statement.all = ((...args: unknown[]) => {
++          const rows = all(...args); sizes.push(rows.length); return rows
++        }) as typeof statement.all
++      }
++      return statement
++    }) as typeof db.prepare
++    try {
++      assert.throws(db.transaction(() => {
++        const actual = []
++        for (const ref of iterateSourceManagedVideoResourceRefs(1)) {
++          actual.push(ref)
++          db.prepare('DELETE FROM video_resources WHERE id = ?').run(ref.resource_id)
++        }
++        assert.deepEqual(actual, expected)
++        assert.ok(sizes.length >= 3)
++        assert.ok(sizes.every(size => size <= 256))
++        throw new Error('rollback cleanup')
++      }), /rollback cleanup/)
++      assert.deepEqual(listSourceManagedVideoResourceRefs(1), expected)
++      db.transaction(() => {
++        const iterator = iterateSourceManagedVideoResourceRefs(1)
++        const first = iterator.next()
++        db.exec(`INSERT INTO video_resources(id,library_id,video_id,kind,locator,resource_key,source_identity)
++          VALUES(2000,1,1,'local','new-path','new-key','new-identity')`)
++        assert.deepEqual([first.value, ...iterator], expected)
++      })()
++      assert.equal(listSourceManagedVideoResourceRefs(2).length > 0, true)
++      assert.deepEqual(db.transaction(() => [...iterateSourceManagedVideoResourceRefs(999)])(), [])
++      const details = JSON.stringify(plans)
++      assert.match(details, /INTEGER PRIMARY KEY/)
++      assert.doesNotMatch(details, /TEMP B-TREE/)
++      console.log(JSON.stringify({sourceIterationPlans: plans}))
++    } finally { db.prepare = prepare }
++  } finally { closeDatabase(); fs.rmSync(root, {recursive:true,force:true}) }
++})
+diff --git a/scripts/performance/source-resource-iteration-benchmark.ts b/scripts/performance/source-resource-iteration-benchmark.ts
+new file mode 100644
+index 0000000..d18796f
+--- /dev/null
++++ b/scripts/performance/source-resource-iteration-benchmark.ts
+@@ -0,0 +1,36 @@
++/** Standalone synthetic cleanup-reference probe; never opens user data. */
++import {it} from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {performance} from 'node:perf_hooks'
++import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
++import {iterateSourceManagedVideoResourceRefs,listSourceManagedVideoResourceRefs} from '../../src/main/db/videoRepo'
++it('measures bounded cleanup enumeration without claiming bounded audit memory',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-source-probe-')),results:unknown[]=[]
++ try {for(const count of [50000,300000]){
++  const db=initDatabaseAtPath(path.join(root,`${count}.db`))
++  db.exec(`INSERT INTO videos(id,code) VALUES(1,'SOURCE');
++    INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(1,1,1);
++    WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${count})
++    INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,source_identity)
++    SELECT 1,1,'local','path/'||x||hex(zeroblob(100)), 'key/'||x,'identity/'||x FROM n; ANALYZE;`)
++  for(const mode of ['full','paged']){
++   const samples=[]
++   for(let sample=-1;sample<3;sample++){
++    const result=db.transaction(()=>{
++     const start=performance.now()
++     const refs=mode==='full'?listSourceManagedVideoResourceRefs(1):iterateSourceManagedVideoResourceRefs(1)
++     let rows=0,checksum=0,firstMs=0
++     for(const ref of refs){if(!rows)firstMs=performance.now()-start;rows++;checksum+=ref.resource_id}
++     return {elapsedMs:performance.now()-start,firstMs,rows,checksum}
++    })()
++    assert.equal(result.rows,count);assert.equal(result.checksum,count*(count+1)/2)
++    if(sample>=0)samples.push(result)
++   }
++   results.push({count,mode,samples})
++  }closeDatabase()
++ }}finally{closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++ console.log(JSON.stringify({results,notes:['Single library, >200-character paths, ANALYZE; one warmup and 3 samples, full first.','Includes enumeration/checksum loop but excludes assertions; firstMs measures first consumer access.','Paged reference arrays at most256 (separate correctness test); total cleanup/audit memory, filesystem time, p95, cold I/O and sparse multi-library distributions not measured.','All enumeration synchronous within original cleanup transaction; no event-loop yielding or shorter writer transaction claimed.']},null,2))
++})

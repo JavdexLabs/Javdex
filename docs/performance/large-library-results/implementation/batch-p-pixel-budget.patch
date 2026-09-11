@@ -1,0 +1,1747 @@
+diff --git a/package.json b/package.json
+index 8197321..45884ce 100644
+--- a/package.json
++++ b/package.json
+@@ -58,6 +58,7 @@
+     "music-metadata": "^11.14.0",
+     "playwright-core": "1.62.1",
+     "qrcode": "^1.5.4",
++    "sharp": "0.35.4",
+     "socks": "2.8.9",
+     "strtok3": "^10.3.5",
+     "undici": "^7.28.0",
+diff --git a/package-lock.json b/package-lock.json
+index 0d78c3f..fc9e7ff 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -20,6 +20,7 @@
+         "music-metadata": "^11.14.0",
+         "playwright-core": "1.62.1",
+         "qrcode": "^1.5.4",
++        "sharp": "0.35.4",
+         "socks": "2.8.9",
+         "strtok3": "^10.3.5",
+         "undici": "^7.28.0",
+@@ -2704,6 +2705,16 @@
+         "node": ">=14.14"
+       }
+     },
++    "node_modules/@emnapi/runtime": {
++      "version": "1.11.3",
++      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz",
++      "integrity": "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "tslib": "^2.4.0"
++      }
++    },
+     "node_modules/@esbuild/aix-ppc64": {
+       "version": "0.25.12",
+       "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.25.12.tgz",
+@@ -3477,6 +3488,506 @@
+         "url": "https://github.com/sponsors/nzakas"
+       }
+     },
++    "node_modules/@img/colour": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
++      "integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@img/sharp-darwin-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.35.4.tgz",
++      "integrity": "sha512-Uhfl4V4lhP2nbUVF9+hyH1+luj86f1gUFeo8ALYxFoULoU+G87D43BfeMP8XHsk9boxAnCY/bf2EHwhA7MuGsA==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-darwin-arm64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-darwin-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.35.4.tgz",
++      "integrity": "sha512-hWniXY3bG5qKpkKrAwPe4y+VTPmf086YQAnkxWh7uA1YrlRouWGa0M0Mxj3ZjnXFkv7/TD1bTy9lGUK26vRvWw==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-darwin-x64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-freebsd-wasm32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-freebsd-wasm32/-/sharp-freebsd-wasm32-0.35.4.tgz",
++      "integrity": "sha512-lIsKw/BU+kjB4eZjxrYrZmwOJYi3Ajrv66iAlBmUPyKc3HpnloevB1g3wxGD9P/5BbQ1brBGl65VRRrCvQDEqA==",
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "dependencies": {
++        "@img/sharp-wasm32": "0.35.4"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-darwin-arm64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.3.tgz",
++      "integrity": "sha512-suTBPTDGrI9WodccaDdwZItTSaBYASlBk1NSfElSHrUfzu3szG6lvIF58+WiFvnfzuK8ZBFS5zE00PxqxnRiPg==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-darwin-x64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.3.tgz",
++      "integrity": "sha512-FVJZ5mITMobmXIz/hPDTw0EintTW5H3WfrxwLqEqjiIihlu+hVRyGrFQ60xl0Lxn7Bt3zdpevPaQi0HEzqz9fw==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-arm": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.3.3.tgz",
++      "integrity": "sha512-3rbU4vqXXc3hY/OiXdl52xZvT0F1yEngWfvqudtPJg/KkyiaQw2DRsFrNzpmLvfavbwOq3qXn36GP8obHRULQA==",
++      "cpu": [
++        "arm"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-arm64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.3.3.tgz",
++      "integrity": "sha512-0DaL0A6Xu6sQSQFwe4iVCrKWU2cCTItnRsYsCdxAMm9NF6twAA9BKnoqy4hqz4+azQ0JHuA26qiUKsf1XJ/v5A==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-ppc64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.3.3.tgz",
++      "integrity": "sha512-cdn1OvUBwsXhbC0zSzJnNzf5MZ/mTrobawDvNXBTxe8VtqKAm0sRuEY2Evzovb/w9JMk4TvRxqt1mekSuJz64w==",
++      "cpu": [
++        "ppc64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-riscv64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.3.3.tgz",
++      "integrity": "sha512-HjPVx7yKz+0lqdhDlTw1tt90wamBoxhiXpvl1XZpJLiHH4RCJ5yDTqH+VlYPv2fwFs89JFw4c1IexYOcQUi4IQ==",
++      "cpu": [
++        "riscv64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-s390x": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.3.3.tgz",
++      "integrity": "sha512-neWLh+3yCNThxnfy3c4BbVBeGgt9aftno+XbT56iK28RgeDs3UOFWviLWlUu0bArYVYJaFDK+RRohbicUNCm8Q==",
++      "cpu": [
++        "s390x"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linux-x64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.3.tgz",
++      "integrity": "sha512-4vKmvAst9nrowcqquKFAyZJUDolUaIp8uRiN0mWFguJ1IplC9/pitXtlnnlU4aa/eJw3J7i67V+pwUL+wZGdsA==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linuxmusl-arm64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.3.3.tgz",
++      "integrity": "sha512-Y9kQaLMuNoB0bPYOOdcZMaseNrFpPodIWWMrx+CZyydf2xn68j9WYc6sWWRrDwNkzCQjKYfc68L7jKjGlHMibw==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-libvips-linuxmusl-x64": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.3.3.tgz",
++      "integrity": "sha512-fj8Mv0HHfD1Rr+4I68+3agJynxDWtBFgicTbSOb9Bke6pIwzGcJ+RX/yHjmiEGFMCavY/dxvem7MyNaJF+wDiw==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-linux-arm": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.35.4.tgz",
++      "integrity": "sha512-7OAS8gI0EReKGVN2HssHlM6umJgxF5VI3xN0p9FA91p/YO+ou5hiNghLdZ5BEHztwaaK5+bLKRf8x/o2L2nk9A==",
++      "cpu": [
++        "arm"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-arm": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.35.4.tgz",
++      "integrity": "sha512-De4jpEnAU8Hd5oT0j1G3uL4ZvTuipVMn7YC6vPaJhy6/7EwEae0SVAoBrUMYQbkLGDm85taVWwuPc1a44LTzCQ==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-arm64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-ppc64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.35.4.tgz",
++      "integrity": "sha512-2oYZJeIl4kCcMGk4ouZVjnkCtFrpQFlNEtJ6GbxzhHQchwH0NH/qEb9ykmOl29dqwMq+JhFdZn+1ak2FKhI9fQ==",
++      "cpu": [
++        "ppc64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-ppc64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-riscv64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.35.4.tgz",
++      "integrity": "sha512-cPbNChoRURAWdebDIHSenxRpgEdy7JkPydSnUxRm9VvKD7m0/xVaR/8Fzlu81pk5nHEvHH87UZUA7cTtwnbJSA==",
++      "cpu": [
++        "riscv64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-riscv64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-s390x": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.35.4.tgz",
++      "integrity": "sha512-RY0JFY8Fd6RonCBtHz+DvadaPkXDSI1AUn6yWL9TipqkZ1vY8w8evqdgyDFnkm4/K1ve1TvZiaePP5oSd4+WVQ==",
++      "cpu": [
++        "s390x"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-s390x": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linux-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.4.tgz",
++      "integrity": "sha512-9qvvEAuk8k89TfWUoX2htWjbAMX8p+NxCppjpcg5k6xMsjhBQPTsoIh36h9Qde4WRuGpJeYnOjdosDn/cnv+OA==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linux-x64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linuxmusl-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.35.4.tgz",
++      "integrity": "sha512-KB5jxpfWQTr0nc3xdHtWChdbifHrBGsd2SM62Eyxrl8afikm+f5qGBU75SJIZBT/S1MC8XyacdlXBMSWq6OURA==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linuxmusl-arm64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-linuxmusl-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.35.4.tgz",
++      "integrity": "sha512-f+eZJZIQNEEd26RPSW+76chwOf1XtA2Y/O+5ocVyLliHkeih3e+jhLVBdNTd2rS3IbNXK8+ug93Vf5ZXtF5Lxg==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-libvips-linuxmusl-x64": "1.3.3"
++      }
++    },
++    "node_modules/@img/sharp-wasm32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.4.tgz",
++      "integrity": "sha512-zQnl4Kwp7Q6NHsENtU2T/00Zi+w3AQNwz3+UaTyVBy2FpXrzXzGjndpK61onhZjRtRpQXxCTeqw19bVyXOh7jA==",
++      "license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
++      "optional": true,
++      "dependencies": {
++        "@emnapi/runtime": "^1.11.3"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-webcontainers-wasm32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-webcontainers-wasm32/-/sharp-webcontainers-wasm32-0.35.4.tgz",
++      "integrity": "sha512-ESfNkywmCfPNyaZjxooddJQiQ+l/nTpGEOGthxiLnIHXC/CmcBixnfwUleX9mCz9ovrUUvKMap/pm8RYbzfwaA==",
++      "cpu": [
++        "wasm32"
++      ],
++      "license": "Apache-2.0",
++      "optional": true,
++      "dependencies": {
++        "@img/sharp-wasm32": "0.35.4"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-arm64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.35.4.tgz",
++      "integrity": "sha512-iNdlBX9gLVvqe2I3uIJSIKTq6wckP/DYxZtcqxm09x5Gi24DnFBmPAWZmr60ZyYMG0xlzo6goG3670ar+RXvRw==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-ia32": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.35.4.tgz",
++      "integrity": "sha512-kqRsbaa5CS6KHlpxnN7WhE6vAAugXyZButpRdvDWetlv6Qv4N9WTcrWzF7tXfB9T7MsoadqdI8hmwLq6UlLvtw==",
++      "cpu": [
++        "ia32"
++      ],
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": "^20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
++    "node_modules/@img/sharp-win32-x64": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.4.tgz",
++      "integrity": "sha512-XtmnYhBcrORsJ4XJngyzr/EWP0hRZLAZRFaApdKuviyqF78+ylxh2y06ZmtULAMOnObJ3ucpN0AcwSWnMowTRg==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "Apache-2.0 AND LGPL-3.0-or-later",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      }
++    },
+     "node_modules/@isaacs/fs-minipass": {
+       "version": "4.0.1",
+       "resolved": "https://registry.npmjs.org/@isaacs/fs-minipass/-/fs-minipass-4.0.1.tgz",
+@@ -6258,6 +6769,15 @@
+         "node": ">=6"
+       }
+     },
++    "node_modules/detect-libc": {
++      "version": "2.1.2",
++      "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
++      "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
++      "license": "Apache-2.0",
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/detect-node": {
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/detect-node/-/detect-node-2.1.0.tgz",
+@@ -11398,10 +11918,9 @@
+       }
+     },
+     "node_modules/semver": {
+-      "version": "7.8.1",
+-      "resolved": "https://registry.npmmirror.com/semver/-/semver-7.8.1.tgz",
+-      "integrity": "sha512-rkVq3IXh+4FDGch+KwzX3aV9W3kO54GyEgpvBzSyctDA6Xtd7RJQV1xmXbeQp5v7+VzLOfVqiutSE6GICgPFvg==",
+-      "dev": true,
++      "version": "7.8.5",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
++      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+       "license": "ISC",
+       "bin": {
+         "semver": "bin/semver.js"
+@@ -11529,6 +12048,55 @@
+       "devOptional": true,
+       "license": "ISC"
+     },
++    "node_modules/sharp": {
++      "version": "0.35.4",
++      "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz",
++      "integrity": "sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "@img/colour": "^1.1.0",
++        "detect-libc": "^2.1.2",
++        "semver": "^7.8.5"
++      },
++      "engines": {
++        "node": ">=20.9.0"
++      },
++      "funding": {
++        "url": "https://opencollective.com/libvips"
++      },
++      "optionalDependencies": {
++        "@img/sharp-darwin-arm64": "0.35.4",
++        "@img/sharp-darwin-x64": "0.35.4",
++        "@img/sharp-freebsd-wasm32": "0.35.4",
++        "@img/sharp-libvips-darwin-arm64": "1.3.3",
++        "@img/sharp-libvips-darwin-x64": "1.3.3",
++        "@img/sharp-libvips-linux-arm": "1.3.3",
++        "@img/sharp-libvips-linux-arm64": "1.3.3",
++        "@img/sharp-libvips-linux-ppc64": "1.3.3",
++        "@img/sharp-libvips-linux-riscv64": "1.3.3",
++        "@img/sharp-libvips-linux-s390x": "1.3.3",
++        "@img/sharp-libvips-linux-x64": "1.3.3",
++        "@img/sharp-libvips-linuxmusl-arm64": "1.3.3",
++        "@img/sharp-libvips-linuxmusl-x64": "1.3.3",
++        "@img/sharp-linux-arm": "0.35.4",
++        "@img/sharp-linux-arm64": "0.35.4",
++        "@img/sharp-linux-ppc64": "0.35.4",
++        "@img/sharp-linux-riscv64": "0.35.4",
++        "@img/sharp-linux-s390x": "0.35.4",
++        "@img/sharp-linux-x64": "0.35.4",
++        "@img/sharp-linuxmusl-arm64": "0.35.4",
++        "@img/sharp-linuxmusl-x64": "0.35.4",
++        "@img/sharp-webcontainers-wasm32": "0.35.4",
++        "@img/sharp-win32-arm64": "0.35.4",
++        "@img/sharp-win32-ia32": "0.35.4",
++        "@img/sharp-win32-x64": "0.35.4"
++      },
++      "peerDependenciesMeta": {
++        "@types/node": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/shebang-command": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmmirror.com/shebang-command/-/shebang-command-2.0.0.tgz",
+@@ -12289,7 +12857,7 @@
+       "version": "2.8.1",
+       "resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
+       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
+-      "dev": true,
++      "devOptional": true,
+       "license": "0BSD"
+     },
+     "node_modules/tsx": {
+diff --git a/electron-builder.config.mjs b/electron-builder.config.mjs
+index d2faebc..3286152 100644
+--- a/electron-builder.config.mjs
++++ b/electron-builder.config.mjs
+@@ -53,6 +53,7 @@ const base = {
+     '!node_modules/@earendil-works/pi-coding-agent/**/*'
+   ],
+   asar: true,
++  asarUnpack: ['node_modules/sharp/**/*', 'node_modules/@img/**/*'],
+   npmRebuild: true,
+   nodeGypRebuild: false,
+   extraResources: [
+diff --git a/src/main/services/mediaAssetStore/pixelBudget.ts b/src/main/services/mediaAssetStore/pixelBudget.ts
+new file mode 100644
+index 0000000..17da4d8
+--- /dev/null
++++ b/src/main/services/mediaAssetStore/pixelBudget.ts
+@@ -0,0 +1,34 @@
++import sharp from 'sharp'
++
++/** Per-frame canvas budget. Animation lifetime and concurrent decoded memory are separate. */
++export const MAX_ASSET_PIXELS = 64 * 1024 * 1024
++
++export class AssetPixelLimitError extends Error {
++  constructor() {
++    super('Image asset exceeds the pixel limit')
++    this.name = 'AssetPixelLimitError'
++  }
++}
++
++const SERVED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'])
++
++/** Read headers asynchronously; never decode pixels just to determine allocation limits. */
++export async function inspectServedImage(body: Buffer, signal?: AbortSignal): Promise<string> {
++  signal?.throwIfAborted()
++  // metadata does not decode pixels. Disable its default limit so oversize failures use our typed error.
++  // Any future resize/decode must separately set limitInputPixels to MAX_ASSET_PIXELS.
++  const reader = sharp(body, { limitInputPixels: false, pages: 1 })
++  try {
++    const metadata = await reader.metadata()
++    signal?.throwIfAborted()
++    const { width, height, mediaType } = metadata
++    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
++      throw new Error('Invalid image dimensions')
++    }
++    if (width > MAX_ASSET_PIXELS / height) throw new AssetPixelLimitError()
++    if (!mediaType || !SERVED_TYPES.has(mediaType)) throw new Error('Unsupported image format')
++    return mediaType
++  } finally {
++    reader.destroy()
++  }
++}
+diff --git a/src/main/services/mediaAssetStore/pixelBudget.test.ts b/src/main/services/mediaAssetStore/pixelBudget.test.ts
+new file mode 100644
+index 0000000..28898f8
+--- /dev/null
++++ b/src/main/services/mediaAssetStore/pixelBudget.test.ts
+@@ -0,0 +1,84 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import sharp, { type Sharp } from 'sharp'
++import { inspectServedImage, AssetPixelLimitError } from './pixelBudget'
++
++async function jpegWithHeaderSize(width: number, height: number): Promise<Buffer> {
++  const image = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#808080' } }).jpeg().toBuffer()
++  const frame = image.indexOf(Buffer.from([0xff, 0xc0]))
++  assert.ok(frame > 0)
++  image.writeUInt16BE(height, frame + 5)
++  image.writeUInt16BE(width, frame + 7)
++  return image
++}
++
++it('inspects all served formats without decoding pixels', async (t) => {
++  const images = await Promise.all((['jpeg', 'png', 'webp', 'gif', 'avif'] as const).map(async (format) => ({
++    format,
++    body: await sharp({ create: { width: 3, height: 2, channels: 3, background: '#804040' } }).toFormat(format).toBuffer()
++  })))
++  t.mock.method(sharp.prototype, 'toBuffer', () => { throw Error('pixel decode forbidden') })
++  for (const { format, body } of images) assert.equal(await inspectServedImage(body), `image/${format}`)
++})
++
++it('rejects a tiny encoded image with an oversized canvas and accepts the exact boundary', async () => {
++  const exact = await jpegWithHeaderSize(8192, 8192)
++  const oversized = await jpegWithHeaderSize(8193, 8192)
++  assert.ok(oversized.length < 1024)
++  // Deliberately inconsistent pixel data: only header inspection is under test, never actual decoding.
++  assert.equal(await inspectServedImage(exact), 'image/jpeg')
++  await assert.rejects(inspectServedImage(oversized), AssetPixelLimitError)
++})
++
++it('rejects corrupt and unsupported image headers', async () => {
++  await assert.rejects(inspectServedImage(Buffer.from('not an image')))
++  await assert.rejects(inspectServedImage(Buffer.from('<svg width="1" height="1"></svg>')), /Unsupported/)
++})
++
++it('inspects the single-frame canvas of real animated GIF and WebP inputs', async (t) => {
++  const raw = Buffer.alloc(3 * 6 * 3)
++  raw.fill(64, 0, 18)
++  raw.fill(128, 18, 36)
++  raw.fill(192, 36)
++  const images = await Promise.all((['gif', 'webp'] as const).map(async (format) => ({
++    format, body: await sharp(raw, { raw: { width: 3, height: 6, channels: 3, pageHeight: 2 } })
++      .toFormat(format).toBuffer()
++  })))
++  const metadata = sharp.prototype.metadata
++  const observed: Array<{ height: number; pages?: number }> = []
++  t.mock.method(sharp.prototype, 'metadata', async function (this: Sharp) {
++    const result = await metadata.call(this)
++    observed.push(result)
++    return result
++  })
++  for (const image of images) assert.equal(await inspectServedImage(image.body), `image/${image.format}`)
++  assert.deepEqual(observed.map(({ height, pages }) => ({ height, pages })), [
++    { height: 2, pages: 3 }, { height: 2, pages: 3 }
++  ])
++})
++
++it('waits for metadata completion when cancelled and destroys the reader', async (t) => {
++  const body = await jpegWithHeaderSize(1, 1)
++  const original = sharp.prototype.metadata
++  const destroy = t.mock.method(sharp.prototype, 'destroy')
++  let release!: () => void
++  let entered!: () => void
++  const gate = new Promise<void>((resolve) => { release = resolve })
++  const started = new Promise<void>((resolve) => { entered = resolve })
++  t.mock.method(sharp.prototype, 'metadata', async function (this: Sharp) {
++    entered()
++    await gate
++    return original.call(this)
++  })
++  const abort = new AbortController()
++  let settled = false
++  const pending = inspectServedImage(body, abort.signal)
++  const rejected = assert.rejects(pending, { name: 'AbortError' }).then(() => { settled = true })
++  await started
++  abort.abort()
++  await new Promise((resolve) => setImmediate(resolve))
++  assert.equal(settled, false)
++  release()
++  await rejected
++  assert.equal(destroy.mock.callCount(), 1)
++})
+diff --git a/src/main/services/mediaAssetStore/filesystem.ts b/src/main/services/mediaAssetStore/filesystem.ts
+index 4adb962..113bf53 100644
+--- a/src/main/services/mediaAssetStore/filesystem.ts
++++ b/src/main/services/mediaAssetStore/filesystem.ts
+@@ -2,8 +2,11 @@ import path from 'node:path'
+ import fs from 'node:fs'
+ import { randomUUID } from 'node:crypto'
+ import { getSettings } from '../../settings/settingsStore'
+-import { encryptPlain, decryptBlob, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
+-import { invalidateAssetCache } from '../assetCache'
++import { encryptPlain, decryptBlob, decryptBlobAsync, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
++import {
++  getAssetCacheRevision, getCachedAsset, setCachedAsset, sameAssetByteSignature,
++  invalidateAssetCache, type AssetByteSignature
++} from '../assetCache'
+ import { ensureMediaAssetDirsAt, resolveMediaAssetsRoot } from '../assetStoragePaths'
+ import {
+   buildActressAssetSeed,
+@@ -17,8 +20,14 @@ import {
+   isUsableImageBuffer
+ } from './imageBytes'
+ import type { ImageAssetSubdir } from './types'
++import { AssetReadQueue } from './readQueue'
++import { AssetReadFlights } from './readFlights'
++import { AssetReadTooLargeError, MAX_ASSET_READ_BYTES, readBoundedAssetFile } from './boundedRead'
++import { inspectServedImage } from './pixelBudget'
+ 
+ const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']
++const serveReads = new AssetReadQueue()
++const serveFlights = new AssetReadFlights()
+ 
+ /** Root directory for downloaded media assets. */
+ export function assetsRoot(): string {
+@@ -65,11 +74,55 @@ export function writeAtomic(abs: string, data: Buffer): void {
+   fs.renameSync(tmp, abs)
+ }
+ 
++async function readAssetSignature(filePath: string): Promise<AssetByteSignature> {
++  const stat = await fs.promises.stat(filePath)
++  return { resolvedPath: filePath, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs,
++    size: stat.size, device: stat.dev, inode: stat.ino }
++}
++
+ /** Read an asset for media:// serving; decrypts .enc blobs when needed. */
+ export function readAssetForServe(relPath: string): { body: Buffer; mime: string } {
+   const abs = resolveAssetPath(relPath)
+   if (!fs.existsSync(abs)) throw new Error('Asset not found')
+   const raw = fs.readFileSync(abs)
++  return decodeAssetForServe(relPath, raw)
++}
++
++/** Asynchronous disk read for request handlers; synchronous business readers remain explicit. */
++export async function readAssetForServeAsync(
++  relPath: string,
++  signal?: AbortSignal
++): Promise<{ body: Buffer; mime: string }> {
++  signal?.throwIfAborted()
++  const abs = resolveAssetPath(relPath)
++  return serveReads.run(() => serveFlights.run(JSON.stringify([abs, getAssetCacheRevision()]), async (signal) => {
++    const revision = getAssetCacheRevision()
++    let before: AssetByteSignature
++    try { before = await readAssetSignature(abs) } catch (error) {
++      invalidateAssetCache(relPath)
++      throw error
++    }
++    signal?.throwIfAborted()
++    if (before.size > MAX_ASSET_READ_BYTES) throw new AssetReadTooLargeError()
++    const cached = getCachedAsset(relPath, before)
++    if (cached) return cached
++    const raw = await readBoundedAssetFile(abs, signal)
++    signal?.throwIfAborted()
++    let image: { body: Buffer; mime: string }
++    if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
++      const { data, ext } = await decryptBlobAsync(raw, signal)
++      image = { body: data, mime: mimeFromExt(ext) }
++    } else image = decodeAssetForServe(relPath, raw)
++    image.mime = await inspectServedImage(image.body, signal)
++    const after = await readAssetSignature(abs)
++    signal?.throwIfAborted()
++    if (!sameAssetByteSignature(before, after)) throw new Error('Asset changed while reading')
++    if (getAssetCacheRevision() === revision) setCachedAsset(relPath, after, image.body, image.mime)
++    return image
++  }, signal), signal)
++}
++
++function decodeAssetForServe(relPath: string, raw: Buffer): { body: Buffer; mime: string } {
+   if (relPath.endsWith('.enc') || isEncryptedBlob(raw)) {
+     const { data, ext } = decryptBlob(raw)
+     return { body: data, mime: mimeFromExt(ext) }
+diff --git a/src/main/services/mediaAssetStore.ts b/src/main/services/mediaAssetStore.ts
+index 64f1c1c..886e80e 100644
+--- a/src/main/services/mediaAssetStore.ts
++++ b/src/main/services/mediaAssetStore.ts
+@@ -1,6 +1,9 @@
+ import { AsyncLocalStorage } from 'node:async_hooks'
+ import fs from 'node:fs'
+ import path from 'node:path'
++export { AssetReadQueueFullError } from './mediaAssetStore/readQueue'
++export { AssetReadTooLargeError, MAX_ASSET_READ_BYTES } from './mediaAssetStore/boundedRead'
++export { AssetPixelLimitError, MAX_ASSET_PIXELS } from './mediaAssetStore/pixelBudget'
+ import {
+   assetsRoot,
+   deleteAssetOrThrow,
+@@ -15,6 +18,7 @@ import {
+   importSampleFromFile,
+   readAssetBytes,
+   readAssetForServe,
++  readAssetForServeAsync,
+   resolveAssetPath
+ } from './mediaAssetStore/filesystem'
+ import {
+@@ -191,6 +195,10 @@ export class MediaAssetStore {
+     return readAssetForServe(relPath)
+   }
+ 
++  readForServeAsync(relPath: string, signal?: AbortSignal): Promise<{ body: Buffer; mime: string }> {
++    return readAssetForServeAsync(relPath, signal)
++  }
++
+   fingerprint(data: Buffer): string {
+     return avatarSourceFingerprint(data)
+   }
+diff --git a/src/main/services/mediaAssetStore.test.ts b/src/main/services/mediaAssetStore.test.ts
+index 01ed552..b9739be 100644
+--- a/src/main/services/mediaAssetStore.test.ts
++++ b/src/main/services/mediaAssetStore.test.ts
+@@ -3,13 +3,17 @@ import assert from 'node:assert/strict'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
++import crypto from 'node:crypto'
++import sharp, { type Sharp } from 'sharp'
++import type { FileHandle } from 'node:fs/promises'
++import { invalidateAssetCache } from './assetCache'
+ import { getPathAlias } from './assetPathAliases'
+ import { isOpaqueEncFilename } from './assetPathNaming'
+-import { MediaAssetStore, mediaAssetStore } from './mediaAssetStore'
++import { MediaAssetStore, mediaAssetStore, AssetReadTooLargeError, MAX_ASSET_READ_BYTES, AssetPixelLimitError } from './mediaAssetStore'
+ import { encryptPlain, resetAssetKeyCacheForTests } from './assetCrypto'
+ 
+ const JPEG_1X1 = Buffer.from(
+-  'ffd8ffe000104a4649460000010101004800480000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191082242b1c11552d1f0243362728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f007b941100ffd9',
++  'ffd8ffdb00430006040506050406060506070706080a100a0a09090a140e0f0c1017141818171416161a1d251f1a1b231c1616202c20232627292a29191f2d302d283025282928ffdb0043010707070a080a130a0a13281a161a2828282828282828282828282828282828282828282828282828282828282828282828282828282828282828282828282828ffc00011080001000103012200021101031101ffc40014000100000000000000000000000000000000ffc40014100100000000000000000000000000000000ffc40014010100000000000000000000000000000000ffc40014110100000000000000000000000000000000ffda000c03010002110311003f00000fffd9',
+   'hex'
+ )
+ 
+@@ -22,6 +26,7 @@ function setup(): string {
+ }
+ 
+ afterEach(() => {
++  invalidateAssetCache()
+   resetAssetKeyCacheForTests()
+   if (root) fs.rmSync(root, { recursive: true, force: true })
+   root = null
+@@ -29,6 +34,407 @@ afterEach(() => {
+ })
+ 
+ describe('MediaAssetStore', () => {
++  it('checks plain and decrypted image pixels before caching and recovers after replacement', async (t) => {
++    setup()
++    mediaAssetStore.importAvatarDisplay('PixelLimit', 1, JPEG_1X1)
++    const oversized = Buffer.from(JPEG_1X1)
++    const frame = oversized.indexOf(Buffer.from([0xff, 0xc0]))
++    assert.ok(frame > 0)
++    oversized.writeUInt16BE(8193, frame + 5)
++    oversized.writeUInt16BE(8192, frame + 7)
++    const metadata = t.mock.method(sharp.prototype, 'metadata')
++    for (const ext of ['jpg', 'enc']) {
++      const rel = `avatars/pixel-limit.${ext}`
++      const save = (body: Buffer) => fs.writeFileSync(mediaAssetStore.resolve(rel), ext === 'enc' ? encryptPlain(body, '.jpg') : body)
++      save(oversized)
++      await assert.rejects(mediaAssetStore.readForServeAsync(rel), AssetPixelLimitError)
++      await assert.rejects(mediaAssetStore.readForServeAsync(rel), AssetPixelLimitError)
++      save(JPEG_1X1)
++      assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, JPEG_1X1)
++      const calls = metadata.mock.callCount()
++      await mediaAssetStore.readForServeAsync(rel)
++      assert.equal(metadata.mock.callCount(), calls, 'warm cache does not inspect headers again')
++    }
++  })
++  for (const stage of ['read', 'close', 'metadata'] as const) {
++    it(`retains cancelled active slots until file ${stage} settles`, { timeout: 5000 }, async (t) => {
++      setup()
++      const rels = Array.from({ length: 5 }, (_, i) => mediaAssetStore.importAvatarDisplay(`Drain${i}`, i + 1, JPEG_1X1))
++      const stats = t.mock.method(fs.promises, 'stat')
++      const original = fs.promises.open
++      const handles: FileHandle[] = []
++      let release!: () => void
++      let entered!: () => void
++      let waiting = 0
++      const gate = new Promise<void>((resolve) => { release = resolve })
++      const started = new Promise<void>((resolve) => { entered = resolve })
++      if (stage === 'metadata') {
++        const metadata = sharp.prototype.metadata
++        t.mock.method(sharp.prototype, 'metadata', async function (this: Sharp) {
++          if (waiting < 4) {
++            if (++waiting === 4) entered()
++            await gate
++          }
++          return metadata.call(this)
++        })
++      }
++      t.mock.method(fs.promises, 'open', async (...args: unknown[]) => {
++        const handle: FileHandle = await Reflect.apply(original, fs.promises, args)
++        handles.push(handle)
++        if (stage === 'metadata') return handle
++        const method = handle[stage]
++        let first = true
++        t.mock.method(handle, stage, async (...methodArgs: unknown[]) => {
++          if (first && handles.indexOf(handle) < 4) {
++            first = false
++            if (++waiting === 4) entered()
++            await gate
++          }
++          return Reflect.apply(method, handle, methodArgs)
++        })
++        return handle
++      })
++      const abort = new AbortController()
++      const active = rels.slice(0, 4).map((rel, i) => mediaAssetStore.readForServeAsync(rel, i === 0 ? abort.signal : undefined))
++      let cancelledSettled = false
++      const rejected = assert.rejects(active[0], { name: 'AbortError' }).then(() => { cancelledSettled = true })
++      let next: ReturnType<typeof mediaAssetStore.readForServeAsync> | undefined
++      try {
++        await started
++        abort.abort()
++        next = mediaAssetStore.readForServeAsync(rels[4])
++        await new Promise((resolve) => setImmediate(resolve))
++        assert.equal(cancelledSettled, false)
++        assert.equal(handles.length, 4)
++        assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(rels[4])).length, 0)
++        release()
++        await rejected
++        await Promise.all(active.slice(1))
++        assert.deepEqual((await next).body, JPEG_1X1)
++        assert.ok(handles.every(handle => handle.fd === -1))
++      } finally {
++        release()
++        await Promise.allSettled([...active, rejected, ...(next ? [next] : [])])
++      }
++    })
++  }
++
++  it('rejects oversized plain and encrypted files before opening or decrypting them', async (t) => {
++    setup()
++    mediaAssetStore.importAvatarDisplay('Small', 1, JPEG_1X1)
++    const open = t.mock.method(fs.promises, 'open')
++    const decrypt = t.mock.method(crypto.webcrypto.subtle, 'decrypt')
++    for (const ext of ['jpg', 'enc']) {
++      const rel = `avatars/oversized.${ext}`
++      fs.writeFileSync(mediaAssetStore.resolve(rel), '')
++      fs.truncateSync(mediaAssetStore.resolve(rel), MAX_ASSET_READ_BYTES + 1)
++      await assert.rejects(mediaAssetStore.readForServeAsync(rel), AssetReadTooLargeError)
++    }
++    assert.equal(open.mock.callCount(), 0)
++    assert.equal(decrypt.mock.callCount(), 0)
++  })
++  it('does not merge a post-invalidation request into the old pending read', { timeout: 5000 }, async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('NewGeneration', 1, JPEG_1X1)
++    let release!: () => void
++    let firstStarted!: () => void
++    let secondStarted!: () => void
++    const first = new Promise<void>((resolve) => { firstStarted = resolve })
++    const second = new Promise<void>((resolve) => { secondStarted = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.open
++    let calls = 0
++    t.mock.method(fs.promises, 'open', async (...args: unknown[]) => {
++      const number = ++calls
++      const raw = await Reflect.apply(original, fs.promises, args)
++      if (number === 1) { firstStarted(); await gate }
++      else secondStarted()
++      return raw
++    })
++    const old = mediaAssetStore.readForServeAsync(rel)
++    try {
++      await first
++      invalidateAssetCache(rel)
++      const current = mediaAssetStore.readForServeAsync(rel)
++      await second
++      assert.deepEqual((await current).body, JPEG_1X1)
++      release()
++      await old
++      await mediaAssetStore.readForServeAsync(rel)
++      assert.equal(calls, 2)
++    } finally {
++      release()
++      await old
++    }
++  })
++
++  it('shares a cold encrypted read and decryption across concurrent requests without sharing cancellation', async (t) => {
++    const testRoot = setup()
++    const rel = 'avatars/shared.enc'
++    fs.mkdirSync(path.join(testRoot, 'media_assets', 'avatars'), { recursive: true })
++    fs.writeFileSync(mediaAssetStore.resolve(rel), encryptPlain(JPEG_1X1, '.jpg'))
++    let release!: () => void
++    let entered!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const started = new Promise<void>((resolve) => { entered = resolve })
++    const original = fs.promises.open
++    const reads = t.mock.method(fs.promises, 'open', async (...args: unknown[]) => {
++      entered()
++      await gate
++      return Reflect.apply(original, fs.promises, args)
++    })
++    const decrypts = t.mock.method(crypto.webcrypto.subtle, 'decrypt')
++    const abort = new AbortController()
++    const cancelled = mediaAssetStore.readForServeAsync(rel, abort.signal)
++    const rejected = assert.rejects(cancelled, { name: 'AbortError' })
++    const consumers = Array.from({ length: 11 }, () => mediaAssetStore.readForServeAsync(rel))
++    await started
++    abort.abort()
++    await rejected
++    release()
++    const images = await Promise.all(consumers)
++    assert.ok(images.every((image) => image.body.equals(JPEG_1X1)))
++    images[0].body.fill(0)
++    assert.deepEqual(images[1].body, JPEG_1X1)
++    assert.equal(reads.mock.callCount(), 1)
++    assert.equal(decrypts.mock.callCount(), 1)
++  })
++
++  it('does not return cached bytes when cancelled while the hot-path stat is pending', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('HotCancel', 1, JPEG_1X1)
++    await mediaAssetStore.readForServeAsync(rel)
++    let entered!: () => void
++    let release!: () => void
++    const started = new Promise<void>((resolve) => { entered = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.stat
++    t.mock.method(fs.promises, 'stat', async (...args: unknown[]) => {
++      const stat = await Reflect.apply(original, fs.promises, args)
++      entered()
++      await gate
++      return stat
++    })
++    const reads = t.mock.method(fs.promises, 'open')
++    const abort = new AbortController()
++    const pending = mediaAssetStore.readForServeAsync(rel, abort.signal)
++    const rejected = assert.rejects(pending, { name: 'AbortError' })
++    await started
++    abort.abort()
++    release()
++    await rejected
++    assert.equal(reads.mock.callCount(), 0)
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, JPEG_1X1)
++    assert.equal(reads.mock.callCount(), 0)
++  })
++
++  it('does not reuse the same relative cache key after the asset root changes', async () => {
++    const firstRoot = setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Root', 1, JPEG_1X1)
++    await mediaAssetStore.readForServeAsync(rel)
++    const secondRoot = path.join(firstRoot, 'other-user')
++    const secondFile = path.join(secondRoot, 'media_assets', rel)
++    fs.mkdirSync(path.dirname(secondFile), { recursive: true })
++    const updated = Buffer.concat([JPEG_1X1, Buffer.from('different root')])
++    fs.writeFileSync(secondFile, updated)
++    process.env.JAVDEX_TEST_USER_DATA = secondRoot
++    try { assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, updated) }
++    finally { process.env.JAVDEX_TEST_USER_DATA = firstRoot }
++  })
++
++  it('rejects a changed file during reading without caching its old bytes', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('DuringRead', 1, JPEG_1X1)
++    let entered!: () => void
++    let release!: () => void
++    const started = new Promise<void>((resolve) => { entered = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.open
++    const reads = t.mock.method(fs.promises, 'open', async (...args: unknown[]) => {
++      const raw = await Reflect.apply(original, fs.promises, args)
++      entered()
++      await gate
++      return raw
++    })
++    const pending = mediaAssetStore.readForServeAsync(rel)
++    const rejected = assert.rejects(pending, /changed while reading/)
++    await started
++    const changed = Buffer.concat([JPEG_1X1, Buffer.from('updated image')])
++    fs.writeFileSync(mediaAssetStore.resolve(rel), changed)
++    release()
++    await rejected
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, changed)
++    await mediaAssetStore.readForServeAsync(rel)
++    assert.equal(reads.mock.callCount(), 2)
++  })
++
++  it('serves hot plaintext and encrypted images without rereading or decrypting their bytes', async (t) => {
++    const testRoot = setup()
++    const plain = mediaAssetStore.importAvatarDisplay('Cached', 1, JPEG_1X1)
++    const enc = 'avatars/cached.enc'
++    fs.writeFileSync(path.join(testRoot, 'media_assets', enc), encryptPlain(JPEG_1X1, '.jpg'))
++    const reads = t.mock.method(fs.promises, 'open')
++    const decrypts = t.mock.method(crypto.webcrypto.subtle, 'decrypt')
++    for (const rel of [plain, enc]) {
++      const first = await mediaAssetStore.readForServeAsync(rel)
++      first.body.fill(0)
++      assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, JPEG_1X1)
++    }
++    assert.equal(reads.mock.callCount(), 2)
++    assert.equal(decrypts.mock.callCount(), 1)
++    invalidateAssetCache(enc)
++    await mediaAssetStore.readForServeAsync(enc)
++    assert.equal(reads.mock.callCount(), 3)
++    assert.equal(decrypts.mock.callCount(), 2)
++  })
++
++  it('reloads replaced files even with restored mtime and rejects deleted files before using cache', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Replaced', 1, JPEG_1X1)
++    const abs = mediaAssetStore.resolve(rel)
++    const originalStat = fs.statSync(abs)
++    const reads = t.mock.method(fs.promises, 'open')
++    await mediaAssetStore.readForServeAsync(rel)
++    const updated = Buffer.from(JPEG_1X1)
++    updated[updated.length - 3] ^= 1
++    fs.writeFileSync(abs + '.replacement', updated)
++    fs.utimesSync(abs + '.replacement', originalStat.atime, originalStat.mtime)
++    fs.renameSync(abs + '.replacement', abs)
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, updated)
++    assert.equal(reads.mock.callCount(), 2)
++    fs.unlinkSync(abs)
++    await assert.rejects(mediaAssetStore.readForServeAsync(rel), { code: 'ENOENT' })
++    fs.writeFileSync(abs, JPEG_1X1)
++    assert.deepEqual((await mediaAssetStore.readForServeAsync(rel)).body, JPEG_1X1)
++    assert.equal(reads.mock.callCount(), 3)
++  })
++
++  it('does not repopulate explicitly invalidated cache from a pending read', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Invalidated', 1, JPEG_1X1)
++    let entered!: () => void
++    let release!: () => void
++    const started = new Promise<void>((resolve) => { entered = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.open
++    const reads = t.mock.method(fs.promises, 'open', async (...args: unknown[]) => {
++      const raw = await Reflect.apply(original, fs.promises, args)
++      entered()
++      await gate
++      return raw
++    })
++    const pending = mediaAssetStore.readForServeAsync(rel)
++    await started
++    invalidateAssetCache(rel)
++    release()
++    await pending
++    await mediaAssetStore.readForServeAsync(rel)
++    assert.equal(reads.mock.callCount(), 2)
++  })
++
++  it('retains read slots while cancelled encrypted requests wait for native crypto completion', async (t) => {
++    const testRoot = setup()
++    const rel = 'avatars/crypto-queue.enc'
++    fs.mkdirSync(path.join(testRoot, 'media_assets', 'avatars'), { recursive: true })
++    fs.writeFileSync(path.join(testRoot, 'media_assets', rel), encryptPlain(JPEG_1X1, '.jpg'))
++    const nextRel = 'avatars/crypto-queue-next.enc'
++    fs.copyFileSync(path.join(testRoot, 'media_assets', rel), path.join(testRoot, 'media_assets', nextRel))
++    const activeRels = Array.from({ length: 4 }, (_, i) => `avatars/crypto-active-${i}.enc`)
++    for (const item of activeRels) fs.copyFileSync(mediaAssetStore.resolve(rel), mediaAssetStore.resolve(item))
++    const stats = t.mock.method(fs.promises, 'stat')
++    let release!: () => void
++    let allStarted!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const started = new Promise<void>((resolve) => { allStarted = resolve })
++    const subtle = crypto.webcrypto.subtle
++    const decrypt = subtle.decrypt
++    const reads = t.mock.method(fs.promises, 'open')
++    let jobs = 0
++    t.mock.method(subtle, 'decrypt', async (...args: unknown[]) => {
++      if (++jobs === 4) allStarted()
++      await gate
++      return Reflect.apply(decrypt, subtle, args)
++    })
++    const abort = new AbortController()
++    const requests = activeRels.map((item, i) => mediaAssetStore.readForServeAsync(item, i === 0 ? abort.signal : undefined))
++    const rejected = assert.rejects(requests.shift()!, { name: 'AbortError' })
++    await started
++    abort.abort()
++    const next = mediaAssetStore.readForServeAsync(nextRel)
++    await new Promise((resolve) => setImmediate(resolve))
++    assert.equal(jobs, 4)
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 0)
++    assert.equal(reads.mock.callCount(), 4, 'the fifth request must not start reading before a crypto slot is released')
++    release()
++    await rejected
++    await Promise.all(requests)
++    assert.deepEqual((await next).body, JPEG_1X1)
++    assert.equal(jobs, 5)
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 2)
++    assert.equal(reads.mock.callCount(), 5)
++  })
++
++  it('cancels queued reads before opening files and keeps active slots until reads settle', async (t) => {
++    setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Queued', 1, JPEG_1X1)
++    const nextRel = mediaAssetStore.importAvatarDisplay('Next', 2, JPEG_1X1)
++    const activeRels = Array.from({ length: 4 }, (_, i) => mediaAssetStore.importAvatarDisplay(`Active${i}`, i + 3, JPEG_1X1))
++    const stats = t.mock.method(fs.promises, 'stat')
++    let release!: () => void
++    let allStarted!: () => void
++    const started = new Promise<void>((resolve) => { allStarted = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const original = fs.promises.open
++    let reads = 0
++    t.mock.method(fs.promises, 'open', async (...args: unknown[]) => {
++      reads++
++      if (reads === 4) allStarted()
++      await gate
++      return Reflect.apply(original, fs.promises, args)
++    })
++    const activeAbort = new AbortController()
++    const active = activeRels.map((item, i) => mediaAssetStore.readForServeAsync(item, i === 0 ? activeAbort.signal : undefined))
++    const activeRejected = assert.rejects(active.shift()!, { name: 'AbortError' })
++    const queuedAbort = new AbortController()
++    const queued = mediaAssetStore.readForServeAsync(rel, queuedAbort.signal)
++    const queuedRejected = assert.rejects(queued, { name: 'AbortError' })
++    await started
++    assert.equal(reads, 4)
++    activeAbort.abort()
++    queuedAbort.abort()
++    await queuedRejected
++    const next = mediaAssetStore.readForServeAsync(nextRel)
++    await Promise.resolve()
++    assert.equal(reads, 4, 'active cancellation must wait for the reader to settle')
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 0)
++    release()
++    await activeRejected
++    await Promise.all(active)
++    assert.deepEqual((await next).body, JPEG_1X1)
++    assert.equal(reads, 5, 'the cancelled queued request never opened a file')
++    assert.equal(stats.mock.calls.filter(call => call.arguments[0] === mediaAssetStore.resolve(nextRel)).length, 2)
++  })
++
++  it('serves plain and encrypted images asynchronously without synchronous file reads', async (t) => {
++    const testRoot = setup()
++    const rel = mediaAssetStore.importAvatarDisplay('Async', 1, JPEG_1X1)
++    const enc = 'avatars/async.enc'
++    fs.writeFileSync(path.join(testRoot, 'media_assets', enc), encryptPlain(JPEG_1X1, '.jpg'))
++    resetAssetKeyCacheForTests()
++    t.mock.method(fs, 'readFileSync', () => { throw Error('synchronous file read forbidden') })
++    t.mock.method(crypto, 'scryptSync', () => { throw Error('synchronous key derivation forbidden') })
++    t.mock.method(crypto, 'createDecipheriv', () => { throw Error('synchronous decryption forbidden') })
++    const plain = await mediaAssetStore.readForServeAsync(rel)
++    const encrypted = await mediaAssetStore.readForServeAsync(enc)
++    assert.deepEqual(plain.body, JPEG_1X1)
++    assert.deepEqual(encrypted, { body: JPEG_1X1, mime: 'image/jpeg' })
++    await assert.rejects(mediaAssetStore.readForServeAsync('../outside.jpg'), /escapes media root/)
++    await assert.rejects(mediaAssetStore.readForServeAsync('avatars/missing.jpg'), { code: 'ENOENT' })
++    const abort = new AbortController()
++    abort.abort()
++    await assert.rejects(mediaAssetStore.readForServeAsync(rel, abort.signal), { name: 'AbortError' })
++  })
++
+   it('reads plain and encrypted images and reports a stable plaintext fingerprint', () => {
+     const testRoot = setup()
+     const plainPath = mediaAssetStore.importAvatarDisplay('Plain', 1, JPEG_1X1)
+diff --git a/src/main/services/mediaProtocol.ts b/src/main/services/mediaProtocol.ts
+index 4397ee5..d5c07e0 100644
+--- a/src/main/services/mediaProtocol.ts
++++ b/src/main/services/mediaProtocol.ts
+@@ -1,4 +1,33 @@
+ import path from 'node:path'
++import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from './mediaAssetStore'
++
++interface AssetReader {
++  rootPath(): string
++  readForServeAsync(relPath: string, signal?: AbortSignal): Promise<{ body: Buffer; mime: string }>
++}
++
++export async function serveMediaAssetRequest(request: Request, reader: AssetReader): Promise<Response> {
++  const headers = {
++    'Access-Control-Allow-Origin': '*',
++    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
++    'Access-Control-Allow-Headers': '*'
++  }
++  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
++  try {
++    const root = reader.rootPath()
++    const abs = resolveMediaAssetPath(request.url, root)
++    if (!abs) return new Response(request.method === 'HEAD' ? null : 'Forbidden', { status: 403, headers })
++    const { body, mime } = await reader.readForServeAsync(toStoredAssetPath(abs, root), request.signal)
++    return new Response(request.method === 'HEAD' ? null : body, {
++      headers: { ...headers, 'Content-Type': mime, 'Content-Length': String(body.length) }
++    })
++  } catch (error) {
++    const status = error instanceof AssetReadQueueFullError ? 503
++      : error instanceof AssetReadTooLargeError || error instanceof AssetPixelLimitError ? 413 : 404
++    const message = status === 503 ? 'Busy' : status === 413 ? 'Image Too Large' : 'Not Found'
++    return new Response(request.method === 'HEAD' ? null : message, { status, headers })
++  }
++}
+ 
+ const DOT_DOT_SEGMENT = /(?:^|[\\/])(?:\.|%2e)(?:\.|%2e)(?=$|[\\/])/i
+ 
+diff --git a/src/main/services/mediaProtocol.test.ts b/src/main/services/mediaProtocol.test.ts
+index b8b7a9c..4524fa1 100644
+--- a/src/main/services/mediaProtocol.test.ts
++++ b/src/main/services/mediaProtocol.test.ts
+@@ -1,9 +1,74 @@
+ import { describe, it } from 'node:test'
+ import assert from 'node:assert/strict'
+ import path from 'node:path'
+-import { resolveMediaAssetPath, toStoredAssetPath } from './mediaProtocol'
++import { resolveMediaAssetPath, toStoredAssetPath, serveMediaAssetRequest } from './mediaProtocol'
++import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from './mediaAssetStore'
+ 
+ describe('mediaProtocol', () => {
++  it('returns 413 for oversized images with an empty HEAD body', async () => {
++    for (const Failure of [AssetReadTooLargeError, AssetPixelLimitError]) for (const method of ['GET', 'HEAD']) {
++      const response = await serveMediaAssetRequest(new Request('media://covers/large.jpg', { method }), {
++        rootPath: () => path.resolve('tmp-assets'),
++        readForServeAsync: async () => { throw new Failure() }
++      })
++      assert.equal(response.status, 413)
++      assert.equal(await response.text(), method === 'HEAD' ? '' : 'Image Too Large')
++    }
++  })
++  it('awaits the image reader and forwards cancellation while serving GET and HEAD', async () => {
++    const request = new Request('media://covers/test.jpg')
++    let release!: () => void
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    let finished = false
++    const reader = {
++      rootPath: () => path.resolve('tmp-assets'),
++      readForServeAsync: async (rel: string, signal?: AbortSignal) => {
++        assert.equal(rel, 'covers/test.jpg')
++        assert.equal(signal, request.signal)
++        await gate
++        return { body: Buffer.from('image'), mime: 'image/jpeg' }
++      }
++    }
++    const response = serveMediaAssetRequest(request, reader).then((value) => { finished = true; return value })
++    await Promise.resolve()
++    assert.equal(finished, false)
++    release()
++    const get = await response
++    assert.equal(await get.text(), 'image')
++    assert.equal(get.headers.get('Content-Type'), 'image/jpeg')
++    const head = await serveMediaAssetRequest(new Request(request.url, { method: 'HEAD' }), {
++      ...reader, readForServeAsync: async () => ({ body: Buffer.from('image'), mime: 'image/jpeg' })
++    })
++    assert.equal(await head.text(), '')
++    assert.equal(head.headers.get('Content-Length'), '5')
++  })
++
++  it('skips reads for preflight and forbidden paths, and distinguishes busy from missing', async () => {
++    let reads = 0
++    let busy = true
++    const reader = {
++      rootPath: () => path.resolve('tmp-assets'),
++      readForServeAsync: async () => {
++        reads++
++        if (busy) throw new AssetReadQueueFullError()
++        throw Error('missing')
++      }
++    }
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/a.jpg', { method: 'OPTIONS' }), reader)).status, 204)
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/%2E%2E%2F%2E%2E%2Fsecret'), reader)).status, 403)
++    assert.equal(reads, 0)
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/a.jpg'), reader)).status, 503)
++    busy = false
++    assert.equal((await serveMediaAssetRequest(new Request('media://covers/a.jpg'), reader)).status, 404)
++    for (const status of [403, 404, 503]) {
++      busy = status === 503
++      const url = status === 403 ? 'media://covers/%2E%2E%2F%2E%2E%2Fsecret' : 'media://covers/a.jpg'
++      const response = await serveMediaAssetRequest(new Request(url, { method: 'HEAD' }), reader)
++      assert.equal(response.status, status)
++      assert.equal(await response.text(), '')
++    }
++  })
++
+   it('resolves media URLs under the asset root', () => {
+     const root = path.resolve('tmp-assets')
+     const abs = resolveMediaAssetPath('media://covers/IPX-535.jpg', root)
+diff --git a/src/main/web/server.ts b/src/main/web/server.ts
+index c73ab0a..cbfc7db 100644
+--- a/src/main/web/server.ts
++++ b/src/main/web/server.ts
+@@ -1,3 +1,4 @@
++import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '../services/mediaAssetStore'
+ import {
+   createServer,
+   type Server,
+@@ -434,10 +435,25 @@ export class WebServer {
+         return
+       }
+       if (match[2] === 'images') {
+-        const image = this.options.catalog.image(id, match[3])
+-        response.setHeader('Content-Type', image.mime)
+-        response.setHeader('Content-Length', image.body.length)
+-        response.end(method === 'HEAD' ? undefined : image.body)
++        const controller = new AbortController()
++        const abort = (): void => controller.abort()
++        response.once('close', abort)
++        try {
++          if (response.destroyed) controller.abort()
++          const image = await this.options.catalog.image(id, match[3], controller.signal)
++          if (response.destroyed || controller.signal.aborted) return
++          if (!this.sessions.check(token(request))) throw new WebError(401, '请先登录')
++          response.setHeader('Content-Type', image.mime)
++          response.setHeader('Content-Length', image.body.length)
++          response.end(method === 'HEAD' ? undefined : image.body)
++        } catch (error) {
++          if (error instanceof AssetReadQueueFullError) throw new WebError(503, '图片读取繁忙，请稍后重试')
++          if (error instanceof AssetReadTooLargeError) throw new WebError(413, '图片文件过大')
++          if (error instanceof AssetPixelLimitError) throw new WebError(413, '图片像素尺寸过大')
++          throw error
++        } finally {
++          response.off('close', abort)
++        }
+         return
+       }
+       const download = url.searchParams.get('download') === '1'
+diff --git a/src/main/web/webServer.test.ts b/src/main/web/webServer.test.ts
+index d65dcca..4a58cfc 100644
+--- a/src/main/web/webServer.test.ts
++++ b/src/main/web/webServer.test.ts
+@@ -8,6 +8,7 @@ import { hashPassword, LoginLimiter, verifyPassword, WebSessions } from './auth'
+ import { parseRange } from './http'
+ import { isLocalPeer, WebServer } from './server'
+ import type { WebCatalogReader } from './catalog'
++import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '../services/mediaAssetStore'
+ 
+ describe('Web authentication and streaming', () => {
+   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-web-'))
+@@ -24,7 +25,7 @@ describe('Web authentication and streaming', () => {
+     detail: () => {
+       throw new Error('not found')
+     },
+-    image: () => ({ body: Buffer.from('image'), mime: 'image/png' }),
++    image: async () => ({ body: Buffer.from('image'), mime: 'image/png' }),
+     media: () => ({ file: movie, stat: fs.statSync(movie), mime: 'video/mp4' })
+   }
+   const login = (password = 'correct horse battery'): Promise<Response> =>
+@@ -66,6 +67,104 @@ describe('Web authentication and streaming', () => {
+     await server.stop()
+     fs.rmSync(directory, { recursive: true, force: true })
+   })
++  it('keeps image responses private and reports read queue overload as 503', async (t) => {
++    t.mock.method(catalog, 'image', async () => { throw new AssetReadQueueFullError() })
++    for (const method of ['GET', 'HEAD']) {
++      const result = await fetch(base + '/api/videos/1/images/cover', { method, headers: { Cookie: sessionCookie } })
++      assert.equal(result.status, 503)
++      assert.equal(result.headers.get('cache-control'), 'no-store')
++      if (method === 'HEAD') assert.equal(await result.text(), '')
++    }
++  })
++
++  it('reports oversized images as 413 without caching or a HEAD body', async (t) => {
++    for (const Failure of [AssetReadTooLargeError, AssetPixelLimitError]) for (const method of ['GET', 'HEAD']) {
++      t.mock.method(catalog, 'image', async () => { throw new Failure() })
++      const result = await fetch(base + '/api/videos/1/images/cover', { method, headers: { Cookie: sessionCookie } })
++      assert.equal(result.status, 413)
++      assert.equal(result.headers.get('cache-control'), 'no-store')
++      if (method === 'HEAD') assert.equal(await result.text(), '')
++    }
++  })
++
++  it('rechecks an expired session after image work while the connection remains open', async (t) => {
++    let clock = Date.now()
++    t.mock.method(Date, 'now', () => clock)
++    let started!: () => void
++    let release!: () => void
++    let readSignal: AbortSignal | undefined
++    const began = new Promise<void>((resolve) => { started = resolve })
++    const gate = new Promise<void>((resolve) => { release = resolve })
++    const isolated = new WebServer({
++      username: 'viewer', passwordHash, staticRoot: directory,
++      catalog: { ...catalog, image: async (_id, _key, signal) => {
++        readSignal = signal
++        started()
++        await gate
++        return { body: Buffer.from('private image'), mime: 'image/png' }
++      } }
++    })
++    try {
++      const origin = `http://127.0.0.1:${await isolated.start(0, '127.0.0.1')}`
++      const loginResponse = await fetch(origin + '/api/login', {
++        method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'X-Javdex-Client': 'web' },
++        body: JSON.stringify({ username: 'viewer', password: 'correct horse battery' })
++      })
++      assert.equal(loginResponse.status, 200)
++      const cookie = loginResponse.headers.get('set-cookie')!.split(';')[0]
++      const response = fetch(origin + '/api/videos/1/images/cover', { headers: { Cookie: cookie } })
++      await began
++      clock += 15 * 24 * 60 * 60 * 1000
++      assert.equal(readSignal?.aborted, false)
++      release()
++      const result = await response
++      assert.equal(result.status, 401)
++      assert.doesNotMatch(await result.text(), /private image/)
++    } finally {
++      release()
++      await isolated.stop()
++    }
++  })
++
++  for (const reason of ['logout', 'disconnect'] as const) {
++    it(`cancels pending image work on ${reason} and never sends its completed bytes`, async (t) => {
++      const cookie = (await login()).headers.get('set-cookie')!.split(';')[0]
++      let started!: () => void
++      let cancelled!: () => void
++      let release!: () => void
++      const began = new Promise<void>((resolve) => { started = resolve })
++      const aborted = new Promise<void>((resolve) => { cancelled = resolve })
++      const gate = new Promise<void>((resolve) => { release = resolve })
++      t.mock.method(catalog, 'image', async (_id: number, _key: string, signal?: AbortSignal) => {
++        signal?.addEventListener('abort', cancelled, { once: true })
++        started()
++        await gate
++        return { body: Buffer.from('private image'), mime: 'image/png' }
++      })
++      const controller = new AbortController()
++      const result = fetch(base + '/api/videos/1/images/cover', {
++        headers: { Cookie: cookie }, signal: controller.signal
++      }).then(async (response) => ({ status: response.status, body: await response.text() }), () => ({ status: 0, body: '' }))
++      try {
++        await began
++        if (reason === 'logout') {
++          const loggedOut = await fetch(base + '/api/logout', {
++            method: 'POST', headers: { Cookie: cookie, Origin: base, 'X-Javdex-Client': 'web' }
++          })
++          assert.equal(loggedOut.status, 200)
++        } else controller.abort()
++        await aborted
++        release()
++        const response = await result
++        assert.notEqual(response.status, 200)
++        assert.notEqual(response.body, 'private image')
++      } finally {
++        release()
++        controller.abort()
++        await result
++      }
++    })
++  }
+   it('stores salted password hashes and enforces minimum length', async () => {
+     assert.equal(await verifyPassword('wrong password', passwordHash), false)
+     assert.equal(
+diff --git a/scripts/performance/asset-cache-benchmark.ts b/scripts/performance/asset-cache-benchmark.ts
+new file mode 100644
+index 0000000..777d0bd
+--- /dev/null
++++ b/scripts/performance/asset-cache-benchmark.ts
+@@ -0,0 +1,74 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import crypto from 'node:crypto'
++import { performance } from 'node:perf_hooks'
++import { mediaAssetStore } from '../../src/main/services/mediaAssetStore'
++import { invalidateAssetCache } from '../../src/main/services/assetCache'
++import { encryptPlain, resetAssetKeyCacheForTests } from '../../src/main/services/assetCrypto'
++
++it('measures cold and hot transport-byte cache reads with synthetic assets', async (t) => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-cache-bench-'))
++  const previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = root
++  const results: object[] = []
++  try {
++    fs.mkdirSync(path.join(root, 'media_assets', 'covers'), { recursive: true })
++    const reads = t.mock.method(fs.promises, 'open')
++    const stats = t.mock.method(fs.promises, 'stat')
++    const decrypts = t.mock.method(crypto.webcrypto.subtle, 'decrypt')
++    for (const bytes of [1024 * 1024, 16 * 1024 * 1024]) {
++      const plain = Buffer.alloc(bytes, 19)
++      fs.readFileSync('build/icon-32.png').copy(plain)
++      for (const encrypted of [false, true]) {
++        const rel = `covers/sample-${bytes}.${encrypted ? 'enc' : 'png'}`
++        fs.writeFileSync(path.join(root, 'media_assets', rel), encrypted ? encryptPlain(plain, '.png') : plain)
++        await mediaAssetStore.readForServeAsync(rel)
++        for (const state of ['cold-byte-cache', 'hot-byte-cache', 'concurrent-cold-byte-cache']) {
++          const readBefore = reads.mock.callCount()
++          const statBefore = stats.mock.callCount()
++          const decryptBefore = decrypts.mock.callCount()
++          let result: { body: Buffer; mime: string } | undefined
++          const concurrent = state === 'concurrent-cold-byte-cache'
++          const iterations = concurrent ? 12 : 5
++          if (concurrent) invalidateAssetCache(rel)
++          let responses: Array<{ body: Buffer; mime: string }> | undefined
++          const start = performance.now()
++          if (concurrent) {
++            responses = await Promise.all(Array.from({ length: iterations }, () => mediaAssetStore.readForServeAsync(rel)))
++            result = responses[0]
++          } else for (let i = 0; i < iterations; i++) {
++            if (state === 'cold-byte-cache') invalidateAssetCache(rel)
++            result = await mediaAssetStore.readForServeAsync(rel)
++          }
++          const elapsedMs = performance.now() - start
++          assert.deepEqual(result?.body, plain)
++          if (responses) assert.ok(responses.every((image) => image.body.equals(plain)))
++          const openCalls = reads.mock.callCount() - readBefore
++          const decryptCalls = decrypts.mock.callCount() - decryptBefore
++          const expectedReads = state === 'hot-byte-cache' ? 0 : concurrent ? 1 : 5
++          assert.equal(openCalls, expectedReads)
++          assert.equal(decryptCalls, encrypted ? expectedReads : 0)
++          results.push({ bytes, encrypted, state, iterations, elapsedMs,
++            openCalls, decryptCalls, statCalls: stats.mock.callCount() - statBefore })
++        }
++      }
++    }
++    const report = { measuredAt: new Date().toISOString(), runtime: process.versions,
++      notes: ['Small PNG plus synthetic trailing bytes; headers inspected but no pixel decoding, browser or network measured.',
++        'OS file cache and crypto key are warm in both cases. Cold refers only to the application byte cache.',
++        'Five sequential or twelve concurrent reads, instrumented open/decrypt/path-stat calls (fstat and bounded read chunks excluded), no p95 or Windows/HDD conclusion.',
++        'The hot path still stats the file and copies response bytes; cache limits do not bound active or response-buffer bytes.'], results }
++    const output = process.env.JAVDEX_ASSET_CACHE_BENCH_OUTPUT
++    if (output) fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n')
++    else process.stdout.write(JSON.stringify(report, null, 2) + '\n')
++  } finally {
++    invalidateAssetCache()
++    resetAssetKeyCacheForTests()
++    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++    else process.env.JAVDEX_TEST_USER_DATA = previous
++    fs.rmSync(root, { recursive: true, force: true })
++  }
++})
+diff --git a/scripts/performance/sharp-packaged-smoke.cjs b/scripts/performance/sharp-packaged-smoke.cjs
+new file mode 100644
+index 0000000..2a2f9b2
+--- /dev/null
++++ b/scripts/performance/sharp-packaged-smoke.cjs
+@@ -0,0 +1,31 @@
++// Run with ELECTRON_RUN_AS_NODE=1 <packaged executable> <this script> <app.asar> [output.json].
++const { createRequire } = require('node:module')
++const { join, sep } = require('node:path')
++const { writeFileSync, realpathSync } = require('node:fs')
++const assert = require('node:assert/strict')
++
++async function main() {
++  if (!process.argv[2]) throw new Error('Expected packaged app.asar path')
++  const archive = realpathSync(process.argv[2])
++  const packagedRequire = createRequire(join(archive, 'package.json'))
++  const resolved = packagedRequire.resolve('sharp')
++  assert.ok(resolved.startsWith(archive + sep), 'must load packaged Sharp, not workspace dependency')
++  const sharp = packagedRequire('sharp')
++  const formats = []
++  for (const format of ['jpeg', 'png', 'webp', 'gif', 'avif']) {
++    const bytes = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#804040' } })
++      .toFormat(format).toBuffer()
++    const metadata = await sharp(bytes).metadata()
++    assert.equal(metadata.width, 12)
++    assert.equal(metadata.height, 8)
++    const thumbnail = await sharp(bytes, { limitInputPixels: 1024 }).resize(6, 4).png().toBuffer()
++    assert.equal((await sharp(thumbnail).metadata()).width, 6)
++    formats.push(format)
++  }
++  const report = { measuredAt: new Date().toISOString(), archive, resolved, platform: process.platform,
++    arch: process.arch, electron: process.versions.electron, sharp: sharp.versions, formats }
++  const json = JSON.stringify(report, null, 2) + '\n'
++  if (process.argv[3]) writeFileSync(process.argv[3], json)
++  process.stdout.write(json)
++}
++main().catch((error) => { console.error(error); process.exitCode = 1 })

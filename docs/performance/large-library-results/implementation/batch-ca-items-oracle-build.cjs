@@ -1,0 +1,28 @@
+const fs = require('node:fs')
+const ts = require(process.cwd() + '/node_modules/typescript')
+const before = fs.readFileSync('/tmp/LibraryScanAuditPanel.before-items-extraction.tsx', 'utf8')
+const sharedBefore = fs.readFileSync('/tmp/scanAuditView.before-items-extraction.ts', 'utf8')
+const bodyStart = before.indexOf('  const items = useMemo((): ViewItem[] => {') + '  const items = useMemo((): ViewItem[] => {\n'.length
+const body = before.slice(bodyStart, before.indexOf('\n  }, [', bodyStart))
+const dedupStart = before.indexOf('  const uniqueUnrecognized = useMemo(() => {') + '  const uniqueUnrecognized = useMemo(() => {\n'.length
+const dedup = before.slice(dedupStart, before.indexOf('\n  }, [unrecognized])', dedupStart))
+const cachedStart = before.indexOf('    () => new Set(unrecognized.map((item) => item.filePath)),')
+if (cachedStart < 0) throw Error('Original cached paths expression not found')
+const cachedExpression = before.slice(cachedStart, before.indexOf('\n', cachedStart)).trim().slice('() => '.length, -1)
+const pendingRoutes = fs.readFileSync('src/renderer/src/listView/pendingRoutes.ts', 'utf8')
+const keyStart = pendingRoutes.indexOf('export function pendingItemKey(')
+const pendingKey = pendingRoutes.slice(keyStart, pendingRoutes.indexOf('\n}', keyStart) + 2)
+const oracle = sharedBefore + '\n' + pendingKey + `\nexport function buildScanAuditViewItems({audit: matchedAudit, unrecognized, activeTab, changesFilter, outcome}) {\nconst uniqueUnrecognized = (() => {\n${dedup}\n})();\nconst cachedUnrecognizedPaths = ${cachedExpression};\n${body}\n}\n`
+fs.writeFileSync('/tmp/scan-audit-items-oracle.ts', oracle)
+fs.writeFileSync('/tmp/scan-audit-items-oracle.cjs', ts.transpileModule(oracle, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)
+fs.writeFileSync('/tmp/scan-audit-items-oracle-preload.cjs', `const Module = require('node:module'); const load = Module._load; Module._load = function(request, ...args) { if (request === './scanAuditView') return load.call(this, '/tmp/scan-audit-items-oracle.cjs', ...args); return load.call(this, request, ...args); };`)
+const extracted = fs.readFileSync('src/shared/scanAuditView.ts','utf8')
+const actualBodyStart = extracted.indexOf("  if (activeTab === 'failed')")
+const actualBody = extracted.slice(actualBodyStart, extracted.lastIndexOf('\n}'))
+const expectedBody = body.split('\n').map(line => line.startsWith('  ') ? line.slice(2) : line).join('\n')
+if (actualBody !== expectedBody) throw Error('Extracted memo body differs beyond indentation')
+console.log('Actual memo callback matches builder body byte-for-byte after removing two-space indentation.')
+const panel = fs.readFileSync('src/renderer/src/components/settings/LibraryScanAuditPanel.tsx','utf8')
+const marker = '  const filtered = useMemo('
+if (panel.slice(panel.indexOf(marker)) !== before.slice(before.indexOf(marker))) throw Error('Search/pagination/presence/render suffix changed')
+console.log('Search/pagination/presence/render suffix unchanged byte-for-byte.')

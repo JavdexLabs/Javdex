@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useActressGalleryPage } from '../hooks/useActressGalleryPage'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ActressGalleryAsset } from '@shared/actressTypes'
-import type { Video } from '@shared/videoTypes'
+import { useActressVideoPage } from '../hooks/useActressVideoPage'
 import { DEFAULT_AVATAR_FACE_RATIO } from '@shared/avatarFaceScale'
 import {
   DEFAULT_AVATAR_CENTERING_MODE,
@@ -13,7 +14,6 @@ import {
   type ActressAvatarCommit,
   type AvatarCropV1
 } from '@shared/avatarCrop'
-import { prepareActressGalleryForDisplay } from '@shared/mediaGalleryDisplay'
 import { assetUrl, api } from '../api'
 import {
   analyzeAvatarBitmap,
@@ -42,8 +42,7 @@ interface Props {
   displayUrl: string | null
   sourceUrl: string | null
   savedCrop: AvatarCropV1 | null
-  videos: Video[]
-  gallery: ActressGalleryAsset[]
+  actressId: number
   onAvatarChange: (commit: ActressAvatarCommit | null) => void
 }
 
@@ -180,8 +179,7 @@ export default function ActressAvatarEditor({
   displayUrl,
   sourceUrl,
   savedCrop,
-  videos,
-  gallery,
+  actressId,
   onAvatarChange
 }: Props): JSX.Element {
   const toast = useToast()
@@ -193,11 +191,32 @@ export default function ActressAvatarEditor({
   const previewSeqRef = useRef(0)
   const autoCropSeqRef = useRef(0)
   const initialCropRef = useRef<AvatarCropV1 | null>(null)
-  const coverScroll = useHorizontalDragScroll()
   const galleryScroll = useHorizontalDragScroll()
+  const coverScroll = useHorizontalDragScroll()
 
-  const coverVideos = useMemo(() => videos.filter((v) => v.cover_path), [videos])
-  const galleryItems = useMemo(() => prepareActressGalleryForDisplay(gallery), [gallery])
+  const covers = useActressVideoPage(actressId, true)
+  const coverVideos = covers.data?.videos ?? []
+  const onCoverRange = covers.window.onVisibleRange
+  const onCoverScroll = (event: { currentTarget: { scrollLeft: number; clientWidth: number; clientHeight: number; scrollWidth: number } }): void => {
+    const { scrollLeft, clientWidth, clientHeight, scrollWidth } = event.currentTarget
+    const stride = Math.max(72, clientHeight) + 8
+    if (scrollWidth > clientWidth + 8 && scrollLeft + clientWidth >= scrollWidth - 32) {
+      onCoverRange(Math.max(coverVideos.length, 1) - 1, coverVideos.length + 59)
+      return
+    }
+    const start = Math.floor(Math.max(0, scrollLeft) / stride)
+    const end = Math.ceil((scrollLeft + clientWidth) / stride)
+    if (end > start) onCoverRange(start, end)
+  }
+  useLayoutEffect(() => {
+    const el = coverScroll.ref.current
+    if (!el || covers.loading || covers.error || coverVideos.length === 0 || coverVideos.length >= covers.total) return
+    if (el.scrollWidth <= el.clientWidth + 8) {
+      onCoverRange(Math.max(coverVideos.length, 1) - 1, coverVideos.length + 59)
+    }
+  }, [coverVideos.length, covers.loading, covers.error, covers.total, onCoverRange, coverScroll.ref])
+  const photos = useActressGalleryPage(actressId, true)
+  const galleryItems = photos.data?.items ?? []
 
   const editableSourceUrl = sourceUrl || displayUrl
   const hasOriginalSource = Boolean(sourceUrl)
@@ -210,6 +229,13 @@ export default function ActressAvatarEditor({
   }, [coverVideos.length, editableSourceUrl, galleryItems.length])
 
   const [activeTab, setActiveTab] = useState<SourceTab>(defaultTab)
+  const initialTabResolved = useRef(false)
+  useEffect(() => {
+    if (!initialTabResolved.current && !covers.loading && !photos.loading) {
+      initialTabResolved.current = true
+      setActiveTab(defaultTab)
+    }
+  }, [covers.loading, photos.loading, defaultTab])
   const [editUrl, setEditUrl] = useState<string | null>(null)
   const [activeSourceKey, setActiveSourceKey] = useState<string | null>(null)
   const [baseScale, setBaseScale] = useState(1)
@@ -730,8 +756,8 @@ export default function ActressAvatarEditor({
   const tabs: Array<{ id: SourceTab; label: string; disabled?: boolean }> = [
     { id: 'current', label: '当前', disabled: !editableSourceUrl },
     { id: 'local', label: '本地' },
-    { id: 'cover', label: '封面', disabled: coverVideos.length === 0 },
-    { id: 'gallery', label: '写真', disabled: galleryItems.length === 0 }
+    { id: 'cover', label: '封面', disabled: false },
+    { id: 'gallery', label: '写真', disabled: false }
   ]
 
   const editingCurrent = editing && activeSourceKey === 'current'
@@ -834,6 +860,7 @@ export default function ActressAvatarEditor({
                   disabled={tab.disabled}
                   onClick={() => {
                     setOpenError(null)
+                    initialTabResolved.current = true
                     setActiveTab(tab.id)
                   }}
                 >
@@ -878,7 +905,7 @@ export default function ActressAvatarEditor({
 
                     size="sm"
                     variant={activeSourceKey === 'local' ? 'primary' : 'default'}
-                    onClick={() => fileRef.current?.click()}
+                    onClick={() => { initialTabResolved.current = true; fileRef.current?.click() }}
                   >
                     选择本地图片…
                   </Button>
@@ -893,43 +920,53 @@ export default function ActressAvatarEditor({
                 }${coverScroll.isDragging ? ' avatar-source-page--dragging' : ''}`}
                 role="tabpanel"
                 hidden={activeTab !== 'cover'}
+                onScroll={onCoverScroll}
                 onPointerDownCapture={coverScroll.onPointerDownCapture}
                 onPointerMove={coverScroll.onPointerMove}
                 onPointerUp={coverScroll.onPointerUp}
                 onPointerCancel={coverScroll.onPointerCancel}
               >
-                {coverVideos.length === 0 ? (
+                {covers.loading && coverVideos.length === 0 ? <p className="avatar-source-empty">加载中…</p> : covers.error && coverVideos.length === 0 ? (
+                  <div role="alert">{covers.error}<Button onClick={covers.reload}>重试</Button></div>
+                ) : coverVideos.length === 0 ? (
                   <p className="avatar-source-empty">暂无关联封面</p>
                 ) : (
-                  coverVideos.map((video) => {
-                    const url = assetUrl(video.cover_path)
-                    if (!url || !video.cover_path) return null
-                    const sourceKey = `cover:${video.id}`
-                    return (
-                      <button
-                        key={video.id}
-                        type="button"
-                        className={`avatar-pick-tile${activeSourceKey === sourceKey ? ' active' : ''}`}
-                        title={video.code}
-                        aria-label={video.code}
-                        aria-busy={openingSourceKey === sourceKey}
-                        onClick={() => {
-                          if (openingSourceKey || coverScroll.shouldSuppressClick()) return
-                          setOpenError(null)
-                          setActiveSourceKey(sourceKey)
-                          void beginEditSource({
-                            url,
-                            sourceKey,
-                            libraryAssetPath: video.cover_path
-                          })
-                        }}
-                      >
-                        <img src={url} alt="" loading="lazy" draggable={false} />
-                      </button>
-                    )
-                  })
+                  <>
+                    {coverVideos.map((video) => {
+                      const url = assetUrl(video.cover_path)
+                      if (!url || !video.cover_path) return null
+                      const sourceKey = `cover:${video.id}`
+                      return (
+                        <button
+                          key={video.id}
+                          type="button"
+                          className={`avatar-pick-tile${activeSourceKey === sourceKey ? ' active' : ''}`}
+                          title={video.code}
+                          aria-label={video.code}
+                          aria-busy={openingSourceKey === sourceKey}
+                          onClick={() => {
+                            if (openingSourceKey || coverScroll.shouldSuppressClick()) return
+                            setOpenError(null)
+                            setActiveSourceKey(sourceKey)
+                            void beginEditSource({
+                              url,
+                              sourceKey,
+                              libraryAssetPath: video.cover_path
+                            })
+                          }}
+                        >
+                          <img src={assetUrl(video.cover_path, 320) ?? undefined} alt="" loading="lazy" draggable={false} />
+                        </button>
+                      )
+                    })}
+                    {covers.error ? (
+                      <div role="alert">{covers.error}<Button onClick={covers.reload}>重试</Button></div>
+                    ) : null}
+                  </>
                 )}
               </div>
+
+
 
               <div
                 ref={galleryScroll.ref}
@@ -943,14 +980,16 @@ export default function ActressAvatarEditor({
                 onPointerUp={galleryScroll.onPointerUp}
                 onPointerCancel={galleryScroll.onPointerCancel}
               >
-                {galleryItems.length === 0 ? (
+                {photos.loading ? <p className="avatar-source-empty">加载中…</p> : photos.error ? (
+                  <div role="alert">{photos.error}<Button onClick={photos.reload}>重试</Button></div>
+                ) : galleryItems.length === 0 ? (
                   <p className="avatar-source-empty">暂无写真</p>
                 ) : (
                   galleryItems.map((asset, index) => {
                     const url = gallerySrc(asset)
                     if (!url || !asset.local_path) return null
                     const sourceKey = `gallery:${asset.id}`
-                    const label = `写真 ${index + 1}`
+                    const label = `写真 ${photos.offset + index + 1}`
                     return (
                       <button
                         key={asset.id}
@@ -970,7 +1009,7 @@ export default function ActressAvatarEditor({
                           })
                         }}
                       >
-                        <img src={url} alt="" loading="lazy" draggable={false} />
+                        <img src={assetUrl(asset.local_path, 320) ?? undefined} alt="" loading="lazy" draggable={false} />
                       </button>
                     )
                   })
@@ -982,6 +1021,14 @@ export default function ActressAvatarEditor({
                 </div>
               ) : null}
             </div>
+
+              {activeTab === 'gallery' && photos.data && photos.data.total > 60 ? (
+                <nav className="actress-works-pagination" aria-label="头像写真分页">
+                  <Button size="sm" disabled={photos.offset === 0} onClick={() => photos.move(photos.offset - 60)}>上一页</Button>
+                  <span>第 {Math.floor(photos.offset / 60) + 1} 页</span>
+                  <Button size="sm" disabled={photos.offset + galleryItems.length >= photos.data.total} onClick={() => photos.move(photos.offset + 60)}>下一页</Button>
+                </nav>
+              ) : null}
           </div>
 
           <div

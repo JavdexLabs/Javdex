@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bt-benchmark.log": "8c531b479e8c748606a18943ae5e2b167a3aa0152b92134248dc838084361154",
+    "batch-bt-build.log": "c806c7c0d9a34c70933f6e7e3fddba5bef377f3fbb89db4817fd489462bfc621",
+    "batch-bt-full.log": "14fd6037d06f0bfae2472acee6622dfb095b6ae7542aafaaf08e33c89d3a6717",
+    "batch-bt-initial.log": "5c87d8770e032c7adf84ceae01dd16e579ac3e444d65fb4354296d77ae5a52d0",
+    "batch-bt-review.md": "afc393b2eff0b84201088659a8387da1514e72b37c0f73b32878862c5448f0e1",
+    "batch-bt-source-iteration.patch": "e5ec386be4317b7b4a9e48038d678faa9c485958bc8cbfe53d6e21fcfaf3685e",
+    "batch-bt-target.log": "b875a4356047ca24b7d42068e306101c87b559b2b4aacb063774ea6fff991cc0"
+  },
+  "notes": [
+    "Selected cumulative source patch depends on earlier batches.",
+    "27 focused; full2365pass1skip0fail; build terminal0.",
+    "Initial plan log shows temp sorting; final query uses primary-key range without sort.",
+    "No full cleanup memory/event-loop/p95 guarantee. Full15/42goal remains incomplete."
+  ]
+}

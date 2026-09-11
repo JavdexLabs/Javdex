@@ -1,0 +1,24 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-av-browser.log": "043c7e8723349671abfe59b846d11dc9fc3c1cb68e6df0e6a782be5fd6eacc67",
+    "batch-av-build.log": "06a496b46e4f297904812a8e1e6bf7338180dc13945f258511a9064f103ff786",
+    "batch-av-choice-red.log": "bd033a74dd043842c6539b257b162d8a0c6767783dc289e9edf6035579b5aae8",
+    "batch-av-full.log": "19e712e45fbd356e7f690dedf3b73c19c231acb30fbbdcc5b3216ee52d6291ed",
+    "batch-av-owner-picker.patch": "28e53efe269efae87b585bed4597d2c22f900d7015368e5889bfac6d80cfac5b",
+    "batch-av-review.md": "f8720e1ce8465a6bfdeeb97a08d99fae318c40b295cfbbb230f46d7cc5dea7a7",
+    "batch-av-target.log": "af5baa388d7af96f5b48039e08907d57d71ed1d114f5cf361e9ee2fa68746214",
+    "batch-av-ui-1000x640.png": "945ee2b4a918dc466beaa4b4dccfcfc74921199e348822a6ece1b9b35a1cfa63",
+    "batch-av-ui-1440x900.png": "d112aaa7f7f005ffa92f067d4b9b4cf0766802d06a4167ff26ecff7ce91ecdc6",
+    "batch-av-ui-results.json": "6f7321c8c55dadb089d49828c28a14458d431bc0570a66327b96dee3e9cc0725"
+  },
+  "notes": [
+    "Cumulative selected diff vsHEAD plus full new files; depends on B-AU, not standalone.",
+    "Final59focused; full2254pass1skip0fail; build passed. Focused predates internal method rename only, final full/browser cover it.",
+    "PickerPage40items; pickerGet narrow current identity avoids full works/profile. Display labels bounded; ownership writes onlyID/revision.",
+    "Command interleaving red2001vs1001 fixed with choicegate; do not claim checked-radio browser trigger reproduced. Browser covers real close-reopen/late response.",
+    "Actual Page/router/styles, synthetic IPC, two desktop sizes. No backend timing/Windows/HDD/nativeIPC/p95 claims.",
+    "No global IPC cancellation/inflight bound or complete candidate-entrypoint migration; full15/42 still active.",
+    "No user data/schema/commit/push/release."
+  ]
+}

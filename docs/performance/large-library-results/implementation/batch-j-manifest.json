@@ -1,0 +1,11 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "6b1bcfc82bb9ee3eb4c09d115403eb8574431e5c78313065158d0d4a16dafcac",
+  "notes": [
+    "Patch is against HEAD. Desktop media:// uses the asynchronous reader; synchronous business readers and Web image delivery are unchanged.",
+    "Disk reads use fs.promises.readFile with request cancellation. Active reads/decode are bounded to 4, waiting closures to 256. Full queue returns 503.",
+    "Default capacity, queued/active cancellation, failure recovery, actual readForServeAsync pipeline and GET/HEAD/OPTIONS/error responses have targeted tests: 36 passed.",
+    "Tests verify byte/MIME parity and prohibit synchronous readFileSync in the asynchronous read API. Crypto derivation/decryption remains synchronous; no claim of complete main-thread isolation.",
+    "No measured Windows HDD latency, browser peak memory or total byte budget. Queue capacity limits requests, not the size of one asset. PERF07 remains partial."
+  ]
+}

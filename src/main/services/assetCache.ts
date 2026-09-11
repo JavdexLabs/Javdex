@@ -1,10 +1,21 @@
 /** In-memory caches for stored media bytes and derived image inspection results. */
 
 interface CacheEntry {
+  relPath: string
   body: Buffer
   mime: string
-  mtimeMs: number
+  signature: AssetByteSignature
   bytes: number
+}
+
+export interface AssetByteSignature extends ImageAssetSignature {
+  device: number
+  inode: number
+}
+
+export function sameAssetByteSignature(a: AssetByteSignature, b: AssetByteSignature): boolean {
+  return a.resolvedPath === b.resolvedPath && a.mtimeMs === b.mtimeMs &&
+    a.ctimeMs === b.ctimeMs && a.size === b.size && a.device === b.device && a.inode === b.inode
 }
 
 export interface ImageAssetSignature {
@@ -29,6 +40,9 @@ const MAX_BYTES = 96 * 1024 * 1024
 const cache = new Map<string, CacheEntry>()
 const imageInspectionCache = new Map<string, ImageInspectionCacheEntry>()
 let totalBytes = 0
+let revision = 0
+
+export function getAssetCacheRevision(): number { return revision }
 
 function evictOne(): void {
   const oldest = cache.keys().next().value as string | undefined
@@ -47,25 +61,30 @@ function trim(): void {
 
 export function getCachedAsset(
   relPath: string,
-  mtimeMs: number
+  signature: AssetByteSignature,
+  variant = 'original'
 ): { body: Buffer; mime: string } | null {
-  const entry = cache.get(relPath)
-  if (!entry || entry.mtimeMs !== mtimeMs) return null
-  cache.delete(relPath)
-  cache.set(relPath, entry)
-  return { body: entry.body, mime: entry.mime }
+  const key = JSON.stringify([relPath, variant])
+  const entry = cache.get(key)
+  if (!entry || !sameAssetByteSignature(entry.signature, signature)) return null
+  cache.delete(key)
+  cache.set(key, entry)
+  return { body: Buffer.from(entry.body), mime: entry.mime }
 }
 
 export function setCachedAsset(
   relPath: string,
-  mtimeMs: number,
+  signature: AssetByteSignature,
   body: Buffer,
-  mime: string
+  mime: string,
+  variant = 'original'
 ): void {
-  const prev = cache.get(relPath)
+  const key = JSON.stringify([relPath, variant])
+  const prev = cache.get(key)
   if (prev) totalBytes -= prev.bytes
-
-  cache.set(relPath, { body, mime, mtimeMs, bytes: body.byteLength })
+  cache.delete(key)
+  if (body.byteLength > MAX_BYTES) return
+  cache.set(key, { relPath, body: Buffer.from(body), mime, signature: { ...signature }, bytes: body.byteLength })
   totalBytes += body.byteLength
   trim()
 }
@@ -100,16 +119,18 @@ export function getOrLoadImageInspection(
 }
 
 export function invalidateAssetCache(relPath?: string): void {
+  revision++
   if (!relPath) {
     cache.clear()
     imageInspectionCache.clear()
     totalBytes = 0
     return
   }
-  const entry = cache.get(relPath)
-  if (entry) {
-    cache.delete(relPath)
-    totalBytes -= entry.bytes
+  for (const [key, entry] of cache) {
+    if (entry.relPath === relPath) {
+      cache.delete(key)
+      totalBytes -= entry.bytes
+    }
   }
   imageInspectionCache.delete(relPath)
 }

@@ -53,6 +53,7 @@ const base = {
     '!node_modules/@earendil-works/pi-coding-agent/**/*'
   ],
   asar: true,
+  asarUnpack: ['node_modules/sharp/**/*', 'node_modules/@img/**/*'],
   npmRebuild: true,
   nodeGypRebuild: false,
   extraResources: [

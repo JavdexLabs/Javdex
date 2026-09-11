@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "d32d8d49c2f3c9ebfbbb60c5f4337ff423f9713c21903fd27955b22099c7f441",
+  "notes": [
+    "Cumulative patch against HEAD. Requires earlier J-P files, Sharp dependency/lock/unpack configuration. Not incremental standalone patch.",
+    "Finite320/640/1280 thumbnails, firstframe orientationcorrected WebP inside/noenlarge. Two native decode slots inside four outer serve slots; cancellation waits settle.",
+    "Original+variants share256entry/96MiB cache; path invalidation clears allvariants; flights include variant/version. No generated plaintext files persisted.",
+    "npm test2072passed/1skipped, build passed. Finaltarget103passed. RealChrome mobilecheck320x844/390x844/844x390/1280x800 passed with thumbnail URL assertions and existing preview/keyboard tests.",
+    "Synthetic noisy2400x1600 JPEG3896737bytes ->640x427 WebP99404bytes. Coldthumb48.89ms vs original2.52ms, warmthumb0.13ms; single warmOS sample notp95 or browser performance.",
+    "Only PosterCard and Web grid wired thisbatch; avatars/category/gallery and diskcache/globalresponsepixel budgets,targethardware remain incomplete."
+  ]
+}

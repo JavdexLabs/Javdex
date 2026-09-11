@@ -8,7 +8,7 @@
 - `list-page`: 列表面的根容器，内部通常包含 `topbar` 和 `scroll-body`。
 - `detail-pane`: 详情面的根容器，可在嵌套详情打开时追加 `detail-pane--stacked`。
 - `detail-pane-overlay`: 详情内的下一层覆盖详情。
-- `scroll-body`: 页面滚动边界。列表虚拟化或固定高度内容使用 `scroll-body--fill`，普通详情使用 `scroll-body--scroll`。
+- `scroll-body`: 页面滚动边界。自带滚动视口的虚拟列表或固定高度内容使用 `scroll-body--fill`，普通详情使用 `scroll-body--scroll`。
 
 页面组件应该组合这些既有 surface class，不要在页面根部临时创造新的滚动或定位模型。
 
@@ -153,10 +153,20 @@
 - 改变结果集的筛选状态写入 URL query。
 - 已应用筛选使用 `AppliedFilterBar`，但搜索词只保留在搜索框内。
 - 可滚动详情使用 `scroll-body--scroll`。
-- 虚拟列表或固定填充列表使用 `scroll-body--fill`。
+- 自带滚动视口的虚拟列表或固定填充列表使用 `scroll-body--fill`；依附外部滚动容器的连续网格使用 `scroll-body--scroll`。
 - 破坏性操作进入确认 modal。
 - 静态视觉值进入 CSS class 和语义 token，并写在组件同名 `.module.css` 中。
 - 主从工作台复用 `components/workbench`；待确认类决定复用 `PendingDecisionParts`。
 - 动态尺寸、位置、进度、变换才允许 inline style。
 - 新增可复制内容时添加可选中语义；新增交互卡片/图片时保持不可选中。
 - 空状态按父容器选型：固定高度面板用 `fill`，滚动详情区块用 `compact`（约 140px），整页无数据用 `page`。
+
+
+## 桌面连续浏览组件
+
+- `useContinuousPage` 适配 `items / total / offset` 和仅提供 `hasMore` 的既有接口。最多保留三页；后者只预留下一页空间，读到末页后确定总量。禁止累计追加所有历史页。
+- `ContinuousGrid` 用于规则网格与固定高度候选行，`ContinuousPosterGrid` 复用海报卡片及封面比例。详情使用已有外层滚动容器（可通过 `scrollRef` 明确指定）；候选弹窗使用固定高度独立视口。焦点留白、滚动条占位和状态色沿用语义 token。
+- 搜索/对象会话隔离请求。页失败不移除其他页或占位高度；重试只读当前保留窗口。关闭候选弹窗后旧请求不更新新会话。
+- 选择状态存储稳定 ID；完整名称、修订及业务资格在确认时通过现有后端读取验证。已选项与确认区不属于虚拟候选 DOM；不能从当前候选页反推全部选择。
+- 方向键按行列移动，遇到未加载目标先读取再聚焦；Tab 只遍历已存在的交互控件。文本输入保留编辑按键。回收焦点所在页时保留焦点单元容器；数据重新进入窗口后再恢复交互目标。
+- 待确认处理、扫描历史和审计保持显式分页。演员写真主列表、候选与预览，本轮保持原实现。

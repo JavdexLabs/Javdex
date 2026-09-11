@@ -1,0 +1,47 @@
+▶ ScanCoordinator
+  ✔ coalesces display progress while preserving per-file callbacks and the final event (11.811ms)
+  ✔ flushes pending progress before a failure without delaying the failure event (0.442916ms)
+  ✔ binds an offline-created root identity and refreshes the frozen snapshot before scanning (0.782292ms)
+  ✔ persists matching complete audit details with the latest summary (0.470042ms)
+  ✔ publishes scan lifecycle events for every trigger (0.219958ms)
+  ✔ uses one frozen configuration snapshot for the complete run (0.133875ms)
+  ✔ reconciles resource identity pending rows only under roots proven safe after traversal (0.137166ms)
+  ✔ preserves offline roots and removes only missing local resources under accessible roots (0.477916ms)
+  ✔ aborts cleanup when a local path cannot be audited (0.289917ms)
+  ✔ treats a root that becomes unreadable after traversal as offline (0.121625ms)
+  ✔ rechecks the frozen root identity immediately before cleanup writes (0.102209ms)
+  ✔ does not run cleanup after cancellation and releases the mutual-exclusion lease (0.13ms)
+  ✔ keeps resources after a coordinator-level failure (0.103292ms)
+  ✔ skips every destructive cleanup after a file processing failure (0.065542ms)
+  ✔ replaces the unrecognized-file snapshot after every safe completed scan (0.093542ms)
+  ✔ completes safe cleanup with errors when failures are isolated to STRM files (0.113083ms)
+  ✔ consumes deferred path cleanup only after a successful uncancelled scan (0.059292ms)
+  ✔ keeps deferred path cleanup queued after a partial folder scan (0.068042ms)
+  ✔ allows a full cleanup-only scan after the final configured folder was removed (0.067709ms)
+  ✖ removes many non-primary resources without reading sibling resource lists (0.151084ms)
+  ✔ consumes cleanup references lazily and closes iteration on a path failure (0.108375ms)
+  ✔ preserves all three cleanup audit sequences above the argument limit (202.717834ms)
+  ✔ removes resource-less memberships after deferred cleanup on a safe full scan (0.234209ms)
+  ✔ persists a sanitized failed summary without running destructive cleanup (0.234375ms)
+  ✔ rolls back resource cleanup and keeps pending roots when auto-delete fails (0.170375ms)
+  ✔ keeps pending roots when the cleanup transaction cannot commit (0.125ms)
+  ✔ rejects duplicate scans and scans blocked by resource maintenance (5.798916ms)
+✖ ScanCoordinator (225.868167ms)
+ℹ tests 27
+ℹ suites 1
+ℹ pass 26
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 678.653417
+
+✖ failing tests:
+
+test at src/main/scanner/scanCoordinator.test.ts:2:29445
+✖ removes many non-primary resources without reading sibling resource lists (0.151084ms)
+  Error: non-primary removal must not load siblings
+      at ScanCoordinator.run (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanCoordinator.ts:463:13)
+      at async TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/scanner/scanCoordinator.test.ts:925:20)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:911:7)

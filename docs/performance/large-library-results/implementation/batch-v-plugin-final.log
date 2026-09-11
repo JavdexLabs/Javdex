@@ -1,0 +1,40 @@
+▶ PluginDeveloper approval and lifecycle stability
+  ✔ restores a legacy run with newly-invalid field ids as a repairable workspace (158.110208ms)
+  ✔ clears every durable plugin-development history without touching other Agent use cases (44.5515ms)
+  ✔ refuses to clear history while a plugin-development operation is running (0.420875ms)
+  ✔ discards unrecoverable plugin-development history without touching recoverable runs (72.49ms)
+  ✔ waits for a slow terminal release before an immediate continuation reopens the run (0.927583ms)
+  ✔ materializes a terminal workspace before lazy continuation projects native file tools (130.049375ms)
+  ✔ projects Pi native file tools into the durable product timeline (123.349792ms)
+  ✔ records exactly one domain error when a runtime fault transitions the run to failed (0.257958ms)
+  ✔ surfaces an unpersistable runtime fault and resolves the active operation (0.198583ms)
+  ✔ publishes the reduced active context immediately after Pi compaction (0.17775ms)
+  ✔ keeps a transient invalid workspace recoverable and resyncs after a valid rewrite (165.234458ms)
+  ✔ streams provider reasoning and answer while persisting each only once per completed turn (73.498125ms)
+  ✔ bounds one displayed reasoning block and reports the original character count (3.18125ms)
+  ✔ revokes an approved permit when Pi rejects the approval continuation (0.362667ms)
+  ✔ does not consume an approval while the operation that emitted waiting_user is still settling (0.152708ms)
+  ✔ binds a typed choice to the exact request without treating it as user feedback (400.6525ms)
+  ✔ resumes a typed browser interaction without turning completion into defect feedback (0.617167ms)
+  ✔ keeps a mechanically ready artifact waiting for user after Pi settles (142.309125ms)
+  ✔ requires real feedback before continuing a mechanically ready artifact (150.36575ms)
+  ✔ keeps readiness for dev-notes edits but invalidates it for package edits (164.48ms)
+  ✔ does not run hidden production execution when Pi settles without a current artifact (146.038375ms)
+  ✔ projects a model-turn limit into waiting_user/working without running a hidden check (141.763792ms)
+  ✔ allows installation only for the exact full production execution artifact (1.553875ms)
+  ✔ marks the session completed only after the accepted artifact is installed (5.15325ms)
+  ✔ adopts the installed display name when install renames to avoid a conflict (138.794125ms)
+  ✔ persists the renamed installed package onto settled product state (145.247375ms)
+  ✔ releases only PluginDeveloper-owned runs during application disposal (1.056416ms)
+✔ PluginDeveloper approval and lifecycle stability (2212.806708ms)
+✔ uses the indexed journal cursor for active and persisted plugin snapshots (1.19025ms)
+✔ preserves incremental logs across stale-runtime cancellation, cold snapshot, restore and export (1312.086833ms)
+✔ keeps the migrated work log reference when runtime reopen fails during recovery (332.966041ms)
+ℹ tests 30
+ℹ suites 1
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4526.388875

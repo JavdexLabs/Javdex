@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useState } from 'react'
-import { useImagePreviewById } from '../hooks/useImagePreviewById'
+import type { ImageThumbnailSize } from '@shared/imageVariants'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useActressGalleryPage } from '../hooks/useActressGalleryPage'
+import { useActressGalleryPreview } from '../hooks/useActressGalleryPreview'
+import Button from './Button'
 import type { ActressGalleryAsset } from '@shared/actressTypes'
 import {
-  actressGalleryRatio,
-  prepareActressGalleryForDisplay
+  actressGalleryRatio
 } from '@shared/mediaGalleryDisplay'
 import { api, assetUrl } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
@@ -21,8 +23,8 @@ import { UI_ICON } from './iconDefaults'
 const GALLERY_MASONRY_GAP = 10
 const GALLERY_MASONRY_MIN_COL_WIDTH = 260
 
-function gallerySrc(asset: ActressGalleryAsset): string | null {
-  return assetUrl(asset.local_path) ?? asset.remote_url
+function gallerySrc(asset: ActressGalleryAsset, size?: ImageThumbnailSize): string | null {
+  return assetUrl(asset.local_path, size) ?? asset.remote_url
 }
 
 function galleryRatio(asset: ActressGalleryAsset): number {
@@ -104,18 +106,18 @@ function toPreviewItems(items: ActressGalleryAsset[]): ImagePreviewItem[] {
   return items.flatMap((asset) => {
     const src = gallerySrc(asset)
     if (!src) return []
-    return [{ id: asset.id, src, localPath: asset.local_path }]
+    return [{ id: asset.id, src, thumbnailSrc: gallerySrc(asset, 320) ?? src, localPath: asset.local_path }]
   })
 }
 
 export default function ActressGalleryPanel({
   actressId,
-  gallery,
+  revision,
   posterPath,
   onChanged
 }: {
   actressId: number
-  gallery: ActressGalleryAsset[]
+  revision: object
   posterPath: string | null
   onChanged: () => void
 }): JSX.Element {
@@ -138,18 +140,21 @@ export default function ActressGalleryPanel({
     [actressId, onChanged, toast]
   )
 
-  const items = useMemo(() => prepareActressGalleryForDisplay(gallery), [gallery])
-
-  const previewItems = useMemo(() => toPreviewItems(items), [items])
-  const {
-    previewIndex,
-    isOpen,
-    isEnabled: previewEnabled,
-    openPreview,
-    closePreview,
-    closePreviewIf,
-    setPreviewIndex
-  } = useImagePreviewById(previewItems)
+  const photos = useActressGalleryPage(actressId)
+  const preview = useActressGalleryPreview(actressId)
+  const reloadPhotos = photos.reload
+  const items = useMemo(() => photos.data?.items ?? [], [photos.data])
+  const previewItems = useMemo(() => toPreviewItems(preview.view?.page.items ?? []), [preview.view])
+  const refreshPreview = useRef(preview.refresh)
+  refreshPreview.current = preview.refresh
+  const previousRevision = useRef(revision)
+  useEffect(() => {
+    if (previousRevision.current === revision) return
+    previousRevision.current = revision
+    reloadPhotos()
+    refreshPreview.current()
+  }, [revision, reloadPhotos])
+  const closePreview = preview.close
 
   const dismissOverlays = useCallback(() => {
     setShowImport(false)
@@ -183,7 +188,7 @@ export default function ActressGalleryPanel({
     try {
       await api.actresses.deleteGalleryImage(actressId, deleteTarget.id)
       setDeleteTarget(null)
-      closePreviewIf(deleteTarget.id)
+      preview.closeIf(deleteTarget.id)
       toast.show('写真已删除', 'success')
       onChanged()
     } catch (e) {
@@ -196,7 +201,7 @@ export default function ActressGalleryPanel({
   return (
     <>
       <div className="actress-gallery-toolbar">
-        <div className="actress-gallery-count">{items.length} 张写真</div>
+        <div className="actress-gallery-count">{photos.data ? `${photos.data.total} 张写真` : '写真读取中…'}</div>
         <IconButton
           className="detail-icon-action"
           icon={<ImagePlus {...UI_ICON} />}
@@ -205,7 +210,9 @@ export default function ActressGalleryPanel({
         />
       </div>
 
-      {items.length === 0 ? (
+      {photos.loading ? <p role="status">正在加载写真…</p> : photos.error ? (
+        <div role="alert">{photos.error}<Button onClick={photos.reload}>重试</Button></div>
+      ) : items.length === 0 ? (
         <EmptyState
           variant="compact"
           className="sample-empty"
@@ -220,7 +227,7 @@ export default function ActressGalleryPanel({
           style={{ height: masonryLayout.height }}
         >
           {masonryLayout.items.map(({ asset, index, x, y, width, height }) => {
-            const src = gallerySrc(asset)
+            const src = gallerySrc(asset, 640)
             if (!src) return null
             return (
               <div
@@ -235,9 +242,9 @@ export default function ActressGalleryPanel({
                 <button
                   type="button"
                   className="sample-masonry-btn actress-gallery-masonry-btn"
-                  disabled={!previewEnabled}
-                  onClick={() => openPreview(asset.id)}
-                  aria-label={`写真 ${index + 1}`}
+                  disabled={!preview.enabled}
+                  onClick={() => { if (photos.data) preview.open(photos.data, asset.id) }}
+                  aria-label={`写真 ${photos.offset + index + 1}`}
                 >
                   <img
                     src={src}
@@ -247,7 +254,7 @@ export default function ActressGalleryPanel({
                   />
                 </button>
                 <MediaTileActionButton
-                  label={`删除写真 ${index + 1}`}
+                  label={`删除写真 ${photos.offset + index + 1}`}
                   title="删除写真"
                   onClick={() => setDeleteTarget(asset)}
                 />
@@ -257,14 +264,26 @@ export default function ActressGalleryPanel({
         </div>
       )}
 
-      {isOpen && previewIndex != null && (
+      {photos.data && photos.data.total > 60 && (
+        <nav className="actress-works-pagination" aria-label="演员写真分页">
+          <Button disabled={photos.offset === 0} onClick={() => photos.move(photos.offset - 60)}>上一页</Button>
+          <span>第 {Math.floor(photos.offset / 60) + 1} 页 · 共 {photos.data.total} 张</span>
+          <Button disabled={photos.offset + items.length >= photos.data.total} onClick={() => photos.move(photos.offset + 60)}>下一页</Button>
+        </nav>
+      )}
+
+      {preview.view && (
         <ImagePreviewLightbox
           items={previewItems}
-          index={previewIndex}
+          index={preview.view.index}
+          windowOffset={preview.view.page.offset}
+          total={preview.view.page.total}
+          loading={preview.loading}
+          navigationStatus={preview.error ? <span role="alert">写真加载失败<Button onClick={preview.retry}>重试</Button></span> : preview.loading ? <span role="status">正在加载写真…</span> : undefined}
           labels={GALLERY_PREVIEW_LABELS}
           posterPath={posterPath}
           onClose={closePreview}
-          onIndexChange={setPreviewIndex}
+          onIndexChange={preview.select}
           onPosterChange={changePoster}
         />
       )}

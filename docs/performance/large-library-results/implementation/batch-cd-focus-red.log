@@ -1,0 +1,18 @@
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression /异常与待办/. Input:
+
+'待确认归属 · FILE-201待处理1 个扫描资源处理待办'
+
+    at file:///Users/nut/Project/JavdexLabs/Javdex/scripts/performance/audit-presence-ui.mjs:110:10 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '待确认归属 · FILE-201待处理1 个扫描资源处理待办',
+  expected: /异常与待办/,
+  operator: 'match',
+  diff: 'simple'
+}
+
+Node.js v22.23.2

@@ -1,0 +1,39 @@
+✔ memo revisions preserve hits, distinguish same-total reorder, WAL snapshots, rollback and reopen (4.864458ms)
+✔ native video and actress pages expose snapshot identity; avatar snapshots retain their own identity (38.602833ms)
+✔ bounds entries and encoded bytes, rejects oversize without truncation and isolates mutation (3.130917ms)
+✔ bypasses outer transactions and never publishes failed or rolled-back reads (0.614417ms)
+✔ invalidates external writes/schema and pins cached count with fresh page to one WAL snapshot (2.113458ms)
+✔ preserves own undefined fields and other non-JSON shapes by bypassing admission (0.40425ms)
+▶ scoped video catalog repo
+  ✔ keeps list resources and membership time inside one library (6.580666ms)
+  ✔ loads detail from the injected database and projects only the active library resources (3.382875ms)
+  ✔ deduplicates global results and selects the newest eligible membership (3.3915ms)
+  ✔ interprets the none resource filter within the selected scope (3.586208ms)
+  ✔ treats an archived media-library scope as unavailable (3.8385ms)
+  ✔ rejects invalid scope ids before building SQL (2.973625ms)
+  ✔ keeps fixed actor and tag filters unique across shared and hidden memberships (4.503041ms)
+  ✔ normalizes a single active library and serves no-count pages with identical ordering (5.704875ms)
+  ✔ uses bounded indexed queries for a large scoped page (15.660792ms)
+✔ scoped video catalog repo (50.153584ms)
+✔ reuses count across pages and sort while isolating scope/filter/page and caller mutations (4.487333ms)
+▶ actressQueryService.listActresses
+  ✔ returns a stable page and the full matching total from the real database (11.113292ms)
+  ✔ reuses one exact avatar-filter snapshot across subsequent pages (0.157958ms)
+  ✔ refreshes the avatar-filter snapshot whenever the first page reloads (0.097125ms)
+  ✔ inspects avatar health and fingerprints outside the database repository (12.172084ms)
+✔ actressQueryService.listActresses (23.937541ms)
+▶ actressQueryService.listFaceScanManifest
+  ✔ exposes the dedicated minimal manifest through the query seam (0.138958ms)
+✔ actressQueryService.listFaceScanManifest (0.191833ms)
+✔ delegates avatar count without reading the legacy list or inspecting images (0.072333ms)
+✔ runtime allowlists remove long metadata without changing source or route/action identities (1.0335ms)
+✔ actress cache drops crop/profile/source metadata and preserves face identity and counts (0.281042ms)
+✔ budget counts encoded Unicode and rejects retained oversized fields without truncating identity (9.116583ms)
+ℹ tests 25
+ℹ suites 3
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 398.023541

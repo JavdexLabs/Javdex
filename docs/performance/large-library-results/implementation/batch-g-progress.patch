@@ -1,0 +1,279 @@
+diff --git a/src/main/scanner/scanCoordinator.test.ts b/src/main/scanner/scanCoordinator.test.ts
+index 7a20de4..2ec1b1e 100644
+--- a/src/main/scanner/scanCoordinator.test.ts
++++ b/src/main/scanner/scanCoordinator.test.ts
+@@ -296,6 +296,44 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
+ }
+ 
+ describe('ScanCoordinator', () => {
++  it('coalesces display progress while preserving per-file callbacks and the final event', async () => {
++    const size = 300_382
++    const events: LibraryScanEvent[] = []
++    let callbacks = 0
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        for (let scanned = 1; scanned <= size; scanned++) {
++          onProgress?.({ scanned, imported: 0, currentFile: `/online/${scanned}.mp4` })
++        }
++        return { ...emptyScanResult(), scannedFiles: size }
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await coordinator.run({ onProgress: () => { callbacks++ } })
++    assert.equal(callbacks, size)
++    const progress = events.filter(event => event.phase === 'progress')
++    assert.ok(progress.length < size)
++    assert.equal(progress.at(-1)?.progress.scanned, size)
++    assert.equal(events.at(-1)?.phase, 'completed')
++    assert.equal(events.at(-2)?.phase, 'progress')
++  })
++
++  it('flushes pending progress before a failure without delaying the failure event', async () => {
++    const events: LibraryScanEvent[] = []
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        onProgress?.({ scanned: 1, imported: 0, currentFile: '/online/one.mp4' })
++        onProgress?.({ scanned: 2, imported: 0, currentFile: '/online/two.mp4' })
++        throw new Error('scan failed')
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await assert.rejects(coordinator.run(), /scan failed/)
++    assert.equal(events.filter(event => event.phase === 'progress').at(-1)?.progress.scanned, 2)
++    assert.equal(events.at(-1)?.phase, 'failed')
++    assert.equal(coordinator.running, false)
++  })
++
+   it('binds an offline-created root identity and refreshes the frozen snapshot before scanning', async () => {
+     let bindings = 0
+     let scanned = 0
+@@ -867,6 +905,45 @@ describe('ScanCoordinator', () => {
+     assert.equal(result.removed, 2)
+   })
+ 
++  it('preserves all three cleanup audit sequences above the argument limit', async () => {
++    const size = 300_382
++    let audited = false
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: () => Array.from({ length: size }, (_, index) => ({
++        video_id: index + 1, resource_id: index + 1, locator: `/online/${index + 1}.mp4`
++      })),
++      getResourceById: id => resource({
++        id, video_id: id, kind: 'local', locator: `/online/${id}.mp4`, is_primary: 1
++      }),
++      getVideoById: id => ({ id, code: `AUDIT-${id}`, title: null }) as Video,
++      listResources: id => [resource({
++        id: size + id, video_id: id, kind: 'web', locator: `https://example.test/${id}`
++      })],
++      inspectPath: () => 'missing',
++      shouldAutoDeleteResourceLessVideos: () => true,
++      deleteResourceLessVideos: () => size,
++      listResourceLessVideos: () => Array.from({ length: size }, (_, index) => ({
++        id: size * 2 + index, code: `EMPTY-${index}`, title: null
++      })),
++      recordScanSummary: (_summary, _files, audit) => {
++        audited = true
++        assert.equal(audit.removedResources.length, size)
++        assert.equal(audit.promotedResources.length, size)
++        assert.equal(audit.deletedVideos.length, size)
++        for (let index = 0; index < size; index++) {
++          assert.equal(audit.removedResources[index].resourceId, index + 1)
++          assert.equal(audit.promotedResources[index].resourceId, size + index + 1)
++          assert.equal(audit.deletedVideos[index].videoId, size * 2 + index)
++        }
++      }
++    })
++    const result = await coordinator.run()
++    assert.equal(result.removed, size)
++    assert.equal(result.promoted, size)
++    assert.equal(result.deletedVideos, size)
++    assert.equal(audited, true)
++  })
++
+   it('removes resource-less memberships after deferred cleanup on a safe full scan', async () => {
+     const order: string[] = []
+     const summaries: LibraryScanSummary[] = []
+diff --git a/src/main/scanner/scanCoordinator.ts b/src/main/scanner/scanCoordinator.ts
+index 7c08dde..7df3996 100644
+--- a/src/main/scanner/scanCoordinator.ts
++++ b/src/main/scanner/scanCoordinator.ts
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs'
++import { createProgressPublisher } from '../services/progressPublisher'
+ import { randomUUID } from 'node:crypto'
+ import type {
+   LibraryScanAudit,
+@@ -200,6 +201,9 @@ export class ScanCoordinator {
+     let snapshot: MediaLibraryScanSnapshot | null = null
+     let selectedRoots: Readonly<MediaLibraryRoot>[] = []
+     let beganRun = false
++    const progressPublisher = createProgressPublisher<ScanProgress>((progress) => {
++      this.emit({ phase: 'progress', libraryId: request.libraryId, runId, trigger, progress })
++    })
+     const auditState: Omit<
+       LibraryScanAudit,
+       | 'schemaVersion'
+@@ -285,13 +289,7 @@ export class ScanCoordinator {
+         },
+         (progress) => {
+           request.onProgress?.(progress)
+-          this.emit({
+-            phase: 'progress',
+-            libraryId: request.libraryId,
+-            runId,
+-            trigger,
+-            progress
+-          })
++          progressPublisher.update(progress)
+         },
+         {
+           signal: controller.signal,
+@@ -410,16 +408,20 @@ export class ScanCoordinator {
+       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+       result.deletedVideos = cleanup.removedMemberships.length
+-      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+-      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
+-      auditState.deletedVideos.push(
+-        ...cleanup.removedMemberships.map((video) => ({
++      for (const resource of cleanup.missingResources.removedResources) {
++        auditState.removedResources.push(resource)
++      }
++      for (const resource of cleanup.missingResources.promotedResources) {
++        auditState.promotedResources.push(resource)
++      }
++      for (const video of cleanup.removedMemberships) {
++        auditState.deletedVideos.push({
+           videoId: video.videoId,
+           videoCode: video.videoCode,
+           videoTitle: video.videoTitle,
+-          reason: 'resource_less' as const
+-        }))
+-      )
++          reason: 'resource_less'
++        })
++      }
+       const status =
+         result.strmFailures.length + result.omittedStrmFailures > 0
+           ? 'completed_with_errors'
+@@ -460,6 +462,7 @@ export class ScanCoordinator {
+       }
+       throw new Error(errorSummary)
+     } finally {
++      progressPublisher.close()
+       if (this.activeRun?.controller === controller) this.activeRun = null
+       lease.release()
+       if (beganRun) {
+@@ -513,6 +516,9 @@ export class ScanCoordinator {
+         )
+         .map((entry) => entry.groupId as number)
+     )
++    const pendingPaths = new Set(auditState.files
++      .filter((entry) => entry.outcome === 'pending')
++      .map((entry) => entry.filePath))
+     auditState.pendingGroups = this.dependencies
+       .listPendingScanGroups(libraryId)
+       .filter((group) => auditPendingIds.has(group.id))
+@@ -520,9 +526,7 @@ export class ScanCoordinator {
+         groupId: group.id,
+         normalizedCode: group.normalizedCode,
+         resourceCount: group.resources.filter((resource) =>
+-          auditState.files.some(
+-            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+-          )
++          pendingPaths.has(resource.filePath)
+         ).length
+       }))
+   }
+diff --git a/src/main/services/progressPublisher.ts b/src/main/services/progressPublisher.ts
+new file mode 100644
+index 0000000..89e0cb2
+--- /dev/null
++++ b/src/main/services/progressPublisher.ts
+@@ -0,0 +1,39 @@
++/** One pending value per task. Progress is lossy; final state must be flushed explicitly. */
++export function createProgressPublisher<T>(
++  publish: (value: T) => void,
++  intervalMs = 100,
++  now: () => number = () => performance.now()
++): { update(value: T): void; close(): void } {
++  let lastPublished = -Infinity
++  let pending: { value: T } | null = null
++  let timer: ReturnType<typeof setTimeout> | undefined
++  let closed = false
++
++  function flush(): void {
++    if (timer !== undefined) clearTimeout(timer)
++    timer = undefined
++    const next = pending
++    pending = null
++    if (!next) return
++    lastPublished = now()
++    publish(next.value)
++  }
++
++  return {
++    update(value) {
++      if (closed) return
++      pending = { value }
++      const delay = Math.max(0, intervalMs - (now() - lastPublished))
++      if (delay === 0) flush()
++      else if (timer === undefined) {
++        timer = setTimeout(flush, delay)
++        timer.unref?.()
++      }
++    },
++    close() {
++      if (closed) return
++      closed = true
++      flush()
++    }
++  }
++}
+diff --git a/src/main/services/progressPublisher.test.ts b/src/main/services/progressPublisher.test.ts
+new file mode 100644
+index 0000000..3f145ba
+--- /dev/null
++++ b/src/main/services/progressPublisher.test.ts
+@@ -0,0 +1,41 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import { createProgressPublisher } from './progressPublisher'
++
++it('coalesces a large burst and flushes the final value without leaking a timer', t => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  let now = 0
++  const values: number[] = []
++  const publisher = createProgressPublisher<number>(value => values.push(value), 100, () => now)
++  for (let value = 1; value <= 300382; value++) publisher.update(value)
++  assert.deepEqual(values, [1])
++  now = 100
++  t.mock.timers.tick(100)
++  assert.deepEqual(values, [1, 300382])
++  publisher.update(300383)
++  publisher.close()
++  assert.deepEqual(values, [1, 300382, 300383])
++  publisher.update(300384)
++  publisher.close()
++  t.mock.timers.tick(1000)
++  assert.deepEqual(values, [1, 300382, 300383])
++})
++
++it('limits continuous progress to ten updates per second plus the final flush', t => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  let now = 0
++  const values: Array<{ time: number; value: number }> = []
++  const publisher = createProgressPublisher<number>(value => values.push({ time: now, value }), 100, () => now)
++  for (let index = 0; index < 1000; index++) {
++    publisher.update(index)
++    now++
++    t.mock.timers.tick(1)
++  }
++  const periodic = values.slice()
++  assert.ok(periodic.length <= 11)
++  for (let index = 1; index < periodic.length; index++) {
++    assert.ok(periodic[index].time - periodic[index - 1].time >= 100)
++  }
++  publisher.close()
++  assert.equal(values.at(-1)?.value, 999)
++})

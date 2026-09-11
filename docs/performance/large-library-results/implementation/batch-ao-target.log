@@ -1,0 +1,87 @@
+✔ pages10k scan decisions in legacy order, scopes active libraries and exposes no resource snapshots (65.609291ms)
+▶ scan latest IPC handler
+  ✔ validates libraryId and forwards the scoped latest snapshot (1.776291ms)
+✔ scan latest IPC handler (2.148334ms)
+✔ bounds the combined audit presence request and validates its library (1.318625ms)
+✔ bounds scan pages and validates scoped detail and anchor inputs (0.625292ms)
+▶ route builders and parsers
+  ✔ round-trips library detail stacks (2.140167ms)
+  ✔ round-trips actress detail stacks (0.306291ms)
+  ✔ round-trips playlist and classification entity detail stacks (0.342541ms)
+  ✔ rejects malformed detail ids (0.185042ms)
+  ✔ builds pending-center locations without page-level query concatenation (0.418166ms)
+✔ route builders and parsers (3.89225ms)
+▶ classification list query contract
+  ✔ accepts only video count and update time sorting with video count descending by default (0.076084ms)
+  ✔ includes organization search and sorting in the shareable query identity (0.07825ms)
+  ✔ keeps series release sorting separate from classification-list sorting (0.061708ms)
+✔ classification list query contract (0.290666ms)
+▶ actress avatar filter query contract
+  ✔ normalizes avatar filter values and omits the all default (0.119875ms)
+  ✔ returns to the actress list without losing its query state (0.154ms)
+  ✔ keeps avatar filters distinct in the actress query hash (0.153417ms)
+✔ actress avatar filter query contract (0.4955ms)
+▶ actress status filter query contract
+  ✔ parses the canonical status values and treats anything else as all (0.09675ms)
+  ✔ omits the param for all and writes the canonical value otherwise (0.11725ms)
+  ✔ includes status in the list query identity and ignores invalid values (0.081958ms)
+  ✔ keeps search, gender and sort identity while only the status changes (0.057333ms)
+  ✔ round-trips the status query through actress detail and back (0.116417ms)
+  ✔ remembers the actress status filter across primary navigation (0.360417ms)
+✔ actress status filter query contract (0.900625ms)
+▶ primary navigation memory
+  ✔ restores query state per list and removes unrelated nested query keys (0.3925ms)
+  ✔ persists search only when leaving a list root (0.137792ms)
+  ✔ forgets a root so cross-nav no longer restores it (0.044833ms)
+  ✔ resolves same-section vs cross-section sidebar targets (0.123583ms)
+  ✔ builds nav link href from current search when active (0.092042ms)
+✔ primary navigation memory (0.837667ms)
+▶ navigation helpers
+  ✔ removes playlist-detail resource filters when returning to the playlist list (0.083792ms)
+  ✔ keeps home, search and media-library detail stacks scoped and reversible (0.578125ms)
+  ✔ closes nested actress details back to their parent video context (0.324958ms)
+  ✔ keeps stable series identity and release direction through its detail stack (0.105083ms)
+  ✔ keeps director identity and query state through its stable detail stack (0.081208ms)
+  ✔ opens an organization by stable id while preserving its role-list query (0.054167ms)
+  ✔ keeps classification query only inside the same classification stack (0.079292ms)
+  ✔ keeps video and actress navigation inside the stable organization stack (0.140333ms)
+  ✔ keeps video and actress navigation inside the pending workbench stack (0.09175ms)
+  ✔ opens actress detail from the pending inbox and returns to it (0.074042ms)
+✔ navigation helpers (1.693ms)
+▶ settings route contract
+  ✔ builds canonical settings paths and resolves valid sections (0.238875ms)
+✔ settings route contract (0.260834ms)
+✔ locates a deep-linked pending item, pages with a bounded cache and ignores a late detail (553.002042ms)
+✔ shows an explicit page error and retries without fetching the full inbox (71.973625ms)
+✔ recovers the last page after deletion and selects the surviving first item (86.453667ms)
+✔ does not block a different queue when scrape count fails or reuse its disabled page total (86.465666ms)
+✔ ignores an old page that resolves after navigation to a newer page (102.142709ms)
+▶ PendingCenterPage scrape resolution
+  ✔ carries an explicit director through merge-and-apply without stacking prompts (440.185167ms)
+  ✔ previews either persisted identity and submits only after explicit confirmation (39.9725ms)
+  ✔ shows the library filter only for scan decisions (26.632292ms)
+  ✔ clears the library filter from the scoped empty state and keeps the scan tab selected (24.377667ms)
+✔ PendingCenterPage scrape resolution (531.916084ms)
+✔ locates scan anchors, reads only selected details and ignores late details after paging (478.330917ms)
+✔ reports page errors and missing selected records without treating them as an empty queue (109.271375ms)
+✔ clamps the deleted last page and does not show an old library page (178.636084ms)
+✔ uses only count on another category and count failure does not block that category (44.226125ms)
+✔ does not block scrape on a library listing failure (46.394333ms)
+✔ resolves identity deep links to the scoped identity pane without group detail reads (48.368125ms)
+✔ retries rejected selected detail without reloading full queues (132.768125ms)
+▶ pending center resolution state
+  ✔ requires every scan resource to have an explicit valid target (0.48975ms)
+  ✔ serializes scan targets only at the select-control boundary (0.67ms)
+  ✔ starts scrape candidates unselected and rejects stale candidate ids (0.093208ms)
+  ✔ shows the same deterministic default primary ordering as persisted resolution (0.230709ms)
+  ✔ labels scan decisions with their owning media library (0.107041ms)
+  ✔ shows resource identity conflicts in the scan queue without exposing a local path (0.053666ms)
+✔ pending center resolution state (2.143958ms)
+ℹ tests 59
+ℹ suites 10
+ℹ pass 59
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1699.252875

@@ -1,0 +1,267 @@
+diff --git a/src/main/agent-platform/agentRunStore.test.ts b/src/main/agent-platform/agentRunStore.test.ts
+index e4e26ac..ea67feb 100644
+--- a/src/main/agent-platform/agentRunStore.test.ts
++++ b/src/main/agent-platform/agentRunStore.test.ts
+@@ -297,3 +297,76 @@ describe('AgentRunStore', () => {
+     }
+   })
+ })
++
++describe('Agent product journal pagination', () => {
++  it('reads the last cursor through the run/seq index without parsing any payload in a 100k journal', (t) => {
++    const { db, store } = createStore()
++    try {
++      store.createRun({ runId: 'large', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      store.createRun({ runId: 'other', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      assert.equal(store.getProductJournalCursor('large'), 0)
++      assert.equal(store.getProductJournalCursor('missing'), 0)
++      const insert = db.prepare(`INSERT INTO agent_product_journal
++        (run_id, event_type, payload_json, created_at) VALUES (?, 'test', ?, '2026-09-10')`)
++      db.transaction(() => {
++        for (let index = 0; index < 100_000; index++) insert.run('large', 'invalid JSON must not be decoded for a cursor')
++        insert.run('other', '{}')
++      })()
++      const parse = t.mock.method(JSON, 'parse', () => { throw new Error('unexpected payload parse') })
++      const prepare = t.mock.method(db, 'prepare')
++      assert.equal(store.getProductJournalCursor('large'), 100_000)
++      assert.equal(prepare.mock.callCount(), 1)
++      const sql = prepare.mock.calls[0].arguments[0]
++      assert.equal(/payload_json|SELECT\s+\*/i.test(sql), false)
++      const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all('large') as Array<{ detail: string }>
++      assert.ok(plan.some((row) => /COVERING INDEX idx_agent_product_journal_run_seq/.test(row.detail)))
++      assert.equal(plan.some((row) => /TEMP B-TREE|SCAN agent_product_journal/.test(row.detail)), false)
++      assert.equal(parse.mock.callCount(), 0)
++      parse.mock.restore()
++      assert.throws(() => store.readProductJournal('large', 99_999, 1), SyntaxError)
++    } finally {
++      t.mock.restoreAll()
++      db.close()
++    }
++  })
++
++  it('pages with a strict size cap and no cross-run, duplicate or skipped events despite sequence gaps', (t) => {
++    const { db, store } = createStore()
++    try {
++      store.createRun({ runId: 'paged', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      store.createRun({ runId: 'other', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      const expected: number[] = []
++      db.transaction(() => {
++        for (let index = 0; index < 1001; index++) {
++          expected.push(store.appendProductEvent('paged', undefined, 'test', { index }))
++          store.appendProductEvent('other', undefined, 'other', { index })
++        }
++      })()
++      const parse = t.mock.method(JSON, 'parse')
++      const first = store.readProductJournal<{ index: number }>('paged')
++      assert.equal(first.length, 500)
++      assert.equal(parse.mock.callCount(), 500)
++      const second = store.readProductJournal<{ index: number }>('paged', first.at(-1)!.seq)
++      const third = store.readProductJournal<{ index: number }>('paged', second.at(-1)!.seq)
++      assert.equal(second.length, 500)
++      assert.equal(third.length, 1)
++      const all = [...first, ...second, ...third]
++      assert.deepEqual(all.map((row) => row.seq), expected)
++      assert.deepEqual(all.map((row) => row.payload.index), Array.from({ length: 1001 }, (_, index) => index))
++      assert.ok(all.every((row) => row.runId === 'paged'))
++      assert.deepEqual(store.readProductJournal('paged', third[0].seq), [])
++      assert.equal(store.readProductJournal('paged', 0, 1).length, 1)
++      assert.deepEqual(store.readProductJournal('missing'), [])
++      for (const value of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
++        assert.throws(() => store.readProductJournal('paged', value), /cursor/)
++      }
++      for (const value of [0, -1, 0.5, 501, NaN, Infinity]) {
++        assert.throws(() => store.readProductJournal('paged', 0, value), /limit/)
++      }
++      assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_product_journal').get() as { total: number }).total, 2002)
++    } finally {
++      t.mock.restoreAll()
++      db.close()
++    }
++  })
++})
+diff --git a/src/main/agent-platform/agentRunStore.ts b/src/main/agent-platform/agentRunStore.ts
+index a6a50e5..4d76b9d 100644
+--- a/src/main/agent-platform/agentRunStore.ts
++++ b/src/main/agent-platform/agentRunStore.ts
+@@ -312,14 +312,25 @@ export class AgentRunStore {
+     return Number(result.lastInsertRowid)
+   }
+ 
++  getProductJournalCursor(runId: string): number {
++    const row = this.database().prepare(`
++      SELECT seq FROM agent_product_journal
++      WHERE run_id = ? ORDER BY seq DESC LIMIT 1
++    `).get(runId) as { seq: number } | undefined
++    return row?.seq ?? 0
++  }
++
+   readProductJournal<Event = Record<string, unknown>>(
+     runId: string,
+-    afterSeq = 0
++    afterSeq = 0,
++    limit = 500
+   ): AgentJournalRecord<Event>[] {
++    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) throw new Error('Invalid journal cursor')
++    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Journal page limit must be between 1 and 500')
+     const rows = this.database().prepare(`
+       SELECT seq, run_id, operation_id, event_type, payload_json, created_at
+-      FROM agent_product_journal WHERE run_id = ? AND seq > ? ORDER BY seq ASC
+-    `).all(runId, afterSeq) as Array<{
++      FROM agent_product_journal WHERE run_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?
++    `).all(runId, afterSeq, limit) as Array<{
+       seq: number; run_id: string; operation_id: string | null; event_type: string; payload_json: string; created_at: string
+     }>
+     return rows.map((row) => ({
+diff --git a/src/main/services/agentMetadata/agentMetadataCollection.ts b/src/main/services/agentMetadata/agentMetadataCollection.ts
+index 32ab202..6c668a0 100644
+--- a/src/main/services/agentMetadata/agentMetadataCollection.ts
++++ b/src/main/services/agentMetadata/agentMetadataCollection.ts
+@@ -474,14 +474,13 @@ export class AgentMetadataCollection {
+   snapshot(runId: string): AgentMetadataSnapshot | null {
+     const active = this.active.get(runId)
+     if (!active) return null
+-    const journal = agentRunStore.readProductJournal(runId)
+     const draft = active.state.draftId
+       ? agentMetadataDraftService.getDraft(active.state.draftId) ?? undefined
+       : undefined
+     return {
+       runId,
+       revision: active.state.revision,
+-      cursor: journal.at(-1)?.seq ?? 0,
++      cursor: agentRunStore.getProductJournalCursor(runId),
+       target: structuredClone(active.state.target),
+       phase: active.state.phase,
+       summary: active.state.summary,
+diff --git a/src/main/services/libraryCuratorAgent/libraryCurator.test.ts b/src/main/services/libraryCuratorAgent/libraryCurator.test.ts
+index bda5ecd..dcf82da 100644
+--- a/src/main/services/libraryCuratorAgent/libraryCurator.test.ts
++++ b/src/main/services/libraryCuratorAgent/libraryCurator.test.ts
+@@ -52,3 +52,19 @@ describe('LibraryCurator lifecycle', { concurrency: false }, () => {
+     }
+   })
+ })
++
++it('uses the indexed journal cursor for a curator snapshot', async (t) => {
++  const { agentRunStore } = await import('../../agent-platform/agentRunStore')
++  const curator = new LibraryCurator()
++  const active = (curator as unknown as { active: Map<string, unknown> }).active
++  active.set('cursor-run', { state: { status: 'waiting_user', summary: 'waiting', totalTokens: 17 } })
++  const cursor = t.mock.method(agentRunStore, 'getProductJournalCursor', () => 23456)
++  t.mock.method(agentRunStore, 'readProductJournal', () => { throw new Error('snapshot must not load the journal') })
++  try {
++    assert.deepEqual(curator.getSnapshot('cursor-run'), {
++      runId: 'cursor-run', status: 'waiting_user', summary: 'waiting', totalTokens: 17, cursor: 23456
++    })
++    assert.equal(cursor.mock.callCount(), 1)
++    assert.equal(cursor.mock.calls[0].arguments[0], 'cursor-run')
++  } finally { t.mock.restoreAll() }
++})
+diff --git a/src/main/services/libraryCuratorAgent/libraryCurator.ts b/src/main/services/libraryCuratorAgent/libraryCurator.ts
+index 8f03a57..fd22b6e 100644
+--- a/src/main/services/libraryCuratorAgent/libraryCurator.ts
++++ b/src/main/services/libraryCuratorAgent/libraryCurator.ts
+@@ -298,8 +298,7 @@ export class LibraryCurator {
+     const id = runId ?? agentRunStore.findLatestRun<LibraryCuratorProductState>('library-curator')?.id
+     const active = id ? this.active.get(id) : undefined
+     if (!id || !active) return null
+-    const journal = agentRunStore.readProductJournal(id)
+-    return { ...result(id, active), cursor: journal.at(-1)?.seq ?? 0 }
++    return { ...result(id, active), cursor: agentRunStore.getProductJournalCursor(id) }
+   }
+ 
+   async dispose(): Promise<void> {
+diff --git a/src/main/services/pluginDevAgent/pluginDeveloper.test.ts b/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
+index 624248c..f0a3442 100644
+--- a/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
++++ b/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
+@@ -1739,3 +1739,36 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+     }
+   })
+ })
++
++it('uses the indexed journal cursor for active and persisted plugin snapshots', (t) => {
++  const developer = new PluginDeveloper()
++  const session = createSession({ ...input, package: structuredClone(packageValue) }, 'snapshot-cursor')
++  testable(developer).active.set(session.id, activeRun(session))
++  const cursor = t.mock.method(agentRunStore, 'getProductJournalCursor', () => 12345)
++  t.mock.method(toolHost, 'pendingApprovals', () => [])
++  t.mock.method(agentRunStore, 'readProductJournal', () => { throw new Error('snapshot must not load the journal') })
++  try {
++    const snapshot = developer.getSnapshot(session.id)
++    assert.equal(snapshot?.cursor, 12345)
++    assert.equal(cursor.mock.callCount(), 1)
++    assert.equal(cursor.mock.calls[0].arguments[0], session.id)
++    assert.deepEqual(snapshot?.workLog, [])
++    testable(developer).active.delete(session.id)
++    const record: AgentRunRecord = {
++      id: session.id, useCase: 'plugin-developer', status: 'settled', configRevision: 'test',
++      configSnapshot: frozenSnapshot(), recoveryGeneration: 0, createdAt: '', updatedAt: '',
++      productState: {
++        schemaVersion: 1, input, status: 'completed', package: packageValue, runTargets: [],
++        summary: 'finished', phase: 'ready', step: 1, totalTokens: 17, workLog: []
++      }
++    }
++    t.mock.method(agentRunStore, 'getRun', (() => record) as typeof agentRunStore.getRun)
++    const persisted = developer.getSnapshot(session.id)
++    assert.equal(persisted?.cursor, 12345)
++    assert.equal(persisted?.result.status, 'completed')
++    assert.equal(cursor.mock.callCount(), 2)
++  } finally {
++    t.mock.restoreAll()
++    deleteSession(session.id)
++  }
++})
+diff --git a/src/main/services/pluginDevAgent/pluginDeveloper.ts b/src/main/services/pluginDevAgent/pluginDeveloper.ts
+index aa70960..98f2227 100644
+--- a/src/main/services/pluginDevAgent/pluginDeveloper.ts
++++ b/src/main/services/pluginDevAgent/pluginDeveloper.ts
+@@ -1136,7 +1136,7 @@ export class PluginDeveloper {
+       if (!record || record.useCase !== 'plugin-developer' || state?.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) return null
+       const workLog = structuredClone(state.workLog ?? [])
+       return {
+-        cursor: agentRunStore.readProductJournal(runId).at(-1)?.seq ?? 0,
++        cursor: agentRunStore.getProductJournalCursor(runId),
+         input: structuredClone(state.input),
+         result: {
+           sessionId: runId,
+@@ -1163,9 +1163,8 @@ export class PluginDeveloper {
+           : undefined
+       }
+     }
+-    const journal = agentRunStore.readProductJournal(runId)
+     return {
+-      cursor: journal.at(-1)?.seq ?? 0,
++      cursor: agentRunStore.getProductJournalCursor(runId),
+       input: structuredClone(active.input),
+       result: structuredClone(toResult(active)),
+       phase: active.session.phase,
+diff --git a/src/main/services/agentMetadata/agentMetadataCollection.test.ts b/src/main/services/agentMetadata/agentMetadataCollection.test.ts
+new file mode 100644
+index 0000000..1aa77ed
+--- /dev/null
++++ b/src/main/services/agentMetadata/agentMetadataCollection.test.ts
+@@ -0,0 +1,24 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import { agentRunStore } from '../../agent-platform/agentRunStore'
++import { AgentMetadataCollection } from './agentMetadataCollection'
++import { AgentMetadataActivityTimeline } from './activityTimeline'
++
++it('uses the indexed journal cursor without loading history for a metadata snapshot', (t) => {
++  const collection = new AgentMetadataCollection()
++  const active = (collection as unknown as { active: Map<string, unknown> }).active
++  active.set('metadata-cursor', {
++    state: { revision: 2, target: { kind: 'video', id: 1 }, phase: 'collecting', summary: 'collecting' },
++    timeline: new AgentMetadataActivityTimeline()
++  })
++  const cursor = t.mock.method(agentRunStore, 'getProductJournalCursor', () => 34567)
++  t.mock.method(agentRunStore, 'readProductJournal', () => { throw new Error('snapshot must not load the journal') })
++  try {
++    const snapshot = collection.snapshot('metadata-cursor')
++    assert.equal(snapshot?.cursor, 34567)
++    assert.equal(snapshot?.revision, 2)
++    assert.deepEqual(snapshot?.activities, [])
++    assert.equal(cursor.mock.callCount(), 1)
++    assert.equal(cursor.mock.calls[0].arguments[0], 'metadata-cursor')
++  } finally { t.mock.restoreAll() }
++})

@@ -536,14 +536,6 @@
     justify-self: stretch;
   }
 
-  .playlist-pick-row {
-    grid-template-columns: 68px minmax(0, 1fr);
-  }
-
-  .playlist-pick-row .btn {
-    grid-column: 1 / -1;
-    justify-self: stretch;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

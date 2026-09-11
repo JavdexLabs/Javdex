@@ -1,0 +1,454 @@
+diff --git a/src/renderer/src/components/MergeActressModal.tsx b/src/renderer/src/components/MergeActressModal.tsx
+index 6640a48..3c83558 100644
+--- a/src/renderer/src/components/MergeActressModal.tsx
++++ b/src/renderer/src/components/MergeActressModal.tsx
+@@ -1,10 +1,9 @@
+-import { useEffect, useState } from 'react'
++import { useEffect, useRef, useState } from 'react'
+ import { SearchX, UserRound } from 'lucide-react'
+ import {
+-  actressGenderMergeLabel,
+-  canMergeActressGenders
++  actressGenderMergeLabel
+ } from '@shared/actressProfileOptions'
+-import type { ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/actressTypes'
++import type { ActressGender, ActressMergeCandidate, ActressMergeMainNameFrom } from '@shared/actressTypes'
+ import type { ActressDetail } from '@shared/actressTypes'
+ import { api, assetUrl } from '../api'
+ import { useDebounce } from '../hooks/useDebounce'
+@@ -88,54 +87,58 @@ function MergeActressCard({
+   )
+ }
+ 
+-export default function MergeActressModal({
++export default function MergeActressModal(props: Props): JSX.Element {
++  return <MergeActressSession key={`${props.keepActress.id}:${props.keepActress.gender ?? ''}`} {...props} />
++}
++
++function MergeActressSession({
+   keepActress,
+   onCancel,
+   onMerged
+ }: Props): JSX.Element {
+   const [searchInput, setSearchInput] = useState('')
+   const debouncedQ = useDebounce(searchInput, 300)
+-  const [items, setItems] = useState<ActressListItem[]>([])
+-  const [loading, setLoading] = useState(false)
+-  const [selected, setSelected] = useState<ActressListItem | null>(null)
++  const [items, setItems] = useState<ActressMergeCandidate[]>([])
++  const [loading, setLoading] = useState(true)
++  const [selected, setSelected] = useState<ActressMergeCandidate | null>(null)
+   const [mainNameFrom, setMainNameFrom] = useState<ActressMergeMainNameFrom>('keep')
+   const [merging, setMerging] = useState(false)
+   const [error, setError] = useState<string | null>(null)
++  const errorRef = useRef<HTMLParagraphElement>(null)
++  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'nearest' }) }, [error])
++  const [pageError, setPageError] = useState<string | null>(null)
++  const [offset, setOffset] = useState(0)
++  const [hasMore, setHasMore] = useState(false)
++  const [retry, setRetry] = useState(0)
++  const mergeInFlight = useRef(false)
++  const mounted = useRef(true)
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
++
+ 
+   useEffect(() => {
+     let cancelled = false
+     setLoading(true)
+-    setError(null)
+-    api.actresses
+-      .list(debouncedQ.trim(), 'all')
+-      .then((list) => {
+-        if (cancelled) return
+-        setItems(
+-          list.filter(
+-            (item) =>
+-              item.id !== keepActress.id &&
+-              canMergeActressGenders(keepActress.gender, item.gender)
+-          )
+-        )
+-      })
+-      .catch((e) => {
+-        if (!cancelled) setError(String((e as Error).message ?? e))
+-      })
+-      .finally(() => {
+-        if (!cancelled) setLoading(false)
++    setItems([])
++    setHasMore(false)
++    setPageError(null)
++    if (searchInput !== debouncedQ) return () => { cancelled = true }
++    void api.actresses.mergeCandidates({ keepId: keepActress.id, search: debouncedQ.trim(), limit: 40, offset })
++      .then(page => {
++        if (!cancelled) { setItems(page.items); setHasMore(page.hasMore) }
+       })
++      .catch(e => { if (!cancelled) setPageError(String((e as Error).message ?? e)) })
++      .finally(() => { if (!cancelled) setLoading(false) })
++    return () => { cancelled = true }
++  }, [debouncedQ, searchInput, keepActress.id, offset, retry])
+ 
+-    return () => {
+-      cancelled = true
+-    }
+-  }, [debouncedQ, keepActress.gender, keepActress.id])
+-
+-  useEffect(() => {
+-    setMainNameFrom('keep')
+-  }, [selected?.id])
++  const changePage = (nextOffset: number): void => {
++    if (merging || loading) return
++    setItems([]); setLoading(true); setPageError(null); setOffset(nextOffset)
++  }
+ 
+   const doMerge = async (): Promise<void> => {
+-    if (!selected || merging) return
++    if (!selected || mergeInFlight.current) return
++    mergeInFlight.current = true
+     setMerging(true)
+     setError(null)
+     try {
+@@ -144,11 +147,12 @@ export default function MergeActressModal({
+         mergeId: selected.id,
+         mainNameFrom
+       })
+-      onMerged()
++      if (mounted.current) onMerged()
+     } catch (e) {
+-      setError(String((e as Error).message ?? e))
++      if (mounted.current) setError(String((e as Error).message ?? e))
+     } finally {
+-      setMerging(false)
++      mergeInFlight.current = false
++      if (mounted.current) setMerging(false)
+     }
+   }
+ 
+@@ -194,6 +198,7 @@ export default function MergeActressModal({
+       className="merge-actress-modal"
+       bodyOverflow="hidden"
+       onCancel={onCancel}
++      closeDisabled={merging}
+       actions={
+         <>
+           <Button type="button" onClick={onCancel} disabled={merging}>
+@@ -228,28 +233,36 @@ export default function MergeActressModal({
+           <div className="merge-actress-section-head">
+             <span className="merge-actress-section-title">选择要合并的演员</span>
+             {!loading && items.length > 0 && (
+-              <span className="merge-actress-section-meta">{items.length} 名候选</span>
++              <span className="merge-actress-section-meta">本页 {items.length} 名候选</span>
+             )}
+           </div>
+           <input
+             className="search-input merge-actress-search"
+             type="search"
+             placeholder="搜索主名或别名…"
++            aria-label="搜索合并候选"
++            maxLength={256}
++            disabled={merging}
+             value={searchInput}
+-            onChange={(e) => setSearchInput(e.target.value)}
++            onChange={(e) => { setItems([]); setLoading(true); setOffset(0); setSearchInput(e.target.value) }}
+             autoFocus
+           />
+ 
+           <div className="merge-actress-pick-panel">
+             {loading ? (
+               <EmptyState variant="modal" loading />
++            ) : pageError ? (
++              <div role="alert" className="merge-actress-page-error">
++                <p>合并候选读取失败</p>
++                <Button size="sm" disabled={merging} onClick={() => setRetry(value => value + 1)}>重试</Button>
++              </div>
+             ) : items.length === 0 ? (
+               <EmptyState
+                 variant="modal"
+                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+-                title={debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
++                title={offset > 0 ? '本页没有候选演员' : debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
+                 description={
+-                  debouncedQ.trim()
++                  offset > 0 ? '返回上一页或调整搜索关键词。' : debouncedQ.trim()
+                     ? '调整搜索关键词后再试。'
+                     : '当前演员没有同组可合并候选。'
+                 }
+@@ -263,9 +276,11 @@ export default function MergeActressModal({
+                       key={item.id}
+                       type="button"
+                       role="option"
++                      aria-label={`选择合并演员 ${item.main_name}`}
+                       aria-selected={isSelected}
+                       className={`merge-actress-pick-item${isSelected ? ' is-selected' : ''}`}
+-                      onClick={() => setSelected(isSelected ? null : item)}
++                      disabled={merging}
++                      onClick={() => { setSelected(isSelected ? null : item); setMainNameFrom('keep') }}
+                     >
+                       <span className="merge-actress-pick-radio" aria-hidden="true" />
+                       <ActressAvatar
+@@ -287,6 +302,11 @@ export default function MergeActressModal({
+               </div>
+             )}
+           </div>
++          <div className="merge-actress-pagination" aria-label="合并候选分页">
++            <Button size="sm" disabled={merging || loading || offset === 0} onClick={() => changePage(Math.max(0, offset - 40))}>上一页</Button>
++            <span aria-live="polite">第 {Math.floor(offset / 40) + 1} 页</span>
++            <Button size="sm" disabled={merging || loading || !hasMore} onClick={() => changePage(offset + 40)}>下一页</Button>
++          </div>
+         </section>
+ 
+         <section
+@@ -305,6 +325,7 @@ export default function MergeActressModal({
+                   <input
+                     type="radio"
+                     name="merge-main-name"
++                    disabled={merging}
+                     checked={mainNameFrom === 'keep'}
+                     onChange={() => setMainNameFrom('keep')}
+                   />
+@@ -319,6 +340,7 @@ export default function MergeActressModal({
+                   <input
+                     type="radio"
+                     name="merge-main-name"
++                    disabled={merging}
+                     checked={mainNameFrom === 'merge'}
+                     onChange={() => setMainNameFrom('merge')}
+                   />
+@@ -352,7 +374,7 @@ export default function MergeActressModal({
+           )}
+         </section>
+ 
+-        {error && <p className="merge-actress-error">{error}</p>}
++        {error && <p ref={errorRef} role="alert" className="merge-actress-error">{error}</p>}
+       </div>
+     </Modal>
+   )
+diff --git a/src/renderer/src/styles/library-content.css b/src/renderer/src/styles/library-content.css
+index 0f55588..2cfc969 100644
+--- a/src/renderer/src/styles/library-content.css
++++ b/src/renderer/src/styles/library-content.css
+@@ -651,8 +651,11 @@
+ .playlist-section-controls {
+   display: inline-flex;
+   align-items: center;
++  justify-content: flex-end;
++  flex-wrap: wrap;
++  min-width: 0;
+   gap: 8px;
+-  flex-shrink: 0;
++  flex-shrink: 1;
+ }
+ .playlist-video-grid {
+   display: grid;
+@@ -767,6 +770,9 @@
+   line-height: 1.5;
+ }
+ .merge-actress-body {
++  overflow-y: auto;
++  padding-right: var(--scrollbar-safe-pad);
++  scrollbar-gutter: stable;
+   display: flex;
+   flex-direction: column;
+   gap: 14px;
+@@ -775,6 +781,7 @@
+   margin-bottom: 0;
+ }
+ .merge-actress-flow {
++  flex: 0 0 auto;
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+   gap: 10px;
+@@ -887,7 +894,7 @@
+   min-width: 0;
+ }
+ .merge-actress-picker {
+-  flex: 1 1 220px;
++  flex: 1 0 280px;
+   min-height: 0;
+ }
+ .merge-actress-section-head {
+@@ -1211,3 +1218,18 @@
+   line-height: 1.35;
+   overflow-wrap: anywhere;
+ }
++
++
++.merge-actress-pagination {
++  display: flex;
++  flex: 0 0 auto;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--form-label-gap);
++  color: var(--text-secondary);
++}
++
++.merge-actress-page-error {
++  padding: var(--form-field-gap);
++  color: var(--text-secondary);
++}
+diff --git a/src/renderer/src/components/MergeActressModal.interaction.test.tsx b/src/renderer/src/components/MergeActressModal.interaction.test.tsx
+new file mode 100644
+index 0000000..383e1bb
+--- /dev/null
++++ b/src/renderer/src/components/MergeActressModal.interaction.test.tsx
+@@ -0,0 +1,79 @@
++import assert from 'node:assert/strict'
++import {afterEach,it} from 'node:test'
++import React from 'react'
++import TestRenderer,{act} from 'react-test-renderer'
++import type {ActressDetail,ActressMergeCandidatePage,ActressMergeCandidateQuery,ActressMergeInput} from '@shared/actressTypes'
++import type {ElectronApi} from '../../../preload/index'
++function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes});return {promise,resolve}}
++const calls:ActressMergeCandidateQuery[]=[],merges:ActressMergeInput[]=[]
++const heldPages:Array<ReturnType<typeof deferred<ActressMergeCandidatePage>>>=[]
++let holdPage=false,failPage=false,failMerge=false,heldMerge:ReturnType<typeof deferred<void>>|undefined,merged=0,cancelled=0
++function page(query:ActressMergeCandidateQuery):ActressMergeCandidatePage {
++ const rows=Array.from({length:101},(_,i)=>({id:i+2,main_name:`Candidate-${i+2}`,avatar_path:null,gender:'female' as const,video_count:i+1}))
++  .filter(row=>row.id!==query.keepId&&(!query.search||row.main_name.includes(query.search)))
++ const offset=query.offset??0
++ return {items:rows.slice(offset,offset+40),hasMore:rows.length>offset+40,offset}
++}
++const fake={actresses:{list:()=>{throw new Error('Full candidate list forbidden')},
++ mergeCandidates:async(query:ActressMergeCandidateQuery)=>{calls.push(query);if(failPage){failPage=false;throw new Error('Page failure')}if(holdPage){holdPage=false;const held=deferred<ActressMergeCandidatePage>();heldPages.push(held);return held.promise}return page(query)},
++ merge:async(input:ActressMergeInput)=>{merges.push(input);if(heldMerge)await heldMerge.promise;if(failMerge)throw new Error('Merge failure');return true}
++}} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fake})})
++Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}}}})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let Component:typeof import('./MergeActressModal')['default']
++const keep=(id:number):ActressDetail=>({id,main_name:`Keep-${id}`,gender:'female',avatar_path:null,videos:[],gallery:[]} as unknown as ActressDetail)
++const element=(id:number)=><Component keepActress={keep(id)} onCancel={()=>cancelled++} onMerged={()=>merged++}/>
++const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
++async function mount(){Component=(await import('./MergeActressModal')).default;await act(async()=>{renderer=TestRenderer.create(element(1))});await settle()}
++function text(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:text(child)).join('')}
++function button(label:string){const result=renderer!.root.findAllByType('button').find(node=>text(node)===label);assert.ok(result,label);return result}
++async function click(label:string){const node=button(label);assert.ok(!node.props.disabled);await act(async()=>node.props.onClick());await settle()}
++function options(){return renderer!.root.findAllByType('button').filter(node=>node.props.role==='option')}
++async function choose(id:number){const node=options().find(node=>node.props['aria-label']===`选择合并演员 Candidate-${id}`);assert.ok(node);assert.ok(!node.props.disabled);await act(async()=>node.props.onClick());await settle()}
++function radios(){return renderer!.root.findAllByType('input').filter(node=>node.props.name==='merge-main-name')}
++async function search(value:string){const input=renderer!.root.findAllByType('input').find(node=>node.props.type==='search')!;await act(async()=>input.props.onChange({target:{value}}))}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;calls.length=0;merges.length=0;heldPages.length=0;holdPage=false;failPage=false;failMerge=false;heldMerge=undefined;merged=0;cancelled=0})
++
++it('pages40 candidates and preserves selection and name plan across pages and search',async()=>{
++ await mount();assert.deepEqual(calls,[{keepId:1,search:'',limit:40,offset:0}]);assert.equal(options().length,40)
++ await choose(2);await act(async()=>radios()[1].props.onChange())
++ await click('下一页');assert.equal(calls.at(-1)?.offset,40);assert.equal(radios()[1].props.checked,true)
++ await click('下一页');assert.equal(options().length,21);assert.equal(button('下一页').props.disabled,true)
++ await search('not-found');await act(async()=>{await new Promise(resolve=>setTimeout(resolve,330))});await settle()
++ assert.equal(calls.at(-1)?.offset,0);assert.equal(options().length,0);assert.equal(radios()[1].props.checked,true)
++ await click('确认合并');assert.deepEqual(merges,[{keepId:1,mergeId:2,mainNameFrom:'merge'}]);assert.equal(merged,1)
++})
++it('retries page failures without losing the selected merge plan',async()=>{
++ await mount();await choose(2);await act(async()=>radios()[1].props.onChange());failPage=true
++ await click('下一页');assert.ok(renderer!.root.findAllByProps({role:'alert'}).length);assert.equal(options().length,0)
++ await click('重试');assert.equal(options().length,40);assert.equal(radios()[1].props.checked,true)
++})
++it('ignores old page responses while a changed search is debouncing',async()=>{
++ await mount();holdPage=true;await click('下一页');await search('Candidate-100')
++ await act(async()=>heldPages[0].resolve(page({keepId:1,offset:40})));await settle();assert.equal(options().length,0)
++ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,330))});await settle()
++ assert.equal(options().length,1);assert.equal(options()[0].props['aria-label'],'选择合并演员 Candidate-100')
++})
++it('locks a captured merge against duplicate submission and retains plan on failure',async()=>{
++ await mount();await choose(2);await act(async()=>radios()[1].props.onChange());heldMerge=deferred<void>();failMerge=true
++ const submit=button('确认合并');await act(async()=>{submit.props.onClick();submit.props.onClick()});await settle()
++ assert.equal(merges.length,1);assert.equal(button('取消').props.disabled,true)
++ assert.ok(options().every(node=>node.props.disabled));assert.ok(radios().every(node=>node.props.disabled))
++ await act(async()=>heldMerge!.resolve());await settle();assert.equal(merged,0);assert.equal(radios()[1].props.checked,true)
++ failPage=true;await click('下一页');assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(node=>text(node)==='Merge failure'))
++ await click('重试');assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(node=>text(node)==='Merge failure'));assert.equal(radios()[1].props.checked,true)
++ failMerge=false;heldMerge=undefined;await click('确认合并');assert.equal(merged,1);assert.equal(merges.length,2)
++})
++it('resets session on keep identity change and ignores old page and merge completion',async()=>{
++ holdPage=true;await mount();await act(async()=>renderer!.update(element(9)));await settle()
++ await act(async()=>heldPages[0].resolve({items:[],hasMore:false,offset:0}));await settle();assert.equal(options().length,40)
++ await choose(2);heldMerge=deferred<void>();await click('确认合并')
++ await act(async()=>renderer!.update(element(10)));await settle();assert.equal(button('确认合并').props.disabled,true)
++ await act(async()=>heldMerge!.resolve());await settle();assert.equal(merged,0);assert.equal(calls.at(-1)?.keepId,10)
++})
++it('resets the name plan only when choosing a different merge candidate or clearing selection',async()=>{
++ await mount();await choose(2);await act(async()=>radios()[1].props.onChange());await choose(3)
++ assert.equal(radios()[0].props.checked,true);await choose(3);assert.equal(button('确认合并').props.disabled,true)
++})
+diff --git a/scripts/performance/merge-actress-ui.mjs b/scripts/performance/merge-actress-ui.mjs
+new file mode 100644
+index 0000000..bba03eb
+--- /dev/null
++++ b/scripts/performance/merge-actress-ui.mjs
+@@ -0,0 +1,77 @@
++/** Actual merge modal and styles, synthetic IPC, no user database. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-merge-ui-'))
++const output=path.resolve(process.env.JAVDEX_MERGE_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import {createRoot} from 'react-dom/client';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__calls=[];window.__merges=[];window.__merged=0;window.__cancelled=0;
++window.api={actresses:{list:()=>{throw new Error('Full actress list forbidden')},mergeCandidates:async query=>{
++ window.__calls.push(query);if(window.__failPage){window.__failPage=false;throw new Error('Page failure')}
++ const all=Array.from({length:101},(_,i)=>({id:i+2,main_name:'Candidate-'+(i+2),gender:'female',avatar_path:null,video_count:i+1})).filter(item=>!query.search||item.main_name.includes(query.search));
++ return {items:all.slice(query.offset,query.offset+40),hasMore:all.length>query.offset+40,offset:query.offset}
++},merge:async input=>{window.__merges.push(input);if(window.__holdMerge)await new Promise(resolve=>{window.__releaseMerge=resolve});if(window.__failMerge){window.__failMerge=false;throw new Error('Merge failure')}return true}}};
++const Component=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/MergeActressModal.tsx'))})).default;
++createRoot(document.getElementById('root')).render(<Component keepActress={{id:1,main_name:'Keep-1',gender:'female',avatar_path:null,videos:[],gallery:[]}} onCancel={()=>window.__cancelled++} onMerged={()=>window.__merged++}/>);
++`)
++let server,browser;const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport}),errors=[];page.on('pageerror',error=>errors.push(error.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.getByRole('option',{name:'选择合并演员 Candidate-2',exact:true}).click()
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-selected.png`)})
++  const layout=await page.evaluate(()=>{
++    const flow=document.querySelector('.merge-actress-flow').getBoundingClientRect(),picker=document.querySelector('.merge-actress-picker').getBoundingClientRect(),plan=document.querySelector('.merge-actress-plan').getBoundingClientRect();
++    return {flowBottom:flow.bottom,pickerTop:picker.top,pickerBottom:picker.bottom,planTop:plan.top}
++  })
++  assert.ok(layout.flowBottom<=layout.pickerTop && layout.pickerBottom<=layout.planTop,'Preview, picker and plan must not overlap')
++  const pager=page.getByLabel('合并候选分页',{exact:true})
++  await pager.scrollIntoViewIfNeeded()
++  const firstPager=await pager.boundingBox();assert.ok(firstPager&&firstPager.y>=0&&firstPager.y+firstPager.height<=viewport.height)
++  await page.getByText('使用对方主名',{exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('option',{name:'选择合并演员 Candidate-42',exact:true}).waitFor()
++  assert.equal(await page.getByRole('option').count(),40)
++  assert.equal(await page.getByRole('radio',{name:/使用对方主名/}).isChecked(),true)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('option',{name:'选择合并演员 Candidate-82',exact:true}).waitFor();assert.equal(await page.getByRole('option').count(),21)
++  await page.evaluate(()=>{window.__failPage=true});await page.getByRole('button',{name:'上一页',exact:true}).click()
++  await page.getByText('合并候选读取失败',{exact:true}).waitFor();await page.getByRole('button',{name:'重试',exact:true}).click()
++  await page.getByRole('option',{name:'选择合并演员 Candidate-42',exact:true}).waitFor()
++  await page.getByRole('searchbox',{name:'搜索合并候选'}).fill('Candidate-100')
++  await page.getByRole('option',{name:'选择合并演员 Candidate-100',exact:true}).waitFor();assert.equal(await page.getByRole('option').count(),1)
++  await page.getByRole('searchbox',{name:'搜索合并候选'}).fill('')
++  await page.getByRole('option',{name:'选择合并演员 Candidate-2',exact:true}).waitFor()
++  assert.equal(await page.getByRole('option',{name:'选择合并演员 Candidate-2',exact:true}).getAttribute('aria-selected'),'true')
++  await page.evaluate(()=>{window.__failMerge=true});await page.getByRole('button',{name:'确认合并',exact:true}).click()
++  await page.getByText('Merge failure',{exact:true}).waitFor()
++  const errorBox=await page.getByText('Merge failure',{exact:true}).boundingBox()
++  const submitBox=await page.getByRole('button',{name:'确认合并',exact:true}).boundingBox()
++  assert.ok(errorBox&&submitBox&&errorBox.y>=0&&errorBox.y+errorBox.height<=submitBox.y,'Merge failure must be visible above the fixed actions')
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  await page.evaluate(()=>{window.__holdMerge=true});await page.getByRole('button',{name:'确认合并',exact:true}).click()
++  await page.waitForFunction(()=>typeof window.__releaseMerge==='function')
++  assert.equal(await page.getByRole('searchbox',{name:'搜索合并候选'}).isDisabled(),true)
++  assert.equal(await page.getByRole('radio',{name:/使用对方主名/}).isDisabled(),true)
++  await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>window.__cancelled),0)
++  await page.evaluate(()=>window.__releaseMerge());await page.waitForFunction(()=>window.__merged===1)
++  assert.deepEqual(await page.evaluate(()=>window.__merges),[{keepId:1,mergeId:2,mainNameFrom:'merge'},{keepId:1,mergeId:2,mainNameFrom:'merge'}])
++  const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1);assert.deepEqual(errors,[])
++  results.push({viewport,geometry,layout,firstPager,errorBox,submitBox,queries:await page.evaluate(()=>window.__calls),merges:await page.evaluate(()=>window.__merges),errors});await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n');console.log(JSON.stringify(results))
++}finally{await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}

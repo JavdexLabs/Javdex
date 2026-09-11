@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Filter, Import, Inbox, Pencil, SearchX } from 'lucide-react'
 import type { SortDir } from '@shared/commonTypes'
-import type { PlaylistDetail, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
-import type { Video } from '@shared/videoTypes'
+import type { PlaylistMetadata, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
+import type { VideoCard } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { navigateToPlaylistList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import PlaylistCreateModal from '../components/PlaylistCreateModal'
-import PosterCard from '../components/PosterCard'
+import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
+import { useContinuousPage } from '../hooks/useContinuousPage'
+import { useRelatedVideoOffset } from '../hooks/useRelatedVideoOffset'
 import DetailScrollBody from '../components/DetailScrollBody'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import DetailActionBar from '../components/DetailActionBar'
@@ -26,7 +28,6 @@ import {
   patchSearchParams,
   videoResourceFiltersParam
 } from '../listView/listQueryParams'
-import { matchesPlaylistResourceFilter } from './playlistResourceFilter'
 import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
 import { onPlaylistImportCompleted } from '../components/playlistImport/events'
 
@@ -35,9 +36,9 @@ const PLAYLIST_VIDEO_SORT_OPTIONS: SortSwitchOption<PlaylistVideoSortBy>[] = [
   { value: 'release_date', label: '发行', title: '发行日期' }
 ]
 
-function playlistDetailCover(detail: PlaylistDetail): string | null {
+function playlistDetailCover(detail: PlaylistMetadata): string | null {
   return assetUrl(
-    detail.cover_path ?? detail.videos.find((video) => video.cover_path)?.cover_path ?? null
+    detail.cover_path ?? detail.preview_cover_path ?? null
   )
 }
 
@@ -50,11 +51,14 @@ export default function PlaylistDetailPage(): JSX.Element {
   const toast = useToast()
   const playlistImport = usePlaylistImport()
   const videoStackOpen = Boolean(useMatch({ path: ROUTE_MATCH.playlistVideoStack, end: false }))
-  const [detail, setDetail] = useState<PlaylistDetail | null>(null)
+  const [detail, setDetail] = useState<PlaylistMetadata | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
+  const requestSequence = useRef(0)
+  const metadataCache = useRef<{ key: string; value: PlaylistMetadata | null } | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [videoRemoveTarget, setVideoRemoveTarget] = useState<Video | null>(null)
+  const [videoRemoveTarget, setVideoRemoveTarget] = useState<VideoCard | null>(null)
   const [removingVideoId, setRemovingVideoId] = useState<number | null>(null)
   const [videoSortBy, setVideoSortBy] = useState<PlaylistVideoSortBy>('added_at')
   const [videoSortDir, setVideoSortDir] = useState<SortDir>('desc')
@@ -62,6 +66,12 @@ export default function PlaylistDetailPage(): JSX.Element {
   const resourceFilterButtonRef = useRef<HTMLButtonElement>(null)
   const previousVideoStackOpenRef = useRef(videoStackOpen)
   const resourceFilters = parseVideoResourceFilters(searchParams.get(LIST_PARAM.resources))
+  const resourceFilterKey = videoResourceFiltersParam(resourceFilters)
+  const metadataKey = JSON.stringify([playlistId, videoSortBy, videoSortDir])
+  const loadKey = JSON.stringify([playlistId, videoSortBy, videoSortDir, resourceFilterKey])
+  const activeLoadKey = useRef(loadKey)
+  activeLoadKey.current = loadKey
+
 
   const dismissOverlays = useCallback(() => {
     setShowEdit(false)
@@ -72,22 +82,38 @@ export default function PlaylistDetailPage(): JSX.Element {
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
-  const loadDetail = useCallback(async (): Promise<void> => {
-    if (Number.isNaN(playlistId)) return
+  const loadDetail = useCallback(async (refreshMetadata = true): Promise<void> => {
+    if (Number.isNaN(playlistId) || activeLoadKey.current !== loadKey) return
+    const sequence = ++requestSequence.current
+    if (refreshMetadata) metadataCache.current = null
     setLoading(true)
     try {
-      setDetail(await api.playlists.get(playlistId, videoSortBy, videoSortDir))
+      const cached = metadataCache.current
+      const metadata = !refreshMetadata && cached?.key === metadataKey
+        ? cached.value
+        : await api.playlists.metadata(playlistId, videoSortBy, videoSortDir)
+      if (sequence !== requestSequence.current || activeLoadKey.current !== loadKey) return
+      metadataCache.current = { key: metadataKey, value: metadata }
+      setDetail(metadata)
+      if (refreshMetadata) refreshVideos.current()
+      setLoadedKey(loadKey)
     } catch (e) {
+      if (sequence !== requestSequence.current || activeLoadKey.current !== loadKey) return
       toast.show(String((e as Error).message), 'error')
       setDetail(null)
     } finally {
-      setLoading(false)
+      if (sequence === requestSequence.current && activeLoadKey.current === loadKey) setLoading(false)
     }
-  }, [playlistId, toast, videoSortBy, videoSortDir])
+  }, [playlistId, toast, videoSortBy, videoSortDir, loadKey, metadataKey])
+
+  const invalidatePendingRequest = useCallback(() => {
+    requestSequence.current++
+  }, [])
 
   useEffect(() => {
-    void loadDetail()
-  }, [loadDetail])
+    void loadDetail(false)
+    return invalidatePendingRequest
+  }, [loadDetail, invalidatePendingRequest])
 
   useEffect(() => onPlaylistImportCompleted((completedPlaylistId) => {
     if (completedPlaylistId === playlistId) void loadDetail()
@@ -118,10 +144,14 @@ export default function PlaylistDetailPage(): JSX.Element {
     )
   }, [setSearchParams])
 
-  const visibleVideos = useMemo(
-    () => detail?.videos.filter((video) => matchesPlaylistResourceFilter(video, resourceFilters)) ?? [],
-    [detail, resourceFilters]
-  )
+  const videoSession = `${playlistId}:${videoSortBy}:${videoSortDir}:${resourceFilterKey}`
+  const { offset: relatedOffset, move: moveRelated, align: alignRelated } = useRelatedVideoOffset(videoSession)
+  const videos = useContinuousPage(JSON.stringify(['playlist-videos', playlistId, videoSortBy, videoSortDir, resourceFilterKey]), 60, async offset => {
+    const result = await api.playlists.videoPage(playlistId, { sortBy: videoSortBy, sortDir: videoSortDir, resourceKinds: parseVideoResourceFilters(resourceFilterKey), limit: 60, offset })
+    return result ? { ...result, unfilteredTotal: result.total, items: result.videos, total: result.filteredTotal } : null
+  }, true, relatedOffset)
+  const refreshVideos = useRef(videos.reload); refreshVideos.current = videos.reload
+  useEffect(() => { alignRelated(videos.known, videos.total) }, [alignRelated, videos.known, videos.total])
 
   const updatePlaylist = async (input: PlaylistUpdateInput): Promise<void> => {
     if (!detail) return
@@ -147,14 +177,12 @@ export default function PlaylistDetailPage(): JSX.Element {
     }
   }
 
-  const removeVideo = async (video: Video): Promise<void> => {
+  const removeVideo = async (video: VideoCard): Promise<void> => {
     if (!detail || removingVideoId !== null) return
     setRemovingVideoId(video.id)
     try {
       await api.playlists.removeVideo(detail.id, video.id)
-      setDetail((prev) =>
-        prev ? { ...prev, videos: prev.videos.filter((item) => item.id !== video.id) } : prev
-      )
+      await loadDetail()
       setVideoRemoveTarget(null)
       toast.show(`已从清单移出 ${video.code}`, 'success')
     } catch (e) {
@@ -174,7 +202,7 @@ export default function PlaylistDetailPage(): JSX.Element {
       </div>
     ) : null
 
-  if (loading && !detail) {
+  if (loading && (!detail || detail.id !== playlistId)) {
     return (
       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
         <EmptyState loading />
@@ -211,7 +239,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 <div className="playlist-detail-kicker">清单</div>
                 <h2>{detail.name}</h2>
                 <div className="playlist-detail-meta-row">
-                  <span>{detail.videos.length} 部影片</span>
+                  <span>{(videos.page?.unfilteredTotal ?? 0)} 部影片</span>
                   <span>{detail.cover_path ? '自定义封面' : '自动封面'}</span>
                 </div>
                 {detail.description ? (
@@ -260,9 +288,9 @@ export default function PlaylistDetailPage(): JSX.Element {
             <div className="playlist-section-head">
               <div className="section-title">
                 影片
-                {resourceFilters.length > 0 && detail.videos.length > 0 ? (
+                {resourceFilters.length > 0 && (videos.page?.unfilteredTotal ?? 0) > 0 ? (
                   <span className="section-title-detail">
-                    匹配 {visibleVideos.length} / 共 {detail.videos.length} 部
+                    匹配 {videos.total} / 共 {(videos.page?.unfilteredTotal ?? 0)} 部
                   </span>
                 ) : null}
               </div>
@@ -285,22 +313,23 @@ export default function PlaylistDetailPage(): JSX.Element {
                   dir={videoSortDir}
                   compact
                   onChange={(nextSortBy, nextSortDir) => {
-                    setVideoSortBy(nextSortBy)
+                                    setVideoSortBy(nextSortBy)
                     setVideoSortDir(nextSortDir)
                   }}
                 />
-                <span className="count-badge">{visibleVideos.length}</span>
+                <span className="count-badge">{videos.total}</span>
+
               </div>
             </div>
 
-            {detail.videos.length === 0 ? (
+            {(loading && loadedKey !== loadKey) || videos.loading ? <EmptyState loading variant="compact" /> : videos.error && videos.total === 0 ? <EmptyState variant="compact" title="清单影片加载失败" description={videos.error}><Button onClick={videos.reload}>重试</Button></EmptyState> : (videos.page?.unfilteredTotal ?? 0) === 0 ? (
               <EmptyState
                 variant="compact"
                 icon={<Inbox {...UI_ICON} aria-hidden />}
                 title="清单内暂无影片"
                 description="可在影片详情页通过「加入清单」添加。"
               />
-            ) : visibleVideos.length === 0 ? (
+            ) : videos.total === 0 ? (
               <EmptyState
                 variant="compact"
                 icon={<SearchX {...UI_ICON} aria-hidden />}
@@ -310,16 +339,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 <Button size="sm" onClick={() => setResourceFilters([])}>清除筛选</Button>
               </EmptyState>
             ) : (
-              <div className="playlist-video-grid">
-                {visibleVideos.map((video) => (
-                  <PosterCard
-                    key={video.id}
-                    video={video}
-                    onRemove={() => setVideoRemoveTarget(video)}
-                    removeDisabled={removingVideoId !== null}
-                  />
-                ))}
-              </div>
+              <ContinuousPosterGrid window={videos.window} initialIndex={relatedOffset} onAnchor={index => moveRelated(Math.floor(index / 60) * 60)} scope={`playlist-videos:${playlistId}:${videoSortBy}:${videoSortDir}:${resourceFilterKey}`} onRemove={setVideoRemoveTarget} removeDisabled={removingVideoId !== null} />
             )}
           </div>
       </DetailScrollBody>

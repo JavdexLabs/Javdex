@@ -1,0 +1,14 @@
+✔ pages40 candidates and preserves selection and name plan across pages and search (581.876875ms)
+✔ retries page failures without losing the selected merge plan (112.121334ms)
+✔ ignores old page responses while a changed search is debouncing (427.666042ms)
+✔ locks a captured merge against duplicate submission and retains plan on failure (164.390083ms)
+✔ resets session on keep identity change and ignores old page and merge completion (168.068125ms)
+✔ resets the name plan only when choosing a different merge candidate or clearing selection (108.289292ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1736.09525

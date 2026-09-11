@@ -1,0 +1,11 @@
+# CD acceptance
+
+Actual controller/Tabs/Panel now consume header plus remote ViewItem pages, not full audit/unrecognized arrays. Production renderer search has no getLatest call. Header success has monotonic revision; inactive gating/gcTime0 and root-migration/scan invalidations preserved. Query/session identities separate ABA and stale responses, current-page presence <=100 remains, search debounces200ms, and retry waits both header completion and observed revision.
+
+Independent Standards review found no issue in controller/key/invalidation/data chain. Spec review identified slow-anchor focus theft; the archived browser red demonstrates tool-bar focus moved to FILE-201 after response. Fixed by recording origin and checking activeElement before restoring focus. A second explicit red showed resolving an anchor target on actual offset200 resent offset0+anchor; handler now saves actual offset and clears anchor only if captured pageState is still current. Added old-row/new-page callback interleaving guards. Rereviews found both fixes closed without a new blocker.
+
+77 parent focused pass, preserving old display/layout/presence checks and adding real controller-to-Panel and Tabs-to-page scenarios. Full npm test2456pass1skip0fail; build terminal0. The earlier full run caught the newly added anchor regression before its fix; the final full run passed after all edits. Original AP/AQ conflict controller test delta remains +27/-0 versus HEAD.
+
+Final browser1000x640 and1440x900 each ran scrape/presence-retry cross-page, search, group-delayed-presence focus, and held-anchor/user-focus, totaling8 passing scenarios with no pageerror. Pages/presence bounded100, third-page focus visible, no horizontal overflow. Screenshots checked. Fixture is the actual component with a synthetic paged API based on shared builder; full synthetic oracle is retained in fixture, so this is not peak-memory or actual IPC latency evidence. Worker/IPC tested independently in CB/CC.
+
+Patch is a selected cumulative source snapshot and depends on prior batches. No user DB/media, persistent schema migration, commit/push/release. Remaining: main-thread audit reread for reveal-path validation, audit construction/writing, first-index/search/shared-worker queueing, broad byte-budget support, business-shape validation and platform/long-run matrix. Full15/42 remains incomplete.

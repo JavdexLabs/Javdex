@@ -5,6 +5,17 @@ import { actressQueryService } from '../services/actressQueryService'
 import { registerActressHandler } from './actressContractAdapter'
 
 export function registerActressHandlers(): void {
+  registerActressHandler(IPC.ACTRESS_PROFILE, (id) => actressQueryService.getProfile(id))
+  registerActressHandler(IPC.ACTRESS_GALLERY_PAGE, (id, query) => actressQueryService.listGallery(id, query))
+  registerActressHandler(IPC.ACTRESS_METADATA, (id) => actressQueryService.getMetadata(id))
+  registerActressHandler(IPC.ACTRESS_VIDEO_PAGE, (id, query) => actressQueryService.listVideos(id, query))
+  registerActressHandler(IPC.ACTRESS_TEST_TARGET_PAGE, (query) => actressQueryService.listTestTargets(query))
+  registerActressHandler(IPC.ACTRESS_TEST_TARGET_GET, (id) => actressQueryService.getTestTarget(id))
+  registerActressHandler(IPC.ACTRESS_AVATAR_CROP_TARGETS, () => actressQueryService.listAvatarCropTargets())
+  registerActressHandler(IPC.ACTRESS_AVATAR_CROP_COUNT, () => actressQueryService.countAvatarCropTargets())
+  registerActressHandler(IPC.ACTRESS_MERGE_CANDIDATES, (query) => actressQueryService.listMergeCandidates(query))
+  registerActressHandler(IPC.ACTRESS_PICKER_GET, (id) => actressQueryService.getPicker(id))
+  registerActressHandler(IPC.ACTRESS_PICKER_PAGE, (query) => actressQueryService.listPicker(query))
   registerActressHandler(IPC.ACTRESS_LIST, (...args) =>
     actressQueryService.listLegacy(...args)
   )
@@ -43,6 +54,12 @@ export function registerActressHandlers(): void {
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_LIST, () =>
     actressIdentityConflictWorkflow.listConflictGroups()
+  )
+  registerActressHandler(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, (query) =>
+    actressIdentityConflictWorkflow.pageConflictQueue(query)
+  )
+  registerActressHandler(IPC.ACTRESS_CONFLICT_GET, (normalizedName) =>
+    actressIdentityConflictWorkflow.getConflictGroup(normalizedName)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_COUNT, () =>
     actressIdentityConflictWorkflow.countPendingReviewItems()

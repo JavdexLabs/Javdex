@@ -15,11 +15,12 @@ import {
 } from 'lucide-react'
 import type {
   Video,
+  VideoCard,
   VideoDetail,
   VideoEditInput,
   VideoQuery
 } from '@shared/videoTypes'
-import type { VideoLifecycleImpact } from '@shared/videoLifecycleTypes'
+import { compactPreview, createBulkPreviewQueue, type BulkPreviewImpact } from './library/bulkPreview'
 import type { LibraryListDefaults } from '../listView/listQueryParams'
 import type {
   VideoDirectorChoiceRequired,
@@ -29,6 +30,7 @@ import type {
 import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/videoScrapeTypes'
 import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
+import { useTagLabels } from '../hooks/useTagLabels'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useRangeSelection } from '../hooks/useRangeSelection'
 import { useToast } from '../components/Toast'
@@ -133,28 +135,37 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   const removalPreviewRequestRef = useRef(0)
   const [filterOpen, setFilterOpen] = useState(false)
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.mediaLibraryVideoOpen, end: false }))
-  const [playlistTarget, setPlaylistTarget] = useState<Video | null>(null)
+  const [playlistTarget, setPlaylistTarget] = useState<VideoCard | null>(null)
   const [showBulkPlaylist, setShowBulkPlaylist] = useState(false)
   const [editingVideo, setEditingVideo] = useState<VideoDetail | null>(null)
   const [editLoadingId, setEditLoadingId] = useState<number | null>(null)
-  const [scrapeTarget, setScrapeTarget] = useState<Video | null>(null)
+  const [scrapeTarget, setScrapeTarget] = useState<VideoCard | null>(null)
   const [pendingDirectorChoice, setPendingDirectorChoice] =
     useState<PendingDirectorChoice | null>(null)
   const [directorChoiceBusy, setDirectorChoiceBusy] = useState(false)
   const [showBulkScrape, setShowBulkScrape] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<Video | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<VideoCard | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [removalPreviewLoading, setRemovalPreviewLoading] = useState(false)
-  const [removalImpacts, setRemovalImpacts] = useState<Map<number, VideoLifecycleImpact>>(
+  const [removalImpacts, setRemovalImpacts] = useState<Map<number, BulkPreviewImpact>>(
     new Map()
   )
+  const previewQueue = useMemo(() => createBulkPreviewQueue(), [])
+  const removalPreviewAbort = useRef<AbortController | null>(null)
+  const membershipPreviewAbort = useRef<AbortController | null>(null)
+  useEffect(() => () => {
+    removalPreviewRequestRef.current += 1
+    removalPreviewAbort.current?.abort()
+    membershipPreviewRequestRef.current += 1
+    membershipPreviewAbort.current?.abort()
+  }, [])
   const membershipPreviewRequestRef = useRef(0)
-  const [membershipTarget, setMembershipTarget] = useState<Video | null>(null)
+  const [membershipTarget, setMembershipTarget] = useState<VideoCard | null>(null)
   const [confirmBulkRemove, setConfirmBulkRemove] = useState(false)
   const [removingMembership, setRemovingMembership] = useState(false)
   const [membershipPreviewLoading, setMembershipPreviewLoading] = useState(false)
-  const [membershipImpacts, setMembershipImpacts] = useState<Map<number, VideoLifecycleImpact>>(
+  const [membershipImpacts, setMembershipImpacts] = useState<Map<number, BulkPreviewImpact>>(
     new Map()
   )
   const [showResourceImport, setShowResourceImport] = useState(false)
@@ -194,11 +205,13 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     setDeleteTarget(null)
     setConfirmBulkDelete(false)
     removalPreviewRequestRef.current += 1
+    removalPreviewAbort.current?.abort()
     setRemovalPreviewLoading(false)
     setRemovalImpacts(new Map())
     setMembershipTarget(null)
     setConfirmBulkRemove(false)
     membershipPreviewRequestRef.current += 1
+    membershipPreviewAbort.current?.abort()
     setMembershipPreviewLoading(false)
     setMembershipImpacts(new Map())
     setShowResourceImport(false)
@@ -266,43 +279,13 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     [setSearchParams]
   )
 
-  const [tagNames, setTagNames] = useState<Map<number, string>>(new Map())
+  const tagNames = useTagLabels(tagIds, surfaceMode === 'active' && !detailOpen)
   const [years, setYears] = useState<number[]>([])
-
-  const refreshTagNames = useCallback(() => {
-    api.tags
-      .list()
-      .then((tags) => setTagNames(new Map(tags.map((t) => [t.id, t.name]))))
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (surfaceMode !== 'active') return
     api.videos.years(scope).then(setYears).catch(() => {})
-    refreshTagNames()
-  }, [refreshTagNames, scope, surfaceMode])
-
-  useEffect(() => {
-    const tagLabels = (location.state as { tagLabels?: Record<number, string> } | null)?.tagLabels
-    if (!tagLabels) return
-    setTagNames((prev) => {
-      const next = new Map(prev)
-      for (const [id, name] of Object.entries(tagLabels)) {
-        next.set(Number(id), name)
-      }
-      return next
-    })
-  }, [location.state])
-
-  useEffect(() => {
-    if (tagIds.some((id) => !tagNames.has(id))) {
-      refreshTagNames()
-    }
-  }, [tagIds, tagNames, refreshTagNames])
-
-  useEffect(() => {
-    if (!detailOpen) refreshTagNames()
-  }, [detailOpen, refreshTagNames])
+  }, [scope, surfaceMode])
 
   useEffect(() => {
     if (effectiveDefaultScraper) {
@@ -380,12 +363,15 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     [toast]
   )
 
-  const { videos, total, loading, loadingMore, hasMore, loadMore, isFetching, refetchSilent } =
+  const { videos, total, loading, loadingMore, hasMore, loadMore, isFetching, refetchSilent, window: catalogWindow } =
     useInfiniteVideoList(scope, query, scopedQueryHash, handlePageError, surfaceMode === 'active')
 
   const unscrapedQuery = useQuery({
     queryKey: videoKeys.list(scope, { scrapedStatus: 0, limit: 1 }, 'unscraped-count'),
-    queryFn: () => api.videos.list(scope, { scrapedStatus: 0, limit: 1, offset: 0 }),
+    queryFn: async () => {
+      const result = await api.videos.list(scope, { scrapedStatus: 0, limit: 1, offset: 0 })
+      return { total: result.total }
+    },
     enabled: surfaceMode === 'active',
     staleTime: 5_000
   })
@@ -400,15 +386,29 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   const {
     selectedIds,
     selectedCount,
+    selectedItems: selectedVideos,
+    selectingRange,
+    selectionError,
     selectionMode,
     toggleSelection: toggleVideoSelection,
     clearSelection
-  } = useRangeSelection(videos, scopedQueryHash)
+  } = useRangeSelection(videos, scopedQueryHash, {
+    window: catalogWindow,
+    onError: handlePageError
+  })
+  useEffect(() => {
+    removalPreviewRequestRef.current += 1
+    membershipPreviewRequestRef.current += 1
+    removalPreviewAbort.current?.abort()
+    membershipPreviewAbort.current?.abort()
+    setRemovalImpacts(new Map())
+    setMembershipImpacts(new Map())
+    setConfirmBulkDelete(false)
+    setConfirmBulkRemove(false)
+    setDeleteTarget(null)
+    setMembershipTarget(null)
+  }, [scopedQueryHash, selectedIds])
 
-  const selectedVideos = useMemo(
-    () => videos.filter((video) => selectedIds.has(video.id)),
-    [videos, selectedIds]
-  )
 
   const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.videoBanner)
@@ -436,7 +436,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     }
   }
 
-  const openEdit = async (video: Video): Promise<void> => {
+  const openEdit = async (video: Pick<VideoCard, 'id'>): Promise<void> => {
     if (editLoadingId !== null) return
     setEditLoadingId(video.id)
     try {
@@ -530,7 +530,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     void executeSingleScrape(request)
   }
 
-  const markScrapeSuccess = async (video: Video): Promise<void> => {
+  const markScrapeSuccess = async (video: Pick<VideoCard, 'id'>): Promise<void> => {
     try {
       await api.videos.markScrapeSuccess(video.id)
       toast.show('已标记为刮削成功', 'success')
@@ -573,16 +573,18 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     }
   }
 
-  const loadDeletePreviews = async (targets: Video[]): Promise<void> => {
+  const loadDeletePreviews = async (targets: readonly Pick<Video, 'id'>[], detail = false): Promise<void> => {
+    removalPreviewAbort.current?.abort()
+    const controller = new AbortController()
+    removalPreviewAbort.current = controller
     const requestId = ++removalPreviewRequestRef.current
     setRemovalPreviewLoading(true)
     setRemovalImpacts(new Map())
     try {
-      const impacts = await Promise.all(
-        targets.map((video) => api.videos.previewDeleteGlobally(video.id))
-      )
+      const impacts = await previewQueue.run(targets, async (video) =>
+        compactPreview(await api.videos.previewDeleteGlobally(video.id), detail), controller.signal)
       if (requestId !== removalPreviewRequestRef.current) return
-      setRemovalImpacts(new Map(impacts.map((impact) => [impact.videoId, impact])))
+      if (impacts) setRemovalImpacts(impacts)
     } catch (error) {
       if (requestId !== removalPreviewRequestRef.current) return
       setDeleteTarget(null)
@@ -593,9 +595,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     }
   }
 
-  const openSingleRemoval = (video: Video): void => {
+  const openSingleRemoval = (video: VideoCard): void => {
     setDeleteTarget(video)
-    void loadDeletePreviews([video])
+    void loadDeletePreviews([video], true)
   }
 
   const openBulkRemoval = (): void => {
@@ -603,7 +605,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     void loadDeletePreviews(selectedVideos)
   }
 
-  const deleteVideos = async (targets: Video[]): Promise<void> => {
+  const deleteVideos = async (targets: readonly Pick<Video, 'id'>[]): Promise<void> => {
     if (deleting || targets.length === 0) return
     if (targets.some((video) => !removalImpacts.has(video.id))) {
       toast.show('删除影响预览尚未就绪，请稍后重试', 'error')
@@ -647,16 +649,18 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     }
   }
 
-  const loadMembershipPreviews = async (targets: Video[]): Promise<void> => {
+  const loadMembershipPreviews = async (targets: readonly Pick<Video, 'id'>[], detail = false): Promise<void> => {
+    membershipPreviewAbort.current?.abort()
+    const controller = new AbortController()
+    membershipPreviewAbort.current = controller
     const requestId = ++membershipPreviewRequestRef.current
     setMembershipPreviewLoading(true)
     setMembershipImpacts(new Map())
     try {
-      const impacts = await Promise.all(
-        targets.map((video) => api.videos.previewRemoveFromLibrary(libraryId, video.id))
-      )
+      const impacts = await previewQueue.run(targets, async (video) =>
+        compactPreview(await api.videos.previewRemoveFromLibrary(libraryId, video.id), detail), controller.signal)
       if (requestId !== membershipPreviewRequestRef.current) return
-      setMembershipImpacts(new Map(impacts.map((impact) => [impact.videoId, impact])))
+      if (impacts) setMembershipImpacts(impacts)
     } catch (error) {
       if (requestId !== membershipPreviewRequestRef.current) return
       setMembershipTarget(null)
@@ -667,9 +671,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     }
   }
 
-  const openSingleMembershipRemoval = (video: Video): void => {
+  const openSingleMembershipRemoval = (video: VideoCard): void => {
     setMembershipTarget(video)
-    void loadMembershipPreviews([video])
+    void loadMembershipPreviews([video], true)
   }
 
   const openBulkMembershipRemoval = (): void => {
@@ -677,7 +681,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     void loadMembershipPreviews(selectedVideos)
   }
 
-  const removeVideosFromLibrary = async (targets: Video[]): Promise<void> => {
+  const removeVideosFromLibrary = async (targets: readonly Pick<Video, 'id'>[]): Promise<void> => {
     if (removingMembership || targets.length === 0) return
     if (targets.some((video) => !membershipImpacts.has(video.id))) {
       toast.show('移出影响预览尚未就绪，请稍后重试', 'error')
@@ -908,7 +912,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                   </Button>
 
                   <LibraryFilterPopover
-                    open={filterOpen}
+                    open={filterOpen && surfaceMode === 'active' && !detailOpen}
                     onClose={() => setFilterOpen(false)}
                     years={years}
                     state={filterState}
@@ -994,6 +998,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
         ) : null}
       </div>
 
+      {selectingRange ? <p role="status">正在读取选择范围…</p> : null}
+      {selectionError ? <p role="alert">{selectionError}</p> : null}
       <ListSurface variant="fill" withInner={false}>
         {libraryQuery.isLoading || loading ? (
           <div className="scroll-body-inner">
@@ -1015,7 +1021,13 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
               ) : null}
             </EmptyState>
           </div>
-        ) : videos.length === 0 ? (
+        ) : catalogWindow.error && total === 0 ? (
+          <div className="scroll-body-inner">
+            <EmptyState title="读取影片失败" description="请重试加载当前列表。">
+              <Button size="sm" onClick={catalogWindow.retry}>重试</Button>
+            </EmptyState>
+          </div>
+        ) : total === 0 ? (
           <div className="scroll-body-inner">
             <EmptyState
               icon={
@@ -1039,6 +1051,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           <VirtualPosterGrid
             scrollMemoryKey={scrollMemoryKey}
             videos={videos}
+            catalogWindow={catalogWindow}
             detailLibraryId={libraryId}
             hasMore={hasMore}
             loadingMore={loadingMore}
@@ -1164,6 +1177,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           onCancel={() => {
             if (!deleting) {
               removalPreviewRequestRef.current += 1
+              removalPreviewAbort.current?.abort()
               setDeleteTarget(null)
               setRemovalImpacts(new Map())
             }
@@ -1173,7 +1187,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             <p>正在读取完整影响范围…</p>
           ) : null}
           {removalImpacts.get(deleteTarget.id) ? (
-            <VideoDeleteImpact impact={removalImpacts.get(deleteTarget.id)!} />
+            <VideoDeleteImpact impact={removalImpacts.get(deleteTarget.id)!.detail!} />
           ) : null}
         </Modal>
       )}
@@ -1195,6 +1209,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           onCancel={() => {
             if (!removingMembership) {
               membershipPreviewRequestRef.current += 1
+              membershipPreviewAbort.current?.abort()
               setMembershipTarget(null)
               setMembershipImpacts(new Map())
             }
@@ -1204,7 +1219,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             <p>正在读取完整影响范围…</p>
           ) : null}
           {membershipImpacts.get(membershipTarget.id) ? (
-            <VideoDeleteImpact impact={membershipImpacts.get(membershipTarget.id)!} />
+            <VideoDeleteImpact impact={membershipImpacts.get(membershipTarget.id)!.detail!} />
           ) : null}
         </Modal>
       )}
@@ -1226,6 +1241,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           onCancel={() => {
             if (!removingMembership) {
               membershipPreviewRequestRef.current += 1
+              membershipPreviewAbort.current?.abort()
               setConfirmBulkRemove(false)
               setMembershipImpacts(new Map())
             }
@@ -1250,6 +1266,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           onCancel={() => {
             if (!deleting) {
               removalPreviewRequestRef.current += 1
+              removalPreviewAbort.current?.abort()
               setConfirmBulkDelete(false)
               setRemovalImpacts(new Map())
             }
@@ -1260,12 +1277,12 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             <div className="modal-path-hint">
               将删除{' '}
               {[...removalImpacts.values()].reduce(
-                (totalResources, impact) => totalResources + impact.sourcePaths.length,
+                (totalResources, impact) => totalResources + impact.sourcePathCount,
                 0
               )}{' '}
               个本地或 STRM 源文件，并移除{' '}
               {[...removalImpacts.values()].reduce(
-                (totalResources, impact) => totalResources + impact.resourceIds.length,
+                (totalResources, impact) => totalResources + impact.resourceCount,
                 0
               )}{' '}
               条资源记录

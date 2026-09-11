@@ -1,0 +1,456 @@
+diff --git a/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx b/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx
+index 7bce2ab..dd6c723 100644
+--- a/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx
++++ b/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx
+@@ -1,11 +1,13 @@
+-import { useEffect, useMemo, useState } from 'react'
++import { useEffect, useMemo, useRef, useState } from 'react'
+ import { SearchX } from 'lucide-react'
+-import type { ActressListItem } from '@shared/actressTypes'
++import type { ActressPickerItem } from '@shared/actressTypes'
++import { parseTestTargetList } from '@shared/pluginDevKindProfile'
+ import type { Video } from '@shared/videoTypes'
+ import { api, resolveMediaSrc } from '../../api'
+ import { ALL_CATALOG_SCOPE } from '../../query/catalogScopes'
+ import { useDebounce } from '../../hooks/useDebounce'
+ import Modal from '../Modal'
++import Button from '../Button'
+ import ActressName from '../ActressName'
+ import ActressAvatar from '../ActressAvatar'
+ import EmptyState from '../EmptyState'
+@@ -20,10 +22,10 @@ interface Props {
+ }
+ 
+ const VIDEO_RESULT_LIMIT = 60
+-const ACTRESS_RESULT_LIMIT = 80
++const ACTRESS_RESULT_LIMIT = 40
+ 
+ function normalizeTarget(value: string): string {
+-  return value.trim().toLowerCase()
++  return value.normalize('NFKC').trim().replace(/\p{White_Space}+/gu, ' ').toLowerCase()
+ }
+ 
+ function formatDate(value: string | null): string {
+@@ -35,7 +37,11 @@ function titleForKind(kind: PluginKind): string {
+   return kind === 'actress' ? '选择测试演员' : '选择测试番号'
+ }
+ 
+-export default function PluginDevMediaTargetPicker({
++export default function PluginDevMediaTargetPicker(props: Props): JSX.Element {
++  return <TargetPickerSession key={props.kind} {...props} />
++}
++
++function TargetPickerSession({
+   kind,
+   selectedValues,
+   onAdd,
+@@ -45,31 +51,76 @@ export default function PluginDevMediaTargetPicker({
+   const debouncedSearch = useDebounce(search, 250)
+   const [videos, setVideos] = useState<Video[]>([])
+   const [videoTotal, setVideoTotal] = useState(0)
+-  const [actresses, setActresses] = useState<ActressListItem[]>([])
+-  const [loading, setLoading] = useState(false)
++  const [actresses, setActresses] = useState<ActressPickerItem[]>([])
++  const [loading, setLoading] = useState(true)
++  const [offset, setOffset] = useState(0)
++  const [hasMore, setHasMore] = useState(false)
++  const [retry, setRetry] = useState(0)
++  const [selectionError, setSelectionError] = useState<string | null>(null)
++  const [resolvingSelection, setResolvingSelection] = useState(false)
++  const [choiceError, setChoiceError] = useState<string | null>(null)
++  const [addingId, setAddingId] = useState<number | null>(null)
++  const [resolvedNames, setResolvedNames] = useState<Record<number, string>>({})
++  const choiceEpoch = useRef(0)
++  const choiceBusy = useRef(false)
++  const mounted = useRef(true)
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+   const [error, setError] = useState<string | null>(null)
+   const selectedSet = useMemo(
+     () => new Set(selectedValues.map((value) => normalizeTarget(value))),
+     [selectedValues]
+   )
+ 
++  const latestSelection = useRef(selectedSet)
++  latestSelection.current = selectedSet
++  const latestTargetCount = useRef(selectedValues.length)
++  latestTargetCount.current = selectedValues.length
++  const latestAdd = useRef(onAdd)
++  latestAdd.current = onAdd
++  const invalidateChoice = (): void => {
++    choiceEpoch.current++
++    choiceBusy.current = false
++    setAddingId(null)
++    setChoiceError(null)
++  }
++  const close = (): void => { choiceEpoch.current++; onClose() }
++  const movePage = (nextOffset: number): void => {
++    invalidateChoice(); setActresses([]); setHasMore(false); setLoading(true); setOffset(nextOffset)
++  }
++  const chooseActress = async (id: number): Promise<void> => {
++    if (choiceBusy.current) return
++    choiceBusy.current = true
++    const epoch = ++choiceEpoch.current
++    setAddingId(id); setChoiceError(null)
++    try {
++      const name = await api.actresses.testTargetGet(id)
++      if (!mounted.current || epoch !== choiceEpoch.current) return
++      if (name === null) throw new Error('该演员已不存在或不再符合候选条件，请刷新列表')
++      const parsed = parseTestTargetList(name)
++      if (parsed.length !== 1 || parsed[0] !== name) throw new Error('该演员名称包含目标分隔符，无法作为单个测试目标添加')
++      if (!latestSelection.current.has(normalizeTarget(name)) && latestTargetCount.current >= 8) throw new Error('每次最多运行 8 个目标')
++      setResolvedNames(current => ({ ...Object.fromEntries(Object.entries(current).filter(([key]) => Number(key) !== id).slice(-99)), [id]: name }))
++      if (!latestSelection.current.has(normalizeTarget(name))) latestAdd.current(name)
++    } catch (error) {
++      if (mounted.current && epoch === choiceEpoch.current) setChoiceError(error instanceof Error ? error.message : String(error))
++    } finally {
++      if (mounted.current && epoch === choiceEpoch.current) { choiceBusy.current = false; setAddingId(null) }
++    }
++  }
++
+   useEffect(() => {
+     let cancelled = false
+     setLoading(true)
+     setError(null)
++    setActresses([]); setVideos([]); setHasMore(false)
++    if (search !== debouncedSearch) return () => { cancelled = true }
+ 
+     const load = async (): Promise<void> => {
+       if (kind === 'actress') {
+-        const items = await api.actresses.list(
+-          debouncedSearch.trim(),
+-          'female',
+-          'video_count',
+-          'desc'
+-        )
++        const page = await api.actresses.testTargetPage({search: debouncedSearch.trim(),limit: ACTRESS_RESULT_LIMIT,offset})
+         if (cancelled) return
+-        setActresses(items.slice(0, ACTRESS_RESULT_LIMIT))
+-        setVideos([])
+-        setVideoTotal(items.length)
++        setActresses(page.items)
++        setHasMore(page.hasMore)
+         return
+       }
+ 
+@@ -97,10 +148,34 @@ export default function PluginDevMediaTargetPicker({
+     return () => {
+       cancelled = true
+     }
+-  }, [debouncedSearch, kind])
++  }, [debouncedSearch, search, kind, offset, retry])
++
++  useEffect(() => {
++    let cancelled = false
++    const uncertain = selectedSet.size === 0 ? [] : actresses.filter(item => Array.from(item.main_name).length > 128)
++    setSelectionError(null)
++    setResolvingSelection(uncertain.length > 0)
++    if (uncertain.length === 0) return
++    let next = 0
++    const resolved: Record<number, string> = {}
++    let failed = false
++    const worker = async (): Promise<void> => {
++      while (!cancelled && next < uncertain.length) {
++        const item = uncertain[next++]
++        try { resolved[item.id] = await api.actresses.testTargetGet(item.id) ?? '' }
++        catch { resolved[item.id] = ''; failed = true }
++      }
++    }
++    void Promise.all(Array.from({ length: Math.min(4, uncertain.length) }, worker)).then(() => {
++      if (cancelled) return
++      setResolvedNames(current => ({ ...Object.fromEntries(Object.entries(current).filter(([key]) => !(key in resolved)).slice(-(100 - uncertain.length))), ...resolved }))
++      setResolvingSelection(false)
++      if (failed) setSelectionError('部分长名称的已选状态无法确认，请重试')
++    })
++    return () => { cancelled = true }
++  }, [actresses, selectedSet])
+ 
+   const resultCount = kind === 'actress' ? actresses.length : videos.length
+-  const totalCount = kind === 'actress' ? videoTotal : videoTotal
+ 
+   return (
+     <Modal
+@@ -111,52 +186,58 @@ export default function PluginDevMediaTargetPicker({
+       bodyOverflow="hidden"
+       confirmText="完成"
+       cancelText="关闭"
+-      onConfirm={onClose}
+-      onCancel={onClose}
++      onConfirm={close}
++      onCancel={close}
+     >
+       <div className="plugin-dev-target-picker">
+         <div className="plugin-dev-target-picker-head">
+           <input
+             className="text-input"
+             value={search}
++            aria-label="搜索测试目标"
++            maxLength={kind === 'actress' ? 256 : undefined}
+             placeholder={kind === 'actress' ? '搜索演员名或别名…' : '搜索番号、标题或演员…'}
+             autoFocus
+-            onChange={(event) => setSearch(event.target.value)}
++            onChange={(event) => { invalidateChoice(); setActresses([]); setVideos([]); setLoading(true); setOffset(0); setSearch(event.target.value) }}
+           />
+           <span className="plugin-dev-target-picker-count">
+-            {loading ? '加载中…' : `${resultCount}/${totalCount}`}
++            {loading ? '加载中…' : kind === 'actress' ? `本页 ${resultCount} 名候选` : `${resultCount}/${videoTotal}`}
+           </span>
+         </div>
+ 
+-        {error ? <div className="plugin-dev-target-picker-error">{error}</div> : null}
++        {error ? <div className="plugin-dev-target-picker-error" role="alert">{error} <Button size="sm" onClick={() => { invalidateChoice(); setLoading(true); setRetry(value => value + 1) }}>重试</Button></div> : null}
++        {selectionError ? <div className="plugin-dev-target-picker-error" role="alert">{selectionError} <Button size="sm" onClick={() => setRetry(value => value + 1)}>重试</Button></div> : null}
++        {choiceError ? <div className="plugin-dev-target-picker-error" role="alert">{choiceError}</div> : null}
+ 
+         <div className="plugin-dev-target-picker-list" role="list">
+           {kind === 'actress'
+             ? actresses.map((actress) => {
+-                const selected = selectedSet.has(normalizeTarget(actress.main_name))
++                const exactName = resolvedNames[actress.id] ?? (Array.from(actress.main_name).length <= 128 ? actress.main_name : '')
++                const selected = exactName !== '' && selectedSet.has(normalizeTarget(exactName))
+                 return (
+                   <button
+                     key={actress.id}
+                     type="button"
+                     className={`plugin-dev-target-picker-row${selected ? ' is-selected' : ''}`}
+-                    disabled={selected}
+-                    onClick={() => onAdd(actress.main_name)}
++                    disabled={selected || addingId !== null || resolvingSelection}
++                    aria-label={`添加测试演员 ${actress.main_name}`}
++                    onClick={() => void chooseActress(actress.id)}
+                   >
+                     <ActressAvatar
+                       src={resolveMediaSrc(actress.avatar_path)}
+                       name={actress.main_name}
+-                      gender={actress.gender}
++                      gender="female"
+                       className="plugin-dev-target-picker-avatar"
+                       decorative
+                     />
+                     <span className="plugin-dev-target-picker-main">
+                       <strong>
+-                        <ActressName name={actress.main_name} gender={actress.gender} />
++                        <ActressName name={actress.main_name} gender="female" />
+                       </strong>
+-                      <small>{actress.video_count} 部影片</small>
++                      
+                     </span>
+                     <span className="plugin-dev-target-picker-action">
+-                      {selected ? '已添加' : '添加'}
++                      {addingId === actress.id ? '读取中…' : resolvingSelection ? '核对中…' : selected ? '已添加' : '添加'}
+                     </span>
+                   </button>
+                 )
+@@ -196,6 +277,11 @@ export default function PluginDevMediaTargetPicker({
+             />
+           ) : null}
+         </div>
++        {kind === 'actress' ? <div className="plugin-dev-target-picker-pagination" aria-label="测试演员分页">
++          <Button size="sm" disabled={loading || offset === 0} onClick={() => movePage(Math.max(0, offset - ACTRESS_RESULT_LIMIT))}>上一页</Button>
++          <span>第 {Math.floor(offset / ACTRESS_RESULT_LIMIT) + 1} 页</span>
++          <Button size="sm" disabled={loading || !hasMore} onClick={() => movePage(offset + ACTRESS_RESULT_LIMIT)}>下一页</Button>
++        </div> : null}
+       </div>
+     </Modal>
+   )
+diff --git a/src/renderer/src/styles/plugin-development-workbench.css b/src/renderer/src/styles/plugin-development-workbench.css
+index 19d0c9d..2eb05cb 100644
+--- a/src/renderer/src/styles/plugin-development-workbench.css
++++ b/src/renderer/src/styles/plugin-development-workbench.css
+@@ -205,7 +205,7 @@
+ }
+ 
+ .plugin-dev-target-picker-poster,
+-.plugin-dev-target-picker-avatar {
++.plugin-dev-target-picker-row .plugin-dev-target-picker-avatar {
+   position: relative;
+   width: 38px;
+   height: 38px;
+@@ -221,7 +221,7 @@
+   font-weight: 800;
+ }
+ 
+-.plugin-dev-target-picker-avatar {
++.plugin-dev-target-picker-row .plugin-dev-target-picker-avatar {
+   border-radius: 50%;
+ }
+ 
+@@ -1398,3 +1398,13 @@
+   cursor: not-allowed;
+   opacity: 0.55;
+ }
++
++
++.plugin-dev-target-picker-pagination {
++  flex: 0 0 auto;
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--form-label-gap);
++  color: var(--text-secondary);
++}
+diff --git a/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.test.tsx b/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.test.tsx
+new file mode 100644
+index 0000000..2391044
+--- /dev/null
++++ b/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.test.tsx
+@@ -0,0 +1,93 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React, { useState } from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import type { ElectronApi } from '../../../../preload/index'
++import type { ActressPickerPage, ActressPickerQuery } from '@shared/actressTypes'
++const fullName='A'.repeat(150)
++const rows=Array.from({length:101},(_,i)=>({id:i+1,main_name:i===0?'A'.repeat(128)+'…':`Candidate-${String(i+1).padStart(3,'0')}`,avatar_path:null}))
++function deferred<T>(){let resolve!:(v:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes});return {promise,resolve}}
++let pageHold:ReturnType<typeof deferred<ActressPickerPage>>|null=null,choiceHold:ReturnType<typeof deferred<string|null>>|null=null
++let pageOverride: typeof rows | null=null
++let getFailure=false
++let pageFailure=false,choiceValue:string|null|undefined,choices=0,closed=0
++const calls:ActressPickerQuery[]=[],added:string[]=[],videoCalls:unknown[]=[]
++function page(q:ActressPickerQuery):ActressPickerPage {const all=(pageOverride??rows).filter(row=>!q.search||row.main_name.includes(q.search));const offset=q.offset??0;return {items:all.slice(offset,offset+40),hasMore:all.length>offset+40,offset}}
++const fake={actresses:{list:()=>{throw new Error('Full actors forbidden')},get:()=>{throw new Error('Wide actor detail forbidden')},testTargetPage:async(q:ActressPickerQuery)=>{calls.push(q);if(pageFailure){pageFailure=false;throw new Error('Page failed')}if(pageHold)return pageHold.promise;return page(q)},testTargetGet:async(id:number)=>{choices++;if(getFailure)throw new Error('Identity failed');if(choiceHold)return choiceHold.promise;return choiceValue!==undefined?choiceValue:id===1?fullName:rows[id-1].main_name}},videos:{list:async(...args:unknown[])=>{videoCalls.push(args);return {items:[],total:0}}}} as unknown as ElectronApi
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:fake})})
++Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}}}})
++let Component:typeof import('./PluginDevMediaTargetPicker')['default'],renderer:TestRenderer.ReactTestRenderer|undefined
++function Harness({kind='actress',initial=[]}:{kind?:'actress'|'video';initial?:string[]}){const[selected,setSelected]=useState(initial);const[open,setOpen]=useState(true);return open?<Component kind={kind} selectedValues={selected} onAdd={value=>{added.push(value);setSelected(previous=>[...previous,value])}} onClose={()=>{closed++;setOpen(false)}}/>:null}
++const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,15))})}
++async function mount(initial:string[]=[]){Component=(await import('./PluginDevMediaTargetPicker')).default;await act(async()=>{renderer=TestRenderer.create(<Harness initial={initial}/>)});await settle()}
++const options=()=>renderer!.root.findAll(node=>node.type==='button'&&String(node.props['aria-label']??'').startsWith('添加测试演员'))
++function label(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:label(child)).join('')}
++const button=(name:string)=>renderer!.root.findAllByType('button').find(node=>label(node)===name)!
++async function click(node:TestRenderer.ReactTestInstance){await act(async()=>node.props.onClick());await settle()}
++async function search(value:string){await act(async()=>renderer!.root.findByProps({'aria-label':'搜索测试目标'}).props.onChange({target:{value}}))}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;pageHold=null;choiceHold=null;pageFailure=false;pageOverride=null;getFailure=false;choiceValue=undefined;choices=0;closed=0;calls.length=0;added.length=0;videoCalls.length=0})
++it('pages40/40/21, resolves full names and retains selected long identities when returning',async()=>{
++ await mount();assert.equal(options().length,40)
++ await click(options()[0]);assert.deepEqual(added,[fullName]);assert.equal(options()[0].props.disabled,true)
++ await click(button('下一页'));assert.equal(options().length,40)
++ await click(button('下一页'));assert.equal(options().length,21)
++ await click(button('上一页'));await click(button('上一页'));assert.equal(options()[0].props.disabled,true)
++ assert.deepEqual(calls.map(q=>q.offset),[0,40,80,40,0])
++})
++it('retries page failures and isolates a stale page during raw search debounce',async()=>{
++ await mount();pageFailure=true;await click(button('下一页'));assert.equal(options().length,0)
++ await click(button('重试'));assert.equal(options().length,40)
++ pageHold=deferred();await click(button('下一页'));const old=pageHold;pageHold=null
++ await search('Candidate-100');old.resolve(page({offset:80}));await settle();assert.equal(options().length,0)
++ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,280))});await settle()
++ assert.equal(options().length,1);assert.equal(calls.at(-1)!.offset,0)
++})
++it('ignores choice completion after search or close and suppresses same-tick duplicate clicks',async()=>{
++ await mount();choiceHold=deferred();const row=options()[0]
++ await act(async()=>{row.props.onClick();row.props.onClick()});assert.equal(choices,1)
++ const first=choiceHold;choiceHold=null;await search('Candidate-002');first.resolve(fullName);await settle();assert.deepEqual(added,[])
++ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,280))});await settle()
++ choiceHold=deferred();await click(options()[0]);const second=choiceHold
++ await click(button('完成'));second.resolve('Candidate-002');await settle()
++ assert.equal(closed,1);assert.deepEqual(added,[])
++})
++it('reports missing or unrepresentable names without adding incorrect targets',async()=>{
++ await mount();choiceValue=null;await click(options()[0]);assert.deepEqual(added,[])
++ choiceValue='Doe, Jane';await click(options()[0]);assert.deepEqual(added,[])
++ assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(node=>label(node).includes('分隔符')))
++ choiceValue='Valid';await click(options()[0]);assert.deepEqual(added,['Valid'])
++})
++it('enforces existing eight-target limit and preserves video query behavior after kind switch',async()=>{
++ await mount(Array.from({length:8},(_,i)=>'Selected-'+(i%4)));await click(options()[0]);assert.deepEqual(added,[])
++ assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(node=>label(node).includes('8 个目标')))
++ await act(async()=>renderer!.update(<Harness kind="video"/>));await settle()
++ assert.equal(videoCalls.length,1);assert.equal(options().length,0)
++ assert.equal((videoCalls[0] as unknown[])[1] && ((videoCalls[0] as unknown[])[1] as {limit:number}).limit,60)
++})
++
++it('recognizes existing long targets on a fresh mount without confusing a common preview prefix',async()=>{
++ await mount([fullName]);assert.equal(options()[0].props.disabled,true)
++ await act(async()=>renderer?.unmount());renderer=undefined
++ await mount(['A'.repeat(149)+'B']);assert.equal(options()[0].props.disabled,false)
++ await click(options()[0]);assert.deepEqual(added,[fullName])
++})
++it('ignores a held actress choice after switching to video',async()=>{
++ await mount();choiceHold=deferred();await click(options()[0]);const held=choiceHold
++ await act(async()=>renderer!.update(<Harness kind="video"/>));await settle()
++ held.resolve(fullName);await settle();assert.deepEqual(added,[])
++ assert.equal(videoCalls.length,1)
++})
++
++it('bounds long-label reconciliation concurrency and stops scheduling after kind switch',async()=>{
++ pageOverride=rows.slice(0,40).map(row=>({...row,main_name:'A'.repeat(128)+'…'}))
++ choiceHold=deferred();await mount([fullName]);assert.equal(choices,4)
++ const held=choiceHold
++ await act(async()=>renderer!.update(<Harness kind="video"/>));held.resolve(fullName);await settle()
++ assert.equal(choices,4);assert.deepEqual(added,[])
++})
++it('retries failed long-label selection reconciliation',async()=>{
++ getFailure=true;await mount([fullName])
++ assert.ok(renderer!.root.findAllByProps({role:'alert'}).some(node=>label(node).includes('已选状态无法确认')))
++ getFailure=false;await click(button('重试'));assert.equal(options()[0].props.disabled,true)
++})
+diff --git a/scripts/performance/plugin-test-picker-ui.mjs b/scripts/performance/plugin-test-picker-ui.mjs
+new file mode 100644
+index 0000000..c799114
+--- /dev/null
++++ b/scripts/performance/plugin-test-picker-ui.mjs
+@@ -0,0 +1,61 @@
++/** Actual plugin target picker and styles, synthetic IPC, no user database. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-plugin-target-ui-'))
++const output=path.resolve(process.env.JAVDEX_PLUGIN_TARGET_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__calls=[];window.__added=[];window.__closed=0;
++const all=Array.from({length:101},(_,i)=>({id:i+1,main_name:i===0?'A'.repeat(128)+'…':'Candidate-'+String(i+1).padStart(3,'0'),avatar_path:null}));
++window.api={actresses:{list:()=>{throw new Error('Full actors forbidden')},testTargetPage:async query=>{window.__calls.push(query);if(window.__failPage){window.__failPage=false;throw new Error('Page failed')}const rows=all.filter(item=>!query.search||item.main_name.includes(query.search));return {items:rows.slice(query.offset,query.offset+40),offset:query.offset,hasMore:rows.length>query.offset+40}},testTargetGet:async id=>{if(window.__hold)await new Promise(resolve=>window.__release=resolve);if(window.__missing)return null;return id===1?'A'.repeat(150):all[id-1].main_name}}};
++const Component=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx'))})).default;
++function App(){const[values,setValues]=useState([]),[open,setOpen]=useState(true);return open?<Component kind="actress" selectedValues={values} onAdd={value=>{window.__added.push(value);setValues(old=>[...old,value])}} onClose={()=>{window.__closed++;setOpen(false)}}/>:<button onClick={()=>setOpen(true)}>重新打开</button>}
++createRoot(document.getElementById('root')).render(<App/>);
++`)
++let server,browser;const results=[]
++try {
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
++  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
++  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
++ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
++  const page=await browser.newPage({viewport}),errors=[];page.on('pageerror',error=>errors.push(error.message))
++  await page.goto(server.resolvedUrls.local[0]);const rows=page.locator('.plugin-dev-target-picker-row')
++  await page.waitForFunction(()=>document.querySelectorAll('.plugin-dev-target-picker-row').length===40)
++  const rowGeometry=await page.evaluate(()=>Array.from(document.querySelectorAll('.plugin-dev-target-picker-row')).slice(0,5).map(row=>{const r=row.getBoundingClientRect(),a=row.querySelector('.plugin-dev-target-picker-avatar').getBoundingClientRect();return {rowTop:r.top,rowBottom:r.bottom,avatarTop:a.top,avatarBottom:a.bottom,avatarWidth:a.width,avatarRadius:getComputedStyle(row.querySelector('.plugin-dev-target-picker-avatar')).borderRadius}}))
++  for(const item of rowGeometry){assert.ok(item.avatarTop>=item.rowTop&&item.avatarBottom<=item.rowBottom,'avatar must fit its candidate row');assert.equal(item.avatarRadius,'50%','actor avatar must remain circular')}
++
++  await rows.first().click();await page.waitForFunction(()=>window.__added.length===1)
++  assert.equal(await page.evaluate(()=>window.__added[0]),'A'.repeat(150))
++  await page.getByRole('button',{name:'下一页',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.plugin-dev-target-picker-row')?.textContent.includes('Candidate-041'))
++  await page.getByRole('button',{name:'下一页',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.plugin-dev-target-picker-row').length===21)
++  await page.getByRole('button',{name:'上一页',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.plugin-dev-target-picker-row')?.textContent.includes('Candidate-041'))
++  await page.getByRole('button',{name:'上一页',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.plugin-dev-target-picker-row')?.disabled)
++  const search=page.getByRole('textbox',{name:'搜索测试目标'})
++  await search.fill('Candidate-100');await page.waitForFunction(()=>document.querySelectorAll('.plugin-dev-target-picker-row').length===1)
++  await search.fill('');await page.waitForFunction(()=>document.querySelectorAll('.plugin-dev-target-picker-row').length===40)
++  await page.evaluate(()=>window.__failPage=true);await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'重试',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.plugin-dev-target-picker-row').length===40)
++  await page.evaluate(()=>window.__missing=true);await rows.first().click();await page.getByRole('alert').waitFor()
++  const pager=await page.locator('.plugin-dev-target-picker-pagination').boundingBox();assert.ok(pager&&pager.y>=0&&pager.y+pager.height<=viewport.height)
++  const geometry=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth}));assert.equal(geometry.width,geometry.scrollWidth)
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-error.png`)})
++  await page.evaluate(()=>{window.__missing=false;window.__hold=true});await rows.first().click()
++  await page.getByRole('button',{name:'完成',exact:true}).click();await page.evaluate(()=>window.__release());await page.waitForTimeout(20)
++  assert.equal(await page.evaluate(()=>window.__added.length),1);assert.deepEqual(errors,[])
++  await page.evaluate(()=>window.__hold=false);await page.getByRole('button',{name:'重新打开'}).click()
++  await page.waitForFunction(()=>document.querySelector('.plugin-dev-target-picker-row')?.classList.contains('is-selected'))
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++
++  results.push({viewport,geometry,pager,rowGeometry,calls:await page.evaluate(()=>window.__calls),errors});await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results))
++}finally{await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}

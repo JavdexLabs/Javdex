@@ -1,0 +1,20 @@
+{
+  "results": [
+    {
+      "entries": 1000,
+      "stateBytes": 110786,
+      "journalBytes": 131780
+    },
+    {
+      "entries": 10000,
+      "stateBytes": 1127788,
+      "journalBytes": 1337780
+    },
+    {
+      "entries": 100000,
+      "stateBytes": 11477790,
+      "journalBytes": 13577780
+    }
+  ],
+  "scope": "Actual in-memory SQLite logical JSON payload bytes from triggers and stored rows; outer transaction amortizes test commits. Not WAL/physical device writes, Windows/HDD latency or UI memory. Full pagewise recovery compared all entries."
+}

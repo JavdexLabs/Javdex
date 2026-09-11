@@ -1,0 +1,21 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bm-target.log": "4002a4519b119f7457cff0d540314c3f454eb9acf5de2ae30b3dfb0c8448faab",
+    "batch-bm-label-red.log": "bed0ac2a48207532950acdfa68cc9f8efc79c0b30097249a809e91648481af69",
+    "batch-bm-full.log": "19ab712c191e10eaa1f4a3ae2b4d340c44e0d4e72fe05598cfd78fd9af45333e",
+    "batch-bm-build.log": "4d6dc0bbd8bea44d4a952c95ca4da6d8711379e7b32991b8714f179022f46469",
+    "batch-bm-ui-1000x640-works.png": "587587bb2a4a60cdfa58ad84faf43985250558e6f184ae7a066b0f56df066141",
+    "batch-bm-ui-1440x900-editor.png": "68163d16b06af4c484b23634a8d93b41aa71f7cce59aa03f33d06a5b7be5ea7d",
+    "batch-bm-ui-1440x900-works.png": "d3e2306c6150dd7500c1a5ecd6f208c678787cffc8058e1aec87b4a3f62c48f7",
+    "batch-bm-ui-results.json": "1873addc155f8d661ad023414d340370933b59ea9ee8a2f77acebdea185ffd22",
+    "batch-bm-ui-1000x640-editor.png": "1186773b0f87806ff3dbc3ec5bf4d3a6ef0747a0de893e87d3ce407b1cc90f5c",
+    "batch-bm-avatar-gallery.patch": "d490e193d02c5fac0098528e0a40243894a7a184eb0e1372f8dd49fd8e9d65e4",
+    "batch-bm-review.md": "ce62a8ec04b2f25a39bc9b3a59165898af785271eedc34cab0029ad94352c4dd"
+  },
+  "notes": [
+    "Selected cumulative diff and complete new files; depends on earlier batches.",
+    "52focused; full2320pass1skip0fail; build and two-viewport browser passed.",
+    "Avatar photo candidates bounded; main gallery/profile migration and full15/42scope remain incomplete."
+  ]
+}

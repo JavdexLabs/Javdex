@@ -1,0 +1,290 @@
+{
+  "videos": 100000,
+  "memberships": 150000,
+  "results": [
+    {
+      "operation": "global-list",
+      "route": "main",
+      "mode": "invalidated",
+      "durationsMs": [
+        143.92954099999997,
+        145.23479200000008,
+        144.47174999999993
+      ],
+      "maxTimerGapsMs": [
+        143.98470900000007,
+        145.27295800000013,
+        144.50983300000007
+      ],
+      "timerTicks": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "operation": "global-list",
+      "route": "main",
+      "mode": "cached",
+      "durationsMs": [
+        0.2115840000001299,
+        0.16083400000002257,
+        0.20650000000000546
+      ],
+      "maxTimerGapsMs": [
+        6.296207999999979,
+        6.3002500000000055,
+        6.300334000000021
+      ],
+      "timerTicks": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "operation": "global-list",
+      "route": "worker",
+      "mode": "invalidated",
+      "durationsMs": [
+        187.4192919999998,
+        145.074208,
+        143.31933299999992
+      ],
+      "maxTimerGapsMs": [
+        6.779166000000032,
+        6.297125000000051,
+        6.297083000000157
+      ],
+      "timerTicks": [
+        32,
+        26,
+        25
+      ]
+    },
+    {
+      "operation": "global-list",
+      "route": "worker",
+      "mode": "cached",
+      "durationsMs": [
+        0.5337500000000546,
+        0.575832999999875,
+        0.4723750000000564
+      ],
+      "maxTimerGapsMs": [
+        5.648874999999862,
+        5.467957999999953,
+        5.356999999999971
+      ],
+      "timerTicks": [
+        1,
+        2,
+        2
+      ]
+    },
+    {
+      "operation": "home",
+      "route": "main",
+      "mode": "invalidated",
+      "durationsMs": [
+        92.97633300000007,
+        94.15779199999997,
+        95.18729199999962
+      ],
+      "maxTimerGapsMs": [
+        92.99274999999989,
+        94.17024999999967,
+        95.21749999999975
+      ],
+      "timerTicks": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "operation": "home",
+      "route": "main",
+      "mode": "cached",
+      "durationsMs": [
+        0.1099170000002232,
+        0.06604199999992488,
+        0.0898749999996653
+      ],
+      "maxTimerGapsMs": [
+        6.304749999999785,
+        6.2860420000001795,
+        6.294374999999945
+      ],
+      "timerTicks": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "operation": "home",
+      "route": "worker",
+      "mode": "invalidated",
+      "durationsMs": [
+        89.60091700000021,
+        79.71029200000021,
+        89.72012499999983
+      ],
+      "maxTimerGapsMs": [
+        6.580916999999772,
+        6.94241699999975,
+        6.288000000000011
+      ],
+      "timerTicks": [
+        16,
+        15,
+        16
+      ]
+    },
+    {
+      "operation": "home",
+      "route": "worker",
+      "mode": "cached",
+      "durationsMs": [
+        0.32804099999975733,
+        0.2641249999996944,
+        0.3066249999997126
+      ],
+      "maxTimerGapsMs": [
+        5.366207999999915,
+        6.522875000000113,
+        6.49862499999972
+      ],
+      "timerTicks": [
+        1,
+        2,
+        2
+      ]
+    },
+    {
+      "operation": "years",
+      "route": "main",
+      "mode": "invalidated",
+      "durationsMs": [
+        87.2038749999997,
+        88.03870800000004,
+        90.93550000000005
+      ],
+      "maxTimerGapsMs": [
+        87.24516700000004,
+        88.06887499999993,
+        90.94670799999994
+      ],
+      "timerTicks": [
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "operation": "years",
+      "route": "main",
+      "mode": "cached",
+      "durationsMs": [
+        0.10854100000005928,
+        0.06712500000003274,
+        0.10620799999969677
+      ],
+      "maxTimerGapsMs": [
+        6.295374999999694,
+        6.367833000000246,
+        5.043458999999984
+      ],
+      "timerTicks": [
+        2,
+        1,
+        2
+      ]
+    },
+    {
+      "operation": "years",
+      "route": "worker",
+      "mode": "invalidated",
+      "durationsMs": [
+        99.06104099999993,
+        90.47129100000029,
+        91.48204200000009
+      ],
+      "maxTimerGapsMs": [
+        6.282042000000274,
+        6.286208999999872,
+        6.29229099999975
+      ],
+      "timerTicks": [
+        18,
+        17,
+        16
+      ]
+    },
+    {
+      "operation": "years",
+      "route": "worker",
+      "mode": "cached",
+      "durationsMs": [
+        0.2521670000000995,
+        0.1758749999999054,
+        0.14350000000013097
+      ],
+      "maxTimerGapsMs": [
+        6.3775839999998425,
+        6.374166999999943,
+        6.34433399999989
+      ],
+      "timerTicks": [
+        2,
+        2,
+        2
+      ]
+    }
+  ],
+  "sqliteVersion": {
+    "version": "3.53.4"
+  },
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "caveats": [
+    "Synthetic metadata-only file database; three warm local samples, no ANALYZE, no customer data.",
+    "Invalidation includes a committed write before timing. First worker sample includes startup.",
+    "Timer gaps include scheduling and a 10 ms drain; samples are not p95 or renderer end-to-end latency.",
+    "Does not establish Windows/HDD, cold storage, sustained writer contention or hard SQL cancellation guarantees."
+  ]
+}

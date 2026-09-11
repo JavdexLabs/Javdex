@@ -1,3 +1,4 @@
+import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
 import { ExternalLink, GitMerge, ImagePlus, Layers3, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
@@ -22,13 +23,12 @@ import ClassificationDeleteModal from '../components/ClassificationDeleteModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
-import PosterCard from '../components/PosterCard'
 import SeriesEditModal from '../components/SeriesEditModal'
 import SeriesMergeModal from '../components/SeriesMergeModal'
 import SortSwitch from '../components/SortSwitch'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
+import { useCatalogVideoPage } from '../query/useCatalogVideoPage'
 import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import { seriesKeys, videoKeys } from '../query/queryKeys'
 import {
@@ -82,8 +82,9 @@ export default function SeriesDetailPage(): JSX.Element {
     (error: unknown) => toast.show(String((error as Error).message), 'error'),
     [toast]
   )
-  const { videos, total, loading, loadingMore, hasMore, loadMore, refetchSilent } =
-    useInfiniteVideoList(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
+  const videoPage =
+    useCatalogVideoPage(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
+  const { total, loading, refetchSilent } = videoPage
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`series-detail:${hash}`)
   const save = async (input: SeriesUpdateInput): Promise<void> => {
@@ -301,7 +302,11 @@ export default function SeriesDetailPage(): JSX.Element {
           <div className="organization-video-heading">关联影片</div>
           {loading ? (
             <EmptyState loading variant="compact" />
-          ) : videos.length === 0 ? (
+          ) : videoPage.error && total === 0 ? (
+            <EmptyState variant="compact" title="关联影片加载失败">
+              <Button size="sm" onClick={videoPage.retry}>重试</Button>
+            </EmptyState>
+          ) : total === 0 ? (
             <EmptyState
               variant="compact"
               icon={<Layers3 {...UI_ICON_SM} />}
@@ -310,24 +315,7 @@ export default function SeriesDetailPage(): JSX.Element {
             />
           ) : (
             <>
-              <div className="poster-grid organization-video-grid">
-                {videos.map((video) => (
-                  <PosterCard key={video.id} video={video} />
-                ))}
-              </div>
-              {hasMore && (
-                <Button
-                  type="button"
-                  variant="ghost"
-
-                  size="sm"
-                  className="organization-load-more"
-                  disabled={loadingMore}
-                  onClick={loadMore}
-                >
-                  {loadingMore ? '加载中…' : '加载更多'}
-                </Button>
-              )}
+              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={hash} />
             </>
           )}
         </ListSurface>

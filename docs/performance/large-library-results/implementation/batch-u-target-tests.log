@@ -1,0 +1,57 @@
+▶ AgentRunStore
+  ✔ returns every durable non-closed run so each use case can apply its recovery policy (3.893417ms)
+  ✔ persists a frozen config without serializing credentials or functions (0.551125ms)
+  ✔ encrypts recovery payloads and fails closed on integrity damage (0.9345ms)
+  ✔ accepts an idempotent operation once and settles only named command ids (0.861875ms)
+  ✔ keeps repeated product events from the same operation in append order (0.9215ms)
+  ✔ does not overwrite a terminal runtime fault when the runtime subsequently settles (0.955416ms)
+  ✔ allows one rebuild attempt per recovery generation (0.561167ms)
+  ✔ records artifact refs in the product journal and fails closed on damaged refs (0.76775ms)
+✔ AgentRunStore (9.942542ms)
+▶ Agent product journal pagination
+  ✔ reads the last cursor through the run/seq index without parsing any payload in a 100k journal (106.3745ms)
+  ✔ pages with a strict size cap and no cross-run, duplicate or skipped events despite sequence gaps (20.190167ms)
+✔ Agent product journal pagination (126.657584ms)
+✔ uses the indexed journal cursor without loading history for a metadata snapshot (0.888125ms)
+▶ LibraryCurator lifecycle
+  ✔ releases its own runs without disposing the application AgentExecution (0.849041ms)
+✔ LibraryCurator lifecycle (1.163667ms)
+✔ uses the indexed journal cursor for a curator snapshot (0.468458ms)
+▶ PluginDeveloper approval and lifecycle stability
+  ✔ restores a legacy run with newly-invalid field ids as a repairable workspace (5.851458ms)
+  ✔ clears every durable plugin-development history without touching other Agent use cases (1.133375ms)
+  ✔ refuses to clear history while a plugin-development operation is running (0.312667ms)
+  ✔ discards unrecoverable plugin-development history without touching recoverable runs (3.905792ms)
+  ✔ waits for a slow terminal release before an immediate continuation reopens the run (0.955875ms)
+  ✔ materializes a terminal workspace before lazy continuation projects native file tools (3.523458ms)
+  ✔ projects Pi native file tools into the durable product timeline (2.906291ms)
+  ✔ records exactly one domain error when a runtime fault transitions the run to failed (0.180667ms)
+  ✔ surfaces an unpersistable runtime fault and resolves the active operation (0.194542ms)
+  ✔ publishes the reduced active context immediately after Pi compaction (0.165625ms)
+  ✔ keeps a transient invalid workspace recoverable and resyncs after a valid rewrite (4.404708ms)
+  ✔ streams provider reasoning and answer while persisting each only once per completed turn (73.056208ms)
+  ✔ bounds one displayed reasoning block and reports the original character count (1.976ms)
+  ✔ revokes an approved permit when Pi rejects the approval continuation (0.220584ms)
+  ✔ does not consume an approval while the operation that emitted waiting_user is still settling (0.086375ms)
+  ✔ binds a typed choice to the exact request without treating it as user feedback (10.799708ms)
+  ✔ resumes a typed browser interaction without turning completion into defect feedback (0.095125ms)
+  ✔ keeps a mechanically ready artifact waiting for user after Pi settles (3.612ms)
+  ✔ requires real feedback before continuing a mechanically ready artifact (3.471292ms)
+  ✔ keeps readiness for dev-notes edits but invalidates it for package edits (3.602834ms)
+  ✔ does not run hidden production execution when Pi settles without a current artifact (2.711875ms)
+  ✔ projects a model-turn limit into waiting_user/working without running a hidden check (2.585958ms)
+  ✔ allows installation only for the exact full production execution artifact (0.23ms)
+  ✔ marks the session completed only after the accepted artifact is installed (0.207541ms)
+  ✔ adopts the installed display name when install renames to avoid a conflict (3.11525ms)
+  ✔ persists the renamed installed package onto settled product state (6.733ms)
+  ✔ releases only PluginDeveloper-owned runs during application disposal (0.134791ms)
+✔ PluginDeveloper approval and lifecycle stability (136.903916ms)
+✔ uses the indexed journal cursor for an active plugin snapshot (0.273125ms)
+ℹ tests 41
+ℹ suites 4
+ℹ pass 41
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 629.195792

@@ -462,3 +462,20 @@ describe('settingsStore privacy mode', () => {
     assert.deepEqual(getSettings().privacyModeScopes, [])
   })
 })
+
+describe('close-to-tray setting', () => {
+  it('defaults off and persists an explicit choice across reloads', () => {
+    writeSettings({})
+    assert.equal(getSettings().closeToTray, false)
+    updateSettings({ closeToTray: true })
+    resetSettingsCacheForTests()
+    assert.equal(getSettings().closeToTray, true)
+    updateSettings({ closeToTray: false })
+    resetSettingsCacheForTests()
+    assert.equal(getSettings().closeToTray, false)
+  })
+  it('does not enable tray hiding from malformed legacy values', () => {
+    writeSettings({ closeToTray: 'true' })
+    assert.equal(getSettings().closeToTray, false)
+  })
+})

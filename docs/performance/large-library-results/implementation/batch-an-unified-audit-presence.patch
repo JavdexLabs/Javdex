@@ -1,0 +1,1139 @@
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..83a568b 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -379,6 +386,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -507,6 +515,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -634,6 +650,11 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +669,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +680,17 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/main/ipc/scanHandlers.test.ts b/src/main/ipc/scanHandlers.test.ts
+index 3432e37..4f209dc 100644
+--- a/src/main/ipc/scanHandlers.test.ts
++++ b/src/main/ipc/scanHandlers.test.ts
+@@ -36,3 +36,9 @@ describe('scan latest IPC handler', () => {
+     assert.throws(() => handler({} as IpcMainInvokeEvent, 0), /无效的 IPC 请求参数/)
+   })
+ })
++
++it('bounds the combined audit presence request and validates its library',()=>{
++ const schema=appIpcSchemas[IPC.PENDING_AUDIT_PRESENCE]
++ assert.equal(schema.safeParse([1,{groupIds:[1],identityIds:[2],scrapeIds:[3]}]).success,true)
++ for(const args of [[0,{groupIds:[],identityIds:[],scrapeIds:[]}],[1,{groupIds:Array(51).fill(1),identityIds:Array(50).fill(1),scrapeIds:[]}],[1,{groupIds:[Number.MAX_SAFE_INTEGER+1],identityIds:[],scrapeIds:[]}],[1,{groupIds:[],identityIds:[],scrapeIds:[],sql:'anything'}]])assert.equal(schema.safeParse(args).success,false)
++})
+diff --git a/src/main/ipc/scanHandlers.ts b/src/main/ipc/scanHandlers.ts
+index 233c391..3b43286 100644
+--- a/src/main/ipc/scanHandlers.ts
++++ b/src/main/ipc/scanHandlers.ts
+@@ -11,6 +11,7 @@ import {
+   renameLibraryUnrecognizedFile
+ } from '../db/libraryScanRepo'
+ import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
++import { getPendingAuditPresence } from '../db/pendingAuditRepo'
+ import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
+ import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+ import { listVideoResources } from '../db/videoRepo'
+@@ -86,6 +87,7 @@ export function registerScanHandlers(ctx: IpcContext): void {
+     shell.showItemInFolder(filePath)
+     return { ok: true }
+   })
++  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
+   appCommandAdapter.register(IPC.PENDING_SCAN_LIST, (libraryId) =>
+     listPendingScanGroups(libraryId)
+   )
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..6a38e60 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1,3 +1,4 @@
++import type { PendingAuditIds } from '../shared/libraryTypes'
+ import type { WebAccessInput } from '../shared/webTypes'
+ import { contextBridge, ipcRenderer, webUtils } from 'electron'
+ import { IPC } from '../shared/ipc-channels'
+@@ -88,7 +89,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -104,7 +105,7 @@ import type {
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+ import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -337,6 +338,7 @@ const api = {
+       code: string,
+       target: VideoResourceImportTarget
+     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
++    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
+     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+     resolvePending: (
+       libraryId: number,
+@@ -381,6 +383,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +452,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -491,6 +501,9 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+@@ -557,6 +570,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
+index 10a8958..228abe6 100644
+--- a/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.test.tsx
+@@ -9,12 +9,20 @@ import type {
+ } from '@shared/libraryTypes'
+ import type { PendingItemKey } from '../../listView/pendingRoutes'
+ 
++let presentIds = new Set<number>()
++let presentIdentities = new Set<number>()
++let presentGroups = new Set<number>()
++const presenceRequests: number[][] = []
++
+ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+ Object.defineProperty(globalThis, 'window', {
+   configurable: true,
+   value: {
+     api: {
+-      scan: { revealAuditFile: async () => ({ ok: true }) },
++      scan: { pendingAuditPresence: async (_libraryId:number, ids:{groupIds:number[];identityIds:number[];scrapeIds:number[]}) => {
++        presenceRequests.push([...ids.groupIds,...ids.identityIds,...ids.scrapeIds]);
++        return {groupIds:ids.groupIds.filter(id=>presentGroups.has(id)),identityIds:ids.identityIds.filter(id=>presentIdentities.has(id)),scrapeIds:ids.scrapeIds.filter(id=>presentIds.has(id))}
++      }, revealAuditFile: async () => ({ ok: true }) },
+       videos: { list: async () => ({ items: [], total: 0 }) }
+     },
+     setTimeout,
+@@ -29,6 +37,8 @@ let renderer: TestRenderer.ReactTestRenderer | null = null
+ afterEach(() => {
+   renderer?.unmount()
+   renderer = null
++  presenceRequests.length = 0
++  presentIds = new Set()
+ })
+ 
+ function summary(overrides: Partial<LibraryScanSummary> = {}): LibraryScanSummary {
+@@ -78,6 +88,7 @@ async function renderPanel({
+   scanSummary,
+   scanAudit,
+   unrecognized = [],
++  currentPendingGroupIds = new Set(),
+   currentPendingIdentityIds = new Set(),
+   currentPendingScrapeIds = new Set(),
+   onOpenPending = () => undefined
+@@ -85,21 +96,22 @@ async function renderPanel({
+   scanSummary: LibraryScanSummary
+   scanAudit: LibraryScanAudit | null
+   unrecognized?: LibraryScanLatestSnapshot['unrecognized']
++  currentPendingGroupIds?: Set<number>
+   currentPendingIdentityIds?: Set<number>
+   currentPendingScrapeIds?: Set<number>
+   onOpenPending?: (target: PendingItemKey) => void
+ }): Promise<void> {
++  presentIds = currentPendingScrapeIds
++  presentIdentities = currentPendingIdentityIds
++  presentGroups = currentPendingGroupIds
+   const { default: LibraryScanAuditPanel } = await import('./LibraryScanAuditPanel')
+-  act(() => {
++  await act(async () => {
+     renderer = TestRenderer.create(
+       <LibraryScanAuditPanel
+         summary={scanSummary}
+         audit={scanAudit}
+         selected={null}
+         unrecognized={unrecognized}
+-        currentPendingGroupIds={new Set()}
+-        currentPendingIdentityIds={currentPendingIdentityIds}
+-        currentPendingScrapeIds={currentPendingScrapeIds}
+         onSelect={() => undefined}
+         onResolvedUnrecognized={() => undefined}
+         onOpenVideo={() => undefined}
+@@ -329,3 +341,44 @@ describe('LibraryScanAuditPanel', () => {
+     assert.match(output, /远程图片已忽略/)
+   })
+ })
++
++
++it('limits a large failed audit to100 visible rows and queries only their pending IDs',async()=>{
++  const files: LibraryScanAudit['files']=Array.from({length:201},(_,i)=>({
++    outcome:'added',rootId:1,sourceKind:'local',filePath:`/synthetic/FILE-${i+1}.mp4`,videoId:i+1,videoCode:`FILE-${i+1}`,
++    resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}
++  }))
++  await renderPanel({scanSummary:summary({scannedFiles:201}),scanAudit:{...audit(files),schemaVersion:2},currentPendingScrapeIds:new Set([1,101,201])})
++  assert.deepEqual(presenceRequests[0],Array.from({length:100},(_,i)=>i+1))
++  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,100)
++  const next=()=>renderer!.root.findAllByType('button').find(node=>node.children.includes('下一页'))!
++  await act(async()=>next().props.onClick())
++  assert.deepEqual(presenceRequests.at(-1),Array.from({length:100},(_,i)=>101+i))
++  await act(async()=>next().props.onClick())
++  assert.deepEqual(presenceRequests.at(-1),[201])
++  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,1)
++  assert.ok(presenceRequests.every(ids=>ids.length<=100))
++})
++
++
++it('routes all three kinds from one mixed pending presence response',async()=>{
++  const opened:PendingItemKey[]=[]
++  const files:LibraryScanAudit['files']=[
++    {outcome:'added',rootId:1,sourceKind:'local',filePath:'/identity.mp4',videoId:1,videoCode:'IDENTITY',resourceId:1,resourceKind:'local',createdVideo:true,nfo:{disposition:'identity-conflict',pendingIdentityId:7}},
++    {outcome:'added',rootId:1,sourceKind:'local',filePath:'/scrape.mp4',videoId:2,videoCode:'SCRAPE',resourceId:2,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:8}}
++  ]
++  await renderPanel({scanSummary:summary(),scanAudit:{...audit(files),schemaVersion:2,pendingGroups:[{groupId:9,normalizedCode:'GROUP',resourceCount:1}]},currentPendingGroupIds:new Set([9]),currentPendingIdentityIds:new Set([7]),currentPendingScrapeIds:new Set([8]),onOpenPending:target=>opened.push(target)})
++  assert.deepEqual(presenceRequests,[ [9,7,8] ])
++  const buttons=renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办'))
++  assert.equal(buttons.length,3)
++  act(()=>buttons.forEach(button=>button.props.onClick()))
++  assert.deepEqual(opened,[{domain:'scan',id:'identity-7'},{domain:'scrape',id:'8'},{domain:'scan',id:'9'}])
++})
++
++
++it('keeps a stable audit anchor when a historical group is no longer pending',async()=>{
++ await renderPanel({scanSummary:summary(),scanAudit:{...audit([]),pendingGroups:[{groupId:9,normalizedCode:'GONE',resourceCount:1}]}})
++ assert.equal(renderer!.root.findAllByProps({'data-audit-anchor':'group:9'}).length,1)
++ assert.equal(renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办')).length,0)
++ assert.match(JSON.stringify(renderer!.toJSON()),/已处理/)
++})
+diff --git a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+index a301be8..a0ff60a 100644
+--- a/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
++++ b/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx
+@@ -1,4 +1,4 @@
+-import { useEffect, useMemo, useRef, useState } from 'react'
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+ import { FixedSizeList, type ListChildComponentProps } from 'react-window'
+ import type {
+   LibraryScanAudit,
+@@ -15,6 +15,7 @@ import SelectControl from '../SelectControl'
+ import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
+ import UnrecognizedRow from './UnrecognizedRow'
+ import { api } from '../../api'
++import { usePendingAuditPresence } from '../../hooks/usePendingAuditPresence'
+ import { pendingItemKey, type PendingItemKey } from '../../listView/pendingRoutes'
+ import { useToast } from '../Toast'
+ import styles from './LibraryScanAuditPanel.module.css'
+@@ -119,21 +120,17 @@ function isAttentionFile(entry: LibraryScanFileAuditEntry): boolean {
+   )
+ }
+ 
+-function isCurrentNfoPending(
+-  entry: LibraryScanFileAuditEntry,
+-  currentPendingIdentityIds: ReadonlySet<number>,
+-  currentPendingScrapeIds: ReadonlySet<number>
++function hasNfoPendingTarget(
++  entry: LibraryScanFileAuditEntry
+ ): boolean {
+   if (entry.nfo?.disposition === 'identity-conflict') {
+     return (
+-      entry.nfo.pendingIdentityId != null &&
+-      currentPendingIdentityIds.has(entry.nfo.pendingIdentityId)
++      entry.nfo.pendingIdentityId != null
+     )
+   }
+   if (entry.nfo?.disposition === 'pending-candidate') {
+     return (
+-      entry.nfo.pendingScrapeId != null &&
+-      currentPendingScrapeIds.has(entry.nfo.pendingScrapeId)
++      entry.nfo.pendingScrapeId != null
+     )
+   }
+   return false
+@@ -329,9 +326,6 @@ export default function LibraryScanAuditPanel({
+   audit,
+   selected,
+   unrecognized,
+-  currentPendingGroupIds,
+-  currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+   onResolvedUnrecognized,
+   onOpenVideo,
+@@ -341,9 +335,6 @@ export default function LibraryScanAuditPanel({
+   audit: LibraryScanAudit | null
+   selected: LibraryScanMetricKey | null
+   unrecognized: LibraryScanLatestSnapshot['unrecognized']
+-  currentPendingGroupIds: Set<number>
+-  currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+   onResolvedUnrecognized: (path: string) => void
+   onOpenVideo: (videoId: number) => void
+@@ -363,6 +354,14 @@ export default function LibraryScanAuditPanel({
+     audit.finishedAt === summary.finishedAt
+       ? audit
+       : null
++  const uniqueUnrecognized = useMemo(() => {
++    const seen = new Set<string>()
++    return unrecognized.filter(item => {
++      if (seen.has(item.filePath)) return false
++      seen.add(item.filePath)
++      return true
++    })
++  }, [unrecognized])
+   const cachedUnrecognizedPaths = useMemo(
+     () => new Set(unrecognized.map((item) => item.filePath)),
+     [unrecognized]
+@@ -376,11 +375,7 @@ export default function LibraryScanAuditPanel({
+       ),
+     [matchedAudit]
+   )
+-  const extraCachedUnrecognizedCount = unrecognized.filter(
+-    (item, index) =>
+-      unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-      !auditedUnrecognizedPaths.has(item.filePath)
+-  ).length
++  const extraCachedUnrecognizedCount = uniqueUnrecognized.filter(item => !auditedUnrecognizedPaths.has(item.filePath)).length
+ 
+   const totalFailed =
+     (matchedAudit?.files.filter(isAttentionFile).length ?? 0) +
+@@ -434,11 +429,7 @@ export default function LibraryScanAuditPanel({
+           entry.nfo?.disposition === 'identity-conflict' ||
+           entry.nfo?.disposition === 'pending-candidate'
+         ) {
+-          const pending = isCurrentNfoPending(
+-            entry,
+-            currentPendingIdentityIds,
+-            currentPendingScrapeIds
+-          )
++          const pending = hasNfoPendingTarget(entry)
+           item.status = pending ? '待处理' : '已处理'
+           item.requiresAttention = pending
+           if (pending) {
+@@ -455,22 +446,16 @@ export default function LibraryScanAuditPanel({
+         key: `pending-group:${entry.groupId}`,
+         title: `待确认归属 · ${entry.normalizedCode}`,
+         detail: `${entry.resourceCount} 个扫描资源`,
+-        groupId: currentPendingGroupIds.has(entry.groupId) ? entry.groupId : undefined,
+-        pendingTarget: currentPendingGroupIds.has(entry.groupId)
+-          ? pendingItemKey('scan', entry.groupId)
+-          : undefined,
+-        status: currentPendingGroupIds.has(entry.groupId) ? '待处理' : '已处理',
+-        requiresAttention: currentPendingGroupIds.has(entry.groupId)
++        groupId: entry.groupId,
++        pendingTarget: pendingItemKey('scan', entry.groupId),
++        status: '待处理',
++        requiresAttention: true
+       }))
+ 
+       // Unrecognized files that might not be in file list (e.g. persistent across scans)
+       const listedPaths = new Set(failedFileEntries.map((f) => f.filePath))
+-      const extraUnrecItems: ViewItem[] = unrecognized
+-        .filter(
+-          (item, index) =>
+-            unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+-            !listedPaths.has(item.filePath)
+-        )
++      const extraUnrecItems: ViewItem[] = uniqueUnrecognized
++        .filter(item => !listedPaths.has(item.filePath))
+         .map((item, idx) => ({
+           key: `extra-unrec:${idx}:${item.filePath}`,
+           title: item.filePath.split(/[\\/]/).pop() || item.filePath,
+@@ -531,11 +516,7 @@ export default function LibraryScanAuditPanel({
+         entry.nfo?.disposition === 'identity-conflict' ||
+         entry.nfo?.disposition === 'pending-candidate'
+       ) {
+-        const pending = isCurrentNfoPending(
+-          entry,
+-          currentPendingIdentityIds,
+-          currentPendingScrapeIds
+-        )
++        const pending = hasNfoPendingTarget(entry)
+         item.status = pending ? '待处理' : '已处理'
+         item.requiresAttention = pending
+         if (pending) {
+@@ -547,7 +528,7 @@ export default function LibraryScanAuditPanel({
+         if (!pending) item.groupId = undefined
+       } else if (entry.outcome === 'pending') {
+         const pending =
+-          entry.groupId != null && currentPendingGroupIds.has(entry.groupId)
++          entry.groupId != null
+         item.status = pending ? '待处理' : '已处理'
+         item.requiresAttention = pending
+         if (pending) item.pendingTarget = pendingItemKey('scan', entry.groupId!)
+@@ -563,12 +544,9 @@ export default function LibraryScanAuditPanel({
+     activeTab,
+     cachedUnrecognizedPaths,
+     changesFilter,
+-    currentPendingGroupIds,
+-    currentPendingIdentityIds,
+-    currentPendingScrapeIds,
+-    matchedAudit,
++          matchedAudit,
+     outcome,
+-    unrecognized
++    uniqueUnrecognized
+   ])
+ 
+   const filtered = useMemo(() => {
+@@ -580,15 +558,39 @@ export default function LibraryScanAuditPanel({
+       : items
+   }, [activeTab, items, search])
+ 
++  const pageScope = JSON.stringify([summary.libraryId,summary.runId,summary.finishedAt,activeTab,search,outcome,changesFilter])
++  const [pageState, setPageState] = useState({scope:'',index:0})
++  const pageIndex = Math.min(pageState.scope === pageScope ? pageState.index : 0, Math.max(0,Math.ceil(filtered.length/100)-1))
++  const setPage = useCallback((index:number) => setPageState({scope:pageScope,index}),[pageScope])
++  const pageItems = filtered.slice(pageIndex*100,(pageIndex+1)*100)
++  const targets = {groupIds:[] as number[],identityIds:[] as number[],scrapeIds:[] as number[]}
++  for (const item of pageItems) {
++    const target=item.pendingTarget
++    if (!target) continue
++    if (target.domain==='scrape') targets.scrapeIds.push(Number(target.id))
++    else if (target.id.startsWith('identity-')) targets.identityIds.push(Number(target.id.slice('identity-'.length)))
++    else targets.groupIds.push(Number(target.id))
++  }
++  const presence = usePendingAuditPresence(summary.libraryId, targets, pageScope)
++  const displayedItems = pageItems.map(item => {
++    if (!item.pendingTarget) return item
++    const known = presence.state === 'ready'
++    const pending = known && presence.ids.has(`${item.pendingTarget.domain}:${item.pendingTarget.id}`)
++    return { ...item, status: !known ? presence.state === 'error' ? '状态未知' : '读取中…' : pending ? '待处理' : '已处理',
++      requiresAttention: pending, pendingTarget: pending ? item.pendingTarget : undefined }
++  })
++
+   const rowHeight = auditRowHeight(activeTab)
+-  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, filtered.length)
++  const shouldVirtualize = shouldVirtualizeAuditRows(activeTab, displayedItems.length)
+ 
+   useEffect(() => {
+     virtualListRef.current?.scrollTo(0)
+-  }, [activeTab, changesFilter, outcome, search, summary.finishedAt])
++  }, [activeTab, changesFilter, outcome, search, summary.finishedAt, pageIndex])
+ 
+   useEffect(() => {
+     if (activeTab !== 'failed' || !attentionTarget) return
++    const targetIndex = filtered.findIndex(item => auditItemAnchor(item) === attentionTarget)
++    if (targetIndex >= 0 && Math.floor(targetIndex / 100) !== pageIndex) { setPage(Math.floor(targetIndex / 100)); return }
+     const frame = window.requestAnimationFrame(() => {
+       const target = listContainerRef.current?.querySelector<HTMLElement>(
+         `[data-audit-anchor="${attentionTarget}"]`
+@@ -598,7 +600,7 @@ export default function LibraryScanAuditPanel({
+       setAttentionTarget(null)
+     })
+     return () => window.cancelAnimationFrame(frame)
+-  }, [activeTab, attentionTarget, filtered])
++  }, [activeTab, attentionTarget, filtered, pageIndex, setPage])
+ 
+   const handleTabChange = (tab: ScanAuditTab): void => {
+     setActiveTab(tab)
+@@ -695,6 +697,15 @@ export default function LibraryScanAuditPanel({
+           <SettingsStatusPill status="muted">{filtered.length} 项</SettingsStatusPill>
+         </div>
+ 
++        {presence.state === 'error' ? <div role="status" className={styles.subFilters}>
++          <span>待办状态读取失败</span><Button size="sm" onClick={presence.retry}>重试状态</Button>
++        </div> : null}
++        {filtered.length > 100 ? <nav aria-label="扫描审计分页" className={styles.subFilters}>
++          <Button size="sm" disabled={pageIndex === 0} onClick={() => setPage(pageIndex-1)}>上一页</Button>
++          <span>{pageIndex+1} / {Math.ceil(filtered.length/100)}</span>
++          <Button size="sm" disabled={(pageIndex+1)*100 >= filtered.length} onClick={() => setPage(pageIndex+1)}>下一页</Button>
++        </nav> : null}
++
+         {/* 资源清理分类下的子标签 */}
+         {activeTab === 'changes' ? (
+           <div className={styles.subFilters}>
+@@ -772,13 +783,13 @@ export default function LibraryScanAuditPanel({
+                   <FixedSizeList
+                     ref={virtualListRef}
+                     className={styles.virtualList}
+-                    height={Math.min(480, filtered.length * rowHeight)}
++                    height={Math.min(480, displayedItems.length * rowHeight)}
+                     width="100%"
+-                    itemCount={filtered.length}
++                    itemCount={displayedItems.length}
+                     itemSize={rowHeight}
+                     itemData={{
+                       libraryId: summary.libraryId,
+-                      items: filtered,
++                      items: displayedItems,
+                       activeTab,
+                       onOpenAttention: handleOpenAttention,
+                       onOpenPending,
+@@ -788,7 +799,7 @@ export default function LibraryScanAuditPanel({
+                     {AuditRow}
+                   </FixedSizeList>
+                 ) : (
+-                  filtered.map((item) => (
++                  displayedItems.map((item) => (
+                     <AuditRowContent
+                       key={item.key}
+                       libraryId={summary.libraryId}
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+index 89a1174..e296a20 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+@@ -108,37 +108,10 @@ export function MediaLibrarySettingsContent({
+     queryKey: ['media-libraries', 'list', 'active'],
+     queryFn: () => api.mediaLibraries.list()
+   })
+-  const pendingGroupsQuery = useQuery({
+-    queryKey: ['pending-scan-groups', libraryId],
+-    queryFn: () => api.scan.listPending(libraryId)
+-  })
+-  const pendingScanGroupIds = useMemo(
+-    () => new Set((pendingGroupsQuery.data ?? []).map((group) => group.id)),
+-    [pendingGroupsQuery.data]
+-  )
+-  const pendingIdentitiesQuery = useQuery({
+-    queryKey: ['pending-resource-identities', libraryId],
+-    queryFn: () => api.scan.listPendingResourceIdentities(libraryId)
+-  })
+-  const pendingResourceIdentityIds = useMemo(
+-    () => new Set((pendingIdentitiesQuery.data ?? []).map((identity) => identity.id)),
+-    [pendingIdentitiesQuery.data]
+-  )
+-  const pendingScrapesQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending()
+-  })
+-  const pendingVideoScrapeIds = useMemo(
+-    () => new Set((pendingScrapesQuery.data ?? []).map((pending) => pending.id)),
+-    [pendingScrapesQuery.data]
+-  )
+   const scan = useMediaLibraryScanController(libraryId, {
+     onSettled: () =>
+       Promise.all([
+-        libraryQuery.refetch(),
+-        pendingGroupsQuery.refetch(),
+-        pendingIdentitiesQuery.refetch(),
+-        pendingScrapesQuery.refetch()
++        libraryQuery.refetch()
+       ]).then(() => undefined)
+   })
+   const library = libraryQuery.data ?? null
+@@ -693,9 +666,6 @@ export function MediaLibrarySettingsContent({
+               library={library}
+               scan={scan}
+               latestScanSummary={latestScanSummary}
+-              pendingScanGroupIds={pendingScanGroupIds}
+-              pendingResourceIdentityIds={pendingResourceIdentityIds}
+-              pendingVideoScrapeIds={pendingVideoScrapeIds}
+               selectedScanMetric={selectedScanMetric}
+               setSelectedScanMetric={setSelectedScanMetric}
+               configDraft={configDraft}
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+index 0e8b80d..c58000c 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+@@ -81,9 +81,6 @@ describe('ScanSettingsTab', () => {
+             refreshLatest: async () => undefined
+           } as never}
+           latestScanSummary={null}
+-          pendingScanGroupIds={new Set()}
+-          pendingResourceIdentityIds={new Set()}
+-          pendingVideoScrapeIds={new Set()}
+           selectedScanMetric={null}
+           setSelectedScanMetric={() => undefined}
+           configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG}
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+index 9b00afc..d5f7f71 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+@@ -133,9 +133,6 @@ function ScanHistorySummary({
+   audit,
+   selected,
+   unrecognized,
+-  currentPendingGroupIds,
+-  currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+   onResolvedUnrecognized,
+   onOpenPending,
+@@ -145,9 +142,6 @@ function ScanHistorySummary({
+   audit: LibraryScanLatestSnapshot['audit']
+   selected: LibraryScanMetricKey | null
+   unrecognized: LibraryScanLatestSnapshot['unrecognized']
+-  currentPendingGroupIds: Set<number>
+-  currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+   onResolvedUnrecognized: (path: string) => void
+   onOpenPending: (target: PendingItemKey) => void
+@@ -178,9 +172,6 @@ function ScanHistorySummary({
+         audit={audit}
+         selected={selected}
+         unrecognized={unrecognized}
+-        currentPendingGroupIds={currentPendingGroupIds}
+-        currentPendingIdentityIds={currentPendingIdentityIds}
+-        currentPendingScrapeIds={currentPendingScrapeIds}
+         onSelect={onSelect}
+         onResolvedUnrecognized={onResolvedUnrecognized}
+         onOpenPending={onOpenPending}
+@@ -470,9 +461,6 @@ export function ScanSettingsTab({
+   library,
+   scan,
+   latestScanSummary,
+-  pendingScanGroupIds,
+-  pendingResourceIdentityIds,
+-  pendingVideoScrapeIds,
+   selectedScanMetric,
+   setSelectedScanMetric,
+   configDraft,
+@@ -484,9 +472,6 @@ export function ScanSettingsTab({
+   library: MediaLibraryDetail
+   scan: ScanController
+   latestScanSummary: LibraryScanSummary | null
+-  pendingScanGroupIds: Set<number>
+-  pendingResourceIdentityIds: Set<number>
+-  pendingVideoScrapeIds: Set<number>
+   selectedScanMetric: LibraryScanMetricKey | null
+   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
+   configDraft: MediaLibraryConfigValues
+@@ -599,9 +584,6 @@ export function ScanSettingsTab({
+               audit={scan.latest?.audit ?? null}
+               selected={selectedScanMetric}
+               unrecognized={scan.latest?.unrecognized ?? []}
+-              currentPendingGroupIds={pendingScanGroupIds}
+-              currentPendingIdentityIds={pendingResourceIdentityIds}
+-              currentPendingScrapeIds={pendingVideoScrapeIds}
+               onSelect={setSelectedScanMetric}
+               onResolvedUnrecognized={() => {
+                 void scan.refreshLatest()
+diff --git a/src/shared/appIpcContract.ts b/src/shared/appIpcContract.ts
+index 14472f9..88fd04c 100644
+--- a/src/shared/appIpcContract.ts
++++ b/src/shared/appIpcContract.ts
+@@ -20,6 +20,7 @@ import type {
+   PendingResourceIdentity,
+   PendingResourceIdentityResolution,
+   PendingResourceIdentityResolutionResult,
++  PendingAuditIds,
+   PendingScanGroup,
+   PendingScanGroupResolution,
+   PendingScanGroupResolutionResult,
+@@ -27,10 +28,14 @@ import type {
+   RenameImportResult,
+   ScanResult
+ } from './libraryTypes'
+-import type { TagListItem, SortDir } from './commonTypes'
++import type { TagListItem, TagLabel, TagOptionsQuery, TagOptionsPage, TagFilterOptionsPage, SortDir } from './commonTypes'
+ import type {
+   PlaylistCreateInput,
+   PlaylistDetail,
++  PlaylistPage,
++  PlaylistMetadata,
++  PlaylistVideosPage,
++  PlaylistPageQuery,
+   PlaylistListItem,
+   PlaylistUpdateInput,
+   PlaylistVideoMembership,
+@@ -214,6 +219,7 @@ export interface AppIpcContract {
+     ]
+     result: ManualImportResult
+   }
++  [IPC.PENDING_AUDIT_PRESENCE]: { args: [libraryId: number, ids: PendingAuditIds]; result: PendingAuditIds }
+   [IPC.PENDING_SCAN_LIST]: {
+     args: [libraryId: number]
+     result: PendingScanGroup[]
+@@ -236,6 +242,9 @@ export interface AppIpcContract {
+     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
+     result: PlaylistDetail | null
+   }
++  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
++  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
++  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
+   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
+   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
+   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
+@@ -245,6 +254,9 @@ export interface AppIpcContract {
+ 
+   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
+   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
++  [IPC.TAG_LABELS]: { args: [ids: number[]]; result: TagLabel[] }
++  [IPC.TAG_FILTER_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagFilterOptionsPage }
++  [IPC.TAG_MANUAL_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagOptionsPage }
+   [IPC.ORGANIZATION_LIST]: {
+     args: [query: OrganizationListQuery]
+     result: OrganizationListItem[]
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..287bf47 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -75,6 +75,7 @@ export const IPC = {
+   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
+   FILE_RENAME: 'file:rename',
+   FILE_IMPORT_MANUAL: 'file:importManual',
++  PENDING_AUDIT_PRESENCE: 'pendingAudit:presence',
+   PENDING_SCAN_LIST: 'pendingScan:list',
+   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+   PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+@@ -94,6 +95,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +116,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -148,6 +153,9 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
+@@ -182,6 +190,10 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+diff --git a/src/shared/libraryTypes.ts b/src/shared/libraryTypes.ts
+index bb32aad..7207dd4 100644
+--- a/src/shared/libraryTypes.ts
++++ b/src/shared/libraryTypes.ts
+@@ -420,3 +420,10 @@ export interface PlayResult {
+   fileMissing?: boolean
+   error?: string
+ }
++
++/** At most100 IDs across all three arrays, for one displayed audit page. */
++export interface PendingAuditIds {
++  groupIds: number[]
++  identityIds: number[]
++  scrapeIds: number[]
++}
+diff --git a/src/main/db/pendingAuditRepo.ts b/src/main/db/pendingAuditRepo.ts
+new file mode 100644
+index 0000000..c6bd2f7
+--- /dev/null
++++ b/src/main/db/pendingAuditRepo.ts
+@@ -0,0 +1,22 @@
++import type { PendingAuditIds } from '@shared/libraryTypes'
++import { getDb } from './database'
++
++/** Current audit page only. Scan IDs are library-scoped; scrape snapshots are global. */
++export function getPendingAuditPresence(libraryId: number, input: PendingAuditIds): PendingAuditIds {
++  const groups = [input.groupIds, input.identityIds, input.scrapeIds]
++  if (!Number.isSafeInteger(libraryId) || libraryId < 1 || groups.reduce((n, ids) => n + ids.length, 0) > 100 ||
++      groups.some(ids => ids.some(id => !Number.isSafeInteger(id) || id < 1))) throw new Error('Invalid audit pending IDs')
++  const db = getDb()
++  return db.transaction(() => {
++    if (!db.prepare('SELECT id FROM media_libraries WHERE id = ?').get(libraryId)) throw new Error('媒体库不存在')
++    const lookup = (table: 'pending_scan_groups' | 'pending_resource_identities' | 'pending_video_scrapes', ids: number[], scoped: boolean): number[] => {
++      const unique = [...new Set(ids)]
++      if (!unique.length) return []
++      return (db.prepare(`SELECT id FROM ${table} WHERE ${scoped ? 'library_id = ? AND ' : ''}id IN (${unique.map(() => '?').join(',')}) ORDER BY id`)
++        .all(...(scoped ? [libraryId, ...unique] : unique)) as Array<{id:number}>).map(row => row.id)
++    }
++    return {groupIds:lookup('pending_scan_groups',input.groupIds,true),
++      identityIds:lookup('pending_resource_identities',input.identityIds,true),
++      scrapeIds:lookup('pending_video_scrapes',input.scrapeIds,false)}
++  })()
++}
+diff --git a/src/main/db/pendingAuditRepo.test.ts b/src/main/db/pendingAuditRepo.test.ts
+new file mode 100644
+index 0000000..098251e
+--- /dev/null
++++ b/src/main/db/pendingAuditRepo.test.ts
+@@ -0,0 +1,36 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { getPendingAuditPresence } from './pendingAuditRepo'
++
++it('scopes scan identities and groups while returning only requested IDs from a large catalog',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-audit-'))
++ try{
++  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++  db.exec(`INSERT INTO media_libraries(id,name) VALUES(2,'Other');
++    INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES(1,1,'/one','/one'),(2,2,'/two','/two');
++    WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++    INSERT INTO pending_scan_groups(id,library_id,normalized_code) SELECT x,CASE WHEN x%2=0 THEN 2 ELSE 1 END,'G-'||x FROM n;
++    INSERT INTO pending_resource_identities(id,library_id,root_id,file_path,normalized_path,source_kind,filename_code,nfo_code)
++      SELECT id,library_id,library_id,'/path/'||id,'/path/'||id,'local','F-'||id,'N-'||id FROM pending_scan_groups;
++    INSERT INTO videos(id,code) VALUES(1,'VIDEO');
++    INSERT INTO pending_video_scrapes(id,video_id,selected_fields_json,applicable_fields_json,update_mode,request_json,warnings_json,created_at,updated_at)
++    VALUES(1,1,'bad-json','bad-json','replace','bad-json','bad-json','2026','2026');`)
++  const input={groupIds:[1,2,9999,10001,1],identityIds:[1,2,10000,10001],scrapeIds:[1,2]}
++  assert.deepEqual(getPendingAuditPresence(1,input),{groupIds:[1,9999],identityIds:[1],scrapeIds:[1]})
++  assert.deepEqual(getPendingAuditPresence(2,input),{groupIds:[2],identityIds:[2,10000],scrapeIds:[1]})
++  const trace:string[]=[];const prepare=db.prepare.bind(db)
++  db.prepare=((sql:string)=>{trace.push(sql);return prepare(sql)}) as typeof db.prepare
++  getPendingAuditPresence(1,input)
++  assert.equal(trace.length,4);assert.ok(trace.every(sql=>sql.startsWith('SELECT id FROM')))
++  assert.ok(trace.every(sql=>!sql.includes('pending_scan_resources')))
++  db.exec('DELETE FROM pending_scan_groups WHERE id=1; DELETE FROM pending_resource_identities WHERE id=1; DELETE FROM pending_video_scrapes')
++  assert.deepEqual(getPendingAuditPresence(1,input),{groupIds:[9999],identityIds:[],scrapeIds:[]})
++  assert.throws(()=>getPendingAuditPresence(3,input),/不存在/)
++  assert.throws(()=>getPendingAuditPresence(1,{groupIds:Array(51).fill(1),identityIds:Array(50).fill(1),scrapeIds:[]}),/Invalid/)
++  assert.throws(()=>getPendingAuditPresence(1,{groupIds:[Number.MAX_SAFE_INTEGER+1],identityIds:[],scrapeIds:[]}),/Invalid/)
++ }finally{closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})
+diff --git a/src/renderer/src/hooks/usePendingAuditPresence.ts b/src/renderer/src/hooks/usePendingAuditPresence.ts
+new file mode 100644
+index 0000000..c9d6162
+--- /dev/null
++++ b/src/renderer/src/hooks/usePendingAuditPresence.ts
+@@ -0,0 +1,29 @@
++import { useEffect, useMemo, useState } from 'react'
++import type { PendingAuditIds } from '@shared/libraryTypes'
++import { api } from '../api'
++
++/** One displayed page, one result snapshot. Old IPC work is not cancelled, but cannot publish. */
++export function usePendingAuditPresence(libraryId: number, ids: PendingAuditIds, scope: string) {
++  const [attempt, setAttempt] = useState(0)
++  const [snapshot, setSnapshot] = useState<{ request: object; state: 'ready' | 'error'; ids: Set<string> }>()
++  const normalize = (values: number[]) => [...new Set(values)].sort((a,b) => a-b)
++  const normalized = {groupIds:normalize(ids.groupIds),identityIds:normalize(ids.identityIds),scrapeIds:normalize(ids.scrapeIds)}
++  const empty = !normalized.groupIds.length && !normalized.identityIds.length && !normalized.scrapeIds.length
++  const key = JSON.stringify([libraryId,scope,normalized,attempt])
++  const request = useMemo(() => ({ key }), [key])
++  useEffect(() => {
++    const [requestedLibrary, , requested] = JSON.parse(request.key) as [number, string, PendingAuditIds, number]
++    let active = true
++    if (!requested.groupIds.length && !requested.identityIds.length && !requested.scrapeIds.length) return
++    void Promise.resolve().then(() => api.scan.pendingAuditPresence(requestedLibrary, requested)).then(
++      existing => { if (active) setSnapshot({request, state:'ready', ids:new Set([...existing.groupIds.map(id => `scan:${id}`), ...existing.identityIds.map(id => `scan:identity-${id}`), ...existing.scrapeIds.map(id => `scrape:${id}`)])}) },
++      () => { if (active) setSnapshot({request, state:'error', ids:new Set()}) }
++    )
++    return () => { active = false }
++  }, [request])
++  return {
++    state: empty ? 'ready' as const : snapshot?.request === request ? snapshot.state : 'loading' as const,
++    ids: snapshot?.request === request ? snapshot.ids : new Set<string>(),
++    retry: () => setAttempt(value => value + 1)
++  }
++}
+diff --git a/src/renderer/src/hooks/usePendingAuditPresence.test.tsx b/src/renderer/src/hooks/usePendingAuditPresence.test.tsx
+new file mode 100644
+index 0000000..5e09da6
+--- /dev/null
++++ b/src/renderer/src/hooks/usePendingAuditPresence.test.tsx
+@@ -0,0 +1,51 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++function deferred() {
++  let resolve!: (value:number[])=>void, reject!: (error:Error)=>void
++  const promise=new Promise<number[]>((yes,no)=>{resolve=yes;reject=no})
++  return {promise,resolve,reject}
++}
++const requests:Array<{ids:number[]} & ReturnType<typeof deferred>>=[]
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{scan:{pendingAuditPresence:(_libraryId:number,input:{scrapeIds:number[]})=>{
++  const ids=input.scrapeIds;
++  const request={ids,...deferred()};requests.push(request);return request.promise.then(scrapeIds=>({groupIds:[],identityIds:[],scrapeIds}))
++}}}}})
++let renderer:TestRenderer.ReactTestRenderer | undefined
++let current:ReturnType<typeof import('./usePendingAuditPresence').usePendingAuditPresence>
++let hook:typeof import('./usePendingAuditPresence').usePendingAuditPresence
++function Probe({ids,scope}:{ids:number[];scope:string}):null {current=hook(1,{groupIds:[],identityIds:[],scrapeIds:ids},scope);return null}
++async function show(ids:number[],scope='one') {
++  hook=(await import('./usePendingAuditPresence')).usePendingAuditPresence
++  await act(async()=>{
++    if(renderer)renderer.update(<Probe ids={ids} scope={scope}/> )
++    else renderer=TestRenderer.create(<Probe ids={ids} scope={scope}/> )
++  })
++}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;requests.length=0})
++it('sends no empty lookup, deduplicates IDs and rejects a stale page response',async()=>{
++  await show([]);assert.equal(requests.length,0);assert.equal(current.state,'ready')
++  await show([3,1,3]);assert.deepEqual(requests[0].ids,[1,3]);assert.equal(current.state,'loading')
++  await show([2]);assert.equal(current.ids.size,0)
++  await act(async()=>requests[1].resolve([2]));assert.equal(current.state,'ready');assert.deepEqual([...current.ids],['scrape:2'])
++  await act(async()=>requests[0].resolve([1,3]));assert.deepEqual([...current.ids],['scrape:2'])
++})
++it('distinguishes a failed lookup from processed items and retries the same page',async()=>{
++  await show([1])
++  await act(async()=>requests[0].reject(new Error('injected')))
++  assert.equal(current.state,'error')
++  await act(async()=>current.retry());assert.equal(current.state,'loading')
++  await act(async()=>requests[1].resolve([]));assert.equal(current.state,'ready');assert.equal(current.ids.size,0)
++  await show([1],'next-run');assert.equal(current.state,'loading');assert.equal(requests.length,3)
++})
++
++
++it('does not reuse old ready state when a page is revisited before another lookup finishes',async()=>{
++  await show([1]);await act(async()=>requests[0].resolve([1]));assert.equal(current.state,'ready')
++  await show([2]);await show([1])
++  assert.equal(current.state,'loading');assert.equal(current.ids.size,0)
++  await act(async()=>requests[1].resolve([2]));assert.equal(current.state,'loading')
++  await act(async()=>requests[2].resolve([]));assert.equal(current.state,'ready');assert.equal(current.ids.size,0)
++})
+diff --git a/scripts/performance/audit-presence-ui.mjs b/scripts/performance/audit-presence-ui.mjs
+new file mode 100644
+index 0000000..49f27bf
+--- /dev/null
++++ b/scripts/performance/audit-presence-ui.mjs
+@@ -0,0 +1,80 @@
++/** Actual audit component, local pagination and visible-page IPC against synthetic records. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {createServer} from 'vite'
++import react from '@vitejs/plugin-react'
++import {chromium} from 'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-presence-'))
++const output=path.resolve(process.env.JAVDEX_AUDIT_UI_OUTPUT??path.join(root,'results'))
++fs.mkdirSync(output,{recursive:true})
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React from 'react';import{createRoot}from'react-dom/client';
++import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
++window.React=React;window.__requests=[];window.__fail=false;window.__opened=[];window.__hold=false;window.__releases=[];
++window.api={scan:{pendingAuditPresence:async(libraryId,input)=>{const ids=[...input.groupIds,...input.identityIds,...input.scrapeIds];window.__requests.push(ids);if(window.__fail){window.__fail=false;throw new Error('fixture')};if(window.__hold)await new Promise(resolve=>window.__releases.push(resolve));return {groupIds:input.groupIds.filter(id=>id===1||id===101||id===201),identityIds:[],scrapeIds:input.scrapeIds.filter(id=>id===1||id===101||id===201)};},revealAuditFile:async()=>({ok:true})}};
++const summary={libraryId:1,runId:'run',configRevision:1,trigger:'manual',startedAt:'2026-09-10T00:00:00Z',finishedAt:'2026-09-10T00:01:00Z',status:'success',scannedFiles:201,resourcesAdded:201,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,skippedFiles:0,failedFiles:0,pendingScanGroups:0,pendingScanResources:201,offlineFolders:[],errorSummary:null};
++const audit={...summary,schemaVersion:2,files:Array.from({length:201},(_,i)=>({outcome:'added',rootId:1,sourceKind:'local',filePath:'/synthetic/FILE-'+(i+1)+'.mp4',videoId:i+1,videoCode:'FILE-'+(i+1),resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}})),removedResources:[],promotedResources:[],deletedVideos:[],pendingGroups:[]};
++if(location.search.includes('groups')){audit.files=audit.files.map(entry=>({...entry,nfo:undefined,outcome:'pending',groupId:entry.resourceId,normalizedCode:entry.videoCode,addedToQueue:true}));audit.pendingGroups=audit.files.map(entry=>({groupId:entry.groupId,normalizedCode:entry.normalizedCode,resourceCount:1}));}
++const Panel=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/settings/LibraryScanAuditPanel.tsx'))})).default;
++function Host(){const[selected,setSelected]=React.useState(null);return <div style={{padding:16}}><Panel summary={summary} audit={audit} selected={selected} unrecognized={[]} onSelect={setSelected} onResolvedUnrecognized={()=>{}} onOpenVideo={()=>{}} onOpenPending={target=>window.__opened.push(target)}/></div>}
++createRoot(document.getElementById('root')).render(<Host/>);
++`)
++let server,browser
++const results=[]
++try{
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]){
++  const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',e=>errors.push(e.message))
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  assert.equal(await page.locator('[data-audit-anchor]').count(),100)
++  await page.evaluate(()=>window.__fail=true)
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByText('待办状态读取失败',{exact:true}).waitFor()
++  assert.equal(await page.getByRole('button',{name:'处理待办',exact:true}).count(),0)
++  await page.getByRole('button',{name:'重试状态',exact:true}).click()
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.waitForFunction(()=>window.__requests.at(-1)?.[0]===201)
++  await page.getByRole('button',{name:'处理待办',exact:true}).click()
++  assert.deepEqual(await page.evaluate(()=>window.__opened),[{domain:'scrape',id:'201'}])
++  await page.getByRole('button',{name:/全部文件/}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'处理',exact:true}).click()
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  const rows=await page.locator('[data-audit-anchor]').count();assert.equal(rows,1)
++  await page.waitForFunction(()=>document.activeElement?.getAttribute('data-audit-anchor')?.includes('FILE-201'))
++  const focused=await page.evaluate(()=>document.activeElement.getAttribute('data-audit-anchor'));assert.ok(focused.includes('FILE-201'))
++  const focusedBox=await page.locator('[data-audit-anchor]').boundingBox();assert.ok(focusedBox && focusedBox.y>=0 && focusedBox.y+focusedBox.height<=viewport.height+1)
++  const geometry=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth}))
++  assert.ok(geometry.scrollWidth<=geometry.width+1);assert.deepEqual(errors,[])
++  assert.ok((await page.evaluate(()=>window.__requests)).every(ids=>ids.length<=100))
++  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
++  results.push({viewport,mode:'scrape',rows,focused,geometry,requests:await page.evaluate(()=>window.__requests),errors});
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port+'/?groups')
++  await page.getByRole('button',{name:'处理待办',exact:true}).waitFor()
++  await page.getByRole('button',{name:/全部文件/}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'下一页',exact:true}).click()
++  await page.getByRole('button',{name:'处理',exact:true}).waitFor()
++  await page.evaluate(()=>window.__hold=true)
++  await page.getByRole('button',{name:'处理',exact:true}).click()
++  await page.waitForFunction(()=>document.activeElement?.getAttribute('data-audit-anchor')==='group:201' && window.__releases.length>0)
++  assert.equal(await page.getByRole('button',{name:'处理待办',exact:true}).count(),0)
++  assert.equal(await page.getByText('读取中…',{exact:true}).count(),1)
++  const heldFocus=await page.evaluate(()=>document.activeElement.getAttribute('data-audit-anchor'))
++  await page.evaluate(()=>{window.__hold=false;window.__releases.splice(0).forEach(resolve=>resolve())})
++  await page.getByRole('button',{name:'处理待办',exact:true}).click()
++  assert.deepEqual(await page.evaluate(()=>window.__opened),[{domain:'scan',id:'201'}])
++  const finalAnchor=await page.locator('[data-audit-anchor]').getAttribute('data-audit-anchor');assert.equal(finalAnchor,'group:201')
++  await page.screenshot({path:path.join(output,`groups-${viewport.width}x${viewport.height}.png`)})
++  assert.deepEqual(errors,[])
++  results.push({viewport,mode:'group-delayed',heldFocus,finalAnchor,requests:await page.evaluate(()=>window.__requests),errors});await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n');console.log(JSON.stringify(results))
++}finally{await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/pending-scrape-benchmark.ts b/scripts/performance/pending-scrape-benchmark.ts
+new file mode 100644
+index 0000000..bffbbca
+--- /dev/null
++++ b/scripts/performance/pending-scrape-benchmark.ts
+@@ -0,0 +1,60 @@
++/** Synthetic inbox only. Compare old full hydration with bounded summary/read-on-select. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { getPendingAuditPresence } from '../../src/main/db/pendingAuditRepo'
++import { closeDatabase, initDatabaseAtPath } from '../../src/main/db/database'
++import { getPendingVideoScrapeById, existingPendingVideoScrapeIds, listPendingVideoScrapes, pagePendingVideoScrapes } from '../../src/main/db/pendingVideoScrapeRepo'
++
++it('measures 10k pending summaries against full candidate hydration', () => {
++  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-bench-'))
++  try {
++    const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++    db.transaction(()=>{
++      db.exec(`WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++        INSERT INTO videos(id,code) SELECT x,'PENDING-'||x FROM n;
++        INSERT INTO pending_video_scrapes(id,video_id,selected_fields_json,applicable_fields_json,update_mode,request_json,warnings_json,created_at,updated_at)
++          SELECT id,id,'[]','[]','replace','{}','[]','2026','2026' FROM videos;
++        INSERT INTO pending_video_scrape_sources(id,pending_scrape_id,position,plugin_name,plugin_source,source_name,selected_fields_json,plugin_config_json)
++          SELECT id,id,0,'p','builtin','s','[]','{}' FROM videos;`)
++      const insert=db.prepare('INSERT INTO pending_video_scrape_candidates(id,source_id,position,result_json) VALUES(?,?,0,?)')
++      for(let id=1;id<=10000;id++)insert.run(id,id,JSON.stringify({code:`CANDIDATE-${id}`,summary:'x'.repeat(4096),tags:['one','two']}))
++      db.exec(`INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES(1,1,'/synthetic','/synthetic');
++        INSERT INTO pending_scan_groups(id,library_id,normalized_code) SELECT id,1,'GROUP-'||id FROM videos;
++        INSERT INTO pending_resource_identities(id,library_id,root_id,file_path,normalized_path,source_kind,filename_code,nfo_code)
++          SELECT id,1,1,'/synthetic/'||id,'/synthetic/'||id,'local','FILE-'||id,'NFO-'||id FROM videos;
++        INSERT INTO pending_video_scrape_resources(candidate_id,field,position,staged_path,size_bytes)
++        SELECT id,'cover',0,'staged/'||id||'.jpg',1000 FROM videos;`)
++    })()
++    db.exec('ANALYZE')
++    const expected=Array.from({length:50},(_,i)=>({id:i+1,videoId:i+1,revision:1,code:`CANDIDATE-${i+1}`,candidateCount:1,sourceCount:1,stagedCoverPath:`staged/${i+1}.jpg`}))
++    const results=[]
++    function measure(name:string,read:()=>unknown,verify:(value:unknown)=>void) {
++      const samples=[];let jsonBytes=0
++      for(let i=0;i<3;i++){
++        const start=performance.now();const value=read();const elapsed=performance.now()-start
++        verify(value);jsonBytes=Buffer.byteLength(JSON.stringify(value));samples.push(elapsed)
++      }
++      results.push({name,samples,medianMs:[...samples].sort((a,b)=>a-b)[1],jsonBytes,rssBytes:process.memoryUsage().rss})
++    }
++    measure('full.list',listPendingVideoScrapes,value=>{const rows=value as ReturnType<typeof listPendingVideoScrapes>;assert.equal(rows.length,10000);assert.equal(rows[9999].sources[0].candidates[0].result.summary!.length,4096)})
++    measure('summary.first',()=>pagePendingVideoScrapes({}),value=>assert.deepEqual(value,{items:expected,total:10000,offset:0}))
++    measure('summary.deep',()=>pagePendingVideoScrapes({anchorId:9876}),value=>{const page=value as ReturnType<typeof pagePendingVideoScrapes>;assert.equal(page.offset,9850);assert.ok(page.items.some(row=>row.id===9876))})
++    measure('detail.selected',()=>getPendingVideoScrapeById(9876),value=>{const item=value as NonNullable<ReturnType<typeof getPendingVideoScrapeById>>;assert.equal(item.videoId,9876);assert.equal(item.sources[0].candidates[0].result.summary!.length,4096)})
++    const auditIds=Array.from({length:100},(_,i)=>9901+i)
++    measure('existing.ids100',()=>existingPendingVideoScrapeIds(auditIds),value=>assert.deepEqual(value,auditIds))
++    const mixed={groupIds:Array.from({length:34},(_,i)=>9967+i),identityIds:Array.from({length:33},(_,i)=>9968+i),scrapeIds:Array.from({length:33},(_,i)=>9968+i)}
++    measure('audit.presence.mixed100',()=>getPendingAuditPresence(1,mixed),value=>assert.deepEqual(value,mixed))
++    const result={count:10000,scanGroups:10000,resourceIdentities:10000,candidatesPerItem:1,summaryCharacters:4096,results,platform:process.platform,arch:process.arch,
++      sqliteVersion:db.prepare('SELECT sqlite_version() AS version').get(),
++      caveats:['Three sequential local warm samples on synthetic catalog; not p95/Windows/HDD/full renderer IPC.',
++        'Times cover repository calls only; assertions and JSON sizing excluded. Bytes are JSON-equivalent payload, not actual IPC allocations.',
++        'First metadata page reads at most50 item metadata, but candidate counts/first-candidate JSON extraction and OFFSET/rank are not constant SQL work.',
++        'RSS is sampled after each stage, not peak or independent allocation; full hydration runs first. No OS cache reset.']}
++    if(process.env.JAVDEX_PENDING_BENCH_OUTPUT)fs.writeFileSync(path.resolve(process.env.JAVDEX_PENDING_BENCH_OUTPUT),JSON.stringify(result,null,2)+'\n')
++    console.log(JSON.stringify(result))
++  } finally {closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})

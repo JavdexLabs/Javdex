@@ -185,3 +185,24 @@ export type ResolveActressConflictInput = ActressConflictDecisionBase &
 export type ResolveActressConflictResult =
   | { status: 'success'; remainingPending: number }
   | { status: 'stale'; message: string }
+
+
+/** Queue projection only; decisions must use a freshly read complete group. */
+export interface ActressConflictQueueItem {
+  normalizedName: string
+  displayName: string
+  status: 'conflict' | 'applicable'
+  candidateCount: number
+  pendingNameClaimCount: number
+  avatarPath: string | null
+}
+export interface ActressConflictQueueQuery {
+  limit?: number
+  offset?: number
+  anchorName?: string
+}
+export interface ActressConflictQueuePage {
+  items: ActressConflictQueueItem[]
+  total: number
+  offset: number
+}

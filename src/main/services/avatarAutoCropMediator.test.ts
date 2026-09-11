@@ -73,3 +73,66 @@ describe('AvatarAutoCropMediator', () => {
     assert.throws(() => mediator.beginBatch(), /批量智能构图正在进行中/)
   })
 })
+
+
+it('creates one lazy snapshot per batch and disposes only its owning token', () => {
+  let created=0,disposed=0,sequence=0
+  const cursors:number[]=[]
+  const mediator=new AvatarAutoCropMediator(dependencies({
+    randomId:()=>`token-${++sequence}`,
+    createBatchTargets:()=>{created++;return {page:(afterId)=>{cursors.push(afterId);return {items:[],total:20,nextAfterId:null}},dispose:()=>{disposed++}}}
+  }))
+  const first=mediator.beginBatch()
+  assert.equal(created,0)
+  assert.throws(()=>mediator.pageBatchTargets('wrong',0),/令牌/)
+  assert.throws(()=>mediator.pageBatchTargets(first,-1),/游标/)
+  assert.equal(created,0)
+  assert.equal(mediator.pageBatchTargets(first,0).total,20)
+  mediator.pageBatchTargets(first,100)
+  assert.equal(created,1);assert.deepEqual(cursors,[0,100])
+  assert.equal(mediator.endBatch('wrong'),false);assert.equal(disposed,0)
+  assert.equal(mediator.endBatch(first),true);assert.equal(disposed,1)
+  assert.throws(()=>mediator.pageBatchTargets(first,0),/令牌/)
+  const second=mediator.beginBatch();mediator.pageBatchTargets(second,0)
+  assert.equal(mediator.endBatch(first),false)
+  mediator.rendererDisconnected();assert.equal(disposed,2)
+  assert.throws(()=>mediator.pageBatchTargets(second,0),/令牌/)
+})
+it('retries failed snapshot creation without poisoning the batch and clears on reinitialization', () => {
+  let attempts=0,disposed=0
+  const mediator=new AvatarAutoCropMediator(dependencies({createBatchTargets:()=>{
+    if(++attempts===1)throw new Error('Snapshot failed')
+    return {page:()=>({items:[],total:0,nextAfterId:null}),dispose:()=>{disposed++}}
+  }}))
+  const token=mediator.beginBatch()
+  assert.throws(()=>mediator.pageBatchTargets(token,0),/Snapshot failed/)
+  assert.equal(mediator.hasActiveBatch(),true)
+  assert.equal(mediator.pageBatchTargets(token,0).total,0)
+  mediator.clearBatchToken();mediator.clearBatchToken()
+  assert.equal(disposed,1);assert.equal(mediator.hasActiveBatch(),false)
+})
+
+
+it('settles disconnected requests despite cleanup failure and retries before allowing another snapshot', async () => {
+  let fail=true,created=0,disposed=0,id=0
+  const mediator=new AvatarAutoCropMediator(dependencies({randomId:()=>String(++id),createBatchTargets:()=>{
+    created++;return {page:()=>({items:[],total:0,nextAfterId:null}),dispose:()=>{disposed++;if(fail)throw new Error('Drop failed')}}
+  }}))
+  const token=mediator.beginBatch();mediator.pageBatchTargets(token,0)
+  const pending=mediator.request({actressId:1,mainName:'Waiting'})
+  const warn=console.warn;console.warn=()=>{}
+  try {mediator.rendererDisconnected()} finally {console.warn=warn}
+  assert.equal((await pending).status,'failed')
+  assert.equal(mediator.hasActiveBatch(),false)
+  assert.throws(()=>mediator.pageBatchTargets(token,0),/令牌/)
+  assert.throws(()=>mediator.beginBatch(),/Drop failed/)
+  assert.equal(created,1)
+  fail=false
+  const next=mediator.beginBatch();mediator.pageBatchTargets(next,0)
+  assert.equal(created,2)
+  fail=true;console.warn=()=>{}
+  try {assert.equal(mediator.endBatch(next),true)} finally {console.warn=warn}
+  assert.equal(mediator.hasActiveBatch(),false)
+  fail=false;mediator.clearBatchToken()
+  assert.ok(disposed>=5)
+})

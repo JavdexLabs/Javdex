@@ -42,8 +42,10 @@
 }
 .tag-chip-cloud-item {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 5px;
+  width: auto;
   max-width: 100%;
   padding: 4px 9px;
   border: 1px solid var(--border);
@@ -55,7 +57,7 @@
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
-.tag-chip-cloud-item:hover {
+.tag-chip-cloud-item:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--text-0);
 }
@@ -84,10 +86,10 @@
   opacity: 0.85;
 }
 .tag-picker-list {
-  max-height: 320px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  padding-inline-end: var(--scrollbar-safe-pad);
+  height: min(320px, 45vh);
+  min-height: 120px;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -128,7 +130,7 @@
   box-shadow: var(--shadow);
 }
 .tag-popover .tag-picker-list {
-  max-height: 320px;
+  height: min(320px, 45vh);
 }
 .tag-option {
   display: flex;
@@ -988,10 +990,6 @@
   align-self: flex-start;
 }
 
-.organization-load-more {
-  align-self: center;
-}
-
 @media (max-width: 680px) {
   .organization-profile {
     grid-template-columns: var(--organization-profile-media-w-compact) minmax(0, 1fr);
@@ -1063,4 +1061,21 @@ button.actress-mini:focus-visible .actress-avatar {
 .actress-mini .actress-name {
   font-size: 12px;
   margin-top: 6px;
+}
+
+
+.tag-chip-cloud-item:disabled {
+  cursor: default;
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+.actress-works-pagination {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--form-label-gap);
+  padding-block: var(--form-label-gap);
+  color: var(--text-secondary);
 }

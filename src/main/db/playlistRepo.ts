@@ -1,8 +1,11 @@
 import type { SortDir } from '@shared/commonTypes'
-import type { Playlist, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
+import type { Playlist, PlaylistMetadata, PlaylistVideosPage, PlaylistPage, PlaylistPageQuery, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
 import { getDb } from './database'
 import {
   hydrateVideoListRows,
+  hydrateVideoCardRows,
+  videoCardSelect,
+  type VideoCardProjectionRow,
   videoListSelectExtras,
   type VideoListProjectionRow
 } from './videoListProjection'
@@ -171,6 +174,58 @@ export function getPlaylistDetail(id: number, sort: PlaylistVideoSort = {}): Pla
     videos: hydrateVideoListRows(videos),
     links: readRelatedLinks(db, 'playlist_links', 'playlist_id', id)
   }
+}
+
+/** Bounded detail read: filtering and pagination precede expensive card projection. */
+export function listPlaylistVideoPage(id: number, query: PlaylistPageQuery = {}): PlaylistVideosPage | null {
+  const db = getDb()
+  return db.transaction(() => {
+    if (!db.prepare('SELECT id FROM playlists WHERE id = ?').get(id)) return null
+    const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 60)))
+    const offset = Math.max(0, Math.trunc(query.offset ?? 0))
+    const orderBy = playlistVideoOrderBy(query.sortBy ?? 'added_at', query.sortDir === 'asc' ? 'ASC' : 'DESC')
+    const kinds = [...new Set(query.resourceKinds ?? [])]
+    const concrete = kinds.filter(kind => kind !== 'none')
+    const alternatives: string[] = []
+    if (concrete.length) alternatives.push(`EXISTS (SELECT 1 FROM video_resources vr
+      WHERE vr.video_id = v.id AND vr.kind IN (${concrete.map(() => '?').join(',')}))`)
+    if (kinds.includes('none')) alternatives.push('NOT EXISTS (SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id)')
+    const filter = alternatives.length ? ` AND (${alternatives.join(' OR ')})` : ''
+    const total = (db.prepare('SELECT COUNT(*) AS n FROM playlist_video WHERE playlist_id = ?').get(id) as { n: number }).n
+    const filteredTotal = !filter ? total : (db.prepare(`SELECT COUNT(*) AS n
+      FROM playlist_video pv JOIN videos v ON v.id = pv.video_id
+      WHERE pv.playlist_id = ?${filter}`).get(id, ...concrete) as { n: number }).n
+    const rows = db.prepare(`WITH page AS MATERIALIZED (
+      SELECT pv.video_id, pv.added_at, pv.position FROM playlist_video pv
+      JOIN videos v ON v.id = pv.video_id WHERE pv.playlist_id = ?${filter}
+      ORDER BY ${orderBy} LIMIT ? OFFSET ?
+    ) SELECT ${videoCardSelect()} FROM page pv JOIN videos v ON v.id = pv.video_id
+      ORDER BY ${orderBy}`).all(id, ...concrete, limit, offset) as VideoCardProjectionRow[]
+    return { videos: hydrateVideoCardRows(rows), total, filteredTotal, limit, offset }
+  })()
+}
+
+export function getPlaylistMetadata(id: number, sort: PlaylistVideoSort = {}): PlaylistMetadata | null {
+  const db = getDb()
+  return db.transaction(() => {
+    const playlist = getPlaylistById(id)
+    if (!playlist) return null
+    const orderBy = playlistVideoOrderBy(sort.sortBy ?? 'added_at', sort.sortDir === 'asc' ? 'ASC' : 'DESC')
+    const preview = db.prepare(`SELECT v.cover_path FROM playlist_video pv JOIN videos v ON v.id = pv.video_id
+      WHERE pv.playlist_id = ? AND v.cover_path IS NOT NULL AND v.cover_path != ''
+      ORDER BY ${orderBy} LIMIT 1`).get(id) as { cover_path: string } | undefined
+    return { ...playlist, preview_cover_path: preview?.cover_path ?? null,
+      links: readRelatedLinks(db, 'playlist_links', 'playlist_id', id) }
+  })()
+}
+
+/** Combined read retained for callers needing one snapshot of metadata and the page. */
+export function getPlaylistPage(id: number, query: PlaylistPageQuery = {}): PlaylistPage | null {
+  return getDb().transaction(() => {
+    const metadata = getPlaylistMetadata(id, query)
+    const page = metadata ? listPlaylistVideoPage(id, query) : null
+    return metadata && page ? { ...metadata, ...page } : null
+  })()
 }
 
 export function listPlaylistsForVideo(videoId: number): PlaylistVideoMembership[] {

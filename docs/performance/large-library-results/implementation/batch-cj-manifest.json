@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cj-lint-ignored.log": "d5382df5d7d820e2ebd6e812b34bb70ebf3d602c5374a0ee48470408a692d2c9",
+    "batch-cj-prototype.log": "c6d03e52c0bd72a935c624855dd662a65012031cd4d03970066d99831d432dce",
+    "batch-cj-prototype.patch": "8042b724c46fd5289367cab082ec3ca3db4957a2922457dce02d037cf5e8ac2e",
+    "batch-cj-review.md": "9a0442300589934bad099a77e552040d94ad33a69a178001e3f4bdbbb494e23d",
+    "batch-cj-type-files.log": "1d0b1f87fa67e9525ece8017d2bd0df67c839ab6a4d8f536ca36444e74ade811",
+    "batch-cj-types-config.json": "88f9180b779425a88fb60b850eaec104bdcdf2b752648c915ee4f072cee7d7eb",
+    "batch-cj-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "notes": [
+    "Prototype only, depends on current prior batches; not a production schema migration.",
+    "4 prototype checks and selected tsc passed; ESLint ignored scripts (not a lint gate).",
+    "No production full/build repeated; full15/42 incomplete."
+  ]
+}

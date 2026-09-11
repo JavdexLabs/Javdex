@@ -239,3 +239,11 @@
     --pending-rail-w: 220px;
   }
 }
+
+.queuePager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--form-label-gap);
+  color: var(--text-secondary);
+}

@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cw-build.log": "4a4ea3240439662b30a8f4444ac4d0b0207e80a7b336ab626387afcb5916ee19",
+    "batch-cw-full.log": "a43534801b8ab735cb099ae546856f0a8e19a72d4eabe2942b9d80a28791aa8c",
+    "batch-cw-review.md": "34d7af1a051e771b89043663ea32d6df9c8913ab410f079549b35e255244a2d5",
+    "batch-cw-target.log": "e947480d9a169c32582621f7ed39d0a75180976653013a7e6a26fcea7d755f5c",
+    "batch-cw-unrecognized-publication.patch": "93016660a989d8528cb8d3b62d1444bdbff4a4fe4277fbebc5ffee2fe3ebf03e"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "98focused before testspy typing correction; finalfull2656pass1skip0fail validates corrected fixture; build terminal0.",
+    "Iterable entries publication and sealed path keyset reader; production coordinator still legacy arrays; full15/42 remains."
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "1a1f0d5a4747f655fb578d40f33dd78245a47596c749f40c7735ffe0d652d108",
+  "notes": [
+    "Cumulative againstHEAD; includes V abort-test baseline and depends on U/V production changes. W adds four recovery/log-reference integration scenarios only.",
+    "Actual AgentExecution+SQLite+PluginWorkLogPersistence with1001entries: success, hashfailure, rebuildfailure, unreconciledwrite. Fake modelruntime and testcipher; no external model or user data.",
+    "Success generation1 andappend afterward; failures generation0, no repeated rebuild within samegeneration. WorkLog reference/fullcontents, executionhistory andtoolledger preserved.",
+    "Final47target tests passed; node types and changedtest lint passed. Initial13execution tests passed before TypeScript union-fixture correction. No production changes, so no repeated fullsuite/build; last fullsuite/build evidence remains V.",
+    "Standards/Spec reviews found no blockers and close the new-reference/recovery-generation host-protocol coverage gap. Not actual Pi checkpoint files, OSsafeStorage, Windows/HDD or powerloss acceptance."
+  ]
+}

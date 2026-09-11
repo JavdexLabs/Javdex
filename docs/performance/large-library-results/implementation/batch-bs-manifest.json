@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bs-after.log": "820b03b7007cd050279865c7a37a0dfa669d18b6e19bbd4ed33204682e8dfb3f",
+    "batch-bs-before.log": "9100418aadbea241a1d1e4abd0523acda3d425f288409461813307779c358017",
+    "batch-bs-build.log": "b251320fbd3a3508cc625265739f1b0c89f395f3cd8a98fe73b93a0affba2afd",
+    "batch-bs-full.log": "b58ee4546ef0d503288038df055625fa2be3b3297257c896b412dba0083d67c2",
+    "batch-bs-narrow-image-page.patch": "b9c0e3691602f98eea6ba3508ae8fccb4cfe168642e01a1a35e0ff7345227c90",
+    "batch-bs-review.md": "8e03dc465c5e5c573e93dc94d0b35b43826cecbe3c37ca50d73c153b22dfa505",
+    "batch-bs-target.log": "bdfeebcf8b8c51a665a4592ea0c806f38d06d5943318777a4bf78d096c199301"
+  },
+  "notes": [
+    "Selected cumulative source snapshot depends on previous batches.",
+    "8 focused; full2363pass1skip0fail; build terminal0.",
+    "Before/after synthetic warm benchmarks use the same script; not p95/cold/mixed worker load.",
+    "Full15/42goal remains incomplete."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "2adc1e6540d0539a1317ec9766ee3e612426ebf94dd0259a17612183e5b8f04f",
+  "notes": [
+    "Cumulative diff against HEAD for listed files; surrounding workspace contains batches B-S.",
+    "Encrypted same-file snapshot and incremental frames; legacy migrated only on mutation. Complete corrupt records reject; incomplete final append recovered before retry.",
+    "Cache signature invalidation; atomic snapshot fsync/rename/POSIX directory sync. Committed append survives optional compaction failure.",
+    "Full npm test 2097 passed, 1 skipped, 0 failed; build passed. Standards and Spec reviews found no concrete blocker.",
+    "Actual local 1000/2000 journal sizes 111800/225800 bytes; encryption calls 1000/2000. Size is not physical-device write count. Timing overlapped full regression and is not latency acceptance.",
+    "Remaining: cold full-file synchronous replay/map memory, per-operation fsync main-loop blocking, file/DB handoff recovery, cross-process writers, Windows/HDD/powerloss and 10k/20k/100k acceptance.",
+    "New format is not readable by older application versions. Preserve pre-upgrade alias file for rollback; do not merely change journal magic. No user data touched."
+  ]
+}

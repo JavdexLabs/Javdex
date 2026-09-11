@@ -1,5 +1,7 @@
+import { useWindowedCatalog } from '../query/useWindowedCatalog'
+import { toScopedVideoCardPage, type ScopedVideoCard, type ScopedVideoCardPage } from '@shared/cardProjection'
 import { useEffect, useMemo, useState } from 'react'
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { LibraryBig, SearchX } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
@@ -58,29 +60,12 @@ export default function GlobalSearchPage(): JSX.Element {
     queryKey: mediaLibraryKeys.activeList(),
     queryFn: () => api.mediaLibraries.list()
   })
-  const resultsQuery = useInfiniteQuery({
-    queryKey: homeKeys.search(queryHash),
-    enabled: Boolean(urlQ.trim()),
-    initialPageParam: 0,
-    queryFn: ({ pageParam }) =>
-      api.home.search(
-        globalSearchInputFromParams(searchParams, {
-          limit: PAGE_SIZE,
-          offset: typeof pageParam === 'number' ? pageParam : 0
-        })
-      ),
-    getNextPageParam: (lastPage, pages) => {
-      const loaded = pages.reduce((total, page) => total + page.items.length, 0)
-      return loaded < lastPage.total ? loaded : undefined
-    },
-    placeholderData: (previous) => previous
-  })
-
-  const videos = useMemo(
-    () => resultsQuery.data?.pages.flatMap((page) => page.items) ?? [],
-    [resultsQuery.data]
+  const resultsQuery = useWindowedCatalog<ScopedVideoCard, ScopedVideoCardPage>(
+    homeKeys.search(queryHash), PAGE_SIZE,
+    async offset => toScopedVideoCardPage(await api.home.search(globalSearchInputFromParams(searchParams, { limit: PAGE_SIZE, offset }))), Boolean(urlQ.trim())
   )
-  const total = resultsQuery.data?.pages[0]?.total ?? 0
+  const videos = resultsQuery.items
+  const total = resultsQuery.total
   const detailLibraryIds = useMemo(
     () => new Map(videos.map((video) => [video.id, video.preferredLibraryId])),
     [videos]
@@ -99,7 +84,7 @@ export default function GlobalSearchPage(): JSX.Element {
     )
   }
 
-  const searching = resultsQuery.isLoading || (resultsQuery.isFetching && videos.length === 0)
+  const searching = resultsQuery.loading || (resultsQuery.isFetching && total === 0)
   const hasQuery = Boolean(urlQ.trim())
 
   return (
@@ -175,19 +160,19 @@ export default function GlobalSearchPage(): JSX.Element {
           <div className="scroll-body-inner">
             <EmptyState loading title="搜索中…" />
           </div>
-        ) : resultsQuery.isError ? (
+        ) : Boolean(resultsQuery.error) && total === 0 ? (
           <div className="scroll-body-inner">
             <EmptyState
               icon={<SearchX {...UI_ICON_SM} aria-hidden />}
               title="搜索失败"
               description="读取跨媒体库结果时发生错误。"
             >
-              <Button size="sm" onClick={() => void resultsQuery.refetch()}>
+              <Button size="sm" onClick={() => void resultsQuery.retry()}>
                 重新搜索
               </Button>
             </EmptyState>
           </div>
-        ) : videos.length === 0 ? (
+        ) : total === 0 ? (
           <div className="scroll-body-inner">
             <EmptyState
               icon={<SearchX {...UI_ICON_SM} aria-hidden />}
@@ -199,11 +184,7 @@ export default function GlobalSearchPage(): JSX.Element {
           <VirtualPosterGrid
             videos={videos}
             detailLibraryIds={detailLibraryIds}
-            hasMore={Boolean(resultsQuery.hasNextPage)}
-            loadingMore={resultsQuery.isFetchingNextPage}
-            onLoadMore={() => {
-              if (!resultsQuery.isFetchingNextPage) void resultsQuery.fetchNextPage()
-            }}
+            catalogWindow={resultsQuery.window}
             showLibraryBadges
             scrollMemoryKey={`global-search:${queryHash}`}
           />

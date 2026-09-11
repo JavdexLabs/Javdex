@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cq-build.log": "9972eadef17ff9ab5303aa4ca81d476948c24949088fe29eeb8a1ca57c2e71f0",
+    "batch-cq-full.log": "4a58c92cdcee5b758dd98933ccc9ac0f4ec486a7639a5074c1bf84db4d5fe000",
+    "batch-cq-local-audit-transactions.patch": "e026c1dbbd58bfb8fa09aba9773839ddb3f441a18cde2338d0bd9d9dd74ea074",
+    "batch-cq-review.md": "10ed190322b1dd4b234757064b6edf9832ffba74226b371a8c34b52468e27e56",
+    "batch-cq-target.log": "066b078f7b0ec884cc89c2910c4b5acb7053c281ed0ed48a6577f10ac2bfb516"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "163 focused; full2586pass1skip0fail; build terminal0.",
+    "Four local same-connection segments; remaining writer paths/coordinator/full15/42 incomplete."
+  ]
+}

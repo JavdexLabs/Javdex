@@ -280,7 +280,8 @@ describe('Web read-only catalog scope', () => {
     })
     const resource = catalog.media(record.videoId, record.fileId)
     assert.ok('file' in resource)
-    assert.equal(resource.file, fs.realpathSync(movie))
+    // Match the guard's native canonical path (Windows expands 8.3 temp-directory names).
+    assert.equal(resource.file, fs.realpathSync.native(movie))
     const outside = path.join(directory, 'private.mp4')
     fs.writeFileSync(outside, 'private')
     fs.unlinkSync(movie)

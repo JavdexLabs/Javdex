@@ -41,7 +41,8 @@ jobs:
       - name: Run tests
         run: npm test
         env:
-          JAVDEX_TEST_TIMEOUT_MS: "300000"
+          # The complete Windows suite can exceed five minutes on hosted runners.
+          JAVDEX_TEST_TIMEOUT_MS: "900000"
 
   package:
     name: Package ${{ matrix.platform }}

@@ -1,7 +1,7 @@
 import { createActressAvatarCropSnapshot } from '@library/db/actressAvatarCropSnapshot'
 import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
 import { randomUUID } from 'node:crypto'
-import { createProgressPublisher } from './progressPublisher'
+import { createProgressPublisher } from '@library/scan/progressPublisher'
 import { IPC } from '@shared/ipc-channels'
 import type { ScrapeIpcEvent, ScrapeIpcEventChannel } from '@shared/scrapeIpcContract'
 import type {

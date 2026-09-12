@@ -27,7 +27,7 @@ import { translateTextToChinese } from '../services/llmTextTranslate'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
-} from '../services/libraryPathCleanupService'
+} from '@library/scan/libraryPathCleanupService'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { getLlmSecretStorageState } from '../settings/llmSecretStore'

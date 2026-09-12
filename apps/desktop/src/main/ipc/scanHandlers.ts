@@ -22,7 +22,7 @@ import {
 } from '@library/scan/libraryScanAuditStore'
 import { importManual, renameAndImport } from '../scanner/scanner'
 import { scanCoordinator } from '../scanner/scanCoordinator'
-import { maintenanceTaskGate } from '../services/maintenanceTaskGate'
+import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
 import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'

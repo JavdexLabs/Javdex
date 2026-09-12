@@ -37,9 +37,9 @@ import {
 import {
   cancelLibraryPathRemoval,
   previewLibraryPathRemoval
-} from './libraryPathCleanupService'
+} from '@library/scan/libraryPathCleanupService'
 import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
-import { maintenanceTaskGate } from './maintenanceTaskGate'
+import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 
 export interface MediaLibraryServiceDependencies {
   create: typeof createMediaLibrary

@@ -86,7 +86,7 @@ import {
 import type {
   LocalNfoAnchor,
   LocalNfoIdentityInspection
-} from '../metadata-sources'
+} from '@library/nfo/localNfoTypes'
 import { appendDirectoryVideoCode, summarizeDirectoryVideoCodes } from '@library/nfo/directoryVideoIdentity'
 import { indexNfoSidecars } from '@library/nfo/nfoSidecarLocator'
 import { getMediaLibraryConfig } from '@library/db/mediaLibraryRepo'

@@ -9,7 +9,7 @@ import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { insertScannedVideo } from '@library/db/videoRepo'
 import { readScanAuditSource } from '@library/db/scanAuditSource'
-import { confirmLibraryPathRemoval, previewLibraryPathRemoval } from '../services/libraryPathCleanupService'
+import { confirmLibraryPathRemoval, previewLibraryPathRemoval } from '@library/scan/libraryPathCleanupService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { createScanCoordinator } from './scanCoordinator'
 

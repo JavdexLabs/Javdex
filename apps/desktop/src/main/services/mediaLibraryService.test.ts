@@ -13,7 +13,7 @@ import {
   createMediaLibraryService,
   type MediaLibraryServiceDependencies
 } from './mediaLibraryService'
-import { MaintenanceTaskGate } from './maintenanceTaskGate'
+import { MaintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 
 function createHarness(runnableNames: readonly string[] = ['Runnable']) {
   const calls = {

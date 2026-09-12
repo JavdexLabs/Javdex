@@ -2,7 +2,7 @@ import type { LibraryScanTrigger, ScanCompletionResult } from '@shared/libraryTy
 import type { MediaLibraryAutomaticScanState } from '@shared/mediaLibraryTypes'
 import { listMediaLibraryAutomaticScanStates } from '@library/db/mediaLibraryRepo'
 import { scanCoordinator } from '../scanner/scanCoordinator'
-import { maintenanceTaskGate } from './maintenanceTaskGate'
+import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 
 export const AUTOMATIC_SCAN_STARTUP_DELAY_MS = 30_000
 export const AUTOMATIC_SCAN_RESUME_DELAY_MS = 3_000

@@ -30,7 +30,7 @@ import {
   listPendingLibraryPathCleanupRoots,
   previewLibraryPathRemoval,
   runLibraryScanCleanupTransaction
-} from './libraryPathCleanupService'
+} from '@library/scan/libraryPathCleanupService'
 import {
   bootstrapLegacyMediaLibrary,
   LEGACY_CLEANUP_WAITING_ERROR
@@ -1129,7 +1129,7 @@ it('rolls back cleanup and audit writes on a native audit INSERT failure, then r
   assert.equal(calls, 2)
   assert.deepEqual(auditCleanupSnapshot(), before)
   database.exec('DROP TRIGGER fail_cleanup_audit_test')
-  const events: import('./libraryPathCleanupService').LibraryPathCleanupAuditEvent[] = []
+  const events: import('@library/scan/libraryPathCleanupService').LibraryPathCleanupAuditEvent[] = []
   const result = applyPendingLibraryPathCleanups([cleanup], (event) => {
     events.push(event)
     database.prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))

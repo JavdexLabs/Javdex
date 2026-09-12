@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { createScanCleanupPages } from '@library/scan/scanCleanupPages'
-import { createProgressPublisher } from '../services/progressPublisher'
+import { createProgressPublisher } from '@library/scan/progressPublisher'
 import { randomUUID } from 'node:crypto'
 import type {
   LibraryScanAudit,
@@ -52,7 +52,7 @@ import { createScanAuditWriter } from '@library/db/scanAuditWriter'
 import { iterateScanAuditUnrecognizedPaths } from '@library/db/scanAuditUnrecognizedPaths'
 import { readPendingScanAuditEntries } from '@library/db/pendingScanAuditRepo'
 import { reconcilePendingResourceIdentities } from '@library/db/pendingResourceIdentityRepo'
-import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+import { maintenanceTaskGate, type MaintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import {
   authorizeMediaLibraryRoot,
   authorizeMediaLibraryRootDeletionTarget,
@@ -66,7 +66,7 @@ import {
   recoverLegacyLibraryPathCleanups,
   type RecoverLegacyLibraryPathCleanupResult,
   type LibraryPathCleanupAuditEvent
-} from '../services/libraryPathCleanupService'
+} from '@library/scan/libraryPathCleanupService'
 import { createLibraryRootMatcher } from '@library/scan/libraryRootMatcher'
 import {
   scanFolders,

@@ -51,7 +51,7 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02 | 进行中（db、图片、扫描辅助、NFO 与 scan NFO workset 已迁入 library） | schema 16。`getDb()` 单例仍保留。剩余：scanner 编排、Electron NFO 封面导出、catalog 业务服务仍在 desktop；S02D 未开始 |
+| S02 | 进行中（library 已含 db、图片、扫描辅助、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：scanner 编排、Electron NFO 封面导出、catalog 业务服务仍在 desktop；S02D 未开始 |
 | S03–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
@@ -232,8 +232,14 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 **S02 实施记录（扫描 NFO workset 切片）**
 
 - 范围：将 `LocalNfoAnchor` / `LocalNfoIdentityInspection` 放到 `packages/library/src/nfo/localNfoTypes.ts`；将 `scanNfoWorkset` 迁入 `packages/library/src/scan`。桌面 local NFO adapter 再导出这些类型，避免打断现有 metadata-sources 入口。
-- 验证：`npm run typecheck:node`；library / metadata-source 边界通过。scanNfoWorkset、scanner NFO 集成、LocalNfoSourceAdapter 与 directory cache 测试 60 项全部通过。
+- 验证：`npm run typecheck:node`；library / metadata-source 边界通过。scanNfoWorkset、scanner NFO 集成、LocalNfoSourceAdapter 与 directory cache 测试 60 项全部通过。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过。
 - 未做：`scanner.ts` / `scanCoordinator.ts` 仍在 desktop；`localNfoScanService` 仍依赖刮削应用服务。
+
+**S02 实施记录（维护闸门与路径清理切片）**
+
+- 范围：将 `maintenanceTaskGate`、`progressPublisher` 和 `libraryPathCleanupService` 迁入 `packages/library/src/scan`。路径清理改为直接引用 `@shared/videoResourcePromotion`，不再经过 desktop 再导出。
+- 工程默认：维护闸门仍是进程单例，S02D 由 LocalCatalogBackend 装配。IPC/scanHandlers 暂时直接引用 library 闸门，S02D 再收到 application。
+- 未做：`scanner.ts` / `scanCoordinator.ts` 仍在 desktop。
 
 ### S02D：先完成桌面本地后端重构
 

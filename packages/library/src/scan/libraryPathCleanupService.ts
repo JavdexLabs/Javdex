@@ -25,7 +25,7 @@ import {
 } from '@library/db/videoRepo'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 import { mediaAssetStore } from '@library/mediaAssetStore'
-import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'
+import { selectPrimaryVideoResourceCandidate } from '@shared/videoResourcePromotion'
 
 export interface LibraryRootScope {
   libraryId: number

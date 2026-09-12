@@ -8,7 +8,7 @@ import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { insertLocalVideoResource, insertScannedVideo, importVideoLinkResourceRecord } from '@library/db/videoRepo'
 import { createScanAuditWriter } from '@library/db/scanAuditWriter'
 import { beginLibraryScanRun } from '@library/db/libraryScanRepo'
-import { confirmLibraryPathRemoval, previewLibraryPathRemoval, createPendingLibraryPathCleanupPages } from './libraryPathCleanupService'
+import { confirmLibraryPathRemoval, previewLibraryPathRemoval, createPendingLibraryPathCleanupPages } from '@library/scan/libraryPathCleanupService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 
 let directory: string, previous: string | undefined

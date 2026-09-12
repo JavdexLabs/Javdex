@@ -19,7 +19,7 @@ import {
   runLibraryCleanup,
   type LibraryCleanupHints
 } from '@library/db/libraryCleanup'
-import { maintenanceTaskGate } from './maintenanceTaskGate'
+import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { videoMaintenanceService } from './videoMaintenanceService'
 

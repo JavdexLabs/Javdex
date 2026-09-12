@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import type { ManagedRootFileCapability } from '../metadata-sources'
-import { MAX_NFO_BYTES } from './nfoArtifactCodec'
+import { MAX_NFO_BYTES } from '@library/nfo/nfoArtifactCodec'
 
 interface CapabilityRecord {
   filePath: string

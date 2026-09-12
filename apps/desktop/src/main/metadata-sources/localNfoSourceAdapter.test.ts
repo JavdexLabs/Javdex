@@ -7,7 +7,7 @@ import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import { assertMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
 import { createNfoFileStore } from '../nfo/nfoFileStore'
-import { renderNfoExportDocument } from '../nfo/export/nfoExportProfiles'
+import { renderNfoExportDocument } from '@library/nfo/export/nfoExportProfiles'
 import { NFO_EXPORT_PROFILE_IDS } from '@shared/nfoExportTypes'
 import {
   LocalNfoSourceAdapter,

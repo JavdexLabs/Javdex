@@ -3,7 +3,7 @@ import path from 'node:path'
 import type Database from 'better-sqlite3'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import type { LocalNfoAnchor, LocalNfoIdentityInspection } from '../metadata-sources'
-import type { DirectoryVideoIdentitySummary } from '../nfo/directoryVideoIdentity'
+import type { DirectoryVideoIdentitySummary } from '@library/nfo/directoryVideoIdentity'
 
 export interface ScanNfoPreflight {
   anchor: LocalNfoAnchor

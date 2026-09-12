@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, it } from 'node:test'
 import Database from 'better-sqlite3'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
-import { summarizeDirectoryVideoCodes } from '../nfo/directoryVideoIdentity'
+import { summarizeDirectoryVideoCodes } from '@library/nfo/directoryVideoIdentity'
 import { createScanNfoWorkset, createMemoryScanNfoWorkset, ScanNfoWorksetError,
   SCAN_NFO_WORKSET_MAX_BYTES, type ScanNfoWorkset, type ScanNfoPreflight } from './scanNfoWorkset'
 

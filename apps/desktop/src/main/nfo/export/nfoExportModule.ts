@@ -23,13 +23,13 @@ import {
   listUnrepresentedNfoFields,
   renderNfoExportDocument,
   type NfoExportVideoDocument
-} from './nfoExportProfiles'
+} from '@library/nfo/export/nfoExportProfiles'
 import {
   nfoExportRepository,
   type NfoExportRepository,
   type NfoExportResourceSnapshot
-} from './nfoExportRepository'
-import { sanitizeNfoExportMessage } from './nfoExportSafety'
+} from '@library/nfo/export/nfoExportRepository'
+import { sanitizeNfoExportMessage } from '@library/nfo/export/nfoExportSafety'
 import { prepareCoverArtwork, renderCoverArtwork, type CoverArtworkRecipe, type CoverImageDecoder } from './nfoCoverArtwork'
 
 interface FileFingerprint {

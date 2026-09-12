@@ -36,7 +36,7 @@
 | `apps/desktop` | 原 main/preload/renderer/MCP 已物理迁移 | 旧 main 内仍含业务、数据库、HTTP 和单例，远程后端尚未接入 |
 | `apps/web` | 现有只读页面及资源已迁移，可单独构建 | 新服务器宿主适配与部署验证 |
 | `packages/contracts` | 原 shared 的类型与纯工具，保留 `@shared/*` 兼容别名 | 正式远程读/写 DTO、输入 schema 与协议分组 |
-| `packages/library` | 已移入 Node 路径/根/资源身份工具、catalog SQLite、图片存储、扫描辅助与本地根护栏 | 扫描编排、NFO、catalog 业务服务仍待抽离 |
+| `packages/library` | 已移入 Node 路径/根/资源身份工具、catalog SQLite、图片存储、扫描辅助、本地根护栏与 NFO 编解码/导出资料 | 扫描编排、NFO 文件票据/封面导出、catalog 业务服务仍待抽离 |
 | `packages/ui` | 现有 Checkbox 与 CSS，桌面/Web 已引用 | 不预先扩大共享 UI 范围 |
 | `packages/http` | 私有 workspace 和职责说明 | HTTP 源码尚未抽离，无可运行入口 |
 | `apps/server` | 私有 workspace 和职责说明 | 服务启动、构建、Docker 均未实施，无占位成功脚本 |
@@ -51,7 +51,7 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02 | 进行中（db、图片存储、扫描辅助已迁入 library） | db、scan helpers、mediaAssetStore、ADR-0024 根护栏已在 `packages/library`。schema 16。`getDb()` 单例仍保留。剩余：scanner 编排、NFO、catalog 业务服务仍在 desktop；S02D 未开始 |
+| S02 | 进行中（db、图片、扫描辅助、NFO 编解码已迁入 library） | schema 16。`getDb()` 单例仍保留。剩余：scanner 编排、NFO 文件票据/封面导出、catalog 业务服务仍在 desktop；S02D 未开始 |
 | S03–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
@@ -212,8 +212,14 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：将 Node-only 扫描辅助（番号解析、时长探测、路径匹配、文件清单/计数/清理页、STRM 重定位索引）和 ADR-0024 本地根文件护栏迁入 `packages/library/src/scan`。桌面 IPC 仍经 `ipcPathGuards` 再导出 `assertMediaLibraryRootFile`，不让 handler 直接导入 `@library/scan`。
 - 工程默认：当前护栏是本地模式策略，继续走 SQLite 根身份 + 实时路径校验；服务端不同挂载策略仍由后续宿主选择，本切片不改产品语义。
-- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。迁出模块及根护栏相关测试 91 项全部通过（IPC path guards、LocalNfoSourceAdapter、NFO sidecar、番号/时长/清单/计数/STRM）。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。迁出模块及根护栏相关测试 91 项全部通过（IPC path guards、LocalNfoSourceAdapter、NFO sidecar、番号/时长/清单/计数/STRM）。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）；`npm run pretest`。一次全量跑中 `useInfiniteVideoList` 未 settle，单独重跑通过，判定为既有时序 flake，与本切片无关。
 - 未做：`scanner.ts` / `scanCoordinator.ts` / `scanNfoWorkset.ts` 仍在 desktop，因为它们还依赖 NFO 适配器、进度发布、维护闸门和路径清理服务。
+
+**S02 实施记录（NFO 编解码与导出资料切片）**
+
+- 范围：将 Node-only 的 NFO 编解码、目录影片身份、导出安全文案、导出 profile 渲染和 SQLite 导出投影迁入 `packages/library/src/nfo`。Electron 封面编解码、窗口护栏、任务控制器和 sidecar 文件票据仍在 desktop。
+- 工程默认：`nfoExportRepository` 仍是 `getDb()` 单例；IPC 暂时直接引用 library 导出资料，S02D 再收到 application 层。未改 schema 16。
+- 未做：`nfoFileStore` / `nfoSidecarLocator` 仍依赖 metadata-sources 的 `ManagedRootFileCapability`；`nfoExportModule` 仍使用 `nativeImage`。
 
 ### S02D：先完成桌面本地后端重构
 

@@ -9,7 +9,7 @@ import type {
 import { maintenanceTaskGate, type MaintenanceTaskGate, type MaintenanceTaskLease } from '../../services/maintenanceTaskGate'
 import { mediaAssetStore, type MediaAssetStore } from '@library/mediaAssetStore'
 import { nfoExportModule, type InternalNfoExportPlan, type NfoExportModule } from './nfoExportModule'
-import { sanitizeNfoExportMessage } from './nfoExportSafety'
+import { sanitizeNfoExportMessage } from '@library/nfo/export/nfoExportSafety'
 
 interface HeldPlan {
   plan: InternalNfoExportPlan

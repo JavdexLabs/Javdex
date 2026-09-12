@@ -18,13 +18,20 @@ it('adds the cleanup queue, tag index and scan audit tables when upgrading V15 a
   try {
     const schemaBefore = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name <> 'idx_video_tag_tag_id' AND name <> 'videos' AND name <> 'trg_videos_revision_after_update' ORDER BY name").all()
     const runsBefore = db.prepare('SELECT * FROM agent_runs').all()
-    const actressesBefore = db.prepare('SELECT * FROM actresses').all()
+    const actressesBefore = db.prepare('SELECT * FROM actresses').all() as Array<Record<string, unknown>>
     migrateDatabase(db)
     assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
     const schemaAfter = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' AND name <> 'videos' AND name <> 'trg_videos_revision_after_update' ORDER BY name").all()
     assert.deepEqual(schemaAfter, schemaBefore)
     assert.deepEqual(db.prepare('SELECT * FROM agent_runs').all(), runsBefore)
-    assert.deepEqual(db.prepare('SELECT * FROM actresses').all(), actressesBefore)
+    const actressesAfter = db.prepare('SELECT * FROM actresses').all() as Array<Record<string, unknown>>
+    assert.deepEqual(
+      actressesAfter.map((row) => {
+        const { generation: _generation, ...rest } = row
+        return rest
+      }),
+      actressesBefore
+    )
     db.prepare("INSERT INTO agent_resource_cleanup VALUES ('old-run','now')").run()
     assert.throws(() => db.prepare("INSERT INTO agent_resource_cleanup VALUES ('missing','now')").run(), /FOREIGN KEY/)
     assert.deepEqual(db.pragma('foreign_key_check'), [])

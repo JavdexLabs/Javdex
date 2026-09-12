@@ -11,6 +11,7 @@ import {
   AGENT_PLATFORM_SCHEMA_SQL,
   AGENT_RESOURCE_CLEANUP_SCHEMA_SQL,
   CATALOG_PROTOCOL_SCHEMA_SQL,
+  CATALOG_IMAGE_UPLOAD_SCHEMA_SQL,
   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
   MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
@@ -25,7 +26,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 17
+export const CURRENT_SCHEMA_VERSION = 18
 
 type Migration = {
   version: number
@@ -63,6 +64,36 @@ function hasOfficialSchema17(database: Database.Database): boolean {
   return videos.has('generation') && videos.has('revision')
 }
 
+function hasOfficialSchema18(database: Database.Database): boolean {
+  if (!tableExists(database, 'catalog_image_uploads') || !tableExists(database, 'catalog_image_file_jobs')) {
+    return false
+  }
+  const uploads = columnNames(database, 'catalog_image_uploads')
+  const jobs = columnNames(database, 'catalog_image_file_jobs')
+  return (
+    uploads.has('upload_id') &&
+    uploads.has('purpose') &&
+    uploads.has('status') &&
+    uploads.has('rel_path') &&
+    uploads.has('expires_at') &&
+    jobs.has('job_id') &&
+    jobs.has('kind') &&
+    jobs.has('rel_path') &&
+    jobs.has('status')
+  )
+}
+
+function addIntegerColumnIfMissing(
+  database: Database.Database,
+  table: string,
+  column: string,
+  sql: string
+): void {
+  if (!tableExists(database, table)) return
+  if (columnNames(database, table).has(column)) return
+  database.exec(sql)
+}
+
 function migrateToV17(database: Database.Database): void {
   database.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
   const videos = columnNames(database, 'videos')
@@ -76,6 +107,64 @@ function migrateToV17(database: Database.Database): void {
       'ALTER TABLE videos ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0)'
     )
   }
+}
+
+function migrateToV18(database: Database.Database): void {
+  database.exec(CATALOG_IMAGE_UPLOAD_SCHEMA_SQL)
+  addIntegerColumnIfMissing(
+    database,
+    'actresses',
+    'generation',
+    'ALTER TABLE actresses ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'organizations',
+    'generation',
+    'ALTER TABLE organizations ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'organizations',
+    'revision',
+    'ALTER TABLE organizations ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'directors',
+    'generation',
+    'ALTER TABLE directors ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'directors',
+    'revision',
+    'ALTER TABLE directors ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'series',
+    'generation',
+    'ALTER TABLE series ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'series',
+    'revision',
+    'ALTER TABLE series ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'playlists',
+    'generation',
+    'ALTER TABLE playlists ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0)'
+  )
+  addIntegerColumnIfMissing(
+    database,
+    'playlists',
+    'revision',
+    'ALTER TABLE playlists ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0)'
+  )
 }
 
 function migrateToV2(database: Database.Database): void {
@@ -1420,6 +1509,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 17,
     migrate: migrateToV17
+  },
+  {
+    version: 18,
+    migrate: migrateToV18
   }
 ]
 
@@ -1445,10 +1538,15 @@ export function migrateDatabase(database: Database.Database): void {
       throw new Error('Database uses an unreleased schema 16 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.')
     }
   }
-  // Withdrawn experimental V17/V18 snapshots must keep failing even after official 17 ships.
+  // Withdrawn experimental V17/V18 snapshots must keep failing even after official 18 ships.
   if (current === 17 && !hasOfficialSchema17(database)) {
     throw new Error(
       'Database uses an unreleased schema 17 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.'
+    )
+  }
+  if (current === 18 && !hasOfficialSchema18(database)) {
+    throw new Error(
+      'Database uses an unreleased schema 18 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.'
     )
   }
   if (current === 0) {

@@ -95,7 +95,7 @@ describe('V15 local NFO import migration', () => {
     try {
       database.pragma('foreign_keys = ON')
       migrateDatabase(database)
-      assert.equal(CURRENT_SCHEMA_VERSION, 17)
+      assert.equal(CURRENT_SCHEMA_VERSION, 18)
       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.equal(columnNames(database, 'media_library_configs').has('auto_import_local_nfo'), true)
       assert.equal(tableExists(database, 'pending_resource_identities'), true)

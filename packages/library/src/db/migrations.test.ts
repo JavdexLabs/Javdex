@@ -7,7 +7,7 @@ import Database from 'better-sqlite3'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
-import { CATALOG_PROTOCOL_SCHEMA_SQL } from './schema'
+import { CATALOG_PROTOCOL_SCHEMA_SQL, CATALOG_IMAGE_UPLOAD_SCHEMA_SQL } from './schema'
 import { ActressIdentityConflictWorkflow } from '../../../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 
@@ -1119,6 +1119,7 @@ describe('database schema', () => {
       assert.equal(actressCols.some((column) => column.name === 'avatar_source_path'), true)
       assert.equal(actressCols.some((column) => column.name === 'avatar_crop_json'), true)
       assert.equal(actressCols.some((column) => column.name === 'revision'), true)
+      assert.equal(actressCols.some((column) => column.name === 'generation'), true)
       const scrapedStatusColumn = actressCols.find((column) => column.name === 'scraped_status')
       assert.deepEqual(
         scrapedStatusColumn
@@ -1177,7 +1178,14 @@ describe('database schema', () => {
         'library_scan_runs',
         'media_library_scan_state',
         'library_unrecognized_files',
-        'library_root_cleanup_jobs'
+        'library_root_cleanup_jobs',
+        'catalog_identity',
+        'catalog_writer_credentials',
+        'catalog_one_time_tokens',
+        'catalog_writer_claims',
+        'catalog_operation_receipts',
+        'catalog_image_uploads',
+        'catalog_image_file_jobs'
       ]
       assert.deepEqual(
         expectedTables.map(
@@ -1519,6 +1527,7 @@ describe('database schema', () => {
         )
       `)
       db.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
+      db.exec(CATALOG_IMAGE_UPLOAD_SCHEMA_SQL)
       db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
       migrateFixture(db)
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)

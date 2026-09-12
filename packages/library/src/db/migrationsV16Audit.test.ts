@@ -91,7 +91,7 @@ function comparableSchema(db: Database.Database): SchemaRow[] {
 
 function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot>) {
   migrateDatabase(db)
-  assert.equal(CURRENT_SCHEMA_VERSION, 17)
+  assert.equal(CURRENT_SCHEMA_VERSION, 18)
   assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
   assert.deepEqual(legacyRows(snapshot(db, before.map(table => table.name)), before), before)
   checkIntegrity(db)
@@ -117,6 +117,8 @@ it('adds combined V16 to the released V15 schema without rewriting any legacy da
     assert.deepEqual(addedTables, [
       'agent_resource_cleanup',
       'catalog_identity',
+      'catalog_image_file_jobs',
+      'catalog_image_uploads',
       'catalog_one_time_tokens',
       'catalog_operation_receipts',
       'catalog_writer_claims',

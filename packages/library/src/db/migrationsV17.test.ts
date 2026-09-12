@@ -13,7 +13,17 @@ function protocolObjects(db: Database.Database) {
   return db
     .prepare(
       `SELECT type, name, tbl_name FROM sqlite_master
-       WHERE name GLOB 'catalog_*'
+       WHERE name GLOB 'catalog_*' AND name NOT GLOB 'catalog_image_*'
+       ORDER BY name`
+    )
+    .all()
+}
+
+function uploadObjects(db: Database.Database) {
+  return db
+    .prepare(
+      `SELECT type, name, tbl_name FROM sqlite_master
+       WHERE name GLOB 'catalog_image_*'
        ORDER BY name`
     )
     .all()
@@ -36,7 +46,7 @@ function officialSchema16() {
   return db
 }
 
-it('upgrades official schema 16 and empty databases to the same protocol objects', () => {
+it('upgrades official schema 16 and empty databases to the same protocol and upload objects', () => {
   const from16 = officialSchema16()
   const fresh = new Database(':memory:')
   const from15 = releasedV15Database()
@@ -45,22 +55,26 @@ it('upgrades official schema 16 and empty databases to the same protocol objects
     migrateDatabase(from16)
     migrateDatabase(fresh)
     migrateDatabase(from15)
-    assert.equal(CURRENT_SCHEMA_VERSION, 17)
+    assert.equal(CURRENT_SCHEMA_VERSION, 18)
     for (const db of [from16, fresh, from15]) {
-      assert.equal(db.pragma('user_version', { simple: true }), 17)
+      assert.equal(db.pragma('user_version', { simple: true }), 18)
       assert.deepEqual(db.pragma('foreign_key_check'), [])
       assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
     }
     assert.deepEqual(protocolObjects(from16), protocolObjects(fresh))
     assert.deepEqual(protocolObjects(from15), protocolObjects(fresh))
+    assert.deepEqual(uploadObjects(from16), uploadObjects(fresh))
+    assert.deepEqual(uploadObjects(from15), uploadObjects(fresh))
     assert.deepEqual(videoVersionColumns(from16), videoVersionColumns(fresh))
     assert.deepEqual(videoVersionColumns(from15), ['generation:INTEGER', 'revision:INTEGER'])
     assert.equal(
-      (from16.prepare("SELECT title, generation, revision FROM videos WHERE code = 'S16-KEEP'").get() as {
-        title: string
-        generation: number
-        revision: number
-      }).revision,
+      (
+        from16.prepare("SELECT title, generation, revision FROM videos WHERE code = 'S16-KEEP'").get() as {
+          title: string
+          generation: number
+          revision: number
+        }
+      ).revision,
       1
     )
   } finally {
@@ -86,8 +100,9 @@ it('rolls back V17 DDL and version when the protocol tables fail, then upgrades 
     assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
     fault.mock.restore()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 17)
+    assert.equal(db.pragma('user_version', { simple: true }), 18)
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_identity'").get())
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get())
   } finally {
     t.mock.restoreAll()
     db.close()
@@ -95,21 +110,40 @@ it('rolls back V17 DDL and version when the protocol tables fail, then upgrades 
 })
 
 it('rejects unpublished experimental V17/V18 snapshots and does not rewrite them', () => {
-  for (const version of [17, 18]) {
-    const db = officialSchema16()
-    try {
-      db.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
-      if (version === 17) {
-        db.exec('DROP TABLE catalog_identity')
-      }
-      db.pragma(`user_version = ${version}`)
-      const snapshot = () => db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()
-      const before = snapshot()
-      assert.throws(() => migrateDatabase(db), /unreleased|no longer supported/)
-      assert.equal(db.pragma('user_version', { simple: true }), version)
-      assert.deepEqual(snapshot(), before)
-    } finally {
-      db.close()
-    }
+  const db17 = officialSchema16()
+  try {
+    db17.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
+    db17.exec('DROP TABLE catalog_identity')
+    db17.pragma('user_version = 17')
+    const snapshot = () => db17.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()
+    const before = snapshot()
+    assert.throws(() => migrateDatabase(db17), /unreleased schema 17/)
+    assert.equal(db17.pragma('user_version', { simple: true }), 17)
+    assert.deepEqual(snapshot(), before)
+  } finally {
+    db17.close()
+  }
+
+  const db18 = officialSchema16()
+  try {
+    db18.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
+    db18.pragma('user_version = 18')
+    const snapshot = () => db18.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()
+    const before = snapshot()
+    assert.throws(() => migrateDatabase(db18), /unreleased schema 18/)
+    assert.equal(db18.pragma('user_version', { simple: true }), 18)
+    assert.deepEqual(snapshot(), before)
+  } finally {
+    db18.close()
+  }
+
+  const db19 = officialSchema16()
+  try {
+    db19.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
+    db19.pragma('user_version = 19')
+    assert.throws(() => migrateDatabase(db19), /no longer supported/)
+    assert.equal(db19.pragma('user_version', { simple: true }), 19)
+  } finally {
+    db19.close()
   }
 })

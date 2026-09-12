@@ -1041,6 +1041,89 @@ CREATE TABLE IF NOT EXISTS catalog_operation_receipts (
 );
 `
 
+/** Official schema 18 image upload slots and crash-recovery file jobs. */
+export const CATALOG_IMAGE_UPLOAD_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS catalog_image_uploads (
+    upload_id TEXT PRIMARY KEY CHECK (length(upload_id) = 36),
+    purpose TEXT NOT NULL CHECK (purpose IN (
+      'videoCover',
+      'videoSample',
+      'actressAvatar',
+      'actressGallery',
+      'classificationImage',
+      'playlistCover',
+      'pendingScrapeStaging'
+    )),
+    content_type TEXT NOT NULL CHECK (content_type IN (
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'image/avif'
+    )),
+    writer_epoch INTEGER NOT NULL,
+    catalog_id TEXT NOT NULL CHECK (length(catalog_id) = 36),
+    status TEXT NOT NULL CHECK (status IN (
+      'reserved',
+      'writing',
+      'ready',
+      'consumed',
+      'expired',
+      'failed',
+      'discarding'
+    )),
+    rel_path TEXT,
+    byte_length INTEGER CHECK (byte_length IS NULL OR byte_length >= 0),
+    sha256 TEXT CHECK (sha256 IS NULL OR length(sha256) = 64),
+    width INTEGER CHECK (width IS NULL OR width > 0),
+    height INTEGER CHECK (height IS NULL OR height > 0),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    consumed_by_operation_id TEXT CHECK (
+      consumed_by_operation_id IS NULL OR length(consumed_by_operation_id) = 36
+    ),
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_image_uploads_status_expires
+    ON catalog_image_uploads(status, expires_at);
+
+CREATE TABLE IF NOT EXISTS catalog_image_file_jobs (
+    job_id TEXT PRIMARY KEY CHECK (length(job_id) = 36),
+    kind TEXT NOT NULL CHECK (kind IN (
+      'uploadWrite',
+      'promoteToFormal',
+      'deleteOrphan',
+      'deleteReplaced'
+    )),
+    upload_id TEXT,
+    rel_path TEXT NOT NULL,
+    target_rel_path TEXT,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'inProgress', 'done', 'failed')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (upload_id) REFERENCES catalog_image_uploads(upload_id)
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_image_file_jobs_status
+    ON catalog_image_file_jobs(status, kind);
+`
+
+/**
+ * F/P/A generation columns for image-apply version envelopes.
+ * Classification CREATE TABLE snapshots stay on V8; columns are added here.
+ */
+export const CATALOG_IMAGE_VERSION_COLUMNS_SQL = `
+ALTER TABLE actresses ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0);
+ALTER TABLE organizations ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0);
+ALTER TABLE organizations ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);
+ALTER TABLE directors ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0);
+ALTER TABLE directors ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);
+ALTER TABLE series ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0);
+ALTER TABLE series ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);
+ALTER TABLE playlists ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0);
+ALTER TABLE playlists ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);
+`
+
 /**
  * Foreground-only playlist import staging. TEMP tables are scoped to the current SQLite
  * connection, so an unfinished import cannot survive an application restart.
@@ -1522,6 +1605,10 @@ ${SCAN_AUDIT_ENTRIES_SCHEMA_SQL}
 ${RELATED_LINKS_SCHEMA_SQL}
 
 ${CATALOG_PROTOCOL_SCHEMA_SQL}
+
+${CATALOG_IMAGE_UPLOAD_SCHEMA_SQL}
+
+${CATALOG_IMAGE_VERSION_COLUMNS_SQL}
 
 ${AGENT_PLATFORM_SCHEMA_SQL}
 

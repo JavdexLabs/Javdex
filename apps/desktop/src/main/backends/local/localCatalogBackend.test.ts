@@ -63,7 +63,7 @@ describe('LocalCatalogBackend', () => {
     const backend = createLocalCatalogBackend({ identity, appVersion: '0.7.0' })
     assert.equal(backend.mode, 'local')
     assert.equal(backend.session().serverId, null)
-    assert.equal(backend.session().schemaVersion, 17)
+    assert.equal(backend.session().schemaVersion, 18)
     assert.equal(backend.capabilities().editCatalog.allowed, true)
     assert.equal(backend.capabilities().playRemoteFile.allowed, false)
 

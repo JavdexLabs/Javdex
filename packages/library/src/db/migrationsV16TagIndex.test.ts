@@ -17,9 +17,14 @@ function snapshot(db: Database.Database) {
   return tables.map(({ name }) => ({
     name,
     rows: (db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all() as Array<Record<string, unknown>>).map((row) => {
-      if (name !== 'videos') return row
-      const { generation: _generation, revision: _revision, ...rest } = row
-      return rest
+      const extra = new Set<string>()
+      if (name === 'videos' || name === 'organizations' || name === 'directors' || name === 'series' || name === 'playlists') {
+        extra.add('generation')
+        extra.add('revision')
+      }
+      if (name === 'actresses') extra.add('generation')
+      if (extra.size === 0) return row
+      return Object.fromEntries(Object.entries(row).filter(([key]) => !extra.has(key)))
     })
   }))
 }

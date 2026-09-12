@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
-import { nativeImage } from 'electron'
+import { getLibraryImageCodec } from '@library/runtime/host'
 import type { ImageDimensions } from './types'
 import { readImageOrientationFromBuffer } from './imageOrientation'
 
@@ -47,22 +47,15 @@ export function isUsableImageBuffer(body: Buffer): boolean {
   if (body.length === 0) return false
   if (body[0] === 0x3c || body[0] === 0x7b) return false
 
-  if (typeof nativeImage?.createFromBuffer === 'function') {
-    const img = nativeImage.createFromBuffer(body)
-    if (!img.isEmpty()) {
-      const { width, height } = img.getSize()
-      if (width > 0 && height > 0) return true
-    }
-  }
+  const decoded = getLibraryImageCodec()?.sizeFromBuffer(body)
+  if (decoded && decoded.width > 0 && decoded.height > 0) return true
 
   return hasImageMagicBytes(body)
 }
 
-function readNativeImageSize(img: Electron.NativeImage): ImageDimensions | null {
-  if (img.isEmpty()) return null
-  const { width, height } = img.getSize()
-  if (width <= 0 || height <= 0) return null
-  return { width, height }
+function readNativeImageSize(img: { width: number; height: number } | null): ImageDimensions | null {
+  if (!img || img.width <= 0 || img.height <= 0) return null
+  return { width: img.width, height: img.height }
 }
 
 function applyExifOrientation(
@@ -124,10 +117,8 @@ function readImageDimensionsFromBufferFallback(data: Buffer): ImageDimensions | 
 /** Read image dimensions from an in-memory image buffer. */
 export function readImageDimensionsFromBuffer(data: Buffer): ImageDimensions | null {
   try {
-    if (typeof nativeImage?.createFromBuffer === 'function') {
-      const fromNative = readNativeImageSize(nativeImage.createFromBuffer(data))
-      if (fromNative) return fromNative
-    }
+    const fromNative = readNativeImageSize(getLibraryImageCodec()?.sizeFromBuffer(data) ?? null)
+    if (fromNative) return fromNative
   } catch {
     // fall through to header parsing
   }
@@ -138,10 +129,8 @@ export function readImageDimensionsFromBuffer(data: Buffer): ImageDimensions | n
 export function readImageDimensionsFromPath(filePath: string): ImageDimensions | null {
   try {
     if (!fs.existsSync(filePath)) return null
-    if (typeof nativeImage?.createFromPath === 'function') {
-      const fromNative = readNativeImageSize(nativeImage.createFromPath(filePath))
-      if (fromNative) return fromNative
-    }
+    const fromNative = readNativeImageSize(getLibraryImageCodec()?.sizeFromPath(filePath) ?? null)
+    if (fromNative) return fromNative
     return readImageDimensionsFromBufferFallback(fs.readFileSync(filePath))
   } catch {
     return null

@@ -1,7 +1,6 @@
-import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { readTestUserDataPath } from '@shared/appIdentity'
+import { resolveLibraryUserDataPath } from '@library/runtime/host'
 import { getSettings } from '../settings/settingsStore'
 
 export const MEDIA_ASSETS_DIRNAME = 'media_assets'
@@ -16,9 +15,7 @@ export const ASSET_MEDIA_SUBDIRS = [
 ] as const
 
 export function defaultMediaAssetsRoot(): string {
-  const userData = readTestUserDataPath() ?? (typeof app?.getPath === 'function' ? app.getPath('userData') : '')
-  if (!userData) throw new Error('无法解析应用数据目录')
-  return path.join(userData, MEDIA_ASSETS_DIRNAME)
+  return path.join(resolveLibraryUserDataPath(), MEDIA_ASSETS_DIRNAME)
 }
 
 /** Active media assets root (custom path or default under userData). */

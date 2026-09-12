@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
+import { configureDesktopLibraryTestRuntime } from '../../../../apps/desktop/src/main/libraryRuntime'
 import {
   configureLibraryHost,
   resetLibraryHostForTests,
@@ -9,9 +10,9 @@ import {
 describe('library host', () => {
   const previous = process.env.JAVDEX_TEST_USER_DATA
   afterEach(() => {
-    resetLibraryHostForTests()
     if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
     else process.env.JAVDEX_TEST_USER_DATA = previous
+    configureDesktopLibraryTestRuntime()
   })
 
   it('prefers the test userData override over a configured host', () => {

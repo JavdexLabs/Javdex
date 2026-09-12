@@ -27,6 +27,8 @@ if (testFiles.length === 0) {
     './scripts/register-test-styles.mjs',
     '--import',
     'tsx',
+    '--import',
+    './scripts/register-library-test-host.ts',
     '--test',
     ...testFiles
   ]

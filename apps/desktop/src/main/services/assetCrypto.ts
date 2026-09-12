@@ -1,8 +1,6 @@
-import { app } from 'electron'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import path from 'node:path'
-import { readTestUserDataPath } from '@shared/appIdentity'
+import { resolveLibraryUserDataPath } from '@library/runtime/host'
 
 const MAGIC = Buffer.from('AVPK\x01')
 const NONCE_LEN = 12
@@ -15,10 +13,7 @@ let decryptKey: Promise<crypto.webcrypto.CryptoKey> | null = null
 let keyGeneration = 0
 
 function resolveUserDataPath(): string {
-  const testPath = readTestUserDataPath()
-  if (testPath) return testPath
-  if (typeof app?.getPath === 'function') return app.getPath('userData')
-  return path.join(os.tmpdir(), 'Javdex-asset-key')
+  return resolveLibraryUserDataPath()
 }
 
 function buildAssetKeyMaterial(userDataPath: string): string {

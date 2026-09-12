@@ -12,9 +12,14 @@ import { closeDatabase, getDb } from '@library/db/database'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
 import { resetLibraryHostForTests } from '@library/runtime/host'
-import { bindInstance } from './identity'
+import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
+import { isStructuredError } from '@shared/protocol/errors'
+import { issueDeployToken } from './identity'
+import { dispatchManageOperation } from './manageDispatch'
 import { startJavdexServer, type JavdexServerHandle } from './runtime'
 import type { ServerConfig } from './config'
+import { SERVER_APP_VERSION } from './appVersion'
+import { randomUUID } from 'node:crypto'
 
 const previousUserData = process.env.JAVDEX_TEST_USER_DATA
 
@@ -52,6 +57,64 @@ async function login(
     status: response.status,
     cookie: response.headers.get('set-cookie')?.split(';')[0] ?? '',
     body: await response.text()
+  }
+}
+
+async function postManage(
+  base: string,
+  operation: string,
+  body: unknown,
+  options: { bearer?: string; cookie?: string; appVersion?: string } = {}
+): Promise<{ status: number; json: unknown }> {
+  const headers: Record<string, string> = {
+    Origin: base,
+    'Content-Type': 'application/json'
+  }
+  if (options.appVersion !== '') {
+    headers['X-Javdex-App-Version'] = options.appVersion ?? SERVER_APP_VERSION
+  }
+  if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
+  if (options.cookie) headers.Cookie = options.cookie
+  const response = await fetch(`${base}/manage/v1/${operation}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  })
+  return { status: response.status, json: await response.json() }
+}
+
+async function claimInitialWriter(
+  base: string,
+  config: ServerConfig
+): Promise<{ secret: string; serverId: string; catalogId: string; writerEpoch: number }> {
+  const handshake = await postManage(base, 'handshake.get', { input: {} }, { appVersion: '' })
+  assert.equal(handshake.status, 200)
+  const result = handshake.json as {
+    ready: string
+    identity: { serverId: string; catalogId: string }
+    writerEpoch: number
+  }
+  assert.equal(result.ready, 'notBound')
+  const issued = issueDeployToken(config, 'initialBind')
+  const secret = generateSecret()
+  const claim = await postManage(base, 'writer.claim', {
+    serverId: result.identity.serverId,
+    catalogId: result.identity.catalogId,
+    input: {
+      kind: 'initialBind',
+      oneTimeToken: issued.oneTimeToken,
+      candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+    }
+  })
+  assert.equal(claim.status, 200)
+  const claimed = claim.json as { status: string; writerEpoch: number; bound: boolean }
+  assert.equal(claimed.status, 'consumed')
+  assert.equal(claimed.bound, true)
+  return {
+    secret,
+    serverId: result.identity.serverId,
+    catalogId: result.identity.catalogId,
+    writerEpoch: claimed.writerEpoch
   }
 }
 
@@ -149,7 +212,7 @@ describe('server runtime lifecycle', () => {
   it('refuses catalog browse until bind, then serves worker/HTTP/Range/session/images', async () => {
     assert.equal(process.versions.electron, undefined)
     const dataDir = path.join(root, 'catalog')
-    const { base } = await boot(dataDir)
+    const { base, config } = await boot(dataDir)
     const live = await fetch(`${base}/live`)
     assert.equal(live.status, 200)
     assert.deepEqual(await live.json(), { status: 'live' })
@@ -169,7 +232,29 @@ describe('server runtime lifecycle', () => {
     assert.match(refused, /尚未认主/)
     assert.doesNotMatch(refused, /默认媒体库/)
 
-    bindInstance(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const cookieManage = await postManage(
+      base,
+      'writer.status',
+      { serverId: writer.serverId, catalogId: writer.catalogId, input: {} },
+      { cookie: signedIn.cookie }
+    )
+    assert.equal(cookieManage.status, 401)
+    assert.throws(
+      () =>
+        dispatchManageOperation(
+          {
+            operation: 'writer.recoverIssue',
+            body: { input: {} },
+            bearerSecret: null,
+            remoteAddress: '192.168.1.10',
+            isLoopback: false
+          },
+          getDb()
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'AUTH_REQUIRED'
+    )
+
     const identity = resolveMediaLibraryRootIdentity(mediaRoot)
     const timestamp = new Date().toISOString()
     const rootRow = getDb()
@@ -206,6 +291,41 @@ describe('server runtime lifecycle', () => {
     fs.mkdirSync(path.join(dataDir, 'media_assets', 'covers'), { recursive: true })
     fs.writeFileSync(path.join(dataDir, 'media_assets', coverRel), png)
     getDb().prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+
+    const version = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(inserted.videoId) as { generation: number; revision: number }
+    const edited = await postManage(
+      base,
+      'videos.edit',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: version },
+        input: { videoId: inserted.videoId, fields: { title: 'Edited clip' } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(edited.status, 200)
+    const editedBody = edited.json as { versions: { V: { revision: number } } }
+    assert.equal(editedBody.versions.V.revision, version.revision + 1)
+    const stale = await postManage(
+      base,
+      'videos.edit',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: version },
+        input: { videoId: inserted.videoId, fields: { title: 'Stale' } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(stale.status, 409)
+    assert.equal((stale.json as { code: string }).code, 'VERSION_CONFLICT')
 
     const open = await fetch(`${base}/api/collections`, { headers: { Cookie: signedIn.cookie } })
     assert.equal(open.status, 200)
@@ -246,7 +366,6 @@ describe('server runtime lifecycle', () => {
   it('recovers interrupted scan rows before HTTP is ready', async () => {
     const dataDir = path.join(root, 'recover')
     await boot(dataDir)
-    bindInstance(dataDir)
     getDb()
       .prepare(
         `INSERT INTO library_scan_runs (

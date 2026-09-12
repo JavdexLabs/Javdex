@@ -1,52 +1,56 @@
-import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+import { closeDatabase, initDatabaseAtPath, isDatabaseOpen } from '@library/db/database'
+import { ensureCatalogIdentity, isWriterBound } from '@library/catalog/catalogIdentity'
+import { issueOneTimeToken, type IssuedOneTimeToken } from '@library/catalog/catalogWriter'
+import { configureLibraryHost } from '@library/runtime/host'
+import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
+import type { ServerConfig } from './config'
+import { ensureLocalDataDir } from './filesystem'
+import { createSharpImageCodec } from './imageCodec'
 
-const BIND_FILE = 'instance-bind.json'
-
-export interface InstanceBindRecord {
-  schema: 1
-  bound: true
-  boundAt: string
+export function configureServerLibraryHost(config: ServerConfig): void {
+  configureLibraryHost({
+    userDataPath: () => config.dataDir,
+    images: createSharpImageCodec(),
+    assets: {
+      assetEncryption: () => false,
+      mediaAssetsPath: () => config.imagesDir
+    }
+  })
 }
 
-function bindPath(dataDir: string): string {
-  return path.join(dataDir, BIND_FILE)
-}
-
-function parseBindRecord(value: unknown): InstanceBindRecord | null {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    (value as { schema?: unknown }).schema !== 1 ||
-    (value as { bound?: unknown }).bound !== true ||
-    typeof (value as { boundAt?: unknown }).boundAt !== 'string'
-  ) {
-    return null
+export function ensureServerCatalog(
+  config: ServerConfig,
+  options: { bootstrapToken?: string } = {}
+): ReturnType<typeof ensureCatalogIdentity> {
+  const identity = ensureCatalogIdentity({ serverId: randomUUID() })
+  if (!isWriterBound() && options.bootstrapToken) {
+    issueOneTimeToken('initialBind', { token: options.bootstrapToken })
   }
-  return value as InstanceBindRecord
+  return identity
 }
 
-export function isInstanceBound(dataDir: string): boolean {
-  const file = bindPath(dataDir)
-  if (!fs.existsSync(file)) return false
+/** One-time bind/recover tokens. Not occupancy files, writer secrets, or recovery passwords. */
+export function issueDeployToken(
+  config: ServerConfig,
+  kind: 'initialBind' | 'deployRecover',
+  options: { bootstrapToken?: string } = {}
+): IssuedOneTimeToken {
+  const owned = !isDatabaseOpen()
+  if (owned) {
+    ensureLocalDataDir(config.dataDir)
+    configureServerLibraryHost(config)
+    ensureMediaAssetDirsAt(config.imagesDir)
+    initDatabaseAtPath(path.join(config.dataDir, 'library.db'))
+  }
   try {
-    return parseBindRecord(JSON.parse(fs.readFileSync(file, 'utf8'))) !== null
-  } catch {
-    return false
+    ensureCatalogIdentity({ serverId: randomUUID() })
+    if (kind === 'initialBind' && options.bootstrapToken) {
+      return issueOneTimeToken('initialBind', { token: options.bootstrapToken })
+    }
+    return issueOneTimeToken(kind)
+  } finally {
+    if (owned) closeDatabase()
   }
-}
-
-/** Deploy-time occupancy marker. Not a writer token, serverId, or recovery password. */
-export function bindInstance(dataDir: string, now = () => new Date().toISOString()): InstanceBindRecord {
-  fs.mkdirSync(dataDir, { recursive: true })
-  const existing = isInstanceBound(dataDir)
-  if (existing) {
-    return parseBindRecord(JSON.parse(fs.readFileSync(bindPath(dataDir), 'utf8'))) as InstanceBindRecord
-  }
-  const record: InstanceBindRecord = { schema: 1, bound: true, boundAt: now() }
-  const temporary = `${bindPath(dataDir)}.${process.pid}.tmp`
-  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
-  fs.renameSync(temporary, bindPath(dataDir))
-  return record
 }

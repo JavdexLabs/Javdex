@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { recoverInterruptedLibraryScanRuns } from '@library/db/libraryScanRepo'
-import { configureLibraryHost } from '@library/runtime/host'
+import { isWriterBound } from '@library/catalog/catalogIdentity'
 import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
 import { createWorkerWebCatalog } from '@http/catalogWorkerAdapter'
 import { WebServer } from '@http/server'
@@ -11,8 +11,10 @@ import { WebSessions } from '@http/auth'
 import { constrainMediaToMounts, gateCatalogUntilBound } from './catalogGate'
 import type { ServerConfig } from './config'
 import { acquireDataDirLock, ensureLocalDataDir, ensureMediaMounts } from './filesystem'
-import { isInstanceBound } from './identity'
-import { assertSharpDecode, createSharpImageCodec } from './imageCodec'
+import { configureServerLibraryHost, ensureServerCatalog } from './identity'
+import { assertSharpDecode } from './imageCodec'
+import { dispatchManageOperation } from './manageDispatch'
+import { SERVER_APP_VERSION } from './appVersion'
 import { WebCatalogWorkerClient } from './webCatalogWorkerClient'
 
 export interface JavdexServerHandle {
@@ -27,7 +29,7 @@ export function defaultWebCatalogWorkerEntry(): string {
 
 export async function startJavdexServer(
   config: ServerConfig,
-  options: { workerEntry?: string } = {}
+  options: { workerEntry?: string; bootstrapToken?: string } = {}
 ): Promise<JavdexServerHandle> {
   if (process.versions.electron) {
     throw new Error('服务器宿主不能在 Electron 中启动')
@@ -56,17 +58,11 @@ export async function startJavdexServer(
     throw error
   }
   try {
-    configureLibraryHost({
-      userDataPath: () => config.dataDir,
-      images: createSharpImageCodec(),
-      assets: {
-        assetEncryption: () => false,
-        mediaAssetsPath: () => config.imagesDir
-      }
-    })
+    configureServerLibraryHost(config)
     ensureMediaAssetDirsAt(config.imagesDir)
     const database = initDatabaseAtPath(path.join(config.dataDir, 'library.db'))
     recoverInterruptedLibraryScanRuns(database)
+    ensureServerCatalog(config, { bootstrapToken: isWriterBound(database) ? undefined : options.bootstrapToken })
     const workerEntry = options.workerEntry ?? defaultWebCatalogWorkerEntry()
     if (!fs.existsSync(workerEntry)) {
       throw new Error(`缺少 catalog 查询 worker: ${workerEntry}`)
@@ -74,7 +70,7 @@ export async function startJavdexServer(
     worker = new WebCatalogWorkerClient(workerEntry, database.name)
     const catalog = gateCatalogUntilBound(
       constrainMediaToMounts(createWorkerWebCatalog(database, worker), mountRoots),
-      () => isInstanceBound(config.dataDir)
+      () => isWriterBound(database)
     )
     const sessions = new WebSessions(Date.now, path.join(config.dataDir, 'web-devices.json'))
     http = new WebServer({
@@ -90,6 +86,10 @@ export async function startJavdexServer(
         live: () => ({ status: 'live' }),
         ready: () =>
           ready && !stopping ? { ready: true } : { ready: false, reason: stopping ? 'stopping' : 'starting' }
+      },
+      manage: {
+        appVersion: SERVER_APP_VERSION,
+        dispatch: (context) => dispatchManageOperation(context, database)
       }
     })
     const port = await http.start(config.port, config.listenHost)

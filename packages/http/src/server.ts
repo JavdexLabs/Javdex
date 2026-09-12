@@ -19,6 +19,7 @@ import {
   createManageHttpServer,
   type HttpSurface
 } from './surfaces'
+import { handleManageHttpRequest, type ManageHttpSurface } from './manage'
 
 const COOKIE = 'javdex_web_session'
 export function isLocalPeer(address: string): boolean {
@@ -134,6 +135,8 @@ export class WebServer {
       surface?: HttpSurface
       /** Server host only. Desktop LAN browse must omit this so /live and /ready stay absent. */
       probes?: WebHealthProbes
+      /** Server host only. Desktop LAN browse must omit this so /manage/v1 stays 404. */
+      manage?: ManageHttpSurface
     }
   ) {
     if ((options.surface ?? BROWSER_HTTP_SURFACE) === MANAGE_HTTP_SURFACE) {
@@ -255,6 +258,10 @@ export class WebServer {
     const url = new URL(request.url ?? '/', `http://${authority}`)
     if (url.origin !== `http://${authority}`)
       throw new WebError(400, '请求地址无效')
+    const originOk = !request.headers.origin || request.headers.origin === `http://${authority}`
+    if (await handleManageHttpRequest(request, response, url, this.options.manage, originOk)) {
+      return
+    }
     const method = request.method ?? 'GET'
     if (
       (method === 'GET' || method === 'HEAD') &&

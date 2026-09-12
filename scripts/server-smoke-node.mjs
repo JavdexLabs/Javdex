@@ -10,6 +10,8 @@ import { closeDatabase, initDatabaseAtPath } from '../packages/library/src/db/da
 import { insertTestVideoWithFile } from '../packages/library/src/db/testVideoFixtures.ts'
 import { resolveMediaLibraryRootIdentity } from '../packages/library/src/mediaLibraryRootPath.ts'
 import { configureLibraryHost, resetLibraryHostForTests } from '../packages/library/src/runtime/host.ts'
+import { digestToken, generateSecret } from '../packages/library/src/catalog/catalogSecrets.ts'
+import { randomUUID } from 'node:crypto'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 assert.equal(path.basename(process.execPath), 'node')
@@ -124,11 +126,65 @@ try {
   const cookie = login.headers.get('set-cookie')?.split(';')[0] ?? ''
   assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 503)
 
+  const handshake = await fetch(`${base}/manage/v1/handshake.get`, {
+    method: 'POST',
+    headers: { Origin: base, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input: {} })
+  })
+  assert.equal(handshake.status, 200)
+  const hello = await handshake.json()
+  assert.equal(hello.ready, 'notBound')
+  assert.equal(typeof hello.identity.serverId, 'string')
+  assert.equal(hello.capabilities.encryptedAssets, false)
+
   const bind = spawnSync(process.execPath, [path.join(appDir, 'index.js'), 'bind', '--config', configPath], {
     cwd: appDir,
     encoding: 'utf8'
   })
   assert.equal(bind.status, 0, bind.stderr + bind.stdout)
+  const issued = JSON.parse(bind.stdout)
+  assert.equal(issued.kind, 'initialBind')
+  assert.equal(typeof issued.oneTimeToken, 'string')
+  const appVersion = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8')).version
+  const secret = generateSecret()
+  const claim = await fetch(`${base}/manage/v1/writer.claim`, {
+    method: 'POST',
+    headers: {
+      Origin: base,
+      'Content-Type': 'application/json',
+      'X-Javdex-App-Version': appVersion
+    },
+    body: JSON.stringify({
+      serverId: hello.identity.serverId,
+      catalogId: hello.identity.catalogId,
+      input: {
+        kind: 'initialBind',
+        oneTimeToken: issued.oneTimeToken,
+        candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+      }
+    })
+  })
+  const claimBody = await claim.text()
+  assert.equal(claim.status, 200, claimBody)
+  const claimed = JSON.parse(claimBody)
+  assert.equal(claimed.bound, true)
+
+  const cookieManage = await fetch(`${base}/manage/v1/writer.status`, {
+    method: 'POST',
+    headers: {
+      Origin: base,
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      'X-Javdex-App-Version': appVersion
+    },
+    body: JSON.stringify({
+      serverId: hello.identity.serverId,
+      catalogId: hello.identity.catalogId,
+      input: {}
+    })
+  })
+  assert.equal(cookieManage.status, 401)
+
   const collections = await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })
   assert.equal(collections.status, 200)
 
@@ -184,7 +240,7 @@ try {
   assert.equal((verify.prepare('SELECT main_name FROM actresses').get()).main_name, 'Smoke')
   verify.close()
   assert.equal(await second.stop(), 0)
-  console.log('PASS: isolated Node production install, SQLite/WAL, HTTP, Range, session, bind gate, SIGTERM, restart')
+  console.log('PASS: isolated Node production install, SQLite/WAL, HTTP, Range, session, writer claim gate, SIGTERM, restart')
 } finally {
   resetLibraryHostForTests()
   closeDatabase()

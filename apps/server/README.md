@@ -2,7 +2,7 @@
 
 Independent Node host for the catalog database, plaintext image store, query worker, and LAN browse HTTP.
 
-This process does **not** assemble management HTTP, run Electron, Playwright, scrapers, or the plugin agent. Desktop keeps local mode; remote desktop access is a later stage.
+This process does **not** run Electron, Playwright, scrapers, or the plugin agent. Desktop keeps local mode. Management HTTP is registered by this host only (`/manage/v1`); the desktop LAN browse server must omit it.
 
 ## Run locally after build
 
@@ -18,9 +18,10 @@ npm run server:smoke:node
 ```bash
 node out/server/index.js start --config deploy/javdex-server.example.json
 node out/server/index.js bind --config deploy/javdex-server.example.json
+node out/server/index.js recover --config deploy/javdex-server.example.json
 ```
 
-Set `JAVDEX_WEB_PASSWORD` to a 12–128 character browse password. Catalog browse stays unavailable until `bind` writes the occupancy marker under the data directory.
+Set `JAVDEX_WEB_PASSWORD` to a 12–128 character browse password. Catalog browse stays unavailable until a writer claims an `initialBind` one-time token. `bind` and `recover` print the plaintext token once to stdout; only the hash is stored. Optional `JAVDEX_BOOTSTRAP_TOKEN` is used as the first unbound bind token and ignored after the instance is bound.
 
 ## Deploy
 
@@ -34,4 +35,4 @@ See `deploy/javdex-server.example.json` and `deploy/docker-compose.example.yml`.
 
 ## Not in this stage
 
-Writer identity, takeover, image upload protocol, RemoteCatalogBackend, and management routes are later stages. The bind file is only an occupancy gate for browse; it is not a writer token or recovery password.
+Image upload protocol, RemoteCatalogBackend, remaining manage mutations, and Docker acceptance are later stages. Recover tokens are issued by the deploy CLI; HTTP `writer.recoverIssue` is loopback-only in this stage.

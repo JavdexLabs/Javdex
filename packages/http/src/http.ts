@@ -30,7 +30,8 @@ export function json(
   response.end(JSON.stringify(value))
 }
 export async function readJson(
-  request: IncomingMessage
+  request: IncomingMessage,
+  maxBytes = 4096
 ): Promise<Record<string, unknown>> {
   if (request.headers['content-type']?.split(';')[0] !== 'application/json')
     throw new WebError(415, '请使用 JSON 请求')
@@ -38,7 +39,7 @@ export async function readJson(
   let body = ''
   for await (const chunk of request) {
     body += chunk.toString()
-    if (Buffer.byteLength(body) > 4096) throw new WebError(413, '请求过大')
+    if (Buffer.byteLength(body) > maxBytes) throw new WebError(413, '请求过大')
   }
   try {
     const value: unknown = JSON.parse(body)

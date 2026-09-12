@@ -404,6 +404,18 @@ describe('Web authentication and streaming', () => {
       req.end()
     })
     assert.equal(denied.status, 403)
+    const manage = await fetch(`${base}/manage/v1/handshake.get`, {
+      method: 'POST',
+      headers: {
+        Origin: base,
+        'Content-Type': 'application/json',
+        'X-Javdex-Client': 'web',
+        Cookie: sessionCookie
+      },
+      body: JSON.stringify({ input: {} })
+    })
+    assert.equal(manage.status, 404)
+    assert.doesNotMatch(await manage.text(), /serverId|catalogId|writerEpoch/i)
   })
 
   it('does not expose live/ready probes on the desktop browse surface', async () => {

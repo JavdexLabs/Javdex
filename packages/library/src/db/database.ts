@@ -73,6 +73,10 @@ export function openReadOnlyDatabaseAtPath(dbPath: string): Database.Database {
   }
 }
 
+export function isDatabaseOpen(): boolean {
+  return db !== null
+}
+
 export function getDb(): Database.Database {
   if (!db) {
     throw new Error('Database not initialised. Call initDatabaseAtPath() first.')

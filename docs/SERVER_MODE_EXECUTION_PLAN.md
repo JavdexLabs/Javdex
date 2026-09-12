@@ -54,6 +54,7 @@
 | S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、刮削应用、catalog 查询 worker 入口仍在 desktop |
 | S02D | 本地架构门槛已验证；剩余 scan/scrape/agent/player/NFO IPC 仍走桌面单例 | 见本文件 S02D 实施记录 |
 | S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
+| S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -364,6 +365,23 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 启动按配置校验 → 数据库升级/恢复 → 任务恢复 → HTTP 就绪执行；升级失败不报告 ready。SIGTERM 后停止新写入、收敛任务、关闭 worker/HTTP/数据库。提供不泄露资料的 live/ready 状态。首次未认主不允许资料浏览。
 
 新增根级 `server:build`、`server:test`、`server:smoke` 明确命令，失败返回非零。容器 smoke 使用临时卷、真实 SQLite/WAL、图片、worker、HTTP、Range、会话与重启持久化；不能只有 /health 通过。
+
+**S04 实施记录（独立 Node 运行和 Linux 镜像）**
+
+- 范围：`apps/server` 真实入口 `start`/`bind`；JSON+env 配置（绝对 `dataDir`、端口 0 或 1024–65535）；本地文件系统/磁盘/单实例锁检查；sharp 原生编解码；浏览 HTTP 在未认主时 503；可选 `/live` `/ready`（桌面 webAccess 不注入，保持 404）；生产 `server:build` 只把 `better-sqlite3`/`sharp` 留在闭包外；Dockerfile 仅复制 `out/server`。`createManageHttpServer()` 仍拒绝由浏览面装配。
+- 工程默认：`apps/server/package.json` 不设 `"type": "module"`（tsx 源码测试走 CJS，避免与 library 双份 `getDb()`）；生产 `out/server/package.json` 为 ESM。占用文件 `instance-bind.json` 只是部署占位，**不是** writer token / `serverId` / 恢复密码，S05 必须换成身份协议。服务端 v1 明文图片。未改 schema 16。管理 HTTP 未装配。
+- 验证（提交 `17559f1`，Linux Node 22.14 / amd64 glibc）：
+  - `npm run server:test` **9 通过 / 0 失败**
+  - 定向 Electron：`webServer.test.ts` + `catalogWorkerHttp.test.ts` **26 通过 / 0 失败**（桌面 `/live` `/ready` 仍 404）
+  - `npm run server:build` 通过；`check:server-production-closure` 通过
+  - `npm run server:smoke:node` **PASS**：隔离目录 `npm install --omit=dev`，`node_modules` 无 electron/playwright；真实 SQLite/WAL、HTTP、Range 206、会话跨 SIGTERM、未 bind 拒绝浏览、认主后演员行持久
+  - `npm run server:smoke` **EXIT 1**：`docker is not available`（按设计非零，未伪装容器成功）
+  - `npm run typecheck` 通过
+  - `npm run pretest` 通过（含 `check:server-boundaries`）
+  - `npm run test:packaging` **8 通过 / 0 失败**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2962 tests / 2961 pass / 0 fail / 1 skip**
+  - `npm run desktop:build` 通过（`server:build` 已含 `web:build`）
+- 未做：Docker 镜像/容器烟测（本环境无 `docker`）；管理 HTTP；writer/`serverId`/`catalogId`/epoch；RemoteCatalogBackend。下一阶段不得把占用文件当认主完成。
 
 ### S05：身份、写入版本、认主与安全重试
 

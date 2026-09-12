@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { IpcChannel } from '@shared/ipc-channels'
 import type { IpcResponse } from '@shared/ipcTypes'
+import { toStructuredError } from '@shared/protocol/errors'
 import { assertTrustedIpcSender } from './ipcSecurity'
 
 export interface IpcContext {
@@ -12,7 +13,7 @@ function ok<T>(data: T): IpcResponse<T> {
 }
 
 function fail<T>(error: unknown): IpcResponse<T> {
-  return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  return { ok: false, error: toStructuredError(error) }
 }
 
 export async function executeIpcHandler<Args extends unknown[], Result>(

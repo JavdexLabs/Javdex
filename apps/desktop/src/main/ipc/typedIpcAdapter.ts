@@ -8,6 +8,7 @@ import type {
   IpcEventPayload
 } from '@shared/typedIpcContract'
 import type { IpcChannel } from '@shared/ipc-channels'
+import { DesktopIpcError, structuredError } from '@shared/protocol/errors'
 import { registerHandler } from './shared'
 
 type HandlerRegistrar = (
@@ -40,7 +41,12 @@ export function createTypedIpcAdapter<Contract extends object>(
           const reason = parsed.error.issues
             .map((issue) => `${issue.path.join('.') || '参数'}: ${issue.message}`)
             .join('；')
-          throw new Error(`无效的 IPC 请求参数（${channel}）：${reason}`)
+          throw new DesktopIpcError(
+            structuredError(
+              'INVALID_INPUT',
+              `无效的 IPC 请求参数（${channel}）：${reason}`
+            )
+          )
         }
         return handler(...(parsed.data as IpcContractArgs<Contract, typeof channel>))
       })

@@ -4,12 +4,12 @@
 
 ## 两条 seam
 
-1. **`ConflictReviewSession`**（[`conflictReviewSession.ts`](../../src/renderer/src/pages/conflictReviewSession.ts)）
+1. **`ConflictReviewSession`**（[`conflictReviewSession.ts`](../../apps/desktop/src/renderer/src/pages/conflictReviewSession.ts)）
    - 拥有：`ConflictReviewSessionState`、`reduceConflictReviewSession(intent)`、`deriveConflictReviewDetail`。
    - 不拥有：fetch、toast、debounce、React Query。
-   - 继续组合 [`actressConflictReviewState.ts`](../../src/renderer/src/pages/actressConflictReviewState.ts) 的纯领域 helper（queue 分段、snapshot、merge actors、refresh 焦点算法）。
+   - 继续组合 [`actressConflictReviewState.ts`](../../apps/desktop/src/renderer/src/pages/actressConflictReviewState.ts) 的纯领域 helper（queue 分段、snapshot、merge actors、refresh 焦点算法）。
 
-2. **`ConflictReviewRemote`**（[`conflictReviewRemote.ts`](../../src/renderer/src/pages/conflictReviewRemote.ts)）
+2. **`ConflictReviewRemote`**（[`conflictReviewRemote.ts`](../../apps/desktop/src/renderer/src/pages/conflictReviewRemote.ts)）
    - 拥有：owner search、live name inspection、replacement validation、resolve/discard、chooseOtherOwner 的异步编排。
    - 依赖注入：`api` / `toast` / `invalidateLibrary` / `refetchGroups`，以及 `LatestRequestGate`。
    - 只回传 session patch / outcome callback，不直接持有 UI state。
@@ -18,7 +18,7 @@
 
 ## 页面 ViewModel 四块
 
-[`ActressConflictReviewPage.tsx`](../../src/renderer/src/pages/ActressConflictReviewPage.tsx) 只解构：
+[`ActressConflictReviewPage.tsx`](../../apps/desktop/src/renderer/src/pages/ActressConflictReviewPage.tsx) 只解构：
 
 - `queue` — 列表、选中组、stale/focus、`chooseGroup`
 - `detail` — selection、来源/归属、打开次级动作、confirm/apply/discard 请求

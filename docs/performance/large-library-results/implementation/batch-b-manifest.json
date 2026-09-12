@@ -3,7 +3,7 @@
   "branch": "codex/large-library-performance",
   "trackedSourcePatchSha256": "c0295168efff6ee29c69eb148415029a7c6382c3a4cf154eaa0408751b9f1f96",
   "untrackedRegressionTests": [
-    "src/main/db/pendingVideoScrapeRepo.test.ts"
+    "apps/desktop/src/main/db/pendingVideoScrapeRepo.test.ts"
   ],
   "notes": [
     "Measurements describe uncommitted production changes in batch-b.patch, not the baseline HEAD alone.",

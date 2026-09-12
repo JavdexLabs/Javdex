@@ -5,10 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { getActressDetail } from '../../src/main/db/actressRepo'
-import { listActressVideoPage } from '../../src/main/db/actressVideoPageRepo'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { getActressDetail } from '../../apps/desktop/src/main/db/actressRepo'
+import { listActressVideoPage } from '../../apps/desktop/src/main/db/actressVideoPageRepo'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 
 it('compares complete actor works with bounded first and last card pages', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-actor-works-probe-'))

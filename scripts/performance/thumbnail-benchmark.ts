@@ -5,8 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import sharp from 'sharp'
-import { mediaAssetStore } from '../../src/main/services/mediaAssetStore'
-import { invalidateAssetCache } from '../../src/main/services/assetCache'
+import { mediaAssetStore } from '../../apps/desktop/src/main/services/mediaAssetStore'
+import { invalidateAssetCache } from '../../apps/desktop/src/main/services/assetCache'
 
 it('measures original and thumbnail response bytes and pixels for a synthetic large photograph', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-thumbnail-bench-'))

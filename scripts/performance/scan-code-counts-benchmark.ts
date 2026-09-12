@@ -3,7 +3,7 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import { performance } from 'node:perf_hooks'
-import { createMemoryScanCodeCounts, createScanCodeCounts } from '../../src/main/scanner/scanCodeCounts'
+import { createMemoryScanCodeCounts, createScanCodeCounts } from '../../apps/desktop/src/main/scanner/scanCodeCounts'
 
 it('compares exact repeated-code counting, correction and frozen reads', () => {
   const results: unknown[] = []

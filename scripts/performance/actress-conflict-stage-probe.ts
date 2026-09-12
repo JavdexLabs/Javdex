@@ -5,9 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
-import { ActressIdentityConflictWorkflow } from '../../src/main/services/actressIdentityConflictWorkflow'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
+import { ActressIdentityConflictWorkflow } from '../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 it('locates skewed actor conflict costs by stage',()=>{
  const count=Number(process.env.JAVDEX_ACTRESS_PROBE_COUNT??1000)
  assert.ok(Number.isSafeInteger(count)&&count>=100&&count<=10000)

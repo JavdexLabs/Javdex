@@ -10,11 +10,11 @@
 
 ## 当前问题与代码依据
 
-- `src/main/nfo/export/nfoExportModule.ts` 将 `snapshot.coverPath` 直接规划为 `coverBasename(profileId, stem)`，除 WebP 转 JPEG 外不改变图片。`makeDocument` 将该文件用作 poster 引用，因此横图也会进入外部软件的竖版海报位。
-- `src/main/nfo/export/nfoExportProfiles.ts` 当前写出 `<thumb aspect="poster">`；普通 profile 用 `<stem>-poster`，Infuse 用 `<stem>`。没有独立横版封面角色。
+- `apps/desktop/src/main/nfo/export/nfoExportModule.ts` 将 `snapshot.coverPath` 直接规划为 `coverBasename(profileId, stem)`，除 WebP 转 JPEG 外不改变图片。`makeDocument` 将该文件用作 poster 引用，因此横图也会进入外部软件的竖版海报位。
+- `apps/desktop/src/main/nfo/export/nfoExportProfiles.ts` 当前写出 `<thumb aspect="poster">`；普通 profile 用 `<stem>-poster`，Infuse 用 `<stem>`。没有独立横版封面角色。
 - `snapshot.posterPath` 在本项目实际用于 fanart/详情背景，名称容易误导，不能当成已存在的竖版海报。
-- `src/renderer/src/styles/library-content.css` 的竖版封面依靠 `object-fit: cover; object-position: right center`，画框比例 7:10；这是显示裁切，不是已保存的图片。
-- `src/renderer/src/coverAspect.ts` 明确将常见 800×538 横版封套的右侧用作竖版展示。项目没有影片封面手动裁剪坐标可直接导出；演员头像裁剪属于另一个用途，不应引入本流程。
+- `apps/desktop/src/renderer/src/styles/library-content.css` 的竖版封面依靠 `object-fit: cover; object-position: right center`，画框比例 7:10；这是显示裁切，不是已保存的图片。
+- `apps/desktop/src/renderer/src/coverAspect.ts` 明确将常见 800×538 横版封套的右侧用作竖版展示。项目没有影片封面手动裁剪坐标可直接导出；演员头像裁剪属于另一个用途，不应引入本流程。
 
 ## 导出规则
 

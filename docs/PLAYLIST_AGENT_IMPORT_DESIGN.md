@@ -119,9 +119,9 @@ Javdex 的影片资料属于全局目录，媒体库只保存成员关系和库�
 
 ### 4.1 统一入口
 
-在清单列表页 [PlaylistsPage.tsx](../src/renderer/src/pages/PlaylistsPage.tsx) 的 toolbar 增加“导入外部清单”次要按钮，保留“创建清单”为主要按钮。
+在清单列表页 [PlaylistsPage.tsx](../apps/desktop/src/renderer/src/pages/PlaylistsPage.tsx) 的 toolbar 增加“导入外部清单”次要按钮，保留“创建清单”为主要按钮。
 
-在清单详情页 [PlaylistDetailPage.tsx](../src/renderer/src/pages/PlaylistDetailPage.tsx) 的 `DetailActionBar` 增加“从网页导入”。
+在清单详情页 [PlaylistDetailPage.tsx](../apps/desktop/src/renderer/src/pages/PlaylistDetailPage.tsx) 的 `DetailActionBar` 增加“从网页导入”。
 
 两处打开同一个 `PlaylistImportModal`：
 
@@ -670,7 +670,7 @@ function planItem(item, targetLibraryId): Resolution {
 
 ## 10. 前台 Session 临时模型
 
-当前数据库版本在 [migrations.ts](../src/main/db/migrations.ts) 中为 V14。外部清单导入暂存表不属于发布 schema，也不由 V13 → V14 迁移创建；`PlaylistImportRepository` 在当前 SQLite 连接中创建 TEMP 表，连接关闭后全部消失。下面保留的字段结构用于说明 Session 内约束，实际定义以 [schema.ts](../src/main/db/schema.ts) 的 `PLAYLIST_IMPORT_SESSION_SCHEMA_SQL` 为准：所有表均为 `CREATE TEMP TABLE`，不引用持久 `agent_runs`、`playlists`、`videos` 外键，另有 `playlist_import_session_events` 保存本次 Session 的页面/交接幂等事件。
+当前数据库版本在 [migrations.ts](../apps/desktop/src/main/db/migrations.ts) 中为 V14。外部清单导入暂存表不属于发布 schema，也不由 V13 → V14 迁移创建；`PlaylistImportRepository` 在当前 SQLite 连接中创建 TEMP 表，连接关闭后全部消失。下面保留的字段结构用于说明 Session 内约束，实际定义以 [schema.ts](../apps/desktop/src/main/db/schema.ts) 的 `PLAYLIST_IMPORT_SESSION_SCHEMA_SQL` 为准：所有表均为 `CREATE TEMP TABLE`，不引用持久 `agent_runs`、`playlists`、`videos` 外键，另有 `playlist_import_session_events` 保存本次 Session 的页面/交接幂等事件。
 
 ### 10.1 `playlist_import_jobs`
 
@@ -929,8 +929,8 @@ CREATE TEMP TABLE playlist_import_decisions (
 
 但不能原样循环使用：
 
-- [playlistRepo.ts](../src/main/db/playlistRepo.ts) 的 `addVideoToPlaylist()` 每次单独计算 position。
-- [relatedLinkStore.ts](../src/main/db/relatedLinkStore.ts) 的 `replaceRelatedLinks()` 会先删除全部链接。
+- [playlistRepo.ts](../apps/desktop/src/main/db/playlistRepo.ts) 的 `addVideoToPlaylist()` 每次单独计算 position。
+- [relatedLinkStore.ts](../apps/desktop/src/main/db/relatedLinkStore.ts) 的 `replaceRelatedLinks()` 会先删除全部链接。
 
 因此需要批量事务内部的 prepared statements和一个“append related link if absent”；媒体库成员插入只服务本次新建影片，不对复用影片执行 upsert。
 
@@ -960,14 +960,14 @@ AND NOT EXISTS (
 
 具体落点：
 
-- [libraryMembershipRepo.ts](../src/main/db/libraryMembershipRepo.ts) 的 `removeResourceLessMemberships()`：候选查询和最终 `DELETE` 都排除被清单引用的影片，避免全量扫描移除其任一媒体库成员。
-- [videoRepo.ts](../src/main/db/videoRepo.ts) 的 `purgeResourceLessVideos()`：候选选择必须放入删除事务，并排除被清单引用的影片，避免全局清理级联删除 `playlist_video`。
+- [libraryMembershipRepo.ts](../apps/desktop/src/main/db/libraryMembershipRepo.ts) 的 `removeResourceLessMemberships()`：候选查询和最终 `DELETE` 都排除被清单引用的影片，避免全量扫描移除其任一媒体库成员。
+- [videoRepo.ts](../apps/desktop/src/main/db/videoRepo.ts) 的 `purgeResourceLessVideos()`：候选选择必须放入删除事务，并排除被清单引用的影片，避免全局清理级联删除 `playlist_video`。
 
 现有 `idx_playlist_video_video_id` 已支持该反向存在性查询，不需要新增 retention 字段、索引或迁移。影片从最后一个清单移除后，如果仍然没有资源且没有其它 pin 保护，就会在下一次适用的自动清理中恢复为可清理对象。显式删除影片或媒体库成员不使用这条自动清理过滤器。
 
 ### 11.2 清单全局读取
 
-现有 [playlistRepo.ts](../src/main/db/playlistRepo.ts) 的清单计数、预览封面和详情查询都会要求影片至少存在一条 active + visible 媒体库成员。该过滤与“清单直接引用全局影片 ID”冲突，也会让仍受清单保护但已被用户显式移除全部媒体库成员的影片消失在清单 UI。
+现有 [playlistRepo.ts](../apps/desktop/src/main/db/playlistRepo.ts) 的清单计数、预览封面和详情查询都会要求影片至少存在一条 active + visible 媒体库成员。该过滤与“清单直接引用全局影片 ID”冲突，也会让仍受清单保护但已被用户显式移除全部媒体库成员的影片消失在清单 UI。
 
 实施时统一改为：
 
@@ -998,7 +998,7 @@ function matchesPlaylistResourceFilters(
 
 `detail.videos` 始终是未筛选全集，`visibleVideos` 用 `useMemo` 派生并保留后端现有排序顺序。移出影片仍修改全集，再由同一函数重算；清单头部总数读取全集长度，区块结果数读取派生数组长度。未来只有在清单详情真正引入后端分页时，才把同一个 `VideoResourceFilter[]` 合同下沉到 query object；V1 不为尚不存在的分页增加位置参数或浅透传层。
 
-URL 复用 [listQueryParams.ts](../src/renderer/src/listView/listQueryParams.ts) 的 `LIST_PARAM.resources`、`parseVideoResourceFilters()` 和 `videoResourceFiltersParam()`。新增通用 `canonicalizeVideoResourceSearchParams()`，由现有 `canonicalizeLibrarySearchParams()` 和清单详情共同组合，保证深链刷新也会以 replace 清理非法值、重复值和非规范顺序。页面不能自行拼接 `resources` 字符串。
+URL 复用 [listQueryParams.ts](../apps/desktop/src/renderer/src/listView/listQueryParams.ts) 的 `LIST_PARAM.resources`、`parseVideoResourceFilters()` 和 `videoResourceFiltersParam()`。新增通用 `canonicalizeVideoResourceSearchParams()`，由现有 `canonicalizeLibrarySearchParams()` 和清单详情共同组合，保证深链刷新也会以 replace 清理非法值、重复值和非规范顺序。页面不能自行拼接 `resources` 字符串。
 
 资源摘要和筛选都作用于全局 `video_resources`：不增加 `library_id`、媒体库状态或成员 hidden 条件。这样同一影片分别在两个媒体库拥有 local/web 时两个筛选都能命中；只有确实零资源行时才命中 `none`。该规则与清单跨媒体库读取、清单引用保护和无媒体库成员影片可见性保持一致。
 
@@ -1044,7 +1044,7 @@ URL 复用 [listQueryParams.ts](../src/renderer/src/listView/listQueryParams.ts)
 
 ## 13. 安全和权限
 
-- 复用元数据 Agent 的公开 HTTP(S)、DNS 和私网地址检查，见 [browserAdapter.ts](../src/main/services/agentMetadata/browserAdapter.ts)。
+- 复用元数据 Agent 的公开 HTTP(S)、DNS 和私网地址检查，见 [browserAdapter.ts](../apps/desktop/src/main/services/agentMetadata/browserAdapter.ts)。
 - URL 不允许用户名、密码或非 HTTP(S) 协议。
 - 来源页面和详情页面都视为不可信数据，不视为指令。
 - Agent 无权更改冻结的 libraryId、destination 或 apply policy。
@@ -1060,7 +1060,7 @@ URL 复用 [listQueryParams.ts](../src/renderer/src/listView/listQueryParams.ts)
 
 ### 14.1 共享类型和通道
 
-新增 `src/shared/playlistImportTypes.ts`，保存 start/control/snapshot/outcome/error 的唯一共享定义。
+新增 `packages/contracts/src/playlistImportTypes.ts`，保存 start/control/snapshot/outcome/error 的唯一共享定义。
 
 新增通道：
 
@@ -1073,10 +1073,10 @@ PLAYLIST_IMPORT_SNAPSHOT_CHANGED
 
 同步修改：
 
-- [ipc-channels.ts](../src/shared/ipc-channels.ts)
-- [appIpcContract.ts](../src/shared/appIpcContract.ts)
-- [ipcCommandSchemas.ts](../src/main/ipc/ipcCommandSchemas.ts)
-- [preload/index.ts](../src/preload/index.ts)
+- [ipc-channels.ts](../packages/contracts/src/ipc-channels.ts)
+- [appIpcContract.ts](../packages/contracts/src/appIpcContract.ts)
+- [ipcCommandSchemas.ts](../apps/desktop/src/main/ipc/ipcCommandSchemas.ts)
+- [preload/index.ts](../apps/desktop/src/preload/index.ts)
 
 Preload 暴露：
 
@@ -1107,7 +1107,7 @@ api.playlistImport.onSnapshotChanged(listener)
 - `PlaylistImportProgress.tsx`：页面内紧凑进度视图。
 - 对应 CSS Module，全部使用语义 token。
 
-`PlaylistImportProvider` 挂在 [App.tsx](../src/renderer/src/App.tsx) 的全局 provider 层，只服务当前打开的导入弹窗，不通过无参数 snapshot 自动接回旧任务。
+`PlaylistImportProvider` 挂在 [App.tsx](../apps/desktop/src/renderer/src/App.tsx) 的全局 provider 层，只服务当前打开的导入弹窗，不通过无参数 snapshot 自动接回旧任务。
 
 任务完成后刷新：
 
@@ -1221,17 +1221,17 @@ V1 明确不支持：
 ## 17. 主要实现落点
 
 - 决策记录：`docs/adr/0025-import-external-playlists-with-global-catalog-reuse.md`。
-- 共享合同：`src/shared/playlistImportTypes.ts`、IPC schema 与 preload 合同。
-- 领域与 Session：`src/main/services/playlistImport/playlistImportModule.ts`、`playlistImportRepository.ts`、`playlistImportRunDriver.ts`。
-- Agent 合同：`src/main/services/playlistImport/playlistImportInstructions.ts`、`toolPack.ts`、`playlistImportBrowserNavigation.ts`。
-- 共享 browser：`src/main/services/agentMetadata/browserAdapter.ts` 负责 session、URL policy、证据和通用页面动作；`src/main/scrapers/scrapeBrowser.ts` 在主 frame request 发出前执行导航 policy。
-- renderer：`src/renderer/src/components/playlistImport/PlaylistImportContext.tsx`、`PlaylistImportIdentityReview.tsx` 与 `events.ts`；入口位于清单页和清单详情页。
+- 共享合同：`packages/contracts/src/playlistImportTypes.ts`、IPC schema 与 preload 合同。
+- 领域与 Session：`apps/desktop/src/main/services/playlistImport/playlistImportModule.ts`、`playlistImportRepository.ts`、`playlistImportRunDriver.ts`。
+- Agent 合同：`apps/desktop/src/main/services/playlistImport/playlistImportInstructions.ts`、`toolPack.ts`、`playlistImportBrowserNavigation.ts`。
+- 共享 browser：`apps/desktop/src/main/services/agentMetadata/browserAdapter.ts` 负责 session、URL policy、证据和通用页面动作；`apps/desktop/src/main/scrapers/scrapeBrowser.ts` 在主 frame request 发出前执行导航 policy。
+- renderer：`apps/desktop/src/renderer/src/components/playlistImport/PlaylistImportContext.tsx`、`PlaylistImportIdentityReview.tsx` 与 `events.ts`；入口位于清单页和清单详情页。
 
 共享 `scroll` 进入 Agent browser 命令和宿主 observation/evidence；`playlist-importer` 复用 `AgentMetadataBrowserAdapter` 获得独立 session 与同站点 URL policy，PluginDev 仍使用自己的 browser capability。不要把该命令加入 `PluginBrowserAction` 或生产插件 `ctx.browser`，后者不属于本需求。清单领域工具在共享滚动原语之上封装回顶、半 viewport 步长、连续性和批次事务，Agent 看不到像素与循环细节。
 
 资源筛选沿用已有 `VideoResourceFilter`、URL parser/serializer 和 `Video.resource_kinds` 投影，不修改 playlist IPC/preload Interface。把 `LibraryFilterPopover` 内现有资源 checkbox 抽成 `VideoResourceFilterFieldset`，由媒体库筛选和新的 `PlaylistResourceFilterPopover` 共同使用；新样式进入同名 CSS Module，并删除迁出的 legacy 全局规则，避免两处资源顺序、文案和 OR 提示漂移。playlist popover 使用 `FloatingLayer`，防止被详情滚动容器裁剪。
 
-若通用化 Metadata Agent browser 的 URL/evidence/session 能明显减少重复，可把公共实现提取到 `src/main/services/agentBrowser/`。提取必须保持 Metadata Agent 行为和测试不变，不为了本功能制造一层只转发的浅 Module。
+若通用化 Metadata Agent browser 的 URL/evidence/session 能明显减少重复，可把公共实现提取到 `apps/desktop/src/main/services/agentBrowser/`。提取必须保持 Metadata Agent 行为和测试不变，不为了本功能制造一层只转发的浅 Module。
 
 ## 18. 实施阶段
 

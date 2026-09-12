@@ -7,7 +7,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import electron from 'electron'
 import { createPackageWithOptions } from '@electron/asar'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
 
 it('loads the built catalog worker and native SQLite from an ASAR in real Electron', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-worker-asar-'))

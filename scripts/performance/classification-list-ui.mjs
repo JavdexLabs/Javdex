@@ -13,13 +13,13 @@ fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root" style=
 fs.writeFileSync(path.join(root,'image.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="640" height="400" fill="#334455"/><circle cx="320" cy="175" r="95" fill="#879aab"/></svg>')
 fs.writeFileSync(path.join(root,'fixture.jsx'),`
 import React from 'react';import{createRoot}from'react-dom/client';import{MemoryRouter,Route,Routes,useNavigate,useLocation,useParams}from'react-router-dom';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';
-import ${local('src/renderer/src/styles/global.css')};
+import ${local('apps/desktop/src/renderer/src/styles/global.css')};
 window.React=React;window.__calls=[];window.__total=125;
 const read=async(kind,query)=>{window.__calls.push({kind,query});if(window.__fail){window.__fail=false;throw Error('Synthetic page failed')}const total=query.search?17:window.__total,offset=query.offset??0;return{items:Array.from({length:Math.min(60,Math.max(0,total-offset))},(_,n)=>({id:offset+n+1,mainName:kind+' '+(offset+n+1),imagePath:kind==='director'?'directors/'+(offset+n+1)+'.jpg':null,fallbackCoverPath:null,videoCount:123,updatedAt:'2026-01-01',ownerOrganization:{id:1,mainName:'示例制作商'}})),total,offset,limit:60}};
 window.api={directors:{page:q=>read('director',q),list:()=>{throw Error('Full list forbidden')}},series:{page:q=>read('series',q),list:()=>{throw Error('Full list forbidden')}},organizations:{page:q=>read(q.role,q),list:()=>{throw Error('Full list forbidden')}}};
-const Director=(await import(${local('src/renderer/src/pages/DirectorListPage.tsx')})).default;
-const Series=(await import(${local('src/renderer/src/pages/SeriesListPage.tsx')})).default;const Organization=(await import(${local('src/renderer/src/pages/OrganizationListPage.tsx')})).default;
-const Shell=(await import(${local('src/renderer/src/components/ListDetailShell.tsx')})).default;
+const Director=(await import(${local('apps/desktop/src/renderer/src/pages/DirectorListPage.tsx')})).default;
+const Series=(await import(${local('apps/desktop/src/renderer/src/pages/SeriesListPage.tsx')})).default;const Organization=(await import(${local('apps/desktop/src/renderer/src/pages/OrganizationListPage.tsx')})).default;
+const Shell=(await import(${local('apps/desktop/src/renderer/src/components/ListDetailShell.tsx')})).default;
 function Surface(){const {type}=useParams();return <Shell list={type==='series'?<Series/>:type==='director'?<Director/>:<Organization role={type}/>} detailMatchPath={['/facet/director/d/:id','/facet/series/s/:id','/facet/:type/o/:id']} detailMatchEnd={false}/>}
 const client=new QueryClient({defaultOptions:{queries:{retry:false}}});window.__client=client;
 function Nav(){window.__navigate=useNavigate();window.__location=useLocation();return null}
@@ -28,7 +28,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
 `)
 let server,browser;const results=[]
 try {
- server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/image.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')}},server:{host:'127.0.0.1',port:0,fs:{allow:[repo,root]}}})
+ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'apps/desktop/src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/image.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{'@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')}},server:{host:'127.0.0.1',port:0,fs:{allow:[repo,root]}}})
  await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
  for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) for(const kind of ['series','maker','director']) {
   const page=await browser.newPage({viewport}),errors=[],mediaRequests=[];page.on('request',request=>{if(request.url().includes('/image.svg?'))mediaRequests.push(request.url())});page.on('pageerror',error=>errors.push(error.message))

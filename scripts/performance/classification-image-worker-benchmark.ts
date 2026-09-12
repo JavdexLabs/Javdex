@@ -6,16 +6,16 @@ import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
 import {buildSync} from 'esbuild'
-import {getDatabaseReadRevision,initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
-import {listClassificationImagePage} from '../../src/main/services/classificationImagePage'
-import {CatalogReadWorkerClient} from '../../src/main/services/catalogReadWorkerClient'
-import {createCatalogReadWorkerTransport} from '../../src/main/services/catalogReadWorkerTransport'
+import {getDatabaseReadRevision,initDatabaseAtPath,closeDatabase} from '../../apps/desktop/src/main/db/database'
+import {listClassificationImagePage} from '../../apps/desktop/src/main/services/classificationImagePage'
+import {CatalogReadWorkerClient} from '../../apps/desktop/src/main/services/catalogReadWorkerClient'
+import {createCatalogReadWorkerTransport} from '../../apps/desktop/src/main/services/catalogReadWorkerTransport'
 const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms))
 it('measures real read worker responsiveness without claiming faster SQL',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-image-worker-bench-')),bundle=path.join(root,'worker.cjs')
  let client:CatalogReadWorkerClient|undefined
  try {
-  buildSync({entryPoints:[path.resolve('src/main/services/catalogReadWorker.ts')],outfile:bundle,bundle:true,platform:'node',format:'cjs',packages:'external',tsconfig:path.resolve('tsconfig.node.json'),banner:{js:`require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});`}})
+  buildSync({entryPoints:[path.resolve('apps/desktop/src/main/services/catalogReadWorker.ts')],outfile:bundle,bundle:true,platform:'node',format:'cjs',packages:'external',tsconfig:path.resolve('tsconfig.node.json'),banner:{js:`require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});`}})
   const db=initDatabaseAtPath(path.join(root,'catalog.db'))
   db.exec(`INSERT INTO directors(id,main_name) VALUES(1,'Director');
    WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<50000)

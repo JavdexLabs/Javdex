@@ -6,8 +6,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright-core'
-import { WebServer } from '../src/main/web/server.ts'
-import { hashPassword } from '../src/main/web/auth.ts'
+import { WebServer } from '../apps/desktop/src/main/web/server.ts'
+import { hashPassword } from '../apps/desktop/src/main/web/auth.ts'
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-web-smoke-'))
 const movie = path.join(directory, 'native.mp4')

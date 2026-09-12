@@ -58,6 +58,7 @@ GET https://api.github.com/repos/JavdexLabs/Javdex/releases/latest
 
 ```powershell
 npm ci
+npm run setup:desktop
 npm test
 npm run build
 npm run packaging:list

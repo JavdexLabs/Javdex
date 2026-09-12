@@ -78,7 +78,7 @@ Pi 不是单一 CLI，而是分层 npm 包：[项目 README](https://github.com/
 
 ## 与 Javdex 18 个工具的匹配
 
-Pi 使用 TypeBox/JSON Schema 定义工具，参数会自动验证；TypeBox schema 可序列化为普通 JSON。[Pi tool schema](https://github.com/earendil-works/pi/blob/v0.84.2/packages/ai/README.md#tools) Javdex 的 `PLUGIN_DEV_TOOL_SCHEMAS` 已经是受限的 object JSON Schema，因此转换主要是包装类型和返回值，不需要重新设计 18 个 schema。[本仓库 tool schemas](../src/main/services/pluginDevAgent/toolSchemas.ts)
+Pi 使用 TypeBox/JSON Schema 定义工具，参数会自动验证；TypeBox schema 可序列化为普通 JSON。[Pi tool schema](https://github.com/earendil-works/pi/blob/v0.84.2/packages/ai/README.md#tools) Javdex 的 `PLUGIN_DEV_TOOL_SCHEMAS` 已经是受限的 object JSON Schema，因此转换主要是包装类型和返回值，不需要重新设计 18 个 schema。[本仓库 tool schemas](../apps/desktop/src/main/services/pluginDevAgent/toolSchemas.ts)
 
 推荐的每个 wrapper 做法：
 
@@ -100,7 +100,7 @@ defineTool({
 })
 ```
 
-Pi 工具执行函数原生收到 `AbortSignal`，可发送增量进度；抛出的错误会作为 `isError` tool result 返回给模型。[Pi AgentTool](https://github.com/earendil-works/pi/blob/v0.84.2/packages/agent/README.md#tools) 但 Javdex 当前 `executeTool()` 不接收 signal，所以取消能立即停止 Agent/LLM，却未必终止已经进入 Electron 浏览器的底层操作；这个缺口对 Pi 和 DeepSeek Harness 都存在，应单独把 signal 逐步传入浏览器和 dry-run 服务。[本仓库 tool executor](../src/main/services/pluginDevAgent/toolExecutor.ts)
+Pi 工具执行函数原生收到 `AbortSignal`，可发送增量进度；抛出的错误会作为 `isError` tool result 返回给模型。[Pi AgentTool](https://github.com/earendil-works/pi/blob/v0.84.2/packages/agent/README.md#tools) 但 Javdex 当前 `executeTool()` 不接收 signal，所以取消能立即停止 Agent/LLM，却未必终止已经进入 Electron 浏览器的底层操作；这个缺口对 Pi 和 DeepSeek Harness 都存在，应单独把 signal 逐步传入浏览器和 dry-run 服务。[本仓库 tool executor](../apps/desktop/src/main/services/pluginDevAgent/toolExecutor.ts)
 
 必须注意两个配置点：
 

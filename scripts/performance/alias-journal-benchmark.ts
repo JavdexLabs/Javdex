@@ -4,10 +4,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
-import { resetAssetKeyCacheForTests } from '../../src/main/services/assetCrypto'
-import { setPathAlias, getPathAlias, resetPathAliasCacheForTests } from '../../src/main/services/assetPathAliases'
-import { aliasStoreAbsAt, resolveMediaAssetsRoot } from '../../src/main/services/assetStoragePaths'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
+import { resetAssetKeyCacheForTests } from '../../apps/desktop/src/main/services/assetCrypto'
+import { setPathAlias, getPathAlias, resetPathAliasCacheForTests } from '../../apps/desktop/src/main/services/assetPathAliases'
+import { aliasStoreAbsAt, resolveMediaAssetsRoot } from '../../apps/desktop/src/main/services/assetStoragePaths'
 
 it('measures encrypted journal growth for 1000 and 2000 aliases', (t) => {
   const previous = process.env.JAVDEX_TEST_USER_DATA

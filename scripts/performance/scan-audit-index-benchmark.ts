@@ -5,8 +5,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
-import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
-import {createScanAuditReadIndex} from '../../src/main/services/scanAuditReadIndex'
+import {initDatabaseAtPath,closeDatabase} from '../../apps/desktop/src/main/db/database'
+import {createScanAuditReadIndex} from '../../apps/desktop/src/main/services/scanAuditReadIndex'
 it('measures actual audit index build and pages on synthetic large documents',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-index-probe-')),results:unknown[]=[]
  try{for(const count of [10000,300000]){

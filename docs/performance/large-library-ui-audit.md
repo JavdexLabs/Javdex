@@ -26,11 +26,11 @@
 
 ## 入口、调用链与边界总表
 
-统一桥接是 `src/renderer/src/api.ts:1–9` 的 `window.api` → `src/preload/index.ts:128–167` 的 `ipcRenderer.invoke` → `src/main/ipc/typedIpcAdapter.ts:36–46` → `src/main/ipc/shared.ts:18–40`。返回是完整 `IpcResponse.data`，没有流式分片；包装成 Promise 不会把 handler 内同步仓储工作移到 worker。
+统一桥接是 `apps/desktop/src/renderer/src/api.ts:1–9` 的 `window.api` → `apps/desktop/src/preload/index.ts:128–167` 的 `ipcRenderer.invoke` → `apps/desktop/src/main/ipc/typedIpcAdapter.ts:36–46` → `apps/desktop/src/main/ipc/shared.ts:18–40`。返回是完整 `IpcResponse.data`，没有流式分片；包装成 Promise 不会把 handler 内同步仓储工作移到 worker。
 
 | UI 入口与准确定位 | 真实 IPC / 查询终点 | 返回、保留与 DOM 边界 | 判定 |
 | --- | --- | --- | --- |
-| `LibraryPage.tsx:383–398,1039`（路径均在 `src/renderer/src/pages/`） | `useInfiniteVideoList.ts:29–46` → preload `:365` → `videoHandlers.ts:12–15` → `videoQueryService.ts:38–39` → `scopedVideoCatalogRepo.ts:365–381` | 每页 200；每次有 COUNT + LIMIT/OFFSET；已读页累计；`VirtualPosterGrid` 限定 DOM | 首屏有保护，深浏览/刷新仍有风险 |
+| `LibraryPage.tsx:383–398,1039`（路径均在 `apps/desktop/src/renderer/src/pages/`） | `useInfiniteVideoList.ts:29–46` → preload `:365` → `videoHandlers.ts:12–15` → `videoQueryService.ts:38–39` → `scopedVideoCatalogRepo.ts:365–381` | 每页 200；每次有 COUNT + LIMIT/OFFSET；已读页累计；`VirtualPosterGrid` 限定 DOM | 首屏有保护，深浏览/刷新仍有风险 |
 | `HomePage.tsx:80,111–139,219,268–316` | preload `:253–254` → `mediaLibraryHandlers.ts:82–83` → `homeDiscoveryRepo.ts:274–304` | 普通首页请求近期/发现各 12；媒体库摘要随库数增长；搜索每页 120、累计、虚拟 DOM | 不存在首页直接渲染 30 万影片的证据 |
 | `GlobalSearchPage.tsx:26,57–86,199` | `api.home.search` → 上述 HOME_SEARCH → `catalog.list` | 空搜索禁用；每页 120，已读页与库 ID Map 累计；虚拟 DOM | 分页有界，缓存无固定页预算 |
 | `ActressesPage.tsx:100,174–188,609` | preload `:472` → `actressHandlers.ts:11–13` → `actressQueryService.ts:90–142` → `actressRepo.ts:471–500` | UI 每页 240，仓储显式 limit 最大 1000；虚拟 DOM；头像筛选另见 F06 | 普通列表已优化，不能重复报成全量 |
@@ -40,15 +40,15 @@
 | Organization/Director/Series 详情 | 各详情元数据 GET + `useInfiniteVideoList` → VIDEO_LIST | 关联影片每页 200；“加载更多”累积后普通 map | F03，分页不等于 DOM 虚拟化 |
 | `PlaylistsPage.tsx:78,137` | preload `:451` → `playlistHandlers.ts:15` → `playlistRepo.ts:118–126` | 全部清单摘要；本地搜索与普通 map | F04，随 P 增长，不附全部清单影片 |
 | `PlaylistDetailPage.tsx:75–124,314` | preload `:452–453` → `playlistHandlers.ts:17–24` → `playlistRepo.ts:153–173` | 单清单全部影片，排序重取、本地资源筛选，普通 map | F01，返回/DOM 都随 K 增长 |
-| Web `src/web/main.tsx:613–633,1011–1034` | `src/web/client.ts:13` → HTTP；本次止于客户端 | 用当前响应替换 result；上一页/下一页；普通 VideoGrid | DOM 随当前响应条数增长，不累计历史页；后端 pageSize 上限未审计 |
+| Web `apps/web/apps/desktop/src/main.tsx:613–633,1011–1034` | `apps/web/src/client.ts:13` → HTTP；本次止于客户端 | 用当前响应替换 result；上一页/下一页；普通 VideoGrid | DOM 随当前响应条数增长，不累计历史页；后端 pageSize 上限未审计 |
 
-表内短名的完整主进程目录分别为 `src/main/ipc/`、`src/main/services/`、`src/main/db/`；hook/query 为 `src/renderer/src/query/`。后续证据使用完整路径。
+表内短名的完整主进程目录分别为 `apps/desktop/src/main/ipc/`、`apps/desktop/src/main/services/`、`apps/desktop/src/main/db/`；hook/query 为 `apps/desktop/src/renderer/src/query/`。后续证据使用完整路径。
 
 ## 发现与建议
 
 ### F01 · P1：清单详情一次取得全部影片，排序和返回会再次整包读取
 
-证据链：`src/renderer/src/pages/PlaylistDetailPage.tsx:75–90` 调用 `api.playlists.get(id, sortBy, sortDir)`，`src/preload/index.ts:451–453` → `src/main/ipc/playlistHandlers.ts:17–24` → `src/main/db/playlistRepo.ts:153–173`。SQL 是 `SELECT v.*` 加列表投影、`.all(id)`，没有 LIMIT。`src/shared/playlistTypes.ts:18–20` 明确返回 `videos: Video[]`。
+证据链：`apps/desktop/src/renderer/src/pages/PlaylistDetailPage.tsx:75–90` 调用 `api.playlists.get(id, sortBy, sortDir)`，`apps/desktop/src/preload/index.ts:451–453` → `apps/desktop/src/main/ipc/playlistHandlers.ts:17–24` → `apps/desktop/src/main/db/playlistRepo.ts:153–173`。SQL 是 `SELECT v.*` 加列表投影、`.all(id)`，没有 LIMIT。`packages/contracts/src/playlistTypes.ts:18–20` 明确返回 `videos: Video[]`。
 
 `PlaylistDetailPage.tsx:121–124` 对整个数组做资源筛选，`:314` 对全部可见影片生成卡片。`:106–110` 从影片栈返回重取，`:92–94` 导入完成重取，`:129–132` 编辑清单后重取，排序依赖改变也触发完整查询。单片移出已有 `:154–156` 本地过滤更新，不能说每种修改都整包刷新。
 
@@ -60,7 +60,7 @@
 
 ### F02 · P1：演员详情的关联影片全量返回、全量渲染
 
-证据链：`src/renderer/src/pages/ActressDetailPage.tsx:104–122` → `src/preload/index.ts:474` → `src/main/ipc/actressHandlers.ts:17–19` → `src/main/services/actressQueryService.ts:84–85` → `src/main/db/actressRepo.ts:550–583`。影片 SQL 有演员 ID 和可见媒体库范围，但没有 LIMIT；写真也一次返回。UI `ActressDetailPage.tsx:452` 直接 `actress.videos.map`。
+证据链：`apps/desktop/src/renderer/src/pages/ActressDetailPage.tsx:104–122` → `apps/desktop/src/preload/index.ts:474` → `apps/desktop/src/main/ipc/actressHandlers.ts:17–19` → `apps/desktop/src/main/services/actressQueryService.ts:84–85` → `apps/desktop/src/main/db/actressRepo.ts:550–583`。影片 SQL 有演员 ID 和可见媒体库范围，但没有 LIMIT；写真也一次返回。UI `ActressDetailPage.tsx:452` 直接 `actress.videos.map`。
 
 已有保护是关联范围，不是页大小；普通演员主列表的 240 条分页不能保护详情。`:124–137` 头像保存或从影片栈返回都会再次 load，修改头像也可能重新搬运整部作品集。
 
@@ -72,13 +72,13 @@
 
 一级列表（P1）证据：
 
-- `src/renderer/src/pages/OrganizationListPage.tsx:77–80,187` → `src/main/services/classificationQueryService.ts:93–145`。
-- `src/renderer/src/pages/DirectorListPage.tsx:51–62,175` → 同服务 `:349–387`。
-- `src/renderer/src/pages/SeriesListPage.tsx:51–54,166` → 同服务 `:501–547`。
+- `apps/desktop/src/renderer/src/pages/OrganizationListPage.tsx:77–80,187` → `apps/desktop/src/main/services/classificationQueryService.ts:93–145`。
+- `apps/desktop/src/renderer/src/pages/DirectorListPage.tsx:51–62,175` → 同服务 `:349–387`。
+- `apps/desktop/src/renderer/src/pages/SeriesListPage.tsx:51–54,166` → 同服务 `:501–547`。
 
 三条列表 SQL 均没有外层 LIMIT；封面 fallback 子查询中的 `LIMIT 1` 只限制**每个实体的封面**，不能视作分类列表分页。列表返回的是名称、封面、数量等摘要，已有 DTO 投影，不能称其为全量影片详情。搜索有 250ms 防抖，但空搜索仍返回整个实体集合。
 
-详情（P2）证据：`src/renderer/src/pages/OrganizationDetailPage.tsx:102–111,350–365`、`DirectorDetailPage.tsx:59–61,258`、`SeriesDetailPage.tsx:85–87,314`。影片复用每页 200 的无限查询，追加后对 `videos` 普通 map。初始有界，点击加载更多后 DOM 随 L 增长至 K，返回影片详情还会 refetch 已加载页。
+详情（P2）证据：`apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx:102–111,350–365`、`DirectorDetailPage.tsx:59–61,258`、`SeriesDetailPage.tsx:85–87,314`。影片复用每页 200 的无限查询，追加后对 `videos` 普通 map。初始有界，点击加载更多后 DOM 随 L 增长至 K，返回影片详情还会 refetch 已加载页。
 
 建议：一级分类列表增加服务端页契约和虚拟网格；详情作品网格复用虚拟海报能力，保留详情滚动容器/嵌套栈语义。元数据详情 GET 本身只取单实体和聚合资料，不应改成全局影片扫描式前端计算。
 
@@ -88,23 +88,23 @@
 
 | 入口与证据 | 实际边界与已有保护 | 优先级 / 建议 |
 | --- | --- | --- |
-| `src/renderer/src/components/MergeActressModal.tsx:105–131,259` → `api.actresses.list(search,'all')` → preload `:466–471` → `actressHandlers.ts:8–10` → `actressQueryService.ts:71–72` → `actressRepo.ts:399–407,352–378` | legacy 无 limit；空搜索全演员，回包后按性别过滤，全部候选 map；已有 300ms 防抖及 cancelled 防旧结果写入 | P1；专用限量搜索/分页演员候选，服务端过滤兼容性，保留已选项 |
-| `src/renderer/src/pages/useConflictReviewController.ts:141` → `conflictReviewRemote.ts:53–71` | 同一个 legacy 全量接口；返回后才 slice(0,40)，并有 latest-request gate | P2；40 是显示候选限量，不是 IPC 限量 |
-| `src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx:22–23,61–85` | 演员先全量 list 再 slice 至 80；影片请求则在 IPC 传 limit=60；250ms 防抖、取消标志 | P2；只修演员候选契约，不扩大到插件运行时审计 |
-| `src/renderer/src/components/AddToPlaylistModal.tsx:32–55,186` → preload `:458–459` 的 listForVideo → `playlistHandlers.ts:40–42` → `playlistRepo.ts:176–192` | 全清单成员关系摘要，本地过滤、普通 map；不是获取每个清单的全部影片 | P2；清单候选分页/搜索，保留 membership 信息 |
-| `src/renderer/src/components/AddVideosToPlaylistModal.tsx:30–53,173` → PLAYLIST_LIST | 全清单摘要，本地过滤；P 很小时成本有限 | P2；与一级清单列表共享候选契约与缓存 |
-| `src/renderer/src/components/ClassificationImageModal.tsx:64,79–84,355–385` → `src/preload/index.ts:537–538` → `facetHandlers.ts:100–102` 分类候选 handler → `classificationQueryService.ts:59–90` | 默认 file 模式即发候选查询，除隐私条件外未按 mode 限制；所有关联封面候选一次返回、video 模式全 map；图片 lazy 仅延后像素加载 | P1；切入 video 模式再拉第一页，服务端候选页 + 虚拟横向列表 |
-| Organization/Director/SeriesPickerField `:31–35 / :26–30 / :21–25`，完整路径 `src/renderer/src/components/` | `api.*.options` → preload `:502,518,529` → `facetHandlers` → `classificationQueryService.ts:265–297,462–498,643–682`；SQL LIMIT 100，普通 map 最多 100 个候选 | P2 请求频率治理，**不是全量候选问题**；useDeferredValue 不是固定时间网络防抖，缺少 IPC 取消协议 |
+| `apps/desktop/src/renderer/src/components/MergeActressModal.tsx:105–131,259` → `api.actresses.list(search,'all')` → preload `:466–471` → `actressHandlers.ts:8–10` → `actressQueryService.ts:71–72` → `actressRepo.ts:399–407,352–378` | legacy 无 limit；空搜索全演员，回包后按性别过滤，全部候选 map；已有 300ms 防抖及 cancelled 防旧结果写入 | P1；专用限量搜索/分页演员候选，服务端过滤兼容性，保留已选项 |
+| `apps/desktop/src/renderer/src/pages/useConflictReviewController.ts:141` → `conflictReviewRemote.ts:53–71` | 同一个 legacy 全量接口；返回后才 slice(0,40)，并有 latest-request gate | P2；40 是显示候选限量，不是 IPC 限量 |
+| `apps/desktop/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx:22–23,61–85` | 演员先全量 list 再 slice 至 80；影片请求则在 IPC 传 limit=60；250ms 防抖、取消标志 | P2；只修演员候选契约，不扩大到插件运行时审计 |
+| `apps/desktop/src/renderer/src/components/AddToPlaylistModal.tsx:32–55,186` → preload `:458–459` 的 listForVideo → `playlistHandlers.ts:40–42` → `playlistRepo.ts:176–192` | 全清单成员关系摘要，本地过滤、普通 map；不是获取每个清单的全部影片 | P2；清单候选分页/搜索，保留 membership 信息 |
+| `apps/desktop/src/renderer/src/components/AddVideosToPlaylistModal.tsx:30–53,173` → PLAYLIST_LIST | 全清单摘要，本地过滤；P 很小时成本有限 | P2；与一级清单列表共享候选契约与缓存 |
+| `apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx:64,79–84,355–385` → `apps/desktop/src/preload/index.ts:537–538` → `facetHandlers.ts:100–102` 分类候选 handler → `classificationQueryService.ts:59–90` | 默认 file 模式即发候选查询，除隐私条件外未按 mode 限制；所有关联封面候选一次返回、video 模式全 map；图片 lazy 仅延后像素加载 | P1；切入 video 模式再拉第一页，服务端候选页 + 虚拟横向列表 |
+| Organization/Director/SeriesPickerField `:31–35 / :26–30 / :21–25`，完整路径 `apps/desktop/src/renderer/src/components/` | `api.*.options` → preload `:502,518,529` → `facetHandlers` → `classificationQueryService.ts:265–297,462–498,643–682`；SQL LIMIT 100，普通 map 最多 100 个候选 | P2 请求频率治理，**不是全量候选问题**；useDeferredValue 不是固定时间网络防抖，缺少 IPC 取消协议 |
 
 分类 options 中每个候选还有别名/角色读取（例如 `classificationQueryService.ts:280–296,485–492,668–680`），次数由 100 条候选限量约束，别名长度仍取决于实体。必要时批量投影；不据此宣称无限 N+1。
 
-标签旁路：`src/renderer/src/pages/LibraryPage.tsx:272–283` 为名称 Map 获取全部 tags；弹层 `src/renderer/src/components/TagFilter.tsx:102–107` 又独立加载一次。preload `src/preload/index.ts:494–497` → `src/main/ipc/facetHandlers.ts:109–112` → `src/main/services/tagQueryService.ts:9–11` → `src/main/db/tagRepo.ts:18–37`，无分页并返回使用计数。TagFilter `:128–135` 在本地过滤、紧凑模式排序后才截取 200；所以**候选 DOM ≤200，IPC/排序仍随 T 增长**，选中 chip 另随选中标签数增长。建议共享标签查询、按 ID 补取已选名称、分页搜索；不能只去掉显示截断。
+标签旁路：`apps/desktop/src/renderer/src/pages/LibraryPage.tsx:272–283` 为名称 Map 获取全部 tags；弹层 `apps/desktop/src/renderer/src/components/TagFilter.tsx:102–107` 又独立加载一次。preload `apps/desktop/src/preload/index.ts:494–497` → `apps/desktop/src/main/ipc/facetHandlers.ts:109–112` → `apps/desktop/src/main/services/tagQueryService.ts:9–11` → `apps/desktop/src/main/db/tagRepo.ts:18–37`，无分页并返回使用计数。TagFilter `:128–135` 在本地过滤、紧凑模式排序后才截取 200；所以**候选 DOM ≤200，IPC/排序仍随 T 增长**，选中 chip 另随选中标签数增长。建议共享标签查询、按 ID 补取已选名称、分页搜索；不能只去掉显示截断。
 
 验收：空搜索、大量同名前缀、多性别、已选项不在当前页、旧请求晚到；逐个断言服务端返回上限及 payload，不能只验 DOM 条数。取消关闭弹窗后不得写入旧结果；不要求本次实现。
 
 ### F05 · P1：全局侧栏用完整待确认快照轮询徽标
 
-`src/renderer/src/components/Layout.tsx:169–179` 每 3,000ms 调 `api.scrape.listPending()`，只用数组长度计算侧栏徽标。真实链路：`src/preload/index.ts:560` → `src/main/ipc/scrapeHandlers.ts:90–91` → `src/main/services/scrapeJobController.ts:267–268` → `src/main/services/videoPendingScrapeService.ts:131–133` → `src/main/db/pendingVideoScrapeRepo.ts:360–367`。
+`apps/desktop/src/renderer/src/components/Layout.tsx:169–179` 每 3,000ms 调 `api.scrape.listPending()`，只用数组长度计算侧栏徽标。真实链路：`apps/desktop/src/preload/index.ts:560` → `apps/desktop/src/main/ipc/scrapeHandlers.ts:90–91` → `apps/desktop/src/main/services/scrapeJobController.ts:267–268` → `apps/desktop/src/main/services/videoPendingScrapeService.ts:131–133` → `apps/desktop/src/main/db/pendingVideoScrapeRepo.ts:360–367`。
 
 该仓储先取全部 pending ID，再逐个 `getPendingVideoScrapeById`；返回含候选 `result_json` 解析结果和暂存资源路径（`:246–276`），并不是 count DTO。单次返回随 Q 及其候选/资源数增长。即便用户只浏览影片、待确认页没打开，也会触发这条请求。3 秒是配置周期，不是实测频率；请求去重、耗时和窗口状态会影响实际次数。
 
@@ -116,13 +116,13 @@
 
 ### F06 · P1（触发时）：演员头像筛选的分页响应掩盖全候选检查
 
-`src/main/services/actressQueryService.ts:90–142`：普通 `avatar='all'` 和 `without-face` 直接走分页仓储；`with/without` 分支若有显式 limit，则首次把 `limit` 去掉，取得全部候选，逐个 `inspectImage`，建立快照再 slice。offset=0 总是重建，后续页复用；最多保留 8 个查询快照（`:44,101–109,129–141`）。**页响应有界，快照内容与首次工作量随 A 增长**，8 是快照个数上限，不是演员行总量上限。
+`apps/desktop/src/main/services/actressQueryService.ts:90–142`：普通 `avatar='all'` 和 `without-face` 直接走分页仓储；`with/without` 分支若有显式 limit，则首次把 `limit` 去掉，取得全部候选，逐个 `inspectImage`，建立快照再 slice。offset=0 总是重建，后续页复用；最多保留 8 个查询快照（`:44,101–109,129–141`）。**页响应有界，快照内容与首次工作量随 A 增长**，8 是快照个数上限，不是演员行总量上限。
 
-图片检查终点 `src/main/services/mediaAssetStore/inspection.ts:37–65` 对非空路径先 `statSync`；缓存未命中才读文件、检查和生成指纹。`src/main/services/assetCache.ts:73–99` 已有签名检查缓存，但仅 256 项；超大候选集合重扫不能保证命中，命中也仍先做 stat。HDD 上有放大同步文件访问的明确机制，具体延迟未测。
+图片检查终点 `apps/desktop/src/main/services/mediaAssetStore/inspection.ts:37–65` 对非空路径先 `statSync`；缓存未命中才读文件、检查和生成指纹。`apps/desktop/src/main/services/assetCache.ts:73–99` 已有签名检查缓存，但仅 256 项；超大候选集合重扫不能保证命中，命中也仍先做 stat。HDD 上有放大同步文件访问的明确机制，具体延迟未测。
 
-“无人脸”另有路径：`src/renderer/src/actressFaceFilter/manifestQueryOptions.ts:8–11` 明确 `enabled:false, staleTime:Infinity`，普通演员页不会自动拉 manifest。用户开始扫描时 `useActressFaceScan.ts:110–129` 才 refetch → preload `:473` → `actressHandlers.ts:14–16` → `actressQueryService.ts:74–82` 全候选检查并返回 manifest；检测后把 ID 子集供列表分页。`scanQueue.ts:86–119` 已逐项检测、复用指纹缓存、检查取消，`useActressFaceScan.ts:75–83` 离页取消；不能称为无控制的并发人脸扫描。
+“无人脸”另有路径：`apps/desktop/src/renderer/src/actressFaceFilter/manifestQueryOptions.ts:8–11` 明确 `enabled:false, staleTime:Infinity`，普通演员页不会自动拉 manifest。用户开始扫描时 `useActressFaceScan.ts:110–129` 才 refetch → preload `:473` → `actressHandlers.ts:14–16` → `actressQueryService.ts:74–82` 全候选检查并返回 manifest；检测后把 ID 子集供列表分页。`scanQueue.ts:86–119` 已逐项检测、复用指纹缓存、检查取消，`useActressFaceScan.ts:75–83` 离页取消；不能称为无控制的并发人脸扫描。
 
-额外按需全量路径：`src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx:346–357` 的“统计所有头像”和“开始所有头像”均先 legacy list 全演员，count 不是轻量计数 API。不是普通浏览必然触发。
+额外按需全量路径：`apps/desktop/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx:346–357` 的“统计所有头像”和“开始所有头像”均先 legacy list 全演员，count 不是轻量计数 API。不是普通浏览必然触发。
 
 建议：头像可用性/指纹采用可增量维护的读模型或独立受控任务；分页筛选读取状态，陈旧状态允许异步更新；manifest 分批传输并维护 session 版本，停止时可取消未执行工作。第一步先增加诊断数据与显式工作进度，不破坏“失败图片不算有头像”和指纹失效语义。
 
@@ -130,16 +130,16 @@
 
 ### F07 · P1：无限查询无保留页预算，返回与全域 invalidation 扩大刷新集合
 
-数据保留：`src/renderer/src/query/useInfiniteVideoList.ts:29–55`、`actressInfiniteQueryOptions.ts:19–29`、`useInfiniteActressList.ts:43–46`、`src/renderer/src/pages/HomePage.tsx:119–137`、`GlobalSearchPage.tsx:61–85` 都保留 pages，再 flatMap。没有 maxPages/窗口预算。flatten 新建的是数组引用容器，不能算成再次深复制每个 DTO；但结果对象、额外 Map、跨查询 key 的数据都会占用内存。
+数据保留：`apps/desktop/src/renderer/src/query/useInfiniteVideoList.ts:29–55`、`actressInfiniteQueryOptions.ts:19–29`、`useInfiniteActressList.ts:43–46`、`apps/desktop/src/renderer/src/pages/HomePage.tsx:119–137`、`GlobalSearchPage.tsx:61–85` 都保留 pages，再 flatMap。没有 maxPages/窗口预算。flatten 新建的是数组引用容器，不能算成再次深复制每个 DTO；但结果对象、额外 Map、跨查询 key 的数据都会占用内存。
 
-全局策略 `src/renderer/src/query/queryClient.ts:3–11` 是 staleTime=5 分钟、gcTime=30 分钟、失焦返回/重连时允许 stale 查询刷新、retry=1；gcTime 针对不活跃查询，不是活跃列表的内存硬上限。首页快照 30 秒、首页搜索 15 秒，未刮削计数 5 秒，Layout 库摘要 2 秒等覆盖默认值。
+全局策略 `apps/desktop/src/renderer/src/query/queryClient.ts:3–11` 是 staleTime=5 分钟、gcTime=30 分钟、失焦返回/重连时允许 stale 查询刷新、retry=1；gcTime 针对不活跃查询，不是活跃列表的内存硬上限。首页快照 30 秒、首页搜索 15 秒，未刮削计数 5 秒，Layout 库摘要 2 秒等覆盖默认值。
 
 刷新调用链：
 
-1. `src/renderer/src/query/QueryProvider.tsx:9–13` 挂根 `LibraryDataSync`；`src/renderer/src/hooks/useLibraryDataSync.ts:94–102` 在进入列表根时调用 `refetchStaleLibraryQueries`。路由判断 `src/renderer/src/lib/librarySurfacePaths.ts:39–45` 是“非列表根→列表根”，包含关闭详情与设置返回，跳过列表根之间切换。
-2. `src/renderer/src/query/invalidateLibraryQueries.ts:49–56` 对 videos、actresses、organizations、directors、series、overviewStats 使用 `type:'all', stale:true`。会涉及仍在缓存中的不活跃旧筛选，**不是只刷新当前可见列表**。这段不含 home 前缀，不能误称所有首页搜索也由这次路由函数刷新。
-3. `src/renderer/src/hooks/useListSurfaceRefetch.ts:4–12` 关闭详情无条件调用页面 refetch。媒体库 `LibraryPage.tsx:394–398`、演员 `ActressesPage.tsx:183–188`、三个分类详情均使用它；fresh 数据也会请求。与路由 stale 刷新可能重合，实际去重/取消时序需请求 trace，不能静态宣称必定双发。
-4. `src/renderer/src/query/invalidateLibraryQueries.ts:14–45` 修改/扫描按多个根 key 失效；默认活跃查询刷新，旧筛选先 stale，再可能被步骤 2 拉起。后台隐藏但仍挂载的列表也可能保持活跃。
+1. `apps/desktop/src/renderer/src/query/QueryProvider.tsx:9–13` 挂根 `LibraryDataSync`；`apps/desktop/src/renderer/src/hooks/useLibraryDataSync.ts:94–102` 在进入列表根时调用 `refetchStaleLibraryQueries`。路由判断 `apps/desktop/src/renderer/src/lib/librarySurfacePaths.ts:39–45` 是“非列表根→列表根”，包含关闭详情与设置返回，跳过列表根之间切换。
+2. `apps/desktop/src/renderer/src/query/invalidateLibraryQueries.ts:49–56` 对 videos、actresses、organizations、directors、series、overviewStats 使用 `type:'all', stale:true`。会涉及仍在缓存中的不活跃旧筛选，**不是只刷新当前可见列表**。这段不含 home 前缀，不能误称所有首页搜索也由这次路由函数刷新。
+3. `apps/desktop/src/renderer/src/hooks/useListSurfaceRefetch.ts:4–12` 关闭详情无条件调用页面 refetch。媒体库 `LibraryPage.tsx:394–398`、演员 `ActressesPage.tsx:183–188`、三个分类详情均使用它；fresh 数据也会请求。与路由 stale 刷新可能重合，实际去重/取消时序需请求 trace，不能静态宣称必定双发。
+4. `apps/desktop/src/renderer/src/query/invalidateLibraryQueries.ts:14–45` 修改/扫描按多个根 key 失效；默认活跃查询刷新，旧筛选先 stale，再可能被步骤 2 拉起。后台隐藏但仍挂载的列表也可能保持活跃。
 
 本地安装的依赖实现 `node_modules/@tanstack/query-core/src/infiniteQueryBehavior.ts:94–107` 使用 oldPages.length 循环 refetch 页面（提前无下一页则停止）。这是本地依赖观察，不作为仓库生产源码行号；后续复测应固定 lockfile 版本。已加载 k 页的列表刷新可能重新执行 k 次分页调用及计数。以 200 条页限计算，完整遍历 300,382 条需要 1,502 页，**只是上界算术，不代表用户已遍历或当前首屏发出 1,502 请求**。
 
@@ -151,9 +151,9 @@
 
 ### F08 · P2：分页 DTO 仍宽，不能把条数上限当作字节上限
 
-`src/main/db/scopedVideoCatalogRepo.ts:375–381` 使用 `v.*`；`hydrateRows :304–326` spread 保留字段。`src/shared/videoTypes.ts:101–129` 包含 summary、original_title、多个名称和时间等，`src/shared/catalogTypes.ts:15–18` 还附跨库 badges；列表不含详情专属 resources/tags/assets 全对象，已有“列表/详情”分层，需在该基础上收窄。`scopedVideoCatalogRepo.ts:141–155` badges SQL 没有数量 LIMIT，每行随影片的库成员关系数增长。
+`apps/desktop/src/main/db/scopedVideoCatalogRepo.ts:375–381` 使用 `v.*`；`hydrateRows :304–326` spread 保留字段。`packages/contracts/src/videoTypes.ts:101–129` 包含 summary、original_title、多个名称和时间等，`packages/contracts/src/catalogTypes.ts:15–18` 还附跨库 badges；列表不含详情专属 resources/tags/assets 全对象，已有“列表/详情”分层，需在该基础上收窄。`scopedVideoCatalogRepo.ts:141–155` badges SQL 没有数量 LIMIT，每行随影片的库成员关系数增长。
 
-演员列表 `src/main/db/actressRepo.ts:359–378` 同样 `a.*`；`src/shared/actressTypes.ts:20–43,75–78` 的 ListItem 继承个人简介、裁剪 JSON 等完整 Actress 字段。清单/演员作品集的 `v.*` 使 F01/F02 的大数组更宽。
+演员列表 `apps/desktop/src/main/db/actressRepo.ts:359–378` 同样 `a.*`；`packages/contracts/src/actressTypes.ts:20–43,75–78` 的 ListItem 继承个人简介、裁剪 JSON 等完整 Actress 字段。清单/演员作品集的 `v.*` 使 F01/F02 的大数组更宽。
 
 建议：显式 `VideoCardDTO / ActressCardDTO / CandidateDTO` 投影；字段以实际卡片消费为准，简介/原始编辑数据按单实体 GET。需要支持多库标识时可传有限可见摘要及总数，或共享库字典；任何截断必须保留正确的点击作用域。类型裁剪不等于运行时裁剪，必须同步改 SQL/映射。
 
@@ -161,14 +161,14 @@
 
 ### F09 · P1/P2：图片按原文件同步服务；虚拟化之外的图片需求仍可放大
 
-准确链路：`src/renderer/src/components/PosterCard.tsx:63,146–150` → `src/renderer/src/api.ts:5–9` 的 `media://` URL → `src/main/appMain.ts:134–160` → `src/main/services/mediaAssetStore.ts:190–191` → `src/main/services/mediaAssetStore/filesystem.ts:69–77`。每次到达 handler 都 existsSync/readFileSync，必要时解密，然后整 Buffer 返回；该链路没有缩略图尺寸参数、异步流式读取或字节缓存调用。这里是桌面资源协议，不是 Web 后端。
+准确链路：`apps/desktop/src/renderer/src/components/PosterCard.tsx:63,146–150` → `apps/desktop/src/renderer/src/api.ts:5–9` 的 `media://` URL → `apps/desktop/src/main/appMain.ts:134–160` → `apps/desktop/src/main/services/mediaAssetStore.ts:190–191` → `apps/desktop/src/main/services/mediaAssetStore/filesystem.ts:69–77`。每次到达 handler 都 existsSync/readFileSync，必要时解密，然后整 Buffer 返回；该链路没有缩略图尺寸参数、异步流式读取或字节缓存调用。这里是桌面资源协议，不是 Web 后端。
 
-`src/main/services/assetCache.ts:26–70` 定义了 256 项/96MiB 字节缓存函数，但本次全 `src` 搜索 `getCachedAsset/setCachedAsset` 只命中定义，**当前 media:// 服务链未使用它们**。同文件的 imageInspectionCache 在 F06 链路确实被使用。浏览器/OS 缓存可能避免部分真实磁盘 I/O，不能把每个 img 都断言为物理盘读取，也不能把未接线工具当作已有热图保护。
+`apps/desktop/src/main/services/assetCache.ts:26–70` 定义了 256 项/96MiB 字节缓存函数，但本次全 `src` 搜索 `getCachedAsset/setCachedAsset` 只命中定义，**当前 media:// 服务链未使用它们**。同文件的 imageInspectionCache 在 F06 链路确实被使用。浏览器/OS 缓存可能避免部分真实磁盘 I/O，不能把每个 img 都断言为物理盘读取，也不能把未接线工具当作已有热图保护。
 
 已有保护与边界：
 
 - 海报有 loading=lazy，主列表虚拟化限定挂载数；`VirtualPosterGrid.tsx:270–293`、`VirtualActressGrid.tsx:146–165`。封面固定布局不等于解码尺寸变小。
-- `src/renderer/src/components/ActressAvatar.tsx:27–49` 有失败占位和隐私默认头像，但无 loading=lazy；主列表虚拟化可限量，演员合并等全量候选会放大请求。
+- `apps/desktop/src/renderer/src/components/ActressAvatar.tsx:27–49` 有失败占位和隐私默认头像，但无 loading=lazy；主列表虚拟化可限量，演员合并等全量候选会放大请求。
 - `VideoSampleGallery.tsx:207–224`、`ActressGalleryPanel.tsx:222–245`、`ImagePreviewLightbox.tsx:702–718` 有 lazy，却仍生成全部该实体的样张/写真/缩略项 DOM；成本随图库规模，不随总影片数必然增长。
 - `AppBackgroundLayer.tsx:82–103` 用 new Image 探测尺寸，`:112–114` 清理 ResizeObserver；同 URL 后续显示是否共享请求由浏览器决定，不能断言下载两次。`Layout.tsx:155–156` 预览/隐私模式关闭背景来源，已有减载。
 
@@ -178,28 +178,28 @@
 
 ### F10 · P2/P3：事件清理已有实现，但进度广播、批量动作和请求竞态仍需约束
 
-事件不应泛报成泄漏：preload `src/preload/index.ts:177–201` 的事件 helper 返回 removeListener；根 `src/renderer/src/contexts/BatchScrapeContext.tsx:48–60` 对影片/演员各订阅一次并清理，`:63–74` memoize context value。`src/renderer/src/hooks/useLibraryDataSync.ts:84–93` 返回 scan 取消订阅。`PosterCard.tsx:85–92` 仅菜单打开时安装 pointerdown，关闭清理，不是每张卡片常驻一个 window pointerdown。
+事件不应泛报成泄漏：preload `apps/desktop/src/preload/index.ts:177–201` 的事件 helper 返回 removeListener；根 `apps/desktop/src/renderer/src/contexts/BatchScrapeContext.tsx:48–60` 对影片/演员各订阅一次并清理，`:63–74` memoize context value。`apps/desktop/src/renderer/src/hooks/useLibraryDataSync.ts:84–93` 返回 scan 取消订阅。`PosterCard.tsx:85–92` 仅菜单打开时安装 pointerdown，关闭清理，不是每张卡片常驻一个 window pointerdown。
 
 剩余风险：
 
 - 每个 batch progress 都 setState，所有消费同一 context 的组件可随进度重新 render；1 秒失效 debounce 不等于 render 节流。P3，先量实际 commit 次数，再考虑状态切片/进度展示采样；本次不审计进度产生端的频率。
-- `src/renderer/src/components/VirtualPosterGrid.tsx:167,292` 与 `VirtualActressGrid.tsx:103,164` 在父 render 内定义 Cell；innerElementType 也随总高度改变（前者 `:120–135`，后者 `:77–92`）。有组件类型变化导致可见项重挂载的风险，即便 DOM 数量有界。P2，通过 Profiler/mount 计数验证后再将单元组件与 itemData 稳定化，保持尺寸恢复行为。
-- `src/renderer/src/pages/LibraryPage.tsx:576–585,650–659` 对选择集用 Promise.all 逐个请求删除/移库影响，瞬时并发随 S 增长。`src/renderer/src/components/AddVideosToPlaylistModal.tsx:57–63` 则逐影片 await addVideo，是串行 S 次 IPC；不能称其并发风暴。建议批量预览 DTO + 有界分块，写入批接口保留部分失败语义。
-- `src/renderer/src/hooks/useRangeSelection.ts:32–48` 的 Shift 选择只覆盖已加载 items，切 query 清空（`:28–30`）；没有证明一次自动选中全库。深浏览后的大 S 仍需预算，不能把选择范围 silently 截断。
+- `apps/desktop/src/renderer/src/components/VirtualPosterGrid.tsx:167,292` 与 `VirtualActressGrid.tsx:103,164` 在父 render 内定义 Cell；innerElementType 也随总高度改变（前者 `:120–135`，后者 `:77–92`）。有组件类型变化导致可见项重挂载的风险，即便 DOM 数量有界。P2，通过 Profiler/mount 计数验证后再将单元组件与 itemData 稳定化，保持尺寸恢复行为。
+- `apps/desktop/src/renderer/src/pages/LibraryPage.tsx:576–585,650–659` 对选择集用 Promise.all 逐个请求删除/移库影响，瞬时并发随 S 增长。`apps/desktop/src/renderer/src/components/AddVideosToPlaylistModal.tsx:57–63` 则逐影片 await addVideo，是串行 S 次 IPC；不能称其并发风暴。建议批量预览 DTO + 有界分块，写入批接口保留部分失败语义。
+- `apps/desktop/src/renderer/src/hooks/useRangeSelection.ts:32–48` 的 Shift 选择只覆盖已加载 items，切 query 清空（`:28–30`）；没有证明一次自动选中全库。深浏览后的大 S 仍需预算，不能把选择范围 silently 截断。
 - 影片/演员/清单详情的手写 load 在 `DetailPage.tsx:248–281`、`ActressDetailPage.tsx:104–122`、`PlaylistDetailPage.tsx:75–90` 没有 request sequence/abort gate；快速切实体或排序时，旧响应可能覆盖新状态。HDD 可能加大竞态窗口，但未实测触发。已有 selector cancelled/gate 只防落地，不能取消已经执行的 IPC/SQL。共享无限查询 queryFn 也不向 preload 传 AbortSignal。
 
 验收：用模拟 API 延迟逆序响应验证最后一次选择获胜；开关页面/弹窗 100 次后 listener 数回到基线；100 页后刷新/选择动作测卡片 mount 与 commit 次数；大 S 批量操作验证有界 in-flight 数、进度和失败重试。避免在用户库执行删除试验。
 
 ## Web UI 专项（不含 Web 后端）
 
-`src/web/main.tsx:613–633` 请求 `/api/videos` 时先清 result，再 setResult(value)，cleanup abort 且检查 aborted；`:1011–1034` 用上一页/下一页替换数据，`:480` VideoGrid map 当前集合。**没有无限追加历史页的路径**，不能因为普通 map 就判定渲染所有 300,382 条。客户端也没有自行 slice response；服务端实际页上限在本次范围外，不声称已验证具体数值。
+`apps/web/apps/desktop/src/main.tsx:613–633` 请求 `/api/videos` 时先清 result，再 setResult(value)，cleanup abort 且检查 aborted；`:1011–1034` 用上一页/下一页替换数据，`:480` VideoGrid map 当前集合。**没有无限追加历史页的路径**，不能因为普通 map 就判定渲染所有 300,382 条。客户端也没有自行 slice response；服务端实际页上限在本次范围外，不声称已验证具体数值。
 
 仍需覆盖的 UI 风险（P2）：
 
 - 媒体库/清单 collections 一次存入状态（`:601–612`），移动选择弹层 `:827–831` 和侧栏 `:859,876` 映射全部项目，DOM 随库数/P 增长。应对大量清单增加搜索/分段呈现或虚拟选择器，保持模态焦点规则。
 - 单影片详情演员/标签/图片 `:422,430,453–460` 都全 map，图片 lazy；这是单影片关联集合边界。头像在 `:196` 已设置 lazy + async decoding，比桌面通用头像更完整。
-- `src/web/navigation.ts:127–141` 每次方向导航遍历文档候选，检查可见性及 getBoundingClientRect；大 collections 或详情图库会放大按键工作。`main.tsx:1089–1090` 已注册/清理唯一顶层 keydown。建议先测候选数量与布局成本，再按导航组索引和缓存几何；需在 resize/滚动/DOM 更新后失效，不能牺牲正确焦点导航。
-- 翻页/离页已有 AbortController；`src/web/client.ts:36,54` 清理父信号 listener。不把这条链路混同桌面不可取消的 invoke。
+- `apps/web/src/navigation.ts:127–141` 每次方向导航遍历文档候选，检查可见性及 getBoundingClientRect；大 collections 或详情图库会放大按键工作。`main.tsx:1089–1090` 已注册/清理唯一顶层 keydown。建议先测候选数量与布局成本，再按导航组索引和缓存几何；需在 resize/滚动/DOM 更新后失效，不能牺牲正确焦点导航。
+- 翻页/离页已有 AbortController；`apps/web/src/client.ts:36,54` 清理父信号 listener。不把这条链路混同桌面不可取消的 invoke。
 
 验收遵守移动规范：320×844、390×844、844×390、1280×800，普通模拟影片数据；单页替换后 DOM 不累计；大 collections 搜索与焦点恢复正确；返回恢复来源卡片/滚动；真正按方向键验证延迟与焦点。Web 后端 SQL、文件服务、分页大小和连接并发留给独立审计。
 
@@ -233,7 +233,7 @@
 
 建议诊断记录字段：`commit / build / OS / CPU / RAM / HDD型号与路径 / 数据量及分布 / 图片尺寸与加密状态 / 场景 / 缓存状态 / handler / scope / queryHash / limit / offset / 返回条数 / JSON估算字节 / 主进程执行时间 / invoke往返时间 / React提交时间 / 长任务 / DOM数 / heap / active与inactive页数 / 图片读取数与字节`。SQL handler 时间、invoke 往返与 React commit 分段记录，不能把往返差值直接命名为纯序列化时间。只对合成数据记录查询参数，日志不要采集用户标题/路径。
 
-回归必须包含 stable ID 与相同排序值、空页/末页、下一页失败重试、数据变化导致 total 改变、隐藏/归档库、跨库 badges、跨页选择、只读/修改后两种返回路径。现有 `src/renderer/src/query/useInfiniteVideoList.test.tsx`、`actressListBehavior.test.ts`、`actressListPages.test.ts`、`src/renderer/src/components/actressGridLayout.test.ts` 可作为正确性测试入口；本次未执行这些测试或新增脚本。
+回归必须包含 stable ID 与相同排序值、空页/末页、下一页失败重试、数据变化导致 total 改变、隐藏/归档库、跨库 badges、跨页选择、只读/修改后两种返回路径。现有 `apps/desktop/src/renderer/src/query/useInfiniteVideoList.test.tsx`、`actressListBehavior.test.ts`、`actressListPages.test.ts`、`apps/desktop/src/renderer/src/components/actressGridLayout.test.ts` 可作为正确性测试入口；本次未执行这些测试或新增脚本。
 
 ## 历史基准、已确认保护与未决事项
 

@@ -71,7 +71,7 @@
 
 ### 1. 建立统一写入计划
 
-在 `src/main/db/videoRepo.ts` 增加只读的 `planVideoScrapeResult`，由它生成每个字段的最终处置。计划至少包含：
+在 `apps/desktop/src/main/db/videoRepo.ts` 增加只读的 `planVideoScrapeResult`，由它生成每个字段的最终处置。计划至少包含：
 
 ```ts
 type VideoScrapeImpactAction = 'preserve' | 'set' | 'replace' | 'clear'
@@ -107,7 +107,7 @@ interface VideoScrapeApplicationPlan {
 
 ### 2. 显式传递字段来源
 
-在 `src/main/scrapers/scraperManager.ts` 增加字段来源解析器：
+在 `apps/desktop/src/main/scrapers/scraperManager.ts` 增加字段来源解析器：
 
 ```ts
 interface VideoScrapeFieldSources {
@@ -125,7 +125,7 @@ interface VideoScrapeFieldSources {
 
 ### 3. 修正字段空值判定
 
-在 `src/main/db/videoRepo.ts` 调整快照与判定：
+在 `apps/desktop/src/main/db/videoRepo.ts` 调整快照与判定：
 
 - 分别统计女性、男性演员数量，移除共用 `castCount`。
 - 封面只看 `cover_path` 是否非空，不探文件健康。
@@ -138,7 +138,7 @@ interface VideoScrapeFieldSources {
 
 ### 4. 图片资源先验证、后提交
 
-在 `MediaAssetStore`（`src/main/services/mediaAssetStore.ts` 及其内部 download/filesystem adapter）和 `src/main/scrapers/scraperManager.ts` 调整下载流程：
+在 `MediaAssetStore`（`apps/desktop/src/main/services/mediaAssetStore.ts` 及其内部 download/filesystem adapter）和 `apps/desktop/src/main/scrapers/scraperManager.ts` 调整下载流程：
 
 - `downloadCover`、`downloadSamples` 在落盘前用 `isUsableImageBuffer` 校验响应，HTML、空响应和损坏图片均视为失败。
 - 封面 URL 存在但下载失败时，向计划传入 `resourceUnavailable`。
@@ -176,18 +176,18 @@ interface ApplyVideoScrapeResult {
 
 修改以下调用链：
 
-- `src/shared/videoTypes.ts` 与 `src/shared/scrapeTypes.ts`
+- `packages/contracts/src/videoTypes.ts` 与 `packages/contracts/src/scrapeTypes.ts`
   - `VideoScrapeOneResult` 增加 `warnings: string[]`。
   - 修正 `applied` 注释，使其适用于三种更新方式。
-- `src/main/scrapers/scraperManager.ts`
+- `apps/desktop/src/main/scrapers/scraperManager.ts`
   - `ScrapeOutcome` 携带 `warnings`，`skipped` 由 `applied` 决定。
-- `src/main/ipc/scrapeHandlers.ts`
+- `apps/desktop/src/main/ipc/scrapeHandlers.ts`
   - 向渲染进程返回 `applied` 和 `warnings`。
-- `src/main/services/videoBatchScrapeQueue.ts`
+- `apps/desktop/src/main/services/videoBatchScrapeQueue.ts`
   - 无应用且无警告：`跳过：所选字段无可写入内容`。
   - 无应用但有资源警告：`跳过：资源不可用，已保留原数据`。
   - 部分应用且有警告：成功计数不变，日志说明哪些图片字段未应用。
-- `src/renderer/src/pages/DetailPage.tsx`、`LibraryPage.tsx`
+- `apps/desktop/src/renderer/src/pages/DetailPage.tsx`、`LibraryPage.tsx`
   - 成功且无警告显示普通成功提示。
   - 成功但有警告显示“已更新，部分图片未应用”。
   - 跳过显示“所选字段无可写入内容”；有资源警告时附带简短原因。
@@ -235,7 +235,7 @@ interface ApplyVideoScrapeResult {
 
 ### 参数化语义测试
 
-在 `src/main/db/videoRepo.test.ts` 为每个字段至少覆盖：
+在 `apps/desktop/src/main/db/videoRepo.test.ts` 为每个字段至少覆盖：
 
 1. 当前为空、刮削有值。
 2. 当前有值、刮削有值。
@@ -275,9 +275,9 @@ interface ApplyVideoScrapeResult {
 
 ```text
 npm run typecheck
-node scripts/run-electron-tests.mjs src/main/db/videoRepo.test.ts
-node scripts/run-electron-tests.mjs src/main/scrapers/scraperManager.test.ts
-node scripts/run-electron-tests.mjs src/main/services/videoBatchScrapeQueue.test.ts
+node scripts/run-electron-tests.mjs apps/desktop/src/main/db/videoRepo.test.ts
+node scripts/run-electron-tests.mjs apps/desktop/src/main/scrapers/scraperManager.test.ts
+node scripts/run-electron-tests.mjs apps/desktop/src/main/services/videoBatchScrapeQueue.test.ts
 npm test
 ```
 

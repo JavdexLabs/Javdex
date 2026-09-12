@@ -5,9 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { closeDatabase, initDatabaseAtPath } from '../../src/main/db/database'
-import { listActresses, listActressPickerPage } from '../../src/main/db/actressRepo'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
+import { closeDatabase, initDatabaseAtPath } from '../../apps/desktop/src/main/db/database'
+import { listActresses, listActressPickerPage } from '../../apps/desktop/src/main/db/actressRepo'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 
 it('measures narrow actor candidate pages', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-picker-benchmark-'))

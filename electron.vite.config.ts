@@ -51,7 +51,7 @@ function mediaPipeRuntimePlugin(): Plugin {
 }
 
 function copyBundledPluginsPlugin() {
-  const source = resolve('src/main/bundled-plugins')
+  const source = resolve('apps/desktop/src/main/bundled-plugins')
   const target = resolve('out/main/bundled-plugins')
   return {
     name: 'copy-bundled-plugins',
@@ -106,7 +106,8 @@ export default defineConfig({
     ],
     resolve: {
       alias: {
-        '@shared': resolve('src/shared'),
+        '@shared': resolve('packages/contracts/src'),
+        '@library': resolve('packages/library/src'),
         '@pi-coding-agent-runtime': resolve(
           'node_modules/@earendil-works/pi-coding-agent/dist'
         )
@@ -115,8 +116,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/main/index.ts'),
-          catalogReadWorker: resolve('src/main/services/catalogReadWorker.ts')
+          index: resolve('apps/desktop/src/main/index.ts'),
+          catalogReadWorker: resolve('apps/desktop/src/main/services/catalogReadWorker.ts')
         }
       }
     }
@@ -126,24 +127,24 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/preload/index.ts')
+          index: resolve('apps/desktop/src/preload/index.ts')
         }
       }
     }
   },
   renderer: {
-    root: 'src/renderer',
+    root: 'apps/desktop/src/renderer',
     resolve: {
       alias: {
-        '@renderer': resolve('src/renderer/src'),
-        '@shared': resolve('src/shared')
+        '@renderer': resolve('apps/desktop/src/renderer/src'),
+        '@shared': resolve('packages/contracts/src')
       }
     },
     plugins: [react(), mediaPipeRuntimePlugin()],
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/renderer/index.html')
+          index: resolve('apps/desktop/src/renderer/index.html')
         }
       }
     }

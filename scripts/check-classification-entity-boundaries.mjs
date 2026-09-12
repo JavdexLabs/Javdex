@@ -10,22 +10,22 @@ function sourceFiles(root) {
 }
 
 const violations = []
-const schemaSource = readFileSync('src/main/db/schema.ts', 'utf8')
+const schemaSource = readFileSync('apps/desktop/src/main/db/schema.ts', 'utf8')
 for (const column of ['maker', 'publisher', 'series', 'director']) {
   if (new RegExp(`^\\s*${column}\\s+TEXT\\b`, 'm').test(schemaSource)) {
-    violations.push(`src/main/db/schema.ts: videos.${column} must not return as text storage`)
+    violations.push(`apps/desktop/src/main/db/schema.ts: videos.${column} must not return as text storage`)
   }
 }
 if (/CREATE TABLE IF NOT EXISTS facet_entries/.test(schemaSource)) {
-  violations.push('src/main/db/schema.ts: facet_entries is retired')
+  violations.push('apps/desktop/src/main/db/schema.ts: facet_entries is retired')
 }
-if (existsSync('src/main/db/facetRepo.ts')) {
-  violations.push('src/main/db/facetRepo.ts: legacy text facet repository is retired')
+if (existsSync('apps/desktop/src/main/db/facetRepo.ts')) {
+  violations.push('apps/desktop/src/main/db/facetRepo.ts: legacy text facet repository is retired')
 }
 
-for (const file of sourceFiles('src/main')) {
+for (const file of sourceFiles('apps/desktop/src/main')) {
   const normalizedFile = file.replaceAll('\\', '/')
-  if (normalizedFile === 'src/main/db/migrations.ts' || /\.test\.[cm]?[jt]sx?$/.test(normalizedFile)) continue
+  if (normalizedFile === 'apps/desktop/src/main/db/migrations.ts' || /\.test\.[cm]?[jt]sx?$/.test(normalizedFile)) continue
   const source = readFileSync(file, 'utf8')
   if (/\bfacet_entries\b/.test(source)) {
     violations.push(`${file}: runtime code must not access facet_entries`)
@@ -38,9 +38,9 @@ for (const file of sourceFiles('src/main')) {
   }
 }
 
-const routeSource = readFileSync('src/renderer/src/listView/routePaths.ts', 'utf8')
+const routeSource = readFileSync('apps/desktop/src/renderer/src/listView/routePaths.ts', 'utf8')
 if (/\/v\/:valueKey|facet(?:Detail|VideoStack|ActressStack)/.test(routeSource)) {
-  violations.push('src/renderer/src/listView/routePaths.ts: name-based classification routes are retired')
+  violations.push('apps/desktop/src/renderer/src/listView/routePaths.ts: name-based classification routes are retired')
 }
 
 if (violations.length > 0) {

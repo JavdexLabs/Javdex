@@ -2,7 +2,7 @@ export default {
   extends: ['stylelint-config-standard'],
   overrides: [
     {
-      files: ['src/renderer/src/**/*.module.css'],
+      files: ['apps/desktop/src/renderer/src/**/*.module.css'],
       rules: {
         'declaration-no-important': true,
         'max-nesting-depth': 2,

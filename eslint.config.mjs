@@ -12,12 +12,12 @@ export default tseslint.config(
       'node_modules/**',
       'out/**',
       'out-tsc/**',
-      'src/main/bundled-plugins/**/*.cjs',
+      'apps/desktop/src/main/bundled-plugins/**/*.cjs',
       'website/**'
     ]
   },
   {
-    files: ['src/**/*.{ts,tsx}', 'electron.vite.config.ts'],
+    files: ['apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}', 'electron.vite.config.ts'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       globals: {
@@ -58,7 +58,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/**/*.test.{ts,tsx}'],
+    files: ['apps/**/*.test.{ts,tsx}', 'packages/**/*.test.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-floating-promises': 'off',
       '@typescript-eslint/no-misused-promises': 'off'

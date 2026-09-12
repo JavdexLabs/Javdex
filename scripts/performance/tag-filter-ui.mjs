@@ -15,7 +15,7 @@ fs.writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><head><
 fs.writeFileSync(path.join(fixture, 'fixture.jsx'), `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import ${JSON.stringify('/@fs' + path.join(repository, 'src/renderer/src/styles/global.css'))};
+import ${JSON.stringify('/@fs' + path.join(repository, 'apps/desktop/src/renderer/src/styles/global.css'))};
 window.React = React;
 window.__requests = []; window.__selected = []; window.__failNext = false;
 const rows = Array.from({length:220},(_,i)=>({id:i+1,video_count:i+1,label:i===1?'L'.repeat(128)+'…':'标签'+String(i+1).padStart(3,'0')}));
@@ -29,7 +29,7 @@ window.api = {
   }},
   videos:{addExistingManualTag:async(_videoId,tagId)=>{window.__selected=tagId;return true},addManualTag:async()=>true,removeManualTag:async()=>true}
 };
-const Panel=(await import(${JSON.stringify('/@fs' + path.join(repository, 'src/renderer/src/components/LibraryFilterPopover.tsx'))})).default;
+const Panel=(await import(${JSON.stringify('/@fs' + path.join(repository, 'apps/desktop/src/renderer/src/components/LibraryFilterPopover.tsx'))})).default;
 function Host(){
   const [open,setOpen]=React.useState(false), anchor=React.useRef(null);
   const [state,setState]=React.useState({status:'all',pendingScrape:'all',year:'all',codePrefix:'',sortBy:'add_time',sortDir:'desc',tagIds:[],resourceKinds:[]});
@@ -44,7 +44,7 @@ const results = []
 try {
   server = await createServer({ configFile: false, root: fixture, cacheDir: path.join(fixture, '.vite'),
     plugins: [react()], resolve: { alias: {
-      '@shared': path.join(repository, 'src/shared'),
+      '@shared': path.join(repository, 'packages/contracts/src'),
       react: path.join(repository, 'node_modules/react'),
       'react-dom': path.join(repository, 'node_modules/react-dom')
     } }, server: { host: '127.0.0.1', port: 0, fs: { allow: [fixture, repository] } } })

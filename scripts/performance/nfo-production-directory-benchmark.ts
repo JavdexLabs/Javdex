@@ -5,10 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { createMediaLibrary } from '../../src/main/db/mediaLibraryRepo'
-import { createDefaultLocalNfoSourceAdapter } from '../../src/main/metadata-sources'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { createMediaLibrary } from '../../apps/desktop/src/main/db/mediaLibraryRepo'
+import { createDefaultLocalNfoSourceAdapter } from '../../apps/desktop/src/main/metadata-sources'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 
 it('measures default NFO collection and directory read counts with many resources in one directory', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-production-probe-'))

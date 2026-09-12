@@ -6,14 +6,14 @@ import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
 import {buildSync} from 'esbuild'
-import {initDatabaseAtPath,closeDatabase,getDatabaseReadRevision} from '../../src/main/db/database'
-import {CatalogReadWorkerClient} from '../../src/main/services/catalogReadWorkerClient'
-import {createCatalogReadWorkerTransport} from '../../src/main/services/catalogReadWorkerTransport'
+import {initDatabaseAtPath,closeDatabase,getDatabaseReadRevision} from '../../apps/desktop/src/main/db/database'
+import {CatalogReadWorkerClient} from '../../apps/desktop/src/main/services/catalogReadWorkerClient'
+import {createCatalogReadWorkerTransport} from '../../apps/desktop/src/main/services/catalogReadWorkerTransport'
 it('measures responsiveness during large audit permission scans on the real worker',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-path-worker-')),bundle=path.join(root,'worker.cjs')
  let client:CatalogReadWorkerClient|undefined,timer:ReturnType<typeof setInterval>|undefined
  try{
-  buildSync({entryPoints:[path.resolve('src/main/services/catalogReadWorker.ts')],outfile:bundle,bundle:true,platform:'node',format:'cjs',packages:'external',tsconfig:path.resolve('tsconfig.node.json'),banner:{js:`require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});`}})
+  buildSync({entryPoints:[path.resolve('apps/desktop/src/main/services/catalogReadWorker.ts')],outfile:bundle,bundle:true,platform:'node',format:'cjs',packages:'external',tsconfig:path.resolve('tsconfig.node.json'),banner:{js:`require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});`}})
   const filename=path.join(root,'catalog.db'),db=initDatabaseAtPath(filename),count=300000
   const files=Array.from({length:count},(_,i)=>({rootId:1,filePath:`/media/${i}/${'x'.repeat(180)}.mp4`,sourceKind:'local',outcome:'skipped',skipReason:'unchanged'}))
   const audit={schemaVersion:2,libraryId:1,runId:'permission',configRevision:1,trigger:'manual',status:'success',startedAt:'before',finishedAt:'now',files,removedResources:[],promotedResources:[],deletedVideos:[],pendingGroups:[]}

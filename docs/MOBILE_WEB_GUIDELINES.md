@@ -1,6 +1,6 @@
 # 移动端 Web 开发规范
 
-适用于 `src/web`，配合 [UI 设计规范](UI_DESIGN_GUIDELINES.md) 和 [路由设计](ROUTING_DESIGN.md)。保持媒体库工具的紧凑风格，以触控可用性优先，不照搬桌面侧栏。
+适用于 `apps/web/src`，配合 [UI 设计规范](UI_DESIGN_GUIDELINES.md) 和 [路由设计](ROUTING_DESIGN.md)。保持媒体库工具的紧凑风格，以触控可用性优先，不照搬桌面侧栏。
 
 ## 实现约束
 

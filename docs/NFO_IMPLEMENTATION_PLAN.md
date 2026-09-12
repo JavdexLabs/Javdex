@@ -383,7 +383,7 @@ type MetadataAssetRef =
 
 ### 34.1 实现任务
 
-1. 在 `src/main/metadata-sources/` 建立来源接口、descriptor、registry、web Adapter 与候选资产模型。
+1. 在 `apps/desktop/src/main/metadata-sources/` 建立来源接口、descriptor、registry、web Adapter 与候选资产模型。
 2. 把 `scraperManager` 中 `BaseScraper` 的直接调用收敛到 web Adapter；保留现有 plugin descriptor 校验、精确番号过滤、URL 去重、代理、延迟控制和浏览器关闭语义。
 3. 把单候选与多候选的图片处理统一到 `videoMetadataCandidateStager`：
    - 单候选仍通过 `videoScrapeApplyService` 应用；
@@ -395,12 +395,12 @@ type MetadataAssetRef =
 
 ### 34.2 重点文件
 
-- `src/main/scrapers/scraperManager.ts`
-- `src/main/scrapers/compositeScrapeRun.ts`
-- `src/main/services/videoScrapeApplyService.ts`
-- `src/main/services/mediaAssetStore.ts`
-- `src/shared/videoScrapeTypes.ts`（仅保留 IPC/renderer 需要的公共形状）
-- 新增 `src/main/metadata-sources/*`
+- `apps/desktop/src/main/scrapers/scraperManager.ts`
+- `apps/desktop/src/main/scrapers/compositeScrapeRun.ts`
+- `apps/desktop/src/main/services/videoScrapeApplyService.ts`
+- `apps/desktop/src/main/services/mediaAssetStore.ts`
+- `packages/contracts/src/videoScrapeTypes.ts`（仅保留 IPC/renderer 需要的公共形状）
+- 新增 `apps/desktop/src/main/metadata-sources/*`
 - `scripts/check-media-asset-store-boundaries.mjs` 及新的 source boundary check
 
 ### 34.3 验收条件
@@ -461,18 +461,18 @@ type MetadataAssetRef =
 
 ### 35.6 重点文件
 
-- `src/main/scanner/scanner.ts`
-- `src/main/scanner/libraryScanAuditStore.ts`
-- `src/main/db/mediaLibraryRepo.ts`
-- `src/main/db/pendingScanRepo.ts` 与新增 identity repo/service
-- `src/main/db/schema.ts`、`src/main/db/migrations.ts`
-- `src/main/services/videoPendingScrapeService.ts`
-- `src/main/services/videoScrapeApplyService.ts`
-- `src/main/services/mediaLibraryRootFileGuard.ts`
-- `src/shared/mediaLibraryTypes.ts`、`src/shared/libraryTypes.ts`、IPC contracts
-- `src/renderer/src/pages/MediaLibrarySettingsTabs.tsx`
-- `src/renderer/src/pages/PendingCenterPage.tsx` 及 scan panes
-- 新增 `src/main/nfo/*` 与 `src/main/metadata-sources/localNfoSourceAdapter.ts`
+- `apps/desktop/src/main/scanner/scanner.ts`
+- `apps/desktop/src/main/scanner/libraryScanAuditStore.ts`
+- `apps/desktop/src/main/db/mediaLibraryRepo.ts`
+- `apps/desktop/src/main/db/pendingScanRepo.ts` 与新增 identity repo/service
+- `apps/desktop/src/main/db/schema.ts`、`apps/desktop/src/main/db/migrations.ts`
+- `apps/desktop/src/main/services/videoPendingScrapeService.ts`
+- `apps/desktop/src/main/services/videoScrapeApplyService.ts`
+- `apps/desktop/src/main/services/mediaLibraryRootFileGuard.ts`
+- `packages/contracts/src/mediaLibraryTypes.ts`、`packages/contracts/src/libraryTypes.ts`、IPC contracts
+- `apps/desktop/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx`
+- `apps/desktop/src/renderer/src/pages/PendingCenterPage.tsx` 及 scan panes
+- 新增 `apps/desktop/src/main/nfo/*` 与 `apps/desktop/src/main/metadata-sources/localNfoSourceAdapter.ts`
 
 ### 35.7 验收条件
 
@@ -539,13 +539,13 @@ type MetadataAssetRef =
 
 ### 36.6 重点文件
 
-- 新增 `src/main/nfo/export/*`
-- 新增 `src/shared/nfoExportTypes.ts` 与 typed IPC contract
-- `src/main/services/maintenanceTaskGate.ts`
-- `src/main/services/mediaAssetStore.ts`
-- `src/main/ipc/*`、`src/preload/index.ts`
-- `src/shared/settingsTypes.ts`、`src/main/settings/settingsStore.ts`
-- `src/renderer/src/components/settings/StorageSettingsPanel.tsx`
+- 新增 `apps/desktop/src/main/nfo/export/*`
+- 新增 `packages/contracts/src/nfoExportTypes.ts` 与 typed IPC contract
+- `apps/desktop/src/main/services/maintenanceTaskGate.ts`
+- `apps/desktop/src/main/services/mediaAssetStore.ts`
+- `apps/desktop/src/main/ipc/*`、`apps/desktop/src/preload/index.ts`
+- `packages/contracts/src/settingsTypes.ts`、`apps/desktop/src/main/settings/settingsStore.ts`
+- `apps/desktop/src/renderer/src/components/settings/StorageSettingsPanel.tsx`
 - 新增 `NfoExportPanel`、preview、blocking progress modal 及 CSS module
 
 ### 36.7 验收条件

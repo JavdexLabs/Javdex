@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-const roots = ['README.md', 'docs', 'src', 'package.json']
+const roots = ['README.md', 'docs', 'apps', 'packages', 'package.json']
 const extensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.md', '.css', '.html'])
 const suspicious = /�|锟|ï¿½/
 

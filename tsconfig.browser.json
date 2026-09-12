@@ -1,14 +1,16 @@
 {
   "extends": "./tsconfig.web.json",
   "include": [
-    "src/web/**/*",
-    "src/shared/webTypes.ts",
-    "src/shared/imageVariants.ts",
-    "src/renderer/src/components/Checkbox.tsx"
+    "apps/web/src/**/*",
+    "packages/contracts/src/webTypes.ts",
+    "packages/contracts/src/imageVariants.ts",
+    "packages/ui/src/**/*"
   ],
   "compilerOptions": {
     "composite": true,
-    "types": ["vite/client"],
+    "types": [
+      "vite/client"
+    ],
     "outDir": "./out-tsc/browser"
   }
 }

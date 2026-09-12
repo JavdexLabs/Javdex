@@ -15,12 +15,12 @@ function isPrivateMediaAssetImpl(specifier) {
   )
 }
 
-const publicStore = path.resolve('src/main/services/mediaAssetStore.ts')
-const privateRoot = path.resolve('src/main/services/mediaAssetStore')
+const publicStore = path.resolve('apps/desktop/src/main/services/mediaAssetStore.ts')
+const privateRoot = path.resolve('apps/desktop/src/main/services/mediaAssetStore')
 
 const violations = []
 
-for (const file of sourceFiles('src')) {
+for (const file of ['apps', 'packages'].flatMap(sourceFiles)) {
   const resolved = path.resolve(file)
   const insidePrivateTree =
     resolved === privateRoot || resolved.startsWith(`${privateRoot}${path.sep}`)

@@ -5,8 +5,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
-import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
-import {iterateSourceManagedVideoResourceRefs,listSourceManagedVideoResourceRefs} from '../../src/main/db/videoRepo'
+import {initDatabaseAtPath,closeDatabase} from '../../apps/desktop/src/main/db/database'
+import {iterateSourceManagedVideoResourceRefs,listSourceManagedVideoResourceRefs} from '../../apps/desktop/src/main/db/videoRepo'
 it('measures bounded cleanup enumeration without claiming bounded audit memory',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-source-probe-')),results:unknown[]=[]
  try {for(const count of [50000,300000]){

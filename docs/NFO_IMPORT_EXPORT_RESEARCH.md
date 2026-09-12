@@ -167,9 +167,9 @@ extrafanart/              # 可选；仅输出剧照，不把它们声明成主�
 
 - [`docs/SCRAPER_PLUGIN_FORMAT.md`](./SCRAPER_PLUGIN_FORMAT.md) 的影片插件入口是 `parseVideo(ctx)`，插件只拿到 `ctx.code`；文档明确没有 `ctx.target`、`ctx.sourceUrl` 等目标上下文。
 - 普通插件运行在沙箱中，没有 Node `fs`、`require` 或任意本地文件访问能力。内置 `serviceBinding` 目前也是受信任绑定而非用户插件 API。
-- [`src/main/scrapers/BaseScraper.ts`](../src/main/scrapers/BaseScraper.ts) 的 Interface 只有 `parseTask(code, proxyUrl?)`，没有 `videoId`、资源 ID 或资源路径。
-- [`src/shared/videoScrapeTypes.ts`](../src/shared/videoScrapeTypes.ts) 的 `ScrapeResult` 以 `coverUrl`、`sampleImageUrls` 和演员 `avatarUrl` 表达图片，没有本地资产引用。
-- [`src/main/services/videoScrapeApplyService.ts`](../src/main/services/videoScrapeApplyService.ts) 的 delivery 通过 `fetcher(url)` 下载这些图片；[`src/main/services/mediaAssetStore.ts`](../src/main/services/mediaAssetStore.ts) 负责暂存、落盘和数据库变更协调。
+- [`apps/desktop/src/main/scrapers/BaseScraper.ts`](../apps/desktop/src/main/scrapers/BaseScraper.ts) 的 Interface 只有 `parseTask(code, proxyUrl?)`，没有 `videoId`、资源 ID 或资源路径。
+- [`packages/contracts/src/videoScrapeTypes.ts`](../packages/contracts/src/videoScrapeTypes.ts) 的 `ScrapeResult` 以 `coverUrl`、`sampleImageUrls` 和演员 `avatarUrl` 表达图片，没有本地资产引用。
+- [`apps/desktop/src/main/services/videoScrapeApplyService.ts`](../apps/desktop/src/main/services/videoScrapeApplyService.ts) 的 delivery 通过 `fetcher(url)` 下载这些图片；[`apps/desktop/src/main/services/mediaAssetStore.ts`](../apps/desktop/src/main/services/mediaAssetStore.ts) 负责暂存、落盘和数据库变更协调。
 
 所以，直接新增一个读取 NFO 的 `.avscraper` 会被迫做出至少一种错误选择：
 
@@ -182,7 +182,7 @@ extrafanart/              # 可选；仅输出剧照，不把它们声明成主�
 
 ### 2.3 可以复用的深度
 
-[`src/main/scrapers/scraperManager.ts`](../src/main/scrapers/scraperManager.ts) 已承担多个重要不变量：番号归一化、候选收集、待确认暂存、字段选择、身份冲突和调用 apply。[`src/main/services/videoScrapeApplyService.ts`](../src/main/services/videoScrapeApplyService.ts) 又把字段覆盖、分类实体解析、图片下载与数据库事务集中在一个 Module 内。
+[`apps/desktop/src/main/scrapers/scraperManager.ts`](../apps/desktop/src/main/scrapers/scraperManager.ts) 已承担多个重要不变量：番号归一化、候选收集、待确认暂存、字段选择、身份冲突和调用 apply。[`apps/desktop/src/main/services/videoScrapeApplyService.ts`](../apps/desktop/src/main/services/videoScrapeApplyService.ts) 又把字段覆盖、分类实体解析、图片下载与数据库事务集中在一个 Module 内。
 
 NFO importer 应复用这些机制，而不是另写一条“解析 XML 后直接 update database”的旁路。最有价值的重构是让 manager 从 `VideoMetadataSource` 收集候选，而不是直接依赖 `BaseScraper`。
 

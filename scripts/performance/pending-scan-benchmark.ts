@@ -5,10 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { listPendingScanGroups, getPendingScanGroup } from '../../src/main/db/pendingScanRepo'
-import { listPendingResourceIdentities } from '../../src/main/db/pendingResourceIdentityRepo'
-import { pagePendingScanQueue, countPendingScanQueue } from '../../src/main/db/pendingScanQueueRepo'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { listPendingScanGroups, getPendingScanGroup } from '../../apps/desktop/src/main/db/pendingScanRepo'
+import { listPendingResourceIdentities } from '../../apps/desktop/src/main/db/pendingResourceIdentityRepo'
+import { pagePendingScanQueue, countPendingScanQueue } from '../../apps/desktop/src/main/db/pendingScanQueueRepo'
 it('measures mixed scan summary pages against complete hydration',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-scan-bench-'))
  try{

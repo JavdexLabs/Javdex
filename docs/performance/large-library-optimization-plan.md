@@ -161,17 +161,17 @@ PERF-00A 是后续工作包表中 PERF-00 的开发前置；PERF-00B 是跨批�
 | 子包 | 主要入口 | 必须补足的验证 |
 |---|---|---|
 | 00A | [基准脚本](../../scripts/performance/large-library-benchmark.ts)、[原始结果](large-library-results/README.md) | 保存基线，不覆盖历史结果；新场景补活动/归档/隐藏/多库重叠、空集合、同分/空白日期和高扇出；计时与 JSON/渲染开销分开 |
-| 01A | [scanner](../../src/main/scanner/scanner.ts)、[scanCoordinator](../../src/main/scanner/scanCoordinator.ts) | 覆盖300k/600k输入实际汇总函数、输出顺序与重复项语义；使用合成路径，无需创建数十万媒体文件；仅表达式不再作为最终完成证据 |
-| 02A | [pendingRepo](../../src/main/db/pendingVideoScrapeRepo.ts)、[scrapeHandlers](../../src/main/ipc/scrapeHandlers.ts)、[preload](../../src/preload/index.ts)、[Layout](../../src/renderer/src/components/Layout.tsx) | 专用count贯通共享类型/IPC/服务/UI；10k候选详情不被读取；确认/丢弃/扫描变更后徽标一致；失败与加载态不冒充0 |
-| 03 | [scopedRepo](../../src/main/db/scopedVideoCatalogRepo.ts)、[homeRepo](../../src/main/db/homeDiscoveryRepo.ts)、[mediaLibraryHandlers](../../src/main/ipc/mediaLibraryHandlers.ts) | 先确认 JOIN 基数再去重移除；逐组合对照ID、顺序、total、资源归属；单库范围归一化与多库首选规则；后补投影只读当前页 |
-| 04 | [tagRepo](../../src/main/db/tagRepo.ts)、[actressRepo](../../src/main/db/actressRepo.ts)、[database](../../src/main/db/database.ts) | 先聚合再讨论缓存；共享/隐藏/归档和manual计数一致；无统计/有统计/过期统计对照；无无条件索引提示或每请求ANALYZE；新增索引走正式迁移 |
+| 01A | [scanner](../../apps/desktop/src/main/scanner/scanner.ts)、[scanCoordinator](../../apps/desktop/src/main/scanner/scanCoordinator.ts) | 覆盖300k/600k输入实际汇总函数、输出顺序与重复项语义；使用合成路径，无需创建数十万媒体文件；仅表达式不再作为最终完成证据 |
+| 02A | [pendingRepo](../../apps/desktop/src/main/db/pendingVideoScrapeRepo.ts)、[scrapeHandlers](../../apps/desktop/src/main/ipc/scrapeHandlers.ts)、[preload](../../apps/desktop/src/preload/index.ts)、[Layout](../../apps/desktop/src/renderer/src/components/Layout.tsx) | 专用count贯通共享类型/IPC/服务/UI；10k候选详情不被读取；确认/丢弃/扫描变更后徽标一致；失败与加载态不冒充0 |
+| 03 | [scopedRepo](../../apps/desktop/src/main/db/scopedVideoCatalogRepo.ts)、[homeRepo](../../apps/desktop/src/main/db/homeDiscoveryRepo.ts)、[mediaLibraryHandlers](../../apps/desktop/src/main/ipc/mediaLibraryHandlers.ts) | 先确认 JOIN 基数再去重移除；逐组合对照ID、顺序、total、资源归属；单库范围归一化与多库首选规则；后补投影只读当前页 |
+| 04 | [tagRepo](../../apps/desktop/src/main/db/tagRepo.ts)、[actressRepo](../../apps/desktop/src/main/db/actressRepo.ts)、[database](../../apps/desktop/src/main/db/database.ts) | 先聚合再讨论缓存；共享/隐藏/归档和manual计数一致；无统计/有统计/过期统计对照；无无条件索引提示或每请求ANALYZE；新增索引走正式迁移 |
 
 验证命令按当前 package.json 和 Electron runner 核对，下面是实施时运行的入口，本轮计划编制没有执行这些生产回归：
 
 ```sh
 # 修改范围内回归（按实际改动增补，不能替代最终全量检查）
-node scripts/run-electron-tests.mjs src/main/scanner/scanner.test.ts src/main/scanner/scanCoordinator.test.ts
-node scripts/run-electron-tests.mjs src/main/db/scopedVideoCatalogRepo.test.ts src/main/db/homeDiscoveryRepo.test.ts src/main/db/tagRepo.test.ts src/main/db/actressRepo.test.ts src/main/ipc/mediaLibraryHandlers.test.ts
+node scripts/run-electron-tests.mjs apps/desktop/src/main/scanner/scanner.test.ts apps/desktop/src/main/scanner/scanCoordinator.test.ts
+node scripts/run-electron-tests.mjs apps/desktop/src/main/db/scopedVideoCatalogRepo.test.ts apps/desktop/src/main/db/homeDiscoveryRepo.test.ts apps/desktop/src/main/db/tagRepo.test.ts apps/desktop/src/main/db/actressRepo.test.ts apps/desktop/src/main/ipc/mediaLibraryHandlers.test.ts
 # 每批集成前；npm test 会调用 pretest 边界、lint 和 UI 检查
 npm test
 npm run build

@@ -14,11 +14,11 @@ fs.writeFileSync(path.join(root, 'index.html'), '<html><body><div id="root" styl
 fs.writeFileSync(path.join(root, 'image.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640"><rect width="640" height="640" fill="#344658"/><circle cx="320" cy="260" r="160" fill="#9aaebe"/></svg>')
 fs.writeFileSync(path.join(root, 'fixture.jsx'), `
 import React,{useState}from'react';import{createRoot}from'react-dom/client';import{MemoryRouter}from'react-router-dom';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';
-import ${local('src/renderer/src/styles/global.css')};
+import ${local('apps/desktop/src/renderer/src/styles/global.css')};
 window.React=React;window.__calls=[];window.__selections=[];window.api={};
-const {useWindowedCatalog}=await import(${local('src/renderer/src/query/useWindowedCatalog.ts')});
-const Poster=(await import(${local('src/renderer/src/components/VirtualPosterGrid.tsx')})).default;
-const Actress=(await import(${local('src/renderer/src/components/VirtualActressGrid.tsx')})).default;
+const {useWindowedCatalog}=await import(${local('apps/desktop/src/renderer/src/query/useWindowedCatalog.ts')});
+const Poster=(await import(${local('apps/desktop/src/renderer/src/components/VirtualPosterGrid.tsx')})).default;
+const Actress=(await import(${local('apps/desktop/src/renderer/src/components/VirtualActressGrid.tsx')})).default;
 const kind=new URLSearchParams(location.search).get('kind')||'video',pageSize=kind==='video'?200:240,total=pageSize*125;
 const client=new QueryClient({defaultOptions:{queries:{retry:false}}});window.__client=client;window.__pageSize=pageSize;
 const read=async(query)=>{window.__calls.push({...query});if(window.__failOffset===query.offset){window.__failOffset=null;throw Error('Synthetic page failed')}return{items:Array.from({length:Math.min(pageSize,total-query.offset)},(_,i)=>{const id=query.offset+i+1;return kind==='video'?{id,code:'VIDEO-'+id,title:'Synthetic '+query.filter,cover_path:'covers/'+id+'.png',scraped_status:0,rating:0,resource_kinds:[],duration_seconds:120,preferredLibraryId:1,membershipAddedAt:'2026-01-01',libraries:[{libraryId:1,name:'Synthetic library',icon:'folder',color:'blue'}]}:{id,main_name:'ACTRESS-'+id+(query.filter==='initial'?'':' '+query.filter),avatar_path:'avatars/'+id+'.png',gender:'female',scraped_status:0,video_count:3}}),total,readRevision:'synthetic-v1'}};
@@ -39,9 +39,9 @@ const results = []
 try {
   server = await createServer({ configFile: false, root, cacheDir: path.join(root, '.vite'), plugins: [react(), {
     name: 'synthetic-images', transform(code, id) {
-      if (id === path.join(repo, 'src/renderer/src/api.ts')) return code.replace('const url = `media://${normalized}`', "const url = '/image.svg?path=' + encodeURIComponent(normalized)")
+      if (id === path.join(repo, 'apps/desktop/src/renderer/src/api.ts')) return code.replace('const url = `media://${normalized}`', "const url = '/image.svg?path=' + encodeURIComponent(normalized)")
     }
-  }], resolve: { alias: { '@shared': path.join(repo, 'src/shared'), react: path.join(repo, 'node_modules/react'), 'react-dom': path.join(repo, 'node_modules/react-dom'), 'react-router-dom': path.join(repo, 'node_modules/react-router-dom'), '@tanstack/react-query': path.join(repo, 'node_modules/@tanstack/react-query'), 'react-window': path.join(repo, 'node_modules/react-window') } }, server: { host: '127.0.0.1', port: 0, fs: { allow: [root, repo] } } })
+  }], resolve: { alias: { '@shared': path.join(repo, 'packages/contracts/src'), react: path.join(repo, 'node_modules/react'), 'react-dom': path.join(repo, 'node_modules/react-dom'), 'react-router-dom': path.join(repo, 'node_modules/react-router-dom'), '@tanstack/react-query': path.join(repo, 'node_modules/@tanstack/react-query'), 'react-window': path.join(repo, 'node_modules/react-window') } }, server: { host: '127.0.0.1', port: 0, fs: { allow: [root, repo] } } })
   await server.listen()
   browser = await chromium.launch({ channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome', headless: true })
   for (const viewport of [{ width: 1000, height: 640 }, { width: 1440, height: 900 }]) for (const kind of ['video', 'actress']) {

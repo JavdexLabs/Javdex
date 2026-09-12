@@ -1,2 +1,3 @@
 # Preserve raw performance evidence, including diff context and captured logs.
 docs/performance/large-library-results/** -whitespace
+scripts/research/server-mode-docker-probe.sh text eol=lf

@@ -10,7 +10,7 @@
 
 MetaTube 的 Go 仓库同时包含刮削引擎、数据模型和 HTTP 服务端入口；服务端公开稳定的 `/v1` REST 路由。Javdex 可以在用户配置服务端地址后，通过 HTTP 搜索、拉取详情，并把结果转换成现有 `ScrapeResult`。这条路径无需把 Go 运行时、数据库或 MetaTube 二进制随 Javdex 分发，平台和许可风险都较低。
 
-但它**不能只靠新增一个 `src/main/bundled-plugins/video/MetaTube/index.cjs` 完成**。当前插件沙箱没有每插件服务配置，也不能为 JSON 请求设置 `Authorization: Bearer ...`；若服务端设置 Token，现有 `ctx.fetchPage` / `ctx.fetchBuffer` 无法完成鉴权。因此完整方案必须先补一个受控的“已配置服务”能力，再实现 MetaTube 字段适配。
+但它**不能只靠新增一个 `apps/desktop/src/main/bundled-plugins/video/MetaTube/index.cjs` 完成**。当前插件沙箱没有每插件服务配置，也不能为 JSON 请求设置 `Authorization: Bearer ...`；若服务端设置 Token，现有 `ctx.fetchPage` / `ctx.fetchBuffer` 无法完成鉴权。因此完整方案必须先补一个受控的“已配置服务”能力，再实现 MetaTube 字段适配。
 
 推荐首发范围：
 
@@ -153,22 +153,22 @@ Javdex 不宜直接下载 `cover_url` / `preview_images` 的原始来源，因�
 
 MetaTube 引擎默认单次外部请求超时为 1 分钟（[固定源码](https://github.com/metatube-community/metatube-sdk-go/blob/6a5e6128c725187aeaf921d48ed7d9cd9f30671b/engine/engine.go#L20-L23)），服务端参数允许通过 `REQUEST_TIMEOUT` 修改且小于 1 秒的值会被忽略（[固定源码](https://github.com/metatube-community/metatube-sdk-go/blob/6a5e6128c725187aeaf921d48ed7d9cd9f30671b/cmd/cmd.go#L47-L57)、[固定源码](https://github.com/metatube-community/metatube-sdk-go/blob/6a5e6128c725187aeaf921d48ed7d9cd9f30671b/cmd/cmd.go#L72-L78)）。其抓取客户端对可重试网络错误最多重试 3 次，间隔 1–3 秒（[固定源码](https://github.com/metatube-community/metatube-sdk-go/blob/6a5e6128c725187aeaf921d48ed7d9cd9f30671b/common/fetch/fetch.go#L66-L99)）。
 
-Javdex 当前整个插件执行上限为 5 分钟（[`scraperPluginSandbox.ts`](../src/main/scrapers/scraperPluginSandbox.ts#L13-L15)）。建议 MetaTube JSON 客户端每请求默认 75 秒、连接测试 10 秒、整个插件仍受 5 分钟总上限约束；不要在 Javdex 对普通 5xx 再做多轮自动重试，以免和服务端重试叠加。只可对连接建立失败做最多一次、带短抖动的重试，批量任务继续使用现有 per-plugin delay。
+Javdex 当前整个插件执行上限为 5 分钟（[`scraperPluginSandbox.ts`](../apps/desktop/src/main/scrapers/scraperPluginSandbox.ts#L13-L15)）。建议 MetaTube JSON 客户端每请求默认 75 秒、连接测试 10 秒、整个插件仍受 5 分钟总上限约束；不要在 Javdex 对普通 5xx 再做多轮自动重试，以免和服务端重试叠加。只可对连接建立失败做最多一次、带短抖动的重试，批量任务继续使用现有 per-plugin delay。
 
 ## 4. 与 Javdex 当前插件系统的差距
 
 ### 4.1 已有契约可承接的数据
 
-Javdex 影片插件支持单结果或多候选，并具备标题、简介、封面、日期、制作/发行、系列、导演、时长、男女演员、标签、来源、5 分制评分与样张字段；完整契约见[`SCRAPER_PLUGIN_FORMAT.md`](./SCRAPER_PLUGIN_FORMAT.md#影片插件-parsevideoctx)和[`videoScrapeTypes.ts`](../src/shared/videoScrapeTypes.ts)。这与 MetaTube `MovieInfo` 的主体数据高度重合。
+Javdex 影片插件支持单结果或多候选，并具备标题、简介、封面、日期、制作/发行、系列、导演、时长、男女演员、标签、来源、5 分制评分与样张字段；完整契约见[`SCRAPER_PLUGIN_FORMAT.md`](./SCRAPER_PLUGIN_FORMAT.md#影片插件-parsevideoctx)和[`videoScrapeTypes.ts`](../packages/contracts/src/videoScrapeTypes.ts)。这与 MetaTube `MovieInfo` 的主体数据高度重合。
 
-现有候选处理会按番号精确匹配、按 `sourceUrl` 去重，并让多个有效候选进入待确认中心（[`scraperManager.ts`](../src/main/scrapers/scraperManager.ts#L111-L138)）。这正适合 MetaTube 同一番号来自多个 provider 的情况。
+现有候选处理会按番号精确匹配、按 `sourceUrl` 去重，并让多个有效候选进入待确认中心（[`scraperManager.ts`](../apps/desktop/src/main/scrapers/scraperManager.ts#L111-L138)）。这正适合 MetaTube 同一番号来自多个 provider 的情况。
 
 ### 4.2 当前阻塞点
 
-1. **无 per-plugin 服务配置。** `AppSettings` 目前只有刮削代理、默认插件、延迟与组合配置，没有服务端 URL/Token（[`settingsTypes.ts`](../src/shared/settingsTypes.ts#L54-L132)）。`ScraperPluginDescriptor` 也没有 `requiresConfiguration`、`configured` 或配置摘要（[`scraperPluginTypes.ts`](../src/shared/scraperPluginTypes.ts#L24-L62)）。
-2. **Token 无法发送。** `ctx.fetchPage` 选项只有等待/超时；`ctx.fetchBuffer` 选项只有持久缓存（[`scraperPluginSandbox.ts`](../src/main/scrapers/scraperPluginSandbox.ts#L16-L28)）。Worker RPC 不接受调用方 headers（[`scraperPluginSandbox.ts`](../src/main/scrapers/scraperPluginSandbox.ts#L290-L312)）。
-3. **配置没有进入 Worker。** `SandboxWorkerData` 只含插件代码、代理和任务字段（[`scraperPluginSandbox.ts`](../src/main/scrapers/scraperPluginSandbox.ts#L30-L42)），`parseVideo(ctx)` 也只拿到番号、代理、抓取器、浏览器和 helpers（[`scraperPluginSandbox.ts`](../src/main/scrapers/scraperPluginSandbox.ts#L590-L600)）。
-4. **内置插件与用户插件共用同一沙箱包装。** `loadBundledVideoScrapers()` 同样实例化 `UserVideoScraper`（[`scraperPluginService.ts`](../src/main/scrapers/scraperPluginService.ts#L46-L60)、[`scraperPluginService.ts`](../src/main/scrapers/scraperPluginService.ts#L103-L116)），所以不能假设内置插件可直接 `require` Node HTTP 客户端。
+1. **无 per-plugin 服务配置。** `AppSettings` 目前只有刮削代理、默认插件、延迟与组合配置，没有服务端 URL/Token（[`settingsTypes.ts`](../packages/contracts/src/settingsTypes.ts#L54-L132)）。`ScraperPluginDescriptor` 也没有 `requiresConfiguration`、`configured` 或配置摘要（[`scraperPluginTypes.ts`](../packages/contracts/src/scraperPluginTypes.ts#L24-L62)）。
+2. **Token 无法发送。** `ctx.fetchPage` 选项只有等待/超时；`ctx.fetchBuffer` 选项只有持久缓存（[`scraperPluginSandbox.ts`](../apps/desktop/src/main/scrapers/scraperPluginSandbox.ts#L16-L28)）。Worker RPC 不接受调用方 headers（[`scraperPluginSandbox.ts`](../apps/desktop/src/main/scrapers/scraperPluginSandbox.ts#L290-L312)）。
+3. **配置没有进入 Worker。** `SandboxWorkerData` 只含插件代码、代理和任务字段（[`scraperPluginSandbox.ts`](../apps/desktop/src/main/scrapers/scraperPluginSandbox.ts#L30-L42)），`parseVideo(ctx)` 也只拿到番号、代理、抓取器、浏览器和 helpers（[`scraperPluginSandbox.ts`](../apps/desktop/src/main/scrapers/scraperPluginSandbox.ts#L590-L600)）。
+4. **内置插件与用户插件共用同一沙箱包装。** `loadBundledVideoScrapers()` 同样实例化 `UserVideoScraper`（[`scraperPluginService.ts`](../apps/desktop/src/main/scrapers/scraperPluginService.ts#L46-L60)、[`scraperPluginService.ts`](../apps/desktop/src/main/scrapers/scraperPluginService.ts#L103-L116)），所以不能假设内置插件可直接 `require` Node HTTP 客户端。
 5. **UI 不知道“已安装但不可用”。** 当前插件卡片/默认源/组合源只依赖描述符与字段覆盖，没有服务连接状态。
 
 ### 4.3 不推荐的捷径
@@ -358,8 +358,8 @@ parseVideo(ctx)
 
 ### Phase 1 — 服务配置、秘密与 IPC
 
-1. 在 `src/shared/settingsTypes.ts` 增加非秘密 MetaTube 服务配置，并在 `DEFAULT_SETTINGS` 中默认空地址、无 Token、direct 访问。
-2. 在 `src/main/settings/settingsStore.ts` 增加严格 normalize：trim URL、只允许 HTTP(S)、拒绝 credentials/query/fragment，不把 Token 纳入普通设置。
+1. 在 `packages/contracts/src/settingsTypes.ts` 增加非秘密 MetaTube 服务配置，并在 `DEFAULT_SETTINGS` 中默认空地址、无 Token、direct 访问。
+2. 在 `apps/desktop/src/main/settings/settingsStore.ts` 增加严格 normalize：trim URL、只允许 HTTP(S)、拒绝 credentials/query/fragment，不把 Token 纳入普通设置。
 3. 新增 scraper service secret store，复用 `llmSecretStore.ts` 的 `safeStorage`、原子写和迁移错误模式；key 采用稳定 `serviceId=metatube`。
 4. 在 shared IPC contract 增加：读取公开配置、更新配置、测试连接、清除 Token；renderer 只拿 `hasToken`。
 5. 主进程实现 `MetaTubeConnectionTestService`，按 `/` → `/v1/providers` → `/v1/db/version` 执行，返回版本/provider 数量和结构化错误。
@@ -381,7 +381,7 @@ parseVideo(ctx)
 
 ### Phase 3 — MetaTube 内置影片插件
 
-1. 新增 `src/main/bundled-plugins/video/MetaTube/plugin.json`，声明推荐 supportedFields、官方 homepage、`serviceId: metatube`、requiresConfiguration。
+1. 新增 `apps/desktop/src/main/bundled-plugins/video/MetaTube/plugin.json`，声明推荐 supportedFields、官方 homepage、`serviceId: metatube`、requiresConfiguration。
 2. 新增 `index.cjs`：
    - 规范化查询番号。
    - 调 `/v1/movies/search`；404 返回 `[]`。

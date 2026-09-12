@@ -1,0 +1,10 @@
+{
+  "name": "@javdex/library",
+  "version": "0.7.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Node-only local path and resource identity helpers; domain service extraction remains planned",
+  "exports": {
+    "./*": "./src/*.ts"
+  }
+}

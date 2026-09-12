@@ -5,11 +5,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { getActressMetadata, getActressProfile } from '../../src/main/db/actressRepo'
-import { listActressGalleryPage } from '../../src/main/db/actressGalleryPageRepo'
-import { prepareActressGalleryForDisplay } from '../../src/shared/mediaGalleryDisplay'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { getActressMetadata, getActressProfile } from '../../apps/desktop/src/main/db/actressRepo'
+import { listActressGalleryPage } from '../../apps/desktop/src/main/db/actressGalleryPageRepo'
+import { prepareActressGalleryForDisplay } from '../../packages/contracts/src/mediaGalleryDisplay'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 
 it('measures complete gallery display preparation versus first and last pages', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-gallery-probe-'))

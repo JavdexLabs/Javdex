@@ -3,8 +3,8 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import { performance } from 'node:perf_hooks'
-import type { MediaLibraryRoot } from '../../src/shared/mediaLibraryTypes'
-import { createMemoryScanFileInventory, createScanFileSpool } from '../../src/main/scanner/scanFileInventory'
+import type { MediaLibraryRoot } from '../../packages/contracts/src/mediaLibraryTypes'
+import { createMemoryScanFileInventory, createScanFileSpool } from '../../apps/desktop/src/main/scanner/scanFileInventory'
 
 it('compares inventory discovery and three sequential passes at 10k, 100k and 600k paths', () => {
   const root: MediaLibraryRoot = { id: 1, libraryId: 1, path: '/synthetic', normalizedPath: '/synthetic',

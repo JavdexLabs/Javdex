@@ -372,7 +372,7 @@ Pi 0.84.2 的 AgentSession.subscribe 是同步 observer，不能直接 await Jav
 - 编解码异常恢复 frame。
 - 维护上述 durable observation queue 和 provider-call 前的 flush gate。
 
-所有 @earendil-works/pi-* import 只能出现在 src/main/agent-runtime/pi/。composition root 只 import createPiRuntimePort。
+所有 @earendil-works/pi-* import 只能出现在 apps/desktop/src/main/agent-runtime/pi/。composition root 只 import createPiRuntimePort。
 
 ### 6.6 长期 session 生命周期
 
@@ -867,7 +867,7 @@ PluginDevPanel 只显示已解析的 profile/route 状态与错误，不再自�
 
 ### 15.1 Architecture
 
-- Pi imports 只在 src/main/agent-runtime/pi/。
+- Pi imports 只在 apps/desktop/src/main/agent-runtime/pi/。
 - renderer/preload/shared 和领域用例的 public types 不含 Pi 类型。
 - AgentExecution 无 provider、loop、retry、compaction、message pairing 或 tool batch 实现。
 - 生产代码中不存在 AgentDefinitionCompiler、generic workflow DSL 或 legacy RuntimePort adapter。

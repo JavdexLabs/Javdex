@@ -1,0 +1,841 @@
+import type { ScanAuditSnapshotIdentity, ScanAuditIndexQuery, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
+import type { ClassificationPageQuery } from '@shared/classificationTypes'
+import type { ActressGalleryPageQuery } from '../../../../packages/contracts/src/actressTypes'
+import type { ActressVideoPageQuery } from '../../../../packages/contracts/src/actressTypes'
+import type { ActressMergeCandidateQuery } from '../../../../packages/contracts/src/actressTypes'
+import type { ActressPickerQuery } from '../../../../packages/contracts/src/actressTypes'
+import type { PendingAuditIds, PendingScanQueueQuery } from '../../../../packages/contracts/src/libraryTypes'
+import type { WebAccessInput } from '../../../../packages/contracts/src/webTypes'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { IPC } from '../../../../packages/contracts/src/ipc-channels'
+import type { UpdateCheckState } from '../../../../packages/contracts/src/updateTypes'
+import type {
+  AppIpcArgs,
+  AppIpcChannel,
+  AppIpcEvent,
+  AppIpcEventChannel,
+  AppIpcResult
+} from '../../../../packages/contracts/src/appIpcContract'
+import type {
+  ActressDeleteMode,
+  ActressIpcArgs,
+  ActressIpcChannel,
+  ActressIpcResult
+} from '../../../../packages/contracts/src/actressIpcContract'
+import type {
+  ScrapeIpcArgs,
+  ScrapeIpcChannel,
+  ScrapeIpcEvent,
+  ScrapeIpcEventChannel,
+  ScrapeIpcResult
+} from '../../../../packages/contracts/src/scrapeIpcContract'
+import type {
+  VideoIpcArgs,
+  VideoIpcChannel,
+  VideoIpcResult
+} from '../../../../packages/contracts/src/videoIpcContract'
+import type {
+  AddMediaLibraryRootInput,
+  CancelMediaLibraryRootRemovalInput,
+  DeleteMediaLibraryInput,
+  MediaLibraryIpcArgs,
+  MediaLibraryIpcChannel,
+  MediaLibraryIpcResult,
+  MediaLibraryDeletePreviewInput,
+  MediaLibraryListInput,
+  MediaLibraryRootMigrationPreviewInput,
+  MediaLibraryRevisionInput,
+  RemoveMediaLibraryRootInput,
+  UpdateMediaLibraryConfigInput,
+  UpdateMediaLibraryInput,
+  UpdateMediaLibraryRootInput
+} from '../../../../packages/contracts/src/mediaLibraryIpcContract'
+import type {
+  NfoExportIpcArgs,
+  NfoExportIpcChannel,
+  NfoExportIpcEvent,
+  NfoExportIpcEventChannel,
+  NfoExportIpcResult
+} from '../../../../packages/contracts/src/nfoExportIpcContract'
+import type { GlobalSearchInput, HomeDiscoveryInput } from '../../../../packages/contracts/src/catalogTypes'
+import type { CatalogScope, CreateMediaLibraryInput } from '../../../../packages/contracts/src/mediaLibraryTypes'
+import type { MigrateMediaLibraryRootInput } from '../../../../packages/contracts/src/mediaLibraryTypes'
+import type {
+  LastVideoResourceRemovalMode,
+  VideoEditInput,
+  VideoFieldUpdateInput,
+  VideoLinkResourceImportInput,
+  VideoLinkResourceUpdateInput,
+  VideoMergeInput,
+  VideoQuery,
+  VideoResourceImportTarget,
+  VideoSampleImportInput
+} from '../../../../packages/contracts/src/videoTypes'
+import type {
+  DeleteVideoGloballyInput,
+  MoveVideoResourceInput,
+  RemoveVideoFromLibraryInput
+} from '../../../../packages/contracts/src/videoLifecycleTypes'
+import type {
+  ActressAvatarAutoCropOutcome,
+  ActressAvatarAutoCropRequest,
+  ActressAvatarAutoCropResponse,
+  ActressBatchScrapeFilter,
+  ActressBatchScrapeRequest,
+  ActressScrapeField,
+  ActressScrapeUpdateMode,
+  CompositeScraperInput,
+  ScraperPluginUpdateInput,
+  ScraperServiceConfigInput,
+  ScraperServiceId,
+  VideoBatchScrapeFilter,
+  VideoBatchScrapeRequest,
+  VideoRematchBatchRequest,
+  VideoRematchScope,
+  VideoScrapeField,
+  VideoScrapeUpdateMode
+} from '../../../../packages/contracts/src/scrapeTypes'
+import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../../../../packages/contracts/src/videoScrapeTypes'
+import type {
+  LibraryScanEvent,
+  PendingResourceIdentityResolution,
+  PendingScanGroupResolution
+} from '../../../../packages/contracts/src/libraryTypes'
+import type { BatchProgress } from '../../../../packages/contracts/src/batchScrapeTypes'
+import type { RendererSettingsPatch } from '../../../../packages/contracts/src/settingsTypes'
+import type { ModelManagementApplyInput } from '../../../../packages/contracts/src/modelManagementTypes'
+import type {
+  AssetCryptoProgress,
+  LibraryScanProgressEvent
+} from '../../../../packages/contracts/src/libraryTypes'
+import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../../../../packages/contracts/src/actressTypes'
+import type { IpcResponse } from '../../../../packages/contracts/src/ipcTypes'
+import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../../../../packages/contracts/src/actressConflictTypes'
+import type { SortDir, TagOptionsQuery } from '../../../../packages/contracts/src/commonTypes'
+import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../../../../packages/contracts/src/playlistTypes'
+import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../../../../packages/contracts/src/pluginDevTypes'
+import type {
+  ClassificationEntityRef,
+  ClassificationImageInput,
+  DirectorListQuery,
+  DirectorMergeInput,
+  DirectorProfileInput,
+  DirectorUpdateInput,
+  OrganizationCreateInput,
+  OrganizationListQuery,
+  OrganizationMergeInput,
+  OrganizationRole,
+  OrganizationUpdateInput,
+  SeriesListQuery,
+  SeriesMergeInput,
+  SeriesProfileInput,
+  SeriesUpdateInput
+} from '../../../../packages/contracts/src/classificationTypes'
+
+/** Helper that unwraps the IpcResponse envelope, throwing on failure. */
+async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const res = (await ipcRenderer.invoke(channel, ...args)) as IpcResponse<T>
+  if (!res.ok) throw new Error(res.error ?? 'IPC 调用失败')
+  return res.data as T
+}
+
+function invokeActress<Channel extends ActressIpcChannel>(
+  channel: Channel,
+  ...args: ActressIpcArgs<Channel>
+): Promise<ActressIpcResult<Channel>> {
+  return invoke<ActressIpcResult<Channel>>(channel, ...args)
+}
+
+function invokeVideo<Channel extends VideoIpcChannel>(
+  channel: Channel,
+  ...args: VideoIpcArgs<Channel>
+): Promise<VideoIpcResult<Channel>> {
+  return invoke<VideoIpcResult<Channel>>(channel, ...args)
+}
+
+function invokeMediaLibrary<Channel extends MediaLibraryIpcChannel>(
+  channel: Channel,
+  ...args: MediaLibraryIpcArgs<Channel>
+): Promise<MediaLibraryIpcResult<Channel>> {
+  return invoke<MediaLibraryIpcResult<Channel>>(channel, ...args)
+}
+
+function invokeScrape<Channel extends ScrapeIpcChannel>(
+  channel: Channel,
+  ...args: ScrapeIpcArgs<Channel>
+): Promise<ScrapeIpcResult<Channel>> {
+  return invoke<ScrapeIpcResult<Channel>>(channel, ...args)
+}
+
+function invokeApp<Channel extends AppIpcChannel>(
+  channel: Channel,
+  ...args: AppIpcArgs<Channel>
+): Promise<AppIpcResult<Channel>> {
+  return invoke<AppIpcResult<Channel>>(channel, ...args)
+}
+
+function invokeNfoExport<Channel extends NfoExportIpcChannel>(
+  channel: Channel,
+  ...args: NfoExportIpcArgs<Channel>
+): Promise<NfoExportIpcResult<Channel>> {
+  return invoke<NfoExportIpcResult<Channel>>(channel, ...args)
+}
+
+function onNfoExportEvent<Channel extends NfoExportIpcEventChannel>(
+  channel: Channel,
+  callback: (payload: NfoExportIpcEvent<Channel>) => void
+): () => void {
+  const listener = (_event: unknown, payload: NfoExportIpcEvent<Channel>): void => callback(payload)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+
+function onAppEvent<Channel extends AppIpcEventChannel>(
+  channel: Channel,
+  callback: (payload: AppIpcEvent<Channel>) => void
+): () => void {
+  const listener = (_event: unknown, payload: AppIpcEvent<Channel>): void => callback(payload)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+
+function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
+  channel: Channel,
+  callback: (payload: ScrapeIpcEvent<Channel>) => void
+): () => void {
+  const listener = (_event: unknown, payload: ScrapeIpcEvent<Channel>): void => callback(payload)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+
+const api = {
+  nfoExport: {
+    getOptions: () => invokeNfoExport(IPC.NFO_EXPORT_GET_OPTIONS),
+    updatePreferences: (preferences: import('../../../../packages/contracts/src/nfoExportTypes').NfoExportPreferences) =>
+      invokeNfoExport(IPC.NFO_EXPORT_UPDATE_PREFERENCES, preferences),
+    plan: (request: import('../../../../packages/contracts/src/nfoExportTypes').NfoExportPlanRequest) =>
+      invokeNfoExport(IPC.NFO_EXPORT_PLAN, request),
+    discardPlan: (planId: string) => invokeNfoExport(IPC.NFO_EXPORT_DISCARD_PLAN, planId),
+    start: (planId: string) => invokeNfoExport(IPC.NFO_EXPORT_START, planId),
+    terminate: (taskId: string) => invokeNfoExport(IPC.NFO_EXPORT_TERMINATE, taskId),
+    onProgress: (callback: (event: import('../../../../packages/contracts/src/nfoExportTypes').NfoExportProgressEvent) => void) =>
+      onNfoExportEvent(IPC.NFO_EXPORT_PROGRESS, callback),
+    onState: (callback: (event: import('../../../../packages/contracts/src/nfoExportTypes').NfoExportStateEvent) => void) =>
+      onNfoExportEvent(IPC.NFO_EXPORT_STATE, callback)
+  },
+  mediaLibraries: {
+    list: (input?: MediaLibraryListInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_LIST, input),
+    get: (libraryId: number) => invokeMediaLibrary(IPC.MEDIA_LIBRARY_GET, libraryId),
+    create: (input: CreateMediaLibraryInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_CREATE, input),
+    update: (input: UpdateMediaLibraryInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_UPDATE, input),
+    updateConfig: (input: UpdateMediaLibraryConfigInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_CONFIG_UPDATE, input),
+    addRoot: (input: AddMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_ADD, input),
+    updateRoot: (input: UpdateMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_UPDATE, input),
+    removeRoot: (input: RemoveMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_REMOVE, input),
+    cancelRootRemoval: (input: CancelMediaLibraryRootRemovalInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL, input),
+    previewRootMigration: (input: MediaLibraryRootMigrationPreviewInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_MIGRATE_PREVIEW, input),
+    migrateRoot: (input: MigrateMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_MIGRATE, input),
+    archive: (input: MediaLibraryRevisionInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ARCHIVE, input),
+    restore: (input: MediaLibraryRevisionInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_RESTORE, input),
+    previewRemoval: (libraryId: number) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_DELETE_PREVIEW, {
+        libraryId
+      } satisfies MediaLibraryDeletePreviewInput),
+    remove: (input: DeleteMediaLibraryInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_DELETE, input)
+  },
+  home: {
+    load: (input: HomeDiscoveryInput) => invokeMediaLibrary(IPC.HOME_LOAD, input),
+    search: (input: GlobalSearchInput) => invokeMediaLibrary(IPC.HOME_SEARCH, input)
+  },
+  externalLinks: {
+    open: (url: string) => invokeApp(IPC.EXTERNAL_LINK_OPEN, url)
+  },
+  appUpdate: {
+    getState: () => invokeApp(IPC.APP_UPDATE_GET_STATE),
+    check: () => invokeApp(IPC.APP_UPDATE_CHECK),
+    openRelease: () => invokeApp(IPC.APP_UPDATE_OPEN_RELEASE),
+    openProjectPage: (page: 'project' | 'releases' | 'license') =>
+      invokeApp(IPC.APP_UPDATE_OPEN_PROJECT_PAGE, page),
+    ignoreVersion: (version: string) =>
+      invokeApp(IPC.APP_UPDATE_IGNORE_VERSION, version),
+    onStateChanged: (cb: (state: UpdateCheckState) => void) =>
+      onAppEvent(IPC.APP_UPDATE_STATE_CHANGED, cb)
+  },
+  webAccess: {
+    deviceReset: () => invokeApp(IPC.WEB_ACCESS_DEVICE_RESET),
+    deviceRename: (id: string, name: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_RENAME, id, name),
+    deviceRemove: (id: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_REMOVE, id),
+    pairDecide: (code: string, approve: boolean) => invokeApp(IPC.WEB_ACCESS_PAIR_DECIDE, code, approve),
+    pairInspect: (code: string) => invokeApp(IPC.WEB_ACCESS_PAIR_INSPECT, code),
+    pairOpen: () => invokeApp(IPC.WEB_ACCESS_PAIR_OPEN),
+    status: () => invokeApp(IPC.WEB_ACCESS_STATUS),
+    apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
+    revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)
+  },
+  settings: {
+    get: () => invokeApp(IPC.SETTINGS_GET),
+    update: (patch: RendererSettingsPatch) => invokeApp(IPC.SETTINGS_UPDATE, patch),
+    pickFolder: () => invokeApp(IPC.SETTINGS_PICK_FOLDER),
+    previewLibraryPathRemoval: (libraryId: number, rootId: number) =>
+      invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, libraryId, rootId),
+    confirmLibraryPathRemoval: (
+      libraryId: number,
+      rootId: number,
+      expectedRevision: number,
+      expectedImpactRevision: string
+    ) =>
+      invokeApp(
+        IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM,
+        libraryId,
+        rootId,
+        expectedRevision,
+        expectedImpactRevision
+      ),
+    getModelManagement: () => invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_GET),
+    applyModelManagement: (input: ModelManagementApplyInput) =>
+      invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_APPLY, input),
+    discoverManagedModels: (connectionId: string) =>
+      invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS, connectionId),
+    testManagedModel: (modelRef: string) =>
+      invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL, modelRef),
+    revealRecoveryBackup: () => invokeApp(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP),
+    testProxy: (kind: 'scrape' | 'llm', proxyUrl: string) =>
+      invokeApp(IPC.SETTINGS_PROXY_TEST, kind, proxyUrl),
+    getOverviewStats: () => invokeApp(IPC.SETTINGS_OVERVIEW_STATS)
+  },
+  scan: {
+    run: (libraryId: number, rootIds?: number[]) =>
+      invokeApp(IPC.SCAN_RUN, libraryId, rootIds),
+    cancel: (runId: string) => invokeApp(IPC.SCAN_CANCEL, runId),
+    getLatest: (libraryId: number) => invokeApp(IPC.SCAN_LATEST_GET, libraryId),
+    getAuditHeader: (libraryId: number) => invokeApp(IPC.SCAN_AUDIT_HEADER, libraryId),
+    getAuditPage: (snapshot: ScanAuditSnapshotIdentity, query: ScanAuditIndexQuery) => invokeApp(IPC.SCAN_AUDIT_PAGE, snapshot, query),
+    getAuditViewPage: (snapshot: ScanAuditSnapshotIdentity, query: ScanAuditViewQuery) =>
+      invokeApp(IPC.SCAN_AUDIT_VIEW_PAGE, snapshot, query),
+    getAudit: (libraryId: number) => invokeApp(IPC.SCAN_AUDIT_GET, libraryId),
+    revealAuditFile: (libraryId: number, filePath: string) =>
+      invokeApp(IPC.SCAN_AUDIT_REVEAL_FILE, libraryId, filePath),
+    rename: (
+      libraryId: number,
+      rootId: number,
+      oldPath: string,
+      newName: string
+    ) =>
+      invokeApp(
+        IPC.FILE_RENAME,
+        libraryId,
+        rootId,
+        oldPath,
+        newName
+      ),
+    importManual: (
+      libraryId: number,
+      rootId: number,
+      filePath: string,
+      code: string,
+      target: VideoResourceImportTarget
+    ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
+    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
+    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
+    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
+    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
+    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
+    listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+    resolvePending: (
+      libraryId: number,
+      groupId: number,
+      resolution: PendingScanGroupResolution
+    ) => invokeApp(IPC.PENDING_SCAN_RESOLVE, libraryId, groupId, resolution),
+    listPendingResourceIdentities: (libraryId: number) =>
+      invokeApp(IPC.PENDING_RESOURCE_IDENTITY_LIST, libraryId),
+    resolvePendingResourceIdentity: (
+      libraryId: number,
+      identityId: number,
+      resolution: PendingResourceIdentityResolution
+    ) =>
+      invokeApp(
+        IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,
+        libraryId,
+        identityId,
+        resolution
+      ),
+    onProgress: (cb: (event: LibraryScanProgressEvent) => void) =>
+      onAppEvent(IPC.SCAN_PROGRESS, cb),
+    onStateChanged: (cb: (event: LibraryScanEvent) => void) =>
+      onAppEvent(IPC.SCAN_STATE_CHANGED, cb)
+  },
+  videos: {
+    list: (scope: CatalogScope, q?: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, scope, q),
+    get: (scope: CatalogScope, id: number) => invokeVideo(IPC.VIDEO_GET, scope, id),
+    update: (id: number, fields: VideoFieldUpdateInput) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
+    edit: (id: number, input: VideoEditInput) => invokeVideo(IPC.VIDEO_EDIT, id, input),
+    clearMeta: (id: number) => invokeVideo(IPC.VIDEO_CLEAR_META, id),
+    markScrapeSuccess: (id: number) => invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
+    setRating: (id: number, rating: number) =>
+      invokeVideo(IPC.VIDEO_SET_RATING, id, rating),
+    correctImport: (id: number, code: string, discardPendingScrape?: boolean) =>
+      invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code, discardPendingScrape),
+    years: (scope: CatalogScope) => invokeVideo(IPC.VIDEO_YEARS, scope),
+    importSample: (id: number, input: VideoSampleImportInput) =>
+      invokeVideo(IPC.VIDEO_SAMPLE_IMPORT, id, input),
+    deleteSample: (id: number, assetId: number) =>
+      invokeVideo(IPC.VIDEO_SAMPLE_DELETE, id, assetId),
+    setPoster: (id: number, posterPath: string | null) =>
+      invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+    addManualTag: (id: number, name: string) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
+    addExistingManualTag: (id: number, tagId: number) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+    removeManualTag: (id: number, tagId: number) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+    importLinkResource: (input: VideoLinkResourceImportInput) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_IMPORT, input),
+    getResource: (libraryId: number, videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_GET, libraryId, videoId, resourceId),
+    checkResourceLink: (url: string) => invokeVideo(IPC.VIDEO_RESOURCE_CHECK, url),
+    updateLinkResource: (
+      libraryId: number,
+      videoId: number,
+      resourceId: number,
+      input: VideoLinkResourceUpdateInput
+    ) => invokeVideo(IPC.VIDEO_RESOURCE_UPDATE, libraryId, videoId, resourceId, input),
+    updateLocalResourceLabel: (
+      libraryId: number,
+      videoId: number,
+      resourceId: number,
+      label: string | null
+    ) =>
+      invokeVideo(
+        IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL,
+        libraryId,
+        videoId,
+        resourceId,
+        label
+      ),
+    setPrimaryResource: (libraryId: number, videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_SET_PRIMARY, libraryId, videoId, resourceId),
+    removeResource: (
+      libraryId: number,
+      videoId: number,
+      resourceId: number,
+      lastResourceMode?: LastVideoResourceRemovalMode
+    ) =>
+      invokeVideo(
+        IPC.VIDEO_RESOURCE_REMOVE,
+        libraryId,
+        videoId,
+        resourceId,
+        lastResourceMode
+      ),
+    previewRemoveFromLibrary: (libraryId: number, videoId: number) =>
+      invokeVideo(IPC.VIDEO_REMOVE_FROM_LIBRARY_PREVIEW, libraryId, videoId),
+    removeFromLibrary: (input: RemoveVideoFromLibraryInput) =>
+      invokeVideo(IPC.VIDEO_REMOVE_FROM_LIBRARY, input),
+    previewMoveResource: (
+      sourceLibraryId: number,
+      targetLibraryId: number,
+      resourceId: number
+    ) =>
+      invokeVideo(
+        IPC.VIDEO_RESOURCE_MOVE_PREVIEW,
+        sourceLibraryId,
+        targetLibraryId,
+        resourceId
+      ),
+    moveResource: (input: MoveVideoResourceInput) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_MOVE, input),
+    previewDeleteGlobally: (videoId: number) =>
+      invokeVideo(IPC.VIDEO_DELETE_GLOBAL_PREVIEW, videoId),
+    deleteGlobally: (input: DeleteVideoGloballyInput) =>
+      invokeVideo(IPC.VIDEO_DELETE_GLOBAL, input),
+    merge: (input: VideoMergeInput) => invokeVideo(IPC.VIDEO_MERGE, input),
+    splitResource: (libraryId: number, videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+  },
+  playlists: {
+    listPage: (query: import('@shared/playlistTypes').PlaylistListQuery) => invokeApp(IPC.PLAYLIST_LIST_PAGE, query),
+    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
+    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
+      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
+    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
+      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+    list: () => invokeApp(IPC.PLAYLIST_LIST),
+    get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+      invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+    create: (input: PlaylistCreateInput) => invokeApp(IPC.PLAYLIST_CREATE, input),
+    update: (id: number, input: PlaylistUpdateInput) =>
+      invokeApp(IPC.PLAYLIST_UPDATE, id, input),
+    remove: (id: number) => invokeApp(IPC.PLAYLIST_DELETE, id),
+    listForVideo: (videoId: number) =>
+      invokeApp(IPC.PLAYLIST_LIST_FOR_VIDEO, videoId),
+    addVideo: (playlistId: number, videoId: number) =>
+      invokeApp(IPC.PLAYLIST_ADD_VIDEO, playlistId, videoId),
+    removeVideo: (playlistId: number, videoId: number) =>
+      invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
+  },
+  actresses: {
+    mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
+    avatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_TARGETS),
+    countAvatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_COUNT),
+    testTargetPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_TEST_TARGET_PAGE, query),
+    testTargetGet: (id: number) => invokeActress(IPC.ACTRESS_TEST_TARGET_GET, id),
+    pickerGet: (id: number) => invokeActress(IPC.ACTRESS_PICKER_GET, id),
+    pickerPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_PICKER_PAGE, query),
+    list: (
+      search?: string,
+      gender?: ActressGenderFilter,
+      sortBy?: ActressListSortBy,
+      sortDir?: SortDir
+    ) => invokeActress(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
+    listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
+    faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),
+    galleryPage: (id: number, query?: ActressGalleryPageQuery) => invokeActress(IPC.ACTRESS_GALLERY_PAGE, id, query),
+    profile: (id: number) => invokeActress(IPC.ACTRESS_PROFILE, id),
+    metadata: (id: number) => invokeActress(IPC.ACTRESS_METADATA, id),
+    videoPage: (id: number, query?: ActressVideoPageQuery) => invokeActress(IPC.ACTRESS_VIDEO_PAGE, id, query),
+    get: (id: number) => invokeActress(IPC.ACTRESS_GET, id),
+    getAvatarSourceInfo: (id: number) =>
+      invokeActress(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
+    edit: (id: number, input: ActressEditInput) => invokeActress(IPC.ACTRESS_EDIT, id, input),
+    deletePreview: (ids: number[]) => invokeActress(IPC.ACTRESS_DELETE_PREVIEW, ids),
+    remove: (id: number, mode: ActressDeleteMode = 'only-unlinked') =>
+      invokeActress(IPC.ACTRESS_DELETE, { ids: [id], mode }),
+    removeBatch: (ids: number[], mode: ActressDeleteMode = 'only-unlinked') =>
+      invokeActress(IPC.ACTRESS_DELETE_BATCH, { ids, mode }),
+    clearMeta: (id: number) => invokeActress(IPC.ACTRESS_CLEAR_META, id),
+    importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
+      invokeActress(IPC.ACTRESS_GALLERY_IMPORT, id, input),
+    deleteGalleryImage: (id: number, assetId: number) =>
+      invokeActress(IPC.ACTRESS_GALLERY_DELETE, id, assetId),
+    setPoster: (id: number, posterPath: string | null) =>
+      invokeActress(IPC.ACTRESS_POSTER_SET, id, posterPath),
+    merge: (input: ActressMergeInput) => invokeActress(IPC.ACTRESS_MERGE, input),
+    markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+  },
+  tags: {
+    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
+    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
+    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+    list: () =>
+      invokeApp(IPC.TAG_LIST),
+    listManual: () =>
+      invokeApp(IPC.TAG_LIST_MANUAL)
+  },
+  organizations: {
+    page: (query: OrganizationListQuery & ClassificationPageQuery) => invokeApp(IPC.ORGANIZATION_PAGE, query),
+    list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),
+    get: (id: number, role: OrganizationRole) => invokeApp(IPC.ORGANIZATION_GET, id, role),
+    options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
+    mergeOptions: (search?: string) => invokeApp(IPC.ORGANIZATION_MERGE_OPTIONS, search),
+    create: (input: OrganizationCreateInput) => invokeApp(IPC.ORGANIZATION_CREATE, input),
+    update: (id: number, input: OrganizationUpdateInput) =>
+      invokeApp(IPC.ORGANIZATION_UPDATE, id, input),
+    merge: (input: OrganizationMergeInput) => invokeApp(IPC.ORGANIZATION_MERGE, input),
+    roleRemovalPreview: (id: number, role: OrganizationRole) =>
+      invokeApp(IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW, id, role),
+    removeRole: (id: number, role: OrganizationRole) =>
+      invokeApp(IPC.ORGANIZATION_ROLE_REMOVE, id, role),
+    deletePreview: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE_PREVIEW, id),
+    remove: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE, id)
+  },
+  directors: {
+    page: (query: DirectorListQuery & ClassificationPageQuery) => invokeApp(IPC.DIRECTOR_PAGE, query),
+    list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),
+    get: (id: number) => invokeApp(IPC.DIRECTOR_GET, id),
+    options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
+    create: (input: DirectorProfileInput) => invokeApp(IPC.DIRECTOR_CREATE, input),
+    update: (id: number, input: DirectorUpdateInput) =>
+      invokeApp(IPC.DIRECTOR_UPDATE, id, input),
+    merge: (input: DirectorMergeInput) => invokeApp(IPC.DIRECTOR_MERGE, input),
+    deletePreview: (id: number) => invokeApp(IPC.DIRECTOR_DELETE_PREVIEW, id),
+    remove: (id: number) => invokeApp(IPC.DIRECTOR_DELETE, id)
+  },
+  series: {
+    page: (query: SeriesListQuery & ClassificationPageQuery) => invokeApp(IPC.SERIES_PAGE, query),
+    list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),
+    get: (id: number) => invokeApp(IPC.SERIES_GET, id),
+    options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
+    create: (input: SeriesProfileInput) => invokeApp(IPC.SERIES_CREATE, input),
+    update: (id: number, input: SeriesUpdateInput) => invokeApp(IPC.SERIES_UPDATE, id, input),
+    merge: (input: SeriesMergeInput) => invokeApp(IPC.SERIES_MERGE, input),
+    deletePreview: (id: number) => invokeApp(IPC.SERIES_DELETE_PREVIEW, id),
+    remove: (id: number) => invokeApp(IPC.SERIES_DELETE, id)
+  },
+  classificationImages: {
+    page: (entity: ClassificationEntityRef, query?: ClassificationPageQuery) => invokeApp(IPC.CLASSIFICATION_IMAGE_PAGE, entity, query),
+    candidates: (entity: ClassificationEntityRef) =>
+      invokeApp(IPC.CLASSIFICATION_IMAGE_CANDIDATES, entity),
+    set: (entity: ClassificationEntityRef, input: ClassificationImageInput | null) =>
+      invokeApp(IPC.CLASSIFICATION_IMAGE_SET, entity, input)
+  },
+  scrape: {
+    one: (
+      videoId: number,
+      scraperName?: string,
+      fields?: VideoScrapeField[],
+      mode?: VideoScrapeUpdateMode,
+      directorSelectionId?: number,
+      libraryId?: number
+    ) =>
+      invokeScrape(
+        IPC.SCRAPE_ONE,
+        videoId,
+        scraperName,
+        fields,
+        mode,
+        directorSelectionId,
+        libraryId
+      ),
+    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
+    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
+    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
+    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+    listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+    confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+      invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+    discardPending: (pendingScrapeId: number) =>
+      invokeScrape(IPC.PENDING_VIDEO_SCRAPE_DISCARD, pendingScrapeId),
+    videoBatchCount: (filter: VideoBatchScrapeFilter) =>
+      invokeScrape(IPC.SCRAPE_VIDEO_BATCH_COUNT, filter),
+    videoBatchStart: (request: VideoBatchScrapeRequest) =>
+      invokeScrape(IPC.SCRAPE_VIDEO_BATCH_START, request),
+    videoBatchCancel: () => invokeScrape(IPC.SCRAPE_VIDEO_BATCH_CANCEL),
+    batchStart: (scraperName?: string) => invokeScrape(IPC.SCRAPE_BATCH_START, scraperName),
+    batchCancel: () => invokeScrape(IPC.SCRAPE_BATCH_CANCEL),
+    rematchCount: (scope: VideoRematchScope) => invokeScrape(IPC.SCRAPE_REMATCH_COUNT, scope),
+    rematchBatchStart: (request: VideoRematchBatchRequest) =>
+      invokeScrape(IPC.SCRAPE_REMATCH_BATCH_START, request),
+    rematchBatchCancel: () => invokeScrape(IPC.SCRAPE_REMATCH_BATCH_CANCEL),
+    listPlugins: () => invokeScrape(IPC.SCRAPER_LIST),
+    listPluginDetails: () => invokeScrape(IPC.SCRAPER_PLUGIN_DETAILS),
+    exportPlugin: (name: string) => invokeScrape(IPC.SCRAPER_PLUGIN_EXPORT, name),
+    getPluginPackage: (name: string) =>
+      invokeScrape(IPC.SCRAPER_PLUGIN_PACKAGE, name),
+    updatePlugin: (name: string, input: ScraperPluginUpdateInput) =>
+      invokeScrape(IPC.SCRAPER_PLUGIN_UPDATE, name, input),
+    deletePlugin: (name: string) => invokeScrape(IPC.SCRAPER_PLUGIN_DELETE, name),
+    getServiceConfig: (serviceId: ScraperServiceId) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_GET, serviceId),
+    saveServiceConfig: (serviceId: ScraperServiceId, input: ScraperServiceConfigInput) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_SAVE, serviceId, input),
+    testServiceConfig: (serviceId: ScraperServiceId, input: ScraperServiceConfigInput) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_TEST, serviceId, input),
+    clearServiceConfig: (serviceId: ScraperServiceId) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_CLEAR, serviceId),
+    createComposite: (input: CompositeScraperInput) =>
+      invokeScrape(IPC.SCRAPER_COMPOSITE_CREATE, input),
+    updateComposite: (name: string, input: CompositeScraperInput) =>
+      invokeScrape(IPC.SCRAPER_COMPOSITE_UPDATE, name, input),
+    deleteComposite: (name: string) => invokeScrape(IPC.SCRAPER_COMPOSITE_DELETE, name),
+    onBatchProgress: (cb: (p: BatchProgress) => void) => {
+      return onScrapeEvent(IPC.SCRAPE_BATCH_PROGRESS, cb)
+    },
+    onVideoBatchProgress: (cb: (p: BatchProgress) => void) => {
+      return onScrapeEvent(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, cb)
+    },
+    onRematchBatchProgress: (cb: (p: BatchProgress) => void) => {
+      return onScrapeEvent(IPC.SCRAPE_REMATCH_BATCH_PROGRESS, cb)
+    }
+  },
+  actressScrape: {
+    one: (
+      actressId: number,
+      scraperName?: string,
+      fields?: ActressScrapeField[],
+      mode?: ActressScrapeUpdateMode,
+      queryName?: string,
+      useAliases?: boolean,
+      autoCropAvatar?: boolean
+    ) =>
+      invokeScrape(
+        IPC.ACTRESS_SCRAPE_ONE,
+        actressId,
+        scraperName,
+        fields,
+        mode,
+        queryName,
+        useAliases,
+        autoCropAvatar
+      ),
+    listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
+    getConflict: (normalizedName: string) => invokeActress(IPC.ACTRESS_CONFLICT_GET, normalizedName),
+    pageConflicts: (query: ActressConflictQueueQuery) => invokeActress(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, query),
+    conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
+    conflictSummary: () =>
+      invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
+    inspectConflictName: (input: InspectActressConflictNameInput) =>
+      invokeActress(IPC.ACTRESS_CONFLICT_INSPECT_NAME, input),
+    discardConflict: (input: DiscardPendingActressScrapeInput) =>
+      invokeActress(IPC.ACTRESS_CONFLICT_DISCARD, input),
+    resolveConflict: (input: ResolveActressConflictInput) =>
+      invokeActress(IPC.ACTRESS_CONFLICT_RESOLVE, input),
+    validateIllegalNameReplacements: (input: ValidateIllegalNameReplacementsInput) =>
+      invokeActress(
+        IPC.ACTRESS_CONFLICT_VALIDATE_ILLEGAL,
+        input
+      ),
+    batchCount: (filter: ActressBatchScrapeFilter) =>
+      invokeScrape(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
+    batchStart: (request?: ActressBatchScrapeRequest | string) =>
+      invokeScrape(IPC.ACTRESS_SCRAPE_BATCH_START, request),
+    batchCancel: () => invokeScrape(IPC.ACTRESS_SCRAPE_BATCH_CANCEL),
+    listPlugins: () => invokeScrape(IPC.ACTRESS_SCRAPER_LIST),
+    listPluginDetails: () =>
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS),
+    exportPlugin: (name: string) =>
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT, name),
+    getPluginPackage: (name: string) =>
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE, name),
+    updatePlugin: (name: string, input: ScraperPluginUpdateInput) =>
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE, name, input),
+    deletePlugin: (name: string) => invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, name),
+    createComposite: (input: CompositeScraperInput) =>
+      invokeScrape(IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE, input),
+    updateComposite: (name: string, input: CompositeScraperInput) =>
+      invokeScrape(IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE, name, input),
+    deleteComposite: (name: string) =>
+      invokeScrape(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, name),
+    onBatchProgress: (cb: (p: BatchProgress) => void) => {
+      return onScrapeEvent(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, cb)
+    },
+    onAvatarAutoCropRequest: (
+      cb: (request: ActressAvatarAutoCropRequest) => Promise<ActressAvatarAutoCropOutcome>
+    ) => {
+      return onScrapeEvent(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, (request) => {
+        void Promise.resolve(cb(request))
+          .catch(
+            (error): ActressAvatarAutoCropOutcome => ({
+              status: 'failed',
+              message: error instanceof Error ? error.message : String(error)
+            })
+          )
+          .then((outcome) =>
+            invokeScrape(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, {
+              requestId: request.requestId,
+              ...outcome
+            } satisfies ActressAvatarAutoCropResponse)
+          )
+          .catch(() => undefined)
+      })
+    }
+  },
+  plugins: {
+    importPlugin: () => invokeScrape(IPC.PLUGIN_IMPORT)
+  },
+  pluginDev: {
+    start: (input: PluginDevAgentStartInput) =>
+      invokeApp(IPC.PLUGIN_DEV_AGENT_START, input),
+    message: (input: PluginDevAgentMessageInput) =>
+      invokeApp(IPC.PLUGIN_DEV_AGENT_MESSAGE, input),
+    cancel: (sessionId: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_CANCEL, sessionId),
+    releaseBrowser: (sessionId: string) =>
+      invokeApp(IPC.PLUGIN_DEV_AGENT_RELEASE_BROWSER, sessionId),
+    snapshot: (sessionId?: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_SNAPSHOT, sessionId),
+    clearHistory: () => invokeApp(IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY),
+    discardUnrecoverableSessions: () =>
+      invokeApp(IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE),
+    exportWorkLog: (sessionId: string) =>
+      invokeApp(IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG, sessionId),
+    dryRun: (input: PluginDevDryRunInput) =>
+      invokeApp(IPC.PLUGIN_DEV_DRY_RUN, input),
+    install: (input: PluginDevInstallInput) =>
+      invokeApp(IPC.PLUGIN_DEV_INSTALL, input),
+    onAgentEvent: (cb: (e: PluginDevAgentEvent) => void) =>
+      onAppEvent(IPC.PLUGIN_DEV_AGENT_EVENT, cb)
+  },
+  libraryCurator: {
+    start: (input?: import('../../../../packages/contracts/src/libraryCuratorTypes').LibraryCuratorStartInput) =>
+      invokeApp(IPC.LIBRARY_CURATOR_START, input),
+    message: (input: import('../../../../packages/contracts/src/libraryCuratorTypes').LibraryCuratorMessageInput) =>
+      invokeApp(IPC.LIBRARY_CURATOR_MESSAGE, input),
+    cancel: (runId: string) => invokeApp(IPC.LIBRARY_CURATOR_CANCEL, runId),
+    snapshot: (runId?: string) => invokeApp(IPC.LIBRARY_CURATOR_SNAPSHOT, runId)
+  },
+  agentMetadata: {
+    start: (input: import('../../../../packages/contracts/src/agentMetadataTypes').AgentMetadataStartInput) =>
+      invokeApp(IPC.AGENT_METADATA_START, input),
+    resume: (input: import('../../../../packages/contracts/src/agentMetadataTypes').AgentMetadataResumeInput) =>
+      invokeApp(IPC.AGENT_METADATA_RESUME, input),
+    cancel: (runId: string) => invokeApp(IPC.AGENT_METADATA_CANCEL, runId),
+    snapshot: (runId: string) => invokeApp(IPC.AGENT_METADATA_SNAPSHOT, runId),
+    findReady: (target: import('../../../../packages/contracts/src/agentMetadataTypes').AgentMetadataTarget) =>
+      invokeApp(IPC.AGENT_METADATA_FIND_READY, target),
+    plan: (input: import('../../../../packages/contracts/src/agentMetadataTypes').AgentMetadataPlanInput) =>
+      invokeApp(IPC.AGENT_METADATA_PLAN, input),
+    apply: (input: import('../../../../packages/contracts/src/agentMetadataTypes').AgentMetadataApplyInput) =>
+      invokeApp(IPC.AGENT_METADATA_APPLY, input),
+    discard: (input: import('../../../../packages/contracts/src/agentMetadataTypes').AgentMetadataDiscardInput) =>
+      invokeApp(IPC.AGENT_METADATA_DISCARD, input),
+    onSnapshotChanged: (
+      cb: (event: import('../../../../packages/contracts/src/agentMetadataTypes').AgentMetadataSnapshotChangedEvent) => void
+    ) => onAppEvent(IPC.AGENT_METADATA_SNAPSHOT_CHANGED, cb)
+  },
+  playlistImport: {
+    start: (input: import('../../../../packages/contracts/src/playlistImportTypes').PlaylistImportStartInput) =>
+      invokeApp(IPC.PLAYLIST_IMPORT_START, input),
+    snapshot: (runId?: string) => invokeApp(IPC.PLAYLIST_IMPORT_SNAPSHOT, runId),
+    control: (
+      runId: string,
+      command: import('../../../../packages/contracts/src/playlistImportTypes').PlaylistImportControlCommand
+    ) => invokeApp(IPC.PLAYLIST_IMPORT_CONTROL, runId, command),
+    onSnapshotChanged: (
+      cb: (event: import('../../../../packages/contracts/src/playlistImportTypes').PlaylistImportSnapshotChangedEvent) => void
+    ) => onAppEvent(IPC.PLAYLIST_IMPORT_SNAPSHOT_CHANGED, cb)
+  },
+  batchScrape: {
+    getState: () => invokeScrape(IPC.BATCH_SCRAPE_STATE),
+    pause: () => invokeScrape(IPC.BATCH_SCRAPE_PAUSE),
+    resume: () => invokeScrape(IPC.BATCH_SCRAPE_RESUME),
+    discard: () => invokeScrape(IPC.BATCH_SCRAPE_DISCARD)
+  },
+  avatarAutoCropBatch: {
+    begin: () => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
+    targets: (token: string, afterId: number) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, token, afterId),
+    end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
+  },
+  player: {
+    play: (libraryId: number, videoId: number) =>
+      invokeApp(IPC.PLAYER_PLAY, libraryId, videoId),
+    reveal: (libraryId: number, videoId: number) =>
+      invokeApp(IPC.PLAYER_REVEAL, libraryId, videoId),
+    openResource: (libraryId: number, resourceId: number) =>
+      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId),
+    revealResource: (libraryId: number, resourceId: number) =>
+      invokeApp(IPC.PLAYER_REVEAL_RESOURCE, libraryId, resourceId)
+  },
+  assetCrypto: {
+    setEnabled: (enabled: boolean) => invokeApp(IPC.ASSET_CRYPTO_SET, enabled),
+    onProgress: (cb: (p: AssetCryptoProgress) => void) =>
+      onAppEvent(IPC.ASSET_CRYPTO_PROGRESS, cb)
+  },
+  assetStorage: {
+    relocate: (targetPath?: string | null) =>
+      invokeApp(IPC.ASSET_STORAGE_RELOCATE, targetPath)
+  },
+  llm: {
+    translateToChinese: (text: string) => invokeApp(IPC.LLM_TRANSLATE_TO_CHINESE, text)
+  },
+  assets: {
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
+    fetchRemoteImagePreview: (url: string) =>
+      invokeApp(IPC.ASSET_FETCH_REMOTE_IMAGE, url)
+  }
+}
+
+export type ElectronApi = typeof api
+
+contextBridge.exposeInMainWorld('api', api)

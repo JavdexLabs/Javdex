@@ -51,14 +51,14 @@ for (const expected of [
 }
 
 const violations = []
-const channelSource = readFileSync('src/shared/ipc-channels.ts', 'utf8')
+const channelSource = readFileSync('packages/contracts/src/ipc-channels.ts', 'utf8')
 const contractFiles = [
-  'src/shared/actressIpcContract.ts',
-  'src/shared/videoIpcContract.ts',
-  'src/shared/scrapeIpcContract.ts',
-  'src/shared/mediaLibraryIpcContract.ts',
-  'src/shared/nfoExportIpcContract.ts',
-  'src/shared/appIpcContract.ts'
+  'packages/contracts/src/actressIpcContract.ts',
+  'packages/contracts/src/videoIpcContract.ts',
+  'packages/contracts/src/scrapeIpcContract.ts',
+  'packages/contracts/src/mediaLibraryIpcContract.ts',
+  'packages/contracts/src/nfoExportIpcContract.ts',
+  'packages/contracts/src/appIpcContract.ts'
 ]
 const contractSources = contractFiles.map((file) => readFileSync(file, 'utf8'))
 const channels = [...channelSource.matchAll(/^\s{2}([A-Z0-9_]+):/gm)].map((match) => match[1])
@@ -67,15 +67,15 @@ for (const channel of channels) {
     contractSources[index].includes(`[IPC.${channel}]`)
   )
   if (owners.length === 0) {
-    violations.push(`src/shared/ipc-channels.ts: IPC.${channel} has no command or event contract`)
+    violations.push(`packages/contracts/src/ipc-channels.ts: IPC.${channel} has no command or event contract`)
   } else if (owners.length > 1) {
-    violations.push(`src/shared/ipc-channels.ts: IPC.${channel} belongs to multiple contracts: ${owners.join(', ')}`)
+    violations.push(`packages/contracts/src/ipc-channels.ts: IPC.${channel} belongs to multiple contracts: ${owners.join(', ')}`)
   }
 }
 
-const retiredAggregate = path.resolve('src/shared/types.ts')
+const retiredAggregate = path.resolve('packages/contracts/src/types.ts')
 if (existsSync(retiredAggregate)) {
-  violations.push('src/shared/types.ts: retired aggregate type entry must not be restored')
+  violations.push('packages/contracts/src/types.ts: retired aggregate type entry must not be restored')
 }
 for (const root of ['src', 'scripts']) {
   for (const file of sourceFiles(root)) {
@@ -92,8 +92,8 @@ for (const root of ['src', 'scripts']) {
   }
 }
 
-for (const file of sourceFiles('src/main/ipc')) {
-  if (['src/main/ipc/shared.ts', 'src/main/ipc/typedIpcAdapter.ts'].includes(file.replaceAll('\\', '/'))) {
+for (const file of sourceFiles('apps/desktop/src/main/ipc')) {
+  if (['apps/desktop/src/main/ipc/shared.ts', 'apps/desktop/src/main/ipc/typedIpcAdapter.ts'].includes(file.replaceAll('\\', '/'))) {
     continue
   }
   const source = readFileSync(file, 'utf8')
@@ -105,16 +105,16 @@ for (const file of sourceFiles('src/main/ipc')) {
   }
 }
 
-const preloadSource = readFileSync('src/preload/index.ts', 'utf8')
+const preloadSource = readFileSync('apps/desktop/src/preload/index.ts', 'utf8')
 const preloadApiSource = preloadSource.slice(preloadSource.indexOf('const api ='))
 if (/\binvoke\s*</.test(preloadApiSource)) {
-  violations.push('src/preload/index.ts: exposed APIs must invoke through a typed domain helper')
+  violations.push('apps/desktop/src/preload/index.ts: exposed APIs must invoke through a typed domain helper')
 }
 if (/ipcRenderer\.on\s*\(\s*IPC\./.test(preloadApiSource)) {
-  violations.push('src/preload/index.ts: exposed event APIs must subscribe through a typed domain helper')
+  violations.push('apps/desktop/src/preload/index.ts: exposed event APIs must subscribe through a typed domain helper')
 }
 
-for (const file of sourceFiles('src/renderer/src')) {
+for (const file of sourceFiles('apps/desktop/src/renderer/src')) {
   for (const specifier of importsOf(file)) {
     if (/(^|\/)main(\/|$)/.test(specifier) || specifier.startsWith('@main/')) {
       violations.push(`${file}: renderer must not import main-process module ${specifier}`)
@@ -122,7 +122,7 @@ for (const file of sourceFiles('src/renderer/src')) {
   }
 }
 
-const actressHandler = 'src/main/ipc/actressHandlers.ts'
+const actressHandler = 'apps/desktop/src/main/ipc/actressHandlers.ts'
 const actressApplicationSeams = new Set([
   '../services/actressQueryService',
   '../services/actressMaintenanceService',
@@ -145,7 +145,7 @@ const videoApplicationSeams = new Set([
   '../services/videoLifecycleService'
 ])
 
-const videoHandler = 'src/main/ipc/videoHandlers.ts'
+const videoHandler = 'apps/desktop/src/main/ipc/videoHandlers.ts'
 for (const specifier of importsOf(videoHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
@@ -157,7 +157,7 @@ for (const specifier of importsOf(videoHandler)) {
   }
 }
 
-const classificationHandler = 'src/main/ipc/facetHandlers.ts'
+const classificationHandler = 'apps/desktop/src/main/ipc/facetHandlers.ts'
 const classificationApplicationSeams = new Set([
   '../services/tagQueryService',
   '../services/catalogReadService',
@@ -181,7 +181,7 @@ for (const specifier of importsOf(classificationHandler)) {
   }
 }
 
-const scrapeHandler = 'src/main/ipc/scrapeHandlers.ts'
+const scrapeHandler = 'apps/desktop/src/main/ipc/scrapeHandlers.ts'
 for (const specifier of importsOf(scrapeHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
@@ -210,7 +210,7 @@ for (const probe of ['node:fs', 'node:fs/promises', 'node:path', 'node:path/posi
   }
 }
 
-for (const file of sourceFiles('src/main/db')) {
+for (const file of sourceFiles('apps/desktop/src/main/db')) {
   if (/\.test\.[cm]?[jt]sx?$/.test(file)) continue
   for (const specifier of importsOf(file)) {
     if (isForbiddenDatabaseImport(specifier)) {
@@ -235,14 +235,14 @@ for (const [pattern, label] of classificationHandlerPolicyPatterns) {
 }
 
 for (const file of [
-  'src/main/services/videoMaintenanceService.ts',
-  'src/main/services/videoScrapeApplyService.ts',
-  'src/main/services/actressQueryService.ts',
-  'src/main/services/actressMaintenanceService.ts',
-  'src/main/services/actressGalleryService.ts',
-  'src/main/services/actressIdentityConflictWorkflow.ts',
-  'src/main/scrapers/actressScraperManager.ts',
-  'src/main/scrapers/scraperManager.ts'
+  'apps/desktop/src/main/services/videoMaintenanceService.ts',
+  'apps/desktop/src/main/services/videoScrapeApplyService.ts',
+  'apps/desktop/src/main/services/actressQueryService.ts',
+  'apps/desktop/src/main/services/actressMaintenanceService.ts',
+  'apps/desktop/src/main/services/actressGalleryService.ts',
+  'apps/desktop/src/main/services/actressIdentityConflictWorkflow.ts',
+  'apps/desktop/src/main/scrapers/actressScraperManager.ts',
+  'apps/desktop/src/main/scrapers/scraperManager.ts'
 ]) {
   for (const specifier of importsOf(file)) {
     if (

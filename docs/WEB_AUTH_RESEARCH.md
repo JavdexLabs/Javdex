@@ -24,7 +24,7 @@
 
 ## 2. 当前实现与容易混淆的寿命
 
-**当前实现（本地工作树基线 `ba98743`）：** 核对了 [`auth.ts`](../src/main/web/auth.ts) 与 [`server.ts`](../src/main/web/server.ts)。
+**当前实现（本地工作树基线 `ba98743`）：** 核对了 [`auth.ts`](../apps/desktop/src/main/web/auth.ts) 与 [`server.ts`](../apps/desktop/src/main/web/server.ts)。
 
 - 密码使用随机盐与 scrypt；要求 12–128 字符。会话 token 为 32 字节随机值，服务端只在内存 Map 保留其 SHA-256 摘要和时间。
 - 会话闲置上限 24 小时、绝对上限 7 天；每次成功 `check()` 更新 `touched`，不更新 `created`。重启会丢失会话，停止服务与显式撤销也会清空。

@@ -1,0 +1,33 @@
+{
+  "name": "@javdex/desktop",
+  "version": "0.7.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "dev": "node ../../scripts/run-root-script.mjs dev",
+    "build": "node ../../scripts/run-root-script.mjs build",
+    "typecheck": "node ../../scripts/run-root-script.mjs typecheck",
+    "test": "node ../../scripts/run-root-script.mjs test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "acorn": "8.18.0",
+    "axios": "^1.7.7",
+    "better-sqlite3": "13.0.3",
+    "cheerio": "^1.0.0",
+    "fast-xml-parser": "5.11.1",
+    "https-proxy-agent": "^7.0.5",
+    "music-metadata": "^11.14.0",
+    "playwright-core": "1.62.1",
+    "qrcode": "^1.5.4",
+    "sharp": "0.35.4",
+    "socks": "2.8.9",
+    "strtok3": "^10.3.5",
+    "undici": "^7.28.0",
+    "yet-another-react-lightbox": "^3.32.2",
+    "zod": "^4.4.3",
+    "@javdex/contracts": "0.7.0",
+    "@javdex/ui": "0.7.0",
+    "@javdex/library": "0.7.0"
+  }
+}

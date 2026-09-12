@@ -12,13 +12,13 @@ fs.mkdirSync(output,{recursive:true})
 fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
 fs.writeFileSync(path.join(root,'fixture.jsx'),`
 import React from 'react';import{createRoot}from'react-dom/client';
-import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
+import ${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/styles/global.css'))};
 window.React=React;window.__requests=[];window.__fail=false;window.__opened=[];window.__hold=false;window.__releases=[];window.__pages=[];window.__anchorHold=false;window.__anchorRelease=null;
 window.api={scan:{pendingAuditPresence:async(libraryId,input)=>{const ids=[...input.groupIds,...input.identityIds,...input.scrapeIds];window.__requests.push(ids);if(window.__fail){window.__fail=false;throw new Error('fixture')};if(window.__hold)await new Promise(resolve=>window.__releases.push(resolve));return {groupIds:input.groupIds.filter(id=>id===1||id===101||id===201),identityIds:[],scrapeIds:input.scrapeIds.filter(id=>id===1||id===101||id===201)};},revealAuditFile:async()=>({ok:true})}};
 const summary={libraryId:1,runId:'run',configRevision:1,trigger:'manual',startedAt:'2026-09-10T00:00:00Z',finishedAt:'2026-09-10T00:01:00Z',status:'success',scannedFiles:201,resourcesAdded:201,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,skippedFiles:0,failedFiles:0,pendingScanGroups:0,pendingScanResources:201,offlineFolders:[],errorSummary:null};
 const audit={...summary,schemaVersion:2,files:Array.from({length:201},(_,i)=>({outcome:'added',rootId:1,sourceKind:'local',filePath:'/synthetic/FILE-'+(i+1)+'.mp4',videoId:i+1,videoCode:'FILE-'+(i+1),resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}})),removedResources:[],promotedResources:[],deletedVideos:[],pendingGroups:[]};
 if(location.search.includes('groups')){audit.files=audit.files.map(entry=>({...entry,nfo:undefined,outcome:'pending',groupId:entry.resourceId,normalizedCode:entry.videoCode,addedToQueue:true}));audit.pendingGroups=audit.files.map(entry=>({groupId:entry.groupId,normalizedCode:entry.normalizedCode,resourceCount:1}));}
-const {buildScanAuditViewItems}=await import(${JSON.stringify('/@fs'+path.join(repo,'src/shared/scanAuditView.ts'))});
+const {buildScanAuditViewItems}=await import(${JSON.stringify('/@fs'+path.join(repo,'packages/contracts/src/scanAuditView.ts'))});
 window.api.scan.getLatest=()=>{throw new Error('Full snapshot forbidden')};
 window.api.scan.getAuditViewPage=async(snapshot,query)=>{
 window.__pages.push(structuredClone({snapshot,query}));
@@ -29,14 +29,14 @@ if(needle)items=items.filter(item=>(item.title+' '+item.detail+' '+(item.path??'
 const total=items.length,limit=query.limit??100;let offset=Math.min(query.offset??0,Math.max(0,Math.floor((total-1)/limit)*limit)),anchorOffset=null;
 if(query.anchor){const position=items.findIndex(item=>item.groupId?query.anchor.kind==='group'&&item.groupId===query.anchor.id:query.anchor.kind==='path'&&item.path===query.anchor.value);if(position>=0){anchorOffset=Math.floor(position/limit)*limit;offset=anchorOffset;}}
 return {snapshot,auditAvailable:true,items:items.slice(offset,offset+limit),total,attentionBadgeCount:201,limit,offset,anchorOffset};};
-const Panel=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/settings/LibraryScanAuditPanel.tsx'))})).default;
+const Panel=(await import(${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx'))})).default;
 function Host(){const[selected,setSelected]=React.useState(null);return <div style={{padding:16}}><Panel summary={summary} revision={1} onRefreshHistory={async()=>{}} selected={selected} onSelect={setSelected} onOpenVideo={()=>{}} onOpenPending={target=>window.__opened.push(target)}/></div>}
 createRoot(document.getElementById('root')).render(<Host/>);
 `)
 let server,browser
 const results=[]
 try{
- server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
+ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{'@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
  await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
  for(const viewport of [{width:1000,height:640},{width:1440,height:900}]){
   const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',e=>errors.push(e.message))

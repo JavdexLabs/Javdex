@@ -4,8 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { chromium } from 'playwright-core'
-import { WebServer } from '../src/main/web/server.ts'
-import { WebSessions } from '../src/main/web/auth.ts'
+import { WebServer } from '../apps/desktop/src/main/web/server.ts'
+import { WebSessions } from '../apps/desktop/src/main/web/auth.ts'
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'web-auth-recovery-'))
 const sessions = new WebSessions(Date.now, path.join(directory, 'devices.json'))
 const server = new WebServer({ sessions, username: 'viewer', passwordHash: '', staticRoot: path.resolve('out/web'), catalog: {

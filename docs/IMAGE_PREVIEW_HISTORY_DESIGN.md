@@ -21,7 +21,7 @@ Lightbox 是覆盖当前详情页的临时界面，不是一个独立业务页�
 
 ## 2. 当前实现的问题
 
-相关代码位于 `src/renderer/src/components/ImagePreviewLightbox.tsx`：
+相关代码位于 `apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx`：
 
 ```ts
 useEffect(() => {

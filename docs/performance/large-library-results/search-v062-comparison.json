@@ -194,9 +194,9 @@
   "releaseTag": "v0.6.2",
   "releaseCommit": "dc6f2d25a8fadd7144e6a36d6e9141942e8c4be5",
   "currentSourceSha256": {
-    "src/main/db/scopedVideoCatalogRepo.ts": "e8d272cb8bb64eee02828472378096f3000b08e604374382f9b2edaef4a7999f",
-    "src/main/db/actressSearchSql.ts": "c50c968d26621d072acdeb449c4847bbed25c30404a424deb946245c201990cb",
-    "src/main/db/revisionReadCache.ts": "436720cfb4db463d7b5c2e65af33bd5998f26a1bcefa1a98eff4152dd367f077",
-    "src/main/db/videoListProjection.ts": "bd467716b5930e705286566e98779c8f84c5ef52998c9fa9d472881406237859"
+    "apps/desktop/src/main/db/scopedVideoCatalogRepo.ts": "e8d272cb8bb64eee02828472378096f3000b08e604374382f9b2edaef4a7999f",
+    "apps/desktop/src/main/db/actressSearchSql.ts": "c50c968d26621d072acdeb449c4847bbed25c30404a424deb946245c201990cb",
+    "apps/desktop/src/main/db/revisionReadCache.ts": "436720cfb4db463d7b5c2e65af33bd5998f26a1bcefa1a98eff4152dd367f077",
+    "apps/desktop/src/main/db/videoListProjection.ts": "bd467716b5930e705286566e98779c8f84c5ef52998c9fa9d472881406237859"
   }
 }

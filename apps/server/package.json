@@ -1,0 +1,7 @@
+{
+  "name": "@javdex/server",
+  "version": "0.7.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Reserved workspace; extraction/implementation tracked in docs/SERVER_MODE_EXECUTION_PLAN.md"
+}

@@ -5,11 +5,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import type { ScanResult } from '../../src/shared/libraryTypes'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { createMediaLibrary } from '../../src/main/db/mediaLibraryRepo'
-import { createScanCoordinator } from '../../src/main/scanner/scanCoordinator'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
+import type { ScanResult } from '../../packages/contracts/src/libraryTypes'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { createMediaLibrary } from '../../apps/desktop/src/main/db/mediaLibraryRepo'
+import { createScanCoordinator } from '../../apps/desktop/src/main/scanner/scanCoordinator'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 
 it('compares atomic and cooperative membership cleanup including durable audit and finalization', async () => {
   const count = Number(process.env.JAVDEX_CLEANUP_BENCH_VIDEOS ?? 10000)

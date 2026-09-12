@@ -7,7 +7,7 @@ import path from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { Worker } from 'node:worker_threads'
 import { buildSync } from 'esbuild'
-import { closeDatabase, initDatabaseAtPath } from '../../src/main/db/database'
+import { closeDatabase, initDatabaseAtPath } from '../../apps/desktop/src/main/db/database'
 
 it('runs native catalog reads in a worker while main timers continue', async () => {
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-reader-worker-'))
@@ -22,7 +22,7 @@ try {
   db.exec("INSERT INTO tags(id,name) VALUES(1,'École')")
   fs.writeFileSync(entry, `
     import { parentPort, workerData } from 'node:worker_threads';
-    import { openReadOnlyDatabaseAtPath } from ${JSON.stringify(path.resolve('src/main/db/database.ts'))};
+    import { openReadOnlyDatabaseAtPath } from ${JSON.stringify(path.resolve('apps/desktop/src/main/db/database.ts'))};
     const reader = openReadOnlyDatabaseAtPath(workerData.catalog);
     let reply;
     try {

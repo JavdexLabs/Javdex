@@ -11,13 +11,13 @@ const local = file => JSON.stringify('/@fs/' + path.join(repo, file).replaceAll(
 fs.writeFileSync(path.join(root, 'index.html'), '<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
 fs.writeFileSync(path.join(root, 'fixture.jsx'), `
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';import{MemoryRouter}from'react-router-dom';
-import ${local('src/renderer/src/styles/global.css')};
-import Grid from ${local('src/renderer/src/components/ContinuousGrid.tsx')};
+import ${local('apps/desktop/src/renderer/src/styles/global.css')};
+import Grid from ${local('apps/desktop/src/renderer/src/components/ContinuousGrid.tsx')};
 
-import Modal from ${local('src/renderer/src/components/Modal.tsx')};
-import {ToastProvider} from ${local('src/renderer/src/components/Toast.tsx')};
-import {useContinuousPage} from ${local('src/renderer/src/hooks/useContinuousPage.ts')};
-window.React=React;window.api={playlists:{listPage:async q=>({items:Array.from({length:60},(_,i)=>({id:q.offset+i+1,name:'旅行影像与纪录片精选 — 长名称布局检查 '+(q.offset+i+1),preview_cover_path:null,video_count:12})),total:7500,offset:q.offset,hasExactName:false})}};const PlaylistPicker=(await import(${local('src/renderer/src/components/PlaylistVideoPicker.tsx')})).default;const Destination=(await import(${local('src/renderer/src/components/PlaylistDestinationPicker.tsx')})).default;const Posters=(await import(${local('src/renderer/src/components/ContinuousPosterGrid.tsx')})).default;const visual=new URLSearchParams(location.search).get('visual'); const kind=new URLSearchParams(location.search).get('kind'), size=60;
+import Modal from ${local('apps/desktop/src/renderer/src/components/Modal.tsx')};
+import {ToastProvider} from ${local('apps/desktop/src/renderer/src/components/Toast.tsx')};
+import {useContinuousPage} from ${local('apps/desktop/src/renderer/src/hooks/useContinuousPage.ts')};
+window.React=React;window.api={playlists:{listPage:async q=>({items:Array.from({length:60},(_,i)=>({id:q.offset+i+1,name:'旅行影像与纪录片精选 — 长名称布局检查 '+(q.offset+i+1),preview_cover_path:null,video_count:12})),total:7500,offset:q.offset,hasExactName:false})}};const PlaylistPicker=(await import(${local('apps/desktop/src/renderer/src/components/PlaylistVideoPicker.tsx')})).default;const Destination=(await import(${local('apps/desktop/src/renderer/src/components/PlaylistDestinationPicker.tsx')})).default;const Posters=(await import(${local('apps/desktop/src/renderer/src/components/ContinuousPosterGrid.tsx')})).default;const visual=new URLSearchParams(location.search).get('visual'); const kind=new URLSearchParams(location.search).get('kind'), size=60;
 function App(){const [filter,setFilter]=useState('initial'),[selection,setSelection]=useState(new Set());
 const result=useContinuousPage(filter, size,async offset=>{if(window.__hold===offset){window.__hold=null;await new Promise(resolve=>window.__resume=resolve)}if(window.__fail===offset){window.__fail=null;throw Error('读取失败测试')}return {items:Array.from({length:Math.min(size,7500-offset)},(_,i)=>({id:offset+i+1})),total:7500}});
 window.__result=result;window.__select=selection;window.__filter=setFilter;
@@ -33,7 +33,7 @@ window.__scroll=index=>{const grid=document.querySelector('[aria-label="候选"]
 let server, browser
 const results=[]
 try {
- server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),'react-router-dom':path.join(repo,'node_modules/react-router-dom')}},server:{host:'127.0.0.1',port:4330,fs:{allow:[root,repo]}}});await server.listen()
+ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{'@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),'react-router-dom':path.join(repo,'node_modules/react-router-dom')}},server:{host:'127.0.0.1',port:4330,fs:{allow:[root,repo]}}});await server.listen()
  browser=await chromium.launch({channel:'chrome',headless:true})
  for(const viewport of [{width:1000,height:640},{width:1440,height:900}])for(const kind of ['external','contained','rows']){
   const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',error=>errors.push(error.message))

@@ -93,15 +93,15 @@ public Pi Skill 和 Codex Browser 的共同点不是具体库，而是：**源�
 
 也就是说，写第一版插件需要的 search path、精确详情页、title、cover 和 source 已经存在。抓取器并没有失败。
 
-但当前 formatter 的顺序是 URL/title → 大段 `body.innerText` → forms → links → structured facts，[见 `formatPageInsightForPrompt`](../src/main/services/pluginDevPageFormat.ts#L73)。随后 Browser capability 不根据 typed page 选择高价值字段，而是直接取 `result.content` 的前 2,200 bytes，[见 `PluginBrowserCapabilityModule`](../src/main/services/pluginDevAgent/browserCapability.ts#L83)。因此普通结果被推荐影片正文占满，在到达 `labeledRows` 前已经截断。
+但当前 formatter 的顺序是 URL/title → 大段 `body.innerText` → forms → links → structured facts，[见 `formatPageInsightForPrompt`](../apps/desktop/src/main/services/pluginDevPageFormat.ts#L73)。随后 Browser capability 不根据 typed page 选择高价值字段，而是直接取 `result.content` 的前 2,200 bytes，[见 `PluginBrowserCapabilityModule`](../apps/desktop/src/main/services/pluginDevAgent/browserCapability.ts#L83)。因此普通结果被推荐影片正文占满，在到达 `labeledRows` 前已经截断。
 
-模型为补足信息读取了完整 artifact。Pi 原生 `read` 默认允许最多 50 KB 或 2,000 行，[见 Pi `read` 实现](https://github.com/earendil-works/pi/blob/v0.84.2/packages/coding-agent/src/core/tools/read.ts)，该次 read 实际向模型加入 43,535 字符；活动上下文估算随后从 10,962 跳到 27,709 tokens。Artifact 又同时保存格式化 `content` 和 typed `page`，形成重复表示，[见当前 artifact 构造](../src/main/services/pluginDevAgent/browserCapability.ts#L83)。
+模型为补足信息读取了完整 artifact。Pi 原生 `read` 默认允许最多 50 KB 或 2,000 行，[见 Pi `read` 实现](https://github.com/earendil-works/pi/blob/v0.84.2/packages/coding-agent/src/core/tools/read.ts)，该次 read 实际向模型加入 43,535 字符；活动上下文估算随后从 10,962 跳到 27,709 tokens。Artifact 又同时保存格式化 `content` 和 typed `page`，形成重复表示，[见当前 artifact 构造](../apps/desktop/src/main/services/pluginDevAgent/browserCapability.ts#L83)。
 
 ### 搜索结果存在，但不能直接操作
 
-搜索页 artifact 已把两个目标详情 URL 排在最前，但链接文本为空；搜索卡片的可见标题在后代节点中。当前 `inspect` 只读取 anchor 的 `innerText/title` 并返回 `parentSelector`，[见链接提取](../src/main/scrapers/scrapeBrowser.ts#L1052)，没有 computed accessible name，也没有可点击 `ref`。模型只能再用 `grep` 找 URL、用 `evaluate` 自己重建卡片关系。
+搜索页 artifact 已把两个目标详情 URL 排在最前，但链接文本为空；搜索卡片的可见标题在后代节点中。当前 `inspect` 只读取 anchor 的 `innerText/title` 并返回 `parentSelector`，[见链接提取](../apps/desktop/src/main/scrapers/scrapeBrowser.ts#L1052)，没有 computed accessible name，也没有可点击 `ref`。模型只能再用 `grep` 找 URL、用 `evaluate` 自己重建卡片关系。
 
-当前 `click/type` 只接受 CSS selector，[见 `executeBrowserAction`](../src/main/services/pluginDevAgent/toolExecutor.ts#L215)；工具 schema 又规定每次只能执行一个 action，[见 browser schema](../src/main/services/pluginDevAgent/toolSchemas.ts#L51)。所以“输入搜索词 → 提交 → 等待 → 获取候选”无法在一个工具调用中完成。
+当前 `click/type` 只接受 CSS selector，[见 `executeBrowserAction`](../apps/desktop/src/main/services/pluginDevAgent/toolExecutor.ts#L215)；工具 schema 又规定每次只能执行一个 action，[见 browser schema](../apps/desktop/src/main/services/pluginDevAgent/toolSchemas.ts#L51)。所以“输入搜索词 → 提交 → 等待 → 获取候选”无法在一个工具调用中完成。
 
 ### 3 KB 不是根因，错误的压缩边界才是
 

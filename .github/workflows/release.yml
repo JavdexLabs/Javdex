@@ -39,7 +39,9 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test
+        # Native modules are prepared explicitly for the desktop runtime.
+        # Root/workspace installs no longer trigger an Electron rebuild.
+        run: npm run setup:desktop && npm test
         env:
           # The complete Windows suite can exceed five minutes on hosted runners.
           JAVDEX_TEST_TIMEOUT_MS: "900000"
@@ -81,7 +83,7 @@ jobs:
         run: npm ci
 
       - name: Package
-        run: npm run dist -- --platform ${{ matrix.platform }}
+        run: npm run setup:desktop && npm run dist -- --platform ${{ matrix.platform }}
 
       - name: Verify packaged Agent runtime
         run: npm run packaging:verify-agent-runtime

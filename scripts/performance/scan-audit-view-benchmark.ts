@@ -5,11 +5,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
-import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
-import {createScanAuditReadIndex} from '../../src/main/services/scanAuditReadIndex'
-import {buildScanAuditViewItems} from '../../src/shared/scanAuditView'
-import type {LibraryScanAudit} from '../../src/shared/libraryTypes'
-import type {ScanAuditViewQuery} from '../../src/shared/scanAuditReadTypes'
+import {initDatabaseAtPath,closeDatabase} from '../../apps/desktop/src/main/db/database'
+import {createScanAuditReadIndex} from '../../apps/desktop/src/main/services/scanAuditReadIndex'
+import {buildScanAuditViewItems} from '../../packages/contracts/src/scanAuditView'
+import type {LibraryScanAudit} from '../../packages/contracts/src/libraryTypes'
+import type {ScanAuditViewQuery} from '../../packages/contracts/src/scanAuditReadTypes'
 it('measures combined audit views against historical full-array output',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-view-probe-')),results:unknown[]=[]
  try{for(const count of [10000,300000]){

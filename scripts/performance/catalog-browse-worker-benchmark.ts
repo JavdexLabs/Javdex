@@ -5,11 +5,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath } from '../../src/main/db/database'
-import { createScopedVideoCatalogRepo } from '../../src/main/db/scopedVideoCatalogRepo'
-import { createHomeDiscoveryRepo } from '../../src/main/db/homeDiscoveryRepo'
-import { CatalogReadWorkerClient } from '../../src/main/services/catalogReadWorkerClient'
-import { createCatalogReadWorkerTransport } from '../../src/main/services/catalogReadWorkerTransport'
+import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath } from '../../apps/desktop/src/main/db/database'
+import { createScopedVideoCatalogRepo } from '../../apps/desktop/src/main/db/scopedVideoCatalogRepo'
+import { createHomeDiscoveryRepo } from '../../apps/desktop/src/main/db/homeDiscoveryRepo'
+import { CatalogReadWorkerClient } from '../../apps/desktop/src/main/services/catalogReadWorkerClient'
+import { createCatalogReadWorkerTransport } from '../../apps/desktop/src/main/services/catalogReadWorkerTransport'
 
 it('measures list/home/year reads, cache reuse, invalidation and event-loop gaps', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browse-bench-'))

@@ -51,7 +51,7 @@
 | 8. 全局关闭窗口刷新 | 配置确为 `refetchOnWindowFocus:true`，但只有 stale 活跃查询才可能刷新，TanStack v5 的默认事件基于可见性，不是每次切窗必然重查所有页面。 | 先统计实际 SQL/IPC；昂贵查询逐项关闭/延长新鲜期，保留精确失效和手动刷新，避免长期过期数据。 |
 | 9. SQLite 参数套餐 | 本次 actual PRAGMA：`cache_size=-16000`、`busy_timeout=5000`、`synchronous=1`，不能当作缺省 2 MB 且没设置。 | 回读运行值/编译选项，逐参数试验。NORMAL 不是绝对耐久；mmap/MEMORY 不解决全量工作量。 |
 
-对应源代码：[legacy 查询](../../src/main/db/videoRepo.ts#L1318)、[scoped 查询](../../src/main/db/scopedVideoCatalogRepo.ts#L67)、[名称搜索](../../src/main/db/actressSearchSql.ts)、[标签](../../src/main/db/tagRepo.ts#L18)、[演员聚合](../../src/main/db/actressRepo.ts#L345)、[Web 查询](../../src/main/web/catalog.ts#L84)、[连接初始化](../../src/main/db/database.ts)、[QueryClient](../../src/renderer/src/query/queryClient.ts)。外部行为边界见[官方参考](large-library-reference-research.md)，不以 AI 生成的 issue 根因说明替代官方文档或实测。
+对应源代码：[legacy 查询](../../apps/desktop/src/main/db/videoRepo.ts#L1318)、[scoped 查询](../../apps/desktop/src/main/db/scopedVideoCatalogRepo.ts#L67)、[名称搜索](../../apps/desktop/src/main/db/actressSearchSql.ts)、[标签](../../apps/desktop/src/main/db/tagRepo.ts#L18)、[演员聚合](../../apps/desktop/src/main/db/actressRepo.ts#L345)、[Web 查询](../../apps/desktop/src/main/web/catalog.ts#L84)、[连接初始化](../../apps/desktop/src/main/db/database.ts)、[QueryClient](../../apps/desktop/src/renderer/src/query/queryClient.ts)。外部行为边界见[官方参考](large-library-reference-research.md)，不以 AI 生成的 issue 根因说明替代官方文档或实测。
 
 ## 4. 基准方法与结果
 
@@ -116,24 +116,24 @@ SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=? AN
 
 | ID / 优先级 | 触发与证据 | 工作量/影响 | 推荐优化与边界 |
 |---|---|---|---|
-| DB-01 / P1 / M | [scoped.list](../../src/main/db/scopedVideoCatalogRepo.ts#L365)，目录/首页/全局搜索 | count + DISTINCT 宽行 + 多个相关投影 + 排序；返回 60 条仍约秒级 | 先获取稳定 ID/成员页，再补 60 条 DTO；count 分离按过滤键缓存，统一结果快照 |
-| DB-02 / P1 / M | [scopeSql](../../src/main/db/scopedVideoCatalogRepo.ts#L67)，all 范围即使只有一个库 | 排名和资源投影覆盖全部候选成员 | 有效单库归一化；多库仅对受限候选去重；保留首选库与时间语义 |
-| DB-03 / P1 / M | [tagRepo](../../src/main/db/tagRepo.ts#L18)、[演员查询](../../src/main/db/actressRepo.ts#L345) | 关联数 E 增长、错误计划可能逼近反复成员扫描；分页未限制聚合 | 成员集合 + 预聚合、统计维护、覆盖索引实验；去重共享影片、保留零计数、manual origin |
-| DB-04 / P1 / M | [数据库初始化](../../src/main/db/database.ts)、上述 EQP | 无统计时小库也能秒级；统计又可能改变其他计划 | 空闲维护 optimize、批量写后调度，持久采样计划/耗时；不强制 INDEXED BY 掩盖所有分布 |
-| DB-05 / P1 / M | [搜索](../../src/main/db/videoRepo.ts#L1190)、[Web 搜索](../../src/main/web/catalog.ts#L84) | 中缀匹配、演员名称 normalize 和关联扫描；30 万 scoped search 约 983 ms | 精确番号优先、名称匹配预求值；FTS 建设见计划，保留匹配语义与冲突名称排除 |
-| DB-06 / P2 / M | [legacy 排序分页](../../src/main/db/videoRepo.ts#L1318)、[scoped order](../../src/main/db/scopedVideoCatalogRepo.ts#L271) | 深 OFFSET 丢弃前置行；日期表达式/跨表时间阻碍索引；legacy 深页约 498 ms | 排序模型和稳定 tie-break、keyset；页码跳转保留兼容方案，不能偷偷删空白日期规则 |
-| DB-07 / P1 / M | [homeDiscoveryRepo.load](../../src/main/db/homeDiscoveryRepo.ts#L274) | recent 调用带精确 count 的 list 但丢弃 total；随机候选仍用 ROW_NUMBER；单次 7 次 SQL | recent 使用 no-count 页面接口、状态快照去重、候选索引范围方案；已有 discovery_key，不应换成 ORDER BY RANDOM |
-| DB-08 / P1 / M | [getPlaylistDetail](../../src/main/db/playlistRepo.ts#L153) | 无 LIMIT，清单全集宽 DTO/转换；3 万条约 20.6 MB | detail 元数据与视频页拆开；排序分页下沉，导出/选择全集由主进程流式处理 |
-| DB-09 / P2 / C | [分类查询](../../src/main/services/classificationQueryService.ts#L58) | 分类列表全量；每实体计数/封面子查询，图片候选无分页 | 分类页/候选分页、概要 read model；保留已有 options LIMIT 100，不笼统判为全部无限 |
-| DB-10 / P2 / C | [listYears](../../src/main/db/scopedVideoCatalogRepo.ts#L460)、[overview](../../src/main/db/overviewRepo.ts)、[库摘要](../../src/main/db/mediaLibraryRepo.ts#L142) | 每次聚合年份/状态/根目录/待处理量；重刷频率可放大 | 快照缓存与精确失效；概要与全局数量共享计算；当前 overview 单次只约 6 ms，不能把它列为已测最大热点 |
-| DB-11 / P2 / C | [listByIds/listByLibrarySelections](../../src/main/db/scopedVideoCatalogRepo.ts#L383) | 全选可构造巨大 IN/VALUES 和结果集；后者每项 3 个 SQL 参数 | 有界批次/临时选择集合，稳定快照 ID；空集合与SQLite变量上限回归 |
-| DB-12 / P2 / M/C | [迁移入口](../../src/main/db/migrations.ts#L1380)、[首窗顺序](../../src/main/appMain.ts#L164) | 已是 schema 15 仍每次运行全库 foreign_key_check；30 万合成库独立热测约 248.51 ms，在首窗前同步执行 | 明确必要一致性校验与启动预算，后台执行并展示进度；不能直接删校验。V11/V14 等历史重建仅升级时执行，另测升级时间/峰值空间 |
-| WEB-01 / P1 / M/C | [HTTP 路由](../../src/main/web/server.ts#L403)、[catalog](../../src/main/web/catalog.ts) | Web 和桌面共用主进程同步 DB；并发设备重复 count/search/home，阻塞互相影响 | 只读查询 worker/队列、按查询键合并、TTL/修订号缓存，丢弃过期请求；认证和库可见性校验不可缓存失效 |
-| WEB-02 / P2 / C/H | [server](../../src/main/web/server.ts#L191)、[images](../../src/main/web/catalog.ts#L226) | API/静态/图片均 no-store；图片每次进入详细目录/资产读取链，反复请求重复 CPU/I/O | 静态 hash 资源缓存、私有版本化图片缓存；认证 JSON 仍不可共享缓存；后续服务器请求保留授权检查；浏览器直接命中的缓存无法即时收回，严格要求重新验证时保留 no-store 或 private/no-cache |
-| WEB-03 / P2 / C/H | [HTTP 流](../../src/main/web/http.ts#L77)、[server.maxConnections](../../src/main/web/server.ts#L145) | 视频已用 pipeline/Range，不整片读内存；但128连接不是HDD吞吐预算，数设备跳播会随机读 | 全局/每设备流预算、读请求调度和取消；目标机器验证带宽/磁盘队列，不盲目将流缓冲变大 |
-| WEB-04 / P2 / C/H | [query integer](../../src/main/web/catalog.ts#L21)、[auth](../../src/main/web/auth.ts#L132) | page 允许很大值；有效登录请求没有目录查询成本预算；设备活动仍周期同步小文件写 | keyset/合理页界、有效用户请求排队限额；活动写可后台批量但授权新增撤销必须持久一致，不能把失败恢复修复回退 |
+| DB-01 / P1 / M | [scoped.list](../../apps/desktop/src/main/db/scopedVideoCatalogRepo.ts#L365)，目录/首页/全局搜索 | count + DISTINCT 宽行 + 多个相关投影 + 排序；返回 60 条仍约秒级 | 先获取稳定 ID/成员页，再补 60 条 DTO；count 分离按过滤键缓存，统一结果快照 |
+| DB-02 / P1 / M | [scopeSql](../../apps/desktop/src/main/db/scopedVideoCatalogRepo.ts#L67)，all 范围即使只有一个库 | 排名和资源投影覆盖全部候选成员 | 有效单库归一化；多库仅对受限候选去重；保留首选库与时间语义 |
+| DB-03 / P1 / M | [tagRepo](../../apps/desktop/src/main/db/tagRepo.ts#L18)、[演员查询](../../apps/desktop/src/main/db/actressRepo.ts#L345) | 关联数 E 增长、错误计划可能逼近反复成员扫描；分页未限制聚合 | 成员集合 + 预聚合、统计维护、覆盖索引实验；去重共享影片、保留零计数、manual origin |
+| DB-04 / P1 / M | [数据库初始化](../../apps/desktop/src/main/db/database.ts)、上述 EQP | 无统计时小库也能秒级；统计又可能改变其他计划 | 空闲维护 optimize、批量写后调度，持久采样计划/耗时；不强制 INDEXED BY 掩盖所有分布 |
+| DB-05 / P1 / M | [搜索](../../apps/desktop/src/main/db/videoRepo.ts#L1190)、[Web 搜索](../../apps/desktop/src/main/web/catalog.ts#L84) | 中缀匹配、演员名称 normalize 和关联扫描；30 万 scoped search 约 983 ms | 精确番号优先、名称匹配预求值；FTS 建设见计划，保留匹配语义与冲突名称排除 |
+| DB-06 / P2 / M | [legacy 排序分页](../../apps/desktop/src/main/db/videoRepo.ts#L1318)、[scoped order](../../apps/desktop/src/main/db/scopedVideoCatalogRepo.ts#L271) | 深 OFFSET 丢弃前置行；日期表达式/跨表时间阻碍索引；legacy 深页约 498 ms | 排序模型和稳定 tie-break、keyset；页码跳转保留兼容方案，不能偷偷删空白日期规则 |
+| DB-07 / P1 / M | [homeDiscoveryRepo.load](../../apps/desktop/src/main/db/homeDiscoveryRepo.ts#L274) | recent 调用带精确 count 的 list 但丢弃 total；随机候选仍用 ROW_NUMBER；单次 7 次 SQL | recent 使用 no-count 页面接口、状态快照去重、候选索引范围方案；已有 discovery_key，不应换成 ORDER BY RANDOM |
+| DB-08 / P1 / M | [getPlaylistDetail](../../apps/desktop/src/main/db/playlistRepo.ts#L153) | 无 LIMIT，清单全集宽 DTO/转换；3 万条约 20.6 MB | detail 元数据与视频页拆开；排序分页下沉，导出/选择全集由主进程流式处理 |
+| DB-09 / P2 / C | [分类查询](../../apps/desktop/src/main/services/classificationQueryService.ts#L58) | 分类列表全量；每实体计数/封面子查询，图片候选无分页 | 分类页/候选分页、概要 read model；保留已有 options LIMIT 100，不笼统判为全部无限 |
+| DB-10 / P2 / C | [listYears](../../apps/desktop/src/main/db/scopedVideoCatalogRepo.ts#L460)、[overview](../../apps/desktop/src/main/db/overviewRepo.ts)、[库摘要](../../apps/desktop/src/main/db/mediaLibraryRepo.ts#L142) | 每次聚合年份/状态/根目录/待处理量；重刷频率可放大 | 快照缓存与精确失效；概要与全局数量共享计算；当前 overview 单次只约 6 ms，不能把它列为已测最大热点 |
+| DB-11 / P2 / C | [listByIds/listByLibrarySelections](../../apps/desktop/src/main/db/scopedVideoCatalogRepo.ts#L383) | 全选可构造巨大 IN/VALUES 和结果集；后者每项 3 个 SQL 参数 | 有界批次/临时选择集合，稳定快照 ID；空集合与SQLite变量上限回归 |
+| DB-12 / P2 / M/C | [迁移入口](../../apps/desktop/src/main/db/migrations.ts#L1380)、[首窗顺序](../../apps/desktop/src/main/appMain.ts#L164) | 已是 schema 15 仍每次运行全库 foreign_key_check；30 万合成库独立热测约 248.51 ms，在首窗前同步执行 | 明确必要一致性校验与启动预算，后台执行并展示进度；不能直接删校验。V11/V14 等历史重建仅升级时执行，另测升级时间/峰值空间 |
+| WEB-01 / P1 / M/C | [HTTP 路由](../../apps/desktop/src/main/web/server.ts#L403)、[catalog](../../apps/desktop/src/main/web/catalog.ts) | Web 和桌面共用主进程同步 DB；并发设备重复 count/search/home，阻塞互相影响 | 只读查询 worker/队列、按查询键合并、TTL/修订号缓存，丢弃过期请求；认证和库可见性校验不可缓存失效 |
+| WEB-02 / P2 / C/H | [server](../../apps/desktop/src/main/web/server.ts#L191)、[images](../../apps/desktop/src/main/web/catalog.ts#L226) | API/静态/图片均 no-store；图片每次进入详细目录/资产读取链，反复请求重复 CPU/I/O | 静态 hash 资源缓存、私有版本化图片缓存；认证 JSON 仍不可共享缓存；后续服务器请求保留授权检查；浏览器直接命中的缓存无法即时收回，严格要求重新验证时保留 no-store 或 private/no-cache |
+| WEB-03 / P2 / C/H | [HTTP 流](../../apps/desktop/src/main/web/http.ts#L77)、[server.maxConnections](../../apps/desktop/src/main/web/server.ts#L145) | 视频已用 pipeline/Range，不整片读内存；但128连接不是HDD吞吐预算，数设备跳播会随机读 | 全局/每设备流预算、读请求调度和取消；目标机器验证带宽/磁盘队列，不盲目将流缓冲变大 |
+| WEB-04 / P2 / C/H | [query integer](../../apps/desktop/src/main/web/catalog.ts#L21)、[auth](../../apps/desktop/src/main/web/auth.ts#L132) | page 允许很大值；有效登录请求没有目录查询成本预算；设备活动仍周期同步小文件写 | keyset/合理页界、有效用户请求排队限额；活动写可后台批量但授权新增撤销必须持久一致，不能把失败恢复修复回退 |
 
-DB-01/02/07 的消费链为 [mediaLibraryHandlers](../../src/main/ipc/mediaLibraryHandlers.ts) → home/scoped repo；不是只有测试调用。legacy 接口仍保留，需与新 scoped 面一致维护，但优化优先级按实际页面调用决定。
+DB-01/02/07 的消费链为 [mediaLibraryHandlers](../../apps/desktop/src/main/ipc/mediaLibraryHandlers.ts) → home/scoped repo；不是只有测试调用。legacy 接口仍保留，需与新 scoped 面一致维护，但优化优先级按实际页面调用决定。
 
 ## 6. 后台、资产、UI 与跨模块风险
 

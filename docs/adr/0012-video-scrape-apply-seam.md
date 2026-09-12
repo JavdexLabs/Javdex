@@ -4,14 +4,14 @@
 
 ## 决策
 
-新增 [`videoScrapeApplyService`](../../src/main/services/videoScrapeApplyService.ts)：
+新增 [`videoScrapeApplyService`](../../apps/desktop/src/main/services/videoScrapeApplyService.ts)：
 
 1. 拥有 `resolveEffective` / `plan` / `apply` 政策与交割 SQL。
 2. 拥有下载 + 两次 `coordinateDatabaseChange` + 失败清理 + 演员头像 adopt（best-effort）。
 3. 吸收并删除浅层 `videoImageAvailability`；batch targets 的 `missingFields` 过滤只经 `resolveVideoBatchTargets`。
 4. `scrapeVideo` 仅作 parse/runner，调用 `deliverParsedResult`。
 
-[`videoRepo`](../../src/main/db/videoRepo.ts) 保留路径候选、`markScrape*`、batch SQL where，以及缺失字段的**引用/链接谓词**（ADR-0018）。fillEmpty 写入矩阵仍在 apply service；**不再**按文件健康过滤批量目标。
+[`videoRepo`](../../apps/desktop/src/main/db/videoRepo.ts) 保留路径候选、`markScrape*`、batch SQL where，以及缺失字段的**引用/链接谓词**（ADR-0018）。fillEmpty 写入矩阵仍在 apply service；**不再**按文件健康过滤批量目标。
 
 ## 必须保持的 invariants
 

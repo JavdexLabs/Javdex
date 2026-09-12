@@ -5,10 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase, getDatabaseReadRevision } from '../../src/main/db/database'
-import { listTagFilterOptions } from '../../src/main/db/tagRepo'
-import { CatalogReadWorkerClient } from '../../src/main/services/catalogReadWorkerClient'
-import { createCatalogReadWorkerTransport } from '../../src/main/services/catalogReadWorkerTransport'
+import { initDatabaseAtPath, closeDatabase, getDatabaseReadRevision } from '../../apps/desktop/src/main/db/database'
+import { listTagFilterOptions } from '../../apps/desktop/src/main/db/tagRepo'
+import { CatalogReadWorkerClient } from '../../apps/desktop/src/main/services/catalogReadWorkerClient'
+import { createCatalogReadWorkerTransport } from '../../apps/desktop/src/main/services/catalogReadWorkerTransport'
 
 it('measures actual built-worker reads and main event-loop responsiveness on a large catalog', async () => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-catalog-worker-bench-'))

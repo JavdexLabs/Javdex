@@ -1,20 +1,26 @@
 {
   "include": [
     "electron.vite.config.*",
-    "src/mcp/**/*",
-    "src/main/**/*",
-    "src/preload/**/*",
-    "src/shared/**/*",
-    "vite.web.config.ts"
+    "apps/desktop/src/mcp/**/*",
+    "apps/desktop/src/main/**/*",
+    "apps/desktop/src/preload/**/*",
+    "packages/contracts/src/**/*",
+    "vite.web.config.ts",
+    "packages/library/src/**/*"
   ],
   "compilerOptions": {
     "composite": true,
-    "types": ["electron-vite/node", "node"],
+    "types": [
+      "electron-vite/node",
+      "node"
+    ],
     "baseUrl": ".",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "strict": true,
     "noUnusedLocals": true,
     "esModuleInterop": true,
@@ -26,7 +32,12 @@
       "@pi-coding-agent-runtime/*": [
         "node_modules/@earendil-works/pi-coding-agent/dist/*"
       ],
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": [
+        "packages/contracts/src/*"
+      ],
+      "@library/*": [
+        "packages/library/src/*"
+      ]
     }
   }
 }

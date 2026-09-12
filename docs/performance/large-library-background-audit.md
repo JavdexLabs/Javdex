@@ -33,18 +33,18 @@
 
 ## 已追踪的入口和现有控制
 
-1. 手动扫描：`src/main/ipc/scanHandlers.ts:62` → `scanCoordinator.run` → `src/main/scanner/scanCoordinator.ts:280` → `scanFolders` → 查验安全根 → 清理事务 → 持久化运行。扫描有单运行控制、AbortController、冻结配置与根目录快照。自动扫描走同一 coordinator。
-2. 自动扫描：`src/main/appMain.ts:223` → `automaticScanScheduler.start`。`src/main/services/automaticScanScheduler.ts:7` 定义启动延迟 30 秒、唤醒延迟 3 秒、轮询 60 秒；`:106` 检查运行状态/维护锁，到期库按顺序扫描，`:122` 以结束时间或启用时间判断到期。**当前 `src/main` 未发现 fs.watch/watchFile/chokidar 媒体目录 watcher，不能把它描述成逐文件变更触发的 watcher 风暴。**风险来自定期全扫。
-3. 批量刮削：`src/main/ipc/scrapeHandlers.ts:18` 接线 controller；`src/main/services/scrapeJobController.ts:305` → 独占 scrape coordinator → `CheckpointedSequentialBatchQueue` → `SequentialBatchQueue` → 单目标 scraper/apply。影片策略 `src/main/services/videoBatchScrapeQueue.ts:180` 每 50 次尝试回收浏览器窗口；`:79` 恢复作用域校验已按 500 ID 分块，`:182` 每项再次校验成员关系。不能建议无约束并行共享浏览器。
+1. 手动扫描：`apps/desktop/src/main/ipc/scanHandlers.ts:62` → `scanCoordinator.run` → `apps/desktop/src/main/scanner/scanCoordinator.ts:280` → `scanFolders` → 查验安全根 → 清理事务 → 持久化运行。扫描有单运行控制、AbortController、冻结配置与根目录快照。自动扫描走同一 coordinator。
+2. 自动扫描：`apps/desktop/src/main/appMain.ts:223` → `automaticScanScheduler.start`。`apps/desktop/src/main/services/automaticScanScheduler.ts:7` 定义启动延迟 30 秒、唤醒延迟 3 秒、轮询 60 秒；`:106` 检查运行状态/维护锁，到期库按顺序扫描，`:122` 以结束时间或启用时间判断到期。**当前 `apps/desktop/src/main` 未发现 fs.watch/watchFile/chokidar 媒体目录 watcher，不能把它描述成逐文件变更触发的 watcher 风暴。**风险来自定期全扫。
+3. 批量刮削：`apps/desktop/src/main/ipc/scrapeHandlers.ts:18` 接线 controller；`apps/desktop/src/main/services/scrapeJobController.ts:305` → 独占 scrape coordinator → `CheckpointedSequentialBatchQueue` → `SequentialBatchQueue` → 单目标 scraper/apply。影片策略 `apps/desktop/src/main/services/videoBatchScrapeQueue.ts:180` 每 50 次尝试回收浏览器窗口；`:79` 恢复作用域校验已按 500 ID 分块，`:182` 每项再次校验成员关系。不能建议无约束并行共享浏览器。
 4. 本地 NFO：扫描 preflight → `localNfoScanService` → `LocalNfoSourceAdapter` → 带物理身份检查的 `NfoFileStore` → candidate staging / `videoScrapeApplyService`。只对首次发现的资源自动导入；不是每次重扫都重写 NFO 元数据。
 5. NFO 导出：`NfoExportTaskController.plan/start` → `NfoExportModule.plan/apply`。它虽在主进程执行，但现有产品合同是前台阻挡的一次性导出，不是可长期恢复的后台队列；性能改进不应擅自更改该合同。
-6. 图像：`src/main/appMain.ts:135` 协议处理 → `src/main/services/mediaAssetStore.ts:190` → `mediaAssetStore/filesystem.ts:69` → 明文读取或 `assetCrypto.decryptBlob`。图片读取和原视频时长解析是不同路径，不能混称为“扫描读取全部影片字节”。
+6. 图像：`apps/desktop/src/main/appMain.ts:135` 协议处理 → `apps/desktop/src/main/services/mediaAssetStore.ts:190` → `mediaAssetStore/filesystem.ts:69` → 明文读取或 `assetCrypto.decryptBlob`。图片读取和原视频时长解析是不同路径，不能混称为“扫描读取全部影片字节”。
 
 ## BG-01：全量扫描清单与超大参数展开
 
-**证据。** `src/main/scanner/scanner.ts:201` 递归收集路径，`:469` 创建全量 files 和目录索引，`:481` 每根额外创建 rootFiles，`:504` 执行 `files.push(...rootFiles.map(...))`。`:513` 再构建目录番号集合；`:520`、`:584`、`:626`、`:627` 保留 NFO preflight、番号计数、逐文件审计和 NFO 批次；`:1351` 才统一输出审计。`:1126` 等路径保存所有无法识别文件。复杂度至少 O(F) 内存，且同时包含多组对象/字符串引用，并非只有一个路径数组。
+**证据。** `apps/desktop/src/main/scanner/scanner.ts:201` 递归收集路径，`:469` 创建全量 files 和目录索引，`:481` 每根额外创建 rootFiles，`:504` 执行 `files.push(...rootFiles.map(...))`。`:513` 再构建目录番号集合；`:520`、`:584`、`:626`、`:627` 保留 NFO preflight、番号计数、逐文件审计和 NFO 批次；`:1351` 才统一输出审计。`:1126` 等路径保存所有无法识别文件。复杂度至少 O(F) 内存，且同时包含多组对象/字符串引用，并非只有一个路径数组。
 
-大数组作为函数实参展开具有运行时参数个数上限；单根涵盖 300,382 个文件时应列为首批复现项。这里**未在目标 Electron/Windows 执行，未声称其具体上限或已经崩溃**。同类风险还见 `src/main/scanner/scanCoordinator.ts:413` 至 `:421` 的清理结果展开：此处位于清理事务之后，若展开失败，会出现清理已提交而收尾失败的诊断问题。
+大数组作为函数实参展开具有运行时参数个数上限；单根涵盖 300,382 个文件时应列为首批复现项。这里**未在目标 Electron/Windows 执行，未声称其具体上限或已经崩溃**。同类风险还见 `apps/desktop/src/main/scanner/scanCoordinator.ts:413` 至 `:421` 的清理结果展开：此处位于清理事务之后，若展开失败，会出现清理已提交而收尾失败的诊断问题。
 
 **已有缓解。** `readdir` 为异步、使用 Dirent，递归检查 signal，符号链接 stat 为异步且坏链接跳过（scanner `:207` 至 `:227`）。STRM 错误只保留 50 条（`:640`），NFO 审计警告限制为 20 条、每条 500 字符（`:168`）。这些限制不约束 files 或普通审计总量。
 
@@ -58,7 +58,7 @@
 
 **证据。** scanner `:528` 至 `:534` 对已有资源跳过 NFO，但该 continue 绕过 `:577` 的让步；开启自动 NFO 的无变化库，预检可以连续做 F 次同步存在性查询。`:585` 至 `:597` 的新文件计数循环同样逐项进行最多四种存在性查询，无取消检查、无 setImmediate。`:976` 至 `:985` 已注册本地资源分支重复取 locator，进入 `:371` 的 refresh 后再次查指纹/目标。`statFileFingerprint` 在 `:285` 使用 `statSync`。普通处理默认每 50 项让步（`:152`、`:194`），不能覆盖预处理中的连续同步工作。
 
-待确认本地资源分支 `:1036` 至 `:1052` 直接 `await readDurationSeconds(file)` 后写回指纹，没有与待确认行已有指纹比较；大量长期未处理待确认文件每次重扫都会再次探测。`src/main/scanner/videoDuration.ts:145` 的已注册资源判断已能跳过“有效时长且指纹不变”的探测；`:149` 对未知时长始终重试。`:66` 的 parser 无外部 AbortSignal/时限参数。
+待确认本地资源分支 `:1036` 至 `:1052` 直接 `await readDurationSeconds(file)` 后写回指纹，没有与待确认行已有指纹比较；大量长期未处理待确认文件每次重扫都会再次探测。`apps/desktop/src/main/scanner/videoDuration.ts:145` 的已注册资源判断已能跳过“有效时长且指纹不变”的探测；`:149` 对未知时长始终重试。`:66` 的 parser 无外部 AbortSignal/时限参数。
 
 **已有缓解。** 时长解析使用 tokenizer、skipCovers，观察到 duration 即关闭句柄，finally 再确保关闭（videoDuration `:71` 至 `:111`）；并非必然读取完整视频。`scanner.ts:296` 可复用本次最小时长过滤已探测值。成功记录的时长与 size/mtime 是重要优化，须保留。
 
@@ -72,7 +72,7 @@
 
 **证据。** 新 STRM 走 scanner `:819` 的重定位候选查找；`:269` 每次获取库内全部 STRM 引用，再按 basename 过滤、逐候选取资源及 stat 旧路径。U 个新路径与 S 个库内 STRM 会产生 O(U×S) 引用遍历，首次导入时 S 增长也可能形成平方累计工作。现存路径分支不走此查找，不应将平方成本套到所有无变化重扫。普通视频重定位 `:324` 按同番号候选取资源，成本依同番号集合大小，不是直接全库平方扫描。
 
-`src/main/scanner/scanCoordinator.ts:504` 至 `:527` 的 `refreshPendingAudit` 先取全部待确认组，再对每个资源调用 `auditState.files.some`，最坏 O(P×F)。这是 JS 匹配成本，即使底层查询变快仍然存在。
+`apps/desktop/src/main/scanner/scanCoordinator.ts:504` 至 `:527` 的 `refreshPendingAudit` 先取全部待确认组，再对每个资源调用 `auditState.files.some`，最坏 O(P×F)。这是 JS 匹配成本，即使底层查询变快仍然存在。
 
 **已有缓解。** STRM 必须唯一候选才重定位，旧路径须 missing，离线根被排除（scanner `:269` 至 `:278`）；审计用 Set 先过滤本次 group ID，降低部分场景的 P。
 
@@ -86,9 +86,9 @@
 
 **证据。** coordinator `:360` 至 `:409` 在一个清理事务内 reconcile pending、逐资源确认缺失并清理成员；`:688` 至 `:723` 全量读取引用、每资源 getResourceById、同步 inspectPath，缺失时再取该影片全部资源选主资源。默认依赖在 `:759` 至 `:781` 明确连接生产 repo 与 inspectLocalPath。此阶段 O(R) 查盘和多次逐项 DB 调用，循环内没有 await/取消检查，不能靠前面扫描每 50 项让步消除卡顿。
 
-`src/main/db/libraryScanRepo.ts:174` 至 `:188` 在事务里 JSON.stringify 完整 audit 后写入。`src/main/scanner/libraryScanAuditStore.ts:112` 读最新 DB audit 并完整 JSON.parse；`:145` 的 JSON 文件写入只是另一个 API，**不是当前 coordinator 默认完成路径**。`src/main/ipc/scanHandlers.ts:70` 原样返回完整审计，`:80` reveal 单文件也加载完整审计。成本 O(审计字节数)，不是一页结果。历史保留策略应由数据库主审进一步核查，本报告不由这一调用单独断言磁盘无限增长。
+`apps/desktop/src/main/db/libraryScanRepo.ts:174` 至 `:188` 在事务里 JSON.stringify 完整 audit 后写入。`apps/desktop/src/main/scanner/libraryScanAuditStore.ts:112` 读最新 DB audit 并完整 JSON.parse；`:145` 的 JSON 文件写入只是另一个 API，**不是当前 coordinator 默认完成路径**。`apps/desktop/src/main/ipc/scanHandlers.ts:70` 原样返回完整审计，`:80` reveal 单文件也加载完整审计。成本 O(审计字节数)，不是一页结果。历史保留策略应由数据库主审进一步核查，本报告不由这一调用单独断言磁盘无限增长。
 
-**已有缓解。** coordinator `:308` 重新检查根；取消和处理失败跳过清理（`:315`、`:338`）；unknown 路径使清理事务失败，避免将断盘当作缺失（`:696`）；仅完整安全扫描执行无资源成员移除（`:405`）。单项导入已有 repo 事务，例如 `src/main/db/videoRepo.ts:314`，不能建议给整个异步扫描套一个超长事务。
+**已有缓解。** coordinator `:308` 重新检查根；取消和处理失败跳过清理（`:315`、`:338`）；unknown 路径使清理事务失败，避免将断盘当作缺失（`:696`）；仅完整安全扫描执行无资源成员移除（`:405`）。单项导入已有 repo 事务，例如 `apps/desktop/src/main/db/videoRepo.ts:314`，不能建议给整个异步扫描套一个超长事务。
 
 **建议。** 将可耗时文件检查移出写事务，形成有界批次的候选删除计划；提交前复验根身份/必要文件证据。清理分批方案必须先定义跨批恢复/运行状态，不能简单拆事务丢掉全阶段回滚保障。审计拆成 summary + 分页 detail，序列化移出锁窗口；reveal 使用限定 run/library 的路径成员查询。
 
@@ -98,9 +98,9 @@
 
 ## BG-05：NFO 自动导入的重复读取与取消空档
 
-**证据。** scanner `:545` preflight 的 `inspectIdentity` → `src/main/metadata-sources/localNfoSourceAdapter.ts:314` 读并解析 NFO；导入 `:362` 再读并解析。同名 NFO 与 movie.nfo 并存时，`src/main/nfo/nfoSidecarLocator.ts:101` 还读取两文件比较。不是单纯一次 XML 解析。scanner `:1293` 至 `:1322` 对已经累积的 NFO 批次逐个 apply，没有 signal 检查或显式事件循环让步；随后选主资源和审计输出（`:1326`、`:1351`）也没有。主扫描循环取消后仍可能处理已积累 NFO 批次，coordinator 到返回后才再次识别 signal。
+**证据。** scanner `:545` preflight 的 `inspectIdentity` → `apps/desktop/src/main/metadata-sources/localNfoSourceAdapter.ts:314` 读并解析 NFO；导入 `:362` 再读并解析。同名 NFO 与 movie.nfo 并存时，`apps/desktop/src/main/nfo/nfoSidecarLocator.ts:101` 还读取两文件比较。不是单纯一次 XML 解析。scanner `:1293` 至 `:1322` 对已经累积的 NFO 批次逐个 apply，没有 signal 检查或显式事件循环让步；随后选主资源和审计输出（`:1326`、`:1351`）也没有。主扫描循环取消后仍可能处理已积累 NFO 批次，coordinator 到返回后才再次识别 signal。
 
-**已有缓解。** NFO sidecar 在目录枚举时索引，避免每影片为寻找 NFO 重读目录（scanner `:482`）。`collectFromAnchors` 以物理文件键去重（adapter `:345` 至 `:358`）。`src/main/nfo/nfoFileStore.ts:59` 校验打开的文件身份及大小；codec `:5` 至 `:8` 限制 NFO 2 MiB、深度 64、节点 50,000、字段 256 KiB。`src/main/services/localNfoScanService.ts:50` 至 `:61` 跳过已刮削/无需补齐的影片；本地图片读取上限 64 MiB（`:91`、`:139`），禁止远程下载；冲突候选保留，不自动覆盖已存在字段。
+**已有缓解。** NFO sidecar 在目录枚举时索引，避免每影片为寻找 NFO 重读目录（scanner `:482`）。`collectFromAnchors` 以物理文件键去重（adapter `:345` 至 `:358`）。`apps/desktop/src/main/nfo/nfoFileStore.ts:59` 校验打开的文件身份及大小；codec `:5` 至 `:8` 限制 NFO 2 MiB、深度 64、节点 50,000、字段 256 KiB。`apps/desktop/src/main/services/localNfoScanService.ts:50` 至 `:61` 跳过已刮削/无需补齐的影片；本地图片读取上限 64 MiB（`:91`、`:139`），禁止远程下载；冲突候选保留，不自动覆盖已存在字段。
 
 **建议。** 为单次扫描采用有界的物理身份+size/mtime 解析缓存，在应用前复验变化，复用未变的解析结果；对 NFO 应用、主资源选择、审计输出补齐时间片和取消边界，将能力票据与读取安全校验保留。不能因缓存命中跳过物理身份核对。
 
@@ -110,9 +110,9 @@
 
 ## BG-06：批量刮削 checkpoint 的平方写放大
 
-**证据。** `src/main/services/checkpointedSequentialBatchQueue.ts:114` 全量 resolveTargets/create；`src/main/services/batchScrapeControl.ts:89` 拷贝目标成 `{id,label}`，`:135` restore 又 map 全量目标。`sequentialBatchQueue.ts:140` 每完成一个目标调用 checkpoint → `checkpointedSequentialBatchQueue.ts:183` → `batchScrapeControl.ts:107` 保留整个 job → `batchScrapeJobStore.ts:99` 同步漂亮打印 JSON 并覆盖文件。每项 O(T) 清单序列化/写入，完成 T 项累计 O(T²)，即使每个 scraper 都很快也无法消除。
+**证据。** `apps/desktop/src/main/services/checkpointedSequentialBatchQueue.ts:114` 全量 resolveTargets/create；`apps/desktop/src/main/services/batchScrapeControl.ts:89` 拷贝目标成 `{id,label}`，`:135` restore 又 map 全量目标。`sequentialBatchQueue.ts:140` 每完成一个目标调用 checkpoint → `checkpointedSequentialBatchQueue.ts:183` → `batchScrapeControl.ts:107` 保留整个 job → `batchScrapeJobStore.ts:99` 同步漂亮打印 JSON 并覆盖文件。每项 O(T) 清单序列化/写入，完成 T 项累计 O(T²)，即使每个 scraper 都很快也无法消除。
 
-**已有缓解。** 串行执行、持久游标、进程内 job cache（job store `:105`）、最多 200 条日志（sequential queue `:6`、`:189`）；启动把 interrupted running 收敛为 paused（`scrapeJobController.ts:165`）。这些降低竞争、日志和重复读盘，不降低每项整清单重写成本。批量延迟由插件级 `src/main/services/scraperDelayController.ts:31` 控制；不是每项无条件双重等待（checkpointed queue `:201` 关闭 generic delay）。
+**已有缓解。** 串行执行、持久游标、进程内 job cache（job store `:105`）、最多 200 条日志（sequential queue `:6`、`:189`）；启动把 interrupted running 收敛为 paused（`scrapeJobController.ts:165`）。这些降低竞争、日志和重复读盘，不降低每项整清单重写成本。批量延迟由插件级 `apps/desktop/src/main/services/scraperDelayController.ts:31` 控制；不是每项无条件双重等待（checkpointed queue `:201` 关闭 generic delay）。
 
 **建议。** 冻结 targets 清单写一次，进度用小型原子 checkpoint/追加 journal，或者独立任务表按页读取；保留每项 durable 进度而非只降低持久频率。当前写文件非 temp+rename 且错误只 log（job store `:98` 至 `:102`），优化时同时明确写失败的暂停/报错策略。暂停/终止仅在目标间检查（sequential queue `:105` 至 `:130`）；插件等待控制器不接 signal，长目标/等待不可立即中止。给等待及可取消下载传信号，提交中则在安全点结束。
 
@@ -122,7 +122,7 @@
 
 ## BG-07：media 协议未接入已有字节缓存
 
-**证据。** `src/main/appMain.ts:136` 的 handler 是同步函数，`:153` 读图；`src/main/services/mediaAssetStore/filesystem.ts:71` existsSync、`:72` readFileSync，`:74` 同步解密。`src/main/services/mediaAssetStore.ts:190` 直接委托，未包缓存。搜索生产代码确认 `getCachedAsset/setCachedAsset` 除定义没有调用。`src/main/services/assetCache.ts:26` 的 256 项 / 96 MiB 字节 LRU **存在但没有服务协议请求**；不能在报告中把它当作已经生效的协议缓解。
+**证据。** `apps/desktop/src/main/appMain.ts:136` 的 handler 是同步函数，`:153` 读图；`apps/desktop/src/main/services/mediaAssetStore/filesystem.ts:71` existsSync、`:72` readFileSync，`:74` 同步解密。`apps/desktop/src/main/services/mediaAssetStore.ts:190` 直接委托，未包缓存。搜索生产代码确认 `getCachedAsset/setCachedAsset` 除定义没有调用。`apps/desktop/src/main/services/assetCache.ts:26` 的 256 项 / 96 MiB 字节 LRU **存在但没有服务协议请求**；不能在报告中把它当作已经生效的协议缓解。
 
 每次请求 O(图片字节数) 读取，密文还产生明密文缓冲和 AES-GCM 工作（`assetCrypto.ts:59` 至 `:75`）；不是媒体协议对图片做 nativeImage 解码，解码发生在其他调用方。`appMain.ts:155` 没有显式 Cache-Control/ETag，也不意味着已证明 Chromium 所有层都不缓存。缺失图片当前每次走文件系统失败路径，无负缓存。
 
@@ -134,9 +134,9 @@
 
 ## BG-08：加密别名表的平方成本和恢复约束
 
-**证据。** `src/main/services/assetMigration.ts:16` 全量收集目标；每项 `:38` 重写文件再 `:41` remap DB，每 20 项让步（`:54`），无取消参数。枚举 `mediaAssetStore/cryptoMigration.ts:34` 同步 readdir+逐文件 stat，无让步。其 `:63` 调 `setPathAlias`，而 `src/main/services/assetPathAliases.ts:44` 每次 readAliasMap→read/decrypt/JSON.parse 全表→writeAliasMap→JSON.stringify/encrypt/同步写临时文件和 rename（`:10`、`:31`）。解密 `getPathAlias` 读整表、`removePathAlias` 再读写整表（`:40`、`:50`）。新增 A 条别名累计 O(A²) 表条目处理。开启加密后的日常图片写入也调用 setPathAlias（filesystem `:114` 至 `:120`），不只设置切换受影响。
+**证据。** `apps/desktop/src/main/services/assetMigration.ts:16` 全量收集目标；每项 `:38` 重写文件再 `:41` remap DB，每 20 项让步（`:54`），无取消参数。枚举 `mediaAssetStore/cryptoMigration.ts:34` 同步 readdir+逐文件 stat，无让步。其 `:63` 调 `setPathAlias`，而 `apps/desktop/src/main/services/assetPathAliases.ts:44` 每次 readAliasMap→read/decrypt/JSON.parse 全表→writeAliasMap→JSON.stringify/encrypt/同步写临时文件和 rename（`:10`、`:31`）。解密 `getPathAlias` 读整表、`removePathAlias` 再读写整表（`:40`、`:50`）。新增 A 条别名累计 O(A²) 表条目处理。开启加密后的日常图片写入也调用 setPathAlias（filesystem `:114` 至 `:120`），不只设置切换受影响。
 
-**已有缓解。** 图像逐项处理、固定间隔让步、单文件和别名文件临时写后 rename；`src/main/ipc/settingsHandlers.ts:197` 使用 `runExclusiveRelocation`，成功后才更新 encryption 设置。仍没有批量 alias 快照或增量存储。
+**已有缓解。** 图像逐项处理、固定间隔让步、单文件和别名文件临时写后 rename；`apps/desktop/src/main/ipc/settingsHandlers.ts:197` 使用 `runExclusiveRelocation`，成功后才更新 encryption 设置。仍没有批量 alias 快照或增量存储。
 
 **建议。** 采用加密增量日志或分块别名存储、单次迁移索引，按安全检查点 compact；既支持有界读写，也避免把整个明文别名表新增到普通 SQLite 而破坏现有隐私语义。文件转换、DB remap、alias 交割应有可恢复日志。当前 `cryptoMigration.ts:68` / `:93` 删除旧文件发生在外层 DB remap 前，失败注入必须覆盖这一窗口；这里只确认时序风险，没有报告已发生用户数据丢失。
 
@@ -144,9 +144,9 @@
 
 ## BG-09：NFO 导出规划和报告全量驻留
 
-**证据。** `src/main/nfo/export/nfoExportModule.ts:421` 在首个让步前取全量快照。repository `src/main/nfo/export/nfoExportRepository.ts:96` 至 `:106` `.all()` 再 map hydrate；`:150` 至 `:184` 每资源分别取 tags/actors/ratings/identities/samples 及 root，至少五条逐资源附属查询，同影片多资源重复 hydrate。规划中 files/documents/plannedTargets/cover recipe cache 全量驻留（module `:412`），NFO Buffer 存在计划里（`:582`），`:687` 再创建完整 publicFiles，`:711` 返回完整预览。尾部 `:672` 全量重渲染 NFO 以处理之后发现的目标冲突，也没有让步。
+**证据。** `apps/desktop/src/main/nfo/export/nfoExportModule.ts:421` 在首个让步前取全量快照。repository `apps/desktop/src/main/nfo/export/nfoExportRepository.ts:96` 至 `:106` `.all()` 再 map hydrate；`:150` 至 `:184` 每资源分别取 tags/actors/ratings/identities/samples 及 root，至少五条逐资源附属查询，同影片多资源重复 hydrate。规划中 files/documents/plannedTargets/cover recipe cache 全量驻留（module `:412`），NFO Buffer 存在计划里（`:582`），`:687` 再创建完整 publicFiles，`:711` 返回完整预览。尾部 `:672` 全量重渲染 NFO 以处理之后发现的目标冲突，也没有让步。
 
-controller `src/main/nfo/export/nfoExportTaskController.ts:51` 持有维护和稳定资产读取租约，规划接口不接取消；`:141` terminate 只面向 running task；`:146` dispose 会等待 planning 全部完成。apply `:737` 文件间可终止，但 `:825` 仍为所有剩余项生成 cancelled 结果，最终完整 items 返回（`:843`）。内存 O(E+元数据+全部 NFO 字节)，规划/最终传输也为全量。
+controller `apps/desktop/src/main/nfo/export/nfoExportTaskController.ts:51` 持有维护和稳定资产读取租约，规划接口不接取消；`:141` terminate 只面向 running task；`:146` dispose 会等待 planning 全部完成。apply `:737` 文件间可终止，但 `:825` 仍为所有剩余项生成 cancelled 结果，最终完整 items 返回（`:843`）。内存 O(E+元数据+全部 NFO 字节)，规划/最终传输也为全量。
 
 **已有缓解。** 每资源规划先 setImmediate（`:431`），每输出项 apply 后让步（`:822`）；已有目标 hash 使用 64 KiB 缓冲，不一次读完整目标（`:113`）。封面按 sourceHash 复用 recipe（`:502`），`nfoCoverArtwork.ts:66` 明确丢弃解码/编码缓冲，只留 recipe；不能声称全部解码图片在计划中长期驻留。规划 inspector 已按根授权缓存（`mediaLibraryRootFileGuard.ts:149`）；输出原子写，来源/目标变更会拒绝陈旧计划。
 
@@ -158,7 +158,7 @@ controller `src/main/nfo/export/nfoExportTaskController.ts:51` 持有维护和�
 
 ## BG-10：资产目录迁移复制后仍有同步全盘收尾
 
-**证据。** `src/main/services/assetLocationMigration.ts:27` 递归同步枚举成数组；`:103` 对目标已有文件进行全内容比较；`:206` copyFileSync+rename。复制循环每 20 项让步（`:334` 至 `:355`），但 commit `:376` 调用 `:172` 重新遍历两边目录、逐文件做 64 KiB 同步全内容比较（`:71`），之后 `:380` 全量同步删除原文件，无让步；rollback `:405` 同步比较/清理。本任务至少 O(A+B)，多阶段重复 I/O 在同 HDD 上争用明显，但没有实测放大倍数。
+**证据。** `apps/desktop/src/main/services/assetLocationMigration.ts:27` 递归同步枚举成数组；`:103` 对目标已有文件进行全内容比较；`:206` copyFileSync+rename。复制循环每 20 项让步（`:334` 至 `:355`），但 commit `:376` 调用 `:172` 重新遍历两边目录、逐文件做 64 KiB 同步全内容比较（`:71`），之后 `:380` 全量同步删除原文件，无让步；rollback `:405` 同步比较/清理。本任务至少 O(A+B)，多阶段重复 I/O 在同 HDD 上争用明显，但没有实测放大倍数。
 
 **已有缓解。** 64 KiB 比较缓冲，临时目标文件后 rename，目标已有相同内容支持继续，拒绝符号链接/相同或嵌套物理根；先复制、设置交割、再清理源，并且 rollback 只删除确认未被替换的本轮副本。
 
@@ -168,7 +168,7 @@ controller `src/main/nfo/export/nfoExportTaskController.ts:51` 持有维护和�
 
 ## BG-11：进度事件与全量结果的 IPC 压力
 
-**证据。** scanner 每文件 progress → coordinator `:286` 每次发事件 → `src/main/ipc/scanHandlers.ts:50` 同时发 `SCAN_STATE_CHANGED` 和 `SCAN_PROGRESS`。若 F=300,382 且全部进入一次正常文件进度回调，代码推导为 **600,764 条进度相关消息**，不含开始/结束；不是采集到的运行计数。`src/main/ipc/typedIpcAdapter.ts:51` 的发送器没有节流。刮削每项开始/完成、等待/log 都 emit（`sequentialBatchQueue.ts:127`、`:141`、`:195`），携带最多 200 条日志快照；有上限，不能称为无限日志增长。迁移每资产 emit（assetMigration `:29`），NFO 导出每文件 emit（module `:821`）。
+**证据。** scanner 每文件 progress → coordinator `:286` 每次发事件 → `apps/desktop/src/main/ipc/scanHandlers.ts:50` 同时发 `SCAN_STATE_CHANGED` 和 `SCAN_PROGRESS`。若 F=300,382 且全部进入一次正常文件进度回调，代码推导为 **600,764 条进度相关消息**，不含开始/结束；不是采集到的运行计数。`apps/desktop/src/main/ipc/typedIpcAdapter.ts:51` 的发送器没有节流。刮削每项开始/完成、等待/log 都 emit（`sequentialBatchQueue.ts:127`、`:141`、`:195`），携带最多 200 条日志快照；有上限，不能称为无限日志增长。迁移每资产 emit（assetMigration `:29`），NFO 导出每文件 emit（module `:821`）。
 
 **建议。** 在后台事件边界按 runId/taskId 合并最新进度，建议 100–200 ms 一次；保留开始、暂停、取消、错误和完成立即发送，完成前 flush 最终计数。可兼容两个扫描通道但让它们共享节流；后续迁移订阅方再移除冗余通道。任务明细采用游标增量，查询完整日志用独立 API。
 
@@ -178,7 +178,7 @@ controller `src/main/nfo/export/nfoExportTaskController.ts:51` 持有维护和�
 
 ## BG-12：启动恢复与退出生命周期
 
-**证据。** `src/main/appMain.ts:168` 打开库后进行 bootstrap/恢复；`:193` 至 `:203` 等待 Agent 恢复、执行待删文件恢复和孤立暂存清理，`:207` 才创建窗口。Agent 恢复进一步核查见 BG-14/15，其成本取决于任务历史，不声称与影片数成正比。`src/main/services/pendingLocalFileDeletionService.ts:17` 全量遍历恢复行，同步 inspect/rename/unlink 并逐项清 journal。暂存引用分别在 `videoPendingScrapeService.ts:46` 和 `actressIdentityConflictWorkflow.ts:134` 全量取出，`mediaAssetStore/download.ts:276` / `:377` 同步枚举目录、stat 和递归 rm。成本取决于待恢复/暂存数量，不是每次启动遍历全部封面目录。
+**证据。** `apps/desktop/src/main/appMain.ts:168` 打开库后进行 bootstrap/恢复；`:193` 至 `:203` 等待 Agent 恢复、执行待删文件恢复和孤立暂存清理，`:207` 才创建窗口。Agent 恢复进一步核查见 BG-14/15，其成本取决于任务历史，不声称与影片数成正比。`apps/desktop/src/main/services/pendingLocalFileDeletionService.ts:17` 全量遍历恢复行，同步 inspect/rename/unlink 并逐项清 journal。暂存引用分别在 `videoPendingScrapeService.ts:46` 和 `actressIdentityConflictWorkflow.ts:134` 全量取出，`mediaAssetStore/download.ts:276` / `:377` 同步枚举目录、stat 和递归 rm。成本取决于待恢复/暂存数量，不是每次启动遍历全部封面目录。
 
 退出 `appMain.ts:246` stop scheduler，只清调度计时器（`automaticScanScheduler.ts:57`）；`:248` 至 `:261` dispose 列表没有 scanCoordinator 的 cancel+await，也没有 batch queue 的 pause+await。helper dispose 并不等价于证明扫描/目标交割已经退出。长期任务增加碰到关闭时序的机会；这里只指出缺少显式 drain，未复现 closeDatabase 竞态。
 
@@ -190,33 +190,33 @@ controller `src/main/nfo/export/nfoExportTaskController.ts:51` 持有维护和�
 
 ## BG-13：图像解码及插件资源缓存的有条件风险
 
-**图像证据。** `src/main/services/mediaAssetStore/imageBytes.ts:46` 可用性检查用同步 nativeImage.createFromBuffer，`:125` 取尺寸又优先解码；`mediaAssetStore/download.ts:145` 拉图后检查，再写盘，再 `:154` 读回取尺寸，失败才回退内存缓冲。批量导入中可能对同图重复读/解码。成本为压缩字节和像素规模，不只图片张数。`nfoCoverArtwork.ts:31` EXIF 非默认方向有逐像素复制，`:73` 规划解码/编码，执行 `:103` 可能再次转换；这是现有准确尺寸与不可变 recipe 合同的成本。
+**图像证据。** `apps/desktop/src/main/services/mediaAssetStore/imageBytes.ts:46` 可用性检查用同步 nativeImage.createFromBuffer，`:125` 取尺寸又优先解码；`mediaAssetStore/download.ts:145` 拉图后检查，再写盘，再 `:154` 读回取尺寸，失败才回退内存缓冲。批量导入中可能对同图重复读/解码。成本为压缩字节和像素规模，不只图片张数。`nfoCoverArtwork.ts:31` EXIF 非默认方向有逐像素复制，`:73` 规划解码/编码，执行 `:103` 可能再次转换；这是现有准确尺寸与不可变 recipe 合同的成本。
 
 **缓解与建议。** `inspection.ts:37` 有签名 inspection cache（256 项）；普通 metadata 列表不应该调用 FS 探活，遵循资产边界 ADR。远程 renderer 图片走 `remoteImageFetch.ts:15` 和 `publicHttpFetch.ts:348`/`:361` 的声明长度及流式累计上限；本地 NFO/图片也有字节上限。字节上限不等于像素上限。复用本次下载的尺寸/指纹，头部取尺寸和完整可用性解码职责分开，解码移有界 worker/utility，设置像素/输出字节预算；不能用只看 magic bytes 取代必要有效性判定。
 
-**插件缓存证据。** `src/main/scrapers/scraperResourceCache.ts:43` memory Map 没有独立 LRU；`:175` 每次 commit 重新 readdir+stat 全 plugin `.bin` 文件。K 个小 URL 首次逐次入缓存可产生 O(K²) 文件计数检查；304 在 `:75` 也走 commit，`:160` 重写 body。不同插件的 Map 没有总内存上限，但 `:188` 有每插件 64 MiB 磁盘配额、单项 16 MiB（`:82` 默认常量），因此不能声称一个固定插件正常写入会无限累积任意字节。`scrapeBrowserImageCache.ts:7` 另有 96 项/200 MiB 缓存；这不是 media:// 的缓存。插件运行在 Worker、有 timeout 和 signal，结束会等 active RPC（`scraperPluginSandbox.ts:241` 至 `:275`），也不等于批量队列已经传递用户取消。
+**插件缓存证据。** `apps/desktop/src/main/scrapers/scraperResourceCache.ts:43` memory Map 没有独立 LRU；`:175` 每次 commit 重新 readdir+stat 全 plugin `.bin` 文件。K 个小 URL 首次逐次入缓存可产生 O(K²) 文件计数检查；304 在 `:75` 也走 commit，`:160` 重写 body。不同插件的 Map 没有总内存上限，但 `:188` 有每插件 64 MiB 磁盘配额、单项 16 MiB（`:82` 默认常量），因此不能声称一个固定插件正常写入会无限累积任意字节。`scrapeBrowserImageCache.ts:7` 另有 96 项/200 MiB 缓存；这不是 media:// 的缓存。插件运行在 Worker、有 timeout 和 signal，结束会等 active RPC（`scraperPluginSandbox.ts:241` 至 `:275`），也不等于批量队列已经传递用户取消。
 
 **建议/验收。** 插件缓存使用原子维护的配额账本、全局有界 LRU和 URL in-flight 去重，304 只更新验证元数据；保留按插件串行 commit、ETag 与 staleIfError。测试多小 URL 的 stat 调用数线性增长，缓存总 RSS 有预算；固定大资源 URL 重复命中零网络/零正文写盘。图像路径测每图读取/解码次数，预期正常下载后无需重新读同图取尺寸；极大像素图片可控失败而非占满主进程。此项依插件/图像使用模式触发，不推定所有 30 万影片每次都发生。
 
 ## BG-14：Agent 长任务日志与历史的重复全量处理（补充）
 
-**代码证据。** `src/main/services/pluginDevAgent/workLog.ts:51` 不限条数追加 session.workLog；`src/main/services/pluginDevAgent/pluginDeveloper.ts:428` 每个领域事件追加 workLog、写 journal，再 `:447` 写产品状态；`toProductState` 在 `:206` structuredClone 全部 workLog，`src/main/agent-platform/agentRunStore.ts:220` JSON 序列化后更新。若一个任务累计 H 个同量级领域事件，此支路累计日志拷贝/序列化 O(H²)，并非仅追加 O(H)。插件 snapshot `pluginDeveloper.ts:1139`/`:1166` 和元数据 snapshot `agentMetadataCollection.ts:477` 为得到末尾 seq 读取整段 journal；`agentRunStore.ts:315` 支持 afterSeq，却没有 LIMIT，这些调用不传游标。插件 snapshot 还同时复制 workLog 和提取 events（`:1174`），最终经 `src/main/ipc/pluginDevHandlers.ts:61` 返回。长历史会放大每次状态读取的主进程成本，不依赖 UI 是否虚拟化。
+**代码证据。** `apps/desktop/src/main/services/pluginDevAgent/workLog.ts:51` 不限条数追加 session.workLog；`apps/desktop/src/main/services/pluginDevAgent/pluginDeveloper.ts:428` 每个领域事件追加 workLog、写 journal，再 `:447` 写产品状态；`toProductState` 在 `:206` structuredClone 全部 workLog，`apps/desktop/src/main/agent-platform/agentRunStore.ts:220` JSON 序列化后更新。若一个任务累计 H 个同量级领域事件，此支路累计日志拷贝/序列化 O(H²)，并非仅追加 O(H)。插件 snapshot `pluginDeveloper.ts:1139`/`:1166` 和元数据 snapshot `agentMetadataCollection.ts:477` 为得到末尾 seq 读取整段 journal；`agentRunStore.ts:315` 支持 afterSeq，却没有 LIMIT，这些调用不传游标。插件 snapshot 还同时复制 workLog 和提取 events（`:1174`），最终经 `apps/desktop/src/main/ipc/pluginDevHandlers.ts:61` 返回。长历史会放大每次状态读取的主进程成本，不依赖 UI 是否虚拟化。
 
-平台 `agentRunStore.ts:401` 每个 durable observation 写 journal，message/tool completed 额外写 audit 与 safeStorage 加密 recovery frame。`readExecutionHistory` 在 `:463` 全量读取、逐帧同步解密/parse/hash；**仅 checkpoint open 失败并满足恢复条件时**才由 `src/main/agent-platform/agentExecution.ts:193` 至 `:205` fallback 触发，不是每次正常恢复都全解密。不要从此推断每帧都保存完整对话，也不把模型上下文 compaction 等同于数据库历史回收。`src/main/services/agentMetadata/activityTimeline.ts:196` 的 256 上限只会删 action，保留全部 reasoning；`:51` snapshot clone 全数组，collection `:254`/`:290` 继续复制产品状态，因此长期轮次仍累积。
+平台 `agentRunStore.ts:401` 每个 durable observation 写 journal，message/tool completed 额外写 audit 与 safeStorage 加密 recovery frame。`readExecutionHistory` 在 `:463` 全量读取、逐帧同步解密/parse/hash；**仅 checkpoint open 失败并满足恢复条件时**才由 `apps/desktop/src/main/agent-platform/agentExecution.ts:193` 至 `:205` fallback 触发，不是每次正常恢复都全解密。不要从此推断每帧都保存完整对话，也不把模型上下文 compaction 等同于数据库历史回收。`apps/desktop/src/main/services/agentMetadata/activityTimeline.ts:196` 的 256 上限只会删 action，保留全部 reasoning；`:51` snapshot clone 全数组，collection `:254`/`:290` 继续复制产品状态，因此长期轮次仍累积。
 
 **已有缓解、建议和验收。** 插件 tool.progress 不持久化（pluginDeveloper `:555`），reasoning 单条有字符截断；元数据 live 通知已有 60 ms 合并且仅发 runId/revision（collection `:295`、`:120`），并非每 token 写 SQLite。应将 workLog 以追加表/流为真相、产品状态只存摘要和游标；cursor 用末尾索引查询，日志分页；恢复采用经完整性验证的 checkpoint+有界增量流，不能丢工具副作用账本或改变 recovery generation 保护。用 1k/10k/100k 合成事件验证：持久化总字节近线性，snapshot 默认 ≤500 条，取 cursor 不 parse payload；恢复保持 hash、codec、安全存储与副作用对账，测最长同步段及峰值内存。不删除用户要求保留的历史，只改变存储和访问方式。
 
 ## BG-15：Agent 历史归档与启动恢复规模（补充）
 
-**代码证据。** `agentRunStore.ts:661` closeRun 只标 closed；`pluginDeveloper.ts:1596` retire 逐任务 close、删 session、`pluginWorkspace.remove`，后者 `src/main/services/pluginDevAgent/pluginWorkspace.ts:333` 同步递归 rm。`:1615` clearHistory 与 `:1630` discardUnrecoverableSessions 均走该链。因此插件工作区确实被删除，不能说“清理完全没有作用”，但 agent_runs/journal/execution_history/artifacts 等数据库历史仍保留；本次生产代码检索未找到这些表的 DELETE/按年龄回收实现，注释所称 retention policy 不能算已执行的保留上限。持续新建/关闭任务的 DB 历史字节随累计事件/产物增长；实际 GB 增量未测。
+**代码证据。** `agentRunStore.ts:661` closeRun 只标 closed；`pluginDeveloper.ts:1596` retire 逐任务 close、删 session、`pluginWorkspace.remove`，后者 `apps/desktop/src/main/services/pluginDevAgent/pluginWorkspace.ts:333` 同步递归 rm。`:1615` clearHistory 与 `:1630` discardUnrecoverableSessions 均走该链。因此插件工作区确实被删除，不能说“清理完全没有作用”，但 agent_runs/journal/execution_history/artifacts 等数据库历史仍保留；本次生产代码检索未找到这些表的 DELETE/按年龄回收实现，注释所称 retention policy 不能算已执行的保留上限。持续新建/关闭任务的 DB 历史字节随累计事件/产物增长；实际 GB 增量未测。
 
-启动三个产品恢复入口分别调用 `listRecoverableRuns`（`pluginDeveloper.ts:985`、`src/main/services/libraryCuratorAgent/libraryCurator.ts:256`、`agentMetadataCollection.ts:498`），平台方法 `agentRunStore.ts:202` 对全部 status≠closed 的 run 做 `.all()` 并解析配置和产品状态，产品随后才按 useCase 过滤。M 个未关闭任务的完整状态被重复加载；已 closed 的历史不会进入此数组，区别于数据库总历史增长。元数据 ready 草稿还需恢复，不能只按 running 过滤。
+启动三个产品恢复入口分别调用 `listRecoverableRuns`（`pluginDeveloper.ts:985`、`apps/desktop/src/main/services/libraryCuratorAgent/libraryCurator.ts:256`、`agentMetadataCollection.ts:498`），平台方法 `agentRunStore.ts:202` 对全部 status≠closed 的 run 做 `.all()` 并解析配置和产品状态，产品随后才按 useCase 过滤。M 个未关闭任务的完整状态被重复加载；已 closed 的历史不会进入此数组，区别于数据库总历史增长。元数据 ready 草稿还需恢复，不能只按 running 过滤。
 
 **建议、约束和验收。** 平台增加按 useCase/status 的窄投影分页，首窗前只恢复必要锁/当前任务；详细历史按需加载。明确可配置历史保留/归档策略、磁盘用量统计与分批回收，不在正常 close 时擅自删除仍需审计或恢复的 history/artifact。插件工作区删除采用异步有界清理，任务已关闭但目录未删成功应可重试。用 0/1k/10k settled/ready/closed 混合任务验证启动载入行数只等于所需集合、单页有界、跨产品不重复解析大 productState；归档不再同步递归删大目录。验证保留期限后磁盘增长受策略控制，同时 active/waiting_user/ready 引用和工具审批/幂等账本不误删。
 
 ## BG-16：Agent 大附件元数据工作（补充）
 
-**代码证据与缓解。** 当前 `agentMetadataCollection.ts:304` 是单 target 采集，`draftService.ts:276` 是单 draft 应用，不能虚构一个自动遍历 30 万影片的 Agent bulk API；普通全库刮削仍见 BG-06。单个候选附件也可以很重：`src/main/services/agentMetadata/draftService.ts:400` 构建 requests/pending，`:444` 最多 320 张，`:451` 单张 20 MiB，`:453` 累计 200 MiB 后停止，`:458` 将每个 Buffer 保留至下载循环结束；然后 `:465` 一次同步 stage 全部，再 `:482` 读回每张计算 SHA-256。总体 O(附件总字节+像素)，**有界但预算较大**，还有当前一张下载及解码缓冲峰值；串行 fetch 和每项 signal 检查已存在，不是无约束 Promise.all。输入 JSON 有 1 MiB 限制（`:214`）。
+**代码证据与缓解。** 当前 `agentMetadataCollection.ts:304` 是单 target 采集，`draftService.ts:276` 是单 draft 应用，不能虚构一个自动遍历 30 万影片的 Agent bulk API；普通全库刮削仍见 BG-06。单个候选附件也可以很重：`apps/desktop/src/main/services/agentMetadata/draftService.ts:400` 构建 requests/pending，`:444` 最多 320 张，`:451` 单张 20 MiB，`:453` 累计 200 MiB 后停止，`:458` 将每个 Buffer 保留至下载循环结束；然后 `:465` 一次同步 stage 全部，再 `:482` 读回每张计算 SHA-256。总体 O(附件总字节+像素)，**有界但预算较大**，还有当前一张下载及解码缓冲峰值；串行 fetch 和每项 signal 检查已存在，不是无约束 Promise.all。输入 JSON 有 1 MiB 限制（`:214`）。
 
 预览 `:517` 走 `assertResourceIntegrity`，`:934` 按 manifest 缓存验证避免同草稿重复读取；apply `:288` 强制重建 review 并校验全部附件。这是防止暂存被更改的正确性保障，不能因缓存而省掉应用前验证。200 MiB 下载缓冲预算也不是整个进程 RSS 上限，且不限制累计草稿/历史磁盘量（BG-15）。
 

@@ -13,7 +13,7 @@
 - Windows 安装包可离线、可重复地携带最小 runtime，且 sidecar 生命周期、签名与升级清理验证通过；
 - 与现有 runner 的真实 create/debug 回归对比证明收益足以覆盖接入和维护成本。
 
-对应代码待办记录在 `src/main/services/pluginDevAgent/runner.ts`。在上述门槛满足前，不删除现有 runner，也不把 Harness 作为默认后端。
+对应代码待办记录在 `apps/desktop/src/main/services/pluginDevAgent/runner.ts`。在上述门槛满足前，不删除现有 runner，也不把 Harness 作为默认后端。
 
 ## 结论
 
@@ -76,7 +76,7 @@ Javdex 的 `PLUGIN_DEV_TOOL_SCHEMAS` 可以机械转换成 Harness tool 或 MCP 
 - 重复 dry-run、代码未改变和验证失败的提醒；
 - max steps、上下文压缩、进度事件和等待用户状态。
 
-其中通用的上下文压缩、事件和生命周期可交给 Harness；其余规则应移入 Javdex 工具本体或 Harness hooks，而不能随旧 runner 一起删除。现有职责见 [`PLUGIN_DEV_AGENT.md`](./PLUGIN_DEV_AGENT.md)、[`runner.ts`](../src/main/services/pluginDevAgent/runner.ts) 和 [`toolSchemas.ts`](../src/main/services/pluginDevAgent/toolSchemas.ts)。
+其中通用的上下文压缩、事件和生命周期可交给 Harness；其余规则应移入 Javdex 工具本体或 Harness hooks，而不能随旧 runner 一起删除。现有职责见 [`PLUGIN_DEV_AGENT.md`](./PLUGIN_DEV_AGENT.md)、[`runner.ts`](../apps/desktop/src/main/services/pluginDevAgent/runner.ts) 和 [`toolSchemas.ts`](../apps/desktop/src/main/services/pluginDevAgent/toolSchemas.ts)。
 
 ## 状态、会话、中断和事件流
 

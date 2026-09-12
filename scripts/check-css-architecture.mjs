@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import postcss from 'postcss'
 
-const rendererRoot = path.resolve('src/renderer/src')
+const rendererRoot = path.resolve('apps/desktop/src/renderer/src')
 const baselinePath = path.resolve('scripts/css-architecture-baseline.json')
 const writeBaseline = process.argv.includes('--write-baseline')
 const debtKeys = [
@@ -37,8 +37,9 @@ function isDescendantSelector(selector) {
 }
 
 function collectMetrics() {
-  const cssFiles = walk(rendererRoot, (file) => file.endsWith('.css'))
-  const sourceFiles = walk(rendererRoot, (file) => /\.tsx?$/.test(file))
+  const roots = [rendererRoot, path.resolve('packages/ui/src')]
+  const cssFiles = roots.flatMap((root) => walk(root, (file) => file.endsWith('.css')))
+  const sourceFiles = roots.flatMap((root) => walk(root, (file) => /\.tsx?$/.test(file)))
   const globalClasses = new Set()
   const classFiles = new Map()
   let descendantSelectorCount = 0
@@ -88,7 +89,7 @@ function collectMetrics() {
     for (const match of source.matchAll(/import\s+['"]([^'"]+\.css)['"]/g)) {
       const importPath = match[1]
       const isMainGlobalEntry =
-        relative(file) === 'src/renderer/src/main.tsx' && importPath === './styles/global.css'
+        relative(file) === 'apps/desktop/src/renderer/src/main.tsx' && importPath === './styles/global.css'
       if (!importPath.endsWith('.module.css') && !isMainGlobalEntry) {
         violations.push(`${relative(file)} imports global CSS directly: ${importPath}`)
       }

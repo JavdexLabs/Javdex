@@ -1,0 +1,12 @@
+{
+  "name": "@javdex/contracts",
+  "version": "0.7.0",
+  "private": true,
+  "license": "MIT",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

@@ -5,9 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
-import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
-import {listActresses,listActressAvatarCropTargets} from '../../src/main/db/actressRepo'
-import {resetSettingsCacheForTests} from '../../src/main/settings/settingsStore'
+import {initDatabaseAtPath,closeDatabase} from '../../apps/desktop/src/main/db/database'
+import {listActresses,listActressAvatarCropTargets} from '../../apps/desktop/src/main/db/actressRepo'
+import {resetSettingsCacheForTests} from '../../apps/desktop/src/main/settings/settingsStore'
 it('measures narrow avatar targets using user-approved ID order',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-merge-probe-')),previous=process.env.JAVDEX_TEST_USER_DATA
  process.env.JAVDEX_TEST_USER_DATA=root;resetSettingsCacheForTests()

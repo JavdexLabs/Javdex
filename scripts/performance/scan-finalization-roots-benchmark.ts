@@ -6,15 +6,15 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import type { LibraryScanAudit, LibraryScanSummary } from '../../src/shared/libraryTypes'
-import { normalizeLocalPathIdentity } from '../../src/shared/localPathIdentity'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { beginLibraryScanRun, finishLibraryScanRun } from '../../src/main/db/libraryScanRepo'
+import type { LibraryScanAudit, LibraryScanSummary } from '../../packages/contracts/src/libraryTypes'
+import { normalizeLocalPathIdentity } from '../../packages/library/src/localPathIdentity'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { beginLibraryScanRun, finishLibraryScanRun } from '../../apps/desktop/src/main/db/libraryScanRepo'
 
 it('measures actual scan finalization across root counts with consistent persisted results', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-finalization-roots-'))
   const count = 30_000
-  const sourcePath = path.resolve('src/main/db/libraryScanRepo.ts')
+  const sourcePath = path.resolve('apps/desktop/src/main/db/libraryScanRepo.ts')
   const sourceHash = (): string => createHash('sha256').update(fs.readFileSync(sourcePath)).digest('hex')
   const productionSha256 = sourceHash()
   const results: unknown[] = []

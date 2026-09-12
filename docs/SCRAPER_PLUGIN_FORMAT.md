@@ -11,7 +11,7 @@
 | `video` | `parseVideo(ctx)` | 影片元数据刮削 |
 | `actress` | `parseActress(ctx)` | 演员资料刮削 |
 
-内置插件位于 `src/main/bundled-plugins/`（如 JavDB、JavLibrary、Xslist、Gfriends 等），以 `plugin.json` + 入口脚本形式随应用分发。
+内置插件位于 `apps/desktop/src/main/bundled-plugins/`（如 JavDB、JavLibrary、Xslist、Gfriends 等），以 `plugin.json` + 入口脚本形式随应用分发。
 
 ## 包与安装形态
 
@@ -159,7 +159,7 @@ const body = await ctx.fetchBuffer(url, {
 
 ### `supportedFields`（video）
 
-字段 id 与 `src/shared/scrapeTypes.ts` 中 `VideoScrapeField` 一致：
+字段 id 与 `packages/contracts/src/scrapeTypes.ts` 中 `VideoScrapeField` 一致：
 
 `title`、`summary`、`cover`、`releaseDate`、`maker`、`publisher`、`series`、`director`、`duration`、`actressesFemale`、`actressesMale`、`tags`、`source`、`rating`、`samples`
 

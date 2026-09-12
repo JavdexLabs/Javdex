@@ -57,7 +57,7 @@
     "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",
     "server:test": "npm run check:server-boundaries && node scripts/server-test.mjs",
     "server:smoke": "node --import tsx scripts/server-smoke.mjs",
-    "server:smoke:node": "node --import tsx scripts/server-smoke-node.mjs",
+    "server:smoke:node": "TSX_TSCONFIG_PATH=tsconfig.server.json node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-smoke-node.mjs",
     "typecheck:browser": "tsc --noEmit -p tsconfig.browser.json"
   },
   "dependencies": {

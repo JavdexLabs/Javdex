@@ -9,7 +9,7 @@ const PASSWORD_HASH = /^[a-f0-9]{32}:[a-f0-9]{128}$/
 const fileSchema = z
   .object({
     listenHost: z.string().min(1).default('0.0.0.0'),
-    port: z.number().int().min(1024).max(65535).default(8096),
+    port: z.union([z.literal(0), z.number().int().min(1024).max(65535)]).default(8096),
     accessHosts: z.array(z.string().min(1)).min(1),
     dataDir: z.string().min(1),
     imagesDir: z.string().min(1).optional(),
@@ -119,8 +119,8 @@ export async function loadServerConfig(
   }
   const listenHost = env.JAVDEX_LISTEN_HOST?.trim() || file.listenHost
   const port = env.JAVDEX_LISTEN_PORT ? Number(env.JAVDEX_LISTEN_PORT) : file.port
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-    throw new ServerConfigError('端口必须是 1024–65535 的整数')
+  if (port !== 0 && (!Number.isInteger(port) || port < 1024 || port > 65535)) {
+    throw new ServerConfigError('端口必须是 0 或 1024–65535 的整数')
   }
   const accessHosts = env.JAVDEX_ACCESS_HOSTS
     ? env.JAVDEX_ACCESS_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)

@@ -85,7 +85,7 @@ function startServer() {
     waitForPort: () =>
       new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error(`server did not start: ${output}`)), 20_000)
-        const check = (): void => {
+        const check = () => {
           const match = /listening on 127\.0\.0\.1:(\d+)/.exec(output)
           if (match) {
             clearTimeout(timer)

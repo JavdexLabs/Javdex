@@ -48,6 +48,12 @@ const REFERENCE_QUERIES: Array<{ table: string; sql: string }> = [
   {
     table: 'agent_metadata_draft_resources',
     sql: "SELECT staged_path AS p FROM agent_metadata_draft_resources WHERE staged_path IS NOT NULL AND trim(staged_path) != ''"
+  },
+  {
+    table: 'catalog_image_uploads',
+    sql: `SELECT rel_path AS p FROM catalog_image_uploads
+          WHERE purpose = 'pendingScrapeStaging' AND status = 'consumed'
+            AND rel_path IS NOT NULL AND trim(rel_path) != ''`
   }
 ]
 

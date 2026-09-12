@@ -160,6 +160,14 @@ export function recoverPromoteJournals(database: Database.Database = getDb()): v
       removePromoteJournal(uploadId)
       continue
     }
+    const upload = readCatalogUpload(uploadId, database)
+    if (
+      journal.destinationRel.startsWith(`${PENDING_SCRAPE_STAGING_DIRNAME}/`) &&
+      upload?.status === 'consumed'
+    ) {
+      removePromoteJournal(uploadId)
+      continue
+    }
     unlinkIfPresent(journal.destinationRel)
     removePromoteJournal(uploadId)
   }

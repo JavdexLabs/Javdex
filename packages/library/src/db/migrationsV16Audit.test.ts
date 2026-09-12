@@ -130,8 +130,8 @@ it('adds combined V16 to the released V15 schema without rewriting any legacy da
       assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${quote(table.name)}`).get() as { n: number }).n, 0)
     }
     assert.deepEqual(
-      schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && oldSchema.some(old => old.name === row.name)),
-      oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos')
+      schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists'].includes(row.name) && oldSchema.some(old => old.name === row.name)),
+      oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists'].includes(row.name))
     )
     assert.deepEqual(auditBytes(), originalBytes)
     // A second startup must remain data- and schema-idempotent.

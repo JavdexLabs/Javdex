@@ -92,7 +92,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | `packages/contracts/src` | 跨进程类型和 IPC 通道 |
 | `apps/desktop/src/mcp` | 插件开发 MCP 服务 |
 | `apps/web/src` | 独立构建的只读浏览页面 |
-| `packages/library/src` | Node 路径/资源身份工具、资料库数据库、图片存储、扫描辅助、本地根护栏与 NFO 编解码/导出资料；扫描编排、NFO 文件票据和业务服务仍在抽离 |
+| `packages/library/src` | Node 路径/资源身份工具、资料库数据库、图片存储、扫描辅助、本地根护栏、NFO 编解码/导出资料与 sidecar 票据；扫描编排、Electron 封面导出和业务服务仍在抽离 |
 | `packages/ui/src` | 桌面和网页真实共用的纯展示组件 |
 | `apps/server`、`packages/http` | 预留工作区，目前没有可运行服务端或已抽离 HTTP |
 

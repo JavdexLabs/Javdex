@@ -15,11 +15,11 @@ import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import { isVideoFile, parseCode } from '@library/scan/codeParser'
 import { isStrmFile } from '@library/scan/strmParser'
 import { authorizeMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
-import { createNfoFileStore, type NfoFileStore } from '../nfo/nfoFileStore'
+import { createNfoFileStore, type NfoFileStore } from '@library/nfo/nfoFileStore'
 import { parseNfoArtifact, type NormalizedNfoArtifact } from '@library/nfo/nfoArtifactCodec'
 import { summarizeDirectoryVideoCodes, type DirectoryVideoIdentityInput } from '@library/nfo/directoryVideoIdentity'
 import { NfoDirectoryCache } from './nfoDirectoryCache'
-import { indexNfoSidecars, locateNfoSidecar, sameLogicalCode } from '../nfo/nfoSidecarLocator'
+import { indexNfoSidecars, locateNfoSidecar, sameLogicalCode } from '@library/nfo/nfoSidecarLocator'
 import { projectVideoScrapeResult } from '../scrapers/videoScrapeFieldProjection'
 import type {
   MetadataAssetRef,

@@ -29,4 +29,4 @@ for (const directory of ['apps/web/src', 'packages/contracts/src', 'packages/ui/
 }
 assert.equal(violations.length, 0, violations.join('\n'))
 console.log('Workspace versions and browser/shared dependency boundaries passed.')
-console.log('library currently owns catalog db, image store, scan helpers, local root file guard, and NFO codec/export projection; scanner orchestration/NFO tickets/services remain in desktop. server/http are reserved. This check does not claim a runnable server.')
+console.log('library currently owns catalog db, image store, scan helpers, local root file guard, NFO codec/export projection, and sidecar tickets; scanner orchestration/Electron NFO export/services remain in desktop. server/http are reserved. This check does not claim a runnable server.')

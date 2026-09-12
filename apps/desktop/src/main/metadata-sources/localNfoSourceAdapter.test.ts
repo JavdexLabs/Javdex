@@ -6,7 +6,7 @@ import { afterEach, describe, it } from 'node:test'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import { assertMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
-import { createNfoFileStore } from '../nfo/nfoFileStore'
+import { createNfoFileStore } from '@library/nfo/nfoFileStore'
 import { renderNfoExportDocument } from '@library/nfo/export/nfoExportProfiles'
 import { NFO_EXPORT_PROFILE_IDS } from '@shared/nfoExportTypes'
 import {

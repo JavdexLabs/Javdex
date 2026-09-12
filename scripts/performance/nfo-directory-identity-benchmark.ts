@@ -3,7 +3,7 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import { performance } from 'node:perf_hooks'
 import { normalizeVideoCode } from '../../packages/contracts/src/videoCode'
-import { sameLogicalCode } from '../../apps/desktop/src/main/nfo/nfoSidecarLocator'
+import { sameLogicalCode } from '../../packages/library/src/nfo/nfoSidecarLocator'
 
 // Frozen pre-DA predicate, retained only as the comparison oracle.
 function legacySameLogicalCode(values: readonly (string | null)[]): boolean {

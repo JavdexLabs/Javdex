@@ -1,11 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
-import { sameLogicalCode, type DirectoryVideoIdentityInput } from '@library/nfo/directoryVideoIdentity'
-import type { ManagedRootFileCapability } from '../metadata-sources'
+import { sameLogicalCode, type DirectoryVideoIdentityInput } from './directoryVideoIdentity'
+import type { ManagedRootFileCapability } from './managedRootFileCapability'
 import type { IssuedNfoFile, NfoFileStore } from './nfoFileStore'
 
-export { sameLogicalCode } from '@library/nfo/directoryVideoIdentity'
+export { sameLogicalCode } from './directoryVideoIdentity'
 
 export type NfoSidecarWarningCode =
   | 'ambiguous-movie-nfo'

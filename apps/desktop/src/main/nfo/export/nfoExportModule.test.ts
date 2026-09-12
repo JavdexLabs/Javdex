@@ -9,7 +9,7 @@ import type { NfoExportPlanRequest } from '@shared/nfoExportTypes'
 import { NfoExportModule } from './nfoExportModule'
 import type { NfoExportRepository, NfoExportResourceSnapshot } from '@library/nfo/export/nfoExportRepository'
 import { LocalNfoSourceAdapter } from '../../metadata-sources'
-import { createNfoFileStore } from '../nfoFileStore'
+import { createNfoFileStore } from '@library/nfo/nfoFileStore'
 import { assertMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
 
 const JPEG_1X1 = Buffer.from(

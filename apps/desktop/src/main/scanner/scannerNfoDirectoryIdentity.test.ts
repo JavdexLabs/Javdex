@@ -7,7 +7,7 @@ import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { createDefaultLocalNfoSourceAdapter, type LocalNfoAnchor, type LocalNfoIdentityInspection,
   type MetadataCandidateBatch } from '../metadata-sources'
-import { sameLogicalCode } from '../nfo/nfoSidecarLocator'
+import { sameLogicalCode } from '@library/nfo/nfoSidecarLocator'
 import type { LocalNfoScanService } from '../services/localNfoScanService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { scanFolders } from './scanner'

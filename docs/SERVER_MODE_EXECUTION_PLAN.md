@@ -53,6 +53,7 @@
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
 | S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、刮削应用、catalog 查询 worker 入口仍在 desktop |
 | S02D | 本地架构门槛已验证；剩余 scan/scrape/agent/player/NFO IPC 仍走桌面单例 | 见本文件 S02D 实施记录 |
+| S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -328,7 +329,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - D01 本地部分：`createDesktopRuntime` 远程不调用 `initDatabaseAtPath` / `getDb()`；`copying` 或本地库未复制完成时抛 `MODE_PREP_REQUIRED` 且不断开 library.db
   - D03：本地启动把 `agent_runs` 复制进 `desktop-work.db`，源行保留，后续 `INSERT` 只进 `work.agent_runs`
   - D06 本地部分：catalog IPC 不得 value-import `@library/db|catalog` 或 `services/`；renderer/preload 不得 import library/http/server
-- 未做：S03 HTTP 抽离；RemoteCatalogBackend；scan/scrape/pluginDev/agent/player/nfo/settings/assets IPC 仍允许直接使用 library/服务单例（D06 白名单）；Electron NFO 导出与刮削应用仍在 desktop。D01 远程三种真实进程监测与 D02 双后端仍待 S07。
+- 未做：RemoteCatalogBackend；scan/scrape/pluginDev/agent/player/nfo/settings/assets IPC 仍允许直接使用 library/服务单例（D06 白名单）；Electron NFO 导出与刮削应用仍在 desktop。D01 远程三种真实进程监测与 D02 双后端仍待 S07。
 
 ### S03：抽离 HTTP，保持本地网页
 
@@ -337,6 +338,22 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 浏览和管理路由注册分别启用，本地模式不因复用模块而新增管理网络面。分别投影图片范围，维持 Host/Origin/配对/Range 等现有防护。公开访问 authority 与容器监听地址分开传入，不默认相信代理头或任何私网 Host。
 
 验收：原网页测试和网页构建通过；真实纯 Node 可加载 HTTP 与查询 worker，不能使用 Electron stub。基线研究探针原本预期 MODULE_NOT_FOUND；此阶段完成后更新其断言与文档，保留“修复前/后”的明确证据。
+
+**S03 实施记录（局域网浏览 HTTP 抽离）**
+
+- 范围：将 `http`/`auth`/`catalog`/`catalogQueryReader`/`catalogQueryRequest`/`catalogWorkerAdapter`/`WebServer` 迁入 `packages/http`。桌面 `webAccess` 仍负责 Electron 生命周期、`userData` 会话文件和本地装配，并显式注入 `listenHost` 与 `accessHosts`。`createManageHttpServer()` 存在以便本地浏览拒绝装配管理面。新增 `check:http-boundaries` 与纯 Node `check:http-node-load`（挂入 pretest）。研究探针改为断言 `packages/http` 可加载，文档保留修复前 `MODULE_NOT_FOUND` 证据。
+- 工程默认：未传入 `accessHosts` 时仍回退到本机局域网地址列表（桌面 LAN 浏览兼容）；请求不读取 `X-Forwarded-*`。管理 HTTP 路由未实现（S04/S05）。桌面 catalog-read worker 入口因 IPC/扫描审计仍留 desktop；S03 纯 Node 加载的是浏览用 `WebCatalogQueryReader`。未改 schema 16。
+- 验证（提交 `457b81e`，Linux Node 22.14）：
+  - `npm run check:http-boundaries` 通过
+  - `npm run check:http-node-load` 通过（`process.execPath` 为 `node`，`process.versions.electron` 为空，加载 `WebServer`/`WebCatalog`/`WebCatalogQueryReader`，并对空库执行 `collections()`）
+  - `npm run pretest` 通过
+  - `npm run typecheck` 通过
+  - `npm run test:packaging` 8 通过
+  - 网页相关 Electron 测试：59 通过 / 0 失败
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2960 tests / 2959 pass / 0 fail / 1 skip**
+  - `npm run desktop:build` 通过；`npm run web:build` 通过
+  - 本环境无 Docker，未复跑容器探针；探针源码已改为成功加载断言
+- 未做：S04 独立 Node/Docker 入口；管理 HTTP；RemoteCatalogBackend。
 
 ### S04：独立 Node 运行和 Linux 镜像
 

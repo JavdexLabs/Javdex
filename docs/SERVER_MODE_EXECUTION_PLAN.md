@@ -239,6 +239,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：将 `maintenanceTaskGate`、`progressPublisher` 和 `libraryPathCleanupService` 迁入 `packages/library/src/scan`。路径清理改为直接引用 `@shared/videoResourcePromotion`，不再经过 desktop 再导出。
 - 工程默认：维护闸门仍是进程单例，S02D 由 LocalCatalogBackend 装配。IPC/scanHandlers 暂时直接引用 library 闸门，S02D 再收到 application。
+- 验证：`npm run typecheck:node`；library / actress 边界通过。progress publisher、路径清理、scan coordinator、cooperative cleanup 与 NFO export controller 测试 77 项全部通过。
 - 未做：`scanner.ts` / `scanCoordinator.ts` 仍在 desktop。
 
 ### S02D：先完成桌面本地后端重构

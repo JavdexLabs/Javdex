@@ -18,7 +18,7 @@ import {
   obsoleteSourceImagePath
 } from './classificationImageCleanup'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { assertNoPendingVideoMetadataMutation } from '@library/db/videoPendingMetadataLock'
 
 type StoredDirector = {

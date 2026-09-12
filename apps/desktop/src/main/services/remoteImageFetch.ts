@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { getSettings } from '../settings/settingsStore'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { fetchPublicHttpBuffer } from './publicHttpFetch'
 
 function isValidImageBuffer(buf: Buffer): boolean {

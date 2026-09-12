@@ -5,7 +5,7 @@ import {
   getPlaylistById,
   updatePlaylistRecord
 } from '@library/db/playlistRepo'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 export function createPlaylist(input: PlaylistCreateInput): number {
   const name = input.name.trim()

@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { parseImageThumbnailSize, type ImageThumbnailSize } from '@shared/imageVariants'
-import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from './mediaAssetStore'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
 
 interface AssetReader {
   rootPath(): string

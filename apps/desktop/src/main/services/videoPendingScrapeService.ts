@@ -27,7 +27,7 @@ import {
   markScrapeFailed,
   mergeVideoRecords
 } from '@library/db/videoRepo'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   findVideoBusinessIdentityConflictForScrape,
   videoScrapeApplyService

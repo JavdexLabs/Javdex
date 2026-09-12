@@ -16,7 +16,7 @@ import {
   authorizeMediaLibraryRootFile,
   createAuthorizedMediaLibraryRootFileInspector
 } from '../../services/mediaLibraryRootFileGuard'
-import { mediaAssetStore, type MediaAssetStore } from '../../services/mediaAssetStore'
+import { mediaAssetStore, type MediaAssetStore } from '@library/mediaAssetStore'
 import {
   coverBasename,
   getNfoExportProfile,

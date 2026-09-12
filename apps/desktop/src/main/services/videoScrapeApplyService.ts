@@ -28,7 +28,7 @@ import {
   type ClassificationIdentityResolution
 } from './classificationIdentityResolver'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 function scrapedCastGender(a: ScrapedActress): ActressGender {
   return a.gender ?? 'female'

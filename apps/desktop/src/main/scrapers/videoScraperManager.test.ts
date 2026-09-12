@@ -13,7 +13,7 @@ import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { getPendingVideoScrapeForVideo } from '@library/db/pendingVideoScrapeRepo'
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
-import { resetAssetKeyCacheForTests } from '../services/assetCrypto'
+import { resetAssetKeyCacheForTests } from '@library/assetCrypto'
 import { resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
 import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
 import {

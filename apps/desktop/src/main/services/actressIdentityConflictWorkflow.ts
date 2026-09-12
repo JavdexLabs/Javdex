@@ -13,7 +13,7 @@ import {
 } from './actressAssetService'
 import { synchronizeActressNameOwnership } from '@library/db/actressNameOwnership'
 import { setActressTypedName, upsertActressName } from '@library/db/actressNames'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 export interface PreparedActressScrapeResource {
   field: 'avatar' | 'gallery'

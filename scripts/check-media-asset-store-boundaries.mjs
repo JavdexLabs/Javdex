@@ -6,6 +6,7 @@ function isPrivateMediaAssetImpl(specifier) {
     specifier.includes('/mediaAssetStore/') ||
     specifier.startsWith('./mediaAssetStore/') ||
     specifier.startsWith('../mediaAssetStore/') ||
+    specifier.startsWith('@library/mediaAssetStore/') ||
     specifier === './mediaAssetStoreFs' ||
     specifier === '../mediaAssetStoreFs' ||
     specifier.endsWith('/mediaAssetStoreFs') ||
@@ -15,8 +16,8 @@ function isPrivateMediaAssetImpl(specifier) {
   )
 }
 
-const publicStore = path.resolve('apps/desktop/src/main/services/mediaAssetStore.ts')
-const privateRoot = path.resolve('apps/desktop/src/main/services/mediaAssetStore')
+const publicStore = path.resolve('packages/library/src/mediaAssetStore.ts')
+const privateRoot = path.resolve('packages/library/src/mediaAssetStore')
 
 const violations = []
 

@@ -7,7 +7,7 @@ import type {
 } from '@shared/classificationTypes'
 import { getDb } from '@library/db/database'
 import { cleanupClassificationImage } from './classificationImageCleanup'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { assertNoPendingVideoMetadataMutation } from '@library/db/videoPendingMetadataLock'
 
 interface ClassificationDeletionServiceDependencies {

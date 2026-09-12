@@ -1,5 +1,5 @@
 import { purgeResourceLessVideos } from '@library/db/videoRepo'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 export function deleteResourceLessVideos(): number {
   return mediaAssetStore.coordinateDatabaseChange(() => {

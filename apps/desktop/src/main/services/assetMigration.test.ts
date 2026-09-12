@@ -5,11 +5,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
-import { resetAssetKeyCacheForTests } from './assetCrypto'
+import { resetAssetKeyCacheForTests } from '@library/assetCrypto'
 import { migrateAssetStorage } from './assetMigration'
-import { getPathAlias } from './assetPathAliases'
-import { mediaAssetStore } from './mediaAssetStore'
-import { isOpaqueEncFilename } from './assetPathNaming'
+import { getPathAlias } from '@library/assetPathAliases'
+import { mediaAssetStore } from '@library/mediaAssetStore'
+import { isOpaqueEncFilename } from '@library/assetPathNaming'
 
 let tempRoot: string | null = null
 

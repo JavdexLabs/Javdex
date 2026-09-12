@@ -24,7 +24,7 @@ import {
   type VideoResourceBatchRemovalPlan
 } from '@library/db/videoRepo'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'
 
 export interface LibraryRootScope {

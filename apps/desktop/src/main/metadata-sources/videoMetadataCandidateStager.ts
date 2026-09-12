@@ -1,5 +1,5 @@
 import type { PendingVideoScrapeCandidateInput } from '@library/db/pendingVideoScrapeRepo'
-import { mediaAssetStore, type MediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore, type MediaAssetStore } from '@library/mediaAssetStore'
 import type { MetadataAssetRef, VideoMetadataCandidateStager } from './types'
 
 interface VideoMetadataCandidateStagerDependencies {

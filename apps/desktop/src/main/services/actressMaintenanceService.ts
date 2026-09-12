@@ -10,7 +10,7 @@ import {
   editActressWithAssets,
   mergeActressesWithAssets
 } from './actressAssetService'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   deleteActressGalleryImage,
   importActressGalleryImage

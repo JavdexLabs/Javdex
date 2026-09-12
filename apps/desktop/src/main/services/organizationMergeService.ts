@@ -20,7 +20,7 @@ import {
   cleanupClassificationImage,
   obsoleteSourceImagePath
 } from './classificationImageCleanup'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   assertOrganizationNamesAvailable,
   writeOrganizationLinks,

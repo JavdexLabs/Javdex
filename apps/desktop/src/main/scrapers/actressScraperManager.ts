@@ -13,7 +13,7 @@ import {
   recordActressScrapeFailure,
 } from '@library/db/actressRepo'
 import { resolveEffectiveActressScrapeFields } from '../services/actressAssetService'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   actressIdentityConflictWorkflow,
   type PreparedActressScrapeResource

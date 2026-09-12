@@ -11,7 +11,7 @@ import type { Video } from '@shared/videoTypes'
 import { getVideoDetail } from '@library/db/videoRepo'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { createAuthorizedMediaLibraryRootFileInspector } from '../services/mediaLibraryRootFileGuard'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { VIDEO_MIMES, WebError } from './http'
 
 /** Every lookup is constrained to visible memberships of active media libraries. */

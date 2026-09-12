@@ -12,7 +12,7 @@ import {
   type LocalNfoIdentityInspection,
   type LocalNfoSourceAdapter
 } from '../metadata-sources'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   findVideoBusinessIdentityConflictForScrape,
   resolveEffectiveVideoScrapeFields,

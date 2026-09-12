@@ -8,7 +8,7 @@ import type {
 } from '@shared/classificationTypes'
 import { getDb } from '@library/db/database'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 const ENTITY_TABLE: Record<ClassificationEntityKind, 'organizations' | 'directors' | 'series'> = {
   organization: 'organizations',

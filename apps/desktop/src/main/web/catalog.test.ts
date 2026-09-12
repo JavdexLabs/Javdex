@@ -7,7 +7,7 @@ import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { addMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import { WebCatalog } from './catalog'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import type Database from 'better-sqlite3'
 
 describe('Web read-only catalog scope', () => {

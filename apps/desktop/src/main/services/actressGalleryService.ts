@@ -4,7 +4,7 @@ import {
   deleteActressGalleryAsset,
   getActressDetail
 } from '@library/db/actressRepo'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 
 export async function importActressGalleryImage(

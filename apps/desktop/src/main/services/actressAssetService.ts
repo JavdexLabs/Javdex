@@ -22,7 +22,7 @@ import {
   type ActressScrapeAssetFacts
 } from '@library/db/actressRepo'
 import { getDb } from '@library/db/database'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 interface GalleryAssetWriteInput {
   remoteUrl?: string | null

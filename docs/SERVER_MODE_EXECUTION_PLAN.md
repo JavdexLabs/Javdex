@@ -51,7 +51,7 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02 | 进行中（db 已回归；宿主/图片解码注入进行中） | db 已迁入 `packages/library`。验证：`npm run typecheck`；`npm run pretest`；`npm run test:packaging`（8 通过）；`node scripts/run-electron-tests.mjs` 2934 项、2933 通过、0 失败、1 跳过。schema 仍为 16。`getDb()` 单例仍保留。扫描审计、资产路径/加密与图片尺寸解码改为宿主注入。剩余：scanner 编排、NFO、mediaAssetStore 模块、catalog 业务服务仍在 desktop；S02D 未开始 |
+| S02 | 进行中（db 与图片存储已迁入 library） | db、scan helpers、mediaAssetStore 与资产路径/加密已在 `packages/library`。schema 16。`getDb()` 单例仍保留。剩余：scanner 编排、NFO、catalog 业务服务仍在 desktop；S02D 未开始 |
 | S03–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
@@ -200,7 +200,13 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：新增 `packages/library/src/runtime/host.ts`；扫描审计 JSON 兼容层迁入 library 并通过 `resolveLibraryUserDataPath()` 取目录，不再导入 Electron。桌面 `configureDesktopLibraryRuntime()` 在 `app.whenReady` 注入 userData 与 `nativeImage` 尺寸解码，并把 catalog 查询 worker 入口从 `app.getAppPath()` 改为显式配置。`assetStoragePaths` / `assetCrypto` / `mediaAssetStore/imageBytes` 改为走宿主，不再直接 `app.getPath` 或 `nativeImage`。查询 worker 源文件仍在 desktop，因为它还依赖尚未抽离的 IPC schema / 审计 / 分类查询服务。
 - 工程默认：Electron 测试通过 `scripts/register-library-test-host.ts` 注入解码器；`JAVDEX_TEST_USER_DATA` 覆盖路径，未设置时测试宿主使用临时目录。生产未配置宿主且无测试覆盖时失败，不静默回退。
-- 未做：mediaAssetStore 模块仍在 desktop，但已不再导入 Electron 或 settingsStore；scanner 编排、NFO 导出窗口护栏仍在 desktop。
+- 未做：当时 mediaAssetStore 仍在 desktop。
+
+**S02 实施记录（图片存储切片）**
+
+- 范围：将 `mediaAssetStore` 及其路径/加密/别名/缓存辅助迁入 `packages/library`。生产 library 仍不导入 Electron 或 settingsStore；加密开关与自定义资料目录继续由桌面宿主从 `getSettings()` 注入。桌面/NFO/Web/刮削改为 `@library/mediaAssetStore`；`scripts/test-nfo-cover-artwork.cjs` 改为加载 library 路径并在原生 Electron 进程里调用 `configureDesktopLibraryTestRuntime()`。
+- 验证：`npm run typecheck:node`；`check:library-boundaries` / `check:media-asset-store-boundaries` / `check:actress-boundaries` 通过。原生封面导出测试（真实 Electron codec + 加密 asset store）通过。
+- 未做：scanner 编排、NFO 导出（仍用 nativeImage/窗口护栏）、catalog 业务服务仍在 desktop。未改 schema 16。
 
 ### S02D：先完成桌面本地后端重构
 

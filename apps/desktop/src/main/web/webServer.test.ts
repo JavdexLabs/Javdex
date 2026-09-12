@@ -8,7 +8,7 @@ import { hashPassword, LoginLimiter, verifyPassword, WebSessions } from './auth'
 import { parseRange } from './http'
 import { isLocalPeer, WebServer } from './server'
 import type { WebCatalogReader } from './catalog'
-import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '../services/mediaAssetStore'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
 
 describe('Web authentication and streaming', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-web-'))

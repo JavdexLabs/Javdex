@@ -7,7 +7,7 @@ import type {
   NfoExportStateEvent
 } from '@shared/nfoExportTypes'
 import { maintenanceTaskGate, type MaintenanceTaskGate, type MaintenanceTaskLease } from '../../services/maintenanceTaskGate'
-import { mediaAssetStore, type MediaAssetStore } from '../../services/mediaAssetStore'
+import { mediaAssetStore, type MediaAssetStore } from '@library/mediaAssetStore'
 import { nfoExportModule, type InternalNfoExportPlan, type NfoExportModule } from './nfoExportModule'
 import { sanitizeNfoExportMessage } from './nfoExportSafety'
 

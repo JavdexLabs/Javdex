@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { resolveMediaAssetPath, toStoredAssetPath, serveMediaAssetRequest } from './mediaProtocol'
-import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from './mediaAssetStore'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
 
 describe('mediaProtocol', () => {
   it('forwards a finite variant and rejects invalid size without reading', async () => {

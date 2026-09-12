@@ -1,4 +1,4 @@
-import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '../services/mediaAssetStore'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
 import { parseImageThumbnailSize, type ImageThumbnailSize } from '@shared/imageVariants'
 import {
   createServer,

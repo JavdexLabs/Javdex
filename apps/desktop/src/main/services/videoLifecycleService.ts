@@ -20,7 +20,7 @@ import {
   type LibraryCleanupHints
 } from '@library/db/libraryCleanup'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { videoMaintenanceService } from './videoMaintenanceService'
 
 export interface VideoLifecycleService {

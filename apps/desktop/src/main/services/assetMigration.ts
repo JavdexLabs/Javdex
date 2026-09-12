@@ -1,6 +1,6 @@
 import type { AssetCryptoProgress } from '@shared/libraryTypes'
 import { remapAssetPath } from '@library/db/videoRepo'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 type ProgressFn = (p: AssetCryptoProgress) => void
 

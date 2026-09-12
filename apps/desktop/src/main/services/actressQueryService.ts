@@ -25,7 +25,7 @@ import {
   listActressMergeCandidates
 } from '@library/db/actressRepo'
 import { getActressAvatarSourceInfo } from './actressAssetService'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import type {
   ActressAvatarSourceInfo,
   ActressDetail,

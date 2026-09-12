@@ -1,11 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { AssetCryptoProgress } from '@shared/libraryTypes'
-import { invalidateAssetCache } from './assetCache'
+import { invalidateAssetCache } from '@library/assetCache'
 import {
   ensureMediaAssetDirsAt,
   mediaAssetsPathForSettings
-} from './assetStoragePaths'
+} from '@library/assetStoragePaths'
 
 type ProgressFn = (p: AssetCryptoProgress) => void
 type AssetFile = { rel: string; abs: string }

@@ -32,7 +32,7 @@ import {
   normalizeActressScrapeResult,
   normalizeVideoScrapeResult
 } from '../../scrapers/scraperResultValidation'
-import { mediaAssetStore } from '../mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   applyActressScrapeResult,
   planActressScrapeResult,

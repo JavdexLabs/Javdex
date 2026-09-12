@@ -86,7 +86,7 @@
 
 **证据。** coordinator `:360` 至 `:409` 在一个清理事务内 reconcile pending、逐资源确认缺失并清理成员；`:688` 至 `:723` 全量读取引用、每资源 getResourceById、同步 inspectPath，缺失时再取该影片全部资源选主资源。默认依赖在 `:759` 至 `:781` 明确连接生产 repo 与 inspectLocalPath。此阶段 O(R) 查盘和多次逐项 DB 调用，循环内没有 await/取消检查，不能靠前面扫描每 50 项让步消除卡顿。
 
-`packages/library/src/db/libraryScanRepo.ts:174` 至 `:188` 在事务里 JSON.stringify 完整 audit 后写入。`apps/desktop/src/main/scanner/libraryScanAuditStore.ts:112` 读最新 DB audit 并完整 JSON.parse；`:145` 的 JSON 文件写入只是另一个 API，**不是当前 coordinator 默认完成路径**。`apps/desktop/src/main/ipc/scanHandlers.ts:70` 原样返回完整审计，`:80` reveal 单文件也加载完整审计。成本 O(审计字节数)，不是一页结果。历史保留策略应由数据库主审进一步核查，本报告不由这一调用单独断言磁盘无限增长。
+`packages/library/src/db/libraryScanRepo.ts:174` 至 `:188` 在事务里 JSON.stringify 完整 audit 后写入。`packages/library/src/scan/libraryScanAuditStore.ts` 读最新 DB audit 并完整 JSON.parse；JSON 文件写入只是另一个 API，**不是当前 coordinator 默认完成路径**。`apps/desktop/src/main/ipc/scanHandlers.ts` 原样返回完整审计，reveal 单文件也加载完整审计。成本 O(审计字节数)，不是一页结果。历史保留策略应由数据库主审进一步核查，本报告不由这一调用单独断言磁盘无限增长。
 
 **已有缓解。** coordinator `:308` 重新检查根；取消和处理失败跳过清理（`:315`、`:338`）；unknown 路径使清理事务失败，避免将断盘当作缺失（`:696`）；仅完整安全扫描执行无资源成员移除（`:405`）。单项导入已有 repo 事务，例如 `packages/library/src/db/videoRepo.ts:314`，不能建议给整个异步扫描套一个超长事务。
 

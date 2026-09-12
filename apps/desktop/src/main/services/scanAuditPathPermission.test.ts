@@ -8,7 +8,7 @@ import type {LibraryScanAudit} from '@shared/libraryTypes'
 import {normalizeLocalPathIdentity} from '@library/localPathIdentity'
 import {initDatabaseAtPath,closeDatabase,openReadOnlyDatabaseAtPath} from '@library/db/database'
 import {createMediaLibrary} from '@library/db/mediaLibraryRepo'
-import {libraryScanAuditContainsPath} from '../scanner/libraryScanAuditStore'
+import {libraryScanAuditContainsPath} from '@library/scan/libraryScanAuditStore'
 import {normalizeAudit} from '@library/scan/libraryScanAuditValidation'
 import {createScanAuditPathPermissionReader} from './scanAuditPathPermission'
 let root:string,writer:Database.Database,reader:Database.Database,audit:LibraryScanAudit,rootId:number,read:ReturnType<typeof createScanAuditPathPermissionReader>

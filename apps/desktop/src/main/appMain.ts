@@ -8,6 +8,7 @@ import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
 import fs from 'node:fs'
 import { initDatabaseAtPath, closeDatabase } from '@library/db/database'
+import { configureDesktopLibraryRuntime } from './libraryRuntime'
 import { catalogReadService } from './services/catalogReadService'
 import { recoverInterruptedLibraryScanRuns } from '@library/db/libraryScanRepo'
 import { mediaAssetStore } from './services/mediaAssetStore'
@@ -141,6 +142,7 @@ function registerAssetProtocol(): void {
 if (gotSingleInstanceLock) {
   void app.whenReady().then(async () => {
     applyAppIcons()
+    configureDesktopLibraryRuntime()
     const databaseDir = path.join(app.getPath('userData'), 'data')
     fs.mkdirSync(databaseDir, { recursive: true })
     const database = initDatabaseAtPath(path.join(databaseDir, 'library.db'))

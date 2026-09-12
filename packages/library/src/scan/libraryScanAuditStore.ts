@@ -1,17 +1,14 @@
-import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import { readTestUserDataPath } from '@shared/appIdentity'
 import type { LibraryScanAudit } from '@shared/libraryTypes'
-import { normalizeAudit } from '@library/scan/libraryScanAuditValidation'
+import { normalizeAudit } from './libraryScanAuditValidation'
 import { getDb } from '@library/db/database'
 import { readScanAuditSource } from '@library/db/scanAuditSource'
+import { resolveLibraryUserDataPath } from '@library/runtime/host'
 
 function auditFilePath(libraryId: number): string {
-  const userData = readTestUserDataPath() ?? (app?.getPath ? app.getPath('userData') : undefined)
-  if (!userData) throw new Error('Electron app userData path is unavailable')
-  return path.join(userData, `library-scan-audit-${libraryId}.json`)
+  return path.join(resolveLibraryUserDataPath(), `library-scan-audit-${libraryId}.json`)
 }
 
 function readPersistedAudit(libraryId: number): LibraryScanAudit | null | undefined {

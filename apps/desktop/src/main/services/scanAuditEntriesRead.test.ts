@@ -8,7 +8,7 @@ import { readScanAuditHeader } from './scanAuditReadHeader'
 import { createScanAuditReadIndex } from './scanAuditReadIndex'
 import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import type { ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
-import { readLibraryScanAudit } from '../scanner/libraryScanAuditStore'
+import { readLibraryScanAudit } from '@library/scan/libraryScanAuditStore'
 import { getLatestLibraryScanSnapshot } from '@library/db/libraryScanRepo'
 let directory: string, filename: string
 const identity = { libraryId: 1, runId: 'dual', finishedAt: 'finish' }

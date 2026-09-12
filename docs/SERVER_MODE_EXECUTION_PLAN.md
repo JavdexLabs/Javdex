@@ -51,7 +51,7 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02 | 进行中（db 切片） | `apps/desktop/src/main/db` 已迁入 `packages/library/src/db`；db 依赖的纯校验/`strm` 解析迁入 `packages/library/src/scan`。生产 library 禁止导入 desktop/Electron/Playwright（`npm run check:library-boundaries`）。schema 仍为 16。`getDb()` 单例保留到 S02D。本切片已通过 `npm run typecheck` 与边界检查；Electron db 回归在后续提交记录。剩余：scanner 编排、NFO、mediaAssetStore、catalog 业务服务仍在 desktop |
+| S02 | 进行中（db 已回归；宿主注入进行中） | db 已迁入 `packages/library`。验证：`npm run typecheck`；`npm run pretest`；`npm run test:packaging`（8 通过）；`node scripts/run-electron-tests.mjs` 2934 项、2933 通过、0 失败、1 跳过。schema 仍为 16。本切片起 `getDb()` 单例仍保留；扫描审计落盘与查询 worker 入口改为宿主注入。剩余：scanner 编排、NFO、mediaAssetStore、catalog 业务服务仍在 desktop；S02D 未开始 |
 | S03–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
@@ -193,7 +193,14 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：目录数据库、迁移、repo 与测试迁入 `packages/library/src/db`；`libraryScanAuditValidation` 与 `strmParser` 因被 db 生产代码依赖而一并迁入 `packages/library/src/scan`；v0.6.2 schema 16 升级夹具迁入 `packages/library/src/testFixtures`。桌面测试对业务服务的引用改为明确的 `apps/desktop/src/main` 夹具路径，不把测试例外写进生产边界。
 - 工程默认：本切片保留 `initDatabaseAtPath` / `getDb()` 进程单例，避免把连接注入扩散到全部 repo 调用点；S02D 由 `LocalCatalogBackend` 装配并注入。根级 `better-sqlite3` 仍由桌面安装闭包持有，服务器安装闭包是 S04。
+- 验证：`npm run typecheck`；`npm run pretest`（含 `check:library-boundaries`）；`npm run test:packaging` 8 通过；全量 Electron 测试 2934 项、2933 通过、0 失败、1 跳过（Linux 上仅保留既有平台跳过项）。
 - 未做：scanner 编排、NFO、图片存储、catalog application services 仍在 desktop；未改 schema 16；未接线 IPC；未实现远程后端。
+
+**S02 实施记录（宿主注入切片）**
+
+- 范围：新增 `packages/library/src/runtime/host.ts`；扫描审计 JSON 兼容层迁入 library 并通过 `resolveLibraryUserDataPath()` 取目录，不再导入 Electron。桌面 `configureDesktopLibraryRuntime()` 在 `app.whenReady` 注入 userData，并把 catalog 查询 worker 入口从 `app.getAppPath()` 改为显式配置。查询 worker 源文件仍在 desktop，因为它还依赖尚未抽离的 IPC schema / 审计 / 分类查询服务。
+- 工程默认：测试可通过 `JAVDEX_TEST_USER_DATA` 覆盖宿主路径；未配置宿主且无测试覆盖时失败，不静默回退。
+- 未做：图片 codec/settings 端口、mediaAssetStore、scanner 编排、NFO 窗口护栏仍在 desktop。
 
 ### S02D：先完成桌面本地后端重构
 

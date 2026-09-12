@@ -19,7 +19,7 @@ import { listPendingResourceIdentities, getPendingResourceIdentity } from '@libr
 import { listVideoResources } from '@library/db/videoRepo'
 import {
   readLibraryScanAudit
-} from '../scanner/libraryScanAuditStore'
+} from '@library/scan/libraryScanAuditStore'
 import { importManual, renameAndImport } from '../scanner/scanner'
 import { scanCoordinator } from '../scanner/scanCoordinator'
 import { maintenanceTaskGate } from '../services/maintenanceTaskGate'

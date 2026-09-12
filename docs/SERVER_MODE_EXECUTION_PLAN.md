@@ -253,21 +253,21 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：将扫描审计只读投影（policy/header/index/view/session/path permission/request）迁入 `packages/library/src/scan`。桌面 `services/scanAudit*` 再导出以保持 IPC 与 catalog worker 入口兼容。
 - 工程默认：审计读取预算不变；catalog 查询 worker 源文件仍在 desktop（仍依赖 IPC schema 与网页查询）。未改 schema 16。
-- 验证：`npm run typecheck:node`；library / workspace 边界通过。扫描审计读取及相关测试 97 项全部通过（path permission、header/index/view/session、entries read、scanHandlers、coordinator entries、catalog worker）。
+- 验证：`npm run typecheck:node`；library / workspace 边界通过。扫描审计读取及相关测试 97 项全部通过（path permission、header/index/view/session、entries read、scanHandlers、coordinator entries、catalog worker）。全量 Electron 测试（与后续分类/清单切片同一轮）2940 项、2939 通过、0 失败、1 跳过。
 - 未做：当时 Electron NFO 封面导出、其余 catalog 业务服务仍在 desktop；S02D 未开始。
 
 **S02 实施记录（分类/标签只读查询切片）**
 
 - 范围：将 `classificationQueryService`、`classificationListPage`、`classificationImagePage` 和 `tagQueryService` 迁入 `packages/library/src/catalog`。桌面再导出以保持 IPC / catalog worker 兼容。依赖 IPC schema 或维护写入的分类分页测试仍留在 desktop。
 - 工程默认：查询仍走 `getDb()` 单例。未改 schema 16。
-- 验证：`npm run typecheck:node`；library / classification / workspace 边界通过。分类/标签查询及相关测试 71 项全部通过（tag cache、list/image pages、facet IPC、catalog worker、director/org/series query+merge）。
+- 验证：`npm run typecheck:node`；library / classification / workspace 边界通过。分类/标签查询及相关测试 71 项全部通过（tag cache、list/image pages、facet IPC、catalog worker、director/org/series query+merge）。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
 - 未做：当时分类维护/合并/图片写入、影片/演员业务服务、Electron NFO 导出仍在 desktop；S02D 未开始。
 
 **S02 实施记录（清单维护切片）**
 
 - 范围：将 `playlistService`（创建/更新/删除及封面交割）迁入 `packages/library/src/catalog`。桌面再导出供 IPC 使用。清单查询仍直接走 `playlistRepo`（S02D 再收到 application）。
 - 工程默认：封面写入仍经 `mediaAssetStore.coordinateDatabaseChange`。未改 schema 16。
-- 验证：`npm run typecheck:node`；library 边界通过。playlistService 测试 2 项全部通过。
+- 验证：`npm run typecheck:node`；library 边界通过。playlistService 测试 2 项全部通过。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
 - 未做：影片/演员/分类维护服务、Electron NFO 导出、catalogReadWorker 入口仍在 desktop；S02D 未开始。
 
 ### S02D：先完成桌面本地后端重构

@@ -10,7 +10,7 @@
 
 简单工程问题自主决定并记录；涉及删除/迁移语义、权限、功能范围或与已确认选择冲突时，说明具体取舍让用户决定。不能为赶进度省略回迁、待确认保护、图片恢复或文件维护。单阶段完成不等于第一版完成。遇到真实阻塞报告证据和剩余工作，不用 mock Electron、内存数据库或模拟播放器掩盖失败。
 
-先读根 `AGENTS.md`、`CONTEXT.md`、[主方案](SERVER_MODE_FEASIBILITY_RESEARCH.md)、[管理合同与验收](SERVER_MODE_API_RESEARCH.md)。按正在修改的领域读取现有 ADR 和相应 UI/插件文档，不要求通读所有 docs。主方案“已撤回实验”只提供历史证据，不存在可直接依赖的 V17 上传实现；原数据库当前仍为 schema 16。
+先读根 `AGENTS.md`、`CONTEXT.md`、[主方案](SERVER_MODE_FEASIBILITY_RESEARCH.md)、[管理合同与验收](SERVER_MODE_API_RESEARCH.md)。按正在修改的领域读取现有 ADR 和相应 UI/插件文档，不要求通读所有 docs。主方案“已撤回实验”只提供历史证据，不存在可直接依赖的 V17 上传实现；正式 schema 17 只含身份/writer/回执与影片 `generation`/`revision`，图片交割仍是 S06。
 
 ## 已确认、不可自行改变的范围
 
@@ -55,6 +55,7 @@
 | S02D | 本地架构门槛已验证；剩余 scan/scrape/agent/player/NFO IPC 仍走桌面单例 | 见本文件 S02D 实施记录 |
 | S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
 | S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
+| S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -392,6 +393,23 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 实现操作编号/摘要持久回执、聚合版本、正式入队边界；最终提交再次校验 epoch。先贯通影片编辑，再推广。事务内先鉴权和查旧回执，再判断 revision，保证成功重试不被自身版本改变拒绝。查询回执仍需当前授权。回执生命周期、批量部分结果及错误恢复按管理合同执行。
 
 同步让 LocalCatalogBackend 使用 library 中真实的业务 revision 与提交结果；不可长期保留“本地忽略 expectedRevision”的旁路。本地无需远程 writer 协议，业务冲突与图片原子提交语义仍应一致。S02D 中仅定义、尚无持久实现的合同项必须在本阶段补齐，再进行双后端一致性验证。
+
+**S05 实施记录（身份、写入版本、认主与安全重试）**
+
+- 范围：正式 schema 17 增加 `catalog_identity` / `catalog_writer_credentials` / `catalog_one_time_tokens` / `catalog_writer_claims` / `catalog_operation_receipts`，以及 `videos.generation`/`revision`（无 revision 触发器；仅 `editVideoRecord` 最终 `updated_at` 更新显式 `revision + 1`）。`hasOfficialSchema17` 要求五张协议表；`videos` 存在时才要求 generation/revision，避免无 videos 的 V14 夹具被误判。未发布实验 V17（缺 `catalog_identity`）与 V18 仍拒绝且不改写。library 实现握手、一次性令牌、领取（含维护等待不消耗令牌）、writer 鉴权、`commitCatalogMutation` 幂等回执与 `assertExpectedVideoVersion`。Node 宿主注册 `/manage/v1`（JSON 1 MiB）；桌面 LAN 浏览省略 `manage` 保持 404。CLI `bind`/`recover` 向 stdout 打印一次性明文，库内只存摘要；`JAVDEX_BOOTSTRAP_TOKEN` 仅未认主时有效。本地 `videos.edit` 走同一回执/版本路径（`writerEpoch: 0`）；页面经 `expectedVideoVersion` 提交 GET 读到的 V。writer 秘密写入加密 `writer-secrets.json`，安全存储不可用时拒绝，不回退 `this-computer.json`。
+- 工程默认：浏览门闸改为 `writerEpoch > 0`，不再使用 `instance-bind.json`。浏览器 Cookie 不进入 manage dispatch。`writer.recoverIssue` 合同为 `publicHandshake`，本阶段 HTTP 仅环回签发；部署恢复以 CLI 为准。**需用户决定**：是否允许局域网签发恢复令牌。`VIDEO_UPDATE` 兼容入口不带 V，会 `INVALID_INPUT`。`setRating` 等其它 V 变更尚未强制 `expectedVersions`、亦不递增 revision。封面/样张上传引用仍 `UNSUPPORTED_CAPABILITY`（S06）。生产 ESM 包为 bundled CJS（undici）注入 `createRequire`。本地 catalogId 为 UUID；`catalog_id` 长度检查为 36。
+- 验证（Linux Node 22.14 / amd64 glibc；实现提交 `2e53f87` `8d6a8ef` `b0daef8`，后续修复见同分支）：
+  - `npm run server:test` **9 通过 / 0 失败**（含握手、认主后浏览、Cookie 不能管、`videos.edit` 冲突、环回外 recover 拒绝）
+  - 定向 Electron：migrations V14–V17、writer/operations、local backend、writerCredentialStore、webServer、createDesktopRuntime、high-frequency worker **58 通过 / 0 失败**
+  - `npm run typecheck` 通过
+  - `npm run pretest` 通过
+  - `npm run test:packaging` **8 通过**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2973 tests / 2972 pass / 0 fail / 1 skip**
+  - `npm run server:build` 通过；`check:server-production-closure` 通过
+  - `npm run server:smoke:node` **PASS**：隔离生产安装、SQLite/WAL、HTTP、Range 206、会话跨 SIGTERM、writer claim 后门闸、Cookie 不能授权 manage
+  - `npm run server:smoke` **EXIT 1**：`docker is not available`（按设计非零）
+  - `npm run desktop:build` 通过
+- 未做：S06 上传表与图片交割；S07 RemoteCatalogBackend 与 D01–D07 远程监测；M01 管理/网页对象范围对照（网页 Cookie 调 manage 已拒绝）；M03 评分后改标题（`setRating` 尚未纳入 V）；M05 上传/任务入队边界；M06 已受理扫描穿越（交接等待已覆盖 running scan）。Docker 容器烟测仍缺。下一阶段不得把 mock 或研究探针当作真实部署/回放证据。
 
 ### S06：图片上传、提交和恢复
 

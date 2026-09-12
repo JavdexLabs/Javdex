@@ -13,8 +13,15 @@ function v15() {
   return db
 }
 function snapshot(db: Database.Database) {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name <> 'agent_resource_cleanup' ORDER BY name").all() as { name: string }[]
-  return tables.map(({ name }) => ({ name, rows: db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all() }))
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name <> 'agent_resource_cleanup' ORDER BY name").all() as { name: string }[]
+  return tables.map(({ name }) => ({
+    name,
+    rows: (db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all() as Array<Record<string, unknown>>).map((row) => {
+      if (name !== 'videos') return row
+      const { generation: _generation, revision: _revision, ...rest } = row
+      return rest
+    })
+  }))
 }
 function columns(db: Database.Database) {
   return (db.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name)
@@ -25,7 +32,7 @@ it('upgrades V15 without changing any business rows or other schema and matches 
   const fresh = new Database(':memory:')
   try {
     const before = snapshot(db)
-    const schema = () => db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' ORDER BY name").all()
+    const schema = () => db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' AND name <> 'videos' AND name <> 'trg_videos_revision_after_update' ORDER BY name").all()
     const oldSchema = schema()
     migrateDatabase(db)
     assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)

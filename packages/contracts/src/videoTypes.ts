@@ -121,6 +121,8 @@ export interface Video {
   last_scraped_at: string | null
   updated_at: string | null
   add_time: string
+  generation?: number
+  revision?: number
   primary_resource_kind?: VideoResourceKind | null
   resource_count?: number
   /** Primary kind first, followed by each remaining kind at most once. */

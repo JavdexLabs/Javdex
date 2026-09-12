@@ -34,3 +34,20 @@ export const VERSION_SCOPE_MEANING: Record<VersionScope, string> = {
   G: 'One root-binding config; live file guard is checked separately',
   Q: 'One pending record or atomic confirmation group'
 }
+
+export function expectedVideoVersion(video: {
+  generation?: number | null
+  revision?: number | null
+}): ExpectedVersions {
+  if (
+    video.generation == null ||
+    video.revision == null ||
+    !Number.isInteger(video.generation) ||
+    !Number.isInteger(video.revision) ||
+    video.generation < 1 ||
+    video.revision < 1
+  ) {
+    throw new Error('影片缺少版本信息，请刷新后重试')
+  }
+  return { V: { generation: video.generation, revision: video.revision } }
+}

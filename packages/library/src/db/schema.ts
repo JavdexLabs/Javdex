@@ -987,6 +987,60 @@ CREATE INDEX IF NOT EXISTS idx_agent_metadata_draft_resources_draft
     ON agent_metadata_draft_resources(draft_id, field, position);
 `
 
+/** Catalog identity, writer credentials, one-time tokens, claims, and operation receipts. */
+export const CATALOG_PROTOCOL_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS catalog_identity (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    catalog_id TEXT NOT NULL CHECK (length(catalog_id) = 36),
+    server_id TEXT CHECK (server_id IS NULL OR length(server_id) = 36),
+    writer_epoch INTEGER NOT NULL DEFAULT 0 CHECK (writer_epoch >= 0),
+    frozen INTEGER NOT NULL DEFAULT 0 CHECK (frozen IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS catalog_writer_credentials (
+    writer_epoch INTEGER PRIMARY KEY CHECK (writer_epoch > 0),
+    secret_digest TEXT NOT NULL CHECK (length(secret_digest) = 64),
+    claim_id TEXT NOT NULL CHECK (length(claim_id) = 36),
+    created_at TEXT NOT NULL,
+    superseded_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS catalog_one_time_tokens (
+    token_digest TEXT PRIMARY KEY CHECK (length(token_digest) = 64),
+    kind TEXT NOT NULL CHECK (kind IN ('initialBind', 'handoff', 'deployRecover')),
+    expires_at TEXT NOT NULL,
+    issued_at TEXT NOT NULL,
+    consumed_at TEXT,
+    claim_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_one_time_tokens_kind
+    ON catalog_one_time_tokens(kind, consumed_at);
+
+CREATE TABLE IF NOT EXISTS catalog_writer_claims (
+    claim_id TEXT PRIMARY KEY CHECK (length(claim_id) = 36),
+    kind TEXT NOT NULL CHECK (kind IN ('initialBind', 'handoff', 'deployRecover')),
+    candidate_secret_digest TEXT NOT NULL CHECK (length(candidate_secret_digest) = 64),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'waitingMaintenance', 'consumed', 'expired', 'superseded')),
+    writer_epoch INTEGER,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS catalog_operation_receipts (
+    operation_id TEXT PRIMARY KEY CHECK (length(operation_id) = 36),
+    request_digest TEXT NOT NULL CHECK (length(request_digest) = 64),
+    operation TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('applied', 'rejected', 'acceptedTask')),
+    writer_epoch INTEGER NOT NULL,
+    result_json TEXT,
+    error_code TEXT,
+    created_at TEXT NOT NULL
+);
+`
+
 /**
  * Foreground-only playlist import staging. TEMP tables are scoped to the current SQLite
  * connection, so an unfinished import cannot survive an application restart.
@@ -1198,6 +1252,8 @@ CREATE TABLE IF NOT EXISTS videos (
     last_scraped_at TEXT,
     updated_at TEXT,
     add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    generation INTEGER NOT NULL DEFAULT 1 CHECK(generation > 0),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
     FOREIGN KEY (maker_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (publisher_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE SET NULL,
@@ -1464,6 +1520,8 @@ ${MEDIA_LIBRARY_SCAN_SCHEMA_SQL}
 ${SCAN_AUDIT_ENTRIES_SCHEMA_SQL}
 
 ${RELATED_LINKS_SCHEMA_SQL}
+
+${CATALOG_PROTOCOL_SCHEMA_SQL}
 
 ${AGENT_PLATFORM_SCHEMA_SQL}
 

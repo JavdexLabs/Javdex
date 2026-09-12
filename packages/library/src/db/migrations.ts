@@ -10,6 +10,7 @@ import {
   AGENT_METADATA_SCHEMA_SQL,
   AGENT_PLATFORM_SCHEMA_SQL,
   AGENT_RESOURCE_CLEANUP_SCHEMA_SQL,
+  CATALOG_PROTOCOL_SCHEMA_SQL,
   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
   MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
@@ -24,7 +25,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 16
+export const CURRENT_SCHEMA_VERSION = 17
 
 type Migration = {
   version: number
@@ -43,6 +44,38 @@ function tableExists(database: Database.Database, table: string): boolean {
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
       .get(table)
   )
+}
+
+function hasOfficialSchema17(database: Database.Database): boolean {
+  if (
+    !tableExists(database, 'catalog_identity') ||
+    !tableExists(database, 'catalog_writer_credentials') ||
+    !tableExists(database, 'catalog_one_time_tokens') ||
+    !tableExists(database, 'catalog_writer_claims') ||
+    !tableExists(database, 'catalog_operation_receipts')
+  ) {
+    return false
+  }
+  // Incomplete V14 fixtures may lack videos; official 17 only requires
+  // generation/revision when the table exists.
+  if (!tableExists(database, 'videos')) return true
+  const videos = columnNames(database, 'videos')
+  return videos.has('generation') && videos.has('revision')
+}
+
+function migrateToV17(database: Database.Database): void {
+  database.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
+  const videos = columnNames(database, 'videos')
+  if (videos.size > 0 && !videos.has('generation')) {
+    database.exec(
+      'ALTER TABLE videos ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK(generation > 0)'
+    )
+  }
+  if (videos.size > 0 && !videos.has('revision')) {
+    database.exec(
+      'ALTER TABLE videos ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0)'
+    )
+  }
 }
 
 function migrateToV2(database: Database.Database): void {
@@ -1383,6 +1416,10 @@ const MIGRATIONS: Migration[] = [
       database.exec('CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id,origin)')
       database.exec(SCAN_AUDIT_ENTRIES_SCHEMA_SQL)
     }
+  },
+  {
+    version: 17,
+    migrate: migrateToV17
   }
 ]
 
@@ -1407,6 +1444,12 @@ export function migrateDatabase(database: Database.Database): void {
     if (additions.length === 1 && additions[0].name === 'agent_resource_cleanup') {
       throw new Error('Database uses an unreleased schema 16 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.')
     }
+  }
+  // Withdrawn experimental V17/V18 snapshots must keep failing even after official 17 ships.
+  if (current === 17 && !hasOfficialSchema17(database)) {
+    throw new Error(
+      'Database uses an unreleased schema 17 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.'
+    )
   }
   if (current === 0) {
     database.transaction(() => {

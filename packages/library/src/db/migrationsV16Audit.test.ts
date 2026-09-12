@@ -65,18 +65,41 @@ function v15(): Database.Database {
   } catch (error) { db.close(); throw error }
 }
 
+function legacyRows(after: ReturnType<typeof snapshot>, before: ReturnType<typeof snapshot>) {
+  return before.map((prev, index) => {
+    const next = after[index]
+    return {
+      name: prev.name,
+      rows: next.rows.map((row, rowIndex) => {
+        const original = prev.rows[rowIndex] as Record<string, unknown>
+        const current = row as Record<string, unknown>
+        return Object.fromEntries(Object.keys(original).map((key) => [key, current[key]]))
+      })
+    }
+  })
+}
+
+function comparableSchema(db: Database.Database): SchemaRow[] {
+  return schema(db).map((row) => {
+    if (row.name !== 'videos' || row.type !== 'table') return row
+    const columns = (db.pragma('table_info(videos)') as Array<{ cid: number; name: string; type: string }>)
+      .map((column) => `${column.cid}:${column.name}:${column.type}`)
+      .join(',')
+    return { ...row, sql: columns }
+  })
+}
+
 function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot>) {
   migrateDatabase(db)
-  assert.equal(CURRENT_SCHEMA_VERSION, 16)
-  assert.equal(db.pragma('user_version', { simple: true }), 16)
-  assert.deepEqual(snapshot(db, before.map(table => table.name)), before)
+  assert.equal(CURRENT_SCHEMA_VERSION, 17)
+  assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+  assert.deepEqual(legacyRows(snapshot(db, before.map(table => table.name)), before), before)
   checkIntegrity(db)
   const fresh = new Database(':memory:')
   try {
     fresh.pragma('foreign_keys = ON')
     fresh.exec(SCHEMA_SQL)
-    // Compare all tables, explicit indexes and triggers, including unchanged legacy definitions.
-    assert.deepEqual(schema(db), schema(fresh))
+    assert.deepEqual(comparableSchema(db), comparableSchema(fresh))
   } finally { fresh.close() }
 }
 
@@ -90,11 +113,24 @@ it('adds combined V16 to the released V15 schema without rewriting any legacy da
     assertUpgrade(db, before)
     assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
     const added = schema(db).filter(row => !oldSchema.some(old => old.name === row.name))
-    assert.equal(added.filter(row => row.type === 'table').length, 3)
+    const addedTables = added.filter(row => row.type === 'table').map(row => row.name).sort()
+    assert.deepEqual(addedTables, [
+      'agent_resource_cleanup',
+      'catalog_identity',
+      'catalog_one_time_tokens',
+      'catalog_operation_receipts',
+      'catalog_writer_claims',
+      'catalog_writer_credentials',
+      'library_scan_audit_entries',
+      'library_scan_audit_manifests'
+    ])
     for (const table of added.filter(row => row.type === 'table')) {
       assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${quote(table.name)}`).get() as { n: number }).n, 0)
     }
-    assert.deepEqual(schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && oldSchema.some(old => old.name === row.name)), oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id'))
+    assert.deepEqual(
+      schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && oldSchema.some(old => old.name === row.name)),
+      oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos')
+    )
     assert.deepEqual(auditBytes(), originalBytes)
     // A second startup must remain data- and schema-idempotent.
     assertUpgrade(db, before)

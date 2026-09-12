@@ -1620,7 +1620,7 @@ export function editVideoRecord(
       replaceRelatedLinks(db, 'video_links', 'video_id', id, input.links)
     }
 
-    db.prepare('UPDATE videos SET updated_at = ? WHERE id = ?').run(nowIso(), id)
+    db.prepare('UPDATE videos SET updated_at = ?, revision = revision + 1 WHERE id = ?').run(nowIso(), id)
 
     // Promote to "scraped" once it has a title.
     const row = db.prepare('SELECT title FROM videos WHERE id = ?').get(id) as

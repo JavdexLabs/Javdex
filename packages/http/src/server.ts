@@ -120,6 +120,7 @@ export class WebServer {
   private sessions: WebSessions
   private pairLimiter = new LoginLimiter()
   private limiter = new LoginLimiter()
+  private browserSurfaceEnabled = true
   constructor(
     private readonly options: {
       username: string
@@ -155,9 +156,19 @@ export class WebServer {
   get devices() {
     return this.sessions.list()
   }
+  get browserEnabled(): boolean {
+    return this.browserSurfaceEnabled
+  }
+  setBrowserEnabled(enabled: boolean): void {
+    this.browserSurfaceEnabled = enabled
+    if (!enabled) this.pairing.clear()
+  }
   removeDevice(id: string): void {
     this.sessions.remove(id)
     this.closeDevice(id)
+  }
+  renameDevice(id: string, name: string): void {
+    this.sessions.rename(id, name)
   }
   revokeSessions(): void {
     this.sessions.clear()
@@ -284,6 +295,9 @@ export class WebServer {
       }
       json(response, status, payload)
       return
+    }
+    if (!this.browserSurfaceEnabled) {
+      throw new WebError(404, '浏览入口已关闭')
     }
     if (method === 'POST') {
       if (

@@ -1026,6 +1026,42 @@ describe('server runtime lifecycle', () => {
       assert.equal(pendingScan.status, 200)
       assert.equal(Array.isArray(pendingScan.json), true)
 
+      const browserOn = (await remote.browser.status({})) as { enabled?: boolean; pairingUntil?: number }
+      assert.equal(browserOn.enabled, true)
+      await remote.browser.setEnabled(
+        { enabled: false },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )
+      const helloOff = await postManage(base, 'handshake.get', { input: {} }, { appVersion: '' })
+      assert.equal(helloOff.status, 200)
+      assert.equal(
+        (helloOff.json as { capabilities?: { browserEnabled?: boolean } }).capabilities?.browserEnabled,
+        false
+      )
+      const loginOff = await login(base, password, true)
+      assert.equal(loginOff.status, 404)
+      assert.equal(
+        JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-surface.json'), 'utf8')).enabled,
+        false
+      )
+      const manageWhileOff = await postManage(
+        base,
+        'home.search',
+        { serverId: writer.serverId, catalogId: writer.catalogId, input: { search: 'S08-LOOP' } },
+        { bearer: writer.secret }
+      )
+      assert.equal(manageWhileOff.status, 200)
+      await remote.browser.setEnabled(
+        { enabled: true },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )
+      const opened = (await remote.browser.pairOpen(
+        {},
+        { operationId: randomUUID(), expectedVersions: {} }
+      )) as { pairingUntil?: number }
+      assert.equal(typeof opened.pairingUntil, 'number')
+      assert.ok((opened.pairingUntil ?? 0) > Date.now())
+
       const cookie = (await login(base, password, true)).cookie
       const cookieSearch = await postManage(
         base,

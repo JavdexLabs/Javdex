@@ -33,7 +33,33 @@ import { getLlmSecretStorageState } from '../settings/llmSecretStore'
 import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
 import { ModelManagementError, modelManagement } from '../agent-platform/modelManagement'
 import type { CatalogBackend } from '../application/catalogBackend'
+import { ipcMutation } from '../application/mutationContext'
 import { structuredError } from '@shared/protocol/errors'
+import type { WebAccessStatus, WebDevice } from '@shared/webTypes'
+
+function mapRemoteBrowserStatus(value: unknown): WebAccessStatus {
+  const row = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const devices = Array.isArray(row.devices) ? (row.devices as WebDevice[]) : []
+  const pairingActivity = Array.isArray(row.pairingActivity)
+    ? (row.pairingActivity as WebAccessStatus['pairingActivity'])
+    : []
+  const urls = Array.isArray(row.urls)
+    ? row.urls.filter((item): item is string => typeof item === 'string')
+    : []
+  return {
+    enabled: row.enabled === true,
+    running: row.running === true || row.enabled === true,
+    port: typeof row.port === 'number' ? row.port : 0,
+    username: typeof row.username === 'string' ? row.username : '',
+    hasPassword: row.hasPassword === true,
+    urls,
+    devices,
+    pairingUntil: typeof row.pairingUntil === 'number' ? row.pairingUntil : 0,
+    pairingActivity,
+    sessions: typeof row.sessions === 'number' ? row.sessions : 0,
+    error: typeof row.error === 'string' ? row.error : null
+  }
+}
 
 function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   const {
@@ -66,37 +92,68 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
     }
   }
 
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, () => {
-    requireLocalCatalog('管理本机网页配对')
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.pairOpen({}, ipcMutation()))
+    }
     return webAccess.openPairing()
   })
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, (code) => {
-    requireLocalCatalog('管理本机网页配对')
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, async (code) => {
+    if (backend.mode === 'remote') {
+      return backend.browser.pairInspect({ code })
+    }
     return webAccess.inspectPair(code)
   })
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, (code, approve) => {
-    requireLocalCatalog('管理本机网页配对')
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, async (code, approve) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(
+        await backend.browser.pairDecide(
+          { code, decision: approve ? 'approve' : 'deny' },
+          ipcMutation()
+        )
+      )
+    }
     return webAccess.decidePair(code, approve)
   })
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, (id) => {
-    requireLocalCatalog('管理本机网页设备')
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, async (id) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.deviceRemove({ deviceId: id }, ipcMutation()))
+    }
     return webAccess.removeDevice(id)
   })
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, (id, name) => {
-    requireLocalCatalog('管理本机网页设备')
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, async (id, name) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(
+        await backend.browser.deviceRename({ deviceId: id, name }, ipcMutation())
+      )
+    }
     return webAccess.renameDevice(id, name)
   })
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, () => {
-    requireLocalCatalog('管理本机网页设备')
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.revokeSessions({}, ipcMutation()))
+    }
     return webAccess.resetDevices()
   })
-  appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, () => webAccess.status())
-  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => {
+  appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.status({}))
+    }
+    return webAccess.status()
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, async (input) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(
+        await backend.browser.setEnabled({ enabled: input.enabled }, ipcMutation())
+      )
+    }
     requireLocalCatalog('在本机启动网页服务')
     return webAccess.apply(input)
   })
-  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => {
-    requireLocalCatalog('撤销本机网页会话')
+  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.revokeSessions({}, ipcMutation()))
+    }
     return webAccess.revoke()
   })
   appCommandAdapter.register(IPC.SETTINGS_GET, (): SettingsSnapshot => toSettingsSnapshot(getSettings()))

@@ -64,6 +64,7 @@ import type {
 } from '@shared/mediaLibraryTypes'
 import type { PlaylistListQuery, PlaylistPageQuery } from '@shared/playlistTypes'
 import { remainderHandlers } from './manageCatalogRemainder'
+import { requireManageBrowserSurface } from './manageBrowser'
 
 export interface ManageEnvelope {
   serverId?: string
@@ -781,6 +782,41 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'libraries.deletePreview'(args) {
     const input = args.envelope.input as { libraryId: number }
     return runLibrary(() => mediaLibraries.previewRemoval(input.libraryId))
+  },
+  'browser.status'() {
+    return requireManageBrowserSurface().status()
+  },
+  'browser.setEnabled'(args) {
+    const input = args.envelope.input as { enabled: boolean }
+    return commit(args, () => requireManageBrowserSurface().setEnabled(input.enabled))
+  },
+  'browser.pairOpen'(args) {
+    return commit(args, () => requireManageBrowserSurface().pairOpen())
+  },
+  'browser.pairInspect'(args) {
+    const input = args.envelope.input as { code: string }
+    return requireManageBrowserSurface().pairInspect(input.code)
+  },
+  'browser.pairDecide'(args) {
+    const input = args.envelope.input as { code: string; decision: 'approve' | 'deny' }
+    return commit(args, () =>
+      requireManageBrowserSurface().pairDecide(input.code, input.decision === 'approve')
+    )
+  },
+  'browser.deviceRemove'(args) {
+    const input = args.envelope.input as { deviceId: string }
+    return commit(args, () => requireManageBrowserSurface().deviceRemove(input.deviceId))
+  },
+  'browser.deviceRename'(args) {
+    const input = args.envelope.input as { deviceId: string; name: string }
+    return commit(args, () => requireManageBrowserSurface().deviceRename(input.deviceId, input.name))
+  },
+  'browser.deviceReset'(args) {
+    const input = args.envelope.input as { deviceId: string }
+    return commit(args, () => requireManageBrowserSurface().deviceReset(input.deviceId))
+  },
+  'browser.revokeSessions'(args) {
+    return commit(args, () => requireManageBrowserSurface().revokeSessions())
   },
   ...remainderHandlers
 }

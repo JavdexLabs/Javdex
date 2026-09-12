@@ -46,6 +46,7 @@ import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import { SERVER_APP_VERSION } from './appVersion'
 import { CATALOG_NOT_HANDLED, dispatchCatalogManage } from './manageCatalogHandlers'
+import { readManageBrowserEnabled } from './manageBrowser'
 
 interface ManageEnvelope {
   serverId?: string
@@ -135,7 +136,10 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
   const meta = MANAGE_OPERATIONS[operation]
   if (operation === 'handshake.get') {
     parseEnvelope('handshake.get', context.body)
-    return readHandshake({ appVersion: SERVER_APP_VERSION, browserEnabled: true }, database)
+    return readHandshake(
+      { appVersion: SERVER_APP_VERSION, browserEnabled: readManageBrowserEnabled() },
+      database
+    )
   }
   if (operation === 'writer.claim') {
     const parsed = parseEnvelope('writer.claim', context.body)

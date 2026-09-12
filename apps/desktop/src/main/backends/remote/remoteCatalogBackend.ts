@@ -713,7 +713,18 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       }
     },
     nfo: rejectSlice(NFO_KEYS, (key) => unsupported(`nfo.${String(key)}`)),
-    browser: rejectSlice(BROWSER_KEYS, (key) => unsupported(`browser.${String(key)}`)),
+    browser: {
+      ...rejectSlice(BROWSER_KEYS, (key) => unsupported(`browser.${String(key)}`)),
+      status: (input, ctx) => query('browser.status', input ?? {}, ctx?.signal),
+      setEnabled: m('browser.setEnabled'),
+      pairOpen: m('browser.pairOpen'),
+      pairInspect: q('browser.pairInspect'),
+      pairDecide: m('browser.pairDecide'),
+      deviceRemove: m('browser.deviceRemove'),
+      deviceRename: m('browser.deviceRename'),
+      deviceReset: m('browser.deviceReset'),
+      revokeSessions: m('browser.revokeSessions')
+    },
     tasks: {
       ...rejectSlice(TASK_KEYS, (key) => unsupported(`tasks.${String(key)}`)),
       async getOperation(input, ctx) {

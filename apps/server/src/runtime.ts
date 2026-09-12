@@ -17,6 +17,11 @@ import { assertSharpDecode } from './imageCodec'
 import { dispatchManageOperation, putManageUpload } from './manageDispatch'
 import { SERVER_APP_VERSION } from './appVersion'
 import { WebCatalogWorkerClient } from './webCatalogWorkerClient'
+import {
+  setManageBrowserSurface,
+  type ManageBrowserStatus,
+  type ManageBrowserSurface
+} from './manageBrowser'
 
 export interface JavdexServerHandle {
   port: number
@@ -26,6 +31,82 @@ export interface JavdexServerHandle {
 
 export function defaultWebCatalogWorkerEntry(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), 'webCatalogWorker.js')
+}
+
+const BROWSER_SURFACE_FILE = 'browser-surface.json'
+
+function loadBrowserEnabled(dataDir: string): boolean {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(dataDir, BROWSER_SURFACE_FILE), 'utf8')
+    ) as { enabled?: unknown }
+    return raw.enabled !== false
+  } catch {
+    return true
+  }
+}
+
+function persistBrowserEnabled(dataDir: string, enabled: boolean): void {
+  fs.writeFileSync(path.join(dataDir, BROWSER_SURFACE_FILE), JSON.stringify({ enabled }), {
+    mode: 0o600
+  })
+}
+
+function createBrowserSurface(
+  http: WebServer,
+  config: ServerConfig,
+  port: number
+): ManageBrowserSurface {
+  const status = (): ManageBrowserStatus => ({
+    enabled: http.browserEnabled,
+    running: http.browserEnabled,
+    port,
+    username: config.web.username,
+    hasPassword: true,
+    urls: (config.accessHosts.length > 0 ? config.accessHosts : ['127.0.0.1']).map(
+      (host) => `http://${host}:${port}`
+    ),
+    devices: http.devices,
+    pairingUntil: http.pairing.enabledUntil,
+    pairingActivity: http.pairing.activity(),
+    sessions: http.sessionCount,
+    error: null
+  })
+  return {
+    status,
+    setEnabled(enabled) {
+      http.setBrowserEnabled(enabled)
+      persistBrowserEnabled(config.dataDir, enabled)
+      return status()
+    },
+    pairOpen() {
+      http.pairing.open()
+      return status()
+    },
+    pairInspect(code) {
+      return http.pairing.inspect(code)
+    },
+    pairDecide(code, approve) {
+      http.pairing.decide(code, approve)
+      return status()
+    },
+    deviceRemove(id) {
+      http.removeDevice(id)
+      return status()
+    },
+    deviceRename(id, name) {
+      http.renameDevice(id, name)
+      return status()
+    },
+    deviceReset(id) {
+      http.removeDevice(id)
+      return status()
+    },
+    revokeSessions() {
+      http.revokeSessions()
+      return status()
+    }
+  }
 }
 
 export async function startJavdexServer(
@@ -44,6 +125,7 @@ export async function startJavdexServer(
   let ready = false
   let stopping = false
   const fail = async (error: unknown): Promise<never> => {
+    setManageBrowserSurface(null)
     try {
       await http?.stop()
     } catch {
@@ -95,7 +177,9 @@ export async function startJavdexServer(
         putUpload: (context) => putManageUpload(context, database)
       }
     })
+    http.setBrowserEnabled(loadBrowserEnabled(config.dataDir))
     const port = await http.start(config.port, config.listenHost)
+    setManageBrowserSurface(createBrowserSurface(http, config, port))
     ready = true
     return {
       port,
@@ -106,6 +190,7 @@ export async function startJavdexServer(
         try {
           await http?.stop()
         } finally {
+          setManageBrowserSurface(null)
           await worker?.dispose()
           closeDatabase()
           lock.release()

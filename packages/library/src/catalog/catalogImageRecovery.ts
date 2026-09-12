@@ -3,8 +3,7 @@ import path from 'node:path'
 import type Database from 'better-sqlite3'
 import { UPLOAD_TTL_MS } from '@shared/protocol/limits'
 import { getDb } from '@library/db/database'
-import { resolveAssetPath } from '@library/mediaAssetStore/filesystem'
-import { isUsableImageBuffer, readImageDimensionsFromBuffer } from '@library/mediaAssetStore/imageBytes'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { listFormallyReferencedImagePaths } from './catalogImageRefs'
 import { maybeCrashImageFlow } from './catalogImageCrash'
 import {
@@ -29,7 +28,7 @@ interface JobRow {
 
 function unlinkIfPresent(relPath: string): void {
   try {
-    const abs = resolveAssetPath(relPath)
+    const abs = mediaAssetStore.resolve(relPath)
     if (fs.existsSync(abs)) fs.unlinkSync(abs)
   } catch {
     // Paths that escape the media root are ignored; recovery must not throw.
@@ -39,7 +38,7 @@ function unlinkIfPresent(relPath: string): void {
 function fileExists(relPath: string | null | undefined): boolean {
   if (!relPath) return false
   try {
-    return fs.existsSync(resolveAssetPath(relPath))
+    return fs.existsSync(mediaAssetStore.resolve(relPath))
   } catch {
     return false
   }
@@ -52,9 +51,9 @@ function markUploadReadyFromFile(
   nowIso: string
 ): boolean {
   if (!fileExists(readyRel)) return false
-  const bytes = fs.readFileSync(resolveAssetPath(readyRel))
-  if (!isUsableImageBuffer(bytes)) return false
-  const dimensions = readImageDimensionsFromBuffer(bytes)
+  const bytes = fs.readFileSync(mediaAssetStore.resolve(readyRel))
+  if (!mediaAssetStore.isUsableImageBuffer(bytes)) return false
+  const dimensions = mediaAssetStore.readImageDimensions(bytes)
   if (!dimensions) return false
   database
     .prepare(
@@ -129,8 +128,8 @@ function recoverUncommittedPromotes(
     if (upload?.status === 'consumed' && target && referenced.has(target)) {
       if (!fileExists(target) && fileExists(job.rel_path)) {
         try {
-          fs.mkdirSync(path.dirname(resolveAssetPath(target)), { recursive: true })
-          fs.copyFileSync(resolveAssetPath(job.rel_path), resolveAssetPath(target))
+          fs.mkdirSync(path.dirname(mediaAssetStore.resolve(target)), { recursive: true })
+          fs.copyFileSync(mediaAssetStore.resolve(job.rel_path), mediaAssetStore.resolve(target))
         } catch {
           // Leave the job pending; a later recovery pass retries.
           continue

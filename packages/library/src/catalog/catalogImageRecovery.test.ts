@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
-import { resolveAssetPath } from '@library/mediaAssetStore/filesystem'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { ensureCatalogIdentity } from './catalogIdentity'
 import {
   completeCatalogUploadFromBuffer,
@@ -80,7 +80,7 @@ describe('catalog image recovery', () => {
     ).cover_path
     insertImageFileJob({ kind: 'deleteReplaced', relPath: cover })
     recoverCatalogImages(getDb())
-    assert.equal(fs.existsSync(resolveAssetPath(cover)), true)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(cover)), true)
     assert.equal(listFormallyReferencedImagePaths(getDb()).has(cover), true)
 
     const pending = createCatalogUpload({
@@ -97,6 +97,6 @@ describe('catalog image recovery', () => {
     const staged = applyPendingScrapeStagingRef(pending.uploadId, randomUUID())
     assert.ok(staged.stagedPath.startsWith(`${PENDING_SCRAPE_STAGING_DIRNAME}/`))
     recoverCatalogImages(getDb(), new Date(Date.now() + 48 * 60 * 60 * 1000))
-    assert.equal(fs.existsSync(resolveAssetPath(staged.stagedPath)), true)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(staged.stagedPath)), true)
   })
 })

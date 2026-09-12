@@ -17,7 +17,7 @@ import {
   UPLOAD_DIRNAME
 } from './catalogUploads'
 import { recoverCatalogImages } from './catalogImageRecovery'
-import { assetsRoot } from '@library/mediaAssetStore/filesystem'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 let root: string | null = null
 
@@ -108,7 +108,7 @@ describe('catalog image uploads', () => {
     recoverCatalogImages(getDb())
     const row = readCatalogUpload(created.uploadId)!
     assert.ok(row.status === 'discarding' || row.status === 'expired')
-    const abs = path.join(assetsRoot(), row.relPath ?? `${UPLOAD_DIRNAME}/${created.uploadId}.part`)
+    const abs = path.join(mediaAssetStore.rootPath(), row.relPath ?? `${UPLOAD_DIRNAME}/${created.uploadId}.part`)
     assert.equal(fs.existsSync(abs), false)
   })
 })

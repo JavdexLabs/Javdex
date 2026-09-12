@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 export { AssetReadQueueFullError } from './mediaAssetStore/readQueue'
 export { AssetReadTooLargeError, MAX_ASSET_READ_BYTES } from './mediaAssetStore/boundedRead'
-export { AssetPixelLimitError, MAX_ASSET_PIXELS } from './mediaAssetStore/pixelBudget'
+export { AssetPixelLimitError, inspectServedImage, MAX_ASSET_PIXELS } from './mediaAssetStore/pixelBudget'
 import type { ImageThumbnailSize } from '@shared/imageVariants'
 import {
   assetsRoot,
@@ -24,7 +24,8 @@ import {
   readAssetBytes,
   readAssetForServe,
   readAssetForServeAsync,
-  resolveAssetPath
+  resolveAssetPath,
+  writeAtomic
 } from './mediaAssetStore/filesystem'
 import {
   avatarSourceFingerprint,
@@ -178,6 +179,11 @@ export class MediaAssetStore {
 
   resolve(storedPath: string): string {
     return resolveAssetPath(storedPath)
+  }
+
+  writeAtomic(destAbs: string, buffer: Buffer): void {
+    this.assertMutationAllowed()
+    writeAtomic(destAbs, buffer)
   }
 
   inspectImage(relPath: string | null | undefined) {

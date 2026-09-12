@@ -6,7 +6,6 @@ import { structuredError } from '@shared/protocol/errors'
 import { createAvatarCropV1 } from '@shared/avatarCrop'
 import { getDb } from '@library/db/database'
 import { mediaAssetStore } from '@library/mediaAssetStore'
-import { resolveAssetPath, writeAtomic } from '@library/mediaAssetStore/filesystem'
 import { addVideoSampleAsset } from '@library/db/videoRepo'
 import { addActressGalleryAsset, getActressAvatarRecord, updateActressAvatarRecord } from '@library/db/actressRepo'
 import { createPlaylistRecord, getPlaylistById, updatePlaylistRecord } from '@library/db/playlistRepo'
@@ -557,9 +556,9 @@ export function applyPendingScrapeStagingRef(
     (bytes, upload) => {
       ensureUploadDirs()
       const rel = pendingScrapeRel(upload.uploadId, extensionFromUpload(upload))
-      const abs = resolveAssetPath(rel)
+      const abs = mediaAssetStore.resolve(rel)
       fs.mkdirSync(path.dirname(abs), { recursive: true })
-      writeAtomic(abs, bytes)
+      mediaAssetStore.writeAtomic(abs, bytes)
       return rel
     },
     operationId,

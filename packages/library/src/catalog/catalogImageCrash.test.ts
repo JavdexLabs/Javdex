@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
-import { resolveAssetPath } from '@library/mediaAssetStore/filesystem'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { ensureCatalogIdentity, type CatalogIdentityState } from './catalogIdentity'
 import {
   completeCatalogUploadFromBuffer,
@@ -217,7 +217,7 @@ describe('catalog image crash recovery', () => {
         cover_path: string
       }
       assert.notEqual(cover.cover_path, previous, point)
-      assert.equal(fs.existsSync(resolveAssetPath(cover.cover_path)), true, point)
+      assert.equal(fs.existsSync(mediaAssetStore.resolve(cover.cover_path)), true, point)
     }
   })
 })

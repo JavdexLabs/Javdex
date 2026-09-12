@@ -8,7 +8,6 @@ import sharp from 'sharp'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { isStructuredError } from '@shared/protocol/errors'
 import { addVideoSampleAsset } from '@library/db/videoRepo'
-import { assetsRoot, resolveAssetPath } from '@library/mediaAssetStore/filesystem'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { ensureCatalogIdentity } from './catalogIdentity'
 import { completeCatalogUploadFromBuffer, createCatalogUpload, readCatalogUpload } from './catalogUploads'
@@ -92,7 +91,7 @@ describe('catalog image apply', () => {
     assert.equal(cover.outcome, 'applied')
     const coverPath = (getDb().prepare('SELECT cover_path FROM videos WHERE id = ?').get(videoId) as { cover_path: string }).cover_path
     assert.ok(coverPath.startsWith('covers/'))
-    assert.equal(fs.existsSync(resolveAssetPath(coverPath)), true)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(coverPath)), true)
     assert.equal(readCatalogUpload(coverUpload)?.status, 'consumed')
 
     const afterCover = readVideoAggregateVersion(videoId)!
@@ -254,7 +253,7 @@ describe('catalog image apply', () => {
     const pendingUpload = await readyUpload('pendingScrapeStaging')
     const staged = applyPendingScrapeStagingRef(pendingUpload, randomUUID())
     assert.ok(staged.stagedPath.startsWith(`${PENDING_SCRAPE_STAGING_DIRNAME}/`))
-    assert.equal(fs.existsSync(resolveAssetPath(staged.stagedPath)), true)
-    assert.ok(assetsRoot().includes(root!))
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(staged.stagedPath)), true)
+    assert.ok(mediaAssetStore.rootPath().includes(root!))
   })
 })

@@ -14,9 +14,7 @@ import {
 import type { UploadCreateResult, UploadInspectResult, UploadPurpose } from '@shared/protocol/uploads'
 import { structuredError } from '@shared/protocol/errors'
 import { getDb } from '@library/db/database'
-import { assetsRoot, resolveAssetPath, writeAtomic } from '@library/mediaAssetStore/filesystem'
-import { detectImageExtensionFromBuffer, readImageDimensionsFromBuffer } from '@library/mediaAssetStore/imageBytes'
-import { AssetPixelLimitError, inspectServedImage } from '@library/mediaAssetStore/pixelBudget'
+import { AssetPixelLimitError, inspectServedImage, mediaAssetStore } from '@library/mediaAssetStore'
 import { readCatalogIdentity } from './catalogIdentity'
 import { maybeCrashImageFlow } from './catalogImageCrash'
 
@@ -110,11 +108,11 @@ export function sha256Buffer(data: Buffer): string {
 }
 
 export function uploadsDir(): string {
-  return path.join(assetsRoot(), UPLOAD_DIRNAME)
+  return path.join(mediaAssetStore.rootPath(), UPLOAD_DIRNAME)
 }
 
 export function pendingScrapeStagingDir(): string {
-  return path.join(assetsRoot(), PENDING_SCRAPE_STAGING_DIRNAME)
+  return path.join(mediaAssetStore.rootPath(), PENDING_SCRAPE_STAGING_DIRNAME)
 }
 
 export function ensureUploadDirs(): void {
@@ -338,7 +336,7 @@ export async function completeCatalogUploadFromStream(
   }
   ensureUploadDirs()
   const partRel = uploadPartRel(uploadId)
-  const partAbs = resolveAssetPath(partRel)
+  const partAbs = mediaAssetStore.resolve(partRel)
   const updatedAt = now.toISOString()
   database
     .prepare(
@@ -377,7 +375,7 @@ export async function completeCatalogUploadFromStream(
     throw error
   }
   const data = fs.readFileSync(partAbs)
-  const detectedExt = detectImageExtensionFromBuffer(data)
+  const detectedExt = mediaAssetStore.detectImageExtension(data)
   if (!detectedExt) {
     fs.unlinkSync(partAbs)
     database
@@ -415,15 +413,15 @@ export async function completeCatalogUploadFromStream(
   }
   const ext = extensionForDetectedType(mediaType, row.contentType)
   const readyRel = uploadReadyRel(uploadId, ext)
-  const readyAbs = resolveAssetPath(readyRel)
-  writeAtomic(readyAbs, data)
+  const readyAbs = mediaAssetStore.resolve(readyRel)
+  mediaAssetStore.writeAtomic(readyAbs, data)
   try {
     fs.unlinkSync(partAbs)
   } catch {
     // Part may already be gone after atomic replace on the same path.
   }
   maybeCrashImageFlow('afterWriteFile')
-  const dimensions = readImageDimensionsFromBuffer(data)
+  const dimensions = mediaAssetStore.readImageDimensions(data)
   if (!dimensions) {
     throw structuredError('INVALID_INPUT', '无法读取图片尺寸')
   }
@@ -453,7 +451,7 @@ export function readReadyUploadBytes(upload: CatalogUploadRow): Buffer {
   if (upload.status !== 'ready' || !upload.relPath) {
     throw structuredError('UPLOAD_NOT_READY', '上传尚未完成')
   }
-  const abs = resolveAssetPath(upload.relPath)
+  const abs = mediaAssetStore.resolve(upload.relPath)
   if (!fs.existsSync(abs)) throw structuredError('UPLOAD_NOT_READY', '上传文件缺失')
   return fs.readFileSync(abs)
 }
@@ -570,8 +568,8 @@ export function promoteJournalRel(uploadId: string): string {
 
 export function writePromoteJournal(uploadId: string, destinationRel: string, stagingRel: string): void {
   ensureUploadDirs()
-  writeAtomic(
-    resolveAssetPath(promoteJournalRel(uploadId)),
+  mediaAssetStore.writeAtomic(
+    mediaAssetStore.resolve(promoteJournalRel(uploadId)),
     Buffer.from(JSON.stringify({ destinationRel, stagingRel, uploadId }), 'utf8')
   )
 }
@@ -579,7 +577,7 @@ export function writePromoteJournal(uploadId: string, destinationRel: string, st
 export function readPromoteJournal(
   uploadId: string
 ): { destinationRel: string; stagingRel: string; uploadId: string } | null {
-  const abs = resolveAssetPath(promoteJournalRel(uploadId))
+  const abs = mediaAssetStore.resolve(promoteJournalRel(uploadId))
   if (!fs.existsSync(abs)) return null
   try {
     const parsed = JSON.parse(fs.readFileSync(abs, 'utf8')) as {
@@ -606,7 +604,7 @@ export function readPromoteJournal(
 
 export function removePromoteJournal(uploadId: string): void {
   try {
-    fs.unlinkSync(resolveAssetPath(promoteJournalRel(uploadId)))
+    fs.unlinkSync(mediaAssetStore.resolve(promoteJournalRel(uploadId)))
   } catch {
     // Journal may already be gone after a previous recovery pass.
   }

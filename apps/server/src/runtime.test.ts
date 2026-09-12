@@ -387,4 +387,221 @@ describe('server runtime lifecycle', () => {
     const ready = await fetch(`${second.base}/ready`)
     assert.equal(ready.status, 200)
   })
+
+  async function putUpload(
+    base: string,
+    uploadId: string,
+    body: Buffer,
+    options: { bearer?: string; cookie?: string; contentType?: string; appVersion?: string } = {}
+  ): Promise<{ status: number; json: unknown }> {
+    const headers: Record<string, string> = {
+      Origin: base,
+      'Content-Type': options.contentType ?? 'image/png'
+    }
+    if (options.appVersion !== '') {
+      headers['X-Javdex-App-Version'] = options.appVersion ?? SERVER_APP_VERSION
+    }
+    if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
+    if (options.cookie) headers.Cookie = options.cookie
+    const response = await fetch(`${base}/manage/v1/uploads/${uploadId}`, {
+      method: 'PUT',
+      headers,
+      body
+    })
+    return { status: response.status, json: await response.json() }
+  }
+
+  async function insertBoundVideo(
+    code: string,
+    filePath = movie
+  ): Promise<{ videoId: number; fileId: number }> {
+    const identity = resolveMediaLibraryRootIdentity(mediaRoot)
+    const existing = getDb()
+      .prepare('SELECT id FROM media_library_roots WHERE normalized_path = ?')
+      .get(identity.normalizedPath) as { id: number } | undefined
+    let rootId = existing?.id
+    if (rootId == null) {
+      const timestamp = new Date().toISOString()
+      const rootRow = getDb()
+        .prepare(
+          `INSERT INTO media_library_roots (
+             library_id, path, normalized_path, real_path, normalized_real_path,
+             device_id, inode, position, state, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?)`
+        )
+        .run(
+          1,
+          identity.path,
+          identity.normalizedPath,
+          identity.realPath,
+          identity.normalizedRealPath,
+          identity.deviceId,
+          identity.inode,
+          timestamp,
+          timestamp
+        )
+      rootId = Number(rootRow.lastInsertRowid)
+    }
+    const inserted = insertTestVideoWithFile(getDb(), {
+      code,
+      title: code,
+      filePath,
+      libraryId: 1,
+      rootId
+    })
+    return { videoId: inserted.videoId, fileId: inserted.fileId }
+  }
+
+  it('uploads an image, applies it as cover, and keeps the formal file after restart', async () => {
+    const dataDir = path.join(root, 'upload-cover')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const { videoId } = await insertBoundVideo('S06-HTTP')
+    const version = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(videoId) as { generation: number; revision: number }
+    const created = await postManage(
+      base,
+      'uploads.create',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: { purpose: 'videoCover', contentType: 'image/png' }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(created.status, 200)
+    const uploadId = (created.json as { uploadId: string }).uploadId
+    const png = await sharp({
+      create: { width: 14, height: 9, channels: 3, background: { r: 30, g: 60, b: 90 } }
+    })
+      .png()
+      .toBuffer()
+    const put = await putUpload(base, uploadId, png, { bearer: writer.secret })
+    assert.equal(put.status, 200)
+    assert.equal((put.json as { consumed: boolean }).consumed, false)
+    const inspected = await postManage(
+      base,
+      'uploads.inspect',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: { uploadId }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(inspected.status, 200)
+    const applied = await postManage(
+      base,
+      'videos.setPoster',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: version },
+        input: { videoId, image: { kind: 'upload', uploadId } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(applied.status, 200)
+    const coverRel = (getDb().prepare('SELECT cover_path FROM videos WHERE id = ?').get(videoId) as { cover_path: string })
+      .cover_path
+    assert.ok(coverRel?.startsWith('covers/'))
+    const coverAbs = path.join(dataDir, 'media_assets', coverRel)
+    assert.equal(fs.existsSync(coverAbs), true)
+    const cookie = (await login(base, password, true)).cookie
+    const cookiePut = await putUpload(base, uploadId, png, { cookie })
+    assert.equal(cookiePut.status, 401)
+    await server?.stop()
+    server = undefined
+    closeDatabase()
+    resetLibraryHostForTests()
+    const restarted = await boot(dataDir)
+    assert.equal(fs.existsSync(coverAbs), true)
+    const cover = await fetch(`${restarted.base}/api/videos/${videoId}/images/cover`, {
+      headers: { Cookie: cookie }
+    })
+    assert.equal(cover.status, 200)
+  })
+
+  it('rejects desktop paths, unknown fields, and foreign sample asset ids', async () => {
+    const dataDir = path.join(root, 'upload-boundary')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const otherFile = path.join(mediaRoot, 'clip-b.mp4')
+    fs.writeFileSync(otherFile, Buffer.from('other-file-bytes'))
+    const first = await insertBoundVideo('S06-A')
+    const second = await insertBoundVideo('S06-B', otherFile)
+    const version = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(first.videoId) as { generation: number; revision: number }
+    const desktopPath = await postManage(
+      base,
+      'videos.setPoster',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: version },
+        input: { videoId: first.videoId, posterPath: 'C:\\covers\\a.jpg' }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(desktopPath.status, 400)
+    const coverSource = await postManage(
+      base,
+      'videos.edit',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: version },
+        input: {
+          videoId: first.videoId,
+          fields: { coverSourcePath: '/tmp/secret.jpg' }
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(coverSource.status, 400)
+    const png = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } }
+    })
+      .png()
+      .toBuffer()
+    const sampleRel = 'samples/foreign.png'
+    fs.mkdirSync(path.join(dataDir, 'media_assets', 'samples'), { recursive: true })
+    fs.writeFileSync(path.join(dataDir, 'media_assets', sampleRel), png)
+    const foreign = getDb()
+      .prepare(
+        "INSERT INTO video_assets (video_id, type, local_path) VALUES (?, 'sample', ?)"
+      )
+      .run(second.videoId, sampleRel)
+    const foreignApply = await postManage(
+      base,
+      'videos.setPoster',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: version },
+        input: { videoId: first.videoId, image: { kind: 'asset', assetId: Number(foreign.lastInsertRowid) } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(foreignApply.status, 400)
+    const cover = getDb()
+      .prepare('SELECT cover_path, poster_path FROM videos WHERE id = ?')
+      .get(first.videoId) as { cover_path: string | null; poster_path: string | null }
+    assert.equal(cover.cover_path, null)
+    assert.equal(cover.poster_path, null)
+  })
 })

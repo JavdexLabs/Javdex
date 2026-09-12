@@ -1,7 +1,8 @@
 import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { structuredError } from '@shared/protocol/errors'
 import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
-import { commitCatalogMutation } from '@library/catalog/catalogOperations'
+import { applyVideoCoverRef, commitManageImageMutation } from '@library/catalog/catalogImageApply'
+import type { CatalogImageRef } from '@shared/protocol/uploads'
 import {
   assertExpectedVideoVersion,
   readVideoAggregateVersion
@@ -244,7 +245,7 @@ export function createLocalCatalogBackend(
 
   const videoCommands: CatalogVideoCommands = {
     async edit(input, ctx: MutationContext) {
-      const result = commitCatalogMutation(
+      const result = commitManageImageMutation(
         {
           operationId: ctx.operationId,
           operation: 'videos.edit',
@@ -254,6 +255,16 @@ export function createLocalCatalogBackend(
         },
         () => {
           assertExpectedVideoVersion(input.videoId, ctx.expectedVersions, ctx.operationId)
+          if (input.fields.cover) {
+            applyVideoCoverRef(
+              input.videoId,
+              input.fields.cover as CatalogImageRef,
+              ctx.expectedVersions,
+              ctx.operationId,
+              undefined,
+              { bumpRevision: false }
+            )
+          }
           const ok = videos.edit(input.videoId, toVideoEditInput(input.fields))
           return {
             ok,

@@ -13,13 +13,29 @@ import {
   type WriterClaimRequest
 } from '@library/catalog/catalogWriter'
 import { commitCatalogMutation, readOperationReceipt } from '@library/catalog/catalogOperations'
+import { assertExpectedVideoVersion, readVideoAggregateVersion } from '@library/catalog/catalogVideoVersion'
 import {
-  assertExpectedVideoVersion,
-  readVideoAggregateVersion
-} from '@library/catalog/catalogVideoVersion'
+  applyActressAvatarRef,
+  applyActressCropRef,
+  applyActressGalleryRefs,
+  applyClassificationImageRef,
+  applyPlaylistCoverRef,
+  applyVideoCoverRef,
+  applyVideoPosterRef,
+  applyVideoSampleRefs,
+  commitManageImageMutation
+} from '@library/catalog/catalogImageApply'
+import { maybeCrashImageFlow } from '@library/catalog/catalogImageCrash'
+import {
+  completeCatalogUploadFromStream,
+  createCatalogUpload,
+  inspectCatalogUpload
+} from '@library/catalog/catalogUploads'
+import type { CatalogImageRef, UploadPurpose } from '@shared/protocol/uploads'
+import type { ManageImageContentType } from '@shared/protocol/limits'
 import { MANAGE_OPERATIONS, type ManageOperationId } from '@shared/manage/operations'
 import { parseManageRequest } from '@shared/manage/parse'
-import type { ManageHttpContext } from '@http/manage'
+import type { ManageHttpContext, ManageUploadPutContext } from '@http/manage'
 import { structuredError } from '@shared/protocol/errors'
 import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { ExpectedVersions } from '@shared/protocol/versions'
@@ -43,7 +59,7 @@ function requireIdentity() {
 }
 
 function requireBearer(
-  context: ManageHttpContext,
+  context: { bearerSecret: string | null },
   expected: { serverId: string; catalogId: string; writerEpoch?: number }
 ) {
   if (!context.bearerSecret) {
@@ -67,6 +83,41 @@ function unknownReceipt(operationId: string): OperationReceipt {
     digest: '',
     createdAt: ''
   }
+}
+
+function requireMutation(envelope: ManageEnvelope): {
+  operationId: string
+  writerEpoch: number
+  expectedVersions: ExpectedVersions
+} {
+  if (!envelope.operationId || envelope.writerEpoch === undefined || !envelope.expectedVersions) {
+    throw structuredError('INVALID_INPUT', '写入请求缺少操作包络')
+  }
+  return {
+    operationId: envelope.operationId,
+    writerEpoch: envelope.writerEpoch,
+    expectedVersions: envelope.expectedVersions
+  }
+}
+
+export async function putManageUpload(
+  context: ManageUploadPutContext,
+  database?: Database.Database
+): Promise<unknown> {
+  const identity = requireIdentity()
+  const auth = requireBearer(context, {
+    serverId: identity.serverId!,
+    catalogId: identity.catalogId
+  })
+  return completeCatalogUploadFromStream(
+    context.uploadId,
+    context.request,
+    {
+      writerEpoch: auth.epoch,
+      catalogId: identity.catalogId
+    },
+    database
+  )
 }
 
 export function dispatchManageOperation(context: ManageHttpContext, database?: Database.Database): unknown {
@@ -108,7 +159,7 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     return issueOneTimeToken('deployRecover', {}, database)
   }
   if (meta.auth === 'migration' || meta.auth === 'publicHandshake') {
-    throw structuredError('UNSUPPORTED_CAPABILITY', `S05 尚未实现 ${operation}`)
+    throw structuredError('UNSUPPORTED_CAPABILITY', `S06 尚未实现 ${operation}`)
   }
 
   if (meta.auth === 'manageRead' || meta.auth === 'manageWrite') {
@@ -136,26 +187,61 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       }
       return scopedVideoCatalogRepo.get(input.scope, input.videoId)
     }
+    if (operation === 'uploads.inspect') {
+      return inspectCatalogUpload((envelope.input as { uploadId: string }).uploadId, {}, database)
+    }
+    if (operation === 'uploads.create') {
+      const mutation = requireMutation(envelope)
+      const input = envelope.input as { purpose: UploadPurpose; contentType: ManageImageContentType }
+      const result = commitCatalogMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'uploads.create',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () =>
+          createCatalogUpload(
+            {
+              purpose: input.purpose,
+              contentType: input.contentType,
+              writerEpoch: auth.epoch,
+              catalogId: envelope.catalogId!
+            },
+            database
+          ),
+        database
+      )
+      maybeCrashImageFlow('afterPersistUploadRow')
+      return { receipt: result.receipt, ...result.data }
+    }
     if (operation === 'videos.edit') {
       const input = envelope.input as {
         videoId: number
-        fields: Parameters<typeof videoEditInputFromManageFields>[0]
+        fields: Parameters<typeof videoEditInputFromManageFields>[0] & { cover?: CatalogImageRef }
       }
-      if (!envelope.operationId || envelope.writerEpoch === undefined || !envelope.expectedVersions) {
-        throw structuredError('INVALID_INPUT', '影片编辑缺少操作包络')
-      }
-      const expectedVersions = envelope.expectedVersions
-      const operationId = envelope.operationId
-      const result = commitCatalogMutation(
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
         {
-          operationId,
+          operationId: mutation.operationId,
           operation: 'videos.edit',
-          expectedVersions,
+          expectedVersions: mutation.expectedVersions,
           input,
           writerEpoch: auth.epoch
         },
         () => {
-          assertExpectedVideoVersion(input.videoId, expectedVersions, operationId, database)
+          assertExpectedVideoVersion(input.videoId, mutation.expectedVersions, mutation.operationId, database)
+          if (input.fields.cover) {
+            applyVideoCoverRef(
+              input.videoId,
+              input.fields.cover,
+              mutation.expectedVersions,
+              mutation.operationId,
+              database,
+              { bumpRevision: false }
+            )
+          }
           const ok = videoMaintenanceService.edit(
             input.videoId,
             videoEditInputFromManageFields(input.fields)
@@ -170,8 +256,171 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       )
       return { receipt: result.receipt, ...result.data }
     }
-    throw structuredError('UNSUPPORTED_CAPABILITY', `S05 尚未实现 ${operation}`)
+    if (operation === 'videos.setPoster') {
+      const input = envelope.input as { videoId: number; image: CatalogImageRef }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'videos.setPoster',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () => applyVideoPosterRef(input.videoId, input.image, mutation.expectedVersions, mutation.operationId, database),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'videos.importSamples') {
+      const input = envelope.input as { videoId: number; images: CatalogImageRef[] }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'videos.importSamples',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () => applyVideoSampleRefs(input.videoId, input.images, mutation.expectedVersions, mutation.operationId, database),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'actresses.setPoster') {
+      const input = envelope.input as { actressId: number; image: CatalogImageRef }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'actresses.setPoster',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () => applyActressAvatarRef(input.actressId, input.image, mutation.expectedVersions, mutation.operationId, database),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'actresses.importGallery') {
+      const input = envelope.input as { actressId: number; images: CatalogImageRef[] }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'actresses.importGallery',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () => applyActressGalleryRefs(input.actressId, input.images, mutation.expectedVersions, mutation.operationId, database),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'actresses.applyCrop') {
+      const input = envelope.input as {
+        actressId: number
+        sourceAssetId: number
+        sourceDigest: string
+        sourceVersion: string
+        image: CatalogImageRef
+      }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'actresses.applyCrop',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () => applyActressCropRef(input, mutation.expectedVersions, mutation.operationId, database),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'classificationImages.set') {
+      const input = envelope.input as {
+        entity: { kind: 'organization' | 'director' | 'series'; id: number }
+        image: CatalogImageRef | { kind: 'videoCover'; videoId: number }
+      }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'classificationImages.set',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () =>
+          applyClassificationImageRef(input.entity, input.image, mutation.expectedVersions, mutation.operationId, database),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'playlists.create') {
+      const input = envelope.input as {
+        name: string
+        description?: string | null
+        cover?: CatalogImageRef
+      }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'playlists.create',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () =>
+          applyPlaylistCoverRef(
+            null,
+            input.cover,
+            { name: input.name, description: input.description },
+            mutation.expectedVersions,
+            mutation.operationId,
+            database
+          ),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'playlists.update') {
+      const input = envelope.input as {
+        playlistId: number
+        name: string
+        description?: string | null
+        cover?: CatalogImageRef
+      }
+      const mutation = requireMutation(envelope)
+      const result = commitManageImageMutation(
+        {
+          operationId: mutation.operationId,
+          operation: 'playlists.update',
+          expectedVersions: mutation.expectedVersions,
+          input,
+          writerEpoch: auth.epoch
+        },
+        () =>
+          applyPlaylistCoverRef(
+            input.playlistId,
+            input.cover,
+            { name: input.name, description: input.description },
+            mutation.expectedVersions,
+            mutation.operationId,
+            database
+          ),
+        database
+      )
+      return { receipt: result.receipt, ...result.data }
+    }
+    throw structuredError('UNSUPPORTED_CAPABILITY', `S06 尚未实现 ${operation}`)
   }
 
-  throw structuredError('UNSUPPORTED_CAPABILITY', `S05 尚未实现 ${operation}`)
+  throw structuredError('UNSUPPORTED_CAPABILITY', `S06 尚未实现 ${operation}`)
 }

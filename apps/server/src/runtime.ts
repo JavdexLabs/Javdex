@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { recoverInterruptedLibraryScanRuns } from '@library/db/libraryScanRepo'
+import { recoverCatalogImages } from '@library/catalog/catalogImageRecovery'
 import { isWriterBound } from '@library/catalog/catalogIdentity'
 import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
 import { createWorkerWebCatalog } from '@http/catalogWorkerAdapter'
@@ -13,7 +14,7 @@ import type { ServerConfig } from './config'
 import { acquireDataDirLock, ensureLocalDataDir, ensureMediaMounts } from './filesystem'
 import { configureServerLibraryHost, ensureServerCatalog } from './identity'
 import { assertSharpDecode } from './imageCodec'
-import { dispatchManageOperation } from './manageDispatch'
+import { dispatchManageOperation, putManageUpload } from './manageDispatch'
 import { SERVER_APP_VERSION } from './appVersion'
 import { WebCatalogWorkerClient } from './webCatalogWorkerClient'
 
@@ -62,6 +63,7 @@ export async function startJavdexServer(
     ensureMediaAssetDirsAt(config.imagesDir)
     const database = initDatabaseAtPath(path.join(config.dataDir, 'library.db'))
     recoverInterruptedLibraryScanRuns(database)
+    recoverCatalogImages(database)
     ensureServerCatalog(config, { bootstrapToken: isWriterBound(database) ? undefined : options.bootstrapToken })
     const workerEntry = options.workerEntry ?? defaultWebCatalogWorkerEntry()
     if (!fs.existsSync(workerEntry)) {
@@ -89,7 +91,8 @@ export async function startJavdexServer(
       },
       manage: {
         appVersion: SERVER_APP_VERSION,
-        dispatch: (context) => dispatchManageOperation(context, database)
+        dispatch: (context) => dispatchManageOperation(context, database),
+        putUpload: (context) => putManageUpload(context, database)
       }
     })
     const port = await http.start(config.port, config.listenHost)

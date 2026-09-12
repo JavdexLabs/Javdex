@@ -20,8 +20,8 @@ import { IPC } from '@shared/ipc-channels'
 import { WebCatalog } from '../web/catalog'
 import { createWorkerWebCatalog } from '../web/catalogWorkerAdapter'
 import { CatalogReadWorkerClient } from './catalogReadWorkerClient'
-import { catalogReadService } from './catalogReadService'
 import { createCatalogReadWorkerTransport } from './catalogReadWorkerTransport'
+import { createLocalCatalogBackend } from '../backends/local/localCatalogBackend'
 
 let root: string
 let bundle: string
@@ -72,11 +72,29 @@ it('routes actual desktop IPC registration and Web catalog queries through the n
     home: home.load(input), search: home.search({ search: 'READ', limit: 60 }),
     web: legacy.browse(new URLSearchParams('q=READ')), webHome: legacy.home('fixture'), collections: legacy.collections() }
   const handlers = new Map<string, (event: never, ...args: unknown[]) => unknown>()
-  registerVideoHandlers(createAsyncVideoQueryService(client!), createTypedIpcAdapter<VideoIpcContract>(videoIpcSchemas, (channel, handler) => handlers.set(channel, handler)))
-  // Keep actual default dependency selection and schema registration; transport is native temporary worker.
-  t.mock.method(catalogReadService, 'readHome', client!.readHome.bind(client))
-  t.mock.method(catalogReadService, 'searchHome', client!.searchHome.bind(client))
-  registerMediaLibraryHandlers(undefined, createMediaLibraryCommandAdapter((channel, handler) => handlers.set(channel, handler)))
+  const queries = createAsyncVideoQueryService(client!)
+  const backend = createLocalCatalogBackend({
+    identity: { mode: 'local', catalogId: 'highfreq-worker' },
+    queries,
+    reads: {
+      homeLoad: (input) => client!.readHome(input),
+      homeSearch: (input) => client!.searchHome(input),
+      tagFilterOptions: (query) => client!.read(query),
+      imagePage: (entity, query) => client!.readImageCandidates(entity, query ?? {})
+    }
+  })
+  registerVideoHandlers(
+    backend,
+    undefined,
+    createTypedIpcAdapter<VideoIpcContract>(videoIpcSchemas, (channel, handler) =>
+      handlers.set(channel, handler)
+    )
+  )
+  registerMediaLibraryHandlers(
+    backend,
+    undefined,
+    createMediaLibraryCommandAdapter((channel, handler) => handlers.set(channel, handler))
+  )
   const web = createWorkerWebCatalog(db, client!)
   const prepare = db.prepare.bind(db)
   t.mock.method(db, 'prepare', (sql: string) => {

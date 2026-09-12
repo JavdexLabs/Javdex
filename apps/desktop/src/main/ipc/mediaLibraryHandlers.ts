@@ -1,85 +1,77 @@
-import { catalogReadService } from '../services/catalogReadService'
 import { IPC } from '@shared/ipc-channels'
-import { homeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
-import {
-  getMediaLibraryDetail,
-  listMediaLibraries,
-} from '@library/db/mediaLibraryRepo'
-import { mediaLibraryService } from '../services/mediaLibraryService'
+import type { CatalogBackend } from '../application/catalogBackend'
+import { ipcMutation } from '../application/mutationContext'
+import type { MediaLibraryRootMigrationPreview, MediaLibraryRootMigrationResult, MigrateMediaLibraryRootInput } from '@shared/mediaLibraryTypes'
 import {
   mediaLibraryCommandAdapter,
   type MediaLibraryCommandAdapter
 } from './mediaLibraryContractAdapter'
 
-export interface MediaLibraryHandlerDependencies {
-  list: typeof listMediaLibraries
-  get: typeof getMediaLibraryDetail
-  create: typeof mediaLibraryService.create
-  update: typeof mediaLibraryService.update
-  updateConfig: typeof mediaLibraryService.updateConfig
-  addRoot: typeof mediaLibraryService.addRoot
-  updateRoot: typeof mediaLibraryService.updateRoot
-  removeRoot: typeof mediaLibraryService.removeRoot
-  cancelRootRemoval: typeof mediaLibraryService.cancelRootRemoval
-  archive: typeof mediaLibraryService.archive
-  restore: typeof mediaLibraryService.restore
-  previewRemoval: typeof mediaLibraryService.previewRemoval
-  remove: typeof mediaLibraryService.remove
-  loadHome: (input: Parameters<typeof homeDiscoveryRepo.load>[0]) => ReturnType<typeof homeDiscoveryRepo.load> | Promise<ReturnType<typeof homeDiscoveryRepo.load>>
-  search: (input: Parameters<typeof homeDiscoveryRepo.search>[0]) => ReturnType<typeof homeDiscoveryRepo.search> | Promise<ReturnType<typeof homeDiscoveryRepo.search>>
-  previewRootMigration: typeof mediaLibraryService.previewRootMigration
-  migrateRoot: typeof mediaLibraryService.migrateRoot
-}
-
-const defaultDependencies: MediaLibraryHandlerDependencies = {
-  list: listMediaLibraries,
-  get: getMediaLibraryDetail,
-  create: mediaLibraryService.create,
-  update: mediaLibraryService.update,
-  updateConfig: mediaLibraryService.updateConfig,
-  addRoot: mediaLibraryService.addRoot,
-  updateRoot: mediaLibraryService.updateRoot,
-  removeRoot: mediaLibraryService.removeRoot,
-  cancelRootRemoval: mediaLibraryService.cancelRootRemoval,
-  archive: mediaLibraryService.archive,
-  restore: mediaLibraryService.restore,
-  previewRemoval: mediaLibraryService.previewRemoval,
-  remove: mediaLibraryService.remove,
-  loadHome: (input) => catalogReadService.readHome(input),
-  search: (input) => catalogReadService.searchHome(input),
-  previewRootMigration: (input) => mediaLibraryService.previewRootMigration(input),
-  migrateRoot: (input) => mediaLibraryService.migrateRoot(input)
+export interface MediaLibraryHandlerDesktopPorts {
+  previewRootMigration(input: {
+    sourceLibraryId: number
+    targetLibraryId: number
+    rootId: number
+  }): MediaLibraryRootMigrationPreview
+  migrateRoot(input: MigrateMediaLibraryRootInput): MediaLibraryRootMigrationResult
 }
 
 export function registerMediaLibraryHandlers(
-  dependencies: MediaLibraryHandlerDependencies = defaultDependencies,
+  backend: CatalogBackend,
+  desktop: MediaLibraryHandlerDesktopPorts | undefined = undefined,
   adapter: MediaLibraryCommandAdapter = mediaLibraryCommandAdapter
 ): void {
-  adapter.register(IPC.MEDIA_LIBRARY_LIST, (input) => dependencies.list(input))
-  adapter.register(IPC.MEDIA_LIBRARY_GET, (libraryId) => dependencies.get(libraryId))
-  adapter.register(IPC.MEDIA_LIBRARY_CREATE, (input) => dependencies.create(input))
-  adapter.register(IPC.MEDIA_LIBRARY_UPDATE, (input) => dependencies.update(input))
+  adapter.register(IPC.MEDIA_LIBRARY_LIST, (input) =>
+    backend.libraries.list(input ?? {})
+  )
+  adapter.register(IPC.MEDIA_LIBRARY_GET, (libraryId) =>
+    backend.libraries.get({ libraryId })
+  )
+  adapter.register(IPC.MEDIA_LIBRARY_CREATE, (input) =>
+    backend.libraries.create(input, ipcMutation())
+  )
+  adapter.register(IPC.MEDIA_LIBRARY_UPDATE, (input) =>
+    backend.libraries.update(input as never, ipcMutation())
+  )
   adapter.register(IPC.MEDIA_LIBRARY_CONFIG_UPDATE, (input) =>
-    dependencies.updateConfig(input)
+    backend.libraries.updateConfig(input as never, ipcMutation())
   )
-  adapter.register(IPC.MEDIA_LIBRARY_ROOT_ADD, (input) => dependencies.addRoot(input))
-  adapter.register(IPC.MEDIA_LIBRARY_ROOT_UPDATE, (input) => dependencies.updateRoot(input))
-  adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE, (input) => dependencies.removeRoot(input))
+  adapter.register(IPC.MEDIA_LIBRARY_ROOT_ADD, (input) =>
+    backend.libraries.addRoot(input as never, ipcMutation())
+  )
+  adapter.register(IPC.MEDIA_LIBRARY_ROOT_UPDATE, (input) =>
+    backend.libraries.updateRoot(input as never, ipcMutation())
+  )
+  adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE, (input) =>
+    backend.libraries.removeRoot(input as never, ipcMutation())
+  )
   adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL, (input) =>
-    dependencies.cancelRootRemoval(input)
+    backend.libraries.cancelRootRemoval(input, ipcMutation())
   )
-  adapter.register(IPC.MEDIA_LIBRARY_ROOT_MIGRATE_PREVIEW, (input) =>
-    dependencies.previewRootMigration(input)
+  adapter.register(IPC.MEDIA_LIBRARY_ROOT_MIGRATE_PREVIEW, (input) => {
+    if (!desktop) {
+      throw new Error('当前模式不能预览本地根目录迁移')
+    }
+    return desktop.previewRootMigration(input)
+  })
+  adapter.register(IPC.MEDIA_LIBRARY_ROOT_MIGRATE, (input) => {
+    if (!desktop) {
+      throw new Error('当前模式不能迁移本地根目录')
+    }
+    return desktop.migrateRoot(input)
+  })
+  adapter.register(IPC.MEDIA_LIBRARY_ARCHIVE, (input) =>
+    backend.libraries.archive(input as never, ipcMutation())
   )
-  adapter.register(IPC.MEDIA_LIBRARY_ROOT_MIGRATE, (input) =>
-    dependencies.migrateRoot(input)
+  adapter.register(IPC.MEDIA_LIBRARY_RESTORE, (input) =>
+    backend.libraries.restore(input as never, ipcMutation())
   )
-  adapter.register(IPC.MEDIA_LIBRARY_ARCHIVE, (input) => dependencies.archive(input))
-  adapter.register(IPC.MEDIA_LIBRARY_RESTORE, (input) => dependencies.restore(input))
   adapter.register(IPC.MEDIA_LIBRARY_DELETE_PREVIEW, (input) =>
-    dependencies.previewRemoval(input.libraryId)
+    backend.libraries.deletePreview({ libraryId: input.libraryId })
   )
-  adapter.register(IPC.MEDIA_LIBRARY_DELETE, (input) => dependencies.remove(input))
-  adapter.register(IPC.HOME_LOAD, (input) => dependencies.loadHome(input))
-  adapter.register(IPC.HOME_SEARCH, (input) => dependencies.search(input))
+  adapter.register(IPC.MEDIA_LIBRARY_DELETE, (input) =>
+    backend.libraries.delete(input as never, ipcMutation())
+  )
+  adapter.register(IPC.HOME_LOAD, (input) => backend.queries.homeLoad(input))
+  adapter.register(IPC.HOME_SEARCH, (input) => backend.queries.homeSearch(input))
 }

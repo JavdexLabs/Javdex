@@ -17,14 +17,20 @@ export interface CatalogQueryContext {
   signal?: AbortSignal
 }
 
-type Query<K extends keyof ManageOperationInputMap> = (
-  input: ManageOperationInput<K>,
+/* Existing domain objects and IPC extras until S08 projects manage DTOs. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CatalogPortInput = any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CatalogPortValue = any
+
+type Query<_K extends keyof ManageOperationInputMap> = (
+  input: CatalogPortInput,
   ctx?: CatalogQueryContext
-) => Promise<unknown>
-type Command<K extends keyof ManageOperationInputMap> = (
-  input: ManageOperationInput<K>,
+) => Promise<CatalogPortValue>
+type Command<_K extends keyof ManageOperationInputMap> = (
+  input: CatalogPortInput,
   ctx: MutationContext
-) => Promise<unknown>
+) => Promise<CatalogPortValue>
 type ManageOperationInputMap = { [K in import('@shared/manage/operations').ManageOperationId]: ManageOperationInput<K> }
 
 export interface CatalogQueries {
@@ -94,6 +100,7 @@ export interface CatalogActressCommands {
   markScrapeSuccess: Command<'actresses.markScrapeSuccess'>
   applyCrop: Command<'actresses.applyCrop'>
   applyScrapeCandidate: Command<'actresses.applyScrapeCandidate'>
+  testTargetPage: Query<'actresses.testTargetPage'>
   conflictList: Query<'actressConflicts.list'>
   conflictQueuePage: Query<'actressConflicts.queuePage'>
   conflictGet: Query<'actressConflicts.get'>
@@ -113,18 +120,31 @@ export interface CatalogClassificationCommands {
   updateOrganization: Command<'organizations.update'>
   mergeOrganizations: Command<'organizations.merge'>
   deleteOrganization: Command<'organizations.delete'>
+  organizationOptions: Query<'organizations.options'>
+  organizationMergeOptions: Query<'organizations.mergeOptions'>
+  organizationRoleRemovePreview: Query<'organizations.roleRemovePreview'>
+  organizationRoleRemove: Command<'organizations.roleRemove'>
+  organizationDeletePreview: Query<'organizations.deletePreview'>
   listDirectors: Query<'directors.list'>
+  pageDirectors: Query<'directors.page'>
   getDirector: Query<'directors.get'>
   createDirector: Command<'directors.create'>
   updateDirector: Command<'directors.update'>
   mergeDirectors: Command<'directors.merge'>
   deleteDirector: Command<'directors.delete'>
+  directorOptions: Query<'directors.options'>
+  directorDeletePreview: Query<'directors.deletePreview'>
   listSeries: Query<'series.list'>
+  pageSeries: Query<'series.page'>
   getSeries: Query<'series.get'>
   createSeries: Command<'series.create'>
   updateSeries: Command<'series.update'>
   mergeSeries: Command<'series.merge'>
   deleteSeries: Command<'series.delete'>
+  seriesOptions: Query<'series.options'>
+  seriesDeletePreview: Query<'series.deletePreview'>
+  imagePage: Query<'classificationImages.page'>
+  imageCandidates: Query<'classificationImages.candidates'>
   setImage: Command<'classificationImages.set'>
 }
 
@@ -132,6 +152,10 @@ export interface CatalogPlaylistCommands {
   list: Query<'playlists.list'>
   listPage: Query<'playlists.listPage'>
   get: Query<'playlists.get'>
+  getPage: Query<'playlists.getPage'>
+  metadata: Query<'playlists.metadata'>
+  videoPage: Query<'playlists.videoPage'>
+  listForVideo: Query<'playlists.listForVideo'>
   create: Command<'playlists.create'>
   update: Command<'playlists.update'>
   delete: Command<'playlists.delete'>

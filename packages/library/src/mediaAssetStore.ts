@@ -11,11 +11,15 @@ import {
   ensureAssetDirs,
   importAvatarDisplayFromBuffer,
   importAvatarSourceFromBuffer,
+  importActressGalleryFromBuffer,
   importActressGalleryFromFile,
   importClassificationImageFromBuffer,
   importClassificationImageFromFile,
+  importCoverFromBuffer,
   importCoverFromFile,
+  importPlaylistCoverFromBuffer,
   importPlaylistCoverFromFile,
+  importSampleFromBuffer,
   importSampleFromFile,
   readAssetBytes,
   readAssetForServe,
@@ -251,9 +255,19 @@ export class MediaAssetStore {
     return this.registerCreated(importCoverFromFile(code, sourcePath))
   }
 
+  importCoverFromBuffer(code: string, data: Buffer): string {
+    this.assertMutationAllowed()
+    return this.registerCreated(importCoverFromBuffer(code, data))
+  }
+
   importPlaylistCover(name: string, sourcePath: string): string {
     this.assertMutationAllowed()
     return this.registerCreated(importPlaylistCoverFromFile(name, sourcePath))
+  }
+
+  importPlaylistCoverFromBuffer(name: string, data: Buffer): string {
+    this.assertMutationAllowed()
+    return this.registerCreated(importPlaylistCoverFromBuffer(name, data))
   }
 
   importSample(code: string, sourcePath: string): string {
@@ -261,9 +275,19 @@ export class MediaAssetStore {
     return this.registerCreated(importSampleFromFile(code, sourcePath))
   }
 
+  importSampleFromBuffer(code: string, data: Buffer): string {
+    this.assertMutationAllowed()
+    return this.registerCreated(importSampleFromBuffer(code, data))
+  }
+
   importActressGallery(name: string, sourcePath: string, actressId?: number | null): string {
     this.assertMutationAllowed()
     return this.registerCreated(importActressGalleryFromFile(name, sourcePath, actressId))
+  }
+
+  importActressGalleryFromBuffer(name: string, data: Buffer, actressId?: number | null): string {
+    this.assertMutationAllowed()
+    return this.registerCreated(importActressGalleryFromBuffer(name, data, actressId))
   }
 
   importClassificationImage(

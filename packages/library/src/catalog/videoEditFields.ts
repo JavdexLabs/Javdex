@@ -1,4 +1,3 @@
-import { structuredError } from '@shared/protocol/errors'
 import type { VideoEditInput } from '@shared/videoTypes'
 
 export function videoEditInputFromManageFields(fields: {
@@ -17,12 +16,6 @@ export function videoEditInputFromManageFields(fields: {
   cover?: { kind: string }
   links?: VideoEditInput['links']
 }): VideoEditInput {
-  if (fields.cover) {
-    throw structuredError(
-      'UNSUPPORTED_CAPABILITY',
-      '影片封面改动走独立图片交割，S05 的 videos.edit 不接受封面引用。'
-    )
-  }
   const input: VideoEditInput = {}
   if ('title' in fields) input.title = fields.title
   if ('summary' in fields) input.summary = fields.summary

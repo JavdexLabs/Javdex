@@ -246,12 +246,36 @@ export function importCoverFromFile(code: string, sourcePath: string): string {
   return importImageFromFile('covers', code, sourcePath)
 }
 
+export function importCoverFromBuffer(code: string, data: Buffer): string {
+  assertUsableImageBuffer(data, '导入的图片不是可用图片')
+  const ext = detectImageExtensionFromBuffer(data) ?? '.jpg'
+  const rel = writeImageAsset('covers', code, `upload:${randomUUID()}`, ext, data)
+  invalidateAssetCache(rel)
+  return rel
+}
+
 export function importPlaylistCoverFromFile(name: string, sourcePath: string): string {
   return importImageFromFile('playlist_covers', name, sourcePath)
 }
 
+export function importPlaylistCoverFromBuffer(name: string, data: Buffer): string {
+  assertUsableImageBuffer(data, '导入的图片不是可用图片')
+  const ext = detectImageExtensionFromBuffer(data) ?? '.jpg'
+  const rel = writeImageAsset('playlist_covers', name, `upload:${randomUUID()}`, ext, data)
+  invalidateAssetCache(rel)
+  return rel
+}
+
 export function importSampleFromFile(code: string, sourcePath: string): string {
   return importImageFromFile('samples', code, sourcePath)
+}
+
+export function importSampleFromBuffer(code: string, data: Buffer): string {
+  assertUsableImageBuffer(data, '导入的图片不是可用图片')
+  const ext = detectImageExtensionFromBuffer(data) ?? '.jpg'
+  const rel = writeImageAsset('samples', code, `upload:${randomUUID()}`, ext, data)
+  invalidateAssetCache(rel)
+  return rel
 }
 
 export function importActressGalleryFromFile(
@@ -264,6 +288,24 @@ export function importActressGalleryFromFile(
     buildActressAssetSeed(name, actressId),
     sourcePath
   )
+}
+
+export function importActressGalleryFromBuffer(
+  name: string,
+  data: Buffer,
+  actressId?: number | null
+): string {
+  assertUsableImageBuffer(data, '导入的图片不是可用图片')
+  const ext = detectImageExtensionFromBuffer(data) ?? '.jpg'
+  const rel = writeImageAsset(
+    'actress_gallery',
+    buildActressAssetSeed(name, actressId),
+    `upload:${randomUUID()}`,
+    ext,
+    data
+  )
+  invalidateAssetCache(rel)
+  return rel
 }
 
 export function importAvatarSourceFromBuffer(

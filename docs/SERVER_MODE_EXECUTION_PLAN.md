@@ -59,6 +59,7 @@
 | S06 | 正式 schema 18 上传表、流式 PUT、全用途 apply 与崩溃恢复已落地；生产烟测含 upload/apply/restart | 见本文件 S06 实施记录 |
 | S07 | 最小双后端闭环与会话/认主/失败 UI 已落地；完整管理面与 D02/D07/M 全矩阵仍待 S08–S13 | 见本文件 S07 实施记录 |
 | S08 | 管理浏览/编辑、资源/生命周期、分类合并删除、待确认与网页配对已落地；扫描/NFO/任务/根维护与刮削确认仍待 S09/S10 | 见本文件 S08 实施记录 |
+| S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入仍待 S10 | 见本文件 S09 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -497,6 +498,27 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 任务持久状态至少区分排队、执行、取消请求、成功、失败、已取消、需要检查。取消请求不直接标已取消；只在安全边界确认。扫描重启可新建一次重新枚举，不伪造原扫描续跑成功；文件维护恢复须逐项核对而不自动从头执行。
 
 计划保存/失效/释放资源，10 分钟超时和重启后失效；交接等待阻止新维护穿越。NFO、重命名、删除复用文件能力保护；只读挂载允许读取扫描、不允许维护写入。真实测试挂载卸载与普通文件缺失分别测试，不能仅用删除标记模拟全部挂载语义。
+
+**S09 实施记录（挂载标记、扫描、XML NFO、持久任务）**
+
+- 范围：正式 schema **19**（`catalog_tasks` / `catalog_maintenance_plans` / `catalog_settings` / `catalog_root_markers`）。服务端 `libraries.addRoot` 只接受 `mountSelectionId`（`config.mediaMounts` 键），在实际挂载内写入普通文件 `.javdex-root`，丢失的已初始化标记不补建。`scans.run` 走 `acceptCatalogTask` + 持久快照（queued/running/cancelRequested/succeeded/failed/cancelled/needsInspection）；取消只在协调器安全边界确认。NFO 计划 10 分钟 TTL、重启丢弃；服务端导出只写 XML，跳过封面/fanart/样张/头像。`files.rename` / `files.importManual` 用根相对路径；只读父目录拒绝维护写入。`RemoteCatalogBackend` / 本地 `CatalogBackend` 映射上述端口；本地 `addRoot` 仍用受信任本机路径。重启 `recoverCatalogMaintenance` 丢弃计划并把未结束任务标失败/needsInspection，不伪造续跑。
+- 工程默认与升级：
+  - 未发布 `user_version=19` 且缺任务表的库拒绝迁移。本地 ADR-0024 根没有 `catalog_root_markers` 行，不跑服务端标记检查。
+  - `scans.run` 声明 G，无根 generation 列，只要求包络含 G，不虚构聚合。
+  - `libraries.updateRoot` / `cancelRootRemoval` 冻结 versions 为 G，领域仍要 L；HTTP **同时要求 L**（需产品确认是否改合同）。
+  - `files.rename` / `libraries.removeRoot` digest 为当前影响 SHA-256，不是 10 分钟计划行（NFO 使用计划表）。
+  - `files.rename` 先改文件再写回执；崩溃后指纹变化会 `VERSION_CONFLICT`。
+  - `libraries.removeRoot` 冻结 completion 为 task：无数据则同步删除，有数据走 `pending_removal` 作业，不另开 `catalog_tasks`。
+  - 服务端扫描配置了 NFO **身份检查**；sidecar 资料应用仍在桌面/S10。桌面 `SCAN_RUN` / Electron NFO IPC 仍走原协调器与 `nfoExportTaskController`（S02D 剩余）。
+  - `targetLists.*` / `play.grant` / 刮削确认仍后续阶段。无冻结 list-mounts HTTP。
+- 验证（Linux Node 22.14 / amd64 glibc；实现 `7ce0bba`，修复 `7e9b67f` `8acf0e9`）：
+  - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.browser.json` 通过
+  - `npm run server:test` **20 通过 / 0 失败**（真实挂载 `ABC-001.mp4` 扫描导入、XML-only NFO、错误 digest 拒绝重命名、删除标记≠卸载目录、`MAINTENANCE_BUSY` 重叠扫描、幂等 `scans.run`）
+  - 定向 Electron：migrations V14–V19、catalogWriter、LocalCatalogBackend、createDesktopRuntime **58 通过 / 0 失败**
+  - `npm run pretest` 通过（含 D06 与 server 生产边界）
+  - `npm run test:packaging` **8 通过**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2997 tests / 2996 pass / 0 fail / 1 skip**
+- 未做：S10 刮削确认/清单导入/Agent 远程应用；S11 media+mpv；S12 迁库；D02 尚未用 Electron 本地后端对照同一 Node 宿主的扫描/NFO（本阶段 in-process `latestScan` + HTTP）；D07 全能力矩阵；M04/M06/M08/M09 其余故障注入与 Docker 真实部署。扫描时 sidecar 元数据不在 Node 上 apply。不得把 mock 当完成证据。需用户决定：updateRoot/cancelRootRemoval 是否继续强制 L；removeRoot 是否必须变成 catalog task。
 
 ### S10：桌面采集、Agent 和批次
 

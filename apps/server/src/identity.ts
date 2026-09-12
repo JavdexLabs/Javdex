@@ -5,11 +5,14 @@ import { ensureCatalogIdentity, isWriterBound } from '@library/catalog/catalogId
 import { issueOneTimeToken, type IssuedOneTimeToken } from '@library/catalog/catalogWriter'
 import { configureLibraryHost } from '@library/runtime/host'
 import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
+import { configureLocalNfoScanService } from '@library/scan/nfoScanPort'
+import { libraryLocalNfoScanService } from '@library/nfo/libraryLocalNfoScanService'
 import type { ServerConfig } from './config'
 import { ensureLocalDataDir } from './filesystem'
 import { createSharpImageCodec } from './imageCodec'
 
 export function configureServerLibraryHost(config: ServerConfig): void {
+  configureLocalNfoScanService(libraryLocalNfoScanService)
   configureLibraryHost({
     userDataPath: () => config.dataDir,
     images: createSharpImageCodec(),

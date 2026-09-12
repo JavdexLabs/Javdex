@@ -1202,7 +1202,7 @@ describe('server runtime lifecycle', () => {
     assert.equal(busyScan.status, 200, JSON.stringify(busyScan.json))
     const busyId = (busyScan.json as { taskId: string }).taskId
     const overlap = await write('scans.run', versions(library), { libraryId: 1 })
-    assert.equal(overlap.status, 400)
+    assert.equal(overlap.status, 409, JSON.stringify(overlap.json))
     assert.equal((overlap.json as { code?: string }).code, 'MAINTENANCE_BUSY')
 
     const credentials = memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
@@ -1273,7 +1273,7 @@ describe('server runtime lifecycle', () => {
         planId: randomUUID(),
         planDigest: 'a'.repeat(64)
       })
-      assert.equal(staleRename.status, 400)
+      assert.equal(staleRename.status, 409, JSON.stringify(staleRename.json))
       assert.equal((staleRename.json as { code?: string }).code, 'VERSION_CONFLICT')
       const digest = filesRenameDigest({
         libraryId: 1,

@@ -114,6 +114,7 @@ function ensureSubscription(): void {
 export function resetCatalogScanRuntime(): void {
   started.clear()
   cancelRequested.clear()
+  scanCoordinator.resetAfterStop()
 }
 
 export function enqueueLibraryScan(input: {

@@ -231,6 +231,12 @@ export class ScanCoordinator {
     await Promise.allSettled([...this.pendingRuns])
   }
 
+  /** Next runtime start may admit scans again after a previous stopAndDrain. */
+  resetAfterStop(): void {
+    this.stopping = false
+    this.activeRun = null
+  }
+
   private async runInternal(request: ScanCoordinatorRequest): Promise<ScanCompletionResult> {
     if (!Number.isSafeInteger(request.libraryId) || request.libraryId <= 0) {
       throw new Error('媒体库 ID 无效')

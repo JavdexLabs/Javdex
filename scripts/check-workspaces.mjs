@@ -29,4 +29,4 @@ for (const directory of ['apps/web/src', 'packages/contracts/src', 'packages/ui/
 }
 assert.equal(violations.length, 0, violations.join('\n'))
 console.log('Workspace versions and browser/shared dependency boundaries passed.')
-console.log('library currently owns catalog db, image store, public-image HTTP, scan helpers/orchestration, scan-audit read, classification query/maintenance/images, actress query/conflict/gallery/maintenance, tag queries, playlist maintenance, video maintenance/lifecycle, NFO, maintenance gate, and path cleanup; Electron NFO export and scrape-apply remain in desktop. server/http are reserved. This check does not claim a runnable server.')
+console.log('library currently owns catalog db, image store, public-image HTTP, scan helpers/orchestration/scheduler, scan-audit read, classification query/maintenance/images, actress query/conflict/gallery/maintenance, tag queries, playlist and media-library maintenance, video maintenance/lifecycle, asset migration, NFO, maintenance gate, and path cleanup; Electron NFO export and scrape-apply remain in desktop. server/http are reserved. This check does not claim a runnable server.')

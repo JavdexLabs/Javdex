@@ -10,7 +10,7 @@ import {
   upsertPendingResourceIdentity
 } from '@library/db/pendingResourceIdentityRepo'
 import { listVideos, listVideoResources } from '@library/db/videoRepo'
-import type { LocalNfoScanService } from './localNfoScanService'
+import type { LocalNfoScanService } from './nfoScanPort'
 import { resolvePendingResourceIdentity } from './pendingResourceIdentityService'
 
 let temporaryDirectory: string | null = null

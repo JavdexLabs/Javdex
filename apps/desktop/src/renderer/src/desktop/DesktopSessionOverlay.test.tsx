@@ -14,6 +14,8 @@ function collectText(node: TestRenderer.ReactTestInstance | string): string {
   return node.children.map((child) => collectText(child as TestRenderer.ReactTestInstance)).join('')
 }
 
+let renderer: TestRenderer.ReactTestRenderer | null = null
+
 function session(state: DesktopSession['state'], extra: Partial<DesktopSession> = {}): DesktopSession {
   return {
     state,
@@ -31,7 +33,6 @@ function session(state: DesktopSession['state'], extra: Partial<DesktopSession> 
 }
 
 function renderOverlay(current: DesktopSession, pathname = '/'): TestRenderer.ReactTestRenderer {
-  let renderer!: TestRenderer.ReactTestRenderer
   act(() => {
     renderer = TestRenderer.create(
       <MemoryRouter initialEntries={[pathname]}>
@@ -51,11 +52,14 @@ function renderOverlay(current: DesktopSession, pathname = '/'): TestRenderer.Re
       </MemoryRouter>
     )
   })
-  return renderer
+  return renderer!
 }
 
 afterEach(() => {
-  TestRenderer.act(() => undefined)
+  act(() => {
+    renderer?.unmount()
+  })
+  renderer = null
 })
 
 it('shows a version mismatch page without exposing a writer token', () => {
@@ -76,8 +80,8 @@ it('asks for a one-time recovery token without showing a stored secret', () => {
 })
 
 it('keeps settings reachable while the catalog is disconnected', () => {
-  const renderer = renderOverlay(session('disconnected'), '/settings/network/mode')
-  assert.equal(collectText(renderer.root), '')
+  const tree = renderOverlay(session('disconnected'), '/settings/network/mode')
+  assert.equal(collectText(tree.root), '')
 })
 
 it('shows a frozen read-only banner', () => {

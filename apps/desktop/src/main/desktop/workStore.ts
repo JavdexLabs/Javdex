@@ -1,14 +1,17 @@
 import Database from 'better-sqlite3'
 import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
 import type { DesktopWorkStore } from '../application/desktopPorts'
+import { ensureAgentWorkSchema } from './agentWorkCopy'
 
 export type WorkStorePrepStatus = 'idle' | 'copying' | 'ready'
 
 export interface DesktopWorkStoreHandle extends DesktopWorkStore {
+  readonly filePath: string
   prepStatus(): WorkStorePrepStatus
   beginCopy(): void
   markReady(): void
   putVerification(operationId: string, catalogId: string): void
+  database(): Database.Database
   close(): void
 }
 
@@ -38,6 +41,7 @@ export function openDesktopWorkStore(filePath: string): DesktopWorkStoreHandle {
   const db = new Database(filePath)
   db.pragma('journal_mode = WAL')
   db.exec(SCHEMA)
+  ensureAgentWorkSchema(db)
 
   const readMeta = db.prepare('SELECT value FROM work_meta WHERE key = ?')
   const writeMeta = db.prepare(
@@ -59,6 +63,10 @@ export function openDesktopWorkStore(filePath: string): DesktopWorkStoreHandle {
   )
 
   const handle: DesktopWorkStoreHandle = {
+    filePath,
+    database(): Database.Database {
+      return db
+    },
     prepStatus(): WorkStorePrepStatus {
       const row = readMeta.get('prepStatus') as { value: string } | undefined
       return parsePrepStatus(row?.value)

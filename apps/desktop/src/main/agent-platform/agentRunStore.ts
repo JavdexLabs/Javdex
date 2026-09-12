@@ -742,7 +742,17 @@ export class AgentRunStore {
   }
 }
 
-export const agentRunStore = new AgentRunStore()
+let agentDatabase: () => Database.Database = getDb
+
+export function configureAgentRunDatabase(factory: () => Database.Database): void {
+  agentDatabase = factory
+}
+
+export function resetAgentRunDatabaseForTests(): void {
+  agentDatabase = getDb
+}
+
+export const agentRunStore = new AgentRunStore(() => agentDatabase())
 
 export function setAgentPayloadCipherForTests(cipher: AgentPayloadCipher | null): void {
   cipherOverride = cipher

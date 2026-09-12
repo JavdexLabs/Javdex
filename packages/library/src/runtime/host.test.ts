@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import { configureDesktopLibraryTestRuntime } from '../../../../apps/desktop/src/main/libraryRuntime'
 import {
+  configureAgentWorkTablePrefix,
   configureLibraryHost,
+  qualifyAgentSql,
   resetLibraryHostForTests,
   resolveLibraryAssetEncryption,
   resolveLibraryMediaAssetsPath,
@@ -15,6 +17,7 @@ describe('library host', () => {
   afterEach(() => {
     if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
     else process.env.JAVDEX_TEST_USER_DATA = previous
+    configureAgentWorkTablePrefix('')
     configureDesktopLibraryTestRuntime()
   })
 
@@ -64,5 +67,27 @@ describe('library host', () => {
     delete process.env.JAVDEX_TEST_USER_DATA
     resetLibraryHostForTests()
     assert.throws(() => resolveLibraryUserDataPath(), /Library host is not configured/)
+  })
+
+  it('qualifies agent tables for an attached workStore without rewriting restore temp tables', () => {
+    assert.equal(
+      qualifyAgentSql('SELECT id FROM agent_runs WHERE status <> \'closed\''),
+      'SELECT id FROM agent_runs WHERE status <> \'closed\''
+    )
+    configureAgentWorkTablePrefix('work.')
+    assert.equal(
+      qualifyAgentSql(
+        'SELECT id FROM agent_runs WHERE EXISTS (SELECT 1 FROM agent_resource_cleanup AS cleanup WHERE cleanup.run_id = agent_runs.id)'
+      ),
+      'SELECT id FROM work.agent_runs WHERE EXISTS (SELECT 1 FROM work.agent_resource_cleanup AS cleanup WHERE cleanup.run_id = work.agent_runs.id)'
+    )
+    assert.equal(
+      qualifyAgentSql('INSERT INTO agent_restore_deadbeef (id) SELECT id FROM agent_runs'),
+      'INSERT INTO agent_restore_deadbeef (id) SELECT id FROM work.agent_runs'
+    )
+    assert.equal(
+      qualifyAgentSql('SELECT * FROM work.agent_runs'),
+      'SELECT * FROM work.agent_runs'
+    )
   })
 })

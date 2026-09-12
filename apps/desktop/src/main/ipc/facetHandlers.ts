@@ -1,4 +1,10 @@
 import { IPC } from '@shared/ipc-channels'
+import type {
+  ClassificationEntityRef,
+  ClassificationImageCandidate,
+  ClassificationListPage,
+  ClassificationPageQuery
+} from '@shared/classificationTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { ipcMutation } from '../application/mutationContext'
 import { appCommandAdapter } from './appContractAdapter'
@@ -10,10 +16,15 @@ import type { SeriesMergeService } from '../services/seriesMergeService'
 import type { OrganizationMergeService } from '../services/organizationMergeService'
 import type { ClassificationDeletionService } from '../services/classificationDeletionService'
 import type { OrganizationDeletionService } from '../services/organizationDeletionService'
-import type { CatalogReadWorkerClient } from '../services/catalogReadWorkerClient'
 
 interface ClassificationHandlerDependencies {
-  readService: Pick<CatalogReadWorkerClient, 'readImageCandidates'>
+  readService: {
+    readImageCandidates(
+      entity: ClassificationEntityRef,
+      query?: ClassificationPageQuery,
+      signal?: AbortSignal
+    ): Promise<ClassificationListPage<ClassificationImageCandidate>>
+  }
   queryService: ClassificationQueryService
   maintenanceService: ClassificationMaintenanceService
   imageService: ClassificationImageService

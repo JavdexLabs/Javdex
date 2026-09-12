@@ -1,4 +1,4 @@
-import { createScanNfoWorkset, createMemoryScanNfoWorkset, ScanNfoWorksetError, type ScanNfoWorkset } from './scanNfoWorkset'
+import { createScanNfoWorkset, createMemoryScanNfoWorkset, ScanNfoWorksetError, type ScanNfoWorkset } from '@library/scan/scanNfoWorkset'
 import { createScanCodeCounts, createMemoryScanCodeCounts, ScanCodeCountsError, type ScanCodeCounts } from '@library/scan/scanCodeCounts'
 import { createScanFileSpool, createMemoryScanFileInventory } from '@library/scan/scanFileInventory'
 import fs from 'node:fs'

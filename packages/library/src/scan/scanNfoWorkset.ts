@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type Database from 'better-sqlite3'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
-import type { LocalNfoAnchor, LocalNfoIdentityInspection } from '../metadata-sources'
+import type { LocalNfoAnchor, LocalNfoIdentityInspection } from '@library/nfo/localNfoTypes'
 import type { DirectoryVideoIdentitySummary } from '@library/nfo/directoryVideoIdentity'
 
 export interface ScanNfoPreflight {

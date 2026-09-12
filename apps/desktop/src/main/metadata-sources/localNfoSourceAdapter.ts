@@ -18,6 +18,7 @@ import { authorizeMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFil
 import { createNfoFileStore, type NfoFileStore } from '@library/nfo/nfoFileStore'
 import { parseNfoArtifact, type NormalizedNfoArtifact } from '@library/nfo/nfoArtifactCodec'
 import { summarizeDirectoryVideoCodes, type DirectoryVideoIdentityInput } from '@library/nfo/directoryVideoIdentity'
+import type { LocalNfoAnchor, LocalNfoIdentityInspection } from '@library/nfo/localNfoTypes'
 import { NfoDirectoryCache } from './nfoDirectoryCache'
 import { indexNfoSidecars, locateNfoSidecar, sameLogicalCode } from '@library/nfo/nfoSidecarLocator'
 import { projectVideoScrapeResult } from '../scrapers/videoScrapeFieldProjection'
@@ -29,6 +30,8 @@ import type {
   VideoMetadataSourceDescriptor,
   VideoMetadataSourceRequest
 } from './types'
+
+export type { LocalNfoAnchor, LocalNfoIdentityInspection }
 
 export const LOCAL_NFO_SUPPORTED_FIELDS = [
   'title',
@@ -47,23 +50,10 @@ export const LOCAL_NFO_SUPPORTED_FIELDS = [
   'samples'
 ] as const satisfies readonly VideoScrapeField[]
 
-export interface LocalNfoAnchor {
-  root: Readonly<MediaLibraryRoot>
-  anchorPath: string
-  directoryVideoCodes: DirectoryVideoIdentityInput
-  directorySidecars?: ReadonlyMap<string, string>
-}
-
 export interface LocalNfoSourceAdapterOptions {
   listAnchors: (videoId: number) => LocalNfoAnchor[] | Promise<LocalNfoAnchor[]>
   fileStore: NfoFileStore
   findExistingActorGender: (name: string) => ActressGender | null
-}
-
-export interface LocalNfoIdentityInspection {
-  status: 'missing' | 'warning' | 'found'
-  code: string | null
-  warnings: string[]
 }
 
 const naturalOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })

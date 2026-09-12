@@ -646,7 +646,7 @@ describe('media-library IPC handlers', () => {
     assert.deepEqual(calls, [])
   })
 
-  it('preserves root continuity domain errors across validated IPC handlers', () => {
+  it('preserves root continuity domain errors across validated IPC handlers', async () => {
     const registrations = new Map<
       IpcChannel,
       (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>
@@ -671,22 +671,22 @@ describe('media-library IPC handlers', () => {
     registerTestHandlers(deps, adapter)
 
     const event = {} as IpcMainInvokeEvent
-    assert.throws(
+    await assert.rejects(
       () =>
         registrations.get(IPC.MEDIA_LIBRARY_ROOT_UPDATE)?.(event, {
           libraryId: 3,
           rootId: 8,
           expectedRevision: 2,
           patch: { state: 'active' }
-        }),
+        }) as Promise<unknown>,
       (error) => error === continuityError
     )
-    assert.throws(
+    await assert.rejects(
       () =>
         registrations.get(IPC.MEDIA_LIBRARY_RESTORE)?.(event, {
           libraryId: 3,
           expectedRevision: 2
-        }),
+        }) as Promise<unknown>,
       (error) => error === continuityError
     )
   })

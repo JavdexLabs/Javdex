@@ -120,10 +120,10 @@ export function registerFacetHandlers(
     backend.classifications.getOrganization({ organizationId: id, role } as never)
   )
   adapter.register(IPC.ORGANIZATION_OPTIONS, (search) =>
-    backend.classifications.organizationOptions({ role: 'maker', search })
+    backend.classifications.organizationOptions({ search })
   )
   adapter.register(IPC.ORGANIZATION_MERGE_OPTIONS, (search) =>
-    backend.classifications.organizationMergeOptions({ organizationId: 1, search })
+    backend.classifications.organizationMergeOptions({ search })
   )
   adapter.register(IPC.ORGANIZATION_CREATE, (input) =>
     backend.classifications.createOrganization(input, ipcMutation())

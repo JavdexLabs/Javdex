@@ -110,7 +110,7 @@ export function registerActressHandlers(
     backend.actresses.conflictQueuePage(query)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_GET, (normalizedName) =>
-    backend.actresses.conflictGet({ pendingId: 1, normalizedName } as never)
+    backend.actresses.conflictGet({ normalizedName } as never)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_COUNT, () =>
     backend.actresses.conflictCount({})

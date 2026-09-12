@@ -51,7 +51,7 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02 | 进行中（library 已含 db、图片、扫描编排、扫描审计读取、分类/标签只读查询、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、catalog 写入/维护服务仍在 desktop；S02D 未开始 |
+| S02 | 进行中（library 已含 db、图片、扫描编排、扫描审计读取、分类/标签只读查询、清单维护、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、影片/演员/分类维护服务仍在 desktop；S02D 未开始 |
 | S03–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
@@ -261,7 +261,14 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - 范围：将 `classificationQueryService`、`classificationListPage`、`classificationImagePage` 和 `tagQueryService` 迁入 `packages/library/src/catalog`。桌面再导出以保持 IPC / catalog worker 兼容。依赖 IPC schema 或维护写入的分类分页测试仍留在 desktop。
 - 工程默认：查询仍走 `getDb()` 单例。未改 schema 16。
 - 验证：`npm run typecheck:node`；library / classification / workspace 边界通过。分类/标签查询及相关测试 71 项全部通过（tag cache、list/image pages、facet IPC、catalog worker、director/org/series query+merge）。
-- 未做：分类维护/合并/图片写入、影片/演员/清单业务服务、Electron NFO 导出仍在 desktop；S02D 未开始。
+- 未做：当时分类维护/合并/图片写入、影片/演员业务服务、Electron NFO 导出仍在 desktop；S02D 未开始。
+
+**S02 实施记录（清单维护切片）**
+
+- 范围：将 `playlistService`（创建/更新/删除及封面交割）迁入 `packages/library/src/catalog`。桌面再导出供 IPC 使用。清单查询仍直接走 `playlistRepo`（S02D 再收到 application）。
+- 工程默认：封面写入仍经 `mediaAssetStore.coordinateDatabaseChange`。未改 schema 16。
+- 验证：`npm run typecheck:node`；library 边界通过。playlistService 测试 2 项全部通过。
+- 未做：影片/演员/分类维护服务、Electron NFO 导出、catalogReadWorker 入口仍在 desktop；S02D 未开始。
 
 ### S02D：先完成桌面本地后端重构
 

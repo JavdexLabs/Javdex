@@ -176,7 +176,7 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     throw structuredError('UNSUPPORTED_CAPABILITY', `S12 尚未实现 ${operation}`)
   }
   if (meta.auth === 'publicHandshake') {
-    throw structuredError('UNSUPPORTED_CAPABILITY', `S08 尚未实现 ${operation}`)
+    throw structuredError('UNSUPPORTED_CAPABILITY', `尚未实现 ${operation}`)
   }
 
   if (meta.auth === 'manageRead' || meta.auth === 'manageWrite') {
@@ -470,8 +470,8 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     }
     const catalogResult = dispatchCatalogManage(operation, envelope, auth, database)
     if (catalogResult !== CATALOG_NOT_HANDLED) return catalogResult
-    throw structuredError('UNSUPPORTED_CAPABILITY', `S08 尚未实现 ${operation}`)
+    throw structuredError('UNSUPPORTED_CAPABILITY', `尚未实现 ${operation}`)
   }
 
-  throw structuredError('UNSUPPORTED_CAPABILITY', `S08 尚未实现 ${operation}`)
+  throw structuredError('UNSUPPORTED_CAPABILITY', `尚未实现 ${operation}`)
 }

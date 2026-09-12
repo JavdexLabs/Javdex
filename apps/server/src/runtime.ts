@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { recoverInterruptedLibraryScanRuns } from '@library/db/libraryScanRepo'
 import { recoverCatalogImages } from '@library/catalog/catalogImageRecovery'
+import { recoverCatalogMaintenance } from '@library/catalog/catalogMaintenanceRecover'
+import { scanCoordinator } from '@library/scan/scanCoordinator'
 import { isWriterBound } from '@library/catalog/catalogIdentity'
 import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
 import { createWorkerWebCatalog } from '@http/catalogWorkerAdapter'
@@ -146,6 +148,7 @@ export async function startJavdexServer(
     const database = initDatabaseAtPath(path.join(config.dataDir, 'library.db'))
     recoverInterruptedLibraryScanRuns(database)
     recoverCatalogImages(database)
+    recoverCatalogMaintenance(database)
     ensureServerCatalog(config, { bootstrapToken: isWriterBound(database) ? undefined : options.bootstrapToken })
     const workerEntry = options.workerEntry ?? defaultWebCatalogWorkerEntry()
     if (!fs.existsSync(workerEntry)) {
@@ -187,6 +190,11 @@ export async function startJavdexServer(
       async stop(_signal?: NodeJS.Signals): Promise<void> {
         stopping = true
         ready = false
+        try {
+          await scanCoordinator.stopAndDrain()
+        } catch {
+          // Drain before closing the catalog; keep stopping even if cancel races.
+        }
         try {
           await http?.stop()
         } finally {

@@ -5,6 +5,7 @@ import {
   recoverInterruptedLibraryScanRuns,
   type InterruptedLibraryScanRecoveryResult
 } from '@library/db/libraryScanRepo'
+import { recoverCatalogMaintenance } from '@library/catalog/catalogMaintenanceRecover'
 import { configureAgentWorkTablePrefix } from '@library/runtime/host'
 import type { CatalogBackend } from '../application/catalogBackend'
 import {
@@ -132,6 +133,7 @@ export async function createDesktopRuntime(
   attachAgentWorkStore(database, workStore.filePath)
   configureAgentRunDatabase(() => workStore.database())
   const scanRecovery = recoverInterruptedLibraryScanRuns(database)
+  recoverCatalogMaintenance(database)
   const backend = createCatalogBackendForMode('local', {
     identity: loadOrCreateLocalCatalogIdentity(localCatalogIdentityPath(userDataPath)),
     appVersion,

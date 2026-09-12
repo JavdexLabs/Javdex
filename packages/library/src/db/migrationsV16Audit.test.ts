@@ -91,7 +91,7 @@ function comparableSchema(db: Database.Database): SchemaRow[] {
 
 function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot>) {
   migrateDatabase(db)
-  assert.equal(CURRENT_SCHEMA_VERSION, 18)
+      assert.equal(CURRENT_SCHEMA_VERSION, 19)
   assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
   assert.deepEqual(legacyRows(snapshot(db, before.map(table => table.name)), before), before)
   checkIntegrity(db)

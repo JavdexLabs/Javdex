@@ -42,11 +42,12 @@ it('upgrades official 16/17 and empty databases to the same schema 18 upload tab
     migrateDatabase(from16)
     migrateDatabase(from17)
     migrateDatabase(fresh)
-    assert.equal(CURRENT_SCHEMA_VERSION, 18)
+    assert.equal(CURRENT_SCHEMA_VERSION, 19)
     for (const db of [from16, from17, fresh]) {
-      assert.equal(db.pragma('user_version', { simple: true }), 18)
+      assert.equal(db.pragma('user_version', { simple: true }), 19)
       assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get())
       assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_file_jobs'").get())
+      assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
       assert.equal(columnNames(db, 'actresses').includes('generation'), true)
       assert.equal(columnNames(db, 'organizations').includes('generation'), true)
       assert.equal(columnNames(db, 'organizations').includes('revision'), true)
@@ -79,24 +80,27 @@ it('rolls back V18 DDL when upload tables fail, then upgrades on retry', (t) => 
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get(), undefined)
     fault.mock.restore()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 18)
+    assert.equal(db.pragma('user_version', { simple: true }), 19)
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get())
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
   } finally {
     t.mock.restoreAll()
     db.close()
   }
 })
 
-it('leaves official schema 18 databases unchanged', () => {
+it('upgrades official schema 18 to durable catalog task tables at schema 19', () => {
   const db = new Database(':memory:')
   try {
     db.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
     db.exec(CATALOG_IMAGE_UPLOAD_SCHEMA_SQL)
     db.pragma('user_version = 18')
-    const before = db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 18)
-    assert.deepEqual(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all(), before)
+    assert.equal(db.pragma('user_version', { simple: true }), 19)
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_maintenance_plans'").get())
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_settings'").get())
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_root_markers'").get())
   } finally {
     db.close()
   }

@@ -55,9 +55,9 @@ it('upgrades official schema 16 and empty databases to the same protocol and upl
     migrateDatabase(from16)
     migrateDatabase(fresh)
     migrateDatabase(from15)
-    assert.equal(CURRENT_SCHEMA_VERSION, 18)
+    assert.equal(CURRENT_SCHEMA_VERSION, 19)
     for (const db of [from16, fresh, from15]) {
-      assert.equal(db.pragma('user_version', { simple: true }), 18)
+      assert.equal(db.pragma('user_version', { simple: true }), 19)
       assert.deepEqual(db.pragma('foreign_key_check'), [])
       assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
     }
@@ -100,16 +100,17 @@ it('rolls back V17 DDL and version when the protocol tables fail, then upgrades 
     assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
     fault.mock.restore()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 18)
+    assert.equal(db.pragma('user_version', { simple: true }), 19)
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_identity'").get())
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get())
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
   } finally {
     t.mock.restoreAll()
     db.close()
   }
 })
 
-it('rejects unpublished experimental V17/V18 snapshots and does not rewrite them', () => {
+it('rejects unpublished experimental V17/V18/V19 snapshots and does not rewrite them', () => {
   const db17 = officialSchema16()
   try {
     db17.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
@@ -141,9 +142,22 @@ it('rejects unpublished experimental V17/V18 snapshots and does not rewrite them
   try {
     db19.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
     db19.pragma('user_version = 19')
-    assert.throws(() => migrateDatabase(db19), /no longer supported/)
+    const snapshot = () => db19.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()
+    const before = snapshot()
+    assert.throws(() => migrateDatabase(db19), /unreleased schema 19/)
     assert.equal(db19.pragma('user_version', { simple: true }), 19)
+    assert.deepEqual(snapshot(), before)
   } finally {
     db19.close()
+  }
+
+  const db20 = officialSchema16()
+  try {
+    db20.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
+    db20.pragma('user_version = 20')
+    assert.throws(() => migrateDatabase(db20), /no longer supported/)
+    assert.equal(db20.pragma('user_version', { simple: true }), 20)
+  } finally {
+    db20.close()
   }
 })

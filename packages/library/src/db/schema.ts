@@ -1108,6 +1108,66 @@ CREATE INDEX IF NOT EXISTS idx_catalog_image_file_jobs_status
     ON catalog_image_file_jobs(status, kind);
 `
 
+/** Official schema 19 durable catalog tasks, 10-minute plans, and server root markers. */
+export const CATALOG_TASK_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS catalog_tasks (
+    task_id TEXT PRIMARY KEY CHECK (length(task_id) = 36),
+    catalog_id TEXT NOT NULL CHECK (length(catalog_id) = 36),
+    operation_id TEXT CHECK (operation_id IS NULL OR length(operation_id) = 36),
+    library_id INTEGER,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN (
+      'queued',
+      'running',
+      'cancelRequested',
+      'succeeded',
+      'failed',
+      'cancelled',
+      'needsInspection'
+    )),
+    task_revision INTEGER NOT NULL CHECK (task_revision > 0),
+    progress_seq INTEGER NOT NULL CHECK (progress_seq >= 0),
+    label TEXT,
+    counts_json TEXT,
+    error_code TEXT,
+    run_id TEXT,
+    snapshot_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_tasks_catalog_updated
+    ON catalog_tasks(catalog_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_catalog_tasks_library_state
+    ON catalog_tasks(library_id, state);
+CREATE INDEX IF NOT EXISTS idx_catalog_tasks_state
+    ON catalog_tasks(state);
+
+CREATE TABLE IF NOT EXISTS catalog_maintenance_plans (
+    plan_id TEXT PRIMARY KEY CHECK (length(plan_id) = 36),
+    kind TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK (length(digest) = 64),
+    payload_json TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_maintenance_plans_expires
+    ON catalog_maintenance_plans(expires_at);
+
+CREATE TABLE IF NOT EXISTS catalog_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS catalog_root_markers (
+    library_id INTEGER NOT NULL,
+    root_id INTEGER NOT NULL,
+    initialized_at TEXT NOT NULL,
+    PRIMARY KEY (library_id, root_id),
+    FOREIGN KEY (root_id, library_id) REFERENCES media_library_roots(id, library_id) ON DELETE CASCADE
+);
+`
+
 /**
  * F/P/A generation columns for image-apply version envelopes.
  * Classification CREATE TABLE snapshots stay on V8; columns are added here.
@@ -1609,6 +1669,8 @@ ${CATALOG_PROTOCOL_SCHEMA_SQL}
 ${CATALOG_IMAGE_UPLOAD_SCHEMA_SQL}
 
 ${CATALOG_IMAGE_VERSION_COLUMNS_SQL}
+
+${CATALOG_TASK_SCHEMA_SQL}
 
 ${AGENT_PLATFORM_SCHEMA_SQL}
 

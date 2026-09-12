@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { addMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import type { ScopedVideoDetail, ScopedVideoListResult } from '@shared/catalogTypes'
@@ -63,7 +64,7 @@ describe('LocalCatalogBackend', () => {
     const backend = createLocalCatalogBackend({ identity, appVersion: '0.7.0' })
     assert.equal(backend.mode, 'local')
     assert.equal(backend.session().serverId, null)
-    assert.equal(backend.session().schemaVersion, 18)
+    assert.equal(backend.session().schemaVersion, CURRENT_SCHEMA_VERSION)
     assert.equal(backend.capabilities().editCatalog.allowed, true)
     assert.equal(backend.capabilities().playRemoteFile.allowed, false)
 

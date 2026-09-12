@@ -24,6 +24,7 @@ export interface LibraryHost {
   images?: LibraryImageCodec
   assets?: LibraryAssetSettings
   http?: LibraryHttpSettings
+  mediaMounts?: () => Readonly<Record<string, string>>
 }
 
 let host: LibraryHost | null = null
@@ -91,4 +92,8 @@ export function resolveLibraryMediaAssetsPath(): string | null {
 
 export function resolveLibraryScrapeProxyUrl(): string {
   return host?.http?.scrapeProxyUrl()?.trim() ?? ''
+}
+
+export function resolveLibraryMediaMounts(): Record<string, string> {
+  return { ...(host?.mediaMounts?.() ?? {}) }
 }

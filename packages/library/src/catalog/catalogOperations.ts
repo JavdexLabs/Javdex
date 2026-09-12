@@ -62,6 +62,29 @@ export function readOperationReceipt(
   return toReceipt(row, row.status === 'applied' ? 'applied' : row.status === 'acceptedTask' ? 'acceptedTask' : 'rejected')
 }
 
+function existingReceipt(
+  request: CatalogMutationRequest,
+  digest: string,
+  database: Database.Database
+): { row: ReceiptRow; receipt: OperationReceipt } | null {
+  const existing = database
+    .prepare(
+      `SELECT operation_id, request_digest, operation, status, writer_epoch, result_json, error_code, created_at
+       FROM catalog_operation_receipts WHERE operation_id = ?`
+    )
+    .get(request.operationId) as ReceiptRow | undefined
+  if (!existing) return null
+  if (existing.request_digest !== digest) {
+    throw structuredError(
+      'OPERATION_KEY_REUSED',
+      '操作编号已被不同内容使用',
+      undefined,
+      request.operationId
+    )
+  }
+  return { row: existing, receipt: toReceipt(existing, 'duplicate') }
+}
+
 export function commitCatalogMutation<T>(
   request: CatalogMutationRequest,
   mutate: () => T,
@@ -77,21 +100,14 @@ export function commitCatalogMutation<T>(
     if (identity.writerEpoch !== request.writerEpoch) {
       throw structuredError('WRITER_REVOKED', '写入代次已变化', undefined, request.operationId)
     }
-    const existing = database
-      .prepare(
-        `SELECT operation_id, request_digest, operation, status, writer_epoch, result_json, error_code, created_at
-         FROM catalog_operation_receipts WHERE operation_id = ?`
-      )
-      .get(request.operationId) as ReceiptRow | undefined
-    if (existing) {
-      if (existing.request_digest !== digest) {
-        throw structuredError('OPERATION_KEY_REUSED', '操作编号已被不同内容使用', undefined, request.operationId)
-      }
-      const receipt = toReceipt(existing, 'duplicate')
+    const duplicate = existingReceipt(request, digest, database)
+    if (duplicate) {
       return {
         outcome: 'duplicate' as const,
-        receipt,
-        data: existing.result_json ? (JSON.parse(existing.result_json) as { data: T }).data : (undefined as T)
+        receipt: duplicate.receipt,
+        data: duplicate.row.result_json
+          ? (JSON.parse(duplicate.row.result_json) as { data: T }).data
+          : (undefined as unknown as T)
       }
     }
     const data = mutate()
@@ -121,6 +137,66 @@ export function commitCatalogMutation<T>(
       digest,
       entityIds: result.entityIds,
       versions: result.versions,
+      createdAt
+    }
+    return { outcome: 'applied' as const, receipt, data }
+  })()
+}
+
+export function acceptCatalogTask<T extends { taskId: string }>(
+  request: CatalogMutationRequest,
+  enqueue: () => T,
+  database: Database.Database = getDb()
+): { outcome: 'applied' | 'duplicate'; receipt: OperationReceipt; data: T } {
+  const digest = digestCatalogMutation(request)
+  return database.transaction(() => {
+    const identity = readCatalogIdentity(database)
+    if (!identity) {
+      throw structuredError('AUTH_REQUIRED', '资料库身份尚未初始化', undefined, request.operationId)
+    }
+    if (identity.frozen) {
+      throw structuredError(
+        'CATALOG_FROZEN',
+        '资料库已冻结',
+        { operationId: request.operationId },
+        request.operationId
+      )
+    }
+    if (identity.writerEpoch !== request.writerEpoch) {
+      throw structuredError('WRITER_REVOKED', '写入代次已变化', undefined, request.operationId)
+    }
+    const duplicate = existingReceipt(request, digest, database)
+    if (duplicate) {
+      return {
+        outcome: 'duplicate' as const,
+        receipt: duplicate.receipt,
+        data: duplicate.row.result_json
+          ? (JSON.parse(duplicate.row.result_json) as { data: T }).data
+          : (undefined as unknown as T)
+      }
+    }
+    const data = enqueue()
+    const createdAt = new Date().toISOString()
+    const result = { taskId: data.taskId, data }
+    database
+      .prepare(
+        `INSERT INTO catalog_operation_receipts (
+           operation_id, request_digest, operation, status, writer_epoch, result_json, error_code, created_at
+         ) VALUES (?, ?, ?, 'acceptedTask', ?, ?, NULL, ?)`
+      )
+      .run(
+        request.operationId,
+        digest,
+        request.operation,
+        request.writerEpoch,
+        JSON.stringify(result),
+        createdAt
+      )
+    const receipt: OperationReceipt = {
+      operationId: request.operationId,
+      status: 'acceptedTask',
+      digest,
+      taskId: data.taskId,
       createdAt
     }
     return { outcome: 'applied' as const, receipt, data }

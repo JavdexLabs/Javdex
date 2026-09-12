@@ -8,7 +8,33 @@ import type {
 import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { structuredError } from '@shared/protocol/errors'
 import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
+import { acceptCatalogTask, commitCatalogMutation, readOperationReceipt } from '@library/catalog/catalogOperations'
 import { applyVideoCoverRef, commitManageImageMutation } from '@library/catalog/catalogImageApply'
+import {
+  enqueueLibraryScan,
+  requestLibraryScanCancel,
+  startLibraryScan
+} from '@library/catalog/catalogScanRuntime'
+import {
+  catalogScanLatest
+} from '@library/catalog/catalogAuditRead'
+import {
+  filesRenameDigest,
+  importCatalogManualFile,
+  renameCatalogFile
+} from '@library/catalog/catalogFileMaintenance'
+import {
+  discardCatalogNfoPlan,
+  enqueueCatalogNfoExport,
+  getCatalogNfoOptions,
+  peekCatalogNfoPlanDigest,
+  planCatalogNfoExport,
+  catalogNfoState,
+  startCatalogNfoExportTask,
+  terminateCatalogNfoExport,
+  updateCatalogNfoPreferences
+} from '@library/catalog/catalogNfoExport'
+import { listCatalogTasks, readCatalogTask } from '@library/catalog/catalogTasks'
 import type { CatalogImageRef } from '@shared/protocol/uploads'
 import {
   assertExpectedVideoVersion,
@@ -839,11 +865,62 @@ export function createLocalCatalogBackend(
     async delete(input) {
       return libraries.remove(input as never)
     },
-    runScan: () => unsupportedCatalogUseCase('scans.run'),
-    cancelScan: () => unsupportedCatalogUseCase('scans.cancel'),
-    latestScan: () => unsupportedCatalogUseCase('scans.getLatest'),
-    renameFile: () => unsupportedCatalogUseCase('files.rename'),
-    importManual: () => unsupportedCatalogUseCase('files.importManual'),
+    async runScan(input, ctx) {
+      const accepted = acceptCatalogTask(
+        {
+          operationId: ctx.operationId,
+          operation: 'scans.run',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => enqueueLibraryScan({ libraryId: input.libraryId, operationId: ctx.operationId })
+      )
+      if (accepted.outcome === 'applied') {
+        queueMicrotask(() => startLibraryScan(accepted.data.taskId))
+      }
+      return { receipt: accepted.receipt, taskId: accepted.data.taskId }
+    },
+    async cancelScan(input) {
+      return requestLibraryScanCancel(input)
+    },
+    async latestScan(input) {
+      return catalogScanLatest(input.libraryId)
+    },
+    async renameFile(input, ctx) {
+      const local = input as {
+        libraryId: number
+        resourceId: number
+        location: { rootId: number; relativePath: string }
+        newFileName: string
+        planDigest?: string
+      }
+      const planDigest = local.planDigest ?? filesRenameDigest(local)
+      const result = await renameCatalogFile({ ...local, planDigest })
+      return commitCatalogMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'files.rename',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => result
+      ).data
+    },
+    async importManual(input, ctx) {
+      const result = await importCatalogManualFile(input)
+      return commitCatalogMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'files.importManual',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => result
+      ).data
+    },
     resolvePendingScan: async (input) => {
       const local = input as {
         libraryId?: number
@@ -910,15 +987,75 @@ export function createLocalCatalogBackend(
     claimWriter: async () => {
       throw structuredError('UNSUPPORTED_CAPABILITY', '本地模式不使用 writer 领取')
     },
-    nfo: unsupportedSlice([
-      'getOptions',
-      'updatePreferences',
-      'plan',
-      'discardPlan',
-      'start',
-      'terminate',
-      'state'
-    ]),
+    nfo: {
+      async getOptions() {
+        return getCatalogNfoOptions()
+      },
+      async updatePreferences(input, ctx) {
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.updatePreferences',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => updateCatalogNfoPreferences(input)
+        ).data
+      },
+      async plan(input, ctx) {
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.plan',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => {
+            const preview = planCatalogNfoExport(input)
+            return { ...preview, planDigest: peekCatalogNfoPlanDigest(preview.planId) }
+          }
+        ).data
+      },
+      async discardPlan(input, ctx) {
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.discardPlan',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => {
+            discardCatalogNfoPlan(input.planId)
+            return { ok: true }
+          }
+        ).data
+      },
+      async start(input, ctx) {
+        const accepted = acceptCatalogTask(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.start',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => enqueueCatalogNfoExport(input.planId, input.planDigest, ctx.operationId)
+        )
+        if (accepted.outcome === 'applied') {
+          queueMicrotask(() => startCatalogNfoExportTask(accepted.data.taskId))
+        }
+        return { receipt: accepted.receipt, taskId: accepted.data.taskId }
+      },
+      async terminate(input) {
+        return terminateCatalogNfoExport(input.taskId)
+      },
+      async state() {
+        return catalogNfoState()
+      }
+    },
     browser: unsupportedSlice([
       'status',
       'setEnabled',
@@ -930,14 +1067,31 @@ export function createLocalCatalogBackend(
       'deviceReset',
       'revokeSessions'
     ]),
-    tasks: unsupportedSlice([
-      'get',
-      'list',
-      'cancel',
-      'getOperation',
-      'createTargetList',
-      'pageTargetList'
-    ]),
+    tasks: {
+      async get(input) {
+        const task = readCatalogTask(input.taskId)
+        if (!task) throw structuredError('INVALID_INPUT', '任务不存在')
+        return task
+      },
+      async list(input) {
+        return listCatalogTasks(input ?? {})
+      },
+      async cancel(input) {
+        const task = readCatalogTask(input.taskId)
+        if (!task) throw structuredError('INVALID_INPUT', '任务不存在')
+        if (task.kind === 'scan') {
+          if (task.libraryId == null) throw structuredError('INVALID_INPUT', '扫描任务缺少媒体库')
+          return requestLibraryScanCancel({ libraryId: task.libraryId, taskId: task.taskId })
+        }
+        if (task.kind === 'nfo-export') return terminateCatalogNfoExport(task.taskId)
+        throw structuredError('UNSUPPORTED_CAPABILITY', '该任务类型的取消仍待后续阶段接入')
+      },
+      async getOperation(input) {
+        return readOperationReceipt(input.operationId)
+      },
+      createTargetList: () => unsupportedCatalogUseCase('targetLists.create'),
+      pageTargetList: () => unsupportedCatalogUseCase('targetLists.page')
+    },
     assets: unsupportedSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
     migration: unsupportedSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),
     async dispose(): Promise<void> {

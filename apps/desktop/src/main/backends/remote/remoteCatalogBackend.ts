@@ -178,16 +178,6 @@ const LIBRARY_KEYS = [
   'resolveResourceIdentity'
 ] as const
 
-const NFO_KEYS = [
-  'getOptions',
-  'updatePreferences',
-  'plan',
-  'discardPlan',
-  'start',
-  'terminate',
-  'state'
-] as const
-
 const BROWSER_KEYS = [
   'status',
   'setEnabled',
@@ -198,15 +188,6 @@ const BROWSER_KEYS = [
   'deviceRename',
   'deviceReset',
   'revokeSessions'
-] as const
-
-const TASK_KEYS = [
-  'get',
-  'list',
-  'cancel',
-  'getOperation',
-  'createTargetList',
-  'pageTargetList'
 ] as const
 
 const ASSET_KEYS = ['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback'] as const
@@ -682,6 +663,63 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           }
         )
       },
+      addRoot: (input, ctx) => {
+        const local = input as {
+          libraryId: number
+          root: { mountSelectionId?: string; path?: string; position?: number; state?: string }
+        }
+        if (local.root.path) {
+          throw structuredError('INVALID_INPUT', '远程添加根目录不能发送主机路径')
+        }
+        if (!local.root.mountSelectionId) {
+          throw structuredError('INVALID_INPUT', '远程添加根目录必须使用 mountSelectionId')
+        }
+        return mutate(
+          'libraries.addRoot',
+          {
+            libraryId: local.libraryId,
+            root: {
+              mountSelectionId: local.root.mountSelectionId,
+              ...(local.root.position != null ? { position: local.root.position } : {}),
+              ...(local.root.state != null ? { state: local.root.state } : {})
+            }
+          },
+          ctx
+        )
+      },
+      updateRoot: (input, ctx) => {
+        const local = input as {
+          libraryId: number
+          rootId: number
+          position?: number
+          state?: string
+          patch?: { position?: number; state?: string; path?: string }
+        }
+        if (local.patch?.path) {
+          throw structuredError('INVALID_INPUT', '远程不能重绑根目录路径')
+        }
+        return mutate(
+          'libraries.updateRoot',
+          {
+            libraryId: local.libraryId,
+            rootId: local.rootId,
+            ...(local.position != null || local.patch?.position != null
+              ? { position: local.position ?? local.patch?.position }
+              : {}),
+            ...(local.state != null || local.patch?.state != null
+              ? { state: local.state ?? local.patch?.state }
+              : {})
+          },
+          ctx
+        )
+      },
+      removeRoot: mPlan('libraries.removeRoot'),
+      cancelRootRemoval: m('libraries.cancelRootRemoval'),
+      runScan: m('scans.run'),
+      cancelScan: m('scans.cancel'),
+      latestScan: q('scans.getLatest'),
+      renameFile: mPlan('files.rename'),
+      importManual: m('files.importManual'),
       resolvePendingScan: (input, ctx) => {
         const local = input as {
           groupId: number
@@ -712,7 +750,15 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         )
       }
     },
-    nfo: rejectSlice(NFO_KEYS, (key) => unsupported(`nfo.${String(key)}`)),
+    nfo: {
+      getOptions: q('nfo.getOptions'),
+      updatePreferences: m('nfo.updatePreferences'),
+      plan: m('nfo.plan'),
+      discardPlan: m('nfo.discardPlan'),
+      start: m('nfo.start'),
+      terminate: m('nfo.terminate'),
+      state: q('nfo.state')
+    },
     browser: {
       ...rejectSlice(BROWSER_KEYS, (key) => unsupported(`browser.${String(key)}`)),
       status: (input, ctx) => query('browser.status', input ?? {}, ctx?.signal),
@@ -726,10 +772,14 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       revokeSessions: m('browser.revokeSessions')
     },
     tasks: {
-      ...rejectSlice(TASK_KEYS, (key) => unsupported(`tasks.${String(key)}`)),
+      get: q('tasks.get'),
+      list: q('tasks.list'),
+      cancel: m('tasks.cancel'),
       async getOperation(input, ctx) {
         return query('operations.get', input, ctx?.signal)
-      }
+      },
+      createTargetList: () => unsupported('targetLists.create'),
+      pageTargetList: () => unsupported('targetLists.page')
     },
     assets: {
       ...rejectSlice(ASSET_KEYS, (key) => unsupported(`assets.${String(key)}`)),

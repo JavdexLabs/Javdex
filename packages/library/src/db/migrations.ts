@@ -12,6 +12,7 @@ import {
   AGENT_RESOURCE_CLEANUP_SCHEMA_SQL,
   CATALOG_PROTOCOL_SCHEMA_SQL,
   CATALOG_IMAGE_UPLOAD_SCHEMA_SQL,
+  CATALOG_TASK_SCHEMA_SQL,
   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
   MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
@@ -26,7 +27,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 18
+export const CURRENT_SCHEMA_VERSION = 19
 
 type Migration = {
   version: number
@@ -83,6 +84,25 @@ function hasOfficialSchema18(database: Database.Database): boolean {
   )
 }
 
+function hasOfficialSchema19(database: Database.Database): boolean {
+  if (
+    !tableExists(database, 'catalog_tasks') ||
+    !tableExists(database, 'catalog_maintenance_plans') ||
+    !tableExists(database, 'catalog_settings') ||
+    !tableExists(database, 'catalog_root_markers')
+  ) {
+    return false
+  }
+  const tasks = columnNames(database, 'catalog_tasks')
+  return (
+    tasks.has('task_id') &&
+    tasks.has('state') &&
+    tasks.has('task_revision') &&
+    tasks.has('progress_seq') &&
+    tasks.has('snapshot_json')
+  )
+}
+
 function addIntegerColumnIfMissing(
   database: Database.Database,
   table: string,
@@ -107,6 +127,10 @@ function migrateToV17(database: Database.Database): void {
       'ALTER TABLE videos ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0)'
     )
   }
+}
+
+function migrateToV19(database: Database.Database): void {
+  database.exec(CATALOG_TASK_SCHEMA_SQL)
 }
 
 function migrateToV18(database: Database.Database): void {
@@ -1513,6 +1537,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 18,
     migrate: migrateToV18
+  },
+  {
+    version: 19,
+    migrate: migrateToV19
   }
 ]
 
@@ -1547,6 +1575,11 @@ export function migrateDatabase(database: Database.Database): void {
   if (current === 18 && !hasOfficialSchema18(database)) {
     throw new Error(
       'Database uses an unreleased schema 18 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.'
+    )
+  }
+  if (current === 19 && !hasOfficialSchema19(database)) {
+    throw new Error(
+      'Database uses an unreleased schema 19 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.'
     )
   }
   if (current === 0) {

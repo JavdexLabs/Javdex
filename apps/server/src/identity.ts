@@ -16,7 +16,8 @@ export function configureServerLibraryHost(config: ServerConfig): void {
     assets: {
       assetEncryption: () => false,
       mediaAssetsPath: () => config.imagesDir
-    }
+    },
+    mediaMounts: () => config.mediaMounts
   })
 }
 

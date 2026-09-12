@@ -64,6 +64,7 @@ import type {
 } from '@shared/mediaLibraryTypes'
 import type { PlaylistListQuery, PlaylistPageQuery } from '@shared/playlistTypes'
 import { remainderHandlers } from './manageCatalogRemainder'
+import { maintenanceHandlers } from './manageCatalogMaintenance'
 import { requireManageBrowserSurface } from './manageBrowser'
 
 export interface ManageEnvelope {
@@ -818,7 +819,8 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'browser.revokeSessions'(args) {
     return commit(args, () => requireManageBrowserSurface().revokeSessions())
   },
-  ...remainderHandlers
+  ...remainderHandlers,
+  ...maintenanceHandlers
 }
 
 export function dispatchCatalogManage(

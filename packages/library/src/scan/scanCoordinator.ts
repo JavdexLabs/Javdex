@@ -75,6 +75,7 @@ import {
   type ScanOptions,
   type ScanProgressFn
 } from './scanner'
+import { inspectJavdexRootMarker } from './javdexRootMarker'
 import { resolveMinScanImportDurationSeconds } from '@library/scan/videoDuration'
 
 export type ScanTrigger = LibraryScanTrigger
@@ -168,7 +169,7 @@ async function inspectStableRoot(root: Readonly<MediaLibraryRoot>): Promise<bool
     }
     if (root.deviceId != null && current.deviceId !== root.deviceId) return false
     if (root.inode != null && current.inode !== root.inode) return false
-    return true
+    return inspectJavdexRootMarker(root)
   } catch {
     return false
   }

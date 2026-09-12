@@ -53,7 +53,24 @@ export function fileMaintenanceBlocksHandoff(database: Database.Database = getDb
       `SELECT 1 AS busy FROM library_scan_runs WHERE status IN ('queued', 'running') LIMIT 1`
     )
     .get() as { busy: number } | undefined
-  return Boolean(scan)
+  if (scan) return true
+  const task = database
+    .prepare(
+      `SELECT 1 AS busy FROM catalog_tasks
+        WHERE state IN ('queued', 'running', 'cancelRequested')
+        LIMIT 1`
+    )
+    .get() as { busy: number } | undefined
+  return Boolean(task)
+}
+
+export function handoffWaitingBlocksNewMaintenance(database: Database.Database = getDb()): boolean {
+  const waiting = database
+    .prepare(
+      `SELECT 1 AS busy FROM catalog_writer_claims WHERE status = 'waitingMaintenance' LIMIT 1`
+    )
+    .get() as { busy: number } | undefined
+  return Boolean(waiting)
 }
 
 export function issueOneTimeToken(

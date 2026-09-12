@@ -57,7 +57,7 @@
 | S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
 | S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
 | S06 | 正式 schema 18 上传表、流式 PUT、全用途 apply 与崩溃恢复已落地；生产烟测含 upload/apply/restart | 见本文件 S06 实施记录 |
-| S07 | 进行中：RemoteCatalogBackend 已能经真实 Node 宿主改标题/上传封面；远程启动不打开本地库 | 见本文件 S07 实施记录 |
+| S07 | 最小双后端闭环与会话/认主/失败 UI 已落地；完整管理面与 D02/D07/M 全矩阵仍待 S08–S13 | 见本文件 S07 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -445,7 +445,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 验收门槛：管理隐藏/归档对象可见、网页不可见；影片编辑和封面上传可保存；丢响应后不重复；切回本地仍能打开原库。完成 D01–D07 的最小真实双后端闭环，未覆盖的大批次/维护细节在 S09/S10 补全并最终在 S13 验收。监测本地数据库和后台任务，证明远程模式没有偷偷打开原库。
 
-**S07 实施记录（RemoteCatalogBackend 最小闭环，进行中）**
+**S07 实施记录（RemoteCatalogBackend 最小闭环）**
 
 - 范围：新增 `packages/http/src/manageClient.ts`（Bearer、版本头、Origin；不带 Cookie）。`createRemoteCatalogBackend` 只走 manage HTTP，不 import SQLite/Electron。已实现 `videos.list`/`videos.get`/`videos.edit`、`uploads.create`/`inspect`/`putUpload`、`videos.setPoster`/`importSamples`、`playlists.create`/`update`、`classificationImages.set`、`operations.get`。其余端口仍 `UNSUPPORTED_CAPABILITY`。握手后比对 `appVersion`，不一致则 `versionMismatch`。`createDesktopRuntime` 远程模式读取 `remoteBaseUrl` 与 `writer-secrets.json`，不打开 `library.db`；无 URL 时仍用未配置占位后端。Node 宿主增加 `videos.list`。
 - 工程默认：本地 `setPoster`/`importSamples`/`assets.createUpload` 仍走本机文件入口。远程未认主或缺少 secret 为 `disconnected`/`recoveryRequired`，不自动领取。超时默认 15s。
@@ -454,7 +454,19 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - Electron `createDesktopRuntime` **7 通过**：远程不打开本地库；切回本地仍能读到远程期间未改的 actress 行
   - `npm run typecheck`；`npm run pretest`；`npm run test:packaging` **8 通过**
   - 全量 Electron：**2986 tests / 2985 pass / 0 fail / 1 skip**
-- 未做：renderer 版本/身份失败页；重连 generation 与迟到响应（D04）；取消/关窗（D05）；完整管理查询面（S08）；M01 隐藏/归档管理可见对照；writer 领取 UI；D07 全能力矩阵。Docker 仍缺。不得把 mock 当远程闭环证据。
+- 当时未做：renderer 版本/身份失败页；重连 generation 与迟到响应（D04）；取消/关窗（D05）；完整管理查询面（S08）；M01 隐藏/归档管理可见对照；writer 领取 UI；D07 全能力矩阵。
+
+**S07 实施记录（会话、认主、失败 UI 与 D01/D04/D05）**
+
+- 范围：桌面会话合同（`DesktopSessionSnapshot`、`DesktopWriterClaimRequest`；renderer 不得收到 writer secret）。新增 IPC `DESKTOP_SESSION_GET` / `CHANGED` / `RECONNECT` / `THIS_COMPUTER_*` / `WRITER_CLAIM`。`createDesktopRuntime` 在打开窗口前对已配置远程做 `reconnect()` 握手。`RemoteCatalogBackend` 可变 `generation`、AbortController 集合、`claimWriter` 在主进程生成 secret 并 POST `writer.claim`。失败态：`disconnected` / `versionMismatch` / `recoveryRequired` / `frozen`。`DesktopSessionOverlay` 阻断非设置页；冻结为横幅；资料库连接在设置 `network/mode`（`settingsPath('network')` 默认仍是 web）。`videos.get` 对隐藏影片回退 `getVideoDetail`；`libraries.list({ includeArchived })` 管理可见。QueryClient 在 `catalogId`/`generation` 变化时清空（D04）。
+- 工程默认：本机模式 `claimWriter` 为 `UNSUPPORTED_CAPABILITY`。远程 URL 仅 http(s)、拒绝 userinfo。未完成 workStore 复制时不打开 `library.db`（`modePrepRequired`）。`writer.recoverIssue` 仍仅环回。`setRating` 仍不递增 revision（M03，未悄悄改 V）。
+- 验证（Linux Node 22.14；提交 `473e559` `97ed837` `caa55bb`）：
+  - `npm run typecheck`；`npm run pretest`（含 D06 桌面架构边界）
+  - `npm run server:test` **18 通过 / 0 失败**（M01 get+归档库、claim 不回传 secret、reconnect/dispose 中止在途查询）
+  - 定向 Electron：createDesktopRuntime / session IPC / overlay / capabilities / local backend 通过
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2994 tests / 2993 pass / 0 fail / 1 skip**
+  - `npm run test:packaging` **8 通过**
+- 未做：S08 完整管理查询/写入面；D02 同一影片在真实本地后端与真实远程 Node 宿主对照（本阶段仅有远程 HTTP）；D07 全能力矩阵；M01 独立演员/清单/待确认图/无成员影片。Docker 容器烟测仍缺。不得把 mock 当远程闭环证据。
 
 ### S08：完整管理功能
 

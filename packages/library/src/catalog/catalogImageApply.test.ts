@@ -128,12 +128,13 @@ describe('catalog image apply', () => {
 
     const otherSampleRel = mediaAssetStore.importSampleFromBuffer('S06-002', await png({ r: 1, g: 1, b: 1 }))
     const foreign = addVideoSampleAsset(otherId, { localPath: otherSampleRel })
+    const currentV = { V: readVideoAggregateVersion(videoId)! }
     assert.throws(
-      () => applyVideoPosterRef(videoId, { kind: 'asset', assetId: foreign.id }, readVideoAggregateVersion(videoId)!, randomUUID()),
+      () => applyVideoPosterRef(videoId, { kind: 'asset', assetId: foreign.id }, currentV, randomUUID()),
       (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
     )
     assert.throws(
-      () => applyVideoCoverRef(videoId, { kind: 'asset', assetId: foreign.id }, readVideoAggregateVersion(videoId)!, randomUUID()),
+      () => applyVideoCoverRef(videoId, { kind: 'asset', assetId: foreign.id }, currentV, randomUUID()),
       (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
     )
     const unchanged = (getDb().prepare('SELECT cover_path FROM videos WHERE id = ?').get(videoId) as { cover_path: string }).cover_path

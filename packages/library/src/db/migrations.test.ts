@@ -7,6 +7,7 @@ import Database from 'better-sqlite3'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
+import { CATALOG_PROTOCOL_SCHEMA_SQL } from './schema'
 import { ActressIdentityConflictWorkflow } from '../../../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 
@@ -1517,6 +1518,7 @@ describe('database schema', () => {
           avatar_crop_json TEXT
         )
       `)
+      db.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
       db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
       migrateFixture(db)
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)

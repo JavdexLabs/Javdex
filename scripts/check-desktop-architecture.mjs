@@ -50,7 +50,8 @@ const catalogIpcFiles = [
   'apps/desktop/src/main/ipc/actressHandlers.ts',
   'apps/desktop/src/main/ipc/facetHandlers.ts',
   'apps/desktop/src/main/ipc/playlistHandlers.ts',
-  'apps/desktop/src/main/ipc/mediaLibraryHandlers.ts'
+  'apps/desktop/src/main/ipc/mediaLibraryHandlers.ts',
+  'apps/desktop/src/main/ipc/desktopSessionHandlers.ts'
 ]
 
 function isCatalogIpcForbidden(specifier) {

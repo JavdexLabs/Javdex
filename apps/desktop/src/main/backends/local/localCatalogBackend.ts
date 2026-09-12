@@ -850,6 +850,10 @@ export function createLocalCatalogBackend(
     classifications: classificationCommands,
     playlists: playlistCommands,
     libraries: libraryCommands,
+    reconnect: async () => session(),
+    claimWriter: async () => {
+      throw structuredError('UNSUPPORTED_CAPABILITY', '本地模式不使用 writer 领取')
+    },
     nfo: unsupportedSlice([
       'getOptions',
       'updatePreferences',

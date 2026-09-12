@@ -1,5 +1,9 @@
 import type { DesktopCapabilityMap } from '@shared/desktop/capabilities'
-import type { DesktopSession } from '@shared/desktop/session'
+import type {
+  DesktopSession,
+  DesktopWriterClaimRequest,
+  DesktopWriterClaimResult
+} from '@shared/desktop/session'
 import type { ManageOperationInput } from '@shared/manage/inputs'
 import type { HandshakeResult } from '@shared/protocol/handshake'
 import type { CatalogIdentity } from '@shared/protocol/identity'
@@ -243,6 +247,8 @@ export interface CatalogBackend {
   readonly generation: number
   capabilities(): DesktopCapabilityMap
   session(): DesktopSession
+  reconnect(): Promise<DesktopSession>
+  claimWriter(input: DesktopWriterClaimRequest): Promise<DesktopWriterClaimResult>
   queries: CatalogQueries
   videos: CatalogVideoCommands
   actresses: CatalogActressCommands

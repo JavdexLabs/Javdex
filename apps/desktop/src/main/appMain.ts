@@ -220,6 +220,7 @@ if (gotSingleInstanceLock) {
       (url) => isSameRendererLocation(url, rendererEntryUrl),
       {
         backend: runtime.backend,
+        settings: runtime.settings,
         videoDesktop:
           runtime.mode === 'local'
             ? { checkLinkResource: (url) => videoMaintenanceService.checkLinkResource(url) }

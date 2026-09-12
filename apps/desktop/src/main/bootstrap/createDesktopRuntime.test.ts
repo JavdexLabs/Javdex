@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { createServer as createHttpServer, type Server } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,6 +17,7 @@ import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../de
 import { openDesktopWorkStore } from '../desktop/workStore'
 
 let tempRoot: string | null = null
+let handshakeServer: Server | null = null
 
 function tempDir(): string {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s02d-bootstrap-'))
@@ -33,13 +35,55 @@ function insertAgentRun(database: ReturnType<typeof getDb>, id: string): void {
     .run(id)
 }
 
-afterEach(() => {
+afterEach(async () => {
   configureAgentWorkTablePrefix('')
   resetAgentRunDatabaseForTests()
   closeDatabase()
+  if (handshakeServer) {
+    await new Promise<void>((resolve, reject) =>
+      handshakeServer!.close((error) => (error ? reject(error) : resolve()))
+    )
+    handshakeServer = null
+  }
   if (tempRoot) fs.rmSync(tempRoot, { recursive: true, force: true })
   tempRoot = null
 })
+
+function listenHandshake(appVersion: string, writerEpoch = 1): Promise<string> {
+  handshakeServer = createHttpServer((_request, response) => {
+    response.setHeader('Content-Type', 'application/json')
+    response.end(
+      JSON.stringify({
+        protocolVersion: 1,
+        appVersion,
+        schemaVersion: 18,
+        identity: { serverId: 'server-1', catalogId: 'catalog-1' },
+        writerEpoch,
+        ready: writerEpoch > 0 ? 'ready' : 'notBound',
+        capabilities: {
+          encryptedAssets: false,
+          transcoding: false,
+          arbitraryUrlProxy: false,
+          pluginExecution: false,
+          publicInternetDefault: false,
+          writerBound: writerEpoch > 0,
+          browserEnabled: true,
+          managementEnabled: true
+        }
+      })
+    )
+  })
+  return new Promise((resolve, reject) => {
+    handshakeServer!.listen(0, '127.0.0.1', () => {
+      const address = handshakeServer!.address()
+      if (!address || typeof address === 'string') {
+        reject(new Error('port'))
+        return
+      }
+      resolve(`http://127.0.0.1:${address.port}`)
+    })
+  })
+}
 
 describe('createDesktopRuntime', () => {
   it('starts local mode, copies agent work, and marks workStore ready', async () => {
@@ -129,31 +173,68 @@ describe('createDesktopRuntime', () => {
     }
   })
 
-  it('refuses remote start while workStore copy is unfinished', async () => {
+  it('starts remote in modePrepRequired when workStore copy is unfinished', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
     await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
     const store = openDesktopWorkStore(workStorePath(root))
     store.beginCopy()
     store.close()
-    await assert.rejects(
-      () => createDesktopRuntime(root, '0.7.0'),
-      (error: unknown) => isStructuredError(error) && error.code === 'MODE_PREP_REQUIRED'
-    )
-    assert.throws(() => getDb(), /Database not initialised/)
+    const runtime = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(runtime.mode, 'remote')
+      assert.equal(runtime.openedCatalog, false)
+      assert.equal(runtime.backend.session().state, 'modePrepRequired')
+      assert.throws(() => getDb(), /Database not initialised/)
+    } finally {
+      await runtime.dispose()
+    }
   })
 
-  it('refuses remote start when a local catalog exists and workStore is not ready', async () => {
+  it('starts remote in modePrepRequired when a local catalog exists and workStore is not ready', async () => {
     const root = tempDir()
     fs.mkdirSync(path.join(root, 'data'), { recursive: true })
     fs.writeFileSync(localCatalogDatabasePath(root), '')
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
     await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
-    await assert.rejects(
-      () => createDesktopRuntime(root, '0.7.0'),
-      (error: unknown) => isStructuredError(error) && error.code === 'MODE_PREP_REQUIRED'
-    )
-    assert.throws(() => getDb(), /Database not initialised/)
+    const runtime = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(runtime.backend.session().state, 'modePrepRequired')
+      assert.equal(runtime.openedCatalog, false)
+      assert.throws(() => getDb(), /Database not initialised/)
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('starts remote versionMismatch without opening library.db', async () => {
+    const base = await listenHandshake('9.9.9-other')
+    const root = tempDir()
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+    await settings.write({ mode: 'remote', remoteBaseUrl: base })
+    const runtime = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(runtime.openedCatalog, false)
+      assert.equal(runtime.backend.session().state, 'versionMismatch')
+      assert.throws(() => getDb(), /Database not initialised/)
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('starts remote recoveryRequired when the catalog is bound but this computer has no writer secret', async () => {
+    const base = await listenHandshake('0.7.0', 1)
+    const root = tempDir()
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+    await settings.write({ mode: 'remote', remoteBaseUrl: base })
+    const runtime = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(runtime.openedCatalog, false)
+      assert.equal(runtime.backend.session().state, 'recoveryRequired')
+      assert.throws(() => getDb(), /Database not initialised/)
+    } finally {
+      await runtime.dispose()
+    }
   })
 
   it('starts remote after a completed local copy without reopening library.db', async () => {

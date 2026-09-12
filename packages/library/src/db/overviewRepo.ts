@@ -1,8 +1,11 @@
+import type Database from 'better-sqlite3'
 import type { LibraryOverviewStats } from '@shared/libraryTypes'
 import { getDb } from './database'
 
-export function getLibraryOverviewStats(): LibraryOverviewStats {
-  const db = getDb()
+export function getLibraryOverviewStats(
+  database: Database.Database = getDb()
+): LibraryOverviewStats {
+  const db = database
 
   let unscraped = 0
   let scraped = 0

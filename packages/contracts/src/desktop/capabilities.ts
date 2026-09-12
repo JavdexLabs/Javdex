@@ -9,6 +9,9 @@ export type DesktopCapabilityReason =
   | 'unsupportedOnServer'
   | 'needsLocalPrep'
   | 'playerMissing'
+  | 'disconnected'
+  | 'versionMismatch'
+  | 'recoveryRequired'
 
 export interface DesktopCapability {
   action: string

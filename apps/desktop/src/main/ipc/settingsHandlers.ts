@@ -13,7 +13,6 @@ import {
   getSettingsRecoveryNotice,
   updateSettings
 } from '../settings/settingsStore'
-import { getLibraryOverviewStats } from '@library/db/overviewRepo'
 import { migrateAssetStorage } from '../services/assetMigration'
 import { prepareMediaAssetsLocationMigration } from '../services/assetLocationMigration'
 import { mediaAssetStore } from '@library/mediaAssetStore'
@@ -33,6 +32,8 @@ import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { getLlmSecretStorageState } from '../settings/llmSecretStore'
 import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
 import { ModelManagementError, modelManagement } from '../agent-platform/modelManagement'
+import type { CatalogBackend } from '../application/catalogBackend'
+import { structuredError } from '@shared/protocol/errors'
 
 function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   const {
@@ -58,19 +59,51 @@ function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   }
 }
 
-export function registerSettingsHandlers(ctx: IpcContext): void {
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, () => webAccess.openPairing())
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, (code) => webAccess.inspectPair(code))
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, (code, approve) => webAccess.decidePair(code, approve))
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, (id) => webAccess.removeDevice(id))
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, (id, name) => webAccess.renameDevice(id, name))
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, () => webAccess.resetDevices())
+export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBackend): void {
+  const requireLocalCatalog = (label: string): void => {
+    if (backend.mode === 'remote') {
+      throw structuredError('UNSUPPORTED_CAPABILITY', `远程模式不能${label}`)
+    }
+  }
+
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, () => {
+    requireLocalCatalog('管理本机网页配对')
+    return webAccess.openPairing()
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, (code) => {
+    requireLocalCatalog('管理本机网页配对')
+    return webAccess.inspectPair(code)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, (code, approve) => {
+    requireLocalCatalog('管理本机网页配对')
+    return webAccess.decidePair(code, approve)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, (id) => {
+    requireLocalCatalog('管理本机网页设备')
+    return webAccess.removeDevice(id)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, (id, name) => {
+    requireLocalCatalog('管理本机网页设备')
+    return webAccess.renameDevice(id, name)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, () => {
+    requireLocalCatalog('管理本机网页设备')
+    return webAccess.resetDevices()
+  })
   appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, () => webAccess.status())
-  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => webAccess.apply(input))
-  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => webAccess.revoke())
+  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => {
+    requireLocalCatalog('在本机启动网页服务')
+    return webAccess.apply(input)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => {
+    requireLocalCatalog('撤销本机网页会话')
+    return webAccess.revoke()
+  })
   appCommandAdapter.register(IPC.SETTINGS_GET, (): SettingsSnapshot => toSettingsSnapshot(getSettings()))
 
-  appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): LibraryOverviewStats => getLibraryOverviewStats())
+  appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): Promise<LibraryOverviewStats> =>
+    backend.queries.overviewStats({})
+  )
 
   appCommandAdapter.register(IPC.SETTINGS_UPDATE, (patch): SettingsSnapshot => {
     const rawPatch = patch as Partial<AppSettings>
@@ -128,18 +161,23 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
 
   appCommandAdapter.register(
     IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW,
-    (libraryId, rootId) => previewLibraryPathRemoval({ libraryId, rootId })
+    (libraryId, rootId) => {
+      requireLocalCatalog('预览本机目录清理')
+      return previewLibraryPathRemoval({ libraryId, rootId })
+    }
   )
 
   appCommandAdapter.register(
     IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM,
-    (libraryId, rootId, expectedRevision, expectedImpactRevision) =>
-      confirmLibraryPathRemoval({
+    (libraryId, rootId, expectedRevision, expectedImpactRevision) => {
+      requireLocalCatalog('确认本机目录清理')
+      return confirmLibraryPathRemoval({
         libraryId,
         rootId,
         expectedRevision,
         expectedImpactRevision
       })
+    }
   )
 
   appCommandAdapter.register(IPC.SETTINGS_MODEL_MANAGEMENT_GET, () => modelManagement.read())
@@ -195,6 +233,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
   })
 
   appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<SettingsSnapshot> => {
+    requireLocalCatalog('开关本机图片加密')
     return mediaAssetStore.runExclusiveRelocation(async () => {
       const latest = getSettings()
       if (latest.assetEncryption === enabled) return toSettingsSnapshot(latest)
@@ -209,6 +248,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
   appCommandAdapter.register(
     IPC.ASSET_STORAGE_RELOCATE,
     async (targetPath): Promise<SettingsSnapshot> => {
+      requireLocalCatalog('迁移本机图片目录')
       const current = getSettings()
       let newRoot: string
 

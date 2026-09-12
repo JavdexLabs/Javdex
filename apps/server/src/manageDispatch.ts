@@ -1,5 +1,10 @@
 import type Database from 'better-sqlite3'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
+import { getVideoDetail } from '@library/db/videoRepo'
+import { listMediaLibraries } from '@library/db/mediaLibraryRepo'
+import { getLibraryOverviewStats } from '@library/db/overviewRepo'
+import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
+import { getDb } from '@library/db/database'
 import { videoMaintenanceService } from '@library/catalog/videoMaintenanceService'
 import { videoEditInputFromManageFields } from '@library/catalog/videoEditFields'
 import { readHandshake } from '@library/catalog/catalogHandshake'
@@ -100,6 +105,10 @@ function requireMutation(envelope: ManageEnvelope): {
   }
 }
 
+function catalogDb(database?: Database.Database): Database.Database {
+  return database ?? getDb()
+}
+
 export async function putManageUpload(
   context: ManageUploadPutContext,
   database?: Database.Database
@@ -192,7 +201,32 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
         scope: Parameters<typeof scopedVideoCatalogRepo.get>[0]
         videoId: number
       }
-      return scopedVideoCatalogRepo.get(input.scope, input.videoId)
+      const scoped = scopedVideoCatalogRepo.get(input.scope, input.videoId)
+      if (scoped) return scoped
+      const detail = getVideoDetail(input.videoId, catalogDb(database))
+      if (!detail) return null
+      return {
+        ...detail,
+        activeLibraryId: 0,
+        membershipAddedAt: '',
+        libraries: []
+      }
+    }
+    if (operation === 'libraries.list') {
+      const input = envelope.input as { includeArchived?: boolean }
+      return listMediaLibraries({ includeArchived: input.includeArchived === true }, catalogDb(database))
+    }
+    if (operation === 'catalog.overviewStats') {
+      return getLibraryOverviewStats(catalogDb(database))
+    }
+    if (operation === 'home.load') {
+      const input = envelope.input as {
+        seed: string
+        recentLimit?: number
+        discoveryLimit?: number
+        libraryIds?: number[]
+      }
+      return createHomeDiscoveryRepo({ database: catalogDb(database) }).load(input)
     }
     if (operation === 'uploads.inspect') {
       return inspectCatalogUpload((envelope.input as { uploadId: string }).uploadId, {}, database)

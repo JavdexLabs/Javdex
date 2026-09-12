@@ -1,14 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { ManageHttpClient } from '@http/manageClient'
+import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
 import { structuredError, isStructuredError, type StructuredError } from '@shared/protocol/errors'
 import type { HandshakeResult } from '@shared/protocol/handshake'
 import type { CatalogIdentity } from '@shared/protocol/identity'
-import type { DesktopSession, DesktopSessionState } from '@shared/desktop/session'
+import type {
+  DesktopSession,
+  DesktopSessionState,
+  DesktopWriterClaimRequest,
+  DesktopWriterClaimResult
+} from '@shared/desktop/session'
 import type { CatalogBackend } from '../../application/catalogBackend'
 import type { DesktopCredentialStore } from '../../application/desktopPorts'
-import {
-  createRemoteDesktopCapabilities,
-  createUnconfiguredRemoteCapabilities
-} from '../../application/desktopCapabilities'
+import { createRemoteSessionCapabilities } from '../../application/desktopCapabilities'
 
 export interface RemoteCatalogBackendOptions {
   baseUrl: string
@@ -16,6 +20,7 @@ export interface RemoteCatalogBackendOptions {
   credentials: DesktopCredentialStore
   generation?: number
   timeoutMs?: number
+  workStore?: { putVerification(operationId: string, catalogId: string): void }
 }
 
 const QUERY_KEYS = [
@@ -222,12 +227,13 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     appVersion: options.appVersion,
     timeoutMs: options.timeoutMs
   })
-  const generation = options.generation ?? 1
+  let generation = options.generation ?? 1
   const identity: CatalogIdentity = { mode: 'remote', catalogId: '' }
   let handshake: HandshakeResult | null = null
   let secret: string | null = null
   let sessionState: DesktopSessionState = 'disconnected'
   let sessionMessage: string | null = '尚未连接到远程资料库'
+  const inFlight = new Set<AbortController>()
 
   const session = (): DesktopSession => ({
     state: sessionState,
@@ -236,11 +242,30 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     serverId: identity.serverId ?? null,
     generation,
     writerEpoch: handshake?.writerEpoch ?? null,
-    frozen: handshake?.ready === 'frozen',
+    frozen: handshake?.ready === 'frozen' || sessionState === 'frozen',
     appVersion: handshake?.appVersion ?? options.appVersion,
     schemaVersion: handshake?.schemaVersion ?? null,
     message: sessionMessage
   })
+
+  const trackSignal = (external?: AbortSignal): { signal: AbortSignal; done: () => void } => {
+    const controller = new AbortController()
+    const onAbort = (): void => controller.abort()
+    external?.addEventListener('abort', onAbort)
+    inFlight.add(controller)
+    return {
+      signal: controller.signal,
+      done: () => {
+        inFlight.delete(controller)
+        external?.removeEventListener('abort', onAbort)
+      }
+    }
+  }
+
+  const abortInFlight = (): void => {
+    for (const controller of [...inFlight]) controller.abort()
+    inFlight.clear()
+  }
 
   const markUnavailable = (error: StructuredError): never => {
     if (error.code === 'VERSION_MISMATCH') {
@@ -258,23 +283,32 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     throw error
   }
 
-  const ensureConnected = async (): Promise<HandshakeResult> => {
-    if (handshake && secret && sessionState === 'available') return handshake
+  const handshakeOnly = async (signal?: AbortSignal): Promise<HandshakeResult> => {
+    const hello = (await client.post(
+      'handshake.get',
+      { input: {} },
+      { sendAppVersion: false, signal }
+    )) as HandshakeResult
+    identity.catalogId = hello.identity.catalogId
+    identity.serverId = hello.identity.serverId
+    handshake = hello
+    if (hello.appVersion !== options.appVersion) {
+      throw structuredError('VERSION_MISMATCH', '桌面与服务器应用版本不一致')
+    }
+    return hello
+  }
+
+  const ensureConnected = async (signal?: AbortSignal): Promise<HandshakeResult> => {
+    if (handshake && secret && (sessionState === 'available' || sessionState === 'frozen')) {
+      return handshake
+    }
     try {
-      const hello = (await client.post('handshake.get', { input: {} }, { sendAppVersion: false })) as HandshakeResult
-      handshake = hello
-      identity.catalogId = hello.identity.catalogId
-      identity.serverId = hello.identity.serverId
-      if (hello.appVersion !== options.appVersion) {
-        throw structuredError('VERSION_MISMATCH', '桌面与服务器应用版本不一致')
-      }
+      const hello = await handshakeOnly(signal)
       secret = await options.credentials.readWriterSecret(hello.identity.catalogId)
       if (!secret) {
         sessionState = hello.writerEpoch > 0 ? 'recoveryRequired' : 'disconnected'
         sessionMessage =
-          hello.writerEpoch > 0
-            ? '缺少写入凭据，需要重新领取'
-            : '远程资料库尚未认主'
+          hello.writerEpoch > 0 ? '缺少写入凭据，需要重新领取' : '远程资料库尚未认主'
         throw structuredError(
           hello.writerEpoch > 0 ? 'RECOVERY_REQUIRED' : 'CONNECTION_UNAVAILABLE',
           sessionMessage
@@ -289,23 +323,30 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       sessionMessage = null
       return hello
     } catch (error) {
-      throw markUnavailable(isStructuredError(error) ? error : structuredError('CONNECTION_UNAVAILABLE', '无法连接远程资料库'))
+      throw markUnavailable(
+        isStructuredError(error) ? error : structuredError('CONNECTION_UNAVAILABLE', '无法连接远程资料库')
+      )
     }
   }
 
   const query = async (operation: string, input: unknown, signal?: AbortSignal): Promise<unknown> => {
-    const hello = await ensureConnected()
-    if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
-    return client.post(
-      operation,
-      {
-        serverId: hello.identity.serverId,
-        catalogId: hello.identity.catalogId,
-        writerEpoch: hello.writerEpoch,
-        input
-      },
-      { bearer: secret, signal }
-    )
+    const tracked = trackSignal(signal)
+    try {
+      const hello = await ensureConnected(tracked.signal)
+      if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
+      return await client.post(
+        operation,
+        {
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          writerEpoch: hello.writerEpoch,
+          input
+        },
+        { bearer: secret, signal: tracked.signal }
+      )
+    } finally {
+      tracked.done()
+    }
   }
 
   const mutate = async (
@@ -313,23 +354,31 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     input: unknown,
     ctx: { operationId: string; expectedVersions: unknown; signal?: AbortSignal }
   ): Promise<unknown> => {
-    const hello = await ensureConnected()
-    if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
-    if (hello.writerEpoch < 1) {
-      throw structuredError('AUTH_REQUIRED', '远程资料库尚未认主')
+    const tracked = trackSignal(ctx.signal)
+    try {
+      const hello = await ensureConnected(tracked.signal)
+      if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
+      if (hello.writerEpoch < 1) {
+        throw structuredError('AUTH_REQUIRED', '远程资料库尚未认主')
+      }
+      if (hello.identity.catalogId) {
+        options.workStore?.putVerification(ctx.operationId, hello.identity.catalogId)
+      }
+      return await client.post(
+        operation,
+        {
+          operationId: ctx.operationId,
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          writerEpoch: hello.writerEpoch,
+          expectedVersions: ctx.expectedVersions,
+          input
+        },
+        { bearer: secret, signal: tracked.signal }
+      )
+    } finally {
+      tracked.done()
     }
-    return client.post(
-      operation,
-      {
-        operationId: ctx.operationId,
-        serverId: hello.identity.serverId,
-        catalogId: hello.identity.catalogId,
-        writerEpoch: hello.writerEpoch,
-        expectedVersions: ctx.expectedVersions,
-        input
-      },
-      { bearer: secret, signal: ctx.signal }
-    )
   }
 
   const unsupported = async (label: string): Promise<never> => {
@@ -337,22 +386,76 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     throw structuredError('UNSUPPORTED_CAPABILITY', `远程尚未实现 ${label}`)
   }
 
+  const reconnect = async (): Promise<DesktopSession> => {
+    abortInFlight()
+    generation += 1
+    handshake = null
+    secret = null
+    sessionState = 'disconnected'
+    sessionMessage = '正在重新连接'
+    try {
+      await ensureConnected()
+    } catch {
+      // Session state already records the failure; callers read the snapshot.
+    }
+    return session()
+  }
+
+  const claimWriter = async (input: DesktopWriterClaimRequest): Promise<DesktopWriterClaimResult> => {
+    const tracked = trackSignal()
+    try {
+      const hello = await handshakeOnly(tracked.signal)
+      const nextSecret = generateSecret()
+      const result = (await client.post(
+        'writer.claim',
+        {
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          input: {
+            kind: input.kind,
+            oneTimeToken: input.oneTimeToken,
+            candidate: { claimId: randomUUID(), secretDigest: digestToken(nextSecret) }
+          }
+        },
+        { signal: tracked.signal }
+      )) as DesktopWriterClaimResult
+      if (result.status === 'consumed' && result.bound) {
+        await options.credentials.writeWriterSecret(hello.identity.catalogId, nextSecret)
+      }
+      await reconnect()
+      return result
+    } catch (error) {
+      throw markUnavailable(
+        isStructuredError(error) ? error : structuredError('CONNECTION_UNAVAILABLE', '无法领取写入凭据')
+      )
+    } finally {
+      tracked.done()
+    }
+  }
+
   return {
     mode: 'remote',
     identity,
-    generation,
-    capabilities: () =>
-      sessionState === 'available'
-        ? createRemoteDesktopCapabilities({ frozen: handshake?.ready === 'frozen' })
-        : createUnconfiguredRemoteCapabilities(),
+    get generation() {
+      return generation
+    },
+    capabilities: () => createRemoteSessionCapabilities(sessionState, handshake?.ready === 'frozen'),
     session,
+    reconnect,
+    claimWriter,
     queries: {
       ...rejectSlice(QUERY_KEYS, (key) => unsupported(`queries.${String(key)}`)),
+      async homeLoad(input, ctx) {
+        return query('home.load', input, ctx?.signal)
+      },
       async listVideos(input, ctx) {
         return query('videos.list', input, ctx?.signal)
       },
       async getVideo(input, ctx) {
         return query('videos.get', input, ctx?.signal)
+      },
+      async overviewStats(input, ctx) {
+        return query('catalog.overviewStats', input ?? {}, ctx?.signal)
       }
     },
     videos: {
@@ -384,7 +487,12 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         return mutate('playlists.update', input, ctx)
       }
     },
-    libraries: rejectSlice(LIBRARY_KEYS, (key) => unsupported(`libraries.${String(key)}`)),
+    libraries: {
+      ...rejectSlice(LIBRARY_KEYS, (key) => unsupported(`libraries.${String(key)}`)),
+      async list(input, ctx) {
+        return query('libraries.list', input ?? {}, ctx?.signal)
+      }
+    },
     nfo: rejectSlice(NFO_KEYS, (key) => unsupported(`nfo.${String(key)}`)),
     browser: rejectSlice(BROWSER_KEYS, (key) => unsupported(`browser.${String(key)}`)),
     tasks: {
@@ -403,16 +511,22 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         return query('uploads.inspect', input, ctx?.signal)
       },
       async putUpload(input, ctx) {
-        await ensureConnected()
-        if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
-        return client.putUpload(input.uploadId, input.body, input.contentType, {
-          bearer: secret,
-          signal: ctx?.signal
-        })
+        const tracked = trackSignal(ctx?.signal)
+        try {
+          await ensureConnected(tracked.signal)
+          if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
+          return await client.putUpload(input.uploadId, input.body, input.contentType, {
+            bearer: secret,
+            signal: tracked.signal
+          })
+        } finally {
+          tracked.done()
+        }
       }
     },
     migration: rejectSlice(MIGRATION_KEYS, (key) => unsupported(`migration.${String(key)}`)),
     async dispose(): Promise<void> {
+      abortInFlight()
       handshake = null
       secret = null
       sessionState = 'disconnected'

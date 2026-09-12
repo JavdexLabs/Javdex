@@ -104,6 +104,13 @@ import type {
 } from '../../../../packages/contracts/src/libraryTypes'
 import type { BatchProgress } from '../../../../packages/contracts/src/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../../../../packages/contracts/src/settingsTypes'
+import type {
+  DesktopSessionSnapshot,
+  DesktopWriterClaimRequest
+} from '../../../../packages/contracts/src/desktop/session'
+import type {
+  ThisComputerSettingsPatch
+} from '../../../../packages/contracts/src/desktop/settings'
 import type { ModelManagementApplyInput } from '../../../../packages/contracts/src/modelManagementTypes'
 import type {
   AssetCryptoProgress,
@@ -288,6 +295,17 @@ const api = {
     status: () => invokeApp(IPC.WEB_ACCESS_STATUS),
     apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
     revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)
+  },
+  desktop: {
+    getSession: () => invokeApp(IPC.DESKTOP_SESSION_GET),
+    reconnect: () => invokeApp(IPC.DESKTOP_RECONNECT),
+    claimWriter: (input: DesktopWriterClaimRequest) => invokeApp(IPC.WRITER_CLAIM, input),
+    onSessionChanged: (cb: (snapshot: DesktopSessionSnapshot) => void) =>
+      onAppEvent(IPC.DESKTOP_SESSION_CHANGED, cb)
+  },
+  thisComputer: {
+    get: () => invokeApp(IPC.THIS_COMPUTER_GET),
+    update: (patch: ThisComputerSettingsPatch) => invokeApp(IPC.THIS_COMPUTER_UPDATE, patch)
   },
   settings: {
     get: () => invokeApp(IPC.SETTINGS_GET),

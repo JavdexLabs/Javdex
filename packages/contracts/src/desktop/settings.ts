@@ -12,6 +12,16 @@ export interface ThisComputerSettings {
   llmProxyUrlEnabled: boolean
 }
 
+export interface ThisComputerSettingsPatch {
+  mode?: 'local' | 'remote'
+  remoteBaseUrl?: string | null
+}
+
+export interface ThisComputerSettingsUpdateResult {
+  settings: ThisComputerSettings
+  restartRequired: boolean
+}
+
 export interface CurrentCatalogSettingsView {
   overviewStats: unknown
   browserAccessEnabled: boolean

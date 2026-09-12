@@ -8,6 +8,7 @@ import { registerPlaylistHandlers } from './playlistHandlers'
 import { registerScanHandlers } from './scanHandlers'
 import { registerScrapeHandlers } from './scrapeHandlers'
 import { registerSettingsHandlers } from './settingsHandlers'
+import { registerDesktopSessionHandlers } from './desktopSessionHandlers'
 import { registerVideoHandlers, type VideoHandlerDesktopPorts } from './videoHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import type { IpcContext } from './shared'
@@ -21,9 +22,11 @@ import {
 import { registerPlaylistImportHandlers } from './playlistImportHandlers'
 import { registerNfoExportHandlers } from './nfoExportHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
+import type { DesktopSettingsStore } from '../application/desktopPorts'
 
 export interface RegisterIpcHandlersOptions {
   backend: CatalogBackend
+  settings: DesktopSettingsStore
   videoDesktop?: VideoHandlerDesktopPorts
   actressDesktop?: ActressHandlerDesktopQueries
   mediaLibraryDesktop?: MediaLibraryHandlerDesktopPorts
@@ -37,7 +40,8 @@ export function registerIpcHandlers(
   const ctx: IpcContext = { getWindow }
   configureIpcSecurity({ getWindow, isTrustedUrl })
 
-  registerSettingsHandlers(ctx)
+  registerDesktopSessionHandlers(ctx, { backend: options.backend, settings: options.settings })
+  registerSettingsHandlers(ctx, options.backend)
   registerNfoExportHandlers(ctx)
   registerMediaLibraryHandlers(options.backend, options.mediaLibraryDesktop)
   registerUpdateHandlers(ctx)

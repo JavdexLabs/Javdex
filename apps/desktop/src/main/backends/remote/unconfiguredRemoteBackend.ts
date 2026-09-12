@@ -1,7 +1,15 @@
 import { structuredError, type StructuredError } from '@shared/protocol/errors'
 import type { CatalogBackend } from '../../application/catalogBackend'
-import { createUnconfiguredRemoteCapabilities } from '../../application/desktopCapabilities'
-import { EMPTY_DESKTOP_SESSION } from '@shared/desktop/session'
+import { createRemoteSessionCapabilities } from '../../application/desktopCapabilities'
+import {
+  EMPTY_DESKTOP_SESSION,
+  type DesktopSessionState
+} from '@shared/desktop/session'
+
+export interface UnconfiguredRemoteBackendOptions {
+  state?: DesktopSessionState
+  message?: string
+}
 
 const UNCONFIGURED = structuredError(
   'CONNECTION_UNAVAILABLE',
@@ -17,21 +25,32 @@ function rejectSlice<T extends object>(keys: readonly (keyof T)[]): T {
 }
 
 /**
- * Remote factory placeholder for S02D. Does not open library.db, scan, recover, or Web.
- * A real RemoteCatalogBackend is S07 after S05/S06 exist.
+ * Remote placeholder when URL is missing or workStore copy is unfinished.
+ * Does not open library.db, scan, recover, or Web.
  */
-export function createUnconfiguredRemoteBackend(): CatalogBackend {
+export function createUnconfiguredRemoteBackend(
+  options: UnconfiguredRemoteBackendOptions = {}
+): CatalogBackend {
+  const state = options.state ?? 'disconnected'
+  const message = options.message ?? UNCONFIGURED.message
+  const session = () => ({
+    ...EMPTY_DESKTOP_SESSION,
+    state,
+    mode: 'remote' as const,
+    message
+  })
   return {
     mode: 'remote',
     identity: { mode: 'remote', catalogId: '' },
     generation: 0,
-    capabilities: createUnconfiguredRemoteCapabilities,
-    session: () => ({
-      ...EMPTY_DESKTOP_SESSION,
-      state: 'disconnected',
-      mode: 'remote',
-      message: UNCONFIGURED.message
-    }),
+    capabilities: () => createRemoteSessionCapabilities(state),
+    session,
+    async reconnect() {
+      return session()
+    },
+    async claimWriter() {
+      throw UNCONFIGURED
+    },
     queries: rejectSlice([
       'homeLoad',
       'homeSearch',

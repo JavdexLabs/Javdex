@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -730,6 +731,275 @@ describe('server runtime lifecycle', () => {
       assert.equal(backend.session().state, 'versionMismatch')
     } finally {
       await backend.dispose()
+    }
+  })
+
+  it('lets manage read hidden videos and archived libraries that web cannot', async () => {
+    const dataDir = path.join(root, 'm01-scope')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const { videoId } = await insertBoundVideo('M01-HIDDEN')
+    getDb()
+      .prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?')
+      .run(videoId)
+    const archivedId = Number(
+      getDb()
+        .prepare("INSERT INTO media_libraries (name, status, position) VALUES ('Archived Box', 'archived', 8)")
+        .run().lastInsertRowid
+    )
+    getDb().prepare('INSERT INTO media_library_configs (library_id) VALUES (?)').run(archivedId)
+
+    const cookie = (await login(base, password, true)).cookie
+    const webDetail = await fetch(`${base}/api/videos/${videoId}`, { headers: { Cookie: cookie } })
+    assert.equal(webDetail.status, 404)
+    const webBrowse = await fetch(`${base}/api/videos?q=M01-HIDDEN`, { headers: { Cookie: cookie } })
+    assert.equal(webBrowse.status, 200)
+    const browseBody = (await webBrowse.json()) as { items?: Array<{ id: number }> }
+    assert.equal((browseBody.items ?? []).some((item) => item.id === videoId), false)
+    const collections = await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })
+    assert.equal(collections.status, 200)
+    const collectionBody = (await collections.json()) as { libraries: Array<{ id: number; name: string }> }
+    assert.equal(collectionBody.libraries.some((library) => library.id === archivedId), false)
+
+    const backend = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials: memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    })
+    try {
+      const detail = (await backend.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId
+      })) as { id: number; title: string }
+      assert.equal(detail.id, videoId)
+      assert.equal(detail.title, 'M01-HIDDEN')
+      const libraries = (await backend.libraries.list({ includeArchived: true })) as Array<{
+        id: number
+        status: string
+      }>
+      assert.equal(libraries.some((library) => library.id === archivedId && library.status === 'archived'), true)
+    } finally {
+      await backend.dispose()
+    }
+  })
+
+  it('redeems a one-time token through RemoteCatalogBackend without exposing the writer secret', async () => {
+    const dataDir = path.join(root, 'remote-claim')
+    const { base, config } = await boot(dataDir)
+    const handshake = await postManage(base, 'handshake.get', { input: {} }, { appVersion: '' })
+    const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+    const issued = issueDeployToken(config, 'initialBind')
+    const credentials = memoryCredentials(new Map())
+    const backend = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials
+    })
+    try {
+      const claimed = await backend.claimWriter({
+        kind: 'initialBind',
+        oneTimeToken: issued.oneTimeToken
+      })
+      assert.equal(claimed.bound, true)
+      assert.equal(claimed.status, 'consumed')
+      assert.equal(await credentials.readWriterSecret(hello.identity.catalogId) != null, true)
+      assert.equal(JSON.stringify(claimed).includes(issued.oneTimeToken), false)
+      assert.equal(backend.session().state, 'available')
+      const status = JSON.stringify(backend.session())
+      assert.equal(status.includes('secret'), false)
+    } finally {
+      await backend.dispose()
+    }
+  })
+})
+
+describe('RemoteCatalogBackend reconnect isolation', () => {
+  it('bumps generation and aborts an in-flight query so a late response cannot replace the new session', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let videosGetCount = 0
+    const http = createHttpServer((request, response) => {
+      const url = request.url ?? ''
+      const send = (body: unknown): void => {
+        response.setHeader('Content-Type', 'application/json')
+        response.end(JSON.stringify(body))
+      }
+      if (url.endsWith('/handshake.get')) {
+        send({
+          protocolVersion: 1,
+          appVersion: '0.7.0',
+          schemaVersion: 18,
+          identity: { serverId: 'server-1', catalogId: 'catalog-1' },
+          writerEpoch: 1,
+          ready: 'ready',
+          capabilities: {
+            encryptedAssets: false,
+            transcoding: false,
+            arbitraryUrlProxy: false,
+            pluginExecution: false,
+            publicInternetDefault: false,
+            writerBound: true,
+            browserEnabled: true,
+            managementEnabled: true
+          }
+        })
+        return
+      }
+      if (url.endsWith('/videos.get')) {
+        videosGetCount += 1
+        const count = videosGetCount
+        void hold.then(() => {
+          try {
+            if (response.writableEnded) return
+            send({ id: 1, title: count === 1 ? 'late-stale' : 'fresh' })
+          } catch {
+            // Client already aborted the stale generation.
+          }
+        })
+        return
+      }
+      response.statusCode = 404
+      send({ code: 'INVALID_INPUT', message: url })
+    })
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve))
+    const address = http.address()
+    if (!address || typeof address === 'string') throw new Error('port')
+    const base = `http://127.0.0.1:${address.port}`
+    const backend = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: '0.7.0',
+      credentials: {
+        async isAvailable() {
+          return true
+        },
+        async readWriterSecret() {
+          return 'writer-secret'
+        },
+        async writeWriterSecret() {
+          return
+        },
+        async deleteWriterSecret() {
+          return
+        }
+      }
+    })
+    try {
+      const pending = backend.queries.getVideo({ scope: { kind: 'all' }, videoId: 1 })
+      const started = Date.now()
+      while (videosGetCount < 1 && Date.now() - started < 2000) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      assert.equal(videosGetCount >= 1, true)
+      assert.equal(backend.generation, 1)
+      const next = await backend.reconnect()
+      assert.equal(next.generation, 2)
+      assert.equal(backend.generation, 2)
+      await assert.rejects(
+        pending,
+        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
+      )
+      release()
+      const fresh = (await backend.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId: 1
+      })) as { title: string }
+      assert.equal(fresh.title, 'fresh')
+      assert.equal(backend.session().generation, 2)
+      assert.equal(backend.session().state, 'available')
+    } finally {
+      await backend.dispose()
+      await new Promise<void>((resolve, reject) => http.close((error) => (error ? reject(error) : resolve())))
+    }
+  })
+
+  it('dispose aborts an in-flight query and does not apply a late response', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let videosGetCount = 0
+    const http = createHttpServer((request, response) => {
+      const url = request.url ?? ''
+      const send = (body: unknown): void => {
+        response.setHeader('Content-Type', 'application/json')
+        response.end(JSON.stringify(body))
+      }
+      if (url.endsWith('/handshake.get')) {
+        send({
+          protocolVersion: 1,
+          appVersion: '0.7.0',
+          schemaVersion: 18,
+          identity: { serverId: 'server-1', catalogId: 'catalog-1' },
+          writerEpoch: 1,
+          ready: 'ready',
+          capabilities: {
+            encryptedAssets: false,
+            transcoding: false,
+            arbitraryUrlProxy: false,
+            pluginExecution: false,
+            publicInternetDefault: false,
+            writerBound: true,
+            browserEnabled: true,
+            managementEnabled: true
+          }
+        })
+        return
+      }
+      if (url.endsWith('/videos.get')) {
+        videosGetCount += 1
+        void hold.then(() => {
+          try {
+            if (response.writableEnded) return
+            send({ id: 1, title: 'after-dispose' })
+          } catch {
+            // Client already aborted.
+          }
+        })
+        return
+      }
+      response.statusCode = 404
+      send({ code: 'INVALID_INPUT', message: url })
+    })
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve))
+    const address = http.address()
+    if (!address || typeof address === 'string') throw new Error('port')
+    const backend = createRemoteCatalogBackend({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      appVersion: '0.7.0',
+      credentials: {
+        async isAvailable() {
+          return true
+        },
+        async readWriterSecret() {
+          return 'writer-secret'
+        },
+        async writeWriterSecret() {
+          return
+        },
+        async deleteWriterSecret() {
+          return
+        }
+      }
+    })
+    try {
+      const pending = backend.queries.getVideo({ scope: { kind: 'all' }, videoId: 1 })
+      const started = Date.now()
+      while (videosGetCount < 1 && Date.now() - started < 2000) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      assert.equal(videosGetCount >= 1, true)
+      await backend.dispose()
+      await assert.rejects(
+        pending,
+        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
+      )
+      release()
+      assert.equal(backend.session().state, 'disconnected')
+    } finally {
+      await backend.dispose()
+      await new Promise<void>((resolve, reject) => http.close((error) => (error ? reject(error) : resolve())))
     }
   })
 })

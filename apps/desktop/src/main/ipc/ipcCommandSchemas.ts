@@ -675,6 +675,25 @@ export const appIpcSchemas = {
   }).strict()]),
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
+  [IPC.DESKTOP_SESSION_GET]: noArgs,
+  [IPC.DESKTOP_RECONNECT]: noArgs,
+  [IPC.THIS_COMPUTER_GET]: noArgs,
+  [IPC.THIS_COMPUTER_UPDATE]: z.tuple([
+    z
+      .object({
+        mode: z.enum(['local', 'remote']).optional(),
+        remoteBaseUrl: z.string().max(2048).nullable().optional()
+      })
+      .strict()
+  ]),
+  [IPC.WRITER_CLAIM]: z.tuple([
+    z
+      .object({
+        kind: z.enum(['initialBind', 'handoff', 'deployRecover']),
+        oneTimeToken: z.string().min(32).max(256)
+      })
+      .strict()
+  ]),
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: z.tuple([id, id]),
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: z.tuple([

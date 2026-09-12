@@ -27,6 +27,8 @@ import {
   isGlobalSearchShortcut,
   queueHomeGlobalSearchFocus
 } from '../globalSearchShortcut'
+import DesktopSessionOverlay from '../desktop/DesktopSessionOverlay'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
@@ -159,21 +161,25 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   const backgroundSrc =
     imagePreviewOpen || privacyHidesBackground ? null : resolveMediaSrc(background?.path)
   const hasBackgroundLayer = Boolean(backgroundSrc)
+  const { catalogReadsEnabled } = useDesktopSession()
   const conflictSummaryQuery = useQuery({
     queryKey: actressKeys.conflictSummary(),
     queryFn: () => api.actressScrape.conflictSummary(),
-    refetchInterval: 3_000
+    refetchInterval: 3_000,
+    enabled: catalogReadsEnabled
   })
   const librariesQuery = useQuery({
     queryKey: mediaLibraryKeys.activeList(),
     queryFn: () => api.mediaLibraries.list(),
     staleTime: 2_000,
-    refetchInterval: 3_000
+    refetchInterval: 3_000,
+    enabled: catalogReadsEnabled
   })
   const pendingVideoQuery = useQuery({
     queryKey: ['pending-video-scrapes', 'count'],
     queryFn: () => api.scrape.countPending(),
-    refetchInterval: 3_000
+    refetchInterval: 3_000,
+    enabled: catalogReadsEnabled
   })
   /** One inbox, one badge: scan groups, scrape snapshots and actress name conflicts. */
   const pendingBadges: Record<string, PendingInboxBadgeValue> = {
@@ -234,6 +240,7 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
         </nav>
       </aside>
       <div className="main-area">
+        <DesktopSessionOverlay />
         <div className="content">{children}</div>
       </div>
       <AssetCryptoOverlay />

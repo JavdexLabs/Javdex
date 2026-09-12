@@ -6,7 +6,6 @@ import {
   type InterruptedLibraryScanRecoveryResult
 } from '@library/db/libraryScanRepo'
 import { configureAgentWorkTablePrefix } from '@library/runtime/host'
-import { structuredError } from '@shared/protocol/errors'
 import type { CatalogBackend } from '../application/catalogBackend'
 import {
   configureAgentRunDatabase,
@@ -27,11 +26,13 @@ import {
 import { attachAgentWorkStore, copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
+import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
 
 export interface DesktopRuntime {
   mode: 'local' | 'remote'
   backend: CatalogBackend
   workStore: DesktopWorkStoreHandle
+  settings: ReturnType<typeof createThisComputerSettingsStore>
   openedCatalog: boolean
   scanRecovery: InterruptedLibraryScanRecoveryResult | null
   dispose(): Promise<void>
@@ -78,14 +79,24 @@ export async function createDesktopRuntime(
   }
 
   if (mode === 'remote') {
-    if (workStore.prepStatus() === 'copying' || (workStore.prepStatus() !== 'ready' && catalogExists)) {
-      workStore.close()
-      throw structuredError(
-        'MODE_PREP_REQUIRED',
-        '工作记录尚未完成复制。请先回到本地模式完成准备，不要在远程模式补开原资料库。'
-      )
-    }
+    const prepBlocked =
+      workStore.prepStatus() === 'copying' || (workStore.prepStatus() !== 'ready' && catalogExists)
     configureAgentRunDatabase(() => workStore.database())
+    if (prepBlocked) {
+      const backend = createUnconfiguredRemoteBackend({
+        state: 'modePrepRequired',
+        message: '工作记录尚未完成复制。请先回到本地模式完成准备，不要在远程模式补开原资料库。'
+      })
+      return {
+        mode,
+        backend,
+        workStore,
+        settings,
+        openedCatalog: false,
+        scanRecovery: null,
+        dispose: () => disposeRemote(backend)
+      }
+    }
     const credentials = createWriterCredentialStore({ userDataPath })
     const backend = createCatalogBackendForMode(
       'remote',
@@ -94,14 +105,17 @@ export async function createDesktopRuntime(
         ? {
             baseUrl: snapshot.remoteBaseUrl,
             appVersion,
-            credentials
+            credentials,
+            workStore
           }
         : undefined
     )
+    await backend.reconnect()
     return {
       mode,
       backend,
       workStore,
+      settings,
       openedCatalog: false,
       scanRecovery: null,
       dispose: () => disposeRemote(backend)
@@ -128,6 +142,7 @@ export async function createDesktopRuntime(
     mode,
     backend,
     workStore,
+    settings,
     openedCatalog: true,
     scanRecovery,
     async dispose(): Promise<void> {

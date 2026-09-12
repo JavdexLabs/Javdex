@@ -58,6 +58,7 @@
 | S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
 | S06 | 正式 schema 18 上传表、流式 PUT、全用途 apply 与崩溃恢复已落地；生产烟测含 upload/apply/restart | 见本文件 S06 实施记录 |
 | S07 | 最小双后端闭环与会话/认主/失败 UI 已落地；完整管理面与 D02/D07/M 全矩阵仍待 S08–S13 | 见本文件 S07 实施记录 |
+| S08 | 管理浏览/编辑、资源/生命周期、分类合并删除、待确认与网页配对已落地；扫描/NFO/任务/根维护与刮削确认仍待 S09/S10 | 见本文件 S08 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -475,6 +476,19 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 预览完整记录关联依赖，删除/合并执行前检测新增引用；外部图片先桌面采集，路径输入替换为受控资产/根定位。根目录重绑、桌面 reveal、远程图片加密/数据目录在线搬迁按明确范围禁用，附合适原因，不留下能失败或误操作的按钮。
 
 每组提供本地/远程相同业务结果测试和管理/网页权限差异测试。清单矩阵逐行标记实现位置、测试位置、限制；没有对应证据的行不得标完成。
+
+**S08 实施记录（管理查询/写入面与网页配对）**
+
+- 范围：Node 宿主 `dispatchCatalogManage` 覆盖影片浏览/评分/标签、资源导入与生命周期预览/提交、演员读写与冲突（`inspectName` 仅冻结 `{ name }`）、机构/导演/系列合并删除（提交时重算影响摘要，无 10 分钟持久计划表）、清单成员、待确认扫描/资源身份/影片刮削查询与丢弃、媒体库 CRUD/归档、网页配对。`RemoteCatalogBackend` 映射上述端口；评分/清资料/标记刮削成功/手动标签 IPC 带 `expectedVersions`。关闭浏览入口只 404 浏览路由，`/manage/v1`、`/live`、`/ready` 仍可用；`browser-surface.json` 持久化。远程设置页同一 `webAccess` IPC 改走 CatalogBackend，隐藏端口/账号/密码。
+- 工程默认：`pendingVideoScrapes.confirm` / `videos.applyScrapeCandidate` / `playlists.applyImport` 仍 `UNSUPPORTED_CAPABILITY`（S10）。扫描/NFO/任务/根增删改/文件维护仍 S09。分类删除 HTTP 要 `planId`+`planDigest`，预览 digest 为当前影响 SHA-256，不是独立计划行。`library_video_memberships` 无 R 版本，资源操作有影片时只断言 V。`setRating` 仍不递增 V（M03）。`actressConflicts.inspectName` 冻结 schema 无 `actressId`，与本地 `inspectConflictName({ actressId, name })` 不完全等价（需产品决定是否改合同）。`pendingResourceIdentity.resolve` 先做文件/NFO IO 再写回执，崩溃窗口仍在。远程 IPC「重置浏览器授权」（无 id）映射 `browser.revokeSessions`；冻结 HTTP `browser.deviceReset` 仍按 `deviceId` 删除单台。浏览操作用例元数据声明 C，本阶段不虚构 catalog 级 C 聚合。分页 HTTP 上限 200，领域页函数多数上限 100，待确认页在 handler 内截到 100。
+- 验证（Linux Node 22.14 / amd64 glibc；实现提交 `5d3b743` `a865b97`）：
+  - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` / `tsconfig.web.json` 通过
+  - `npm run server:test` **19 通过 / 0 失败**（含真实 Node 宿主 local+remote 浏览/评分/标签/机构/清单/链接资源/导演删除/inspectName/待确认；关闭浏览后 login 404、manage search 200、配对窗口、`browser-surface.json`；Cookie 不能 manage）
+  - 定向 Electron：IPC 版本包络、LocalCatalogBackend、VideoTagPanel、WebAccessPanel、pairing/webServer **72 通过 / 0 失败**
+  - `npm run pretest` 通过（含 D06 桌面架构与 server 生产边界）
+  - `npm run test:packaging` **8 通过**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2994 tests / 2993 pass / 0 fail / 1 skip**
+- 未做：S01 全表每一行都有独立证据（缺扫描/NFO/任务/根/刮削确认/迁库/播放授权）；D02 尚未用 Electron 本地后端对照同一 Node 宿主（本阶段 in-process `createLocalCatalogBackend` vs HTTP）；D07 全能力矩阵；M01 独立待确认图/无成员影片；真实 Docker/部署/mpv。不得把 mock 当完成证据。需用户决定：是否给 `inspectName` 增加 `actressId`；浏览写是否要真正的 catalog C；远程「重置全部设备」是否应保持与本机 `resetDevices` 文件级重建一致。
 
 ### S09：挂载、扫描、NFO 与持久维护任务
 

@@ -246,7 +246,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：将 `scanner.ts` / `scanCoordinator.ts` 迁入 `packages/library/src/scan`。本地 NFO apply 通过 `nfoScanPort` 由桌面注入（实现仍依赖刮削应用服务，留在 desktop）。`scanCoordinator` 改为直接引用 `@shared/videoResourcePromotion`。桌面 `scanner/` 仅再导出并在导入时配置 NFO 端口，供 IPC/测试兼容。
 - 工程默认：扫描编排仍使用 `getDb()` 与维护闸门进程单例；S02D 由 LocalCatalogBackend 装配。未改 schema 16。
-- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。扫描编排及相关测试 277 项全部通过（nfoScanPort、scanner、coordinator、cooperative cleanup、path cleanup、pending identity、local NFO transaction）。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。扫描编排及相关测试 277 项全部通过（nfoScanPort、scanner、coordinator、cooperative cleanup、path cleanup、pending identity、local NFO transaction）。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`；新增 2 项为 `nfoScanPort`）。
 - 未做：`nfoExportModule` 仍使用 `nativeImage` 与窗口护栏；catalog 业务服务仍在 desktop；S02D 未开始。
 
 ### S02D：先完成桌面本地后端重构

@@ -12,6 +12,7 @@ import { resolveMediaLibraryRootIdentity } from '../packages/library/src/mediaLi
 import { configureLibraryHost, resetLibraryHostForTests } from '../packages/library/src/runtime/host.ts'
 import { digestToken, generateSecret } from '../packages/library/src/catalog/catalogSecrets.ts'
 import { randomUUID } from 'node:crypto'
+import sharp from 'sharp'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 assert.equal(path.basename(process.execPath), 'node')
@@ -168,6 +169,8 @@ try {
   assert.equal(claim.status, 200, claimBody)
   const claimed = JSON.parse(claimBody)
   assert.equal(claimed.bound, true)
+  assert.equal(typeof claimed.writerEpoch, 'number')
+  assert.ok(claimed.writerEpoch > 0)
 
   const cookieManage = await fetch(`${base}/manage/v1/writer.status`, {
     method: 'POST',
@@ -238,9 +241,105 @@ try {
   const verify = new reader(path.join(dataDir, 'library.db'), { readonly: true, fileMustExist: true })
   assert.equal(verify.pragma('journal_mode', { simple: true }), 'wal')
   assert.equal((verify.prepare('SELECT main_name FROM actresses').get()).main_name, 'Smoke')
+  const version = verify
+    .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+    .get(inserted.videoId)
   verify.close()
+
+  async function postManage(base, operation, body, bearer) {
+    const headers = {
+      Origin: base,
+      'Content-Type': 'application/json',
+      'X-Javdex-App-Version': appVersion
+    }
+    if (bearer) headers.Authorization = `Bearer ${bearer}`
+    const response = await fetch(`${base}/manage/v1/${operation}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    })
+    return { status: response.status, json: await response.json() }
+  }
+
+  const created = await postManage(
+    base2,
+    'uploads.create',
+    {
+      operationId: randomUUID(),
+      serverId: hello.identity.serverId,
+      catalogId: hello.identity.catalogId,
+      writerEpoch: claimed.writerEpoch,
+      expectedVersions: {},
+      input: { purpose: 'videoCover', contentType: 'image/png' }
+    },
+    secret
+  )
+  assert.equal(created.status, 200, JSON.stringify(created.json))
+  const uploadId = created.json.uploadId
+  const png = await sharp({
+    create: { width: 16, height: 10, channels: 3, background: { r: 20, g: 40, b: 80 } }
+  })
+    .png()
+    .toBuffer()
+  const put = await fetch(`${base2}/manage/v1/uploads/${uploadId}`, {
+    method: 'PUT',
+    headers: {
+      Origin: base2,
+      'Content-Type': 'image/png',
+      'X-Javdex-App-Version': appVersion,
+      Authorization: `Bearer ${secret}`
+    },
+    body: png
+  })
+  const putBody = await put.json()
+  assert.equal(put.status, 200, JSON.stringify(putBody))
+  assert.equal(putBody.consumed, false)
+  const cookiePut = await fetch(`${base2}/manage/v1/uploads/${uploadId}`, {
+    method: 'PUT',
+    headers: {
+      Origin: base2,
+      'Content-Type': 'image/png',
+      'X-Javdex-App-Version': appVersion,
+      Cookie: cookie
+    },
+    body: png
+  })
+  assert.equal(cookiePut.status, 401)
+  const applied = await postManage(
+    base2,
+    'videos.setPoster',
+    {
+      operationId: randomUUID(),
+      serverId: hello.identity.serverId,
+      catalogId: hello.identity.catalogId,
+      writerEpoch: claimed.writerEpoch,
+      expectedVersions: { V: version },
+      input: { videoId: inserted.videoId, image: { kind: 'upload', uploadId } }
+    },
+    secret
+  )
+  assert.equal(applied.status, 200, JSON.stringify(applied.json))
+  const afterApply = new reader(path.join(dataDir, 'library.db'), { readonly: true, fileMustExist: true })
+  const coverRel = afterApply.prepare('SELECT cover_path FROM videos WHERE id = ?').get(inserted.videoId)
+    .cover_path
+  afterApply.close()
+  assert.match(coverRel, /^covers\//)
+  const coverAbs = path.join(dataDir, 'media_assets', coverRel)
+  assert.equal(fs.existsSync(coverAbs), true)
   assert.equal(await second.stop(), 0)
-  console.log('PASS: isolated Node production install, SQLite/WAL, HTTP, Range, session, writer claim gate, SIGTERM, restart')
+
+  const third = startServer()
+  const port3 = await third.waitForPort()
+  const base3 = `http://127.0.0.1:${port3}`
+  assert.equal(fs.existsSync(coverAbs), true)
+  const cover = await fetch(`${base3}/api/videos/${inserted.videoId}/images/cover`, {
+    headers: { Cookie: cookie }
+  })
+  assert.equal(cover.status, 200)
+  assert.equal(await third.stop(), 0)
+  console.log(
+    'PASS: isolated Node production install, SQLite/WAL, HTTP, Range, session, writer claim gate, image upload/apply/restart, SIGTERM'
+  )
 } finally {
   resetLibraryHostForTests()
   closeDatabase()

@@ -308,9 +308,9 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 **S02D 实施记录（本地后端与 workStore 起步）**
 
-- 范围：新增独立 `this-computer.json` 设置、稳定本地 catalog 身份文件、SQLite `workStore`（含可重复 copy/ready 标记）、未配置远程工厂（不打开 `library.db`）、以及 `LocalCatalogBackend` 的影片查询/编辑/评分/清元数据接入。IPC 仍走原服务单例，尚未替换字符串错误。
-- 工程默认：未配置远程的 session 为 `disconnected`，能力一律拒绝；本地身份为 userData 目录上的 UUID，不是路径字符串。workStore 复制中断保持 `copying`，`ready` 后不再重新 beginCopy。影片封面上传引用仍标 `UNSUPPORTED_CAPABILITY`，等 S06。未改 schema 16，未伪造 serverId/revision。
-- 验证：`npm run typecheck:node`；S02D 脚手架测试 7 项全部通过。
+- 范围：新增独立 `this-computer.json` 设置、稳定本地 catalog 身份文件、SQLite `workStore`（含可重复 copy/ready 标记）、未配置远程工厂（不打开 `library.db`）、`LocalCatalogBackend` 的影片查询/编辑/评分/清元数据接入，以及 `createDesktopRuntime` 按模式装配（远程在 workStore `copying` 时拒绝启动）。IPC 仍走原服务单例，尚未替换字符串错误。
+- 工程默认：未配置远程的 session 为 `disconnected`，能力一律拒绝；本地身份为 userData 目录上的 UUID，不是路径字符串。workStore 复制中断保持 `copying`，`idle`（无需复制）和 `ready` 允许远程启动，`copying` 必须回本地。影片封面上传引用仍标 `UNSUPPORTED_CAPABILITY`，等 S06。未改 schema 16，未伪造 serverId/revision。
+- 验证：`npm run typecheck:node`；S02D 脚手架测试 7 项 + bootstrap 3 项全部通过。
 - 未做：IPC 改为注入 CatalogBackend、结构化 `IpcResponse.error`、workStore 从 `library.db` 复制 agent 工作记录、bootstrap 接入 `appMain`、D01 远程三种启动的真实进程监测、D06 生产依赖图检查。S02 剩余 Electron NFO 导出、刮削应用、catalog worker 入口仍在 desktop。
 
 ### S03：抽离 HTTP，保持本地网页

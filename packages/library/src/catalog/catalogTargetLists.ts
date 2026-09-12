@@ -26,7 +26,7 @@ function digestIds(kind: string, ids: number[]): string {
   return createHash('sha256').update(JSON.stringify({ kind, ids })).digest('hex')
 }
 
-function evaluateKind(kind: string, database: Database.Database): number[] {
+function evaluateKind(kind: string, _database: Database.Database): number[] {
   const videoLibrary = /^videos\.library:(\d+)\.status:(all|0|1|2)$/.exec(kind)
   if (videoLibrary) {
     const libraryId = Number(videoLibrary[1])

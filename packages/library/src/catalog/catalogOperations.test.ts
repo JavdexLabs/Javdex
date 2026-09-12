@@ -25,7 +25,7 @@ afterEach(() => {
 describe('catalog operation receipts and video versions', () => {
   it('rejects a stale V, returns the original receipt on retry, and refuses a reused operation id', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s05-ops-'))
-    const db = initDatabaseAtPath(path.join(root, 'library.db'))
+    initDatabaseAtPath(path.join(root, 'library.db'))
     ensureCatalogIdentity({ catalogId: randomUUID() })
     const videoId = Number(getDb().prepare("INSERT INTO videos (code, title) VALUES ('S05-001', 'One')").run().lastInsertRowid)
     const version = readVideoAggregateVersion(videoId)!
@@ -68,7 +68,7 @@ describe('catalog operation receipts and video versions', () => {
       expectedVersions: { V: version },
       input: { videoId, title: 'Two' },
       writerEpoch: 0
-    }, () => {
+    }, (): typeof first.data => {
       throw new Error('must not run again')
     })
     assert.equal(retry.outcome, 'duplicate')

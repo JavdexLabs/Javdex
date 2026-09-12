@@ -1,6 +1,6 @@
 # 服务端模式执行与 Agent 交接计划
 
-> 状态：结构准备已实施；桌面架构重构及服务端产品功能待实施。用户本轮要求将桌面架构并入计划，本轮仅更新文档。此文件是本次用户要求的本地执行交接材料，不替代 GitHub Issues 中的正式 PRD/任务记录，也不代表已发布工单。
+> 状态：S00 结构准备已实施；S01 合同已冻结（见 [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)）。桌面架构重构及服务端产品功能待实施。用户本轮要求将桌面架构并入计划，本轮仅更新文档。此文件是本次用户要求的本地执行交接材料，不替代 GitHub Issues 中的正式 PRD/任务记录，也不代表已发布工单。
 >
 > 起点：远程分支 `origin/codex/server-mode-feasibility` 中包含本文件及 S00 结构调整的交接提交。原研究代码基线为 `cac9f6982eaef6afc34f86f9a51486f8ff10dd2b`，不能从该旧基线直接开工。接手先 fetch 并核对交接提交，再从该提交建立实施分支；具体提交哈希随交接提示提供。
 
@@ -44,6 +44,14 @@
 根 `package.json` 暂保留桌面打包 metadata 和已有运行依赖，产物仍为 `out/main`、`out/preload`、`out/renderer`、`out/web`。workspace 脚本通过根命令执行，避免 cwd 改变破坏 worker/图片/打包资源位置。根安装不再隐式 Electron rebuild；桌面环境显式运行 `npm run setup:desktop`。根仍有 Electron 开发依赖，不能把整份根安装作为独立服务端生产安装。
 
 `npm run check:workspaces` 检查版本一致和网页/共享模块边界；它不声称已验证独立服务器。现有边界、类型、测试发现、构建配置与研究探针已适配目录。后续移动用例时继续更新脚本和可点击文档链接，禁止保留第二份旧源码或用目录链接模拟迁移。
+
+## 实施状态
+
+| 阶段 | 状态 | 记录 |
+|---|---|---|
+| S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
+| S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
+| S02–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
 

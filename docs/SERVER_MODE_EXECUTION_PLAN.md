@@ -219,6 +219,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：将 Node-only 的 NFO 编解码、目录影片身份、导出安全文案、导出 profile 渲染和 SQLite 导出投影迁入 `packages/library/src/nfo`。Electron 封面编解码、窗口护栏、任务控制器和 sidecar 文件票据仍在 desktop。
 - 工程默认：`nfoExportRepository` 仍是 `getDb()` 单例；IPC 暂时直接引用 library 导出资料，S02D 再收到 application 层。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。NFO codec/profile/repository/safety、sidecar、export module/controller、native artwork 与 LocalNfoSourceAdapter 测试通过。
 - 未做：`nfoFileStore` / `nfoSidecarLocator` 仍依赖 metadata-sources 的 `ManagedRootFileCapability`；`nfoExportModule` 仍使用 `nativeImage`。
 
 ### S02D：先完成桌面本地后端重构

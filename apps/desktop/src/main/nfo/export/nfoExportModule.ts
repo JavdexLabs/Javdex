@@ -15,7 +15,7 @@ import type {
 import {
   authorizeMediaLibraryRootFile,
   createAuthorizedMediaLibraryRootFileInspector
-} from '../../services/mediaLibraryRootFileGuard'
+} from '@library/scan/mediaLibraryRootFileGuard'
 import { mediaAssetStore, type MediaAssetStore } from '@library/mediaAssetStore'
 import {
   coverBasename,

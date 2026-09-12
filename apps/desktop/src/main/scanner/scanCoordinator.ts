@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { createScanCleanupPages } from './scanCleanupPages'
+import { createScanCleanupPages } from '@library/scan/scanCleanupPages'
 import { createProgressPublisher } from '../services/progressPublisher'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -57,7 +57,7 @@ import {
   authorizeMediaLibraryRoot,
   authorizeMediaLibraryRootDeletionTarget,
   authorizeMediaLibraryRootFile
-} from '../services/mediaLibraryRootFileGuard'
+} from '@library/scan/mediaLibraryRootFileGuard'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
 import {
   applyPendingLibraryPathCleanups,
@@ -67,7 +67,7 @@ import {
   type RecoverLegacyLibraryPathCleanupResult,
   type LibraryPathCleanupAuditEvent
 } from '../services/libraryPathCleanupService'
-import { createLibraryRootMatcher } from './libraryRootMatcher'
+import { createLibraryRootMatcher } from '@library/scan/libraryRootMatcher'
 import {
   scanFolders,
   ScanFoldersFailure,
@@ -75,7 +75,7 @@ import {
   type ScanOptions,
   type ScanProgressFn
 } from './scanner'
-import { resolveMinScanImportDurationSeconds } from './videoDuration'
+import { resolveMinScanImportDurationSeconds } from '@library/scan/videoDuration'
 
 export type ScanTrigger = LibraryScanTrigger
 

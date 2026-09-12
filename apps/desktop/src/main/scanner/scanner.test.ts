@@ -40,7 +40,7 @@ import {
   MediaLibraryRepoError,
   resolveMediaLibraryRootPath
 } from '@library/db/mediaLibraryRepo'
-import { isPathUnderRoot } from './libraryPathUtils'
+import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
 import { listPendingResourceIdentities } from '@library/db/pendingResourceIdentityRepo'
 import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
 import type {

@@ -13,7 +13,7 @@ import { readScanAuditSource } from '@library/db/scanAuditSource'
 import { removeResourceLessMembershipPage } from '@library/db/libraryMembershipRepo'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { createScanCoordinator } from './scanCoordinator'
-import { createScanCleanupPages, type CleanupCandidates } from './scanCleanupPages'
+import { createScanCleanupPages, type CleanupCandidates } from '@library/scan/scanCleanupPages'
 
 let db:Database.Database,directory:string,libraryId:number,previousUserData:string|undefined
 const count=260

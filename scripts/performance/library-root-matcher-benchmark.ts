@@ -3,8 +3,8 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { isPathUnderRoot } from '../../apps/desktop/src/main/scanner/libraryPathUtils'
-import { createLibraryRootMatcher } from '../../apps/desktop/src/main/scanner/libraryRootMatcher'
+import { isPathUnderRoot } from '../../packages/library/src/scan/libraryPathUtils'
+import { createLibraryRootMatcher } from '../../packages/library/src/scan/libraryRootMatcher'
 
 type Root = { id: number; path: string; realPath: string | null }
 type Match = (filePath: string) => Root | undefined

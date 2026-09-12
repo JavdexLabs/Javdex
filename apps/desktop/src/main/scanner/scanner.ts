@@ -1,9 +1,9 @@
 import { createScanNfoWorkset, createMemoryScanNfoWorkset, ScanNfoWorksetError, type ScanNfoWorkset } from './scanNfoWorkset'
-import { createScanCodeCounts, createMemoryScanCodeCounts, ScanCodeCountsError, type ScanCodeCounts } from './scanCodeCounts'
-import { createScanFileSpool, createMemoryScanFileInventory } from './scanFileInventory'
+import { createScanCodeCounts, createMemoryScanCodeCounts, ScanCodeCountsError, type ScanCodeCounts } from '@library/scan/scanCodeCounts'
+import { createScanFileSpool, createMemoryScanFileInventory } from '@library/scan/scanFileInventory'
 import fs from 'node:fs'
 import path from 'node:path'
-import { isVideoFile, parseCode } from './codeParser'
+import { isVideoFile, parseCode } from '@library/scan/codeParser'
 import {
   backfillLocalVideoResourceFingerprint,
   getVideoByCode,
@@ -51,7 +51,7 @@ import {
   shouldProbeLocalVideoResourceDuration,
   shouldRefreshLocalVideoResourceDuration,
   type VideoFileFingerprint
-} from './videoDuration'
+} from '@library/scan/videoDuration'
 import { normalizeVideoCode } from '@shared/videoCode'
 import {
   pendingScanResourceExists,
@@ -65,14 +65,14 @@ import {
   type ParsedStrmTarget
 } from '@library/scan/strmParser'
 import { getDb, getDatabaseReadRevision } from '@library/db/database'
-import { StrmRelocationIndex } from './strmRelocationIndex'
+import { StrmRelocationIndex } from '@library/scan/strmRelocationIndex'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
 import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
 import {
   authorizeMediaLibraryRoot,
   authorizeMediaLibraryRootFile
-} from '../services/mediaLibraryRootFileGuard'
+} from '@library/scan/mediaLibraryRootFileGuard'
 import {
   getPendingResourceIdentityByPath,
   pendingResourceIdentityExists,

@@ -10,7 +10,7 @@ import type {
 import type { Video } from '@shared/videoTypes'
 import { getVideoDetail } from '@library/db/videoRepo'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
-import { createAuthorizedMediaLibraryRootFileInspector } from '../services/mediaLibraryRootFileGuard'
+import { createAuthorizedMediaLibraryRootFileInspector } from '@library/scan/mediaLibraryRootFileGuard'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { VIDEO_MIMES, WebError } from './http'
 

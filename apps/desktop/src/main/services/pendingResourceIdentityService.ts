@@ -20,11 +20,11 @@ import {
   insertStrmVideoResource,
   listVideosByCode
 } from '@library/db/videoRepo'
-import { isVideoFile, parseCode } from '../scanner/codeParser'
-import { readLocalVideoDurationSeconds } from '../scanner/videoDuration'
+import { isVideoFile, parseCode } from '@library/scan/codeParser'
+import { readLocalVideoDurationSeconds } from '@library/scan/videoDuration'
 import { readStrmFile, isStrmFile } from '@library/scan/strmParser'
 import { statFileFingerprint } from '../scanner/scanner'
-import { authorizeMediaLibraryRootFile } from './mediaLibraryRootFileGuard'
+import { authorizeMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
 import {
   localNfoScanService,
   type LocalNfoScanService

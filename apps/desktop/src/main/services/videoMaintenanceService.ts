@@ -63,7 +63,7 @@ import {
 import { inspectWritableLocalPath } from './localFileAvailability'
 import { deletePendingVideoScrapeForVideo } from '@library/db/pendingVideoScrapeRepo'
 import { getMediaLibrary, getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
-import { assertMediaLibraryRootDeletionTarget } from './mediaLibraryRootFileGuard'
+import { assertMediaLibraryRootDeletionTarget } from '@library/scan/mediaLibraryRootFileGuard'
 
 export interface VideoMaintenanceService {
   update(id: number, fields: VideoFieldUpdateInput): boolean

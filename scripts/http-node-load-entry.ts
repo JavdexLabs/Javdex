@@ -12,7 +12,7 @@ assert.equal(process.versions.electron, undefined, 'http node-load must not run 
 assert.equal(WebServer.name, 'WebServer')
 assert.equal(WebCatalog.name, 'WebCatalog')
 assert.equal(WebCatalogQueryReader.name, 'WebCatalogQueryReader')
-assert.throws(() => createManageHttpServer(), /管理 HTTP 面不能由本地浏览服务装配/)
+assert.throws(() => createManageHttpServer(), /管理 HTTP 面不能由浏览服务装配/)
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-http-node-load-'))
 try {

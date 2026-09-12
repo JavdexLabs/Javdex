@@ -12,7 +12,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import type { WebCatalogReader } from './catalog'
 import { LoginLimiter, verifyPassword, WebSessions, WebPairing } from './auth'
-import { json, readJson, sendFile, WebError } from './http'
+import { json, readJson, sendFile, isWebError, WebError } from './http'
 import {
   BROWSER_HTTP_SURFACE,
   MANAGE_HTTP_SURFACE,
@@ -63,6 +63,25 @@ function cookie(value: string, expire = false, remember = false): string {
   // Direct LAN HTTP cannot use Secure; HTTPS termination is deliberately not trusted implicitly.
   return `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/${expire || remember ? `; Max-Age=${expire ? 0 : 365 * 86400}` : ''}`
 }
+const HEALTH_LIVE_KEYS = new Set(['status'])
+const HEALTH_READY_KEYS = new Set(['ready', 'reason'])
+
+export interface WebHealthProbes {
+  live: () => { status: string }
+  ready: () => { ready: boolean; reason?: string }
+}
+
+function assertHealthPayload(
+  payload: Record<string, unknown>,
+  allowed: Set<string>
+): void {
+  for (const key of Object.keys(payload)) {
+    if (!allowed.has(key)) {
+      throw new Error('健康检查不得返回资料字段')
+    }
+  }
+}
+
 export class WebServer {
   private server: Server | null = null
   private epoch = 0
@@ -113,6 +132,8 @@ export class WebServer {
       /** Host header names allowed for this process. Never taken from forwarded headers. */
       accessHosts?: string[]
       surface?: HttpSurface
+      /** Server host only. Desktop LAN browse must omit this so /live and /ready stay absent. */
+      probes?: WebHealthProbes
     }
   ) {
     if ((options.surface ?? BROWSER_HTTP_SURFACE) === MANAGE_HTTP_SURFACE) {
@@ -154,9 +175,9 @@ export class WebServer {
             return
           }
           res.removeHeader('Content-Length')
-          json(res, error instanceof WebError ? error.status : 404, {
+          json(res, isWebError(error) ? error.status : 404, {
             error:
-              error instanceof WebError
+              isWebError(error)
                 ? error.message
                 : '内容暂不可用，请稍后重试'
           })
@@ -235,6 +256,28 @@ export class WebServer {
     if (url.origin !== `http://${authority}`)
       throw new WebError(400, '请求地址无效')
     const method = request.method ?? 'GET'
+    if (
+      (method === 'GET' || method === 'HEAD') &&
+      this.options.probes &&
+      (url.pathname === '/live' || url.pathname === '/ready')
+    ) {
+      const payload =
+        url.pathname === '/live'
+          ? this.options.probes.live()
+          : this.options.probes.ready()
+      assertHealthPayload(payload, url.pathname === '/live' ? HEALTH_LIVE_KEYS : HEALTH_READY_KEYS)
+      const status =
+        url.pathname === '/ready' && !('ready' in payload && payload.ready === true) ? 503 : 200
+      if (method === 'HEAD') {
+        response.writeHead(status, {
+          'Content-Type': 'application/json; charset=utf-8'
+        })
+        response.end()
+        return
+      }
+      json(response, status, payload)
+      return
+    }
     if (method === 'POST') {
       if (
         request.headers.origin !== `http://${authority}` ||
@@ -348,7 +391,7 @@ export class WebServer {
             username: this.options.username
           })
         } catch (error) {
-          if (error instanceof WebError) throw error
+          if (isWebError(error)) throw error
           if ((error as Error).message.startsWith('设备记录保存失败'))
             throw new WebError(503, (error as Error).message)
           if ((error as Error).message === '请稍后查询配对结果') {
@@ -444,7 +487,7 @@ export class WebServer {
           json(response,200,result)
         } catch (error) {
           if (response.destroyed || controller.signal.aborted) return
-          if (error instanceof WebError) throw error
+          if (isWebError(error)) throw error
           throw new WebError(503,'目录读取暂不可用，请稍后重试')
         } finally {
           response.off('close',abort)

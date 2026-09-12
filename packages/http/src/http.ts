@@ -8,7 +8,16 @@ export class WebError extends Error {
     message: string
   ) {
     super(message)
+    this.name = 'WebError'
   }
+}
+
+export function isWebError(error: unknown): error is WebError {
+  return (
+    error instanceof Error &&
+    error.name === 'WebError' &&
+    Number.isInteger((error as { status?: unknown }).status)
+  )
 }
 export function json(
   response: ServerResponse,

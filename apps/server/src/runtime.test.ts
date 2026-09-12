@@ -22,6 +22,8 @@ import type { ServerConfig } from './config'
 import { SERVER_APP_VERSION } from './appVersion'
 import { randomUUID } from 'node:crypto'
 import { createRemoteCatalogBackend } from '../../desktop/src/main/backends/remote/remoteCatalogBackend'
+import { createLocalCatalogBackend } from '../../desktop/src/main/backends/local/localCatalogBackend'
+import { upsertActressFromScrape } from '@library/db/actressRepo'
 
 const previousUserData = process.env.JAVDEX_TEST_USER_DATA
 
@@ -809,6 +811,232 @@ describe('server runtime lifecycle', () => {
       assert.equal(status.includes('secret'), false)
     } finally {
       await backend.dispose()
+    }
+  })
+
+  it('serves S08 browse/edit on the real Node host for both local and remote backends', async () => {
+    const dataDir = path.join(root, 's08-browse-edit')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const { videoId, fileId } = await insertBoundVideo('S08-LOOP')
+    getDb().prepare('UPDATE videos SET release_date = ? WHERE id = ?').run('2024-03-01', videoId)
+    const independentId = upsertActressFromScrape('Independent Star', null, 'female')
+    const version = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(videoId) as { generation: number; revision: number }
+    const credentials = memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    const remote = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials
+    })
+    const local = createLocalCatalogBackend({
+      identity: { mode: 'local', catalogId: writer.catalogId }
+    })
+    const ctx = { operationId: randomUUID(), expectedVersions: { V: version } }
+    try {
+      const remoteSearch = (await remote.queries.homeSearch({ search: 'S08-LOOP' })) as {
+        items: Array<{ id: number; title: string | null }>
+      }
+      const localSearch = (await local.queries.homeSearch({ search: 'S08-LOOP' })) as {
+        items: Array<{ id: number; title: string | null }>
+      }
+      assert.equal(remoteSearch.items.some((item) => item.id === videoId), true)
+      assert.equal(localSearch.items.some((item) => item.id === videoId), true)
+
+      const remoteYears = (await remote.queries.listVideoYears({ scope: { kind: 'all' } })) as number[]
+      const localYears = (await local.queries.listVideoYears({ scope: { kind: 'all' } })) as number[]
+      assert.equal(remoteYears.includes(2024), true)
+      assert.deepEqual(remoteYears, localYears)
+
+      const remoteResource = (await remote.queries.getResource({
+        libraryId: 1,
+        videoId,
+        resourceId: fileId
+      })) as { id: number; video_id: number }
+      const localResource = (await local.queries.getResource({
+        libraryId: 1,
+        videoId,
+        resourceId: fileId
+      })) as { id: number; video_id: number }
+      assert.equal(remoteResource.id, fileId)
+      assert.equal(localResource.id, fileId)
+      assert.equal(remoteResource.video_id, videoId)
+
+      const rated = await remote.videos.setRating({ videoId, rating: 4 }, ctx)
+      assert.equal(rated, true)
+      const remoteDetail = (await remote.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId
+      })) as { rating: number; title: string }
+      const localDetail = (await local.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId
+      })) as { rating: number; title: string }
+      assert.equal(remoteDetail.rating, 4)
+      assert.equal(localDetail.rating, 4)
+      const afterRating = getDb()
+        .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+        .get(videoId) as { generation: number; revision: number }
+      assert.deepEqual(afterRating, version)
+
+      await remote.videos.addManualTag({ videoId, name: 's08-manual' }, {
+        operationId: randomUUID(),
+        expectedVersions: { V: version }
+      })
+      const manuals = (await remote.queries.listManualTags({})) as Array<{ name: string }>
+      const localManuals = (await local.queries.listManualTags({})) as Array<{ name: string }>
+      assert.equal(manuals.some((tag) => tag.name === 's08-manual'), true)
+      assert.equal(localManuals.some((tag) => tag.name === 's08-manual'), true)
+
+      const actresses = (await remote.actresses.list({ gender: 'female' })) as Array<{
+        id: number
+        main_name: string
+      }>
+      const localActresses = (await local.actresses.list({ gender: 'female' })) as Array<{
+        id: number
+        main_name: string
+      }>
+      assert.equal(actresses.some((row) => row.id === independentId && row.main_name === 'Independent Star'), true)
+      assert.equal(
+        localActresses.some((row) => row.id === independentId && row.main_name === 'Independent Star'),
+        true
+      )
+
+      const orgId = (await remote.classifications.createOrganization(
+        { role: 'maker', mainName: 'S08 Studio' },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )) as number
+      assert.equal(typeof orgId, 'number')
+      const orgs = (await remote.classifications.listOrganizations({ role: 'maker' })) as Array<{
+        id: number
+        mainName: string
+      }>
+      const localOrgs = (await local.classifications.listOrganizations({ role: 'maker' })) as Array<{
+        id: number
+        mainName: string
+      }>
+      assert.equal(orgs.some((row) => row.id === orgId && row.mainName === 'S08 Studio'), true)
+      assert.equal(localOrgs.some((row) => row.id === orgId && row.mainName === 'S08 Studio'), true)
+
+      const playlist = (await remote.playlists.create(
+        { name: 'S08 List' },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )) as { playlistId: number }
+      const added = await remote.playlists.addVideo(
+        { playlistId: playlist.playlistId, videoId },
+        {
+          operationId: randomUUID(),
+          expectedVersions: {
+            P: getDb()
+              .prepare('SELECT generation, revision FROM playlists WHERE id = ?')
+              .get(playlist.playlistId) as { generation: number; revision: number }
+          }
+        }
+      )
+      assert.equal(added, true)
+      const memberships = (await remote.playlists.listForVideo({ videoId })) as Array<{
+        id: number
+        contains_video: boolean
+      }>
+      const localMemberships = (await local.playlists.listForVideo({ videoId })) as Array<{
+        id: number
+        contains_video: boolean
+      }>
+      assert.equal(memberships.some((row) => row.id === playlist.playlistId && row.contains_video), true)
+      assert.equal(
+        localMemberships.some((row) => row.id === playlist.playlistId && row.contains_video),
+        true
+      )
+
+      const library = (await remote.libraries.get({ libraryId: 1 })) as { id: number; name: string }
+      const localLibrary = (await local.libraries.get({ libraryId: 1 })) as { id: number; name: string }
+      assert.equal(library.id, 1)
+      assert.equal(localLibrary.id, 1)
+      assert.equal(library.name, localLibrary.name)
+
+      const imported = (await remote.videos.importResource(
+        {
+          libraryId: 1,
+          code: 'S08-LINK',
+          target: { kind: 'new' },
+          url: 'https://example.test/s08-link',
+          kind: 'web',
+          displayName: 'S08 link'
+        },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )) as { videoId: number; createdVideo: boolean }
+      assert.equal(imported.createdVideo, true)
+      const localImported = (await local.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId: imported.videoId
+      })) as { code: string }
+      assert.equal(localImported.code, 'S08-LINK')
+
+      const preview = (await remote.videos.previewDeleteGlobal({ videoId: imported.videoId })) as {
+        revision: string
+        videoId: number
+      }
+      assert.equal(preview.videoId, imported.videoId)
+      assert.match(preview.revision, /^[a-f0-9]{64}$/)
+
+      const directorId = (await remote.classifications.createDirector(
+        { mainName: 'S08 Director' },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )) as number
+      const directorPreview = (await remote.classifications.directorDeletePreview({
+        directorId
+      })) as { id: number; planDigest: string }
+      assert.equal(directorPreview.id, directorId)
+      assert.match(directorPreview.planDigest, /^[a-f0-9]{64}$/)
+      const directorVersion = getDb()
+        .prepare('SELECT generation, revision FROM directors WHERE id = ?')
+        .get(directorId) as { generation: number; revision: number }
+      await remote.classifications.deleteDirector(
+        { directorId, planId: randomUUID(), planDigest: directorPreview.planDigest },
+        { operationId: randomUUID(), expectedVersions: { F: directorVersion } }
+      )
+      assert.equal(await remote.classifications.getDirector({ directorId }), null)
+
+      const inspect = (await remote.actresses.inspectName({
+        actressId: independentId,
+        name: 'Unused Conflict Name'
+      })) as { status: string }
+      const localInspect = (await local.actresses.inspectName({
+        actressId: independentId,
+        name: 'Unused Conflict Name'
+      })) as { status: string }
+      assert.equal(inspect.status, 'available')
+      assert.equal(localInspect.status, 'available')
+
+      const pendingCount = await postManage(
+        base,
+        'pendingVideoScrapes.count',
+        { serverId: writer.serverId, catalogId: writer.catalogId, input: {} },
+        { bearer: writer.secret }
+      )
+      assert.equal(pendingCount.status, 200)
+      assert.equal(pendingCount.json, 0)
+      const pendingScan = await postManage(
+        base,
+        'pendingScan.list',
+        { serverId: writer.serverId, catalogId: writer.catalogId, input: {} },
+        { bearer: writer.secret }
+      )
+      assert.equal(pendingScan.status, 200)
+      assert.equal(Array.isArray(pendingScan.json), true)
+
+      const cookie = (await login(base, password, true)).cookie
+      const cookieSearch = await postManage(
+        base,
+        'home.search',
+        { serverId: writer.serverId, catalogId: writer.catalogId, input: { search: 'S08-LOOP' } },
+        { cookie }
+      )
+      assert.equal(cookieSearch.status, 401)
+    } finally {
+      await remote.dispose()
+      await local.dispose()
     }
   })
 })

@@ -634,8 +634,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleRating = async (rating: number): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.setRating(videoId, rating)
+      await api.videos.setRating(videoId, rating, expectedVideoVersion(video))
       setVideo((v) => (v ? { ...v, rating } : v))
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -660,8 +661,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const doClearMeta = async (): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.clearMeta(videoId)
+      await api.videos.clearMeta(videoId, expectedVideoVersion(video))
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
       invalidateVideos()
@@ -672,8 +674,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleMarkScrapeSuccess = async (): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.markScrapeSuccess(videoId)
+      await api.videos.markScrapeSuccess(videoId, expectedVideoVersion(video))
       toast.show('已标记为刮削成功', 'success')
       invalidateVideos()
       void load({ silent: true })
@@ -1136,6 +1139,7 @@ export default function DetailPage(): JSX.Element {
       <VideoTagPanel
         videoId={video.id}
         tags={video.tags}
+        expectedVersions={expectedVideoVersion(video)}
         onFilterTag={(tag) =>
           navigateToVideoListSurface(
             navigate,

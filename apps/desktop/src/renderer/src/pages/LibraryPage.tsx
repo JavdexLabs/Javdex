@@ -533,7 +533,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
 
   const markScrapeSuccess = async (video: Pick<VideoCard, 'id'>): Promise<void> => {
     try {
-      await api.videos.markScrapeSuccess(video.id)
+      const detail = await api.videos.get({ kind: 'all' }, video.id)
+      if (!detail) throw new Error('影片不存在')
+      await api.videos.markScrapeSuccess(video.id, expectedVideoVersion(detail))
       toast.show('已标记为刮削成功', 'success')
       invalidateVideoLibraryQueries(queryClient)
       refetchLibrarySurface()

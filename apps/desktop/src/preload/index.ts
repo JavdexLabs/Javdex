@@ -405,10 +405,12 @@ const api = {
     update: (id: number, fields: VideoFieldUpdateInput) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
     edit: (id: number, input: VideoEditInput, expectedVersions: ExpectedVersions) =>
       invokeVideo(IPC.VIDEO_EDIT, id, input, expectedVersions),
-    clearMeta: (id: number) => invokeVideo(IPC.VIDEO_CLEAR_META, id),
-    markScrapeSuccess: (id: number) => invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
-    setRating: (id: number, rating: number) =>
-      invokeVideo(IPC.VIDEO_SET_RATING, id, rating),
+    clearMeta: (id: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_CLEAR_META, id, expectedVersions),
+    markScrapeSuccess: (id: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id, expectedVersions),
+    setRating: (id: number, rating: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_SET_RATING, id, rating, expectedVersions),
     correctImport: (id: number, code: string, discardPendingScrape?: boolean) =>
       invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code, discardPendingScrape),
     years: (scope: CatalogScope) => invokeVideo(IPC.VIDEO_YEARS, scope),
@@ -418,12 +420,12 @@ const api = {
       invokeVideo(IPC.VIDEO_SAMPLE_DELETE, id, assetId),
     setPoster: (id: number, posterPath: string | null) =>
       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
-    addManualTag: (id: number, name: string) =>
-      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
-    addExistingManualTag: (id: number, tagId: number) =>
-      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
-    removeManualTag: (id: number, tagId: number) =>
-      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+    addManualTag: (id: number, name: string, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name, expectedVersions),
+    addExistingManualTag: (id: number, tagId: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId, expectedVersions),
+    removeManualTag: (id: number, tagId: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId, expectedVersions),
     importLinkResource: (input: VideoLinkResourceImportInput) =>
       invokeVideo(IPC.VIDEO_RESOURCE_IMPORT, input),
     getResource: (libraryId: number, videoId: number, resourceId: number) =>

@@ -18,8 +18,9 @@ it('validates manual tag candidate bounds and existing-tag identities', () => {
     }
   }
   const attach = videoIpcSchemas[IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]
-  assert.equal(attach.safeParse([1, 2]).success, true)
-  for (const args of [[0, 2], [1, -1], [1, 1.5], [1, Number.MAX_SAFE_INTEGER + 1], [1, 'name']]) {
+  const versions = { V: { generation: 1, revision: 1 } }
+  assert.equal(attach.safeParse([1, 2, versions]).success, true)
+  for (const args of [[0, 2, versions], [1, -1, versions], [1, 1.5, versions], [1, Number.MAX_SAFE_INTEGER + 1, versions], [1, 'name', versions], [1, 2]]) {
     assert.equal(attach.safeParse(args).success, false)
   }
 })
@@ -40,19 +41,27 @@ describe('typed IPC adapter', () => {
   })
 
   it('forwards command arguments and returns the application result', async () => {
-    let registered: ((id: number, rating: number) => unknown | Promise<unknown>) | null = null
+    let registered: ((
+      id: number,
+      rating: number,
+      expectedVersions: { V: { generation: number; revision: number } }
+    ) => unknown | Promise<unknown>) | null = null
     const adapter = createTypedIpcAdapter<VideoIpcContract>(
       videoIpcSchemas,
       (channel, handler) => {
         assert.equal(channel, IPC.VIDEO_SET_RATING)
-        registered = (id: number, rating: number) =>
-          handler({} as IpcMainInvokeEvent, id, rating)
+        registered = (id, rating, expectedVersions) =>
+          handler({} as IpcMainInvokeEvent, id, rating, expectedVersions)
       }
     )
     adapter.register(IPC.VIDEO_SET_RATING, (id, rating) => id === 7 && rating === 4)
 
     assert.equal(
-      await (registered as ((id: number, rating: number) => unknown | Promise<unknown>) | null)?.(7, 4),
+      await (registered as ((id: number, rating: number, expectedVersions: { V: { generation: number; revision: number } }) => unknown | Promise<unknown>) | null)?.(
+        7,
+        4,
+        { V: { generation: 1, revision: 1 } }
+      ),
       true
     )
   })

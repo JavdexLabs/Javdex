@@ -1,3 +1,10 @@
+import { getDb } from '@library/db/database'
+import { resolvePendingScanGroup } from '@library/db/pendingScanRepo'
+import { resolvePendingResourceIdentity } from '@library/scan/pendingResourceIdentityService'
+import type {
+  PendingResourceIdentityChoice,
+  PendingScanGroupResolution
+} from '@shared/libraryTypes'
 import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { structuredError } from '@shared/protocol/errors'
 import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
@@ -528,10 +535,13 @@ export function createLocalCatalogBackend(
       if (local.normalizedName) {
         return actressIdentityConflictWorkflow.getConflictGroup(local.normalizedName)
       }
-      throw structuredError(
-        'INVALID_INPUT',
-        '本地演员冲突详情仍按规范化名查询；pendingId 投影在 S08 完成。'
-      )
+      const row = getDb()
+        .prepare(
+          'SELECT normalized_name FROM pending_actress_scrape_conflicts WHERE pending_scrape_id = ? ORDER BY id LIMIT 1'
+        )
+        .get(local.pendingId) as { normalized_name: string } | undefined
+      if (!row) return null
+      return actressIdentityConflictWorkflow.getConflictGroup(row.normalized_name)
     },
     async conflictCount() {
       return actressIdentityConflictWorkflow.countPendingReviewItems()
@@ -834,8 +844,54 @@ export function createLocalCatalogBackend(
     latestScan: () => unsupportedCatalogUseCase('scans.getLatest'),
     renameFile: () => unsupportedCatalogUseCase('files.rename'),
     importManual: () => unsupportedCatalogUseCase('files.importManual'),
-    resolvePendingScan: () => unsupportedCatalogUseCase('pendingScan.resolve'),
-    resolveResourceIdentity: () => unsupportedCatalogUseCase('pendingResourceIdentity.resolve')
+    resolvePendingScan: async (input) => {
+      const local = input as {
+        libraryId?: number
+        groupId: number
+        expectedRevision?: number
+        assignments: PendingScanGroupResolution['assignments']
+        primaryResourceIds?: PendingScanGroupResolution['primaryResourceIds']
+      }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_scan_groups WHERE id = ?')
+            .get(local.groupId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) throw structuredError('INVALID_INPUT', '待确认扫描组不存在')
+      if (local.expectedRevision == null) {
+        throw structuredError('INVALID_INPUT', '待确认扫描需要 Q 版本')
+      }
+      return resolvePendingScanGroup(libraryId, local.groupId, {
+        expectedRevision: local.expectedRevision,
+        assignments: local.assignments,
+        primaryResourceIds: local.primaryResourceIds
+      })
+    },
+    resolveResourceIdentity: async (input) => {
+      const local = input as {
+        libraryId?: number
+        identityId: number
+        choice: PendingResourceIdentityChoice
+        expectedRevision?: number
+      }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_resource_identities WHERE id = ?')
+            .get(local.identityId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) throw structuredError('INVALID_INPUT', '资源身份待办不存在')
+      if (local.expectedRevision == null) {
+        throw structuredError('INVALID_INPUT', '资源身份待办需要 Q 版本')
+      }
+      return resolvePendingResourceIdentity(libraryId, local.identityId, {
+        expectedRevision: local.expectedRevision,
+        choice: local.choice
+      })
+    }
   }
 
   return {

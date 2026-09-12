@@ -30,11 +30,11 @@ export function registerVideoHandlers(
   adapter.register(IPC.VIDEO_EDIT, (id, input, expectedVersions) =>
     backend.videos.edit({ videoId: id, fields: input }, ipcMutation(undefined, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_CLEAR_META, (id) =>
-    backend.videos.clearMeta({ videoId: id }, ipcMutation())
+  adapter.register(IPC.VIDEO_CLEAR_META, (id, expectedVersions) =>
+    backend.videos.clearMeta({ videoId: id }, ipcMutation(undefined, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_MARK_SCRAPE_SUCCESS, (id) =>
-    backend.videos.markScrapeSuccess({ videoId: id }, ipcMutation())
+  adapter.register(IPC.VIDEO_MARK_SCRAPE_SUCCESS, (id, expectedVersions) =>
+    backend.videos.markScrapeSuccess({ videoId: id }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.VIDEO_CORRECT_IMPORT, (id, code, discardPendingScrape) =>
     backend.videos.correctImport(
@@ -42,8 +42,8 @@ export function registerVideoHandlers(
       ipcMutation()
     )
   )
-  adapter.register(IPC.VIDEO_SET_RATING, (id, rating) =>
-    backend.videos.setRating({ videoId: id, rating }, ipcMutation())
+  adapter.register(IPC.VIDEO_SET_RATING, (id, rating, expectedVersions) =>
+    backend.videos.setRating({ videoId: id, rating }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.VIDEO_YEARS, (scope) =>
     backend.queries.listVideoYears({ scope })
@@ -64,14 +64,14 @@ export function registerVideoHandlers(
       ipcMutation()
     )
   )
-  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD, (id, name) =>
-    backend.videos.addManualTag({ videoId: id, name }, ipcMutation())
+  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD, (id, name, expectedVersions) =>
+    backend.videos.addManualTag({ videoId: id, name }, ipcMutation(undefined, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, (id, tagId) =>
-    backend.videos.addExistingManualTag({ videoId: id, tagId }, ipcMutation())
+  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, (id, tagId, expectedVersions) =>
+    backend.videos.addExistingManualTag({ videoId: id, tagId }, ipcMutation(undefined, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_MANUAL_TAG_REMOVE, (id, tagId) =>
-    backend.videos.removeManualTag({ videoId: id, tagId }, ipcMutation())
+  adapter.register(IPC.VIDEO_MANUAL_TAG_REMOVE, (id, tagId, expectedVersions) =>
+    backend.videos.removeManualTag({ videoId: id, tagId }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.VIDEO_RESOURCE_IMPORT, (input) =>
     backend.videos.importResource(input, ipcMutation())

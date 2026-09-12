@@ -45,6 +45,7 @@ import { structuredError } from '@shared/protocol/errors'
 import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import { SERVER_APP_VERSION } from './appVersion'
+import { CATALOG_NOT_HANDLED, dispatchCatalogManage } from './manageCatalogHandlers'
 
 interface ManageEnvelope {
   serverId?: string
@@ -167,8 +168,11 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     }
     return issueOneTimeToken('deployRecover', {}, database)
   }
-  if (meta.auth === 'migration' || meta.auth === 'publicHandshake') {
-    throw structuredError('UNSUPPORTED_CAPABILITY', `S06 尚未实现 ${operation}`)
+  if (meta.auth === 'migration') {
+    throw structuredError('UNSUPPORTED_CAPABILITY', `S12 尚未实现 ${operation}`)
+  }
+  if (meta.auth === 'publicHandshake') {
+    throw structuredError('UNSUPPORTED_CAPABILITY', `S08 尚未实现 ${operation}`)
   }
 
   if (meta.auth === 'manageRead' || meta.auth === 'manageWrite') {
@@ -460,8 +464,10 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       )
       return { receipt: result.receipt, ...result.data }
     }
-    throw structuredError('UNSUPPORTED_CAPABILITY', `S06 尚未实现 ${operation}`)
+    const catalogResult = dispatchCatalogManage(operation, envelope, auth, database)
+    if (catalogResult !== CATALOG_NOT_HANDLED) return catalogResult
+    throw structuredError('UNSUPPORTED_CAPABILITY', `S08 尚未实现 ${operation}`)
   }
 
-  throw structuredError('UNSUPPORTED_CAPABILITY', `S06 尚未实现 ${operation}`)
+  throw structuredError('UNSUPPORTED_CAPABILITY', `S08 尚未实现 ${operation}`)
 }

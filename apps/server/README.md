@@ -1,5 +1,37 @@
-# Server workspace — reserved, not implemented
+# Javdex server
 
-This workspace reserves the independent Node entry point, lifecycle, deployment configuration and Docker build. There is intentionally no placeholder server or successful no-op build script.
+Independent Node host for the catalog database, plaintext image store, query worker, and LAN browse HTTP.
 
-The first server build must use real SQLite, image storage, query workers and HTTP without Electron/Playwright. Implement stages S02–S04 in [the execution plan](../../docs/SERVER_MODE_EXECUTION_PLAN.md). Do not import the desktop application entry point or copy desktop `node_modules` into the image.
+This process does **not** assemble management HTTP, run Electron, Playwright, scrapers, or the plugin agent. Desktop keeps local mode; remote desktop access is a later stage.
+
+## Run locally after build
+
+```bash
+npm run web:build
+npm run server:build
+npm run server:test
+npm run server:smoke:node
+```
+
+`server:smoke` builds and runs the Linux container. It exits non-zero when Docker is missing.
+
+```bash
+node out/server/index.js start --config deploy/javdex-server.example.json
+node out/server/index.js bind --config deploy/javdex-server.example.json
+```
+
+Set `JAVDEX_WEB_PASSWORD` to a 12–128 character browse password. Catalog browse stays unavailable until `bind` writes the occupancy marker under the data directory.
+
+## Deploy
+
+See `deploy/javdex-server.example.json` and `deploy/docker-compose.example.yml`.
+
+- SQLite and images live on the `/data` volume (local filesystem).
+- Media files are a separate mount from deploy config, not an admin UI path.
+- `/live` and `/ready` do not return catalog data.
+- Schema upgrade failure prevents listen/`ready`.
+- SIGTERM stops HTTP, the query worker, and SQLite.
+
+## Not in this stage
+
+Writer identity, takeover, image upload protocol, RemoteCatalogBackend, and management routes are later stages. The bind file is only an occupancy gate for browse; it is not a writer token or recovery password.

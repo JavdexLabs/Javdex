@@ -1,0 +1,14 @@
+{
+  "listenHost": "0.0.0.0",
+  "port": 8096,
+  "accessHosts": ["127.0.0.1"],
+  "dataDir": "/data",
+  "imagesDir": "/data/media_assets",
+  "staticRoot": "/app/web",
+  "mediaMounts": {
+    "library": "/media"
+  },
+  "web": {
+    "username": "viewer"
+  }
+}

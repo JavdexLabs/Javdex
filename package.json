@@ -42,7 +42,7 @@
     "lint": "npm run lint:ts && npm run lint:css",
     "check:css-architecture": "node scripts/check-css-architecture.mjs",
     "check:ui-controls": "node scripts/check-ui-controls.mjs",
-    "pretest": "npm run check:workspaces && npm run check:library-boundaries && npm run check:http-boundaries && npm run check:http-node-load && npm run check:desktop-architecture && npm run check:actress-boundaries && npm run check:media-asset-store-boundaries && npm run check:metadata-source-boundaries && npm run check:classification-entity-boundaries && npm run check:agent-platform-boundaries && npm run lint && npm run check:css-architecture && npm run check:ui-controls",
+    "pretest": "npm run check:workspaces && npm run check:library-boundaries && npm run check:http-boundaries && npm run check:http-node-load && npm run check:server-boundaries && npm run check:desktop-architecture && npm run check:actress-boundaries && npm run check:media-asset-store-boundaries && npm run check:metadata-source-boundaries && npm run check:classification-entity-boundaries && npm run check:agent-platform-boundaries && npm run lint && npm run check:css-architecture && npm run check:ui-controls",
     "test": "npm run typecheck && npm run test:packaging && node scripts/run-electron-tests.mjs",
     "mcp:plugin-dev": "tsx apps/desktop/src/mcp/javdex-plugin-dev-server.ts",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
@@ -52,6 +52,12 @@
     "desktop:build": "electron-vite build && node scripts/check-mediapipe-assets.mjs && node scripts/check-built-pi-runtime.mjs",
     "setup:desktop": "electron-rebuild -f -w better-sqlite3",
     "check:workspaces": "node scripts/check-workspaces.mjs",
+    "check:server-boundaries": "node scripts/check-server-boundaries.mjs",
+    "check:server-production-closure": "node scripts/check-server-production-closure.mjs",
+    "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",
+    "server:test": "npm run check:server-boundaries && node scripts/server-test.mjs",
+    "server:smoke": "node --import tsx scripts/server-smoke.mjs",
+    "server:smoke:node": "node --import tsx scripts/server-smoke-node.mjs",
     "typecheck:browser": "tsc --noEmit -p tsconfig.browser.json"
   },
   "dependencies": {

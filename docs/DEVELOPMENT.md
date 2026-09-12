@@ -95,9 +95,9 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | `packages/library/src` | Node 路径/资源身份工具、资料库数据库、图片存储、扫描辅助、NFO、维护闸门与路径清理；扫描编排、Electron 封面导出和业务服务仍在抽离 |
 | `packages/http/src` | 局域网浏览 HTTP、配对/会话、浏览 DTO 与静态资源；桌面 webAccess 生命周期仍在 desktop |
 | `packages/ui/src` | 桌面和网页真实共用的纯展示组件 |
-| `apps/server` | 预留工作区，目前没有可运行服务端 |
+| `apps/server` | 独立 Node 入口：配置、数据卷、SQLite/图片、查询 worker、浏览 HTTP、`/live` `/ready`；管理 HTTP 仍未装配 |
 
-根通过 npm workspaces 管理内部包，统一版本；运行 `npm run check:workspaces` 检查边界。可以用 `npm run build -w @javdex/web` 单独构建网页，或 `npm run build -w @javdex/desktop` 构建桌面及附带网页。根仍暂时持有桌面打包 metadata 与生产依赖，产物目录维持 `out/`；服务端独立依赖闭包按 [执行计划](SERVER_MODE_EXECUTION_PLAN.md) 后续建立。调整产品版本时必须同时更新所有 workspace 的版本、内部依赖版本和 lockfile。
+根通过 npm workspaces 管理内部包，统一版本；运行 `npm run check:workspaces` 检查边界。可以用 `npm run build -w @javdex/web` 单独构建网页，或 `npm run build -w @javdex/desktop` 构建桌面及附带网页。根仍暂时持有桌面打包 metadata 与生产依赖，产物目录维持 `out/`；服务端生产闭包由 `npm run server:build` 写入 `out/server`（仅 better-sqlite3 与 sharp）。调整产品版本时必须同时更新所有 workspace 的版本、内部依赖版本和 lockfile。
 
 渲染进程不直接访问 Node.js、数据库或文件系统，相关操作通过主进程处理。图片通过应用的 `media://` 协议读取，主进程负责资产路径解析和解密。
 

@@ -7,7 +7,8 @@
     "packages/contracts/src/**/*",
     "vite.web.config.ts",
     "packages/library/src/**/*",
-    "packages/http/src/**/*"
+    "packages/http/src/**/*",
+    "apps/server/src/**/*"
   ],
   "compilerOptions": {
     "composite": true,

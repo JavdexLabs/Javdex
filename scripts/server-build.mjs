@@ -38,7 +38,13 @@ async function bundle(entry, outfile) {
     format: 'esm',
     external: ['better-sqlite3', 'sharp'],
     alias,
-    plugins: [forbidDesktopPlugin()]
+    plugins: [forbidDesktopPlugin()],
+    // Bundled CJS (undici via video maintenance HTTP) calls require("node:assert").
+    banner: {
+      js: `import { createRequire as __javdexCreateRequire } from 'node:module';
+const require = __javdexCreateRequire(import.meta.url);
+`
+    }
   })
 }
 

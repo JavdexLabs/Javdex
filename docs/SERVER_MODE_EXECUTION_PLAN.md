@@ -57,6 +57,7 @@
 | S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
 | S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
 | S06 | 正式 schema 18 上传表、流式 PUT、全用途 apply 与崩溃恢复已落地；生产烟测含 upload/apply/restart | 见本文件 S06 实施记录 |
+| S07 | 进行中：RemoteCatalogBackend 已能经真实 Node 宿主改标题/上传封面；远程启动不打开本地库 | 见本文件 S07 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -443,6 +444,17 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 实现 DesktopSession、版本/身份失败页、模式切换重启、generation 与缓存隔离、最小结果核实日志和旧请求取消。复用 S02D 的独立 workStore；不得在 remote 构造/重连/恢复过程中补开旧业务库。remote 自己处理协议身份和认证，页面只提供业务目标、原版本和用户选择。远程错误不自动本地回退；模式切换前处理未保存编辑、活跃桌面工作和结果不明提交。
 
 验收门槛：管理隐藏/归档对象可见、网页不可见；影片编辑和封面上传可保存；丢响应后不重复；切回本地仍能打开原库。完成 D01–D07 的最小真实双后端闭环，未覆盖的大批次/维护细节在 S09/S10 补全并最终在 S13 验收。监测本地数据库和后台任务，证明远程模式没有偷偷打开原库。
+
+**S07 实施记录（RemoteCatalogBackend 最小闭环，进行中）**
+
+- 范围：新增 `packages/http/src/manageClient.ts`（Bearer、版本头、Origin；不带 Cookie）。`createRemoteCatalogBackend` 只走 manage HTTP，不 import SQLite/Electron。已实现 `videos.list`/`videos.get`/`videos.edit`、`uploads.create`/`inspect`/`putUpload`、`videos.setPoster`/`importSamples`、`playlists.create`/`update`、`classificationImages.set`、`operations.get`。其余端口仍 `UNSUPPORTED_CAPABILITY`。握手后比对 `appVersion`，不一致则 `versionMismatch`。`createDesktopRuntime` 远程模式读取 `remoteBaseUrl` 与 `writer-secrets.json`，不打开 `library.db`；无 URL 时仍用未配置占位后端。Node 宿主增加 `videos.list`。
+- 工程默认：本地 `setPoster`/`importSamples`/`assets.createUpload` 仍走本机文件入口。远程未认主或缺少 secret 为 `disconnected`/`recoveryRequired`，不自动领取。超时默认 15s。
+- 验证（Linux Node 22.14；提交 `b909965`）：
+  - `npm run server:test` **14 通过 / 0 失败**（含 RemoteCatalogBackend 改标题、同 operationId 重试、videoCover PUT/apply 落盘、VERSION_MISMATCH）
+  - Electron `createDesktopRuntime` **7 通过**：远程不打开本地库；切回本地仍能读到远程期间未改的 actress 行
+  - `npm run typecheck`；`npm run pretest`；`npm run test:packaging` **8 通过**
+  - 全量 Electron：**2986 tests / 2985 pass / 0 fail / 1 skip**
+- 未做：renderer 版本/身份失败页；重连 generation 与迟到响应（D04）；取消/关窗（D05）；完整管理查询面（S08）；M01 隐藏/归档管理可见对照；writer 领取 UI；D07 全能力矩阵。Docker 仍缺。不得把 mock 当远程闭环证据。
 
 ### S08：完整管理功能
 

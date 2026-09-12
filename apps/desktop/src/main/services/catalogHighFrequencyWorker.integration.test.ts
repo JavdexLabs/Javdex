@@ -74,7 +74,7 @@ it('routes actual desktop IPC registration and Web catalog queries through the n
   const handlers = new Map<string, (event: never, ...args: unknown[]) => unknown>()
   const queries = createAsyncVideoQueryService(client!)
   const backend = createLocalCatalogBackend({
-    identity: { mode: 'local', catalogId: 'highfreq-worker' },
+    identity: { mode: 'local', catalogId: '11111111-1111-4111-8111-111111111111' },
     queries,
     reads: {
       homeLoad: (input) => client!.readHome(input),

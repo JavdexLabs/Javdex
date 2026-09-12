@@ -9,6 +9,7 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
+import { expectedVersionsSchema } from '@shared/manage/primitives'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
 const scanAuditViewQuery = z.object({
@@ -406,7 +407,7 @@ export const videoIpcSchemas = {
   [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
   [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
   [IPC.VIDEO_UPDATE]: z.tuple([id, object]),
-  [IPC.VIDEO_EDIT]: z.tuple([id, object]),
+  [IPC.VIDEO_EDIT]: z.tuple([id, object, expectedVersionsSchema]),
   [IPC.VIDEO_CLEAR_META]: z.tuple([id]),
   [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
   [IPC.VIDEO_SET_RATING]: z.tuple([id, finiteNumber.min(0).max(5)]),

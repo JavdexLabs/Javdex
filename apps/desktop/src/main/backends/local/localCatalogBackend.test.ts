@@ -63,7 +63,7 @@ describe('LocalCatalogBackend', () => {
     const backend = createLocalCatalogBackend({ identity, appVersion: '0.7.0' })
     assert.equal(backend.mode, 'local')
     assert.equal(backend.session().serverId, null)
-    assert.equal(backend.session().schemaVersion, 16)
+    assert.equal(backend.session().schemaVersion, 17)
     assert.equal(backend.capabilities().editCatalog.allowed, true)
     assert.equal(backend.capabilities().playRemoteFile.allowed, false)
 
@@ -76,16 +76,60 @@ describe('LocalCatalogBackend', () => {
       videoId
     })) as ScopedVideoDetail | null
     assert.equal(detail?.title, 'Before')
+    assert.equal(detail?.generation, 1)
+    assert.equal(detail?.revision, 1)
 
     await backend.videos.edit(
       { videoId, fields: { title: 'After' } },
-      { operationId: '00000000-0000-4000-8000-000000000001', expectedVersions: {} }
+      {
+        operationId: '00000000-0000-4000-8000-000000000001',
+        expectedVersions: { V: { generation: 1, revision: 1 } }
+      }
     )
     const updated = (await backend.queries.getVideo({
       scope: { kind: 'library', libraryId },
       videoId
     })) as ScopedVideoDetail | null
     assert.equal(updated?.title, 'After')
+    assert.equal(updated?.revision, 2)
+
+    await assert.rejects(
+      () =>
+        backend.videos.edit(
+          { videoId, fields: { title: 'Stale' } },
+          {
+            operationId: '00000000-0000-4000-8000-000000000010',
+            expectedVersions: { V: { generation: 1, revision: 1 } }
+          }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+    )
+    const retry = await backend.videos.edit(
+      { videoId, fields: { title: 'After' } },
+      {
+        operationId: '00000000-0000-4000-8000-000000000001',
+        expectedVersions: { V: { generation: 1, revision: 1 } }
+      }
+    )
+    assert.equal(retry, true)
+    assert.equal(
+      (
+        (await backend.queries.getVideo({
+          scope: { kind: 'library', libraryId },
+          videoId
+        })) as ScopedVideoDetail
+      ).revision,
+      2
+    )
+
+    await assert.rejects(
+      () =>
+        backend.videos.edit(
+          { videoId, fields: { title: 'No version' } },
+          { operationId: '00000000-0000-4000-8000-000000000011', expectedVersions: {} }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+    )
 
     await assert.rejects(
       () =>

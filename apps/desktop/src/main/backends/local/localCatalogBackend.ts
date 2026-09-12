@@ -1,5 +1,12 @@
 import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { structuredError } from '@shared/protocol/errors'
+import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
+import { commitCatalogMutation } from '@library/catalog/catalogOperations'
+import {
+  assertExpectedVideoVersion,
+  readVideoAggregateVersion
+} from '@library/catalog/catalogVideoVersion'
+import { videoEditInputFromManageFields } from '@library/catalog/videoEditFields'
 import type { DesktopSession } from '@shared/desktop/session'
 import type { CatalogIdentity } from '@shared/protocol/identity'
 import type {
@@ -130,26 +137,7 @@ function toVideoEditInput(
     links?: VideoEditInput['links']
   }
 ): VideoEditInput {
-  if (fields.cover && fields.cover.kind === 'upload') {
-    throw structuredError(
-      'UNSUPPORTED_CAPABILITY',
-      '本地影片编辑暂不通过上传引用改封面；请使用现有封面导入入口。'
-    )
-  }
-  const input: VideoEditInput = {}
-  if ('title' in fields) input.title = fields.title
-  if ('summary' in fields) input.summary = fields.summary
-  if ('release_date' in fields) input.release_date = fields.release_date
-  if ('makerOrganization' in fields) input.makerOrganization = fields.makerOrganization
-  if ('publisherOrganization' in fields) input.publisherOrganization = fields.publisherOrganization
-  if ('directorAssignment' in fields) input.directorAssignment = fields.directorAssignment
-  if ('seriesAssignment' in fields) input.seriesAssignment = fields.seriesAssignment
-  if ('duration_seconds' in fields) input.duration_seconds = fields.duration_seconds
-  if ('rating' in fields) input.rating = fields.rating
-  if ('tags' in fields) input.tags = fields.tags
-  if ('actressesFemale' in fields) input.actressesFemale = fields.actressesFemale
-  if ('actressesMale' in fields) input.actressesMale = fields.actressesMale
-  if ('links' in fields) input.links = fields.links
+  const input = videoEditInputFromManageFields(fields)
   if ('coverSourcePath' in fields) input.coverSourcePath = fields.coverSourcePath
   return input
 }
@@ -193,6 +181,7 @@ export function createLocalCatalogBackend(
   if (dependencies.identity.mode !== 'local') {
     throw new Error('LocalCatalogBackend requires a local catalog identity')
   }
+  ensureCatalogIdentity({ catalogId: dependencies.identity.catalogId })
   const queries = dependencies.queries ?? createVideoQueryService()
   const videos = dependencies.videos ?? videoMaintenanceService
   const lifecycle = dependencies.lifecycle ?? videoLifecycleService
@@ -254,8 +243,26 @@ export function createLocalCatalogBackend(
   }
 
   const videoCommands: CatalogVideoCommands = {
-    async edit(input, _ctx: MutationContext) {
-      return videos.edit(input.videoId, toVideoEditInput(input.fields))
+    async edit(input, ctx: MutationContext) {
+      const result = commitCatalogMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'videos.edit',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => {
+          assertExpectedVideoVersion(input.videoId, ctx.expectedVersions, ctx.operationId)
+          const ok = videos.edit(input.videoId, toVideoEditInput(input.fields))
+          return {
+            ok,
+            videoId: input.videoId,
+            versions: { V: readVideoAggregateVersion(input.videoId)! }
+          }
+        }
+      )
+      return result.data.ok
     },
     async clearMeta(input) {
       return videos.clearMetadata(input.videoId)

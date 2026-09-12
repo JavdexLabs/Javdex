@@ -40,6 +40,7 @@ import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import ActressAvatar from '../components/ActressAvatar'
 import type { VideoEditInput } from '@shared/videoTypes'
+import { expectedVideoVersion } from '@shared/protocol/versions'
 import type {
   VideoDirectorChoiceRequired,
   VideoScrapeField,
@@ -642,8 +643,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleEditSave = async (input: VideoEditInput): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.edit(videoId, input)
+      await api.videos.edit(videoId, input, expectedVideoVersion(video))
       setShowEdit(false)
       toast.show('元数据已保存', 'success')
       invalidateVideos()

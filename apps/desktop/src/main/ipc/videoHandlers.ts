@@ -27,8 +27,8 @@ export function registerVideoHandlers(
   adapter.register(IPC.VIDEO_UPDATE, (id, fields) =>
     backend.videos.edit({ videoId: id, fields }, ipcMutation())
   )
-  adapter.register(IPC.VIDEO_EDIT, (id, input) =>
-    backend.videos.edit({ videoId: id, fields: input }, ipcMutation())
+  adapter.register(IPC.VIDEO_EDIT, (id, input, expectedVersions) =>
+    backend.videos.edit({ videoId: id, fields: input }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.VIDEO_CLEAR_META, (id) =>
     backend.videos.clearMeta({ videoId: id }, ipcMutation())

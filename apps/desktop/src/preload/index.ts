@@ -60,6 +60,7 @@ import type {
 import type { GlobalSearchInput, HomeDiscoveryInput } from '../../../../packages/contracts/src/catalogTypes'
 import type { CatalogScope, CreateMediaLibraryInput } from '../../../../packages/contracts/src/mediaLibraryTypes'
 import type { MigrateMediaLibraryRootInput } from '../../../../packages/contracts/src/mediaLibraryTypes'
+import type { ExpectedVersions } from '../../../../packages/contracts/src/protocol/versions'
 import type {
   LastVideoResourceRemovalMode,
   VideoEditInput,
@@ -384,7 +385,8 @@ const api = {
     list: (scope: CatalogScope, q?: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, scope, q),
     get: (scope: CatalogScope, id: number) => invokeVideo(IPC.VIDEO_GET, scope, id),
     update: (id: number, fields: VideoFieldUpdateInput) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
-    edit: (id: number, input: VideoEditInput) => invokeVideo(IPC.VIDEO_EDIT, id, input),
+    edit: (id: number, input: VideoEditInput, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_EDIT, id, input, expectedVersions),
     clearMeta: (id: number) => invokeVideo(IPC.VIDEO_CLEAR_META, id),
     markScrapeSuccess: (id: number) => invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
     setRating: (id: number, rating: number) =>

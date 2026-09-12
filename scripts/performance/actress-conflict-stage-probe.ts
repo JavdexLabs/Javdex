@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { initDatabaseAtPath, closeDatabase } from '../../packages/library/src/db/database'
 import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 import { ActressIdentityConflictWorkflow } from '../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 it('locates skewed actor conflict costs by stage',()=>{

@@ -11,18 +11,18 @@ import type {
   PendingLibraryPathCleanup
 } from '@shared/libraryTypes'
 import type { VideoResource } from '@shared/videoTypes'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import {
   findManagedMediaLibraryRootConflict,
   getMediaLibraryRoot,
   MediaLibraryRepoError,
   resolveMediaLibraryRootPath
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import {
   listVideoResources,
   removeSourceManagedVideoResourcesBatch,
   type VideoResourceBatchRemovalPlan
-} from '../db/videoRepo'
+} from '@library/db/videoRepo'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 import { mediaAssetStore } from './mediaAssetStore'
 import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'

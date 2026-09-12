@@ -3,13 +3,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { initDatabaseAtPath, closeDatabase, getDb } from '../db/database'
+import { initDatabaseAtPath, closeDatabase, getDb } from '@library/db/database'
 import { readScanAuditHeader } from './scanAuditReadHeader'
 import { createScanAuditReadIndex } from './scanAuditReadIndex'
 import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import type { ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
 import { readLibraryScanAudit } from '../scanner/libraryScanAuditStore'
-import { getLatestLibraryScanSnapshot } from '../db/libraryScanRepo'
+import { getLatestLibraryScanSnapshot } from '@library/db/libraryScanRepo'
 let directory: string, filename: string
 const identity = { libraryId: 1, runId: 'dual', finishedAt: 'finish' }
 const limits = { sourceBytes: 8 * 1024 * 1024, indexBytes: 16 * 1024 * 1024, pageBytes: 1024 * 1024 }

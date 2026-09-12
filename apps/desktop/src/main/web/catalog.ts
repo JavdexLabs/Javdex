@@ -8,8 +8,8 @@ import type {
   WebVideo
 } from '@shared/webTypes'
 import type { Video } from '@shared/videoTypes'
-import { getVideoDetail } from '../db/videoRepo'
-import { createHomeDiscoveryRepo } from '../db/homeDiscoveryRepo'
+import { getVideoDetail } from '@library/db/videoRepo'
+import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { createAuthorizedMediaLibraryRootFileInspector } from '../services/mediaLibraryRootFileGuard'
 import { mediaAssetStore } from '../services/mediaAssetStore'
 import { VIDEO_MIMES, WebError } from './http'

@@ -5,7 +5,7 @@ import type {
 } from '@shared/classificationTypes'
 import type Database from 'better-sqlite3'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { mergeRelatedLinks } from '../db/relatedLinkStore'
+import { mergeRelatedLinks } from '@library/db/relatedLinkStore'
 
 export interface ClassificationMergeName {
   name: string

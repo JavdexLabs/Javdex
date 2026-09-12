@@ -9,11 +9,11 @@ import {
   LOCAL_NFO_SOURCE_ID,
   LOCAL_NFO_SOURCE_NAME
 } from '@shared/videoMetadataSourceConstants'
-import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
-import { getDb } from '../db/database'
-import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
+import { findActressByNameOrAlias, getActressDetail } from '@library/db/actressRepo'
+import { getDb } from '@library/db/database'
+import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import { isVideoFile, parseCode } from '../scanner/codeParser'
-import { isStrmFile } from '../scanner/strmParser'
+import { isStrmFile } from '@library/scan/strmParser'
 import { authorizeMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
 import { createNfoFileStore, type NfoFileStore } from '../nfo/nfoFileStore'
 import { parseNfoArtifact, type NormalizedNfoArtifact } from '../nfo/nfoArtifactCodec'

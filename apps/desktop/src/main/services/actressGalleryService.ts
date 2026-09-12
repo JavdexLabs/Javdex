@@ -3,7 +3,7 @@ import {
   addActressGalleryAsset,
   deleteActressGalleryAsset,
   getActressDetail
-} from '../db/actressRepo'
+} from '@library/db/actressRepo'
 import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 

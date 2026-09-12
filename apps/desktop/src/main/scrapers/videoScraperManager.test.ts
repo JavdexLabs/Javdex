@@ -7,11 +7,11 @@ import {
   findActressByNameOrAlias,
   getActressDetail,
   upsertActressFromScrape
-} from '../db/actressRepo'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { insertTestVideoWithFile } from '../db/testVideoFixtures'
-import { createMediaLibrary } from '../db/mediaLibraryRepo'
-import { getPendingVideoScrapeForVideo } from '../db/pendingVideoScrapeRepo'
+} from '@library/db/actressRepo'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
+import { getPendingVideoScrapeForVideo } from '@library/db/pendingVideoScrapeRepo'
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
 import { resetAssetKeyCacheForTests } from '../services/assetCrypto'
 import { resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'

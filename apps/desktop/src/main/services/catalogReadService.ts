@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import path from 'node:path'
-import { getDatabaseReadRevision, getDb } from '../db/database'
+import { getDatabaseReadRevision, getDb } from '@library/db/database'
 import { CatalogReadWorkerClient } from './catalogReadWorkerClient'
 import { createCatalogReadWorkerTransport } from './catalogReadWorkerTransport'
 

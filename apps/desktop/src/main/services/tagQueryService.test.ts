@@ -4,8 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
-import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '../db/database'
-import { insertTestVideoWithFile } from '../db/testVideoFixtures'
+import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '@library/db/database'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createTagFilterOptionsReader, tagQueryService } from './tagQueryService'
 
 let root: string | undefined

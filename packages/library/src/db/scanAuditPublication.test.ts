@@ -9,8 +9,8 @@ import { initDatabaseAtPath, closeDatabase } from './database'
 import { beginLibraryScanRun, finishLibraryScanEntriesRun, recoverInterruptedLibraryScanRuns } from './libraryScanRepo'
 import { readScanAuditSource } from './scanAuditSource'
 import { createScanAuditWriter, type ScanAuditMetadata } from './scanAuditWriter'
-import { readScanAuditHeader } from '../services/scanAuditReadHeader'
-import { createScanAuditPathPermissionReader } from '../services/scanAuditPathPermission'
+import { readScanAuditHeader } from '../../../../apps/desktop/src/main/services/scanAuditReadHeader'
+import { createScanAuditPathPermissionReader } from '../../../../apps/desktop/src/main/services/scanAuditPathPermission'
 
 let directory: string, db: Database.Database
 const sections = ['files','removedResources','promotedResources','deletedVideos','pendingGroups'] as const

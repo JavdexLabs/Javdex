@@ -5,7 +5,7 @@ import type {
   SeriesStatus
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import {
   assertClassificationMergeInput,
   mergeClassificationAliases,
@@ -25,7 +25,7 @@ import {
   writeSeriesLinks,
   writeSeriesNames
 } from './seriesProfilePersistence'
-import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
+import { assertNoPendingVideoMetadataMutation } from '@library/db/videoPendingMetadataLock'
 
 type StoredSeries = {
   id: number

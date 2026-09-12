@@ -6,7 +6,7 @@ import type {
   OrganizationStatus
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import {
   assertClassificationMergeInput,
   mergeClassificationAliases,
@@ -27,7 +27,7 @@ import {
   writeOrganizationNames
 } from './organizationProfilePersistence'
 import { findSeriesOwnershipScopeConflict } from './seriesOwnershipScopeConflict'
-import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
+import { assertNoPendingVideoMetadataMutation } from '@library/db/videoPendingMetadataLock'
 
 type StoredOrganization = {
   id: number

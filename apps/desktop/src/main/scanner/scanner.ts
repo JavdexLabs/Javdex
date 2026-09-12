@@ -26,7 +26,7 @@ import {
   updateStrmVideoResourceTarget,
   insertStrmVideoResource,
   updateLocalVideoResourceAfterProbe
-} from '../db/videoRepo'
+} from '@library/db/videoRepo'
 import type {
   ManualImportResult,
   LibraryScanFileAuditEntry,
@@ -38,7 +38,7 @@ import type {
   ScanExecutionResult,
   StrmScanFailure
 } from '@shared/libraryTypes'
-import type { ScannedVideoInput } from '../db/videoRepo'
+import type { ScannedVideoInput } from '@library/db/videoRepo'
 import type {
   LocalVideoResource,
   VideoResource,
@@ -57,14 +57,14 @@ import {
   pendingScanResourceExists,
   removePendingScanResource,
   upsertPendingScanResources
-} from '../db/pendingScanRepo'
+} from '@library/db/pendingScanRepo'
 import {
   StrmParseError,
   isStrmFile,
   readStrmFile,
   type ParsedStrmTarget
-} from './strmParser'
-import { getDb, getDatabaseReadRevision } from '../db/database'
+} from '@library/scan/strmParser'
+import { getDb, getDatabaseReadRevision } from '@library/db/database'
 import { StrmRelocationIndex } from './strmRelocationIndex'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
@@ -77,7 +77,7 @@ import {
   getPendingResourceIdentityByPath,
   pendingResourceIdentityExists,
   upsertPendingResourceIdentity
-} from '../db/pendingResourceIdentityRepo'
+} from '@library/db/pendingResourceIdentityRepo'
 import {
   localNfoScanService,
   type LocalNfoScanService,
@@ -89,7 +89,7 @@ import type {
 } from '../metadata-sources'
 import { appendDirectoryVideoCode, summarizeDirectoryVideoCodes } from '../nfo/directoryVideoIdentity'
 import { indexNfoSidecars } from '../nfo/nfoSidecarLocator'
-import { getMediaLibraryConfig } from '../db/mediaLibraryRepo'
+import { getMediaLibraryConfig } from '@library/db/mediaLibraryRepo'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 

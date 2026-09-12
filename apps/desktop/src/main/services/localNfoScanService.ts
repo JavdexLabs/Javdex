@@ -1,8 +1,8 @@
 import { ALL_VIDEO_SCRAPE_FIELDS, type VideoScrapeField } from '@shared/videoScrapeTypes'
 import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
-import { getDb } from '../db/database'
-import { getVideoById } from '../db/videoRepo'
-import { replacePendingVideoScrape } from '../db/pendingVideoScrapeRepo'
+import { getDb } from '@library/db/database'
+import { getVideoById } from '@library/db/videoRepo'
+import { replacePendingVideoScrape } from '@library/db/pendingVideoScrapeRepo'
 import {
   createDefaultLocalNfoSourceAdapter,
   createVideoMetadataCandidateStager,

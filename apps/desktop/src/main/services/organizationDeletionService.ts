@@ -6,11 +6,11 @@ import type {
   OrganizationRoleRemovalImpact,
   OrganizationRoleRemovalResult
 } from '@shared/classificationTypes'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import { cleanupClassificationImage } from './classificationImageCleanup'
 import { mediaAssetStore } from './mediaAssetStore'
 import { findSeriesOwnershipScopeConflict } from './seriesOwnershipScopeConflict'
-import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
+import { assertNoPendingVideoMetadataMutation } from '@library/db/videoPendingMetadataLock'
 
 const ROLE_COLUMNS: Record<
   OrganizationRole,

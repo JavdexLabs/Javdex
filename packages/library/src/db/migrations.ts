@@ -1,10 +1,10 @@
 import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
-import { normalizeClassificationName } from '../../../../../packages/contracts/src/classificationNameNormalization'
-import { normalizeLocalPathIdentity } from '../../../../../packages/library/src/localPathIdentity'
-import { normalizeRelatedLinkUrl } from '../../../../../packages/contracts/src/relatedLinkUrl'
-import { normalizeVideoCode } from '../../../../../packages/contracts/src/videoCode'
-import { buildVideoResourceSourceIdentity } from '../../../../../packages/library/src/videoResourceIdentity'
+import { normalizeClassificationName } from '@shared/classificationNameNormalization'
+import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
+import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
+import { normalizeVideoCode } from '@shared/videoCode'
+import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 import {
   CLASSIFICATION_V8_SCHEMA_SQL,
   AGENT_METADATA_SCHEMA_SQL,

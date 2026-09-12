@@ -6,10 +6,10 @@ import path from 'node:path'
 import type Database from 'better-sqlite3'
 import type {LibraryScanAudit} from '@shared/libraryTypes'
 import {normalizeLocalPathIdentity} from '@library/localPathIdentity'
-import {initDatabaseAtPath,closeDatabase,openReadOnlyDatabaseAtPath} from '../db/database'
-import {createMediaLibrary} from '../db/mediaLibraryRepo'
+import {initDatabaseAtPath,closeDatabase,openReadOnlyDatabaseAtPath} from '@library/db/database'
+import {createMediaLibrary} from '@library/db/mediaLibraryRepo'
 import {libraryScanAuditContainsPath} from '../scanner/libraryScanAuditStore'
-import {normalizeAudit} from '../scanner/libraryScanAuditValidation'
+import {normalizeAudit} from '@library/scan/libraryScanAuditValidation'
 import {createScanAuditPathPermissionReader} from './scanAuditPathPermission'
 let root:string,writer:Database.Database,reader:Database.Database,audit:LibraryScanAudit,rootId:number,read:ReturnType<typeof createScanAuditPathPermissionReader>
 beforeEach(()=>{

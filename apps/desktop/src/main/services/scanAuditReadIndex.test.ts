@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
-import {initDatabaseAtPath,closeDatabase,getDb} from '../db/database'
+import {initDatabaseAtPath,closeDatabase,getDb} from '@library/db/database'
 import {createScanAuditReadIndex,type ScanAuditSnapshotIdentity,type ScanAuditSection} from './scanAuditReadIndex'
 let root:string
 const identity:ScanAuditSnapshotIdentity={libraryId:1,runId:'index-test',finishedAt:'2026-09-11T00:00:00Z'}

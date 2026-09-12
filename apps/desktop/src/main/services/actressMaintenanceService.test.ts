@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
-import { insertTestVideoWithFile } from '../db/testVideoFixtures'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { findActressByNameOrAlias, getActressDetail } from '@library/db/actressRepo'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createActressMaintenanceService } from './actressMaintenanceService'
 
 let tempRoot: string | null = null

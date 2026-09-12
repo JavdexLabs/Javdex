@@ -36,8 +36,8 @@ import {
   planActressScrapeResult,
   setActressAvatarBundle,
   upsertActressFromScrapeWithAssets as upsertActressFromScrape
-} from '../services/actressAssetService'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+} from '../../../../apps/desktop/src/main/services/actressAssetService'
+import { mediaAssetStore } from '../../../../apps/desktop/src/main/services/mediaAssetStore'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 
 let tempRoot: string | null = null

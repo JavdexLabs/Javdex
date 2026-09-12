@@ -9,8 +9,8 @@ import type {ScanAuditViewQuery} from '@shared/scanAuditReadTypes'
 import {SCAN_AUDIT_OUTCOMES} from '@shared/scanAuditReadTypes'
 import {buildScanAuditViewItems,isAttentionFile} from '@shared/scanAuditView'
 import {createScanAuditReadIndex} from './scanAuditReadIndex'
-import {initDatabaseAtPath,getDb,closeDatabase} from '../db/database'
-import {createMediaLibrary} from '../db/mediaLibraryRepo'
+import {initDatabaseAtPath,getDb,closeDatabase} from '@library/db/database'
+import {createMediaLibrary} from '@library/db/mediaLibraryRepo'
 let root:string,filename:string,audit:LibraryScanAudit,unrecognized:Array<{rootId:number;filePath:string}>
 const budgets={sourceBytes:16*1024*1024,indexBytes:32*1024*1024,pageBytes:1024*1024}
 beforeEach(()=>{

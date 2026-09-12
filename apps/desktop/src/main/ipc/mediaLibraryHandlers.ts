@@ -1,10 +1,10 @@
 import { catalogReadService } from '../services/catalogReadService'
 import { IPC } from '@shared/ipc-channels'
-import { homeDiscoveryRepo } from '../db/homeDiscoveryRepo'
+import { homeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import {
   getMediaLibraryDetail,
   listMediaLibraries,
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import { mediaLibraryService } from '../services/mediaLibraryService'
 import {
   mediaLibraryCommandAdapter,

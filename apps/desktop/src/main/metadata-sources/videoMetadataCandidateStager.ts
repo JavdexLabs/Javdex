@@ -1,4 +1,4 @@
-import type { PendingVideoScrapeCandidateInput } from '../db/pendingVideoScrapeRepo'
+import type { PendingVideoScrapeCandidateInput } from '@library/db/pendingVideoScrapeRepo'
 import { mediaAssetStore, type MediaAssetStore } from '../services/mediaAssetStore'
 import type { MetadataAssetRef, VideoMetadataCandidateStager } from './types'
 

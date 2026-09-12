@@ -7,18 +7,16 @@ import Database from 'better-sqlite3'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { editActress, listActresses, listActressMergeCandidates } from './actressRepo'
 import { canMergeActressGenders } from '@shared/actressProfileOptions'
-import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 let root: string
 let previous: string | undefined
 beforeEach(() => {
   root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-merge-candidates-'))
   previous=process.env.JAVDEX_TEST_USER_DATA;process.env.JAVDEX_TEST_USER_DATA=root
-  resetSettingsCacheForTests();initDatabaseAtPath(path.join(root,'catalog.db'))
+  initDatabaseAtPath(path.join(root,'catalog.db'))
 })
 afterEach(() => {
-  closeDatabase();resetSettingsCacheForTests()
-  if(previous===undefined)delete process.env.JAVDEX_TEST_USER_DATA;else process.env.JAVDEX_TEST_USER_DATA=previous
+  closeDatabase();  if(previous===undefined)delete process.env.JAVDEX_TEST_USER_DATA;else process.env.JAVDEX_TEST_USER_DATA=previous
   fs.rmSync(root,{recursive:true,force:true})
 })
 function actors() {

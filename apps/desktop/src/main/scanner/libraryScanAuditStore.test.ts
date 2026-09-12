@@ -4,8 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { LibraryScanAudit } from '@shared/libraryTypes'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { createMediaLibrary } from '../db/mediaLibraryRepo'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
 import {
   libraryScanAuditContainsPath,
   readLibraryScanAudit,

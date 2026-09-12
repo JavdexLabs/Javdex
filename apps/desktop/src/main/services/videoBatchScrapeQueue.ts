@@ -12,8 +12,8 @@ import {
   type CheckpointedBatchPolicy
 } from './checkpointedSequentialBatchQueue'
 import { resolveVideoBatchTargets } from './videoScrapeApplyService'
-import { getMediaLibrary } from '../db/mediaLibraryRepo'
-import { hasActiveVisibleVideoMembership } from '../db/libraryMembershipRepo'
+import { getMediaLibrary } from '@library/db/mediaLibraryRepo'
+import { hasActiveVisibleVideoMembership } from '@library/db/libraryMembershipRepo'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import type { QueueItemOutcome } from './sequentialBatchQueue'
 

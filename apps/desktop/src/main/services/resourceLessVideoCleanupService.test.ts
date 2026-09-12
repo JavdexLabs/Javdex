@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { deleteResourceLessVideos } from './resourceLessVideoCleanupService'
 
 let tempRoot = ''

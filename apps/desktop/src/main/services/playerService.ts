@@ -4,8 +4,8 @@ import {
   getPrimaryVideoResource,
   getVideoById,
   getVideoResourceInLibrary
-} from '../db/videoRepo'
-import { getMediaLibrary } from '../db/mediaLibraryRepo'
+} from '@library/db/videoRepo'
+import { getMediaLibrary } from '@library/db/mediaLibraryRepo'
 import type { PlayResult } from '@shared/libraryTypes'
 import type { VideoResource } from '@shared/videoTypes'
 

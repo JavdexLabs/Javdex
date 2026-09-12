@@ -5,7 +5,7 @@ import type { VideoResource } from '@shared/videoTypes'
 import type {
   DeleteVideoGloballyRepoResult,
   VideoLifecycleRepo
-} from '../db/videoLifecycleRepo'
+} from '@library/db/videoLifecycleRepo'
 import { createVideoLifecycleService } from './videoLifecycleService'
 
 function impact(): VideoLifecycleImpact {

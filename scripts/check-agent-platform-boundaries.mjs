@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-const sourceRoot = path.resolve('src')
+const sourceRoot = path.resolve('apps/desktop/src')
 const piRoot = path.resolve('apps/desktop/src/main/agent-runtime/pi')
 const sourceFiles = []
 

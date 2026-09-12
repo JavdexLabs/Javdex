@@ -44,7 +44,7 @@ import {
   updateLocalVideoResourceLabel,
   updateVideoFields,
   hasPendingVideoScrape
-} from '../db/videoRepo'
+} from '@library/db/videoRepo'
 import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { videoResourceLinkService } from './videoResourceLinkService'
@@ -53,16 +53,16 @@ import { fetchRemoteImageBuffer } from './remoteImageFetch'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import {
   getPendingLocalFileDeletionByOriginalPath,
   markLocalFileDeletionsCommitted,
   prepareLocalFileDeletion,
   removePendingLocalFileDeletions
-} from '../db/pendingLocalFileDeletionRepo'
+} from '@library/db/pendingLocalFileDeletionRepo'
 import { inspectWritableLocalPath } from './localFileAvailability'
-import { deletePendingVideoScrapeForVideo } from '../db/pendingVideoScrapeRepo'
-import { getMediaLibrary, getMediaLibraryRoot } from '../db/mediaLibraryRepo'
+import { deletePendingVideoScrapeForVideo } from '@library/db/pendingVideoScrapeRepo'
+import { getMediaLibrary, getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import { assertMediaLibraryRootDeletionTarget } from './mediaLibraryRootFileGuard'
 
 export interface VideoMaintenanceService {

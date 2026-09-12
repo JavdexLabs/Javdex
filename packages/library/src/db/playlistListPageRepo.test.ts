@@ -9,7 +9,7 @@ import { listPlaylistBrowsePage } from './playlistListPageRepo'
 import { listPlaylists, listPlaylistsForVideo } from './playlistRepo'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import { IPC } from '@shared/ipc-channels'
-import { appIpcSchemas } from '../ipc/ipcCommandSchemas'
+import { appIpcSchemas } from '../../../../apps/desktop/src/main/ipc/ipcCommandSchemas'
 
 let root:string,previous:string|undefined
 beforeEach(()=>{root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-playlist-list-'));previous=process.env.JAVDEX_TEST_USER_DATA;process.env.JAVDEX_TEST_USER_DATA=root})

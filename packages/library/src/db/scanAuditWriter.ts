@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { LibraryScanAudit, LibraryScanNfoAudit } from '@shared/libraryTypes'
 import { SCAN_AUDIT_SECTIONS, type ScanAuditSection } from '@shared/scanAuditReadTypes'
-import { isFileEntry, isResourceEntry, normalizeAudit } from '../scanner/libraryScanAuditValidation'
+import { isFileEntry, isResourceEntry, normalizeAudit } from '@library/scan/libraryScanAuditValidation'
 import { visitPendingScanAuditEntriesForRun } from './pendingScanAuditRepo'
 
 export type ScanAuditMetadata = Omit<LibraryScanAudit, ScanAuditSection>

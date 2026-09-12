@@ -1,7 +1,7 @@
 import { safeStorage } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import type {
   ExecutionHistoryFrame,
   OpaqueRuntimeSessionRef,

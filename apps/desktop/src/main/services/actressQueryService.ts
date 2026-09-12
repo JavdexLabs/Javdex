@@ -1,11 +1,11 @@
-import { getActressProfile } from '../db/actressRepo'
+import { getActressProfile } from '@library/db/actressRepo'
 import { randomUUID } from 'node:crypto'
 import type { ActressProfile } from '@shared/actressTypes'
-import { listActressGalleryPage } from '../db/actressGalleryPageRepo'
+import { listActressGalleryPage } from '@library/db/actressGalleryPageRepo'
 import type { ActressGalleryPage, ActressGalleryPageQuery } from '@shared/actressTypes'
-import { getActressMetadata } from '../db/actressRepo'
+import { getActressMetadata } from '@library/db/actressRepo'
 import type { ActressMetadata } from '@shared/actressTypes'
-import { listActressVideoPage } from '../db/actressVideoPageRepo'
+import { listActressVideoPage } from '@library/db/actressVideoPageRepo'
 import type { ActressVideoPage, ActressVideoPageQuery } from '@shared/actressTypes'
 import { normalizeRunTargets } from '@shared/pluginDevKindProfile'
 import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
@@ -23,7 +23,7 @@ import {
   listActressPage,
   listActressPickerPage,
   listActressMergeCandidates
-} from '../db/actressRepo'
+} from '@library/db/actressRepo'
 import { getActressAvatarSourceInfo } from './actressAssetService'
 import { mediaAssetStore } from './mediaAssetStore'
 import type {

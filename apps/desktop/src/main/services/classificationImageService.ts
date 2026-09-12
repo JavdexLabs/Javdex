@@ -6,7 +6,7 @@ import type {
   ClassificationImageInput,
   ClassificationImageUpdateResult
 } from '@shared/classificationTypes'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 import { mediaAssetStore } from './mediaAssetStore'
 

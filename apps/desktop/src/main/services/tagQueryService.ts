@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { TagLabel, TagListItem, TagOptionsPage, TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
-import { getDatabaseReadRevision, getDb } from '../db/database'
-import { getTagLabels, listTagFilterOptions, normalizeTagOptionsQuery, listManualTagOptions, listManualTags, listTags } from '../db/tagRepo'
+import { getDatabaseReadRevision, getDb } from '@library/db/database'
+import { getTagLabels, listTagFilterOptions, normalizeTagOptionsQuery, listManualTagOptions, listManualTags, listTags } from '@library/db/tagRepo'
 
 export interface TagQueryService {
   list(): TagListItem[]

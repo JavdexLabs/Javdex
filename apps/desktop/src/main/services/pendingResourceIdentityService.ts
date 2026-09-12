@@ -9,20 +9,20 @@ import {
   deletePendingResourceIdentity,
   getPendingResourceIdentityRecord,
   selectedPendingResourceIdentityCode
-} from '../db/pendingResourceIdentityRepo'
-import { getDb } from '../db/database'
-import { getMediaLibraryConfig, getMediaLibraryRoot } from '../db/mediaLibraryRepo'
-import { upsertPendingScanResources } from '../db/pendingScanRepo'
+} from '@library/db/pendingResourceIdentityRepo'
+import { getDb } from '@library/db/database'
+import { getMediaLibraryConfig, getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
+import { upsertPendingScanResources } from '@library/db/pendingScanRepo'
 import {
   insertLocalVideoResource,
   insertNewScannedStrmVideo,
   insertNewScannedVideo,
   insertStrmVideoResource,
   listVideosByCode
-} from '../db/videoRepo'
+} from '@library/db/videoRepo'
 import { isVideoFile, parseCode } from '../scanner/codeParser'
 import { readLocalVideoDurationSeconds } from '../scanner/videoDuration'
-import { readStrmFile, isStrmFile } from '../scanner/strmParser'
+import { readStrmFile, isStrmFile } from '@library/scan/strmParser'
 import { statFileFingerprint } from '../scanner/scanner'
 import { authorizeMediaLibraryRootFile } from './mediaLibraryRootFileGuard'
 import {

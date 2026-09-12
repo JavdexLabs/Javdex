@@ -26,7 +26,7 @@ npm run dev
 
 已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。将来正式增加版本 17/18 时，须重新检查旧开发库的结构识别，不能仅靠版本数字接受这些历史快照。
 
-旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `apps/desktop/src/main/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
+旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `packages/library/src/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
 
 ## 检查与构建
 
@@ -86,13 +86,13 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 | 目录 | 职责 |
 |---|---|
-| `apps/desktop/src/main` | 数据库、扫描、刮削、图片资产、AI 工作流与应用生命周期 |
+| `apps/desktop/src/main` | 扫描、刮削、图片资产、AI 工作流与应用生命周期；本地装配仍打开资料库连接 |
 | `apps/desktop/src/preload` | 通过 `contextBridge` 暴露受控 IPC API |
 | `apps/desktop/src/renderer` | React 页面、组件、交互与查询状态 |
 | `packages/contracts/src` | 跨进程类型和 IPC 通道 |
 | `apps/desktop/src/mcp` | 插件开发 MCP 服务 |
 | `apps/web/src` | 独立构建的只读浏览页面 |
-| `packages/library/src` | 已抽离的 Node 路径与资源身份工具；业务抽离仍待实施 |
+| `packages/library/src` | Node 路径/资源身份工具与资料库数据库（schema、迁移、repo）；扫描编排、NFO 与业务服务仍在抽离 |
 | `packages/ui/src` | 桌面和网页真实共用的纯展示组件 |
 | `apps/server`、`packages/http` | 预留工作区，目前没有可运行服务端或已抽离 HTTP |
 
@@ -118,7 +118,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 插件开发助手与 MCP | [插件开发 Agent](PLUGIN_DEV_AGENT.md) |
 | NFO 导出格式与验证范围 | [NFO 兼容性](NFO_COMPATIBILITY.md) |
 | 大媒体库性能与优化计划 | [性能审计](performance/large-library-performance-audit.md)、[实施计划](performance/large-library-optimization-plan.md)、[基准复跑](performance/large-library-results/README.md) |
-| 数据库结构与迁移 | [schema.ts](../apps/desktop/src/main/db/schema.ts)、[migrations.ts](../apps/desktop/src/main/db/migrations.ts) |
+| 数据库结构与迁移 | [schema.ts](../packages/library/src/db/schema.ts)、[migrations.ts](../packages/library/src/db/migrations.ts) |
 | Issue、PRD 与分类标签 | [Issue 约定](agents/issue-tracker.md)、[标签约定](agents/triage-labels.md) |
 | 版本与发布 | [发布规范](VERSIONING_AND_RELEASE.md)、[更新日志](../CHANGELOG.md) |
 | 第三方集成与许可 | [第三方说明](THIRD_PARTY_NOTICES.md)、[MIT License](../LICENSE) |

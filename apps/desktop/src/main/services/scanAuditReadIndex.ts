@@ -1,9 +1,9 @@
 import { readScanAuditHeader } from './scanAuditReadHeader'
 import { prepareScanAuditViews } from './scanAuditViewIndex'
 import type { ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
-import { openReadOnlyDatabaseAtPath } from '../db/database'
-import { readScanAuditSource } from '../db/scanAuditSource'
-import { normalizeAudit } from '../scanner/libraryScanAuditValidation'
+import { openReadOnlyDatabaseAtPath } from '@library/db/database'
+import { readScanAuditSource } from '@library/db/scanAuditSource'
+import { normalizeAudit } from '@library/scan/libraryScanAuditValidation'
 
 import { SCAN_AUDIT_SECTIONS as sections, SCAN_AUDIT_OUTCOMES as outcomes } from '@shared/scanAuditReadTypes'
 import type { ScanAuditSection, ScanAuditSnapshotIdentity, ScanAuditIndexLimits, ScanAuditIndexQuery, ScanAuditIndexPage } from '@shared/scanAuditReadTypes'

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_SETTINGS } from '@shared/settingsTypes'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import {
   createMediaLibrary,
   getMediaLibrary,
@@ -13,14 +13,14 @@ import {
   listMediaLibraryAutomaticScanStates,
   updateMediaLibraryConfig,
   updateMediaLibraryRoot
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import {
   importVideoLinkResourceRecord,
   insertLocalVideoResource,
   insertScannedVideo,
   insertStrmVideoResource,
   listVideoResources
-} from '../db/videoRepo'
+} from '@library/db/videoRepo'
 import { createScanCoordinator } from '../scanner/scanCoordinator'
 import {
   applyPendingLibraryPathCleanups,

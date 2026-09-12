@@ -7,7 +7,7 @@ import Database from 'better-sqlite3'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
-import { ActressIdentityConflictWorkflow } from '../services/actressIdentityConflictWorkflow'
+import { ActressIdentityConflictWorkflow } from '../../../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 
 /** Older fixtures intentionally model only the tables relevant to their test.

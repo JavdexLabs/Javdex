@@ -1,10 +1,10 @@
 import { catalogReadService } from './catalogReadService'
-import { getVideoResourceInLibrary } from '../db/videoRepo'
+import { getVideoResourceInLibrary } from '@library/db/videoRepo'
 import {
   scopedVideoCatalogRepo,
   type ScopedStoredVideoDetail,
   type ScopedVideoCatalogRepo
-} from '../db/scopedVideoCatalogRepo'
+} from '@library/db/scopedVideoCatalogRepo'
 import { resolveVideoDisplayDurationSeconds } from '../scanner/videoDuration'
 import type { CatalogScope } from '@shared/mediaLibraryTypes'
 import type { ScopedVideoDetail, ScopedVideoListResult } from '@shared/catalogTypes'

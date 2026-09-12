@@ -9,7 +9,6 @@ import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { createScopedVideoCatalogRepo } from './scopedVideoCatalogRepo'
 import { listVideos } from './videoRepo'
 import { normalizeActressName } from './actressNameNormalization'
-import { resetSettingsCacheForTests } from '../settings/settingsStore'
 
 // Frozen from 4c953a960d910aed3fb102b39a337b418c6292f9:
 // videoRepo.buildWhere / scopedVideoCatalogRepo.buildWhere and actressSearchSql.
@@ -33,8 +32,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-video-search-oracle-'))
   previousUserData = process.env.JAVDEX_TEST_USER_DATA
   process.env.JAVDEX_TEST_USER_DATA = root
-  resetSettingsCacheForTests()
-  initDatabaseAtPath(path.join(root, 'catalog.db'))
+    initDatabaseAtPath(path.join(root, 'catalog.db'))
   const db = getDb()
   db.exec(`
     INSERT INTO media_libraries(id,name,icon,color,position,status,is_default,revision)
@@ -77,8 +75,7 @@ beforeEach(() => {
   })()
 })
 afterEach(() => {
-  closeDatabase(); resetSettingsCacheForTests()
-  if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+  closeDatabase();   if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previousUserData
   fs.rmSync(root, { recursive: true, force: true })
 })

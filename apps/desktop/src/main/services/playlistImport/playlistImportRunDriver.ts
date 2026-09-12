@@ -21,7 +21,7 @@ import type {
   RuntimeObservation,
   HostedToolResult
 } from '../../agent-platform/types'
-import { getDb } from '../../db/database'
+import { getDb } from '@library/db/database'
 import {
   isScrapeBrowserChallengeError,
   type ScrapeBrowserListExtractionPlan

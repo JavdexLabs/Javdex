@@ -1,9 +1,9 @@
 import type Database from 'better-sqlite3'
 import path from 'node:path'
 import { normalizeAbsoluteLocalPath } from '@library/localPathIdentity'
-import { isFileEntry, isResourceEntry, normalizeAudit } from '../scanner/libraryScanAuditValidation'
+import { isFileEntry, isResourceEntry, normalizeAudit } from '@library/scan/libraryScanAuditValidation'
 import { SCAN_AUDIT_READ_LIMITS } from './scanAuditReadPolicy'
-import { readScanAuditSource } from '../db/scanAuditSource'
+import { readScanAuditSource } from '@library/db/scanAuditSource'
 
 export function normalizeAuditPathRequest(libraryId: number, filePath: string) {
   if (!Number.isSafeInteger(libraryId) || libraryId <= 0 || typeof filePath !== 'string' || filePath.length > 32768) throw new Error('Invalid audit path request')

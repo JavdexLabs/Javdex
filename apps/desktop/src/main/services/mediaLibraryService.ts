@@ -19,8 +19,8 @@ import type {
 import {
   createMediaLibraryRootMigrationRepo,
   type MediaLibraryRootMigrationRepo
-} from '../db/mediaLibraryRootMigrationRepo'
-import { getDb } from '../db/database'
+} from '@library/db/mediaLibraryRootMigrationRepo'
+import { getDb } from '@library/db/database'
 import {
   addMediaLibraryRoot,
   archiveMediaLibrary,
@@ -33,7 +33,7 @@ import {
   updateMediaLibrary,
   updateMediaLibraryConfig,
   updateMediaLibraryRoot
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import {
   cancelLibraryPathRemoval,
   previewLibraryPathRemoval

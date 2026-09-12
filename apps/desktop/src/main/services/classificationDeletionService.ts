@@ -5,10 +5,10 @@ import type {
   SeriesDeleteImpact,
   SeriesDeleteResult
 } from '@shared/classificationTypes'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import { cleanupClassificationImage } from './classificationImageCleanup'
 import { mediaAssetStore } from './mediaAssetStore'
-import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
+import { assertNoPendingVideoMetadataMutation } from '@library/db/videoPendingMetadataLock'
 
 interface ClassificationDeletionServiceDependencies {
   database: () => Database.Database

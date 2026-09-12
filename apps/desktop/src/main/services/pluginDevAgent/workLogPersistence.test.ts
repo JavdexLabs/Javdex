@@ -2,7 +2,7 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import type { PluginDevAgentWorkLogEntry } from '@shared/pluginDevTypes'
-import { AGENT_PLATFORM_SCHEMA_SQL } from '../../db/schema'
+import { AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
 import { AgentRunStore } from '../../agent-platform/agentRunStore'
 import { appendPluginWorkLog, readPluginWorkLog, type PersistedPluginWorkLog, type PluginWorkLogReference } from './workLogPersistence'
 

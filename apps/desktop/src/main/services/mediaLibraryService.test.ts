@@ -8,7 +8,7 @@ import type {
   MediaLibraryRootMigrationResult
 } from '@shared/mediaLibraryTypes'
 import type { LibraryPathRemovalPreview } from '@shared/libraryTypes'
-import { MediaLibraryRepoError } from '../db/mediaLibraryRepo'
+import { MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
 import {
   createMediaLibraryService,
   type MediaLibraryServiceDependencies

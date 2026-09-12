@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import Database from 'better-sqlite3'
-import { migrateDatabase } from '../../db/migrations'
+import { migrateDatabase } from '@library/db/migrations'
 import { PlaylistImportModuleImpl, type PlaylistImportRunDriver } from './playlistImportModule'
 import { PlaylistImportRepository } from './playlistImportRepository'
 

@@ -10,7 +10,7 @@
 
 ## 按任务阅读
 
-本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（S01 起含 browser/manage/desktop/protocol 分组），Node 路径身份工具在 `packages/library/src`，共用 Checkbox 在 `packages/ui/src`。`packages/http` 和 `apps/server` 目前只有工作区声明，服务端尚未实现；后续实施按 `docs/SERVER_MODE_EXECUTION_PLAN.md` 执行，不能把占位工作区当作已完成运行时隔离。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
+本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（S01 起含 browser/manage/desktop/protocol 分组），Node 路径身份与资料库数据库在 `packages/library/src`，共用 Checkbox 在 `packages/ui/src`。`packages/http` 和 `apps/server` 目前只有工作区声明，服务端尚未实现；后续实施按 `docs/SERVER_MODE_EXECUTION_PLAN.md` 执行，不能把占位工作区当作已完成运行时隔离。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
 
 | 你在改什么 | 必读 | 可选 |
 |------------|------|------|
@@ -19,7 +19,7 @@
 | 列表/详情页、路由、URL 筛选、返回栈 | [`docs/ROUTING_DESIGN.md`](docs/ROUTING_DESIGN.md) | `UI_COMPONENT_CONTRACTS.md`（若动 toolbar/筛选） |
 | 刮削插件、`bundled-plugins`、沙箱 `ctx`、导入包 | [`docs/SCRAPER_PLUGIN_FORMAT.md`](docs/SCRAPER_PLUGIN_FORMAT.md) | — |
 | 插件开发 Agent、`PluginDevPanel`、MCP、`pluginDevAgent/*` | [`docs/PLUGIN_DEV_AGENT.md`](docs/PLUGIN_DEV_AGENT.md) | `SCRAPER_PLUGIN_FORMAT.md` |
-| 数据库表结构、迁移 | `apps/desktop/src/main/db/schema.ts`、`apps/desktop/src/main/db/migrations.ts` | — |
+| 数据库表结构、迁移 | `packages/library/src/db/schema.ts`、`packages/library/src/db/migrations.ts` | — |
 
 ## 不必引导 Agent 通读
 

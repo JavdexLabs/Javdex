@@ -20,7 +20,7 @@ import type {
   SeriesOption
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 
 const VIDEO_ROLE_COLUMN: Record<OrganizationRole, string> = {
   maker: 'maker_organization_id',

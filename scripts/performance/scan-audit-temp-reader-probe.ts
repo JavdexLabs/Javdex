@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import {initDatabaseAtPath,closeDatabase,openReadOnlyDatabaseAtPath} from '../../apps/desktop/src/main/db/database'
+import {initDatabaseAtPath,closeDatabase,openReadOnlyDatabaseAtPath} from '../../packages/library/src/db/database'
 it('verifies native readonly protection while building connection-local TEMP data',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-audit-temp-reader-'))
  try{

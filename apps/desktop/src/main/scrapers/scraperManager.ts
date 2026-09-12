@@ -26,12 +26,12 @@ import {
   LOCAL_NFO_SOURCE_NAME
 } from '@shared/videoMetadataSourceConstants'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
-import { getVideoById, markScrapeFailed } from '../db/videoRepo'
+import { getVideoById, markScrapeFailed } from '@library/db/videoRepo'
 import {
   deletePendingVideoScrape,
   getPendingVideoScrapeForVideo,
   replacePendingVideoScrape
-} from '../db/pendingVideoScrapeRepo'
+} from '@library/db/pendingVideoScrapeRepo'
 import {
   findVideoBusinessIdentityConflictForScrape,
   resolveEffectiveVideoScrapeFields,

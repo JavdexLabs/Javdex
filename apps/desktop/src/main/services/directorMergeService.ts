@@ -4,7 +4,7 @@ import type {
   DirectorMergeResult,
   DirectorStatus
 } from '@shared/classificationTypes'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import {
   assertClassificationMergeInput,
   mergeClassificationAliases,
@@ -19,7 +19,7 @@ import {
 } from './classificationImageCleanup'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
 import { mediaAssetStore } from './mediaAssetStore'
-import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
+import { assertNoPendingVideoMetadataMutation } from '@library/db/videoPendingMetadataLock'
 
 type StoredDirector = {
   id: number

@@ -6,7 +6,7 @@ import {
 } from 'node:crypto'
 import fs from 'node:fs'
 import { randomInt } from 'node:crypto'
-import type { WebDevice, WebPairState } from '../../../../../packages/contracts/src/webTypes'
+import type { WebDevice, WebPairState } from '@shared/webTypes'
 import { promisify } from 'node:util'
 
 const scrypt = promisify(derive)

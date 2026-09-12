@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { SqliteNfoExportRepository } from './nfoExportRepository'
 
 let tempRoot: string | null = null

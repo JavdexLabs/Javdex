@@ -1,7 +1,9 @@
-# Shared library backend — extraction started
+# Shared library backend — extraction in progress
 
-`src/` currently contains the existing Node-only local path, root identity and source-resource identity helpers plus their existing resource-identity test. `@library/*` resolves here.
+`src/` contains Node-only local path, root identity and source-resource identity helpers, the catalog SQLite layer under `src/db`, and the scan helpers that layer currently requires (`src/scan`). `@library/*` resolves here.
 
-Database/schema, domain services, scan/NFO and transactional image coordination remain under `apps/desktop/src/main` until S02. This package must not depend on Electron or desktop modules. Inject settings, paths, storage and runtime policy; preserve the different local/server root and encryption policies. A directory rename is not a substitute for removing import-time desktop singletons.
+Scanner orchestration, NFO import/export, catalog application services and image storage remain under `apps/desktop/src/main` until later S02 slices. This package must not depend on Electron, Playwright, desktop modules, or the reserved `http`/`server` workspaces. Inject settings, paths, storage and runtime policy; preserve the different local/server root and encryption policies. A directory rename is not a substitute for removing import-time desktop singletons.
+
+`getDb()` remains a process-local connection opened by `initDatabaseAtPath` in this slice. S02D will inject the connection through `CatalogBackend`; do not treat the current singleton as the final host assembly.
 
 See [the execution plan](../../docs/SERVER_MODE_EXECUTION_PLAN.md).

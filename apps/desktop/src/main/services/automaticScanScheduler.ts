@@ -1,6 +1,6 @@
 import type { LibraryScanTrigger, ScanCompletionResult } from '@shared/libraryTypes'
 import type { MediaLibraryAutomaticScanState } from '@shared/mediaLibraryTypes'
-import { listMediaLibraryAutomaticScanStates } from '../db/mediaLibraryRepo'
+import { listMediaLibraryAutomaticScanStates } from '@library/db/mediaLibraryRepo'
 import { scanCoordinator } from '../scanner/scanCoordinator'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 

@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
-import type { StrmVideoResourceRef } from '../db/videoRepo'
-import type { getDatabaseReadRevision } from '../db/database'
+import type { StrmVideoResourceRef } from '@library/db/videoRepo'
+import type { getDatabaseReadRevision } from '@library/db/database'
 
 type Revision = ReturnType<typeof getDatabaseReadRevision>
 type Resource = StrmVideoResourceRef & { root_id: number | null }

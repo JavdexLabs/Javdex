@@ -5,7 +5,7 @@ import {
   markActressScrapeSucceeded,
   previewActressDelete,
   setActressPosterPath
-} from '../db/actressRepo'
+} from '@library/db/actressRepo'
 import {
   editActressWithAssets,
   mergeActressesWithAssets

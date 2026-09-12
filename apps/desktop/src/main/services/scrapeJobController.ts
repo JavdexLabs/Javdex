@@ -1,4 +1,4 @@
-import { createActressAvatarCropSnapshot } from '../db/actressAvatarCropSnapshot'
+import { createActressAvatarCropSnapshot } from '@library/db/actressAvatarCropSnapshot'
 import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
 import { randomUUID } from 'node:crypto'
 import { createProgressPublisher } from './progressPublisher'
@@ -57,9 +57,9 @@ import {
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
-import { getActressDetail } from '../db/actressRepo'
-import { hasActiveVisibleVideoMembership } from '../db/libraryMembershipRepo'
-import { countVideosForRematch } from '../db/videoRepo'
+import { getActressDetail } from '@library/db/actressRepo'
+import { hasActiveVisibleVideoMembership } from '@library/db/libraryMembershipRepo'
+import { countVideosForRematch } from '@library/db/videoRepo'
 import { resolveVideoBatchTargets } from './videoScrapeApplyService'
 import { videoPendingScrapeService } from './videoPendingScrapeService'
 import {

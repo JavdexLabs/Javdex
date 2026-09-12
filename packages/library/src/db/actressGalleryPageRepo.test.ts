@@ -1,6 +1,6 @@
 import { getActressMetadata, getActressProfile } from './actressRepo'
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
-import { createActressQueryService } from '../services/actressQueryService'
+import { createActressQueryService } from '../../../../apps/desktop/src/main/services/actressQueryService'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, it } from 'node:test'
 import fs from 'node:fs'
@@ -11,7 +11,6 @@ import type { ActressGalleryAsset } from '@shared/actressTypes'
 import { prepareActressGalleryForDisplay } from '@shared/mediaGalleryDisplay'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { listActressGalleryPage } from './actressGalleryPageRepo'
-import { resetSettingsCacheForTests } from '../settings/settingsStore'
 
 let root: string
 let previous: string | undefined
@@ -19,13 +18,11 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-gallery-page-'))
   previous = process.env.JAVDEX_TEST_USER_DATA
   process.env.JAVDEX_TEST_USER_DATA = root
-  resetSettingsCacheForTests()
-  initDatabaseAtPath(path.join(root, 'catalog.db'))
+    initDatabaseAtPath(path.join(root, 'catalog.db'))
   getDb().exec("INSERT INTO actresses(id,main_name) VALUES(1,'Actor'),(2,'Empty')")
 })
 afterEach(() => {
-  closeDatabase(); resetSettingsCacheForTests()
-  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+  closeDatabase();   if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previous
   fs.rmSync(root, { recursive: true, force: true })
 })

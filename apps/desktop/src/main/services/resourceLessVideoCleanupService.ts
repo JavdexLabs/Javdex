@@ -1,4 +1,4 @@
-import { purgeResourceLessVideos } from '../db/videoRepo'
+import { purgeResourceLessVideos } from '@library/db/videoRepo'
 import { mediaAssetStore } from './mediaAssetStore'
 
 export function deleteResourceLessVideos(): number {

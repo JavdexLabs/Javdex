@@ -11,14 +11,14 @@ import {
   createVideoLifecycleRepo,
   type DeleteVideoGloballyRepoResult,
   type VideoLifecycleRepo
-} from '../db/videoLifecycleRepo'
-import { listVideoResourcesAcrossLibraries } from '../db/videoRepo'
-import { getDb } from '../db/database'
+} from '@library/db/videoLifecycleRepo'
+import { listVideoResourcesAcrossLibraries } from '@library/db/videoRepo'
+import { getDb } from '@library/db/database'
 import {
   collectVideoLibraryCleanupHints,
   runLibraryCleanup,
   type LibraryCleanupHints
-} from '../db/libraryCleanup'
+} from '@library/db/libraryCleanup'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 import { mediaAssetStore } from './mediaAssetStore'
 import { videoMaintenanceService } from './videoMaintenanceService'

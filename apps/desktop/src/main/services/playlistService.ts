@@ -4,7 +4,7 @@ import {
   deletePlaylistRecord,
   getPlaylistById,
   updatePlaylistRecord
-} from '../db/playlistRepo'
+} from '@library/db/playlistRepo'
 import { mediaAssetStore } from './mediaAssetStore'
 
 export function createPlaylist(input: PlaylistCreateInput): number {

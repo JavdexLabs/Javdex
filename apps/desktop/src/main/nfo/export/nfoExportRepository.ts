@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
-import { getDb } from '../../db/database'
-import { getMediaLibraryRoot } from '../../db/mediaLibraryRepo'
+import { getDb } from '@library/db/database'
+import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import type {
   NfoExportActor,
   NfoExportIdentity,

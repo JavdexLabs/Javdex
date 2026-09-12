@@ -4,8 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
-import { listTags, listManualTags, listManualTagOptions } from '../../apps/desktop/src/main/db/tagRepo'
+import { initDatabaseAtPath, closeDatabase } from '../../packages/library/src/db/database'
+import { listTags, listManualTags, listManualTagOptions } from '../../packages/library/src/db/tagRepo'
 
 const videos = Number(process.env.JAVDEX_TAG_BENCH_VIDEOS ?? 10000)
 const samples = Number(process.env.JAVDEX_TAG_BENCH_SAMPLES ?? 3)

@@ -4,7 +4,7 @@ import type {
   VideoClassificationField
 } from '@shared/videoScrapeTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 
 export type ClassificationIdentityResolution =
   | { status: 'invalid'; inputName: string; message: string }

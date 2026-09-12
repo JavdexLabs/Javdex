@@ -18,7 +18,7 @@
 
 | 区域 | 代码证据 | 判断与所需改动 |
 |---|---|---|
-| 数据库 | [`database.ts`](../apps/desktop/src/main/db/database.ts) 提供 `initDatabaseAtPath`，开启 WAL、外键并执行迁移；当前 schema 为 16，与研究基线一致 | 初始化已经不依赖 Electron。可以复用 SQLite 与仓库逻辑，但需由服务端入口唯一负责升级和恢复 |
+| 数据库 | [`database.ts`](../packages/library/src/db/database.ts) 提供 `initDatabaseAtPath`，开启 WAL、外键并执行迁移；当前 schema 为 16，与研究基线一致 | 初始化已经不依赖 Electron。可以复用 SQLite 与仓库逻辑，但需由服务端入口唯一负责升级和恢复 |
 | HTTP 与网页 | [`server.ts`](../apps/desktop/src/main/web/server.ts)、[`http.ts`](../apps/desktop/src/main/web/http.ts)、`apps/web/src` | 会话、配对、静态资源、Range 可复用；认证角色、部署地址与文件授权需适配 |
 | 网页目录 | [`catalog.ts`](../apps/desktop/src/main/web/catalog.ts)、[`webTypes.ts`](../packages/contracts/src/webTypes.ts) | 明确只展示活动库的未隐藏成员，固定简化 DTO。适合浏览器，不足以承接完整桌面查询 |
 | 桌面生命周期 | [`appMain.ts`](../apps/desktop/src/main/appMain.ts) | 当前先打开本地数据库，恢复扫描、Agent 与删除任务，清理暂存图片，再启动 IPC、Web 和自动扫描。模式选择必须前移到这些操作之前 |
@@ -150,7 +150,7 @@ HTTP 是原方案接受的可信 LAN 前提，writer 凭据也会经明文链路
 
 确认目标尚未启用时，失败或取消可丢弃目标暂存结果并解除源库冻结；断网导致结果不明时，先核实目标是否启用，核实前源库保持冻结，不自动恢复写入。目标已经启用后不自动解冻源库，回迁应以当前目标库重新执行反向迁移。第一版不要求传输断点续传，可重新迁移，但必须持久保存迁移阶段和结果，重启后仍能确定可写端；取消/失败恢复与目标启用须协调，不能仅凭一次状态查询同时开放两端写入。以上尚未实施；迁移后的设备授权见下文已确认规则。
 
-当前路径身份包括 `video_resources.locator/resource_key/source_identity/strm_source_path`、无法识别快照和审计等数据。图片也不仅是封面，还包括头像源图、裁切图、演员图库、分类图、清单封面与样张。待确认扫描、资源身份和刮削项必须在迁移前处理完毕；未提交上传不作为正式资产迁入。应以 [`schema.ts`](../apps/desktop/src/main/db/schema.ts) 及各存储模块制作完整清单，区分活跃路径与历史审计文本，不能全库字符串替换。
+当前路径身份包括 `video_resources.locator/resource_key/source_identity/strm_source_path`、无法识别快照和审计等数据。图片也不仅是封面，还包括头像源图、裁切图、演员图库、分类图、清单封面与样张。待确认扫描、资源身份和刮削项必须在迁移前处理完毕；未提交上传不作为正式资产迁入。应以 [`schema.ts`](../packages/library/src/db/schema.ts) 及各存储模块制作完整清单，区分活跃路径与历史审计文本，不能全库字符串替换。
 
 按已确认规则展开的执行步骤与工程建议如下：
 
@@ -239,7 +239,7 @@ HTTP 是原方案接受的可信 LAN 前提，writer 凭据也会经明文链路
 
 #### STRM 迁移的来源解绑（已确认）
 
-已确认“不映射根也保留非本地资源”，但 STRM 不能简单清空路径字段：[ADR-0019](adr/0019-identify-strm-resources-by-source-file.md) 允许不同源文件指向同一链接并保持独立资源，普通手动链接则按目标去重；当前 [`schema.ts`](../apps/desktop/src/main/db/schema.ts) 的资源唯一键作用于整个媒体库，而非单部影片。解绑会触及现有身份规则，属于需要用户决定的产品取舍。
+已确认“不映射根也保留非本地资源”，但 STRM 不能简单清空路径字段：[ADR-0019](adr/0019-identify-strm-resources-by-source-file.md) 允许不同源文件指向同一链接并保持独立资源，普通手动链接则按目标去重；当前 [`schema.ts`](../packages/library/src/db/schema.ts) 的资源唯一键作用于整个媒体库，而非单部影片。解绑会触及现有身份规则，属于需要用户决定的产品取舍。
 
 例：同一媒体库的 `a.strm` 与 `b.strm` 指向相同 URL，分别归属影片甲、乙；同库还可能有该 URL 的手动链接。把它们全部转成普通链接将产生唯一键冲突，不能自动选择一部影片接收、自动合并影片或丢弃某条资源。
 

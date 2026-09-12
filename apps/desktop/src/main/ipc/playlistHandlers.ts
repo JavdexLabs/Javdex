@@ -1,4 +1,4 @@
-import { listPlaylistBrowsePage } from '../db/playlistListPageRepo'
+import { listPlaylistBrowsePage } from '@library/db/playlistListPageRepo'
 import { IPC } from '@shared/ipc-channels'
 import type { SortDir } from '@shared/commonTypes'
 import type { PlaylistDetail, PlaylistListItem, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
@@ -11,7 +11,7 @@ import {
   listPlaylists,
   listPlaylistsForVideo,
   removeVideoFromPlaylist
-} from '../db/playlistRepo'
+} from '@library/db/playlistRepo'
 import { createPlaylist, deletePlaylist, updatePlaylist } from '../services/playlistService'
 import { appCommandAdapter } from './appContractAdapter'
 

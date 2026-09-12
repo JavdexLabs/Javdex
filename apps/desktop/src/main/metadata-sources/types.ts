@@ -1,6 +1,6 @@
 import type { ScraperPluginSource } from '@shared/scraperPluginTypes'
 import type { ScrapeResult, VideoScrapeField } from '@shared/videoScrapeTypes'
-import type { PendingVideoScrapeCandidateInput } from '../db/pendingVideoScrapeRepo'
+import type { PendingVideoScrapeCandidateInput } from '@library/db/pendingVideoScrapeRepo'
 
 export type VideoMetadataSourceKind = 'web-scraper' | 'local-nfo'
 

@@ -9,8 +9,7 @@ import { createScopedVideoCatalogRepo } from './scopedVideoCatalogRepo'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { getActressMetadata, listActressPage } from './actressRepo'
 import { toActressCardPage, toScopedVideoCardPage } from '@shared/cardProjection'
-import { createActressQueryService } from '../services/actressQueryService'
-import { resetSettingsCacheForTests } from '../settings/settingsStore'
+import { createActressQueryService } from '../../../../apps/desktop/src/main/services/actressQueryService'
 
 test('memo revisions preserve hits, distinguish same-total reorder, WAL snapshots, rollback and reopen', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-list-revision-'))
@@ -60,8 +59,7 @@ test('native video and actress pages expose snapshot identity; avatar snapshots 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-native-list-revision-'))
   const previous = process.env.JAVDEX_TEST_USER_DATA
   process.env.JAVDEX_TEST_USER_DATA = root
-  resetSettingsCacheForTests()
-  let other: Database.Database | undefined
+    let other: Database.Database | undefined
   try {
     initDatabaseAtPath(path.join(root, 'catalog.db'))
     const db = getDb()
@@ -100,8 +98,7 @@ test('native video and actress pages expose snapshot identity; avatar snapshots 
     assert.equal(getActressMetadata(1)?.profile_summary, long)
     assert.equal(wideActors.items.find(row => row.id === 1)?.avatar_crop_json, long)
   } finally {
-    other?.close(); closeDatabase(); resetSettingsCacheForTests()
-    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+    other?.close(); closeDatabase();     if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
     else process.env.JAVDEX_TEST_USER_DATA = previous
     fs.rmSync(root, { recursive: true, force: true })
   }

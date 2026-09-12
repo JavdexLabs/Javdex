@@ -13,7 +13,7 @@ import {
   getSettingsRecoveryNotice,
   updateSettings
 } from '../settings/settingsStore'
-import { getLibraryOverviewStats } from '../db/overviewRepo'
+import { getLibraryOverviewStats } from '@library/db/overviewRepo'
 import { migrateAssetStorage } from '../services/assetMigration'
 import { prepareMediaAssetsLocationMigration } from '../services/assetLocationMigration'
 import { mediaAssetStore } from '../services/mediaAssetStore'

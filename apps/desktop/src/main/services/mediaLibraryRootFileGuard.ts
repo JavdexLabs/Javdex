@@ -6,7 +6,7 @@ import {
   getMediaLibrary,
   getMediaLibraryRoot,
   MediaLibraryRepoError
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import { isPathUnderRoot } from '../scanner/libraryPathUtils'
 
 const MANAGED_ROOT_FILE_ERROR = '只能操作身份有效的启用媒体库根目录内文件'

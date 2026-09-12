@@ -9,7 +9,7 @@ import {
   updateMediaLibraryRoot
 } from './mediaLibraryRepo'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
-import { readStrmFile } from '../scanner/strmParser'
+import { readStrmFile } from '@library/scan/strmParser'
 import {
   PendingScanRepoError,
   getPendingScanGroup,

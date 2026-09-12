@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
-import { AGENT_PLATFORM_SCHEMA_SQL } from '../db/schema'
+import { AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
 import { AgentRunStore, setAgentPayloadCipherForTests } from './agentRunStore'
 import type { ResolvedRunConfiguration, RuntimeRecoveryFrame } from './types'
 

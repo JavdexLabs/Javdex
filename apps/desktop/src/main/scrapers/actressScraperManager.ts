@@ -11,7 +11,7 @@ import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import {
   getActressDetail,
   recordActressScrapeFailure,
-} from '../db/actressRepo'
+} from '@library/db/actressRepo'
 import { resolveEffectiveActressScrapeFields } from '../services/actressAssetService'
 import { mediaAssetStore } from '../services/mediaAssetStore'
 import {

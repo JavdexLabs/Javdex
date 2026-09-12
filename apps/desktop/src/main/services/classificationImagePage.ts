@@ -1,6 +1,6 @@
 import type { ClassificationEntityRef, ClassificationImageCandidate, ClassificationListPage, ClassificationPageQuery } from '@shared/classificationTypes'
 import type Database from 'better-sqlite3'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 
 /** Preserve the original all-video cover eligibility and date ordering. */
 export function createClassificationImagePageReader(connection: () => Database.Database) {

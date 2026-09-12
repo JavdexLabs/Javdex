@@ -1,6 +1,6 @@
 import type { DirectorListItem, DirectorListQuery, ClassificationListPage, ClassificationPageQuery, OrganizationListItem, OrganizationListQuery, SeriesListItem, SeriesListQuery } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 
 function bounds(query: ClassificationPageQuery): { limit: number; offset: number } {
   const limit = query.limit ?? 60, offset = query.offset ?? 0

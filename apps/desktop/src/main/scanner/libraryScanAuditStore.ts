@@ -4,9 +4,9 @@ import path from 'node:path'
 import process from 'node:process'
 import { readTestUserDataPath } from '@shared/appIdentity'
 import type { LibraryScanAudit } from '@shared/libraryTypes'
-import { normalizeAudit } from './libraryScanAuditValidation'
-import { getDb } from '../db/database'
-import { readScanAuditSource } from '../db/scanAuditSource'
+import { normalizeAudit } from '@library/scan/libraryScanAuditValidation'
+import { getDb } from '@library/db/database'
+import { readScanAuditSource } from '@library/db/scanAuditSource'
 
 function auditFilePath(libraryId: number): string {
   const userData = readTestUserDataPath() ?? (app?.getPath ? app.getPath('userData') : undefined)

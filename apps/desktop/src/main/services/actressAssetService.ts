@@ -20,8 +20,8 @@ import {
   updateActressAvatarRecord,
   upsertActressFromScrape as upsertActressRecord,
   type ActressScrapeAssetFacts
-} from '../db/actressRepo'
-import { getDb } from '../db/database'
+} from '@library/db/actressRepo'
+import { getDb } from '@library/db/database'
 import { mediaAssetStore } from './mediaAssetStore'
 
 interface GalleryAssetWriteInput {

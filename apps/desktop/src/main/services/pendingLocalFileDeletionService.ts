@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import {
   listPendingLocalFileDeletions,
   removePendingLocalFileDeletions
-} from '../db/pendingLocalFileDeletionRepo'
+} from '@library/db/pendingLocalFileDeletionRepo'
 import { inspectWritableLocalPath } from './localFileAvailability'
 
 export interface PendingLocalFileDeletionRecoveryResult {

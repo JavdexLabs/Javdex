@@ -28,30 +28,30 @@ import {
   removeVideoResourceRecord,
   setPrimaryVideoResource,
   type LocalVideoResourceRef
-} from '../db/videoRepo'
-import { getDb } from '../db/database'
+} from '@library/db/videoRepo'
+import { getDb } from '@library/db/database'
 import {
   bindOnlineMediaLibraryRootIdentities,
   readMediaLibraryScanSnapshot,
   resolveMediaLibraryRootPath
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import {
   removeResourceLessMemberships,
   removeResourceLessMembershipPage,
   removeResourceLessMembershipsWithAudit,
   type RemovedResourceLessMembership
-} from '../db/libraryMembershipRepo'
+} from '@library/db/libraryMembershipRepo'
 import {
   beginLibraryScanRun,
   finishLibraryScanRun,
   finishLibraryScanEntriesRun,
   type LibraryUnrecognizedFileInput
-} from '../db/libraryScanRepo'
-import { reconcilePendingScanResources } from '../db/pendingScanRepo'
-import { createScanAuditWriter } from '../db/scanAuditWriter'
-import { iterateScanAuditUnrecognizedPaths } from '../db/scanAuditUnrecognizedPaths'
-import { readPendingScanAuditEntries } from '../db/pendingScanAuditRepo'
-import { reconcilePendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+} from '@library/db/libraryScanRepo'
+import { reconcilePendingScanResources } from '@library/db/pendingScanRepo'
+import { createScanAuditWriter } from '@library/db/scanAuditWriter'
+import { iterateScanAuditUnrecognizedPaths } from '@library/db/scanAuditUnrecognizedPaths'
+import { readPendingScanAuditEntries } from '@library/db/pendingScanAuditRepo'
+import { reconcilePendingResourceIdentities } from '@library/db/pendingResourceIdentityRepo'
 import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import {
   authorizeMediaLibraryRoot,

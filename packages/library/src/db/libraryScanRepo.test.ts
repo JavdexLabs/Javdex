@@ -392,7 +392,7 @@ describe('libraryScanRepo latest snapshot', () => {
 })
 
 it('reads a scoped audit header without loading audit JSON or pending path arrays',async()=>{
- const {readScanAuditHeader}=await import('../services/scanAuditReadHeader')
+ const {readScanAuditHeader}=await import('../../../../apps/desktop/src/main/services/scanAuditReadHeader')
  const directory=path.join(tempRoot,'header');fs.mkdirSync(directory)
  const library=createMediaLibrary({name:'Header',roots:[{path:directory}]})
  persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-run',filePath:path.join(directory,'unknown.mp4')})
@@ -411,7 +411,7 @@ it('reads a scoped audit header without loading audit JSON or pending path array
 })
 
 it('keeps summary failure semantics and rejects oversized summary/header payloads',async()=>{
- const {readScanAuditHeader}=await import('../services/scanAuditReadHeader'),{SCAN_AUDIT_HEADER_BYTES}=await import('../services/scanAuditReadPolicy')
+ const {readScanAuditHeader}=await import('../../../../apps/desktop/src/main/services/scanAuditReadHeader'),{SCAN_AUDIT_HEADER_BYTES}=await import('../../../../apps/desktop/src/main/services/scanAuditReadPolicy')
  const directory=path.join(tempRoot,'header-errors');fs.mkdirSync(directory)
  const library=createMediaLibrary({name:'Header errors',roots:[{path:directory}]})
  persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-errors',filePath:path.join(directory,'unknown.mp4')})
@@ -425,7 +425,7 @@ it('keeps summary failure semantics and rejects oversized summary/header payload
 })
 
 it('keeps header summary, audit availability and unrecognized count in one WAL snapshot',async()=>{
- const {default:Database}=await import('better-sqlite3'),{readScanAuditHeader}=await import('../services/scanAuditReadHeader')
+ const {default:Database}=await import('better-sqlite3'),{readScanAuditHeader}=await import('../../../../apps/desktop/src/main/services/scanAuditReadHeader')
  const directory=path.join(tempRoot,'header-snapshot');fs.mkdirSync(directory)
  const library=createMediaLibrary({name:'Header snapshot',roots:[{path:directory}]})
  persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'old-header',filePath:path.join(directory,'unknown.mp4')})

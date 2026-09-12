@@ -1,5 +1,5 @@
 import type { ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
-import type { ActressAvatarCropSnapshot } from '../db/actressAvatarCropSnapshot'
+import type { ActressAvatarCropSnapshot } from '@library/db/actressAvatarCropSnapshot'
 import { IPC } from '@shared/ipc-channels'
 import type { ScrapeIpcEvent, ScrapeIpcEventChannel } from '@shared/scrapeIpcContract'
 import type {

@@ -13,7 +13,7 @@ import type {
 import type { GlobalSearchResult, HomeSnapshot } from '@shared/catalogTypes'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
-import { MediaLibraryRepoError } from '../db/mediaLibraryRepo'
+import { MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
 import { createMediaLibraryCommandAdapter } from './mediaLibraryContractAdapter'
 import {
   registerMediaLibraryHandlers,

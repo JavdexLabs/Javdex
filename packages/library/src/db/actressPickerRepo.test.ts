@@ -5,7 +5,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { editActress, getActressPickerIdentity, listActresses, listActressPickerPage } from './actressRepo'
-import { resetSettingsCacheForTests } from '../settings/settingsStore'
 
 let root: string
 let previous: string | undefined
@@ -13,12 +12,10 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-picker-'))
   previous = process.env.JAVDEX_TEST_USER_DATA
   process.env.JAVDEX_TEST_USER_DATA = root
-  resetSettingsCacheForTests()
-  initDatabaseAtPath(path.join(root, 'catalog.db'))
+    initDatabaseAtPath(path.join(root, 'catalog.db'))
 })
 afterEach(() => {
-  closeDatabase(); resetSettingsCacheForTests()
-  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+  closeDatabase();   if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previous
   fs.rmSync(root, { recursive: true, force: true })
 })

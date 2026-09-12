@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { ClassificationEntityKind, ClassificationLink } from '@shared/classificationTypes'
-import { writeRelatedLinks } from '../db/relatedLinkStore'
+import { writeRelatedLinks } from '@library/db/relatedLinkStore'
 
 const LINK_TABLE: Record<
   ClassificationEntityKind,

@@ -7,7 +7,7 @@ import type {
 } from '@shared/libraryTypes'
 import { getDb } from './database'
 import { readScanAuditSource } from './scanAuditSource'
-import { normalizeAudit } from '../scanner/libraryScanAuditValidation'
+import { normalizeAudit } from '@library/scan/libraryScanAuditValidation'
 import { SCAN_AUDIT_META_MAX_BYTES } from './scanAuditWriter'
 
 type PersistedScanTrigger = 'manual' | 'automatic' | 'initial' | 'root'

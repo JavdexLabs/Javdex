@@ -6,7 +6,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { normalizeLocalPathIdentity } from "@library/localPathIdentity";
 import { DEFAULT_SETTINGS } from "@shared/settingsTypes";
-import { migrateDatabase } from "../db/migrations";
+import { migrateDatabase } from "@library/db/migrations";
 import {
   bootstrapLegacyMediaLibrary,
   LEGACY_CLEANUP_WAITING_ERROR,

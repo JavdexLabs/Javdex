@@ -3,13 +3,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { createMediaLibrary } from '../db/mediaLibraryRepo'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
 import {
   getPendingResourceIdentityRecord,
   upsertPendingResourceIdentity
-} from '../db/pendingResourceIdentityRepo'
-import { listVideos, listVideoResources } from '../db/videoRepo'
+} from '@library/db/pendingResourceIdentityRepo'
+import { listVideos, listVideoResources } from '@library/db/videoRepo'
 import type { LocalNfoScanService } from './localNfoScanService'
 import { resolvePendingResourceIdentity } from './pendingResourceIdentityService'
 

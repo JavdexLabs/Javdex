@@ -1,8 +1,8 @@
-import { createRevisionReadCache, type ReadCacheMemo } from '../db/revisionReadCache'
+import { createRevisionReadCache, type ReadCacheMemo } from '@library/db/revisionReadCache'
 import type Database from 'better-sqlite3'
 import type { WebBrowse, WebCollection, WebVideo } from '@shared/webTypes'
 import type { Video } from '@shared/videoTypes'
-import { createHomeDiscoveryRepo } from '../db/homeDiscoveryRepo'
+import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 
 import { normalizeWebBrowseQuery, normalizeWebSeed, webBrowseParams, integer, WebCatalogQueryError, type WebBrowseQuery } from './catalogQueryRequest'
 /** Every lookup is constrained to visible memberships of active media libraries. */

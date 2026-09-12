@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
-import { normalizeClassificationName } from '../../../../../packages/contracts/src/classificationNameNormalization'
+import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { ensureVideoMembership } from './libraryMembershipRepo'
-import { buildVideoResourceSourceIdentity } from '../../../../../packages/library/src/videoResourceIdentity'
+import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 
 function ensureOrganization(
   db: Database.Database,

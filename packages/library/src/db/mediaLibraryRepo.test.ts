@@ -10,7 +10,7 @@ import { ensureVideoMembership } from './libraryMembershipRepo'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
-} from '../services/libraryPathCleanupService'
+} from '../../../../apps/desktop/src/main/services/libraryPathCleanupService'
 import {
   MediaLibraryRepoError,
   addMediaLibraryRoot,

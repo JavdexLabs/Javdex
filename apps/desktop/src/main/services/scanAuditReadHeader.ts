@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import type { LibraryScanSummary } from '@shared/libraryTypes'
 import type { ScanAuditReadHeader } from '@shared/scanAuditReadTypes'
 import { SCAN_AUDIT_HEADER_BYTES } from './scanAuditReadPolicy'
-import { readScanAuditSource } from '../db/scanAuditSource'
+import { readScanAuditSource } from '@library/db/scanAuditSource'
 
 /** No audit JSON or unrecognized row arrays cross this boundary. Run on the shared read worker. */
 export function readScanAuditHeader(db: Database.Database, libraryId: number): ScanAuditReadHeader {

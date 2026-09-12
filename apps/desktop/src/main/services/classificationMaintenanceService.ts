@@ -20,7 +20,7 @@ import type {
   SeriesUpdateInput
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
 import { prepareClassificationNames } from './classificationNamePreparation'
 import {
@@ -33,7 +33,7 @@ import {
   writeSeriesLinks,
   writeSeriesNames
 } from './seriesProfilePersistence'
-import { prepareRelatedLinks } from '../db/relatedLinkStore'
+import { prepareRelatedLinks } from '@library/db/relatedLinkStore'
 
 const VIDEO_ROLE_FIELDS: Record<
   OrganizationRole,

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { normalizeAudit } from '../scanner/libraryScanAuditValidation'
+import { normalizeAudit } from '@library/scan/libraryScanAuditValidation'
 
 export type ScanAuditSourceSelection =
   | { libraryId: number; runId: string }

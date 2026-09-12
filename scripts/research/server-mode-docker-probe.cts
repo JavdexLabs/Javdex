@@ -4,8 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { closeDatabase, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '../../apps/desktop/src/main/db/database'
-import { CURRENT_SCHEMA_VERSION } from '../../apps/desktop/src/main/db/migrations'
+import { closeDatabase, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '../../packages/library/src/db/database'
+import { CURRENT_SCHEMA_VERSION } from '../../packages/library/src/db/migrations'
 
 async function main(): Promise<void> {
   console.log(JSON.stringify({ platform: process.platform, arch: process.arch,

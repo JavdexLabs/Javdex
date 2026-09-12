@@ -1,18 +1,18 @@
 import type { ActressConflictQueueItem, ActressConflictQueuePage, ActressConflictQueueQuery, ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
-import { getDatabaseReadRevision, getDb } from '../db/database'
-import { normalizeActressName } from '../db/actressNameNormalization'
+import { getDatabaseReadRevision, getDb } from '@library/db/database'
+import { normalizeActressName } from '@library/db/actressNameNormalization'
 import {
   markActressScrapeSucceeded,
   recordActressScrapeFailure
-} from '../db/actressRepo'
+} from '@library/db/actressRepo'
 import {
   applyActressScrapeResult,
   mergeActressesWithAssets,
   planActressScrapeResult
 } from './actressAssetService'
-import { synchronizeActressNameOwnership } from '../db/actressNameOwnership'
-import { setActressTypedName, upsertActressName } from '../db/actressNames'
+import { synchronizeActressNameOwnership } from '@library/db/actressNameOwnership'
+import { setActressTypedName, upsertActressName } from '@library/db/actressNames'
 import { mediaAssetStore } from './mediaAssetStore'
 
 export interface PreparedActressScrapeResource {

@@ -29,4 +29,4 @@ for (const directory of ['apps/web/src', 'packages/contracts/src', 'packages/ui/
 }
 assert.equal(violations.length, 0, violations.join('\n'))
 console.log('Workspace versions and browser/shared dependency boundaries passed.')
-console.log('library extraction is partial; server/http are reserved. This check does not claim a runnable server.')
+console.log('library currently owns catalog db plus path identity; scanner/NFO/services remain in desktop. server/http are reserved. This check does not claim a runnable server.')

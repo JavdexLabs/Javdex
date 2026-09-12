@@ -10,13 +10,13 @@ import {
   getLatestLibraryScanSnapshot,
   removeLibraryUnrecognizedFile,
   renameLibraryUnrecognizedFile
-} from '../db/libraryScanRepo'
-import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
-import { pagePendingScanQueue, countPendingScanQueue } from '../db/pendingScanQueueRepo'
-import { getPendingAuditPresence } from '../db/pendingAuditRepo'
-import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '../db/pendingScanRepo'
-import { listPendingResourceIdentities, getPendingResourceIdentity } from '../db/pendingResourceIdentityRepo'
-import { listVideoResources } from '../db/videoRepo'
+} from '@library/db/libraryScanRepo'
+import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
+import { pagePendingScanQueue, countPendingScanQueue } from '@library/db/pendingScanQueueRepo'
+import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
+import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '@library/db/pendingScanRepo'
+import { listPendingResourceIdentities, getPendingResourceIdentity } from '@library/db/pendingResourceIdentityRepo'
+import { listVideoResources } from '@library/db/videoRepo'
 import {
   readLibraryScanAudit
 } from '../scanner/libraryScanAuditStore'

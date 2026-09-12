@@ -51,7 +51,8 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02–S14 | 未开始 | 含必需阶段 S02D |
+| S02 | 进行中（db 切片） | `apps/desktop/src/main/db` 已迁入 `packages/library/src/db`；db 依赖的纯校验/`strm` 解析迁入 `packages/library/src/scan`。生产 library 禁止导入 desktop/Electron/Playwright（`npm run check:library-boundaries`）。schema 仍为 16。`getDb()` 单例保留到 S02D。本切片已通过 `npm run typecheck` 与边界检查；Electron db 回归在后续提交记录。剩余：scanner 编排、NFO、mediaAssetStore、catalog 业务服务仍在 desktop |
+| S03–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
 
@@ -188,6 +189,12 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 验收：现有数据库迁移、图片交割、扫描/NFO、影片和演员维护回归；本地根 ADR-0024 不退化。没有新增产品 schema 时保持版本 16。
 
+**S02 实施记录（db 切片）**
+
+- 范围：目录数据库、迁移、repo 与测试迁入 `packages/library/src/db`；`libraryScanAuditValidation` 与 `strmParser` 因被 db 生产代码依赖而一并迁入 `packages/library/src/scan`；v0.6.2 schema 16 升级夹具迁入 `packages/library/src/testFixtures`。桌面测试对业务服务的引用改为明确的 `apps/desktop/src/main` 夹具路径，不把测试例外写进生产边界。
+- 工程默认：本切片保留 `initDatabaseAtPath` / `getDb()` 进程单例，避免把连接注入扩散到全部 repo 调用点；S02D 由 `LocalCatalogBackend` 装配并注入。根级 `better-sqlite3` 仍由桌面安装闭包持有，服务器安装闭包是 S04。
+- 未做：scanner 编排、NFO、图片存储、catalog application services 仍在 desktop；未改 schema 16；未接线 IPC；未实现远程后端。
+
 ### S02D：先完成桌面本地后端重构
 
 依 S01 的端口把 IPC 的本地调用搬到 application 和 LocalCatalogBackend，以 S02 的 library 工厂替代业务 singleton。先迁移查询、普通编辑和图片，再迁移预览/任务，最后逐个处理 Agent/采集工作流的依赖注入。保留现有 UI 页面和清晰的业务入口，不一次性重命名整个 preload API。
@@ -316,7 +323,7 @@ $env:JAVDEX_TEST_TIMEOUT_MS = '900000'
 node scripts/run-electron-tests.mjs
 ```
 
-特定领域测试用移动后的真实路径，例如 `node scripts/run-electron-tests.mjs apps/desktop/src/main/db/migrationsV16.test.ts`；后续 S02 移动该文件时更新命令。S04 建立的 server 命令须写入根 scripts 并在 Docker/CI 实际运行后才可作为完成依据。
+特定领域测试用移动后的真实路径，例如 `node scripts/run-electron-tests.mjs packages/library/src/db/migrationsV16.test.ts`；后续 S02 移动该文件时更新命令。S04 建立的 server 命令须写入根 scripts 并在 Docker/CI 实际运行后才可作为完成依据。
 
 当前工作区的 `node_modules` 是指向 `D:/Project/JavdexLabs/Javdex/node_modules` 的已有 junction。本次没有在其目标执行安装或重建；只更新仓库 lockfile。接手不要在这个共享依赖目录上运行会破坏其它任务的重建；需要独立依赖时使用新的真实检出。不要复制 Electron node_modules 到容器。
 

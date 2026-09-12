@@ -14,7 +14,7 @@ import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
 import { normalizeVideoCode } from '@shared/videoCode'
 import type { ExternalVideoResourceKind } from '@shared/videoTypes'
 import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
-import { readStrmFile } from '../scanner/strmParser'
+import { readStrmFile } from '@library/scan/strmParser'
 import { getDb } from './database'
 import { insertLocalVideoResource, insertStrmVideoResource } from './videoRepo'
 

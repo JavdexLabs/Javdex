@@ -42,13 +42,13 @@
 | `PlaylistDetailPage.tsx:75–124,314` | preload `:452–453` → `playlistHandlers.ts:17–24` → `playlistRepo.ts:153–173` | 单清单全部影片，排序重取、本地资源筛选，普通 map | F01，返回/DOM 都随 K 增长 |
 | Web `apps/web/apps/desktop/src/main.tsx:613–633,1011–1034` | `apps/web/src/client.ts:13` → HTTP；本次止于客户端 | 用当前响应替换 result；上一页/下一页；普通 VideoGrid | DOM 随当前响应条数增长，不累计历史页；后端 pageSize 上限未审计 |
 
-表内短名的完整主进程目录分别为 `apps/desktop/src/main/ipc/`、`apps/desktop/src/main/services/`、`apps/desktop/src/main/db/`；hook/query 为 `apps/desktop/src/renderer/src/query/`。后续证据使用完整路径。
+表内短名的完整主进程目录分别为 `apps/desktop/src/main/ipc/`、`apps/desktop/src/main/services/`、`packages/library/src/db/`；hook/query 为 `apps/desktop/src/renderer/src/query/`。后续证据使用完整路径。
 
 ## 发现与建议
 
 ### F01 · P1：清单详情一次取得全部影片，排序和返回会再次整包读取
 
-证据链：`apps/desktop/src/renderer/src/pages/PlaylistDetailPage.tsx:75–90` 调用 `api.playlists.get(id, sortBy, sortDir)`，`apps/desktop/src/preload/index.ts:451–453` → `apps/desktop/src/main/ipc/playlistHandlers.ts:17–24` → `apps/desktop/src/main/db/playlistRepo.ts:153–173`。SQL 是 `SELECT v.*` 加列表投影、`.all(id)`，没有 LIMIT。`packages/contracts/src/playlistTypes.ts:18–20` 明确返回 `videos: Video[]`。
+证据链：`apps/desktop/src/renderer/src/pages/PlaylistDetailPage.tsx:75–90` 调用 `api.playlists.get(id, sortBy, sortDir)`，`apps/desktop/src/preload/index.ts:451–453` → `apps/desktop/src/main/ipc/playlistHandlers.ts:17–24` → `packages/library/src/db/playlistRepo.ts:153–173`。SQL 是 `SELECT v.*` 加列表投影、`.all(id)`，没有 LIMIT。`packages/contracts/src/playlistTypes.ts:18–20` 明确返回 `videos: Video[]`。
 
 `PlaylistDetailPage.tsx:121–124` 对整个数组做资源筛选，`:314` 对全部可见影片生成卡片。`:106–110` 从影片栈返回重取，`:92–94` 导入完成重取，`:129–132` 编辑清单后重取，排序依赖改变也触发完整查询。单片移出已有 `:154–156` 本地过滤更新，不能说每种修改都整包刷新。
 
@@ -60,7 +60,7 @@
 
 ### F02 · P1：演员详情的关联影片全量返回、全量渲染
 
-证据链：`apps/desktop/src/renderer/src/pages/ActressDetailPage.tsx:104–122` → `apps/desktop/src/preload/index.ts:474` → `apps/desktop/src/main/ipc/actressHandlers.ts:17–19` → `apps/desktop/src/main/services/actressQueryService.ts:84–85` → `apps/desktop/src/main/db/actressRepo.ts:550–583`。影片 SQL 有演员 ID 和可见媒体库范围，但没有 LIMIT；写真也一次返回。UI `ActressDetailPage.tsx:452` 直接 `actress.videos.map`。
+证据链：`apps/desktop/src/renderer/src/pages/ActressDetailPage.tsx:104–122` → `apps/desktop/src/preload/index.ts:474` → `apps/desktop/src/main/ipc/actressHandlers.ts:17–19` → `apps/desktop/src/main/services/actressQueryService.ts:84–85` → `packages/library/src/db/actressRepo.ts:550–583`。影片 SQL 有演员 ID 和可见媒体库范围，但没有 LIMIT；写真也一次返回。UI `ActressDetailPage.tsx:452` 直接 `actress.videos.map`。
 
 已有保护是关联范围，不是页大小；普通演员主列表的 240 条分页不能保护详情。`:124–137` 头像保存或从影片栈返回都会再次 load，修改头像也可能重新搬运整部作品集。
 
@@ -98,13 +98,13 @@
 
 分类 options 中每个候选还有别名/角色读取（例如 `classificationQueryService.ts:280–296,485–492,668–680`），次数由 100 条候选限量约束，别名长度仍取决于实体。必要时批量投影；不据此宣称无限 N+1。
 
-标签旁路：`apps/desktop/src/renderer/src/pages/LibraryPage.tsx:272–283` 为名称 Map 获取全部 tags；弹层 `apps/desktop/src/renderer/src/components/TagFilter.tsx:102–107` 又独立加载一次。preload `apps/desktop/src/preload/index.ts:494–497` → `apps/desktop/src/main/ipc/facetHandlers.ts:109–112` → `apps/desktop/src/main/services/tagQueryService.ts:9–11` → `apps/desktop/src/main/db/tagRepo.ts:18–37`，无分页并返回使用计数。TagFilter `:128–135` 在本地过滤、紧凑模式排序后才截取 200；所以**候选 DOM ≤200，IPC/排序仍随 T 增长**，选中 chip 另随选中标签数增长。建议共享标签查询、按 ID 补取已选名称、分页搜索；不能只去掉显示截断。
+标签旁路：`apps/desktop/src/renderer/src/pages/LibraryPage.tsx:272–283` 为名称 Map 获取全部 tags；弹层 `apps/desktop/src/renderer/src/components/TagFilter.tsx:102–107` 又独立加载一次。preload `apps/desktop/src/preload/index.ts:494–497` → `apps/desktop/src/main/ipc/facetHandlers.ts:109–112` → `apps/desktop/src/main/services/tagQueryService.ts:9–11` → `packages/library/src/db/tagRepo.ts:18–37`，无分页并返回使用计数。TagFilter `:128–135` 在本地过滤、紧凑模式排序后才截取 200；所以**候选 DOM ≤200，IPC/排序仍随 T 增长**，选中 chip 另随选中标签数增长。建议共享标签查询、按 ID 补取已选名称、分页搜索；不能只去掉显示截断。
 
 验收：空搜索、大量同名前缀、多性别、已选项不在当前页、旧请求晚到；逐个断言服务端返回上限及 payload，不能只验 DOM 条数。取消关闭弹窗后不得写入旧结果；不要求本次实现。
 
 ### F05 · P1：全局侧栏用完整待确认快照轮询徽标
 
-`apps/desktop/src/renderer/src/components/Layout.tsx:169–179` 每 3,000ms 调 `api.scrape.listPending()`，只用数组长度计算侧栏徽标。真实链路：`apps/desktop/src/preload/index.ts:560` → `apps/desktop/src/main/ipc/scrapeHandlers.ts:90–91` → `apps/desktop/src/main/services/scrapeJobController.ts:267–268` → `apps/desktop/src/main/services/videoPendingScrapeService.ts:131–133` → `apps/desktop/src/main/db/pendingVideoScrapeRepo.ts:360–367`。
+`apps/desktop/src/renderer/src/components/Layout.tsx:169–179` 每 3,000ms 调 `api.scrape.listPending()`，只用数组长度计算侧栏徽标。真实链路：`apps/desktop/src/preload/index.ts:560` → `apps/desktop/src/main/ipc/scrapeHandlers.ts:90–91` → `apps/desktop/src/main/services/scrapeJobController.ts:267–268` → `apps/desktop/src/main/services/videoPendingScrapeService.ts:131–133` → `packages/library/src/db/pendingVideoScrapeRepo.ts:360–367`。
 
 该仓储先取全部 pending ID，再逐个 `getPendingVideoScrapeById`；返回含候选 `result_json` 解析结果和暂存资源路径（`:246–276`），并不是 count DTO。单次返回随 Q 及其候选/资源数增长。即便用户只浏览影片、待确认页没打开，也会触发这条请求。3 秒是配置周期，不是实测频率；请求去重、耗时和窗口状态会影响实际次数。
 
@@ -151,9 +151,9 @@
 
 ### F08 · P2：分页 DTO 仍宽，不能把条数上限当作字节上限
 
-`apps/desktop/src/main/db/scopedVideoCatalogRepo.ts:375–381` 使用 `v.*`；`hydrateRows :304–326` spread 保留字段。`packages/contracts/src/videoTypes.ts:101–129` 包含 summary、original_title、多个名称和时间等，`packages/contracts/src/catalogTypes.ts:15–18` 还附跨库 badges；列表不含详情专属 resources/tags/assets 全对象，已有“列表/详情”分层，需在该基础上收窄。`scopedVideoCatalogRepo.ts:141–155` badges SQL 没有数量 LIMIT，每行随影片的库成员关系数增长。
+`packages/library/src/db/scopedVideoCatalogRepo.ts:375–381` 使用 `v.*`；`hydrateRows :304–326` spread 保留字段。`packages/contracts/src/videoTypes.ts:101–129` 包含 summary、original_title、多个名称和时间等，`packages/contracts/src/catalogTypes.ts:15–18` 还附跨库 badges；列表不含详情专属 resources/tags/assets 全对象，已有“列表/详情”分层，需在该基础上收窄。`scopedVideoCatalogRepo.ts:141–155` badges SQL 没有数量 LIMIT，每行随影片的库成员关系数增长。
 
-演员列表 `apps/desktop/src/main/db/actressRepo.ts:359–378` 同样 `a.*`；`packages/contracts/src/actressTypes.ts:20–43,75–78` 的 ListItem 继承个人简介、裁剪 JSON 等完整 Actress 字段。清单/演员作品集的 `v.*` 使 F01/F02 的大数组更宽。
+演员列表 `packages/library/src/db/actressRepo.ts:359–378` 同样 `a.*`；`packages/contracts/src/actressTypes.ts:20–43,75–78` 的 ListItem 继承个人简介、裁剪 JSON 等完整 Actress 字段。清单/演员作品集的 `v.*` 使 F01/F02 的大数组更宽。
 
 建议：显式 `VideoCardDTO / ActressCardDTO / CandidateDTO` 投影；字段以实际卡片消费为准，简介/原始编辑数据按单实体 GET。需要支持多库标识时可传有限可见摘要及总数，或共享库字典；任何截断必须保留正确的点击作用域。类型裁剪不等于运行时裁剪，必须同步改 SQL/映射。
 

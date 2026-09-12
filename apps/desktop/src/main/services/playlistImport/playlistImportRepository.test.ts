@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import Database from 'better-sqlite3'
-import { migrateDatabase } from '../../db/migrations'
-import { ensureVideoMembership } from '../../db/libraryMembershipRepo'
+import { migrateDatabase } from '@library/db/migrations'
+import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
 import {
   normalizePlaylistImportUrl,
   PLAYLIST_IMPORT_DISCOVERY_LIMITS,

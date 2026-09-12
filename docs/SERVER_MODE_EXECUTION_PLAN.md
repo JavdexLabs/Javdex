@@ -200,7 +200,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：新增 `packages/library/src/runtime/host.ts`；扫描审计 JSON 兼容层迁入 library 并通过 `resolveLibraryUserDataPath()` 取目录，不再导入 Electron。桌面 `configureDesktopLibraryRuntime()` 在 `app.whenReady` 注入 userData 与 `nativeImage` 尺寸解码，并把 catalog 查询 worker 入口从 `app.getAppPath()` 改为显式配置。`assetStoragePaths` / `assetCrypto` / `mediaAssetStore/imageBytes` 改为走宿主，不再直接 `app.getPath` 或 `nativeImage`。查询 worker 源文件仍在 desktop，因为它还依赖尚未抽离的 IPC schema / 审计 / 分类查询服务。
 - 工程默认：Electron 测试通过 `scripts/register-library-test-host.ts` 注入解码器；`JAVDEX_TEST_USER_DATA` 覆盖路径，未设置时测试宿主使用临时目录。生产未配置宿主且无测试覆盖时失败，不静默回退。
-- 未做：settings 仍由 desktop `getSettings()` 提供媒体目录自定义路径与加密开关；mediaAssetStore 模块仍在 desktop；scanner 编排、NFO 导出窗口护栏仍在 desktop。
+- 未做：mediaAssetStore 模块仍在 desktop，但已不再导入 Electron 或 settingsStore；scanner 编排、NFO 导出窗口护栏仍在 desktop。
 
 ### S02D：先完成桌面本地后端重构
 

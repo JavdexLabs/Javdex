@@ -1,7 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveLibraryUserDataPath } from '@library/runtime/host'
-import { getSettings } from '../settings/settingsStore'
+import { resolveLibraryMediaAssetsPath, resolveLibraryUserDataPath } from '@library/runtime/host'
 
 export const MEDIA_ASSETS_DIRNAME = 'media_assets'
 export const ASSET_PATH_ALIAS_FILENAME = '.asset-path-aliases.enc'
@@ -20,7 +19,7 @@ export function defaultMediaAssetsRoot(): string {
 
 /** Active media assets root (custom path or default under userData). */
 export function resolveMediaAssetsRoot(): string {
-  const custom = getSettings().mediaAssetsPath?.trim()
+  const custom = resolveLibraryMediaAssetsPath()
   if (!custom) return defaultMediaAssetsRoot()
   return path.resolve(custom)
 }

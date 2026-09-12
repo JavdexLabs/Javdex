@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { getSettings } from '../../settings/settingsStore'
+import { resolveLibraryAssetEncryption } from '@library/runtime/host'
 import { encryptPlain, decryptBlob, decryptBlobAsync, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
 import {
   getAssetCacheRevision, getCachedAsset, setCachedAsset, sameAssetByteSignature,
@@ -170,7 +170,7 @@ export function writeImageAsset(
   ensureAssetDirs()
   const dir = imageAssetDir(subdir)
   const readableBase = buildReadableAssetBase(seed, urlKey)
-  if (getSettings().assetEncryption) {
+  if (resolveLibraryAssetEncryption()) {
     const plainRel = path.posix.join(subdir, `${readableBase}${ext}`)
     const opaqueBase = buildOpaqueAssetBase(seed, urlKey)
     const filename = `${opaqueBase}.enc`

@@ -10,9 +10,15 @@ export interface LibraryImageCodec {
   sizeFromPath(filePath: string): LibraryImageSize | null
 }
 
+export interface LibraryAssetSettings {
+  assetEncryption(): boolean
+  mediaAssetsPath(): string | null
+}
+
 export interface LibraryHost {
   userDataPath(): string
   images?: LibraryImageCodec
+  assets?: LibraryAssetSettings
 }
 
 let host: LibraryHost | null = null
@@ -34,4 +40,13 @@ export function resolveLibraryUserDataPath(): string {
 
 export function getLibraryImageCodec(): LibraryImageCodec | undefined {
   return host?.images
+}
+
+export function resolveLibraryAssetEncryption(): boolean {
+  return host?.assets?.assetEncryption() === true
+}
+
+export function resolveLibraryMediaAssetsPath(): string | null {
+  const custom = host?.assets?.mediaAssetsPath()?.trim()
+  return custom ? custom : null
 }

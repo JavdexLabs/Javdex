@@ -62,9 +62,10 @@ function identityCatalogId(): string {
 
 function activePreferences(input: NfoExportPreferences): NfoExportPreferences {
   const active = new Set(nfoExportRepository.listActiveLibraries().map((library) => library.id))
+  const requested = Array.isArray(input.libraryIds) ? input.libraryIds : []
   return {
     ...input,
-    libraryIds: Array.from(new Set(input.libraryIds.filter((id) => active.has(id))))
+    libraryIds: Array.from(new Set(requested.filter((id) => active.has(id))))
   }
 }
 

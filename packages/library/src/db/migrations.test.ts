@@ -1185,7 +1185,11 @@ describe('database schema', () => {
         'catalog_writer_claims',
         'catalog_operation_receipts',
         'catalog_image_uploads',
-        'catalog_image_file_jobs'
+        'catalog_image_file_jobs',
+        'catalog_tasks',
+        'catalog_maintenance_plans',
+        'catalog_settings',
+        'catalog_root_markers'
       ]
       assert.deepEqual(
         expectedTables.map(

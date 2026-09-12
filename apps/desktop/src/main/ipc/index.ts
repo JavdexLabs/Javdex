@@ -51,10 +51,10 @@ export function registerIpcHandlers(
   registerPlaylistHandlers(options.backend)
   registerActressHandlers(options.backend, options.actressDesktop)
   registerFacetHandlers(options.backend)
-  registerScrapeHandlers(ctx)
+  registerScrapeHandlers(ctx, options.backend)
   registerPluginDevHandlers(ctx)
   registerLibraryCuratorHandlers()
-  registerAgentMetadataHandlers(ctx)
+  registerAgentMetadataHandlers(ctx, options.backend)
   registerPlaylistImportHandlers(ctx)
   registerPlayerHandlers()
 }

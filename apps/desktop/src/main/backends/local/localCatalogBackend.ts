@@ -9,7 +9,31 @@ import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { structuredError } from '@shared/protocol/errors'
 import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
 import { acceptCatalogTask, commitCatalogMutation, readOperationReceipt } from '@library/catalog/catalogOperations'
-import { applyVideoCoverRef, commitManageImageMutation } from '@library/catalog/catalogImageApply'
+import {
+  applyActressCropRef,
+  applyVideoCoverRef,
+  commitManageImageMutation
+} from '@library/catalog/catalogImageApply'
+import { bumpRowRevision } from '@library/catalog/catalogAggregateVersion'
+import { applyActressScrapeCandidate, applyVideoScrapeCandidate } from '@library/catalog/catalogScrapeApply'
+import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
+import { createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
+import {
+  applyAgentMetadataDraft,
+  discardAgentMetadataDraft,
+  findReadyAgentMetadata
+} from '@library/catalog/catalogAgentMetadata'
+import {
+  confirmPendingVideoScrape,
+  discardPendingVideoScrapeRecord
+} from '@library/catalog/catalogPendingVideoScrapes'
+import {
+  countPendingVideoScrapes,
+  getPendingVideoScrapeById,
+  listPendingVideoScrapes,
+  pagePendingVideoScrapes
+} from '@library/db/pendingVideoScrapeRepo'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   enqueueLibraryScan,
   requestLibraryScanCancel,
@@ -438,7 +462,29 @@ export function createLocalCatalogBackend(
     async splitResource(input) {
       return videos.splitResource(input.libraryId, input.videoId, input.resourceId)
     },
-    applyScrapeCandidate: () => unsupportedCatalogUseCase('videos.applyScrapeCandidate')
+    applyScrapeCandidate: async (input, ctx) => {
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'videos.applyScrapeCandidate',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () =>
+          applyVideoScrapeCandidate({
+            videoId: input.videoId,
+            fields: input.fields,
+            mode: input.mode,
+            candidate: input.candidate,
+            cover: input.cover,
+            samples: input.samples,
+            expected: ctx.expectedVersions,
+            operationId: ctx.operationId
+          })
+      )
+      return result.data
+    }
   }
 
   const actressCommands: CatalogActressCommands = {
@@ -548,8 +594,40 @@ export function createLocalCatalogBackend(
     async markScrapeSuccess(input) {
       return actressMaintenanceService.markScrapeSucceeded(input.actressId)
     },
-    applyCrop: () => unsupportedCatalogUseCase('actresses.applyCrop'),
-    applyScrapeCandidate: () => unsupportedCatalogUseCase('actresses.applyScrapeCandidate'),
+    applyCrop: async (input, ctx) => {
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'actresses.applyCrop',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => applyActressCropRef(input, ctx.expectedVersions, ctx.operationId)
+      )
+      return result.data
+    },
+    applyScrapeCandidate: async (input, ctx) => {
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'actresses.applyScrapeCandidate',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () =>
+          applyActressScrapeCandidate({
+            actressId: input.actressId,
+            candidate: input.candidate,
+            avatar: input.avatar,
+            gallery: input.gallery,
+            expected: ctx.expectedVersions,
+            operationId: ctx.operationId
+          })
+      )
+      return result.data
+    },
     async conflictList() {
       return actressIdentityConflictWorkflow.listConflictGroups()
     },
@@ -783,7 +861,33 @@ export function createLocalCatalogBackend(
     async removeVideo(input) {
       return removeVideoFromPlaylist(input)
     },
-    applyImport: () => unsupportedCatalogUseCase('playlists.applyImport')
+    async applyImport(input, ctx) {
+      const expectedL = ctx.expectedVersions.L
+      if (!expectedL) {
+        throw structuredError('INVALID_INPUT', '媒体库更新需要 L 版本', { field: 'expectedVersions.L' })
+      }
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'playlists.applyImport',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () =>
+          applyPlaylistImport({
+            name: input.name,
+            videoIds: input.videoIds,
+            libraryId: input.libraryId,
+            cover: input.cover,
+            sourceUrl: input.sourceUrl,
+            expected: ctx.expectedVersions,
+            operationId: ctx.operationId,
+            expectedLibraryRevision: expectedL.revision
+          })
+      )
+      return result.data
+    }
   }
 
   const libraryCommands: CatalogLibraryCommands = {
@@ -1089,8 +1193,142 @@ export function createLocalCatalogBackend(
       async getOperation(input) {
         return readOperationReceipt(input.operationId)
       },
-      createTargetList: () => unsupportedCatalogUseCase('targetLists.create'),
-      pageTargetList: () => unsupportedCatalogUseCase('targetLists.page')
+      async createTargetList(input, ctx) {
+        const result = commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'targetLists.create',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => createCatalogTargetList(input)
+        )
+        return result.data
+      },
+      async pageTargetList(input) {
+        return pageCatalogTargetList(input)
+      }
+    },
+    pendingVideoScrapes: {
+      async count() {
+        return countPendingVideoScrapes()
+      },
+      async existingIds() {
+        return (
+          getDb()
+            .prepare('SELECT video_id FROM pending_video_scrapes ORDER BY video_id')
+            .all() as Array<{ video_id: number }>
+        ).map((row) => row.video_id)
+      },
+      async page(input) {
+        return pagePendingVideoScrapes({
+          offset: input.offset,
+          limit: Math.min(input.limit ?? 50, 100)
+        })
+      },
+      async get(input) {
+        return getPendingVideoScrapeById(input.pendingScrapeId)
+      },
+      async list() {
+        return listPendingVideoScrapes()
+      },
+      async confirm(input, ctx) {
+        const expectedRevision = ctx.expectedVersions.Q?.revision
+        if (expectedRevision == null) {
+          throw structuredError('INVALID_INPUT', '待确认操作需要 Q 版本', {
+            field: 'expectedVersions.Q'
+          })
+        }
+        const pending = getPendingVideoScrapeById(input.pendingScrapeId)
+        if (!pending) throw structuredError('INVALID_INPUT', '待确认影片刮削结果不存在')
+        assertExpectedVideoVersion(pending.videoId, ctx.expectedVersions, ctx.operationId)
+        const result = commitManageImageMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'pendingVideoScrapes.confirm',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => {
+            const confirmed = confirmPendingVideoScrape(input, { expectedRevision })
+            if (confirmed.applied) {
+              bumpRowRevision('videos', input.mergeRetainedVideoId ?? pending.videoId)
+            }
+            return confirmed
+          }
+        )
+        return result.data
+      },
+      async discard(input, ctx) {
+        const expectedRevision =
+          ctx.expectedVersions.Q?.revision ??
+          getPendingVideoScrapeById(input.pendingScrapeId)?.revision
+        let stagedPaths: string[] = []
+        const result = commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'pendingVideoScrapes.discard',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => {
+            const pending = getPendingVideoScrapeById(input.pendingScrapeId)
+            if (!pending || (expectedRevision != null && pending.revision !== expectedRevision)) {
+              throw structuredError('VERSION_CONFLICT', '待确认刮削结果已变化，请刷新后重新确认')
+            }
+            const discarded = discardPendingVideoScrapeRecord(input.pendingScrapeId)
+            stagedPaths = discarded.stagedPaths
+            return { ok: discarded.ok }
+          }
+        )
+        if (stagedPaths.length > 0) mediaAssetStore.cleanupVideoScrapeStagingPaths(stagedPaths)
+        return result.data
+      }
+    },
+    agentMetadata: {
+      async findReady(input) {
+        return findReadyAgentMetadata(input.target)
+      },
+      async apply(input, ctx) {
+        const result = commitManageImageMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'agentMetadata.apply',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () =>
+            applyAgentMetadataDraft({
+              draftId: input.draftId,
+              reviewToken: input.reviewToken,
+              uploads: input.uploads,
+              expected: ctx.expectedVersions,
+              operationId: ctx.operationId
+            })
+        )
+        return result.data
+      },
+      async discard(input, ctx) {
+        const expectedRevision = ctx.expectedVersions.Q?.revision
+        if (expectedRevision == null) {
+          throw structuredError('INVALID_INPUT', '待确认操作需要 Q 版本', { field: 'expectedVersions.Q' })
+        }
+        const result = commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'agentMetadata.discard',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => discardAgentMetadataDraft(input.draftId, expectedRevision)
+        )
+        return result.data
+      }
     },
     assets: unsupportedSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
     migration: unsupportedSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),

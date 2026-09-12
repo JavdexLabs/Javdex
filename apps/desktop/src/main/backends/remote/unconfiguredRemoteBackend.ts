@@ -227,6 +227,16 @@ export function createUnconfiguredRemoteBackend(
       'createTargetList',
       'pageTargetList'
     ]),
+    pendingVideoScrapes: rejectSlice([
+      'count',
+      'existingIds',
+      'page',
+      'get',
+      'list',
+      'confirm',
+      'discard'
+    ]),
+    agentMetadata: rejectSlice(['findReady', 'apply', 'discard']),
     assets: rejectSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
     migration: rejectSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),
     async dispose(): Promise<void> {

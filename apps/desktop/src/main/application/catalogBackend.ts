@@ -222,6 +222,22 @@ export interface CatalogTaskCommands {
   pageTargetList: Query<'targetLists.page'>
 }
 
+export interface CatalogPendingVideoScrapeCommands {
+  count: Query<'pendingVideoScrapes.count'>
+  existingIds: Query<'pendingVideoScrapes.existingIds'>
+  page: Query<'pendingVideoScrapes.page'>
+  get: Query<'pendingVideoScrapes.get'>
+  list: Query<'pendingVideoScrapes.list'>
+  confirm: Command<'pendingVideoScrapes.confirm'>
+  discard: Command<'pendingVideoScrapes.discard'>
+}
+
+export interface CatalogAgentMetadataCommands {
+  findReady: Query<'agentMetadata.findReady'>
+  apply: Command<'agentMetadata.apply'>
+  discard: Command<'agentMetadata.discard'>
+}
+
 export interface CatalogAssetCommands {
   createUpload: Command<'uploads.create'>
   inspectUpload: Query<'uploads.inspect'>
@@ -258,6 +274,8 @@ export interface CatalogBackend {
   nfo: CatalogNfoCommands
   browser: CatalogBrowserCommands
   tasks: CatalogTaskCommands
+  pendingVideoScrapes: CatalogPendingVideoScrapeCommands
+  agentMetadata: CatalogAgentMetadataCommands
   assets: CatalogAssetCommands
   migration: CatalogMigrationCommands
   dispose(): Promise<void>

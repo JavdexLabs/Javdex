@@ -65,6 +65,7 @@ import type {
 import type { PlaylistListQuery, PlaylistPageQuery } from '@shared/playlistTypes'
 import { remainderHandlers } from './manageCatalogRemainder'
 import { maintenanceHandlers } from './manageCatalogMaintenance'
+import { scrapeHandlers } from './manageCatalogScrape'
 import { requireManageBrowserSurface } from './manageBrowser'
 
 export interface ManageEnvelope {
@@ -820,7 +821,8 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
     return commit(args, () => requireManageBrowserSurface().revokeSessions())
   },
   ...remainderHandlers,
-  ...maintenanceHandlers
+  ...maintenanceHandlers,
+  ...scrapeHandlers
 }
 
 export function dispatchCatalogManage(

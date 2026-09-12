@@ -507,7 +507,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       merge: m('videos.merge'),
       splitResource: m('videos.splitResource'),
       setPoster: m('videos.setPoster'),
-      importSamples: m('videos.importSamples')
+      importSamples: m('videos.importSamples'),
+      applyScrapeCandidate: m('videos.applyScrapeCandidate')
     },
     actresses: {
       ...rejectSlice(ACTRESS_KEYS, (key) => unsupported(`actresses.${String(key)}`)),
@@ -534,6 +535,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       setPoster: m('actresses.setPoster'),
       importGallery: m('actresses.importGallery'),
       applyCrop: m('actresses.applyCrop'),
+      applyScrapeCandidate: m('actresses.applyScrapeCandidate'),
       conflictList: q('actressConflicts.list'),
       conflictQueuePage: q('actressConflicts.queuePage'),
       conflictGet: q('actressConflicts.get'),
@@ -620,7 +622,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       update: m('playlists.update'),
       delete: mOk('playlists.delete'),
       addVideo: mOk('playlists.addVideo'),
-      removeVideo: mOk('playlists.removeVideo')
+      removeVideo: mOk('playlists.removeVideo'),
+      applyImport: m('playlists.applyImport')
     },
     libraries: {
       ...rejectSlice(LIBRARY_KEYS, (key) => unsupported(`libraries.${String(key)}`)),
@@ -778,8 +781,22 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       async getOperation(input, ctx) {
         return query('operations.get', input, ctx?.signal)
       },
-      createTargetList: () => unsupported('targetLists.create'),
-      pageTargetList: () => unsupported('targetLists.page')
+      createTargetList: m('targetLists.create'),
+      pageTargetList: q('targetLists.page')
+    },
+    pendingVideoScrapes: {
+      count: q('pendingVideoScrapes.count'),
+      existingIds: q('pendingVideoScrapes.existingIds'),
+      page: q('pendingVideoScrapes.page'),
+      get: q('pendingVideoScrapes.get'),
+      list: q('pendingVideoScrapes.list'),
+      confirm: m('pendingVideoScrapes.confirm'),
+      discard: m('pendingVideoScrapes.discard')
+    },
+    agentMetadata: {
+      findReady: q('agentMetadata.findReady'),
+      apply: m('agentMetadata.apply'),
+      discard: m('agentMetadata.discard')
     },
     assets: {
       ...rejectSlice(ASSET_KEYS, (key) => unsupported(`assets.${String(key)}`)),

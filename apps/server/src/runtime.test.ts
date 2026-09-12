@@ -20,13 +20,20 @@ import { dispatchManageOperation } from './manageDispatch'
 import { startJavdexServer, type JavdexServerHandle } from './runtime'
 import type { ServerConfig } from './config'
 import { SERVER_APP_VERSION } from './appVersion'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createRemoteCatalogBackend } from '../../desktop/src/main/backends/remote/remoteCatalogBackend'
 import { createLocalCatalogBackend } from '../../desktop/src/main/backends/local/localCatalogBackend'
 import { upsertActressFromScrape } from '@library/db/actressRepo'
 import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
 import { previewLibraryPathRemoval } from '@library/scan/libraryPathCleanupService'
 import { JAVDEX_ROOT_MARKER } from '@library/scan/javdexRootMarker'
+import { mediaAssetStore } from '@library/mediaAssetStore'
+import {
+  getPendingVideoScrapeById,
+  replacePendingVideoScrape
+} from '@library/db/pendingVideoScrapeRepo'
+import { targetListFilterDigest } from '@library/catalog/catalogTargetLists'
+import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 
 const previousUserData = process.env.JAVDEX_TEST_USER_DATA
 
@@ -1349,6 +1356,490 @@ describe('server runtime lifecycle', () => {
       const localLatest = await local.libraries.latestScan({ libraryId: 1 })
       assert.equal(Boolean(remoteLatest), true)
       assert.equal(Boolean(localLatest), true)
+    } finally {
+      await remote.dispose()
+      await local.dispose()
+    }
+  })
+
+  it('confirms a staged scrape, applies candidates, imports a playlist, and freezes a target list', async () => {
+    const dataDir = path.join(root, 's10-apply')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const uniqueClip = (code: string): string => {
+      const filePath = path.join(mediaRoot, `${code}.mp4`)
+      fs.writeFileSync(filePath, Buffer.from(code))
+      return filePath
+    }
+    const { videoId } = await insertBoundVideo('S10-001', uniqueClip('S10-001'))
+    const second = await insertBoundVideo('S10-002', uniqueClip('S10-002'))
+    const png = await sharp({
+      create: { width: 16, height: 12, channels: 3, background: { r: 12, g: 80, b: 40 } }
+    })
+      .png()
+      .toBuffer()
+    const staged = mediaAssetStore.stageVideoScrapeImages([
+      { field: 'cover', position: 0, remoteUrl: 'https://example.test/cover.png', data: png }
+    ])
+    const pending = replacePendingVideoScrape({
+      videoId,
+      selectedFields: ['title', 'cover'],
+      applicableFields: ['title', 'cover'],
+      updateMode: 'replace',
+      request: { source: 's10-test' },
+      warnings: [],
+      sources: [
+        {
+          pluginName: 's10',
+          pluginSource: 'builtin',
+          pluginVersion: '1',
+          pluginConfig: {},
+          sourceName: 's10',
+          selectedFields: ['title', 'cover'],
+          candidates: [
+            {
+              result: {
+                code: 'S10-001',
+                title: 'Confirmed Title',
+                coverUrl: 'https://example.test/cover.png'
+              },
+              sourceUrl: 'https://example.test/s10-001',
+              normalizedSourceUrl: 'https://example.test/s10-001',
+              resources: staged.map((item) => ({
+                field: item.field,
+                position: item.position,
+                remoteUrl: item.remoteUrl,
+                stagedPath: item.stagedPath,
+                width: item.width,
+                height: item.height,
+                sizeBytes: item.sizeBytes
+              }))
+            }
+          ]
+        }
+      ]
+    })
+    const pendingRow = getPendingVideoScrapeById(pending.pendingScrapeId)!
+    const videoVersion = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(videoId) as { generation: number; revision: number }
+    const confirm = await postManage(
+      base,
+      'pendingVideoScrapes.confirm',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {
+          V: videoVersion,
+          Q: { generation: 1, revision: pendingRow.revision }
+        },
+        input: {
+          pendingScrapeId: pending.pendingScrapeId,
+          selections: [
+            {
+              sourceId: pendingRow.sources[0].id,
+              candidateId: pendingRow.sources[0].candidates[0].id
+            }
+          ]
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(confirm.status, 200, JSON.stringify(confirm.json))
+    assert.equal((confirm.json as { applied: boolean }).applied, true)
+    const confirmed = getDb()
+      .prepare('SELECT title, cover_path FROM videos WHERE id = ?')
+      .get(videoId) as { title: string; cover_path: string }
+    assert.equal(confirmed.title, 'Confirmed Title')
+    assert.ok(confirmed.cover_path?.startsWith('covers/'))
+    assert.equal(fs.existsSync(path.join(dataDir, 'media_assets', confirmed.cover_path)), true)
+    assert.equal(getPendingVideoScrapeById(pending.pendingScrapeId), null)
+
+    const applyVersion = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(second.videoId) as { generation: number; revision: number }
+    const apply = await postManage(
+      base,
+      'videos.applyScrapeCandidate',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: applyVersion },
+        input: {
+          videoId: second.videoId,
+          fields: ['title'],
+          mode: 'replace',
+          candidate: { code: 'S10-002', title: 'Applied Candidate' }
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(apply.status, 200, JSON.stringify(apply.json))
+    assert.equal((apply.json as { applied: boolean }).applied, true)
+    const appliedTitle = getDb()
+      .prepare('SELECT title FROM videos WHERE id = ?')
+      .get(second.videoId) as { title: string }
+    assert.equal(appliedTitle.title, 'Applied Candidate')
+
+    const actressId = upsertActressFromScrape('S10 Star', null, 'female')
+    const actressVersion = getDb()
+      .prepare('SELECT generation, revision FROM actresses WHERE id = ?')
+      .get(actressId) as { generation: number; revision: number }
+    const actressApply = await postManage(
+      base,
+      'actresses.applyScrapeCandidate',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { A: actressVersion },
+        input: {
+          actressId,
+          candidate: { mainName: 'S10 Star', nameZh: '测试演员', nationality: 'JP' }
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(actressApply.status, 200, JSON.stringify(actressApply.json))
+
+    const avatarUpload = await postManage(
+      base,
+      'uploads.create',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: { purpose: 'actressAvatar', contentType: 'image/png' }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(avatarUpload.status, 200, JSON.stringify(avatarUpload.json))
+    const avatarUploadId = (avatarUpload.json as { uploadId: string }).uploadId
+    const avatarPut = await putUpload(base, avatarUploadId, png, { bearer: writer.secret })
+    assert.equal(avatarPut.status, 200, JSON.stringify(avatarPut.json))
+    const afterActressApply = getDb()
+      .prepare('SELECT generation, revision FROM actresses WHERE id = ?')
+      .get(actressId) as { generation: number; revision: number }
+    const setAvatar = await postManage(
+      base,
+      'actresses.setPoster',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { A: afterActressApply },
+        input: { actressId, image: { kind: 'upload', uploadId: avatarUploadId } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(setAvatar.status, 200, JSON.stringify(setAvatar.json))
+    const avatarRow = getDb()
+      .prepare('SELECT avatar_source_path, generation, revision FROM actresses WHERE id = ?')
+      .get(actressId) as {
+      avatar_source_path: string
+      generation: number
+      revision: number
+    }
+    assert.ok(avatarRow.avatar_source_path)
+    const sourceDigest = createHash('sha256')
+      .update(mediaAssetStore.readBytes(avatarRow.avatar_source_path))
+      .digest('hex')
+    const cropUpload = await postManage(
+      base,
+      'uploads.create',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: { purpose: 'actressAvatar', contentType: 'image/png' }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(cropUpload.status, 200, JSON.stringify(cropUpload.json))
+    const cropUploadId = (cropUpload.json as { uploadId: string }).uploadId
+    const cropPng = await sharp({
+      create: { width: 16, height: 12, channels: 3, background: { r: 200, g: 10, b: 10 } }
+    })
+      .png()
+      .toBuffer()
+    const cropPut = await putUpload(base, cropUploadId, cropPng, { bearer: writer.secret })
+    assert.equal(cropPut.status, 200, JSON.stringify(cropPut.json))
+    const staleCrop = await postManage(
+      base,
+      'actresses.applyCrop',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { A: { generation: avatarRow.generation, revision: avatarRow.revision } },
+        input: {
+          actressId,
+          sourceAssetId: actressId,
+          sourceDigest: '0'.repeat(64),
+          sourceVersion: String(avatarRow.revision),
+          image: { kind: 'upload', uploadId: cropUploadId }
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(staleCrop.status, 409, JSON.stringify(staleCrop.json))
+    const cropped = await postManage(
+      base,
+      'actresses.applyCrop',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { A: { generation: avatarRow.generation, revision: avatarRow.revision } },
+        input: {
+          actressId,
+          sourceAssetId: actressId,
+          sourceDigest,
+          sourceVersion: String(avatarRow.revision),
+          image: { kind: 'upload', uploadId: cropUploadId }
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(cropped.status, 200, JSON.stringify(cropped.json))
+
+    const agentVideo = await insertBoundVideo('S10-003', uniqueClip('S10-003'))
+    const now = new Date().toISOString()
+    getDb()
+      .prepare(
+        `INSERT INTO agent_runs (
+           id, use_case, status, config_revision, config_snapshot_json, runtime_id,
+           product_state_json, created_at, updated_at
+         ) VALUES (?, 'metadata-collector', 'running', 's10', '{}', 'pi', '{}', ?, ?)`
+      )
+      .run('s10-agent-run', now, now)
+    const drafts = new AgentMetadataDraftRepo()
+    const createdDraft = drafts.create({
+      id: 's10-agent-draft',
+      runId: 's10-agent-run',
+      target: { kind: 'video', id: agentVideo.videoId },
+      source: {
+        requestedUrl: 'https://example.test/s10-003',
+        finalUrl: 'https://example.test/s10-003',
+        displayUrl: 'https://example.test/s10-003',
+        sourceName: 's10'
+      },
+      payload: {
+        kind: 'video',
+        result: { code: 'S10-003', title: 'Agent Applied Title' },
+        observedFields: ['title'],
+        explicitlyEmptyFields: [],
+        evidenceRefs: []
+      },
+      resources: [],
+      warnings: []
+    }).draft
+    drafts.saveReview({
+      draftId: createdDraft.id,
+      expectedRevision: createdDraft.revision,
+      review: {
+        kind: 'video',
+        draftId: createdDraft.id,
+        revision: createdDraft.revision + 1,
+        token: 's10-review-token',
+        selection: {
+          kind: 'video',
+          draftId: createdDraft.id,
+          expectedRevision: createdDraft.revision + 1,
+          fields: ['title'],
+          mode: 'replace'
+        },
+        impacts: [],
+        warnings: [],
+        classifications: [],
+        canApply: true
+      }
+    })
+    const ready = await postManage(
+      base,
+      'agentMetadata.findReady',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { target: { kind: 'video', id: agentVideo.videoId } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(ready.status, 200, JSON.stringify(ready.json))
+    assert.equal((ready.json as { draft: { id: string } | null }).draft?.id, createdDraft.id)
+    const readyDraft = drafts.require(createdDraft.id)
+    const agentVideoVersion = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(agentVideo.videoId) as { generation: number; revision: number }
+    const agentApply = await postManage(
+      base,
+      'agentMetadata.apply',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {
+          V: agentVideoVersion,
+          Q: { generation: 1, revision: readyDraft.revision }
+        },
+        input: { draftId: createdDraft.id, reviewToken: 's10-review-token' }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(agentApply.status, 200, JSON.stringify(agentApply.json))
+    assert.equal((agentApply.json as { status: string }).status, 'applied')
+    const agentTitle = getDb()
+      .prepare('SELECT title FROM videos WHERE id = ?')
+      .get(agentVideo.videoId) as { title: string }
+    assert.equal(agentTitle.title, 'Agent Applied Title')
+
+    const discardVideo = await insertBoundVideo('S10-004', uniqueClip('S10-004'))
+    const discardDraft = drafts.create({
+      id: 's10-agent-discard',
+      runId: 's10-agent-run',
+      target: { kind: 'video', id: discardVideo.videoId },
+      source: {
+        requestedUrl: 'https://example.test/s10-004',
+        displayUrl: 'https://example.test/s10-004',
+        sourceName: 's10'
+      },
+      payload: {
+        kind: 'video',
+        result: { code: 'S10-004', title: 'Discard Me' },
+        observedFields: ['title'],
+        explicitlyEmptyFields: [],
+        evidenceRefs: []
+      },
+      resources: [],
+      warnings: []
+    }).draft
+    const discarded = await postManage(
+      base,
+      'agentMetadata.discard',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { Q: { generation: 1, revision: discardDraft.revision } },
+        input: { draftId: discardDraft.id }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(discarded.status, 200, JSON.stringify(discarded.json))
+    assert.equal(drafts.require(discardDraft.id).status, 'discarded')
+
+    const library = (await postManage(
+      base,
+      'libraries.get',
+      { serverId: writer.serverId, catalogId: writer.catalogId, input: { libraryId: 1 } },
+      { bearer: writer.secret }
+    )).json as { revision: number }
+    const imported = await postManage(
+      base,
+      'playlists.applyImport',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {
+          L: { generation: 1, revision: library.revision },
+          V: getDb()
+            .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+            .get(videoId) as { generation: number; revision: number }
+        },
+        input: {
+          name: 'S10 Import',
+          libraryId: 1,
+          videoIds: [videoId, second.videoId],
+          sourceUrl: 'https://example.test/list'
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(imported.status, 200, JSON.stringify(imported.json))
+    const playlistId = (imported.json as { playlistId: number }).playlistId
+    const members = getDb()
+      .prepare('SELECT video_id FROM playlist_video WHERE playlist_id = ? ORDER BY position')
+      .all(playlistId) as Array<{ video_id: number }>
+    assert.deepEqual(
+      members.map((row) => row.video_id),
+      [videoId, second.videoId]
+    )
+
+    const digest = targetListFilterDigest('videos.status:all')
+    const createdList = await postManage(
+      base,
+      'targetLists.create',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: { kind: 'videos.status:all', filterDigest: digest }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(createdList.status, 200, JSON.stringify(createdList.json))
+    const targetListId = (createdList.json as { targetListId: string }).targetListId
+    const page = await postManage(
+      base,
+      'targetLists.page',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { targetListId }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(page.status, 200, JSON.stringify(page.json))
+    const ids = (page.json as { ids: number[] }).ids
+    assert.equal(ids.includes(videoId), true)
+    assert.equal(ids.includes(second.videoId), true)
+    const stale = await postManage(
+      base,
+      'targetLists.create',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: { kind: 'videos.status:all', filterDigest: '0'.repeat(64) }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(stale.status, 409, JSON.stringify(stale.json))
+    assert.equal((stale.json as { code?: string }).code, 'VERSION_CONFLICT')
+
+    const credentials = memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    const remote = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials
+    })
+    const local = createLocalCatalogBackend({
+      identity: { mode: 'local', catalogId: writer.catalogId }
+    })
+    try {
+      const remotePage = (await remote.tasks.pageTargetList({ targetListId })) as { ids: number[] }
+      const localPage = (await local.tasks.pageTargetList({ targetListId })) as { ids: number[] }
+      assert.deepEqual(remotePage.ids, localPage.ids)
     } finally {
       await remote.dispose()
       await local.dispose()

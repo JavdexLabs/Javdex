@@ -6,6 +6,7 @@ import type {
   AgentMetadataApplyInput,
   AgentMetadataApplyOutcome,
   AgentMetadataDiscardInput,
+  AgentMetadataDraft,
   AgentMetadataPlanInput,
   AgentMetadataReview,
   AgentMetadataSnapshot,
@@ -37,6 +38,8 @@ import { agentMetadataBrowser } from './browserAdapter'
 import { agentMetadataDraftService } from './draftService'
 import { createAgentMetadataToolHandlers } from './toolPack'
 import { AgentMetadataActivityTimeline } from './activityTimeline'
+import type { CatalogBackend } from '../../application/catalogBackend'
+import type { ExpectedVersions } from '@shared/protocol/versions'
 
 interface AgentMetadataProductState extends Record<string, unknown> {
   schemaVersion: 1
@@ -111,6 +114,11 @@ function targetExists(target: AgentMetadataTarget): boolean {
 export class AgentMetadataCollection {
   private readonly active = new Map<string, ActiveMetadataRun>()
   private readonly listeners = new Set<(event: AgentMetadataSnapshotChangedEvent) => void>()
+  private catalog: CatalogBackend | null = null
+
+  bindCatalog(backend: CatalogBackend): void {
+    this.catalog = backend
+  }
 
   subscribe(listener: (event: AgentMetadataSnapshotChangedEvent) => void): () => void {
     this.listeners.add(listener)
@@ -432,43 +440,95 @@ export class AgentMetadataCollection {
     return review
   }
 
-  apply(input: AgentMetadataApplyInput): AgentMetadataApplyOutcome {
+  apply(input: AgentMetadataApplyInput): Promise<AgentMetadataApplyOutcome> | AgentMetadataApplyOutcome {
     const draft = agentMetadataDraftService.getDraft(input.draftId)
     if (!draft) throw new Error('元数据草稿不存在。')
     this.syncDraftState(input.draftId, 'applying', '正在应用元数据')
     try {
-      const outcome = agentMetadataDraftService.apply(input)
-      this.syncDraftState(
-        input.draftId,
-        outcome.status === 'preview_stale'
-          ? 'ready'
-          : outcome.status === 'routed_to_pending'
-            ? 'routed_to_pending'
-            : 'applied',
-        outcome.status === 'preview_stale'
-          ? '媒体库内容已变化，请重新检查预览'
-          : outcome.status === 'no_op'
-            ? '没有需要写入的变化'
-            : outcome.status === 'routed_to_pending'
-              ? '元数据冲突已转入待处理中心'
-              : '元数据已应用'
-      )
-      if (outcome.status !== 'preview_stale') this.retireDraftRun(input.draftId)
-      return outcome
+      const outcome = this.catalog
+        ? this.applyThroughCatalog(draft, input)
+        : agentMetadataDraftService.apply(input)
+      if (outcome instanceof Promise) {
+        return outcome.then(
+          (result) => this.finishApply(input.draftId, result),
+          (error) => {
+            this.syncDraftState(input.draftId, 'ready', '应用失败，草稿仍可重新检查')
+            throw error
+          }
+        )
+      }
+      return this.finishApply(input.draftId, outcome)
     } catch (error) {
       this.syncDraftState(input.draftId, 'ready', '应用失败，草稿仍可重新检查')
       throw error
     }
   }
 
-  discard(input: AgentMetadataDiscardInput): void {
-    agentMetadataDraftService.discard(input)
+  private finishApply(
+    draftId: string,
+    outcome: AgentMetadataApplyOutcome
+  ): AgentMetadataApplyOutcome {
+    this.syncDraftState(
+      draftId,
+      outcome.status === 'preview_stale'
+        ? 'ready'
+        : outcome.status === 'routed_to_pending'
+          ? 'routed_to_pending'
+          : 'applied',
+      outcome.status === 'preview_stale'
+        ? '媒体库内容已变化，请重新检查预览'
+        : outcome.status === 'no_op'
+          ? '没有需要写入的变化'
+          : outcome.status === 'routed_to_pending'
+            ? '元数据冲突已转入待处理中心'
+            : '元数据已应用'
+    )
+    if (outcome.status !== 'preview_stale') this.retireDraftRun(draftId)
+    return outcome
+  }
+
+  private async applyThroughCatalog(
+    draft: AgentMetadataDraft,
+    input: AgentMetadataApplyInput
+  ): Promise<AgentMetadataApplyOutcome> {
+    const catalog = this.catalog
+    if (!catalog) return agentMetadataDraftService.apply(input)
+    const ready = (await catalog.agentMetadata.findReady({ target: draft.target })) as {
+      draft?: AgentMetadataDraft | null
+      versions?: ExpectedVersions
+    }
+    const versions: ExpectedVersions = { ...(ready.versions ?? {}) }
+    versions.Q = { generation: 1, revision: draft.revision }
+    return (await catalog.agentMetadata.apply(
+      { draftId: input.draftId, reviewToken: input.reviewToken },
+      { operationId: input.idempotencyKey, expectedVersions: versions }
+    )) as AgentMetadataApplyOutcome
+  }
+
+  async discard(input: AgentMetadataDiscardInput): Promise<void> {
+    if (this.catalog) {
+      await this.catalog.agentMetadata.discard(
+        { draftId: input.draftId },
+        {
+          operationId: randomUUID(),
+          expectedVersions: { Q: { generation: 1, revision: input.expectedRevision } }
+        }
+      )
+    } else {
+      agentMetadataDraftService.discard(input)
+    }
     this.syncDraftState(input.draftId, 'discarded', '元数据草稿已丢弃')
     this.retireDraftRun(input.draftId)
   }
 
-  findReady(target: AgentMetadataTarget) {
-    return agentMetadataDraftService.findReadyForTarget(target)
+  async findReady(target: AgentMetadataTarget): Promise<AgentMetadataDraft | null> {
+    if (!this.catalog) return agentMetadataDraftService.findReadyForTarget(target)
+    const result = (await this.catalog.agentMetadata.findReady({ target })) as
+      | { draft?: AgentMetadataDraft | null }
+      | AgentMetadataDraft
+      | null
+    if (result && typeof result === 'object' && 'draft' in result) return result.draft ?? null
+    return (result as AgentMetadataDraft | null) ?? null
   }
 
   snapshot(runId: string): AgentMetadataSnapshot | null {

@@ -19,7 +19,6 @@ import {
 import type { DesktopCapabilityMap } from '@shared/desktop/capabilities'
 import { DESKTOP_CAPABILITY_ACTIONS } from '@shared/desktop/capabilities'
 import { queryClient } from '../query/queryClient'
-import { api } from '../api'
 
 function assumedLocalCapabilities(): DesktopCapabilityMap {
   return Object.fromEntries(
@@ -90,13 +89,13 @@ export function DesktopSessionProvider({ children }: { children: ReactNode }): J
   }, [applySnapshot])
 
   const reconnect = useCallback(async () => {
-    applySnapshot(await api.desktop.reconnect())
+    applySnapshot(await window.api.desktop.reconnect())
   }, [applySnapshot])
 
   const claimWriter = useCallback(
     async (input: DesktopWriterClaimRequest) => {
-      const result = await api.desktop.claimWriter(input)
-      applySnapshot(await api.desktop.getSession())
+      const result = await window.api.desktop.claimWriter(input)
+      applySnapshot(await window.api.desktop.getSession())
       return result
     },
     [applySnapshot]

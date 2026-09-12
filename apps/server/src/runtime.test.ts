@@ -887,6 +887,12 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
     })
     try {
       const pending = backend.queries.getVideo({ scope: { kind: 'all' }, videoId: 1 })
+      const pendingError = pending.then(
+        () => {
+          throw new Error('stale generation query resolved')
+        },
+        (error: unknown) => error
+      )
       const started = Date.now()
       while (videosGetCount < 1 && Date.now() - started < 2000) {
         await new Promise((resolve) => setTimeout(resolve, 10))
@@ -896,10 +902,8 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
       const next = await backend.reconnect()
       assert.equal(next.generation, 2)
       assert.equal(backend.generation, 2)
-      await assert.rejects(
-        pending,
-        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
-      )
+      const aborted = await pendingError
+      assert.equal(isStructuredError(aborted) && aborted.code === 'CONNECTION_UNAVAILABLE', true)
       release()
       const fresh = (await backend.queries.getVideo({
         scope: { kind: 'all' },
@@ -985,16 +989,20 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
     })
     try {
       const pending = backend.queries.getVideo({ scope: { kind: 'all' }, videoId: 1 })
+      const pendingError = pending.then(
+        () => {
+          throw new Error('disposed query resolved')
+        },
+        (error: unknown) => error
+      )
       const started = Date.now()
       while (videosGetCount < 1 && Date.now() - started < 2000) {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       assert.equal(videosGetCount >= 1, true)
       await backend.dispose()
-      await assert.rejects(
-        pending,
-        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
-      )
+      const aborted = await pendingError
+      assert.equal(isStructuredError(aborted) && aborted.code === 'CONNECTION_UNAVAILABLE', true)
       release()
       assert.equal(backend.session().state, 'disconnected')
     } finally {

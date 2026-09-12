@@ -8,37 +8,21 @@ import {
   createVideoMetadataCandidateStager,
   getDefaultNfoFileStore,
   LOCAL_NFO_SUPPORTED_FIELDS,
-  type LocalNfoAnchor,
-  type LocalNfoIdentityInspection,
   type LocalNfoSourceAdapter
 } from '../metadata-sources'
 import { mediaAssetStore } from '@library/mediaAssetStore'
+import type { LocalNfoScanApplyResult, LocalNfoScanService } from '@library/scan/nfoScanPort'
 import {
   findVideoBusinessIdentityConflictForScrape,
   resolveEffectiveVideoScrapeFields,
   videoScrapeApplyService
 } from './videoScrapeApplyService'
 
-export type LocalNfoScanDisposition =
-  | 'none'
-  | 'imported'
-  | 'skipped'
-  | 'warning'
-  | 'pending-candidate'
-
-export interface LocalNfoScanApplyResult {
-  disposition: LocalNfoScanDisposition
-  warnings: string[]
-  pendingScrapeId?: number
-}
-
-export interface LocalNfoScanService {
-  inspectIdentity(anchor: LocalNfoAnchor): LocalNfoIdentityInspection
-  /** Before DB commit, not proof of commit. No-write outcomes may run without a business transaction.
-   * Returned warnings may grow during post-commit asset handling. */
-  apply(videoId: number, code: string, anchors: readonly LocalNfoAnchor[],
-    beforeCommit?: (result: LocalNfoScanApplyResult) => void): Promise<LocalNfoScanApplyResult>
-}
+export type {
+  LocalNfoScanApplyResult,
+  LocalNfoScanDisposition,
+  LocalNfoScanService
+} from '@library/scan/nfoScanPort'
 
 const SCAN_FIELDS = ALL_VIDEO_SCRAPE_FIELDS.filter((field) =>
   (LOCAL_NFO_SUPPORTED_FIELDS as readonly VideoScrapeField[]).includes(field)

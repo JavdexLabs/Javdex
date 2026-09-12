@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "private": true,
   "license": "MIT",
-  "description": "Node-only catalog database, image store, scan helpers, NFO codec/tickets/workset/export projection, and local path/resource identity; scanner orchestration/Electron NFO export/services extraction remains in progress",
+  "description": "Node-only catalog database, image store, scan helpers/orchestration, NFO codec/tickets/workset/export projection, and local path/resource identity; Electron NFO export and catalog application services extraction remains in progress",
   "exports": {
     "./*": "./src/*.ts"
   }

@@ -36,7 +36,7 @@
 | `apps/desktop` | 原 main/preload/renderer/MCP 已物理迁移 | 旧 main 内仍含业务、数据库、HTTP 和单例，远程后端尚未接入 |
 | `apps/web` | 现有只读页面及资源已迁移，可单独构建 | 新服务器宿主适配与部署验证 |
 | `packages/contracts` | 原 shared 的类型与纯工具，保留 `@shared/*` 兼容别名 | 正式远程读/写 DTO、输入 schema 与协议分组 |
-| `packages/library` | 已移入 Node 路径/根/资源身份工具、catalog SQLite、图片存储、扫描辅助、本地根护栏、NFO 编解码/导出资料与 sidecar 票据 | 扫描编排、Electron 封面导出、catalog 业务服务仍待抽离 |
+| `packages/library` | 已移入 Node 路径/根/资源身份工具、catalog SQLite、图片存储、扫描辅助与编排、本地根护栏、NFO 编解码/导出资料与 sidecar 票据 | Electron 封面导出、catalog 业务服务仍待抽离 |
 | `packages/ui` | 现有 Checkbox 与 CSS，桌面/Web 已引用 | 不预先扩大共享 UI 范围 |
 | `packages/http` | 私有 workspace 和职责说明 | HTTP 源码尚未抽离，无可运行入口 |
 | `apps/server` | 私有 workspace 和职责说明 | 服务启动、构建、Docker 均未实施，无占位成功脚本 |
@@ -51,7 +51,7 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02 | 进行中（library 已含 db、图片、扫描辅助、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：scanner 编排、Electron NFO 封面导出、catalog 业务服务仍在 desktop；S02D 未开始 |
+| S02 | 进行中（library 已含 db、图片、扫描辅助与编排、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、catalog 业务服务仍在 desktop；S02D 未开始 |
 | S03–S14 | 未开始 | 含必需阶段 S02D |
 
 ## 阶段顺序与工作分配
@@ -239,8 +239,15 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：将 `maintenanceTaskGate`、`progressPublisher` 和 `libraryPathCleanupService` 迁入 `packages/library/src/scan`。路径清理改为直接引用 `@shared/videoResourcePromotion`，不再经过 desktop 再导出。
 - 工程默认：维护闸门仍是进程单例，S02D 由 LocalCatalogBackend 装配。IPC/scanHandlers 暂时直接引用 library 闸门，S02D 再收到 application。
-- 验证：`npm run typecheck:node`；library / actress 边界通过。progress publisher、路径清理、scan coordinator、cooperative cleanup 与 NFO export controller 测试 77 项全部通过。
-- 未做：`scanner.ts` / `scanCoordinator.ts` 仍在 desktop。
+- 验证：`npm run typecheck:node`；library / actress 边界通过。progress publisher、路径清理、scan coordinator、cooperative cleanup 与 NFO export controller 测试 77 项全部通过。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
+- 未做：当时 `scanner.ts` / `scanCoordinator.ts` 仍在 desktop。
+
+**S02 实施记录（扫描编排切片）**
+
+- 范围：将 `scanner.ts` / `scanCoordinator.ts` 迁入 `packages/library/src/scan`。本地 NFO apply 通过 `nfoScanPort` 由桌面注入（实现仍依赖刮削应用服务，留在 desktop）。`scanCoordinator` 改为直接引用 `@shared/videoResourcePromotion`。桌面 `scanner/` 仅再导出并在导入时配置 NFO 端口，供 IPC/测试兼容。
+- 工程默认：扫描编排仍使用 `getDb()` 与维护闸门进程单例；S02D 由 LocalCatalogBackend 装配。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。扫描编排及相关测试 277 项全部通过（nfoScanPort、scanner、coordinator、cooperative cleanup、path cleanup、pending identity、local NFO transaction）。
+- 未做：`nfoExportModule` 仍使用 `nativeImage` 与窗口护栏；catalog 业务服务仍在 desktop；S02D 未开始。
 
 ### S02D：先完成桌面本地后端重构
 

@@ -461,7 +461,7 @@ type MetadataAssetRef =
 
 ### 35.6 重点文件
 
-- `apps/desktop/src/main/scanner/scanner.ts`
+- `packages/library/src/scan/scanner.ts`
 - `packages/library/src/scan/libraryScanAuditStore.ts`
 - `packages/library/src/db/mediaLibraryRepo.ts`
 - `packages/library/src/db/pendingScanRepo.ts` 与新增 identity repo/service

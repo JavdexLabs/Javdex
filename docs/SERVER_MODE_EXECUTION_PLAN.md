@@ -56,6 +56,7 @@
 | S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
 | S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
 | S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
+| S06 | 正式 schema 18 上传表、流式 PUT、全用途 apply 与崩溃恢复已落地；生产烟测含 upload/apply/restart | 见本文件 S06 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -418,6 +419,22 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 正式资源引用、上传 consumed 状态和短操作回执同数据库事务；文件写入、替换、旧图清理有持久恢复记录。恢复器可重复运行，不能删除任何正式引用图片，待确认图片有独立引用保护。覆盖封面、样张、头像源/裁切/图库、分类与清单图片，不只实现封面示例。
 
 未引用上传初值 24 小时过期；按服务器时间回收、受理中的消费须防止与 GC 竞争，正式待确认不按普通上传 TTL 清理。上传写入中断必须释放文件句柄、磁盘空间和并发占用。注入写文件前/后、引用提交前/后、旧图删除前/后的进程退出；分清进程退出测试和断电验证。
+
+**S06 实施记录（上传、apply、崩溃恢复）**
+
+- 范围：正式 schema 18 增加 `catalog_image_uploads` / `catalog_image_file_jobs`，以及 actresses/organizations/directors/series/playlists 的 `generation`/`revision`（不改写冻结的 V8 CREATE；新库 CREATE 后 ALTER）。`hasOfficialSchema18` 要求上传表与 job 表；未发布实验 V17（缺 identity）与未发布 18（`user_version=18` 但缺上传表）拒绝且不改写。本环境 SQLite 会把 `ALTER TABLE ADD COLUMN` 内联进 `sqlite_master` CREATE SQL，V16 等值检查对 A/F/P 表与 `videos` 一样排除列清单比较。library：槽位行先于字节；PUT 流 32 MiB、内容类型必须与申请一致、`inspectServedImage` 64M 像素预算；用途 `videoCover` / `videoSample` / `actressAvatar` / `actressGallery` / `classificationImage` / `playlistCover` / `pendingScrapeStaging`。`commitManageImageMutation` 在回执事务后跑 promote journal 与 file jobs；未提交 promote 的目标文件可被回收，正式引用与已 consumed 的 pending-scrape 路径永不删除。崩溃点 `JAVDEX_IMAGE_CRASH`：`afterPersistUploadRow` / `beforeWriteFile` / `afterWriteFile` / `beforeRefCommit` / `afterRefCommit` / `beforeOldDelete` / `afterOldDelete`，子进程 `process.exit(75)`。Node 宿主 PUT `/manage/v1/uploads/:uuid`（Bearer、版本头、Origin）；JSON `uploads.create`/`inspect`、`videos.edit`（cover ref，`bumpRevision: false` 再走 `editVideoRecord`）、`videos.setPoster`（upload→`cover_path`，本片 sample asset→`poster_path`，clear 清 poster）、`videos.importSamples`、`actresses.setPoster`/`importGallery`/`applyCrop`、`classificationImages.set`、`playlists.create`/`update`。桌面 LAN 浏览仍无 manage。catalog 图片 I/O 只走公开 `mediaAssetStore`（含 `writeAtomic` / `inspectServedImage` 再导出），不 import 私有 filesystem/pixelBudget。
+- 工程默认：暂存目录是 imagesDir 下的 `uploads/`，不进入 `ASSET_MEDIA_SUBDIRS`；刮削待确认独立 `.pending_scrape_staging/`。服务端 v1 `assetEncryption: () => false`，只存明文图。外键资产 ID、桌面路径字段（`posterPath`/`coverSourcePath`）与未知字段拒绝（M02）。Cookie 不能 PUT。本地 `videos.edit.cover` 走同一 apply；本地 `setPoster`/`importSamples` 仍用受信任本机文件/URL 入口（产品：本地文件导入、远程流式上传）。24h TTL 按服务器时间过期未消费槽位。
+- 验证（Linux Node 22.14 / amd64 glibc；实现提交 `9ad2f76` `703f96f` `47fe77b`，后续修复 `d02f56b` `4b5788d` `755a5f5`，生产烟测 `0f6658f`）：
+  - `npm run server:test` **11 通过 / 0 失败**（含 create→PUT→inspect→`videos.setPoster` 封面、重启后正式文件仍在且浏览可取图；Cookie 不能 PUT；拒绝桌面路径/未知字段/外键 sample）
+  - 定向 Electron：migrations V16–V18、uploads/apply/recovery/crash **24 通过 / 0 失败**；S05/S02D 回归 writer/operations/local backend/credentials/webServer/createDesktopRuntime **36 通过 / 0 失败**
+  - `npm run typecheck` 通过；`npm run pretest` 通过（含 `check:media-asset-store-boundaries`）
+  - `npm run test:packaging` **8 通过**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2985 tests / 2984 pass / 0 fail / 1 skip**
+  - `npm run server:build` 通过；`check:server-production-closure` 通过
+  - `npm run server:smoke:node` **PASS**：隔离生产安装、SQLite/WAL、HTTP、Range 206、会话跨 SIGTERM、writer claim 后门闸、Cookie 不能 PUT、videoCover 上传/apply 后重启仍可浏览正式封面
+  - `npm run server:smoke` **EXIT 1**：`docker is not available`（按设计非零）
+  - `npm run desktop:build` 通过
+- 未做：S07 RemoteCatalogBackend（桌面远程编辑/封面闭环、D01–D07 远程监测）；本地 `assets.createUpload` 仍 `UNSUPPORTED_CAPABILITY`；M14 迁库图片解密/存量检查（S12）；M05 任务入队（S08/S09）；M03 `setRating` 仍不递增 revision。崩溃注入覆盖进程退出，不是断电/fsync 失败。Docker 容器烟测仍缺。下一阶段不得把 mock 或研究探针当作真实部署/回放证据。
 
 ### S07：接入远程后端与最小闭环
 

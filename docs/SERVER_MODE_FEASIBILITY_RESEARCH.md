@@ -392,10 +392,10 @@ node scripts/run-electron-tests.mjs apps/desktop/src/main/services/videoScrapeAp
 | SQLite 读写与恢复 | WAL 读连接可见已提交数据，拒绝只读连接写入，关闭/重开保留数据，外键和完整性检查通过 |
 | 发布版本迁移 | `migrationsV16.test.ts` 在纯 Node 中 3 passed、0 failed，覆盖升级保留数据、失败回滚/重试和拒绝旧开发结构 |
 | Linux 图片依赖 | `sharp@0.35.4` 完成 PNG 生成、WebP 缩略图与尺寸读取；使用 Linux x64 原生模块 |
-| 未适配的 WebServer | 加载失败：`server.ts → mediaAssetStore.ts → filesystem.ts → settingsStore.ts → electron`，`MODULE_NOT_FOUND` |
-| 未适配的 WebCatalog | 同样因 `settingsStore.ts` 导入 Electron 而失败 |
+| 未适配的 WebServer | **S03 修复后**：`packages/http/src/server` 可在无 Electron 的纯 Node 中加载。修复前：`apps/desktop/src/main/web/server.ts → mediaAssetStore.ts → filesystem.ts → settingsStore.ts → electron`，`MODULE_NOT_FOUND` |
+| 未适配的 WebCatalog | **S03 修复后**：`packages/http/src/catalog` 可在无 Electron 的纯 Node 中加载。修复前同样因 `settingsStore.ts` 导入 Electron 而失败 |
 
-最后两项仍是当前基线的依赖阻塞，保留的探针以预期加载失败核查这些依赖；此前的解耦实验已撤回。**首轮结果本身不代表阶段 A 完成**。首轮尚未验证独立应用镜像构建、真实目录 worker 服务、HTTP/图片交割集成、Linux 挂载卸载保护、NAS网络、并发负载或远程播放器。
+最后两项在 S03 之后已改为纯 Node 可加载 HTTP 适配器；保留的探针现在断言这些模块成功加载，并在注释中保留修复前的 MODULE_NOT_FOUND 证据。**首轮结果本身不代表阶段 A 完成**。独立应用镜像构建、真实目录 worker 服务集成、Linux 挂载卸载保护、NAS网络、并发负载或远程播放器仍待后续阶段。
 
 复跑方式（在仓库根目录的 PowerShell）：
 

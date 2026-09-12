@@ -3,5 +3,8 @@
   "version": "0.7.0",
   "private": true,
   "license": "MIT",
-  "description": "Reserved workspace; extraction/implementation tracked in docs/SERVER_MODE_EXECUTION_PLAN.md"
+  "description": "Runtime-neutral LAN browser HTTP, pairing/auth storage, browse DTO projection, and static file serving. Desktop keeps webAccess lifecycle; management HTTP is registered separately by the server host.",
+  "exports": {
+    "./*": "./src/*.ts"
+  }
 }

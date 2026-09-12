@@ -38,7 +38,7 @@
 | `packages/contracts` | 原 shared 的类型与纯工具，保留 `@shared/*` 兼容别名 | 正式远程读/写 DTO、输入 schema 与协议分组 |
 | `packages/library` | 已移入 Node 路径/根/资源身份工具、catalog SQLite、图片存储、公网图片 HTTP、扫描辅助与编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、本地根护栏、NFO 编解码/导出资料与 sidecar 票据 | Electron 封面导出、刮削应用、catalog 查询 worker 入口仍待抽离 |
 | `packages/ui` | 现有 Checkbox 与 CSS，桌面/Web 已引用 | 不预先扩大共享 UI 范围 |
-| `packages/http` | 私有 workspace 和职责说明 | HTTP 源码尚未抽离，无可运行入口 |
+| `packages/http` | 局域网浏览 HTTP、配对/会话、浏览 DTO、Range/静态文件 | 管理 HTTP 面尚未实现；由服务器宿主单独注册 |
 | `apps/server` | 私有 workspace 和职责说明 | 服务启动、构建、Docker 均未实施，无占位成功脚本 |
 
 根 `package.json` 暂保留桌面打包 metadata 和已有运行依赖，产物仍为 `out/main`、`out/preload`、`out/renderer`、`out/web`。workspace 脚本通过根命令执行，避免 cwd 改变破坏 worker/图片/打包资源位置。根安装不再隐式 Electron rebuild；桌面环境显式运行 `npm run setup:desktop`。根仍有 Electron 开发依赖，不能把整份根安装作为独立服务端生产安装。

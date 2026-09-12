@@ -46,14 +46,12 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ nativeModules }))
     console.log('PASS: native sharp PNG generation, WebP thumbnail and decode')
 
-    // Record the real, unmodified module graph failure; never replace Electron with a stub.
-    for (const modulePath of ['../../apps/desktop/src/main/web/server', '../../apps/desktop/src/main/web/catalog']) {
-      let failure: NodeJS.ErrnoException | undefined
-      try { require(modulePath) } catch (error) { failure = error as NodeJS.ErrnoException }
-      assert.ok(failure, `${modulePath} unexpectedly loaded; update the research conclusion`)
-      assert.equal(failure.code, 'MODULE_NOT_FOUND')
-      assert.match(failure.message, /Cannot find module 'electron'/)
-      console.log(`CONFIRMED BLOCKER: ${modulePath}\n${failure.message}`)
+    // After S03 the HTTP adapter and browse catalog load without Electron.
+    // Before S03 this required desktop/web → settingsStore → electron (MODULE_NOT_FOUND).
+    for (const modulePath of ['../../packages/http/src/server', '../../packages/http/src/catalog']) {
+      const loaded = require(modulePath) as { WebServer?: unknown; WebCatalog?: unknown }
+      assert.equal(typeof loaded.WebServer === 'function' || typeof loaded.WebCatalog === 'function', true)
+      console.log(`PASS: ${modulePath} loaded without Electron`)
     }
   } finally {
     closeDatabase()

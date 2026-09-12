@@ -61,6 +61,9 @@ export class WebAccess {
       sessions: this.store(),
       staticRoot,
       catalog: createWorkerWebCatalog(getDb(), catalogReadService),
+      listenHost: '0.0.0.0',
+      accessHosts: localAddresses(),
+      surface: 'browser',
       onError: (message) => {
         if (this.server === server) {
           this.server = null

@@ -18,7 +18,7 @@ import { getTagLabels, listTagFilterOptions, listManualTagOptions, listTags, lis
 import { listActressPage } from '../../packages/library/src/db/actressRepo'
 import { getLibraryOverviewStats } from '../../packages/library/src/db/overviewRepo'
 import { getPlaylistDetail, getPlaylistPage, getPlaylistMetadata, listPlaylistVideoPage } from '../../packages/library/src/db/playlistRepo'
-import { WebCatalog } from '../../apps/desktop/src/main/web/catalog'
+import { WebCatalog } from '../../packages/http/src/catalog'
 import { tagQueryService } from '../../apps/desktop/src/main/services/tagQueryService'
 
 const count = Number(process.env.JAVDEX_BENCH_VIDEOS ?? 10000)

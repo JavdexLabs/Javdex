@@ -20,6 +20,9 @@ Module._resolveFilename = function resolveWithProjectAliases(request, parent, is
   if (request.startsWith('@library/')) {
     return path.join(process.cwd(), 'packages', 'library', 'src', `${request.slice('@library/'.length)}.ts`)
   }
+  if (request.startsWith('@http/')) {
+    return path.join(process.cwd(), 'packages', 'http', 'src', `${request.slice('@http/'.length)}.ts`)
+  }
   if (request.startsWith('@renderer/')) {
     return path.join(process.cwd(), 'apps', 'desktop', 'src', 'renderer', 'src', `${request.slice('@renderer/'.length)}.ts`)
   }

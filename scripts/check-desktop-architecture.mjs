@@ -80,6 +80,7 @@ for (const root of ['apps/desktop/src/preload', 'apps/desktop/src/renderer/src']
       if (
         specifier.startsWith('@library/') ||
         specifier.startsWith('@javdex/library') ||
+        specifier.startsWith('@http/') ||
         specifier.startsWith('@javdex/http') ||
         /(?:^|\/)packages\/(?:library|http)\//.test(resolved) ||
         /(?:^|\/)apps\/server\//.test(resolved)

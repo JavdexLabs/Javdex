@@ -6,6 +6,7 @@ import {
   resetLibraryHostForTests,
   resolveLibraryAssetEncryption,
   resolveLibraryMediaAssetsPath,
+  resolveLibraryScrapeProxyUrl,
   resolveLibraryUserDataPath
 } from './host'
 
@@ -40,6 +41,23 @@ describe('library host', () => {
     })
     assert.equal(resolveLibraryAssetEncryption(), true)
     assert.equal(resolveLibraryMediaAssetsPath(), '/mnt/assets')
+  })
+
+  it('reads the scrape proxy URL from the host without touching desktop settings', () => {
+    delete process.env.JAVDEX_TEST_USER_DATA
+    configureLibraryHost({
+      userDataPath: () => '/var/lib/javdex',
+      http: {
+        scrapeProxyUrl: () => 'socks5://127.0.0.1:1080'
+      }
+    })
+    assert.equal(resolveLibraryScrapeProxyUrl(), 'socks5://127.0.0.1:1080')
+  })
+
+  it('treats a missing scrape proxy as empty instead of reading settings', () => {
+    delete process.env.JAVDEX_TEST_USER_DATA
+    configureLibraryHost({ userDataPath: () => '/var/lib/javdex' })
+    assert.equal(resolveLibraryScrapeProxyUrl(), '')
   })
 
   it('rejects production reads before the host is configured', () => {

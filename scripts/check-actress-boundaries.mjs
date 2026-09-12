@@ -250,7 +250,12 @@ for (const file of [
   'apps/desktop/src/main/services/actressGalleryService.ts',
   'apps/desktop/src/main/services/actressIdentityConflictWorkflow.ts',
   'apps/desktop/src/main/scrapers/actressScraperManager.ts',
-  'apps/desktop/src/main/scrapers/scraperManager.ts'
+  'apps/desktop/src/main/scrapers/scraperManager.ts',
+  'packages/library/src/catalog/videoMaintenanceService.ts',
+  'packages/library/src/catalog/actressQueryService.ts',
+  'packages/library/src/catalog/actressMaintenanceService.ts',
+  'packages/library/src/catalog/actressGalleryService.ts',
+  'packages/library/src/catalog/actressIdentityConflictWorkflow.ts'
 ]) {
   for (const specifier of importsOf(file)) {
     if (

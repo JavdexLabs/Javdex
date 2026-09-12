@@ -15,10 +15,15 @@ export interface LibraryAssetSettings {
   mediaAssetsPath(): string | null
 }
 
+export interface LibraryHttpSettings {
+  scrapeProxyUrl(): string
+}
+
 export interface LibraryHost {
   userDataPath(): string
   images?: LibraryImageCodec
   assets?: LibraryAssetSettings
+  http?: LibraryHttpSettings
 }
 
 let host: LibraryHost | null = null
@@ -49,4 +54,8 @@ export function resolveLibraryAssetEncryption(): boolean {
 export function resolveLibraryMediaAssetsPath(): string | null {
   const custom = host?.assets?.mediaAssetsPath()?.trim()
   return custom ? custom : null
+}
+
+export function resolveLibraryScrapeProxyUrl(): string {
+  return host?.http?.scrapeProxyUrl()?.trim() ?? ''
 }

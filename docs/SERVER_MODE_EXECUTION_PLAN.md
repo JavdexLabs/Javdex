@@ -50,9 +50,9 @@
 | 阶段 | 状态 | 记录 |
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
-| S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：S02D 替换字符串 IPC 错误；管理结果 DTO 在接入后端时从现有领域类型投影 |
+| S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
 | S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、刮削应用、catalog 查询 worker 入口仍在 desktop |
-| S02D | 进行中（IPC 已注入 CatalogBackend；本地 runtime 打开资料库并复制 agent 工作记录；未配置远程不打开 `library.db`） | 见本文件 S02D 实施记录 |
+| S02D | 本地架构门槛已验证；剩余 scan/scrape/agent/player/NFO IPC 仍走桌面单例 | 见本文件 S02D 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -316,9 +316,19 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 **S02D 实施记录（IPC、本地 runtime、agent 工作复制）**
 
 - 范围：`IpcResponse.error` 改为结构化错误并在 preload 抛出 `DesktopIpcError`；影片/演员/分类/清单/媒体库 IPC 改为注入 `CatalogBackend`；`appMain` 按 this-computer 模式装配 runtime。本地打开 `library.db`、恢复中断扫描、把 `agent_*` 表可重复复制进 `desktop-work.db` 后 ATTACH 为 `work`，catalog SQL 通过 `qualifyAgentSql` 写 workStore；远程在 copy 未完成或本地库仍待复制时拒绝启动且不打开原库。`registerIpcHandlers` 接收后端与桌面端口。新增 `check:desktop-architecture`（D06 本地部分：catalog IPC 不得导入 repo/业务单例；renderer/preload 不得导入 library/http）。
-- 工程默认：S05 的 `expectedVersions` 本地仍未强制；封面/样张/图库上传引用仍 `UNSUPPORTED_CAPABILITY`（S06）；刮削应用、NFO、扫描/待确认、browser/tasks/migration 仍未接入 CatalogBackend。`agent_metadata_drafts` 随 agent 表复制，草稿应用与 catalog 删除仍走 writer 连接上的 ATTACH 事务。SQLite 不对 ATTACH 库强制外键；`AgentRunStore` 在本地/远程都改用 workStore 作为 main 连接。远程三种真实进程监测（D01 全项）和双后端 D02 仍待 S07。未改 schema 16。
-- 验证：见本切片提交说明与测试命令。
-- 未做：S03 HTTP 抽离；RemoteCatalogBackend；scan/scrape/pluginDev/agent/player/nfo/settings/assets IPC 仍允许直接使用 library/服务单例（D06 白名单）；Electron NFO 导出与刮削应用仍在 desktop。
+- 工程默认：S05 的 `expectedVersions` 本地仍未强制；封面/样张/图库上传引用仍 `UNSUPPORTED_CAPABILITY`（S06）；刮削应用、NFO、扫描/待确认、browser/tasks/migration 仍未接入 CatalogBackend。`agent_metadata_drafts` 随 agent 表复制，草稿应用与 catalog 删除仍走 writer 连接上的 ATTACH 事务。SQLite 不对 ATTACH 库强制外键；`AgentRunStore` 在本地/远程都改用 workStore 作为 main 连接。远程三种真实进程监测（D01 全项）和双后端 D02 仍待 S07。MODE_PREP_REQUIRED 在 `app.whenReady` 中仍会抛错而不是打开桌面错误页。未改 schema 16。
+- 验证（提交 `deb4210`，Linux Node 22.14 / Electron-as-Node）：
+  - `npm run check:desktop-architecture` 通过
+  - `npm run pretest` 通过（含 D06 本地图检查、actress/library 边界、lint、CSS/UI 检查）
+  - `npm run typecheck` 通过
+  - `npm run test:packaging` 8 通过 / 0 失败
+  - 定向 Electron：`JAVDEX_TEST_TIMEOUT_MS=180000 node scripts/run-electron-tests.mjs`（errors / host / workStore / createDesktopRuntime / localCatalogBackend / typedIpcAdapter / mediaLibraryHandlers / facetHandlers / catalogHighFrequencyWorker）**64 通过 / 0 失败**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2959 tests / 2958 pass / 0 fail / 1 skip**（Linux 上跳过 Windows 路径别名用例）
+  - `npm run desktop:build` 通过；`npm run web:build` 通过
+  - D01 本地部分：`createDesktopRuntime` 远程不调用 `initDatabaseAtPath` / `getDb()`；`copying` 或本地库未复制完成时抛 `MODE_PREP_REQUIRED` 且不断开 library.db
+  - D03：本地启动把 `agent_runs` 复制进 `desktop-work.db`，源行保留，后续 `INSERT` 只进 `work.agent_runs`
+  - D06 本地部分：catalog IPC 不得 value-import `@library/db|catalog` 或 `services/`；renderer/preload 不得 import library/http/server
+- 未做：S03 HTTP 抽离；RemoteCatalogBackend；scan/scrape/pluginDev/agent/player/nfo/settings/assets IPC 仍允许直接使用 library/服务单例（D06 白名单）；Electron NFO 导出与刮削应用仍在 desktop。D01 远程三种真实进程监测与 D02 双后端仍待 S07。
 
 ### S03：抽离 HTTP，保持本地网页
 

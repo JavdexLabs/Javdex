@@ -25,6 +25,7 @@ import {
   localCatalogIdentityPath
 } from '../desktop/localCatalogIdentity'
 import { attachAgentWorkStore, copyAgentWorkTables } from '../desktop/agentWorkCopy'
+import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
 
 export interface DesktopRuntime {
@@ -54,7 +55,7 @@ function resetDesktopWorkBindings(): void {
 }
 
 /**
- * Choose local or unconfigured-remote assembly from this-computer settings.
+ * Choose local or remote assembly from this-computer settings.
  * Remote must not open library.db. A workStore copy left in `copying`, or an
  * existing catalog that has not been copied yet, must return to local mode.
  */
@@ -65,7 +66,8 @@ export async function createDesktopRuntime(
 ): Promise<DesktopRuntime> {
   const settings = createThisComputerSettingsStore(thisComputerSettingsPath(userDataPath))
   const workStore = openDesktopWorkStore(workStorePath(userDataPath))
-  const mode = (await settings.read()).mode
+  const snapshot = await settings.read()
+  const mode = snapshot.mode
   const catalogPath = localCatalogDatabasePath(userDataPath)
   const catalogExists = fs.existsSync(catalogPath)
 
@@ -84,9 +86,18 @@ export async function createDesktopRuntime(
       )
     }
     configureAgentRunDatabase(() => workStore.database())
-    const backend = createCatalogBackendForMode('remote', {
-      identity: { mode: 'local', catalogId: '' }
-    })
+    const credentials = createWriterCredentialStore({ userDataPath })
+    const backend = createCatalogBackendForMode(
+      'remote',
+      { identity: { mode: 'local', catalogId: '' } },
+      snapshot.remoteBaseUrl
+        ? {
+            baseUrl: snapshot.remoteBaseUrl,
+            appVersion,
+            credentials
+          }
+        : undefined
+    )
     return {
       mode,
       backend,

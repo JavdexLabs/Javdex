@@ -208,7 +208,7 @@ export function createUnconfiguredRemoteBackend(): CatalogBackend {
       'createTargetList',
       'pageTargetList'
     ]),
-    assets: rejectSlice(['createUpload', 'inspectUpload', 'grantPlayback']),
+    assets: rejectSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
     migration: rejectSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),
     async dispose(): Promise<void> {
       return

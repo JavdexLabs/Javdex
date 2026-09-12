@@ -50,3 +50,36 @@ export function createUnconfiguredRemoteCapabilities(): DesktopCapabilityMap {
     })
   ) as DesktopCapabilityMap
 }
+
+export function createRemoteDesktopCapabilities(options: { frozen?: boolean } = {}): DesktopCapabilityMap {
+  const frozen = options.frozen === true
+  const desktopTools = new Set([
+    'runPlugins',
+    'runAgents',
+    'cropAvatars',
+    'openExternalLink',
+    'playRemoteFile',
+    'editCatalog'
+  ])
+  return Object.fromEntries(
+    DESKTOP_CAPABILITY_ACTIONS.map((action) => {
+      if (action === 'editCatalog') {
+        return [action, capability(action, !frozen, frozen ? 'catalogFrozen' : 'available')]
+      }
+      if (desktopTools.has(action)) {
+        return [action, capability(action, true, 'available')]
+      }
+      if (
+        action === 'revealLocalFile' ||
+        action === 'pickLocalFolder' ||
+        action === 'rebindLocalRoot' ||
+        action === 'encryptAssets' ||
+        action === 'relocateAssetStorage' ||
+        action === 'playLocalFile'
+      ) {
+        return [action, capability(action, false, 'remoteMode')]
+      }
+      return [action, capability(action, false, 'unsupportedOnServer')]
+    })
+  ) as DesktopCapabilityMap
+}

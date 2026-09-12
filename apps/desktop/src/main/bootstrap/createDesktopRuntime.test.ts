@@ -113,7 +113,7 @@ describe('createDesktopRuntime', () => {
   it('starts unconfigured remote without opening library.db', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://library.example' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
     const runtime = await createDesktopRuntime(root, '0.7.0')
     try {
       assert.equal(runtime.mode, 'remote')
@@ -132,7 +132,7 @@ describe('createDesktopRuntime', () => {
   it('refuses remote start while workStore copy is unfinished', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://library.example' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
     const store = openDesktopWorkStore(workStorePath(root))
     store.beginCopy()
     store.close()
@@ -148,7 +148,7 @@ describe('createDesktopRuntime', () => {
     fs.mkdirSync(path.join(root, 'data'), { recursive: true })
     fs.writeFileSync(localCatalogDatabasePath(root), '')
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://library.example' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
     await assert.rejects(
       () => createDesktopRuntime(root, '0.7.0'),
       (error: unknown) => isStructuredError(error) && error.code === 'MODE_PREP_REQUIRED'
@@ -164,7 +164,7 @@ describe('createDesktopRuntime', () => {
     assert.throws(() => getDb(), /Database not initialised/)
 
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://library.example' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
     const remote = await createDesktopRuntime(root, '0.7.0')
     try {
       assert.equal(remote.mode, 'remote')
@@ -172,6 +172,34 @@ describe('createDesktopRuntime', () => {
       assert.throws(() => getDb(), /Database not initialised/)
     } finally {
       await remote.dispose()
+    }
+  })
+
+  it('reopens the original local catalog after switching back from remote', async () => {
+    const root = tempDir()
+    const local = await createDesktopRuntime(root, '0.7.0')
+    getDb().prepare("INSERT INTO actresses (main_name) VALUES ('Keep Local')").run()
+    await local.dispose()
+
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    const remote = await createDesktopRuntime(root, '0.7.0')
+    assert.equal(remote.openedCatalog, false)
+    assert.throws(() => getDb(), /Database not initialised/)
+    await remote.dispose()
+
+    await settings.write({ mode: 'local', remoteBaseUrl: null })
+    const back = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(back.mode, 'local')
+      assert.equal(back.openedCatalog, true)
+      assert.equal(
+        (getDb().prepare("SELECT main_name FROM actresses WHERE main_name = 'Keep Local'").get() as { main_name: string })
+          .main_name,
+        'Keep Local'
+      )
+    } finally {
+      await back.dispose()
     }
   })
 })

@@ -20,6 +20,7 @@ import { startJavdexServer, type JavdexServerHandle } from './runtime'
 import type { ServerConfig } from './config'
 import { SERVER_APP_VERSION } from './appVersion'
 import { randomUUID } from 'node:crypto'
+import { createRemoteCatalogBackend } from '../../desktop/src/main/backends/remote/remoteCatalogBackend'
 
 const previousUserData = process.env.JAVDEX_TEST_USER_DATA
 
@@ -603,5 +604,132 @@ describe('server runtime lifecycle', () => {
       .get(first.videoId) as { cover_path: string | null; poster_path: string | null }
     assert.equal(cover.cover_path, null)
     assert.equal(cover.poster_path, null)
+  })
+
+  function memoryCredentials(entries: Map<string, string>) {
+    return {
+      async isAvailable(): Promise<boolean> {
+        return true
+      },
+      async readWriterSecret(catalogId: string): Promise<string | null> {
+        return entries.get(catalogId) ?? null
+      },
+      async writeWriterSecret(catalogId: string, secret: string): Promise<void> {
+        entries.set(catalogId, secret)
+      },
+      async deleteWriterSecret(catalogId: string): Promise<void> {
+        entries.delete(catalogId)
+      }
+    }
+  }
+
+  it('does not import the catalog database from RemoteCatalogBackend', () => {
+    const source = fs.readFileSync(
+      path.resolve('apps/desktop/src/main/backends/remote/remoteCatalogBackend.ts'),
+      'utf8'
+    )
+    assert.equal(source.includes('@library/db'), false)
+    assert.equal(source.includes('initDatabase'), false)
+    assert.equal(source.includes('getDb'), false)
+    assert.equal(source.includes("from 'electron'"), false)
+  })
+
+  it('edits a title and cover through RemoteCatalogBackend without a second local catalog', async () => {
+    const dataDir = path.join(root, 'remote-backend')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const { videoId } = await insertBoundVideo('S07-REMOTE')
+    const credentials = memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    const backend = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials
+    })
+    try {
+      assert.equal(backend.mode, 'remote')
+      const detail = (await backend.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId
+      })) as { title: string; generation: number; revision: number; cover_path: string | null }
+      assert.equal(detail.title, 'S07-REMOTE')
+      const operationId = randomUUID()
+      const edited = await backend.videos.edit(
+        { videoId, fields: { title: 'Remote After' } },
+        {
+          operationId,
+          expectedVersions: { V: { generation: detail.generation, revision: detail.revision } }
+        }
+      )
+      assert.equal(edited, true)
+      const retry = await backend.videos.edit(
+        { videoId, fields: { title: 'Remote After' } },
+        {
+          operationId,
+          expectedVersions: { V: { generation: detail.generation, revision: detail.revision } }
+        }
+      )
+      assert.equal(retry, true)
+      const afterEdit = (await backend.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId
+      })) as { title: string; revision: number; generation: number }
+      assert.equal(afterEdit.title, 'Remote After')
+      assert.equal(afterEdit.revision, detail.revision + 1)
+
+      const created = (await backend.assets.createUpload(
+        { purpose: 'videoCover', contentType: 'image/png' },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )) as { uploadId: string }
+      const png = await sharp({
+        create: { width: 12, height: 8, channels: 3, background: { r: 9, g: 18, b: 27 } }
+      })
+        .png()
+        .toBuffer()
+      const uploaded = (await backend.assets.putUpload({
+        uploadId: created.uploadId,
+        body: png,
+        contentType: 'image/png'
+      })) as { consumed: boolean }
+      assert.equal(uploaded.consumed, false)
+      await backend.videos.setPoster(
+        { videoId, image: { kind: 'upload', uploadId: created.uploadId } },
+        {
+          operationId: randomUUID(),
+          expectedVersions: { V: { generation: afterEdit.generation, revision: afterEdit.revision } }
+        }
+      )
+      const covered = (await backend.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId
+      })) as { cover_path: string | null; title: string }
+      assert.equal(covered.title, 'Remote After')
+      assert.ok(covered.cover_path?.startsWith('covers/'))
+      assert.equal(fs.existsSync(path.join(dataDir, 'media_assets', covered.cover_path!)), true)
+      assert.equal(backend.session().state, 'available')
+      assert.equal(backend.capabilities().editCatalog.allowed, true)
+      assert.equal(backend.capabilities().playLocalFile.allowed, false)
+    } finally {
+      await backend.dispose()
+    }
+  })
+
+  it('marks versionMismatch when the desktop app version does not match the server', async () => {
+    const dataDir = path.join(root, 'remote-version')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const backend = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: '0.0.0-test',
+      credentials: memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    })
+    try {
+      await assert.rejects(
+        () => backend.queries.getVideo({ scope: { kind: 'all' }, videoId: 1 }),
+        (error: unknown) => isStructuredError(error) && error.code === 'VERSION_MISMATCH'
+      )
+      assert.equal(backend.session().state, 'versionMismatch')
+    } finally {
+      await backend.dispose()
+    }
   })
 })

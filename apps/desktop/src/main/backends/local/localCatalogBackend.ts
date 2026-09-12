@@ -66,6 +66,10 @@ import type {
 } from '../../application/catalogBackend'
 import { createLocalDesktopCapabilities } from '../../application/desktopCapabilities'
 import { createUnconfiguredRemoteBackend } from '../remote/unconfiguredRemoteBackend'
+import {
+  createRemoteCatalogBackend,
+  type RemoteCatalogBackendOptions
+} from '../remote/remoteCatalogBackend'
 import type { VideoMaintenanceService } from '../../services/videoMaintenanceService'
 import {
   createVideoQueryService,
@@ -874,7 +878,7 @@ export function createLocalCatalogBackend(
       'createTargetList',
       'pageTargetList'
     ]),
-    assets: unsupportedSlice(['createUpload', 'inspectUpload', 'grantPlayback']),
+    assets: unsupportedSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
     migration: unsupportedSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),
     async dispose(): Promise<void> {
       return
@@ -884,8 +888,12 @@ export function createLocalCatalogBackend(
 
 export function createCatalogBackendForMode(
   mode: 'local' | 'remote',
-  local: LocalCatalogBackendDependencies
+  local: LocalCatalogBackendDependencies,
+  remote?: RemoteCatalogBackendOptions
 ): CatalogBackend {
-  if (mode === 'remote') return createUnconfiguredRemoteBackend()
+  if (mode === 'remote') {
+    if (remote?.baseUrl) return createRemoteCatalogBackend(remote)
+    return createUnconfiguredRemoteBackend()
+  }
   return createLocalCatalogBackend(local)
 }

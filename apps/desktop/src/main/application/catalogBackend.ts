@@ -221,6 +221,10 @@ export interface CatalogTaskCommands {
 export interface CatalogAssetCommands {
   createUpload: Command<'uploads.create'>
   inspectUpload: Query<'uploads.inspect'>
+  putUpload: (
+    input: { uploadId: string; body: Buffer; contentType: string },
+    ctx?: CatalogQueryContext
+  ) => Promise<CatalogPortValue>
   grantPlayback: Query<'play.grant'>
 }
 

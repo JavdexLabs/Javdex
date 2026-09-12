@@ -180,6 +180,13 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       const input = envelope.input as { operationId: string }
       return readOperationReceipt(input.operationId, database) ?? unknownReceipt(input.operationId)
     }
+    if (operation === 'videos.list') {
+      const input = envelope.input as {
+        scope: Parameters<typeof scopedVideoCatalogRepo.list>[0]
+        query?: Parameters<typeof scopedVideoCatalogRepo.list>[1]
+      }
+      return scopedVideoCatalogRepo.list(input.scope, input.query)
+    }
     if (operation === 'videos.get') {
       const input = envelope.input as {
         scope: Parameters<typeof scopedVideoCatalogRepo.get>[0]

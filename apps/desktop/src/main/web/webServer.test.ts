@@ -8,7 +8,8 @@ import { hashPassword, LoginLimiter, verifyPassword, WebSessions } from './auth'
 import { parseRange } from './http'
 import { isLocalPeer, WebServer } from './server'
 import type { WebCatalogReader } from './catalog'
-import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '../services/mediaAssetStore'
+import { MANAGE_HTTP_SURFACE } from '@http/surfaces'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
 
 describe('Web authentication and streaming', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-web-'))
@@ -367,6 +368,77 @@ describe('Web authentication and streaming', () => {
       req.end()
     })
     assert.equal(revokedStatus, 401)
+  })
+
+  it('does not assemble the management HTTP surface and ignores forwarded hosts', async () => {
+    assert.throws(
+      () =>
+        new WebServer({
+          username: 'viewer',
+          passwordHash,
+          staticRoot: directory,
+          catalog,
+          surface: MANAGE_HTTP_SURFACE
+        }),
+      /管理 HTTP 面不能由浏览服务装配/
+    )
+    const port = Number(new URL(base).port)
+    const denied = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = request(
+        {
+          hostname: '127.0.0.1',
+          port,
+          path: '/',
+          headers: {
+            Host: `evil.example:${port}`,
+            'X-Forwarded-Host': `127.0.0.1:${port}`,
+            'X-Forwarded-For': '127.0.0.1'
+          }
+        },
+        (response) => {
+          response.resume()
+          resolve({ status: response.statusCode ?? 0 })
+        }
+      )
+      req.on('error', reject)
+      req.end()
+    })
+    assert.equal(denied.status, 403)
+  })
+
+  it('does not expose live/ready probes on the desktop browse surface', async () => {
+    for (const pathName of ['/live', '/ready']) {
+      const response = await fetch(`${base}${pathName}`)
+      assert.equal(response.status, 404)
+      assert.doesNotMatch(await response.text(), /library|playlist|video|catalog/i)
+    }
+  })
+
+  it('serves injected live/ready probes without catalog fields or a session', async () => {
+    const probed = new WebServer({
+      username: 'viewer',
+      passwordHash,
+      staticRoot: directory,
+      catalog,
+      probes: {
+        live: () => ({ status: 'live' }),
+        ready: () => ({ ready: true })
+      }
+    })
+    const probedBase = `http://127.0.0.1:${await probed.start(0, '127.0.0.1')}`
+    try {
+      const live = await fetch(`${probedBase}/live`)
+      assert.equal(live.status, 200)
+      assert.deepEqual(await live.json(), { status: 'live' })
+      const ready = await fetch(`${probedBase}/ready`)
+      assert.equal(ready.status, 200)
+      assert.deepEqual(await ready.json(), { ready: true })
+      const head = await fetch(`${probedBase}/live`, { method: 'HEAD' })
+      assert.equal(head.status, 200)
+      assert.equal(await head.text(), '')
+    } finally {
+      await probed.stop()
+    }
   })
 })
 

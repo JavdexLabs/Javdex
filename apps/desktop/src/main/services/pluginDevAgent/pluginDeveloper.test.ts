@@ -16,7 +16,7 @@ import type { AgentRunRecord } from '../../agent-platform/agentRunStore'
 import { agentRunStore } from '../../agent-platform/agentRunStore'
 import { setCacheAffinityDeviceKeyForTests } from '../../agent-platform/cacheAffinity'
 import { toolHost } from '../../agent-platform/toolHost'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import type {
   HostedToolBinding,
   PersistedRunConfigurationSnapshot,

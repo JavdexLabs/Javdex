@@ -1,8 +1,19 @@
-import { app } from 'electron'
-import path from 'node:path'
-import { getDatabaseReadRevision, getDb } from '../db/database'
+import { getDatabaseReadRevision, getDb } from '@library/db/database'
 import { CatalogReadWorkerClient } from './catalogReadWorkerClient'
 import { createCatalogReadWorkerTransport } from './catalogReadWorkerTransport'
+
+let workerEntryPath: string | undefined
+
+export function configureCatalogReadWorkerEntry(entryPath: string): void {
+  const trimmed = entryPath.trim()
+  if (!trimmed) throw new Error('Catalog read worker entry path is required')
+  workerEntryPath = trimmed
+}
+
+function resolveCatalogReadWorkerEntry(): string {
+  if (!workerEntryPath) throw new Error('Catalog read worker entry path is not configured')
+  return workerEntryPath
+}
 
 /** Lazy startup occurs only after normal writer initialization and IPC registration. */
 export const catalogReadService = new CatalogReadWorkerClient({
@@ -12,6 +23,5 @@ export const catalogReadService = new CatalogReadWorkerClient({
     return { identity: connection, path: connection.name,
       revision: JSON.stringify([revision.changes, revision.dataVersion, connection.pragma('schema_version', { simple: true })]) }
   },
-  transportFactory: context => createCatalogReadWorkerTransport(
-    path.join(app.getAppPath(), 'out/main/catalogReadWorker.js'), context.path)
+  transportFactory: context => createCatalogReadWorkerTransport(resolveCatalogReadWorkerEntry(), context.path)
 })

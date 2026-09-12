@@ -1,5 +1,5 @@
-import { createScopedVideoCatalogRepo } from '../db/scopedVideoCatalogRepo'
-import { createHomeDiscoveryRepo } from '../db/homeDiscoveryRepo'
+import { createScopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
+import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { WebCatalogQueryReader } from '../web/catalogQueryReader'
 import { IPC } from '@shared/ipc-channels'
 import { videoIpcSchemas } from '../ipc/ipcCommandSchemas'
@@ -12,7 +12,7 @@ import { createScanAuditReadIndex } from './scanAuditReadIndex'
 import { normalizeScanAuditReadRequest, normalizeScanAuditViewRequest } from './scanAuditReadRequest'
 import { createClassificationImagePageReader } from './classificationImagePage'
 import { parentPort, workerData } from 'node:worker_threads'
-import { openReadOnlyDatabaseAtPath } from '../db/database'
+import { openReadOnlyDatabaseAtPath } from '@library/db/database'
 import { createTagFilterOptionsReader } from './tagQueryService'
 
 const port = parentPort

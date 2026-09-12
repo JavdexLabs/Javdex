@@ -3,5 +3,16 @@
   "version": "0.7.0",
   "private": true,
   "license": "MIT",
-  "description": "Reserved workspace; extraction/implementation tracked in docs/SERVER_MODE_EXECUTION_PLAN.md"
+  "description": "Independent Node catalog host: SQLite, image storage, query worker, LAN browse HTTP, and process lifecycle. Management HTTP is not assembled here.",
+  "bin": {
+    "javdex-server": "./src/index.ts"
+  },
+  "dependencies": {
+    "@javdex/contracts": "0.7.0",
+    "@javdex/http": "0.7.0",
+    "@javdex/library": "0.7.0",
+    "better-sqlite3": "13.0.3",
+    "sharp": "0.35.4",
+    "zod": "^4.4.3"
+  }
 }

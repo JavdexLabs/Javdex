@@ -13,21 +13,21 @@ import {
   getSettingsRecoveryNotice,
   updateSettings
 } from '../settings/settingsStore'
-import { getLibraryOverviewStats } from '../db/overviewRepo'
+import { getLibraryOverviewStats } from '@library/db/overviewRepo'
 import { migrateAssetStorage } from '../services/assetMigration'
 import { prepareMediaAssetsLocationMigration } from '../services/assetLocationMigration'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   defaultMediaAssetsRoot,
   resolveMediaAssetsRoot,
   validateMediaAssetsPath
-} from '../services/assetStoragePaths'
+} from '@library/assetStoragePaths'
 import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
-} from '../services/libraryPathCleanupService'
+} from '@library/scan/libraryPathCleanupService'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { getLlmSecretStorageState } from '../settings/llmSecretStore'

@@ -1,10 +1,10 @@
 import { IPC } from '@shared/ipc-channels'
 import type { NfoExportPreferences } from '@shared/nfoExportTypes'
 import { getSettings, updateSettings } from '../settings/settingsStore'
-import { nfoExportRepository } from '../nfo/export/nfoExportRepository'
+import { nfoExportRepository } from '@library/nfo/export/nfoExportRepository'
 import { nfoExportTaskController } from '../nfo/export/nfoExportTaskController'
-import { NFO_EXPORT_PROFILES } from '../nfo/export/nfoExportProfiles'
-import { sanitizeNfoExportMessage } from '../nfo/export/nfoExportSafety'
+import { NFO_EXPORT_PROFILES } from '@library/nfo/export/nfoExportProfiles'
+import { sanitizeNfoExportMessage } from '@library/nfo/export/nfoExportSafety'
 import { nfoExportCommandAdapter, nfoExportEventAdapter } from './nfoExportContractAdapter'
 import type { IpcContext } from './shared'
 

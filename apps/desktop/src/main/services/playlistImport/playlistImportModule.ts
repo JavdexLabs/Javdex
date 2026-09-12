@@ -6,7 +6,7 @@ import type {
   PlaylistImportSnapshot,
   PlaylistImportStartInput
 } from '@shared/playlistImportTypes'
-import { getDb } from '../../db/database'
+import { getDb } from '@library/db/database'
 import { agentRunStore } from '../../agent-platform/agentRunStore'
 import {
   normalizePlaylistImportHost,

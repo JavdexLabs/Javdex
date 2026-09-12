@@ -11,7 +11,7 @@ import type {
 } from '@shared/libraryTypes'
 import type { Video, VideoResource } from '@shared/videoTypes'
 import { DEFAULT_MEDIA_LIBRARY_CONFIG, type MediaLibraryRoot } from '@shared/mediaLibraryTypes'
-import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+import { MaintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { createScanCoordinator, type ScanCoordinatorDependencies } from './scanCoordinator'
 import type { ScanOptions, ScanProgressFn } from './scanner'
 

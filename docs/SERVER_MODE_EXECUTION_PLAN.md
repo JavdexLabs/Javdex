@@ -1,6 +1,6 @@
 # 服务端模式执行与 Agent 交接计划
 
-> 状态：结构准备已实施；桌面架构重构及服务端产品功能待实施。用户本轮要求将桌面架构并入计划，本轮仅更新文档。此文件是本次用户要求的本地执行交接材料，不替代 GitHub Issues 中的正式 PRD/任务记录，也不代表已发布工单。
+> 状态：S00 结构准备已实施；S01 合同已冻结（见 [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)）。桌面架构重构及服务端产品功能待实施。用户本轮要求将桌面架构并入计划，本轮仅更新文档。此文件是本次用户要求的本地执行交接材料，不替代 GitHub Issues 中的正式 PRD/任务记录，也不代表已发布工单。
 >
 > 起点：远程分支 `origin/codex/server-mode-feasibility` 中包含本文件及 S00 结构调整的交接提交。原研究代码基线为 `cac9f6982eaef6afc34f86f9a51486f8ff10dd2b`，不能从该旧基线直接开工。接手先 fetch 并核对交接提交，再从该提交建立实施分支；具体提交哈希随交接提示提供。
 
@@ -36,14 +36,24 @@
 | `apps/desktop` | 原 main/preload/renderer/MCP 已物理迁移 | 旧 main 内仍含业务、数据库、HTTP 和单例，远程后端尚未接入 |
 | `apps/web` | 现有只读页面及资源已迁移，可单独构建 | 新服务器宿主适配与部署验证 |
 | `packages/contracts` | 原 shared 的类型与纯工具，保留 `@shared/*` 兼容别名 | 正式远程读/写 DTO、输入 schema 与协议分组 |
-| `packages/library` | 已移入 Node 路径/根/资源身份工具及原测试，使用 `@library/*` | 数据库、业务、扫描/NFO、图片协调仍待抽离 |
+| `packages/library` | 已移入 Node 路径/根/资源身份工具、catalog SQLite、图片存储、公网图片 HTTP、扫描辅助与编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、本地根护栏、NFO 编解码/导出资料与 sidecar 票据 | Electron 封面导出、刮削应用、catalog 查询 worker 入口仍待抽离 |
 | `packages/ui` | 现有 Checkbox 与 CSS，桌面/Web 已引用 | 不预先扩大共享 UI 范围 |
-| `packages/http` | 私有 workspace 和职责说明 | HTTP 源码尚未抽离，无可运行入口 |
+| `packages/http` | 局域网浏览 HTTP、配对/会话、浏览 DTO、Range/静态文件 | 管理 HTTP 面尚未实现；由服务器宿主单独注册 |
 | `apps/server` | 私有 workspace 和职责说明 | 服务启动、构建、Docker 均未实施，无占位成功脚本 |
 
 根 `package.json` 暂保留桌面打包 metadata 和已有运行依赖，产物仍为 `out/main`、`out/preload`、`out/renderer`、`out/web`。workspace 脚本通过根命令执行，避免 cwd 改变破坏 worker/图片/打包资源位置。根安装不再隐式 Electron rebuild；桌面环境显式运行 `npm run setup:desktop`。根仍有 Electron 开发依赖，不能把整份根安装作为独立服务端生产安装。
 
 `npm run check:workspaces` 检查版本一致和网页/共享模块边界；它不声称已验证独立服务器。现有边界、类型、测试发现、构建配置与研究探针已适配目录。后续移动用例时继续更新脚本和可点击文档链接，禁止保留第二份旧源码或用目录链接模拟迁移。
+
+## 实施状态
+
+| 阶段 | 状态 | 记录 |
+|---|---|---|
+| S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
+| S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
+| S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、刮削应用、catalog 查询 worker 入口仍在 desktop |
+| S02D | 本地架构门槛已验证；剩余 scan/scrape/agent/player/NFO IPC 仍走桌面单例 | 见本文件 S02D 实施记录 |
+| S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -180,6 +190,115 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 验收：现有数据库迁移、图片交割、扫描/NFO、影片和演员维护回归；本地根 ADR-0024 不退化。没有新增产品 schema 时保持版本 16。
 
+**S02 实施记录（db 切片）**
+
+- 范围：目录数据库、迁移、repo 与测试迁入 `packages/library/src/db`；`libraryScanAuditValidation` 与 `strmParser` 因被 db 生产代码依赖而一并迁入 `packages/library/src/scan`；v0.6.2 schema 16 升级夹具迁入 `packages/library/src/testFixtures`。桌面测试对业务服务的引用改为明确的 `apps/desktop/src/main` 夹具路径，不把测试例外写进生产边界。
+- 工程默认：本切片保留 `initDatabaseAtPath` / `getDb()` 进程单例，避免把连接注入扩散到全部 repo 调用点；S02D 由 `LocalCatalogBackend` 装配并注入。根级 `better-sqlite3` 仍由桌面安装闭包持有，服务器安装闭包是 S04。
+- 验证：`npm run typecheck`；`npm run pretest`（含 `check:library-boundaries`）；`npm run test:packaging` 8 通过；全量 Electron 测试 2934 项、2933 通过、0 失败、1 跳过（Linux 上仅保留既有平台跳过项）。
+- 未做：scanner 编排、NFO、图片存储、catalog application services 仍在 desktop；未改 schema 16；未接线 IPC；未实现远程后端。
+
+**S02 实施记录（宿主注入切片）**
+
+- 范围：新增 `packages/library/src/runtime/host.ts`；扫描审计 JSON 兼容层迁入 library 并通过 `resolveLibraryUserDataPath()` 取目录，不再导入 Electron。桌面 `configureDesktopLibraryRuntime()` 在 `app.whenReady` 注入 userData 与 `nativeImage` 尺寸解码，并把 catalog 查询 worker 入口从 `app.getAppPath()` 改为显式配置。`assetStoragePaths` / `assetCrypto` / `mediaAssetStore/imageBytes` 改为走宿主，不再直接 `app.getPath` 或 `nativeImage`。查询 worker 源文件仍在 desktop，因为它还依赖尚未抽离的 IPC schema / 审计 / 分类查询服务。
+- 工程默认：Electron 测试通过 `scripts/register-library-test-host.ts` 注入解码器；`JAVDEX_TEST_USER_DATA` 覆盖路径，未设置时测试宿主使用临时目录。生产未配置宿主且无测试覆盖时失败，不静默回退。
+- 未做：当时 mediaAssetStore 仍在 desktop。
+
+**S02 实施记录（图片存储切片）**
+
+- 范围：将 `mediaAssetStore` 及其路径/加密/别名/缓存辅助迁入 `packages/library`。生产 library 仍不导入 Electron 或 settingsStore；加密开关与自定义资料目录继续由桌面宿主从 `getSettings()` 注入。桌面/NFO/Web/刮削改为 `@library/mediaAssetStore`；`scripts/test-nfo-cover-artwork.cjs` 改为加载 library 路径并在原生 Electron 进程里调用 `configureDesktopLibraryTestRuntime()`。
+- 验证：`npm run typecheck:node`；`npm run typecheck:web`；`check:library-boundaries` / `check:media-asset-store-boundaries` / `check:actress-boundaries` 通过。原生封面导出测试（真实 Electron codec + 加密 asset store）通过。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过（Linux 既有平台跳过）；`npm run pretest`；`npm run test:packaging` 8 通过。默认测试超时 180s 不够跑完全套，本切片用 `JAVDEX_TEST_TIMEOUT_MS=360000`。
+- 未做：scanner 编排、NFO 导出（仍用 nativeImage/窗口护栏）、catalog 业务服务仍在 desktop。未改 schema 16。
+
+**S02 实施记录（扫描辅助与根护栏切片）**
+
+- 范围：将 Node-only 扫描辅助（番号解析、时长探测、路径匹配、文件清单/计数/清理页、STRM 重定位索引）和 ADR-0024 本地根文件护栏迁入 `packages/library/src/scan`。桌面 IPC 仍经 `ipcPathGuards` 再导出 `assertMediaLibraryRootFile`，不让 handler 直接导入 `@library/scan`。
+- 工程默认：当前护栏是本地模式策略，继续走 SQLite 根身份 + 实时路径校验；服务端不同挂载策略仍由后续宿主选择，本切片不改产品语义。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。迁出模块及根护栏相关测试 91 项全部通过（IPC path guards、LocalNfoSourceAdapter、NFO sidecar、番号/时长/清单/计数/STRM）。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）；`npm run pretest`。一次全量跑中 `useInfiniteVideoList` 未 settle，单独重跑通过，判定为既有时序 flake，与本切片无关。
+- 未做：`scanner.ts` / `scanCoordinator.ts` / `scanNfoWorkset.ts` 仍在 desktop，因为它们还依赖 NFO 适配器、进度发布、维护闸门和路径清理服务。
+
+**S02 实施记录（NFO 编解码与导出资料切片）**
+
+- 范围：将 Node-only 的 NFO 编解码、目录影片身份、导出安全文案、导出 profile 渲染和 SQLite 导出投影迁入 `packages/library/src/nfo`。Electron 封面编解码、窗口护栏、任务控制器和 sidecar 文件票据仍在 desktop。
+- 工程默认：`nfoExportRepository` 仍是 `getDb()` 单例；IPC 暂时直接引用 library 导出资料，S02D 再收到 application 层。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。NFO codec/profile/repository/safety、sidecar、export module/controller、native artwork 与 LocalNfoSourceAdapter 测试通过。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过。
+- 未做：`nfoFileStore` / `nfoSidecarLocator` 仍依赖 metadata-sources 的 `ManagedRootFileCapability`；`nfoExportModule` 仍使用 `nativeImage`。
+
+**S02 实施记录（NFO sidecar 票据切片）**
+
+- 范围：将 `ManagedRootFileCapability`、`nfoFileStore` 和 `nfoSidecarLocator` 迁入 `packages/library/src/nfo`。桌面 metadata-sources 继续再导出该能力类型，供刮削候选引用。
+- 工程默认：能力票据仍是进程内 WeakMap，路径不进入 IPC/候选 JSON。授权函数由调用方注入（本地 ADR-0024 护栏）。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。sidecar locator、LocalNfoSourceAdapter、export module、scanner NFO directory identity 与 codec 测试 64 项、63 通过、0 失败、1 跳过（Windows 路径别名）。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过。
+- 未做：`nfoExportModule` 仍使用 `nativeImage` 与窗口护栏；`localNfoSourceAdapter` / `scanNfoWorkset` / scanner 编排仍在 desktop。
+
+**S02 实施记录（扫描 NFO workset 切片）**
+
+- 范围：将 `LocalNfoAnchor` / `LocalNfoIdentityInspection` 放到 `packages/library/src/nfo/localNfoTypes.ts`；将 `scanNfoWorkset` 迁入 `packages/library/src/scan`。桌面 local NFO adapter 再导出这些类型，避免打断现有 metadata-sources 入口。
+- 验证：`npm run typecheck:node`；library / metadata-source 边界通过。scanNfoWorkset、scanner NFO 集成、LocalNfoSourceAdapter 与 directory cache 测试 60 项全部通过。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过。
+- 未做：`scanner.ts` / `scanCoordinator.ts` 仍在 desktop；`localNfoScanService` 仍依赖刮削应用服务。
+
+**S02 实施记录（维护闸门与路径清理切片）**
+
+- 范围：将 `maintenanceTaskGate`、`progressPublisher` 和 `libraryPathCleanupService` 迁入 `packages/library/src/scan`。路径清理改为直接引用 `@shared/videoResourcePromotion`，不再经过 desktop 再导出。
+- 工程默认：维护闸门仍是进程单例，S02D 由 LocalCatalogBackend 装配。IPC/scanHandlers 暂时直接引用 library 闸门，S02D 再收到 application。
+- 验证：`npm run typecheck:node`；library / actress 边界通过。progress publisher、路径清理、scan coordinator、cooperative cleanup 与 NFO export controller 测试 77 项全部通过。全量 Electron 测试 2938 项、2937 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
+- 未做：当时 `scanner.ts` / `scanCoordinator.ts` 仍在 desktop。
+
+**S02 实施记录（扫描编排切片）**
+
+- 范围：将 `scanner.ts` / `scanCoordinator.ts` 迁入 `packages/library/src/scan`。本地 NFO apply 通过 `nfoScanPort` 由桌面注入（实现仍依赖刮削应用服务，留在 desktop）。`scanCoordinator` 改为直接引用 `@shared/videoResourcePromotion`。桌面 `scanner/` 仅再导出并在导入时配置 NFO 端口，供 IPC/测试兼容。
+- 工程默认：扫描编排仍使用 `getDb()` 与维护闸门进程单例；S02D 由 LocalCatalogBackend 装配。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。扫描编排及相关测试 277 项全部通过（nfoScanPort、scanner、coordinator、cooperative cleanup、path cleanup、pending identity、local NFO transaction）。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`；新增 2 项为 `nfoScanPort`）。
+- 未做：当时 `nfoExportModule` 仍使用 `nativeImage` 与窗口护栏；catalog 业务服务仍在 desktop；S02D 未开始。
+
+**S02 实施记录（扫描审计读取切片）**
+
+- 范围：将扫描审计只读投影（policy/header/index/view/session/path permission/request）迁入 `packages/library/src/scan`。桌面 `services/scanAudit*` 再导出以保持 IPC 与 catalog worker 入口兼容。
+- 工程默认：审计读取预算不变；catalog 查询 worker 源文件仍在 desktop（仍依赖 IPC schema 与网页查询）。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / workspace 边界通过。扫描审计读取及相关测试 97 项全部通过（path permission、header/index/view/session、entries read、scanHandlers、coordinator entries、catalog worker）。全量 Electron 测试（与后续分类/清单切片同一轮）2940 项、2939 通过、0 失败、1 跳过。
+- 未做：当时 Electron NFO 封面导出、其余 catalog 业务服务仍在 desktop；S02D 未开始。
+
+**S02 实施记录（分类/标签只读查询切片）**
+
+- 范围：将 `classificationQueryService`、`classificationListPage`、`classificationImagePage` 和 `tagQueryService` 迁入 `packages/library/src/catalog`。桌面再导出以保持 IPC / catalog worker 兼容。依赖 IPC schema 或维护写入的分类分页测试仍留在 desktop。
+- 工程默认：查询仍走 `getDb()` 单例。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / classification / workspace 边界通过。分类/标签查询及相关测试 71 项全部通过（tag cache、list/image pages、facet IPC、catalog worker、director/org/series query+merge）。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
+- 未做：当时分类维护/合并/图片写入、影片/演员业务服务、Electron NFO 导出仍在 desktop；S02D 未开始。
+
+**S02 实施记录（清单维护切片）**
+
+- 范围：将 `playlistService`（创建/更新/删除及封面交割）迁入 `packages/library/src/catalog`。桌面再导出供 IPC 使用。清单查询仍直接走 `playlistRepo`（S02D 再收到 application）。
+- 工程默认：封面写入仍经 `mediaAssetStore.coordinateDatabaseChange`。未改 schema 16。
+- 验证：`npm run typecheck:node`；library 边界通过。playlistService 测试 2 项全部通过。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
+- 未做：当时影片/演员/分类维护服务、Electron NFO 导出、catalogReadWorker 入口仍在 desktop；S02D 未开始。
+
+**S02 实施记录（分类维护切片）**
+
+- 范围：将分类资料维护、合并、删除及 profile/name/link persistence 迁入 `packages/library/src/catalog`。`classificationImageService` 仍留 desktop，因为它依赖 `remoteImageFetch`（settings 代理）。桌面再导出以保持 facet IPC 兼容。
+- 工程默认：维护仍走 `getDb()` 与 `mediaAssetStore`。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / classification / actress 边界通过。分类维护及相关测试 199 项全部通过（query/maintenance、merge、deletion、facet IPC、video scrape apply、video maintenance）。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
+- 未做：当时影片/演员维护、分类远程图片导入、Electron NFO 导出、catalogReadWorker 入口仍在 desktop；S02D 未开始。
+
+**S02 实施记录（演员查询与冲突切片）**
+
+- 范围：将 `actressQueryService`、`actressAssetService` 和 `actressIdentityConflictWorkflow` 迁入 `packages/library/src/catalog`。`actressGalleryService` / `actressMaintenanceService` 仍留 desktop（远程图依赖 settings 代理）。桌面再导出以保持 actress IPC 兼容。
+- 工程默认：查询与冲突处理仍走 `getDb()`。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / actress 边界通过。演员查询、冲突工作流和维护测试 82 项全部通过。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
+- 未做：影片维护、演员图库远程导入、分类远程图片导入、Electron NFO 导出仍在 desktop；S02D 未开始。
+
+**S02 实施记录（公网图片 HTTP 与 catalog 写入切片）**
+
+- 范围：`LibraryHost` 增加 `http.scrapeProxyUrl()`，桌面从 `getSettings()` 注入，library 不再读取 settingsStore。将 `publicHttpUrl` / `publicHttpFetch` 迁入 `packages/library/src/net`，将 `remoteImageFetch`、分类主图、演员图库/维护、影片维护/生命周期、链接探测、无资源清理、本地文件可用性与待删除恢复迁入 library。桌面保留薄再导出以保持 IPC / `check-actress-boundaries` 缝兼容。
+- 工程默认：刮削代理为空字符串表示直连；未配置宿主时不抛错、不回读桌面设置。未改 schema 16。`getDb()` 与维护闸门仍是进程单例。
+- 验证：`npm run typecheck:node`；library / actress / classification / media-asset / workspace 边界通过。相关测试 233 项全部通过（host、public HTTP、分类主图、演员维护/冲突、影片维护/生命周期、链接探测、无资源清理、facet IPC、scanner）。全量 Electron 测试 2942 项、2941 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`；相对上一轮 +2 为 host 刮削代理测试）。
+- 未做：Electron NFO 封面导出、刮削应用（metadata-sources）、catalog 查询 worker 入口、`videoQueryService`、`mediaLibraryService` 的刮削插件检查、待确认资源身份（本地 NFO）仍在 desktop；S02D 未开始。
+
+**S02 实施记录（扫描调度、媒体库与资源迁移切片）**
+
+- 范围：将自动扫描调度、分类身份解析、媒体库维护、遗留媒体库 bootstrap、待确认资源身份、图片加密迁移与图片目录搬迁迁入 library。桌面媒体库再导出装配刮削插件可运行检查，避免 library 导入 desktop scrapers。待确认资源身份默认走 `nfoScanPort`，不再直接依赖 desktop `localNfoScanService`。
+- 工程默认：未配置 NFO 端口时待确认身份解析要求调用方注入 `nfoService`（测试）或由 desktop scanner 再导出配置端口。未改 schema 16。
+- 验证：`npm run typecheck:node`；library / actress / metadata-source / workspace 边界通过。相关测试 139 项全部通过（scheduler、asset migration/location、legacy bootstrap、media-library service、pending identity、path cleanup、scanner）。全量 Electron 测试 2942 项、2941 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
+- 未做：Electron NFO 封面导出、刮削应用、catalog 查询 worker 入口、`videoQueryService` 仍在 desktop；S02D 未开始。
+
 ### S02D：先完成桌面本地后端重构
 
 依 S01 的端口把 IPC 的本地调用搬到 application 和 LocalCatalogBackend，以 S02 的 library 工厂替代业务 singleton。先迁移查询、普通编辑和图片，再迁移预览/任务，最后逐个处理 Agent/采集工作流的依赖注入。保留现有 UI 页面和清晰的业务入口，不一次性重命名整个 preload API。
@@ -188,6 +307,30 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 交付边界检查和 D01–D03/D06 可在本地完成的部分，完整原业务测试与构建通过后才进入 S03。不能为了提前宣布全合同完成而跳过 S05/S07 的真实远程验证。此阶段不新增远程产品功能，也不改已经确认的本地根保护、图片加密、播放器和只读网页行为。
 
+**S02D 实施记录（本地后端与 workStore 起步）**
+
+- 范围：新增独立 `this-computer.json` 设置、稳定本地 catalog 身份文件、SQLite `workStore`（含可重复 copy/ready 标记）、未配置远程工厂（不打开 `library.db`）、`LocalCatalogBackend` 的影片查询/编辑/评分/清元数据接入，以及 `createDesktopRuntime` 按模式装配（远程在 workStore `copying` 时拒绝启动）。IPC 仍走原服务单例，尚未替换字符串错误。
+- 工程默认：未配置远程的 session 为 `disconnected`，能力一律拒绝；本地身份为 userData 目录上的 UUID，不是路径字符串。workStore 复制中断保持 `copying`，`idle`（无需复制）和 `ready` 允许远程启动，`copying` 必须回本地。影片封面上传引用仍标 `UNSUPPORTED_CAPABILITY`，等 S06。未改 schema 16，未伪造 serverId/revision。
+- 验证：`npm run typecheck:node`；S02D 脚手架测试 7 项 + bootstrap 3 项全部通过。
+- 未做：IPC 改为注入 CatalogBackend、结构化 `IpcResponse.error`、workStore 从 `library.db` 复制 agent 工作记录、bootstrap 接入 `appMain`、D01 远程三种启动的真实进程监测、D06 生产依赖图检查。S02 剩余 Electron NFO 导出、刮削应用、catalog worker 入口仍在 desktop。
+
+**S02D 实施记录（IPC、本地 runtime、agent 工作复制）**
+
+- 范围：`IpcResponse.error` 改为结构化错误并在 preload 抛出 `DesktopIpcError`；影片/演员/分类/清单/媒体库 IPC 改为注入 `CatalogBackend`；`appMain` 按 this-computer 模式装配 runtime。本地打开 `library.db`、恢复中断扫描、把 `agent_*` 表可重复复制进 `desktop-work.db` 后 ATTACH 为 `work`，catalog SQL 通过 `qualifyAgentSql` 写 workStore；远程在 copy 未完成或本地库仍待复制时拒绝启动且不打开原库。`registerIpcHandlers` 接收后端与桌面端口。新增 `check:desktop-architecture`（D06 本地部分：catalog IPC 不得导入 repo/业务单例；renderer/preload 不得导入 library/http）。
+- 工程默认：S05 的 `expectedVersions` 本地仍未强制；封面/样张/图库上传引用仍 `UNSUPPORTED_CAPABILITY`（S06）；刮削应用、NFO、扫描/待确认、browser/tasks/migration 仍未接入 CatalogBackend。`agent_metadata_drafts` 随 agent 表复制，草稿应用与 catalog 删除仍走 writer 连接上的 ATTACH 事务。SQLite 不对 ATTACH 库强制外键；`AgentRunStore` 在本地/远程都改用 workStore 作为 main 连接。远程三种真实进程监测（D01 全项）和双后端 D02 仍待 S07。MODE_PREP_REQUIRED 在 `app.whenReady` 中仍会抛错而不是打开桌面错误页。未改 schema 16。
+- 验证（提交 `deb4210`，Linux Node 22.14 / Electron-as-Node）：
+  - `npm run check:desktop-architecture` 通过
+  - `npm run pretest` 通过（含 D06 本地图检查、actress/library 边界、lint、CSS/UI 检查）
+  - `npm run typecheck` 通过
+  - `npm run test:packaging` 8 通过 / 0 失败
+  - 定向 Electron：`JAVDEX_TEST_TIMEOUT_MS=180000 node scripts/run-electron-tests.mjs`（errors / host / workStore / createDesktopRuntime / localCatalogBackend / typedIpcAdapter / mediaLibraryHandlers / facetHandlers / catalogHighFrequencyWorker）**64 通过 / 0 失败**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2959 tests / 2958 pass / 0 fail / 1 skip**（Linux 上跳过 Windows 路径别名用例）
+  - `npm run desktop:build` 通过；`npm run web:build` 通过
+  - D01 本地部分：`createDesktopRuntime` 远程不调用 `initDatabaseAtPath` / `getDb()`；`copying` 或本地库未复制完成时抛 `MODE_PREP_REQUIRED` 且不断开 library.db
+  - D03：本地启动把 `agent_runs` 复制进 `desktop-work.db`，源行保留，后续 `INSERT` 只进 `work.agent_runs`
+  - D06 本地部分：catalog IPC 不得 value-import `@library/db|catalog` 或 `services/`；renderer/preload 不得 import library/http/server
+- 未做：RemoteCatalogBackend；scan/scrape/pluginDev/agent/player/nfo/settings/assets IPC 仍允许直接使用 library/服务单例（D06 白名单）；Electron NFO 导出与刮削应用仍在 desktop。D01 远程三种真实进程监测与 D02 双后端仍待 S07。
+
 ### S03：抽离 HTTP，保持本地网页
 
 从 `apps/desktop/src/main/web` 拆出纯 HTTP、认证存储、浏览 DTO 和静态文件服务到 `packages/http`；桌面的 webAccess 生命周期和本机设置适配留桌面。禁止 http 导入 desktop 或 server 入口；只依赖 contracts、library 的公开接口与标准 Node 能力。
@@ -195,6 +338,22 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 浏览和管理路由注册分别启用，本地模式不因复用模块而新增管理网络面。分别投影图片范围，维持 Host/Origin/配对/Range 等现有防护。公开访问 authority 与容器监听地址分开传入，不默认相信代理头或任何私网 Host。
 
 验收：原网页测试和网页构建通过；真实纯 Node 可加载 HTTP 与查询 worker，不能使用 Electron stub。基线研究探针原本预期 MODULE_NOT_FOUND；此阶段完成后更新其断言与文档，保留“修复前/后”的明确证据。
+
+**S03 实施记录（局域网浏览 HTTP 抽离）**
+
+- 范围：将 `http`/`auth`/`catalog`/`catalogQueryReader`/`catalogQueryRequest`/`catalogWorkerAdapter`/`WebServer` 迁入 `packages/http`。桌面 `webAccess` 仍负责 Electron 生命周期、`userData` 会话文件和本地装配，并显式注入 `listenHost` 与 `accessHosts`。`createManageHttpServer()` 存在以便本地浏览拒绝装配管理面。新增 `check:http-boundaries` 与纯 Node `check:http-node-load`（挂入 pretest）。研究探针改为断言 `packages/http` 可加载，文档保留修复前 `MODULE_NOT_FOUND` 证据。
+- 工程默认：未传入 `accessHosts` 时仍回退到本机局域网地址列表（桌面 LAN 浏览兼容）；请求不读取 `X-Forwarded-*`。管理 HTTP 路由未实现（S04/S05）。桌面 catalog-read worker 入口因 IPC/扫描审计仍留 desktop；S03 纯 Node 加载的是浏览用 `WebCatalogQueryReader`。未改 schema 16。
+- 验证（提交 `457b81e`，Linux Node 22.14）：
+  - `npm run check:http-boundaries` 通过
+  - `npm run check:http-node-load` 通过（`process.execPath` 为 `node`，`process.versions.electron` 为空，加载 `WebServer`/`WebCatalog`/`WebCatalogQueryReader`，并对空库执行 `collections()`）
+  - `npm run pretest` 通过
+  - `npm run typecheck` 通过
+  - `npm run test:packaging` 8 通过
+  - 网页相关 Electron 测试：59 通过 / 0 失败
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2960 tests / 2959 pass / 0 fail / 1 skip**
+  - `npm run desktop:build` 通过；`npm run web:build` 通过
+  - 本环境无 Docker，未复跑容器探针；探针源码已改为成功加载断言
+- 未做：S04 独立 Node/Docker 入口；管理 HTTP；RemoteCatalogBackend。
 
 ### S04：独立 Node 运行和 Linux 镜像
 
@@ -308,7 +467,7 @@ $env:JAVDEX_TEST_TIMEOUT_MS = '900000'
 node scripts/run-electron-tests.mjs
 ```
 
-特定领域测试用移动后的真实路径，例如 `node scripts/run-electron-tests.mjs apps/desktop/src/main/db/migrationsV16.test.ts`；后续 S02 移动该文件时更新命令。S04 建立的 server 命令须写入根 scripts 并在 Docker/CI 实际运行后才可作为完成依据。
+特定领域测试用移动后的真实路径，例如 `node scripts/run-electron-tests.mjs packages/library/src/db/migrationsV16.test.ts`；后续 S02 移动该文件时更新命令。S04 建立的 server 命令须写入根 scripts 并在 Docker/CI 实际运行后才可作为完成依据。
 
 当前工作区的 `node_modules` 是指向 `D:/Project/JavdexLabs/Javdex/node_modules` 的已有 junction。本次没有在其目标执行安装或重建；只更新仓库 lockfile。接手不要在这个共享依赖目录上运行会破坏其它任务的重建；需要独立依赖时使用新的真实检出。不要复制 Electron node_modules 到容器。
 

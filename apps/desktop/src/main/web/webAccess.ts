@@ -2,7 +2,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { WebAccessInput, WebAccessStatus } from '@shared/webTypes'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import { hashPassword, WebSessions } from './auth'
 import { createWorkerWebCatalog } from './catalogWorkerAdapter'
 import { catalogReadService } from '../services/catalogReadService'
@@ -61,6 +61,9 @@ export class WebAccess {
       sessions: this.store(),
       staticRoot,
       catalog: createWorkerWebCatalog(getDb(), catalogReadService),
+      listenHost: '0.0.0.0',
+      accessHosts: localAddresses(),
+      surface: 'browser',
       onError: (message) => {
         if (this.server === server) {
           this.server = null

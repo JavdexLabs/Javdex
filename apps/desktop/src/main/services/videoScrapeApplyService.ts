@@ -15,10 +15,10 @@ import type {
   VideoMetadataCandidateStager
 } from '../metadata-sources'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
-import { findActressByNameOrAlias, upsertActressFromScrape } from '../db/actressRepo'
-import { getDb } from '../db/database'
-import { collectVideoLibraryCleanupHints, runLibraryCleanup } from '../db/libraryCleanup'
-import { getVideoById, listVideosForBatchScrape, replaceVideoTagsByOrigin } from '../db/videoRepo'
+import { findActressByNameOrAlias, upsertActressFromScrape } from '@library/db/actressRepo'
+import { getDb } from '@library/db/database'
+import { collectVideoLibraryCleanupHints, runLibraryCleanup } from '@library/db/libraryCleanup'
+import { getVideoById, listVideosForBatchScrape, replaceVideoTagsByOrigin } from '@library/db/videoRepo'
 import { adoptDownloadedAvatarIfMissing } from './actressAssetService'
 import {
   classificationFieldLabel,
@@ -28,7 +28,7 @@ import {
   type ClassificationIdentityResolution
 } from './classificationIdentityResolver'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
-import { mediaAssetStore } from './mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 function scrapedCastGender(a: ScrapedActress): ActressGender {
   return a.gender ?? 'female'

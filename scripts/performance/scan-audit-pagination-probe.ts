@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
-import {initDatabaseAtPath,closeDatabase} from '../../apps/desktop/src/main/db/database'
+import {initDatabaseAtPath,closeDatabase} from '../../packages/library/src/db/database'
 
 type Entry={rootId:number;filePath:string;sourceKind:string;outcome:string;nfo?:{disposition:string}}
 const attention=(e:Entry)=>['unrecognized','strm_failure','processing_failure'].includes(e.outcome)||['warning','identity-conflict','pending-candidate'].includes(e.nfo?.disposition??'')

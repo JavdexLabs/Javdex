@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import type { ManagedRootFileCapability, VideoMetadataCandidate } from './types'
 import { createVideoMetadataCandidateStager } from './videoMetadataCandidateStager'
 

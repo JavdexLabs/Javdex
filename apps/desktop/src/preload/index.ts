@@ -110,6 +110,7 @@ import type {
 } from '../../../../packages/contracts/src/libraryTypes'
 import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../../../../packages/contracts/src/actressTypes'
 import type { IpcResponse } from '../../../../packages/contracts/src/ipcTypes'
+import { DesktopIpcError, structuredError } from '../../../../packages/contracts/src/protocol/errors'
 import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../../../../packages/contracts/src/actressConflictTypes'
 import type { SortDir, TagOptionsQuery } from '../../../../packages/contracts/src/commonTypes'
 import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../../../../packages/contracts/src/playlistTypes'
@@ -135,7 +136,9 @@ import type {
 /** Helper that unwraps the IpcResponse envelope, throwing on failure. */
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const res = (await ipcRenderer.invoke(channel, ...args)) as IpcResponse<T>
-  if (!res.ok) throw new Error(res.error ?? 'IPC 调用失败')
+  if (!res.ok) {
+    throw new DesktopIpcError(res.error ?? structuredError('INVALID_INPUT', 'IPC 调用失败'))
+  }
   return res.data as T
 }
 

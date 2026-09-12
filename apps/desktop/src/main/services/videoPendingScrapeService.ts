@@ -9,7 +9,7 @@ import type {
   ScrapedActress,
   VideoScrapeField
 } from '@shared/videoScrapeTypes'
-import { getDb } from '../db/database'
+import { getDb } from '@library/db/database'
 import {
   countPendingVideoScrapes,
   existingPendingVideoScrapeIds,
@@ -19,15 +19,15 @@ import {
   getPendingVideoScrapeResolutionSnapshot,
   listPendingVideoScrapes,
   type PendingVideoScrapeResolutionCandidate
-} from '../db/pendingVideoScrapeRepo'
+} from '@library/db/pendingVideoScrapeRepo'
 import {
   getVideoById,
   hasPendingVideoScrape,
   listVideoResourcesAcrossLibraries,
   markScrapeFailed,
   mergeVideoRecords
-} from '../db/videoRepo'
-import { mediaAssetStore } from './mediaAssetStore'
+} from '@library/db/videoRepo'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   findVideoBusinessIdentityConflictForScrape,
   videoScrapeApplyService

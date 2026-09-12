@@ -1,41 +1,43 @@
 import { IPC } from '@shared/ipc-channels'
+import type {
+  ClassificationEntityRef,
+  ClassificationImageCandidate,
+  ClassificationListPage,
+  ClassificationPageQuery
+} from '@shared/classificationTypes'
+import type { CatalogBackend } from '../application/catalogBackend'
+import { ipcMutation } from '../application/mutationContext'
 import { appCommandAdapter } from './appContractAdapter'
-import { tagQueryService } from '../services/tagQueryService'
-import { catalogReadService } from '../services/catalogReadService'
-import { classificationQueryService } from '../services/classificationQueryService'
-import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
-import { classificationImageService } from '../services/classificationImageService'
-import { directorMergeService } from '../services/directorMergeService'
-import { seriesMergeService } from '../services/seriesMergeService'
-import { organizationMergeService } from '../services/organizationMergeService'
-import { classificationDeletionService } from '../services/classificationDeletionService'
-import { organizationDeletionService } from '../services/organizationDeletionService'
+import type { ClassificationQueryService } from '../services/classificationQueryService'
+import type { ClassificationMaintenanceService } from '../services/classificationMaintenanceService'
+import type { ClassificationImageService } from '../services/classificationImageService'
+import type { DirectorMergeService } from '../services/directorMergeService'
+import type { SeriesMergeService } from '../services/seriesMergeService'
+import type { OrganizationMergeService } from '../services/organizationMergeService'
+import type { ClassificationDeletionService } from '../services/classificationDeletionService'
+import type { OrganizationDeletionService } from '../services/organizationDeletionService'
 
 interface ClassificationHandlerDependencies {
-  readService: Pick<typeof catalogReadService, 'readImageCandidates'>
-  queryService: typeof classificationQueryService
-  maintenanceService: typeof classificationMaintenanceService
-  imageService: typeof classificationImageService
-  organizationMergeService: typeof organizationMergeService
-  organizationDeletionService: typeof organizationDeletionService
-  deletionService: typeof classificationDeletionService
-  directorMergeService: typeof directorMergeService
-  seriesMergeService: typeof seriesMergeService
+  readService: {
+    readImageCandidates(
+      entity: ClassificationEntityRef,
+      query?: ClassificationPageQuery,
+      signal?: AbortSignal
+    ): Promise<ClassificationListPage<ClassificationImageCandidate>>
+  }
+  queryService: ClassificationQueryService
+  maintenanceService: ClassificationMaintenanceService
+  imageService: ClassificationImageService
+  organizationMergeService: OrganizationMergeService
+  organizationDeletionService: OrganizationDeletionService
+  deletionService: ClassificationDeletionService
+  directorMergeService: DirectorMergeService
+  seriesMergeService: SeriesMergeService
 }
 
 export function registerClassificationHandlers(
-  adapter: typeof appCommandAdapter = appCommandAdapter,
-  dependencies: ClassificationHandlerDependencies = {
-    readService: catalogReadService,
-    queryService: classificationQueryService,
-    maintenanceService: classificationMaintenanceService,
-    imageService: classificationImageService,
-    organizationMergeService,
-    organizationDeletionService,
-    deletionService: classificationDeletionService,
-    directorMergeService,
-    seriesMergeService
-  }
+  adapter: typeof appCommandAdapter,
+  dependencies: ClassificationHandlerDependencies
 ): void {
   adapter.register(IPC.ORGANIZATION_PAGE, (query) => dependencies.queryService.listOrganizationsPage(query))
   adapter.register(IPC.SERIES_PAGE, (query) => dependencies.queryService.listSeriesPage(query))
@@ -112,19 +114,100 @@ export function registerClassificationHandlers(
   )
 }
 
-export function registerFacetHandlers(): void {
-  appCommandAdapter.register(IPC.TAG_LABELS, (ids) => tagQueryService.labels(ids))
-  appCommandAdapter.register(IPC.TAG_FILTER_OPTIONS, (query) => catalogReadService.read(query))
-  appCommandAdapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => tagQueryService.manualOptions(query))
-  appCommandAdapter.register(
-    IPC.TAG_LIST,
-    (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()
-  )
+export function registerFacetHandlers(
+  backend: CatalogBackend,
+  adapter: typeof appCommandAdapter = appCommandAdapter
+): void {
+  adapter.register(IPC.TAG_LABELS, (ids) => backend.queries.tagLabels({ ids }))
+  adapter.register(IPC.TAG_FILTER_OPTIONS, (query) => backend.queries.tagFilterOptions(query))
+  adapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => backend.queries.tagManualOptions(query))
+  adapter.register(IPC.TAG_LIST, () => backend.queries.listTags({}))
+  adapter.register(IPC.TAG_LIST_MANUAL, () => backend.queries.listManualTags({}))
 
-  appCommandAdapter.register(
-    IPC.TAG_LIST_MANUAL,
-    (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.listManual()
+  adapter.register(IPC.ORGANIZATION_PAGE, (query) => backend.classifications.pageOrganizations(query))
+  adapter.register(IPC.SERIES_PAGE, (query) => backend.classifications.pageSeries(query))
+  adapter.register(IPC.ORGANIZATION_LIST, (query) => backend.classifications.listOrganizations(query))
+  adapter.register(IPC.ORGANIZATION_GET, (id, role) =>
+    backend.classifications.getOrganization({ organizationId: id, role } as never)
   )
-
-  registerClassificationHandlers()
+  adapter.register(IPC.ORGANIZATION_OPTIONS, (search) =>
+    backend.classifications.organizationOptions({ search })
+  )
+  adapter.register(IPC.ORGANIZATION_MERGE_OPTIONS, (search) =>
+    backend.classifications.organizationMergeOptions({ search })
+  )
+  adapter.register(IPC.ORGANIZATION_CREATE, (input) =>
+    backend.classifications.createOrganization(input, ipcMutation())
+  )
+  adapter.register(IPC.ORGANIZATION_UPDATE, (id, input) =>
+    backend.classifications.updateOrganization(
+      { organizationId: id, ...input },
+      ipcMutation()
+    )
+  )
+  adapter.register(IPC.ORGANIZATION_MERGE, (input) =>
+    backend.classifications.mergeOrganizations(input, ipcMutation())
+  )
+  adapter.register(IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW, (id, role) =>
+    backend.classifications.organizationRoleRemovePreview({ organizationId: id, role })
+  )
+  adapter.register(IPC.ORGANIZATION_ROLE_REMOVE, (id, role) =>
+    backend.classifications.organizationRoleRemove({ organizationId: id, role } as never, ipcMutation())
+  )
+  adapter.register(IPC.ORGANIZATION_DELETE_PREVIEW, (id) =>
+    backend.classifications.organizationDeletePreview({ organizationId: id })
+  )
+  adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
+    backend.classifications.deleteOrganization({ organizationId: id } as never, ipcMutation())
+  )
+  adapter.register(IPC.DIRECTOR_PAGE, (query) => backend.classifications.pageDirectors(query))
+  adapter.register(IPC.DIRECTOR_LIST, (query) => backend.classifications.listDirectors(query ?? {}))
+  adapter.register(IPC.DIRECTOR_GET, (id) => backend.classifications.getDirector({ directorId: id }))
+  adapter.register(IPC.DIRECTOR_OPTIONS, (search) =>
+    backend.classifications.directorOptions({ search })
+  )
+  adapter.register(IPC.DIRECTOR_CREATE, (input) =>
+    backend.classifications.createDirector(input, ipcMutation())
+  )
+  adapter.register(IPC.DIRECTOR_UPDATE, (id, input) =>
+    backend.classifications.updateDirector({ directorId: id, ...input }, ipcMutation())
+  )
+  adapter.register(IPC.DIRECTOR_MERGE, (input) =>
+    backend.classifications.mergeDirectors(input, ipcMutation())
+  )
+  adapter.register(IPC.DIRECTOR_DELETE_PREVIEW, (id) =>
+    backend.classifications.directorDeletePreview({ directorId: id })
+  )
+  adapter.register(IPC.DIRECTOR_DELETE, (id) =>
+    backend.classifications.deleteDirector({ directorId: id } as never, ipcMutation())
+  )
+  adapter.register(IPC.SERIES_LIST, (query) => backend.classifications.listSeries(query ?? {}))
+  adapter.register(IPC.SERIES_GET, (id) => backend.classifications.getSeries({ seriesId: id }))
+  adapter.register(IPC.SERIES_OPTIONS, (search) =>
+    backend.classifications.seriesOptions({ search })
+  )
+  adapter.register(IPC.SERIES_CREATE, (input) =>
+    backend.classifications.createSeries(input, ipcMutation())
+  )
+  adapter.register(IPC.SERIES_UPDATE, (id, input) =>
+    backend.classifications.updateSeries({ seriesId: id, ...input }, ipcMutation())
+  )
+  adapter.register(IPC.SERIES_MERGE, (input) =>
+    backend.classifications.mergeSeries(input, ipcMutation())
+  )
+  adapter.register(IPC.SERIES_DELETE_PREVIEW, (id) =>
+    backend.classifications.seriesDeletePreview({ seriesId: id })
+  )
+  adapter.register(IPC.SERIES_DELETE, (id) =>
+    backend.classifications.deleteSeries({ seriesId: id } as never, ipcMutation())
+  )
+  adapter.register(IPC.CLASSIFICATION_IMAGE_PAGE, (entity, query) =>
+    backend.classifications.imagePage({ entity, ...query })
+  )
+  adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
+    backend.classifications.imageCandidates({ entity })
+  )
+  adapter.register(IPC.CLASSIFICATION_IMAGE_SET, (entity, input) =>
+    backend.classifications.setImage({ entity, image: input as never }, ipcMutation())
+  )
 }

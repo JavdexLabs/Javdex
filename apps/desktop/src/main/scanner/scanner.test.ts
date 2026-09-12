@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import {
   listLocalVideoResources as listLocalVideoResourcesScoped,
   insertLocalVideoResource,
   listVideoResources as listVideoResourcesScoped,
   listVideos
-} from '../db/videoRepo'
+} from '@library/db/videoRepo'
 import {
   importManual as importManualScoped,
   renameAndImport as renameAndImportScoped,
@@ -18,14 +18,14 @@ import {
   type ScanOptions,
   type ScanProgressFn
 } from './scanner'
-import { insertTestVideoWithFile as insertTestVideoWithFileBase } from '../db/testVideoFixtures'
-import { ensureVideoMembership } from '../db/libraryMembershipRepo'
+import { insertTestVideoWithFile as insertTestVideoWithFileBase } from '@library/db/testVideoFixtures'
+import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
 import {
   listPendingScanGroups as listPendingScanGroupsScoped,
   resolvePendingScanGroup as resolvePendingScanGroupScoped,
   upsertPendingScanResources as upsertPendingScanResourcesScoped,
   type PendingScanResourceInput
-} from '../db/pendingScanRepo'
+} from '@library/db/pendingScanRepo'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
 import { createVideoMaintenanceService } from '../services/videoMaintenanceService'
 import type {
@@ -39,9 +39,9 @@ import {
   getMediaLibraryRoot,
   MediaLibraryRepoError,
   resolveMediaLibraryRootPath
-} from '../db/mediaLibraryRepo'
-import { isPathUnderRoot } from './libraryPathUtils'
-import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+} from '@library/db/mediaLibraryRepo'
+import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
+import { listPendingResourceIdentities } from '@library/db/pendingResourceIdentityRepo'
 import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
 import type {
   LocalNfoScanApplyResult,

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { VideoResource } from '@shared/videoTypes'
-import { closeDatabase, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { createPlayerService } from './playerService'
 
 function resource(overrides: Partial<VideoResource> = {}): VideoResource {

@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
-import {initDatabaseAtPath,closeDatabase} from '../../apps/desktop/src/main/db/database'
+import {initDatabaseAtPath,closeDatabase} from '../../packages/library/src/db/database'
 import {classificationQueryService as read} from '../../apps/desktop/src/main/services/classificationQueryService'
 it('compares full cover candidates with bounded pages',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-cover-page-bench-')),results:unknown[]=[]

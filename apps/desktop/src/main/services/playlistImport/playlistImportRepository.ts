@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import { PLAYLIST_IMPORT_SESSION_SCHEMA_SQL } from '../../db/schema'
+import { PLAYLIST_IMPORT_SESSION_SCHEMA_SQL } from '@library/db/schema'
 import type {
   PlaylistImportDestination,
   PlaylistImportOutcome,
@@ -13,7 +13,7 @@ import { normalizeClassificationName } from '@shared/classificationNameNormaliza
 import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { hasSensitiveUrlQuery, isSensitiveUrlQueryKey } from '@shared/urlCredentialPolicy'
-import { ensureVideoMembership } from '../../db/libraryMembershipRepo'
+import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
 
 export interface PlaylistImportPageItemInput {
   detailUrl: string

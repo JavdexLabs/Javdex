@@ -23,16 +23,16 @@ import {
 } from '@shared/videoScrapeTypes'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { normalizeActressName } from '@shared/actressNameNormalization'
-import { getActressDetail } from '../../db/actressRepo'
-import { agentMetadataDraftRepo, type AgentMetadataDraftRepo } from '../../db/agentMetadataDraftRepo'
-import { getDb } from '../../db/database'
-import { replacePendingVideoScrape } from '../../db/pendingVideoScrapeRepo'
-import { getVideoById } from '../../db/videoRepo'
+import { getActressDetail } from '@library/db/actressRepo'
+import { agentMetadataDraftRepo, type AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
+import { getDb } from '@library/db/database'
+import { replacePendingVideoScrape } from '@library/db/pendingVideoScrapeRepo'
+import { getVideoById } from '@library/db/videoRepo'
 import {
   normalizeActressScrapeResult,
   normalizeVideoScrapeResult
 } from '../../scrapers/scraperResultValidation'
-import { mediaAssetStore } from '../mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   applyActressScrapeResult,
   planActressScrapeResult,

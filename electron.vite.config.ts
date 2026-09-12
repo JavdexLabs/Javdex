@@ -108,6 +108,7 @@ export default defineConfig({
       alias: {
         '@shared': resolve('packages/contracts/src'),
         '@library': resolve('packages/library/src'),
+        '@http': resolve('packages/http/src'),
         '@pi-coding-agent-runtime': resolve(
           'node_modules/@earendil-works/pi-coding-agent/dist'
         )

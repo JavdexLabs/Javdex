@@ -1,7 +1,9 @@
-# HTTP adapter — reserved, not extracted
+# HTTP adapter
 
-Extract the runtime-neutral HTTP server, browser authorization/DTO projection and management routes here in S03. Existing implementation remains under `apps/desktop/src/main/web` and still imports desktop dependencies.
+Runtime-neutral LAN browser HTTP lives here: request helpers, pairing/session storage, browse catalog projection, Range/static serving, and `WebServer`.
 
-HTTP depends on contracts and explicit library services. It must not depend on desktop settings, Electron or the server executable entry point. Desktop local mode assembles only the permitted local browser surface; server mode assembles browser and separately authorized management surfaces.
+Desktop `webAccess` still owns Electron lifecycle, `userData` session files, and local-mode assembly. It injects listen address and access hosts separately and never enables the management HTTP surface.
+
+HTTP may import contracts, `packages/library` public modules, and Node builtins. It must not import Electron, desktop settings, Playwright, or `apps/server`.
 
 See [the execution plan](../../docs/SERVER_MODE_EXECUTION_PLAN.md).

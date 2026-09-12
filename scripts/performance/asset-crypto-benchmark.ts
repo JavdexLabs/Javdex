@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { decryptBlob, decryptBlobAsync, encryptPlain, resetAssetKeyCacheForTests } from '../../apps/desktop/src/main/services/assetCrypto'
+import { decryptBlob, decryptBlobAsync, encryptPlain, resetAssetKeyCacheForTests } from '@library/assetCrypto'
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 

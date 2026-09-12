@@ -28,6 +28,7 @@
     "zod": "^4.4.3",
     "@javdex/contracts": "0.7.0",
     "@javdex/ui": "0.7.0",
-    "@javdex/library": "0.7.0"
+    "@javdex/library": "0.7.0",
+    "@javdex/http": "0.7.0"
   }
 }

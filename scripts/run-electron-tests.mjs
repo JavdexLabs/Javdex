@@ -8,7 +8,10 @@ function discoverTests(root) {
     .flatMap((entry) => {
       if (['node_modules', 'out', 'dist', 'coverage', '.git'].includes(entry.name)) return []
       const fullPath = path.join(root, entry.name)
-      if (entry.isDirectory()) return discoverTests(fullPath)
+      if (entry.isDirectory()) {
+        if (entry.name === 'server' && path.basename(root) === 'apps') return []
+        return discoverTests(fullPath)
+      }
       return /\.test\.tsx?$/.test(entry.name) ? [fullPath.replaceAll('\\', '/')] : []
     })
     .sort()
@@ -27,6 +30,8 @@ if (testFiles.length === 0) {
     './scripts/register-test-styles.mjs',
     '--import',
     'tsx',
+    '--import',
+    './scripts/register-library-test-host.ts',
     '--test',
     ...testFiles
   ]

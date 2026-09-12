@@ -8,13 +8,13 @@ import { createHash } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import type { LibraryScanAudit, LibraryScanSummary } from '../../packages/contracts/src/libraryTypes'
 import { normalizeLocalPathIdentity } from '../../packages/library/src/localPathIdentity'
-import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
-import { beginLibraryScanRun, finishLibraryScanRun } from '../../apps/desktop/src/main/db/libraryScanRepo'
+import { initDatabaseAtPath, closeDatabase } from '../../packages/library/src/db/database'
+import { beginLibraryScanRun, finishLibraryScanRun } from '../../packages/library/src/db/libraryScanRepo'
 
 it('measures actual scan finalization across root counts with consistent persisted results', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-finalization-roots-'))
   const count = 30_000
-  const sourcePath = path.resolve('apps/desktop/src/main/db/libraryScanRepo.ts')
+  const sourcePath = path.resolve('packages/library/src/db/libraryScanRepo.ts')
   const sourceHash = (): string => createHash('sha256').update(fs.readFileSync(sourcePath)).digest('hex')
   const productionSha256 = sourceHash()
   const results: unknown[] = []

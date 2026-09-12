@@ -13,13 +13,13 @@ import type {
 import type { GlobalSearchResult, HomeSnapshot } from '@shared/catalogTypes'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
-import { MediaLibraryRepoError } from '../db/mediaLibraryRepo'
+import { MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
 import { createMediaLibraryCommandAdapter } from './mediaLibraryContractAdapter'
-import {
-  registerMediaLibraryHandlers,
-  type MediaLibraryHandlerDependencies
-} from './mediaLibraryHandlers'
+import { registerMediaLibraryHandlers } from './mediaLibraryHandlers'
 import { mediaLibraryIpcSchemas } from './mediaLibraryIpcSchemas'
+import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
+import type { CatalogBackend } from '../application/catalogBackend'
+import type { MigrateMediaLibraryRootInput } from '@shared/mediaLibraryTypes'
 
 const detail = { id: 3, name: '电影' } as MediaLibraryDetail
 const config = { libraryId: 3, revision: 2 } as MediaLibraryConfig
@@ -85,7 +85,72 @@ const rootMigrationResult = {
   sourceFilesPreserved: true
 } satisfies MediaLibraryRootMigrationResult
 
-function createDependencies(calls: string[]): MediaLibraryHandlerDependencies {
+interface MediaLibraryHandlerTestDependencies {
+  list: (input?: { includeArchived?: boolean }) => MediaLibrarySummary[]
+  get: (libraryId: number) => MediaLibraryDetail
+  create: (input: { name: string }) => MediaLibraryDetail
+  update: (input: { libraryId: number; expectedRevision: number }) => MediaLibraryDetail
+  updateConfig: (input: { libraryId: number; expectedRevision: number }) => MediaLibraryConfig
+  addRoot: (input: { libraryId: number; root: { path: string } }) => MediaLibraryRoot
+  updateRoot: (input: { libraryId: number; rootId: number }) => MediaLibraryRoot
+  removeRoot: (input: { libraryId: number; rootId: number }) => MediaLibraryRoot
+  cancelRootRemoval: (input: {
+    libraryId: number
+    rootId: number
+    expectedRevision: number
+  }) => MediaLibraryRoot
+  previewRootMigration: (input: {
+    sourceLibraryId: number
+    targetLibraryId: number
+    rootId: number
+  }) => MediaLibraryRootMigrationPreview
+  migrateRoot: (input: MigrateMediaLibraryRootInput) => MediaLibraryRootMigrationResult
+  archive: (input: { libraryId: number; expectedRevision: number }) => MediaLibraryDetail
+  restore: (input: { libraryId: number; expectedRevision: number }) => MediaLibraryDetail
+  previewRemoval: (libraryId: number) => MediaLibraryDeletePreview
+  remove: (input: {
+    libraryId: number
+    expectedRevision: number
+    expectedImpactRevision: string
+  }) => MediaLibraryDetail
+  loadHome: (input: { seed: string }) => HomeSnapshot
+  search: (input: { search?: string }) => GlobalSearchResult
+}
+
+function backendFromDeps(deps: MediaLibraryHandlerTestDependencies): CatalogBackend {
+  const backend = createUnconfiguredRemoteBackend()
+  Object.assign(backend.queries, {
+    homeLoad: async (input: { seed: string }) => deps.loadHome(input),
+    homeSearch: async (input: { search?: string }) => deps.search(input)
+  })
+  Object.assign(backend.libraries, {
+    list: async (input?: { includeArchived?: boolean }) => deps.list(input),
+    get: async (input: { libraryId: number }) => deps.get(input.libraryId),
+    create: async (input: { name: string }) => deps.create(input),
+    update: async (input: { libraryId: number; expectedRevision: number }) => deps.update(input),
+    updateConfig: async (input: { libraryId: number; expectedRevision: number }) =>
+      deps.updateConfig(input),
+    addRoot: async (input: { libraryId: number; root: { path: string } }) => deps.addRoot(input),
+    updateRoot: async (input: { libraryId: number; rootId: number }) => deps.updateRoot(input),
+    removeRoot: async (input: { libraryId: number; rootId: number }) => deps.removeRoot(input),
+    cancelRootRemoval: async (input: {
+      libraryId: number
+      rootId: number
+      expectedRevision: number
+    }) => deps.cancelRootRemoval(input),
+    archive: async (input: { libraryId: number; expectedRevision: number }) => deps.archive(input),
+    restore: async (input: { libraryId: number; expectedRevision: number }) => deps.restore(input),
+    deletePreview: async (input: { libraryId: number }) => deps.previewRemoval(input.libraryId),
+    delete: async (input: {
+      libraryId: number
+      expectedRevision: number
+      expectedImpactRevision: string
+    }) => deps.remove(input)
+  })
+  return backend
+}
+
+function createDependencies(calls: string[]): MediaLibraryHandlerTestDependencies {
   return {
     list: (input) => {
       calls.push(`list:${String(input?.includeArchived ?? false)}`)
@@ -442,6 +507,20 @@ describe('media-library IPC schemas', () => {
   })
 })
 
+function registerTestHandlers(
+  deps: MediaLibraryHandlerTestDependencies,
+  adapter: ReturnType<typeof createMediaLibraryCommandAdapter>
+): void {
+  registerMediaLibraryHandlers(
+    backendFromDeps(deps),
+    {
+      previewRootMigration: deps.previewRootMigration,
+      migrateRoot: deps.migrateRoot
+    },
+    adapter
+  )
+}
+
 describe('media-library IPC handlers', () => {
   it('registers the complete contract and forwards validated arguments', async () => {
     const registrations = new Map<
@@ -452,7 +531,7 @@ describe('media-library IPC handlers', () => {
       registrations.set(channel, handler)
     })
     const calls: string[] = []
-    registerMediaLibraryHandlers(createDependencies(calls), adapter)
+    registerTestHandlers(createDependencies(calls), adapter)
 
     assert.deepEqual(
       [...registrations.keys()].sort(),
@@ -551,7 +630,7 @@ describe('media-library IPC handlers', () => {
       registrations.set(channel, handler)
     })
     const calls: string[] = []
-    registerMediaLibraryHandlers(createDependencies(calls), adapter)
+    registerTestHandlers(createDependencies(calls), adapter)
 
     assert.throws(
       () => registrations.get(IPC.MEDIA_LIBRARY_GET)?.({} as IpcMainInvokeEvent, 0),
@@ -567,7 +646,7 @@ describe('media-library IPC handlers', () => {
     assert.deepEqual(calls, [])
   })
 
-  it('preserves root continuity domain errors across validated IPC handlers', () => {
+  it('preserves root continuity domain errors across validated IPC handlers', async () => {
     const registrations = new Map<
       IpcChannel,
       (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>
@@ -580,36 +659,34 @@ describe('media-library IPC handlers', () => {
       'VALIDATION_FAILED',
       '根目录缺少可验证的原物理身份。'
     )
-    registerMediaLibraryHandlers(
-      {
-        ...createDependencies(calls),
-        updateRoot: () => {
-          throw continuityError
-        },
-        restore: () => {
-          throw continuityError
-        }
+    const deps = {
+      ...createDependencies(calls),
+      updateRoot: () => {
+        throw continuityError
       },
-      adapter
-    )
+      restore: () => {
+        throw continuityError
+      }
+    }
+    registerTestHandlers(deps, adapter)
 
     const event = {} as IpcMainInvokeEvent
-    assert.throws(
+    await assert.rejects(
       () =>
         registrations.get(IPC.MEDIA_LIBRARY_ROOT_UPDATE)?.(event, {
           libraryId: 3,
           rootId: 8,
           expectedRevision: 2,
           patch: { state: 'active' }
-        }),
+        }) as Promise<unknown>,
       (error) => error === continuityError
     )
-    assert.throws(
+    await assert.rejects(
       () =>
         registrations.get(IPC.MEDIA_LIBRARY_RESTORE)?.(event, {
           libraryId: 3,
           expectedRevision: 2
-        }),
+        }) as Promise<unknown>,
       (error) => error === continuityError
     )
   })

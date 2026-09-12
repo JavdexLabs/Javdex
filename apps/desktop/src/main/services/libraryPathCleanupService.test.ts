@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_SETTINGS } from '@shared/settingsTypes'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import {
   createMediaLibrary,
   getMediaLibrary,
@@ -13,14 +13,14 @@ import {
   listMediaLibraryAutomaticScanStates,
   updateMediaLibraryConfig,
   updateMediaLibraryRoot
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import {
   importVideoLinkResourceRecord,
   insertLocalVideoResource,
   insertScannedVideo,
   insertStrmVideoResource,
   listVideoResources
-} from '../db/videoRepo'
+} from '@library/db/videoRepo'
 import { createScanCoordinator } from '../scanner/scanCoordinator'
 import {
   applyPendingLibraryPathCleanups,
@@ -30,7 +30,7 @@ import {
   listPendingLibraryPathCleanupRoots,
   previewLibraryPathRemoval,
   runLibraryScanCleanupTransaction
-} from './libraryPathCleanupService'
+} from '@library/scan/libraryPathCleanupService'
 import {
   bootstrapLegacyMediaLibrary,
   LEGACY_CLEANUP_WAITING_ERROR
@@ -1129,7 +1129,7 @@ it('rolls back cleanup and audit writes on a native audit INSERT failure, then r
   assert.equal(calls, 2)
   assert.deepEqual(auditCleanupSnapshot(), before)
   database.exec('DROP TRIGGER fail_cleanup_audit_test')
-  const events: import('./libraryPathCleanupService').LibraryPathCleanupAuditEvent[] = []
+  const events: import('@library/scan/libraryPathCleanupService').LibraryPathCleanupAuditEvent[] = []
   const result = applyPendingLibraryPathCleanups([cleanup], (event) => {
     events.push(event)
     database.prepare('INSERT INTO test_cleanup_audit VALUES(?,?)').run(event.section, JSON.stringify(event.entry))

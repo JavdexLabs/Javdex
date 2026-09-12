@@ -1,12 +1,1 @@
-import { purgeResourceLessVideos } from '../db/videoRepo'
-import { mediaAssetStore } from './mediaAssetStore'
-
-export function deleteResourceLessVideos(): number {
-  return mediaAssetStore.coordinateDatabaseChange(() => {
-    const result = purgeResourceLessVideos()
-    for (const assetPath of result.obsoletePaths) {
-      mediaAssetStore.deleteBestEffort(assetPath)
-    }
-    return result.deleted
-  })
-}
+export * from '@library/catalog/resourceLessVideoCleanupService'

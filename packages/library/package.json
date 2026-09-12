@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "private": true,
   "license": "MIT",
-  "description": "Node-only local path and resource identity helpers; domain service extraction remains planned",
+  "description": "Node-only catalog database, image store, public-image HTTP, scan helpers/orchestration/audit-read/scheduler, classification query/maintenance/images, actress query/conflict/gallery/maintenance, tag queries, playlist and media-library maintenance, video maintenance/lifecycle, asset migration, NFO codec/tickets/workset/export projection, and local path/resource identity; Electron NFO export and scrape-apply remain in desktop",
   "exports": {
     "./*": "./src/*.ts"
   }

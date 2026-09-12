@@ -8,7 +8,7 @@ import type {
   LibraryCuratorSnapshot,
   LibraryCuratorStartInput
 } from '@shared/libraryCuratorTypes'
-import { getLibraryOverviewStats } from '../../db/overviewRepo'
+import { getLibraryOverviewStats } from '@library/db/overviewRepo'
 import { agentConfiguration } from '../../agent-platform/agentConfiguration'
 import { agentExecution } from '../../agent-platform/agentExecution'
 import { agentRunStore, type AgentRunRecord } from '../../agent-platform/agentRunStore'

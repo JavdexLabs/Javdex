@@ -6,7 +6,9 @@
     "apps/desktop/src/preload/**/*",
     "packages/contracts/src/**/*",
     "vite.web.config.ts",
-    "packages/library/src/**/*"
+    "packages/library/src/**/*",
+    "packages/http/src/**/*",
+    "apps/server/src/**/*"
   ],
   "compilerOptions": {
     "composite": true,
@@ -37,6 +39,9 @@
       ],
       "@library/*": [
         "packages/library/src/*"
+      ],
+      "@http/*": [
+        "packages/http/src/*"
       ]
     }
   }

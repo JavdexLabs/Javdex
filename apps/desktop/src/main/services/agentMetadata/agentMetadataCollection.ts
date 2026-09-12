@@ -31,8 +31,8 @@ import type {
   RuntimeDurableObservation,
   RuntimeObservation
 } from '../../agent-platform/types'
-import { getActressDetail } from '../../db/actressRepo'
-import { getVideoById } from '../../db/videoRepo'
+import { getActressDetail } from '@library/db/actressRepo'
+import { getVideoById } from '@library/db/videoRepo'
 import { agentMetadataBrowser } from './browserAdapter'
 import { agentMetadataDraftService } from './draftService'
 import { createAgentMetadataToolHandlers } from './toolPack'

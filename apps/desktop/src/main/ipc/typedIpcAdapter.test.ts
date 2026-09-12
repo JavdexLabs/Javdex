@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { IPC } from '@shared/ipc-channels'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
+import { structuredError } from '@shared/protocol/errors'
 import { executeIpcHandler } from './shared'
 import { actressIpcSchemas, appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
 import type { IpcMainInvokeEvent } from 'electron'
@@ -301,7 +302,31 @@ describe('typed IPC adapter', () => {
       await executeIpcHandler(() => {
         throw new Error('broken')
       }, []),
-      { ok: false, error: 'broken' }
+      {
+        ok: false,
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'broken',
+          details: undefined,
+          operationId: undefined,
+          recovery: 'correctInput'
+        }
+      }
+    )
+    assert.deepEqual(
+      await executeIpcHandler(() => {
+        throw structuredError('CONNECTION_UNAVAILABLE', '远程资料库尚未配置')
+      }, []),
+      {
+        ok: false,
+        error: {
+          code: 'CONNECTION_UNAVAILABLE',
+          message: '远程资料库尚未配置',
+          details: undefined,
+          operationId: undefined,
+          recovery: 'retryConnection'
+        }
+      }
     )
   })
 

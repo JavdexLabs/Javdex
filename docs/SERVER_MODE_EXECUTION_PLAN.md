@@ -274,14 +274,14 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 
 - 范围：将分类资料维护、合并、删除及 profile/name/link persistence 迁入 `packages/library/src/catalog`。`classificationImageService` 仍留 desktop，因为它依赖 `remoteImageFetch`（settings 代理）。桌面再导出以保持 facet IPC 兼容。
 - 工程默认：维护仍走 `getDb()` 与 `mediaAssetStore`。未改 schema 16。
-- 验证：`npm run typecheck:node`；library / classification / actress 边界通过。分类维护及相关测试 199 项全部通过（query/maintenance、merge、deletion、facet IPC、video scrape apply、video maintenance）。
+- 验证：`npm run typecheck:node`；library / classification / actress 边界通过。分类维护及相关测试 199 项全部通过（query/maintenance、merge、deletion、facet IPC、video scrape apply、video maintenance）。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
 - 未做：当时影片/演员维护、分类远程图片导入、Electron NFO 导出、catalogReadWorker 入口仍在 desktop；S02D 未开始。
 
 **S02 实施记录（演员查询与冲突切片）**
 
 - 范围：将 `actressQueryService`、`actressAssetService` 和 `actressIdentityConflictWorkflow` 迁入 `packages/library/src/catalog`。`actressGalleryService` / `actressMaintenanceService` 仍留 desktop（远程图依赖 settings 代理）。桌面再导出以保持 actress IPC 兼容。
 - 工程默认：查询与冲突处理仍走 `getDb()`。未改 schema 16。
-- 验证：`npm run typecheck:node`；library / actress 边界通过。演员查询、冲突工作流和维护测试 82 项全部通过。
+- 验证：`npm run typecheck:node`；library / actress 边界通过。演员查询、冲突工作流和维护测试 82 项全部通过。全量 Electron 测试 2940 项、2939 通过、0 失败、1 跳过（`JAVDEX_TEST_TIMEOUT_MS=360000`）。
 - 未做：影片维护、演员图库远程导入、分类远程图片导入、Electron NFO 导出仍在 desktop；S02D 未开始。
 
 ### S02D：先完成桌面本地后端重构

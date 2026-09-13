@@ -1,8 +1,15 @@
 import { getDb } from '@library/db/database'
 import {
   PendingScanRepoError,
+  getPendingScanGroup,
+  listPendingScanGroups,
   resolvePendingScanGroup
 } from '@library/db/pendingScanRepo'
+import { pagePendingScanQueue, countPendingScanQueue } from '@library/db/pendingScanQueueRepo'
+import {
+  getPendingResourceIdentity,
+  listPendingResourceIdentities
+} from '@library/db/pendingResourceIdentityRepo'
 import { selectAccessibleFallbackPrimaryResourceId } from '@library/scan/accessiblePrimaryResource'
 import { resolvePendingResourceIdentity } from '@library/scan/pendingResourceIdentityService'
 import type {
@@ -1015,6 +1022,48 @@ export function createLocalCatalogBackend(
     },
     async auditHeader(input) {
       return catalogScanAuditHeader(input.libraryId)
+    },
+    async getPendingScan(input) {
+      const local = input as { libraryId?: number; groupId: number }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_scan_groups WHERE id = ?')
+            .get(local.groupId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) return null
+      return getPendingScanGroup(libraryId, local.groupId)
+    },
+    async listPendingScans(input) {
+      if (input.libraryId) return listPendingScanGroups(input.libraryId)
+      return listMediaLibraries({ includeArchived: true }).flatMap((library) =>
+        listPendingScanGroups(library.id)
+      )
+    },
+    async pagePendingScanQueue(input) {
+      return pagePendingScanQueue(input)
+    },
+    async countPendingScanQueue(input) {
+      return countPendingScanQueue(input.libraryId)
+    },
+    async getPendingResourceIdentity(input) {
+      const local = input as { libraryId?: number; identityId: number }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_resource_identities WHERE id = ?')
+            .get(local.identityId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) return null
+      return getPendingResourceIdentity(libraryId, local.identityId)
+    },
+    async listPendingResourceIdentities(input) {
+      if (input.libraryId) return listPendingResourceIdentities(input.libraryId)
+      return listMediaLibraries({ includeArchived: true }).flatMap((library) =>
+        listPendingResourceIdentities(library.id)
+      )
     },
     async renameFile(input, ctx) {
       const local = input as {

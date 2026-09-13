@@ -180,6 +180,12 @@ const LIBRARY_KEYS = [
   'latestScan',
   'auditGet',
   'auditHeader',
+  'getPendingScan',
+  'listPendingScans',
+  'pagePendingScanQueue',
+  'countPendingScanQueue',
+  'getPendingResourceIdentity',
+  'listPendingResourceIdentities',
   'renameFile',
   'importManual',
   'resolvePendingScan',
@@ -755,6 +761,29 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       latestScan: q('scans.getLatest'),
       auditGet: q('scans.auditGet'),
       auditHeader: q('scans.auditHeader'),
+      getPendingScan: (input, ctx) =>
+        query('pendingScan.get', { groupId: (input as { groupId: number }).groupId }, ctx?.signal),
+      listPendingScans: q('pendingScan.list'),
+      pagePendingScanQueue: (input, ctx) => {
+        const local = (input ?? {}) as { libraryId?: number; limit?: number; offset?: number }
+        return query(
+          'pendingScan.queuePage',
+          {
+            ...(local.libraryId != null ? { libraryId: local.libraryId } : {}),
+            ...(local.limit != null ? { limit: local.limit } : {}),
+            ...(local.offset != null ? { offset: local.offset } : {})
+          },
+          ctx?.signal
+        )
+      },
+      countPendingScanQueue: q('pendingScan.queueCount'),
+      getPendingResourceIdentity: (input, ctx) =>
+        query(
+          'pendingResourceIdentity.get',
+          { identityId: (input as { identityId: number }).identityId },
+          ctx?.signal
+        ),
+      listPendingResourceIdentities: q('pendingResourceIdentity.list'),
       renameFile: mPlan('files.rename'),
       importManual: m('files.importManual'),
       resolvePendingScan: (input, ctx) => {

@@ -9,6 +9,7 @@ import type {
   ManualImportResult,
   PendingResourceIdentityResolution,
   PendingScanGroupResolution,
+  PendingScanQueueQuery,
   RenameImportResult,
   ScanCompletionResult,
   LibraryScanLatestSnapshot
@@ -26,10 +27,7 @@ import {
   renameLibraryUnrecognizedFile
 } from '@library/db/libraryScanRepo'
 import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
-import { pagePendingScanQueue, countPendingScanQueue } from '@library/db/pendingScanQueueRepo'
 import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
-import { listPendingScanGroups, getPendingScanGroup } from '@library/db/pendingScanRepo'
-import { listPendingResourceIdentities, getPendingResourceIdentity } from '@library/db/pendingResourceIdentityRepo'
 import { getLocalVideoResourceByLocator } from '@library/db/videoRepo'
 import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
 import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
@@ -121,6 +119,47 @@ export async function resolveResourceIdentityThroughBackend(
 
 export function auditGetThroughBackend(backend: CatalogBackend, libraryId: number) {
   return backend.libraries.auditGet({ libraryId })
+}
+
+export function getPendingScanThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  groupId: number
+) {
+  return backend.libraries.getPendingScan({ libraryId, groupId })
+}
+
+export function listPendingScansThroughBackend(backend: CatalogBackend, libraryId: number) {
+  return backend.libraries.listPendingScans({ libraryId })
+}
+
+export function pagePendingScanQueueThroughBackend(
+  backend: CatalogBackend,
+  query: PendingScanQueueQuery
+) {
+  return backend.libraries.pagePendingScanQueue(query)
+}
+
+export function countPendingScanQueueThroughBackend(
+  backend: CatalogBackend,
+  libraryId?: number
+) {
+  return backend.libraries.countPendingScanQueue(libraryId == null ? {} : { libraryId })
+}
+
+export function getPendingResourceIdentityThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  identityId: number
+) {
+  return backend.libraries.getPendingResourceIdentity({ libraryId, identityId })
+}
+
+export function listPendingResourceIdentitiesThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number
+) {
+  return backend.libraries.listPendingResourceIdentities({ libraryId })
 }
 
 export async function importManualThroughBackend(
@@ -377,18 +416,26 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
   appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) => auditGetThroughBackend(backend, libraryId))
   registerScanAuditRevealHandler()
   appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
-  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) => pagePendingScanQueue(query))
-  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_COUNT, (libraryId) => countPendingScanQueue(libraryId))
-  appCommandAdapter.register(IPC.PENDING_SCAN_GET, (libraryId, groupId) => getPendingScanGroup(libraryId, groupId))
-  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_GET, (libraryId, identityId) => getPendingResourceIdentity(libraryId, identityId))
+  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) =>
+    pagePendingScanQueueThroughBackend(backend, query)
+  )
+  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_COUNT, (libraryId) =>
+    countPendingScanQueueThroughBackend(backend, libraryId)
+  )
+  appCommandAdapter.register(IPC.PENDING_SCAN_GET, (libraryId, groupId) =>
+    getPendingScanThroughBackend(backend, libraryId, groupId)
+  )
+  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_GET, (libraryId, identityId) =>
+    getPendingResourceIdentityThroughBackend(backend, libraryId, identityId)
+  )
   appCommandAdapter.register(IPC.PENDING_SCAN_LIST, (libraryId) =>
-    listPendingScanGroups(libraryId)
+    listPendingScansThroughBackend(backend, libraryId)
   )
   appCommandAdapter.register(IPC.PENDING_SCAN_RESOLVE, (libraryId, groupId, resolution) =>
     resolvePendingScanThroughBackend(backend, libraryId, groupId, resolution)
   )
   appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_LIST, (libraryId) =>
-    listPendingResourceIdentities(libraryId)
+    listPendingResourceIdentitiesThroughBackend(backend, libraryId)
   )
   appCommandAdapter.register(
     IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,

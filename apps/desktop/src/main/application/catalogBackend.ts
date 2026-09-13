@@ -187,6 +187,12 @@ export interface CatalogLibraryCommands {
   latestScan: Query<'scans.getLatest'>
   auditGet: Query<'scans.auditGet'>
   auditHeader: Query<'scans.auditHeader'>
+  getPendingScan: Query<'pendingScan.get'>
+  listPendingScans: Query<'pendingScan.list'>
+  pagePendingScanQueue: Query<'pendingScan.queuePage'>
+  countPendingScanQueue: Query<'pendingScan.queueCount'>
+  getPendingResourceIdentity: Query<'pendingResourceIdentity.get'>
+  listPendingResourceIdentities: Query<'pendingResourceIdentity.list'>
   renameFile: Command<'files.rename'>
   importManual: Command<'files.importManual'>
   resolvePendingScan: Command<'pendingScan.resolve'>

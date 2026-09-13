@@ -5,7 +5,7 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend } from './scanHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
@@ -417,4 +417,47 @@ it('routes SCAN_AUDIT_GET through the catalog backend', async () => {
   } as unknown as CatalogBackend
   assert.deepEqual(await auditGetThroughBackend(backend, 3), { summary: null })
   assert.deepEqual(calls, [{ libraryId: 3 }])
+})
+
+it('routes pending scan get/list/queue reads through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    libraries: {
+      getPendingScan: async (input: unknown) => {
+        calls.push(['get', input])
+        return { id: 9 }
+      },
+      listPendingScans: async (input: unknown) => {
+        calls.push(['list', input])
+        return []
+      },
+      pagePendingScanQueue: async (input: unknown) => {
+        calls.push(['page', input])
+        return { items: [], total: 0 }
+      },
+      countPendingScanQueue: async (input: unknown) => {
+        calls.push(['count', input])
+        return 2
+      }
+    }
+  } as unknown as CatalogBackend
+  assert.deepEqual(await getPendingScanThroughBackend(backend, 1, 9), { id: 9 })
+  assert.deepEqual(await listPendingScansThroughBackend(backend, 1), [])
+  assert.deepEqual(
+    await pagePendingScanQueueThroughBackend(backend, {
+      libraryId: 1,
+      limit: 50,
+      offset: 0,
+      anchor: { kind: 'group', id: 9 }
+    }),
+    { items: [], total: 0 }
+  )
+  assert.equal(await countPendingScanQueueThroughBackend(backend, 1), 2)
+  assert.deepEqual(calls, [
+    ['get', { libraryId: 1, groupId: 9 }],
+    ['list', { libraryId: 1 }],
+    ['page', { libraryId: 1, limit: 50, offset: 0, anchor: { kind: 'group', id: 9 } }],
+    ['count', { libraryId: 1 }]
+  ])
 })

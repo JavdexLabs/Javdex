@@ -51,15 +51,16 @@
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
-| S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理） | schema 16。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、刮削应用、catalog 查询 worker 入口仍在 desktop |
-| S02D | 本地架构门槛已验证；剩余 scan/scrape/agent/player/NFO IPC 仍走桌面单例 | 见本文件 S02D 实施记录 |
+| S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理、刮削确认/候选应用/清单 applyImport/目标列表/Agent findReady·apply·discard） | schema 已到 19。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、catalog 查询 worker 入口仍在 desktop；采集/deliver 仍桌面 |
+| S02D | 本地架构门槛已验证；刮削确认/Agent apply 已走 CatalogBackend。剩余 scan/player/NFO IPC 与采集 start/plan 仍走桌面单例 | 见本文件 S02D 实施记录 |
 | S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
 | S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
 | S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
 | S06 | 正式 schema 18 上传表、流式 PUT、全用途 apply 与崩溃恢复已落地；生产烟测含 upload/apply/restart | 见本文件 S06 实施记录 |
 | S07 | 最小双后端闭环与会话/认主/失败 UI 已落地；完整管理面与 D02/D07/M 全矩阵仍待 S08–S13 | 见本文件 S07 实施记录 |
 | S08 | 管理浏览/编辑、资源/生命周期、分类合并删除、待确认与网页配对已落地；扫描/NFO/任务/根维护与刮削确认仍待 S09/S10 | 见本文件 S08 实施记录 |
-| S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入仍待 S10 | 见本文件 S09 实施记录 |
+| S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入已交 S10 | 见本文件 S09 实施记录 |
+| S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面；play.grant 仍待 S11 | 见本文件 S10 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -529,6 +530,29 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 批次开始取得固定目标及原始版本，采集结束提交仍使用该版本；不能悄悄刷新 revision 来绕过冲突。每项独立操作编号，暂停/取消停止新的桌面工作；已受理服务器提交继续并查询结果。桌面退出后不承诺未上传候选自动续传；只保存隔离的工作记录。
 
 头像裁切回传来源版本/摘要，过期结果不得覆盖新图片。清单最终应用保持身份与有序成员的原子边界。每项错误、未开始及不确定数量明确；依赖项不得当作独立批次继续。
+
+**S10 实施记录（刮削确认、候选应用、清单导入、目标列表、Agent apply）**
+
+- 范围：插件、Playwright、候选采集、裁切 UI、清单 TEMP 会话与 Agent start/plan 留桌面。正式确认/应用进入 library + 管理 HTTP：`pendingVideoScrapes.confirm`、`videos.applyScrapeCandidate`、`actresses.applyScrapeCandidate`、`playlists.applyImport`、`targetLists.create|page`、`agentMetadata.findReady|apply|discard`。桌面 IPC 确认/丢弃/计数/分页走 `CatalogBackend`；`SCRAPE_ONE` / 批次采集仍 `scrapeJobController`。成功应用影片刮削后由 catalog 包装显式 `videos.revision + 1`（`applyScrapeResult` 本身不 bump，以免改既有刮削测试）。本地 `actresses.applyCrop` 走 `applyActressCropRef`。目标列表写入 schema 19 的 `catalog_settings` 键 `target-list:<uuid>`，不升 schema 20。
+- 工程默认与升级：
+  - 冻结 `targetLists.create` 仅 `{kind, filterDigest}`，无筛选载荷。本阶段只支持命名 kind（`videos.status:{all|0|1|2}`、`videos.library:{id}.status:…`、`actresses.status:{all|unscraped|success|failed}`）。自定义 `VideoBatchScrapeFilter` 无法从 digest 还原；桌面批次仍用本地 `resolveVideoBatchTargets`，未先 `targetLists.create`。
+  - 冻结 `playlists.applyImport.videoIds` 上限 200，且只创建清单并挂已有影片（不自动建片、不追加）。桌面清单导入 IPC 仍走 TEMP + `playlistImportRepository.apply`（可建片、可超过 200）。切到冻结 HTTP 会丢掉该原子边界，保持本地 repository。
+  - 冻结 `playlists.applyImport` versions P/L/V：新建清单无 P；HTTP/本地要求 L；若带 V 只断言**第一部**影片。
+  - 冻结 `videos.applyScrapeCandidate` 声明 Q，但直达应用没有 pending 行：若已有 pending 则拒绝，要求走 confirm/discard；直达路径不要求 Q。
+  - 冻结 `actresses.applyScrapeCandidate` versions A、Q；HTTP/本地不要求 Q。
+  - 冻结 `agentMetadata.apply` versions V、A、F、Q；实现断言 V 或 A 以及 Q，**不断言 F**。`findReady` 查询不要求版本。无冻结 `pendingVideoScrapes.create` / Agent draft-create HTTP；远程采集不能把 pending/draft 写到服务器。
+  - `pendingVideoScrapes.existingIds`：HTTP 空输入返回全部影片 id；IPC 仍接受 id 列表。
+  - 渲染器裁切仍 `actresses.edit({ avatar })`；HTTP/本地 `actresses.applyCrop` 已接线但页面未切换。
+  - `applyAgentMetadataDraft` 不重建桌面 review token，也不复制 `draftService` 的 route-to-pending。
+  - 无冻结 list-mounts；`play.grant` 仍 S11。sidecar 扫描资料应用仍桌面。
+- 验证（Linux Node 22.14 / amd64 glibc；实现 `72a966e`，修复 `4ffe0b8`）：
+  - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.browser.json` 通过
+  - `npm run server:test` **21 通过 / 0 失败**（真实 staged PNG 确认封面、直达刮削改标题、演员候选+upload poster+过期 crop digest 409、Agent findReady/apply/discard、清单有序成员、目标列表 + 过期 digest 409、local vs remote `pageTargetList`）
+  - 定向 Electron：videoScrapeApplyService、localCatalogBackend、createDesktopRuntime、scrapeJobController、draftService **112 通过 / 0 失败**
+  - `npm run pretest` 通过（含 D06 与 server 生产边界）
+  - `npm run test:packaging` **8 通过**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **2997 tests / 2996 pass / 0 fail / 1 skip**
+- 未做：S11 media+mpv；S12 迁库；远程 Agent start/plan 与清单导入 IPC；桌面批次冻结目标列表；渲染器 crop 切 `applyCrop`；pending/draft create HTTP；D02 Electron 本地后端对照同一 Node 宿主；D07 全能力矩阵；M07/M10/M11 真实远程采集隔离与分页拼接；Docker 真实部署。不得把 mock 当完成证据。需用户决定：是否给 `targetLists.create` 增加筛选载荷或 `targetListId` 批次入口；清单导入是否允许 >200 / 自动建片；直达 `applyScrapeCandidate` 是否应要求 Q；Agent apply 是否断言 F；`inspectName` 是否增加 `actressId`（仍为既有升级）。
 
 ### S11：管理图片与真实播放
 

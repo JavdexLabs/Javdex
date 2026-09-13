@@ -462,13 +462,16 @@ describe('server runtime lifecycle', () => {
 
   async function boot(
     dataDir: string,
-    extraMounts: Record<string, string> = {}
+    extraMounts: Record<string, string> = {},
+    bind: { listenHost?: string; accessHosts?: string[] } = {}
   ): Promise<{ base: string; config: ServerConfig }> {
     process.env.JAVDEX_TEST_USER_DATA = dataDir
+    const listenHost = bind.listenHost ?? '127.0.0.1'
+    const accessHosts = bind.accessHosts ?? [listenHost]
     const config: ServerConfig = {
-      listenHost: '127.0.0.1',
-      port: await freePort(),
-      accessHosts: ['127.0.0.1'],
+      listenHost,
+      port: listenHost === '127.0.0.1' ? await freePort() : 0,
+      accessHosts,
       dataDir,
       imagesDir: path.join(dataDir, 'media_assets'),
       staticRoot,
@@ -476,7 +479,37 @@ describe('server runtime lifecycle', () => {
       web: { username: 'viewer', passwordHash }
     }
     server = await startJavdexServer(config, { workerEntry })
-    return { base: `http://127.0.0.1:${server.port}`, config }
+    return { base: `http://${listenHost}:${server.port}`, config }
+  }
+
+  function addNonLoopbackListenHost(): { host: string; cleanup: () => void } {
+    const requested = '10.67.67.1'
+    const iface = Object.entries(os.networkInterfaces()).find(([, addrs]) =>
+      (addrs ?? []).some(
+        (item) => (item.family === 'IPv4' || (item.family as unknown) === 4) && !item.internal
+      )
+    )?.[0]
+    if (!iface) throw new Error('no non-loopback IPv4 interface')
+    const added = spawnSync('sudo', ['-n', 'ip', 'addr', 'add', `${requested}/32`, 'dev', iface], {
+      encoding: 'utf8'
+    })
+    if (added.status === 0 || /File exists/i.test(added.stderr ?? '')) {
+      return {
+        host: requested,
+        cleanup: () => {
+          spawnSync('sudo', ['-n', 'ip', 'addr', 'del', `${requested}/32`, 'dev', iface], {
+            encoding: 'utf8'
+          })
+        }
+      }
+    }
+    const existing = (os.networkInterfaces()[iface] ?? []).find(
+      (item) => (item.family === 'IPv4' || (item.family as unknown) === 4) && !item.internal
+    )?.address
+    if (!existing || existing.startsWith('127.')) {
+      throw new Error(`cannot bind non-loopback address on ${iface}: ${added.stderr || added.stdout}`)
+    }
+    return { host: existing, cleanup: () => undefined }
   }
 
   it('does not listen after a schema upgrade failure', async () => {
@@ -3960,6 +3993,73 @@ describe('server runtime lifecycle', () => {
       assert.match(mpv.log(), /404|HTTP error/i)
     } finally {
       mpv.child.kill('SIGKILL')
+    }
+  })
+
+  it('plays a real mpv Range grant through a non-loopback listen address', { timeout: 60_000 }, async () => {
+    assert.equal(fs.existsSync('/usr/bin/mpv'), true)
+    const lan = addNonLoopbackListenHost()
+    assert.notEqual(lan.host, '127.0.0.1')
+    assert.equal(lan.host.startsWith('127.'), false)
+    const dataDir = path.join(root, 's13-m15-lan')
+    try {
+      const { base, config } = await boot(dataDir, {}, { listenHost: lan.host, accessHosts: [lan.host] })
+      assert.equal(config.listenHost, lan.host)
+      assert.match(base, new RegExp(`^http://${lan.host.replaceAll('.', '\\.')}:\\d+$`))
+      const writer = await claimInitialWriter(base, config)
+      const mp4 = path.join(mediaRoot, 'S15-LAN.mp4')
+      encodeTestMedia(mp4)
+      const bound = await insertBoundVideo('S15-LAN', mp4)
+      const resource = getDb()
+        .prepare('SELECT * FROM video_resources WHERE id = ?')
+        .get(bound.fileId) as {
+          kind: 'local'
+          locator: string
+          source_identity: string | null
+          root_id: number | null
+          size_bytes: number | null
+          file_mtime_ms: number | null
+        }
+      const granted = await postManage(
+        base,
+        'play.grant',
+        {
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          input: {
+            libraryId: 1,
+            videoId: bound.videoId,
+            resourceId: bound.fileId,
+            locatorRevision: resourceLocatorRevision(resource)
+          }
+        },
+        { bearer: writer.secret }
+      )
+      assert.equal(granted.status, 200, JSON.stringify(granted.json))
+      const play = granted.json as { grantId: string; playbackHandle: string }
+      assert.match(
+        play.playbackHandle,
+        new RegExp(`^http://${lan.host.replaceAll('.', '\\.')}:\\d+/play/v1/`)
+      )
+      const head = await fetch(play.playbackHandle, { method: 'HEAD' })
+      assert.equal(head.status, 200, await head.text())
+      const socketPath = path.join(dataDir, 'mpv-lan.sock')
+      const mpv = await startMpv(socketPath)
+      try {
+        const loaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'])
+        assert.equal(loaded.error, 'success', JSON.stringify(loaded))
+        const started = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
+        assert.ok(started >= 0.2, String(started))
+      } finally {
+        mpv.child.kill('SIGKILL')
+      }
+    } finally {
+      await server?.stop()
+      server = undefined
+      closeDatabase()
+      resetLibraryHostForTests()
+      lan.cleanup()
     }
   })
 

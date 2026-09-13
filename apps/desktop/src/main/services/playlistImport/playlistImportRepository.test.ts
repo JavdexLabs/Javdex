@@ -28,6 +28,22 @@ function createAgentRun(database: Database.Database, runId: string): void {
 }
 
 describe('PlaylistImportRepository', () => {
+  it('snapshots a workStore session that has no catalog tables', () => {
+    const database = new Database(':memory:')
+    const repository = new PlaylistImportRepository(database)
+    const snapshot = repository.createJob({
+      runId: 'run-workstore',
+      idempotencyKey: 'workstore',
+      sourceUrl: 'https://example.test/list',
+      targetLibraryId: 1,
+      destination: { kind: 'create' },
+      targetLibrary: { id: 1, name: '远程库' }
+    })
+    assert.equal(snapshot.phase, 'discovering-list')
+    assert.equal(snapshot.frozenInput.targetLibraryNameAtStart, '远程库')
+    assert.equal(snapshot.preview?.items?.length ?? 0, 0)
+  })
+
   it('keeps all import staging in the current SQLite connection only', () => {
     const database = new Database(':memory:')
     try {

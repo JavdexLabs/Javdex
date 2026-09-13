@@ -22,6 +22,8 @@ import { agentMetadataCollection } from '../services/agentMetadata/agentMetadata
 import { libraryCurator, readCuratorOverview } from '../services/libraryCuratorAgent/libraryCurator'
 import { loadCatalogActressAvatarCropSnapshot } from '../application/catalogActressAvatarCropSnapshot'
 import { createPlaylistImportModule } from '../services/playlistImport/playlistImportModule'
+import { createMemoryPlaylistImportCatalogLookup } from '../services/playlistImport/playlistImportCatalogLookup'
+import { ipcMutation } from '../application/mutationContext'
 
 const thisFile = fileURLToPath(import.meta.url)
 
@@ -171,6 +173,16 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
           destination: { kind: 'create' }
         })
       })
+      const playlistMatch = await probe(async () => {
+        const lookup = createMemoryPlaylistImportCatalogLookup()
+        return lookup.ingestCodes(runtime.backend, ['ABC-001'])
+      })
+      const playlistApply = await probe(() =>
+        runtime.backend.playlists.applyImport(
+          { name: 'm10', videoIds: [1], libraryId: 1 },
+          ipcMutation()
+        )
+      )
       let getDbError = ''
       try {
         getDb()
@@ -186,7 +198,9 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
           collection,
           curator,
           crop,
-          playlist
+          playlist,
+          playlistMatch,
+          playlistApply
         })}\n`
       )
       return new Promise<void>(() => undefined)
@@ -369,6 +383,8 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
     curator: M10Probe
     crop: M10Probe
     playlist: M10Probe
+    playlistMatch: M10Probe
+    playlistApply: M10Probe
   }
 
   async function spawnM10Child(root: string): Promise<{ child: ChildProcess; report: M10Report }> {
@@ -555,7 +571,14 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         assert.deepEqual(report.fds, [])
         assert.deepEqual(listLibraryDbFds(child.pid ?? 0, catalogPath), [])
         assert.match(report.getDbError, /Database not initialised/)
-        for (const probe of [report.collection, report.curator, report.crop, report.playlist] as const) {
+        for (const probe of [
+          report.collection,
+          report.curator,
+          report.crop,
+          report.playlist,
+          report.playlistMatch,
+          report.playlistApply
+        ] as const) {
           assert.equal(probe.ok, false, probe.error)
           assert.equal(/Database not initialised/i.test(probe.error), false, probe.error)
           assert.ok(probe.error.length > 0, 'probe must fail through the catalog, not silently')

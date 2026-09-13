@@ -824,6 +824,10 @@ if (hostConfigRaw) {
         },
         secret
       )
+      const pendingResult = pending.then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (reason: unknown) => ({ status: 'rejected' as const, reason })
+      )
       await waitPath(`${stallPath}.ready`, 15_000)
       const killed = child.kill('SIGKILL')
       assert.equal(killed, true)
@@ -836,7 +840,8 @@ if (hostConfigRaw) {
       })
       const index = children.indexOf(child)
       if (index >= 0) children.splice(index, 1)
-      await Promise.allSettled([pending])
+      const killedRequest = await pendingResult
+      assert.equal(killedRequest.status, 'rejected')
 
       const rolledBack = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
       try {

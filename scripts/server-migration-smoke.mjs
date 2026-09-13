@@ -118,7 +118,6 @@ function runContainer({ name, port, dataDir, imagesDir, mediaDir, configDir, ima
   const run = docker(
     [
       'run',
-      '--rm',
       '-d',
       '--name',
       name,
@@ -242,7 +241,22 @@ function mountTmpfs(dir, sizeSpec) {
 }
 
 function unmountTmpfs(dir) {
-  spawnSync('sudo', ['-n', 'umount', '-l', dir], { encoding: 'utf8', stdio: 'ignore' })
+  for (let i = 0; i < 20; i += 1) {
+    const mounted = spawnSync('findmnt', ['-n', '--mountpoint', dir], { encoding: 'utf8' })
+    if (mounted.status !== 0) return
+    spawnSync('sudo', ['-n', 'umount', dir], { encoding: 'utf8', stdio: 'ignore' })
+    spawnSync('sleep', ['0.25'])
+  }
+  const still = spawnSync('findmnt', ['-n', '--mountpoint', dir], { encoding: 'utf8' })
+  if (still.status === 0) {
+    throw new Error(`tmpfs still mounted on ${dir}\n${still.stdout}`)
+  }
+}
+
+function dumpContainer(name) {
+  process.stderr.write(docker(['ps', '-a', '--filter', `name=${name}`]).stdout || '')
+  process.stderr.write(docker(['logs', '--tail', '120', name]).stdout || '')
+  process.stderr.write(docker(['logs', '--tail', '120', name]).stderr || '')
 }
 
 async function importPackageToReady({
@@ -556,10 +570,13 @@ try {
     assertCatalogRolledBack(path.join(enospcData, 'library.db'))
     assert.equal(fs.existsSync(path.join(enospcImages, COVER_REL)), false)
   } finally {
+    docker(['stop', '-t', '5', ENOSPC_NAME], { stdio: 'ignore' })
     docker(['rm', '-f', ENOSPC_NAME], { stdio: 'ignore' })
     unmountTmpfs(enospcImages)
   }
   assert.ok(enospcBase && enospcToken, 'ENOSPC import did not finish before retry')
+  fs.mkdirSync(enospcImages, { recursive: true })
+  fs.chmodSync(enospcImages, 0o755)
   runContainer({
     name: ENOSPC_NAME,
     port: ENOSPC_PORT,
@@ -569,7 +586,12 @@ try {
     configDir: enospcConfig,
     image
   })
-  await waitLive(enospcBase, 'enospc-retry')
+  try {
+    await waitLive(enospcBase, 'enospc-retry')
+  } catch (error) {
+    dumpContainer(ENOSPC_NAME)
+    throw error
+  }
   const enospcRetried = await enableMigration(
     enospcBase,
     mapped.migrationId,

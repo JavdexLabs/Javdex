@@ -25,7 +25,7 @@ export async function validatePlaylistImportStartTargets(
     name: string
     status: string
   } | null
-  if (!library) {
+  if (!library || typeof library.status !== 'string' || typeof library.name !== 'string') {
     throw new PlaylistImportTargetError('TARGET_LIBRARY_NOT_FOUND', '目标媒体库不存在。')
   }
   if (library.status !== 'active') {

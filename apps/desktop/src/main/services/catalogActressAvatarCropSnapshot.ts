@@ -38,7 +38,10 @@ export async function collectCatalogActressAvatarCropTargets(
       limit: CROP_PAGE_LIMIT,
       offset
     })) as { items?: CatalogActressCropRow[]; total?: number }
-    const rows = Array.isArray(page.items) ? page.items : []
+    if (!page || !Array.isArray(page.items)) {
+      throw new Error('演员列表页响应无效。')
+    }
+    const rows = page.items
     for (const row of rows) {
       if (hasCroppableAvatar(row)) items.push(toTarget(row))
     }

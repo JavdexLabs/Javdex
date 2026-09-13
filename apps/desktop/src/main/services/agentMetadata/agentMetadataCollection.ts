@@ -93,7 +93,9 @@ async function describeBoundTarget(
       scope: { kind: 'all' },
       videoId: target.id
     })) as { id: number; code: string } | null
-    if (!video) throw new Error('影片不存在。')
+    if (!video || !Number.isFinite(video.id) || typeof video.code !== 'string' || video.code.length === 0) {
+      throw new Error('影片不存在。')
+    }
     return `当前目标是影片 #${video.id}，库内番号为「${video.code}」。必须在页面中找到并核对同一番号。`
   }
   const actress = (await catalog.actresses.get({ actressId: target.id })) as {
@@ -101,7 +103,9 @@ async function describeBoundTarget(
     main_name: string
     names?: Array<{ name: string }>
   } | null
-  if (!actress) throw new Error('演员不存在。')
+  if (!actress || !Number.isFinite(actress.id) || typeof actress.main_name !== 'string') {
+    throw new Error('演员不存在。')
+  }
   const names = [...new Set([actress.main_name, ...(actress.names ?? []).map((item) => item.name)])]
   return `当前目标是演员 #${actress.id}，库内已知名称为：${names.map((name) => `「${name}」`).join('、')}。优先用同名核对身份；若页面名称均不匹配，必须提交 identityMatched=false 交由用户确认，不能猜测。`
 }

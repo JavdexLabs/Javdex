@@ -79,5 +79,11 @@ it('reads curator overview through a bound catalog without getDb', async () => {
   } as unknown as CatalogBackend)
   assert.deepEqual(overview, stats)
   assert.notEqual(overview, stats)
+  await assert.rejects(
+    () => readCuratorOverview({
+      queries: { overviewStats: async () => ({ protocolVersion: 1 }) }
+    } as unknown as CatalogBackend),
+    /概览响应无效/
+  )
 })
 

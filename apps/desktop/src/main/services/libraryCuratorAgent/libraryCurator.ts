@@ -62,7 +62,11 @@ export async function readCuratorOverview(
   catalog: CatalogBackend | null
 ): Promise<Record<string, unknown>> {
   if (catalog) {
-    return structuredClone(await catalog.queries.overviewStats({})) as Record<string, unknown>
+    const stats = (await catalog.queries.overviewStats({})) as { videos?: unknown } | null
+    if (!stats || typeof stats !== 'object' || typeof stats.videos !== 'object' || stats.videos == null) {
+      throw new Error('媒体库概览响应无效。')
+    }
+    return structuredClone(stats) as Record<string, unknown>
   }
   return structuredClone(getLibraryOverviewStats()) as unknown as Record<string, unknown>
 }

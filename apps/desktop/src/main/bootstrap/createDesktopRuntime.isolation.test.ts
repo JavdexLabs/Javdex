@@ -556,7 +556,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         assert.deepEqual(listLibraryDbFds(child.pid ?? 0, catalogPath), [])
         assert.match(report.getDbError, /Database not initialised/)
         for (const probe of [report.collection, report.curator, report.crop, report.playlist] as const) {
-          assert.equal(probe.ok, false)
+          assert.equal(probe.ok, false, probe.error)
           assert.equal(/Database not initialised/i.test(probe.error), false, probe.error)
           assert.ok(probe.error.length > 0, 'probe must fail through the catalog, not silently')
         }

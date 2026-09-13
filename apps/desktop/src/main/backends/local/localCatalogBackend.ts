@@ -382,9 +382,9 @@ export function createLocalCatalogBackend(
         },
         () => {
           assertExpectedVideoVersion(input.videoId, ctx.expectedVersions, ctx.operationId)
-          const ok = videos.setRating(input.videoId, input.rating)
+          videos.setRating(input.videoId, input.rating)
           return {
-            ok,
+            ok: true,
             videoId: input.videoId,
             versions: { V: readVideoAggregateVersion(input.videoId)! }
           }

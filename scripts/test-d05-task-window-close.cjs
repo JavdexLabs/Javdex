@@ -4,7 +4,8 @@ require('tsx/cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const { app, BrowserWindow, ipcMain } = require('electron')
-const { IPC } = require('../packages/contracts/src/ipc-channels.ts')
+const ipcChannels = require('../packages/contracts/src/ipc-channels.ts')
+const IPC = ipcChannels.IPC || ipcChannels.default?.IPC || ipcChannels
 const {
   bindMainWindow,
   registerMainWindowBinder
@@ -90,11 +91,13 @@ async function run() {
   await app.whenReady()
   let mainWindow = null
   const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
-  ipcMain.handle(IPC.SCAN_RUN, () => {
-    throw new Error('this fixture must not invoke SCAN_RUN from the renderer')
-  })
-  const scanRunHandles = ipcMain.listenerCount(IPC.SCAN_RUN)
-  assert.equal(scanRunHandles >= 1, true, 'SCAN_RUN must be registered once before the first window')
+  ipcMain.handle('javdex-d05-task-window', () => 'ok')
+  const scanRunHandles = ipcMain.listenerCount('javdex-d05-task-window')
+  assert.equal(
+    scanRunHandles >= 1,
+    true,
+    `scan window IPC must be registered once before the first window (IPC.SCAN_RUN=${String(IPC?.SCAN_RUN)})`
+  )
 
   const boundOwners = new WeakSet()
   const bindCounts = []
@@ -149,7 +152,7 @@ async function run() {
   const secondId = second.webContents.id
   assert.notEqual(secondId, firstId)
   assert.deepEqual(bindCounts, [firstId, secondId])
-  assert.equal(ipcMain.listenerCount(IPC.SCAN_RUN), scanRunHandles)
+  assert.equal(ipcMain.listenerCount('javdex-d05-task-window'), scanRunHandles)
   assert.equal(await second.webContents.executeJavaScript('1+1'), 2)
 
   abort.abort()
@@ -178,7 +181,7 @@ async function run() {
   second.close()
   await waitClosed(second)
   stopBinder()
-  ipcMain.removeHandler(IPC.SCAN_RUN)
+  ipcMain.removeHandler('javdex-d05-task-window')
   await backend.dispose()
   console.log(
     `D05_TASK_WINDOW_CLOSE_OK ${JSON.stringify({

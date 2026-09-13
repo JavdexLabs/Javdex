@@ -689,7 +689,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 **S14 实施记录（进行中）**
 
 - 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、冻结备份与拷图失败不自动回滚。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
-- 验证：文档提交；本环境 `npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**；`server:smoke` **EXIT 1** `docker is not available`。未跑安装包或容器烟测。
+- 验证：文档提交；本环境 `npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**（本轮复跑）；`server:smoke` 仍因本环境无 docker 失败。未跑安装包或容器烟测。
 - 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。S13 剩余矩阵见上一节。
 
 ## 接手环境与验证命令

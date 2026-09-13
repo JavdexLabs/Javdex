@@ -281,8 +281,15 @@ it('runs SCAN_RUN through the catalog backend instead of the local coordinator s
     generation: 1,
     session: () => ({ catalogId: 'catalog' }),
     libraries: {
-      runScan: async (input: { libraryId: number }) => {
-        calls.push(['runScan', input])
+      get: async (input: { libraryId: number }) => {
+        calls.push(['get', input])
+        return { revision: 4, config: { revision: 2 } }
+      },
+      runScan: async (
+        input: { libraryId: number },
+        ctx: { expectedVersions: { L: { revision: number }; C: { revision: number }; G: { revision: number } } }
+      ) => {
+        calls.push(['runScan', input, ctx.expectedVersions])
         return { taskId: '11111111-1111-1111-1111-111111111111', receipt: { operationId: 'op' } }
       }
     },
@@ -306,8 +313,17 @@ it('runs SCAN_RUN through the catalog backend instead of the local coordinator s
   assert.equal(result.libraryId, 3)
   assert.equal(result.scannedFiles, 4)
   assert.equal(result.imported, 1)
-  assert.deepEqual(calls[0], ['runScan', { libraryId: 3 }])
-  assert.equal((calls[1] as [string, { taskId: string }])[0], 'tasks.get')
+  assert.deepEqual(calls[0], ['get', { libraryId: 3 }])
+  assert.deepEqual(calls[1], [
+    'runScan',
+    { libraryId: 3 },
+    {
+      L: { generation: 1, revision: 4 },
+      C: { generation: 1, revision: 2 },
+      G: { generation: 1, revision: 1 }
+    }
+  ])
+  assert.equal((calls[2] as [string, { taskId: string }])[0], 'tasks.get')
 })
 
 it('cancels the remote SCAN_RUN wait without waiting for a later terminal poll', async () => {
@@ -317,6 +333,7 @@ it('cancels the remote SCAN_RUN wait without waiting for a later terminal poll',
     generation: 1,
     session: () => ({ catalogId: 'catalog' }),
     libraries: {
+      get: async () => ({ revision: 1, config: { revision: 1 } }),
       runScan: async () => ({ taskId, receipt: { operationId: 'op' } })
     },
     tasks: {

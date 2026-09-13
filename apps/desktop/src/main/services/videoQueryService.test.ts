@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { insertTestVideoWithFile } from '../db/testVideoFixtures'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createVideoQueryService, createAsyncVideoQueryService } from './videoQueryService'
-import { buildVideoResourceSourceIdentity } from '../../../../../packages/library/src/videoResourceIdentity'
+import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 
 const DEFAULT_SCOPE = { kind: 'library', libraryId: 1 } as const
 

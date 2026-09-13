@@ -21,7 +21,7 @@ import type {
   RuntimeObservation,
   HostedToolResult
 } from '../../agent-platform/types'
-import { getDb } from '../../db/database'
+import { getDb } from '@library/db/database'
 import {
   isScrapeBrowserChallengeError,
   type ScrapeBrowserListExtractionPlan
@@ -37,6 +37,8 @@ import {
   PlaylistImportRepository,
   type PlaylistImportBrowserWork
 } from './playlistImportRepository'
+import { applyPlaylistImportThroughCatalog } from './playlistImportCatalogApply'
+import type { PlaylistImportCatalogLookup } from './playlistImportCatalogLookup'
 import {
   assertPlaylistImportFinalAdvance,
   assertPlaylistImportTerminalVerified,
@@ -252,6 +254,21 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
   private readonly listeners = new Set<(snapshot: PlaylistImportSnapshot) => void>()
   private readonly timelines = new Map<string, AgentMetadataActivityTimeline>()
   private readonly liveEmitTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private database: () => ReturnType<typeof getDb> = getDb
+  private catalog: import('../../application/catalogBackend').CatalogBackend | null = null
+  private catalogLookup?: PlaylistImportCatalogLookup
+
+  bindDatabase(database: () => ReturnType<typeof getDb>): void {
+    this.database = database
+  }
+
+  bindCatalog(
+    catalog: import('../../application/catalogBackend').CatalogBackend | null,
+    catalogLookup?: PlaylistImportCatalogLookup
+  ): void {
+    this.catalog = catalog
+    this.catalogLookup = catalogLookup
+  }
 
   subscribe(listener: (snapshot: PlaylistImportSnapshot) => void): () => void {
     this.listeners.add(listener)
@@ -259,7 +276,12 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
   }
 
   private repository(): PlaylistImportRepository {
-    return new PlaylistImportRepository(getDb())
+    return new PlaylistImportRepository(this.database(), this.catalogLookup)
+  }
+
+  private async refreshCatalogIdentities(codes: Array<string | null | undefined>): Promise<void> {
+    if (this.catalog?.mode !== 'remote' || !this.catalogLookup?.ingestCodes) return
+    await this.catalogLookup.ingestCodes(this.catalog, codes)
   }
 
   private timeline(runId: string, initial: PlaylistImportActivity[] = []): AgentMetadataActivityTimeline {
@@ -545,11 +567,20 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     throw new Error('VIRTUAL_LIST_CONTINUITY_UNPROVEN')
   }
 
-  private result(runId: string, snapshot: PlaylistImportSnapshot): HostedToolResult {
+  private async result(runId: string, snapshot: PlaylistImportSnapshot): Promise<HostedToolResult> {
     let current = snapshot
     if (current.phase === 'ready-to-apply') {
       try {
-        this.repository().apply(runId, `auto-apply:${runId}`)
+        if (this.catalog?.mode === 'remote') {
+          await applyPlaylistImportThroughCatalog(
+            this.catalog,
+            this.repository(),
+            runId,
+            `auto-apply:${runId}`
+          )
+        } else {
+          this.repository().apply(runId, `auto-apply:${runId}`)
+        }
       } catch (error) {
         current = this.repository().snapshot(runId)!
         if (current.phase !== 'failed' && !(current.phase === 'ready-to-apply' && current.error)) {
@@ -659,6 +690,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
             assertPlaylistImportVirtualStart(reset.scrollState)
           }
           const extracted = await this.browser.extractList({ runId, plan, signal })
+          await this.refreshCatalogIdentities(extracted.items.map((item) => item.code))
           if (args.kind === 'virtual-page-start') {
             assertPlaylistImportVirtualStart(extracted.scrollState)
             evidenceRef = await this.captureExtractionEvidence(runId, extracted, signal)
@@ -711,6 +743,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
           }
           if (args.kind === 'static-page') {
             if (isLoadMore) throw new Error('PLAYLIST_IMPORT_ARGUMENT_INVALID:kind')
+            await this.refreshCatalogIdentities(extracted.items.map((item) => item.code))
             return this.result(runId, repository.checkpointStaticPage({
               ...common,
               viewRevision: extracted.viewRevision,
@@ -726,6 +759,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
               absolutePosition,
               occurrenceKey: `${absolutePosition}:${normalizePlaylistImportUrl(item.detailUrl)}`
             }))
+            await this.refreshCatalogIdentities(positioned.map((item) => item.code))
             return this.result(runId, repository.checkpointVirtualBatch({
               ...common,
               enumerationKind: 'load-more',
@@ -1147,6 +1181,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
             documentRevision,
             viewRevision
           })
+          await this.refreshCatalogIdentities([checkpoint.detailCode])
           return this.result(runId, repository.checkpointDetailIdentity(checkpoint))
         }
       })

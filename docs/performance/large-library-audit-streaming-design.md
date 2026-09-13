@@ -72,7 +72,7 @@ CJ归档：7项证据及SHA256见 `large-library-results/implementation/batch-cj
 
 ## CK：生产统一选源边界（B 的第一步）
 
-`apps/desktop/src/main/db/scanAuditSource.ts` 已由五处真实读取路径使用，统一 library/run 选择和 identity/bytes/body 三种投影。精确run与latest非NULL明确分开：有有效summary但缺正文不得退回其他run；兼容store只在DB未初始化时读旧文件。legacy JSON为空、损坏或非终态仍保留原可选中规则，随后由各reader做既有验证，不在selector悄悄过滤历史。
+`packages/library/src/db/scanAuditSource.ts` 已由五处真实读取路径使用，统一 library/run 选择和 identity/bytes/body 三种投影。精确run与latest非NULL明确分开：有有效summary但缺正文不得退回其他run；兼容store只在DB未初始化时读旧文件。legacy JSON为空、损坏或非终态仍保留原可选中规则，随后由各reader做既有验证，不在selector悄悄过滤历史。
 
 header仅取身份；分页索引按指定run取字节数；路径权限按最新run取字节数后在同事务校验；两个完整兼容入口按需取正文。字节数为BLOB UTF-8长度（含NUL），不把正文返回JS，但SQLite可能仍读源页，不能声称恒定I/O；body模式仍是全量兼容读取。source选择和后续查询的快照仍由caller事务保证，不新建连接或缓存。
 

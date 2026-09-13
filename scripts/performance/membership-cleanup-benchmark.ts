@@ -3,8 +3,8 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import { performance } from 'node:perf_hooks'
-import { migrateDatabase } from '../../apps/desktop/src/main/db/migrations'
-import { removeResourceLessMembershipsWithAudit } from '../../apps/desktop/src/main/db/libraryMembershipRepo'
+import { migrateDatabase } from '../../packages/library/src/db/migrations'
+import { removeResourceLessMembershipsWithAudit } from '../../packages/library/src/db/libraryMembershipRepo'
 
 it('measures complete membership cleanup and first callback at increasing scales', () => {
   const results: unknown[] = []

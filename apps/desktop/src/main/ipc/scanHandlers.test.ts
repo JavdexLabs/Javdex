@@ -5,7 +5,9 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, abortRemoteCatalogScanWait, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend, pendingAuditPresenceThroughBackend } from './scanHandlers'
+import type { CatalogBackend } from '../application/catalogBackend'
+import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
 import { createTypedIpcAdapter } from './typedIpcAdapter'
 
@@ -270,4 +272,303 @@ it('returns fileMissing on asynchronous access failure without revealing', async
     assert.deepEqual(await handler(1, '/media/missing.mp4'), { ok: false, fileMissing: true })
     assert.deepEqual(calls, ['permission', 'access'])
   }
+})
+
+it('runs SCAN_RUN through the catalog backend instead of the local coordinator singleton', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 1,
+    session: () => ({ catalogId: 'catalog' }),
+    libraries: {
+      runScan: async (input: { libraryId: number }) => {
+        calls.push(['runScan', input])
+        return { taskId: '11111111-1111-1111-1111-111111111111', receipt: { operationId: 'op' } }
+      }
+    },
+    tasks: {
+      get: async (input: { taskId: string }) => {
+        calls.push(['tasks.get', input])
+        return {
+          owner: 'catalog',
+          taskId: input.taskId,
+          catalogId: 'catalog',
+          kind: 'scan',
+          state: 'succeeded',
+          taskRevision: 2,
+          progressSeq: 1,
+          counts: { scanned: 4, imported: 1 }
+        }
+      }
+    }
+  } as unknown as CatalogBackend
+  const result = await runScanThroughBackend(backend, 3)
+  assert.equal(result.libraryId, 3)
+  assert.equal(result.scannedFiles, 4)
+  assert.equal(result.imported, 1)
+  assert.deepEqual(calls[0], ['runScan', { libraryId: 3 }])
+  assert.equal((calls[1] as [string, { taskId: string }])[0], 'tasks.get')
+})
+
+it('cancels the remote SCAN_RUN wait without waiting for a later terminal poll', async () => {
+  const taskId = '22222222-2222-2222-2222-222222222222'
+  const backend = {
+    mode: 'remote',
+    generation: 1,
+    session: () => ({ catalogId: 'catalog' }),
+    libraries: {
+      runScan: async () => ({ taskId, receipt: { operationId: 'op' } })
+    },
+    tasks: {
+      get: async () => new Promise(() => undefined)
+    }
+  } as unknown as CatalogBackend
+  const pending = runScanThroughBackend(backend, 3)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(abortRemoteCatalogScanWait(taskId), true)
+  const result = await pending
+  assert.equal(result.cancelled, true)
+  assert.equal(result.runId, taskId)
+})
+
+it('runs FILE_IMPORT_MANUAL through the catalog backend with a root-relative location', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 1,
+    libraries: {
+      importManual: async (input: unknown, ctx: unknown) => {
+        calls.push(['importManual', input, ctx])
+        return { imported: true, code: 'D02-001' }
+      }
+    }
+  } as unknown as CatalogBackend
+  const result = await importManualThroughBackend(
+    backend,
+    3,
+    8,
+    'clip.mp4',
+    'D02-001',
+    { kind: 'new' }
+  )
+  assert.equal(result.imported, true)
+  assert.equal((calls[0] as [string, { location: { relativePath: string } }])[0], 'importManual')
+  assert.equal(
+    ((calls[0] as [string, { location: { relativePath: string } }])[1]).location.relativePath,
+    'clip.mp4'
+  )
+  await assert.rejects(
+    () =>
+      importManualThroughBackend(backend, 3, 8, '/abs/clip.mp4', 'D02-001', { kind: 'new' }),
+    (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+  )
+})
+
+it('refuses remote FILE_RENAME until the IPC carries a resource id', async () => {
+  const backend = { mode: 'remote', generation: 1, libraries: {} } as unknown as CatalogBackend
+  await assert.rejects(
+    () => renameThroughBackend(backend, 3, 8, 'clip.mp4', 'renamed.mp4'),
+    (error: unknown) => isStructuredError(error) && error.code === 'UNSUPPORTED_CAPABILITY'
+  )
+})
+
+it('routes PENDING_SCAN_RESOLVE through the catalog backend with Q/V/R/G', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 4,
+    libraries: {
+      resolvePendingScan: async (input: unknown, ctx: unknown) => {
+        calls.push(['resolvePendingScan', input, ctx])
+        return { createdVideoIds: [11] }
+      }
+    }
+  } as unknown as CatalogBackend
+  const resolution = {
+    expectedRevision: 7,
+    assignments: [{ resourceId: 3, target: { kind: 'new' as const, groupKey: 'ABC-001' } }]
+  }
+  const result = await resolvePendingScanThroughBackend(backend, 1, 9, resolution)
+  assert.deepEqual(result, { createdVideoIds: [11] })
+  const [, input, ctx] = calls[0] as [
+    string,
+    { libraryId: number; groupId: number; expectedRevision: number },
+    { expectedVersions: { Q: { generation: number; revision: number } } }
+  ]
+  assert.equal(input.libraryId, 1)
+  assert.equal(input.groupId, 9)
+  assert.equal(input.expectedRevision, 7)
+  assert.deepEqual(ctx.expectedVersions.Q, { generation: 4, revision: 7 })
+})
+
+it('routes PENDING_RESOURCE_IDENTITY_RESOLVE through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 2,
+    libraries: {
+      resolveResourceIdentity: async (input: unknown, ctx: unknown) => {
+        calls.push(['resolveResourceIdentity', input, ctx])
+        return { applied: true }
+      }
+    }
+  } as unknown as CatalogBackend
+  const result = await resolveResourceIdentityThroughBackend(backend, 1, 5, {
+    expectedRevision: 3,
+    choice: 'nfo'
+  })
+  assert.deepEqual(result, { applied: true })
+  const [, input, ctx] = calls[0] as [
+    string,
+    { identityId: number; choice: string },
+    { expectedVersions: { Q: { revision: number } } }
+  ]
+  assert.equal(input.identityId, 5)
+  assert.equal(input.choice, 'nfo')
+  assert.equal(ctx.expectedVersions.Q.revision, 3)
+})
+
+it('routes SCAN_AUDIT_GET through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    libraries: {
+      auditGet: async (input: { libraryId: number }) => {
+        calls.push(input)
+        return { summary: null }
+      }
+    }
+  } as unknown as CatalogBackend
+  assert.deepEqual(await auditGetThroughBackend(backend, 3), { summary: null })
+  assert.deepEqual(calls, [{ libraryId: 3 }])
+})
+
+it('routes remote SCAN_AUDIT_PAGE and VIEW_PAGE through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    libraries: {
+      auditPage: async (input: unknown) => {
+        calls.push(['page', input])
+        return { items: [], total: 0 }
+      },
+      auditViewPage: async (input: unknown) => {
+        calls.push(['view', input])
+        return { items: [], total: 0, auditAvailable: true }
+      }
+    }
+  } as unknown as CatalogBackend
+  const snapshot = { libraryId: 4, runId: 'run-4', finishedAt: 'now' }
+  assert.deepEqual(
+    await auditPageThroughBackend(backend, snapshot, {
+      section: 'files',
+      attention: true,
+      limit: 20,
+      offset: 5
+    }),
+    { items: [], total: 0 }
+  )
+  assert.deepEqual(
+    await auditViewPageThroughBackend(backend, snapshot, {
+      tab: 'failed',
+      outcome: 'all',
+      search: 'ABC',
+      locale: 'zh-hans-cn',
+      limit: 50,
+      offset: 0,
+      anchor: { kind: 'path', value: '/media/ABC-001.mp4' }
+    }),
+    { items: [], total: 0, auditAvailable: true }
+  )
+  assert.deepEqual(calls, [
+    [
+      'page',
+      {
+        libraryId: 4,
+        section: 'files',
+        attention: true,
+        limit: 20,
+        offset: 5
+      }
+    ],
+    [
+      'view',
+      {
+        libraryId: 4,
+        tab: 'failed',
+        outcome: 'all',
+        search: 'ABC',
+        locale: 'zh-hans-cn',
+        limit: 50,
+        offset: 0,
+        anchor: { kind: 'path', value: '/media/ABC-001.mp4' }
+      }
+    ]
+  ])
+})
+
+it('routes pending scan get/list/queue reads through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    libraries: {
+      getPendingScan: async (input: unknown) => {
+        calls.push(['get', input])
+        return { id: 9 }
+      },
+      listPendingScans: async (input: unknown) => {
+        calls.push(['list', input])
+        return []
+      },
+      pagePendingScanQueue: async (input: unknown) => {
+        calls.push(['page', input])
+        return { items: [], total: 0 }
+      },
+      countPendingScanQueue: async (input: unknown) => {
+        calls.push(['count', input])
+        return 2
+      }
+    }
+  } as unknown as CatalogBackend
+  assert.deepEqual(await getPendingScanThroughBackend(backend, 1, 9), { id: 9 })
+  assert.deepEqual(await listPendingScansThroughBackend(backend, 1), [])
+  assert.deepEqual(
+    await pagePendingScanQueueThroughBackend(backend, {
+      libraryId: 1,
+      limit: 50,
+      offset: 0,
+      anchor: { kind: 'group', id: 9 }
+    }),
+    { items: [], total: 0 }
+  )
+  assert.equal(await countPendingScanQueueThroughBackend(backend, 1), 2)
+  assert.deepEqual(calls, [
+    ['get', { libraryId: 1, groupId: 9 }],
+    ['list', { libraryId: 1 }],
+    ['page', { libraryId: 1, limit: 50, offset: 0, anchor: { kind: 'group', id: 9 } }],
+    ['count', { libraryId: 1 }]
+  ])
+})
+
+it('routes PENDING_AUDIT_PRESENCE through the catalog backend without frozen emptyInput presence', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    libraries: {
+      pendingAuditPresence: async (input: unknown) => {
+        calls.push(input)
+        return { groupIds: [1], identityIds: [], scrapeIds: [8] }
+      }
+    }
+  } as unknown as CatalogBackend
+  assert.deepEqual(
+    await pendingAuditPresenceThroughBackend(backend, 3, {
+      groupIds: [1, 2],
+      identityIds: [4],
+      scrapeIds: [8]
+    }),
+    { groupIds: [1], identityIds: [], scrapeIds: [8] }
+  )
+  assert.deepEqual(calls, [
+    { libraryId: 3, groupIds: [1, 2], identityIds: [4], scrapeIds: [8] }
+  ])
 })

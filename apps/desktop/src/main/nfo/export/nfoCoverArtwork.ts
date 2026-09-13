@@ -1,5 +1,5 @@
 import { nativeImage, type NativeImage } from 'electron'
-import { readImageOrientationFromBuffer } from '../../services/mediaAssetStore'
+import { readImageOrientationFromBuffer } from '@library/mediaAssetStore'
 
 export type CoverImageDecoder = (bytes: Buffer) => NativeImage
 

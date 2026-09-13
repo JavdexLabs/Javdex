@@ -2,7 +2,7 @@ import type { ActressBatchScrapeFilter, ActressBatchScrapeRequest, ActressBatchS
 import {
   listActressesForBatchScrape,
   type ActressBatchTarget
-} from '../db/actressRepo'
+} from '@library/db/actressRepo'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 
 /** Batch filter as received over IPC or read back from a persisted job snapshot. */

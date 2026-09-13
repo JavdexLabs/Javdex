@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import { PLAYLIST_IMPORT_SESSION_SCHEMA_SQL } from '../../db/schema'
+import { PLAYLIST_IMPORT_SESSION_SCHEMA_SQL } from '@library/db/schema'
 import type {
   PlaylistImportDestination,
   PlaylistImportOutcome,
@@ -13,7 +13,12 @@ import { normalizeClassificationName } from '@shared/classificationNameNormaliza
 import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { hasSensitiveUrlQuery, isSensitiveUrlQueryKey } from '@shared/urlCredentialPolicy'
-import { ensureVideoMembership } from '../../db/libraryMembershipRepo'
+import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
+import {
+  catalogIdentityRevision,
+  type PlaylistImportCatalogLookup,
+  type PlaylistImportCatalogVideoRecord
+} from './playlistImportCatalogLookup'
 
 export interface PlaylistImportPageItemInput {
   detailUrl: string
@@ -205,7 +210,7 @@ class ImportPreviewStaleError extends Error {
   }
 }
 
-class PlaylistImportTargetError extends Error {
+export class PlaylistImportTargetError extends Error {
   constructor(readonly code: string, message: string) {
     super(`${code}: ${message}`)
     this.name = 'PlaylistImportTargetError'
@@ -242,6 +247,13 @@ function isRetryablePlaylistImportError(code: string): boolean {
 
 function hash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+function isMissingCatalogTable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /no such table: (videos|playlists|media_libraries|video_links|video_sources|library_video_memberships|playlist_video|organizations|organization_name_ownership|video_resources)\b/i.test(
+    message
+  )
 }
 
 function paginationLoopDigest(
@@ -451,8 +463,148 @@ class PlaylistImportTotalMismatchError extends Error {
 }
 
 export class PlaylistImportRepository {
-  constructor(private readonly database: Database.Database) {
+  constructor(
+    private readonly database: Database.Database,
+    private readonly catalogLookup?: PlaylistImportCatalogLookup
+  ) {
     this.database.exec(PLAYLIST_IMPORT_SESSION_SCHEMA_SQL)
+  }
+
+  private usesCatalogWrites(): boolean {
+    return this.catalogLookup?.writes === 'catalog'
+  }
+
+  private catalogVideoById(id: number): PlaylistImportCatalogVideoRecord | null {
+    if (this.catalogLookup) return this.catalogLookup.videoById(id)
+    return this.sqlCatalogVideoById(id)
+  }
+
+  private sqlCatalogVideoById(id: number): PlaylistImportCatalogVideoRecord | null {
+    try {
+      const video = this.database.prepare(
+        `SELECT video.id, video.code, video.title, video.publisher_organization_id, video.release_date,
+                publisher.main_name AS publisher
+         FROM videos video
+         LEFT JOIN organizations publisher ON publisher.id = video.publisher_organization_id
+         WHERE video.id = ?`
+      ).get(id) as {
+        id: number
+        code: string
+        title: string | null
+        publisher_organization_id: number | null
+        release_date: string | null
+        publisher: string | null
+      } | undefined
+      if (!video) return null
+      const libraryRows = this.database.prepare(
+        `SELECT library.id, library.name
+         FROM library_video_memberships membership
+         JOIN media_libraries library ON library.id = membership.library_id
+         WHERE membership.video_id = ?
+         ORDER BY library.position, library.id`
+      ).all(id) as Array<{ id: number; name: string }>
+      const relatedLinks = this.database.prepare(
+        'SELECT label, url, normalized_url FROM video_links WHERE video_id = ? ORDER BY position, id'
+      ).all(id) as Array<{ label: string; url: string; normalized_url: string }>
+      const sources = this.database.prepare(
+        `SELECT source, external_code, url FROM video_sources
+         WHERE video_id = ? ORDER BY source, external_code, url`
+      ).all(id) as Array<{ source: string; external_code: string | null; url: string | null }>
+      const resourceKinds = this.database.prepare(
+        'SELECT DISTINCT kind FROM video_resources WHERE video_id = ? ORDER BY kind'
+      ).all(id) as Array<{ kind: string }>
+      return {
+        videoId: video.id,
+        code: video.code,
+        title: video.title,
+        publisher: video.publisher,
+        publisherOrganizationId: video.publisher_organization_id,
+        releaseDate: video.release_date,
+        libraryIds: libraryRows.map((row) => row.id),
+        libraryNames: libraryRows.map((row) => row.name),
+        relatedUrls: relatedLinks.map((link) => link.normalized_url),
+        relatedLinks: relatedLinks.map((link) => ({ label: link.label, url: link.url })),
+        sources: sources.map((row) => ({
+          source: row.source,
+          externalCode: row.external_code,
+          url: row.url
+        })),
+        resourceKinds: resourceKinds.map((row) => row.kind)
+      }
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return null
+      throw error
+    }
+  }
+
+  private sqlVideoIdsByDetailUrl(normalizedDetailUrl: string): number[] {
+    try {
+      return (this.database.prepare(
+        'SELECT video_id FROM video_links WHERE normalized_url = ? ORDER BY video_id'
+      ).all(normalizedDetailUrl) as Array<{ video_id: number }>).map((row) => row.video_id)
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
+    }
+  }
+
+  private sqlVideoIdsBySourceCode(source: string, externalCode: string): number[] {
+    try {
+      return (this.database.prepare(
+        `SELECT video_id FROM video_sources
+         WHERE lower(trim(source)) = lower(trim(?))
+           AND upper(trim(external_code)) = upper(trim(?))
+         ORDER BY video_id`
+      ).all(source, externalCode) as Array<{ video_id: number }>).map((row) => row.video_id)
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
+    }
+  }
+
+  private sqlVideoIdsBySourceUrl(source: string, sourceUrl: string): number[] {
+    try {
+      return (this.database.prepare(
+        `SELECT video_id, url FROM video_sources
+         WHERE lower(trim(source)) = lower(trim(?)) AND url IS NOT NULL
+         ORDER BY video_id`
+      ).all(source) as Array<{ video_id: number; url: string }>)
+        .filter((row) => {
+          try {
+            return normalizePlaylistImportUrl(row.url) === sourceUrl
+          } catch {
+            return false
+          }
+        })
+        .map((row) => row.video_id)
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
+    }
+  }
+
+  private sqlVideoIdsByPublisherCodeRelease(
+    normalizedPublisher: string,
+    code: string,
+    releaseDate: string
+  ): number[] {
+    try {
+      return (this.database.prepare(
+        `SELECT video.id AS video_id
+         FROM videos video
+         JOIN organization_name_ownership owner
+           ON owner.organization_id = video.publisher_organization_id
+         WHERE owner.normalized_name = ?
+           AND upper(trim(video.code)) = ?
+           AND video.release_date = ?
+         ORDER BY video.id`
+      ).all(normalizedPublisher, code, releaseDate) as Array<{ video_id: number }>).map(
+        (row) => row.video_id
+      )
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
+    }
   }
 
   assertRunWithinBudget(runId: string, observedAt = Date.now()): void {
@@ -647,26 +799,14 @@ export class PlaylistImportRepository {
         videoId: number
         libraryIds: number[]
       }>).map((candidate) => {
-        const video = this.database.prepare(
-          `SELECT video.title, video.release_date, publisher.main_name AS publisher
-           FROM videos video
-           LEFT JOIN organizations publisher ON publisher.id = video.publisher_organization_id
-           WHERE video.id = ?`
-        ).get(candidate.videoId) as {
-          title: string | null
-          release_date: string | null
-          publisher: string | null
-        } | undefined
-        const links = this.database.prepare(
-          'SELECT url FROM video_links WHERE video_id = ? ORDER BY position, id'
-        ).all(candidate.videoId) as Array<{ url: string }>
+        const video = this.catalogVideoById(candidate.videoId)
         return {
           videoId: candidate.videoId,
           ...(video?.title ? { title: video.title } : {}),
-          ...(video?.release_date ? { releaseDate: video.release_date } : {}),
+          ...(video?.releaseDate ? { releaseDate: video.releaseDate } : {}),
           ...(video?.publisher ? { publisher: video.publisher } : {}),
           libraryIds: candidate.libraryIds,
-          relatedUrls: links.map((link) => link.url)
+          relatedUrls: video?.relatedLinks.map((link) => link.url) ?? []
         }
       })
       return {
@@ -801,10 +941,11 @@ export class PlaylistImportRepository {
     autoCreateUnmatchedVideos?: boolean
     saveDetailLinks?: boolean
     saveSourcePlaylistLink?: boolean
+    targetLibrary?: { id: number; name: string }
   }): PlaylistImportSnapshot {
     const normalizedSourceUrl = normalizePlaylistImportUrl(input.sourceUrl)
     const url = new URL(normalizedSourceUrl)
-    const library = this.validateStartTargets(input)
+    const library = input.targetLibrary ?? this.validateStartTargets(input)
     const at = now()
     this.database.transaction(() => {
       this.database.prepare(
@@ -930,9 +1071,8 @@ export class PlaylistImportRepository {
     const previewRows = this.database.prepare(
       `SELECT item.id, item.source_position, item.raw_code, item.normalized_code,
         item.title, item.detail_url, item.state, item.error_code, item.resolution_kind,
-        video.id AS video_id, video.code AS video_code, video.title AS video_title
+        item.resolved_video_id
        FROM playlist_import_items item
-       LEFT JOIN videos video ON video.id = item.resolved_video_id
        WHERE item.run_id = ?
        ORDER BY item.source_position
        LIMIT ?`
@@ -946,12 +1086,14 @@ export class PlaylistImportRepository {
       state: PlaylistImportPreviewItemState
       error_code: string | null
       resolution_kind: string | null
-      video_id: number | null
-      video_code: string | null
-      video_title: string | null
+      resolved_video_id: number | null
     }>
     const preview = {
-      items: previewRows.map((item) => ({
+      items: previewRows.map((item) => {
+        const resolved = item.resolved_video_id != null
+          ? this.catalogVideoById(item.resolved_video_id)
+          : null
+        return {
         itemId: item.id,
         sourcePosition: item.source_position,
         ...(item.normalized_code ?? item.raw_code
@@ -962,16 +1104,17 @@ export class PlaylistImportRepository {
         state: item.state,
         ...(item.error_code ? { errorCode: item.error_code } : {}),
         ...(item.resolution_kind ? { resolutionKind: item.resolution_kind } : {}),
-        ...(item.video_id && item.video_code
+        ...(item.resolved_video_id
           ? {
               resolvedVideo: {
-                id: item.video_id,
-                code: item.video_code,
-                ...(item.video_title ? { title: item.video_title } : {})
+                id: item.resolved_video_id,
+                code: resolved?.code ?? item.normalized_code ?? item.raw_code ?? String(item.resolved_video_id),
+                ...(resolved?.title ? { title: resolved.title } : item.title ? { title: item.title } : {})
               }
             }
           : {})
-      })),
+      }
+      }),
       totalItems: counts.unique_items,
       truncated: counts.unique_items > previewRows.length
     }
@@ -998,8 +1141,8 @@ export class PlaylistImportRepository {
         autoCreateUnmatchedVideos: row.auto_create_unmatched_videos === 1,
         saveDetailLinks: row.save_detail_links === 1,
         saveSourcePlaylistLink: row.save_source_playlist_link === 1,
-        ...(playlistNameForSnapshot(this.database, row) ? {
-          destinationPlaylistNameAtStart: playlistNameForSnapshot(this.database, row)!
+        ...(this.playlistNameForSnapshot(row) ? {
+          destinationPlaylistNameAtStart: this.playlistNameForSnapshot(row)!
         } : {}),
         policyVersion: 1
       },
@@ -2133,34 +2276,75 @@ export class PlaylistImportRepository {
     )
   }
 
+  private candidatesFromCatalogRecords(
+    records: PlaylistImportCatalogVideoRecord[]
+  ): GlobalIdentityCandidate[] {
+    return records
+      .map((record) => ({
+        videoId: record.videoId,
+        code: record.code,
+        libraryIds: record.libraryIds,
+        publisherOrganizationId: record.publisherOrganizationId,
+        releaseDate: record.releaseDate,
+        identityRevision: catalogIdentityRevision(record)
+      }))
+      .sort((left, right) => left.videoId - right.videoId)
+  }
+
   private globalCodeCandidates(code: string): GlobalIdentityCandidate[] {
-    const videos = this.database.prepare(
-      `SELECT id, code, publisher_organization_id, release_date
-       FROM videos WHERE upper(trim(code)) = ? ORDER BY id`
-    ).all(code) as GlobalIdentityVideoRow[]
-    return this.hydrateGlobalIdentityCandidates(videos)
+    if (this.catalogLookup) {
+      return this.candidatesFromCatalogRecords(this.catalogLookup.videosByCode(code))
+    }
+    try {
+      const videos = this.database.prepare(
+        `SELECT id, code, publisher_organization_id, release_date
+         FROM videos WHERE upper(trim(code)) = ? ORDER BY id`
+      ).all(code) as GlobalIdentityVideoRow[]
+      return this.hydrateGlobalIdentityCandidates(videos)
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
+    }
   }
 
   private globalDetailUrlCandidates(normalizedDetailUrl: string): GlobalIdentityCandidate[] {
-    const videos = this.database.prepare(
-      `SELECT video.id, video.code, video.publisher_organization_id, video.release_date
-       FROM video_links link
-       JOIN videos video ON video.id = link.video_id
-       WHERE link.normalized_url = ?
-       ORDER BY video.id`
-    ).all(normalizedDetailUrl) as GlobalIdentityVideoRow[]
-    return this.hydrateGlobalIdentityCandidates(videos)
+    if (this.catalogLookup) {
+      return this.candidatesFromCatalogRecords(
+        this.catalogLookup.videosByDetailUrl(normalizedDetailUrl)
+      )
+    }
+    try {
+      const videos = this.database.prepare(
+        `SELECT video.id, video.code, video.publisher_organization_id, video.release_date
+         FROM video_links link
+         JOIN videos video ON video.id = link.video_id
+         WHERE link.normalized_url = ?
+         ORDER BY video.id`
+      ).all(normalizedDetailUrl) as GlobalIdentityVideoRow[]
+      return this.hydrateGlobalIdentityCandidates(videos)
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
+    }
   }
 
   private globalVideoCandidatesByIds(videoIds: number[]): GlobalIdentityCandidate[] {
     const ids = [...new Set(videoIds)].sort((left, right) => left - right)
     if (ids.length === 0) return []
-    const placeholders = ids.map(() => '?').join(', ')
-    const videos = this.database.prepare(
-      `SELECT id, code, publisher_organization_id, release_date
-       FROM videos WHERE id IN (${placeholders}) ORDER BY id`
-    ).all(...ids) as GlobalIdentityVideoRow[]
-    return this.hydrateGlobalIdentityCandidates(videos)
+    if (this.catalogLookup) {
+      return this.candidatesFromCatalogRecords(this.catalogLookup.videosByIds(ids))
+    }
+    try {
+      const placeholders = ids.map(() => '?').join(', ')
+      const videos = this.database.prepare(
+        `SELECT id, code, publisher_organization_id, release_date
+         FROM videos WHERE id IN (${placeholders}) ORDER BY id`
+      ).all(...ids) as GlobalIdentityVideoRow[]
+      return this.hydrateGlobalIdentityCandidates(videos)
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
+    }
   }
 
   private globalSourceIdentityCandidates(identity: {
@@ -2168,43 +2352,51 @@ export class PlaylistImportRepository {
     externalCode?: string
     sourceUrl?: string
   }): GlobalIdentityCandidate[] {
+    if (this.catalogLookup) {
+      return this.candidatesFromCatalogRecords(this.catalogLookup.videosBySourceIdentity(identity))
+    }
     const source = identity.source?.trim()
     if (!source) return []
-    const videoIds: number[] = []
-    if (identity.externalCode?.trim()) {
-      const rows = this.database.prepare(
-        `SELECT video_id FROM video_sources
-         WHERE lower(trim(source)) = lower(trim(?))
-           AND upper(trim(external_code)) = upper(trim(?))
-         ORDER BY video_id`
-      ).all(source, identity.externalCode.trim()) as Array<{ video_id: number }>
-      videoIds.push(...rows.map((row) => row.video_id))
-    }
-    if (identity.sourceUrl?.trim()) {
-      let normalizedSourceUrl: string | null = null
-      try {
-        normalizedSourceUrl = normalizePlaylistImportUrl(identity.sourceUrl)
-      } catch {
-        normalizedSourceUrl = null
-      }
-      if (normalizedSourceUrl) {
+    try {
+      const videoIds: number[] = []
+      if (identity.externalCode?.trim()) {
         const rows = this.database.prepare(
-          `SELECT video_id, url FROM video_sources
-           WHERE lower(trim(source)) = lower(trim(?)) AND url IS NOT NULL
+          `SELECT video_id FROM video_sources
+           WHERE lower(trim(source)) = lower(trim(?))
+             AND upper(trim(external_code)) = upper(trim(?))
            ORDER BY video_id`
-        ).all(source) as Array<{ video_id: number; url: string }>
-        for (const row of rows) {
-          try {
-            if (normalizePlaylistImportUrl(row.url) === normalizedSourceUrl) {
-              videoIds.push(row.video_id)
+        ).all(source, identity.externalCode.trim()) as Array<{ video_id: number }>
+        videoIds.push(...rows.map((row) => row.video_id))
+      }
+      if (identity.sourceUrl?.trim()) {
+        let normalizedSourceUrl: string | null = null
+        try {
+          normalizedSourceUrl = normalizePlaylistImportUrl(identity.sourceUrl)
+        } catch {
+          normalizedSourceUrl = null
+        }
+        if (normalizedSourceUrl) {
+          const rows = this.database.prepare(
+            `SELECT video_id, url FROM video_sources
+             WHERE lower(trim(source)) = lower(trim(?)) AND url IS NOT NULL
+             ORDER BY video_id`
+          ).all(source) as Array<{ video_id: number; url: string }>
+          for (const row of rows) {
+            try {
+              if (normalizePlaylistImportUrl(row.url) === normalizedSourceUrl) {
+                videoIds.push(row.video_id)
+              }
+            } catch {
+              // Ignore malformed legacy source URLs; they cannot establish identity.
             }
-          } catch {
-            // Ignore malformed legacy source URLs; they cannot establish identity.
           }
         }
       }
+      return this.globalVideoCandidatesByIds(videoIds)
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return []
+      throw error
     }
-    return this.globalVideoCandidatesByIds(videoIds)
   }
 
   private hydrateGlobalIdentityCandidates(
@@ -2288,11 +2480,11 @@ export class PlaylistImportRepository {
     }
     const candidateIds = new Set(input.candidates.map((candidate) => candidate.videoId))
     const signals: number[][] = []
-    const detailMatches = (this.database.prepare(
-      'SELECT video_id FROM video_links WHERE normalized_url = ? ORDER BY video_id'
-    ).all(canonical.detailUrl) as Array<{ video_id: number }>)
-      .map((row) => row.video_id)
-      .filter((videoId) => candidateIds.has(videoId))
+    const detailMatches = (
+      this.catalogLookup
+        ? this.catalogLookup.videosByDetailUrl(canonical.detailUrl).map((video) => video.videoId)
+        : this.sqlVideoIdsByDetailUrl(canonical.detailUrl)
+    ).filter((videoId) => candidateIds.has(videoId))
     if (detailMatches.length > 0) {
       signals.push(detailMatches)
       if (input.code && detailMatches.some((videoId) => {
@@ -2304,14 +2496,14 @@ export class PlaylistImportRepository {
     }
 
     if (canonical.source && canonical.externalCode) {
-      const externalCodeMatches = (this.database.prepare(
-        `SELECT video_id FROM video_sources
-         WHERE lower(trim(source)) = lower(trim(?))
-           AND upper(trim(external_code)) = upper(trim(?))
-         ORDER BY video_id`
-      ).all(canonical.source, canonical.externalCode) as Array<{ video_id: number }>)
-        .map((row) => row.video_id)
-        .filter((videoId) => candidateIds.has(videoId))
+      const externalCodeMatches = (
+        this.catalogLookup
+          ? this.catalogLookup.videosBySourceIdentity({
+              source: canonical.source,
+              externalCode: canonical.externalCode
+            }).map((video) => video.videoId)
+          : this.sqlVideoIdsBySourceCode(canonical.source, canonical.externalCode)
+      ).filter((videoId) => candidateIds.has(videoId))
       if (externalCodeMatches.length > 0) {
         signals.push(externalCodeMatches)
         if (input.code && externalCodeMatches.some((videoId) => {
@@ -2324,20 +2516,14 @@ export class PlaylistImportRepository {
     }
 
     if (canonical.source && canonical.sourceUrl) {
-      const sourceUrlMatches = (this.database.prepare(
-        `SELECT video_id, url FROM video_sources
-         WHERE lower(trim(source)) = lower(trim(?)) AND url IS NOT NULL
-         ORDER BY video_id`
-      ).all(canonical.source) as Array<{ video_id: number; url: string }>)
-        .filter((row) => {
-          try {
-            return normalizePlaylistImportUrl(row.url) === canonical.sourceUrl
-          } catch {
-            return false
-          }
-        })
-        .map((row) => row.video_id)
-        .filter((videoId) => candidateIds.has(videoId))
+      const sourceUrlMatches = (
+        this.catalogLookup
+          ? this.catalogLookup.videosBySourceIdentity({
+              source: canonical.source,
+              sourceUrl: canonical.sourceUrl
+            }).map((video) => video.videoId)
+          : this.sqlVideoIdsBySourceUrl(canonical.source, canonical.sourceUrl)
+      ).filter((videoId) => candidateIds.has(videoId))
       if (sourceUrlMatches.length > 0) {
         signals.push(sourceUrlMatches)
         if (input.code && sourceUrlMatches.some((videoId) => {
@@ -2357,18 +2543,19 @@ export class PlaylistImportRepository {
         normalizedPublisher = null
       }
       if (normalizedPublisher) {
-        const businessMatches = (this.database.prepare(
-          `SELECT video.id AS video_id
-           FROM videos video
-           JOIN organization_name_ownership owner
-             ON owner.organization_id = video.publisher_organization_id
-           WHERE owner.normalized_name = ?
-             AND upper(trim(video.code)) = ?
-             AND video.release_date = ?
-           ORDER BY video.id`
-        ).all(normalizedPublisher, input.code, canonical.releaseDate) as Array<{ video_id: number }>)
-          .map((row) => row.video_id)
-          .filter((videoId) => candidateIds.has(videoId))
+        const businessMatches = (
+          this.catalogLookup
+            ? this.catalogLookup.videosByPublisherCodeRelease(
+                normalizedPublisher,
+                input.code,
+                canonical.releaseDate
+              ).map((video) => video.videoId)
+            : this.sqlVideoIdsByPublisherCodeRelease(
+                normalizedPublisher,
+                input.code,
+                canonical.releaseDate
+              )
+        ).filter((videoId) => candidateIds.has(videoId))
         if (businessMatches.length > 0) {
           signals.push(businessMatches)
         } else if (input.candidates.some((candidate) => (
@@ -2576,38 +2763,18 @@ export class PlaylistImportRepository {
         code: string
         libraryIds: number[]
       }>).map((candidate) => {
-        const detail = this.database.prepare(
-          `SELECT video.title, video.release_date, publisher.main_name AS publisher
-           FROM videos video
-           LEFT JOIN organizations publisher ON publisher.id = video.publisher_organization_id
-           WHERE video.id = ?`
-        ).get(candidate.videoId) as {
-          title: string | null
-          release_date: string | null
-          publisher: string | null
-        } | undefined
-        const resources = this.database.prepare(
-          'SELECT DISTINCT kind FROM video_resources WHERE video_id = ? ORDER BY kind'
-        ).all(candidate.videoId) as Array<{ kind: string }>
-        const libraries = this.database.prepare(
-          `SELECT library.name FROM library_video_memberships membership
-           JOIN media_libraries library ON library.id = membership.library_id
-           WHERE membership.video_id = ? ORDER BY library.position, library.id`
-        ).all(candidate.videoId) as Array<{ name: string }>
-        const relatedLinks = this.database.prepare(
-          'SELECT label, url FROM video_links WHERE video_id = ? ORDER BY position, id'
-        ).all(candidate.videoId) as Array<{ label: string; url: string }>
+        const detail = this.catalogVideoById(candidate.videoId)
         return {
           videoId: candidate.videoId,
           code: candidate.code,
           ...(detail?.title ? { title: detail.title } : {}),
           ...(detail?.publisher ? { publisher: detail.publisher } : {}),
-          ...(detail?.release_date ? { releaseDate: detail.release_date } : {}),
+          ...(detail?.releaseDate ? { releaseDate: detail.releaseDate } : {}),
           libraryIds: candidate.libraryIds,
-          libraryNames: libraries.map((library) => library.name),
+          libraryNames: detail?.libraryNames ?? [],
           belongsToTargetLibrary: candidate.libraryIds.includes(job.target_library_id),
-          resourceKinds: resources.map((resource) => resource.kind),
-          relatedLinks
+          resourceKinds: detail?.resourceKinds ?? [],
+          relatedLinks: detail?.relatedLinks ?? []
         }
       })
       }
@@ -2715,7 +2882,182 @@ export class PlaylistImportRepository {
     ).run(code, message, now(), runId)
   }
 
+  catalogApplyOperationId(runId: string, applyIdempotencyKey: string): string | null {
+    const rows = this.database.prepare(
+      `SELECT payload_json FROM playlist_import_session_events
+       WHERE run_id = ? AND event_type = 'playlist-import.catalog-apply'
+       ORDER BY seq DESC`
+    ).all(runId) as Array<{ payload_json: string }>
+    for (const row of rows) {
+      const payload = JSON.parse(row.payload_json) as {
+        applyIdempotencyKey?: string
+        operationId?: string
+      }
+      if (payload.applyIdempotencyKey === applyIdempotencyKey && payload.operationId) {
+        return payload.operationId
+      }
+    }
+    return null
+  }
+
+  rememberCatalogApplyOperation(
+    runId: string,
+    applyIdempotencyKey: string,
+    operationId: string
+  ): void {
+    this.database.prepare(
+      `INSERT INTO playlist_import_session_events (
+        run_id, operation_id, event_type, payload_json, created_at
+      ) VALUES (?, ?, 'playlist-import.catalog-apply', ?, ?)`
+    ).run(
+      runId,
+      operationId,
+      JSON.stringify({ applyIdempotencyKey, operationId }),
+      now()
+    )
+  }
+
+  prepareRemoteApply(runId: string, applyIdempotencyKey: string): {
+    name: string
+    videoIds: number[]
+    libraryId: number
+    sourceUrl?: string
+    job: JobRow
+    items: ApplyItemRow[]
+  } {
+    const job = this.requireJob(runId)
+    if (job.phase === 'completed' && job.outcome_json) {
+      if (job.apply_idempotency_key !== applyIdempotencyKey) {
+        throw new Error('APPLY_IDEMPOTENCY_KEY_REUSED')
+      }
+      throw new Error('PLAYLIST_IMPORT_ALREADY_APPLIED')
+    }
+    if (job.phase !== 'ready-to-apply') throw new Error('PLAYLIST_IMPORT_NOT_READY')
+    if (job.destination_kind === 'append') {
+      throw new PlaylistImportTargetError(
+        'UNSUPPORTED_CAPABILITY',
+        '远程清单导入不能追加到已有清单；冻结 playlists.applyImport 只创建新清单。'
+      )
+    }
+    const items = this.database.prepare(
+      `SELECT * FROM playlist_import_items WHERE run_id = ? ORDER BY source_position`
+    ).all(runId) as ApplyItemRow[]
+    if (items.some((item) => (
+      !['planned-reuse', 'planned-create'].includes(item.state) &&
+      !(item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED')
+    ))) {
+      throw new Error('PLAYLIST_IMPORT_ITEMS_NOT_READY')
+    }
+    if (items.some((item) => (
+      item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'
+        ? this.currentCandidatesForItem(item).length > 0
+        : !this.isResolutionCurrent(job, item)
+    ))) {
+      this.reopenStalePreview(runId)
+      throw new Error('IMPORT_PREVIEW_STALE')
+    }
+    const creates = items.filter((item) => item.state === 'planned-create')
+    if (creates.length > 0) {
+      throw new Error(
+        '远程清单导入不能自动建片。请先在资料库中创建对应影片，或关闭自动创建未匹配项。'
+      )
+    }
+    const videoIds: number[] = []
+    for (const item of items) {
+      if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') continue
+      if (item.resolved_video_id == null || !this.catalogVideoById(item.resolved_video_id)) {
+        throw new Error('MATCH_SNAPSHOT_STALE')
+      }
+      videoIds.push(item.resolved_video_id)
+    }
+    if (videoIds.length === 0) {
+      throw new Error('PLAYLIST_IMPORT_ITEMS_NOT_READY')
+    }
+    if (videoIds.length > 200) {
+      throw new Error('清单导入一次最多 200 个影片 ID；远程冻结 applyImport 不接受更长列表。')
+    }
+    const fallbackName = `${job.source_host} · ${new Date().toISOString().slice(0, 10)}`
+    return {
+      name: job.requested_playlist_name || job.agent_suggested_playlist_name || fallbackName,
+      videoIds,
+      libraryId: job.target_library_id,
+      ...(job.save_source_playlist_link === 1 ? { sourceUrl: job.normalized_source_url } : {}),
+      job,
+      items
+    }
+  }
+
+  commitRemoteApply(
+    runId: string,
+    applyIdempotencyKey: string,
+    result: { playlistId: number; added: number; playlistName?: string }
+  ): PlaylistImportOutcome {
+    const plan = this.prepareRemoteApply(runId, applyIdempotencyKey)
+    const at = now()
+    const reusedVideos = plan.items.filter((item) => item.state === 'planned-reuse').length
+    const skippedVideos = plan.items.filter(
+      (item) => item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'
+    ).length
+    const pagesRead = (this.database.prepare(
+      'SELECT COUNT(*) AS value FROM playlist_import_pages WHERE run_id = ?'
+    ).get(runId) as { value: number }).value
+    const sourceItems = (this.database.prepare(
+      `SELECT COUNT(*) AS value FROM playlist_import_page_items occurrence
+       JOIN playlist_import_pages page ON page.id = occurrence.page_id
+       WHERE page.run_id = ?`
+    ).get(runId) as { value: number }).value
+    for (const item of plan.items) {
+      if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') continue
+      this.database.prepare(
+        `UPDATE playlist_import_items SET state = 'applied', resolved_video_id = ?,
+         revision = revision + 1, updated_at = ? WHERE id = ?`
+      ).run(item.resolved_video_id, at, item.id)
+    }
+    const outcome: PlaylistImportOutcome = {
+      playlistId: result.playlistId,
+      playlistName: result.playlistName ?? plan.name,
+      targetLibraryId: plan.job.target_library_id,
+      targetLibraryName: plan.job.target_library_name_snapshot,
+      pagesRead,
+      sourceItems,
+      uniqueDetailUrls: plan.items.length,
+      totalItems: plan.items.length,
+      reusedVideos,
+      directReuses: reusedVideos,
+      detailReuses: 0,
+      userSelectedReuses: 0,
+      crossLibraryReuses: 0,
+      createdVideos: 0,
+      targetLibraryMembersCreated: 0,
+      skippedVideos,
+      addedToPlaylist: result.added,
+      alreadyInPlaylist: Math.max(0, plan.videoIds.length - result.added),
+      relatedLinksAdded: 0,
+      playlistRelatedLinksAdded: plan.sourceUrl ? 1 : 0,
+      externalDuplicateItems: Math.max(0, sourceItems - plan.items.length),
+      convergedExternalItems: plan.videoIds.length - new Set(plan.videoIds).size,
+      reuseLibraryDistribution: []
+    }
+    this.database.prepare(
+      `UPDATE playlist_import_jobs SET phase = 'completed', error_code = NULL,
+       error_message = NULL, revision = revision + 1,
+       resolved_playlist_id = ?, apply_idempotency_key = ?, outcome_json = ?,
+       committed_at = ?, updated_at = ? WHERE run_id = ?`
+    ).run(result.playlistId, applyIdempotencyKey, JSON.stringify(outcome), at, at, runId)
+    return outcome
+  }
+
   apply(runId: string, applyIdempotencyKey: string): PlaylistImportOutcome {
+    if (this.usesCatalogWrites()) {
+      const job = this.requireJob(runId)
+      if (job.phase === 'completed' && job.outcome_json) {
+        if (job.apply_idempotency_key !== applyIdempotencyKey) {
+          throw new Error('APPLY_IDEMPOTENCY_KEY_REUSED')
+        }
+        return parseOutcome(job.outcome_json)
+      }
+      throw new Error('PLAYLIST_IMPORT_CATALOG_APPLY_REQUIRED')
+    }
     try {
       return this.database.transaction(() => {
       const job = this.requireJob(runId)
@@ -3200,11 +3542,18 @@ export class PlaylistImportRepository {
        revision = revision + 1, updated_at = ? WHERE run_id = ?`
     ).run(at, runId)
   }
-}
 
-function playlistNameForSnapshot(database: Database.Database, row: JobRow): string | null {
-  if (row.destination_kind !== 'append' || row.requested_playlist_id == null) return null
-  return (database.prepare('SELECT name FROM playlists WHERE id = ?').get(row.requested_playlist_id) as {
-    name: string
-  } | undefined)?.name ?? null
+  private playlistNameForSnapshot(row: JobRow): string | null {
+    if (row.destination_kind !== 'append' || row.requested_playlist_id == null) return null
+    const remembered = this.catalogLookup?.playlistName?.(row.requested_playlist_id)
+    if (remembered) return remembered
+    try {
+      return (this.database.prepare('SELECT name FROM playlists WHERE id = ?').get(row.requested_playlist_id) as {
+        name: string
+      } | undefined)?.name ?? null
+    } catch (error) {
+      if (isMissingCatalogTable(error)) return null
+      throw error
+    }
+  }
 }

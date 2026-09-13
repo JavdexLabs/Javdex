@@ -1,6 +1,6 @@
 /** UNSHIPPED scratch-only crash harness, launched by the prototype runner. */
 import path from 'node:path'
-import { initDatabaseAtPath } from '../../../apps/desktop/src/main/db/database'
+import { initDatabaseAtPath } from '../../../packages/library/src/db/database'
 import { createPrototypeAuditStore } from './scan-audit-staging.prototype'
 const [filename, library, runId, phase] = process.argv.slice(2)
 if (!filename || path.basename(filename) !== 'PROTOTYPE-wipe-me.sqlite' ||

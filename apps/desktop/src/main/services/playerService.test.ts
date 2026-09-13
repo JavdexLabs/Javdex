@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { VideoResource } from '@shared/videoTypes'
-import { closeDatabase, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { createPlayerService } from './playerService'
 
 function resource(overrides: Partial<VideoResource> = {}): VideoResource {
@@ -242,5 +242,104 @@ describe('PlayerService', () => {
     } finally {
       closeDatabase()
     }
+  })
+
+  it('spawns the configured player with a grant URL and does not shell-concatenate', async () => {
+    const spawned: Array<{ program: string; args: string[] }> = []
+    const service = createPlayerService({
+      catalog: {
+        mode: 'remote',
+        queries: {
+          getVideo: async () => ({ resources: [{ id: 3, is_primary: 1 }] }),
+          getResource: async () => ({
+            id: 3,
+            library_id: 1,
+            video_id: 7,
+            kind: 'local',
+            locator: '/server/movie.mp4',
+            locatorRevision: 'abc'
+          })
+        },
+        assets: {
+          grantPlayback: async () => ({
+            grantId: '11111111-1111-4111-8111-111111111111',
+            resourceId: 3,
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            playbackHandle: 'http://127.0.0.1:8096/play/v1/g?t=secret',
+            methods: ['HEAD', 'GET'],
+            range: true
+          })
+        }
+      } as never,
+      readPlayerPath: async () => '/usr/bin/mpv',
+      spawnPlayer: async (program, args) => {
+        spawned.push({ program, args })
+        return { ok: true }
+      }
+    })
+    assert.deepEqual(await service.playVideo(1, 7), { ok: true })
+    assert.deepEqual(spawned, [
+      { program: '/usr/bin/mpv', args: ['http://127.0.0.1:8096/play/v1/g?t=secret'] }
+    ])
+    assert.deepEqual(service.revealVideo(1, 7) as { ok: boolean; error: string }, {
+      ok: false,
+      error: '远程模式不能在本机显示文件位置'
+    })
+  })
+
+  it('opens remote direct links in the player without a Javdex grant', async () => {
+    const spawned: string[][] = []
+    let granted = 0
+    const service = createPlayerService({
+      catalog: {
+        mode: 'remote',
+        queries: {
+          getResource: async () =>
+            resource({ kind: 'direct', locator: 'https://cdn.example/movie.mp4?token=origin' })
+        },
+        assets: {
+          grantPlayback: async () => {
+            granted += 1
+            throw new Error('should not grant')
+          }
+        }
+      } as never,
+      readPlayerPath: async () => '/usr/bin/mpv',
+      spawnPlayer: async (_program, args) => {
+        spawned.push(args)
+        return { ok: true }
+      }
+    })
+    assert.deepEqual(await service.openResource(1, 3, 7), { ok: true })
+    assert.equal(granted, 0)
+    assert.deepEqual(spawned, [['https://cdn.example/movie.mp4?token=origin']])
+  })
+
+  it('refuses remote local-file playback until an absolute player path is set', async () => {
+    const service = createPlayerService({
+      catalog: {
+        mode: 'remote',
+        queries: {
+          getResource: async () => ({
+            id: 3,
+            library_id: 1,
+            video_id: 7,
+            kind: 'local',
+            locator: '/server/movie.mp4',
+            locatorRevision: 'abc'
+          })
+        },
+        assets: {
+          grantPlayback: async () => {
+            throw new Error('should not grant without a player')
+          }
+        }
+      } as never,
+      readPlayerPath: async () => null
+    })
+    assert.deepEqual(await service.openResource(1, 3, 7), {
+      ok: false,
+      error: '请在此电脑设置中指定播放器程序（例如 mpv）'
+    })
   })
 })

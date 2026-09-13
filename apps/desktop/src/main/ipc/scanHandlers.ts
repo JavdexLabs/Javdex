@@ -1,30 +1,45 @@
 import { catalogReadService } from '../services/catalogReadService'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
 import fs from 'node:fs'
+import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { ManualImportResult, RenameImportResult, ScanCompletionResult } from '@shared/libraryTypes'
+import type {
+  ManualImportResult,
+  PendingAuditIds,
+  PendingResourceIdentityResolution,
+  PendingScanGroupResolution,
+  PendingScanQueueQuery,
+  RenameImportResult,
+  ScanCompletionResult,
+  LibraryScanLatestSnapshot
+} from '@shared/libraryTypes'
+import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
+import type { VideoResourceImportTarget } from '@shared/videoTypes'
+import type { ScanAuditIndexQuery, ScanAuditSnapshotIdentity, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
+import type { CatalogBackend } from '../application/catalogBackend'
+import {
+  isAbortError,
+  isTerminalCatalogTaskState,
+  waitForCatalogTask
+} from '../application/catalogTaskProgress'
+import { ipcMutation } from '../application/mutationContext'
+import { structuredError } from '@shared/protocol/errors'
 import { normalizeAbsoluteLocalPath, normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import {
   getLatestLibraryScanSnapshot,
   removeLibraryUnrecognizedFile,
   renameLibraryUnrecognizedFile
-} from '../db/libraryScanRepo'
-import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
-import { pagePendingScanQueue, countPendingScanQueue } from '../db/pendingScanQueueRepo'
-import { getPendingAuditPresence } from '../db/pendingAuditRepo'
-import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '../db/pendingScanRepo'
-import { listPendingResourceIdentities, getPendingResourceIdentity } from '../db/pendingResourceIdentityRepo'
-import { listVideoResources } from '../db/videoRepo'
-import {
-  readLibraryScanAudit
-} from '../scanner/libraryScanAuditStore'
-import { importManual, renameAndImport } from '../scanner/scanner'
+} from '@library/db/libraryScanRepo'
+import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
+import { getLocalVideoResourceByLocator } from '@library/db/videoRepo'
+import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
+import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
+import { renameAndImport } from '../scanner/scanner'
 import { scanCoordinator } from '../scanner/scanCoordinator'
-import { maintenanceTaskGate } from '../services/maintenanceTaskGate'
-import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
-import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
+import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { assertFileNameOnly, assertMediaLibraryRootFile } from './ipcPathGuards'
 import type { IpcContext } from './shared'
@@ -41,11 +56,374 @@ function removeScopedUnrecognizedFile(libraryId: number, rootId: number, filePat
   removeLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(filePath))
 }
 
+function fileMaintenanceVersions(backend: CatalogBackend) {
+  return {
+    G: { generation: backend.generation, revision: 1 },
+    R: { generation: backend.generation, revision: 1 },
+    V: { generation: backend.generation, revision: 1 }
+  }
+}
+
+function toRootRelativePath(libraryId: number, rootId: number, filePath: string): string {
+  if (!path.isAbsolute(filePath)) return filePath
+  const root = requireActiveRoot(libraryId, rootId)
+  const base = root.realPath ?? root.path
+  const resolved = path.resolve(filePath)
+  if (!isPathUnderRoot(resolved, base)) {
+    throw structuredError('INVALID_INPUT', '文件不在授权根目录内')
+  }
+  const relative = path.relative(base, resolved)
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw structuredError('INVALID_INPUT', '远程文件位置必须是根目录相对路径')
+  }
+  return relative
+}
+
+function pendingResolveVersions(backend: CatalogBackend, qRevision: number) {
+  return {
+    Q: { generation: backend.generation, revision: qRevision },
+    V: { generation: backend.generation, revision: 1 },
+    R: { generation: backend.generation, revision: 1 },
+    G: { generation: backend.generation, revision: 1 }
+  }
+}
+
+export async function resolvePendingScanThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  groupId: number,
+  resolution: PendingScanGroupResolution
+) {
+  return backend.libraries.resolvePendingScan(
+    {
+      libraryId,
+      groupId,
+      assignments: resolution.assignments,
+      primaryResourceIds: resolution.primaryResourceIds,
+      expectedRevision: resolution.expectedRevision
+    },
+    ipcMutation(undefined, pendingResolveVersions(backend, resolution.expectedRevision))
+  )
+}
+
+export async function resolveResourceIdentityThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  identityId: number,
+  resolution: PendingResourceIdentityResolution
+) {
+  return backend.libraries.resolveResourceIdentity(
+    {
+      libraryId,
+      identityId,
+      choice: resolution.choice,
+      expectedRevision: resolution.expectedRevision
+    },
+    ipcMutation(undefined, pendingResolveVersions(backend, resolution.expectedRevision))
+  )
+}
+
+export function auditGetThroughBackend(backend: CatalogBackend, libraryId: number) {
+  return backend.libraries.auditGet({ libraryId })
+}
+
+export function auditPageThroughBackend(
+  backend: CatalogBackend,
+  snapshot: ScanAuditSnapshotIdentity,
+  query: ScanAuditIndexQuery
+) {
+  if (backend.mode !== 'remote') {
+    return catalogReadService.readAuditPage(snapshot, query, SCAN_AUDIT_READ_LIMITS)
+  }
+  return backend.libraries.auditPage({
+    libraryId: snapshot.libraryId,
+    section: query.section,
+    ...(query.outcome != null ? { outcome: query.outcome } : {}),
+    ...(query.attention != null ? { attention: query.attention } : {}),
+    ...(query.limit != null ? { limit: query.limit } : {}),
+    ...(query.offset != null ? { offset: query.offset } : {})
+  })
+}
+
+export function auditViewPageThroughBackend(
+  backend: CatalogBackend,
+  snapshot: ScanAuditSnapshotIdentity,
+  query: ScanAuditViewQuery
+) {
+  if (backend.mode !== 'remote') {
+    return catalogReadService.readAuditViewPage(snapshot, query, SCAN_AUDIT_READ_LIMITS)
+  }
+  return backend.libraries.auditViewPage({
+    libraryId: snapshot.libraryId,
+    tab: query.tab,
+    ...(query.outcome != null ? { outcome: query.outcome } : {}),
+    ...(query.changesFilter != null ? { changesFilter: query.changesFilter } : {}),
+    ...(query.search != null ? { search: query.search } : {}),
+    ...(query.locale != null ? { locale: query.locale } : {}),
+    ...(query.limit != null ? { limit: query.limit } : {}),
+    ...(query.offset != null ? { offset: query.offset } : {}),
+    ...(query.anchor != null ? { anchor: query.anchor } : {})
+  })
+}
+
+export function getPendingScanThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  groupId: number
+) {
+  return backend.libraries.getPendingScan({ libraryId, groupId })
+}
+
+export function listPendingScansThroughBackend(backend: CatalogBackend, libraryId: number) {
+  return backend.libraries.listPendingScans({ libraryId })
+}
+
+export function pagePendingScanQueueThroughBackend(
+  backend: CatalogBackend,
+  query: PendingScanQueueQuery
+) {
+  return backend.libraries.pagePendingScanQueue(query)
+}
+
+export function countPendingScanQueueThroughBackend(
+  backend: CatalogBackend,
+  libraryId?: number
+) {
+  return backend.libraries.countPendingScanQueue(libraryId == null ? {} : { libraryId })
+}
+
+export function getPendingResourceIdentityThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  identityId: number
+) {
+  return backend.libraries.getPendingResourceIdentity({ libraryId, identityId })
+}
+
+export function listPendingResourceIdentitiesThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number
+) {
+  return backend.libraries.listPendingResourceIdentities({ libraryId })
+}
+
+export function pendingAuditPresenceThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  ids: PendingAuditIds
+) {
+  return backend.libraries.pendingAuditPresence({ libraryId, ...ids })
+}
+
+export async function importManualThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  rootId: number,
+  filePath: string,
+  code: string,
+  target: VideoResourceImportTarget
+): Promise<ManualImportResult> {
+  if (path.isAbsolute(filePath) && backend.mode === 'remote') {
+    throw structuredError('INVALID_INPUT', '远程文件位置必须是根目录相对路径')
+  }
+  const relativePath = toRootRelativePath(libraryId, rootId, filePath)
+  return backend.libraries.importManual(
+    { libraryId, location: { rootId, relativePath }, code, target },
+    ipcMutation(undefined, fileMaintenanceVersions(backend))
+  ) as Promise<ManualImportResult>
+}
+
+export async function renameThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  rootId: number,
+  oldPath: string,
+  newName: string
+): Promise<RenameImportResult> {
+  assertFileNameOnly(newName)
+  if (backend.mode === 'remote') {
+    throw structuredError(
+      'UNSUPPORTED_CAPABILITY',
+      '远程重命名仍需要资料库资源编号；当前桌面 IPC 只有根目录相对/绝对路径。'
+    )
+  }
+  const root = requireActiveRoot(libraryId, rootId)
+  const relativePath = toRootRelativePath(libraryId, rootId, oldPath)
+  const locator = path.isAbsolute(oldPath)
+    ? oldPath
+    : path.resolve(root.realPath ?? root.path, relativePath)
+  const resource = getLocalVideoResourceByLocator(libraryId, locator)
+  if (!resource) {
+    assertMediaLibraryRootFile(oldPath, root)
+    return maintenanceTaskGate.run('resource-maintenance', async () => {
+      const result = await renameAndImport({
+        libraryId,
+        rootId,
+        oldPath,
+        newName
+      })
+      if (result.outcome === 'imported' || result.outcome === 'pending') {
+        removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
+      } else {
+        renameLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(oldPath), {
+          filePath: result.newPath,
+          normalizedPath: normalizeLocalPathIdentity(result.newPath)
+        })
+      }
+      return result
+    })
+  }
+  const location = { rootId, relativePath }
+  return backend.libraries.renameFile(
+    {
+      libraryId,
+      resourceId: resource.id,
+      location,
+      newFileName: newName,
+      planId: randomUUID(),
+      planDigest: filesRenameDigest({
+        libraryId,
+        resourceId: resource.id,
+        location,
+        newFileName: newName
+      })
+    },
+    ipcMutation(undefined, fileMaintenanceVersions(backend))
+  ) as Promise<RenameImportResult>
+}
+
 export function registerScanLatestHandler(
   commandAdapter: Pick<typeof appCommandAdapter, 'register'> = appCommandAdapter,
-  readLatest: typeof getLatestLibraryScanSnapshot = getLatestLibraryScanSnapshot
+  readLatest: (
+    libraryId: number
+  ) => LibraryScanLatestSnapshot | Promise<LibraryScanLatestSnapshot> = getLatestLibraryScanSnapshot
 ): void {
   commandAdapter.register(IPC.SCAN_LATEST_GET, (libraryId) => readLatest(libraryId))
+}
+
+function completionFromTask(libraryId: number, task: CatalogTaskSnapshot): ScanCompletionResult {
+  return {
+    libraryId,
+    runId: task.taskId,
+    scannedFiles: task.counts?.scanned ?? 0,
+    imported: task.counts?.imported ?? 0,
+    skipped: 0,
+    skippedShort: 0,
+    failed: task.counts?.failed ?? 0,
+    pendingGroups: task.counts?.pending ?? 0,
+    pendingResources: 0,
+    relocated: 0,
+    refreshed: 0,
+    removed: 0,
+    promoted: 0,
+    deletedVideos: 0,
+    offlineFolders: [],
+    strmFailures: [],
+    omittedStrmFailures: 0,
+    unrecognizedCount: 0,
+    ...(task.state === 'cancelled' ? { cancelled: true } : {})
+  }
+}
+
+function waitForLocalScan(libraryId: number): {
+  promise: Promise<ScanCompletionResult>
+  cancel: () => void
+} {
+  let unsubscribe = (): void => {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const promise = new Promise<ScanCompletionResult>((resolve, reject) => {
+    timer = setTimeout(() => {
+      unsubscribe()
+      reject(new Error('扫描超时'))
+    }, 120_000)
+    unsubscribe = scanCoordinator.subscribe((event) => {
+      if (event.libraryId !== libraryId) return
+      if (event.phase === 'completed') {
+        if (timer) clearTimeout(timer)
+        unsubscribe()
+        resolve(event.result)
+      } else if (event.phase === 'failed') {
+        if (timer) clearTimeout(timer)
+        unsubscribe()
+        reject(new Error(event.error))
+      }
+    })
+  })
+  return {
+    promise,
+    cancel: () => {
+      if (timer) clearTimeout(timer)
+      unsubscribe()
+    }
+  }
+}
+
+const remoteScanWaits = new Map<string, AbortController>()
+
+export function abortRemoteCatalogScanWait(taskId: string): boolean {
+  const abort = remoteScanWaits.get(taskId)
+  if (!abort) return false
+  abort.abort()
+  return true
+}
+
+async function waitForRemoteScan(
+  backend: CatalogBackend,
+  libraryId: number,
+  taskId: string,
+  onProgress?: (task: CatalogTaskSnapshot) => void,
+  signal?: AbortSignal
+): Promise<ScanCompletionResult> {
+  const task = await waitForCatalogTask({
+    backend,
+    taskId,
+    signal,
+    onApplied: (snapshot) => {
+      if (!isTerminalCatalogTaskState(snapshot.state)) onProgress?.(snapshot)
+    }
+  })
+  if (task.state === 'failed') {
+    throw new Error(task.label || '扫描失败')
+  }
+  return completionFromTask(libraryId, task)
+}
+
+export async function runScanThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  onProgress?: (task: CatalogTaskSnapshot) => void
+): Promise<ScanCompletionResult> {
+  if (backend.mode === 'remote') {
+    const accepted = (await backend.libraries.runScan({ libraryId }, ipcMutation())) as { taskId: string }
+    const abort = new AbortController()
+    remoteScanWaits.set(accepted.taskId, abort)
+    try {
+      return await waitForRemoteScan(backend, libraryId, accepted.taskId, onProgress, abort.signal)
+    } catch (error) {
+      if (isAbortError(error)) {
+        return completionFromTask(libraryId, {
+          owner: 'catalog',
+          taskId: accepted.taskId,
+          catalogId: backend.session().catalogId ?? '',
+          kind: 'scan',
+          state: 'cancelled',
+          taskRevision: 0,
+          progressSeq: 0
+        })
+      }
+      throw error
+    } finally {
+      remoteScanWaits.delete(accepted.taskId)
+    }
+  }
+  const waiting = waitForLocalScan(libraryId)
+  try {
+    await backend.libraries.runScan({ libraryId }, ipcMutation())
+    return await waiting.promise
+  } catch (error) {
+    waiting.cancel()
+    throw error
+  }
 }
 
 export function registerScanAuditReadHandlers(
@@ -87,7 +465,7 @@ export function registerScanAuditRevealHandler(
   })
 }
 
-export function registerScanHandlers(ctx: IpcContext): void {
+export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): void {
   scanCoordinator.subscribe((event) => {
     const webContents = ctx.getWindow()?.webContents
     appEventAdapter.send(webContents, IPC.SCAN_STATE_CHANGED, event)
@@ -100,87 +478,72 @@ export function registerScanHandlers(ctx: IpcContext): void {
     }
   })
 
-  appCommandAdapter.register(
-    IPC.SCAN_RUN,
-    async (libraryId, rootIds): Promise<ScanCompletionResult> =>
-      scanCoordinator.run({ libraryId, rootIds, trigger: 'manual' })
+  appCommandAdapter.register(IPC.SCAN_RUN, async (libraryId): Promise<ScanCompletionResult> =>
+    runScanThroughBackend(backend, libraryId, (task) => {
+      appEventAdapter.send(ctx.getWindow()?.webContents, IPC.SCAN_PROGRESS, {
+        libraryId: task.libraryId ?? libraryId,
+        runId: task.taskId,
+        progress: {
+          scanned: task.counts?.scanned ?? 0,
+          imported: task.counts?.imported ?? 0,
+          currentFile: task.label ?? ''
+        }
+      })
+    })
   )
 
-  appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => scanCoordinator.cancel(runId))
-  registerScanLatestHandler()
-  registerScanAuditReadHandlers()
-  appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) =>
-    readLibraryScanAudit(libraryId)
-  )
+  appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => {
+    abortRemoteCatalogScanWait(runId)
+    if (scanCoordinator.cancel(runId)) return true
+    if (backend.mode === 'remote') {
+      void backend.tasks.cancel({ taskId: runId }, ipcMutation()).catch(() => undefined)
+      return true
+    }
+    return false
+  })
+  registerScanLatestHandler(appCommandAdapter, (libraryId) => backend.libraries.latestScan({ libraryId }))
+  registerScanAuditReadHandlers(appCommandAdapter, {
+    readAuditHeader: (libraryId) => backend.libraries.auditHeader({ libraryId }),
+    readAuditPage: (snapshot, query) => auditPageThroughBackend(backend, snapshot, query),
+    readAuditViewPage: (snapshot, query) => auditViewPageThroughBackend(backend, snapshot, query)
+  })
+  appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) => auditGetThroughBackend(backend, libraryId))
   registerScanAuditRevealHandler()
-  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
-  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) => pagePendingScanQueue(query))
-  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_COUNT, (libraryId) => countPendingScanQueue(libraryId))
-  appCommandAdapter.register(IPC.PENDING_SCAN_GET, (libraryId, groupId) => getPendingScanGroup(libraryId, groupId))
-  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_GET, (libraryId, identityId) => getPendingResourceIdentity(libraryId, identityId))
+  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) =>
+    pendingAuditPresenceThroughBackend(backend, libraryId, ids)
+  )
+  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) =>
+    pagePendingScanQueueThroughBackend(backend, query)
+  )
+  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_COUNT, (libraryId) =>
+    countPendingScanQueueThroughBackend(backend, libraryId)
+  )
+  appCommandAdapter.register(IPC.PENDING_SCAN_GET, (libraryId, groupId) =>
+    getPendingScanThroughBackend(backend, libraryId, groupId)
+  )
+  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_GET, (libraryId, identityId) =>
+    getPendingResourceIdentityThroughBackend(backend, libraryId, identityId)
+  )
   appCommandAdapter.register(IPC.PENDING_SCAN_LIST, (libraryId) =>
-    listPendingScanGroups(libraryId)
+    listPendingScansThroughBackend(backend, libraryId)
   )
   appCommandAdapter.register(IPC.PENDING_SCAN_RESOLVE, (libraryId, groupId, resolution) =>
-    maintenanceTaskGate.runSync('resource-maintenance', () =>
-      resolvePendingScanGroup(libraryId, groupId, resolution, {
-        selectFallbackPrimaryResourceId: (candidateLibraryId, videoId) =>
-          selectPrimaryVideoResourceCandidate(
-            listVideoResources(candidateLibraryId, videoId),
-            fs.existsSync
-          )?.id ?? null
-      })
-    )
+    resolvePendingScanThroughBackend(backend, libraryId, groupId, resolution)
   )
   appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_LIST, (libraryId) =>
-    listPendingResourceIdentities(libraryId)
+    listPendingResourceIdentitiesThroughBackend(backend, libraryId)
   )
   appCommandAdapter.register(
     IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,
     (libraryId, identityId, resolution) =>
-      maintenanceTaskGate.run('resource-maintenance', () =>
-        resolvePendingResourceIdentity(libraryId, identityId, resolution)
-      )
+      resolveResourceIdentityThroughBackend(backend, libraryId, identityId, resolution)
   )
 
-  appCommandAdapter.register(
-    IPC.FILE_RENAME,
-    (libraryId, rootId, oldPath, newName): Promise<RenameImportResult> => {
-      const root = requireActiveRoot(libraryId, rootId)
-      assertMediaLibraryRootFile(oldPath, root)
-      assertFileNameOnly(newName)
-      return maintenanceTaskGate.run('resource-maintenance', async () => {
-        const result = await renameAndImport({
-          libraryId,
-          rootId,
-          oldPath,
-          newName
-        })
-        if (result.outcome === 'imported' || result.outcome === 'pending') {
-          removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
-        } else {
-          renameLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(oldPath), {
-            filePath: result.newPath,
-            normalizedPath: normalizeLocalPathIdentity(result.newPath)
-          })
-        }
-        return result
-      })
-    }
+  appCommandAdapter.register(IPC.FILE_RENAME, (libraryId, rootId, oldPath, newName) =>
+    renameThroughBackend(backend, libraryId, rootId, oldPath, newName)
   )
 
-  appCommandAdapter.register(
-    IPC.FILE_IMPORT_MANUAL,
-    (libraryId, rootId, filePath, code, target): Promise<ManualImportResult> => {
-      const root = requireActiveRoot(libraryId, rootId)
-      assertMediaLibraryRootFile(filePath, root)
-      return maintenanceTaskGate.run('resource-maintenance', async () => {
-        const result = await importManual({ libraryId, rootId, filePath, code, target })
-        if (result.imported || result.skippedPath) {
-          removeScopedUnrecognizedFile(libraryId, rootId, filePath)
-        }
-        return result
-      })
-    }
+  appCommandAdapter.register(IPC.FILE_IMPORT_MANUAL, (libraryId, rootId, filePath, code, target) =>
+    importManualThroughBackend(backend, libraryId, rootId, filePath, code, target)
   )
 }

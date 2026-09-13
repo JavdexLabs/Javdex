@@ -43,15 +43,24 @@ const fakeApi = {
   }
 } as unknown as ElectronApi
 
-Object.defineProperty(globalThis, 'window', {
-  configurable: true,
-  value: { api: fakeApi }
-})
-
 type VideoListHook = typeof import('./useInfiniteVideoList')['useInfiniteVideoList']
 type VideoListResult = ReturnType<VideoListHook>
 let renderer: TestRenderer.ReactTestRenderer | null = null
 let hook: VideoListHook | null = null
+
+function installFakeApi(): void {
+  const current = (globalThis as { window?: { api?: ElectronApi } }).window
+  if (current && typeof current === 'object') {
+    current.api = Object.assign(current.api ?? ({} as ElectronApi), fakeApi)
+    return
+  }
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { api: fakeApi }
+  })
+}
+
+installFakeApi()
 
 async function settle(): Promise<void> {
   await act(async () => {
@@ -76,6 +85,9 @@ afterEach(async () => {
 
 describe('useInfiniteVideoList', () => {
   it('loads a library larger than the IPC page limit in bounded pages', async () => {
+    installFakeApi()
+    const { api } = await import('../api')
+    Object.assign(api, fakeApi)
     hook ??= (await import('./useInfiniteVideoList')).useInfiniteVideoList
     const useVideoList = hook
     const errors: unknown[] = []

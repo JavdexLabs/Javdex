@@ -5,9 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
-import { getActressDetail } from '../../apps/desktop/src/main/db/actressRepo'
-import { listActressVideoPage } from '../../apps/desktop/src/main/db/actressVideoPageRepo'
+import { initDatabaseAtPath, closeDatabase } from '../../packages/library/src/db/database'
+import { getActressDetail } from '../../packages/library/src/db/actressRepo'
+import { listActressVideoPage } from '../../packages/library/src/db/actressVideoPageRepo'
 import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 
 it('compares complete actor works with bounded first and last card pages', () => {

@@ -26,12 +26,12 @@ import {
   LOCAL_NFO_SOURCE_NAME
 } from '@shared/videoMetadataSourceConstants'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
-import { getVideoById, markScrapeFailed } from '../db/videoRepo'
+import { getVideoById, markScrapeFailed } from '@library/db/videoRepo'
 import {
   deletePendingVideoScrape,
   getPendingVideoScrapeForVideo,
   replacePendingVideoScrape
-} from '../db/pendingVideoScrapeRepo'
+} from '@library/db/pendingVideoScrapeRepo'
 import {
   findVideoBusinessIdentityConflictForScrape,
   resolveEffectiveVideoScrapeFields,
@@ -39,7 +39,7 @@ import {
 } from '../services/videoScrapeApplyService'
 import { getSettings } from '../settings/settingsStore'
 import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 
 /** Registry imports — see file bottom for registration. */
 import type { BaseScraper } from './BaseScraper'

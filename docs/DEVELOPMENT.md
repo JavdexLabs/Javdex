@@ -22,11 +22,11 @@ npm run dev
 
 ## 未发布数据库迁移
 
-生产版 v0.6.2 使用 schema 15。本分支此前拆分的开发迁移 16/17/18 已合并为单次 **15 → 16**：建立 Agent 资源清理队列、升级标签覆盖索引、建立逐项扫描审计表及约束。三部分在同一事务内执行，全部成功后才记录版本 16；失败整次回滚。新建数据库与生产版升级后的结构相同。
+生产版 v0.6.2 使用 schema 15。已发布路径为 **15 → 16**（Agent 清理队列、标签覆盖索引、逐项扫描审计）再 **16 → 17**（catalog 身份、writer 凭据/一次性令牌/领取、操作回执，以及影片 `generation`/`revision`）。正式 17 不是已撤回实验中的上传表。新建数据库与从官方 16 升级后的协议对象相同。
 
-已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。将来正式增加版本 17/18 时，须重新检查旧开发库的结构识别，不能仅靠版本数字接受这些历史快照。
+已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。正式 17 仍靠协议表结构识别，不能仅靠 `user_version = 17` 接受历史实验快照。
 
-旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `apps/desktop/src/main/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
+旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `packages/library/src/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
 
 ## 检查与构建
 
@@ -86,19 +86,20 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 | 目录 | 职责 |
 |---|---|
-| `apps/desktop/src/main` | 数据库、扫描、刮削、图片资产、AI 工作流与应用生命周期 |
+| `apps/desktop/src/main` | 扫描、刮削、图片资产、AI 工作流与应用生命周期；本地装配仍打开资料库连接 |
 | `apps/desktop/src/preload` | 通过 `contextBridge` 暴露受控 IPC API |
 | `apps/desktop/src/renderer` | React 页面、组件、交互与查询状态 |
 | `packages/contracts/src` | 跨进程类型和 IPC 通道 |
 | `apps/desktop/src/mcp` | 插件开发 MCP 服务 |
 | `apps/web/src` | 独立构建的只读浏览页面 |
-| `packages/library/src` | 已抽离的 Node 路径与资源身份工具；业务抽离仍待实施 |
+| `packages/library/src` | Node 路径/资源身份工具、资料库数据库、图片存储、扫描辅助、NFO、维护闸门与路径清理；扫描编排、Electron 封面导出和业务服务仍在抽离 |
+| `packages/http/src` | 局域网浏览 HTTP、配对/会话、浏览 DTO 与静态资源；桌面 webAccess 生命周期仍在 desktop |
 | `packages/ui/src` | 桌面和网页真实共用的纯展示组件 |
-| `apps/server`、`packages/http` | 预留工作区，目前没有可运行服务端或已抽离 HTTP |
+| `apps/server` | 独立 Node 入口：配置、`dataDir`/`imagesDir`/挂载、SQLite/图片、查询 worker、浏览 HTTP、管理 HTTP、writer 认主、迁库与播放授权；生产闭包 `out/server`。容器烟测 `server:smoke`（单容器）与 `server:smoke:migration`（Docker 两端迁库）取决于本机是否有 Docker；同版本 Linux 桌面包 + 镜像安装烟测 `smoke:same-version-install`（先 `server:build` 与 `dist:linux`）。Cursor Cloud 见根目录 `AGENTS.md` 的 Cursor Cloud specific instructions |
 
-根通过 npm workspaces 管理内部包，统一版本；运行 `npm run check:workspaces` 检查边界。可以用 `npm run build -w @javdex/web` 单独构建网页，或 `npm run build -w @javdex/desktop` 构建桌面及附带网页。根仍暂时持有桌面打包 metadata 与生产依赖，产物目录维持 `out/`；服务端独立依赖闭包按 [执行计划](SERVER_MODE_EXECUTION_PLAN.md) 后续建立。调整产品版本时必须同时更新所有 workspace 的版本、内部依赖版本和 lockfile。
+根通过 npm workspaces 管理内部包，统一版本；运行 `npm run check:workspaces` 检查边界。可以用 `npm run build -w @javdex/web` 单独构建网页，或 `npm run build -w @javdex/desktop` 构建桌面及附带网页。根仍暂时持有桌面打包 metadata 与生产依赖，产物目录维持 `out/`；服务端生产闭包由 `npm run server:build` 写入 `out/server`（仅 better-sqlite3 与 sharp）。调整产品版本时必须同时更新所有 workspace 的版本、内部依赖版本和 lockfile。
 
-渲染进程不直接访问 Node.js、数据库或文件系统，相关操作通过主进程处理。图片通过应用的 `media://` 协议读取，主进程负责资产路径解析和解密。
+渲染进程不直接访问 Node.js、数据库或文件系统，相关操作通过主进程处理。图片通过应用的 `media://` 协议读取：本地模式由主进程解析 MediaAssetStore；远程模式由主进程携带管理凭据代理，不把长期凭据拼进页面地址。
 
 插件在 Worker 沙箱中执行，通过受控 `ctx` API 访问宿主能力。内置插件开发助手支持页面探测、生成代码、试运行与验证，也可通过可选 MCP 服务接入外部工具。插件产物规范与助手实现分别查阅下表中的文档。
 
@@ -111,14 +112,14 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 领域术语与数据归属 | [领域上下文](../CONTEXT.md)、[多媒体库设计](MULTI_LIBRARY_DESIGN.md) |
 | UI、样式和交互 | [UI 设计规范](UI_DESIGN_GUIDELINES.md)、[组件契约](UI_COMPONENT_CONTRACTS.md) |
 | 局域网 Web 移动端 | [移动端 Web 规范](MOBILE_WEB_GUIDELINES.md) |
-| 服务端模式可行性（未实施） | [服务端模式研究](SERVER_MODE_FEASIBILITY_RESEARCH.md) |
-| 服务端模式执行交接 | [阶段计划与验收门槛](SERVER_MODE_EXECUTION_PLAN.md)、[管理合同与验收](SERVER_MODE_API_RESEARCH.md) |
+| 服务端模式部署与双模式 | [服务端模式](SERVER_MODE.md)、[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) |
+| 服务端模式研究与执行交接 | [可行性研究](SERVER_MODE_FEASIBILITY_RESEARCH.md)、[阶段计划与验收门槛](SERVER_MODE_EXECUTION_PLAN.md)、[管理合同与验收](SERVER_MODE_API_RESEARCH.md) |
 | 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |
 | 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |
 | 插件开发助手与 MCP | [插件开发 Agent](PLUGIN_DEV_AGENT.md) |
 | NFO 导出格式与验证范围 | [NFO 兼容性](NFO_COMPATIBILITY.md) |
 | 大媒体库性能与优化计划 | [性能审计](performance/large-library-performance-audit.md)、[实施计划](performance/large-library-optimization-plan.md)、[基准复跑](performance/large-library-results/README.md) |
-| 数据库结构与迁移 | [schema.ts](../apps/desktop/src/main/db/schema.ts)、[migrations.ts](../apps/desktop/src/main/db/migrations.ts) |
+| 数据库结构与迁移 | [schema.ts](../packages/library/src/db/schema.ts)、[migrations.ts](../packages/library/src/db/migrations.ts) |
 | Issue、PRD 与分类标签 | [Issue 约定](agents/issue-tracker.md)、[标签约定](agents/triage-labels.md) |
 | 版本与发布 | [发布规范](VERSIONING_AND_RELEASE.md)、[更新日志](../CHANGELOG.md) |
 | 第三方集成与许可 | [第三方说明](THIRD_PARTY_NOTICES.md)、[MIT License](../LICENSE) |

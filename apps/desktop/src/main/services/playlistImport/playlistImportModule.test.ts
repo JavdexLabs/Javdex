@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import Database from 'better-sqlite3'
-import { migrateDatabase } from '../../db/migrations'
+import { migrateDatabase } from '@library/db/migrations'
 import { PlaylistImportModuleImpl, type PlaylistImportRunDriver } from './playlistImportModule'
 import { PlaylistImportRepository } from './playlistImportRepository'
+import type { CatalogBackend } from '../../application/catalogBackend'
 
 function fixture(): {
   database: Database.Database
@@ -653,5 +654,107 @@ describe('PlaylistImportModule interface', () => {
     } finally {
       database.close()
     }
+  })
+
+  it('validates remote start targets through catalog before opening a database', async () => {
+    let dbCalls = 0
+    const driver: PlaylistImportRunDriver = {
+      create: async () => {
+        throw new Error('driver create must not run')
+      },
+      start: async () => {
+        throw new Error('driver start must not run')
+      },
+      resume: async () => {
+        throw new Error('resume')
+      },
+      retry: async () => undefined,
+      finish: async () => undefined,
+      cancel: async () => undefined,
+      discard: async () => undefined
+    }
+    const module = new PlaylistImportModuleImpl(
+      () => {
+        dbCalls += 1
+        throw new Error('opened db')
+      },
+      driver,
+      {
+        libraries: {
+          get: async () => null
+        },
+        playlists: {
+          get: async () => {
+            throw new Error('playlist lookup must not run when the library is missing')
+          }
+        }
+      } as unknown as CatalogBackend
+    )
+    await assert.rejects(
+      module.start({
+        idempotencyKey: 'm10-catalog-first',
+        sourceUrl: 'https://example.test/list',
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      }),
+      /TARGET_LIBRARY_NOT_FOUND/
+    )
+    assert.equal(dbCalls, 0)
+  })
+
+  it('rejects remote append and auto-create before opening workStore', async () => {
+    let dbCalls = 0
+    const driver: PlaylistImportRunDriver = {
+      create: async () => {
+        throw new Error('driver create must not run')
+      },
+      start: async () => {
+        throw new Error('driver start must not run')
+      },
+      resume: async () => {
+        throw new Error('resume')
+      },
+      retry: async () => undefined,
+      finish: async () => undefined,
+      cancel: async () => undefined,
+      discard: async () => undefined
+    }
+    const module = new PlaylistImportModuleImpl(
+      () => {
+        dbCalls += 1
+        throw new Error('opened db')
+      },
+      driver,
+      {
+        mode: 'remote',
+        libraries: {
+          get: async () => ({ id: 1, name: '主库', status: 'active' })
+        },
+        playlists: {
+          get: async () => ({ id: 2, name: '已有' })
+        }
+      } as unknown as CatalogBackend
+    )
+    await assert.rejects(
+      module.start({
+        idempotencyKey: 'm10-remote-append',
+        sourceUrl: 'https://example.test/list',
+        targetLibraryId: 1,
+        destination: { kind: 'append', playlistId: 2 },
+        autoCreateUnmatchedVideos: false
+      }),
+      /不能追加到已有清单/
+    )
+    await assert.rejects(
+      module.start({
+        idempotencyKey: 'm10-remote-autocreate',
+        sourceUrl: 'https://example.test/list',
+        targetLibraryId: 1,
+        destination: { kind: 'create' },
+        autoCreateUnmatchedVideos: true
+      }),
+      /不能自动建片/
+    )
+    assert.equal(dbCalls, 0)
   })
 })

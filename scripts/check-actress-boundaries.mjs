@@ -77,7 +77,7 @@ const retiredAggregate = path.resolve('packages/contracts/src/types.ts')
 if (existsSync(retiredAggregate)) {
   violations.push('packages/contracts/src/types.ts: retired aggregate type entry must not be restored')
 }
-for (const root of ['src', 'scripts']) {
+for (const root of ['apps', 'packages', 'scripts']) {
   for (const file of sourceFiles(root)) {
     for (const specifier of importsOf(file)) {
       const resolved = specifier === '@shared/types'
@@ -131,6 +131,8 @@ const actressApplicationSeams = new Set([
 for (const specifier of importsOf(actressHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
+    specifier.startsWith('@library/db/') ||
+    specifier.startsWith('@library/scan/') ||
     (/\.\.\/services\//.test(specifier) && !actressApplicationSeams.has(specifier))
   ) {
     violations.push(
@@ -149,6 +151,8 @@ const videoHandler = 'apps/desktop/src/main/ipc/videoHandlers.ts'
 for (const specifier of importsOf(videoHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
+    specifier.startsWith('@library/db/') ||
+    specifier.startsWith('@library/scan/') ||
     (/\.\.\/services\//.test(specifier) && !videoApplicationSeams.has(specifier))
   ) {
     violations.push(
@@ -173,6 +177,8 @@ const classificationApplicationSeams = new Set([
 for (const specifier of importsOf(classificationHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
+    specifier.startsWith('@library/db/') ||
+    specifier.startsWith('@library/scan/') ||
     (/\.\.\/services\//.test(specifier) && !classificationApplicationSeams.has(specifier))
   ) {
     violations.push(
@@ -185,6 +191,8 @@ const scrapeHandler = 'apps/desktop/src/main/ipc/scrapeHandlers.ts'
 for (const specifier of importsOf(scrapeHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
+    specifier.startsWith('@library/db/') ||
+    specifier.startsWith('@library/scan/') ||
     (/\.\.\/services\//.test(specifier) &&
       ![
         '../services/scrapeJobController',
@@ -210,7 +218,7 @@ for (const probe of ['node:fs', 'node:fs/promises', 'node:path', 'node:path/posi
   }
 }
 
-for (const file of sourceFiles('apps/desktop/src/main/db')) {
+for (const file of sourceFiles('packages/library/src/db')) {
   if (/\.test\.[cm]?[jt]sx?$/.test(file)) continue
   for (const specifier of importsOf(file)) {
     if (isForbiddenDatabaseImport(specifier)) {
@@ -242,7 +250,12 @@ for (const file of [
   'apps/desktop/src/main/services/actressGalleryService.ts',
   'apps/desktop/src/main/services/actressIdentityConflictWorkflow.ts',
   'apps/desktop/src/main/scrapers/actressScraperManager.ts',
-  'apps/desktop/src/main/scrapers/scraperManager.ts'
+  'apps/desktop/src/main/scrapers/scraperManager.ts',
+  'packages/library/src/catalog/videoMaintenanceService.ts',
+  'packages/library/src/catalog/actressQueryService.ts',
+  'packages/library/src/catalog/actressMaintenanceService.ts',
+  'packages/library/src/catalog/actressGalleryService.ts',
+  'packages/library/src/catalog/actressIdentityConflictWorkflow.ts'
 ]) {
   for (const specifier of importsOf(file)) {
     if (

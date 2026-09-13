@@ -5,9 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
-import { listActressAvatarCropTargets } from '../../apps/desktop/src/main/db/actressRepo'
-import { createActressAvatarCropSnapshot } from '../../apps/desktop/src/main/db/actressAvatarCropSnapshot'
+import { initDatabaseAtPath, closeDatabase } from '../../packages/library/src/db/database'
+import { listActressAvatarCropTargets } from '../../packages/library/src/db/actressRepo'
+import { createActressAvatarCropSnapshot } from '../../packages/library/src/db/actressAvatarCropSnapshot'
 import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
 
 it('measures full targets versus snapshot startup and page reads at two actor scales', () => {

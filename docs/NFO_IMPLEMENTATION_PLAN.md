@@ -461,11 +461,11 @@ type MetadataAssetRef =
 
 ### 35.6 重点文件
 
-- `apps/desktop/src/main/scanner/scanner.ts`
-- `apps/desktop/src/main/scanner/libraryScanAuditStore.ts`
-- `apps/desktop/src/main/db/mediaLibraryRepo.ts`
-- `apps/desktop/src/main/db/pendingScanRepo.ts` 与新增 identity repo/service
-- `apps/desktop/src/main/db/schema.ts`、`apps/desktop/src/main/db/migrations.ts`
+- `packages/library/src/scan/scanner.ts`
+- `packages/library/src/scan/libraryScanAuditStore.ts`
+- `packages/library/src/db/mediaLibraryRepo.ts`
+- `packages/library/src/db/pendingScanRepo.ts` 与新增 identity repo/service
+- `packages/library/src/db/schema.ts`、`packages/library/src/db/migrations.ts`
 - `apps/desktop/src/main/services/videoPendingScrapeService.ts`
 - `apps/desktop/src/main/services/videoScrapeApplyService.ts`
 - `apps/desktop/src/main/services/mediaLibraryRootFileGuard.ts`

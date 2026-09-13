@@ -43,6 +43,12 @@ export const IPC = {
   SETTINGS_RECOVERY_REVEAL_BACKUP: 'settings:recoveryRevealBackup',
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
+  DESKTOP_SESSION_GET: 'desktop:sessionGet',
+  DESKTOP_SESSION_CHANGED: 'desktop:sessionChanged',
+  DESKTOP_RECONNECT: 'desktop:reconnect',
+  THIS_COMPUTER_GET: 'thisComputer:get',
+  THIS_COMPUTER_UPDATE: 'thisComputer:update',
+  WRITER_CLAIM: 'writer:claim',
 
   // One-shot foreground NFO export
   NFO_EXPORT_GET_OPTIONS: 'nfoExport:getOptions',

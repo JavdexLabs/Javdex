@@ -4,14 +4,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
-import { normalizeActressName } from '../db/actressNameNormalization'
+import { normalizeActressName } from '@library/db/actressNameNormalization'
 import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import {
   editActress,
   findActressByNameOrAlias,
   getActressDetail
-} from '../db/actressRepo'
+} from '@library/db/actressRepo'
 import { createActressMaintenanceService } from './actressMaintenanceService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import {

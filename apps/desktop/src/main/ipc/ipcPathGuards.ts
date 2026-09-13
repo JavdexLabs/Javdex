@@ -1,5 +1,5 @@
 import path from 'node:path'
-export { assertMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
+export { assertMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
 
 export function assertFileNameOnly(fileName: string): void {
   if (fileName !== path.basename(fileName) || fileName === '.' || fileName === '..') {

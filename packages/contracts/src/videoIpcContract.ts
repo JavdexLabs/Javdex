@@ -1,4 +1,5 @@
 import { IPC } from './ipc-channels'
+import type { ExpectedVersions } from './protocol/versions'
 import type {
   CorrectImportResult,
   VideoAsset,
@@ -39,10 +40,22 @@ export interface VideoIpcContract {
   }
   [IPC.VIDEO_GET]: { args: [scope: CatalogScope, id: number]; result: ScopedVideoDetail | null }
   [IPC.VIDEO_UPDATE]: { args: [id: number, fields: VideoFieldUpdateInput]; result: boolean }
-  [IPC.VIDEO_EDIT]: { args: [id: number, input: VideoEditInput]; result: boolean }
-  [IPC.VIDEO_CLEAR_META]: { args: [id: number]; result: boolean }
-  [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: { args: [id: number]; result: boolean }
-  [IPC.VIDEO_SET_RATING]: { args: [id: number, rating: number]; result: boolean }
+  [IPC.VIDEO_EDIT]: {
+    args: [id: number, input: VideoEditInput, expectedVersions: ExpectedVersions]
+    result: boolean
+  }
+  [IPC.VIDEO_CLEAR_META]: {
+    args: [id: number, expectedVersions: ExpectedVersions]
+    result: boolean
+  }
+  [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: {
+    args: [id: number, expectedVersions: ExpectedVersions]
+    result: boolean
+  }
+  [IPC.VIDEO_SET_RATING]: {
+    args: [id: number, rating: number, expectedVersions: ExpectedVersions]
+    result: boolean
+  }
   [IPC.VIDEO_CORRECT_IMPORT]: {
     args: [id: number, code: string, discardPendingScrape?: boolean]
     result: CorrectImportResult
@@ -57,9 +70,18 @@ export interface VideoIpcContract {
     args: [id: number, posterPath: string | null]
     result: boolean
   }
-  [IPC.VIDEO_MANUAL_TAG_ADD]: { args: [id: number, name: string]; result: boolean }
-  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: { args: [id: number, tagId: number]; result: boolean }
-  [IPC.VIDEO_MANUAL_TAG_REMOVE]: { args: [id: number, tagId: number]; result: boolean }
+  [IPC.VIDEO_MANUAL_TAG_ADD]: {
+    args: [id: number, name: string, expectedVersions: ExpectedVersions]
+    result: boolean
+  }
+  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: {
+    args: [id: number, tagId: number, expectedVersions: ExpectedVersions]
+    result: boolean
+  }
+  [IPC.VIDEO_MANUAL_TAG_REMOVE]: {
+    args: [id: number, tagId: number, expectedVersions: ExpectedVersions]
+    result: boolean
+  }
   [IPC.VIDEO_RESOURCE_IMPORT]: {
     args: [input: VideoLinkResourceImportInput]
     result: VideoResourceImportResult

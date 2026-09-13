@@ -74,6 +74,6 @@ Web 的可见成员 ID 则是另一种候选集合：它替代逐影片重复计
 
 原始数据、日志、修改前源码及 UNION 实验均在 [search-equivalent](large-library-results/search-equivalent/manifest.json)。`release` 字段沿用旧探针变量名，**在此代表本轮前工作区，不代表 v0.6.2 release**。无 ANALYZE 数据中的空 candidate 数组表示该轮没有执行 UNION 对照。
 
-原生测试：`node scripts/run-electron-tests.mjs apps/desktop/src/main/db/videoSearchOptimization.test.ts apps/desktop/src/main/web/webSearchOptimization.test.ts`。
+原生测试：`node scripts/run-electron-tests.mjs packages/library/src/db/videoSearchOptimization.test.ts apps/desktop/src/main/web/webSearchOptimization.test.ts`。
 
 性能 fixture 以 `.txt` 归档，内含本机绝对路径和 `/tmp` 输出路径。复跑需把仓库前缀替换为当前 checkout，并把归档的 `desktop-before.source.txt`、`desktop-union-experiment.source.txt`、`web-before.source.txt` 分别保存为 fixture import 指向的 `/tmp/javdex-perf11-*.ts`。从本轮源码快照运行；这些旧仓库快照依赖当前共享模块，不是独立历史应用。三种实验的 fixture 分别为 `desktop.fixture.txt`、`desktop-no-analyze.fixture.txt`、`web.fixture.txt`。

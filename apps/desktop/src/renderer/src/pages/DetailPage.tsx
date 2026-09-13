@@ -40,6 +40,7 @@ import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import ActressAvatar from '../components/ActressAvatar'
 import type { VideoEditInput } from '@shared/videoTypes'
+import { expectedVideoVersion } from '@shared/protocol/versions'
 import type {
   VideoDirectorChoiceRequired,
   VideoScrapeField,
@@ -355,7 +356,7 @@ export default function DetailPage(): JSX.Element {
   const handleOpenResource = async (resourceId: number): Promise<void> => {
     if (!video) return
     try {
-      const result = await api.player.openResource(video.activeLibraryId, resourceId)
+      const result = await api.player.openResource(video.activeLibraryId, resourceId, videoId)
       if (result.ok) {
         toast.show('已交给系统打开', 'success')
       } else if (result.fileMissing) {
@@ -633,8 +634,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleRating = async (rating: number): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.setRating(videoId, rating)
+      await api.videos.setRating(videoId, rating, expectedVideoVersion(video))
       setVideo((v) => (v ? { ...v, rating } : v))
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -642,8 +644,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleEditSave = async (input: VideoEditInput): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.edit(videoId, input)
+      await api.videos.edit(videoId, input, expectedVideoVersion(video))
       setShowEdit(false)
       toast.show('元数据已保存', 'success')
       invalidateVideos()
@@ -658,8 +661,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const doClearMeta = async (): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.clearMeta(videoId)
+      await api.videos.clearMeta(videoId, expectedVideoVersion(video))
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
       invalidateVideos()
@@ -670,8 +674,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleMarkScrapeSuccess = async (): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.markScrapeSuccess(videoId)
+      await api.videos.markScrapeSuccess(videoId, expectedVideoVersion(video))
       toast.show('已标记为刮削成功', 'success')
       invalidateVideos()
       void load({ silent: true })
@@ -1134,6 +1139,7 @@ export default function DetailPage(): JSX.Element {
       <VideoTagPanel
         videoId={video.id}
         tags={video.tags}
+        expectedVersions={expectedVideoVersion(video)}
         onFilterTag={(tag) =>
           navigateToVideoListSurface(
             navigate,

@@ -1,10 +1,22 @@
 import path from 'node:path'
 import { parseImageThumbnailSize, type ImageThumbnailSize } from '@shared/imageVariants'
-import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from './mediaAssetStore'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
+import { isStructuredError } from '@shared/protocol/errors'
+import type { CatalogBackend } from '../application/catalogBackend'
 
 interface AssetReader {
   rootPath(): string
   readForServeAsync(relPath: string, signal?: AbortSignal, size?: ImageThumbnailSize): Promise<{ body: Buffer; mime: string }>
+}
+
+const REMOTE_MEDIA_ROOT = path.resolve('/javdex-remote-media')
+
+export function createRemoteAssetReader(backend: CatalogBackend): AssetReader {
+  return {
+    rootPath: () => REMOTE_MEDIA_ROOT,
+    readForServeAsync: (relPath, signal, size) =>
+      backend.assets.readImage({ relPath, size }, { signal })
+  }
 }
 
 export async function serveMediaAssetRequest(request: Request, reader: AssetReader): Promise<Response> {
@@ -26,6 +38,9 @@ export async function serveMediaAssetRequest(request: Request, reader: AssetRead
       headers: { ...headers, 'Content-Type': mime, 'Content-Length': String(body.length) }
     })
   } catch (error) {
+    if (isStructuredError(error) && (error.code === 'CONNECTION_UNAVAILABLE' || error.code === 'AUTH_REQUIRED')) {
+      return new Response(request.method === 'HEAD' ? null : 'Unavailable', { status: 503, headers })
+    }
     const status = error instanceof AssetReadQueueFullError ? 503
       : error instanceof AssetReadTooLargeError || error instanceof AssetPixelLimitError ? 413 : 404
     const message = status === 503 ? 'Busy' : status === 413 ? 'Image Too Large' : 'Not Found'

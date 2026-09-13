@@ -8,7 +8,8 @@ import type {
   LibraryCuratorSnapshot,
   LibraryCuratorStartInput
 } from '@shared/libraryCuratorTypes'
-import { getLibraryOverviewStats } from '../../db/overviewRepo'
+import { getLibraryOverviewStats } from '@library/db/overviewRepo'
+import type { CatalogBackend } from '../../application/catalogBackend'
 import { agentConfiguration } from '../../agent-platform/agentConfiguration'
 import { agentExecution } from '../../agent-platform/agentExecution'
 import { agentRunStore, type AgentRunRecord } from '../../agent-platform/agentRunStore'
@@ -57,8 +58,26 @@ function runStatus(status: LibraryCuratorResult['status']): AgentRunRecord['stat
   return status
 }
 
+export async function readCuratorOverview(
+  catalog: CatalogBackend | null
+): Promise<Record<string, unknown>> {
+  if (catalog) {
+    const stats = (await catalog.queries.overviewStats({})) as { videos?: unknown } | null
+    if (!stats || typeof stats !== 'object' || typeof stats.videos !== 'object' || stats.videos == null) {
+      throw new Error('媒体库概览响应无效。')
+    }
+    return structuredClone(stats) as Record<string, unknown>
+  }
+  return structuredClone(getLibraryOverviewStats()) as unknown as Record<string, unknown>
+}
+
 export class LibraryCurator {
   private readonly active = new Map<string, ActiveCuratorRun>()
+  private catalog: CatalogBackend | null = null
+
+  bindCatalog(backend: CatalogBackend): void {
+    this.catalog = backend
+  }
 
   private registerTools(runId: string, profile: PersistedRunConfigurationSnapshot['profile']) {
     return toolHost.registerRun({
@@ -66,9 +85,7 @@ export class LibraryCurator {
       profile,
       status: () => agentRunStore.getRun(runId)?.status ?? 'closed',
       operationId: () => agentRunStore.getRun(runId)?.activeOperationId,
-      handlers: createLibraryCuratorToolHandlers(async () => (
-        structuredClone(getLibraryOverviewStats()) as unknown as Record<string, unknown>
-      ))
+      handlers: createLibraryCuratorToolHandlers(async () => readCuratorOverview(this.catalog))
     })
   }
 

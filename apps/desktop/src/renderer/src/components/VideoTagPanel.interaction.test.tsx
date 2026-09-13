@@ -44,7 +44,7 @@ before(async () => { Panel = (await import('./VideoTagPanel')).default; Modal = 
 let viewport = continuousViewport()
 let renderer: TestRenderer.ReactTestRenderer | undefined
 async function show(videoId = 1) {
-  const element = <Panel videoId={videoId} tags={[]} onFilterTag={() => {}} onChanged={() => changed.push(videoId)} />
+  const element = <Panel videoId={videoId} tags={[]} expectedVersions={{ V: { generation: 1, revision: 1 } }} onFilterTag={() => {}} onChanged={() => changed.push(videoId)} />
   await act(async () => {
     if (renderer) renderer.update(element)
     else renderer = TestRenderer.create(element, { createNodeMock: viewport.createNodeMock })

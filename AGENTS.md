@@ -10,7 +10,7 @@
 
 ## 按任务阅读
 
-本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`，Node 路径身份工具在 `packages/library/src`，共用 Checkbox 在 `packages/ui/src`。`packages/http` 和 `apps/server` 目前只有工作区声明，服务端尚未实现；后续实施按 `docs/SERVER_MODE_EXECUTION_PLAN.md` 执行，不能把占位工作区当作已完成运行时隔离。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
+本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（S01 起含 browser/manage/desktop/protocol 分组），Node 路径身份与资料库数据库在 `packages/library/src`，局域网浏览 HTTP 在 `packages/http/src`，共用 Checkbox 在 `packages/ui/src`。`apps/server` 仍是预留工作区，不能把占位入口当作已完成的独立服务。后续实施按 `docs/SERVER_MODE_EXECUTION_PLAN.md` 执行。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
 
 | 你在改什么 | 必读 | 可选 |
 |------------|------|------|
@@ -19,7 +19,7 @@
 | 列表/详情页、路由、URL 筛选、返回栈 | [`docs/ROUTING_DESIGN.md`](docs/ROUTING_DESIGN.md) | `UI_COMPONENT_CONTRACTS.md`（若动 toolbar/筛选） |
 | 刮削插件、`bundled-plugins`、沙箱 `ctx`、导入包 | [`docs/SCRAPER_PLUGIN_FORMAT.md`](docs/SCRAPER_PLUGIN_FORMAT.md) | — |
 | 插件开发 Agent、`PluginDevPanel`、MCP、`pluginDevAgent/*` | [`docs/PLUGIN_DEV_AGENT.md`](docs/PLUGIN_DEV_AGENT.md) | `SCRAPER_PLUGIN_FORMAT.md` |
-| 数据库表结构、迁移 | `apps/desktop/src/main/db/schema.ts`、`apps/desktop/src/main/db/migrations.ts` | — |
+| 数据库表结构、迁移 | `packages/library/src/db/schema.ts`、`packages/library/src/db/migrations.ts` | — |
 
 ## 不必引导 Agent 通读
 
@@ -49,3 +49,20 @@ Issue 与 PRD 统一记录在 GitHub Issues。详见 `docs/agents/issue-tracker.
 ### Domain docs
 
 采用单上下文领域文档布局。详见 `docs/agents/domain.md`。
+
+## Cursor Cloud specific instructions
+
+Docker for Cloud Agents comes from `.cursor/environment.json` (build context defaults to `.cursor`) and `.cursor/Dockerfile`. That image follows Cursor’s official “Running Docker” recipe (Docker CE + CLI + containerd + buildx + compose plugin, fuse-overlayfs, iptables-legacy, `ubuntu` in the docker group with passwordless sudo). `start` runs `sudo service docker start` and waits until `docker info` succeeds.
+
+`npm run server:smoke` builds the **root** `Dockerfile` (it `COPY`s `out/server`) and runs a Linux container. Use it only in a session that booted from this environment. A VM that started from an older snapshot without this image cannot run container smoke — do not fake a pass.
+
+Follow-up session verification:
+
+1. `docker version` and `docker info` succeed (daemon up, `ubuntu` can talk to it).
+2. `npm run server:build` writes `out/server` (the image context).
+3. `npm run server:smoke` exits 0. Missing Docker must exit non-zero.
+4. `npm run server:smoke:migration` is the Docker dual-host catalog migration smoke (separate source/target volumes, `migrate-auth`, package, start/enable, status + official image file checks). Missing Docker must exit non-zero.
+5. `npm run server:smoke:node` is a host-process check, not container acceptance.
+6. `npm run smoke:same-version-install` is the same-source-version Linux desktop package + server image install smoke. It needs `out/server` and a Linux `dist/` artifact from this commit. Missing Docker or missing Linux packages must exit non-zero. Windows NSIS/ZIP and macOS DMG are not produced on this Linux VM.
+
+`install` is `npm ci` only. Do not run `setup:desktop` / Electron rebuild for server-only smoke. Desktop package smoke does need `setup:desktop` then `dist:linux`.

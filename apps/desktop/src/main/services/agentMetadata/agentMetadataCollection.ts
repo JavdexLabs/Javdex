@@ -6,6 +6,7 @@ import type {
   AgentMetadataApplyInput,
   AgentMetadataApplyOutcome,
   AgentMetadataDiscardInput,
+  AgentMetadataDraft,
   AgentMetadataPlanInput,
   AgentMetadataReview,
   AgentMetadataSnapshot,
@@ -31,12 +32,14 @@ import type {
   RuntimeDurableObservation,
   RuntimeObservation
 } from '../../agent-platform/types'
-import { getActressDetail } from '../../db/actressRepo'
-import { getVideoById } from '../../db/videoRepo'
+import { getActressDetail } from '@library/db/actressRepo'
+import { getVideoById } from '@library/db/videoRepo'
 import { agentMetadataBrowser } from './browserAdapter'
 import { agentMetadataDraftService } from './draftService'
 import { createAgentMetadataToolHandlers } from './toolPack'
 import { AgentMetadataActivityTimeline } from './activityTimeline'
+import type { CatalogBackend } from '../../application/catalogBackend'
+import type { ExpectedVersions } from '@shared/protocol/versions'
 
 interface AgentMetadataProductState extends Record<string, unknown> {
   schemaVersion: 1
@@ -78,7 +81,33 @@ function currentPhase(active: ActiveMetadataRun): AgentMetadataPhase {
 type TargetPromptBuilders = {
   [Kind in AgentMetadataTargetKind]: (
     target: Extract<AgentMetadataTarget, { kind: Kind }>
-  ) => string
+  ) => string | Promise<string>
+}
+
+async function describeBoundTarget(
+  catalog: CatalogBackend,
+  target: AgentMetadataTarget
+): Promise<string> {
+  if (target.kind === 'video') {
+    const video = (await catalog.queries.getVideo({
+      scope: { kind: 'all' },
+      videoId: target.id
+    })) as { id: number; code: string } | null
+    if (!video || !Number.isFinite(video.id) || typeof video.code !== 'string' || video.code.length === 0) {
+      throw new Error('影片不存在。')
+    }
+    return `当前目标是影片 #${video.id}，库内番号为「${video.code}」。必须在页面中找到并核对同一番号。`
+  }
+  const actress = (await catalog.actresses.get({ actressId: target.id })) as {
+    id: number
+    main_name: string
+    names?: Array<{ name: string }>
+  } | null
+  if (!actress || !Number.isFinite(actress.id) || typeof actress.main_name !== 'string') {
+    throw new Error('演员不存在。')
+  }
+  const names = [...new Set([actress.main_name, ...(actress.names ?? []).map((item) => item.name)])]
+  return `当前目标是演员 #${actress.id}，库内已知名称为：${names.map((name) => `「${name}」`).join('、')}。优先用同名核对身份；若页面名称均不匹配，必须提交 identityMatched=false 交由用户确认，不能猜测。`
 }
 
 const TARGET_PROMPT_BUILDERS = {
@@ -95,22 +124,38 @@ const TARGET_PROMPT_BUILDERS = {
   }
 } satisfies TargetPromptBuilders
 
-function targetPrompt(target: AgentMetadataTarget): string {
+async function targetPrompt(catalog: CatalogBackend | null, target: AgentMetadataTarget): Promise<string> {
+  if (catalog) return describeBoundTarget(catalog, target)
   return target.kind === 'video'
     ? TARGET_PROMPT_BUILDERS.video(target)
     : TARGET_PROMPT_BUILDERS.actress(target)
 }
 
-function targetExists(target: AgentMetadataTarget): boolean {
-  if (target.kind === 'video') return Boolean(getVideoById(target.id))
-  if (target.kind === 'actress') return Boolean(getActressDetail(target.id))
-  const unsupported: never = target
-  return unsupported
+async function targetExists(catalog: CatalogBackend | null, target: AgentMetadataTarget): Promise<boolean> {
+  if (catalog) {
+    try {
+      await describeBoundTarget(catalog, target)
+      return true
+    } catch {
+      return false
+    }
+  }
+  try {
+    await targetPrompt(null, target)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export class AgentMetadataCollection {
   private readonly active = new Map<string, ActiveMetadataRun>()
   private readonly listeners = new Set<(event: AgentMetadataSnapshotChangedEvent) => void>()
+  private catalog: CatalogBackend | null = null
+
+  bindCatalog(backend: CatalogBackend): void {
+    this.catalog = backend
+  }
 
   subscribe(listener: (event: AgentMetadataSnapshotChangedEvent) => void): () => void {
     this.listeners.add(listener)
@@ -302,7 +347,7 @@ export class AgentMetadataCollection {
   }
 
   async start(input: AgentMetadataStartInput): Promise<AgentMetadataSnapshot> {
-    targetPrompt(input.target)
+    const prompt = await targetPrompt(this.catalog, input.target)
     if (!input.sourceUrl.trim()) throw new Error('请输入外部详情页 URL。')
     const runId = randomUUID()
     const source: AgentMetadataSource = {
@@ -339,15 +384,15 @@ export class AgentMetadataCollection {
         notify: (event) => this.notify(runId, active, event),
         project: (event) => this.project(runId, active, event)
       })
-      const prompt = [
-        targetPrompt(input.target),
+      const dispatchedPrompt = [
+        prompt,
         `用户指定详情页：${active.state.source.displayUrl}`,
         '请先用 browser open 打开该 URL，核对身份并采集页面明确提供的信息。完成后只调用一次 submit_metadata_candidate。'
       ].join('\n')
       const dispatched = await agentExecution.dispatch({
         runId,
         kind: 'prompt',
-        text: prompt,
+        text: dispatchedPrompt,
         idempotencyKey: input.idempotencyKey
       })
       if (!dispatched.accepted) throw new Error('Agent runtime 拒绝了元数据采集任务。')
@@ -432,43 +477,95 @@ export class AgentMetadataCollection {
     return review
   }
 
-  apply(input: AgentMetadataApplyInput): AgentMetadataApplyOutcome {
+  apply(input: AgentMetadataApplyInput): Promise<AgentMetadataApplyOutcome> | AgentMetadataApplyOutcome {
     const draft = agentMetadataDraftService.getDraft(input.draftId)
     if (!draft) throw new Error('元数据草稿不存在。')
     this.syncDraftState(input.draftId, 'applying', '正在应用元数据')
     try {
-      const outcome = agentMetadataDraftService.apply(input)
-      this.syncDraftState(
-        input.draftId,
-        outcome.status === 'preview_stale'
-          ? 'ready'
-          : outcome.status === 'routed_to_pending'
-            ? 'routed_to_pending'
-            : 'applied',
-        outcome.status === 'preview_stale'
-          ? '媒体库内容已变化，请重新检查预览'
-          : outcome.status === 'no_op'
-            ? '没有需要写入的变化'
-            : outcome.status === 'routed_to_pending'
-              ? '元数据冲突已转入待处理中心'
-              : '元数据已应用'
-      )
-      if (outcome.status !== 'preview_stale') this.retireDraftRun(input.draftId)
-      return outcome
+      const outcome = this.catalog
+        ? this.applyThroughCatalog(draft, input)
+        : agentMetadataDraftService.apply(input)
+      if (outcome instanceof Promise) {
+        return outcome.then(
+          (result) => this.finishApply(input.draftId, result),
+          (error) => {
+            this.syncDraftState(input.draftId, 'ready', '应用失败，草稿仍可重新检查')
+            throw error
+          }
+        )
+      }
+      return this.finishApply(input.draftId, outcome)
     } catch (error) {
       this.syncDraftState(input.draftId, 'ready', '应用失败，草稿仍可重新检查')
       throw error
     }
   }
 
-  discard(input: AgentMetadataDiscardInput): void {
-    agentMetadataDraftService.discard(input)
+  private finishApply(
+    draftId: string,
+    outcome: AgentMetadataApplyOutcome
+  ): AgentMetadataApplyOutcome {
+    this.syncDraftState(
+      draftId,
+      outcome.status === 'preview_stale'
+        ? 'ready'
+        : outcome.status === 'routed_to_pending'
+          ? 'routed_to_pending'
+          : 'applied',
+      outcome.status === 'preview_stale'
+        ? '媒体库内容已变化，请重新检查预览'
+        : outcome.status === 'no_op'
+          ? '没有需要写入的变化'
+          : outcome.status === 'routed_to_pending'
+            ? '元数据冲突已转入待处理中心'
+            : '元数据已应用'
+    )
+    if (outcome.status !== 'preview_stale') this.retireDraftRun(draftId)
+    return outcome
+  }
+
+  private async applyThroughCatalog(
+    draft: AgentMetadataDraft,
+    input: AgentMetadataApplyInput
+  ): Promise<AgentMetadataApplyOutcome> {
+    const catalog = this.catalog
+    if (!catalog) return agentMetadataDraftService.apply(input)
+    const ready = (await catalog.agentMetadata.findReady({ target: draft.target })) as {
+      draft?: AgentMetadataDraft | null
+      versions?: ExpectedVersions
+    }
+    const versions: ExpectedVersions = { ...(ready.versions ?? {}) }
+    versions.Q = { generation: 1, revision: draft.revision }
+    return (await catalog.agentMetadata.apply(
+      { draftId: input.draftId, reviewToken: input.reviewToken },
+      { operationId: input.idempotencyKey, expectedVersions: versions }
+    )) as AgentMetadataApplyOutcome
+  }
+
+  async discard(input: AgentMetadataDiscardInput): Promise<void> {
+    if (this.catalog) {
+      await this.catalog.agentMetadata.discard(
+        { draftId: input.draftId },
+        {
+          operationId: randomUUID(),
+          expectedVersions: { Q: { generation: 1, revision: input.expectedRevision } }
+        }
+      )
+    } else {
+      agentMetadataDraftService.discard(input)
+    }
     this.syncDraftState(input.draftId, 'discarded', '元数据草稿已丢弃')
     this.retireDraftRun(input.draftId)
   }
 
-  findReady(target: AgentMetadataTarget) {
-    return agentMetadataDraftService.findReadyForTarget(target)
+  async findReady(target: AgentMetadataTarget): Promise<AgentMetadataDraft | null> {
+    if (!this.catalog) return agentMetadataDraftService.findReadyForTarget(target)
+    const result = (await this.catalog.agentMetadata.findReady({ target })) as
+      | { draft?: AgentMetadataDraft | null }
+      | AgentMetadataDraft
+      | null
+    if (result && typeof result === 'object' && 'draft' in result) return result.draft ?? null
+    return (result as AgentMetadataDraft | null) ?? null
   }
 
   snapshot(runId: string): AgentMetadataSnapshot | null {
@@ -510,7 +607,7 @@ export class AgentMetadataCollection {
         if (
           ownedDraft?.runId === record.id &&
           ownedDraft.status === 'ready' &&
-          !targetExists(state.target)
+          ! (await targetExists(this.catalog, state.target))
         ) {
           agentMetadataDraftService.discard({
             draftId: ownedDraft.id,

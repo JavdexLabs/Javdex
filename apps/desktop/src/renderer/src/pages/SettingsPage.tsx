@@ -19,6 +19,7 @@ import AboutSettingsPanel from '../components/settings/AboutSettingsPanel'
 import BatchSettingsPanel from '../components/settings/BatchSettingsPanel'
 import ModelSettingsPanel from '../components/settings/ModelSettingsPanel'
 import NetworkSettingsPanel from '../components/settings/NetworkSettingsPanel'
+import CatalogConnectionPanel from '../components/settings/CatalogConnectionPanel'
 import PluginsSettingsPanel from '../components/settings/PluginsSettingsPanel'
 import StorageSettingsPanel from '../components/settings/StorageSettingsPanel'
 import SettingsOverviewPanel from '../components/settings/SettingsOverviewPanel'
@@ -900,6 +901,8 @@ export default function SettingsPage(): JSX.Element {
               {activeGroup.id === 'models' && (
                 <ModelSettingsPanel settings={settings} activeTab={activeTab === 'advanced' ? 'advanced' : activeTab === 'providers' ? 'providers' : 'usage'} />
               )}
+
+              {activeGroup.id === 'network' && activeTab === 'mode' && <CatalogConnectionPanel />}
 
               {activeGroup.id === 'network' && activeTab === 'proxy' && settings && (
                 <NetworkSettingsPanel

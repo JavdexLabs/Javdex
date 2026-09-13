@@ -1,9 +1,11 @@
 import { IPC } from '@shared/ipc-channels'
 import { agentMetadataCollection } from '../services/agentMetadata/agentMetadataCollection'
+import type { CatalogBackend } from '../application/catalogBackend'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 
-export function registerAgentMetadataHandlers(ctx: IpcContext): void {
+export function registerAgentMetadataHandlers(ctx: IpcContext, backend: CatalogBackend): void {
+  agentMetadataCollection.bindCatalog(backend)
   agentMetadataCollection.subscribe((event) => {
     appEventAdapter.send(
       ctx.getWindow()?.webContents,

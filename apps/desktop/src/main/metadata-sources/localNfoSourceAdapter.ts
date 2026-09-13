@@ -9,17 +9,18 @@ import {
   LOCAL_NFO_SOURCE_ID,
   LOCAL_NFO_SOURCE_NAME
 } from '@shared/videoMetadataSourceConstants'
-import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
-import { getDb } from '../db/database'
-import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
-import { isVideoFile, parseCode } from '../scanner/codeParser'
-import { isStrmFile } from '../scanner/strmParser'
-import { authorizeMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
-import { createNfoFileStore, type NfoFileStore } from '../nfo/nfoFileStore'
-import { parseNfoArtifact, type NormalizedNfoArtifact } from '../nfo/nfoArtifactCodec'
-import { summarizeDirectoryVideoCodes, type DirectoryVideoIdentityInput } from '../nfo/directoryVideoIdentity'
+import { findActressByNameOrAlias, getActressDetail } from '@library/db/actressRepo'
+import { getDb } from '@library/db/database'
+import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
+import { isVideoFile, parseCode } from '@library/scan/codeParser'
+import { isStrmFile } from '@library/scan/strmParser'
+import { authorizeMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
+import { createNfoFileStore, type NfoFileStore } from '@library/nfo/nfoFileStore'
+import { parseNfoArtifact, type NormalizedNfoArtifact } from '@library/nfo/nfoArtifactCodec'
+import { summarizeDirectoryVideoCodes, type DirectoryVideoIdentityInput } from '@library/nfo/directoryVideoIdentity'
+import type { LocalNfoAnchor, LocalNfoIdentityInspection } from '@library/nfo/localNfoTypes'
 import { NfoDirectoryCache } from './nfoDirectoryCache'
-import { indexNfoSidecars, locateNfoSidecar, sameLogicalCode } from '../nfo/nfoSidecarLocator'
+import { indexNfoSidecars, locateNfoSidecar, sameLogicalCode } from '@library/nfo/nfoSidecarLocator'
 import { projectVideoScrapeResult } from '../scrapers/videoScrapeFieldProjection'
 import type {
   MetadataAssetRef,
@@ -29,6 +30,8 @@ import type {
   VideoMetadataSourceDescriptor,
   VideoMetadataSourceRequest
 } from './types'
+
+export type { LocalNfoAnchor, LocalNfoIdentityInspection }
 
 export const LOCAL_NFO_SUPPORTED_FIELDS = [
   'title',
@@ -47,23 +50,10 @@ export const LOCAL_NFO_SUPPORTED_FIELDS = [
   'samples'
 ] as const satisfies readonly VideoScrapeField[]
 
-export interface LocalNfoAnchor {
-  root: Readonly<MediaLibraryRoot>
-  anchorPath: string
-  directoryVideoCodes: DirectoryVideoIdentityInput
-  directorySidecars?: ReadonlyMap<string, string>
-}
-
 export interface LocalNfoSourceAdapterOptions {
   listAnchors: (videoId: number) => LocalNfoAnchor[] | Promise<LocalNfoAnchor[]>
   fileStore: NfoFileStore
   findExistingActorGender: (name: string) => ActressGender | null
-}
-
-export interface LocalNfoIdentityInspection {
-  status: 'missing' | 'warning' | 'found'
-  code: string | null
-  warnings: string[]
 }
 
 const naturalOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })

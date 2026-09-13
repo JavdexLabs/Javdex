@@ -3,7 +3,7 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import { performance } from 'node:perf_hooks'
 import { normalizeVideoCode } from '../../packages/contracts/src/videoCode'
-import { sameLogicalCode } from '../../apps/desktop/src/main/nfo/nfoSidecarLocator'
+import { sameLogicalCode } from '../../packages/library/src/nfo/nfoSidecarLocator'
 
 // Frozen pre-DA predicate, retained only as the comparison oracle.
 function legacySameLogicalCode(values: readonly (string | null)[]): boolean {
@@ -17,7 +17,7 @@ function legacySameLogicalCode(values: readonly (string | null)[]): boolean {
 
 it('measures one directory identity build and one eligibility check per anchor', async () => {
   const summaryModule = process.env.JAVDEX_NFO_SUMMARY_PROBE === '1'
-    ? await import('../../apps/desktop/src/main/nfo/directoryVideoIdentity') : null
+    ? await import('../../packages/library/src/nfo/directoryVideoIdentity') : null
   const results: unknown[] = []
   for (const count of [1000, 5000]) {
     const codes = Array.from({ length: count }, () => 'IPX-001')

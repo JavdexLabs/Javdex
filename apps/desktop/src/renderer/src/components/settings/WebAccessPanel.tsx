@@ -12,6 +12,7 @@ import styles from "./WebAccessPanel.module.css";
 import WebDevices, { AddressCode } from "./WebDevices";
 import SelectControl from "../SelectControl";
 import Modal from "../Modal";
+import { useDesktopSession } from "../../desktop/DesktopSessionContext";
 
 export default function WebAccessPanel(): JSX.Element {
   const [status, setStatus] = useState<WebAccessStatus | null>(null);
@@ -39,6 +40,8 @@ function WebAccessForm({
   status: WebAccessStatus;
   onChange: (status: WebAccessStatus) => void;
 }): JSX.Element {
+  const { session } = useDesktopSession();
+  const remoteCatalog = session.mode === "remote";
   const form = useSettingsDraft({
     enabled: status.enabled,
     port: String(status.port),
@@ -68,31 +71,41 @@ function WebAccessForm({
     if (lock.current) return false;
     const submitted = form.draft;
     const port = Number(submitted.port);
-    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-      setError("端口需为 1024–65535 的整数");
-      return false;
-    }
-    if (!/^[\w.-]{1,64}$/.test(submitted.username)) {
-      setError("账号使用 1–64 位字母、数字、点、横线或下划线");
-      return false;
-    }
-    if (
-      (submitted.enabled && !status.hasPassword && !submitted.password) ||
-      (submitted.password &&
-        (submitted.password.length < 12 || submitted.password.length > 128))
-    ) {
-      setError("请设置 12–128 个字符的访问密码");
-      return false;
+    if (!remoteCatalog) {
+      if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+        setError("端口需为 1024–65535 的整数");
+        return false;
+      }
+      if (!/^[\w.-]{1,64}$/.test(submitted.username)) {
+        setError("账号使用 1–64 位字母、数字、点、横线或下划线");
+        return false;
+      }
+      if (
+        (submitted.enabled && !status.hasPassword && !submitted.password) ||
+        (submitted.password &&
+          (submitted.password.length < 12 || submitted.password.length > 128))
+      ) {
+        setError("请设置 12–128 个字符的访问密码");
+        return false;
+      }
     }
     lock.current = true;
     setSaving(true);
     setError(null);
     try {
-      const next = await api.webAccess.apply({
-        ...submitted,
-        port,
-        password: submitted.password || undefined,
-      });
+      const next = await api.webAccess.apply(
+        remoteCatalog
+          ? {
+              enabled: submitted.enabled,
+              port: status.port || 8096,
+              username: status.username || "viewer",
+            }
+          : {
+              ...submitted,
+              port,
+              password: submitted.password || undefined,
+            },
+      );
       onChange(next);
       form.accept(
         {
@@ -124,7 +137,11 @@ function WebAccessForm({
     <div ref={configuration}>
       <SettingsCard
         title="服务配置"
-        hint="保存后生效；完全退出 Javdex 后服务停止。"
+        hint={
+          remoteCatalog
+            ? "关闭浏览入口不会关闭管理接口。端口和访问账号由服务端部署配置决定。"
+            : "保存后生效；完全退出 Javdex 后服务停止。"
+        }
         actions={
           <SettingsFormActions
             placement="header"
@@ -144,12 +161,17 @@ function WebAccessForm({
           <div className="settings-toggle-list">
             <SettingsSwitchRow
               title={`开启${WEB_ACCESS_LABEL}`}
-              description="手机、平板、电视和电脑连上同一网络后，可用浏览器打开媒体库。"
+              description={
+                remoteCatalog
+                  ? "关闭后网页无法登录或配对，管理接口保持可用。"
+                  : "手机、平板、电视和电脑连上同一网络后，可用浏览器打开媒体库。"
+              }
               checked={form.draft.enabled}
               disabled={saving}
               onChange={(enabled) => form.setDraft((d) => ({ ...d, enabled }))}
             />
           </div>
+          {remoteCatalog ? null : (
           <div className={styles.fields}>
             <label className={styles.field}>
               端口
@@ -219,6 +241,7 @@ function WebAccessForm({
               )}
             </div>
           </div>
+          )}
           {error && (
             <p className={styles.statusCopy} role="alert">
               {error}

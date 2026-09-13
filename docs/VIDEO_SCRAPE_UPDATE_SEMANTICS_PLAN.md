@@ -71,7 +71,7 @@
 
 ### 1. 建立统一写入计划
 
-在 `apps/desktop/src/main/db/videoRepo.ts` 增加只读的 `planVideoScrapeResult`，由它生成每个字段的最终处置。计划至少包含：
+在 `packages/library/src/db/videoRepo.ts` 增加只读的 `planVideoScrapeResult`，由它生成每个字段的最终处置。计划至少包含：
 
 ```ts
 type VideoScrapeImpactAction = 'preserve' | 'set' | 'replace' | 'clear'
@@ -125,7 +125,7 @@ interface VideoScrapeFieldSources {
 
 ### 3. 修正字段空值判定
 
-在 `apps/desktop/src/main/db/videoRepo.ts` 调整快照与判定：
+在 `packages/library/src/db/videoRepo.ts` 调整快照与判定：
 
 - 分别统计女性、男性演员数量，移除共用 `castCount`。
 - 封面只看 `cover_path` 是否非空，不探文件健康。
@@ -235,7 +235,7 @@ interface ApplyVideoScrapeResult {
 
 ### 参数化语义测试
 
-在 `apps/desktop/src/main/db/videoRepo.test.ts` 为每个字段至少覆盖：
+在 `packages/library/src/db/videoRepo.test.ts` 为每个字段至少覆盖：
 
 1. 当前为空、刮削有值。
 2. 当前有值、刮削有值。
@@ -275,7 +275,7 @@ interface ApplyVideoScrapeResult {
 
 ```text
 npm run typecheck
-node scripts/run-electron-tests.mjs apps/desktop/src/main/db/videoRepo.test.ts
+node scripts/run-electron-tests.mjs packages/library/src/db/videoRepo.test.ts
 node scripts/run-electron-tests.mjs apps/desktop/src/main/scrapers/scraperManager.test.ts
 node scripts/run-electron-tests.mjs apps/desktop/src/main/services/videoBatchScrapeQueue.test.ts
 npm test

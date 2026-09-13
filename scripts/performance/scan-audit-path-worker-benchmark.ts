@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {performance} from 'node:perf_hooks'
 import {buildSync} from 'esbuild'
-import {initDatabaseAtPath,closeDatabase,getDatabaseReadRevision} from '../../apps/desktop/src/main/db/database'
+import {initDatabaseAtPath,closeDatabase,getDatabaseReadRevision} from '../../packages/library/src/db/database'
 import {CatalogReadWorkerClient} from '../../apps/desktop/src/main/services/catalogReadWorkerClient'
 import {createCatalogReadWorkerTransport} from '../../apps/desktop/src/main/services/catalogReadWorkerTransport'
 it('measures responsiveness during large audit permission scans on the real worker',async()=>{

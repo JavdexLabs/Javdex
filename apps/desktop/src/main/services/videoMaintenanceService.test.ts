@@ -3,15 +3,15 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { insertTestVideoWithFile } from '../db/testVideoFixtures'
-import { listVideoResourcesAcrossLibraries } from '../db/videoRepo'
-import { ensureVideoMembership } from '../db/libraryMembershipRepo'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { listVideoResourcesAcrossLibraries } from '@library/db/videoRepo'
+import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
 import {
   addMediaLibraryRoot,
   createMediaLibrary,
   updateMediaLibraryRoot
-} from '../db/mediaLibraryRepo'
+} from '@library/db/mediaLibraryRepo'
 import {
   createVideoMaintenanceService as createScopedVideoMaintenanceService
 } from './videoMaintenanceService'
@@ -20,11 +20,11 @@ import type {
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
   VideoQuery
-} from '../../../../../packages/contracts/src/videoTypes'
+} from '@shared/videoTypes'
 import { classificationQueryService } from './classificationQueryService'
 import { recoverPendingLocalFileDeletions } from './pendingLocalFileDeletionService'
-import { buildStrmResourceKey } from '../../../../../packages/library/src/strmResource'
-import { buildVideoResourceSourceIdentity } from '../../../../../packages/library/src/videoResourceIdentity'
+import { buildStrmResourceKey } from '@library/strmResource'
+import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 
 let tempRoot: string | null = null
 

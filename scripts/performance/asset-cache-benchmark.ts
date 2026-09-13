@@ -5,9 +5,9 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { mediaAssetStore } from '../../apps/desktop/src/main/services/mediaAssetStore'
-import { invalidateAssetCache } from '../../apps/desktop/src/main/services/assetCache'
-import { encryptPlain, resetAssetKeyCacheForTests } from '../../apps/desktop/src/main/services/assetCrypto'
+import { mediaAssetStore } from '@library/mediaAssetStore'
+import { invalidateAssetCache } from '@library/assetCache'
+import { encryptPlain, resetAssetKeyCacheForTests } from '@library/assetCrypto'
 
 it('measures cold and hot transport-byte cache reads with synthetic assets', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-cache-bench-'))

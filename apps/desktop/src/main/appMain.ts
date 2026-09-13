@@ -1,20 +1,18 @@
 import { destroyAppTray, hasAppTray, initializeAppTray, setCloseToTrayEnabled } from './appTray'
 import { webAccess } from './web/webAccess'
 import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
-import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
-import fs from 'node:fs'
-import { initDatabaseAtPath, closeDatabase } from './db/database'
+import { getDb } from '@library/db/database'
+import { configureDesktopLibraryRuntime } from './libraryRuntime'
 import { catalogReadService } from './services/catalogReadService'
-import { recoverInterruptedLibraryScanRuns } from './db/libraryScanRepo'
-import { mediaAssetStore } from './services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
-import { serveMediaAssetRequest } from './services/mediaProtocol'
+import { serveMediaAssetRequest, createRemoteAssetReader } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
 import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
@@ -33,10 +31,18 @@ import { bootstrapLegacyMediaLibrary } from './services/legacyMediaLibraryBootst
 import { getSettings, updateSettings } from './settings/settingsStore'
 import { nfoExportTaskController } from './nfo/export/nfoExportTaskController'
 import { bindNfoExportWindowGuard } from './nfo/export/nfoExportWindowGuard'
+import { createDesktopRuntime, type DesktopRuntime } from './bootstrap/createDesktopRuntime'
+import { bindMainWindow } from './desktop/mainWindowBindings'
+import { actressQueryService } from './services/actressQueryService'
+import { mediaLibraryService } from './services/mediaLibraryService'
+import { videoMaintenanceService } from './services/videoMaintenanceService'
+import { videoLifecycleService } from './services/videoLifecycleService'
+import { videoQueryService } from './services/videoQueryService'
 
 let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
 let shutdownReady = false
+let desktopRuntime: DesktopRuntime | null = null
 
 // Register the custom asset scheme as privileged BEFORE app is ready so the
 // renderer can load downloaded covers/avatars via media://covers/xxx.jpg
@@ -109,6 +115,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   bindNfoExportWindowGuard(mainWindow, nfoExportTaskController, () => shutdownInProgress)
+  bindMainWindow(mainWindow)
   const window = mainWindow
   window.on('close', (event) => {
     if (event.defaultPrevented || shutdownInProgress || !getSettings().closeToTray || !hasAppTray()) return
@@ -133,32 +140,53 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   })
 }
 
-/** Serve files from the media_assets directory through the media:// scheme. */
+/** Serve catalog images through the media:// scheme. Remote mode proxies with manage credentials. */
 function registerAssetProtocol(): void {
-  protocol.handle('media', (request) => serveMediaAssetRequest(request, mediaAssetStore))
+  protocol.handle('media', (request) => {
+    const runtime = desktopRuntime
+    if (!runtime || runtime.mode !== 'remote') {
+      return serveMediaAssetRequest(request, mediaAssetStore)
+    }
+    return serveMediaAssetRequest(request, createRemoteAssetReader(runtime.backend))
+  })
 }
 
 if (gotSingleInstanceLock) {
   void app.whenReady().then(async () => {
     applyAppIcons()
-    const databaseDir = path.join(app.getPath('userData'), 'data')
-    fs.mkdirSync(databaseDir, { recursive: true })
-    const database = initDatabaseAtPath(path.join(databaseDir, 'library.db'))
-    const libraryBootstrap = bootstrapLegacyMediaLibrary({
-      database,
-      readSettings: getSettings,
-      updateSettings
+    configureDesktopLibraryRuntime()
+    const runtime = await createDesktopRuntime(app.getPath('userData'), app.getVersion(), {
+      local: {
+        queries: videoQueryService,
+        videos: videoMaintenanceService,
+        lifecycle: videoLifecycleService,
+        actresses: actressQueryService,
+        libraries: mediaLibraryService,
+        reads: {
+          homeLoad: (input) => catalogReadService.readHome(input),
+          homeSearch: (input) => catalogReadService.searchHome(input),
+          tagFilterOptions: (query) => catalogReadService.read(query),
+          imagePage: (entity, query) => catalogReadService.readImageCandidates(entity, query ?? {})
+        }
+      }
     })
-    if (libraryBootstrap.settingsCleanup.status === 'failed') {
-      console.error(
-        `[media-library-bootstrap] 旧设置清理失败，将在下次启动重试：${libraryBootstrap.settingsCleanup.error}`
-      )
-    }
-    const scanRecovery = recoverInterruptedLibraryScanRuns(database)
-    if (scanRecovery.recoveredRunCount > 0) {
-      console.warn(
-        `[media-library-scan-recovery] 已收敛 ${scanRecovery.recoveredRunCount} 个异常中断的扫描任务。`
-      )
+    desktopRuntime = runtime
+    if (runtime.mode === 'local') {
+      const libraryBootstrap = bootstrapLegacyMediaLibrary({
+        database: getDb(),
+        readSettings: getSettings,
+        updateSettings
+      })
+      if (libraryBootstrap.settingsCleanup.status === 'failed') {
+        console.error(
+          `[media-library-bootstrap] 旧设置清理失败，将在下次启动重试：${libraryBootstrap.settingsCleanup.error}`
+        )
+      }
+      if ((runtime.scanRecovery?.recoveredRunCount ?? 0) > 0) {
+        console.warn(
+          `[media-library-scan-recovery] 已收敛 ${runtime.scanRecovery?.recoveredRunCount} 个异常中断的扫描任务。`
+        )
+      }
     }
     try {
       modelManagement.read()
@@ -167,6 +195,8 @@ if (gotSingleInstanceLock) {
       console.error(`[model-management] ${(error as Error).message}`)
     }
     initializeAgentPlatform()
+    agentMetadataCollection.bindCatalog(runtime.backend)
+    libraryCurator.bindCatalog(runtime.backend)
     const recoveryFailures = [
       ...await pluginDeveloper.restoreRecoverableRuns(),
       ...await libraryCurator.restoreRecoverableRuns(),
@@ -175,10 +205,12 @@ if (gotSingleInstanceLock) {
     for (const failure of recoveryFailures) {
       console.error(`[agent-recovery:${failure.runId}] ${failure.error}`)
     }
-    recoverPendingLocalFileDeletions()
-    mediaAssetStore.ensureReady()
-    cleanupOrphanedActressScrapeStaging()
-    cleanupOrphanedVideoScrapeStaging()
+    if (runtime.mode === 'local') {
+      recoverPendingLocalFileDeletions()
+      mediaAssetStore.ensureReady()
+      cleanupOrphanedActressScrapeStaging()
+      cleanupOrphanedVideoScrapeStaging()
+    }
     migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()
     const rendererEntryUrl = resolveRendererEntryUrl()
@@ -195,11 +227,38 @@ if (gotSingleInstanceLock) {
     }
     registerIpcHandlers(
       () => mainWindow,
-      (url) => isSameRendererLocation(url, rendererEntryUrl)
+      (url) => isSameRendererLocation(url, rendererEntryUrl),
+      {
+        backend: runtime.backend,
+        settings: runtime.settings,
+        workStore: runtime.workStore,
+        videoDesktop:
+          runtime.mode === 'local'
+            ? { checkLinkResource: (url) => videoMaintenanceService.checkLinkResource(url) }
+            : undefined,
+        actressDesktop:
+          runtime.mode === 'local'
+            ? {
+                listAvatarCropTargets: () => actressQueryService.listAvatarCropTargets(),
+                countAvatarCropTargets: () => actressQueryService.countAvatarCropTargets(),
+                listFaceScanManifest: () => actressQueryService.listFaceScanManifest(),
+                getTestTarget: (id) => actressQueryService.getTestTarget(id)
+              }
+            : undefined,
+        mediaLibraryDesktop:
+          runtime.mode === 'local'
+            ? {
+                previewRootMigration: (input) => mediaLibraryService.previewRootMigration(input),
+                migrateRoot: (input) => mediaLibraryService.migrateRoot(input)
+              }
+            : undefined
+      }
     )
-    await webAccess.initialize()
-    automaticScanScheduler.start()
-    powerMonitor.on('resume', handleSystemResume)
+    if (runtime.mode === 'local') {
+      await webAccess.initialize()
+      automaticScanScheduler.start()
+      powerMonitor.on('resume', handleSystemResume)
+    }
     setTimeout(() => {
       if (shouldRunAutomaticCheck()) void checkForLatestRelease()
     }, 15_000)
@@ -221,8 +280,10 @@ if (gotSingleInstanceLock) {
     event.preventDefault()
     if (shutdownInProgress) return
     shutdownInProgress = true
-    automaticScanScheduler.stop()
-    powerMonitor.off('resume', handleSystemResume)
+    if (desktopRuntime?.mode === 'local') {
+      automaticScanScheduler.stop()
+      powerMonitor.off('resume', handleSystemResume)
+    }
     let readerTerminationFailed = false
     void Promise.allSettled([
       scanCoordinator.stopAndDrain(),
@@ -238,7 +299,8 @@ if (gotSingleInstanceLock) {
     ])
       .then(() => Promise.allSettled([
         agentExecution.dispose(),
-        scrapeBrowser.dispose()
+        scrapeBrowser.dispose(),
+        desktopRuntime?.dispose() ?? Promise.resolve()
       ]))
       .finally(() => {
         destroyAppTray()
@@ -248,7 +310,6 @@ if (gotSingleInstanceLock) {
           app.exit(1)
           return
         }
-        closeDatabase()
         shutdownReady = true
         app.quit()
       })

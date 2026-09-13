@@ -2,16 +2,57 @@ import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type {
   PlaylistImportControlCommand,
+  PlaylistImportDestination,
   PlaylistImportModule,
   PlaylistImportSnapshot,
   PlaylistImportStartInput
 } from '@shared/playlistImportTypes'
-import { getDb } from '../../db/database'
+import { getDb } from '@library/db/database'
+import type { CatalogBackend } from '../../application/catalogBackend'
 import { agentRunStore } from '../../agent-platform/agentRunStore'
 import {
   normalizePlaylistImportHost,
-  PlaylistImportRepository
+  PlaylistImportRepository,
+  PlaylistImportTargetError
 } from './playlistImportRepository'
+import { applyPlaylistImportThroughCatalog } from './playlistImportCatalogApply'
+import {
+  createMemoryPlaylistImportCatalogLookup,
+  type PlaylistImportCatalogLookup
+} from './playlistImportCatalogLookup'
+
+export async function validatePlaylistImportStartTargets(
+  catalog: CatalogBackend,
+  input: { targetLibraryId: number; destination: PlaylistImportDestination }
+): Promise<{ id: number; name: string; playlistName?: string }> {
+  if (catalog.mode === 'remote' && input.destination.kind === 'append') {
+    throw new PlaylistImportTargetError(
+      'UNSUPPORTED_CAPABILITY',
+      '远程清单导入不能追加到已有清单；冻结 playlists.applyImport 只创建新清单。'
+    )
+  }
+  const library = (await catalog.libraries.get({ libraryId: input.targetLibraryId })) as {
+    id: number
+    name: string
+    status: string
+  } | null
+  if (!library || typeof library.status !== 'string' || typeof library.name !== 'string') {
+    throw new PlaylistImportTargetError('TARGET_LIBRARY_NOT_FOUND', '目标媒体库不存在。')
+  }
+  if (library.status !== 'active') {
+    throw new PlaylistImportTargetError('TARGET_LIBRARY_ARCHIVED', '目标媒体库已归档。')
+  }
+  if (input.destination.kind === 'append') {
+    const playlist = (await catalog.playlists.get({
+      playlistId: input.destination.playlistId
+    })) as { id?: number; name?: string } | null
+    if (!playlist || typeof playlist.name !== 'string') {
+      throw new PlaylistImportTargetError('TARGET_PLAYLIST_NOT_FOUND', '追加目标清单不存在。')
+    }
+    return { id: library.id, name: library.name, playlistName: playlist.name }
+  }
+  return { id: library.id, name: library.name }
+}
 
 export interface PlaylistImportRunDriver {
   subscribe?(listener: (snapshot: PlaylistImportSnapshot) => void): () => void
@@ -42,9 +83,15 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
 
   constructor(
     private readonly database: () => Database.Database = getDb,
-    private readonly driver: PlaylistImportRunDriver
+    private readonly driver: PlaylistImportRunDriver,
+    private readonly catalog: CatalogBackend | null = null,
+    private readonly catalogLookup?: PlaylistImportCatalogLookup
   ) {
     this.driver.subscribe?.((snapshot) => this.emit(snapshot))
+  }
+
+  private repository(): PlaylistImportRepository {
+    return new PlaylistImportRepository(this.database(), this.catalogLookup)
   }
 
   subscribe(listener: (event: { runId: string; revision: number }) => void): () => void {
@@ -63,15 +110,25 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
   }
 
   async start(input: PlaylistImportStartInput): Promise<PlaylistImportSnapshot> {
+    const remote = this.catalog?.mode === 'remote'
     const normalizedInput: PlaylistImportStartInput = {
       ...input,
-      autoCreateUnmatchedVideos: input.autoCreateUnmatchedVideos ?? true,
+      autoCreateUnmatchedVideos: input.autoCreateUnmatchedVideos ?? !remote,
       saveDetailLinks: input.saveDetailLinks ?? true,
       saveSourcePlaylistLink: input.saveSourcePlaylistLink ?? false
     }
+    if (remote && normalizedInput.autoCreateUnmatchedVideos) {
+      throw new PlaylistImportTargetError(
+        'UNSUPPORTED_CAPABILITY',
+        '远程清单导入不能自动建片。请先在资料库中创建对应影片，或关闭自动创建未匹配项。'
+      )
+    }
     const key = normalizedInput.idempotencyKey.trim()
     if (!key) throw new Error('idempotencyKey 不能为空')
-    const repository = new PlaylistImportRepository(this.database())
+    const targetLibrary = this.catalog
+      ? await validatePlaylistImportStartTargets(this.catalog, normalizedInput)
+      : undefined
+    const repository = this.repository()
     const expectedHash = repository.expectedInputHash(normalizedInput)
     const replay = repository.findByIdempotencyKey(key)
     if (replay) {
@@ -79,7 +136,10 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
       return this.present(repository.snapshot(replay.runId)!)
     }
     if (repository.activeRunId()) throw new Error('PLAYLIST_IMPORT_ALREADY_RUNNING')
-    repository.validateStartTargets(normalizedInput)
+    if (!targetLibrary) repository.validateStartTargets(normalizedInput)
+    if (targetLibrary?.playlistName && this.catalogLookup?.rememberPlaylist && normalizedInput.destination.kind === 'append') {
+      this.catalogLookup.rememberPlaylist(normalizedInput.destination.playlistId, targetLibrary.playlistName)
+    }
     const runId = randomUUID()
     let createdRun = false
     let snapshot: PlaylistImportSnapshot | null = null
@@ -89,7 +149,12 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
       const provisional = provisionalSnapshot(runId, normalizedInput)
       await this.driver.create(runId, provisional, () => {
         createdRun = true
-        snapshot = repository.createJob({ ...normalizedInput, idempotencyKey: key, runId })
+        snapshot = repository.createJob({
+          ...normalizedInput,
+          idempotencyKey: key,
+          runId,
+          ...(targetLibrary ? { targetLibrary } : {})
+        })
       })
       if (!snapshot) throw new Error('PLAYLIST_IMPORT_SESSION_NOT_CREATED')
       await this.driver.start(runId, normalizedInput)
@@ -114,8 +179,7 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
   }
 
   snapshot(runId?: string): PlaylistImportSnapshot | null {
-    const database = this.database()
-    const repository = new PlaylistImportRepository(database)
+    const repository = this.repository()
     const selectedRunId = runId ?? repository.latestRunId()
     const snapshot = selectedRunId
       ? repository.snapshot(selectedRunId)
@@ -127,7 +191,7 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
     runId: string,
     command: PlaylistImportControlCommand
   ): Promise<PlaylistImportSnapshot> {
-    const repository = new PlaylistImportRepository(this.database())
+    const repository = this.repository()
     if (command.kind === 'cancel') {
       const snapshot = repository.cancel(runId)
       await this.driver.cancel(runId)
@@ -175,7 +239,16 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
     })
     if (snapshot.phase === 'ready-to-apply') {
       try {
-        repository.apply(runId, `identity-apply:${command.idempotencyKey}`)
+        if (this.catalog?.mode === 'remote') {
+          await applyPlaylistImportThroughCatalog(
+            this.catalog,
+            repository,
+            runId,
+            `identity-apply:${command.idempotencyKey}`
+          )
+        } else {
+          repository.apply(runId, `identity-apply:${command.idempotencyKey}`)
+        }
         snapshot = repository.snapshot(runId)!
       } catch (error) {
         const failed = repository.snapshot(runId)
@@ -233,7 +306,16 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
     if (!snapshot.error?.retryable) throw new Error('PLAYLIST_IMPORT_RETRY_NOT_AVAILABLE')
     if (snapshot.phase === 'ready-to-apply') {
       try {
-        repository.apply(runId, `retry-apply:${command.idempotencyKey}`)
+        if (this.catalog?.mode === 'remote') {
+          await applyPlaylistImportThroughCatalog(
+            this.catalog,
+            repository,
+            runId,
+            `retry-apply:${command.idempotencyKey}`
+          )
+        } else {
+          repository.apply(runId, `retry-apply:${command.idempotencyKey}`)
+        }
       } catch {
         // The foreground Session records retryable apply errors and stale-preview transitions.
       }
@@ -290,10 +372,23 @@ function provisionalSnapshot(
   }
 }
 
-export async function createPlaylistImportModule(): Promise<PlaylistImportModule> {
+export async function createPlaylistImportModule(options?: {
+  database?: () => Database.Database
+  catalog?: CatalogBackend | null
+}): Promise<PlaylistImportModule> {
   const { playlistImportRunDriver } = await import('./playlistImportRunDriver')
+  const database = options?.database ?? getDb
+  const catalogLookup =
+    options?.catalog?.mode === 'remote' ? createMemoryPlaylistImportCatalogLookup() : undefined
+  playlistImportRunDriver.bindDatabase(database)
+  playlistImportRunDriver.bindCatalog(options?.catalog ?? null, catalogLookup)
   for (const id of agentRunStore.iterateRecoverableRunIds('playlist-importer')) {
     agentRunStore.closeRun(id)
   }
-  return new PlaylistImportModuleImpl(getDb, playlistImportRunDriver)
+  return new PlaylistImportModuleImpl(
+    database,
+    playlistImportRunDriver,
+    options?.catalog ?? null,
+    catalogLookup
+  )
 }

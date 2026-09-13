@@ -5,9 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { getPendingAuditPresence } from '../../apps/desktop/src/main/db/pendingAuditRepo'
-import { closeDatabase, initDatabaseAtPath } from '../../apps/desktop/src/main/db/database'
-import { getPendingVideoScrapeById, existingPendingVideoScrapeIds, listPendingVideoScrapes, pagePendingVideoScrapes } from '../../apps/desktop/src/main/db/pendingVideoScrapeRepo'
+import { getPendingAuditPresence } from '../../packages/library/src/db/pendingAuditRepo'
+import { closeDatabase, initDatabaseAtPath } from '../../packages/library/src/db/database'
+import { getPendingVideoScrapeById, existingPendingVideoScrapeIds, listPendingVideoScrapes, pagePendingVideoScrapes } from '../../packages/library/src/db/pendingVideoScrapeRepo'
 
 it('measures 10k pending summaries against full candidate hydration', () => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-pending-bench-'))

@@ -21,6 +21,7 @@ export type SettingsTab =
   | 'assets'
   | 'proxy'
   | 'web'
+  | 'mode'
   | 'info'
   | 'usage'
   | 'advanced'
@@ -101,7 +102,11 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     label: '网络',
     hint: `${WEB_ACCESS_LABEL}与代理`,
     defaultTab: 'web',
-    tabs: [{ id: 'web', label: WEB_ACCESS_LABEL }, { id: 'proxy', label: '代理' }]
+    tabs: [
+      { id: 'mode', label: '资料库连接' },
+      { id: 'web', label: WEB_ACCESS_LABEL },
+      { id: 'proxy', label: '代理' }
+    ]
   },
   {
     id: 'about',

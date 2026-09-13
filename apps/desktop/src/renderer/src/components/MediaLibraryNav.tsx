@@ -26,6 +26,7 @@ import { useToast } from './Toast'
 import { mediaLibraryKeys } from '../query/queryKeys'
 import { invalidateAllLibraryQueries } from '../query/invalidateLibraryQueries'
 import { mediaLibraryIdentityStyle } from './mediaLibraryIdentity'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
 export default function MediaLibraryNav(): JSX.Element {
   const location = useLocation()
@@ -39,10 +40,12 @@ export default function MediaLibraryNav(): JSX.Element {
   useEffect(() => {
     if (activeLibraryId) rememberMediaLibrarySettingsLibraryId(activeLibraryId)
   }, [activeLibraryId])
+  const { catalogReadsEnabled } = useDesktopSession()
   const librariesQuery = useQuery({
     queryKey: mediaLibraryKeys.fullList(),
     queryFn: () => api.mediaLibraries.list({ includeArchived: true }),
-    staleTime: 10_000
+    staleTime: 10_000,
+    enabled: catalogReadsEnabled
   })
   const activeLibraries = (librariesQuery.data ?? []).filter(
     (library) => library.status === 'active'

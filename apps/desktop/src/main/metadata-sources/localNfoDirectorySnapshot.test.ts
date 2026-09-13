@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, initDatabaseAtPath } from '../db/database'
-import { createMediaLibrary } from '../db/mediaLibraryRepo'
+import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
+import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import {
   LocalNfoSourceAdapter, createDefaultNfoFileStore, createDefaultLocalNfoSourceAdapter,

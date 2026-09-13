@@ -1,13 +1,17 @@
 import { dialog } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { IPC } from '@shared/ipc-channels'
 import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import { createDefaultScrapeJobController } from '../services/scrapeJobController'
 import { createDefaultScraperPluginCatalog } from '../services/scraperPluginCatalog'
 import { createDefaultScraperServiceConfiguration } from '../services/scraperServiceConfiguration'
+import { loadCatalogActressAvatarCropSnapshot } from '../application/catalogActressAvatarCropSnapshot'
+import type { CatalogBackend } from '../application/catalogBackend'
 import type { IpcContext } from './shared'
 import { registerScrapeHandler, sendScrapeEvent } from './scrapeContractAdapter'
+import { registerMainWindowBinder } from '../desktop/mainWindowBindings'
 
-export function registerScrapeHandlers(ctx: IpcContext): void {
+export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend): void {
   const plugins = createDefaultScraperPluginCatalog()
   const serviceConfiguration = createDefaultScraperServiceConfiguration()
   const jobs = createDefaultScrapeJobController({
@@ -15,15 +19,26 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
       const window = ctx.getWindow()
       return Boolean(window && !window.isDestroyed() && !window.webContents.isDestroyed())
     },
-    emit: (channel, payload) => sendScrapeEvent(ctx.getWindow()?.webContents, channel, payload)
+    emit: (channel, payload) => sendScrapeEvent(ctx.getWindow()?.webContents, channel, payload),
+    avatarAutoCropOptions:
+      backend.mode === 'remote'
+        ? { createBatchTargets: () => loadCatalogActressAvatarCropSnapshot(backend) }
+        : undefined
   })
   jobs.initialize()
 
-  const webContents = ctx.getWindow()?.webContents
-  webContents?.on('render-process-gone', () => jobs.rendererDisconnected())
-  webContents?.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) jobs.rendererDisconnected()
-  })
+  const boundOwners = new WeakSet<object>()
+  const bindRendererLifecycle = (): void => {
+    const webContents = ctx.getWindow()?.webContents
+    if (!webContents || boundOwners.has(webContents)) return
+    boundOwners.add(webContents)
+    webContents.on('render-process-gone', () => jobs.rendererDisconnected())
+    webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) jobs.rendererDisconnected()
+    })
+  }
+  bindRendererLifecycle()
+  registerMainWindowBinder(bindRendererLifecycle)
 
   registerScrapeHandler(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, (response) =>
     jobs.completeAvatarAutoCrop(response)
@@ -88,20 +103,47 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
 
   registerScrapeHandler(IPC.SCRAPE_ONE, (...args) => jobs.scrapeOneVideo(...args))
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_COUNT, () =>
-    jobs.countPendingVideoScrapes()
+    backend.pendingVideoScrapes.count({})
   )
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, (ids) => jobs.existingPendingVideoScrapeIds(ids))
-  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_PAGE, (query) => jobs.pagePendingVideoScrapes(query))
-  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_GET, (id) => jobs.getPendingVideoScrape(id))
-  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () =>
-    jobs.listPendingVideoScrapes()
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_PAGE, (query) => backend.pendingVideoScrapes.page(query ?? {}))
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_GET, (id) =>
+    backend.pendingVideoScrapes.get({ pendingScrapeId: id })
   )
-  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, (input) =>
-    jobs.confirmPendingVideoScrape(input)
-  )
-  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_DISCARD, (pendingScrapeId) =>
-    jobs.discardPendingVideoScrape(pendingScrapeId)
-  )
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () => backend.pendingVideoScrapes.list({}))
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, async (input) => {
+    const pending = (await backend.pendingVideoScrapes.get({
+      pendingScrapeId: input.pendingScrapeId
+    })) as { videoId: number; revision: number } | null
+    if (!pending) throw new Error('待确认影片刮削结果不存在')
+    const video = (await backend.queries.getVideo({
+      scope: { kind: 'all' },
+      videoId: pending.videoId
+    })) as { generation?: number; revision?: number } | null
+    return backend.pendingVideoScrapes.confirm(input, {
+      operationId: randomUUID(),
+      expectedVersions: {
+        Q: { generation: 1, revision: pending.revision },
+        ...(video?.revision != null
+          ? { V: { generation: video.generation ?? 1, revision: video.revision } }
+          : {})
+      }
+    })
+  })
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_DISCARD, async (pendingScrapeId) => {
+    const pending = (await backend.pendingVideoScrapes.get({ pendingScrapeId })) as {
+      revision: number
+    } | null
+    if (!pending) return false
+    const result = (await backend.pendingVideoScrapes.discard(
+      { pendingScrapeId },
+      {
+        operationId: randomUUID(),
+        expectedVersions: { Q: { generation: 1, revision: pending.revision } }
+      }
+    )) as { ok?: boolean }
+    return result.ok !== false
+  })
   registerScrapeHandler(IPC.SCRAPE_BATCH_START, (scraperName) =>
     jobs.startLegacyVideoBatch(scraperName)
   )

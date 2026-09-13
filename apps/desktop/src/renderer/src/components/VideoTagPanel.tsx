@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { VideoTag } from '@shared/videoTypes'
+import type { ExpectedVersions } from '@shared/protocol/versions'
 import { api } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useDebounce } from '../hooks/useDebounce'
@@ -16,6 +17,7 @@ import Button from './Button'
 interface Props {
   videoId: number
   tags: VideoTag[]
+  expectedVersions: ExpectedVersions
   onFilterTag: (tag: VideoTag) => void
   onChanged: () => void
 }
@@ -23,6 +25,7 @@ interface Props {
 export default function VideoTagPanel({
   videoId,
   tags,
+  expectedVersions,
   onFilterTag,
   onChanged
 }: Props): JSX.Element {
@@ -99,8 +102,8 @@ export default function VideoTagPanel({
     const operationContext = context.current
     setBusy(true)
     try {
-      if ('tagId' in input) await api.videos.addExistingManualTag(videoId, input.tagId)
-      else await api.videos.addManualTag(videoId, input.name.trim())
+      if ('tagId' in input) await api.videos.addExistingManualTag(videoId, input.tagId, expectedVersions)
+      else await api.videos.addManualTag(videoId, input.name.trim(), expectedVersions)
       if (context.current !== operationContext) return true
       setAddForVideoId(null)
       setDraft('')
@@ -123,7 +126,7 @@ export default function VideoTagPanel({
     const operationContext = context.current
     setBusy(true)
     try {
-      await api.videos.removeManualTag(videoId, tag.id)
+      await api.videos.removeManualTag(videoId, tag.id, expectedVersions)
       if (context.current !== operationContext) return
       setRemoveSelection(null)
       onChanged()

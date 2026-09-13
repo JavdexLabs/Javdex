@@ -670,7 +670,7 @@ function planItem(item, targetLibraryId): Resolution {
 
 ## 10. 前台 Session 临时模型
 
-当前数据库版本在 [migrations.ts](../apps/desktop/src/main/db/migrations.ts) 中为 V14。外部清单导入暂存表不属于发布 schema，也不由 V13 → V14 迁移创建；`PlaylistImportRepository` 在当前 SQLite 连接中创建 TEMP 表，连接关闭后全部消失。下面保留的字段结构用于说明 Session 内约束，实际定义以 [schema.ts](../apps/desktop/src/main/db/schema.ts) 的 `PLAYLIST_IMPORT_SESSION_SCHEMA_SQL` 为准：所有表均为 `CREATE TEMP TABLE`，不引用持久 `agent_runs`、`playlists`、`videos` 外键，另有 `playlist_import_session_events` 保存本次 Session 的页面/交接幂等事件。
+当前数据库版本在 [migrations.ts](../packages/library/src/db/migrations.ts) 中为 V14。外部清单导入暂存表不属于发布 schema，也不由 V13 → V14 迁移创建；`PlaylistImportRepository` 在当前 SQLite 连接中创建 TEMP 表，连接关闭后全部消失。下面保留的字段结构用于说明 Session 内约束，实际定义以 [schema.ts](../packages/library/src/db/schema.ts) 的 `PLAYLIST_IMPORT_SESSION_SCHEMA_SQL` 为准：所有表均为 `CREATE TEMP TABLE`，不引用持久 `agent_runs`、`playlists`、`videos` 外键，另有 `playlist_import_session_events` 保存本次 Session 的页面/交接幂等事件。
 
 ### 10.1 `playlist_import_jobs`
 
@@ -929,8 +929,8 @@ CREATE TEMP TABLE playlist_import_decisions (
 
 但不能原样循环使用：
 
-- [playlistRepo.ts](../apps/desktop/src/main/db/playlistRepo.ts) 的 `addVideoToPlaylist()` 每次单独计算 position。
-- [relatedLinkStore.ts](../apps/desktop/src/main/db/relatedLinkStore.ts) 的 `replaceRelatedLinks()` 会先删除全部链接。
+- [playlistRepo.ts](../packages/library/src/db/playlistRepo.ts) 的 `addVideoToPlaylist()` 每次单独计算 position。
+- [relatedLinkStore.ts](../packages/library/src/db/relatedLinkStore.ts) 的 `replaceRelatedLinks()` 会先删除全部链接。
 
 因此需要批量事务内部的 prepared statements和一个“append related link if absent”；媒体库成员插入只服务本次新建影片，不对复用影片执行 upsert。
 
@@ -960,14 +960,14 @@ AND NOT EXISTS (
 
 具体落点：
 
-- [libraryMembershipRepo.ts](../apps/desktop/src/main/db/libraryMembershipRepo.ts) 的 `removeResourceLessMemberships()`：候选查询和最终 `DELETE` 都排除被清单引用的影片，避免全量扫描移除其任一媒体库成员。
-- [videoRepo.ts](../apps/desktop/src/main/db/videoRepo.ts) 的 `purgeResourceLessVideos()`：候选选择必须放入删除事务，并排除被清单引用的影片，避免全局清理级联删除 `playlist_video`。
+- [libraryMembershipRepo.ts](../packages/library/src/db/libraryMembershipRepo.ts) 的 `removeResourceLessMemberships()`：候选查询和最终 `DELETE` 都排除被清单引用的影片，避免全量扫描移除其任一媒体库成员。
+- [videoRepo.ts](../packages/library/src/db/videoRepo.ts) 的 `purgeResourceLessVideos()`：候选选择必须放入删除事务，并排除被清单引用的影片，避免全局清理级联删除 `playlist_video`。
 
 现有 `idx_playlist_video_video_id` 已支持该反向存在性查询，不需要新增 retention 字段、索引或迁移。影片从最后一个清单移除后，如果仍然没有资源且没有其它 pin 保护，就会在下一次适用的自动清理中恢复为可清理对象。显式删除影片或媒体库成员不使用这条自动清理过滤器。
 
 ### 11.2 清单全局读取
 
-现有 [playlistRepo.ts](../apps/desktop/src/main/db/playlistRepo.ts) 的清单计数、预览封面和详情查询都会要求影片至少存在一条 active + visible 媒体库成员。该过滤与“清单直接引用全局影片 ID”冲突，也会让仍受清单保护但已被用户显式移除全部媒体库成员的影片消失在清单 UI。
+现有 [playlistRepo.ts](../packages/library/src/db/playlistRepo.ts) 的清单计数、预览封面和详情查询都会要求影片至少存在一条 active + visible 媒体库成员。该过滤与“清单直接引用全局影片 ID”冲突，也会让仍受清单保护但已被用户显式移除全部媒体库成员的影片消失在清单 UI。
 
 实施时统一改为：
 

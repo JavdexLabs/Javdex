@@ -13,26 +13,53 @@ import {
   getSettingsRecoveryNotice,
   updateSettings
 } from '../settings/settingsStore'
-import { getLibraryOverviewStats } from '../db/overviewRepo'
 import { migrateAssetStorage } from '../services/assetMigration'
 import { prepareMediaAssetsLocationMigration } from '../services/assetLocationMigration'
-import { mediaAssetStore } from '../services/mediaAssetStore'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   defaultMediaAssetsRoot,
   resolveMediaAssetsRoot,
   validateMediaAssetsPath
-} from '../services/assetStoragePaths'
+} from '@library/assetStoragePaths'
 import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
-} from '../services/libraryPathCleanupService'
+} from '@library/scan/libraryPathCleanupService'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { getLlmSecretStorageState } from '../settings/llmSecretStore'
 import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
 import { ModelManagementError, modelManagement } from '../agent-platform/modelManagement'
+import type { CatalogBackend } from '../application/catalogBackend'
+import { ipcMutation } from '../application/mutationContext'
+import { structuredError } from '@shared/protocol/errors'
+import type { WebAccessStatus, WebDevice } from '@shared/webTypes'
+
+function mapRemoteBrowserStatus(value: unknown): WebAccessStatus {
+  const row = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const devices = Array.isArray(row.devices) ? (row.devices as WebDevice[]) : []
+  const pairingActivity = Array.isArray(row.pairingActivity)
+    ? (row.pairingActivity as WebAccessStatus['pairingActivity'])
+    : []
+  const urls = Array.isArray(row.urls)
+    ? row.urls.filter((item): item is string => typeof item === 'string')
+    : []
+  return {
+    enabled: row.enabled === true,
+    running: row.running === true || row.enabled === true,
+    port: typeof row.port === 'number' ? row.port : 0,
+    username: typeof row.username === 'string' ? row.username : '',
+    hasPassword: row.hasPassword === true,
+    urls,
+    devices,
+    pairingUntil: typeof row.pairingUntil === 'number' ? row.pairingUntil : 0,
+    pairingActivity,
+    sessions: typeof row.sessions === 'number' ? row.sessions : 0,
+    error: typeof row.error === 'string' ? row.error : null
+  }
+}
 
 function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   const {
@@ -58,19 +85,82 @@ function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   }
 }
 
-export function registerSettingsHandlers(ctx: IpcContext): void {
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, () => webAccess.openPairing())
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, (code) => webAccess.inspectPair(code))
-  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, (code, approve) => webAccess.decidePair(code, approve))
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, (id) => webAccess.removeDevice(id))
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, (id, name) => webAccess.renameDevice(id, name))
-  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, () => webAccess.resetDevices())
-  appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, () => webAccess.status())
-  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => webAccess.apply(input))
-  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => webAccess.revoke())
+export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBackend): void {
+  const requireLocalCatalog = (label: string): void => {
+    if (backend.mode === 'remote') {
+      throw structuredError('UNSUPPORTED_CAPABILITY', `远程模式不能${label}`)
+    }
+  }
+
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.pairOpen({}, ipcMutation()))
+    }
+    return webAccess.openPairing()
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, async (code) => {
+    if (backend.mode === 'remote') {
+      return backend.browser.pairInspect({ code })
+    }
+    return webAccess.inspectPair(code)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, async (code, approve) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(
+        await backend.browser.pairDecide(
+          { code, decision: approve ? 'approve' : 'deny' },
+          ipcMutation()
+        )
+      )
+    }
+    return webAccess.decidePair(code, approve)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, async (id) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.deviceRemove({ deviceId: id }, ipcMutation()))
+    }
+    return webAccess.removeDevice(id)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, async (id, name) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(
+        await backend.browser.deviceRename({ deviceId: id, name }, ipcMutation())
+      )
+    }
+    return webAccess.renameDevice(id, name)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.revokeSessions({}, ipcMutation()))
+    }
+    return webAccess.resetDevices()
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.status({}))
+    }
+    return webAccess.status()
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, async (input) => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(
+        await backend.browser.setEnabled({ enabled: input.enabled }, ipcMutation())
+      )
+    }
+    requireLocalCatalog('在本机启动网页服务')
+    return webAccess.apply(input)
+  })
+  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.revokeSessions({}, ipcMutation()))
+    }
+    return webAccess.revoke()
+  })
   appCommandAdapter.register(IPC.SETTINGS_GET, (): SettingsSnapshot => toSettingsSnapshot(getSettings()))
 
-  appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): LibraryOverviewStats => getLibraryOverviewStats())
+  appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): Promise<LibraryOverviewStats> =>
+    backend.queries.overviewStats({})
+  )
 
   appCommandAdapter.register(IPC.SETTINGS_UPDATE, (patch): SettingsSnapshot => {
     const rawPatch = patch as Partial<AppSettings>
@@ -128,18 +218,23 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
 
   appCommandAdapter.register(
     IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW,
-    (libraryId, rootId) => previewLibraryPathRemoval({ libraryId, rootId })
+    (libraryId, rootId) => {
+      requireLocalCatalog('预览本机目录清理')
+      return previewLibraryPathRemoval({ libraryId, rootId })
+    }
   )
 
   appCommandAdapter.register(
     IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM,
-    (libraryId, rootId, expectedRevision, expectedImpactRevision) =>
-      confirmLibraryPathRemoval({
+    (libraryId, rootId, expectedRevision, expectedImpactRevision) => {
+      requireLocalCatalog('确认本机目录清理')
+      return confirmLibraryPathRemoval({
         libraryId,
         rootId,
         expectedRevision,
         expectedImpactRevision
       })
+    }
   )
 
   appCommandAdapter.register(IPC.SETTINGS_MODEL_MANAGEMENT_GET, () => modelManagement.read())
@@ -195,6 +290,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
   })
 
   appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<SettingsSnapshot> => {
+    requireLocalCatalog('开关本机图片加密')
     return mediaAssetStore.runExclusiveRelocation(async () => {
       const latest = getSettings()
       if (latest.assetEncryption === enabled) return toSettingsSnapshot(latest)
@@ -209,6 +305,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
   appCommandAdapter.register(
     IPC.ASSET_STORAGE_RELOCATE,
     async (targetPath): Promise<SettingsSnapshot> => {
+      requireLocalCatalog('迁移本机图片目录')
       const current = getSettings()
       let newRoot: string
 

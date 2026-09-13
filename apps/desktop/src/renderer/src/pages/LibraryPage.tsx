@@ -20,6 +20,7 @@ import type {
   VideoEditInput,
   VideoQuery
 } from '@shared/videoTypes'
+import { expectedVideoVersion } from '@shared/protocol/versions'
 import { compactPreview, createBulkPreviewQueue, type BulkPreviewImpact } from './library/bulkPreview'
 import type { LibraryListDefaults } from '../listView/listQueryParams'
 import type {
@@ -456,7 +457,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   const saveEdit = async (input: VideoEditInput): Promise<void> => {
     if (!editingVideo) return
     try {
-      await api.videos.edit(editingVideo.id, input)
+      await api.videos.edit(editingVideo.id, input, expectedVideoVersion(editingVideo))
       setEditingVideo(null)
       toast.show('元数据已保存', 'success')
       invalidateVideoLibraryQueries(queryClient)
@@ -532,7 +533,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
 
   const markScrapeSuccess = async (video: Pick<VideoCard, 'id'>): Promise<void> => {
     try {
-      await api.videos.markScrapeSuccess(video.id)
+      const detail = await api.videos.get({ kind: 'all' }, video.id)
+      if (!detail) throw new Error('影片不存在')
+      await api.videos.markScrapeSuccess(video.id, expectedVideoVersion(detail))
       toast.show('已标记为刮削成功', 'success')
       invalidateVideoLibraryQueries(queryClient)
       refetchLibrarySurface()

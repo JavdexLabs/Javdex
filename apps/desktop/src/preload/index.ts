@@ -60,6 +60,7 @@ import type {
 import type { GlobalSearchInput, HomeDiscoveryInput } from '../../../../packages/contracts/src/catalogTypes'
 import type { CatalogScope, CreateMediaLibraryInput } from '../../../../packages/contracts/src/mediaLibraryTypes'
 import type { MigrateMediaLibraryRootInput } from '../../../../packages/contracts/src/mediaLibraryTypes'
+import type { ExpectedVersions } from '../../../../packages/contracts/src/protocol/versions'
 import type {
   LastVideoResourceRemovalMode,
   VideoEditInput,
@@ -103,6 +104,13 @@ import type {
 } from '../../../../packages/contracts/src/libraryTypes'
 import type { BatchProgress } from '../../../../packages/contracts/src/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../../../../packages/contracts/src/settingsTypes'
+import type {
+  DesktopSessionSnapshot,
+  DesktopWriterClaimRequest
+} from '../../../../packages/contracts/src/desktop/session'
+import type {
+  ThisComputerSettingsPatch
+} from '../../../../packages/contracts/src/desktop/settings'
 import type { ModelManagementApplyInput } from '../../../../packages/contracts/src/modelManagementTypes'
 import type {
   AssetCryptoProgress,
@@ -110,6 +118,7 @@ import type {
 } from '../../../../packages/contracts/src/libraryTypes'
 import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../../../../packages/contracts/src/actressTypes'
 import type { IpcResponse } from '../../../../packages/contracts/src/ipcTypes'
+import { DesktopIpcError, structuredError } from '../../../../packages/contracts/src/protocol/errors'
 import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../../../../packages/contracts/src/actressConflictTypes'
 import type { SortDir, TagOptionsQuery } from '../../../../packages/contracts/src/commonTypes'
 import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../../../../packages/contracts/src/playlistTypes'
@@ -135,7 +144,9 @@ import type {
 /** Helper that unwraps the IpcResponse envelope, throwing on failure. */
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const res = (await ipcRenderer.invoke(channel, ...args)) as IpcResponse<T>
-  if (!res.ok) throw new Error(res.error ?? 'IPC 调用失败')
+  if (!res.ok) {
+    throw new DesktopIpcError(res.error ?? structuredError('INVALID_INPUT', 'IPC 调用失败'))
+  }
   return res.data as T
 }
 
@@ -285,6 +296,17 @@ const api = {
     apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
     revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)
   },
+  desktop: {
+    getSession: () => invokeApp(IPC.DESKTOP_SESSION_GET),
+    reconnect: () => invokeApp(IPC.DESKTOP_RECONNECT),
+    claimWriter: (input: DesktopWriterClaimRequest) => invokeApp(IPC.WRITER_CLAIM, input),
+    onSessionChanged: (cb: (snapshot: DesktopSessionSnapshot) => void) =>
+      onAppEvent(IPC.DESKTOP_SESSION_CHANGED, cb)
+  },
+  thisComputer: {
+    get: () => invokeApp(IPC.THIS_COMPUTER_GET),
+    update: (patch: ThisComputerSettingsPatch) => invokeApp(IPC.THIS_COMPUTER_UPDATE, patch)
+  },
   settings: {
     get: () => invokeApp(IPC.SETTINGS_GET),
     update: (patch: RendererSettingsPatch) => invokeApp(IPC.SETTINGS_UPDATE, patch),
@@ -381,11 +403,14 @@ const api = {
     list: (scope: CatalogScope, q?: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, scope, q),
     get: (scope: CatalogScope, id: number) => invokeVideo(IPC.VIDEO_GET, scope, id),
     update: (id: number, fields: VideoFieldUpdateInput) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
-    edit: (id: number, input: VideoEditInput) => invokeVideo(IPC.VIDEO_EDIT, id, input),
-    clearMeta: (id: number) => invokeVideo(IPC.VIDEO_CLEAR_META, id),
-    markScrapeSuccess: (id: number) => invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
-    setRating: (id: number, rating: number) =>
-      invokeVideo(IPC.VIDEO_SET_RATING, id, rating),
+    edit: (id: number, input: VideoEditInput, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_EDIT, id, input, expectedVersions),
+    clearMeta: (id: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_CLEAR_META, id, expectedVersions),
+    markScrapeSuccess: (id: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id, expectedVersions),
+    setRating: (id: number, rating: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_SET_RATING, id, rating, expectedVersions),
     correctImport: (id: number, code: string, discardPendingScrape?: boolean) =>
       invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code, discardPendingScrape),
     years: (scope: CatalogScope) => invokeVideo(IPC.VIDEO_YEARS, scope),
@@ -395,12 +420,12 @@ const api = {
       invokeVideo(IPC.VIDEO_SAMPLE_DELETE, id, assetId),
     setPoster: (id: number, posterPath: string | null) =>
       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
-    addManualTag: (id: number, name: string) =>
-      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
-    addExistingManualTag: (id: number, tagId: number) =>
-      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
-    removeManualTag: (id: number, tagId: number) =>
-      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+    addManualTag: (id: number, name: string, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name, expectedVersions),
+    addExistingManualTag: (id: number, tagId: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId, expectedVersions),
+    removeManualTag: (id: number, tagId: number, expectedVersions: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId, expectedVersions),
     importLinkResource: (input: VideoLinkResourceImportInput) =>
       invokeVideo(IPC.VIDEO_RESOURCE_IMPORT, input),
     getResource: (libraryId: number, videoId: number, resourceId: number) =>
@@ -812,8 +837,8 @@ const api = {
       invokeApp(IPC.PLAYER_PLAY, libraryId, videoId),
     reveal: (libraryId: number, videoId: number) =>
       invokeApp(IPC.PLAYER_REVEAL, libraryId, videoId),
-    openResource: (libraryId: number, resourceId: number) =>
-      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId),
+    openResource: (libraryId: number, resourceId: number, videoId?: number) =>
+      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId, videoId),
     revealResource: (libraryId: number, resourceId: number) =>
       invokeApp(IPC.PLAYER_REVEAL_RESOURCE, libraryId, resourceId)
   },

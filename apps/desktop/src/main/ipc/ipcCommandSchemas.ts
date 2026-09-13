@@ -9,6 +9,7 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
+import { expectedVersionsSchema } from '@shared/manage/primitives'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
 const scanAuditViewQuery = z.object({
@@ -406,18 +407,22 @@ export const videoIpcSchemas = {
   [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
   [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
   [IPC.VIDEO_UPDATE]: z.tuple([id, object]),
-  [IPC.VIDEO_EDIT]: z.tuple([id, object]),
-  [IPC.VIDEO_CLEAR_META]: z.tuple([id]),
-  [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
-  [IPC.VIDEO_SET_RATING]: z.tuple([id, finiteNumber.min(0).max(5)]),
+  [IPC.VIDEO_EDIT]: z.tuple([id, object, expectedVersionsSchema]),
+  [IPC.VIDEO_CLEAR_META]: z.tuple([id, expectedVersionsSchema]),
+  [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: z.tuple([id, expectedVersionsSchema]),
+  [IPC.VIDEO_SET_RATING]: z.tuple([id, finiteNumber.min(0).max(5), expectedVersionsSchema]),
   [IPC.VIDEO_CORRECT_IMPORT]: z.tuple([id, nonEmptyText, z.boolean().optional()]),
   [IPC.VIDEO_YEARS]: z.tuple([catalogScope]),
   [IPC.VIDEO_SAMPLE_IMPORT]: z.tuple([id, mediaImageImport]),
   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
-  [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
-  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
-  [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+  [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText, expectedVersionsSchema]),
+  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([
+    positiveSafeInteger,
+    positiveSafeInteger,
+    expectedVersionsSchema
+  ]),
+  [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id, expectedVersionsSchema]),
   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
   [IPC.VIDEO_RESOURCE_CHECK]: z.tuple([nonEmptyText]),
@@ -674,6 +679,26 @@ export const appIpcSchemas = {
   }).strict()]),
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
+  [IPC.DESKTOP_SESSION_GET]: noArgs,
+  [IPC.DESKTOP_RECONNECT]: noArgs,
+  [IPC.THIS_COMPUTER_GET]: noArgs,
+  [IPC.THIS_COMPUTER_UPDATE]: z.tuple([
+    z
+      .object({
+        mode: z.enum(['local', 'remote']).optional(),
+        remoteBaseUrl: z.string().max(2048).nullable().optional(),
+        playerPath: z.string().max(4096).nullable().optional()
+      })
+      .strict()
+  ]),
+  [IPC.WRITER_CLAIM]: z.tuple([
+    z
+      .object({
+        kind: z.enum(['initialBind', 'handoff', 'deployRecover']),
+        oneTimeToken: z.string().min(32).max(256)
+      })
+      .strict()
+  ]),
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: z.tuple([id, id]),
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: z.tuple([
@@ -911,7 +936,7 @@ export const appIpcSchemas = {
   [IPC.PLAYLIST_IMPORT_CONTROL]: z.tuple([nonEmptyText, playlistImportControl]),
   [IPC.PLAYER_PLAY]: z.tuple([id, id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id, id]),
-  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id]),
+  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id, id.optional()]),
   [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id, id]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),

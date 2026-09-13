@@ -59,6 +59,16 @@ import type {
 } from './pluginDevTypes'
 import type { ScraperPluginDescriptor } from './scraperPluginTypes'
 import type { RendererSettingsPatch, SettingsSnapshot } from './settingsTypes'
+import type {
+  DesktopSessionSnapshot,
+  DesktopWriterClaimRequest,
+  DesktopWriterClaimResult
+} from './desktop/session'
+import type {
+  ThisComputerSettings,
+  ThisComputerSettingsPatch,
+  ThisComputerSettingsUpdateResult
+} from './desktop/settings'
 import type { VideoResourceImportTarget } from './videoTypes'
 import type {
   LibraryCuratorMessageInput,
@@ -151,6 +161,17 @@ export interface AppIpcContract {
   [IPC.WEB_ACCESS_REVOKE]: { args: []; result: WebAccessStatus }
   [IPC.SETTINGS_GET]: { args: []; result: SettingsSnapshot }
   [IPC.SETTINGS_UPDATE]: { args: [patch: RendererSettingsPatch]; result: SettingsSnapshot }
+  [IPC.DESKTOP_SESSION_GET]: { args: []; result: DesktopSessionSnapshot }
+  [IPC.DESKTOP_RECONNECT]: { args: []; result: DesktopSessionSnapshot }
+  [IPC.THIS_COMPUTER_GET]: { args: []; result: ThisComputerSettings }
+  [IPC.THIS_COMPUTER_UPDATE]: {
+    args: [patch: ThisComputerSettingsPatch]
+    result: ThisComputerSettingsUpdateResult
+  }
+  [IPC.WRITER_CLAIM]: {
+    args: [input: DesktopWriterClaimRequest]
+    result: DesktopWriterClaimResult
+  }
   [IPC.SETTINGS_PICK_FOLDER]: { args: []; result: string[] }
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: {
     args: [libraryId: number, rootId: number]
@@ -425,7 +446,7 @@ export interface AppIpcContract {
     result: PlayResult
   }
   [IPC.PLAYER_OPEN_RESOURCE]: {
-    args: [libraryId: number, resourceId: number]
+    args: [libraryId: number, resourceId: number, videoId?: number]
     result: PlayResult
   }
   [IPC.PLAYER_REVEAL_RESOURCE]: {
@@ -447,6 +468,7 @@ export interface AppIpcEventContract {
   [IPC.ASSET_CRYPTO_PROGRESS]: AssetCryptoProgress
   [IPC.AGENT_METADATA_SNAPSHOT_CHANGED]: AgentMetadataSnapshotChangedEvent
   [IPC.PLAYLIST_IMPORT_SNAPSHOT_CHANGED]: PlaylistImportSnapshotChangedEvent
+  [IPC.DESKTOP_SESSION_CHANGED]: DesktopSessionSnapshot
 }
 
 export type AppIpcChannel = IpcContractChannel<AppIpcContract>

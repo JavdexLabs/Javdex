@@ -344,15 +344,13 @@ if (hostConfigRaw) {
           libraryId: 1,
           tab: 'all',
           limit: 50,
-          offset: 0,
-          anchor: { kind: 'path', value: 'ABC-001.mp4' }
+          offset: 0
         })) as { auditAvailable: boolean; total: number }
         const remoteAuditView = (await remote.libraries.auditViewPage({
           libraryId: 1,
           tab: 'all',
           limit: 50,
-          offset: 0,
-          anchor: { kind: 'path', value: 'ABC-001.mp4' }
+          offset: 0
         })) as { auditAvailable: boolean; total: number }
         assert.equal(localAuditView.auditAvailable, true, JSON.stringify(localAuditView))
         assert.equal(remoteAuditView.auditAvailable, true, JSON.stringify(remoteAuditView))

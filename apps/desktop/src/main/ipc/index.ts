@@ -42,11 +42,11 @@ export function registerIpcHandlers(
 
   registerDesktopSessionHandlers(ctx, { backend: options.backend, settings: options.settings })
   registerSettingsHandlers(ctx, options.backend)
-  registerNfoExportHandlers(ctx)
+  registerNfoExportHandlers(ctx, options.backend)
   registerMediaLibraryHandlers(options.backend, options.mediaLibraryDesktop)
   registerUpdateHandlers(ctx)
   registerAssetHandlers()
-  registerScanHandlers(ctx)
+  registerScanHandlers(ctx, options.backend)
   registerVideoHandlers(options.backend, options.videoDesktop)
   registerPlaylistHandlers(options.backend)
   registerActressHandlers(options.backend, options.actressDesktop)

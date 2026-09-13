@@ -3,7 +3,10 @@ import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
 import fs from 'node:fs'
 import { shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { ManualImportResult, RenameImportResult, ScanCompletionResult } from '@shared/libraryTypes'
+import type { ManualImportResult, RenameImportResult, ScanCompletionResult, LibraryScanLatestSnapshot } from '@shared/libraryTypes'
+import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
+import type { CatalogBackend } from '../application/catalogBackend'
+import { ipcMutation } from '../application/mutationContext'
 import { normalizeAbsoluteLocalPath, normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import {
@@ -43,9 +46,105 @@ function removeScopedUnrecognizedFile(libraryId: number, rootId: number, filePat
 
 export function registerScanLatestHandler(
   commandAdapter: Pick<typeof appCommandAdapter, 'register'> = appCommandAdapter,
-  readLatest: typeof getLatestLibraryScanSnapshot = getLatestLibraryScanSnapshot
+  readLatest: (
+    libraryId: number
+  ) => LibraryScanLatestSnapshot | Promise<LibraryScanLatestSnapshot> = getLatestLibraryScanSnapshot
 ): void {
   commandAdapter.register(IPC.SCAN_LATEST_GET, (libraryId) => readLatest(libraryId))
+}
+
+function completionFromTask(libraryId: number, task: CatalogTaskSnapshot): ScanCompletionResult {
+  return {
+    libraryId,
+    runId: task.taskId,
+    scannedFiles: task.counts?.scanned ?? 0,
+    imported: task.counts?.imported ?? 0,
+    skipped: 0,
+    skippedShort: 0,
+    failed: task.counts?.failed ?? 0,
+    pendingGroups: task.counts?.pending ?? 0,
+    pendingResources: 0,
+    relocated: 0,
+    refreshed: 0,
+    removed: 0,
+    promoted: 0,
+    deletedVideos: 0,
+    offlineFolders: [],
+    strmFailures: [],
+    omittedStrmFailures: 0,
+    unrecognizedCount: 0,
+    ...(task.state === 'cancelled' ? { cancelled: true } : {})
+  }
+}
+
+function waitForLocalScan(libraryId: number): {
+  promise: Promise<ScanCompletionResult>
+  cancel: () => void
+} {
+  let unsubscribe = (): void => {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const promise = new Promise<ScanCompletionResult>((resolve, reject) => {
+    timer = setTimeout(() => {
+      unsubscribe()
+      reject(new Error('扫描超时'))
+    }, 120_000)
+    unsubscribe = scanCoordinator.subscribe((event) => {
+      if (event.libraryId !== libraryId) return
+      if (event.phase === 'completed') {
+        if (timer) clearTimeout(timer)
+        unsubscribe()
+        resolve(event.result)
+      } else if (event.phase === 'failed') {
+        if (timer) clearTimeout(timer)
+        unsubscribe()
+        reject(new Error(event.error))
+      }
+    })
+  })
+  return {
+    promise,
+    cancel: () => {
+      if (timer) clearTimeout(timer)
+      unsubscribe()
+    }
+  }
+}
+
+async function waitForRemoteScan(
+  backend: CatalogBackend,
+  libraryId: number,
+  taskId: string
+): Promise<ScanCompletionResult> {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const task = (await backend.tasks.get({ taskId })) as CatalogTaskSnapshot
+    if (task.state === 'succeeded' || task.state === 'cancelled' || task.state === 'needsInspection') {
+      return completionFromTask(libraryId, task)
+    }
+    if (task.state === 'failed') {
+      throw new Error(task.label || '扫描失败')
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error('扫描超时')
+}
+
+export async function runScanThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number
+): Promise<ScanCompletionResult> {
+  if (backend.mode === 'remote') {
+    const accepted = (await backend.libraries.runScan({ libraryId }, ipcMutation())) as { taskId: string }
+    return waitForRemoteScan(backend, libraryId, accepted.taskId)
+  }
+  const waiting = waitForLocalScan(libraryId)
+  try {
+    await backend.libraries.runScan({ libraryId }, ipcMutation())
+    return await waiting.promise
+  } catch (error) {
+    waiting.cancel()
+    throw error
+  }
 }
 
 export function registerScanAuditReadHandlers(
@@ -87,7 +186,7 @@ export function registerScanAuditRevealHandler(
   })
 }
 
-export function registerScanHandlers(ctx: IpcContext): void {
+export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): void {
   scanCoordinator.subscribe((event) => {
     const webContents = ctx.getWindow()?.webContents
     appEventAdapter.send(webContents, IPC.SCAN_STATE_CHANGED, event)
@@ -100,14 +199,19 @@ export function registerScanHandlers(ctx: IpcContext): void {
     }
   })
 
-  appCommandAdapter.register(
-    IPC.SCAN_RUN,
-    async (libraryId, rootIds): Promise<ScanCompletionResult> =>
-      scanCoordinator.run({ libraryId, rootIds, trigger: 'manual' })
+  appCommandAdapter.register(IPC.SCAN_RUN, async (libraryId): Promise<ScanCompletionResult> =>
+    runScanThroughBackend(backend, libraryId)
   )
 
-  appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => scanCoordinator.cancel(runId))
-  registerScanLatestHandler()
+  appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => {
+    if (scanCoordinator.cancel(runId)) return true
+    if (backend.mode === 'remote') {
+      void backend.tasks.cancel({ taskId: runId }, ipcMutation()).catch(() => undefined)
+      return true
+    }
+    return false
+  })
+  registerScanLatestHandler(appCommandAdapter, (libraryId) => backend.libraries.latestScan({ libraryId }))
   registerScanAuditReadHandlers()
   appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) =>
     readLibraryScanAudit(libraryId)

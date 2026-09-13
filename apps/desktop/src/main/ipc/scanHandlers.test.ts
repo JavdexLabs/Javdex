@@ -5,7 +5,8 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend } from './scanHandlers'
+import type { CatalogBackend } from '../application/catalogBackend'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
 import { createTypedIpcAdapter } from './typedIpcAdapter'
 
@@ -270,4 +271,38 @@ it('returns fileMissing on asynchronous access failure without revealing', async
     assert.deepEqual(await handler(1, '/media/missing.mp4'), { ok: false, fileMissing: true })
     assert.deepEqual(calls, ['permission', 'access'])
   }
+})
+
+it('runs SCAN_RUN through the catalog backend instead of the local coordinator singleton', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    libraries: {
+      runScan: async (input: { libraryId: number }) => {
+        calls.push(['runScan', input])
+        return { taskId: '11111111-1111-1111-1111-111111111111', receipt: { operationId: 'op' } }
+      }
+    },
+    tasks: {
+      get: async (input: { taskId: string }) => {
+        calls.push(['tasks.get', input])
+        return {
+          owner: 'catalog',
+          taskId: input.taskId,
+          catalogId: 'catalog',
+          kind: 'scan',
+          state: 'succeeded',
+          taskRevision: 2,
+          progressSeq: 1,
+          counts: { scanned: 4, imported: 1 }
+        }
+      }
+    }
+  } as unknown as CatalogBackend
+  const result = await runScanThroughBackend(backend, 3)
+  assert.equal(result.libraryId, 3)
+  assert.equal(result.scannedFiles, 4)
+  assert.equal(result.imported, 1)
+  assert.deepEqual(calls[0], ['runScan', { libraryId: 3 }])
+  assert.equal((calls[1] as [string, { taskId: string }])[0], 'tasks.get')
 })

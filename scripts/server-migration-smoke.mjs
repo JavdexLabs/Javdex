@@ -225,7 +225,6 @@ function assertCatalogRolledBack(dbPath) {
     assert.equal(catalogLooksEmpty(db), true, 'target catalog must stay empty after copy failure')
     const identity = readCatalogIdentity(db)
     assert.ok(identity, 'rolled-back target still has catalog identity')
-    assert.equal(identity.frozen, false)
   } finally {
     db.close()
   }

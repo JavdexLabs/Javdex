@@ -643,11 +643,11 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`。第三例在 `ready` 后丢弃 enable/abandon HTTP 响应再 SIGTERM，拉起后以 `migration.status` 为准，终态仍互斥（`e700e3f`）。不是 Docker 两端。
 - M12：启用后对目标 `library.db` 做真实 `scanCoordinator.run`。未映射孤儿片无本地资源、自动清理关闭时成员保留；把 `remove_resource_less_memberships` 改回 1 再扫才会删成员（`e05c165`）。
 - S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` / `PENDING_SCAN_RESOLVE` / `PENDING_RESOURCE_IDENTITY_RESOLVE` / `PENDING_SCAN_GET|LIST|QUEUE` / `PENDING_RESOURCE_IDENTITY_GET|LIST` / `PENDING_AUDIT_PRESENCE` / `SCAN_AUDIT_GET` / `SCAN_AUDIT_HEADER` / 远程 `SCAN_AUDIT_PAGE` / 远程 `SCAN_AUDIT_VIEW_PAGE` 走 `CatalogBackend`。本地 PAGE/VIEW 仍走 `catalogReadService` worker，保留 snapshot 身份、section 与 attention。冻结 `scans.auditPage` 无 section/attention，远程 HTTP 会剥掉；冻结 `scans.auditViewPage` 无 IPC `anchor`，远程同样剥掉。待确认解析在本地后端与服务端 HTTP 都传入 `fs.existsSync` 主资源回退（helper 在 `scan/accessiblePrimaryResource.ts`，不进 db 模块）。本地队列页仍带 IPC `anchor`；远程冻结 `pendingScan.queuePage` 无该字段，HTTP 映射会剥掉。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 Playwright/plan 仍桌面单例：远程 `agentMetadataCollection.start` 经 CatalogBackend 描述目标；`libraryCurator` 概览经 `catalog.overviewStats`；远程裁切快照经 `actresses.listPage`；清单导入 start 经 `libraries.get`/`playlists.get`，远程匹配经 `videos.list`/`videos.get`，远程 apply 经 `playlists.applyImport`，远程会话写 workStore。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 且 digest 必须指纹服务端活文件而拒绝；未识别路径仍走桌面 `renameAndImport`。冻结 `pendingAudit.presence` 仍是空输入的目录级计数；桌面 IPC 是 libraryId+ids，本地包装 `getPendingAuditPresence`，远程用 `libraries.get` 加 pending list 求交，不调用冻结 presence。远程 `SCAN_RUN` / NFO 轮询 `tasks.get`。
-- M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。源端 `encryptStoredAsset` 后 preview 含 `encrypted-assets` 且 start 拒绝；`decryptStoredAsset` 后 blocker 消失、start 冻结成功，封面不是 `AVPK\x01`。不在迁移内自动解密。`chmod 000` 目标 `imagesDir` 后 enable 事务已提交、拷图 EACCES：资料库保持 `enabled`、封面文件不在。用户命名空间 256k tmpfs 挂到 `imagesDir` 后 enable 拷 400KiB 封面 `ENOSPC`：资料库仍 `enabled`、封面不在，没有整笔回滚。
+- M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。正式封面随迁。源端加密图在 start/导出时自动解密到迁移包（源正式图与别名不变）；缺别名则 start 失败并解冻。`chmod 000` / tmpfs `ENOSPC` 后 enable 回滚为 `ready`、目标保持空库、已拷文件尽量删除，可在恢复权限后重试 enable。
 - 远程图片临时磁盘 LRU：`userData/remote-image-cache/<catalogHash>/`，按 catalog 隔离；第二次 `readImage` 不打 HTTP；中止的 GET 不落盘。
 - D03：workStore 已复制行但 `prepStatus=copying` 时远程仍 `modePrepRequired` 且不 `getDb()`；回到本地才 `markReady`，源 `agent_runs` 仍在。OS 级 `SIGKILL`：子进程 `beginCopy` 后、`copyAgentWorkTables` 前被杀，`prepStatus` 保持 `copying`、目标 `agent_runs` 为 0、源行仍在；远程仍 `modePrepRequired`，回本地后复制完成（`933797f`）。
 - D05：`createWindow` 不注册 IPC；远程 runtime dispose 后再装配仍不打开 `library.db`。主窗口重建调用已注册的 `bindMainWindow` binders（清单导入/刮削 renderer 生命周期用 WeakSet 去重），不二次注册 IPC（`870ddf2`）。`6be92a7` 用原生 Electron（非 `ELECTRON_RUN_AS_NODE`）关闭后再建 `BrowserWindow`：新 `webContents` 只绑定一次，`ipcMain.handle` 次数不变。不是任务进行中关窗的完整 GUI 产品流。
-- D07：本地/远程 available/frozen/断线/版本不符/恢复/authInvalid/modePrepRequired 的能力原因已枚举。远程 `migrateCatalog` 能力为 `unsupportedOnServer`（HTTP migration 面已接线，能力位未放开）。
+- D07：本地/远程 available/frozen/断线/版本不符/恢复/authInvalid/modePrepRequired 的能力原因已枚举。远程 `migrateCatalog` 在 available/frozen 与本地同一入口（`available`）；远程走现有 HTTP migration，不打开 `library.db`。`manageBrowserPairing` 仍 `unsupportedOnServer`。
 - M15：真实 `/usr/bin/mpv` 0.37.0 + ffmpeg `testsrc` H.264/AAC 播放 Range grant：`closePlayStreams` 后同一 handle 再 `loadfile` 可续播；把 `play-grant` `expiresAt` 写成过去后 `HEAD 404` 且 mpv 日志含 HTTP 404；`seek 2.2 absolute` 落到 ≥2.05；MKV 同样解码；writer handoff 后 seek/`HEAD` 404（`e9ee433`）。
 - M10：已连接远程 + `chmod 000` 本地 `library.db` 后，子进程绑定 CatalogBackend 并启动采集（空 URL）、助手概览、裁切快照、清单导入 start、`videos.list` 匹配 ingest、`playlists.applyImport`：`/proc/<pid>/fd` 无 `library.db`，`getDb()` 仍是 `Database not initialised`，失败路径也不是打开本地库（`5401689` / `3152bf1` / `86a82b5` / `bc019ee` / `2dd1e54`）。远程匹配写入 memory lookup，workStore snapshot 不再 JOIN `videos`。远程 apply 走冻结 `playlists.applyImport` 与持久 `operationId`；启动即拒绝 append 与自动建片；`>200` 在 prepare 时拒绝。Handshake 形 `videos.list` 不能当成空页。`8fc3d9a` 另用独立 Node 宿主：扫描出 ABC-001 后 `ingestCodes` + `applyPlaylistImportThroughCatalog` 经真实 manage HTTP 建清单，父进程 `chmod 000` 本地 `library.db` 后 `/proc` 无该库、`getDb()` 仍未初始化。刮削单条仍可走本地队列。无冻结 `video_sources` API，远程 sources 为空。冻结 applyImport 不写 per-video `video_links`。
 - D04：`waitForCatalogTask` 按 generation / catalogId / taskId / taskRevision / progressSeq 应用 `tasks.get` 快照，终态不回绕；重连 generation 丢弃旧成功快照；失败退避至 30s；`SCAN_CANCEL` / `NFO_EXPORT_TERMINATE` 中止本地等待（`870ddf2`）。`8fc3d9a` 对真实 Node 宿主 `tasks.get`：HTTP 响应已返回后 `reconnect()` 推进 generation，再把该快照交给 `waitForCatalogTask`，旧 generation 不应用，后续 poll 才应用终态。`cb13f72` 另在真实 `tasks.get` 已受理后卡住响应，再 `reconnect()` 中止 in-flight fetch：3s 内完成，不等待 8s 服务端 stall。不是掐断 TCP/WAN 丢包的物理断线。
@@ -659,7 +659,8 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=900000 node scripts/run-electron-tests.mjs` **3057 tests / 3056 pass / 0 fail / 1 skip**（`2dd1e54` 工作树；本轮未重跑全量）
   - `npm run server:smoke` **EXIT 0**（本会话 Docker Engine 28.5.2；见上条单容器证据）
   - 未跑安装包；未跑 Docker 两端迁库状态/文件检查
-- 未做：Docker 两端状态与文件检查；同版本桌面安装包烟测；enable 拷图失败整笔回滚（产品待决）；远程 FILE_RENAME（冻结 IPC 无 resourceId）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流。不得把 mock 当完成证据。不得宣称 M01–M15 / D01–D07 已全部完成。
+- 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](SERVER_MODE.md) C1–C7 / E2。单容器 `server:smoke` 已通过（#107），不是 Docker 两端迁库或安装包。
+- 未做：Docker 两端状态与文件检查；同版本桌面安装包烟测；远程 FILE_RENAME（C1）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流。不得把 mock 当完成证据。不得宣称 M01–M15 / D01–D07 已全部完成。不得升 0.8 / 写 CHANGELOG / 合并 main（E2）。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -667,7 +668,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 |---|---|---|---|---|
 | M01 管理范围 | 部分 | S08 `runtime.test.ts` 隐藏/归档管理可见、网页不可见，Cookie 不能调 manage | Linux Node 22.14 in-process 宿主 | 独立演员/清单/待确认图/无成员影片未在同一用例一次铺齐 |
 | M02 字段边界 | 部分 | S08 拒绝桌面路径、未知字段、外库 sample id | 同上 | 手动导入逃逸相对路径的独立注入仍薄 |
-| M03 编辑冲突 | 部分 | S05/S08 `expectedVersions` 冲突拒绝与回执；评分不 bump V，评分后用评分前 V 改标题成功；S09 首次扫描与 XML NFO 都不 bump V，随后用该 V 改 ABC-001 标题成功 | Linux Node 22.14 in-process 宿主 `runtime.test.ts` | 是否让评分参与 V 待用户决定 |
+| M03 编辑冲突 | 部分 | S05/S08 `expectedVersions` 冲突拒绝与回执；`setRating` 递增 V，评分后用评分前 V 改标题得 `VERSION_CONFLICT`；S09 首次扫描与 XML NFO 都不 bump V，随后用该 V 改 ABC-001 标题成功 | Linux Node 22.14 in-process 宿主 `runtime.test.ts`；本地 `localCatalogBackend.test.ts` | 扫描/NFO 是否纳入 V 仍按既有语义 |
 | M04 关联竞争 | 部分 | S09 删除预览/计划过期；S10 预览 deleteGlobal 后加入清单或新增媒体库成员再提交旧 digest 得 409，影片仍在 | 同上 | 预览后只改资源集合但不改成员的独立注入未再单列 |
 | M05 受理边界 | 部分 | S06 上传/apply/重启；S09 任务入队 | 同上 | 短事务提交前断响应的断电级注入未做 |
 | M06 接管竞争 | 部分 | S05/S09 交接等待挡住新扫描 | 同上 | 旧请求暂停于 I/O 再领取的完整时序未做 |
@@ -677,8 +678,8 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M10 桌面隔离 | 部分 | 远程 start 采集/助手概览/裁切快照/清单导入，以及 matching ingest 与 applyImport，chmod 000 后 `/proc` 无 `library.db`；`8fc3d9a` 对真实 Node 宿主 ingest+apply 建清单 | Electron-as-Node isolation + `dualBackendScan.e2e.test.ts` | 刮削单条仍可走本地队列；无冻结 `video_sources`；apply 不写 per-video links |
 | M11 分页与目标清单 | 部分 | S10 `targetLists`；limit=1 取第一页后插入新片或删除已冻结 id，offset=1 与完整 page 仍是冻结快照 | Node 宿主 `runtime.test.ts` | UI 对已删除冻结 id 的占位展示未再铺 |
 | M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
-| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs 上 enable 拷图 ENOSPC 后仍 enabled | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts` ENOSPC | 非 Docker |
-| M14 图片与恢复 | 部分 | 加密阻止迁入；源端 decrypt 后才允许 start；正式封面随迁；孤立 uploads 不进包且恢复删除；`chmod 000` / tmpfs `ENOSPC` 后 enable 保持 enabled、无自动回滚 | Electron-as-Node | 拷图失败整笔回滚待产品决定 |
+| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs `ENOSPC` / `chmod 000` `EACCES` 后 enable 回滚 `ready` | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts` | 非 Docker |
+| M14 图片与恢复 | 部分 | 源端导出自动解密到包（源正式图不变）；缺别名 start 失败并解冻；正式封面随迁；孤立 uploads 不进包且恢复删除；拷图 `EACCES`/`ENOSPC` 后 enable 回滚 | Electron-as-Node `catalogMigration.test.ts` | 目标仍拒绝包内残留密文 |
 | M15 播放 | 部分 | S11 HTTP Range + S13 真实 mpv：断流后续播、过期 404、seek 2.2、MKV、handoff 后 404 | 本机 `/usr/bin/mpv` 0.37.0；ffmpeg 6.1.1 | 非环回 WAN 丢包未做 |
 | D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据/已连接 available 及 M10 六探针子进程 `/proc/<pid>/fd` 均无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 刮削单条队列仍可 `getDb()` |
 | D02 业务合同 | 部分 | LocalCatalogBackend 与 RemoteCatalogBackend 对同一夹具扫描/NFO 计划，并在扫描后读取 audit header/page/view 与 IPC 形状 `pendingAuditPresence`；同用例含 live HTTP 任务重连与远程清单 apply | `dualBackendScan.e2e.test.ts`（独立 `node --test` 进程） | 非 Electron IPC NFO 封面编码；非 Docker |
@@ -686,7 +687,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询；中止的图片 GET 不写入磁盘缓存；`waitForCatalogTask` 拒绝旧 generation/revision/progressSeq 与终态回绕，并中止本地 SCAN/NFO 等待；`8fc3d9a` 真实 Node `tasks.get` HTTP 完成后 reconnect，迟到快照不应用；`cb13f72` 已受理的 in-flight `tasks.get` 在 reconnect 时中止，3s 内完成 | 远程后端 + `catalogTaskProgress.test.ts` + `scanHandlers.test.ts` + `dualBackendScan.e2e.test.ts` | 物理掐断 TCP/WAN 后再重连未做 |
 | D05 取消与退出 | 部分 | S07 dispose/abort；`createWindow` 不注册 IPC；远程 runtime 重建不打开 `library.db`；重建窗口只重绑 binders；`6be92a7` 原生 Electron 关闭后再建 `BrowserWindow`，新 webContents 绑定一次且 IPC handle 不加倍 | Electron-as-Node bootstrap + `mainWindowBindings.test.ts` + `mainWindowBindings.native.test.ts` | 任务进行中的完整 GUI 关窗产品流未做 |
 | D06 边界检查 | 部分 | pretest 生产依赖图；FILE_IMPORT / pending resolve+get/list/queue/presence / SCAN_AUDIT GET+HEADER+远程 PAGE/VIEW 走 CatalogBackend | 仓库脚本 + `scanHandlers.test.ts` | 远程 FILE_RENAME 仍拒绝；冻结 queuePage 无 IPC anchor；冻结 auditPage 无 section/attention；冻结 presence 仍是目录级计数 |
-| D07 能力与错误 | 部分 | 本地/远程各会话态能力原因已枚举 | `desktopCapabilities.test.ts` | 远程 `migrateCatalog` 能力位仍 `unsupportedOnServer`；UI 全动作未再铺 |
+| D07 能力与错误 | 部分 | 本地/远程各会话态能力原因已枚举；远程 available/frozen 允许 `migrateCatalog` | `desktopCapabilities.test.ts` | UI 全动作未再铺；迁库调用仍需 CLI migration Bearer |
 
 ### S14：发布准备与收尾
 
@@ -696,7 +697,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 
 **S14 实施记录（进行中）**
 
-- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、冻结备份与拷图失败不自动回滚。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
+- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、源端导出自动解密、enable 拷图失败回滚，以及 C1–C7 / E2 已知限制。单容器 `server:smoke` 已通过（#107），不是安装包或两端迁库。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
 - 验证：文档提交；`npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**（先前记录）；后续 Docker-in-Docker 会话 `server:smoke` **EXIT 0**（单容器 bind+claim+restart，见 S13）。`server:smoke:node` 仍只是宿主进程检查。
 - 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。S13 剩余矩阵见上一节。不得宣称 S13/S14 完成。
 

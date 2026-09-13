@@ -196,6 +196,21 @@ export async function getManageAsset(
   return readManageCatalogImage(context.relPath, context.signal, context.size)
 }
 
+/** Test-only: if `JAVDEX_TEST_STALL_VIDEOS_EDIT` names an existing file, consume it and delay after commit. */
+function stallVideosEditForTests(): Promise<void> | null {
+  const stallPath = process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT
+  if (!stallPath) return null
+  try {
+    fs.unlinkSync(stallPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  fs.writeFileSync(`${stallPath}.started`, '1')
+  const delayMs = Number(process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_MS ?? 8_000)
+  return new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : 8_000))
+}
+
 export function dispatchManageOperation(context: ManageHttpContext, database?: Database.Database): unknown {
   const operation = context.operation
   const meta = MANAGE_OPERATIONS[operation]
@@ -413,7 +428,9 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
         },
         database
       )
-      return { receipt: result.receipt, ...result.data }
+      const payload = { receipt: result.receipt, ...result.data }
+      const stalled = stallVideosEditForTests()
+      return stalled ? stalled.then(() => payload) : payload
     }
     if (operation === 'videos.setPoster') {
       const input = envelope.input as { videoId: number; image: CatalogImageRef }

@@ -446,10 +446,11 @@ if (hostConfigRaw) {
           ipcMutation(undefined, versionsFrom(remoteLibrary))
         )
         remoteLibrary = (await remote.libraries.get({ libraryId: 1 })) as MediaLibraryDetail
+        const scanOperationId = randomUUID()
         const remoteScan = (await remote.libraries.runScan(
           { libraryId: 1 },
-          ipcMutation(undefined, versionsFrom(remoteLibrary))
-        )) as { taskId: string }
+          ipcMutation(scanOperationId, versionsFrom(remoteLibrary))
+        )) as { taskId: string; receipt?: { status?: string } }
         const remoteProgress = await waitForRemoteScanAfterLateReconnect(remote, remoteScan.taskId)
         const remoteTask = remoteProgress.snapshot
         assert.equal(['succeeded', 'needsInspection'].includes(remoteTask.state), true, JSON.stringify(remoteTask))
@@ -517,6 +518,38 @@ if (hostConfigRaw) {
         const remoteVideos = (await remote.queries.listVideos({ scope: { kind: 'all' } })) as ScopedVideoListResult
         assert.equal(localVideos.items.some((item) => item.code === 'ABC-001'), true, JSON.stringify(localVideos))
         assert.equal(remoteVideos.items.some((item) => item.code === 'ABC-001'), true, JSON.stringify(remoteVideos))
+        const remoteVideoId = remoteVideos.items.find((item) => item.code === 'ABC-001')!.id
+        const generationBeforeVideo = remote.generation
+        const lateVideos: unknown[] = []
+        const originalGetVideo = remote.queries.getVideo.bind(remote.queries)
+        remote.queries.getVideo = async (input, ctx) => {
+          const row = await originalGetVideo(input, ctx)
+          if (lateVideos.length === 0) {
+            await remote.reconnect()
+            lateVideos.push(row)
+          }
+          return row
+        }
+        try {
+          const lateVideo = await remote.queries.getVideo({
+            scope: { kind: 'all' },
+            videoId: remoteVideoId
+          })
+          assert.equal(lateVideos.length, 1, 'first live videos.get must complete before reconnect')
+          assert.ok(
+            remote.generation > generationBeforeVideo,
+            `reconnect must advance generation (${generationBeforeVideo} -> ${remote.generation})`
+          )
+          assert.equal(lateVideo, lateVideos[0])
+          const currentVideo = (await originalGetVideo({
+            scope: { kind: 'all' },
+            videoId: remoteVideoId
+          })) as { id: number; code?: string }
+          assert.equal(currentVideo.id, remoteVideoId)
+          assert.equal(currentVideo.code, 'ABC-001')
+        } finally {
+          remote.queries.getVideo = originalGetVideo
+        }
 
         const localNfo = (await local.nfo.getOptions({})) as NfoExportOptions
         const remoteNfo = (await remote.nfo.getOptions({})) as NfoExportOptions
@@ -613,6 +646,43 @@ if (hostConfigRaw) {
           }
         } finally {
           restoreCatalog()
+        }
+
+        const cancelWait = new AbortController()
+        const waiting = waitForCatalogTask({
+          backend: remote,
+          taskId: remoteScan.taskId,
+          timeoutMs: 10_000,
+          intervalMs: 50,
+          signal: cancelWait.signal
+        })
+        cancelWait.abort()
+        await assert.rejects(() => waiting, /任务已取消/)
+        await remote.dispose()
+        const resumed = createRemoteCatalogBackend({
+          baseUrl: base,
+          appVersion: SERVER_APP_VERSION,
+          credentials: memoryCredentials(new Map([[hello.identity.catalogId, secret]]))
+        })
+        try {
+          const receipt = (await resumed.tasks.getOperation({ operationId: scanOperationId })) as {
+            status: string
+            operationId: string
+          }
+          assert.equal(receipt.operationId, scanOperationId)
+          assert.equal(
+            ['acceptedTask', 'applied'].includes(receipt.status),
+            true,
+            JSON.stringify(receipt)
+          )
+          const continued = await waitTask(resumed, remoteScan.taskId)
+          assert.equal(
+            ['succeeded', 'needsInspection'].includes(continued.state),
+            true,
+            JSON.stringify(continued)
+          )
+        } finally {
+          await resumed.dispose()
         }
       } finally {
         await remote.dispose()

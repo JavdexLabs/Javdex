@@ -131,4 +131,75 @@ describe('RemoteCatalogBackend image disk cache', () => {
       await backend.dispose()
     }
   })
+
+  it('does not cache a late image GET that finishes after reconnect generation advances', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-d04-img-'))
+    roots.push(root)
+    let assetGets = 0
+    let hold = Promise.resolve()
+    let releaseLate: () => void = () => undefined
+    const http = createHttpServer((request, response) => {
+      const url = request.url ?? ''
+      if (url.endsWith('/handshake.get')) {
+        response.setHeader('Content-Type', 'application/json')
+        response.end(JSON.stringify(handshakeBody('catalog-cache')))
+        return
+      }
+      if (url.includes('/manage/v1/assets/')) {
+        assetGets += 1
+        const count = assetGets
+        void hold.then(() => {
+          if (response.writableEnded || response.destroyed) return
+          response.setHeader('Content-Type', 'image/png')
+          response.end(count === 1 ? PNG : Buffer.concat([PNG, Buffer.from(String(count))]))
+        })
+        return
+      }
+      response.statusCode = 404
+      response.end()
+    })
+    servers.push(http)
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve))
+    const address = http.address()
+    if (!address || typeof address === 'string') throw new Error('port')
+    const backend = createRemoteCatalogBackend({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      appVersion: '0.7.0',
+      credentials: memoryCredentials(),
+      userDataPath: root
+    })
+    try {
+      const generationBefore = backend.generation
+      hold = new Promise<void>((resolve) => {
+        releaseLate = resolve
+      })
+      const pending = backend.assets.readImage({ relPath: 'covers/reconnect.png' })
+      const rejected = assert.rejects(
+        () => pending,
+        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
+      )
+      const started = Date.now()
+      while (assetGets < 1 && Date.now() - started < 2000) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      assert.equal(assetGets, 1)
+      const session = await backend.reconnect()
+      assert.ok(session.generation > generationBefore, `${generationBefore} -> ${session.generation}`)
+      releaseLate()
+      await rejected
+      const cacheDir = remoteImageCacheCatalogDir(root, 'catalog-cache')
+      assert.equal(
+        fs.existsSync(cacheDir)
+          ? fs.readdirSync(cacheDir).some((name) => name.includes('reconnect'))
+          : false,
+        false
+      )
+      hold = Promise.resolve()
+      const after = await backend.assets.readImage({ relPath: 'covers/reconnect.png' })
+      assert.equal(assetGets, 2)
+      assert.deepEqual(after.body, Buffer.concat([PNG, Buffer.from('2')]))
+    } finally {
+      await backend.dispose()
+    }
+  })
 })

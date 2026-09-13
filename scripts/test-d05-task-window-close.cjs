@@ -182,7 +182,7 @@ async function run() {
       taskId: accepted.taskId,
       receiptStatus: receipt.status,
       taskState: terminal.state,
-      scanRunHandles: 1
+      ipcRegisteredOnce: true
     })}`
   )
 }

@@ -657,6 +657,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - M02：`files.importManual` 提交 `../` 逃逸相对路径得 400 `INVALID_INPUT`，不新建影片，错误 JSON 不含宿主绝对路径或逃逸文件名。
 - M04：`previewDeleteGlobal` 后只 `videos.importResource` 加一条 web 资源（成员数不变），再提交旧 digest 得 409，影片仍在。
 - M07：三个独立 `videos.edit`：过期 V 得 409 且标题不变；成功项同 `operationId` 重试回执为 `duplicate`；第三项在 commit 后、HTTP 返回前中止客户端，`operations.get` 为 `applied`，同号重试不改第二次标题。不是三目标分页 UI 拼接。
+- M08：扫描在枚举后、每个协作清理页前、以及原子清理前重新 `inspectRoot`；已卸载的根从 `safeRoots` 拿掉，不会把挂载消失当成每个文件 `missing` 而删记录。`JAVDEX_TEST_UMOUNT_SCAN` 只在测试指令文件存在时暂停，让测试去 `umount` 真实 `mount --bind`（`522246c`）。`runtime.test.ts`：挂载点卸载后仍存在（区别于 S09 `renameSync` 路径消失和只删标记）；KEEP/GONE 记录保留；原 `.javdex-root` inode/mtime 在 remount 后不变（不自动补建）；再挂上后扫描才清理真正删掉的 GONE 文件；卸载后用挂载时算的 `files.rename` digest 得 409 `VERSION_CONFLICT`。协作清理页与页之间：已提交 128 条 missing-resource 删除后 `inspectRoot` 变离线，第 129 条保留（`scanCooperativeCleanup.test.ts`，不是第二次真实 umount）。
 - 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2` / `65c3e1c` / `5ebff2d` / `4822fb6` / `1bac323` / `4c79d67` / `e187266` / `6ad4b84` / `156c1a8` / `5699eae` / `8d3d8f4` / `544e099` / `747ab75` / `933797f` / `e9ee433` / `5401689` / `3152bf1` / `86a82b5` / `870ddf2` / `bc019ee` / `2dd1e54` / `8fc3d9a` / `cb13f72` / `6be92a7`）：
   - `npx tsc --noEmit -p tsconfig.server.json --composite false` 通过
   - `npx tsc --noEmit -p tsconfig.node.json --composite false` 通过
@@ -667,8 +668,9 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - `npm run server:smoke:migration` **EXIT 0**（本会话 `bc-d991d9d2-a4ef-57ac-86c9-f10d2c228a95`；Docker Engine 28.5.2，fuse-overlayfs）：`PASS: Docker dual-host migrate-auth, package, start/enable, status phases, official images, source frozen backup`。本会话预构建 snapshot `bld-20260913-35f7dd31-…` 未写入 `.cursor/Dockerfile`（无 `docker` 二进制，`start` 为 `docker: unrecognized service`）；按仓库配方在会话内安装 Docker CE 28.5.2 后跑通，不是静默跳过。覆盖两个生产镜像容器、源/空目标独立 `dataDir`+`imagesDir` 卷、CLI `migrate-auth`、manage HTTP preview/start/PUT/enable、两端 `migration.status`（源 `frozen` / 目标 `enabled`）、目标正式封面文件、源封面仍在。不是安装包；不是完整 M/D 矩阵；未在 Docker 内重做 `EACCES` 拷图回滚或 enable/abandon 竞态。
   - Linux 同版本安装包+镜像烟测见 S14（`bc-5e834a3f-586f-520f-8029-8ce75378a04f`）。不是 Windows/macOS 安装包；不是完整 M/D 矩阵。
   - 本会话 `bc-0428fa2d-2d80-5b88-9a24-3803823e9244`：`tsc --noEmit` `tsconfig.server.json` / `tsconfig.node.json` 通过。定向 `runtime.test.ts` M01/M02/M04/M07 **4 通过**。`dualBackendScan.e2e.test.ts` **1 通过**（含迟到 `videos.get` 与取消等待后 `operations.get`）。`remoteImageDiskCache.integration.test.ts` **2 通过**。`npm run server:test` 其余宿主项通过；本机无 `/usr/bin/mpv`，既有 M15 mpv 项失败且未伪装绿灯。未重跑全量 Electron。
+  - 本会话 `bc-59bde151-be0b-4c9e-8ca2-12376b967412`：`tsc --noEmit` `tsconfig.server.json` / `tsconfig.node.json` 通过。`runtime.test.ts` **21 通过 / 0 失败**（含 S09 标记 vs 路径消失、M08 真实 bind-mount umount、M15 `/usr/bin/mpv`）。定向 Electron `scanCoordinator.test.ts` + `scanCooperativeCleanup.test.ts` **49 通过**；`scanCoordinatorEntries.test.ts` + `libraryPathCleanupService.test.ts` **33 通过**。本机有 `sudo mount --bind` / `umount` 与 `/usr/bin/mpv`；无 `docker`，未重跑容器烟测或全量 Electron。
 - 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](SERVER_MODE.md) C1–C7。E2 已改为解锁第一版发布路径（S14 剩余门闩通过后可升 0.8 / 写 CHANGELOG / 准备合并 main）；本轮仍不升版本、不写 CHANGELOG、不合并 main。单容器 `server:smoke` 已通过（#107）。Linux 同版本安装烟测见 S14，不是完整桌面 GUI 产品流，也不是 Windows/macOS 安装包。
-- 未做：Windows NSIS/ZIP 与 macOS DMG 安装包烟测（本 Linux VM 不能诚实构建/签署）；远程 FILE_RENAME（C1）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流；M07 三目标分页 UI 拼接；完整 M01–M15 / D01–D07。不得把 mock 当完成证据。不得宣称 S13/S14 或 M/D 矩阵已全部完成。本会话 `bc-0428fa2d-2d80-5b88-9a24-3803823e9244` 无 `/usr/bin/mpv`，未重跑 M15 真实播放。
+- 未做：Windows NSIS/ZIP 与 macOS DMG 安装包烟测（本 Linux VM 不能诚实构建/签署）；远程 FILE_RENAME（C1）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流；M07 三目标分页 UI 拼接；M08 第二页清理前的第二次真实 umount（页间离线用 `inspectRoot` 注入）；完整 M01–M15 / D01–D07。不得把 mock 当完成证据。不得宣称 S13/S14 或 M/D 矩阵已全部完成。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -681,7 +683,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M05 受理边界 | 部分 | S06 上传/apply/重启；S09 任务入队 | 同上 | 短事务提交前断响应的断电级注入未做 |
 | M06 接管竞争 | 部分 | S05/S09 交接等待挡住新扫描 | 同上 | 旧请求暂停于 I/O 再领取的完整时序未做 |
 | M07 批量部分结果 | 部分 | S10 目标列表冻结；本轮三独立 `videos.edit`：过期 409、成功 duplicate、commit 后断线查回执再同号重试 | Linux Node 22.14 in-process 宿主 `runtime.test.ts` | 三目标分页 UI 拼接未做；断线是 AbortSignal 不是 WAN |
-| M08 真挂载卸载 | 部分 | S09 标记 vs 卸载 | 同上 | 枚举后/每批清理前真实卸载未做 |
+| M08 真挂载卸载 | 部分 | S09 标记 vs `renameSync` 路径消失；本轮真实 `mount --bind` + `umount`：枚举后与首个 resources 清理页前卸载，挂载点仍在、记录保留、remount 不补建标记、随后挂上才清理真正缺失文件；卸载后 rename digest 409 | Linux Node 22.14 in-process 宿主；`sudo mount --bind` | 页与页之间的第二次真实 umount 未做（`inspectRoot` 注入）；不是 NAS 拔盘 / Windows 盘符 |
 | M09 预览与停服 | 部分 | S09 NFO 计划与关浏览 | 同上 | 过期后再提交、停网页后管理仍可用已有部分证据 |
 | M10 桌面隔离 | 部分 | 远程 start 采集/助手概览/裁切快照/清单导入，以及 matching ingest 与 applyImport，chmod 000 后 `/proc` 无 `library.db`；`8fc3d9a` 对真实 Node 宿主 ingest+apply 建清单 | Electron-as-Node isolation + `dualBackendScan.e2e.test.ts` | 刮削单条仍可走本地队列；无冻结 `video_sources`；apply 不写 per-video links |
 | M11 分页与目标清单 | 部分 | S10 `targetLists`；limit=1 取第一页后插入新片或删除已冻结 id，offset=1 与完整 page 仍是冻结快照 | Node 宿主 `runtime.test.ts` | UI 对已删除冻结 id 的占位展示未再铺 |

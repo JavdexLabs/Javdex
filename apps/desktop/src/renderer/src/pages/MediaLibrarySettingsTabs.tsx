@@ -32,6 +32,7 @@ import { NavIcon } from '../components/NavIcons'
 import SelectControl from '../components/SelectControl'
 import SettingsSwitchRow from '../components/SettingsSwitchRow'
 import LibraryScanAuditPanel from '../components/settings/LibraryScanAuditPanel'
+import MediaLibraryScanRunButton from '../components/settings/MediaLibraryScanRunButton'
 import {
   SettingsEmptyPanel,
   SettingsNumberStepper,
@@ -40,7 +41,6 @@ import {
 } from '../components/settings/SettingsPrimitives'
 import type { useMediaLibraryScanController } from '../hooks/useMediaLibraryScanController'
 import {
-  canRunMediaLibraryScan,
   mediaLibraryLifecycleCapabilities,
   type MediaLibraryConfigKey,
   type MediaLibraryIdentityDraft
@@ -506,34 +506,7 @@ export function ScanSettingsTab({
         </div>
 
         <div className={styles.scanCommandRow}>
-          <Button
-            type="button"
-            variant={scan.running ? 'default' : 'primary'}
-            disabled={
-              scan.running
-                ? scan.cancelling || !scan.activeRunId
-                : formDisabled || !canRunMediaLibraryScan(library)
-            }
-            title={
-              !scan.running && !canRunMediaLibraryScan(library)
-                ? '请先添加或启用来源目录'
-                : undefined
-            }
-            onClick={() => void (scan.running ? scan.cancel() : scan.start())}
-          >
-            {scan.running ? (
-              <Square {...UI_ICON_SM} aria-hidden />
-            ) : (
-              <Play {...UI_ICON_SM} aria-hidden />
-            )}
-            {scan.running
-              ? scan.cancelling
-                ? '正在取消…'
-                : '取消扫描'
-              : library.activeRootCount > 0
-                ? '扫描并导入'
-                : '执行待清理'}
-          </Button>
+          <MediaLibraryScanRunButton scan={scan} library={library} formDisabled={formDisabled} />
           <div className={styles.scanDuration}>
             <span className={styles.scanDurationLabel}>
               <Clock {...UI_ICON_SM} aria-hidden />

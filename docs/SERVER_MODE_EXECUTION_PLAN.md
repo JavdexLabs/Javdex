@@ -63,8 +63,8 @@
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面，但远程匹配/apply 走 CatalogBackend | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理、远程 mpv 与按 catalog 隔离的临时磁盘 LRU 已落地 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
-| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start+匹配+真实 Node HTTP apply、D04 任务进度 generation 门闩、迟到 HTTP 交付与 in-flight abort、D05 窗口 binder 与真实 BrowserWindow 关闭/重建、M13/M15 mpv、全量 Electron 3056 通过；单容器 `server:smoke` 已通过；Docker 两端迁库烟测见 `server:smoke:migration`。安装包未做。不得宣称 M01–M15 / D01–D07 全部完成 | 见本文件 S13 实施记录 |
-| S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
+| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start+匹配+真实 Node HTTP apply、D04 任务进度 generation 门闩、迟到 HTTP 交付与 in-flight abort、D05 窗口 binder 与真实 BrowserWindow 关闭/重建、M13/M15 mpv、全量 Electron 3056 通过；单容器 `server:smoke` 已通过；Docker 两端迁库烟测见 `server:smoke:migration`。Linux 同版本安装包+镜像烟测见 S14。不得宣称 M01–M15 / D01–D07 全部完成 | 见本文件 S13 实施记录 |
+| S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；Linux 同版本 `deb`/`AppImage` + `javdex-server:smoke` 安装烟测已做（`smoke:same-version-install`）。Windows/macOS 安装包与 CHANGELOG 0.8 未做 | 见本文件 S14 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -660,9 +660,9 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=900000 node scripts/run-electron-tests.mjs` **3057 tests / 3056 pass / 0 fail / 1 skip**（`2dd1e54` 工作树；本轮未重跑全量）
   - `npm run server:smoke` **EXIT 0**（本会话 Docker Engine 28.5.2；见上条单容器证据）
   - `npm run server:smoke:migration` **EXIT 0**（本会话 `bc-d991d9d2-a4ef-57ac-86c9-f10d2c228a95`；Docker Engine 28.5.2，fuse-overlayfs）：`PASS: Docker dual-host migrate-auth, package, start/enable, status phases, official images, source frozen backup`。本会话预构建 snapshot `bld-20260913-35f7dd31-…` 未写入 `.cursor/Dockerfile`（无 `docker` 二进制，`start` 为 `docker: unrecognized service`）；按仓库配方在会话内安装 Docker CE 28.5.2 后跑通，不是静默跳过。覆盖两个生产镜像容器、源/空目标独立 `dataDir`+`imagesDir` 卷、CLI `migrate-auth`、manage HTTP preview/start/PUT/enable、两端 `migration.status`（源 `frozen` / 目标 `enabled`）、目标正式封面文件、源封面仍在。不是安装包；不是完整 M/D 矩阵；未在 Docker 内重做 `EACCES` 拷图回滚或 enable/abandon 竞态。
-  - 未跑安装包
-- 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](SERVER_MODE.md) C1–C7。E2 已改为解锁第一版发布路径（S14 剩余门闩通过后可升 0.8 / 写 CHANGELOG / 准备合并 main）；本轮仍不升版本、不写 CHANGELOG、不合并 main。单容器 `server:smoke` 已通过（#107），不是安装包。
-- 未做：同版本桌面安装包烟测；远程 FILE_RENAME（C1）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流；完整 M01–M15 / D01–D07。不得把 mock 当完成证据。不得宣称 S13/S14 或 M/D 矩阵已全部完成。
+  - Linux 同版本安装包+镜像烟测见 S14（`bc-5e834a3f-586f-520f-8029-8ce75378a04f`）。不是 Windows/macOS 安装包；不是完整 M/D 矩阵。
+- 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](SERVER_MODE.md) C1–C7。E2 已改为解锁第一版发布路径（S14 剩余门闩通过后可升 0.8 / 写 CHANGELOG / 准备合并 main）；本轮仍不升版本、不写 CHANGELOG、不合并 main。单容器 `server:smoke` 已通过（#107）。Linux 同版本安装烟测见 S14，不是完整桌面 GUI 产品流，也不是 Windows/macOS 安装包。
+- 未做：Windows NSIS/ZIP 与 macOS DMG 安装包烟测（本 Linux VM 不能诚实构建/签署）；远程 FILE_RENAME（C1）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流；完整 M01–M15 / D01–D07。不得把 mock 当完成证据。不得宣称 S13/S14 或 M/D 矩阵已全部完成。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -680,7 +680,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M10 桌面隔离 | 部分 | 远程 start 采集/助手概览/裁切快照/清单导入，以及 matching ingest 与 applyImport，chmod 000 后 `/proc` 无 `library.db`；`8fc3d9a` 对真实 Node 宿主 ingest+apply 建清单 | Electron-as-Node isolation + `dualBackendScan.e2e.test.ts` | 刮削单条仍可走本地队列；无冻结 `video_sources`；apply 不写 per-video links |
 | M11 分页与目标清单 | 部分 | S10 `targetLists`；limit=1 取第一页后插入新片或删除已冻结 id，offset=1 与完整 page 仍是冻结快照 | Node 宿主 `runtime.test.ts` | UI 对已删除冻结 id 的占位展示未再铺 |
 | M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
-| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs `ENOSPC` / `chmod 000` `EACCES` 后 enable 回滚 `ready`；Docker 两端成功 enable 路径见 `server:smoke:migration` | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts`；`scripts/server-migration-smoke.mjs` | 竞态/回滚仍非 Docker；安装包未做 |
+| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs `ENOSPC` / `chmod 000` `EACCES` 后 enable 回滚 `ready`；Docker 两端成功 enable 路径见 `server:smoke:migration` | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts`；`scripts/server-migration-smoke.mjs` | 竞态/回滚仍非 Docker；Windows/macOS 安装包未做 |
 | M14 图片与恢复 | 部分 | 源端导出自动解密到包（源正式图不变）；缺别名 start 失败并解冻；正式封面随迁；孤立 uploads 不进包且恢复删除；拷图 `EACCES`/`ENOSPC` 后 enable 回滚 | Electron-as-Node `catalogMigration.test.ts` | 目标仍拒绝包内残留密文 |
 | M15 播放 | 部分 | S11 HTTP Range + S13 真实 mpv：断流后续播、过期 404、seek 2.2、MKV、handoff 后 404 | 本机 `/usr/bin/mpv` 0.37.0；ffmpeg 6.1.1 | 非环回 WAN 丢包未做 |
 | D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据/已连接 available 及 M10 六探针子进程 `/proc/<pid>/fd` 均无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 刮削单条队列仍可 `getDb()` |
@@ -699,9 +699,18 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 
 **S14 实施记录（进行中）**
 
-- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、源端导出自动解密、enable 拷图失败回滚，以及 C1–C7 已知限制。E2 已解锁第一版发布路径，仍须 S14 剩余门闩（含安装包烟测与 CHANGELOG）通过后才升 0.8 / 准备合并 main。单容器 `server:smoke` 已通过（#107）；Docker 两端迁库见 S13 `server:smoke:migration`。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
+- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、源端导出自动解密、enable 拷图失败回滚，以及 C1–C7 已知限制。E2 已解锁第一版发布路径，仍须 S14 剩余门闩（含 Windows/macOS 安装包与 CHANGELOG）通过后才升 0.8 / 准备合并 main。单容器 `server:smoke` 已通过（#107）；Docker 两端迁库见 S13 `server:smoke:migration`。Linux 同版本桌面包 + 服务镜像安装烟测见本轮 `smoke:same-version-install`。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
 - 验证：文档提交；`npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**（先前记录）；后续 Docker-in-Docker 会话 `server:smoke` **EXIT 0**（单容器 bind+claim+restart，见 S13）。`server:smoke:node` 仍只是宿主进程检查。
-- 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。S13 剩余矩阵见上一节。不得宣称 S13/S14 完成。
+- Linux 同版本安装烟测（本会话 `bc-5e834a3f-586f-520f-8029-8ce75378a04f`；Engine 28.5.2 / fuse-overlayfs；snapshot `bld-20260913-35f7dd31-…` 仍未写入 `.cursor/Dockerfile`，按仓库配方现装 Docker CE 后跑通，不是静默跳过）：
+  - 源码版本保持 **0.7.0**（根与全部 workspace；未升 0.8，未写 CHANGELOG）
+  - `npm run test:packaging` **8 通过 / 0 失败** **EXIT 0**
+  - `npm run setup:desktop` **EXIT 0**；`CI=true npm run dist:linux` **EXIT 0**：`dist/Javdex-0.7.0-amd64.deb`（121 MiB，`dpkg-deb` Package=`javdex` Version=`0.7.0` Architecture=`amd64`）、`dist/Javdex-0.7.0-x86_64.AppImage`（154 MiB）、`dist/linux-unpacked/javdex`
+  - `npm run packaging:verify-agent-runtime -- dist/linux-unpacked` **EXIT 0**（`app.asar` 88.5 MiB）
+  - `npm run server:build` **EXIT 0**：`out/server` version `0.7.0`
+  - `npm run smoke:same-version-install` **EXIT 0**：workspace/`out/server`/deb control/`app.asar`/AppImage/`javdex-server:smoke` 均为 `0.7.0`；`dpkg-deb -x` 解包到 `/opt/Javdex`；打包 Electron **43.4.1**（`ELECTRON_RUN_AS_NODE`）；Xvfb 下解包二进制保持运行至 `timeout` 12s（exit **124**，不是完整首次使用 GUI）；镜像 `sha256:63e10f03…`；内嵌 `server:smoke` **`PASS: Docker image, volume SQLite, bind gate, session restart`**
+  - 缺 `dist/` 时脚本 **EXIT 1**（`No Linux .deb or linux-unpacked`），不静默跳过
+  - **硬限制（有证据，不伪装绿灯）**：本机 `Linux x86_64`。`packaging.targets.json` 规定 win-nsis/win-zip 需 Windows、mac-dmg 需 macOS（含签名身份）。本会话未产生、未安装、未签署这些产物。
+- 未做：Windows NSIS/ZIP 与 macOS DMG 真实安装；完整桌面首次使用/远程连接 GUI 产品流；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。S13 剩余矩阵见上一节。不得宣称 S13/S14 完成。
 
 ## 接手环境与验证命令
 
@@ -718,6 +727,14 @@ npm run test:packaging
 $env:JAVDEX_TEST_TIMEOUT_MS = '900000'
 node scripts/run-electron-tests.mjs
 ```
+
+Linux 同版本安装烟测（需本机 Docker，以及先 `npm run setup:desktop`、`npm run dist:linux`、`npm run server:build`）：
+
+```powershell
+npm run smoke:same-version-install
+```
+
+缺 Docker 或缺 Linux `dist/` 产物必须非零退出。Windows/macOS 安装包须在对应操作系统构建，不能用本命令冒充。
 
 特定领域测试用移动后的真实路径，例如 `node scripts/run-electron-tests.mjs packages/library/src/db/migrationsV16.test.ts`；后续 S02 移动该文件时更新命令。S04 建立的 server 命令须写入根 scripts 并在 Docker/CI 实际运行后才可作为完成依据。
 

@@ -63,5 +63,6 @@ Follow-up session verification:
 3. `npm run server:smoke` exits 0. Missing Docker must exit non-zero.
 4. `npm run server:smoke:migration` is the Docker dual-host catalog migration smoke (separate source/target volumes, `migrate-auth`, package, start/enable, status + official image file checks). Missing Docker must exit non-zero.
 5. `npm run server:smoke:node` is a host-process check, not container acceptance.
+6. `npm run smoke:same-version-install` is the same-source-version Linux desktop package + server image install smoke. It needs `out/server` and a Linux `dist/` artifact from this commit. Missing Docker or missing Linux packages must exit non-zero. Windows NSIS/ZIP and macOS DMG are not produced on this Linux VM.
 
-`install` is `npm ci` only. Do not run `setup:desktop` / Electron rebuild for server smoke.
+`install` is `npm ci` only. Do not run `setup:desktop` / Electron rebuild for server-only smoke. Desktop package smoke does need `setup:desktop` then `dist:linux`.

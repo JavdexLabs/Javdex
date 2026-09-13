@@ -59,6 +59,7 @@
     "server:smoke": "node --import tsx scripts/server-smoke.mjs",
     "server:smoke:node": "TSX_TSCONFIG_PATH=tsconfig.server.json node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-smoke-node.mjs",
     "server:smoke:migration": "TSX_TSCONFIG_PATH=tsconfig.server.json ELECTRON_RUN_AS_NODE= node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-migration-smoke.mjs",
+    "smoke:same-version-install": "node scripts/same-version-install-smoke.mjs",
     "typecheck:browser": "tsc --noEmit -p tsconfig.browser.json"
   },
   "dependencies": {

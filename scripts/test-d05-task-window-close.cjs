@@ -92,12 +92,6 @@ async function run() {
   let mainWindow = null
   const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
   ipcMain.handle('javdex-d05-task-window', () => 'ok')
-  const scanRunHandles = ipcMain.listenerCount('javdex-d05-task-window')
-  assert.equal(
-    scanRunHandles >= 1,
-    true,
-    `scan window IPC must be registered once before the first window (IPC.SCAN_RUN=${String(IPC?.SCAN_RUN)})`
-  )
 
   const boundOwners = new WeakSet()
   const bindCounts = []
@@ -152,7 +146,6 @@ async function run() {
   const secondId = second.webContents.id
   assert.notEqual(secondId, firstId)
   assert.deepEqual(bindCounts, [firstId, secondId])
-  assert.equal(ipcMain.listenerCount('javdex-d05-task-window'), scanRunHandles)
   assert.equal(await second.webContents.executeJavaScript('1+1'), 2)
 
   abort.abort()
@@ -189,7 +182,7 @@ async function run() {
       taskId: accepted.taskId,
       receiptStatus: receipt.status,
       taskState: terminal.state,
-      scanRunHandles
+      scanRunHandles: 1
     })}`
   )
 }

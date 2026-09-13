@@ -896,9 +896,21 @@ describe('server runtime lifecycle', () => {
         .get(videoId) as { generation: number; revision: number }
       assert.deepEqual(afterRating, version)
 
+      const titled = await remote.videos.edit(
+        { videoId, fields: { title: 'Rated then titled' } },
+        { operationId: randomUUID(), expectedVersions: { V: version } }
+      )
+      assert.equal(titled, true)
+      const afterTitle = (await remote.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId
+      })) as { title: string; revision: number }
+      assert.equal(afterTitle.title, 'Rated then titled')
+      assert.equal(afterTitle.revision, version.revision + 1)
+
       await remote.videos.addManualTag({ videoId, name: 's08-manual' }, {
         operationId: randomUUID(),
-        expectedVersions: { V: version }
+        expectedVersions: { V: { generation: version.generation, revision: afterTitle.revision } }
       })
       const manuals = (await remote.queries.listManualTags({})) as Array<{ name: string }>
       const localManuals = (await local.queries.listManualTags({})) as Array<{ name: string }>

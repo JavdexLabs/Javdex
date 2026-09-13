@@ -13,7 +13,7 @@ npm run server:test
 npm run server:smoke:node
 ```
 
-`server:smoke` builds and runs the Linux container. `server:smoke:migration` starts two containers with separate `dataDir`/`imagesDir` volumes and runs source → empty-target catalog migration over manage HTTP. Both exit non-zero when Docker is missing.
+`server:smoke` builds and runs the Linux container. `server:smoke:migration` starts two containers with separate `dataDir`/`imagesDir` volumes and runs source → empty-target catalog migration over manage HTTP, then extra production containers for enable/abandon races and image-copy `EACCES`/`ENOSPC` rollback. Both exit non-zero when Docker is missing.
 
 ```bash
 node out/server/index.js start --config deploy/javdex-server.example.json

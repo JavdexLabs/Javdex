@@ -61,7 +61,7 @@ Follow-up session verification:
 1. `docker version` and `docker info` succeed (daemon up, `ubuntu` can talk to it).
 2. `npm run server:build` writes `out/server` (the image context).
 3. `npm run server:smoke` exits 0. Missing Docker must exit non-zero.
-4. `npm run server:smoke:migration` is the Docker dual-host catalog migration smoke (separate source/target volumes, `migrate-auth`, package, start/enable, status + official image file checks). Missing Docker must exit non-zero.
+4. `npm run server:smoke:migration` is the Docker dual-host catalog migration smoke (separate source/target volumes, `migrate-auth`, package, start/enable, status + official image file checks, and image-copy `EACCES`/`ENOSPC` rollback). Missing Docker must exit non-zero.
 5. `npm run server:smoke:node` is a host-process check, not container acceptance.
 6. `npm run smoke:same-version-install` is the same-source-version Linux desktop package + server image install smoke. It needs `out/server` and a Linux `dist/` artifact from this commit. Missing Docker or missing Linux packages must exit non-zero. Windows NSIS/ZIP and macOS DMG are not produced on this Linux VM.
 

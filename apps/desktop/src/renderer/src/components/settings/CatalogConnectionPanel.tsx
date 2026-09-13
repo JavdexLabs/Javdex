@@ -18,7 +18,7 @@ type ConnectionDraft = {
 }
 
 export default function CatalogConnectionPanel(): JSX.Element {
-  const { session, reconnect, claimWriter } = useDesktopSession()
+  const { session, capabilities, reconnect, claimWriter } = useDesktopSession()
   const [savedSettings, setSavedSettings] = useState<ThisComputerSettings | null>(null)
   const saved: ConnectionDraft = {
     mode: savedSettings?.mode ?? 'local',
@@ -133,6 +133,11 @@ export default function CatalogConnectionPanel(): JSX.Element {
           {session.mode === 'remote' ? '远程' : '本地'} · {session.state}
           {session.catalogId ? ` · ${session.catalogId}` : ''}
           {session.message ? ` · ${session.message}` : ''}
+        </p>
+        <p className={styles.testHint}>
+          {capabilities.migrateCatalog.allowed
+            ? '迁库入口与本地相同；远程走现有 HTTP migration，不打开本机 library.db。'
+            : `迁库不可用（${capabilities.migrateCatalog.reason}）。`}
         </p>
         {session.mode === 'remote' && session.state !== 'available' ? (
           <div className={styles.addressRow}>

@@ -133,10 +133,10 @@ export function auditPageThroughBackend(
   return backend.libraries.auditPage({
     libraryId: snapshot.libraryId,
     section: query.section,
-    outcome: query.outcome,
-    attention: query.attention,
-    limit: query.limit,
-    offset: query.offset
+    ...(query.outcome != null ? { outcome: query.outcome } : {}),
+    ...(query.attention != null ? { attention: query.attention } : {}),
+    ...(query.limit != null ? { limit: query.limit } : {}),
+    ...(query.offset != null ? { offset: query.offset } : {})
   })
 }
 
@@ -151,13 +151,13 @@ export function auditViewPageThroughBackend(
   return backend.libraries.auditViewPage({
     libraryId: snapshot.libraryId,
     tab: query.tab,
-    outcome: query.outcome,
-    changesFilter: query.changesFilter,
-    search: query.search,
-    locale: query.locale,
-    limit: query.limit,
-    offset: query.offset,
-    anchor: query.anchor
+    ...(query.outcome != null ? { outcome: query.outcome } : {}),
+    ...(query.changesFilter != null ? { changesFilter: query.changesFilter } : {}),
+    ...(query.search != null ? { search: query.search } : {}),
+    ...(query.locale != null ? { locale: query.locale } : {}),
+    ...(query.limit != null ? { limit: query.limit } : {}),
+    ...(query.offset != null ? { offset: query.offset } : {}),
+    ...(query.anchor != null ? { anchor: query.anchor } : {})
   })
 }
 

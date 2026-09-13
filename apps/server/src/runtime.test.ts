@@ -4028,9 +4028,7 @@ describe('server runtime lifecycle', () => {
       await remote.dispose()
     }
   })
-})
 
-describe('RemoteCatalogBackend reconnect isolation', () => {
   it('fails an in-flight remote query with a TCP RST and reconnects on a new generation', async () => {
     const dataDir = path.join(root, 'd04-tcp-rst')
     const { base, config } = await boot(dataDir)
@@ -4085,7 +4083,9 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
       await proxy.close()
     }
   })
+})
 
+describe('RemoteCatalogBackend reconnect isolation', () => {
   it('bumps generation and aborts an in-flight query so a late response cannot replace the new session', async () => {
     let release!: () => void
     const hold = new Promise<void>((resolve) => {

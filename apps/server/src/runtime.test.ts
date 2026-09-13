@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { createConnection, createServer, type Socket } from 'node:net'
-import { createServer as createHttpServer } from 'node:http'
+import { createServer as createHttpServer, request as httpRequest } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -242,6 +242,8 @@ function startTcpRstProxy(targetPort: number): Promise<{
   const sockets = new Set<Socket>()
   let dropUpstream = false
   let dropped = 0
+  const targetHost = `127.0.0.1:${targetPort}`
+  const targetOrigin = `http://${targetHost}`
   const ignoreSocketError = (): void => undefined
   const track = (socket: Socket): void => {
     sockets.add(socket)
@@ -257,26 +259,34 @@ function startTcpRstProxy(targetPort: number): Promise<{
       socket.destroy()
     }
   }
-  const server = createServer((client) => {
-    track(client)
-    const upstream = createConnection({ host: '127.0.0.1', port: targetPort })
-    track(upstream)
-    client.on('data', (chunk) => {
-      if (!upstream.destroyed) upstream.write(chunk)
-    })
-    upstream.on('data', (chunk) => {
-      if (dropUpstream) {
-        dropped += chunk.length
-        return
+  const server = createHttpServer((req, res) => {
+    track(req.socket)
+    const headers = { ...req.headers, host: targetHost, origin: targetOrigin }
+    const upstream = httpRequest(
+      {
+        hostname: '127.0.0.1',
+        port: targetPort,
+        path: req.url,
+        method: req.method,
+        headers
+      },
+      (upRes) => {
+        if (dropUpstream) {
+          upRes.on('data', (chunk) => {
+            dropped += chunk.length
+          })
+          upRes.resume()
+          return
+        }
+        res.writeHead(upRes.statusCode ?? 502, upRes.headers)
+        upRes.pipe(res)
       }
-      if (!client.destroyed) client.write(chunk)
-    })
-    client.on('close', () => {
-      if (!upstream.destroyed) upstream.destroy()
-    })
-    upstream.on('close', () => {
-      if (!client.destroyed) client.destroy()
-    })
+    )
+    upstream.on('socket', (socket) => track(socket))
+    upstream.on('error', ignoreSocketError)
+    req.on('error', ignoreSocketError)
+    res.on('error', ignoreSocketError)
+    req.pipe(upstream)
   })
   return new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -1332,7 +1342,7 @@ describe('server runtime lifecycle', () => {
       assert.equal(nextScan.status, 200, JSON.stringify(nextScan.json))
       const nextTask = await pollTask((nextScan.json as { taskId: string }).taskId)
       assert.equal(nextTask.state, 'succeeded', JSON.stringify(nextTask))
-      const oldWriter = await postManage(
+      const oldSecret = await postManage(
         base,
         'videos.edit',
         {
@@ -1345,8 +1355,23 @@ describe('server runtime lifecycle', () => {
         },
         { bearer: writer.secret }
       )
-      assert.equal(oldWriter.status, 409, JSON.stringify(oldWriter.json))
-      assert.equal((oldWriter.json as { code?: string }).code, 'WRITER_REVOKED')
+      assert.equal(oldSecret.status, 401, JSON.stringify(oldSecret.json))
+      assert.equal((oldSecret.json as { code?: string }).code, 'AUTH_REQUIRED')
+      const staleEpoch = await postManage(
+        base,
+        'videos.edit',
+        {
+          operationId: randomUUID(),
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          expectedVersions: { V: { generation: 1, revision: 1 } },
+          input: { videoId: 1, fields: { title: 'should not apply' } }
+        },
+        { bearer: nextSecret }
+      )
+      assert.equal(staleEpoch.status, 409, JSON.stringify(staleEpoch.json))
+      assert.equal((staleEpoch.json as { code?: string }).code, 'WRITER_REVOKED')
     } finally {
       if (previousUnmount === undefined) delete process.env.JAVDEX_TEST_UMOUNT_SCAN
       else process.env.JAVDEX_TEST_UMOUNT_SCAN = previousUnmount

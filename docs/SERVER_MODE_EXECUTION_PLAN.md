@@ -63,7 +63,8 @@
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理与远程 mpv 启动已落地；无磁盘 LRU 图片缓存 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
-| S13 | 进行中：首次扫描、孤立暂存恢复、两端重启已落地；Docker/安装包/全量矩阵未做 | 见本文件 S13 实施记录 |
+| S13 | 进行中：D01 `/proc`、D02 双后端扫描/NFO、M13 丢响应后再重启、FILE_IMPORT 已落地；Docker/安装包/全量矩阵未做 | 见本文件 S13 实施记录 |
+| S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -636,17 +637,17 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 **S13 实施记录（进行中）**
 
 - 本环境 `docker` 不存在（`command not found`，无 `/var/run/docker.sock`）。容器镜像烟测仍按设计失败，不能用 Node 进程冒充镜像验收。
-- 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。另有启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`，封面与影片行仍在。`npm run server:test` 现为 24 + 2 通过。这覆盖 M13 的进程级竞态与启用后重启，不是 Docker 两端，也不是“丢弃两种 HTTP 响应后再重启”。
+- 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`。第三例在 `ready` 后丢弃 enable/abandon HTTP 响应再 SIGTERM，拉起后以 `migration.status` 为准，终态仍互斥（`e700e3f`）。不是 Docker 两端。
 - M12：启用后对目标 `library.db` 做真实 `scanCoordinator.run`。未映射孤儿片无本地资源、自动清理关闭时成员保留；把 `remove_resource_less_memberships` 改回 1 再扫才会删成员（`e05c165`）。
 - M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。加密存量仍只预检计数，无源端解密流程。
-- S02D：`SCAN_RUN` / `SCAN_LATEST_GET` 走 `CatalogBackend`；远程 NFO IPC 走 catalog XML 导出并轮询任务事件。本地 NFO 仍用 Electron `nfoExportTaskController` 以保留封面编码。采集 start/plan 仍桌面单例。
-- 验证（Linux Node 22.14 / amd64 glibc；`e05c165` / `5a5a0fc` / `3c9ed03`）：
+- S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` 走 `CatalogBackend`。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 start/plan 仍桌面单例。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 拒绝；未识别路径仍走桌面 `renameAndImport`。`PENDING_SCAN_RESOLVE` / `SCAN_AUDIT_PAGE` 仍 library 单例。
+- 验证（Linux Node 22.14 / amd64 glibc；`e05c165` / `5a5a0fc` / `3c9ed03` / `18b31df` / `8fe392a` / `e700e3f` / `034d6f2`）：
   - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` 通过
   - `npm run pretest` 通过
-  - `npm run server:test` **24 + 2 通过 / 0 失败**
-  - 定向 Electron：`catalogMigrationAcceptance` **2 通过**；`catalogImageRecovery` **2 通过**；`catalogMigration` + `scanHandlers` **18 通过**
+  - `npm run server:test` **24 + 3 + 1 通过 / 0 失败**（runtime、migrationHosts 含丢响应后再重启、dualBackendScan）
+  - 定向 Electron：`catalogMigrationAcceptance` **2 通过**；`catalogImageRecovery` **2 通过**；`createDesktopRuntime` / isolation **11 通过**；`scanHandlers` **18 通过**
   - 未跑本阶段全量 Electron / Docker / 安装包
-- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；磁盘不足/权限变化故障注入；源端加密解密流程；丢响应后再重启两端；S14 ADR/用户迁移文档；磁盘 LRU；全量 Electron。不得把 mock 当完成证据。
+- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；磁盘不足/权限变化故障注入；源端加密解密流程；磁盘 LRU；全量 Electron。不得把 mock 当完成证据。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -664,15 +665,15 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M10 桌面隔离 | 部分 | S07/S10 远程不打开本地权威库；采集工作留桌面 | Electron-as-Node + Node 宿主 | 远程启动采集/助手/裁切的进程级文件监测未做 |
 | M11 分页与目标清单 | 部分 | S10 `targetLists` | Node 宿主 | 翻页中插入/删除后再取下一页未做 |
 | M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
-| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启 | `migrationHosts.e2e.test.ts` | 丢弃两种 HTTP 响应后再重启未做；非 Docker |
+| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启 | `migrationHosts.e2e.test.ts` 3 例 | 非 Docker；磁盘满未做 |
 | M14 图片与恢复 | 部分 | 加密阻止迁入；正式封面随迁；孤立 uploads 不进包且恢复删除 | Electron-as-Node | 无源端解密；enable 拷图失败整笔回滚未做 |
 | M15 播放 | 部分 | S11 真实 mpv + Range | 本机 `/usr/bin/mpv` 0.37.0 | 短断线/凭据到期/接管中的拖动未做 |
-| D01 启动隔离 | 部分 | S07 runtime 远程不 `getDb()` | Electron-as-Node bootstrap | 远程正常/断线/版本不符的真实进程监测未做 |
-| D02 业务合同 | 部分 | S08 in-process 本地 vs HTTP；S13 `SCAN_RUN` 走 CatalogBackend | Node + Electron-as-Node | Electron 本地后端对照同一 Node 宿主的扫描/NFO 未做 |
-| D03 工作存储升级 | 部分 | S02D workStore 复制 | Electron-as-Node | 复制中断/崩溃/远程偷开源库补迁的完整故障未做 |
+| D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据子进程 `/proc/<pid>/fd` 无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 已连接远程的 `/proc` 对照未再单列 |
+| D02 业务合同 | 部分 | LocalCatalogBackend 与 RemoteCatalogBackend 对同一夹具扫描/NFO 计划 | `dualBackendScan.e2e.test.ts`（独立 `node --test` 进程） | 非 Electron IPC NFO 封面编码；非 Docker |
+| D03 工作存储升级 | 部分 | S02D workStore 复制；远程 `copying` 不打开原库 | Electron-as-Node bootstrap | 复制中断后本地续完、远程仍拒绝补开的对照未再加强 |
 | D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询 | 远程后端测试 | 进度/图片请求迟到未做 |
 | D05 取消与退出 | 部分 | S07 dispose/abort | 远程后端测试 | 窗口关闭/重建未做 |
-| D06 边界检查 | 部分 | pretest 生产依赖图 | 仓库脚本 | SCAN_AUDIT/待确认/FILE_* IPC 仍可触达 library 单例 |
+| D06 边界检查 | 部分 | pretest 生产依赖图；FILE_IMPORT 走 CatalogBackend | 仓库脚本 + `scanHandlers.test.ts` | SCAN_AUDIT/待确认解析/远程 FILE_RENAME 仍可触达 library 或拒绝 |
 | D07 能力与错误 | 部分 | S07 会话/冻结/能力 | UI + 后端 | 全能力矩阵未出 |
 
 ### S14：发布准备与收尾
@@ -680,6 +681,12 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 补充服务端适用的 ADR，明确与 0024/0027 的扩展边界；保留本地原合同。更新开发、用户、迁移、部署、恢复及版本发布文档，不把实施细节堆到 README。根和所有 workspace 使用统一版本，桌面产物/服务镜像/Web 来自同一源码版本。
 
 说明 setup、UID/GID、存储要求、绑定/恢复命令、更新时序、版本不符、旧库冻结备份及恢复限制。发布前真实安装包与镜像烟测，完成用户要求的评审流程；本文件本身不授权自动公开发布。
+
+**S14 实施记录（进行中）**
+
+- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、冻结备份与拷图失败不自动回滚。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
+- 验证：文档提交；未跑安装包或 Docker 镜像烟测。
+- 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。磁盘 LRU 与 S13 剩余矩阵见上一节。
 
 ## 接手环境与验证命令
 

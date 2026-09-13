@@ -1244,6 +1244,9 @@ describe('server runtime lifecycle', () => {
       const afterCancel = await pollTask(busyId)
       assert.equal(['cancelled', 'succeeded'].includes(afterCancel.state), true, afterCancel.state)
 
+      const beforeNfo = getDb()
+        .prepare("SELECT id, generation, revision FROM videos WHERE code = 'ABC-001'")
+        .get() as { id: number; generation: number; revision: number }
       const nfoPlan = await write('nfo.plan', versions(library), {
         libraryIds: [1],
         profileId: 'portable-v1',
@@ -1273,6 +1276,22 @@ describe('server runtime lifecycle', () => {
       const nfoXml = fs.readFileSync(path.join(s09Mount, 'ABC-001.nfo'), 'utf8')
       assert.match(nfoXml, /ABC-001/)
       assert.equal(fs.existsSync(path.join(s09Mount, 'ABC-001-poster.jpg')), false)
+
+      const afterNfo = getDb()
+        .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+        .get(beforeNfo.id) as { generation: number; revision: number }
+      assert.deepEqual(afterNfo, { generation: beforeNfo.generation, revision: beforeNfo.revision })
+      const nfoThenTitle = await write(
+        'videos.edit',
+        { V: { generation: beforeNfo.generation, revision: beforeNfo.revision } },
+        { videoId: beforeNfo.id, fields: { title: 'After NFO' } }
+      )
+      assert.equal(nfoThenTitle.status, 200, JSON.stringify(nfoThenTitle.json))
+      const titled = getDb()
+        .prepare('SELECT title, revision FROM videos WHERE id = ?')
+        .get(beforeNfo.id) as { title: string; revision: number }
+      assert.equal(titled.title, 'After NFO')
+      assert.equal(titled.revision, beforeNfo.revision + 1)
 
       const resource = getDb()
         .prepare(

@@ -24,6 +24,7 @@ import {
   statusCatalogMigration,
   migrationPackagePath
 } from './catalogMigration'
+import { catalogLooksEmpty } from './catalogMigrationState'
 import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 
 function insertRoot(
@@ -430,7 +431,7 @@ describe('catalogMigration protocol', () => {
         sourceDb
       )
       assert.ok(preview.pendingBlockers.includes('pending-video-scrapes'))
-      assert.ok(preview.pendingBlockers.includes('encrypted-assets'))
+      assert.equal(preview.pendingBlockers.includes('encrypted-assets'), false)
       await assert.rejects(
         () =>
           startCatalogMigration(
@@ -446,7 +447,7 @@ describe('catalogMigration protocol', () => {
     }
   })
 
-  it('unblocks source migration after decrypting stored assets without auto-decrypt', async () => {
+  it('decrypts stored assets automatically during source start', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-decrypt-'))
     roots.push(root)
     const sourceDir = path.join(root, 'source')
@@ -484,25 +485,6 @@ describe('catalogMigration protocol', () => {
         imagesDir: sourceImages,
         mediaMounts: { mapped: mappedMount }
       }
-      const blocked = previewCatalogMigration(
-        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
-        sourceHost,
-        sourceDb
-      )
-      assert.ok(blocked.pendingBlockers.includes('encrypted-assets'))
-      await assert.rejects(
-        () =>
-          startCatalogMigration(
-            { migrationId: blocked.migrationId, digest: blocked.digest },
-            sourceHost,
-            sourceDb
-          ),
-        (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
-      )
-      const decrypted = mediaAssetStore.decryptStoredAsset(rewrite.toRel)
-      assert.ok(decrypted)
-      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(decrypted.toRel, inserted.videoId)
-      mediaAssetStore.clearPathAliases()
       const preview = previewCatalogMigration(
         { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
         sourceHost,
@@ -516,14 +498,84 @@ describe('catalogMigration protocol', () => {
       )
       assert.equal((started as { state?: string }).state, 'succeeded')
       assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
-      const packed = fs.readFileSync(path.join(sourceImages, decrypted.toRel))
+      const liveCover = fs.readFileSync(path.join(sourceImages, rewrite.toRel))
+      assert.equal(liveCover.subarray(0, 5).equals(Buffer.from('AVPK\x01')), true)
+      const packed = fs.readFileSync(
+        path.join(sourceDir, 'migration-work', preview.migrationId, 'images', coverRel)
+      )
       assert.equal(packed.subarray(0, 5).equals(Buffer.from('AVPK\x01')), false)
+      const packedDb = openIsolatedCatalog(
+        path.join(sourceDir, 'migration-work', preview.migrationId, 'catalog', 'library.db')
+      )
+      try {
+        const packedCover = packedDb
+          .prepare('SELECT cover_path FROM videos WHERE id = ?')
+          .get(inserted.videoId) as { cover_path: string }
+        assert.equal(packedCover.cover_path, coverRel)
+      } finally {
+        packedDb.close()
+      }
     } finally {
       sourceDb.close()
     }
   })
 
-  it('keeps the enabled catalog if image copy hits EACCES after the transaction commits', async () => {
+  it('fails source start and unfreezes when staged decrypt has no path alias', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-decrypt-fail-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const mappedMount = path.join(root, 'mount-mapped')
+    for (const dir of [sourceDir, mappedMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    const coverRel = 'covers/orphan.enc'
+    fs.writeFileSync(path.join(sourceImages, coverRel), Buffer.from('AVPK\x01rest'))
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    try {
+      process.env.JAVDEX_TEST_USER_DATA = sourceDir
+      configureLibraryHost({
+        userDataPath: () => sourceDir,
+        assets: { assetEncryption: () => true, mediaAssetsPath: () => sourceImages }
+      })
+      resetAssetKeyCacheForTests()
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S13-DEC-FAIL.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S13-DEC-FAIL',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      await assert.rejects(
+        () =>
+          startCatalogMigration(
+            { migrationId: preview.migrationId, digest: preview.digest },
+            sourceHost,
+            sourceDb
+          ),
+        (error: unknown) => isStructuredError(error) && error.code === 'RECOVERY_REQUIRED'
+      )
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, false)
+    } finally {
+      sourceDb.close()
+    }
+  })
+
+  it('rolls back enable if image copy hits EACCES after the transaction commits', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-eacces-'))
     roots.push(root)
     const sourceDir = path.join(root, 'source')
@@ -606,8 +658,16 @@ describe('catalogMigration protocol', () => {
         fs.chmodSync(targetImages, 0o755)
       }
       const status = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
-      assert.equal(status.targetPhase, 'enabled')
+      assert.equal(status.targetPhase, 'ready')
       assert.equal(fs.existsSync(path.join(targetImages, coverRel)), false)
+      assert.equal(catalogLooksEmpty(targetDb), true)
+      const retried = enableCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      assert.equal(retried.targetPhase, 'enabled')
+      assert.equal(fs.existsSync(path.join(targetImages, coverRel)), true)
     } finally {
       try {
         fs.chmodSync(targetImages, 0o755)
@@ -619,7 +679,7 @@ describe('catalogMigration protocol', () => {
     }
   })
 
-  it('keeps the enabled catalog if image copy hits ENOSPC after the transaction commits', async () => {
+  it('rolls back enable if image copy hits ENOSPC after the transaction commits', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-enospc-'))
     roots.push(root)
     const sourceDir = path.join(root, 'source')
@@ -731,13 +791,14 @@ describe('catalogMigration protocol', () => {
         coverExists: boolean
       }
       assert.equal(report.code, 'ENOSPC', JSON.stringify(report))
-      assert.equal(report.targetPhase, 'enabled')
+      assert.equal(report.targetPhase, 'ready')
       assert.equal(report.coverExists, false)
       const reopened = openIsolatedCatalog(path.join(targetDir, 'library.db'))
       try {
         const status = statusCatalogMigration({ migrationId: preview.migrationId }, reopened)
-        assert.equal(status.targetPhase, 'enabled')
+        assert.equal(status.targetPhase, 'ready')
         assert.equal(fs.existsSync(path.join(targetImages, coverRel)), false)
+        assert.equal(catalogLooksEmpty(reopened), true)
       } finally {
         reopened.close()
       }

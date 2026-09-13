@@ -19,6 +19,8 @@ import {
   resolveLibraryUserDataPath
 } from '@library/runtime/host'
 import { structuredError } from '@shared/protocol/errors'
+import { decryptBlob, isEncryptedBlob } from '@library/assetCrypto'
+import { getPathAlias } from '@library/assetPathAliases'
 import { getDb } from '@library/db/database'
 import { digestEquals, digestRequest } from './catalogSecrets'
 import { readCatalogIdentity, setCatalogFrozen } from './catalogIdentity'
@@ -139,11 +141,93 @@ function stagingDir(userDataPath: string, migrationId: string): string {
   return path.join(userDataPath, 'migration-staging', migrationId)
 }
 
-function copyOfficialImages(fromDir: string, toDir: string): void {
+function copyOfficialImages(fromDir: string, toDir: string): string[] {
+  const copied: string[] = []
   for (const rel of walkOfficialImages(fromDir)) {
     const dest = path.join(toDir, rel)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.copyFileSync(path.join(fromDir, rel), dest)
+    copied.push(rel)
+  }
+  return copied
+}
+
+function removeCopiedOfficialImages(imagesDir: string, rels: readonly string[]): void {
+  for (const rel of rels) {
+    try {
+      fs.unlinkSync(path.join(imagesDir, rel))
+    } catch {
+      // Best-effort: EACCES on the directory may also block cleanup.
+    }
+  }
+}
+
+function snapshotLiveCatalog(database: Database.Database, destPath: string): void {
+  if (!database.name || database.name === ':memory:') {
+    throw structuredError('UNSUPPORTED_CAPABILITY', '内存资料库不能启用迁入')
+  }
+  database.pragma('wal_checkpoint(TRUNCATE)')
+  fs.mkdirSync(path.dirname(destPath), { recursive: true })
+  fs.copyFileSync(database.name, destPath)
+}
+
+function restoreCatalogFromSnapshot(database: Database.Database, snapshotPath: string): void {
+  database.exec(`ATTACH DATABASE ${sqlLiteral(snapshotPath)} AS preroll`)
+  try {
+    database.transaction(() => {
+      copyAttachedCatalog(database, 'preroll')
+    })()
+  } finally {
+    try {
+      database.exec('DETACH DATABASE preroll')
+    } catch {
+      // Detach after a rolled-back attach is optional.
+    }
+  }
+}
+
+function remapAssetPathOn(
+  database: Database.Database,
+  fromRel: string,
+  toRel: string
+): void {
+  database.prepare('UPDATE videos SET cover_path = ? WHERE cover_path = ?').run(toRel, fromRel)
+  database.prepare('UPDATE videos SET poster_path = ? WHERE poster_path = ?').run(toRel, fromRel)
+  database.prepare('UPDATE actresses SET avatar_path = ? WHERE avatar_path = ?').run(toRel, fromRel)
+  database
+    .prepare('UPDATE actresses SET avatar_source_path = ? WHERE avatar_source_path = ?')
+    .run(toRel, fromRel)
+  database.prepare('UPDATE actresses SET poster_path = ? WHERE poster_path = ?').run(toRel, fromRel)
+  database.prepare('UPDATE playlists SET cover_path = ? WHERE cover_path = ?').run(toRel, fromRel)
+  database.prepare('UPDATE video_assets SET local_path = ? WHERE local_path = ?').run(toRel, fromRel)
+  database
+    .prepare('UPDATE actress_gallery_assets SET local_path = ? WHERE local_path = ?')
+    .run(toRel, fromRel)
+}
+
+/**
+ * Decrypt official images in a staging/export tree using the source LibraryHost
+ * key (hostname + username + userDataPath) and source path aliases. Does not
+ * mutate the live source imagesDir or alias journal.
+ */
+function decryptStagedOfficialImages(
+  stagedImages: string,
+  database: Database.Database
+): void {
+  for (const rel of walkOfficialImages(stagedImages)) {
+    const abs = path.join(stagedImages, rel)
+    const blob = fs.readFileSync(abs)
+    if (!isEncryptedBlob(blob)) continue
+    const plainRel = getPathAlias(rel)
+    if (!plainRel) {
+      throw structuredError('RECOVERY_REQUIRED', `缺少加密路径别名，无法在迁库中解密：${rel}`)
+    }
+    const { data } = decryptBlob(blob)
+    const plainAbs = path.join(stagedImages, plainRel)
+    fs.mkdirSync(path.dirname(plainAbs), { recursive: true })
+    fs.writeFileSync(plainAbs, data)
+    if (plainAbs !== abs) fs.unlinkSync(abs)
+    if (plainRel !== rel) remapAssetPathOn(database, rel, plainRel)
   }
 }
 
@@ -282,14 +366,15 @@ async function exportSourcePackage(
   fs.mkdirSync(path.join(workDir, 'images'), { recursive: true })
   const copiedDb = path.join(workDir, 'catalog', 'library.db')
   fs.copyFileSync(dbPath, copiedDb)
+  copyOfficialImages(imagesDir, path.join(workDir, 'images'))
   const copy = openIsolatedCatalog(copiedDb)
   try {
     stripExportSecrets(copy)
+    decryptStagedOfficialImages(path.join(workDir, 'images'), copy)
     copy.pragma('wal_checkpoint(TRUNCATE)')
   } finally {
     copy.close()
   }
-  copyOfficialImages(imagesDir, path.join(workDir, 'images'))
   const imageRels = walkOfficialImages(path.join(workDir, 'images'))
   const imageDigest = digestImages(path.join(workDir, 'images'), imageRels)
   const dataDigest = sha256File(copiedDb)
@@ -593,12 +678,17 @@ export function enableCatalogMigration(
     }
   }
   const { userDataPath, imagesDir } = hostPaths(host)
-  const stagedDb = path.join(stagingDir(userDataPath, input.migrationId), 'catalog', 'library.db')
-  const appliedImages = path.join(stagingDir(userDataPath, input.migrationId), 'applied-images')
+  const workStaging = stagingDir(userDataPath, input.migrationId)
+  const stagedDb = path.join(workStaging, 'catalog', 'library.db')
+  const appliedImages = path.join(workStaging, 'applied-images')
+  const snapshotPath = path.join(workStaging, 'pre-enable.db')
   if (!fs.existsSync(stagedDb)) {
     throw structuredError('RECOVERY_REQUIRED', '迁移暂存不完整，不能发布')
   }
   const savedAuth = readCatalogSetting<unknown>(MIGRATION_AUTH_KEY, null, database)
+  snapshotLiveCatalog(database, snapshotPath)
+  let justEnabled = false
+  let copiedRels: string[] = []
   database.exec(`ATTACH DATABASE ${sqlLiteral(stagedDb)} AS migsrc`)
   try {
     const result = database.transaction(() => {
@@ -648,6 +738,7 @@ export function enableCatalogMigration(
       }
       writeState(next, database)
       writeFinal(next, database)
+      justEnabled = true
       return {
         migrationId: next.migrationId,
         sourcePhase: next.sourcePhase,
@@ -656,7 +747,24 @@ export function enableCatalogMigration(
       }
     })()
     if (result.targetPhase === 'enabled' && fs.existsSync(appliedImages)) {
-      copyOfficialImages(appliedImages, imagesDir)
+      try {
+        copiedRels = copyOfficialImages(appliedImages, imagesDir)
+      } catch (error) {
+        if (justEnabled) {
+          try {
+            restoreCatalogFromSnapshot(database, snapshotPath)
+          } catch {
+            // Prefer the original copy failure; rollback is best-effort after that.
+          }
+          removeCopiedOfficialImages(imagesDir, copiedRels)
+        }
+        throw error
+      }
+    }
+    try {
+      fs.unlinkSync(snapshotPath)
+    } catch {
+      // Snapshot is only a rollback aid.
     }
     return result
   } finally {

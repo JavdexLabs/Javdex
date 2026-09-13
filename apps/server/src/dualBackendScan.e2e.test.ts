@@ -1028,7 +1028,7 @@ if (hostConfigRaw) {
       assert.match(result.stdout, new RegExp(operationId.replaceAll('-', '\\-')))
     })
 
-    it('rolls back videos.edit when catalog fsync returns EIO', {
+    it('rolls back videos.edit when catalog pwrite or fsync returns EIO', {
       timeout: 60_000,
       skip: process.platform === 'linux' ? false : 'LD_PRELOAD fsync fault is Linux-only'
     }, async () => {

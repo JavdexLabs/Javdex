@@ -28,6 +28,7 @@ import { attachAgentWorkStore, copyAgentWorkTables } from '../desktop/agentWorkC
 import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
 import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
+import type { DesktopCredentialStore } from '../application/desktopPorts'
 
 export interface DesktopRuntime {
   mode: 'local' | 'remote'
@@ -41,6 +42,7 @@ export interface DesktopRuntime {
 
 export interface CreateDesktopRuntimeOptions {
   local?: Omit<Partial<LocalCatalogBackendDependencies>, 'identity'>
+  credentials?: DesktopCredentialStore
 }
 
 export function workStorePath(userDataPath: string): string {
@@ -98,7 +100,7 @@ export async function createDesktopRuntime(
         dispose: () => disposeRemote(backend)
       }
     }
-    const credentials = createWriterCredentialStore({ userDataPath })
+    const credentials = options.credentials ?? createWriterCredentialStore({ userDataPath })
     const backend = createCatalogBackendForMode(
       'remote',
       { identity: { mode: 'local', catalogId: '' } },

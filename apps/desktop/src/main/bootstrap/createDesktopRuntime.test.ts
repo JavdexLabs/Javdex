@@ -16,6 +16,15 @@ import {
 import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../desktop/thisComputerSettingsStore'
 import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { openDesktopWorkStore } from '../desktop/workStore'
+import { createWriterCredentialStore, type WriterSecretCipher } from '../desktop/writerCredentialStore'
+
+function memoryCipher(): WriterSecretCipher {
+  return {
+    isAvailable: () => true,
+    encrypt: (value) => Buffer.from(value, 'utf8').toString('base64'),
+    decrypt: (value) => Buffer.from(value, 'base64').toString('utf8')
+  }
+}
 
 let tempRoot: string | null = null
 let handshakeServer: Server | null = null
@@ -232,6 +241,24 @@ describe('createDesktopRuntime', () => {
     try {
       assert.equal(runtime.openedCatalog, false)
       assert.equal(runtime.backend.session().state, 'recoveryRequired')
+      assert.throws(() => getDb(), /Database not initialised/)
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('starts connected remote without opening library.db when a writer secret is present', async () => {
+    const base = await listenHandshake('0.7.0', 1)
+    const root = tempDir()
+    const credentials = createWriterCredentialStore({ userDataPath: root, cipher: memoryCipher() })
+    await credentials.writeWriterSecret('catalog-1', 'writer-secret')
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+    await settings.write({ mode: 'remote', remoteBaseUrl: base })
+    const runtime = await createDesktopRuntime(root, '0.7.0', { credentials })
+    try {
+      assert.equal(runtime.mode, 'remote')
+      assert.equal(runtime.openedCatalog, false)
+      assert.equal(runtime.backend.session().state, 'available')
       assert.throws(() => getDb(), /Database not initialised/)
     } finally {
       await runtime.dispose()

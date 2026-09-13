@@ -14,8 +14,17 @@ import {
   localCatalogDatabasePath
 } from './createDesktopRuntime'
 import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../desktop/thisComputerSettingsStore'
+import { createWriterCredentialStore, type WriterSecretCipher } from '../desktop/writerCredentialStore'
 
 const thisFile = fileURLToPath(import.meta.url)
+
+function isolationCipher(): WriterSecretCipher {
+  return {
+    isAvailable: () => true,
+    encrypt: (value) => Buffer.from(value, 'utf8').toString('base64'),
+    decrypt: (value) => Buffer.from(value, 'base64').toString('utf8')
+  }
+}
 
 function catalogArtifacts(catalogPath: string): string[] {
   return [catalogPath, `${catalogPath}-wal`, `${catalogPath}-shm`]
@@ -59,7 +68,12 @@ if (process.env.JAVDEX_D01_CHILD === '1') {
     process.stderr.write('JAVDEX_TEST_USER_DATA is required\n')
     process.exit(1)
   }
-  void createDesktopRuntime(root, process.env.JAVDEX_D01_APP_VERSION ?? '0.7.0')
+  const credentials = process.env.JAVDEX_D01_TEST_CIPHER
+    ? createWriterCredentialStore({ userDataPath: root, cipher: isolationCipher() })
+    : undefined
+  void createDesktopRuntime(root, process.env.JAVDEX_D01_APP_VERSION ?? '0.7.0', {
+    ...(credentials ? { credentials } : {})
+  })
     .then((runtime) => {
       const catalogPath = localCatalogDatabasePath(root)
       process.stdout.write(
@@ -164,7 +178,11 @@ if (process.env.JAVDEX_D01_CHILD === '1') {
     })
   }
 
-  async function spawnRemoteChild(root: string, appVersion: string): Promise<{
+  async function spawnRemoteChild(
+    root: string,
+    appVersion: string,
+    options: { testCipher?: boolean } = {}
+  ): Promise<{
     child: ChildProcess
     report: {
       openedCatalog: boolean
@@ -193,7 +211,8 @@ if (process.env.JAVDEX_D01_CHILD === '1') {
           ELECTRON_RUN_AS_NODE: '1',
           JAVDEX_D01_CHILD: '1',
           JAVDEX_TEST_USER_DATA: root,
-          JAVDEX_D01_APP_VERSION: appVersion
+          JAVDEX_D01_APP_VERSION: appVersion,
+          ...(options.testCipher ? { JAVDEX_D01_TEST_CIPHER: '1' } : {})
         },
         stdio: ['ignore', 'pipe', 'pipe']
       }
@@ -306,6 +325,27 @@ if (process.env.JAVDEX_D01_CHILD === '1') {
         }
         fs.rmSync(root, { recursive: true, force: true })
         tempRoot = null
+      }
+    })
+
+    it('starts connected remote without opening library.db even when the local catalog is unreadable', async () => {
+      const root = tempDir()
+      const catalogPath = await prepareLocalCatalog(root)
+      const credentials = createWriterCredentialStore({ userDataPath: root, cipher: isolationCipher() })
+      await credentials.writeWriterSecret('catalog-1', 'd01-writer-secret')
+      const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+      await settings.write({ mode: 'remote', remoteBaseUrl: await listenHandshake('0.7.0', 1) })
+      const restore = chmodCatalogClosed(catalogPath)
+      try {
+        const { child, report } = await spawnRemoteChild(root, '0.7.0', { testCipher: true })
+        assert.equal(report.openedCatalog, false)
+        assert.equal(report.state, 'available')
+        assert.equal(report.scanRecovery, null)
+        assert.deepEqual(report.fds, [])
+        assert.deepEqual(listLibraryDbFds(child.pid ?? 0, catalogPath), [])
+        await stopChild(child)
+      } finally {
+        restore()
       }
     })
   })

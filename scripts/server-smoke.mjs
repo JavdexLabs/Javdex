@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { digestToken, generateSecret } from '../packages/library/src/catalog/catalogSecrets.ts'
+
+function digestToken(token) {
+  return createHash('sha256').update(token, 'utf8').digest('hex')
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const docker = spawnSync('docker', ['version'], { encoding: 'utf8' })
@@ -126,7 +129,7 @@ try {
   assert.equal(typeof issued.oneTimeToken, 'string')
 
   const appVersion = JSON.parse(fs.readFileSync(path.join(root, 'out', 'server', 'package.json'), 'utf8')).version
-  const secret = generateSecret()
+  const secret = randomBytes(32).toString('base64url')
   const claim = await fetch(`${base}/manage/v1/writer.claim`, {
     method: 'POST',
     headers: {

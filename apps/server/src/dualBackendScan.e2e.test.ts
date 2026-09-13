@@ -1663,7 +1663,7 @@ if (hostConfigRaw) {
           const generationBefore = remote.generation
           sudoRun(['iptables', '-I', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
           const lost = await remote.queries
-            .getVideo({ scope: { kind: 'all' }, videoId })
+            .getVideo({ scope: { kind: 'all' }, videoId }, { signal: AbortSignal.timeout(4_000) })
             .then(
               () => {
                 throw new Error('packet-loss query resolved')

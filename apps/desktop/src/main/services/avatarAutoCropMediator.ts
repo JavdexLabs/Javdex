@@ -18,7 +18,7 @@ export interface AvatarAutoCropMediatorDependencies {
   autoCropTimeoutMs: number
   /** Queue / scrape availability checks; crop token ownership stays inside the mediator. */
   assertCanBeginBatch(): void
-  createBatchTargets?: () => ActressAvatarCropSnapshot
+  createBatchTargets?: () => ActressAvatarCropSnapshot | Promise<ActressAvatarCropSnapshot>
 }
 
 export class AvatarAutoCropMediator {
@@ -95,12 +95,12 @@ export class AvatarAutoCropMediator {
     return token
   }
 
-  pageBatchTargets(token: string, afterId: number): ActressAvatarCropTargetPage {
+  async pageBatchTargets(token: string, afterId: number): Promise<ActressAvatarCropTargetPage> {
     if (token !== this.batchToken) throw new Error('头像任务令牌已失效')
     if (!Number.isSafeInteger(afterId) || afterId < 0) throw new Error('无效的头像任务游标')
     if (!this.batchTargets) {
       if (!this.dependencies.createBatchTargets) throw new Error('头像任务快照服务不可用')
-      this.batchTargets = this.dependencies.createBatchTargets()
+      this.batchTargets = await this.dependencies.createBatchTargets()
     }
     return this.batchTargets.page(afterId)
   }

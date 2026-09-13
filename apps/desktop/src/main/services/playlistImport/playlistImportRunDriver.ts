@@ -252,6 +252,11 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
   private readonly listeners = new Set<(snapshot: PlaylistImportSnapshot) => void>()
   private readonly timelines = new Map<string, AgentMetadataActivityTimeline>()
   private readonly liveEmitTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private database: () => ReturnType<typeof getDb> = getDb
+
+  bindDatabase(database: () => ReturnType<typeof getDb>): void {
+    this.database = database
+  }
 
   subscribe(listener: (snapshot: PlaylistImportSnapshot) => void): () => void {
     this.listeners.add(listener)
@@ -259,7 +264,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
   }
 
   private repository(): PlaylistImportRepository {
-    return new PlaylistImportRepository(getDb())
+    return new PlaylistImportRepository(this.database())
   }
 
   private timeline(runId: string, initial: PlaylistImportActivity[] = []): AgentMetadataActivityTimeline {

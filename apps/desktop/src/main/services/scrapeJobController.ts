@@ -451,7 +451,7 @@ export class ScrapeJobController {
     return this.avatarAutoCrop.beginBatch()
   }
 
-  pageAvatarAutoCropTargets(token: string, afterId: number): ActressAvatarCropTargetPage {
+  pageAvatarAutoCropTargets(token: string, afterId: number): Promise<ActressAvatarCropTargetPage> {
     return this.avatarAutoCrop.pageBatchTargets(token, afterId)
   }
 
@@ -495,7 +495,9 @@ export function createScrapeJobController(
 }
 
 export function createDefaultScrapeJobController(
-  boundary: Pick<ScrapeJobControllerDependencies, 'emit' | 'rendererAvailable'>
+  boundary: Pick<ScrapeJobControllerDependencies, 'emit' | 'rendererAvailable'> & {
+    avatarAutoCropOptions?: ScrapeJobControllerDependencies['avatarAutoCropOptions']
+  }
 ): ScrapeJobController {
   return createScrapeJobController({
     coordinator: scrapeRunCoordinator,
@@ -513,7 +515,9 @@ export function createDefaultScrapeJobController(
     resolveVideoFieldSources: resolveVideoScrapeFieldSources,
     pendingVideoScrapes: videoPendingScrapeService,
     checkpoints: defaultBatchScrapeCheckpoints,
-    ...boundary
+    avatarAutoCropOptions: boundary.avatarAutoCropOptions,
+    emit: boundary.emit,
+    rendererAvailable: boundary.rendererAvailable
   })
 }
 

@@ -1,8 +1,10 @@
 import { IPC } from '@shared/ipc-channels'
 import { libraryCurator } from '../services/libraryCuratorAgent/libraryCurator'
 import { appCommandAdapter } from './appContractAdapter'
+import type { CatalogBackend } from '../application/catalogBackend'
 
-export function registerLibraryCuratorHandlers(): void {
+export function registerLibraryCuratorHandlers(backend: CatalogBackend): void {
+  libraryCurator.bindCatalog(backend)
   appCommandAdapter.register(
     IPC.LIBRARY_CURATOR_START,
     (input) => libraryCurator.start(input)

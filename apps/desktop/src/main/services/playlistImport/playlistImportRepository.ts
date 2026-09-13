@@ -205,7 +205,7 @@ class ImportPreviewStaleError extends Error {
   }
 }
 
-class PlaylistImportTargetError extends Error {
+export class PlaylistImportTargetError extends Error {
   constructor(readonly code: string, message: string) {
     super(`${code}: ${message}`)
     this.name = 'PlaylistImportTargetError'
@@ -801,10 +801,11 @@ export class PlaylistImportRepository {
     autoCreateUnmatchedVideos?: boolean
     saveDetailLinks?: boolean
     saveSourcePlaylistLink?: boolean
+    targetLibrary?: { id: number; name: string }
   }): PlaylistImportSnapshot {
     const normalizedSourceUrl = normalizePlaylistImportUrl(input.sourceUrl)
     const url = new URL(normalizedSourceUrl)
-    const library = this.validateStartTargets(input)
+    const library = input.targetLibrary ?? this.validateStartTargets(input)
     const at = now()
     this.database.transaction(() => {
       this.database.prepare(

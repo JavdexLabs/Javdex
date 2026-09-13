@@ -1,8 +1,11 @@
 import type { WebContents } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import type { PlaylistImportModule } from '@shared/playlistImportTypes'
+import { getDb } from '@library/db/database'
 import { createPlaylistImportModule } from '../services/playlistImport/playlistImportModule'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
+import type { CatalogBackend } from '../application/catalogBackend'
+import type { DesktopWorkStoreHandle } from '../desktop/workStore'
 import type { IpcContext } from './shared'
 
 const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled'])
@@ -32,8 +35,15 @@ export function bindPlaylistImportRendererLifecycle(
   })
 }
 
-export function registerPlaylistImportHandlers(ctx: IpcContext): void {
-  const modulePromise = createPlaylistImportModule()
+export function registerPlaylistImportHandlers(
+  ctx: IpcContext,
+  options: { backend: CatalogBackend; workStore: DesktopWorkStoreHandle }
+): void {
+  const modulePromise = createPlaylistImportModule({
+    catalog: options.backend,
+    database:
+      options.backend.mode === 'remote' ? () => options.workStore.database() : getDb
+  })
   const boundOwners = new WeakSet<WebContents>()
   let disconnectCancellation = Promise.resolve()
   const rendererDisconnected = (): void => {

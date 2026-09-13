@@ -18,6 +18,10 @@ import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { openDesktopWorkStore } from '../desktop/workStore'
 import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../desktop/thisComputerSettingsStore'
 import { createWriterCredentialStore, type WriterSecretCipher } from '../desktop/writerCredentialStore'
+import { agentMetadataCollection } from '../services/agentMetadata/agentMetadataCollection'
+import { libraryCurator, readCuratorOverview } from '../services/libraryCuratorAgent/libraryCurator'
+import { loadCatalogActressAvatarCropSnapshot } from '../services/catalogActressAvatarCropSnapshot'
+import { createPlaylistImportModule } from '../services/playlistImport/playlistImportModule'
 
 const thisFile = fileURLToPath(import.meta.url)
 
@@ -108,6 +112,81 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
           state: runtime.backend.session().state,
           scanRecovery: runtime.scanRecovery,
           fds: listLibraryDbFds(process.pid, catalogPath)
+        })}\n`
+      )
+      return new Promise<void>(() => undefined)
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
+      process.exit(1)
+    })
+} else if (process.env.JAVDEX_M10_CHILD === '1') {
+  const root = process.env.JAVDEX_TEST_USER_DATA
+  if (!root) {
+    process.stderr.write('JAVDEX_TEST_USER_DATA is required\n')
+    process.exit(1)
+  }
+  const credentials = process.env.JAVDEX_D01_TEST_CIPHER
+    ? createWriterCredentialStore({ userDataPath: root, cipher: isolationCipher() })
+    : undefined
+  void createDesktopRuntime(root, process.env.JAVDEX_D01_APP_VERSION ?? '0.7.0', {
+    ...(credentials ? { credentials } : {})
+  })
+    .then(async (runtime) => {
+      const catalogPath = localCatalogDatabasePath(root)
+      agentMetadataCollection.bindCatalog(runtime.backend)
+      libraryCurator.bindCatalog(runtime.backend)
+      const errorMessage = (error: unknown): string =>
+        error instanceof Error ? error.message : String(error)
+      const probe = async (work: () => Promise<unknown>): Promise<{ ok: boolean; error: string }> => {
+        try {
+          await work()
+          return { ok: true, error: '' }
+        } catch (error) {
+          return { ok: false, error: errorMessage(error) }
+        }
+      }
+      const collection = await probe(() =>
+        agentMetadataCollection.start({
+          target: { kind: 'video', id: 1 },
+          sourceUrl: '',
+          idempotencyKey: 'm10-collection'
+        })
+      )
+      const curator = await probe(() => readCuratorOverview(runtime.backend))
+      const crop = await probe(async () => {
+        const snapshot = await loadCatalogActressAvatarCropSnapshot(runtime.backend)
+        snapshot.page(0)
+        snapshot.dispose()
+      })
+      const playlist = await probe(async () => {
+        const module = await createPlaylistImportModule({
+          catalog: runtime.backend,
+          database: () => runtime.workStore.database()
+        })
+        return module.start({
+          idempotencyKey: 'm10-isolation',
+          sourceUrl: 'https://example.test/list',
+          targetLibraryId: 1,
+          destination: { kind: 'create' }
+        })
+      })
+      let getDbError = ''
+      try {
+        getDb()
+      } catch (error) {
+        getDbError = errorMessage(error)
+      }
+      process.stdout.write(
+        `${JSON.stringify({
+          openedCatalog: runtime.openedCatalog,
+          state: runtime.backend.session().state,
+          fds: listLibraryDbFds(process.pid, catalogPath),
+          getDbError,
+          collection,
+          curator,
+          crop,
+          playlist
         })}\n`
       )
       return new Promise<void>(() => undefined)
@@ -280,6 +359,72 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
     return { child, report }
   }
 
+  type M10Probe = { ok: boolean; error: string }
+  type M10Report = {
+    openedCatalog: boolean
+    state: string
+    fds: string[]
+    getDbError: string
+    collection: M10Probe
+    curator: M10Probe
+    crop: M10Probe
+    playlist: M10Probe
+  }
+
+  async function spawnM10Child(root: string): Promise<{ child: ChildProcess; report: M10Report }> {
+    const child = spawn(
+      process.execPath,
+      [
+        '--require',
+        './scripts/register-test-paths.cjs',
+        '--import',
+        './scripts/register-test-styles.mjs',
+        '--import',
+        'tsx',
+        '--import',
+        './scripts/register-library-test-host.ts',
+        thisFile
+      ],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          JAVDEX_M10_CHILD: '1',
+          JAVDEX_TEST_USER_DATA: root,
+          JAVDEX_D01_APP_VERSION: '0.7.0',
+          JAVDEX_D01_TEST_CIPHER: '1'
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    children.push(child)
+    const report = await new Promise<M10Report>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error(`m10 child did not report\n${stderr}`)), 30_000)
+      let stdout = ''
+      let stderr = ''
+      const onOut = (chunk: Buffer): void => {
+        stdout += chunk.toString('utf8')
+        const line = stdout.split('\n').find((entry) => entry.startsWith('{'))
+        if (line) {
+          clearTimeout(timeout)
+          child.stdout?.off('data', onOut)
+          resolve(JSON.parse(line) as M10Report)
+        }
+      }
+      const onErr = (chunk: Buffer): void => {
+        stderr += chunk.toString('utf8')
+      }
+      child.stdout?.on('data', onOut)
+      child.stderr?.on('data', onErr)
+      child.on('exit', (code) => {
+        clearTimeout(timeout)
+        reject(new Error(`m10 child exited ${code}\n${stdout}\n${stderr}`))
+      })
+    })
+    return { child, report }
+  }
+
   async function prepareLocalCatalog(root: string): Promise<string> {
     const local = await createDesktopRuntime(root, '0.7.0')
     try {
@@ -389,6 +534,32 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         assert.equal(report.scanRecovery, null)
         assert.deepEqual(report.fds, [])
         assert.deepEqual(listLibraryDbFds(child.pid ?? 0, catalogPath), [])
+        await stopChild(child)
+      } finally {
+        restore()
+      }
+    })
+
+    it('starts remote collection, curator overview, crop, and playlist import without opening library.db', { timeout: 60_000 }, async () => {
+      const root = tempDir()
+      const catalogPath = await prepareLocalCatalog(root)
+      const credentials = createWriterCredentialStore({ userDataPath: root, cipher: isolationCipher() })
+      await credentials.writeWriterSecret('catalog-1', 'd01-writer-secret')
+      const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+      await settings.write({ mode: 'remote', remoteBaseUrl: await listenHandshake('0.7.0', 1) })
+      const restore = chmodCatalogClosed(catalogPath)
+      try {
+        const { child, report } = await spawnM10Child(root)
+        assert.equal(report.openedCatalog, false)
+        assert.equal(report.state, 'available')
+        assert.deepEqual(report.fds, [])
+        assert.deepEqual(listLibraryDbFds(child.pid ?? 0, catalogPath), [])
+        assert.match(report.getDbError, /Database not initialised/)
+        for (const probe of [report.collection, report.curator, report.crop, report.playlist] as const) {
+          assert.equal(probe.ok, false)
+          assert.equal(/Database not initialised/i.test(probe.error), false, probe.error)
+          assert.ok(probe.error.length > 0, 'probe must fail through the catalog, not silently')
+        }
         await stopChild(child)
       } finally {
         restore()

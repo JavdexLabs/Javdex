@@ -193,6 +193,8 @@ if (gotSingleInstanceLock) {
       console.error(`[model-management] ${(error as Error).message}`)
     }
     initializeAgentPlatform()
+    agentMetadataCollection.bindCatalog(runtime.backend)
+    libraryCurator.bindCatalog(runtime.backend)
     const recoveryFailures = [
       ...await pluginDeveloper.restoreRecoverableRuns(),
       ...await libraryCurator.restoreRecoverableRuns(),
@@ -227,6 +229,7 @@ if (gotSingleInstanceLock) {
       {
         backend: runtime.backend,
         settings: runtime.settings,
+        workStore: runtime.workStore,
         videoDesktop:
           runtime.mode === 'local'
             ? { checkLinkResource: (url) => videoMaintenanceService.checkLinkResource(url) }

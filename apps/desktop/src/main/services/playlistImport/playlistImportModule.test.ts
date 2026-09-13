@@ -4,6 +4,7 @@ import Database from 'better-sqlite3'
 import { migrateDatabase } from '@library/db/migrations'
 import { PlaylistImportModuleImpl, type PlaylistImportRunDriver } from './playlistImportModule'
 import { PlaylistImportRepository } from './playlistImportRepository'
+import type { CatalogBackend } from '../../application/catalogBackend'
 
 function fixture(): {
   database: Database.Database
@@ -653,5 +654,51 @@ describe('PlaylistImportModule interface', () => {
     } finally {
       database.close()
     }
+  })
+
+  it('validates remote start targets through catalog before opening a database', async () => {
+    let dbCalls = 0
+    const driver: PlaylistImportRunDriver = {
+      create: async () => {
+        throw new Error('driver create must not run')
+      },
+      start: async () => {
+        throw new Error('driver start must not run')
+      },
+      resume: async () => {
+        throw new Error('resume')
+      },
+      retry: async () => undefined,
+      finish: async () => undefined,
+      cancel: async () => undefined,
+      discard: async () => undefined
+    }
+    const module = new PlaylistImportModuleImpl(
+      () => {
+        dbCalls += 1
+        throw new Error('opened db')
+      },
+      driver,
+      {
+        libraries: {
+          get: async () => null
+        },
+        playlists: {
+          get: async () => {
+            throw new Error('playlist lookup must not run when the library is missing')
+          }
+        }
+      } as unknown as CatalogBackend
+    )
+    await assert.rejects(
+      module.start({
+        idempotencyKey: 'm10-catalog-first',
+        sourceUrl: 'https://example.test/list',
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      }),
+      /TARGET_LIBRARY_NOT_FOUND/
+    )
+    assert.equal(dbCalls, 0)
   })
 })

@@ -23,10 +23,12 @@ import { registerPlaylistImportHandlers } from './playlistImportHandlers'
 import { registerNfoExportHandlers } from './nfoExportHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
+import type { DesktopWorkStoreHandle } from '../desktop/workStore'
 
 export interface RegisterIpcHandlersOptions {
   backend: CatalogBackend
   settings: DesktopSettingsStore
+  workStore: DesktopWorkStoreHandle
   videoDesktop?: VideoHandlerDesktopPorts
   actressDesktop?: ActressHandlerDesktopQueries
   mediaLibraryDesktop?: MediaLibraryHandlerDesktopPorts
@@ -53,8 +55,11 @@ export function registerIpcHandlers(
   registerFacetHandlers(options.backend)
   registerScrapeHandlers(ctx, options.backend)
   registerPluginDevHandlers(ctx)
-  registerLibraryCuratorHandlers()
+  registerLibraryCuratorHandlers(options.backend)
   registerAgentMetadataHandlers(ctx, options.backend)
-  registerPlaylistImportHandlers(ctx)
+  registerPlaylistImportHandlers(ctx, {
+    backend: options.backend,
+    workStore: options.workStore
+  })
   registerPlayerHandlers(options.backend, options.settings)
 }

@@ -81,7 +81,29 @@ function currentPhase(active: ActiveMetadataRun): AgentMetadataPhase {
 type TargetPromptBuilders = {
   [Kind in AgentMetadataTargetKind]: (
     target: Extract<AgentMetadataTarget, { kind: Kind }>
-  ) => string
+  ) => string | Promise<string>
+}
+
+async function describeBoundTarget(
+  catalog: CatalogBackend,
+  target: AgentMetadataTarget
+): Promise<string> {
+  if (target.kind === 'video') {
+    const video = (await catalog.queries.getVideo({
+      scope: { kind: 'all' },
+      videoId: target.id
+    })) as { id: number; code: string } | null
+    if (!video) throw new Error('影片不存在。')
+    return `当前目标是影片 #${video.id}，库内番号为「${video.code}」。必须在页面中找到并核对同一番号。`
+  }
+  const actress = (await catalog.actresses.get({ actressId: target.id })) as {
+    id: number
+    main_name: string
+    names?: Array<{ name: string }>
+  } | null
+  if (!actress) throw new Error('演员不存在。')
+  const names = [...new Set([actress.main_name, ...(actress.names ?? []).map((item) => item.name)])]
+  return `当前目标是演员 #${actress.id}，库内已知名称为：${names.map((name) => `「${name}」`).join('、')}。优先用同名核对身份；若页面名称均不匹配，必须提交 identityMatched=false 交由用户确认，不能猜测。`
 }
 
 const TARGET_PROMPT_BUILDERS = {
@@ -98,17 +120,28 @@ const TARGET_PROMPT_BUILDERS = {
   }
 } satisfies TargetPromptBuilders
 
-function targetPrompt(target: AgentMetadataTarget): string {
+async function targetPrompt(catalog: CatalogBackend | null, target: AgentMetadataTarget): Promise<string> {
+  if (catalog) return describeBoundTarget(catalog, target)
   return target.kind === 'video'
     ? TARGET_PROMPT_BUILDERS.video(target)
     : TARGET_PROMPT_BUILDERS.actress(target)
 }
 
-function targetExists(target: AgentMetadataTarget): boolean {
-  if (target.kind === 'video') return Boolean(getVideoById(target.id))
-  if (target.kind === 'actress') return Boolean(getActressDetail(target.id))
-  const unsupported: never = target
-  return unsupported
+async function targetExists(catalog: CatalogBackend | null, target: AgentMetadataTarget): Promise<boolean> {
+  if (catalog) {
+    try {
+      await describeBoundTarget(catalog, target)
+      return true
+    } catch {
+      return false
+    }
+  }
+  try {
+    await targetPrompt(null, target)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export class AgentMetadataCollection {
@@ -310,7 +343,7 @@ export class AgentMetadataCollection {
   }
 
   async start(input: AgentMetadataStartInput): Promise<AgentMetadataSnapshot> {
-    targetPrompt(input.target)
+    const prompt = await targetPrompt(this.catalog, input.target)
     if (!input.sourceUrl.trim()) throw new Error('请输入外部详情页 URL。')
     const runId = randomUUID()
     const source: AgentMetadataSource = {
@@ -347,15 +380,15 @@ export class AgentMetadataCollection {
         notify: (event) => this.notify(runId, active, event),
         project: (event) => this.project(runId, active, event)
       })
-      const prompt = [
-        targetPrompt(input.target),
+      const dispatchedPrompt = [
+        prompt,
         `用户指定详情页：${active.state.source.displayUrl}`,
         '请先用 browser open 打开该 URL，核对身份并采集页面明确提供的信息。完成后只调用一次 submit_metadata_candidate。'
       ].join('\n')
       const dispatched = await agentExecution.dispatch({
         runId,
         kind: 'prompt',
-        text: prompt,
+        text: dispatchedPrompt,
         idempotencyKey: input.idempotencyKey
       })
       if (!dispatched.accepted) throw new Error('Agent runtime 拒绝了元数据采集任务。')
@@ -570,7 +603,7 @@ export class AgentMetadataCollection {
         if (
           ownedDraft?.runId === record.id &&
           ownedDraft.status === 'ready' &&
-          !targetExists(state.target)
+          ! (await targetExists(this.catalog, state.target))
         ) {
           agentMetadataDraftService.discard({
             draftId: ownedDraft.id,

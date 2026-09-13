@@ -2,7 +2,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { agentExecution } from '../../agent-platform/agentExecution'
 import { toolHost } from '../../agent-platform/toolHost'
-import { LibraryCurator } from './libraryCurator'
+import { LibraryCurator, readCuratorOverview } from './libraryCurator'
+import type { CatalogBackend } from '../../application/catalogBackend'
 
 function replaceMethod<T extends object, K extends keyof T>(
   target: T,
@@ -68,3 +69,15 @@ it('uses the indexed journal cursor for a curator snapshot', async (t) => {
     assert.equal(cursor.mock.calls[0].arguments[0], 'cursor-run')
   } finally { t.mock.restoreAll() }
 })
+
+it('reads curator overview through a bound catalog without getDb', async () => {
+  const stats = { videos: { total: 4, scraped: 1, unscraped: 2, failed: 1 } }
+  const overview = await readCuratorOverview({
+    queries: {
+      overviewStats: async () => stats
+    }
+  } as unknown as CatalogBackend)
+  assert.deepEqual(overview, stats)
+  assert.notEqual(overview, stats)
+})
+

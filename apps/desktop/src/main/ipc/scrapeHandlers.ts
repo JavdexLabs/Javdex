@@ -5,6 +5,8 @@ import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import { createDefaultScrapeJobController } from '../services/scrapeJobController'
 import { createDefaultScraperPluginCatalog } from '../services/scraperPluginCatalog'
 import { createDefaultScraperServiceConfiguration } from '../services/scraperServiceConfiguration'
+import { createActressAvatarCropSnapshot } from '@library/db/actressAvatarCropSnapshot'
+import { loadCatalogActressAvatarCropSnapshot } from '../services/catalogActressAvatarCropSnapshot'
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { IpcContext } from './shared'
 import { registerScrapeHandler, sendScrapeEvent } from './scrapeContractAdapter'
@@ -17,7 +19,11 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
       const window = ctx.getWindow()
       return Boolean(window && !window.isDestroyed() && !window.webContents.isDestroyed())
     },
-    emit: (channel, payload) => sendScrapeEvent(ctx.getWindow()?.webContents, channel, payload)
+    emit: (channel, payload) => sendScrapeEvent(ctx.getWindow()?.webContents, channel, payload),
+    avatarAutoCropOptions:
+      backend.mode === 'remote'
+        ? { createBatchTargets: () => loadCatalogActressAvatarCropSnapshot(backend) }
+        : { createBatchTargets: createActressAvatarCropSnapshot }
   })
   jobs.initialize()
 

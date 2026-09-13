@@ -5,6 +5,7 @@ import { structuredError } from '@shared/protocol/errors'
 import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
 import type { ActressFaceScanManifestItem } from '@shared/actressTypes'
 import { registerActressHandler } from './actressContractAdapter'
+import { collectCatalogActressAvatarCropTargets } from '../services/catalogActressAvatarCropSnapshot'
 
 export interface ActressHandlerDesktopQueries {
   listAvatarCropTargets(): ActressAvatarAutoCropTarget[]
@@ -39,16 +40,12 @@ export function registerActressHandlers(
     return desktopQueries.getTestTarget(id)
   })
   registerActressHandler(IPC.ACTRESS_AVATAR_CROP_TARGETS, () => {
-    if (!desktopQueries) {
-      throw structuredError('UNSUPPORTED_CAPABILITY', '当前模式不能枚举头像裁切目标。')
-    }
-    return desktopQueries.listAvatarCropTargets()
+    if (desktopQueries) return desktopQueries.listAvatarCropTargets()
+    return collectCatalogActressAvatarCropTargets(backend)
   })
-  registerActressHandler(IPC.ACTRESS_AVATAR_CROP_COUNT, () => {
-    if (!desktopQueries) {
-      throw structuredError('UNSUPPORTED_CAPABILITY', '当前模式不能统计头像裁切目标。')
-    }
-    return desktopQueries.countAvatarCropTargets()
+  registerActressHandler(IPC.ACTRESS_AVATAR_CROP_COUNT, async () => {
+    if (desktopQueries) return desktopQueries.countAvatarCropTargets()
+    return (await collectCatalogActressAvatarCropTargets(backend)).length
   })
   registerActressHandler(IPC.ACTRESS_MERGE_CANDIDATES, (query) =>
     backend.actresses.mergeCandidates(query)

@@ -61,7 +61,7 @@
 | S08 | 管理浏览/编辑、资源/生命周期、分类合并删除、待确认与网页配对已落地；扫描/NFO/任务/根维护与刮削确认仍待 S09/S10 | 见本文件 S08 实施记录 |
 | S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入已交 S10 | 见本文件 S09 实施记录 |
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
-| S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理与远程 mpv 启动已落地；无磁盘 LRU 图片缓存 | 见本文件 S11 实施记录 |
+| S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理、远程 mpv 与按 catalog 隔离的临时磁盘 LRU 已落地 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
 | S13 | 进行中：D01 `/proc`、D02 双后端扫描/NFO、M13 丢响应后再重启、FILE_IMPORT 已落地；Docker/安装包/全量矩阵未做 | 见本文件 S13 实施记录 |
 | S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
@@ -581,7 +581,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - `videos.getResource` 仍返回绝对 `locator`（S08 既有展示定位泄漏）；本阶段只附加 `locatorRevision`，不静默删 locator。
   - 无冻结 manage-image GET 路径；本阶段增加二进制 `GET /manage/v1/assets/...` 作为 `PUT /uploads/:id` 的姊妹面。无冻结 play-stream HTTP；使用 `/play/v1/` 而不是 `/manage/v1`。
   - 本地 `assets.grantPlayback` 仍 `UNSUPPORTED_CAPABILITY`；本地播放仍走受保护文件句柄 / `shell.openPath`。
-  - 图片临时缓存：进行中的 `AbortSignal`（catalog 切换/后端 `trackSignal`）会取消 in-flight 远程读取。未做磁盘 LRU。失败返回占位/404/503，不持久同步远程图库。
+  - 图片临时缓存：进行中的 `AbortSignal`（catalog 切换/后端 `trackSignal`）会取消 in-flight 远程读取。远程 `readImage` 在 `userData/remote-image-cache/<catalogHash>/` 做按 catalog 隔离的临时磁盘 LRU（默认 512 项 / 256 MiB）；命中跳过第二次 GET，中止的读取不写入。失败返回占位/404/503，不持久同步远程图库，不断网当完整图库。
   - 服务端 v1 明文图片。Play HTTP 无效/过期 token 一律 404，不泄露 grant 是否存在。
 - 验证（Linux Node 22.14 / amd64 glibc；实现 `8a00ab9`，e2e 路径修复 `443d9ee`）：
   - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.browser.json` 通过
@@ -591,7 +591,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - `npm run test:packaging` **8 通过**
   - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **3003 tests / 3002 pass / 0 fail / 1 skip**
   - M15 真实播放（本环境 apt 安装 `/usr/bin/mpv` 0.37.0；ffmpeg 生成 4s H.264 AAC `testsrc` 320×240）：mpv `--vo=null --ao=null`、参数数组、`shell: false`。IPC 观测 `time-pos` 从 0.000→0.333（duration 4.023）；pause 保持；resume 再前进；`seek 2.2 absolute` 落到 2.200。MKV grant `video/x-matroska` 同样解码到 `time-pos` 0.333。停服后 grant 仍在 `catalog_settings`；换端口重启 HEAD 200，mpv `loadfile` 再播 `time-pos` 0.125。writer handoff 后 HEAD 404，mpv 日志 `HTTP error 404 Not Found`。mpv 打开并软件解码 `h264 320x240 24.000fps` + `aac`，`VO: [null] 320x240 yuv420p`。这不是只断言进程启动。
-- 未做：S12 迁库；S13 全矩阵/Docker/安装包烟测；S14 文档与 ADR；磁盘 LRU 图片缓存；远程 Agent start/plan 与清单导入 IPC；桌面 `SCAN_RUN`/NFO IPC 仍桌面单例；`videos.getResource` 仍带绝对 locator。不得把 mock 当完成证据。需用户决定：`play.grant` 查询是否应断言 R；manage 图片是否必须改成 JSON op；play 流是否必须挂在 `/manage/v1`；`PLAYER_OPEN_RESOURCE` 是否永久保持两参数；`videos.getResource` 是否去掉绝对 locator。
+- 未做：S12 迁库；S13 全矩阵/Docker/安装包烟测；S14 文档与 ADR；远程 Agent start/plan 与清单导入 IPC；桌面 `SCAN_RUN`/NFO IPC 仍桌面单例；`videos.getResource` 仍带绝对 locator。不得把 mock 当完成证据。需用户决定：`play.grant` 查询是否应断言 R；manage 图片是否必须改成 JSON op；play 流是否必须挂在 `/manage/v1`；`PLAYER_OPEN_RESOURCE` 是否永久保持两参数；`videos.getResource` 是否去掉绝对 locator。
 
 ### S12：双向整库迁移
 
@@ -639,15 +639,19 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - 本环境 `docker` 不存在（`command not found`，无 `/var/run/docker.sock`）。容器镜像烟测仍按设计失败，不能用 Node 进程冒充镜像验收。
 - 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`。第三例在 `ready` 后丢弃 enable/abandon HTTP 响应再 SIGTERM，拉起后以 `migration.status` 为准，终态仍互斥（`e700e3f`）。不是 Docker 两端。
 - M12：启用后对目标 `library.db` 做真实 `scanCoordinator.run`。未映射孤儿片无本地资源、自动清理关闭时成员保留；把 `remove_resource_less_memberships` 改回 1 再扫才会删成员（`e05c165`）。
-- M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。加密存量仍只预检计数，无源端解密流程。
 - S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` 走 `CatalogBackend`。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 start/plan 仍桌面单例。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 拒绝；未识别路径仍走桌面 `renameAndImport`。`PENDING_SCAN_RESOLVE` / `SCAN_AUDIT_PAGE` 仍 library 单例。
-- 验证（Linux Node 22.14 / amd64 glibc；`e05c165` / `5a5a0fc` / `3c9ed03` / `18b31df` / `8fe392a` / `e700e3f` / `034d6f2`）：
+- M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。加密存量仍只预检计数，无源端解密流程。`chmod 000` 目标 `imagesDir` 后 enable 事务已提交、拷图 EACCES：资料库保持 `enabled`、封面文件不在，没有整笔回滚。
+- 远程图片临时磁盘 LRU：`userData/remote-image-cache/<catalogHash>/`，按 catalog 隔离；第二次 `readImage` 不打 HTTP；中止的 GET 不落盘。
+- D03：workStore 已复制行但 `prepStatus=copying` 时远程仍 `modePrepRequired` 且不 `getDb()`；回到本地才 `markReady`，源 `agent_runs` 仍在。
+- D05：`createWindow` 不注册 IPC；远程 runtime dispose 后再装配仍不打开 `library.db`。
+- D07：本地/远程 available/frozen/断线/版本不符/恢复/authInvalid/modePrepRequired 的能力原因已枚举。远程 `migrateCatalog` 能力为 `unsupportedOnServer`（HTTP migration 面已接线，能力位未放开）。
+- 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2`）：
   - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` 通过
   - `npm run pretest` 通过
   - `npm run server:test` **24 + 3 + 1 通过 / 0 失败**（runtime、migrationHosts 含丢响应后再重启、dualBackendScan）
-  - 定向 Electron：`catalogMigrationAcceptance` **2 通过**；`catalogImageRecovery` **2 通过**；`createDesktopRuntime` / isolation **11 通过**；`scanHandlers` **18 通过**
+  - 定向 Electron：`remoteImageDiskCache` + 远程 GET 缓存 **3 通过**；`createDesktopRuntime` **11 通过**；isolation **2 通过**；`desktopCapabilities` **2 通过**；`catalogMigration` 含 EACCES **5 通过**
   - 未跑本阶段全量 Electron / Docker / 安装包
-- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；磁盘不足/权限变化故障注入；源端加密解密流程；磁盘 LRU；全量 Electron。不得把 mock 当完成证据。
+- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；磁盘不足故障注入；源端加密解密流程；enable 拷图失败整笔回滚（产品待决）；全量 Electron。不得把 mock 当完成证据。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -666,15 +670,15 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M11 分页与目标清单 | 部分 | S10 `targetLists` | Node 宿主 | 翻页中插入/删除后再取下一页未做 |
 | M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
 | M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启 | `migrationHosts.e2e.test.ts` 3 例 | 非 Docker；磁盘满未做 |
-| M14 图片与恢复 | 部分 | 加密阻止迁入；正式封面随迁；孤立 uploads 不进包且恢复删除 | Electron-as-Node | 无源端解密；enable 拷图失败整笔回滚未做 |
+| M14 图片与恢复 | 部分 | 加密阻止迁入；正式封面随迁；孤立 uploads 不进包且恢复删除；`chmod 000` imagesDir 后 enable 保持 enabled、无自动回滚 | Electron-as-Node | 无源端解密；拷图失败整笔回滚待产品决定 |
 | M15 播放 | 部分 | S11 真实 mpv + Range | 本机 `/usr/bin/mpv` 0.37.0 | 短断线/凭据到期/接管中的拖动未做 |
 | D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据子进程 `/proc/<pid>/fd` 无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 已连接远程的 `/proc` 对照未再单列 |
 | D02 业务合同 | 部分 | LocalCatalogBackend 与 RemoteCatalogBackend 对同一夹具扫描/NFO 计划 | `dualBackendScan.e2e.test.ts`（独立 `node --test` 进程） | 非 Electron IPC NFO 封面编码；非 Docker |
-| D03 工作存储升级 | 部分 | S02D workStore 复制；远程 `copying` 不打开原库 | Electron-as-Node bootstrap | 复制中断后本地续完、远程仍拒绝补开的对照未再加强 |
-| D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询 | 远程后端测试 | 进度/图片请求迟到未做 |
-| D05 取消与退出 | 部分 | S07 dispose/abort | 远程后端测试 | 窗口关闭/重建未做 |
+| D03 工作存储升级 | 部分 | 复制已写入但未 `markReady` 时远程拒绝补开原库，本地续完且源行保留 | `createDesktopRuntime.test.ts` | 复制过程中杀进程的 OS 级崩溃未做 |
+| D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询；中止的图片 GET 不写入磁盘缓存 | 远程后端 + `remoteImageDiskCache.integration.test.ts` | 进度请求迟到未做 |
+| D05 取消与退出 | 部分 | S07 dispose/abort；`createWindow` 不注册 IPC；远程 runtime 重建不打开 `library.db` | Electron-as-Node bootstrap | 真实 BrowserWindow 关闭未做 |
 | D06 边界检查 | 部分 | pretest 生产依赖图；FILE_IMPORT 走 CatalogBackend | 仓库脚本 + `scanHandlers.test.ts` | SCAN_AUDIT/待确认解析/远程 FILE_RENAME 仍可触达 library 或拒绝 |
-| D07 能力与错误 | 部分 | S07 会话/冻结/能力 | UI + 后端 | 全能力矩阵未出 |
+| D07 能力与错误 | 部分 | 本地/远程各会话态能力原因已枚举 | `desktopCapabilities.test.ts` | 远程 `migrateCatalog` 能力位仍 `unsupportedOnServer`；UI 全动作未再铺 |
 
 ### S14：发布准备与收尾
 
@@ -686,7 +690,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 
 - 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、冻结备份与拷图失败不自动回滚。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
 - 验证：文档提交；未跑安装包或 Docker 镜像烟测。
-- 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。磁盘 LRU 与 S13 剩余矩阵见上一节。
+- 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。S13 剩余矩阵见上一节。
 
 ## 接手环境与验证命令
 

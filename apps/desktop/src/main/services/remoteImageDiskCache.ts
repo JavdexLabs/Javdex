@@ -72,9 +72,15 @@ export function openRemoteImageDiskCache(options: RemoteImageDiskCacheOptions): 
   fs.mkdirSync(directory, { recursive: true })
   const indexPath = path.join(directory, 'index.json')
   let record = loadIndex(indexPath, options.catalogId)
+  let clock = record.entries.reduce((max, entry) => Math.max(max, entry.atime), 0)
 
   const persist = (): void => {
     fs.writeFileSync(indexPath, JSON.stringify(record))
+  }
+
+  const touch = (): number => {
+    clock += 1
+    return clock
   }
 
   const evict = (): void => {
@@ -108,7 +114,7 @@ export function openRemoteImageDiskCache(options: RemoteImageDiskCacheOptions): 
           persist()
           return null
         }
-        entry.atime = Date.now()
+        entry.atime = touch()
         persist()
         return { body: Buffer.from(body), mime: entry.mime }
       } catch {
@@ -131,7 +137,7 @@ export function openRemoteImageDiskCache(options: RemoteImageDiskCacheOptions): 
         file,
         mime,
         bytes: body.byteLength,
-        atime: Date.now()
+        atime: touch()
       })
       evict()
       persist()

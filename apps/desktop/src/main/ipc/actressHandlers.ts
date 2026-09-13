@@ -5,7 +5,7 @@ import { structuredError } from '@shared/protocol/errors'
 import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
 import type { ActressFaceScanManifestItem } from '@shared/actressTypes'
 import { registerActressHandler } from './actressContractAdapter'
-import { collectCatalogActressAvatarCropTargets } from '../services/catalogActressAvatarCropSnapshot'
+import { collectCatalogActressAvatarCropTargets } from '../application/catalogActressAvatarCropSnapshot'
 
 export interface ActressHandlerDesktopQueries {
   listAvatarCropTargets(): ActressAvatarAutoCropTarget[]

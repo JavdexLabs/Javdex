@@ -4,7 +4,7 @@ import {
   collectCatalogActressAvatarCropTargets,
   loadCatalogActressAvatarCropSnapshot
 } from './catalogActressAvatarCropSnapshot'
-import type { CatalogBackend } from '../application/catalogBackend'
+import type { CatalogBackend } from './catalogBackend'
 
 function catalogWithPages(
   pages: Array<{ items: Array<{

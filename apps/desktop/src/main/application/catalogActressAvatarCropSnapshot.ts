@@ -1,6 +1,6 @@
 import type { ActressAvatarAutoCropTarget, ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
 import type { ActressAvatarCropSnapshot } from '@library/db/actressAvatarCropSnapshot'
-import type { CatalogBackend } from '../application/catalogBackend'
+import type { CatalogBackend } from './catalogBackend'
 
 const CROP_PAGE_LIMIT = 100
 const CROP_PAGE_HARD_CAP = 100_000

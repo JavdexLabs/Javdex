@@ -20,7 +20,7 @@ import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../de
 import { createWriterCredentialStore, type WriterSecretCipher } from '../desktop/writerCredentialStore'
 import { agentMetadataCollection } from '../services/agentMetadata/agentMetadataCollection'
 import { libraryCurator, readCuratorOverview } from '../services/libraryCuratorAgent/libraryCurator'
-import { loadCatalogActressAvatarCropSnapshot } from '../services/catalogActressAvatarCropSnapshot'
+import { loadCatalogActressAvatarCropSnapshot } from '../application/catalogActressAvatarCropSnapshot'
 import { createPlaylistImportModule } from '../services/playlistImport/playlistImportModule'
 
 const thisFile = fileURLToPath(import.meta.url)

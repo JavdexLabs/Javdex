@@ -178,6 +178,8 @@ const LIBRARY_KEYS = [
   'runScan',
   'cancelScan',
   'latestScan',
+  'auditGet',
+  'auditHeader',
   'renameFile',
   'importManual',
   'resolvePendingScan',
@@ -751,6 +753,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       runScan: m('scans.run'),
       cancelScan: m('scans.cancel'),
       latestScan: q('scans.getLatest'),
+      auditGet: q('scans.auditGet'),
+      auditHeader: q('scans.auditHeader'),
       renameFile: mPlan('files.rename'),
       importManual: m('files.importManual'),
       resolvePendingScan: (input, ctx) => {

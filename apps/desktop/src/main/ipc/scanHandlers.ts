@@ -5,7 +5,14 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { ManualImportResult, RenameImportResult, ScanCompletionResult, LibraryScanLatestSnapshot } from '@shared/libraryTypes'
+import type {
+  ManualImportResult,
+  PendingResourceIdentityResolution,
+  PendingScanGroupResolution,
+  RenameImportResult,
+  ScanCompletionResult,
+  LibraryScanLatestSnapshot
+} from '@shared/libraryTypes'
 import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
 import type { VideoResourceImportTarget } from '@shared/videoTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
@@ -21,19 +28,14 @@ import {
 import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import { pagePendingScanQueue, countPendingScanQueue } from '@library/db/pendingScanQueueRepo'
 import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
-import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '@library/db/pendingScanRepo'
+import { listPendingScanGroups, getPendingScanGroup } from '@library/db/pendingScanRepo'
 import { listPendingResourceIdentities, getPendingResourceIdentity } from '@library/db/pendingResourceIdentityRepo'
-import { getLocalVideoResourceByLocator, listVideoResources } from '@library/db/videoRepo'
+import { getLocalVideoResourceByLocator } from '@library/db/videoRepo'
 import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
 import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
-import {
-  readLibraryScanAudit
-} from '@library/scan/libraryScanAuditStore'
 import { renameAndImport } from '../scanner/scanner'
 import { scanCoordinator } from '../scanner/scanCoordinator'
 import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
-import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
-import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { assertFileNameOnly, assertMediaLibraryRootFile } from './ipcPathGuards'
 import type { IpcContext } from './shared'
@@ -71,6 +73,54 @@ function toRootRelativePath(libraryId: number, rootId: number, filePath: string)
     throw structuredError('INVALID_INPUT', '远程文件位置必须是根目录相对路径')
   }
   return relative
+}
+
+function pendingResolveVersions(backend: CatalogBackend, qRevision: number) {
+  return {
+    Q: { generation: backend.generation, revision: qRevision },
+    V: { generation: backend.generation, revision: 1 },
+    R: { generation: backend.generation, revision: 1 },
+    G: { generation: backend.generation, revision: 1 }
+  }
+}
+
+export async function resolvePendingScanThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  groupId: number,
+  resolution: PendingScanGroupResolution
+) {
+  return backend.libraries.resolvePendingScan(
+    {
+      libraryId,
+      groupId,
+      assignments: resolution.assignments,
+      primaryResourceIds: resolution.primaryResourceIds,
+      expectedRevision: resolution.expectedRevision
+    },
+    ipcMutation(undefined, pendingResolveVersions(backend, resolution.expectedRevision))
+  )
+}
+
+export async function resolveResourceIdentityThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  identityId: number,
+  resolution: PendingResourceIdentityResolution
+) {
+  return backend.libraries.resolveResourceIdentity(
+    {
+      libraryId,
+      identityId,
+      choice: resolution.choice,
+      expectedRevision: resolution.expectedRevision
+    },
+    ipcMutation(undefined, pendingResolveVersions(backend, resolution.expectedRevision))
+  )
+}
+
+export function auditGetThroughBackend(backend: CatalogBackend, libraryId: number) {
+  return backend.libraries.auditGet({ libraryId })
 }
 
 export async function importManualThroughBackend(
@@ -318,10 +368,13 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
     return false
   })
   registerScanLatestHandler(appCommandAdapter, (libraryId) => backend.libraries.latestScan({ libraryId }))
-  registerScanAuditReadHandlers()
-  appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) =>
-    readLibraryScanAudit(libraryId)
-  )
+  registerScanAuditReadHandlers(appCommandAdapter, {
+    readAuditHeader: (libraryId) => backend.libraries.auditHeader({ libraryId }),
+    readAuditPage: (snapshot, query, limits) => catalogReadService.readAuditPage(snapshot, query, limits),
+    readAuditViewPage: (snapshot, query, limits) =>
+      catalogReadService.readAuditViewPage(snapshot, query, limits)
+  })
+  appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) => auditGetThroughBackend(backend, libraryId))
   registerScanAuditRevealHandler()
   appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
   appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) => pagePendingScanQueue(query))
@@ -332,15 +385,7 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
     listPendingScanGroups(libraryId)
   )
   appCommandAdapter.register(IPC.PENDING_SCAN_RESOLVE, (libraryId, groupId, resolution) =>
-    maintenanceTaskGate.runSync('resource-maintenance', () =>
-      resolvePendingScanGroup(libraryId, groupId, resolution, {
-        selectFallbackPrimaryResourceId: (candidateLibraryId, videoId) =>
-          selectPrimaryVideoResourceCandidate(
-            listVideoResources(candidateLibraryId, videoId),
-            fs.existsSync
-          )?.id ?? null
-      })
-    )
+    resolvePendingScanThroughBackend(backend, libraryId, groupId, resolution)
   )
   appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_LIST, (libraryId) =>
     listPendingResourceIdentities(libraryId)
@@ -348,9 +393,7 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
   appCommandAdapter.register(
     IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,
     (libraryId, identityId, resolution) =>
-      maintenanceTaskGate.run('resource-maintenance', () =>
-        resolvePendingResourceIdentity(libraryId, identityId, resolution)
-      )
+      resolveResourceIdentityThroughBackend(backend, libraryId, identityId, resolution)
   )
 
   appCommandAdapter.register(IPC.FILE_RENAME, (libraryId, rootId, oldPath, newName) =>

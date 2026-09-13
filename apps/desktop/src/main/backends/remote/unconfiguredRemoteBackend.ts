@@ -194,6 +194,8 @@ export function createUnconfiguredRemoteBackend(
       'runScan',
       'cancelScan',
       'latestScan',
+      'auditGet',
+      'auditHeader',
       'renameFile',
       'importManual',
       'resolvePendingScan',

@@ -185,6 +185,8 @@ export interface CatalogLibraryCommands {
   runScan: Command<'scans.run'>
   cancelScan: Command<'scans.cancel'>
   latestScan: Query<'scans.getLatest'>
+  auditGet: Query<'scans.auditGet'>
+  auditHeader: Query<'scans.auditHeader'>
   renameFile: Command<'files.rename'>
   importManual: Command<'files.importManual'>
   resolvePendingScan: Command<'pendingScan.resolve'>

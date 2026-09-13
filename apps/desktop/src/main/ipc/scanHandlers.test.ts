@@ -5,7 +5,7 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend } from './scanHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
@@ -347,4 +347,74 @@ it('refuses remote FILE_RENAME until the IPC carries a resource id', async () =>
     () => renameThroughBackend(backend, 3, 8, 'clip.mp4', 'renamed.mp4'),
     (error: unknown) => isStructuredError(error) && error.code === 'UNSUPPORTED_CAPABILITY'
   )
+})
+
+it('routes PENDING_SCAN_RESOLVE through the catalog backend with Q/V/R/G', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 4,
+    libraries: {
+      resolvePendingScan: async (input: unknown, ctx: unknown) => {
+        calls.push(['resolvePendingScan', input, ctx])
+        return { createdVideoIds: [11] }
+      }
+    }
+  } as unknown as CatalogBackend
+  const resolution = {
+    expectedRevision: 7,
+    assignments: [{ resourceId: 3, target: { kind: 'new' as const, groupKey: 'ABC-001' } }]
+  }
+  const result = await resolvePendingScanThroughBackend(backend, 1, 9, resolution)
+  assert.deepEqual(result, { createdVideoIds: [11] })
+  const [, input, ctx] = calls[0] as [
+    string,
+    { libraryId: number; groupId: number; expectedRevision: number },
+    { expectedVersions: { Q: { generation: number; revision: number } } }
+  ]
+  assert.equal(input.libraryId, 1)
+  assert.equal(input.groupId, 9)
+  assert.equal(input.expectedRevision, 7)
+  assert.deepEqual(ctx.expectedVersions.Q, { generation: 4, revision: 7 })
+})
+
+it('routes PENDING_RESOURCE_IDENTITY_RESOLVE through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 2,
+    libraries: {
+      resolveResourceIdentity: async (input: unknown, ctx: unknown) => {
+        calls.push(['resolveResourceIdentity', input, ctx])
+        return { applied: true }
+      }
+    }
+  } as unknown as CatalogBackend
+  const result = await resolveResourceIdentityThroughBackend(backend, 1, 5, {
+    expectedRevision: 3,
+    choice: 'nfo'
+  })
+  assert.deepEqual(result, { applied: true })
+  const [, input, ctx] = calls[0] as [
+    string,
+    { identityId: number; choice: string },
+    { expectedVersions: { Q: { revision: number } } }
+  ]
+  assert.equal(input.identityId, 5)
+  assert.equal(input.choice, 'nfo')
+  assert.equal(ctx.expectedVersions.Q.revision, 3)
+})
+
+it('routes SCAN_AUDIT_GET through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    libraries: {
+      auditGet: async (input: { libraryId: number }) => {
+        calls.push(input)
+        return { summary: null }
+      }
+    }
+  } as unknown as CatalogBackend
+  assert.deepEqual(await auditGetThroughBackend(backend, 3), { summary: null })
+  assert.deepEqual(calls, [{ libraryId: 3 }])
 })

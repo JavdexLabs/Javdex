@@ -15,8 +15,10 @@ import { normalizeVideoCode } from '@shared/videoCode'
 import type { ExternalVideoResourceKind } from '@shared/videoTypes'
 import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
 import { readStrmFile } from '@library/scan/strmParser'
+import fs from 'node:fs'
 import { getDb } from './database'
 import { insertLocalVideoResource, insertStrmVideoResource } from './videoRepo'
+import { selectLibraryVideoResourcePromotionCandidate } from './videoResourcePromotionRepo'
 
 export interface PendingScanResourceInput {
   rootId: number
@@ -650,6 +652,20 @@ function assertResolutionAssignments(
   ) {
     validationError('必须将待确认扫描组内每条资源恰好分配一次。')
   }
+}
+
+export function selectAccessibleFallbackPrimaryResourceId(
+  libraryId: number,
+  videoId: number,
+  database: Database.Database = getDb()
+): number | null {
+  return (
+    selectLibraryVideoResourcePromotionCandidate(database, {
+      libraryId,
+      videoId,
+      isLocalAccessible: (filePath) => fs.existsSync(filePath)
+    })?.id ?? null
+  )
 }
 
 export function resolvePendingScanGroup(

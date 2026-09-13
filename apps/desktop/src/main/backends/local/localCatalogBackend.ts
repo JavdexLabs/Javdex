@@ -1,5 +1,9 @@
 import { getDb } from '@library/db/database'
-import { resolvePendingScanGroup } from '@library/db/pendingScanRepo'
+import {
+  PendingScanRepoError,
+  resolvePendingScanGroup,
+  selectAccessibleFallbackPrimaryResourceId
+} from '@library/db/pendingScanRepo'
 import { resolvePendingResourceIdentity } from '@library/scan/pendingResourceIdentityService'
 import type {
   PendingResourceIdentityChoice,
@@ -50,8 +54,11 @@ import {
   startLibraryScan
 } from '@library/catalog/catalogScanRuntime'
 import {
+  catalogScanAuditGet,
+  catalogScanAuditHeader,
   catalogScanLatest
 } from '@library/catalog/catalogAuditRead'
+import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import {
   filesRenameDigest,
   importCatalogManualFile,
@@ -1003,6 +1010,12 @@ export function createLocalCatalogBackend(
     async latestScan(input) {
       return catalogScanLatest(input.libraryId)
     },
+    async auditGet(input) {
+      return catalogScanAuditGet(input.libraryId)
+    },
+    async auditHeader(input) {
+      return catalogScanAuditHeader(input.libraryId)
+    },
     async renameFile(input, ctx) {
       const local = input as {
         libraryId: number
@@ -1037,7 +1050,7 @@ export function createLocalCatalogBackend(
         () => result
       ).data
     },
-    resolvePendingScan: async (input) => {
+    resolvePendingScan: async (input, ctx) => {
       const local = input as {
         libraryId?: number
         groupId: number
@@ -1053,16 +1066,44 @@ export function createLocalCatalogBackend(
             .get(local.groupId) as { library_id: number } | undefined
         )?.library_id
       if (libraryId == null) throw structuredError('INVALID_INPUT', '待确认扫描组不存在')
-      if (local.expectedRevision == null) {
+      const expectedRevision = local.expectedRevision ?? ctx.expectedVersions.Q?.revision
+      if (expectedRevision == null) {
         throw structuredError('INVALID_INPUT', '待确认扫描需要 Q 版本')
       }
-      return resolvePendingScanGroup(libraryId, local.groupId, {
-        expectedRevision: local.expectedRevision,
-        assignments: local.assignments,
-        primaryResourceIds: local.primaryResourceIds
-      })
+      try {
+        const result = maintenanceTaskGate.runSync('resource-maintenance', () =>
+          resolvePendingScanGroup(
+            libraryId,
+            local.groupId,
+            {
+              expectedRevision,
+              assignments: local.assignments,
+              primaryResourceIds: local.primaryResourceIds
+            },
+            { selectFallbackPrimaryResourceId: selectAccessibleFallbackPrimaryResourceId }
+          )
+        )
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'pendingScan.resolve',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => result
+        ).data
+      } catch (error) {
+        if (error instanceof PendingScanRepoError) {
+          if (error.code === 'REVISION_CONFLICT') {
+            throw structuredError('VERSION_CONFLICT', error.message)
+          }
+          throw structuredError('INVALID_INPUT', error.message)
+        }
+        throw error
+      }
     },
-    resolveResourceIdentity: async (input) => {
+    resolveResourceIdentity: async (input, ctx) => {
       const local = input as {
         libraryId?: number
         identityId: number
@@ -1077,13 +1118,26 @@ export function createLocalCatalogBackend(
             .get(local.identityId) as { library_id: number } | undefined
         )?.library_id
       if (libraryId == null) throw structuredError('INVALID_INPUT', '资源身份待办不存在')
-      if (local.expectedRevision == null) {
+      const expectedRevision = local.expectedRevision ?? ctx.expectedVersions.Q?.revision
+      if (expectedRevision == null) {
         throw structuredError('INVALID_INPUT', '资源身份待办需要 Q 版本')
       }
-      return resolvePendingResourceIdentity(libraryId, local.identityId, {
-        expectedRevision: local.expectedRevision,
-        choice: local.choice
-      })
+      const result = await maintenanceTaskGate.run('resource-maintenance', () =>
+        resolvePendingResourceIdentity(libraryId, local.identityId, {
+          expectedRevision,
+          choice: local.choice
+        })
+      )
+      return commitCatalogMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'pendingResourceIdentity.resolve',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => result
+      ).data
     }
   }
 

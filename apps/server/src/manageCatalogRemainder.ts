@@ -57,7 +57,8 @@ import {
   getPendingScanGroup,
   listPendingScanGroups,
   PendingScanRepoError,
-  resolvePendingScanGroup
+  resolvePendingScanGroup,
+  selectAccessibleFallbackPrimaryResourceId
 } from '@library/db/pendingScanRepo'
 import {
   getPendingResourceIdentity,
@@ -711,11 +712,16 @@ export const remainderHandlers: Partial<Record<ManageOperationId, CatalogHandler
     if (libraryId == null) throw structuredError('INVALID_INPUT', '待确认扫描组不存在')
     return commit(args, () =>
       runDomain(() =>
-        resolvePendingScanGroup(libraryId, input.groupId, {
-          expectedRevision: requireQRevision(mutation.expectedVersions, mutation.operationId),
-          assignments: input.assignments,
-          primaryResourceIds: input.primaryResourceIds
-        })
+        resolvePendingScanGroup(
+          libraryId,
+          input.groupId,
+          {
+            expectedRevision: requireQRevision(mutation.expectedVersions, mutation.operationId),
+            assignments: input.assignments,
+            primaryResourceIds: input.primaryResourceIds
+          },
+          { selectFallbackPrimaryResourceId: selectAccessibleFallbackPrimaryResourceId }
+        )
       )
     )
   },

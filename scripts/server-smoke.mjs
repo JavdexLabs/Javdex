@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+
+function digestToken(token) {
+  return createHash('sha256').update(token, 'utf8').digest('hex')
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const docker = spawnSync('docker', ['version'], { encoding: 'utf8' })
@@ -102,12 +107,52 @@ try {
   const cookie = login.headers.get('set-cookie')?.split(';')[0] ?? ''
   assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 503)
 
+  const handshake = await fetch(`${base}/manage/v1/handshake.get`, {
+    method: 'POST',
+    headers: { Origin: base, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input: {} })
+  })
+  assert.equal(handshake.status, 200)
+  const hello = await handshake.json()
+  assert.equal(hello.ready, 'notBound')
+  assert.equal(typeof hello.identity.serverId, 'string')
+  assert.equal(typeof hello.identity.catalogId, 'string')
+
   const bind = spawnSync(
     'docker',
     ['exec', 'javdex-server-smoke', 'node', 'index.js', 'bind', '--config', '/config/server.json'],
     { encoding: 'utf8' }
   )
   assert.equal(bind.status, 0, bind.stderr + bind.stdout)
+  const issued = JSON.parse(bind.stdout)
+  assert.equal(issued.kind, 'initialBind')
+  assert.equal(typeof issued.oneTimeToken, 'string')
+
+  const appVersion = JSON.parse(fs.readFileSync(path.join(root, 'out', 'server', 'package.json'), 'utf8')).version
+  const secret = randomBytes(32).toString('base64url')
+  const claim = await fetch(`${base}/manage/v1/writer.claim`, {
+    method: 'POST',
+    headers: {
+      Origin: base,
+      'Content-Type': 'application/json',
+      'X-Javdex-App-Version': appVersion
+    },
+    body: JSON.stringify({
+      serverId: hello.identity.serverId,
+      catalogId: hello.identity.catalogId,
+      input: {
+        kind: 'initialBind',
+        oneTimeToken: issued.oneTimeToken,
+        candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+      }
+    })
+  })
+  const claimBody = await claim.text()
+  assert.equal(claim.status, 200, claimBody)
+  const claimed = JSON.parse(claimBody)
+  assert.equal(claimed.bound, true)
+  assert.equal(typeof claimed.writerEpoch, 'number')
+  assert.ok(claimed.writerEpoch > 0)
   assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 200)
 
   spawnSync('docker', ['restart', 'javdex-server-smoke'], { stdio: 'inherit' })

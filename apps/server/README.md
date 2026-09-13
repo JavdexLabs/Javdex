@@ -35,4 +35,4 @@ See `deploy/javdex-server.example.json` and `deploy/docker-compose.example.yml`.
 
 ## Not in this stage
 
-Image upload protocol, RemoteCatalogBackend, remaining manage mutations, and Docker acceptance are later stages. Recover tokens are issued by the deploy CLI; HTTP `writer.recoverIssue` is loopback-only in this stage.
+Recover tokens are issued by the deploy CLI; HTTP `writer.recoverIssue` is loopback-only. `npm run server:smoke` is the Linux container check (requires Docker and a prior `server:build`); it claims a writer after `bind`. `server:smoke:node` is host-process only.

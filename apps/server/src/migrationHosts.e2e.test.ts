@@ -832,5 +832,154 @@ if (hostConfigRaw) {
         targetLive.close()
       }
     })
+
+    it('rewrites mapped STRM source paths over two HTTP hosts', async () => {
+      const sourceDir = path.join(root, 'source-mapped-strm')
+      const targetDir = path.join(root, 'target-mapped-strm')
+      const sourceMount = path.join(root, 'source-mapped-strm-mount')
+      const targetMount = path.join(root, 'target-mapped-strm-mount')
+      for (const dir of [sourceDir, targetDir, sourceMount, targetMount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(sourceDir, 'media_assets'), { recursive: true })
+      fs.mkdirSync(path.join(targetDir, 'media_assets'), { recursive: true })
+      const locator = 'https://example.test/mapped-strm.mp4'
+      const clip = path.join(sourceMount, 'M12-MAPPED.mp4')
+      const strmPath = path.join(sourceMount, 'M12-MAPPED.strm')
+      fs.writeFileSync(clip, 'video-mapped')
+      fs.writeFileSync(strmPath, `${locator}\n`)
+      fs.writeFileSync(path.join(targetMount, 'M12-MAPPED.strm'), `${locator}\n`)
+
+      const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+      const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+      let sourceToken = ''
+      let targetToken = ''
+      let rootId = 0
+      try {
+        ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+        ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
+        rootId = insertRoot(sourceDb, sourceMount)
+        const inserted = insertTestVideoWithFile(sourceDb, {
+          code: 'M12-MAPPED',
+          title: 'Mapped STRM',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        })
+        insertStrmResource(sourceDb, {
+          libraryId: 1,
+          videoId: inserted.videoId,
+          rootId,
+          locator,
+          strmPath
+        })
+        sourceToken = issueCatalogMigrationToken({}, sourceDb).oneTimeToken
+        targetToken = issueCatalogMigrationToken({}, targetDb).oneTimeToken
+      } finally {
+        sourceDb.close()
+        targetDb.close()
+      }
+
+      const sourceChild = spawnHost(hostConfig(sourceDir, { mapped: sourceMount }))
+      const targetChild = spawnHost(hostConfig(targetDir, { mapped: targetMount }))
+      try {
+        const sourcePort = await waitListening(sourceChild)
+        const targetPort = await waitListening(targetChild)
+        const sourceBase = `http://127.0.0.1:${sourcePort}`
+        const targetBase = `http://127.0.0.1:${targetPort}`
+
+        const preview = await postManage(
+          sourceBase,
+          'migration.preview',
+          { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'mapped' }] } },
+          sourceToken
+        )
+        assert.equal(preview.status, 200, JSON.stringify(preview.json))
+        const body = preview.json as {
+          migrationId: string
+          digest: string
+          strmConversions: number
+          strmConflicts: unknown[]
+        }
+        assert.equal(body.strmConversions, 0, JSON.stringify(body))
+        assert.equal((body.strmConflicts ?? []).length, 0, JSON.stringify(body.strmConflicts))
+
+        const started = await postManage(
+          sourceBase,
+          'migration.start',
+          { input: { migrationId: body.migrationId, digest: body.digest } },
+          sourceToken
+        )
+        assert.equal(started.status, 200, JSON.stringify(started.json))
+        const pkg = path.join(sourceDir, 'migration-packages', `${body.migrationId}.tar.gz`)
+        assert.equal(fs.existsSync(pkg), true)
+        assert.equal(
+          await putPackage(targetBase, body.migrationId, fs.readFileSync(pkg), targetToken),
+          200
+        )
+        const imported = await postManage(
+          targetBase,
+          'migration.start',
+          { input: { migrationId: body.migrationId, digest: body.digest } },
+          targetToken
+        )
+        assert.equal(imported.status, 200, JSON.stringify(imported.json))
+        const enabled = await postManage(
+          targetBase,
+          'migration.enable',
+          { input: { migrationId: body.migrationId, digest: body.digest } },
+          targetToken
+        )
+        assert.equal(enabled.status, 200, JSON.stringify(enabled.json))
+        assert.equal((enabled.json as { targetPhase: string }).targetPhase, 'enabled')
+
+        const targetLive = new Database(path.join(targetDir, 'library.db'), {
+          readonly: true,
+          fileMustExist: true
+        })
+        try {
+          const strm = targetLive
+            .prepare(
+              `SELECT kind, locator, strm_source_path, root_id
+                 FROM video_resources
+                WHERE strm_source_path IS NOT NULL
+                LIMIT 1`
+            )
+            .get() as {
+            kind: string
+            locator: string
+            strm_source_path: string
+            root_id: number | null
+          }
+          assert.ok(strm, 'mapped STRM resource missing on target')
+          assert.equal(strm.kind, 'direct')
+          assert.equal(strm.locator, locator)
+          assert.equal(strm.strm_source_path.startsWith(targetMount), true, strm.strm_source_path)
+          assert.equal(path.basename(strm.strm_source_path), 'M12-MAPPED.strm')
+          assert.ok(strm.root_id && strm.root_id > 0)
+          const local = targetLive
+            .prepare(`SELECT locator FROM video_resources WHERE kind = 'local'`)
+            .get() as { locator: string }
+          assert.equal(local.locator.startsWith(targetMount), true, local.locator)
+        } finally {
+          targetLive.close()
+        }
+
+        const sourceLive = new Database(path.join(sourceDir, 'library.db'), {
+          readonly: true,
+          fileMustExist: true
+        })
+        try {
+          assert.equal(readCatalogIdentity(sourceLive)?.frozen, true)
+          const sourceStrm = sourceLive
+            .prepare('SELECT strm_source_path FROM video_resources WHERE strm_source_path IS NOT NULL')
+            .get() as { strm_source_path: string }
+          assert.equal(sourceStrm.strm_source_path, strmPath)
+        } finally {
+          sourceLive.close()
+        }
+      } finally {
+        await stopChild(sourceChild)
+        await stopChild(targetChild)
+      }
+    })
   })
 }

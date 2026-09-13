@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "private": true,
   "license": "MIT",
-  "description": "Independent Node catalog host: SQLite, image storage, query worker, LAN browse HTTP, manage HTTP handshake/claim/edit, and process lifecycle.",
+  "description": "Independent Node catalog host: SQLite, image storage, query worker, LAN browse HTTP, manage HTTP handshake/claim/edit/migration, CLI bind/recover/migrate-auth, and process lifecycle.",
   "bin": {
     "javdex-server": "./src/index.ts"
   },

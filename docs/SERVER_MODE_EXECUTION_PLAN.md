@@ -61,7 +61,8 @@
 | S08 | 管理浏览/编辑、资源/生命周期、分类合并删除、待确认与网页配对已落地；扫描/NFO/任务/根维护与刮削确认仍待 S09/S10 | 见本文件 S08 实施记录 |
 | S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入已交 S10 | 见本文件 S09 实施记录 |
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
-| S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理与远程 mpv 启动已落地；无磁盘 LRU 图片缓存；S12 迁库仍待 | 见本文件 S11 实施记录 |
+| S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理与远程 mpv 启动已落地；无磁盘 LRU 图片缓存 | 见本文件 S11 实施记录 |
+| S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描保留成员、双进程 HTTP 竞态、Docker 两端与图片后拷失败未做 | 见本文件 S12 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -594,6 +595,27 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 数据包 manifest 至少含格式/应用/schema 版本、源平台与身份、migrationId、数据/图片数量和摘要、映射摘要；验证 ZIP/归档路径逃逸、符号链接、重复条目、大小上限及解包空间。凭据不进入包。
 
 源端持久“允许启用”后才发许可；目标同一个持久决策点选择 active 或 abandoned。只有目标永久 abandoned 才允许源解冻；删除暂存文件不删除终态。断网、迟到许可、两端重启、启用响应丢失全部有验收。启用新 catalog 和重置授权后，源端保留冻结备份；回迁从当前目标重新执行。
+
+**S12 实施记录（双向整库迁移）**
+
+- 范围：冻结 ops `migration.preview|start|status|allowEnable|enable|abandon`，auth class `migration`（独立于 writer Bearer；Cookie 不能授权）。无冻结签发 HTTP；CLI `migrate-auth` → `issueMigrationToken` / `issueCatalogMigrationToken`。一次性凭据首次成功 `authenticateMigration` 转为同 secret 的 recovery（无冻结 `migration.claim`）。状态写入 schema 19 `catalog_settings`（`migration-auth` / `migration-state` / `migration-final:<uuid>`），不升 schema 20。源端 preview 计算影响并持久 prepare；start 冻结后重算 digest，导出 gzip+ustar（`manifest.json`、`catalog/library.db`、官方图片相对路径），完成态为 catalog task。目标必须空库且 `writerEpoch=0`；preview 只校验挂载不持久冲突 digest。start 解包到 `{userData}/migration-staging/{id}/`，在拷贝上做转换，phase=`ready`。enable 在 ATTACH 后 `BEGIN IMMEDIATE` 拷入 live：新 `catalogId`、保留目标 `serverId`、`writerEpoch=0`、解冻；abandon 写永久终态、拒绝迟到 enable、删暂存不删 final。包上限 `MIGRATION_PACKAGE_MAX_BYTES` 512 MiB。凭据/一次性令牌/writer/pending/扫描组/未识别/Agent 工作/play-grant 不进包。`claimWriter` 在 frozen 时 `CATALOG_FROZEN`。`PUT /manage/v1/migration/packages/:uuid` 为冻结 JSON 之外的二进制姊妹面。本地/远程 `CatalogBackend.migration` 均接线；远程用 `migrationSecret`，不走 writer 包络 / `ensureConnected`。
+- 转换：映射错误 `INVALID_INPUT`，不降级为不映射。未映射本地资源删除；未映射 STRM 转普通链接（`strm_source_path`/`source_identity`/`root_id` 置空）；规范化 `(library_id, kind, locator)` 冲突阻塞 start。映射根用源平台 `path.win32|posix` 相对化再在目标 `path.join`；目标 `resolveMediaLibraryRootIdentity` 检查大小写/别名。省略未映射根行。受影响库关闭 `remove_resource_less_memberships`（ADR-0028 例外）。主资源按 ADR-0014 kind 序重选。`AVPK\x01` 加密存量进入 `pendingBlockers` 并阻止 start/import。
+- 工程默认与升级：
+  - 冻结无签发 migration token 的 HTTP op。实现只用 CLI。源端 HTTP 也需要该凭据，因此允许在非空资料库签发（研究表述偏“空目标 staging”）。
+  - 冻结无 PUT 包路径。增加 `PUT /manage/v1/migration/packages/:uuid`，与 uploads 同级。
+  - 冻结 `migration.abandon` 摘要写“目标永久放弃后源才解冻”，但源 HTTP 没有目标证明回执。实现：持有 migration 凭据的协调者在源调用 abandon 即解冻（须先目标 abandon）。启用成功后源保持冻结备份；happy-path 测试不断言启用后再 abandon。
+  - 目标 preview 不持久独占状态。目标 start 以包内 manifest（`previewDigest`、mappings）自洽。
+  - SQLite `ATTACH` 不能在事务内执行：先 ATTACH 再 `BEGIN IMMEDIATE`。
+  - enable 事务提交后再拷图片；拷图失败时库已启用、图可能缺失。
+  - `start` 同步打包/解包后直接返回 succeeded task，不是后台队列。
+  - 回迁是启用后的当前目标作为新源重新跑一遍，不是自动反向包。
+- 验证（Linux Node 22.14 / amd64 glibc；实现 `f817eca`，补测 `a88760e`）：
+  - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` 通过
+  - `npm run server:test` **24 通过 / 0 失败**（CLI token、cookie/writer ≠ migration、PUT 包 cookie/writer 401、token PUT 200、source start 冻结、`videos.list` writer 403 `CATALOG_FROZEN`、remote `migration.status`）
+  - 定向 Electron：`catalogMigration` / `catalogMigrationArchive` / `catalogWriter` **14 通过 / 0 失败**（STRM 转普通链接、未映射本地删除并关自动清理、封面文件随迁、新 catalogId / 保留目标 serverId / epoch 0、迟到 enable `AUTH_REQUIRED`、源未启用可 abandon 解冻、pending+加密阻止冻结、归档逃逸/重复/超限）
+  - `npm run pretest` 通过
+  - 未跑本阶段全量 Electron / Docker 两端真实部署
+- 未做：M12 启用后对目标做真实首次扫描以证明无资源成员仍保留；M13 两个 HTTP 进程并发 enable/abandon（`getDb()` 单例，library 测试为同一连接上的顺序 IMMEDIATE）；M14 孤立暂存在引用/清理边界的注入；加密存量仅预检计数，无源端解密流程；断网/响应丢失/两端重启的完整矩阵；Docker 两端状态与文件检查。S13 全矩阵；S14 ADR/用户迁移文档；磁盘 LRU；S02D `SCAN_RUN`/NFO IPC 与采集 start/plan 仍桌面单例。不得把 mock 当完成证据。需用户决定：是否增加冻结的 migration 签发 HTTP op；PUT 包是否必须改成 JSON op 或沿用 uploads；源 abandon 是否必须携带目标终态证明而不能仅凭协调者声明；enable 图片拷贝失败是否必须整笔回滚；非空库签发 migrate-auth 是否收窄为空目标。
 
 ### S13：完整验收
 

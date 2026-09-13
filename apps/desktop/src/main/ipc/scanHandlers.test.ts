@@ -5,8 +5,9 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend } from './scanHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
+import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
 import { createTypedIpcAdapter } from './typedIpcAdapter'
 
@@ -305,4 +306,45 @@ it('runs SCAN_RUN through the catalog backend instead of the local coordinator s
   assert.equal(result.imported, 1)
   assert.deepEqual(calls[0], ['runScan', { libraryId: 3 }])
   assert.equal((calls[1] as [string, { taskId: string }])[0], 'tasks.get')
+})
+
+it('runs FILE_IMPORT_MANUAL through the catalog backend with a root-relative location', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 1,
+    libraries: {
+      importManual: async (input: unknown, ctx: unknown) => {
+        calls.push(['importManual', input, ctx])
+        return { imported: true, code: 'D02-001' }
+      }
+    }
+  } as unknown as CatalogBackend
+  const result = await importManualThroughBackend(
+    backend,
+    3,
+    8,
+    'clip.mp4',
+    'D02-001',
+    { kind: 'new' }
+  )
+  assert.equal(result.imported, true)
+  assert.equal((calls[0] as [string, { location: { relativePath: string } }])[0], 'importManual')
+  assert.equal(
+    ((calls[0] as [string, { location: { relativePath: string } }])[1]).location.relativePath,
+    'clip.mp4'
+  )
+  await assert.rejects(
+    () =>
+      importManualThroughBackend(backend, 3, 8, '/abs/clip.mp4', 'D02-001', { kind: 'new' }),
+    (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+  )
+})
+
+it('refuses remote FILE_RENAME until the IPC carries a resource id', async () => {
+  const backend = { mode: 'remote', generation: 1, libraries: {} } as unknown as CatalogBackend
+  await assert.rejects(
+    () => renameThroughBackend(backend, 3, 8, 'clip.mp4', 'renamed.mp4'),
+    (error: unknown) => isStructuredError(error) && error.code === 'UNSUPPORTED_CAPABILITY'
+  )
 })

@@ -1,12 +1,16 @@
 import { catalogReadService } from '../services/catalogReadService'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
 import fs from 'node:fs'
+import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import type { ManualImportResult, RenameImportResult, ScanCompletionResult, LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
+import type { VideoResourceImportTarget } from '@shared/videoTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { ipcMutation } from '../application/mutationContext'
+import { structuredError } from '@shared/protocol/errors'
 import { normalizeAbsoluteLocalPath, normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import {
@@ -19,11 +23,13 @@ import { pagePendingScanQueue, countPendingScanQueue } from '@library/db/pending
 import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
 import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '@library/db/pendingScanRepo'
 import { listPendingResourceIdentities, getPendingResourceIdentity } from '@library/db/pendingResourceIdentityRepo'
-import { listVideoResources } from '@library/db/videoRepo'
+import { getLocalVideoResourceByLocator, listVideoResources } from '@library/db/videoRepo'
+import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
+import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
 import {
   readLibraryScanAudit
 } from '@library/scan/libraryScanAuditStore'
-import { importManual, renameAndImport } from '../scanner/scanner'
+import { renameAndImport } from '../scanner/scanner'
 import { scanCoordinator } from '../scanner/scanCoordinator'
 import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
@@ -42,6 +48,106 @@ function requireActiveRoot(libraryId: number, rootId: number): MediaLibraryRoot 
 
 function removeScopedUnrecognizedFile(libraryId: number, rootId: number, filePath: string): void {
   removeLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(filePath))
+}
+
+function fileMaintenanceVersions(backend: CatalogBackend) {
+  return {
+    G: { generation: backend.generation, revision: 1 },
+    R: { generation: backend.generation, revision: 1 },
+    V: { generation: backend.generation, revision: 1 }
+  }
+}
+
+function toRootRelativePath(libraryId: number, rootId: number, filePath: string): string {
+  if (!path.isAbsolute(filePath)) return filePath
+  const root = requireActiveRoot(libraryId, rootId)
+  const base = root.realPath ?? root.path
+  const resolved = path.resolve(filePath)
+  if (!isPathUnderRoot(resolved, base)) {
+    throw structuredError('INVALID_INPUT', '文件不在授权根目录内')
+  }
+  const relative = path.relative(base, resolved)
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw structuredError('INVALID_INPUT', '远程文件位置必须是根目录相对路径')
+  }
+  return relative
+}
+
+export async function importManualThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  rootId: number,
+  filePath: string,
+  code: string,
+  target: VideoResourceImportTarget
+): Promise<ManualImportResult> {
+  if (path.isAbsolute(filePath) && backend.mode === 'remote') {
+    throw structuredError('INVALID_INPUT', '远程文件位置必须是根目录相对路径')
+  }
+  const relativePath = toRootRelativePath(libraryId, rootId, filePath)
+  return backend.libraries.importManual(
+    { libraryId, location: { rootId, relativePath }, code, target },
+    ipcMutation(undefined, fileMaintenanceVersions(backend))
+  ) as Promise<ManualImportResult>
+}
+
+export async function renameThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  rootId: number,
+  oldPath: string,
+  newName: string
+): Promise<RenameImportResult> {
+  assertFileNameOnly(newName)
+  if (backend.mode === 'remote') {
+    throw structuredError(
+      'UNSUPPORTED_CAPABILITY',
+      '远程重命名仍需要资料库资源编号；当前桌面 IPC 只有根目录相对/绝对路径。'
+    )
+  }
+  const root = requireActiveRoot(libraryId, rootId)
+  const relativePath = toRootRelativePath(libraryId, rootId, oldPath)
+  const locator = path.isAbsolute(oldPath)
+    ? oldPath
+    : path.resolve(root.realPath ?? root.path, relativePath)
+  const resource = getLocalVideoResourceByLocator(libraryId, locator)
+  if (!resource) {
+    assertMediaLibraryRootFile(oldPath, root)
+    return maintenanceTaskGate.run('resource-maintenance', async () => {
+      const result = await renameAndImport({
+        libraryId,
+        rootId,
+        oldPath,
+        newName
+      })
+      if (result.outcome === 'imported' || result.outcome === 'pending') {
+        removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
+      } else {
+        renameLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(oldPath), {
+          filePath: result.newPath,
+          normalizedPath: normalizeLocalPathIdentity(result.newPath)
+        })
+      }
+      return result
+    })
+  }
+  const location = { rootId, relativePath }
+  return backend.libraries.renameFile(
+    {
+      libraryId,
+      resourceId: resource.id,
+      location,
+      newFileName: newName,
+      planId: randomUUID(),
+      planDigest: filesRenameDigest({
+        libraryId,
+        resourceId: resource.id,
+        location,
+        newFileName: newName
+      })
+    },
+    ipcMutation(undefined, fileMaintenanceVersions(backend))
+  ) as Promise<RenameImportResult>
 }
 
 export function registerScanLatestHandler(
@@ -247,44 +353,11 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
       )
   )
 
-  appCommandAdapter.register(
-    IPC.FILE_RENAME,
-    (libraryId, rootId, oldPath, newName): Promise<RenameImportResult> => {
-      const root = requireActiveRoot(libraryId, rootId)
-      assertMediaLibraryRootFile(oldPath, root)
-      assertFileNameOnly(newName)
-      return maintenanceTaskGate.run('resource-maintenance', async () => {
-        const result = await renameAndImport({
-          libraryId,
-          rootId,
-          oldPath,
-          newName
-        })
-        if (result.outcome === 'imported' || result.outcome === 'pending') {
-          removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
-        } else {
-          renameLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(oldPath), {
-            filePath: result.newPath,
-            normalizedPath: normalizeLocalPathIdentity(result.newPath)
-          })
-        }
-        return result
-      })
-    }
+  appCommandAdapter.register(IPC.FILE_RENAME, (libraryId, rootId, oldPath, newName) =>
+    renameThroughBackend(backend, libraryId, rootId, oldPath, newName)
   )
 
-  appCommandAdapter.register(
-    IPC.FILE_IMPORT_MANUAL,
-    (libraryId, rootId, filePath, code, target): Promise<ManualImportResult> => {
-      const root = requireActiveRoot(libraryId, rootId)
-      assertMediaLibraryRootFile(filePath, root)
-      return maintenanceTaskGate.run('resource-maintenance', async () => {
-        const result = await importManual({ libraryId, rootId, filePath, code, target })
-        if (result.imported || result.skippedPath) {
-          removeScopedUnrecognizedFile(libraryId, rootId, filePath)
-        }
-        return result
-      })
-    }
+  appCommandAdapter.register(IPC.FILE_IMPORT_MANUAL, (libraryId, rootId, filePath, code, target) =>
+    importManualThroughBackend(backend, libraryId, rootId, filePath, code, target)
   )
 }

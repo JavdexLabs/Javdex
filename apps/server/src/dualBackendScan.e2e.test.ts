@@ -317,6 +317,48 @@ if (hostConfigRaw) {
         assert.equal((localLatest.summary?.scannedFiles ?? 0) >= 1, true, JSON.stringify(localLatest))
         assert.equal((remoteLatest.summary?.scannedFiles ?? 0) >= 1, true, JSON.stringify(remoteLatest))
 
+        const localHeader = (await local.libraries.auditHeader({ libraryId: 1 })) as {
+          snapshot: { runId: string } | null
+        }
+        const remoteHeader = (await remote.libraries.auditHeader({ libraryId: 1 })) as {
+          snapshot: { runId: string } | null
+        }
+        assert.equal(Boolean(localHeader.snapshot?.runId), true, JSON.stringify(localHeader))
+        assert.equal(Boolean(remoteHeader.snapshot?.runId), true, JSON.stringify(remoteHeader))
+        const localAuditPage = (await local.libraries.auditPage({
+          libraryId: 1,
+          section: 'files',
+          limit: 50,
+          offset: 0
+        })) as { total: number }
+        const remoteAuditPage = (await remote.libraries.auditPage({
+          libraryId: 1,
+          section: 'files',
+          attention: true,
+          limit: 50,
+          offset: 0
+        })) as { total: number }
+        assert.equal(localAuditPage.total >= 1, true, JSON.stringify(localAuditPage))
+        assert.equal(remoteAuditPage.total >= 1, true, JSON.stringify(remoteAuditPage))
+        const localAuditView = (await local.libraries.auditViewPage({
+          libraryId: 1,
+          tab: 'all',
+          limit: 50,
+          offset: 0,
+          anchor: { kind: 'path', value: 'ABC-001.mp4' }
+        })) as { auditAvailable: boolean; total: number }
+        const remoteAuditView = (await remote.libraries.auditViewPage({
+          libraryId: 1,
+          tab: 'all',
+          limit: 50,
+          offset: 0,
+          anchor: { kind: 'path', value: 'ABC-001.mp4' }
+        })) as { auditAvailable: boolean; total: number }
+        assert.equal(localAuditView.auditAvailable, true, JSON.stringify(localAuditView))
+        assert.equal(remoteAuditView.auditAvailable, true, JSON.stringify(remoteAuditView))
+        assert.equal(localAuditView.total >= 1, true, JSON.stringify(localAuditView))
+        assert.equal(remoteAuditView.total >= 1, true, JSON.stringify(remoteAuditView))
+
         const localVideos = (await local.queries.listVideos({ scope: { kind: 'all' } })) as ScopedVideoListResult
         const remoteVideos = (await remote.queries.listVideos({ scope: { kind: 'all' } })) as ScopedVideoListResult
         assert.equal(localVideos.items.some((item) => item.code === 'ABC-001'), true, JSON.stringify(localVideos))

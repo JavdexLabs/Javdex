@@ -10,6 +10,7 @@ import {
   getPendingResourceIdentity,
   listPendingResourceIdentities
 } from '@library/db/pendingResourceIdentityRepo'
+import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
 import { selectAccessibleFallbackPrimaryResourceId } from '@library/scan/accessiblePrimaryResource'
 import { resolvePendingResourceIdentity } from '@library/scan/pendingResourceIdentityService'
 import type {
@@ -1098,6 +1099,19 @@ export function createLocalCatalogBackend(
       return listMediaLibraries({ includeArchived: true }).flatMap((library) =>
         listPendingResourceIdentities(library.id)
       )
+    },
+    async pendingAuditPresence(input) {
+      const local = input as {
+        libraryId: number
+        groupIds: number[]
+        identityIds: number[]
+        scrapeIds: number[]
+      }
+      return getPendingAuditPresence(local.libraryId, {
+        groupIds: local.groupIds,
+        identityIds: local.identityIds,
+        scrapeIds: local.scrapeIds
+      })
     },
     async renameFile(input, ctx) {
       const local = input as {

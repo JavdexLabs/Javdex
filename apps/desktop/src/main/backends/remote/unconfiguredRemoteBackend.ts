@@ -204,6 +204,7 @@ export function createUnconfiguredRemoteBackend(
       'countPendingScanQueue',
       'getPendingResourceIdentity',
       'listPendingResourceIdentities',
+      'pendingAuditPresence',
       'renameFile',
       'importManual',
       'resolvePendingScan',

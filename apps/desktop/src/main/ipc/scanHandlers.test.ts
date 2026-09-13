@@ -5,7 +5,7 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend, pendingAuditPresenceThroughBackend } from './scanHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
@@ -523,5 +523,29 @@ it('routes pending scan get/list/queue reads through the catalog backend', async
     ['list', { libraryId: 1 }],
     ['page', { libraryId: 1, limit: 50, offset: 0, anchor: { kind: 'group', id: 9 } }],
     ['count', { libraryId: 1 }]
+  ])
+})
+
+it('routes PENDING_AUDIT_PRESENCE through the catalog backend without frozen emptyInput presence', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    libraries: {
+      pendingAuditPresence: async (input: unknown) => {
+        calls.push(input)
+        return { groupIds: [1], identityIds: [], scrapeIds: [8] }
+      }
+    }
+  } as unknown as CatalogBackend
+  assert.deepEqual(
+    await pendingAuditPresenceThroughBackend(backend, 3, {
+      groupIds: [1, 2],
+      identityIds: [4],
+      scrapeIds: [8]
+    }),
+    { groupIds: [1], identityIds: [], scrapeIds: [8] }
+  )
+  assert.deepEqual(calls, [
+    { libraryId: 3, groupIds: [1, 2], identityIds: [4], scrapeIds: [8] }
   ])
 })

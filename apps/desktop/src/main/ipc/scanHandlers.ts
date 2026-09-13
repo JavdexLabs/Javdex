@@ -7,6 +7,7 @@ import { shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import type {
   ManualImportResult,
+  PendingAuditIds,
   PendingResourceIdentityResolution,
   PendingScanGroupResolution,
   PendingScanQueueQuery,
@@ -28,7 +29,6 @@ import {
   renameLibraryUnrecognizedFile
 } from '@library/db/libraryScanRepo'
 import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
-import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
 import { getLocalVideoResourceByLocator } from '@library/db/videoRepo'
 import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
 import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
@@ -200,6 +200,14 @@ export function listPendingResourceIdentitiesThroughBackend(
   libraryId: number
 ) {
   return backend.libraries.listPendingResourceIdentities({ libraryId })
+}
+
+export function pendingAuditPresenceThroughBackend(
+  backend: CatalogBackend,
+  libraryId: number,
+  ids: PendingAuditIds
+) {
+  return backend.libraries.pendingAuditPresence({ libraryId, ...ids })
 }
 
 export async function importManualThroughBackend(
@@ -454,7 +462,9 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
   })
   appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) => auditGetThroughBackend(backend, libraryId))
   registerScanAuditRevealHandler()
-  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
+  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) =>
+    pendingAuditPresenceThroughBackend(backend, libraryId, ids)
+  )
   appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) =>
     pagePendingScanQueueThroughBackend(backend, query)
   )

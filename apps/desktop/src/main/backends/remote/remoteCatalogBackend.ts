@@ -188,6 +188,7 @@ const LIBRARY_KEYS = [
   'countPendingScanQueue',
   'getPendingResourceIdentity',
   'listPendingResourceIdentities',
+  'pendingAuditPresence',
   'renameFile',
   'importManual',
   'resolvePendingScan',
@@ -824,6 +825,42 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           ctx?.signal
         ),
       listPendingResourceIdentities: q('pendingResourceIdentity.list'),
+      pendingAuditPresence: async (input, ctx) => {
+        const local = (input ?? {}) as {
+          libraryId: number
+          groupIds?: number[]
+          identityIds?: number[]
+          scrapeIds?: number[]
+        }
+        await query('libraries.get', { libraryId: local.libraryId }, ctx?.signal)
+        const groupIds = local.groupIds ?? []
+        const identityIds = local.identityIds ?? []
+        const scrapeIds = local.scrapeIds ?? []
+        const [groups, identities, scrapes] = await Promise.all([
+          groupIds.length
+            ? (query('pendingScan.list', { libraryId: local.libraryId }, ctx?.signal) as Promise<
+                Array<{ id: number }>
+              >)
+            : Promise.resolve([]),
+          identityIds.length
+            ? (query('pendingResourceIdentity.list', { libraryId: local.libraryId }, ctx?.signal) as Promise<
+                Array<{ id: number }>
+              >)
+            : Promise.resolve([]),
+          scrapeIds.length
+            ? (query('pendingVideoScrapes.list', {}, ctx?.signal) as Promise<Array<{ id: number }>>)
+            : Promise.resolve([])
+        ])
+        const pick = (wanted: number[], rows: Array<{ id: number }>) => {
+          const have = new Set(rows.map((row) => row.id))
+          return [...new Set(wanted)].filter((id) => have.has(id)).sort((a, b) => a - b)
+        }
+        return {
+          groupIds: pick(groupIds, groups),
+          identityIds: pick(identityIds, identities),
+          scrapeIds: pick(scrapeIds, scrapes)
+        }
+      },
       renameFile: mPlan('files.rename'),
       importManual: m('files.importManual'),
       resolvePendingScan: (input, ctx) => {

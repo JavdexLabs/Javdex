@@ -12,6 +12,7 @@ import { hashPassword } from '@http/auth'
 import { isStructuredError } from '@shared/protocol/errors'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
+import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 import { ensureCatalogIdentity, readCatalogIdentity } from '@library/catalog/catalogIdentity'
 import { issueCatalogMigrationToken } from '@library/catalog/catalogMigrationAuth'
 import { openIsolatedCatalog } from '@library/catalog/catalogMigration'
@@ -43,7 +44,42 @@ if (hostConfigRaw) {
 } else {
   const thisFile = fileURLToPath(import.meta.url)
 
-  function insertRoot(db: Database.Database, dir: string): number {
+    function insertStrmResource(
+      db: Database.Database,
+      opts: {
+        libraryId: number
+        videoId: number
+        rootId: number
+        locator: string
+        strmPath: string
+      }
+    ): number {
+      const strmIdentity = buildVideoResourceSourceIdentity({
+        kind: 'direct',
+        locator: opts.locator,
+        strmSourcePath: opts.strmPath
+      })
+      const row = db
+        .prepare(
+          `INSERT INTO video_resources (
+             library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+             strm_source_path, is_primary, add_time
+           ) VALUES (?, ?, ?, 'direct', ?, ?, ?, ?, 0, ?)`
+        )
+        .run(
+          opts.libraryId,
+          opts.videoId,
+          opts.rootId,
+          opts.locator,
+          `strm:${opts.strmPath}`,
+          strmIdentity,
+          opts.strmPath,
+          new Date().toISOString()
+        )
+      return Number(row.lastInsertRowid)
+    }
+
+    function insertRoot(db: Database.Database, dir: string): number {
     const identity = resolveMediaLibraryRootIdentity(dir)
     const timestamp = new Date().toISOString()
     const row = db
@@ -112,12 +148,12 @@ if (hostConfigRaw) {
       let stderr = ''
       const onOut = (chunk: Buffer): void => {
         stdout += chunk.toString('utf8')
-        const match = /listening 127\.0\.0\.1:(\d+)/.exec(stdout)
+        const match = /listening (\S+):(\d+)/.exec(stdout)
         if (match) {
           clearTimeout(timeout)
           child.stdout?.off('data', onOut)
           child.off('exit', onExit)
-          resolve(Number(match[1]))
+          resolve(Number(match[2]))
         }
       }
       const onErr = (chunk: Buffer): void => {
@@ -661,6 +697,139 @@ if (hostConfigRaw) {
         )
         assert.equal(lateEnable.status, 401)
         assert.equal(isStructuredError(lateEnable.json) && lateEnable.json.code === 'AUTH_REQUIRED', true)
+      }
+    })
+
+    it('blocks HTTP start when unmapped STRM conversions share a locator', async () => {
+      const sourceDir = path.join(root, 'source-strm')
+      const targetDir = path.join(root, 'target-strm')
+      const sourceMount = path.join(root, 'source-strm-mount')
+      const targetMount = path.join(root, 'target-strm-mount')
+      for (const dir of [sourceDir, targetDir, sourceMount, targetMount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(sourceDir, 'media_assets'), { recursive: true })
+      fs.mkdirSync(path.join(targetDir, 'media_assets'), { recursive: true })
+      const locator = 'https://example.test/shared-strm.mp4'
+      const firstClip = path.join(sourceMount, 'M12-STRM-A.mp4')
+      const secondClip = path.join(sourceMount, 'M12-STRM-B.mp4')
+      const firstStrm = path.join(sourceMount, 'M12-STRM-A.strm')
+      const secondStrm = path.join(sourceMount, 'M12-STRM-B.strm')
+      fs.writeFileSync(firstClip, 'video-a')
+      fs.writeFileSync(secondClip, 'video-b')
+      fs.writeFileSync(firstStrm, `${locator}\n`)
+      fs.writeFileSync(secondStrm, `${locator}\n`)
+
+      const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+      const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+      let sourceToken = ''
+      let targetToken = ''
+      try {
+        ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+        ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
+        const rootId = insertRoot(sourceDb, sourceMount)
+        const first = insertTestVideoWithFile(sourceDb, {
+          code: 'M12-STRM-A',
+          title: 'STRM A',
+          filePath: firstClip,
+          libraryId: 1,
+          rootId
+        })
+        const second = insertTestVideoWithFile(sourceDb, {
+          code: 'M12-STRM-B',
+          title: 'STRM B',
+          filePath: secondClip,
+          libraryId: 1,
+          rootId
+        })
+        insertStrmResource(sourceDb, {
+          libraryId: 1,
+          videoId: first.videoId,
+          rootId,
+          locator,
+          strmPath: firstStrm
+        })
+        insertStrmResource(sourceDb, {
+          libraryId: 1,
+          videoId: second.videoId,
+          rootId,
+          locator,
+          strmPath: secondStrm
+        })
+        sourceToken = issueCatalogMigrationToken({}, sourceDb).oneTimeToken
+        targetToken = issueCatalogMigrationToken({}, targetDb).oneTimeToken
+      } finally {
+        sourceDb.close()
+        targetDb.close()
+      }
+
+      const sourceChild = spawnHost(hostConfig(sourceDir, { mapped: sourceMount }))
+      const targetChild = spawnHost(hostConfig(targetDir, { mapped: targetMount }))
+      const sourcePort = await waitListening(sourceChild)
+      const targetPort = await waitListening(targetChild)
+      const sourceBase = `http://127.0.0.1:${sourcePort}`
+      const targetBase = `http://127.0.0.1:${targetPort}`
+
+      const preview = await postManage(sourceBase, 'migration.preview', { input: { mappings: [] } }, sourceToken)
+      assert.equal(preview.status, 200, JSON.stringify(preview.json))
+      const body = preview.json as {
+        migrationId: string
+        digest: string
+        strmConversions: number
+        strmConflicts: Array<{ libraryId: number; resourceIds: number[] }>
+      }
+      assert.equal(body.strmConversions, 2, JSON.stringify(body))
+      assert.equal(body.strmConflicts.length, 1, JSON.stringify(body.strmConflicts))
+      assert.equal(body.strmConflicts[0]?.resourceIds.length, 2)
+
+      const started = await postManage(
+        sourceBase,
+        'migration.start',
+        { input: { migrationId: body.migrationId, digest: body.digest } },
+        sourceToken
+      )
+      assert.equal(started.status, 400, JSON.stringify(started.json))
+      assert.equal(isStructuredError(started.json) && started.json.code === 'INVALID_INPUT', true)
+      assert.equal(
+        isStructuredError(started.json) && started.json.message === '迁移预检未通过',
+        true,
+        JSON.stringify(started.json)
+      )
+      assert.equal(fs.existsSync(path.join(sourceDir, 'migration-packages', `${body.migrationId}.tar.gz`)), false)
+
+      const sourceLive = new Database(path.join(sourceDir, 'library.db'), {
+        readonly: true,
+        fileMustExist: true
+      })
+      try {
+        assert.equal(readCatalogIdentity(sourceLive)?.frozen, false)
+        const codes = sourceLive.prepare('SELECT code FROM videos ORDER BY code').all() as Array<{ code: string }>
+        assert.deepEqual(
+          codes.map((row) => row.code),
+          ['M12-STRM-A', 'M12-STRM-B']
+        )
+      } finally {
+        sourceLive.close()
+      }
+
+      const targetStatus = await postManage(
+        targetBase,
+        'migration.status',
+        { input: { migrationId: body.migrationId } },
+        targetToken
+      )
+      assert.equal(targetStatus.status, 400, JSON.stringify(targetStatus.json))
+      assert.equal(isStructuredError(targetStatus.json) && targetStatus.json.code === 'INVALID_INPUT', true)
+      const targetLive = new Database(path.join(targetDir, 'library.db'), {
+        readonly: true,
+        fileMustExist: true
+      })
+      try {
+        const targetVideos = (
+          targetLive.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }
+        ).n
+        assert.equal(targetVideos, 0)
+        assert.equal(readCatalogIdentity(targetLive)?.frozen, false)
+      } finally {
+        targetLive.close()
       }
     })
   })

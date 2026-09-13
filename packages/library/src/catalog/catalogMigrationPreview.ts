@@ -6,7 +6,7 @@ import { MANAGE_PROTOCOL_VERSION } from '@shared/protocol/identity'
 import { structuredError } from '@shared/protocol/errors'
 import { digestRequest } from './catalogSecrets'
 import { readCatalogIdentity } from './catalogIdentity'
-import { BLOCKER_ENCRYPTED, countPendingBlockers } from './catalogMigrationState'
+import { countPendingBlockers } from './catalogMigrationState'
 
 interface ResourceRow {
   id: number
@@ -160,7 +160,6 @@ export function computeMigrationPreview(
   autoCleanupDisabledLibraryIds.sort((a, b) => a - b)
 
   const pendingBlockers = countPendingBlockers(database)
-  if ((options.encryptedAssetCount ?? 0) > 0) pendingBlockers.push(BLOCKER_ENCRYPTED)
 
   const previewBase = {
     sourceServerId: identity.serverId,

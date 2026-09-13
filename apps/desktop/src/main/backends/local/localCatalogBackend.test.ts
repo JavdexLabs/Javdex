@@ -142,6 +142,75 @@ describe('LocalCatalogBackend', () => {
     )
   })
 
+  it('bumps V on setRating and rejects a stale rating write', async () => {
+    const { libraryId, videoId } = setupLibrary()
+    const identity = loadOrCreateLocalCatalogIdentity(localCatalogIdentityPath(tempRoot!))
+    const backend = createLocalCatalogBackend({ identity, appVersion: '0.7.0' })
+    const before = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail
+    const beforeVersion = { generation: before.generation ?? 1, revision: before.revision ?? 1 }
+    assert.equal(beforeVersion.revision, 1)
+
+    const rated = await backend.videos.setRating(
+      { videoId, rating: 4 },
+      {
+        operationId: '00000000-0000-4000-8000-000000000021',
+        expectedVersions: { V: beforeVersion }
+      }
+    )
+    assert.equal(rated, true)
+    const afterRating = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail
+    const afterRatingVersion = {
+      generation: afterRating.generation ?? beforeVersion.generation,
+      revision: afterRating.revision ?? beforeVersion.revision + 1
+    }
+    assert.equal(afterRating.rating, 4)
+    assert.equal(afterRatingVersion.revision, beforeVersion.revision + 1)
+
+    await assert.rejects(
+      () =>
+        backend.videos.setRating(
+          { videoId, rating: 1 },
+          {
+            operationId: '00000000-0000-4000-8000-000000000022',
+            expectedVersions: { V: beforeVersion }
+          }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+    )
+    await assert.rejects(
+      () =>
+        backend.videos.edit(
+          { videoId, fields: { title: 'Stale after rating' } },
+          {
+            operationId: '00000000-0000-4000-8000-000000000023',
+            expectedVersions: { V: beforeVersion }
+          }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+    )
+
+    const titled = await backend.videos.edit(
+      { videoId, fields: { title: 'Rated then titled' } },
+      {
+        operationId: '00000000-0000-4000-8000-000000000024',
+        expectedVersions: { V: afterRatingVersion }
+      }
+    )
+    assert.equal(titled, true)
+    const afterTitle = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail
+    assert.equal(afterTitle.title, 'Rated then titled')
+    assert.equal(afterTitle.revision, afterRatingVersion.revision + 1)
+  })
+
   it('selects the unconfigured remote factory without opening library.db', async () => {
     const backend = createCatalogBackendForMode('remote', {
       identity: { mode: 'local', catalogId: 'should-not-open' }

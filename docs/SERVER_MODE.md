@@ -1,6 +1,6 @@
 # 服务端模式：部署、认主与迁库
 
-桌面日常操作见 [使用指南](USER_GUIDE.md)。局域网只读网页见 [LAN_WEB.md](LAN_WEB.md)。本页说明独立 Node 宿主、桌面远程模式、认主与整库迁移。第一版范围仍以 [执行计划](SERVER_MODE_EXECUTION_PLAN.md) 为准；本环境尚未用 Docker 镜像或安装包烟测替代源码验证。
+桌面日常操作见 [使用指南](USER_GUIDE.md)。局域网只读网页见 [LAN_WEB.md](LAN_WEB.md)。本页说明独立 Node 宿主、桌面远程模式、认主与整库迁移。第一版范围仍以 [执行计划](SERVER_MODE_EXECUTION_PLAN.md) 为准。单容器生产镜像 `server:smoke` 已通过（#107：bind + writer.claim + restart）；安装包与 Docker 两端迁库尚未替代完整源码验收，不得据此宣称 S13 / M–D 矩阵完成。
 
 ## 版本
 
@@ -31,8 +31,22 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 ## 迁库
 
-双向整库迁移只接受空目标。视频文件不复制，只按挂载映射改写定位。CLI `migrate-auth` 签发独立 migration Bearer（不是 writer）。源在 start 后冻结；目标 enable 与 abandon 互斥。启用成功后源保持冻结备份，除非操作者再对源调用 abandon。加密图片会阻止迁入；孤立 `uploads/` 不会成为目标封面。丢响应或重启后以 `migration.status` 为准，不要重复猜测 enable/abandon。
+双向整库迁移只接受空目标。视频文件不复制，只按挂载映射改写定位。CLI `migrate-auth` 签发独立 migration Bearer（不是 writer）。源在 start 后冻结；目标 enable 与 abandon 互斥。启用成功后源保持冻结备份，除非操作者再对源调用 abandon。源端加密图片在 start/导出时自动解密到迁移包（明文进目标）；解密使用当前 LibraryHost 机器密钥（hostname + 用户名 + userDataPath）及源 `imagesDir` 路径别名，不改源正式图。缺少别名或密钥不匹配时 start 失败并解冻。目标 enable 在 ATTACH 提交后若拷图失败（`EACCES`/`ENOSPC` 等）会回滚启用状态并尽量删除已拷文件，不留下安静的 `enabled` 半状态。孤立 `uploads/` 不会成为目标封面。丢响应或重启后以 `migration.status` 为准，不要重复猜测 enable/abandon。
+
+桌面远程模式的 `migrateCatalog` 与本地同一入口；远程走现有 HTTP migration，不打开本机 `library.db`。调用仍需要 CLI `migrate-auth` 签发的 migration Bearer。
 
 ## 更新与恢复限制
 
-先停服务，备份 `dataDir` 与 `imagesDir`，再换同版本产物。版本不符时桌面不会写入远程。冻结中的源库不能领取 writer。图片拷贝失败时资料库可能已启用但封面缺失，需按备份恢复，当前没有自动整笔回滚。
+先停服务，备份 `dataDir` 与 `imagesDir`，再换同版本产物。版本不符时桌面不会写入远程。冻结中的源库不能领取 writer。
+
+## 本版已知限制（已接受，不扩合同）
+
+- **C1** 远程 `FILE_RENAME` 仍 UNSUPPORTED（冻结 IPC 无 `resourceId`，不扩 resourceId 合同）
+- **C2** `pendingScan.queuePage` 远程不支持 IPC `anchor`，仅本地队列页保留
+- **C3** 冻结 `pendingAudit.presence` 保持空输入的目录级计数；桌面适配器本地包装 / 远程用 `libraries.get` 与 pending list 求交
+- **C4** 远程 `scans.auditPage` 仅 `{libraryId}` + page，无 section/attention
+- **C5** 无细粒度远程 `video_sources` 匹配 API，远程 sources 可为空
+- **C6** 远程刮削单条不支持；刮削仍仅本地模式
+- **C7** 远程 `playlists.applyImport` 不写 per-video `video_links`
+- **E1** 单容器 `server:smoke` 已通过（#107）。不是 Docker 两端迁库，也不是安装包烟测
+- **E2** 实施分支 #104 保持 draft；不升 0.8 版本、不写入 CHANGELOG、不合并 main

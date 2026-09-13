@@ -1389,7 +1389,11 @@ export function listYears(): number[] {
 export function setRating(id: number, rating: number): void {
   const db = getDb()
   const clamped = Math.max(0, Math.min(5, Math.round(rating)))
-  db.prepare('UPDATE videos SET rating = ? WHERE id = ?').run(clamped, id)
+  db.prepare('UPDATE videos SET rating = ?, updated_at = ?, revision = revision + 1 WHERE id = ?').run(
+    clamped,
+    nowIso(),
+    id
+  )
 }
 
 export function setVideoPosterPath(id: number, posterPath: string | null): void {

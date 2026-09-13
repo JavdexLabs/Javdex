@@ -371,8 +371,26 @@ export function createLocalCatalogBackend(
     async markScrapeSuccess(input) {
       return videos.markScrapeSucceeded(input.videoId)
     },
-    async setRating(input) {
-      return videos.setRating(input.videoId, input.rating)
+    async setRating(input, ctx: MutationContext) {
+      const result = commitCatalogMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'videos.setRating',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => {
+          assertExpectedVideoVersion(input.videoId, ctx.expectedVersions, ctx.operationId)
+          videos.setRating(input.videoId, input.rating)
+          return {
+            ok: true,
+            videoId: input.videoId,
+            versions: { V: readVideoAggregateVersion(input.videoId)! }
+          }
+        }
+      )
+      return result.data.ok
     },
     async setPoster(input, _ctx: MutationContext) {
       if (input.image.kind === 'clear') return videos.setPoster(input.videoId, null)

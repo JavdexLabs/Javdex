@@ -7,8 +7,11 @@ import { fileURLToPath } from 'node:url'
 import { after, before, describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import { buildSync } from 'esbuild'
+import Database from 'better-sqlite3'
 import { hashPassword } from '@http/auth'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
 import { configureLibraryHost, resetLibraryHostForTests } from '@library/runtime/host'
 import { scanCoordinator } from '@library/scan/scanCoordinator'
 import { resetCatalogScanRuntime } from '@library/catalog/catalogScanRuntime'
@@ -110,12 +113,12 @@ if (hostConfigRaw) {
       let stderr = ''
       const onOut = (chunk: Buffer): void => {
         stdout += chunk.toString('utf8')
-        const match = /listening 127\.0\.0\.1:(\d+)/.exec(stdout)
+        const match = /listening (\S+):(\d+)/.exec(stdout)
         if (match) {
           clearTimeout(timeout)
           child.stdout?.off('data', onOut)
           child.off('exit', onExit)
-          resolve(Number(match[1]))
+          resolve(Number(match[2]))
         }
       }
       const onErr = (chunk: Buffer): void => {
@@ -307,6 +310,69 @@ if (hostConfigRaw) {
         }
       })
     })
+
+    function insertRoot(db: Database.Database, dir: string): number {
+      const identity = resolveMediaLibraryRootIdentity(dir)
+      const timestamp = new Date().toISOString()
+      const row = db
+        .prepare(
+          `INSERT INTO media_library_roots (
+             library_id, path, normalized_path, real_path, normalized_real_path,
+             device_id, inode, position, state, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?)`
+        )
+        .run(
+          1,
+          identity.path,
+          identity.normalizedPath,
+          identity.realPath,
+          identity.normalizedRealPath,
+          identity.deviceId,
+          identity.inode,
+          timestamp,
+          timestamp
+        )
+      return Number(row.lastInsertRowid)
+    }
+
+    async function stopChild(child: ChildProcess): Promise<void> {
+      const index = children.indexOf(child)
+      if (index >= 0) children.splice(index, 1)
+      if (child.exitCode != null || child.signalCode) return
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL')
+          resolve()
+        }, 5_000)
+        child.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+        child.kill('SIGTERM')
+      })
+    }
+
+    function spawnHost(config: ServerConfig, extraEnv: NodeJS.ProcessEnv = {}): ChildProcess {
+      const child = spawn(
+        process.execPath,
+        ['--require', './scripts/register-test-paths.cjs', '--import', 'tsx', thisFile],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '',
+            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
+            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(config),
+            JAVDEX_TEST_HOST_WORKER: workerEntry,
+            JAVDEX_TEST_USER_DATA: config.dataDir,
+            ...extraEnv
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      return child
+    }
 
     after(async () => {
       await Promise.all(
@@ -687,6 +753,153 @@ if (hostConfigRaw) {
       } finally {
         await remote.dispose()
         await local.dispose()
+      }
+    })
+
+    it('rolls back videos.edit when SIGKILL hits the HTTP host before SQLite commit', { timeout: 60_000 }, async () => {
+      const hostDir = path.join(root, 'm05-http-host')
+      const mount = path.join(root, 'm05-http-media')
+      const stallPath = path.join(root, 'm05-http-stall')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const clip = path.join(mount, 'M05-HTTP.mp4')
+      fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+      fs.writeFileSync(stallPath, '1')
+
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      let videoId = 0
+      try {
+        const rootId = insertRoot(seeded, mount)
+        videoId = insertTestVideoWithFile(seeded, {
+          code: 'M05-HTTP',
+          title: 'original',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        }).videoId
+      } finally {
+        seeded.close()
+      }
+
+      const child = spawnHost(remoteConfig, { JAVDEX_TEST_STALL_BEFORE_COMMIT: stallPath })
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string }; writerEpoch: number }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+      const writerEpoch = (claim.json as { writerEpoch: number }).writerEpoch
+      const operationId = randomUUID()
+      const pending = postManage(
+        base,
+        'videos.edit',
+        {
+          operationId,
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          writerEpoch,
+          expectedVersions: { V: { generation: 1, revision: 1 } },
+          input: { videoId, fields: { title: 'should-rollback' } }
+        },
+        secret
+      )
+      await waitPath(`${stallPath}.ready`, 15_000)
+      const killed = child.kill('SIGKILL')
+      assert.equal(killed, true)
+      await new Promise<void>((resolve) => {
+        if (child.exitCode != null || child.signalCode) {
+          resolve()
+          return
+        }
+        child.once('exit', () => resolve())
+      })
+      const index = children.indexOf(child)
+      if (index >= 0) children.splice(index, 1)
+      await Promise.allSettled([pending])
+
+      const rolledBack = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = rolledBack.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'original')
+        assert.equal(row.revision, 1)
+        const receipt = rolledBack
+          .prepare('SELECT operation_id FROM catalog_operation_receipts WHERE operation_id = ?')
+          .get(operationId)
+        assert.equal(receipt, undefined)
+      } finally {
+        rolledBack.close()
+      }
+
+      const restarted = spawnHost(remoteConfig)
+      const restartPort = await waitListening(restarted)
+      const restartBase = `http://127.0.0.1:${restartPort}`
+      try {
+        const unknown = await postManage(
+          restartBase,
+          'operations.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            input: { operationId }
+          },
+          secret
+        )
+        assert.equal(unknown.status, 200, JSON.stringify(unknown.json))
+        assert.equal((unknown.json as { status?: string }).status, 'unknown')
+        const retry = await postManage(
+          restartBase,
+          'videos.edit',
+          {
+            operationId,
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: { V: { generation: 1, revision: 1 } },
+            input: { videoId, fields: { title: 'after-kill' } }
+          },
+          secret
+        )
+        assert.equal(retry.status, 200, JSON.stringify(retry.json))
+        assert.equal((retry.json as { receipt?: { status?: string } }).receipt?.status, 'applied')
+      } finally {
+        await stopChild(restarted)
+      }
+
+      const applied = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = applied.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'after-kill')
+        assert.equal(row.revision, 2)
+      } finally {
+        applied.close()
       }
     })
   })

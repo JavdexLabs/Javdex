@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -58,6 +59,14 @@ if (hostConfigRaw) {
     })
 } else {
   const thisFile = fileURLToPath(import.meta.url)
+  const require = createRequire(import.meta.url)
+  const electronPath = require('electron') as string | { app?: unknown }
+
+  function resolveElectronBin(): string {
+    if (process.versions.electron) return process.execPath
+    if (typeof electronPath === 'string' && electronPath.length > 0) return electronPath
+    throw new Error('native Electron binary is required')
+  }
 
   function versionsFrom(library: MediaLibraryDetail) {
     return {
@@ -906,6 +915,112 @@ if (hostConfigRaw) {
       } finally {
         applied.close()
       }
+    })
+
+    it('closes a native BrowserWindow while a remote scan keeps running', {
+      timeout: 90_000,
+      skip:
+        process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+          ? 'Native Electron requires a display server; run under xvfb-run'
+          : false
+    }, async () => {
+      const remoteDir = path.join(root, 'd05-host')
+      const desktopDir = path.join(root, 'd05-desktop')
+      const mediaDir = path.join(root, 'd05-media')
+      const stallPath = path.join(root, 'd05-scan-stall')
+      for (const dir of [remoteDir, desktopDir, mediaDir]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(remoteDir, 'media_assets'), { recursive: true })
+      fs.writeFileSync(path.join(mediaDir, 'D05-001.mp4'), Buffer.from('0123456789abcdef'))
+      fs.writeFileSync(stallPath, JSON.stringify({ phase: 'afterEnumerate' }))
+
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: remoteDir,
+        imagesDir: path.join(remoteDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mediaDir },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const child = spawn(
+        process.execPath,
+        ['--require', './scripts/register-test-paths.cjs', '--import', 'tsx', thisFile],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '',
+            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
+            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(remoteConfig),
+            JAVDEX_TEST_HOST_WORKER: workerEntry,
+            JAVDEX_TEST_USER_DATA: remoteDir,
+            JAVDEX_TEST_UMOUNT_SCAN: stallPath
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+
+      const remote = createRemoteCatalogBackend({
+        baseUrl: base,
+        appVersion: SERVER_APP_VERSION,
+        credentials: memoryCredentials(new Map([[hello.identity.catalogId, secret]]))
+      })
+      try {
+        let library = (await remote.libraries.get({ libraryId: 1 })) as MediaLibraryDetail
+        await remote.libraries.updateConfig(
+          { libraryId: 1, patch: { minImportDurationMinutes: 0, autoImportLocalNfo: false } },
+          ipcMutation(undefined, versionsFrom(library))
+        )
+        library = (await remote.libraries.get({ libraryId: 1 })) as MediaLibraryDetail
+        await remote.libraries.addRoot(
+          { libraryId: 1, root: { mountSelectionId: 'media' } },
+          ipcMutation(undefined, versionsFrom(library))
+        )
+      } finally {
+        await remote.dispose()
+      }
+
+      const operationId = randomUUID()
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        JAVDEX_TEST_USER_DATA: desktopDir,
+        JAVDEX_TEST_REMOTE_BASE: base,
+        JAVDEX_TEST_WRITER_SECRET: secret,
+        JAVDEX_TEST_CATALOG_ID: hello.identity.catalogId,
+        JAVDEX_TEST_APP_VERSION: SERVER_APP_VERSION,
+        JAVDEX_TEST_OPERATION_ID: operationId,
+        JAVDEX_TEST_STALL_PATH: stallPath
+      }
+      delete env.ELECTRON_RUN_AS_NODE
+      const result = spawnSync(resolveElectronBin(), ['scripts/test-d05-task-window-close.cjs'], {
+        env,
+        encoding: 'utf8',
+        timeout: 80_000,
+        windowsHide: true
+      })
+      assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`)
+      assert.match(result.stdout, /D05_TASK_WINDOW_CLOSE_OK/)
+      assert.match(result.stdout, new RegExp(operationId.replaceAll('-', '\\-')))
     })
   })
 }

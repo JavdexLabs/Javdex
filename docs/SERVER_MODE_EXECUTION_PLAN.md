@@ -639,19 +639,19 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - 本环境 `docker` 不存在（`command not found`，无 `/var/run/docker.sock`）。容器镜像烟测仍按设计失败，不能用 Node 进程冒充镜像验收。
 - 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`。第三例在 `ready` 后丢弃 enable/abandon HTTP 响应再 SIGTERM，拉起后以 `migration.status` 为准，终态仍互斥（`e700e3f`）。不是 Docker 两端。
 - M12：启用后对目标 `library.db` 做真实 `scanCoordinator.run`。未映射孤儿片无本地资源、自动清理关闭时成员保留；把 `remove_resource_less_memberships` 改回 1 再扫才会删成员（`e05c165`）。
-- S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` 走 `CatalogBackend`。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 start/plan 仍桌面单例。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 拒绝；未识别路径仍走桌面 `renameAndImport`。`PENDING_SCAN_RESOLVE` / `SCAN_AUDIT_PAGE` 仍 library 单例。
-- M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。加密存量仍只预检计数，无源端解密流程。`chmod 000` 目标 `imagesDir` 后 enable 事务已提交、拷图 EACCES：资料库保持 `enabled`、封面文件不在，没有整笔回滚。
+- S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` / `PENDING_SCAN_RESOLVE` / `PENDING_RESOURCE_IDENTITY_RESOLVE` / `SCAN_AUDIT_GET` / `SCAN_AUDIT_HEADER` 走 `CatalogBackend`。待确认解析在本地后端与服务端 HTTP 都传入 `fs.existsSync` 主资源回退（helper 在 `scan/accessiblePrimaryResource.ts`，不进 db 模块）。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 start/plan 仍桌面单例。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 且 digest 必须指纹服务端活文件而拒绝；未识别路径仍走桌面 `renameAndImport`。`SCAN_AUDIT_PAGE` / `PENDING_SCAN_GET|LIST|QUEUE` 仍 library 单例。
+- M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。源端 `encryptStoredAsset` 后 preview 含 `encrypted-assets` 且 start 拒绝；`decryptStoredAsset` 后 blocker 消失、start 冻结成功，封面不是 `AVPK\x01`。不在迁移内自动解密。`chmod 000` 目标 `imagesDir` 后 enable 事务已提交、拷图 EACCES：资料库保持 `enabled`、封面文件不在。用户命名空间 256k tmpfs 挂到 `imagesDir` 后 enable 拷 400KiB 封面 `ENOSPC`：资料库仍 `enabled`、封面不在，没有整笔回滚。
 - 远程图片临时磁盘 LRU：`userData/remote-image-cache/<catalogHash>/`，按 catalog 隔离；第二次 `readImage` 不打 HTTP；中止的 GET 不落盘。
 - D03：workStore 已复制行但 `prepStatus=copying` 时远程仍 `modePrepRequired` 且不 `getDb()`；回到本地才 `markReady`，源 `agent_runs` 仍在。
 - D05：`createWindow` 不注册 IPC；远程 runtime dispose 后再装配仍不打开 `library.db`。
 - D07：本地/远程 available/frozen/断线/版本不符/恢复/authInvalid/modePrepRequired 的能力原因已枚举。远程 `migrateCatalog` 能力为 `unsupportedOnServer`（HTTP migration 面已接线，能力位未放开）。
-- 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2`）：
+- 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2` / `65c3e1c` / `5ebff2d` / `4822fb6`）：
   - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` 通过
   - `npm run pretest` 通过
-  - `npm run server:test` **24 + 3 + 1 通过 / 0 失败**（runtime、migrationHosts 含丢响应后再重启、dualBackendScan）
-  - 定向 Electron：`remoteImageDiskCache` + 远程 GET 缓存 **3 通过**；`createDesktopRuntime` **11 通过**；isolation **2 通过**；`desktopCapabilities` **2 通过**；`catalogMigration` 含 EACCES **5 通过**
+  - `npm run server:test` **24 + 3 + 1 通过 / 0 失败**（runtime 含评分后以评分前 V 改标题、migrationHosts、dualBackendScan）
+  - 定向 Electron：`scanHandlers` **19 通过**（pending/audit 走 CatalogBackend；远程 FILE_RENAME 仍拒绝）；`catalogMigration` **7 通过**（含源端解密后迁出、EACCES、用户命名空间 tmpfs ENOSPC）；`localCatalogBackend` **3 通过**
   - 未跑本阶段全量 Electron / Docker / 安装包
-- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；磁盘不足故障注入；源端加密解密流程；enable 拷图失败整笔回滚（产品待决）；全量 Electron。不得把 mock 当完成证据。
+- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；enable 拷图失败整笔回滚（产品待决）；远程 FILE_RENAME（冻结 IPC 无 resourceId）；`SCAN_AUDIT_PAGE` 与 pending GET/LIST/QUEUE 仍 library 单例；全量 Electron。不得把 mock 当完成证据。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -659,7 +659,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 |---|---|---|---|---|
 | M01 管理范围 | 部分 | S08 `runtime.test.ts` 隐藏/归档管理可见、网页不可见，Cookie 不能调 manage | Linux Node 22.14 in-process 宿主 | 独立演员/清单/待确认图/无成员影片未在同一用例一次铺齐 |
 | M02 字段边界 | 部分 | S08 拒绝桌面路径、未知字段、外库 sample id | 同上 | 手动导入逃逸相对路径的独立注入仍薄 |
-| M03 编辑冲突 | 部分 | S05/S08 `expectedVersions` 冲突拒绝与回执 | 同上 | 评分后改标题；扫描/NFO 改同一目标的交叉未做 |
+| M03 编辑冲突 | 部分 | S05/S08 `expectedVersions` 冲突拒绝与回执；评分不 bump V，评分后用评分前 V 改标题成功 | Linux Node 22.14 in-process 宿主 `runtime.test.ts` | 扫描/NFO 改同一目标的交叉未做；是否让评分参与 V 待用户决定 |
 | M04 关联竞争 | 部分 | S09 删除预览/计划过期 | 同上 | 预览后新增成员/清单再提交旧计划未单列 |
 | M05 受理边界 | 部分 | S06 上传/apply/重启；S09 任务入队 | 同上 | 短事务提交前断响应的断电级注入未做 |
 | M06 接管竞争 | 部分 | S05/S09 交接等待挡住新扫描 | 同上 | 旧请求暂停于 I/O 再领取的完整时序未做 |
@@ -669,15 +669,15 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M10 桌面隔离 | 部分 | S07/S10 远程不打开本地权威库；采集工作留桌面 | Electron-as-Node + Node 宿主 | 远程启动采集/助手/裁切的进程级文件监测未做 |
 | M11 分页与目标清单 | 部分 | S10 `targetLists` | Node 宿主 | 翻页中插入/删除后再取下一页未做 |
 | M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
-| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启 | `migrationHosts.e2e.test.ts` 3 例 | 非 Docker；磁盘满未做 |
-| M14 图片与恢复 | 部分 | 加密阻止迁入；正式封面随迁；孤立 uploads 不进包且恢复删除；`chmod 000` imagesDir 后 enable 保持 enabled、无自动回滚 | Electron-as-Node | 无源端解密；拷图失败整笔回滚待产品决定 |
+| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs 上 enable 拷图 ENOSPC 后仍 enabled | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts` ENOSPC | 非 Docker |
+| M14 图片与恢复 | 部分 | 加密阻止迁入；源端 decrypt 后才允许 start；正式封面随迁；孤立 uploads 不进包且恢复删除；`chmod 000` / tmpfs `ENOSPC` 后 enable 保持 enabled、无自动回滚 | Electron-as-Node | 拷图失败整笔回滚待产品决定 |
 | M15 播放 | 部分 | S11 真实 mpv + Range | 本机 `/usr/bin/mpv` 0.37.0 | 短断线/凭据到期/接管中的拖动未做 |
 | D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据子进程 `/proc/<pid>/fd` 无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 已连接远程的 `/proc` 对照未再单列 |
 | D02 业务合同 | 部分 | LocalCatalogBackend 与 RemoteCatalogBackend 对同一夹具扫描/NFO 计划 | `dualBackendScan.e2e.test.ts`（独立 `node --test` 进程） | 非 Electron IPC NFO 封面编码；非 Docker |
 | D03 工作存储升级 | 部分 | 复制已写入但未 `markReady` 时远程拒绝补开原库，本地续完且源行保留 | `createDesktopRuntime.test.ts` | 复制过程中杀进程的 OS 级崩溃未做 |
 | D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询；中止的图片 GET 不写入磁盘缓存 | 远程后端 + `remoteImageDiskCache.integration.test.ts` | 进度请求迟到未做 |
 | D05 取消与退出 | 部分 | S07 dispose/abort；`createWindow` 不注册 IPC；远程 runtime 重建不打开 `library.db` | Electron-as-Node bootstrap | 真实 BrowserWindow 关闭未做 |
-| D06 边界检查 | 部分 | pretest 生产依赖图；FILE_IMPORT 走 CatalogBackend | 仓库脚本 + `scanHandlers.test.ts` | SCAN_AUDIT/待确认解析/远程 FILE_RENAME 仍可触达 library 或拒绝 |
+| D06 边界检查 | 部分 | pretest 生产依赖图；FILE_IMPORT / pending resolve / SCAN_AUDIT GET+HEADER 走 CatalogBackend | 仓库脚本 + `scanHandlers.test.ts` | SCAN_AUDIT_PAGE / pending GET/LIST/QUEUE 仍 library 单例；远程 FILE_RENAME 仍拒绝 |
 | D07 能力与错误 | 部分 | 本地/远程各会话态能力原因已枚举 | `desktopCapabilities.test.ts` | 远程 `migrateCatalog` 能力位仍 `unsupportedOnServer`；UI 全动作未再铺 |
 
 ### S14：发布准备与收尾

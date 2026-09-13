@@ -63,7 +63,7 @@
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理、远程 mpv 与按 catalog 隔离的临时磁盘 LRU 已落地 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
-| S13 | 进行中：D01 `/proc`、D02 双后端扫描/NFO、M13 丢响应后再重启、FILE_IMPORT 已落地；Docker/安装包/全量矩阵未做 | 见本文件 S13 实施记录 |
+| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M13/M15 mpv 故障、FILE_IMPORT 已落地；Docker/安装包/全量 Electron 未做 | 见本文件 S13 实施记录 |
 | S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
 
 ## 阶段顺序与工作分配
@@ -642,14 +642,15 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` / `PENDING_SCAN_RESOLVE` / `PENDING_RESOURCE_IDENTITY_RESOLVE` / `PENDING_SCAN_GET|LIST|QUEUE` / `PENDING_RESOURCE_IDENTITY_GET|LIST` / `PENDING_AUDIT_PRESENCE` / `SCAN_AUDIT_GET` / `SCAN_AUDIT_HEADER` / 远程 `SCAN_AUDIT_PAGE` / 远程 `SCAN_AUDIT_VIEW_PAGE` 走 `CatalogBackend`。本地 PAGE/VIEW 仍走 `catalogReadService` worker，保留 snapshot 身份、section 与 attention。冻结 `scans.auditPage` 无 section/attention，远程 HTTP 会剥掉；冻结 `scans.auditViewPage` 无 IPC `anchor`，远程同样剥掉。待确认解析在本地后端与服务端 HTTP 都传入 `fs.existsSync` 主资源回退（helper 在 `scan/accessiblePrimaryResource.ts`，不进 db 模块）。本地队列页仍带 IPC `anchor`；远程冻结 `pendingScan.queuePage` 无该字段，HTTP 映射会剥掉。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 start/plan 仍桌面单例。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 且 digest 必须指纹服务端活文件而拒绝；未识别路径仍走桌面 `renameAndImport`。冻结 `pendingAudit.presence` 仍是空输入的目录级计数；桌面 IPC 是 libraryId+ids，本地包装 `getPendingAuditPresence`，远程用 `libraries.get` 加 pending list 求交，不调用冻结 presence。
 - M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。源端 `encryptStoredAsset` 后 preview 含 `encrypted-assets` 且 start 拒绝；`decryptStoredAsset` 后 blocker 消失、start 冻结成功，封面不是 `AVPK\x01`。不在迁移内自动解密。`chmod 000` 目标 `imagesDir` 后 enable 事务已提交、拷图 EACCES：资料库保持 `enabled`、封面文件不在。用户命名空间 256k tmpfs 挂到 `imagesDir` 后 enable 拷 400KiB 封面 `ENOSPC`：资料库仍 `enabled`、封面不在，没有整笔回滚。
 - 远程图片临时磁盘 LRU：`userData/remote-image-cache/<catalogHash>/`，按 catalog 隔离；第二次 `readImage` 不打 HTTP；中止的 GET 不落盘。
-- D03：workStore 已复制行但 `prepStatus=copying` 时远程仍 `modePrepRequired` 且不 `getDb()`；回到本地才 `markReady`，源 `agent_runs` 仍在。
+- D03：workStore 已复制行但 `prepStatus=copying` 时远程仍 `modePrepRequired` 且不 `getDb()`；回到本地才 `markReady`，源 `agent_runs` 仍在。OS 级 `SIGKILL`：子进程 `beginCopy` 后、`copyAgentWorkTables` 前被杀，`prepStatus` 保持 `copying`、目标 `agent_runs` 为 0、源行仍在；远程仍 `modePrepRequired`，回本地后复制完成（`933797f`）。
 - D05：`createWindow` 不注册 IPC；远程 runtime dispose 后再装配仍不打开 `library.db`。
 - D07：本地/远程 available/frozen/断线/版本不符/恢复/authInvalid/modePrepRequired 的能力原因已枚举。远程 `migrateCatalog` 能力为 `unsupportedOnServer`（HTTP migration 面已接线，能力位未放开）。
-- 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2` / `65c3e1c` / `5ebff2d` / `4822fb6` / `1bac323` / `4c79d67` / `e187266` / `6ad4b84` / `156c1a8` / `5699eae` / `8d3d8f4` / `544e099` / `747ab75`）：
+- M15：真实 `/usr/bin/mpv` 0.37.0 + ffmpeg `testsrc` H.264/AAC 播放 Range grant：`closePlayStreams` 后同一 handle 再 `loadfile` 可续播；把 `play-grant` `expiresAt` 写成过去后 `HEAD 404` 且 mpv 日志含 HTTP 404；`seek 2.2 absolute` 落到 ≥2.05；MKV 同样解码；writer handoff 后 seek/`HEAD` 404（`e9ee433`）。
+- 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2` / `65c3e1c` / `5ebff2d` / `4822fb6` / `1bac323` / `4c79d67` / `e187266` / `6ad4b84` / `156c1a8` / `5699eae` / `8d3d8f4` / `544e099` / `747ab75` / `933797f` / `e9ee433`）：
   - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` 通过
   - `npm run pretest` 通过
-  - `npm run server:test` **24 + 3 + 1 通过 / 0 失败**（runtime 含评分后以评分前 V 改标题、扫描+NFO 不 bump V、playlist 后旧 deleteGlobal 409、冻结目标清单翻页中插入不影响下一页、migrationHosts、dualBackendScan 含 audit page/view）
-  - 定向 Electron：`scanHandlers` **22 通过**（PENDING_AUDIT_PRESENCE 与远程 SCAN_AUDIT PAGE/VIEW 走 CatalogBackend；远程 FILE_RENAME 仍拒绝）；`createDesktopRuntime` **12 通过**（含已连接远程不 `getDb()`）；`createDesktopRuntime.isolation` **3 通过**；`localCatalogBackend` **3 通过**；`catalogMigration` **7 通过**（先前 revision）
+  - `npm run server:test` **25 + 3 + 1 通过 / 0 失败**（runtime 含评分后以评分前 V 改标题、扫描+NFO 不 bump V、playlist 与新增媒体库成员后旧 deleteGlobal 409、冻结目标清单翻页中插入/删除不影响快照、真实 mpv 断流/过期/handoff、migrationHosts、dualBackendScan 含 audit page/view 与 pendingAuditPresence）
+  - 定向 Electron：`scanHandlers` **22 通过**（PENDING_AUDIT_PRESENCE 与远程 SCAN_AUDIT PAGE/VIEW 走 CatalogBackend；远程 FILE_RENAME 仍拒绝）；`createDesktopRuntime` **12 通过**（含已连接远程不 `getDb()`）；`createDesktopRuntime.isolation` **4 通过**（含 D03 SIGKILL）；`localCatalogBackend` **3 通过**；`catalogMigration` **7 通过**（先前 revision）
   - 未跑本阶段全量 Electron / Docker / 安装包
 - 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；enable 拷图失败整笔回滚（产品待决）；远程 FILE_RENAME（冻结 IPC 无 resourceId）；全量 Electron。不得把 mock 当完成证据。
 
@@ -660,21 +661,21 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M01 管理范围 | 部分 | S08 `runtime.test.ts` 隐藏/归档管理可见、网页不可见，Cookie 不能调 manage | Linux Node 22.14 in-process 宿主 | 独立演员/清单/待确认图/无成员影片未在同一用例一次铺齐 |
 | M02 字段边界 | 部分 | S08 拒绝桌面路径、未知字段、外库 sample id | 同上 | 手动导入逃逸相对路径的独立注入仍薄 |
 | M03 编辑冲突 | 部分 | S05/S08 `expectedVersions` 冲突拒绝与回执；评分不 bump V，评分后用评分前 V 改标题成功；S09 首次扫描与 XML NFO 都不 bump V，随后用该 V 改 ABC-001 标题成功 | Linux Node 22.14 in-process 宿主 `runtime.test.ts` | 是否让评分参与 V 待用户决定 |
-| M04 关联竞争 | 部分 | S09 删除预览/计划过期；S10 预览 deleteGlobal 后加入清单再提交旧 digest 得 409，影片仍在 | 同上 | 预览后新增媒体库成员再提交旧库删除计划未再单列 |
+| M04 关联竞争 | 部分 | S09 删除预览/计划过期；S10 预览 deleteGlobal 后加入清单或新增媒体库成员再提交旧 digest 得 409，影片仍在 | 同上 | 预览后只改资源集合但不改成员的独立注入未再单列 |
 | M05 受理边界 | 部分 | S06 上传/apply/重启；S09 任务入队 | 同上 | 短事务提交前断响应的断电级注入未做 |
 | M06 接管竞争 | 部分 | S05/S09 交接等待挡住新扫描 | 同上 | 旧请求暂停于 I/O 再领取的完整时序未做 |
 | M07 批量部分结果 | 部分 | S10 目标列表冻结 | 同上 | 三目标过期/成功/断线分页拼接未做 |
 | M08 真挂载卸载 | 部分 | S09 标记 vs 卸载 | 同上 | 枚举后/每批清理前真实卸载未做 |
 | M09 预览与停服 | 部分 | S09 NFO 计划与关浏览 | 同上 | 过期后再提交、停网页后管理仍可用已有部分证据 |
 | M10 桌面隔离 | 部分 | S07/S10 远程不打开本地权威库；采集工作留桌面 | Electron-as-Node + Node 宿主 | 远程启动采集/助手/裁切的进程级文件监测未做 |
-| M11 分页与目标清单 | 部分 | S10 `targetLists`；limit=1 取第一页后插入新片，offset=1 仍是冻结快照且全页 id 不变 | Node 宿主 `runtime.test.ts` | 翻页中删除已冻结 id 的展示缺口未再铺 |
+| M11 分页与目标清单 | 部分 | S10 `targetLists`；limit=1 取第一页后插入新片或删除已冻结 id，offset=1 与完整 page 仍是冻结快照 | Node 宿主 `runtime.test.ts` | UI 对已删除冻结 id 的占位展示未再铺 |
 | M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
 | M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs 上 enable 拷图 ENOSPC 后仍 enabled | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts` ENOSPC | 非 Docker |
 | M14 图片与恢复 | 部分 | 加密阻止迁入；源端 decrypt 后才允许 start；正式封面随迁；孤立 uploads 不进包且恢复删除；`chmod 000` / tmpfs `ENOSPC` 后 enable 保持 enabled、无自动回滚 | Electron-as-Node | 拷图失败整笔回滚待产品决定 |
-| M15 播放 | 部分 | S11 真实 mpv + Range | 本机 `/usr/bin/mpv` 0.37.0 | 短断线/凭据到期/接管中的拖动未做 |
+| M15 播放 | 部分 | S11 HTTP Range + S13 真实 mpv：断流后续播、过期 404、seek 2.2、MKV、handoff 后 404 | 本机 `/usr/bin/mpv` 0.37.0；ffmpeg 6.1.1 | 非环回 WAN 丢包未做 |
 | D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据/已连接 available 子进程 `/proc/<pid>/fd` 均无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 远程启动采集/助手/裁切的进程级监测未做 |
-| D02 业务合同 | 部分 | LocalCatalogBackend 与 RemoteCatalogBackend 对同一夹具扫描/NFO 计划，并在扫描后读取 audit header/page/view | `dualBackendScan.e2e.test.ts`（独立 `node --test` 进程） | 非 Electron IPC NFO 封面编码；非 Docker |
-| D03 工作存储升级 | 部分 | 复制已写入但未 `markReady` 时远程拒绝补开原库，本地续完且源行保留 | `createDesktopRuntime.test.ts` | 复制过程中杀进程的 OS 级崩溃未做 |
+| D02 业务合同 | 部分 | LocalCatalogBackend 与 RemoteCatalogBackend 对同一夹具扫描/NFO 计划，并在扫描后读取 audit header/page/view 与 IPC 形状 `pendingAuditPresence` | `dualBackendScan.e2e.test.ts`（独立 `node --test` 进程） | 非 Electron IPC NFO 封面编码；非 Docker |
+| D03 工作存储升级 | 部分 | 复制已写入但未 `markReady` 时远程拒绝补开原库；OS `SIGKILL` 落在 `copying` 窗内，源行保留，回本地才 `markReady` | `createDesktopRuntime.test.ts`；`createDesktopRuntime.isolation.test.ts` | 复制 SQL 事务中途杀进程的更窄窗口未再铺 |
 | D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询；中止的图片 GET 不写入磁盘缓存 | 远程后端 + `remoteImageDiskCache.integration.test.ts` | 进度请求迟到未做 |
 | D05 取消与退出 | 部分 | S07 dispose/abort；`createWindow` 不注册 IPC；远程 runtime 重建不打开 `library.db` | Electron-as-Node bootstrap | 真实 BrowserWindow 关闭未做 |
 | D06 边界检查 | 部分 | pretest 生产依赖图；FILE_IMPORT / pending resolve+get/list/queue/presence / SCAN_AUDIT GET+HEADER+远程 PAGE/VIEW 走 CatalogBackend | 仓库脚本 + `scanHandlers.test.ts` | 远程 FILE_RENAME 仍拒绝；冻结 queuePage 无 IPC anchor；冻结 auditPage 无 section/attention；冻结 presence 仍是目录级计数 |

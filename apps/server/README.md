@@ -13,7 +13,7 @@ npm run server:test
 npm run server:smoke:node
 ```
 
-`server:smoke` builds and runs the Linux container. It exits non-zero when Docker is missing.
+`server:smoke` builds and runs the Linux container. `server:smoke:migration` starts two containers with separate `dataDir`/`imagesDir` volumes and runs source → empty-target catalog migration over manage HTTP. Both exit non-zero when Docker is missing.
 
 ```bash
 node out/server/index.js start --config deploy/javdex-server.example.json
@@ -35,4 +35,4 @@ See `deploy/javdex-server.example.json` and `deploy/docker-compose.example.yml`.
 
 ## Not in this stage
 
-Recover tokens are issued by the deploy CLI; HTTP `writer.recoverIssue` is loopback-only. `npm run server:smoke` is the Linux container check (requires Docker and a prior `server:build`); it claims a writer after `bind`. `server:smoke:node` is host-process only.
+Recover tokens are issued by the deploy CLI; HTTP `writer.recoverIssue` is loopback-only. `npm run server:smoke` is the Linux single-container check (requires Docker and a prior `server:build`); it claims a writer after `bind`. `server:smoke:migration` is the dual-host Docker migration check. `server:smoke:node` is host-process only.

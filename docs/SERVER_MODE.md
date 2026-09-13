@@ -1,6 +1,6 @@
 # 服务端模式：部署、认主与迁库
 
-桌面日常操作见 [使用指南](USER_GUIDE.md)。局域网只读网页见 [LAN_WEB.md](LAN_WEB.md)。本页说明独立 Node 宿主、桌面远程模式、认主与整库迁移。第一版范围仍以 [执行计划](SERVER_MODE_EXECUTION_PLAN.md) 为准。单容器生产镜像 `server:smoke` 已通过（#107：bind + writer.claim + restart）；安装包与 Docker 两端迁库尚未替代完整源码验收，不得据此宣称 S13 / M–D 矩阵完成。
+桌面日常操作见 [使用指南](USER_GUIDE.md)。局域网只读网页见 [LAN_WEB.md](LAN_WEB.md)。本页说明独立 Node 宿主、桌面远程模式、认主与整库迁移。第一版范围仍以 [执行计划](SERVER_MODE_EXECUTION_PLAN.md) 为准。单容器生产镜像 `server:smoke` 已通过（#107：bind + writer.claim + restart）。Docker 两端迁库烟测见 `server:smoke:migration` / 执行计划 S13。安装包烟测尚未替代完整源码验收，不得据此宣称 S13 / M–D 矩阵完成。
 
 ## 版本
 
@@ -48,5 +48,5 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 - **C5** 无细粒度远程 `video_sources` 匹配 API，远程 sources 可为空
 - **C6** 远程刮削单条不支持；刮削仍仅本地模式
 - **C7** 远程 `playlists.applyImport` 不写 per-video `video_links`
-- **E1** 单容器 `server:smoke` 已通过（#107）。不是 Docker 两端迁库，也不是安装包烟测
-- **E2** 实施分支 #104 保持 draft；不升 0.8 版本、不写入 CHANGELOG、不合并 main
+- **E1** 单容器 `server:smoke` 已通过（#107）。Docker 两端迁库见 `server:smoke:migration` / 执行计划 S13。不是安装包烟测
+- **E2** 第一版发布路径已解锁：S14 剩余门闩通过后可升 0.8、写 CHANGELOG、准备合并 main。不得在剩余门闩通过前宣称 S13/S14 完成；本文件不授权自动合并 main，也不在本阶段升版本或写 CHANGELOG

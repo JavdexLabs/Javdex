@@ -150,13 +150,14 @@ describe('LocalCatalogBackend', () => {
       scope: { kind: 'library', libraryId },
       videoId
     })) as ScopedVideoDetail
-    assert.equal(before.revision, 1)
+    const beforeVersion = { generation: before.generation ?? 1, revision: before.revision ?? 1 }
+    assert.equal(beforeVersion.revision, 1)
 
     const rated = await backend.videos.setRating(
       { videoId, rating: 4 },
       {
         operationId: '00000000-0000-4000-8000-000000000021',
-        expectedVersions: { V: { generation: before.generation, revision: before.revision } }
+        expectedVersions: { V: beforeVersion }
       }
     )
     assert.equal(rated, true)
@@ -164,8 +165,12 @@ describe('LocalCatalogBackend', () => {
       scope: { kind: 'library', libraryId },
       videoId
     })) as ScopedVideoDetail
+    const afterRatingVersion = {
+      generation: afterRating.generation ?? beforeVersion.generation,
+      revision: afterRating.revision ?? beforeVersion.revision + 1
+    }
     assert.equal(afterRating.rating, 4)
-    assert.equal(afterRating.revision, before.revision + 1)
+    assert.equal(afterRatingVersion.revision, beforeVersion.revision + 1)
 
     await assert.rejects(
       () =>
@@ -173,7 +178,7 @@ describe('LocalCatalogBackend', () => {
           { videoId, rating: 1 },
           {
             operationId: '00000000-0000-4000-8000-000000000022',
-            expectedVersions: { V: { generation: before.generation, revision: before.revision } }
+            expectedVersions: { V: beforeVersion }
           }
         ),
       (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
@@ -184,7 +189,7 @@ describe('LocalCatalogBackend', () => {
           { videoId, fields: { title: 'Stale after rating' } },
           {
             operationId: '00000000-0000-4000-8000-000000000023',
-            expectedVersions: { V: { generation: before.generation, revision: before.revision } }
+            expectedVersions: { V: beforeVersion }
           }
         ),
       (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
@@ -194,9 +199,7 @@ describe('LocalCatalogBackend', () => {
       { videoId, fields: { title: 'Rated then titled' } },
       {
         operationId: '00000000-0000-4000-8000-000000000024',
-        expectedVersions: {
-          V: { generation: afterRating.generation, revision: afterRating.revision }
-        }
+        expectedVersions: { V: afterRatingVersion }
       }
     )
     assert.equal(titled, true)
@@ -205,7 +208,7 @@ describe('LocalCatalogBackend', () => {
       videoId
     })) as ScopedVideoDetail
     assert.equal(afterTitle.title, 'Rated then titled')
-    assert.equal(afterTitle.revision, afterRating.revision + 1)
+    assert.equal(afterTitle.revision, afterRatingVersion.revision + 1)
   })
 
   it('selects the unconfigured remote factory without opening library.db', async () => {

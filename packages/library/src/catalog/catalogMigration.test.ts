@@ -529,7 +529,9 @@ describe('catalogMigration protocol', () => {
     const sourceImages = path.join(sourceDir, 'media_assets')
     fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
     const coverRel = 'covers/orphan.enc'
-    fs.writeFileSync(path.join(sourceImages, coverRel), Buffer.from('AVPK\x01rest'))
+    const orphanBlob = Buffer.alloc(5 + 1 + 12 + 16, 0)
+    Buffer.from('AVPK\x01').copy(orphanBlob)
+    fs.writeFileSync(path.join(sourceImages, coverRel), orphanBlob)
     const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
     try {
       process.env.JAVDEX_TEST_USER_DATA = sourceDir

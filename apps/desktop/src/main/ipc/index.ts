@@ -24,6 +24,7 @@ import { registerNfoExportHandlers } from './nfoExportHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
 import type { DesktopWorkStoreHandle } from '../desktop/workStore'
+import { bindMainWindow } from '../desktop/mainWindowBindings'
 
 export interface RegisterIpcHandlersOptions {
   backend: CatalogBackend
@@ -62,4 +63,5 @@ export function registerIpcHandlers(
     workStore: options.workStore
   })
   registerPlayerHandlers(options.backend, options.settings)
+  bindMainWindow(getWindow())
 }

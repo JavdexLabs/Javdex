@@ -9,6 +9,7 @@ import { loadCatalogActressAvatarCropSnapshot } from '../application/catalogActr
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { IpcContext } from './shared'
 import { registerScrapeHandler, sendScrapeEvent } from './scrapeContractAdapter'
+import { registerMainWindowBinder } from '../desktop/mainWindowBindings'
 
 export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend): void {
   const plugins = createDefaultScraperPluginCatalog()
@@ -26,11 +27,18 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
   })
   jobs.initialize()
 
-  const webContents = ctx.getWindow()?.webContents
-  webContents?.on('render-process-gone', () => jobs.rendererDisconnected())
-  webContents?.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) jobs.rendererDisconnected()
-  })
+  const boundOwners = new WeakSet<object>()
+  const bindRendererLifecycle = (): void => {
+    const webContents = ctx.getWindow()?.webContents
+    if (!webContents || boundOwners.has(webContents)) return
+    boundOwners.add(webContents)
+    webContents.on('render-process-gone', () => jobs.rendererDisconnected())
+    webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) jobs.rendererDisconnected()
+    })
+  }
+  bindRendererLifecycle()
+  registerMainWindowBinder(bindRendererLifecycle)
 
   registerScrapeHandler(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, (response) =>
     jobs.completeAvatarAutoCrop(response)

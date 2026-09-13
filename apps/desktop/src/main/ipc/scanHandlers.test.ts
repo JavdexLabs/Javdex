@@ -5,7 +5,7 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend, pendingAuditPresenceThroughBackend } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, abortRemoteCatalogScanWait, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend, pendingAuditPresenceThroughBackend } from './scanHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
@@ -278,6 +278,8 @@ it('runs SCAN_RUN through the catalog backend instead of the local coordinator s
   const calls: unknown[] = []
   const backend = {
     mode: 'remote',
+    generation: 1,
+    session: () => ({ catalogId: 'catalog' }),
     libraries: {
       runScan: async (input: { libraryId: number }) => {
         calls.push(['runScan', input])
@@ -306,6 +308,27 @@ it('runs SCAN_RUN through the catalog backend instead of the local coordinator s
   assert.equal(result.imported, 1)
   assert.deepEqual(calls[0], ['runScan', { libraryId: 3 }])
   assert.equal((calls[1] as [string, { taskId: string }])[0], 'tasks.get')
+})
+
+it('cancels the remote SCAN_RUN wait without waiting for a later terminal poll', async () => {
+  const taskId = '22222222-2222-2222-2222-222222222222'
+  const backend = {
+    mode: 'remote',
+    generation: 1,
+    session: () => ({ catalogId: 'catalog' }),
+    libraries: {
+      runScan: async () => ({ taskId, receipt: { operationId: 'op' } })
+    },
+    tasks: {
+      get: async () => new Promise(() => undefined)
+    }
+  } as unknown as CatalogBackend
+  const pending = runScanThroughBackend(backend, 3)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(abortRemoteCatalogScanWait(taskId), true)
+  const result = await pending
+  assert.equal(result.cancelled, true)
+  assert.equal(result.runId, taskId)
 })
 
 it('runs FILE_IMPORT_MANUAL through the catalog backend with a root-relative location', async () => {

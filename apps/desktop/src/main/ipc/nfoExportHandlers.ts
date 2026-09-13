@@ -8,6 +8,10 @@ import type {
 } from '@shared/nfoExportTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { ipcMutation } from '../application/mutationContext'
+import {
+  isTerminalCatalogTaskState,
+  waitForCatalogTask
+} from '../application/catalogTaskProgress'
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { nfoExportRepository } from '@library/nfo/export/nfoExportRepository'
 import { nfoExportTaskController } from '../nfo/export/nfoExportTaskController'
@@ -82,43 +86,52 @@ function reportFromTask(task: CatalogTaskSnapshot): NfoExportReport {
   }
 }
 
+const remoteNfoWaits = new Map<string, AbortController>()
+
 async function emitRemoteNfoFinished(
   backend: CatalogBackend,
   taskId: string,
   webContents: WebContents | undefined
 ): Promise<void> {
-  const deadline = Date.now() + 120_000
-  while (Date.now() < deadline) {
-    const task = (await backend.tasks.get({ taskId })) as CatalogTaskSnapshot
-    if (
-      task.state === 'succeeded' ||
-      task.state === 'cancelled' ||
-      task.state === 'failed' ||
-      task.state === 'needsInspection'
-    ) {
-      nfoExportEventAdapter.send(webContents, IPC.NFO_EXPORT_STATE, {
-        taskId,
-        state: 'finished',
-        report: reportFromTask(task)
-      })
-      return
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-  nfoExportEventAdapter.send(webContents, IPC.NFO_EXPORT_STATE, {
-    taskId,
-    state: 'finished',
-    report: {
+  const abort = new AbortController()
+  remoteNfoWaits.set(taskId, abort)
+  try {
+    const task = await waitForCatalogTask({
+      backend,
       taskId,
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-      terminated: false,
-      writtenCount: 0,
-      skippedCount: 0,
-      failedCount: 1,
-      items: []
-    }
-  })
+      signal: abort.signal,
+      onApplied: (snapshot) => {
+        if (isTerminalCatalogTaskState(snapshot.state)) return
+        nfoExportEventAdapter.send(webContents, IPC.NFO_EXPORT_PROGRESS, {
+          taskId: snapshot.taskId,
+          completed: snapshot.counts?.written ?? snapshot.counts?.scanned ?? 0,
+          total: snapshot.counts?.total ?? snapshot.counts?.planned ?? 0
+        })
+      }
+    })
+    nfoExportEventAdapter.send(webContents, IPC.NFO_EXPORT_STATE, {
+      taskId,
+      state: 'finished',
+      report: reportFromTask(task)
+    })
+  } catch {
+    nfoExportEventAdapter.send(webContents, IPC.NFO_EXPORT_STATE, {
+      taskId,
+      state: 'finished',
+      report: {
+        taskId,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        terminated: abort.signal.aborted,
+        writtenCount: 0,
+        skippedCount: 0,
+        failedCount: abort.signal.aborted ? 0 : 1,
+        items: []
+      }
+    })
+  } finally {
+    remoteNfoWaits.delete(taskId)
+  }
 }
 
 function registerCatalogNfoExportHandlers(ctx: IpcContext, backend: CatalogBackend): void {
@@ -155,9 +168,10 @@ function registerCatalogNfoExportHandlers(ctx: IpcContext, backend: CatalogBacke
     void emitRemoteNfoFinished(backend, started.taskId, webContents)
     return { taskId: started.taskId }
   })
-  nfoExportCommandAdapter.register(IPC.NFO_EXPORT_TERMINATE, (taskId) =>
-    backend.nfo.terminate({ taskId }, ipcMutation())
-  )
+  nfoExportCommandAdapter.register(IPC.NFO_EXPORT_TERMINATE, (taskId) => {
+    remoteNfoWaits.get(taskId)?.abort()
+    return backend.nfo.terminate({ taskId }, ipcMutation())
+  })
 }
 
 export function registerNfoExportHandlers(ctx: IpcContext, backend: CatalogBackend): void {

@@ -7,6 +7,7 @@ import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { DesktopWorkStoreHandle } from '../desktop/workStore'
 import type { IpcContext } from './shared'
+import { registerMainWindowBinder } from '../desktop/mainWindowBindings'
 
 const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled'])
 
@@ -60,6 +61,7 @@ export function registerPlaylistImportHandlers(
     rendererDisconnected
   )
   bindCurrentRenderer()
+  registerMainWindowBinder(() => bindCurrentRenderer())
   void modulePromise.then((module) => {
     module.subscribe((event) => {
       appEventAdapter.send(

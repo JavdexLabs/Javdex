@@ -19,6 +19,11 @@ import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
 import type { VideoResourceImportTarget } from '@shared/videoTypes'
 import type { ScanAuditIndexQuery, ScanAuditSnapshotIdentity, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
+import {
+  isAbortError,
+  isTerminalCatalogTaskState,
+  waitForCatalogTask
+} from '../application/catalogTaskProgress'
 import { ipcMutation } from '../application/mutationContext'
 import { structuredError } from '@shared/protocol/errors'
 import { normalizeAbsoluteLocalPath, normalizeLocalPathIdentity } from '@library/localPathIdentity'
@@ -353,32 +358,63 @@ function waitForLocalScan(libraryId: number): {
   }
 }
 
+const remoteScanWaits = new Map<string, AbortController>()
+
+export function abortRemoteCatalogScanWait(taskId: string): boolean {
+  const abort = remoteScanWaits.get(taskId)
+  if (!abort) return false
+  abort.abort()
+  return true
+}
+
 async function waitForRemoteScan(
   backend: CatalogBackend,
   libraryId: number,
-  taskId: string
+  taskId: string,
+  onProgress?: (task: CatalogTaskSnapshot) => void,
+  signal?: AbortSignal
 ): Promise<ScanCompletionResult> {
-  const deadline = Date.now() + 120_000
-  while (Date.now() < deadline) {
-    const task = (await backend.tasks.get({ taskId })) as CatalogTaskSnapshot
-    if (task.state === 'succeeded' || task.state === 'cancelled' || task.state === 'needsInspection') {
-      return completionFromTask(libraryId, task)
+  const task = await waitForCatalogTask({
+    backend,
+    taskId,
+    signal,
+    onApplied: (snapshot) => {
+      if (!isTerminalCatalogTaskState(snapshot.state)) onProgress?.(snapshot)
     }
-    if (task.state === 'failed') {
-      throw new Error(task.label || '扫描失败')
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+  if (task.state === 'failed') {
+    throw new Error(task.label || '扫描失败')
   }
-  throw new Error('扫描超时')
+  return completionFromTask(libraryId, task)
 }
 
 export async function runScanThroughBackend(
   backend: CatalogBackend,
-  libraryId: number
+  libraryId: number,
+  onProgress?: (task: CatalogTaskSnapshot) => void
 ): Promise<ScanCompletionResult> {
   if (backend.mode === 'remote') {
     const accepted = (await backend.libraries.runScan({ libraryId }, ipcMutation())) as { taskId: string }
-    return waitForRemoteScan(backend, libraryId, accepted.taskId)
+    const abort = new AbortController()
+    remoteScanWaits.set(accepted.taskId, abort)
+    try {
+      return await waitForRemoteScan(backend, libraryId, accepted.taskId, onProgress, abort.signal)
+    } catch (error) {
+      if (isAbortError(error)) {
+        return completionFromTask(libraryId, {
+          owner: 'catalog',
+          taskId: accepted.taskId,
+          catalogId: backend.session().catalogId ?? '',
+          kind: 'scan',
+          state: 'cancelled',
+          taskRevision: 0,
+          progressSeq: 0
+        })
+      }
+      throw error
+    } finally {
+      remoteScanWaits.delete(accepted.taskId)
+    }
   }
   const waiting = waitForLocalScan(libraryId)
   try {
@@ -443,10 +479,21 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
   })
 
   appCommandAdapter.register(IPC.SCAN_RUN, async (libraryId): Promise<ScanCompletionResult> =>
-    runScanThroughBackend(backend, libraryId)
+    runScanThroughBackend(backend, libraryId, (task) => {
+      appEventAdapter.send(ctx.getWindow()?.webContents, IPC.SCAN_PROGRESS, {
+        libraryId: task.libraryId ?? libraryId,
+        runId: task.taskId,
+        progress: {
+          scanned: task.counts?.scanned ?? 0,
+          imported: task.counts?.imported ?? 0,
+          currentFile: task.label ?? ''
+        }
+      })
+    })
   )
 
   appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => {
+    abortRemoteCatalogScanWait(runId)
     if (scanCoordinator.cancel(runId)) return true
     if (backend.mode === 'remote') {
       void backend.tasks.cancel({ taskId: runId }, ipcMutation()).catch(() => undefined)

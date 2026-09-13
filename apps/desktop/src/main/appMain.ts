@@ -32,6 +32,7 @@ import { getSettings, updateSettings } from './settings/settingsStore'
 import { nfoExportTaskController } from './nfo/export/nfoExportTaskController'
 import { bindNfoExportWindowGuard } from './nfo/export/nfoExportWindowGuard'
 import { createDesktopRuntime, type DesktopRuntime } from './bootstrap/createDesktopRuntime'
+import { bindMainWindow } from './desktop/mainWindowBindings'
 import { actressQueryService } from './services/actressQueryService'
 import { mediaLibraryService } from './services/mediaLibraryService'
 import { videoMaintenanceService } from './services/videoMaintenanceService'
@@ -114,6 +115,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   bindNfoExportWindowGuard(mainWindow, nfoExportTaskController, () => shutdownInProgress)
+  bindMainWindow(mainWindow)
   const window = mainWindow
   window.on('close', (event) => {
     if (event.defaultPrevented || shutdownInProgress || !getSettings().closeToTray || !hasAppTray()) return

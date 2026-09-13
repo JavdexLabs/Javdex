@@ -18,10 +18,15 @@ import type { NfoExportOptions, NfoExportPlanPreview } from '@shared/nfoExportTy
 import type { ScopedVideoListResult } from '@shared/catalogTypes'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
+import { waitForCatalogTask } from '../../desktop/src/main/application/catalogTaskProgress'
 import { ipcMutation } from '../../desktop/src/main/application/mutationContext'
 import { createLocalCatalogBackend } from '../../desktop/src/main/backends/local/localCatalogBackend'
 import { createRemoteCatalogBackend } from '../../desktop/src/main/backends/remote/remoteCatalogBackend'
 import { loadOrCreateLocalCatalogIdentity, localCatalogIdentityPath } from '../../desktop/src/main/desktop/localCatalogIdentity'
+import { openDesktopWorkStore } from '../../desktop/src/main/desktop/workStore'
+import { applyPlaylistImportThroughCatalog } from '../../desktop/src/main/services/playlistImport/playlistImportCatalogApply'
+import { createMemoryPlaylistImportCatalogLookup } from '../../desktop/src/main/services/playlistImport/playlistImportCatalogLookup'
+import { PlaylistImportRepository } from '../../desktop/src/main/services/playlistImport/playlistImportRepository'
 import { issueDeployToken } from './identity'
 import { startJavdexServer } from './runtime'
 import type { ServerConfig } from './config'
@@ -137,6 +142,97 @@ if (hostConfigRaw) {
     throw new Error(`task ${taskId} did not finish: ${last?.state ?? 'missing'}`)
   }
 
+  function catalogArtifacts(catalogPath: string): string[] {
+    return [catalogPath, `${catalogPath}-wal`, `${catalogPath}-shm`]
+  }
+
+  function listLibraryDbFds(catalogPath: string): string[] {
+    const hits: string[] = []
+    const dir = `/proc/${process.pid}/fd`
+    if (!fs.existsSync(dir)) return hits
+    for (const fd of fs.readdirSync(dir)) {
+      try {
+        const target = fs.readlinkSync(path.join(dir, fd))
+        if (catalogArtifacts(catalogPath).some((artifact) => target === artifact || target.startsWith(`${artifact} `))) {
+          hits.push(target)
+        }
+      } catch {
+        // Descriptor disappeared between readdir and readlink.
+      }
+    }
+    return hits
+  }
+
+  function chmodCatalogClosed(catalogPath: string): () => void {
+    const files = catalogArtifacts(catalogPath).filter((file) => fs.existsSync(file))
+    const modes = files.map((file) => fs.statSync(file).mode)
+    for (const file of files) fs.chmodSync(file, 0)
+    return () => {
+      files.forEach((file, index) => {
+        fs.chmodSync(file, modes[index]!)
+      })
+    }
+  }
+
+  async function waitForRemoteScanAfterLateReconnect(
+    remote: ReturnType<typeof createRemoteCatalogBackend>,
+    taskId: string
+  ): Promise<{
+    snapshot: CatalogTaskSnapshot
+    generationBeforeReconnect: number
+    generationAfterReconnect: number
+    lateSnapshot: CatalogTaskSnapshot
+    applied: CatalogTaskSnapshot[]
+  }> {
+    const generationBeforeReconnect = remote.generation
+    const lateSnapshots: CatalogTaskSnapshot[] = []
+    const applied: CatalogTaskSnapshot[] = []
+    const originalGet = remote.tasks.get.bind(remote.tasks)
+    remote.tasks.get = async (input, ctx) => {
+      const snapshot = (await originalGet(input, ctx)) as CatalogTaskSnapshot
+      if (lateSnapshots.length === 0) {
+        await remote.reconnect()
+        lateSnapshots.push(snapshot)
+      }
+      return snapshot
+    }
+    try {
+      const snapshot = await waitForCatalogTask({
+        backend: remote,
+        taskId,
+        timeoutMs: 60_000,
+        intervalMs: 50,
+        onApplied: (next) => applied.push(next)
+      })
+      assert.equal(lateSnapshots.length, 1, 'first live tasks.get must complete before reconnect')
+      const lateSnapshot = lateSnapshots[0]!
+      assert.ok(
+        remote.generation > generationBeforeReconnect,
+        `reconnect must advance generation (${generationBeforeReconnect} -> ${remote.generation})`
+      )
+      assert.equal(
+        applied.includes(lateSnapshot),
+        false,
+        'late HTTP snapshot delivered after reconnect must not be applied'
+      )
+      assert.equal(applied.length >= 1, true, 'a later generation poll must apply a live snapshot')
+      assert.equal(
+        ['succeeded', 'needsInspection'].includes(snapshot.state),
+        true,
+        JSON.stringify(snapshot)
+      )
+      return {
+        snapshot,
+        generationBeforeReconnect,
+        generationAfterReconnect: remote.generation,
+        lateSnapshot,
+        applied
+      }
+    } finally {
+      remote.tasks.get = originalGet
+    }
+  }
+
   describe('local CatalogBackend vs Node host scan/NFO', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-d02-'))
     const workerEntry = path.join(root, 'webCatalogWorker.js')
@@ -196,7 +292,7 @@ if (hostConfigRaw) {
       fs.rmSync(root, { recursive: true, force: true })
     })
 
-    it('runs the same scan and XML NFO plan through LocalCatalogBackend and RemoteCatalogBackend', async () => {
+    it('runs the same scan and XML NFO plan through LocalCatalogBackend and RemoteCatalogBackend', { timeout: 120_000 }, async () => {
       const remoteDir = path.join(root, 'remote-host')
       const localDir = path.join(root, 'local-desktop')
       const remoteMount = path.join(root, 'remote-media')
@@ -307,7 +403,8 @@ if (hostConfigRaw) {
           { libraryId: 1 },
           ipcMutation(undefined, versionsFrom(remoteLibrary))
         )) as { taskId: string }
-        const remoteTask = await waitTask(remote, remoteScan.taskId)
+        const remoteProgress = await waitForRemoteScanAfterLateReconnect(remote, remoteScan.taskId)
+        const remoteTask = remoteProgress.snapshot
         assert.equal(['succeeded', 'needsInspection'].includes(remoteTask.state), true, JSON.stringify(remoteTask))
 
         const localLatest = (await local.libraries.latestScan({ libraryId: 1 })) as LibraryScanLatestSnapshot
@@ -403,6 +500,72 @@ if (hostConfigRaw) {
         assert.equal(remotePlan.summary.fileCount >= 1, true, JSON.stringify(remotePlan))
         assert.equal(Boolean(localPlan.planDigest), true)
         assert.equal(Boolean(remotePlan.planDigest), true)
+
+        await local.dispose()
+        closeDatabase()
+        const localCatalogPath = path.join(localDir, 'library.db')
+        const restoreCatalog = chmodCatalogClosed(localCatalogPath)
+        try {
+          assert.throws(() => getDb(), /Database not initialised/)
+          assert.deepEqual(listLibraryDbFds(localCatalogPath), [])
+          const lookup = createMemoryPlaylistImportCatalogLookup()
+          await lookup.ingestCodes(remote, ['ABC-001'])
+          const matched = lookup.videosByCode('ABC-001')
+          assert.equal(matched.length, 1, JSON.stringify(matched))
+          const videoId = matched[0]!.videoId
+          const work = openDesktopWorkStore(path.join(localDir, 'desktop-work.db'))
+          try {
+            const repository = new PlaylistImportRepository(work.database(), lookup)
+            repository.createJob({
+              runId: 'run-remote-http-apply',
+              idempotencyKey: 'remote-http-apply',
+              sourceUrl: 'https://example.test/list',
+              targetLibraryId: 1,
+              destination: { kind: 'create', requestedName: '远程导入清单' },
+              targetLibrary: { id: 1, name: remoteLibrary.name },
+              autoCreateUnmatchedVideos: false
+            })
+            const preview = repository.checkpointStaticPage({
+              runId: 'run-remote-http-apply',
+              pageKey: 'page-0',
+              pageOrder: 0,
+              pageUrl: 'https://example.test/list',
+              documentRevision: '1:1',
+              viewRevision: '1:1:0',
+              evidenceRef: 'evidence',
+              items: [{ code: 'ABC-001', detailUrl: 'https://example.test/video/abc-001' }],
+              nextPageUrls: [],
+              terminal: true
+            })
+            assert.equal(preview.phase, 'ready-to-apply', JSON.stringify(preview))
+            const outcome = await applyPlaylistImportThroughCatalog(
+              remote,
+              repository,
+              'run-remote-http-apply',
+              'apply-http-1'
+            )
+            assert.equal(outcome.playlistId > 0, true, JSON.stringify(outcome))
+            assert.equal(outcome.reusedVideos, 1)
+            assert.equal(outcome.createdVideos, 0)
+            const created = (await remote.playlists.get({ playlistId: outcome.playlistId })) as {
+              name?: string
+              videos?: Array<{ id: number; code?: string }>
+            } | null
+            assert.equal(created?.name, '远程导入清单', JSON.stringify(created))
+            assert.equal(
+              created?.videos?.some((video) => video.id === videoId || video.code === 'ABC-001'),
+              true,
+              JSON.stringify(created)
+            )
+            assert.equal(repository.snapshot('run-remote-http-apply')?.phase, 'completed')
+            assert.throws(() => getDb(), /Database not initialised/)
+            assert.deepEqual(listLibraryDbFds(localCatalogPath), [])
+          } finally {
+            work.close()
+          }
+        } finally {
+          restoreCatalog()
+        }
       } finally {
         await remote.dispose()
         await local.dispose()

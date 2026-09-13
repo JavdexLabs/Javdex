@@ -180,6 +180,8 @@ const LIBRARY_KEYS = [
   'latestScan',
   'auditGet',
   'auditHeader',
+  'auditPage',
+  'auditViewPage',
   'getPendingScan',
   'listPendingScans',
   'pagePendingScanQueue',
@@ -761,6 +763,44 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       latestScan: q('scans.getLatest'),
       auditGet: q('scans.auditGet'),
       auditHeader: q('scans.auditHeader'),
+      auditPage: (input, ctx) => {
+        const local = (input ?? {}) as { libraryId: number; limit?: number; offset?: number }
+        return query(
+          'scans.auditPage',
+          {
+            libraryId: local.libraryId,
+            ...(local.limit != null ? { limit: local.limit } : {}),
+            ...(local.offset != null ? { offset: local.offset } : {})
+          },
+          ctx?.signal
+        )
+      },
+      auditViewPage: (input, ctx) => {
+        const local = (input ?? {}) as {
+          libraryId: number
+          tab: string
+          outcome?: string
+          changesFilter?: string
+          search?: string
+          locale?: string
+          limit?: number
+          offset?: number
+        }
+        return query(
+          'scans.auditViewPage',
+          {
+            libraryId: local.libraryId,
+            tab: local.tab,
+            ...(local.outcome != null ? { outcome: local.outcome } : {}),
+            ...(local.changesFilter != null ? { changesFilter: local.changesFilter } : {}),
+            ...(local.search != null ? { search: local.search } : {}),
+            ...(local.locale != null ? { locale: local.locale } : {}),
+            ...(local.limit != null ? { limit: local.limit } : {}),
+            ...(local.offset != null ? { offset: local.offset } : {})
+          },
+          ctx?.signal
+        )
+      },
       getPendingScan: (input, ctx) =>
         query('pendingScan.get', { groupId: (input as { groupId: number }).groupId }, ctx?.signal),
       listPendingScans: q('pendingScan.list'),

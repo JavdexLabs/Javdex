@@ -5,7 +5,7 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend } from './scanHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
@@ -417,6 +417,70 @@ it('routes SCAN_AUDIT_GET through the catalog backend', async () => {
   } as unknown as CatalogBackend
   assert.deepEqual(await auditGetThroughBackend(backend, 3), { summary: null })
   assert.deepEqual(calls, [{ libraryId: 3 }])
+})
+
+it('routes remote SCAN_AUDIT_PAGE and VIEW_PAGE through the catalog backend', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    libraries: {
+      auditPage: async (input: unknown) => {
+        calls.push(['page', input])
+        return { items: [], total: 0 }
+      },
+      auditViewPage: async (input: unknown) => {
+        calls.push(['view', input])
+        return { items: [], total: 0, auditAvailable: true }
+      }
+    }
+  } as unknown as CatalogBackend
+  const snapshot = { libraryId: 4, runId: 'run-4', finishedAt: 'now' }
+  assert.deepEqual(
+    await auditPageThroughBackend(backend, snapshot, {
+      section: 'files',
+      attention: true,
+      limit: 20,
+      offset: 5
+    }),
+    { items: [], total: 0 }
+  )
+  assert.deepEqual(
+    await auditViewPageThroughBackend(backend, snapshot, {
+      tab: 'failed',
+      outcome: 'all',
+      search: 'ABC',
+      locale: 'zh-hans-cn',
+      limit: 50,
+      offset: 0,
+      anchor: { kind: 'path', value: '/media/ABC-001.mp4' }
+    }),
+    { items: [], total: 0, auditAvailable: true }
+  )
+  assert.deepEqual(calls, [
+    [
+      'page',
+      {
+        libraryId: 4,
+        section: 'files',
+        attention: true,
+        limit: 20,
+        offset: 5
+      }
+    ],
+    [
+      'view',
+      {
+        libraryId: 4,
+        tab: 'failed',
+        outcome: 'all',
+        search: 'ABC',
+        locale: 'zh-hans-cn',
+        limit: 50,
+        offset: 0,
+        anchor: { kind: 'path', value: '/media/ABC-001.mp4' }
+      }
+    ]
+  ])
 })
 
 it('routes pending scan get/list/queue reads through the catalog backend', async () => {

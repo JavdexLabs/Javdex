@@ -196,6 +196,8 @@ export function createUnconfiguredRemoteBackend(
       'latestScan',
       'auditGet',
       'auditHeader',
+      'auditPage',
+      'auditViewPage',
       'getPendingScan',
       'listPendingScans',
       'pagePendingScanQueue',

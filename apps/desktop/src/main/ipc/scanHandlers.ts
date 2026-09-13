@@ -16,6 +16,7 @@ import type {
 } from '@shared/libraryTypes'
 import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
 import type { VideoResourceImportTarget } from '@shared/videoTypes'
+import type { ScanAuditIndexQuery, ScanAuditSnapshotIdentity, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { ipcMutation } from '../application/mutationContext'
 import { structuredError } from '@shared/protocol/errors'
@@ -119,6 +120,45 @@ export async function resolveResourceIdentityThroughBackend(
 
 export function auditGetThroughBackend(backend: CatalogBackend, libraryId: number) {
   return backend.libraries.auditGet({ libraryId })
+}
+
+export function auditPageThroughBackend(
+  backend: CatalogBackend,
+  snapshot: ScanAuditSnapshotIdentity,
+  query: ScanAuditIndexQuery
+) {
+  if (backend.mode !== 'remote') {
+    return catalogReadService.readAuditPage(snapshot, query, SCAN_AUDIT_READ_LIMITS)
+  }
+  return backend.libraries.auditPage({
+    libraryId: snapshot.libraryId,
+    section: query.section,
+    outcome: query.outcome,
+    attention: query.attention,
+    limit: query.limit,
+    offset: query.offset
+  })
+}
+
+export function auditViewPageThroughBackend(
+  backend: CatalogBackend,
+  snapshot: ScanAuditSnapshotIdentity,
+  query: ScanAuditViewQuery
+) {
+  if (backend.mode !== 'remote') {
+    return catalogReadService.readAuditViewPage(snapshot, query, SCAN_AUDIT_READ_LIMITS)
+  }
+  return backend.libraries.auditViewPage({
+    libraryId: snapshot.libraryId,
+    tab: query.tab,
+    outcome: query.outcome,
+    changesFilter: query.changesFilter,
+    search: query.search,
+    locale: query.locale,
+    limit: query.limit,
+    offset: query.offset,
+    anchor: query.anchor
+  })
 }
 
 export function getPendingScanThroughBackend(
@@ -409,9 +449,8 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
   registerScanLatestHandler(appCommandAdapter, (libraryId) => backend.libraries.latestScan({ libraryId }))
   registerScanAuditReadHandlers(appCommandAdapter, {
     readAuditHeader: (libraryId) => backend.libraries.auditHeader({ libraryId }),
-    readAuditPage: (snapshot, query, limits) => catalogReadService.readAuditPage(snapshot, query, limits),
-    readAuditViewPage: (snapshot, query, limits) =>
-      catalogReadService.readAuditViewPage(snapshot, query, limits)
+    readAuditPage: (snapshot, query) => auditPageThroughBackend(backend, snapshot, query),
+    readAuditViewPage: (snapshot, query) => auditViewPageThroughBackend(backend, snapshot, query)
   })
   appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) => auditGetThroughBackend(backend, libraryId))
   registerScanAuditRevealHandler()

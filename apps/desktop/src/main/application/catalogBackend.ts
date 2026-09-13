@@ -187,6 +187,8 @@ export interface CatalogLibraryCommands {
   latestScan: Query<'scans.getLatest'>
   auditGet: Query<'scans.auditGet'>
   auditHeader: Query<'scans.auditHeader'>
+  auditPage: Query<'scans.auditPage'>
+  auditViewPage: Query<'scans.auditViewPage'>
   getPendingScan: Query<'pendingScan.get'>
   listPendingScans: Query<'pendingScan.list'>
   pagePendingScanQueue: Query<'pendingScan.queuePage'>

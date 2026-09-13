@@ -63,6 +63,8 @@ import {
 import {
   catalogScanAuditGet,
   catalogScanAuditHeader,
+  catalogScanAuditPage,
+  catalogScanAuditViewPage,
   catalogScanLatest
 } from '@library/catalog/catalogAuditRead'
 import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
@@ -1022,6 +1024,38 @@ export function createLocalCatalogBackend(
     },
     async auditHeader(input) {
       return catalogScanAuditHeader(input.libraryId)
+    },
+    async auditPage(input) {
+      const local = input as {
+        libraryId: number
+        section?: 'files' | 'removedResources' | 'promotedResources' | 'deletedVideos' | 'pendingGroups'
+        outcome?: 'added' | 'updated' | 'pending' | 'skipped' | 'unrecognized' | 'strm_failure' | 'processing_failure'
+        attention?: boolean
+        limit?: number
+        offset?: number
+      }
+      return catalogScanAuditPage(local.libraryId, {
+        section: local.section,
+        outcome: local.outcome,
+        attention: local.attention,
+        limit: local.limit,
+        offset: local.offset
+      })
+    },
+    async auditViewPage(input) {
+      const local = input as {
+        libraryId: number
+        tab: 'failed' | 'all' | 'added_updated' | 'skipped' | 'changes'
+        outcome?: 'all' | 'added' | 'updated' | 'pending' | 'skipped' | 'unrecognized' | 'strm_failure' | 'processing_failure'
+        changesFilter?: 'all' | 'removed' | 'promoted' | 'deleted'
+        search?: string
+        locale?: string
+        limit?: number
+        offset?: number
+        anchor?: { kind: 'path'; value: string } | { kind: 'group'; id: number }
+      }
+      const { libraryId, ...query } = local
+      return catalogScanAuditViewPage(libraryId, query)
     },
     async getPendingScan(input) {
       const local = input as { libraryId?: number; groupId: number }

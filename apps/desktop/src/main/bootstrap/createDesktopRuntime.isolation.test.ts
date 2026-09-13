@@ -177,12 +177,16 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         const lookup = createMemoryPlaylistImportCatalogLookup()
         return lookup.ingestCodes(runtime.backend, ['ABC-001'])
       })
-      const playlistApply = await probe(() =>
-        runtime.backend.playlists.applyImport(
+      const playlistApply = await probe(async () => {
+        const result = await runtime.backend.playlists.applyImport(
           { name: 'm10', videoIds: [1], libraryId: 1 },
           ipcMutation()
         )
-      )
+        if (result == null || typeof (result as { playlistId?: unknown }).playlistId !== 'number') {
+          throw new Error('清单导入响应无效。')
+        }
+        return result
+      })
       let getDbError = ''
       try {
         getDb()
@@ -571,17 +575,17 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         assert.deepEqual(report.fds, [])
         assert.deepEqual(listLibraryDbFds(child.pid ?? 0, catalogPath), [])
         assert.match(report.getDbError, /Database not initialised/)
-        for (const probe of [
-          report.collection,
-          report.curator,
-          report.crop,
-          report.playlist,
-          report.playlistMatch,
-          report.playlistApply
+        for (const [name, probe] of [
+          ['collection', report.collection],
+          ['curator', report.curator],
+          ['crop', report.crop],
+          ['playlist', report.playlist],
+          ['playlistMatch', report.playlistMatch],
+          ['playlistApply', report.playlistApply]
         ] as const) {
-          assert.equal(probe.ok, false, probe.error)
-          assert.equal(/Database not initialised/i.test(probe.error), false, probe.error)
-          assert.ok(probe.error.length > 0, 'probe must fail through the catalog, not silently')
+          assert.equal(probe.ok, false, `${name}: ${probe.error}`)
+          assert.equal(/Database not initialised/i.test(probe.error), false, `${name}: ${probe.error}`)
+          assert.ok(probe.error.length > 0, `${name} must fail through the catalog, not silently`)
         }
         await stopChild(child)
       } finally {

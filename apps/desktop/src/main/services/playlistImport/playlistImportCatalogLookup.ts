@@ -175,7 +175,10 @@ export function createMemoryPlaylistImportCatalogLookup(): PlaylistImportCatalog
           scope: { kind: 'all' },
           query: { search: code, sortBy: 'code', limit: 200 }
         })) as { items?: Array<{ id: number; code?: string }> }
-        for (const item of page.items ?? []) {
+        if (!page || !Array.isArray(page.items)) {
+          throw new Error('影片列表响应无效。')
+        }
+        for (const item of page.items) {
           if (!item.code || normalizedCode(item.code) !== code) continue
           const detail = (await catalog.queries.getVideo({
             scope: { kind: 'all' },

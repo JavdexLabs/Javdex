@@ -57,6 +57,22 @@ describe('playlistImportCatalogLookup', () => {
       1
     )
   })
+
+  it('rejects a handshake-shaped videos.list payload as a catalog read', async () => {
+    const lookup = createMemoryPlaylistImportCatalogLookup()
+    await assert.rejects(
+      () =>
+        lookup.ingestCodes(
+          {
+            queries: {
+              listVideos: async () => ({ protocolVersion: 1, identity: { catalogId: 'catalog-1' } })
+            }
+          } as unknown as CatalogBackend,
+          ['ABC-001']
+        ),
+      /影片列表响应无效/
+    )
+  })
 })
 
 describe('playlistImport catalog apply', () => {

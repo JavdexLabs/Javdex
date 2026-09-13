@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+import { isStructuredError } from '@shared/protocol/errors'
 import Database from 'better-sqlite3'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
@@ -15,8 +16,10 @@ import { openIsolatedCatalog } from '@library/catalog/catalogMigration'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SOURCE_NAME = 'javdex-server-migration-source'
 const TARGET_NAME = 'javdex-server-migration-target'
+const RACE_NAME = 'javdex-server-migration-race-target'
 const SOURCE_PORT = 18096
 const TARGET_PORT = 18097
+const RACE_PORT = 18098
 const COVER_REL = 'covers/s13-docker.png'
 const VIDEO_CODE = 'S13-DOCKER'
 const PNG_1X1 = Buffer.from(
@@ -232,9 +235,14 @@ const targetData = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-target-data
 const targetImages = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-target-images-'))
 const targetMedia = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-target-media-'))
 const targetConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-target-config-'))
+const raceData = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-race-data-'))
+const raceImages = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-race-images-'))
+const raceMedia = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-race-media-'))
+const raceConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-race-config-'))
 
 writeServerConfig(sourceConfig, SOURCE_PORT)
 writeServerConfig(targetConfig, TARGET_PORT)
+writeServerConfig(raceConfig, RACE_PORT)
 const rootId = seedSourceCatalog(sourceData, sourceImages, sourceMedia)
 assert.ok(rootId > 0)
 assert.equal(fs.existsSync(path.join(sourceImages, COVER_REL)), true)
@@ -342,16 +350,89 @@ try {
   assert.notEqual(targetAfter.identity.catalogId, sourceAfter.identity.catalogId)
   assert.equal(fs.existsSync(path.join(targetData, 'library.db')), true)
 
+  runContainer({
+    name: RACE_NAME,
+    port: RACE_PORT,
+    dataDir: raceData,
+    imagesDir: raceImages,
+    mediaDir: raceMedia,
+    configDir: raceConfig,
+    image
+  })
+  const raceBase = `http://127.0.0.1:${RACE_PORT}`
+  await waitLive(raceBase, 'race-target')
+  const raceToken = issueMigrateAuth(RACE_NAME)
+  assert.equal(await putPackage(raceBase, mapped.migrationId, fs.readFileSync(pkg), raceToken), 200)
+  const raceImported = await postManage(
+    raceBase,
+    'migration.start',
+    { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+    raceToken
+  )
+  assert.equal(raceImported.status, 200, JSON.stringify(raceImported.json))
+  const [raceEnabled, raceAbandoned] = await Promise.all([
+    postManage(
+      raceBase,
+      'migration.enable',
+      { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+      raceToken
+    ),
+    postManage(
+      raceBase,
+      'migration.abandon',
+      { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+      raceToken
+    )
+  ])
+  const raceStatus = await postManage(
+    raceBase,
+    'migration.status',
+    { input: { migrationId: mapped.migrationId } },
+    raceToken
+  )
+  assert.equal(
+    raceStatus.status,
+    200,
+    JSON.stringify({ raceStatus: raceStatus.json, raceEnabled, raceAbandoned })
+  )
+  const racePhase = raceStatus.json.targetPhase
+  assert.ok(racePhase === 'enabled' || racePhase === 'abandoned', racePhase)
+  if (racePhase === 'enabled') {
+    const raceAfter = readFrozenAndCodes(path.join(raceData, 'library.db'))
+    assert.equal(raceAfter.identity?.frozen, false)
+    assert.deepEqual(raceAfter.codes, [VIDEO_CODE])
+    assert.equal(fs.existsSync(path.join(raceImages, COVER_REL)), true)
+    const lateAbandon = await postManage(
+      raceBase,
+      'migration.abandon',
+      { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+      raceToken
+    )
+    assert.equal(lateAbandon.status, 200, JSON.stringify(lateAbandon.json))
+    assert.equal(lateAbandon.json.targetPhase, 'enabled')
+  } else {
+    const lateEnable = await postManage(
+      raceBase,
+      'migration.enable',
+      { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+      raceToken
+    )
+    assert.equal(lateEnable.status, 401, JSON.stringify(lateEnable.json))
+    assert.equal(isStructuredError(lateEnable.json) && lateEnable.json.code === 'AUTH_REQUIRED', true)
+  }
+
   console.log(
-    'PASS: Docker dual-host migrate-auth, package, start/enable, status phases, official images, source frozen backup'
+    'PASS: Docker dual-host migrate-auth, package, start/enable, status phases, official images, source frozen backup, enable/abandon race'
   )
 } catch (error) {
   process.stderr.write(docker(['logs', '--tail', '80', SOURCE_NAME]).stdout || '')
   process.stderr.write(docker(['logs', '--tail', '80', TARGET_NAME]).stdout || '')
+  process.stderr.write(docker(['logs', '--tail', '80', RACE_NAME]).stdout || '')
   throw error
 } finally {
   docker(['rm', '-f', SOURCE_NAME], { stdio: 'ignore' })
   docker(['rm', '-f', TARGET_NAME], { stdio: 'ignore' })
+  docker(['rm', '-f', RACE_NAME], { stdio: 'ignore' })
   for (const dir of [
     sourceData,
     sourceImages,
@@ -360,7 +441,11 @@ try {
     targetData,
     targetImages,
     targetMedia,
-    targetConfig
+    targetConfig,
+    raceData,
+    raceImages,
+    raceMedia,
+    raceConfig
   ]) {
     fs.rmSync(dir, { recursive: true, force: true })
   }

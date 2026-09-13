@@ -49,3 +49,18 @@ Issue 与 PRD 统一记录在 GitHub Issues。详见 `docs/agents/issue-tracker.
 ### Domain docs
 
 采用单上下文领域文档布局。详见 `docs/agents/domain.md`。
+
+## Cursor Cloud specific instructions
+
+Docker for Cloud Agents comes from `.cursor/environment.json` (build context defaults to `.cursor`) and `.cursor/Dockerfile`. That image follows Cursor’s official “Running Docker” recipe (Docker CE + CLI + containerd + buildx + compose plugin, fuse-overlayfs, iptables-legacy, `ubuntu` in the docker group with passwordless sudo). `start` runs `sudo service docker start` and waits until `docker info` succeeds.
+
+`npm run server:smoke` builds the **root** `Dockerfile` (it `COPY`s `out/server`) and runs a Linux container. Use it only in a session that booted from this environment. A VM that started from an older snapshot without this image cannot run container smoke — do not fake a pass.
+
+Follow-up session verification:
+
+1. `docker version` and `docker info` succeed (daemon up, `ubuntu` can talk to it).
+2. `npm run server:build` writes `out/server` (the image context).
+3. `npm run server:smoke` exits 0. Missing Docker must exit non-zero.
+4. `npm run server:smoke:node` is a host-process check, not container acceptance.
+
+`install` is `npm ci` only. Do not run `setup:desktop` / Electron rebuild for server smoke.

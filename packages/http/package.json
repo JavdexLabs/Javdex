@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "private": true,
   "license": "MIT",
-  "description": "Runtime-neutral LAN browser HTTP, pairing/auth storage, browse DTO projection, and static file serving. Desktop keeps webAccess lifecycle; management HTTP is registered separately by the server host.",
+  "description": "Runtime-neutral LAN browser HTTP, pairing/auth storage, browse DTO projection, static file serving, manage upload/asset GET, and original-file play Range streams. Desktop keeps webAccess lifecycle; management HTTP is registered separately by the server host.",
   "exports": {
     "./*": "./src/*.ts"
   }

@@ -52,7 +52,7 @@
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
 | S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理、刮削确认/候选应用/清单 applyImport/目标列表/Agent findReady·apply·discard） | schema 已到 19。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、catalog 查询 worker 入口仍在 desktop；采集/deliver 仍桌面 |
-| S02D | 本地架构门槛已验证；刮削确认/Agent apply 已走 CatalogBackend。剩余 scan/player/NFO IPC 与采集 start/plan 仍走桌面单例 | 见本文件 S02D 实施记录 |
+| S02D | 本地架构门槛已验证；刮削确认/Agent apply/player 已走 CatalogBackend。剩余 scan/NFO IPC 与采集 start/plan 仍走桌面单例 | 见本文件 S02D 实施记录 |
 | S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
 | S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
 | S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
@@ -60,7 +60,8 @@
 | S07 | 最小双后端闭环与会话/认主/失败 UI 已落地；完整管理面与 D02/D07/M 全矩阵仍待 S08–S13 | 见本文件 S07 实施记录 |
 | S08 | 管理浏览/编辑、资源/生命周期、分类合并删除、待确认与网页配对已落地；扫描/NFO/任务/根维护与刮削确认仍待 S09/S10 | 见本文件 S08 实施记录 |
 | S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入已交 S10 | 见本文件 S09 实施记录 |
-| S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面；play.grant 仍待 S11 | 见本文件 S10 实施记录 |
+| S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
+| S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理与远程 mpv 启动已落地；无磁盘 LRU 图片缓存；S12 迁库仍待 | 见本文件 S11 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -561,6 +562,26 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 播放器设置程序路径，参数数组启动，禁止 shell 拼接。资源专用 token 只允许目标 HEAD/GET/Range，12 小时固定期限；到期/接管/资源定位改变后拒绝新请求并按主方案关闭旧流。普通标题修改不终止播放；外部直链直接交播放器，不带 Javdex 凭据。
 
 以具体 mpv 二进制和测试媒体验收首播、拖动、暂停后续播、短断线、服务重启、撤销/过期。记录真实播放结果而不是只断言 HTTP 状态或进程启动。失败必须修复或请求用户作出兼容范围取舍，不能默默取消远程播放。
+
+**S11 实施记录（管理图片、play.grant、真实 mpv）**
+
+- 范围：`play.grant` 签发 12 小时资源专用 token，流式面为 `GET|HEAD /play/v1/:grantId?t=`（Range via `sendFile`）。凭据写入 schema 19 `catalog_settings`（`play-grant:` / `play-token:`），不升 schema 20。Cookie 不能授权播放或管理图片。`GET|HEAD /manage/v1/assets/<relpath>` 用管理 Bearer + 应用版本，前缀白名单 `covers`/`avatars`/`actress_gallery`/`samples`/`playlist_covers`/`uploads`/刮削暂存。远程 `media://` 由主进程带 Bearer 代理；本地仍读 `mediaAssetStore`。远程本地影片：`grantPlayback` 后 `spawn(绝对路径, [playbackHandle], { shell: false })`。直链 HTTP(S) 把源 URL 交给播放器，不签发 Javdex grant；web/magnet/ed2k `openExternal`。远程 reveal 明确拒绝。播放器路径是此电脑设置 `playerPath`（资料库连接面板文本框，无新 IPC）。writer 代次前进时事务内 `revokeAllPlayGrants`，提交后 `closePlayStreams`。标题修改不终止 grant。`PLAYER_OPEN_RESOURCE` 增加可选 `videoId` 以满足冻结 `videos.getResource({ libraryId, videoId, resourceId })`；IPC 键数仍 288。
+- 工程默认与升级：
+  - 冻结 `play.grant` versions R、G 写在查询包络上，查询无 `expectedVersions`。实现用 `locatorRevision`（kind/locator/source_identity/root_id/size_bytes/file_mtime_ms 的 sha256）做定位检查；G 由 catalogId/鉴权覆盖。不虚构 `library_video_memberships` 的 R 聚合。
+  - `videos.getResource` 仍返回绝对 `locator`（S08 既有展示定位泄漏）；本阶段只附加 `locatorRevision`，不静默删 locator。
+  - 无冻结 manage-image GET 路径；本阶段增加二进制 `GET /manage/v1/assets/...` 作为 `PUT /uploads/:id` 的姊妹面。无冻结 play-stream HTTP；使用 `/play/v1/` 而不是 `/manage/v1`。
+  - 本地 `assets.grantPlayback` 仍 `UNSUPPORTED_CAPABILITY`；本地播放仍走受保护文件句柄 / `shell.openPath`。
+  - 图片临时缓存：进行中的 `AbortSignal`（catalog 切换/后端 `trackSignal`）会取消 in-flight 远程读取。未做磁盘 LRU。失败返回占位/404/503，不持久同步远程图库。
+  - 服务端 v1 明文图片。Play HTTP 无效/过期 token 一律 404，不泄露 grant 是否存在。
+- 验证（Linux Node 22.14 / amd64 glibc；实现 `8a00ab9`，e2e 路径修复 `443d9ee`）：
+  - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.browser.json` 通过
+  - `npm run server:test` **22 通过 / 0 失败**（12h grant、Range 206 `0123`/`4567`、cookie≠auth、过期 digest 409、改标题仍 206、manage PNG GET、cookie 图片 401、编码遍历 400、remote `grantPlayback`/`readImage`、handoff 后旧流 404、过期 inspect `AUTH_REQUIRED`）
+  - 定向 Electron：playerService、mediaProtocol、catalogPlay、catalogManageImages、catalogWriter、ipcDisposition、this-computer settings **32 通过 / 0 失败**
+  - `npm run pretest` 通过
+  - `npm run test:packaging` **8 通过**
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=360000 node scripts/run-electron-tests.mjs` **3003 tests / 3002 pass / 0 fail / 1 skip**
+  - M15 真实播放（本环境 apt 安装 `/usr/bin/mpv` 0.37.0；ffmpeg 生成 4s H.264 AAC `testsrc` 320×240）：mpv `--vo=null --ao=null`、参数数组、`shell: false`。IPC 观测 `time-pos` 从 0.000→0.333（duration 4.023）；pause 保持；resume 再前进；`seek 2.2 absolute` 落到 2.200。MKV grant `video/x-matroska` 同样解码到 `time-pos` 0.333。停服后 grant 仍在 `catalog_settings`；换端口重启 HEAD 200，mpv `loadfile` 再播 `time-pos` 0.125。writer handoff 后 HEAD 404，mpv 日志 `HTTP error 404 Not Found`。mpv 打开并软件解码 `h264 320x240 24.000fps` + `aac`，`VO: [null] 320x240 yuv420p`。这不是只断言进程启动。
+- 未做：S12 迁库；S13 全矩阵/Docker/安装包烟测；S14 文档与 ADR；磁盘 LRU 图片缓存；远程 Agent start/plan 与清单导入 IPC；桌面 `SCAN_RUN`/NFO IPC 仍桌面单例；`videos.getResource` 仍带绝对 locator。不得把 mock 当完成证据。需用户决定：`play.grant` 查询是否应断言 R；manage 图片是否必须改成 JSON op；play 流是否必须挂在 `/manage/v1`；`PLAYER_OPEN_RESOURCE` 是否永久保持两参数；`videos.getResource` 是否去掉绝对 locator。
 
 ### S12：双向整库迁移
 

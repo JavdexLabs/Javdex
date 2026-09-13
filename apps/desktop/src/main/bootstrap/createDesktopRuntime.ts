@@ -107,7 +107,8 @@ export async function createDesktopRuntime(
             baseUrl: snapshot.remoteBaseUrl,
             appVersion,
             credentials,
-            workStore
+            workStore,
+            userDataPath
           }
         : undefined
     )

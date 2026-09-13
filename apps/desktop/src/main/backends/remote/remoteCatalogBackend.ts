@@ -14,6 +14,10 @@ import type { CatalogBackend } from '../../application/catalogBackend'
 import type { CatalogQueryContext, MutationContext } from '../../application/catalogBackend'
 import type { DesktopCredentialStore } from '../../application/desktopPorts'
 import { createRemoteSessionCapabilities } from '../../application/desktopCapabilities'
+import {
+  openRemoteImageDiskCache,
+  type RemoteImageDiskCache
+} from '../../services/remoteImageDiskCache'
 
 export interface RemoteCatalogBackendOptions {
   baseUrl: string
@@ -23,6 +27,7 @@ export interface RemoteCatalogBackendOptions {
   timeoutMs?: number
   workStore?: { putVerification(operationId: string, catalogId: string): void }
   migrationSecret?: string | null
+  userDataPath?: string
 }
 
 const QUERY_KEYS = [
@@ -216,6 +221,19 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
   let sessionState: DesktopSessionState = 'disconnected'
   let sessionMessage: string | null = '尚未连接到远程资料库'
   const inFlight = new Set<AbortController>()
+  let imageCache: RemoteImageDiskCache | null = null
+  let imageCacheCatalogId: string | null = null
+
+  const cacheFor = (catalogId: string): RemoteImageDiskCache | null => {
+    if (!options.userDataPath || !catalogId) return null
+    if (imageCache && imageCacheCatalogId === catalogId) return imageCache
+    imageCache = openRemoteImageDiskCache({
+      userDataPath: options.userDataPath,
+      catalogId
+    })
+    imageCacheCatalogId = catalogId
+    return imageCache
+  }
 
   const session = (): DesktopSession => ({
     state: sessionState,
@@ -848,13 +866,20 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       async readImage(input, ctx) {
         const tracked = trackSignal(ctx?.signal)
         try {
-          await ensureConnected(tracked.signal)
+          const hello = await ensureConnected(tracked.signal)
           if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
-          return await client.getAsset(input.relPath, {
+          const cache = cacheFor(hello.identity.catalogId)
+          if (!tracked.signal.aborted) {
+            const hit = cache?.get(input.relPath, input.size)
+            if (hit) return hit
+          }
+          const image = await client.getAsset(input.relPath, {
             bearer: secret,
             signal: tracked.signal,
             size: input.size
           })
+          if (!tracked.signal.aborted) cache?.set(input.relPath, image.mime, image.body, input.size)
+          return image
         } finally {
           tracked.done()
         }

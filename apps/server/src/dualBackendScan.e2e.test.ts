@@ -1040,7 +1040,16 @@ if (hostConfigRaw) {
       fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
       const compiled = spawnSync(
         'gcc',
-        ['-shared', '-fPIC', '-O2', '-o', soPath, path.resolve('scripts/javdex-fsync-fault.c'), '-ldl'],
+        [
+          '-shared',
+          '-fPIC',
+          '-O2',
+          `-Wl,--version-script=${path.resolve('scripts/javdex-fsync-fault.map')}`,
+          '-o',
+          soPath,
+          path.resolve('scripts/javdex-fsync-fault.c'),
+          '-ldl'
+        ],
         { encoding: 'utf8' }
       )
       assert.equal(compiled.status, 0, compiled.stderr || compiled.stdout)

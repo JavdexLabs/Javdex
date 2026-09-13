@@ -6,35 +6,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <unistd.h>
-
-#define MAX_FD 8192
 
 static int (*real_fsync)(int);
 static int (*real_fdatasync)(int);
-static int (*real_open)(const char *, int, ...);
-static int (*real_open64)(const char *, int, ...);
-static int (*real_openat)(int, const char *, int, ...);
-static int (*real_openat64)(int, const char *, int, ...);
-static int (*real_dup)(int);
-static int (*real_dup2)(int, int);
-static int (*real_dup3)(int, int, int);
-static int (*real_close)(int);
-static unsigned char tracked[MAX_FD];
+static ssize_t (*real_write)(int, const void *, size_t);
+static ssize_t (*real_pwrite64)(int, const void *, size_t, off_t);
 static int ready;
+
+__attribute__((constructor)) static void onload(void) {
+  fprintf(stderr, "JAVDEX_FSYNC_PRELOAD_LOADED\n");
+  fflush(stderr);
+}
 
 static void bind_reals(void) {
   if (ready) return;
-  real_fsync = dlsym(RTLD_NEXT, "fsync");
+  real_fsync = dlvsym(RTLD_NEXT, "fsync", "GLIBC_2.2.5");
+  if (!real_fsync) real_fsync = dlsym(RTLD_NEXT, "fsync");
   real_fdatasync = dlsym(RTLD_NEXT, "fdatasync");
-  real_open = dlsym(RTLD_NEXT, "open");
-  real_open64 = dlsym(RTLD_NEXT, "open64");
-  real_openat = dlsym(RTLD_NEXT, "openat");
-  real_openat64 = dlsym(RTLD_NEXT, "openat64");
-  real_dup = dlsym(RTLD_NEXT, "dup");
-  real_dup2 = dlsym(RTLD_NEXT, "dup2");
-  real_dup3 = dlsym(RTLD_NEXT, "dup3");
-  real_close = dlsym(RTLD_NEXT, "close");
+  real_write = dlvsym(RTLD_NEXT, "write", "GLIBC_2.2.5");
+  if (!real_write) real_write = dlsym(RTLD_NEXT, "write");
+  real_pwrite64 = dlvsym(RTLD_NEXT, "pwrite64", "GLIBC_2.2.5");
+  if (!real_pwrite64) real_pwrite64 = dlsym(RTLD_NEXT, "pwrite64");
   ready = 1;
 }
 
@@ -43,123 +37,50 @@ static int fault_enabled(void) {
   return path && path[0] && access(path, F_OK) == 0;
 }
 
-static int is_catalog(const char *path) {
-  return path && strstr(path, "library.db") != NULL;
+static int fd_is_catalog(int fd) {
+  char link[64];
+  char target[512];
+  ssize_t n;
+  if (fd < 0) return 0;
+  snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+  n = readlink(link, target, sizeof(target) - 1);
+  if (n < 0) return 0;
+  target[n] = '\0';
+  return strstr(target, "library.db") != NULL;
 }
 
-static void track_path(int fd, const char *path) {
-  if (fd < 0 || fd >= MAX_FD) return;
-  tracked[fd] = is_catalog(path) ? 1 : 0;
-}
-
-static void track_dup(int from, int to) {
-  if (to < 0 || to >= MAX_FD) return;
-  tracked[to] = (from >= 0 && from < MAX_FD) ? tracked[from] : 0;
-}
-
-static int maybe_fault(int fd) {
-  if (fd >= 0 && fd < MAX_FD && tracked[fd] && fault_enabled()) {
-    fprintf(stderr, "JAVDEX_FSYNC_FAULT fd=%d\n", fd);
-    fflush(stderr);
-    errno = EIO;
-    return -1;
-  }
-  return 0;
+static int maybe_fault(int fd, const char *op) {
+  if (!fault_enabled() || !fd_is_catalog(fd)) return 0;
+  fprintf(stderr, "JAVDEX_FSYNC_FAULT op=%s fd=%d\n", op, fd);
+  fflush(stderr);
+  errno = EIO;
+  return -1;
 }
 
 int fsync(int fd) {
   bind_reals();
-  if (maybe_fault(fd)) return -1;
+  if (maybe_fault(fd, "fsync")) return -1;
   return real_fsync(fd);
 }
 
 int fdatasync(int fd) {
   bind_reals();
-  if (maybe_fault(fd)) return -1;
-  return real_fdatasync(fd);
+  if (maybe_fault(fd, "fdatasync")) return -1;
+  return real_fdatasync ? real_fdatasync(fd) : real_fsync(fd);
 }
 
-int open(const char *path, int flags, ...) {
-  va_list args;
-  mode_t mode = 0;
-  int fd;
+ssize_t write(int fd, const void *buf, size_t count) {
   bind_reals();
-  va_start(args, flags);
-  if (flags & O_CREAT) mode = (mode_t)va_arg(args, int);
-  va_end(args);
-  fd = real_open(path, flags, mode);
-  track_path(fd, path);
-  return fd;
+  if (maybe_fault(fd, "write")) return -1;
+  return real_write(fd, buf, count);
 }
 
-int open64(const char *path, int flags, ...) {
-  va_list args;
-  mode_t mode = 0;
-  int fd;
+ssize_t pwrite64(int fd, const void *buf, size_t count, off_t offset) {
   bind_reals();
-  if (!real_open64) return open(path, flags);
-  va_start(args, flags);
-  if (flags & O_CREAT) mode = (mode_t)va_arg(args, int);
-  va_end(args);
-  fd = real_open64(path, flags, mode);
-  track_path(fd, path);
-  return fd;
+  if (maybe_fault(fd, "pwrite64")) return -1;
+  return real_pwrite64(fd, buf, count, offset);
 }
 
-int openat(int dirfd, const char *path, int flags, ...) {
-  va_list args;
-  mode_t mode = 0;
-  int fd;
-  bind_reals();
-  va_start(args, flags);
-  if (flags & O_CREAT) mode = (mode_t)va_arg(args, int);
-  va_end(args);
-  fd = real_openat(dirfd, path, flags, mode);
-  track_path(fd, path);
-  return fd;
-}
-
-int openat64(int dirfd, const char *path, int flags, ...) {
-  va_list args;
-  mode_t mode = 0;
-  int fd;
-  bind_reals();
-  if (!real_openat64) return openat(dirfd, path, flags);
-  va_start(args, flags);
-  if (flags & O_CREAT) mode = (mode_t)va_arg(args, int);
-  va_end(args);
-  fd = real_openat64(dirfd, path, flags, mode);
-  track_path(fd, path);
-  return fd;
-}
-
-int dup(int fd) {
-  int next;
-  bind_reals();
-  next = real_dup(fd);
-  track_dup(fd, next);
-  return next;
-}
-
-int dup2(int fd, int fd2) {
-  int next;
-  bind_reals();
-  next = real_dup2(fd, fd2);
-  track_dup(fd, next);
-  return next;
-}
-
-int dup3(int fd, int fd2, int flags) {
-  int next;
-  bind_reals();
-  if (!real_dup3) return dup2(fd, fd2);
-  next = real_dup3(fd, fd2, flags);
-  track_dup(fd, next);
-  return next;
-}
-
-int close(int fd) {
-  bind_reals();
-  if (fd >= 0 && fd < MAX_FD) tracked[fd] = 0;
-  return real_close(fd);
-}
+__asm__(".symver fsync,fsync@GLIBC_2.2.5");
+__asm__(".symver write,write@GLIBC_2.2.5");
+__asm__(".symver pwrite64,pwrite64@GLIBC_2.2.5");

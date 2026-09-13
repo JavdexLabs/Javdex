@@ -62,7 +62,8 @@
 | S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入已交 S10 | 见本文件 S09 实施记录 |
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理与远程 mpv 启动已落地；无磁盘 LRU 图片缓存 | 见本文件 S11 实施记录 |
-| S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描保留成员、双进程 HTTP 竞态、Docker 两端与图片后拷失败未做 | 见本文件 S12 实施记录 |
+| S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描、Docker 两端与图片后拷失败未做 | 见本文件 S12 实施记录 |
+| S13 | 进行中：两进程迁库竞态已落地；Docker/全矩阵/安装包未做 | 见本文件 S13 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -615,7 +616,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - 定向 Electron：`catalogMigration` / `catalogMigrationArchive` / `catalogWriter` **14 通过 / 0 失败**（STRM 转普通链接、未映射本地删除并关自动清理、封面文件随迁、新 catalogId / 保留目标 serverId / epoch 0、迟到 enable `AUTH_REQUIRED`、源未启用可 abandon 解冻、pending+加密阻止冻结、归档逃逸/重复/超限）
   - `npm run pretest` 通过
   - 未跑本阶段全量 Electron / Docker 两端真实部署
-- 未做：M12 启用后对目标做真实首次扫描以证明无资源成员仍保留；M13 两个 HTTP 进程并发 enable/abandon（`getDb()` 单例，library 测试为同一连接上的顺序 IMMEDIATE）；M14 孤立暂存在引用/清理边界的注入；加密存量仅预检计数，无源端解密流程；断网/响应丢失/两端重启的完整矩阵；Docker 两端状态与文件检查。S13 全矩阵；S14 ADR/用户迁移文档；磁盘 LRU；S02D `SCAN_RUN`/NFO IPC 与采集 start/plan 仍桌面单例。不得把 mock 当完成证据。需用户决定：是否增加冻结的 migration 签发 HTTP op；PUT 包是否必须改成 JSON op 或沿用 uploads；源 abandon 是否必须携带目标终态证明而不能仅凭协调者声明；enable 图片拷贝失败是否必须整笔回滚；非空库签发 migrate-auth 是否收窄为空目标。
+- 未做：M12 启用后对目标做真实首次扫描以证明无资源成员仍保留；M14 孤立暂存在引用/清理边界的注入；加密存量仅预检计数，无源端解密流程；断网/响应丢失/两端重启的完整矩阵；Docker 两端状态与文件检查。S13 全矩阵；S14 ADR/用户迁移文档；磁盘 LRU；S02D `SCAN_RUN`/NFO IPC 与采集 start/plan 仍桌面单例。不得把 mock 当完成证据。需用户决定：是否增加冻结的 migration 签发 HTTP op；PUT 包是否必须改成 JSON op 或沿用 uploads；源 abandon 是否必须携带目标终态证明而不能仅凭协调者声明；enable 图片拷贝失败是否必须整笔回滚；非空库签发 migrate-auth 是否收窄为空目标。
 
 ### S13：完整验收
 
@@ -624,6 +625,12 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 证明服务端依赖图与镜像生产安装没有 Electron/Playwright/Agent 运行时，网页包没有 Node/数据库代码；打包后的 worker、图片、网页路径可用。只验证源码 tsx 不能替代正式镜像和安装包验证。
 
 输出验收矩阵，每项记录 commit、环境、步骤、预期/实际、日志与未覆盖部分。已知基线编码检查问题需单独记录，不能通过全局关闭检查解决。失败但未修复的核心条目意味着计划尚未完成。
+
+**S13 实施记录（进行中）**
+
+- 本环境 `docker` 不存在（`command not found`，无 `/var/run/docker.sock`）。容器镜像烟测仍按设计失败，不能用 Node 进程冒充镜像验收。
+- 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。`npm run server:test` 现为 24 + 1 通过。这覆盖 M13 的进程级竞态，不是 Docker 两端、也不是丢响应后重启两端。
+- M01–M11/M15 仍以既有 S05–S11 记录为准；本阶段尚未输出完整验收矩阵，也未跑全量 Electron / 安装包。
 
 ### S14：发布准备与收尾
 

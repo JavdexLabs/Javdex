@@ -99,4 +99,13 @@ describe('catalog image recovery', () => {
     recoverCatalogImages(getDb(), new Date(Date.now() + 48 * 60 * 60 * 1000))
     assert.equal(fs.existsSync(mediaAssetStore.resolve(staged.stagedPath)), true)
   })
+
+  it('deletes leftover upload files that are not live uploads or formal covers', async () => {
+    setup()
+    const orphanRel = 'uploads/orphan-staging.png'
+    fs.mkdirSync(path.dirname(mediaAssetStore.resolve(orphanRel)), { recursive: true })
+    fs.writeFileSync(mediaAssetStore.resolve(orphanRel), await png())
+    recoverCatalogImages(getDb())
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(orphanRel)), false)
+  })
 })

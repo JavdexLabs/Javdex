@@ -8,6 +8,7 @@ import { listFormallyReferencedImagePaths } from './catalogImageRefs'
 import { maybeCrashImageFlow } from './catalogImageCrash'
 import {
   PENDING_SCRAPE_STAGING_DIRNAME,
+  UPLOAD_DIRNAME,
   findReadyUploadRelOnDisk,
   listPromoteJournalUploadIds,
   readCatalogUpload,
@@ -250,6 +251,34 @@ export function runCatalogImageFileJobs(database: Database.Database = getDb()): 
   maybeCrashImageFlow('afterOldDelete')
 }
 
+function liveStagingRels(database: Database.Database, referenced: Set<string>): Set<string> {
+  const keep = new Set(referenced)
+  const rows = database
+    .prepare(
+      `SELECT rel_path AS p FROM catalog_image_uploads
+        WHERE rel_path IS NOT NULL AND trim(rel_path) != ''
+          AND status NOT IN ('expired')`
+    )
+    .all() as Array<{ p: string }>
+  for (const row of rows) keep.add(row.p)
+  return keep
+}
+
+/** Delete leftover upload/staging files that are neither live uploads nor formal references. */
+export function recoverOrphanStagingFiles(database: Database.Database = getDb()): void {
+  const keep = liveStagingRels(database, listFormallyReferencedImagePaths(database))
+  for (const dirName of [UPLOAD_DIRNAME, PENDING_SCRAPE_STAGING_DIRNAME]) {
+    const absDir = path.join(mediaAssetStore.rootPath(), dirName)
+    if (!fs.existsSync(absDir)) continue
+    for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      const rel = path.posix.join(dirName, entry.name)
+      if (keep.has(rel)) continue
+      unlinkIfPresent(rel)
+    }
+  }
+}
+
 export function recoverCatalogImages(database: Database.Database = getDb(), now = new Date()): void {
   const nowIso = now.toISOString()
   recoverIncompleteWrites(database, nowIso)
@@ -258,5 +287,6 @@ export function recoverCatalogImages(database: Database.Database = getDb(), now 
   recoverUncommittedPromotes(database, nowIso, referenced)
   expireUnconsumedUploads(database, nowIso)
   runCatalogImageFileJobs(database)
+  recoverOrphanStagingFiles(database)
   void UPLOAD_TTL_MS
 }

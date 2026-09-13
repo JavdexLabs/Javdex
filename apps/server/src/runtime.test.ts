@@ -861,6 +861,7 @@ describe('server runtime lifecycle', () => {
       assert.equal(fs.existsSync(path.join(dataDir, 'media_assets', covered.cover_path!)), true)
       assert.equal(backend.session().state, 'available')
       assert.equal(backend.capabilities().editCatalog.allowed, true)
+      assert.equal(backend.capabilities().migrateCatalog.allowed, true)
       assert.equal(backend.capabilities().playLocalFile.allowed, false)
     } finally {
       await backend.dispose()
@@ -1019,21 +1020,33 @@ describe('server runtime lifecycle', () => {
       const remoteDetail = (await remote.queries.getVideo({
         scope: { kind: 'all' },
         videoId
-      })) as { rating: number; title: string }
+      })) as { rating: number; title: string; revision: number }
       const localDetail = (await local.queries.getVideo({
         scope: { kind: 'all' },
         videoId
-      })) as { rating: number; title: string }
+      })) as { rating: number; title: string; revision: number }
       assert.equal(remoteDetail.rating, 4)
       assert.equal(localDetail.rating, 4)
       const afterRating = getDb()
         .prepare('SELECT generation, revision FROM videos WHERE id = ?')
         .get(videoId) as { generation: number; revision: number }
-      assert.deepEqual(afterRating, version)
+      assert.equal(afterRating.generation, version.generation)
+      assert.equal(afterRating.revision, version.revision + 1)
+      assert.equal(remoteDetail.revision, afterRating.revision)
+      assert.equal(localDetail.revision, afterRating.revision)
+
+      await assert.rejects(
+        () =>
+          remote.videos.edit(
+            { videoId, fields: { title: 'Stale after rating' } },
+            { operationId: randomUUID(), expectedVersions: { V: version } }
+          ),
+        (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+      )
 
       const titled = await remote.videos.edit(
         { videoId, fields: { title: 'Rated then titled' } },
-        { operationId: randomUUID(), expectedVersions: { V: version } }
+        { operationId: randomUUID(), expectedVersions: { V: afterRating } }
       )
       assert.equal(titled, true)
       const afterTitle = (await remote.queries.getVideo({
@@ -1041,7 +1054,7 @@ describe('server runtime lifecycle', () => {
         videoId
       })) as { title: string; revision: number }
       assert.equal(afterTitle.title, 'Rated then titled')
-      assert.equal(afterTitle.revision, version.revision + 1)
+      assert.equal(afterTitle.revision, afterRating.revision + 1)
 
       await remote.videos.addManualTag({ videoId, name: 's08-manual' }, {
         operationId: randomUUID(),

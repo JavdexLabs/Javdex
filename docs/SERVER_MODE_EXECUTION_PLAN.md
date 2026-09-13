@@ -63,7 +63,7 @@
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面，但远程匹配/apply 走 CatalogBackend | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理、远程 mpv 与按 catalog 隔离的临时磁盘 LRU 已落地 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
-| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start+匹配+真实 Node HTTP apply、D04 任务进度 generation 门闩与 live HTTP 迟到交付、D05 窗口 binder、M13/M15 mpv、全量 Electron 3056 通过；Docker/安装包未做（用户已暂停容器验收） | 见本文件 S13 实施记录 |
+| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start+匹配+真实 Node HTTP apply、D04 任务进度 generation 门闩、迟到 HTTP 交付与 in-flight abort、D05 窗口 binder 与真实 BrowserWindow 关闭/重建、M13/M15 mpv、全量 Electron 3056 通过；Docker/安装包未做（用户已暂停容器验收） | 见本文件 S13 实施记录 |
 | S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
 
 ## 阶段顺序与工作分配
@@ -643,19 +643,19 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。源端 `encryptStoredAsset` 后 preview 含 `encrypted-assets` 且 start 拒绝；`decryptStoredAsset` 后 blocker 消失、start 冻结成功，封面不是 `AVPK\x01`。不在迁移内自动解密。`chmod 000` 目标 `imagesDir` 后 enable 事务已提交、拷图 EACCES：资料库保持 `enabled`、封面文件不在。用户命名空间 256k tmpfs 挂到 `imagesDir` 后 enable 拷 400KiB 封面 `ENOSPC`：资料库仍 `enabled`、封面不在，没有整笔回滚。
 - 远程图片临时磁盘 LRU：`userData/remote-image-cache/<catalogHash>/`，按 catalog 隔离；第二次 `readImage` 不打 HTTP；中止的 GET 不落盘。
 - D03：workStore 已复制行但 `prepStatus=copying` 时远程仍 `modePrepRequired` 且不 `getDb()`；回到本地才 `markReady`，源 `agent_runs` 仍在。OS 级 `SIGKILL`：子进程 `beginCopy` 后、`copyAgentWorkTables` 前被杀，`prepStatus` 保持 `copying`、目标 `agent_runs` 为 0、源行仍在；远程仍 `modePrepRequired`，回本地后复制完成（`933797f`）。
-- D05：`createWindow` 不注册 IPC；远程 runtime dispose 后再装配仍不打开 `library.db`。主窗口重建调用已注册的 `bindMainWindow` binders（清单导入/刮削 renderer 生命周期用 WeakSet 去重），不二次注册 IPC（`870ddf2`）。本 VM 未做真实 Electron `BrowserWindow` 关闭/重建 GUI。
+- D05：`createWindow` 不注册 IPC；远程 runtime dispose 后再装配仍不打开 `library.db`。主窗口重建调用已注册的 `bindMainWindow` binders（清单导入/刮削 renderer 生命周期用 WeakSet 去重），不二次注册 IPC（`870ddf2`）。`6be92a7` 用原生 Electron（非 `ELECTRON_RUN_AS_NODE`）关闭后再建 `BrowserWindow`：新 `webContents` 只绑定一次，`ipcMain.handle` 次数不变。不是任务进行中关窗的完整 GUI 产品流。
 - D07：本地/远程 available/frozen/断线/版本不符/恢复/authInvalid/modePrepRequired 的能力原因已枚举。远程 `migrateCatalog` 能力为 `unsupportedOnServer`（HTTP migration 面已接线，能力位未放开）。
 - M15：真实 `/usr/bin/mpv` 0.37.0 + ffmpeg `testsrc` H.264/AAC 播放 Range grant：`closePlayStreams` 后同一 handle 再 `loadfile` 可续播；把 `play-grant` `expiresAt` 写成过去后 `HEAD 404` 且 mpv 日志含 HTTP 404；`seek 2.2 absolute` 落到 ≥2.05；MKV 同样解码；writer handoff 后 seek/`HEAD` 404（`e9ee433`）。
 - M10：已连接远程 + `chmod 000` 本地 `library.db` 后，子进程绑定 CatalogBackend 并启动采集（空 URL）、助手概览、裁切快照、清单导入 start、`videos.list` 匹配 ingest、`playlists.applyImport`：`/proc/<pid>/fd` 无 `library.db`，`getDb()` 仍是 `Database not initialised`，失败路径也不是打开本地库（`5401689` / `3152bf1` / `86a82b5` / `bc019ee` / `2dd1e54`）。远程匹配写入 memory lookup，workStore snapshot 不再 JOIN `videos`。远程 apply 走冻结 `playlists.applyImport` 与持久 `operationId`；启动即拒绝 append 与自动建片；`>200` 在 prepare 时拒绝。Handshake 形 `videos.list` 不能当成空页。`8fc3d9a` 另用独立 Node 宿主：扫描出 ABC-001 后 `ingestCodes` + `applyPlaylistImportThroughCatalog` 经真实 manage HTTP 建清单，父进程 `chmod 000` 本地 `library.db` 后 `/proc` 无该库、`getDb()` 仍未初始化。刮削单条仍可走本地队列。无冻结 `video_sources` API，远程 sources 为空。冻结 applyImport 不写 per-video `video_links`。
-- D04：`waitForCatalogTask` 按 generation / catalogId / taskId / taskRevision / progressSeq 应用 `tasks.get` 快照，终态不回绕；重连 generation 丢弃旧成功快照；失败退避至 30s；`SCAN_CANCEL` / `NFO_EXPORT_TERMINATE` 中止本地等待（`870ddf2`）。`8fc3d9a` 对真实 Node 宿主 `tasks.get`：HTTP 响应已返回后 `reconnect()` 推进 generation，再把该快照交给 `waitForCatalogTask`，旧 generation 不应用，后续 poll 才应用终态。不是掐断 TCP/WAN 丢包的物理断线。
-- 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2` / `65c3e1c` / `5ebff2d` / `4822fb6` / `1bac323` / `4c79d67` / `e187266` / `6ad4b84` / `156c1a8` / `5699eae` / `8d3d8f4` / `544e099` / `747ab75` / `933797f` / `e9ee433` / `5401689` / `3152bf1` / `86a82b5` / `870ddf2` / `bc019ee` / `2dd1e54` / `8fc3d9a`）：
+- D04：`waitForCatalogTask` 按 generation / catalogId / taskId / taskRevision / progressSeq 应用 `tasks.get` 快照，终态不回绕；重连 generation 丢弃旧成功快照；失败退避至 30s；`SCAN_CANCEL` / `NFO_EXPORT_TERMINATE` 中止本地等待（`870ddf2`）。`8fc3d9a` 对真实 Node 宿主 `tasks.get`：HTTP 响应已返回后 `reconnect()` 推进 generation，再把该快照交给 `waitForCatalogTask`，旧 generation 不应用，后续 poll 才应用终态。`cb13f72` 另在真实 `tasks.get` 已受理后卡住响应，再 `reconnect()` 中止 in-flight fetch：3s 内完成，不等待 8s 服务端 stall。不是掐断 TCP/WAN 丢包的物理断线。
+- 验证（Linux Node 22.14 / amd64 glibc；另见 `3c9f97b` / `5589d42` / `83d6cf2` / `65c3e1c` / `5ebff2d` / `4822fb6` / `1bac323` / `4c79d67` / `e187266` / `6ad4b84` / `156c1a8` / `5699eae` / `8d3d8f4` / `544e099` / `747ab75` / `933797f` / `e9ee433` / `5401689` / `3152bf1` / `86a82b5` / `870ddf2` / `bc019ee` / `2dd1e54` / `8fc3d9a` / `cb13f72` / `6be92a7`）：
   - `npx tsc --noEmit -p tsconfig.server.json --composite false` 通过
   - `npx tsc --noEmit -p tsconfig.node.json --composite false` 通过
-  - 定向：`ELECTRON_RUN_AS_NODE= TSX_TSCONFIG_PATH=tsconfig.server.json node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/dualBackendScan.e2e.test.ts` **1 通过**（含 live HTTP reconnect 与远程清单 apply）
-  - 定向 Electron：`createDesktopRuntime.isolation` **5 通过**（含 D03 SIGKILL 与 M10 六探针）；`createDesktopRuntime` **12 通过**；`catalogTaskProgress` **8 通过**；`mainWindowBindings` **1 通过**；清单 lookup/apply/module/repository/driver 与 `scanHandlers` 远程 SCAN_RUN 取消均通过
+  - 定向：`ELECTRON_RUN_AS_NODE= TSX_TSCONFIG_PATH=tsconfig.server.json node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/dualBackendScan.e2e.test.ts` **1 通过**（含 live HTTP reconnect、in-flight abort 与远程清单 apply）
+  - 定向 Electron：`createDesktopRuntime.isolation` **5 通过**（含 D03 SIGKILL 与 M10 六探针）；`createDesktopRuntime` **12 通过**；`catalogTaskProgress` **8 通过**；`mainWindowBindings` **1 通过**；`mainWindowBindings.native` **1 通过**（真实 BrowserWindow）；清单 lookup/apply/module/repository/driver 与 `scanHandlers` 远程 SCAN_RUN 取消均通过
   - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=900000 node scripts/run-electron-tests.mjs` **3057 tests / 3056 pass / 0 fail / 1 skip**（`2dd1e54` 工作树；本轮未重跑全量）
   - 未跑 Docker / 安装包（用户已暂停容器验收）
-- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；enable 拷图失败整笔回滚（产品待决）；远程 FILE_RENAME（冻结 IPC 无 resourceId）；D04 物理掐断 TCP/WAN 后再重连；D05 真实 BrowserWindow。不得把 mock 当完成证据。不得宣称 M01–M15 / D01–D07 已全部完成。
+- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；enable 拷图失败整笔回滚（产品待决）；远程 FILE_RENAME（冻结 IPC 无 resourceId）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流。不得把 mock 当完成证据。不得宣称 M01–M15 / D01–D07 已全部完成。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -679,8 +679,8 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据/已连接 available 及 M10 六探针子进程 `/proc/<pid>/fd` 均无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 刮削单条队列仍可 `getDb()` |
 | D02 业务合同 | 部分 | LocalCatalogBackend 与 RemoteCatalogBackend 对同一夹具扫描/NFO 计划，并在扫描后读取 audit header/page/view 与 IPC 形状 `pendingAuditPresence`；同用例含 live HTTP 任务重连与远程清单 apply | `dualBackendScan.e2e.test.ts`（独立 `node --test` 进程） | 非 Electron IPC NFO 封面编码；非 Docker |
 | D03 工作存储升级 | 部分 | 复制已写入但未 `markReady` 时远程拒绝补开原库；OS `SIGKILL` 落在 `copying` 窗内，源行保留，回本地才 `markReady` | `createDesktopRuntime.test.ts`；`createDesktopRuntime.isolation.test.ts` | 复制 SQL 事务中途杀进程的更窄窗口未再铺 |
-| D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询；中止的图片 GET 不写入磁盘缓存；`waitForCatalogTask` 拒绝旧 generation/revision/progressSeq 与终态回绕，并中止本地 SCAN/NFO 等待；`8fc3d9a` 真实 Node `tasks.get` HTTP 完成后 reconnect，迟到快照不应用 | 远程后端 + `catalogTaskProgress.test.ts` + `scanHandlers.test.ts` + `dualBackendScan.e2e.test.ts` | 物理掐断 TCP/WAN 后再重连未做 |
-| D05 取消与退出 | 部分 | S07 dispose/abort；`createWindow` 不注册 IPC；远程 runtime 重建不打开 `library.db`；重建窗口只重绑 binders | Electron-as-Node bootstrap + `mainWindowBindings.test.ts` | 真实 BrowserWindow 关闭未做 |
+| D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询；中止的图片 GET 不写入磁盘缓存；`waitForCatalogTask` 拒绝旧 generation/revision/progressSeq 与终态回绕，并中止本地 SCAN/NFO 等待；`8fc3d9a` 真实 Node `tasks.get` HTTP 完成后 reconnect，迟到快照不应用；`cb13f72` 已受理的 in-flight `tasks.get` 在 reconnect 时中止，3s 内完成 | 远程后端 + `catalogTaskProgress.test.ts` + `scanHandlers.test.ts` + `dualBackendScan.e2e.test.ts` | 物理掐断 TCP/WAN 后再重连未做 |
+| D05 取消与退出 | 部分 | S07 dispose/abort；`createWindow` 不注册 IPC；远程 runtime 重建不打开 `library.db`；重建窗口只重绑 binders；`6be92a7` 原生 Electron 关闭后再建 `BrowserWindow`，新 webContents 绑定一次且 IPC handle 不加倍 | Electron-as-Node bootstrap + `mainWindowBindings.test.ts` + `mainWindowBindings.native.test.ts` | 任务进行中的完整 GUI 关窗产品流未做 |
 | D06 边界检查 | 部分 | pretest 生产依赖图；FILE_IMPORT / pending resolve+get/list/queue/presence / SCAN_AUDIT GET+HEADER+远程 PAGE/VIEW 走 CatalogBackend | 仓库脚本 + `scanHandlers.test.ts` | 远程 FILE_RENAME 仍拒绝；冻结 queuePage 无 IPC anchor；冻结 auditPage 无 section/attention；冻结 presence 仍是目录级计数 |
 | D07 能力与错误 | 部分 | 本地/远程各会话态能力原因已枚举 | `desktopCapabilities.test.ts` | 远程 `migrateCatalog` 能力位仍 `unsupportedOnServer`；UI 全动作未再铺 |
 

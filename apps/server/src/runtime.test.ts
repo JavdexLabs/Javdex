@@ -1897,7 +1897,7 @@ describe('server runtime lifecycle', () => {
     assert.equal(firstPage.status, 200, JSON.stringify(firstPage.json))
     const firstIds = (firstPage.json as { ids: number[]; hasMore: boolean }).ids
     assert.equal(firstIds.length, 1)
-    await insertBoundVideo('S10-003', uniqueClip('S10-003'))
+    await insertBoundVideo('S10-005', uniqueClip('S10-005'))
     const nextPage = await postManage(
       base,
       'targetLists.page',

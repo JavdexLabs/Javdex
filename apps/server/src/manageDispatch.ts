@@ -211,6 +211,29 @@ function stallVideosEditForTests(): Promise<void> | null {
   return new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : 8_000))
 }
 
+/** Test-only: pause before the mutation transaction so another request can claim a new writer. */
+function stallVideosEditBeforeMutationForTests(): Promise<void> | null {
+  const stallPath = process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_BEFORE
+  if (!stallPath) return null
+  try {
+    fs.unlinkSync(stallPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  fs.writeFileSync(`${stallPath}.started`, '1')
+  const donePath = `${stallPath}.done`
+  const deadline = Date.now() + 15_000
+  return (async () => {
+    while (!fs.existsSync(donePath)) {
+      if (Date.now() > deadline) {
+        throw new Error('JAVDEX_TEST_STALL_VIDEOS_EDIT_BEFORE timed out')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  })()
+}
+
 export function dispatchManageOperation(context: ManageHttpContext, database?: Database.Database): unknown {
   const operation = context.operation
   const meta = MANAGE_OPERATIONS[operation]
@@ -396,41 +419,45 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
         fields: Parameters<typeof videoEditInputFromManageFields>[0] & { cover?: CatalogImageRef }
       }
       const mutation = requireMutation(envelope)
-      const result = commitManageImageMutation(
-        {
-          operationId: mutation.operationId,
-          operation: 'videos.edit',
-          expectedVersions: mutation.expectedVersions,
-          input,
-          writerEpoch: auth.epoch
-        },
-        () => {
-          assertExpectedVideoVersion(input.videoId, mutation.expectedVersions, mutation.operationId, database)
-          if (input.fields.cover) {
-            applyVideoCoverRef(
+      const run = () => {
+        const result = commitManageImageMutation(
+          {
+            operationId: mutation.operationId,
+            operation: 'videos.edit',
+            expectedVersions: mutation.expectedVersions,
+            input,
+            writerEpoch: auth.epoch
+          },
+          () => {
+            assertExpectedVideoVersion(input.videoId, mutation.expectedVersions, mutation.operationId, database)
+            if (input.fields.cover) {
+              applyVideoCoverRef(
+                input.videoId,
+                input.fields.cover,
+                mutation.expectedVersions,
+                mutation.operationId,
+                database,
+                { bumpRevision: false }
+              )
+            }
+            const ok = videoMaintenanceService.edit(
               input.videoId,
-              input.fields.cover,
-              mutation.expectedVersions,
-              mutation.operationId,
-              database,
-              { bumpRevision: false }
+              videoEditInputFromManageFields(input.fields)
             )
-          }
-          const ok = videoMaintenanceService.edit(
-            input.videoId,
-            videoEditInputFromManageFields(input.fields)
-          )
-          return {
-            ok,
-            videoId: input.videoId,
-            versions: { V: readVideoAggregateVersion(input.videoId, database)! }
-          }
-        },
-        database
-      )
-      const payload = { receipt: result.receipt, ...result.data }
-      const stalled = stallVideosEditForTests()
-      return stalled ? stalled.then(() => payload) : payload
+            return {
+              ok,
+              videoId: input.videoId,
+              versions: { V: readVideoAggregateVersion(input.videoId, database)! }
+            }
+          },
+          database
+        )
+        const payload = { receipt: result.receipt, ...result.data }
+        const stalled = stallVideosEditForTests()
+        return stalled ? stalled.then(() => payload) : payload
+      }
+      const before = stallVideosEditBeforeMutationForTests()
+      return before ? before.then(run) : run()
     }
     if (operation === 'videos.setPoster') {
       const input = envelope.input as { videoId: number; image: CatalogImageRef }

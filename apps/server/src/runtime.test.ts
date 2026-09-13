@@ -29,6 +29,7 @@ import { upsertActressFromScrape } from '@library/db/actressRepo'
 import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
 import { previewLibraryPathRemoval } from '@library/scan/libraryPathCleanupService'
 import { JAVDEX_ROOT_MARKER } from '@library/scan/javdexRootMarker'
+import { SCAN_CLEANUP_PAGE_SIZE } from '@library/scan/scanCleanupPages'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
   getPendingVideoScrapeById,
@@ -363,6 +364,7 @@ describe('server runtime lifecycle', () => {
     resetLibraryHostForTests()
     delete process.env.JAVDEX_TEST_USER_DATA
     delete process.env.JAVDEX_TEST_UMOUNT_SCAN
+    delete process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_BEFORE
   })
 
   after(() => {
@@ -1011,6 +1013,112 @@ describe('server runtime lifecycle', () => {
       if (previousStallMs === undefined) delete process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_MS
       else process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_MS = previousStallMs
       await backend.dispose()
+    }
+  })
+
+  it('rejects an in-flight videos.edit after a new writer is claimed during the pause', async () => {
+    const dataDir = path.join(root, 'm06-handoff')
+    const stallPath = path.join(root, 'stall-videos-edit-before')
+    fs.rmSync(stallPath, { force: true })
+    fs.rmSync(`${stallPath}.started`, { force: true })
+    fs.rmSync(`${stallPath}.done`, { force: true })
+    const previous = process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_BEFORE
+    process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_BEFORE = stallPath
+    fs.writeFileSync(stallPath, '1')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const paused = await insertBoundVideo('M06-PAUSE', path.join(mediaRoot, 'm06-pause.mp4'))
+    fs.writeFileSync(path.join(mediaRoot, 'm06-pause.mp4'), Buffer.from('pause'))
+    const version = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(paused.videoId) as { generation: number; revision: number }
+    const operationId = randomUUID()
+    try {
+      const pending = postManage(
+        base,
+        'videos.edit',
+        {
+          operationId,
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          expectedVersions: { V: version },
+          input: { videoId: paused.videoId, fields: { title: 'M06 should not apply' } }
+        },
+        { bearer: writer.secret }
+      )
+      await waitForPath(`${stallPath}.started`)
+      const handoff = await postManage(
+        base,
+        'writer.handoffBegin',
+        {
+          operationId: randomUUID(),
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          expectedVersions: {},
+          input: {}
+        },
+        { bearer: writer.secret }
+      )
+      assert.equal(handoff.status, 200, JSON.stringify(handoff.json))
+      const nextSecret = generateSecret()
+      const consumed = await postManage(base, 'writer.claim', {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: {
+          kind: 'handoff',
+          oneTimeToken: (handoff.json as { oneTimeToken: string }).oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(nextSecret) }
+        }
+      })
+      assert.equal(consumed.status, 200, JSON.stringify(consumed.json))
+      assert.equal((consumed.json as { status: string }).status, 'consumed')
+      const nextEpoch = (consumed.json as { writerEpoch: number }).writerEpoch
+      assert.ok(nextEpoch > writer.writerEpoch)
+      fs.writeFileSync(`${stallPath}.done`, '1')
+      const pausedResult = await pending
+      assert.equal(pausedResult.status, 409, JSON.stringify(pausedResult.json))
+      assert.equal((pausedResult.json as { code?: string }).code, 'WRITER_REVOKED')
+      assert.equal(
+        (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(paused.videoId) as { title: string }).title,
+        'M06-PAUSE'
+      )
+      const receipt = await postManage(
+        base,
+        'operations.get',
+        {
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: nextEpoch,
+          input: { operationId }
+        },
+        { bearer: nextSecret }
+      )
+      assert.equal(receipt.status, 200, JSON.stringify(receipt.json))
+      assert.equal((receipt.json as { status?: string }).status, 'unknown')
+      const applied = await postManage(
+        base,
+        'videos.edit',
+        {
+          operationId: randomUUID(),
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: nextEpoch,
+          expectedVersions: { V: version },
+          input: { videoId: paused.videoId, fields: { title: 'M06 after claim' } }
+        },
+        { bearer: nextSecret }
+      )
+      assert.equal(applied.status, 200, JSON.stringify(applied.json))
+      assert.equal(
+        (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(paused.videoId) as { title: string }).title,
+        'M06 after claim'
+      )
+    } finally {
+      if (previous === undefined) delete process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_BEFORE
+      else process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_BEFORE = previous
+      fs.writeFileSync(`${stallPath}.done`, '1')
     }
   })
 
@@ -2157,6 +2265,160 @@ describe('server runtime lifecycle', () => {
       assert.equal(recoveredMarker.ino, markerStat.ino)
       assert.equal(fs.existsSync(path.join(mountPoint, JAVDEX_ROOT_MARKER)), true)
       assert.equal(fs.existsSync(path.join(mountPoint, 'KEEP-001.mp4')), true)
+    } finally {
+      if (previousUnmount === undefined) delete process.env.JAVDEX_TEST_UMOUNT_SCAN
+      else process.env.JAVDEX_TEST_UMOUNT_SCAN = previousUnmount
+      try {
+        unmountBind(mountPoint)
+      } catch {
+        // Keep the suite able to delete the temp tree even if umount already ran.
+      }
+    }
+  })
+
+  it('keeps the next cleanup page when a real bind mount is unmounted between pages', async () => {
+    const backing = path.join(root, 'm08-page-backing')
+    const mountPoint = path.join(root, 'm08-page-mnt')
+    bindMount(backing, mountPoint)
+    const dataDir = path.join(root, 'm08-bind-umount-pages')
+    const instructionDir = path.join(dataDir, 'unmount-instructions')
+    fs.mkdirSync(instructionDir, { recursive: true })
+    const previousUnmount = process.env.JAVDEX_TEST_UMOUNT_SCAN
+    const { base, config } = await boot(dataDir, { m08: mountPoint })
+    const writer = await claimInitialWriter(base, config)
+    const pageCount = SCAN_CLEANUP_PAGE_SIZE + 1
+    const codeAt = (index: number) => `PG-${String(index).padStart(3, '0')}`
+
+    const versions = (library: { revision: number; config: { revision: number } }) => ({
+      L: { generation: 1, revision: library.revision },
+      C: { generation: 1, revision: library.config.revision },
+      G: { generation: 1, revision: 1 },
+      V: { generation: 1, revision: 1 },
+      R: { generation: 1, revision: 1 }
+    })
+    const write = async (operation: string, expectedVersions: unknown, input: unknown) =>
+      postManage(
+        base,
+        operation,
+        {
+          operationId: randomUUID(),
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          expectedVersions,
+          input
+        },
+        { bearer: writer.secret }
+      )
+    const read = async (operation: string, input: unknown) =>
+      postManage(
+        base,
+        operation,
+        {
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          input
+        },
+        { bearer: writer.secret }
+      )
+    const pollTask = async (taskId: string, timeoutMs = 60_000) => {
+      const startedAt = Date.now()
+      let last: { state: string; counts?: { removed?: number } } | undefined
+      while (Date.now() - startedAt < timeoutMs) {
+        const result = await read('tasks.get', { taskId })
+        assert.equal(result.status, 200)
+        last = result.json as { state: string; counts?: { removed?: number } }
+        if (['succeeded', 'failed', 'cancelled', 'needsInspection'].includes(last.state)) return last
+        await new Promise((resolve) => setTimeout(resolve, 40))
+      }
+      throw new Error(`task ${taskId} did not finish: ${last?.state ?? 'missing'}`)
+    }
+    const pageResourceCount = () =>
+      (
+        getDb()
+          .prepare(
+            `SELECT COUNT(*) AS n
+               FROM video_resources resource
+               JOIN videos video ON video.id = resource.video_id
+              WHERE resource.library_id = 1 AND video.code LIKE 'PG-%'`
+          )
+          .get() as { n: number }
+      ).n
+
+    let library = (await read('libraries.get', { libraryId: 1 })).json as {
+      revision: number
+      config: { revision: number }
+      roots: Array<{ id: number; path: string }>
+    }
+    try {
+      const configUpdated = await write('libraries.updateConfig', versions(library), {
+        libraryId: 1,
+        patch: { minImportDurationMinutes: 0 }
+      })
+      assert.equal(configUpdated.status, 200)
+      library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+      const added = await write('libraries.addRoot', versions(library), {
+        libraryId: 1,
+        root: { mountSelectionId: 'm08' }
+      })
+      assert.equal(added.status, 200, JSON.stringify(added.json))
+      const addedRoot = added.json as { id: number; path: string }
+      for (let index = 0; index < pageCount; index += 1) {
+        fs.writeFileSync(path.join(mountPoint, `${codeAt(index)}.mp4`), Buffer.from('0123456789abcdef'))
+      }
+      const markerStat = fs.statSync(path.join(backing, JAVDEX_ROOT_MARKER))
+
+      library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+      const imported = await write('scans.run', versions(library), { libraryId: 1 })
+      assert.equal(imported.status, 200, JSON.stringify(imported.json))
+      const importedTask = await pollTask((imported.json as { taskId: string }).taskId)
+      assert.equal(importedTask.state, 'succeeded', JSON.stringify(importedTask))
+      assert.equal(pageResourceCount(), pageCount)
+
+      for (let index = 0; index < pageCount; index += 1) {
+        fs.unlinkSync(path.join(backing, `${codeAt(index)}.mp4`))
+      }
+      const instructionPath = path.join(instructionDir, 'between-pages.json')
+      fs.writeFileSync(
+        instructionPath,
+        JSON.stringify({ phase: 'beforeCleanupPage', kind: 'resources', afterPages: 1 })
+      )
+      process.env.JAVDEX_TEST_UMOUNT_SCAN = instructionPath
+      const watch = watchTestUnmount(instructionPath, mountPoint)
+      library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+      const partial = await write('scans.run', versions(library), { libraryId: 1 })
+      assert.equal(partial.status, 200, JSON.stringify(partial.json))
+      const partialTask = await pollTask((partial.json as { taskId: string }).taskId)
+      assert.equal(partialTask.state, 'succeeded', JSON.stringify(partialTask))
+      await watch
+      assert.equal(pageResourceCount(), 1, 'the committed first cleanup page must stay; the next page must not delete')
+      assert.equal(isBindMounted(mountPoint), false)
+      assert.equal(fs.existsSync(mountPoint), true)
+      const latest = (await read('scans.getLatest', { libraryId: 1 })).json as {
+        summary?: { offlineFolders?: string[]; removed?: number }
+        offlineFolders?: string[]
+        removed?: number
+      }
+      const offline = latest.summary?.offlineFolders ?? latest.offlineFolders ?? []
+      assert.equal(
+        offline.some((folder) => folder === addedRoot.path || folder === mountPoint),
+        true,
+        JSON.stringify(latest)
+      )
+      const removed = latest.summary?.removed ?? latest.removed
+      if (typeof removed === 'number') assert.equal(removed, SCAN_CLEANUP_PAGE_SIZE, JSON.stringify(latest))
+
+      bindMount(backing, mountPoint)
+      const remountedMarker = fs.statSync(path.join(backing, JAVDEX_ROOT_MARKER))
+      assert.equal(remountedMarker.ino, markerStat.ino)
+      library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+      const finished = await write('scans.run', versions(library), { libraryId: 1 })
+      assert.equal(finished.status, 200, JSON.stringify(finished.json))
+      const finishedTask = await pollTask((finished.json as { taskId: string }).taskId)
+      assert.equal(finishedTask.state, 'succeeded', JSON.stringify(finishedTask))
+      assert.equal(pageResourceCount(), 0)
+      assert.equal(fs.existsSync(path.join(mountPoint, JAVDEX_ROOT_MARKER)), true)
     } finally {
       if (previousUnmount === undefined) delete process.env.JAVDEX_TEST_UMOUNT_SCAN
       else process.env.JAVDEX_TEST_UMOUNT_SCAN = previousUnmount

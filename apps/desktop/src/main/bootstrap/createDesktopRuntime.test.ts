@@ -14,6 +14,7 @@ import {
   workStorePath
 } from './createDesktopRuntime'
 import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../desktop/thisComputerSettingsStore'
+import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { openDesktopWorkStore } from '../desktop/workStore'
 
 let tempRoot: string | null = null
@@ -281,6 +282,71 @@ describe('createDesktopRuntime', () => {
       )
     } finally {
       await back.dispose()
+    }
+  })
+
+  it('does not let remote mode finish an interrupted workStore copy by opening library.db', async () => {
+    const root = tempDir()
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true })
+    const catalog = initDatabaseAtPath(localCatalogDatabasePath(root))
+    insertAgentRun(catalog, 'run-partial')
+    const store = openDesktopWorkStore(workStorePath(root))
+    store.beginCopy()
+    copyAgentWorkTables(catalog, store.database())
+    store.close()
+    closeDatabase()
+
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    const blocked = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(blocked.backend.session().state, 'modePrepRequired')
+      assert.equal(blocked.openedCatalog, false)
+      assert.throws(() => getDb(), /Database not initialised/)
+    } finally {
+      await blocked.dispose()
+    }
+
+    await settings.write({ mode: 'local', remoteBaseUrl: null })
+    const resumed = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(resumed.workStore.prepStatus(), 'ready')
+      assert.equal(
+        (getDb().prepare("SELECT id FROM main.agent_runs").get() as { id: string }).id,
+        'run-partial'
+      )
+      assert.equal(
+        (resumed.workStore.database().prepare("SELECT id FROM agent_runs").get() as { id: string }).id,
+        'run-partial'
+      )
+    } finally {
+      await resumed.dispose()
+    }
+  })
+
+  it('rebuilds a remote runtime without reopening library.db or re-registering window IPC', async () => {
+    const source = fs.readFileSync(path.resolve('apps/desktop/src/main/appMain.ts'), 'utf8')
+    const windowStart = source.indexOf('function createWindow')
+    const windowEnd = source.indexOf('function registerAssetProtocol')
+    assert.ok(windowStart >= 0 && windowEnd > windowStart)
+    assert.equal(source.slice(windowStart, windowEnd).includes('registerIpcHandlers'), false)
+    assert.equal(source.includes('registerIpcHandlers('), true)
+
+    const root = tempDir()
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    const first = await createDesktopRuntime(root, '0.7.0')
+    assert.equal(first.openedCatalog, false)
+    await first.dispose()
+    assert.throws(() => getDb(), /Database not initialised/)
+    const second = await createDesktopRuntime(root, '0.7.0')
+    try {
+      assert.equal(second.mode, 'remote')
+      assert.equal(second.openedCatalog, false)
+      assert.equal(second.backend.session().state, 'disconnected')
+      assert.throws(() => getDb(), /Database not initialised/)
+    } finally {
+      await second.dispose()
     }
   })
 })

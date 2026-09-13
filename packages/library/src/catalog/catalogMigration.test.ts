@@ -438,4 +438,101 @@ describe('catalogMigration protocol', () => {
       sourceDb.close()
     }
   })
+
+  it('keeps the enabled catalog if image copy hits EACCES after the transaction commits', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-eacces-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const targetDir = path.join(root, 'target')
+    const mappedMount = path.join(root, 'mount-mapped')
+    const targetMount = path.join(root, 'mount-target')
+    for (const dir of [sourceDir, targetDir, mappedMount, targetMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    const targetImages = path.join(targetDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    fs.mkdirSync(targetImages, { recursive: true })
+    const coverRel = 'covers/s13-perm.png'
+    fs.writeFileSync(path.join(sourceImages, coverRel), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+    try {
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S13-PERM.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S13-PERM',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      allowEnableCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      const targetHost = {
+        appVersion: '0.7.0',
+        userDataPath: targetDir,
+        imagesDir: targetImages,
+        mediaMounts: { mapped: targetMount }
+      }
+      const issued = issueCatalogMigrationToken({}, targetDb)
+      authenticateMigration(issued.oneTimeToken, targetDb)
+      stageMigrationPackageFile(
+        preview.migrationId,
+        migrationPackagePath(preview.migrationId, sourceHost),
+        targetHost
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      fs.chmodSync(targetImages, 0)
+      try {
+        assert.throws(
+          () =>
+            enableCatalogMigration(
+              { migrationId: preview.migrationId, digest: preview.digest },
+              targetHost,
+              targetDb
+            ),
+          (error: unknown) =>
+            error instanceof Error && (error as NodeJS.ErrnoException).code === 'EACCES'
+        )
+      } finally {
+        fs.chmodSync(targetImages, 0o755)
+      }
+      const status = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
+      assert.equal(status.targetPhase, 'enabled')
+      assert.equal(fs.existsSync(path.join(targetImages, coverRel)), false)
+    } finally {
+      try {
+        fs.chmodSync(targetImages, 0o755)
+      } catch {
+        // Directory may already be writable.
+      }
+      sourceDb.close()
+      targetDb.close()
+    }
+  })
 })

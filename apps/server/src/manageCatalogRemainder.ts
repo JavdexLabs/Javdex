@@ -57,9 +57,9 @@ import {
   getPendingScanGroup,
   listPendingScanGroups,
   PendingScanRepoError,
-  resolvePendingScanGroup,
-  selectAccessibleFallbackPrimaryResourceId
+  resolvePendingScanGroup
 } from '@library/db/pendingScanRepo'
+import { selectAccessibleFallbackPrimaryResourceId } from '@library/scan/accessiblePrimaryResource'
 import {
   getPendingResourceIdentity,
   listPendingResourceIdentities

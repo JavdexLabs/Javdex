@@ -1,9 +1,9 @@
 import { getDb } from '@library/db/database'
 import {
   PendingScanRepoError,
-  resolvePendingScanGroup,
-  selectAccessibleFallbackPrimaryResourceId
+  resolvePendingScanGroup
 } from '@library/db/pendingScanRepo'
+import { selectAccessibleFallbackPrimaryResourceId } from '@library/scan/accessiblePrimaryResource'
 import { resolvePendingResourceIdentity } from '@library/scan/pendingResourceIdentityService'
 import type {
   PendingResourceIdentityChoice,

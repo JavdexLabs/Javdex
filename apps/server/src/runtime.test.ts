@@ -1960,13 +1960,16 @@ describe('server runtime lifecycle', () => {
       }
     })
     assert.equal(cookieImage.status, 401)
-    const traversal = await fetch(`${base}/manage/v1/assets/covers/../../library.db`, {
-      headers: {
-        Origin: base,
-        Authorization: `Bearer ${writer.secret}`,
-        'X-Javdex-App-Version': SERVER_APP_VERSION
+    const traversal = await fetch(
+      `${base}/manage/v1/assets/${encodeURIComponent('covers/../../library.db')}`,
+      {
+        headers: {
+          Origin: base,
+          Authorization: `Bearer ${writer.secret}`,
+          'X-Javdex-App-Version': SERVER_APP_VERSION
+        }
       }
-    })
+    )
     assert.equal(traversal.status, 400)
 
     const credentials = memoryCredentials(new Map([[writer.catalogId, writer.secret]]))

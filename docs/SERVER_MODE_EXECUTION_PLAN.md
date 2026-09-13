@@ -63,7 +63,7 @@
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理、远程 mpv 与按 catalog 隔离的临时磁盘 LRU 已落地 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
-| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M13/M15 mpv 故障、FILE_IMPORT 已落地；Docker/安装包/全量 Electron 未做 | 见本文件 S13 实施记录 |
+| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M13/M15 mpv、全量 Electron 3034 通过；Docker/安装包未做 | 见本文件 S13 实施记录 |
 | S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
 
 ## 阶段顺序与工作分配
@@ -651,8 +651,9 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - `npm run pretest` 通过
   - `npm run server:test` **25 + 3 + 1 通过 / 0 失败**（runtime 含评分后以评分前 V 改标题、扫描+NFO 不 bump V、playlist 与新增媒体库成员后旧 deleteGlobal 409、冻结目标清单翻页中插入/删除不影响快照、真实 mpv 断流/过期/handoff、migrationHosts、dualBackendScan 含 audit page/view 与 pendingAuditPresence）
   - 定向 Electron：`scanHandlers` **22 通过**（PENDING_AUDIT_PRESENCE 与远程 SCAN_AUDIT PAGE/VIEW 走 CatalogBackend；远程 FILE_RENAME 仍拒绝）；`createDesktopRuntime` **12 通过**（含已连接远程不 `getDb()`）；`createDesktopRuntime.isolation` **4 通过**（含 D03 SIGKILL）；`localCatalogBackend` **3 通过**；`catalogMigration` **7 通过**（先前 revision）
-  - 未跑本阶段全量 Electron / Docker / 安装包
-- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；enable 拷图失败整笔回滚（产品待决）；远程 FILE_RENAME（冻结 IPC 无 resourceId）；全量 Electron。不得把 mock 当完成证据。
+  - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=900000 node scripts/run-electron-tests.mjs` **3035 tests / 3034 pass / 0 fail / 1 skip**（`fd9d6f9` 工作树）
+  - 未跑 Docker / 安装包
+- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；enable 拷图失败整笔回滚（产品待决）；远程 FILE_RENAME（冻结 IPC 无 resourceId）。不得把 mock 当完成证据。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 

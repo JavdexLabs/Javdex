@@ -63,7 +63,7 @@
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面，但远程匹配/apply 走 CatalogBackend | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理、远程 mpv 与按 catalog 隔离的临时磁盘 LRU 已落地 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
-| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start+匹配+真实 Node HTTP apply、D04 任务进度 generation 门闩、迟到 HTTP 交付与 in-flight abort、D05 窗口 binder 与真实 BrowserWindow 关闭/重建、M13/M15 mpv、全量 Electron 3056 通过；单容器 `server:smoke` 已通过；安装包与 Docker 两端迁库未做。不得宣称 M01–M15 / D01–D07 全部完成 | 见本文件 S13 实施记录 |
+| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start+匹配+真实 Node HTTP apply、D04 任务进度 generation 门闩、迟到 HTTP 交付与 in-flight abort、D05 窗口 binder 与真实 BrowserWindow 关闭/重建、M13/M15 mpv、全量 Electron 3056 通过；单容器 `server:smoke` 已通过；Docker 两端迁库烟测见 `server:smoke:migration`。安装包未做。不得宣称 M01–M15 / D01–D07 全部完成 | 见本文件 S13 实施记录 |
 | S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
 
 ## 阶段顺序与工作分配
@@ -639,7 +639,8 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 - 早期 Cloud Agent 会话无 `docker`（`command not found`），容器烟测按设计非零，不能用 `server:smoke:node` 冒充镜像验收。用户删除阻挡的个人 Environment “Javdex” 后，本会话（`bc-ea15dce7-e037-5983-9443-6c3d73044e82`）从仓库 `.cursor/Dockerfile` + `.cursor/environment.json` 启动：`docker version` / `docker info` 成功（Engine 28.5.2，fuse-overlayfs）。`environment-info.build.resolution` 为 `no_finished_builds`（即时启动，不是预构建 snapshot），但镜像含 Docker CE，daemon 已就绪。
 - `npm run server:build` **EXIT 0**：写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp）。
 - 首次 `npm run server:smoke` **EXIT 1**（未伪装）：镜像 `javdex-server:smoke` 构建并启动成功；未认主 `/api/collections` 503 正确；`docker exec bind` 后仍 503。原因是 S05 后 `bind` 只签发一次性令牌，浏览门闸要 `writer.claim` 把 `writerEpoch` 升到 >0。`server:smoke:node` 已含 handshake→bind→claim，容器脚本当时没有。
-- 补上 claim 后 `npm run server:smoke` **EXIT 0**：`PASS: Docker image, volume SQLite, bind gate, session restart`。覆盖临时卷 SQLite、`/live` `/ready`、未认主 503、handshake `notBound`、容器内 `bind`、宿主 `writer.claim`、认主后 collections 200、restart 后 session 与 `library.db`。这是单容器生产镜像烟测，不是 Docker 两端迁库，也不是安装包烟测。
+- 补上 claim 后 `npm run server:smoke` **EXIT 0**：`PASS: Docker image, volume SQLite, bind gate, session restart`。覆盖临时卷 SQLite、`/live` `/ready`、未认主 503、handshake `notBound`、容器内 `bind`、宿主 `writer.claim`、认主后 collections 200、restart 后 session 与 `library.db`。这是单容器生产镜像烟测，不是安装包烟测。
+- 本轮新增 `scripts/server-migration-smoke.mjs` / `npm run server:smoke:migration`：两个 `javdex-server:smoke` 容器，源与空目标各用独立 `dataDir` 与 `imagesDir` 卷；源夹具按 `migrationHosts.e2e.test.ts` 写入番号 + 正式封面；两端 `docker exec migrate-auth`；宿主经 manage HTTP 走 preview → source start → PUT 包 → target start → enable。断言两端 `migration.status`（源 `frozen` / 目标 `enabled`）、目标正式图文件、源封面仍在（冻结备份）、目标新 `catalogId`。拷图 `EACCES` 回滚仍以既有单测为准，本烟测不重复。enable/abandon 竞态仍见 `migrationHosts.e2e.test.ts`。
 - 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`。第三例在 `ready` 后丢弃 enable/abandon HTTP 响应再 SIGTERM，拉起后以 `migration.status` 为准，终态仍互斥（`e700e3f`）。不是 Docker 两端。
 - M12：启用后对目标 `library.db` 做真实 `scanCoordinator.run`。未映射孤儿片无本地资源、自动清理关闭时成员保留；把 `remove_resource_less_memberships` 改回 1 再扫才会删成员（`e05c165`）。
 - S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` / `PENDING_SCAN_RESOLVE` / `PENDING_RESOURCE_IDENTITY_RESOLVE` / `PENDING_SCAN_GET|LIST|QUEUE` / `PENDING_RESOURCE_IDENTITY_GET|LIST` / `PENDING_AUDIT_PRESENCE` / `SCAN_AUDIT_GET` / `SCAN_AUDIT_HEADER` / 远程 `SCAN_AUDIT_PAGE` / 远程 `SCAN_AUDIT_VIEW_PAGE` 走 `CatalogBackend`。本地 PAGE/VIEW 仍走 `catalogReadService` worker，保留 snapshot 身份、section 与 attention。冻结 `scans.auditPage` 无 section/attention，远程 HTTP 会剥掉；冻结 `scans.auditViewPage` 无 IPC `anchor`，远程同样剥掉。待确认解析在本地后端与服务端 HTTP 都传入 `fs.existsSync` 主资源回退（helper 在 `scan/accessiblePrimaryResource.ts`，不进 db 模块）。本地队列页仍带 IPC `anchor`；远程冻结 `pendingScan.queuePage` 无该字段，HTTP 映射会剥掉。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 Playwright/plan 仍桌面单例：远程 `agentMetadataCollection.start` 经 CatalogBackend 描述目标；`libraryCurator` 概览经 `catalog.overviewStats`；远程裁切快照经 `actresses.listPage`；清单导入 start 经 `libraries.get`/`playlists.get`，远程匹配经 `videos.list`/`videos.get`，远程 apply 经 `playlists.applyImport`，远程会话写 workStore。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 且 digest 必须指纹服务端活文件而拒绝；未识别路径仍走桌面 `renameAndImport`。冻结 `pendingAudit.presence` 仍是空输入的目录级计数；桌面 IPC 是 libraryId+ids，本地包装 `getPendingAuditPresence`，远程用 `libraries.get` 加 pending list 求交，不调用冻结 presence。远程 `SCAN_RUN` / NFO 轮询 `tasks.get`。
@@ -658,9 +659,10 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - 定向 Electron：`createDesktopRuntime.isolation` **5 通过**（含 D03 SIGKILL 与 M10 六探针）；`createDesktopRuntime` **12 通过**；`catalogTaskProgress` **8 通过**；`mainWindowBindings` **1 通过**；`mainWindowBindings.native` **1 通过**（真实 BrowserWindow）；清单 lookup/apply/module/repository/driver 与 `scanHandlers` 远程 SCAN_RUN 取消均通过
   - 全量 Electron：`JAVDEX_TEST_TIMEOUT_MS=900000 node scripts/run-electron-tests.mjs` **3057 tests / 3056 pass / 0 fail / 1 skip**（`2dd1e54` 工作树；本轮未重跑全量）
   - `npm run server:smoke` **EXIT 0**（本会话 Docker Engine 28.5.2；见上条单容器证据）
-  - 未跑安装包；未跑 Docker 两端迁库状态/文件检查
-- 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](SERVER_MODE.md) C1–C7 / E2。单容器 `server:smoke` 已通过（#107），不是 Docker 两端迁库或安装包。
-- 未做：Docker 两端状态与文件检查；同版本桌面安装包烟测；远程 FILE_RENAME（C1）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流。不得把 mock 当完成证据。不得宣称 M01–M15 / D01–D07 已全部完成。不得升 0.8 / 写 CHANGELOG / 合并 main（E2）。
+  - `npm run server:smoke:migration`：本轮新增 Docker 两端迁库烟测（源/目标各 `dataDir`+`imagesDir` 卷；CLI `migrate-auth`；manage HTTP preview/start/PUT/enable；两端 `migration.status`；目标正式图文件与源冻结备份）。运行证据见本轮提交后的验证记录；未通过前不得记为 EXIT 0。
+  - 未跑安装包
+- 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](SERVER_MODE.md) C1–C7。E2 已改为解锁第一版发布路径（S14 剩余门闩通过后可升 0.8 / 写 CHANGELOG / 准备合并 main）；本轮仍不升版本、不写 CHANGELOG、不合并 main。单容器 `server:smoke` 已通过（#107），不是安装包。
+- 未做：同版本桌面安装包烟测；远程 FILE_RENAME（C1）；D04 物理掐断 TCP/WAN 后再重连；D05 任务进行中的完整 GUI 关窗产品流；完整 M01–M15 / D01–D07。不得把 mock 当完成证据。不得宣称 S13/S14 或 M/D 矩阵已全部完成。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
 
@@ -678,7 +680,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 | M10 桌面隔离 | 部分 | 远程 start 采集/助手概览/裁切快照/清单导入，以及 matching ingest 与 applyImport，chmod 000 后 `/proc` 无 `library.db`；`8fc3d9a` 对真实 Node 宿主 ingest+apply 建清单 | Electron-as-Node isolation + `dualBackendScan.e2e.test.ts` | 刮削单条仍可走本地队列；无冻结 `video_sources`；apply 不写 per-video links |
 | M11 分页与目标清单 | 部分 | S10 `targetLists`；limit=1 取第一页后插入新片或删除已冻结 id，offset=1 与完整 page 仍是冻结快照 | Node 宿主 `runtime.test.ts` | UI 对已删除冻结 id 的占位展示未再铺 |
 | M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
-| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs `ENOSPC` / `chmod 000` `EACCES` 后 enable 回滚 `ready` | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts` | 非 Docker |
+| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启；丢弃 enable/abandon 响应后再重启；256k tmpfs `ENOSPC` / `chmod 000` `EACCES` 后 enable 回滚 `ready`；Docker 两端成功 enable 路径见 `server:smoke:migration` | `migrationHosts.e2e.test.ts` 3 例；`catalogMigration.test.ts`；`scripts/server-migration-smoke.mjs` | 竞态/回滚仍非 Docker；安装包未做 |
 | M14 图片与恢复 | 部分 | 源端导出自动解密到包（源正式图不变）；缺别名 start 失败并解冻；正式封面随迁；孤立 uploads 不进包且恢复删除；拷图 `EACCES`/`ENOSPC` 后 enable 回滚 | Electron-as-Node `catalogMigration.test.ts` | 目标仍拒绝包内残留密文 |
 | M15 播放 | 部分 | S11 HTTP Range + S13 真实 mpv：断流后续播、过期 404、seek 2.2、MKV、handoff 后 404 | 本机 `/usr/bin/mpv` 0.37.0；ffmpeg 6.1.1 | 非环回 WAN 丢包未做 |
 | D01 启动隔离 | 部分 | S07 远程不 `getDb()`；断线/版本不符/缺凭据/已连接 available 及 M10 六探针子进程 `/proc/<pid>/fd` 均无 `library.db`，且 `chmod 000` 后仍能启动 | `createDesktopRuntime.isolation.test.ts` | 刮削单条队列仍可 `getDb()` |
@@ -697,7 +699,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 
 **S14 实施记录（进行中）**
 
-- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、源端导出自动解密、enable 拷图失败回滚，以及 C1–C7 / E2 已知限制。单容器 `server:smoke` 已通过（#107），不是安装包或两端迁库。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
+- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、源端导出自动解密、enable 拷图失败回滚，以及 C1–C7 已知限制。E2 已解锁第一版发布路径，仍须 S14 剩余门闩（含安装包烟测与 CHANGELOG）通过后才升 0.8 / 准备合并 main。单容器 `server:smoke` 已通过（#107）；Docker 两端迁库见 S13 `server:smoke:migration`。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
 - 验证：文档提交；`npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**（先前记录）；后续 Docker-in-Docker 会话 `server:smoke` **EXIT 0**（单容器 bind+claim+restart，见 S13）。`server:smoke:node` 仍只是宿主进程检查。
 - 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。S13 剩余矩阵见上一节。不得宣称 S13/S14 完成。
 

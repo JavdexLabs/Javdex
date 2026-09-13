@@ -52,7 +52,7 @@
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
 | S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
 | S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理、刮削确认/候选应用/清单 applyImport/目标列表/Agent findReady·apply·discard） | schema 已到 19。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、catalog 查询 worker 入口仍在 desktop；采集/deliver 仍桌面 |
-| S02D | 本地架构门槛已验证；刮削确认/Agent apply/player 已走 CatalogBackend。剩余 scan/NFO IPC 与采集 start/plan 仍走桌面单例 | 见本文件 S02D 实施记录 |
+| S02D | 本地架构门槛已验证；刮削确认/Agent apply/player/SCAN_RUN 已走 CatalogBackend。本地 Electron NFO 封面导出与采集 start/plan 仍桌面单例 | 见本文件 S02D 实施记录 |
 | S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
 | S04 | Node 宿主、生产闭包与 Linux 镜像定义已落地；本环境完成 Node 生产烟测。Docker 容器烟测因无 Docker 按设计失败 | 见本文件 S04 实施记录 |
 | S05 | 身份/writer/回执与影片版本已落地；本地 `videos.edit` 强制 `expectedVersions`；管理 HTTP 仅 Node 宿主装配 | 见本文件 S05 实施记录 |
@@ -62,8 +62,8 @@
 | S09 | 挂载标记、扫描/审计、XML NFO、持久任务与文件维护已落地；刮削确认/清单导入已交 S10 | 见本文件 S09 实施记录 |
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理与远程 mpv 启动已落地；无磁盘 LRU 图片缓存 | 见本文件 S11 实施记录 |
-| S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描、Docker 两端与图片后拷失败未做 | 见本文件 S12 实施记录 |
-| S13 | 进行中：两进程迁库竞态已落地；Docker/全矩阵/安装包未做 | 见本文件 S13 实施记录 |
+| S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
+| S13 | 进行中：首次扫描、孤立暂存恢复、两端重启已落地；Docker/安装包/全量矩阵未做 | 见本文件 S13 实施记录 |
 
 ## 阶段顺序与工作分配
 
@@ -341,6 +341,13 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - D06 本地部分：catalog IPC 不得 value-import `@library/db|catalog` 或 `services/`；renderer/preload 不得 import library/http/server
 - 未做：RemoteCatalogBackend；scan/scrape/pluginDev/agent/player/nfo/settings/assets IPC 仍允许直接使用 library/服务单例（D06 白名单）；Electron NFO 导出与刮削应用仍在 desktop。D01 远程三种真实进程监测与 D02 双后端仍待 S07。
 
+**S02D 实施记录（SCAN_RUN 与远程 NFO IPC）**
+
+- 范围：`IPC.SCAN_RUN` / `SCAN_LATEST_GET` 改为 `CatalogBackend.libraries.runScan|latestScan`。本地等待 `scanCoordinator` 完成事件以保持 renderer 的 `ScanCompletionResult` 合同；远程轮询 `tasks.get`。远程 NFO IPC 走 `backend.nfo.*` 并用任务终态合成 `finished` 事件；本地 NFO 仍用 `nfoExportTaskController`（Electron 封面编码）。采集 start/plan 仍桌面单例。
+- 工程默认：冻结 `scans.run` 只有 `libraryId`，IPC 可选 `rootIds` 不再传入后端（界面本来只传 libraryId）。远程 `SCAN_CANCEL` 在本地 coordinator 未命中时按 taskId 取消。未改 schema。
+- 验证：见 S13 记录 `3c9ed03`；`scanHandlers` 含后端路径单测。
+- 未做：SCAN_AUDIT / FILE_* / pending 解析 IPC 仍触达 library 单例；本地 Electron NFO 封面导出未迁入 CatalogBackend。
+
 ### S03：抽离 HTTP，保持本地网页
 
 从 `apps/desktop/src/main/web` 拆出纯 HTTP、认证存储、浏览 DTO 和静态文件服务到 `packages/http`；桌面的 webAccess 生命周期和本机设置适配留桌面。禁止 http 导入 desktop 或 server 入口；只依赖 contracts、library 的公开接口与标准 Node 能力。
@@ -616,7 +623,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - 定向 Electron：`catalogMigration` / `catalogMigrationArchive` / `catalogWriter` **14 通过 / 0 失败**（STRM 转普通链接、未映射本地删除并关自动清理、封面文件随迁、新 catalogId / 保留目标 serverId / epoch 0、迟到 enable `AUTH_REQUIRED`、源未启用可 abandon 解冻、pending+加密阻止冻结、归档逃逸/重复/超限）
   - `npm run pretest` 通过
   - 未跑本阶段全量 Electron / Docker 两端真实部署
-- 未做：M12 启用后对目标做真实首次扫描以证明无资源成员仍保留；M14 孤立暂存在引用/清理边界的注入；加密存量仅预检计数，无源端解密流程；断网/响应丢失/两端重启的完整矩阵；Docker 两端状态与文件检查。S13 全矩阵；S14 ADR/用户迁移文档；磁盘 LRU；S02D `SCAN_RUN`/NFO IPC 与采集 start/plan 仍桌面单例。不得把 mock 当完成证据。需用户决定：是否增加冻结的 migration 签发 HTTP op；PUT 包是否必须改成 JSON op 或沿用 uploads；源 abandon 是否必须携带目标终态证明而不能仅凭协调者声明；enable 图片拷贝失败是否必须整笔回滚；非空库签发 migrate-auth 是否收窄为空目标。
+- 未做：M12 启用后对目标做真实首次扫描以证明无资源成员仍保留（S13 `e05c165` 已补）；M14 孤立暂存在引用/清理边界的注入（S13 `e05c165` 已补）；加密存量仅预检计数，无源端解密流程；断网/响应丢失/两端重启的完整矩阵（S13 `5a5a0fc` 覆盖启用后两端重启，不是丢响应后再重启）；Docker 两端状态与文件检查。S13 全矩阵；S14 ADR/用户迁移文档；磁盘 LRU；S02D 采集 start/plan 仍桌面单例，本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。不得把 mock 当完成证据。需用户决定：是否增加冻结的 migration 签发 HTTP op；PUT 包是否必须改成 JSON op 或沿用 uploads；源 abandon 是否必须携带目标终态证明而不能仅凭协调者声明；enable 图片拷贝失败是否必须整笔回滚；非空库签发 migrate-auth 是否收窄为空目标。
 
 ### S13：完整验收
 
@@ -629,8 +636,44 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 **S13 实施记录（进行中）**
 
 - 本环境 `docker` 不存在（`command not found`，无 `/var/run/docker.sock`）。容器镜像烟测仍按设计失败，不能用 Node 进程冒充镜像验收。
-- 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。`npm run server:test` 现为 24 + 1 通过。这覆盖 M13 的进程级竞态，不是 Docker 两端、也不是丢响应后重启两端。
-- M01–M11/M15 仍以既有 S05–S11 记录为准；本阶段尚未输出完整验收矩阵，也未跑全量 Electron / 安装包。
+- 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。另有启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`，封面与影片行仍在。`npm run server:test` 现为 24 + 2 通过。这覆盖 M13 的进程级竞态与启用后重启，不是 Docker 两端，也不是“丢弃两种 HTTP 响应后再重启”。
+- M12：启用后对目标 `library.db` 做真实 `scanCoordinator.run`。未映射孤儿片无本地资源、自动清理关闭时成员保留；把 `remove_resource_less_memberships` 改回 1 再扫才会删成员（`e05c165`）。
+- M14：源库 `uploads/` 孤立暂存不进包、不成为目标封面；目标磁盘上再放一份无引用 uploads 文件后 `recoverCatalogImages` 删除且不改正式 `cover_path`。加密存量仍只预检计数，无源端解密流程。
+- S02D：`SCAN_RUN` / `SCAN_LATEST_GET` 走 `CatalogBackend`；远程 NFO IPC 走 catalog XML 导出并轮询任务事件。本地 NFO 仍用 Electron `nfoExportTaskController` 以保留封面编码。采集 start/plan 仍桌面单例。
+- 验证（Linux Node 22.14 / amd64 glibc；`e05c165` / `5a5a0fc` / `3c9ed03`）：
+  - `npx tsc --noEmit`：`tsconfig.server.json` / `tsconfig.node.json` 通过
+  - `npm run pretest` 通过
+  - `npm run server:test` **24 + 2 通过 / 0 失败**
+  - 定向 Electron：`catalogMigrationAcceptance` **2 通过**；`catalogImageRecovery` **2 通过**；`catalogMigration` + `scanHandlers` **18 通过**
+  - 未跑本阶段全量 Electron / Docker / 安装包
+- 未做：Docker 两端状态与文件检查；安装包与 `server:smoke` 容器烟测；磁盘不足/权限变化故障注入；源端加密解密流程；丢响应后再重启两端；S14 ADR/用户迁移文档；磁盘 LRU；全量 Electron。不得把 mock 当完成证据。
+
+S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
+
+| 编号 | 状态 | 证据 | 环境 | 剩余 |
+|---|---|---|---|---|
+| M01 管理范围 | 部分 | S08 `runtime.test.ts` 隐藏/归档管理可见、网页不可见，Cookie 不能调 manage | Linux Node 22.14 in-process 宿主 | 独立演员/清单/待确认图/无成员影片未在同一用例一次铺齐 |
+| M02 字段边界 | 部分 | S08 拒绝桌面路径、未知字段、外库 sample id | 同上 | 手动导入逃逸相对路径的独立注入仍薄 |
+| M03 编辑冲突 | 部分 | S05/S08 `expectedVersions` 冲突拒绝与回执 | 同上 | 评分后改标题；扫描/NFO 改同一目标的交叉未做 |
+| M04 关联竞争 | 部分 | S09 删除预览/计划过期 | 同上 | 预览后新增成员/清单再提交旧计划未单列 |
+| M05 受理边界 | 部分 | S06 上传/apply/重启；S09 任务入队 | 同上 | 短事务提交前断响应的断电级注入未做 |
+| M06 接管竞争 | 部分 | S05/S09 交接等待挡住新扫描 | 同上 | 旧请求暂停于 I/O 再领取的完整时序未做 |
+| M07 批量部分结果 | 部分 | S10 目标列表冻结 | 同上 | 三目标过期/成功/断线分页拼接未做 |
+| M08 真挂载卸载 | 部分 | S09 标记 vs 卸载 | 同上 | 枚举后/每批清理前真实卸载未做 |
+| M09 预览与停服 | 部分 | S09 NFO 计划与关浏览 | 同上 | 过期后再提交、停网页后管理仍可用已有部分证据 |
+| M10 桌面隔离 | 部分 | S07/S10 远程不打开本地权威库；采集工作留桌面 | Electron-as-Node + Node 宿主 | 远程启动采集/助手/裁切的进程级文件监测未做 |
+| M11 分页与目标清单 | 部分 | S10 `targetLists` | Node 宿主 | 翻页中插入/删除后再取下一页未做 |
+| M12 迁移语义 | 部分 | S12 转换 + S13 首次真实扫描保留无资源成员 | Electron-as-Node `catalogMigrationAcceptance` | STRM 规范化冲突的 HTTP 两端用例未再跑 |
+| M13 启用取消竞争 | 部分 | 两进程并发 enable/abandon；启用后两端重启 | `migrationHosts.e2e.test.ts` | 丢弃两种 HTTP 响应后再重启未做；非 Docker |
+| M14 图片与恢复 | 部分 | 加密阻止迁入；正式封面随迁；孤立 uploads 不进包且恢复删除 | Electron-as-Node | 无源端解密；enable 拷图失败整笔回滚未做 |
+| M15 播放 | 部分 | S11 真实 mpv + Range | 本机 `/usr/bin/mpv` 0.37.0 | 短断线/凭据到期/接管中的拖动未做 |
+| D01 启动隔离 | 部分 | S07 runtime 远程不 `getDb()` | Electron-as-Node bootstrap | 远程正常/断线/版本不符的真实进程监测未做 |
+| D02 业务合同 | 部分 | S08 in-process 本地 vs HTTP；S13 `SCAN_RUN` 走 CatalogBackend | Node + Electron-as-Node | Electron 本地后端对照同一 Node 宿主的扫描/NFO 未做 |
+| D03 工作存储升级 | 部分 | S02D workStore 复制 | Electron-as-Node | 复制中断/崩溃/远程偷开源库补迁的完整故障未做 |
+| D04 迟到响应 | 部分 | S07 generation 丢弃迟到查询 | 远程后端测试 | 进度/图片请求迟到未做 |
+| D05 取消与退出 | 部分 | S07 dispose/abort | 远程后端测试 | 窗口关闭/重建未做 |
+| D06 边界检查 | 部分 | pretest 生产依赖图 | 仓库脚本 | SCAN_AUDIT/待确认/FILE_* IPC 仍可触达 library 单例 |
+| D07 能力与错误 | 部分 | S07 会话/冻结/能力 | UI + 后端 | 全能力矩阵未出 |
 
 ### S14：发布准备与收尾
 

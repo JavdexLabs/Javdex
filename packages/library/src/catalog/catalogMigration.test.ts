@@ -486,7 +486,6 @@ describe('catalogMigration protocol', () => {
       )
       allowEnableCatalogMigration(
         { migrationId: preview.migrationId, digest: preview.digest },
-        sourceHost,
         sourceDb
       )
       const targetHost = {

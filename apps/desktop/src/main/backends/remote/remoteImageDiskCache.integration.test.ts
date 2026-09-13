@@ -68,8 +68,8 @@ describe('RemoteCatalogBackend image disk cache', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s11-remote-img-'))
     roots.push(root)
     let assetGets = 0
-    let releaseHold: (() => void) | null = null
     let hold = Promise.resolve()
+    let releaseLate: () => void = () => undefined
     const http = createHttpServer((request, response) => {
       const url = request.url ?? ''
       if (url.endsWith('/handshake.get')) {
@@ -110,7 +110,7 @@ describe('RemoteCatalogBackend image disk cache', () => {
       assert.equal(fs.existsSync(remoteImageCacheCatalogDir(root, 'catalog-cache')), true)
 
       hold = new Promise<void>((resolve) => {
-        releaseHold = resolve
+        releaseLate = resolve
       })
       const abort = new AbortController()
       const pending = backend.assets.readImage({ relPath: 'covers/late.png' }, { signal: abort.signal })
@@ -119,7 +119,7 @@ describe('RemoteCatalogBackend image disk cache', () => {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       abort.abort()
-      releaseHold?.()
+      releaseLate()
       await assert.rejects(
         pending,
         (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'

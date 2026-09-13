@@ -163,27 +163,25 @@ if (hostConfigRaw) {
       })
     })
 
+    async function stopChild(child: ChildProcess): Promise<void> {
+      const index = children.indexOf(child)
+      if (index >= 0) children.splice(index, 1)
+      if (child.exitCode != null || child.signalCode) return
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL')
+          resolve()
+        }, 5_000)
+        child.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+        child.kill('SIGTERM')
+      })
+    }
+
     after(async () => {
-      await Promise.all(
-        children.splice(0).map(
-          (child) =>
-            new Promise<void>((resolve) => {
-              if (child.exitCode != null || child.signalCode) {
-                resolve()
-                return
-              }
-              const timer = setTimeout(() => {
-                child.kill('SIGKILL')
-                resolve()
-              }, 5_000)
-              child.once('exit', () => {
-                clearTimeout(timer)
-                resolve()
-              })
-              child.kill('SIGTERM')
-            })
-        )
-      )
+      await Promise.all(children.splice(0).map((child) => stopChild(child)))
       fs.rmSync(root, { recursive: true, force: true })
     })
 
@@ -350,6 +348,139 @@ if (hostConfigRaw) {
         assert.equal(lateEnable.status, 401)
         assert.equal(isStructuredError(lateEnable.json) && lateEnable.json.code === 'AUTH_REQUIRED', true)
       }
+    })
+
+    it('keeps enabled terminal state after both hosts restart', async () => {
+      const sourceDir = path.join(root, 'source-restart')
+      const targetDir = path.join(root, 'target-restart')
+      const sourceMount = path.join(root, 'source-restart-mount')
+      const targetMount = path.join(root, 'target-restart-mount')
+      for (const dir of [sourceDir, targetDir, sourceMount, targetMount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(sourceDir, 'media_assets', 'covers'), { recursive: true })
+      fs.mkdirSync(path.join(targetDir, 'media_assets'), { recursive: true })
+      fs.writeFileSync(
+        path.join(sourceDir, 'media_assets', 'covers', 's13-restart.png'),
+        Buffer.from([0x89, 0x50, 0x4e, 0x47])
+      )
+      const clip = path.join(sourceMount, 'S13-RESTART.mp4')
+      fs.writeFileSync(clip, 'video')
+
+      const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+      const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+      let sourceToken = ''
+      let targetToken = ''
+      let rootId = 0
+      try {
+        ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+        ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
+        rootId = insertRoot(sourceDb, sourceMount)
+        insertTestVideoWithFile(sourceDb, {
+          code: 'S13-RESTART',
+          title: 'Restart clip',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        })
+        sourceDb
+          .prepare('UPDATE videos SET cover_path = ? WHERE code = ?')
+          .run('covers/s13-restart.png', 'S13-RESTART')
+        sourceToken = issueCatalogMigrationToken({}, sourceDb).oneTimeToken
+        targetToken = issueCatalogMigrationToken({}, targetDb).oneTimeToken
+      } finally {
+        sourceDb.close()
+        targetDb.close()
+      }
+
+      let sourceChild = spawnHost(hostConfig(sourceDir, { mapped: sourceMount }))
+      let targetChild = spawnHost(hostConfig(targetDir, { mapped: targetMount }))
+      let sourcePort = await waitListening(sourceChild)
+      let targetPort = await waitListening(targetChild)
+      let sourceBase = `http://127.0.0.1:${sourcePort}`
+      let targetBase = `http://127.0.0.1:${targetPort}`
+
+      const preview = await postManage(
+        sourceBase,
+        'migration.preview',
+        { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'mapped' }] } },
+        sourceToken
+      )
+      assert.equal(preview.status, 200, JSON.stringify(preview.json))
+      const mappedBody = preview.json as { migrationId: string; digest: string }
+      const started = await postManage(
+        sourceBase,
+        'migration.start',
+        { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+        sourceToken
+      )
+      assert.equal(started.status, 200, JSON.stringify(started.json))
+      const pkg = path.join(sourceDir, 'migration-packages', `${mappedBody.migrationId}.tar.gz`)
+      assert.equal(
+        await putPackage(targetBase, mappedBody.migrationId, fs.readFileSync(pkg), targetToken),
+        200
+      )
+      const imported = await postManage(
+        targetBase,
+        'migration.start',
+        { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+        targetToken
+      )
+      assert.equal(imported.status, 200, JSON.stringify(imported.json))
+      const enabled = await postManage(
+        targetBase,
+        'migration.enable',
+        { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+        targetToken
+      )
+      assert.equal(enabled.status, 200, JSON.stringify(enabled.json))
+      assert.equal((enabled.json as { targetPhase: string }).targetPhase, 'enabled')
+
+      await stopChild(sourceChild)
+      await stopChild(targetChild)
+
+      sourceChild = spawnHost(hostConfig(sourceDir, { mapped: sourceMount }))
+      targetChild = spawnHost(hostConfig(targetDir, { mapped: targetMount }))
+      sourcePort = await waitListening(sourceChild)
+      targetPort = await waitListening(targetChild)
+      sourceBase = `http://127.0.0.1:${sourcePort}`
+      targetBase = `http://127.0.0.1:${targetPort}`
+
+      const sourceStatus = await postManage(
+        sourceBase,
+        'migration.status',
+        { input: { migrationId: mappedBody.migrationId } },
+        sourceToken
+      )
+      const targetStatus = await postManage(
+        targetBase,
+        'migration.status',
+        { input: { migrationId: mappedBody.migrationId } },
+        targetToken
+      )
+      assert.equal(sourceStatus.status, 200, JSON.stringify(sourceStatus.json))
+      assert.equal(targetStatus.status, 200, JSON.stringify(targetStatus.json))
+      assert.equal((sourceStatus.json as { sourcePhase: string }).sourcePhase, 'frozen')
+      assert.equal((targetStatus.json as { targetPhase: string }).targetPhase, 'enabled')
+      const live = new Database(path.join(targetDir, 'library.db'), { readonly: true, fileMustExist: true })
+      try {
+        const identity = readCatalogIdentity(live)
+        assert.equal(identity?.frozen, false)
+        const codes = live.prepare('SELECT code FROM videos').all() as Array<{ code: string }>
+        assert.deepEqual(
+          codes.map((row) => row.code),
+          ['S13-RESTART']
+        )
+      } finally {
+        live.close()
+      }
+      assert.equal(fs.existsSync(path.join(targetDir, 'media_assets', 'covers', 's13-restart.png')), true)
+      const lateEnable = await postManage(
+        targetBase,
+        'migration.enable',
+        { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+        targetToken
+      )
+      assert.equal(lateEnable.status, 200, JSON.stringify(lateEnable.json))
+      assert.equal((lateEnable.json as { targetPhase: string }).targetPhase, 'enabled')
     })
   })
 }

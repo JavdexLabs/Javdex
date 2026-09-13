@@ -44,3 +44,11 @@ run([
   '--test',
   'apps/server/src/migrationHosts.e2e.test.ts'
 ])
+run([
+  '--require',
+  './scripts/register-test-paths.cjs',
+  '--import',
+  'tsx',
+  '--test',
+  'apps/server/src/dualBackendScan.e2e.test.ts'
+])

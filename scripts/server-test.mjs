@@ -36,3 +36,11 @@ run([
   'apps/server/src/catalogGate.test.ts',
   'apps/server/src/runtime.test.ts'
 ])
+run([
+  '--require',
+  './scripts/register-test-paths.cjs',
+  '--import',
+  'tsx',
+  '--test',
+  'apps/server/src/migrationHosts.e2e.test.ts'
+])

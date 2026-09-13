@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import fs from 'node:fs'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { OperationReceipt, OperationReceiptStatus } from '@shared/protocol/operationReceipt'
 import { structuredError } from '@shared/protocol/errors'
@@ -46,6 +47,28 @@ export function digestCatalogMutation(request: Omit<CatalogMutationRequest, 'ope
     expectedVersions: request.expectedVersions,
     input: request.input
   })
+}
+
+/** Test-only: pause inside the open SQLite transaction so a test can SIGKILL before commit. */
+function stallBeforeCommitForTests(): void {
+  const instructionPath = process.env.JAVDEX_TEST_STALL_BEFORE_COMMIT
+  if (!instructionPath || !fs.existsSync(instructionPath)) return
+  try {
+    fs.unlinkSync(instructionPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  fs.writeFileSync(`${instructionPath}.ready`, '1')
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    if (fs.existsSync(`${instructionPath}.done`)) return
+    const slice = Date.now() + 20
+    while (Date.now() < slice) {
+      // Keep the SQLite transaction open until the test SIGKILLs this process.
+    }
+  }
+  throw new Error('JAVDEX_TEST_STALL_BEFORE_COMMIT timed out inside the mutation transaction')
 }
 
 export function readOperationReceipt(
@@ -139,6 +162,7 @@ export function commitCatalogMutation<T>(
       versions: result.versions,
       createdAt
     }
+    stallBeforeCommitForTests()
     return { outcome: 'applied' as const, receipt, data }
   })()
 }

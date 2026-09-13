@@ -48,5 +48,5 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 - **C5** 无细粒度远程 `video_sources` 匹配 API，远程 sources 可为空
 - **C6** 远程刮削单条不支持；刮削仍仅本地模式
 - **C7** 远程 `playlists.applyImport` 不写 per-video `video_links`
-- **E1** 单容器 `server:smoke` 已通过（#107）。不是安装包烟测
+- **E1** 单容器 `server:smoke` 已通过（#107）。Docker 两端迁库见 `server:smoke:migration` / 执行计划 S13。不是安装包烟测
 - **E2** 第一版发布路径已解锁：S14 剩余门闩通过后可升 0.8、写 CHANGELOG、准备合并 main。不得在剩余门闩通过前宣称 S13/S14 完成；本文件不授权自动合并 main，也不在本阶段升版本或写 CHANGELOG

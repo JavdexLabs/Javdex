@@ -1212,9 +1212,10 @@ describe('server runtime lifecycle', () => {
     const finished = await pollTask(startedBody.taskId)
     assert.equal(finished.state, 'succeeded', JSON.stringify(finished))
     const video = getDb()
-      .prepare("SELECT code FROM videos WHERE code = 'ABC-001'")
-      .get() as { code: string } | undefined
+      .prepare("SELECT id, code, generation, revision FROM videos WHERE code = 'ABC-001'")
+      .get() as { id: number; code: string; generation: number; revision: number } | undefined
     assert.equal(video?.code, 'ABC-001')
+    const afterFirstScan = { generation: video!.generation, revision: video!.revision }
 
     for (let index = 0; index < 80; index += 1) {
       fs.writeFileSync(path.join(s09Mount, `ZZZ-${String(index).padStart(3, '0')}.mp4`), 'x')
@@ -1281,6 +1282,7 @@ describe('server runtime lifecycle', () => {
         .prepare('SELECT generation, revision FROM videos WHERE id = ?')
         .get(beforeNfo.id) as { generation: number; revision: number }
       assert.deepEqual(afterNfo, { generation: beforeNfo.generation, revision: beforeNfo.revision })
+      assert.deepEqual(afterNfo, afterFirstScan)
       const nfoThenTitle = await write(
         'videos.edit',
         { V: { generation: beforeNfo.generation, revision: beforeNfo.revision } },
@@ -1782,6 +1784,20 @@ describe('server runtime lifecycle', () => {
       { serverId: writer.serverId, catalogId: writer.catalogId, input: { libraryId: 1 } },
       { bearer: writer.secret }
     )).json as { revision: number }
+    const stalePreview = await postManage(
+      base,
+      'videos.previewDeleteGlobal',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: { videoId: second.videoId }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(stalePreview.status, 200, JSON.stringify(stalePreview.json))
+    const staleImpact = stalePreview.json as { revision: string; playlistCount: number }
+    assert.equal(staleImpact.playlistCount, 0)
     const imported = await postManage(
       base,
       'playlists.applyImport',
@@ -1814,6 +1830,29 @@ describe('server runtime lifecycle', () => {
       members.map((row) => row.video_id),
       [videoId, second.videoId]
     )
+    const staleDelete = await postManage(
+      base,
+      'videos.deleteGlobal',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: {
+          videoId: second.videoId,
+          planId: randomUUID(),
+          planDigest: staleImpact.revision
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(staleDelete.status, 409, JSON.stringify(staleDelete.json))
+    assert.equal((staleDelete.json as { code?: string }).code, 'VERSION_CONFLICT')
+    assert.equal(
+      (getDb().prepare('SELECT id FROM videos WHERE id = ?').get(second.videoId) as { id: number } | undefined)?.id,
+      second.videoId
+    )
 
     const digest = targetListFilterDigest('videos.status:all')
     const createdList = await postManage(
@@ -1845,6 +1884,47 @@ describe('server runtime lifecycle', () => {
     const ids = (page.json as { ids: number[] }).ids
     assert.equal(ids.includes(videoId), true)
     assert.equal(ids.includes(second.videoId), true)
+    const firstPage = await postManage(
+      base,
+      'targetLists.page',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { targetListId, limit: 1, offset: 0 }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(firstPage.status, 200, JSON.stringify(firstPage.json))
+    const firstIds = (firstPage.json as { ids: number[]; hasMore: boolean }).ids
+    assert.equal(firstIds.length, 1)
+    await insertBoundVideo('S10-003', uniqueClip('S10-003'))
+    const nextPage = await postManage(
+      base,
+      'targetLists.page',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { targetListId, limit: 1, offset: 1 }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(nextPage.status, 200, JSON.stringify(nextPage.json))
+    const nextIds = (nextPage.json as { ids: number[]; hasMore: boolean }).ids
+    assert.equal(nextIds.length, 1)
+    assert.equal(ids.includes(nextIds[0]), true)
+    assert.equal(nextIds[0] === firstIds[0], false)
+    const afterInsert = await postManage(
+      base,
+      'targetLists.page',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { targetListId }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(afterInsert.status, 200, JSON.stringify(afterInsert.json))
+    assert.deepEqual((afterInsert.json as { ids: number[] }).ids, ids)
     const stale = await postManage(
       base,
       'targetLists.create',

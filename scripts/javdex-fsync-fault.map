@@ -1,0 +1,9 @@
+GLIBC_2.2.5 {
+  global:
+    fsync;
+    fdatasync;
+    write;
+    pwrite64;
+  local:
+    *;
+};

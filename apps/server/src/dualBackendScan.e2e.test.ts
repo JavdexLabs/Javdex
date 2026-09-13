@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, before, describe, it } from 'node:test'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import React, { createElement } from 'react'
+import TestRenderer, { act } from 'react-test-renderer'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useFrozenTargetWindow } from '../../desktop/src/renderer/src/query/useFrozenTargetWindow'
+import { resolveFrozenTargetSlots } from '../../desktop/src/renderer/src/query/resolveFrozenTargetSlots'
 import { buildSync } from 'esbuild'
+import Database from 'better-sqlite3'
 import { hashPassword } from '@http/auth'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
 import { configureLibraryHost, resetLibraryHostForTests } from '@library/runtime/host'
 import { scanCoordinator } from '@library/scan/scanCoordinator'
 import { resetCatalogScanRuntime } from '@library/catalog/catalogScanRuntime'
@@ -31,6 +40,7 @@ import { issueDeployToken } from './identity'
 import { startJavdexServer } from './runtime'
 import type { ServerConfig } from './config'
 import { SERVER_APP_VERSION } from './appVersion'
+import { isStructuredError } from '@shared/protocol/errors'
 
 const hostConfigRaw = process.env.JAVDEX_TEST_HOST_CONFIG
 if (hostConfigRaw) {
@@ -55,6 +65,14 @@ if (hostConfigRaw) {
     })
 } else {
   const thisFile = fileURLToPath(import.meta.url)
+  const require = createRequire(import.meta.url)
+  const electronPath = require('electron') as string | { app?: unknown }
+
+  function resolveElectronBin(): string {
+    if (process.versions.electron) return process.execPath
+    if (typeof electronPath === 'string' && electronPath.length > 0) return electronPath
+    throw new Error('native Electron binary is required')
+  }
 
   function versionsFrom(library: MediaLibraryDetail) {
     return {
@@ -110,12 +128,12 @@ if (hostConfigRaw) {
       let stderr = ''
       const onOut = (chunk: Buffer): void => {
         stdout += chunk.toString('utf8')
-        const match = /listening 127\.0\.0\.1:(\d+)/.exec(stdout)
+        const match = /listening (\S+):(\d+)/.exec(stdout)
         if (match) {
           clearTimeout(timeout)
           child.stdout?.off('data', onOut)
           child.off('exit', onExit)
-          resolve(Number(match[1]))
+          resolve(Number(match[2]))
         }
       }
       const onErr = (chunk: Buffer): void => {
@@ -307,6 +325,129 @@ if (hostConfigRaw) {
         }
       })
     })
+
+    function insertRoot(db: Database.Database, dir: string): number {
+      const identity = resolveMediaLibraryRootIdentity(dir)
+      const timestamp = new Date().toISOString()
+      const row = db
+        .prepare(
+          `INSERT INTO media_library_roots (
+             library_id, path, normalized_path, real_path, normalized_real_path,
+             device_id, inode, position, state, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?)`
+        )
+        .run(
+          1,
+          identity.path,
+          identity.normalizedPath,
+          identity.realPath,
+          identity.normalizedRealPath,
+          identity.deviceId,
+          identity.inode,
+          timestamp,
+          timestamp
+        )
+      return Number(row.lastInsertRowid)
+    }
+
+    async function stopChild(child: ChildProcess): Promise<void> {
+      const index = children.indexOf(child)
+      if (index >= 0) children.splice(index, 1)
+      if (child.exitCode != null || child.signalCode) return
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL')
+          resolve()
+        }, 5_000)
+        child.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+        child.kill('SIGTERM')
+      })
+    }
+
+    function spawnHost(config: ServerConfig, extraEnv: NodeJS.ProcessEnv = {}): ChildProcess {
+      const child = spawn(
+        process.execPath,
+        ['--require', './scripts/register-test-paths.cjs', '--import', 'tsx', thisFile],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '',
+            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
+            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(config),
+            JAVDEX_TEST_HOST_WORKER: workerEntry,
+            JAVDEX_TEST_USER_DATA: config.dataDir,
+            ...extraEnv
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      return child
+    }
+
+    function sudoRun(args: string[]): void {
+      const result = spawnSync('sudo', ['-n', ...args], { encoding: 'utf8' })
+      assert.equal(result.status, 0, `sudo ${args.join(' ')}\n${result.stderr}\n${result.stdout}`)
+    }
+
+    function spawnNetnsHost(ns: string, config: ServerConfig): ChildProcess {
+      const child = spawn(
+        'sudo',
+        [
+          '-n',
+          '-E',
+          'ip',
+          'netns',
+          'exec',
+          ns,
+          'sudo',
+          '-n',
+          '-u',
+          os.userInfo().username,
+          '-E',
+          process.execPath,
+          '--require',
+          './scripts/register-test-paths.cjs',
+          '--import',
+          'tsx',
+          thisFile
+        ],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '',
+            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
+            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(config),
+            JAVDEX_TEST_HOST_WORKER: workerEntry,
+            JAVDEX_TEST_USER_DATA: config.dataDir
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      return child
+    }
+
+    async function stopNetnsHost(ns: string, clientDev: string, child: ChildProcess): Promise<void> {
+      const pids = spawnSync('sudo', ['-n', 'ip', 'netns', 'pids', ns], { encoding: 'utf8' })
+      for (const pid of (pids.stdout ?? '').trim().split(/\s+/).filter(Boolean)) {
+        const n = Number(pid)
+        if (!Number.isInteger(n)) continue
+        try {
+          process.kill(n, 'SIGTERM')
+        } catch {
+          spawnSync('sudo', ['-n', 'kill', '-TERM', pid])
+        }
+      }
+      await stopChild(child)
+      spawnSync('sudo', ['-n', 'ip', 'netns', 'delete', ns], { encoding: 'utf8' })
+      spawnSync('sudo', ['-n', 'ip', 'link', 'delete', clientDev], { encoding: 'utf8' })
+    }
 
     after(async () => {
       await Promise.all(
@@ -687,6 +828,866 @@ if (hostConfigRaw) {
       } finally {
         await remote.dispose()
         await local.dispose()
+      }
+    })
+
+    it('rolls back videos.edit when SIGKILL hits the HTTP host before SQLite commit', { timeout: 60_000 }, async () => {
+      const hostDir = path.join(root, 'm05-http-host')
+      const mount = path.join(root, 'm05-http-media')
+      const stallPath = path.join(root, 'm05-http-stall')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const clip = path.join(mount, 'M05-HTTP.mp4')
+      fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+      fs.writeFileSync(stallPath, '1')
+
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      let videoId = 0
+      try {
+        const rootId = insertRoot(seeded, mount)
+        videoId = insertTestVideoWithFile(seeded, {
+          code: 'M05-HTTP',
+          title: 'original',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        }).videoId
+      } finally {
+        seeded.close()
+      }
+
+      const child = spawnHost(remoteConfig, { JAVDEX_TEST_STALL_BEFORE_COMMIT: stallPath })
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string }; writerEpoch: number }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+      const writerEpoch = (claim.json as { writerEpoch: number }).writerEpoch
+      const operationId = randomUUID()
+      const pending = postManage(
+        base,
+        'videos.edit',
+        {
+          operationId,
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          writerEpoch,
+          expectedVersions: { V: { generation: 1, revision: 1 } },
+          input: { videoId, fields: { title: 'should-rollback' } }
+        },
+        secret
+      )
+      const pendingResult = pending.then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (reason: unknown) => ({ status: 'rejected' as const, reason })
+      )
+      await waitPath(`${stallPath}.ready`, 15_000)
+      const killed = child.kill('SIGKILL')
+      assert.equal(killed, true)
+      await new Promise<void>((resolve) => {
+        if (child.exitCode != null || child.signalCode) {
+          resolve()
+          return
+        }
+        child.once('exit', () => resolve())
+      })
+      const index = children.indexOf(child)
+      if (index >= 0) children.splice(index, 1)
+      const killedRequest = await pendingResult
+      assert.equal(killedRequest.status, 'rejected')
+
+      const rolledBack = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = rolledBack.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'original')
+        assert.equal(row.revision, 1)
+        const receipt = rolledBack
+          .prepare('SELECT operation_id FROM catalog_operation_receipts WHERE operation_id = ?')
+          .get(operationId)
+        assert.equal(receipt, undefined)
+      } finally {
+        rolledBack.close()
+      }
+
+      const restarted = spawnHost(remoteConfig)
+      const restartPort = await waitListening(restarted)
+      const restartBase = `http://127.0.0.1:${restartPort}`
+      try {
+        const unknown = await postManage(
+          restartBase,
+          'operations.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            input: { operationId }
+          },
+          secret
+        )
+        assert.equal(unknown.status, 200, JSON.stringify(unknown.json))
+        assert.equal((unknown.json as { status?: string }).status, 'unknown')
+        const retry = await postManage(
+          restartBase,
+          'videos.edit',
+          {
+            operationId,
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: { V: { generation: 1, revision: 1 } },
+            input: { videoId, fields: { title: 'after-kill' } }
+          },
+          secret
+        )
+        assert.equal(retry.status, 200, JSON.stringify(retry.json))
+        assert.equal((retry.json as { receipt?: { status?: string } }).receipt?.status, 'applied')
+      } finally {
+        await stopChild(restarted)
+      }
+
+      const applied = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = applied.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'after-kill')
+        assert.equal(row.revision, 2)
+      } finally {
+        applied.close()
+      }
+    })
+
+    it('closes a native BrowserWindow while a remote scan keeps running', {
+      timeout: 90_000,
+      skip:
+        process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+          ? 'Native Electron requires a display server; run under xvfb-run'
+          : false
+    }, async () => {
+      const remoteDir = path.join(root, 'd05-host')
+      const desktopDir = path.join(root, 'd05-desktop')
+      const mediaDir = path.join(root, 'd05-media')
+      const stallPath = path.join(root, 'd05-scan-stall')
+      for (const dir of [remoteDir, desktopDir, mediaDir]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(remoteDir, 'media_assets'), { recursive: true })
+      fs.writeFileSync(path.join(mediaDir, 'D05-001.mp4'), Buffer.from('0123456789abcdef'))
+      fs.writeFileSync(stallPath, JSON.stringify({ phase: 'afterEnumerate' }))
+
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: remoteDir,
+        imagesDir: path.join(remoteDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mediaDir },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const child = spawn(
+        process.execPath,
+        ['--require', './scripts/register-test-paths.cjs', '--import', 'tsx', thisFile],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '',
+            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
+            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(remoteConfig),
+            JAVDEX_TEST_HOST_WORKER: workerEntry,
+            JAVDEX_TEST_USER_DATA: remoteDir,
+            JAVDEX_TEST_UMOUNT_SCAN: stallPath
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+
+      const remote = createRemoteCatalogBackend({
+        baseUrl: base,
+        appVersion: SERVER_APP_VERSION,
+        credentials: memoryCredentials(new Map([[hello.identity.catalogId, secret]]))
+      })
+      try {
+        let library = (await remote.libraries.get({ libraryId: 1 })) as MediaLibraryDetail
+        await remote.libraries.updateConfig(
+          { libraryId: 1, patch: { minImportDurationMinutes: 0, autoImportLocalNfo: false } },
+          ipcMutation(undefined, versionsFrom(library))
+        )
+        library = (await remote.libraries.get({ libraryId: 1 })) as MediaLibraryDetail
+        await remote.libraries.addRoot(
+          { libraryId: 1, root: { mountSelectionId: 'media' } },
+          ipcMutation(undefined, versionsFrom(library))
+        )
+      } finally {
+        await remote.dispose()
+      }
+
+      const operationId = randomUUID()
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        JAVDEX_TEST_USER_DATA: desktopDir,
+        JAVDEX_TEST_REMOTE_BASE: base,
+        JAVDEX_TEST_WRITER_SECRET: secret,
+        JAVDEX_TEST_CATALOG_ID: hello.identity.catalogId,
+        JAVDEX_TEST_APP_VERSION: SERVER_APP_VERSION,
+        JAVDEX_TEST_OPERATION_ID: operationId,
+        JAVDEX_TEST_STALL_PATH: stallPath
+      }
+      delete env.ELECTRON_RUN_AS_NODE
+      const result = spawnSync(resolveElectronBin(), ['scripts/test-d05-task-window-close.cjs'], {
+        env,
+        encoding: 'utf8',
+        timeout: 80_000,
+        windowsHide: true
+      })
+      assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`)
+      assert.match(result.stdout, /D05_TASK_WINDOW_CLOSE_OK/)
+      assert.match(result.stdout, new RegExp(operationId.replaceAll('-', '\\-')))
+    })
+
+    it('closes a native window after the React scan button starts a remote scan', {
+      timeout: 90_000,
+      skip:
+        process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+          ? 'Native Electron requires a display server; run under xvfb-run'
+          : false
+    }, async () => {
+      const remoteDir = path.join(root, 'd05-console-host')
+      const desktopDir = path.join(root, 'd05-console-desktop')
+      const mediaDir = path.join(root, 'd05-console-media')
+      const stallPath = path.join(root, 'd05-console-scan-stall')
+      for (const dir of [remoteDir, desktopDir, mediaDir]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(remoteDir, 'media_assets'), { recursive: true })
+      fs.writeFileSync(path.join(mediaDir, 'D05-002.mp4'), Buffer.from('0123456789abcdef'))
+      fs.writeFileSync(stallPath, JSON.stringify({ phase: 'afterEnumerate' }))
+
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: remoteDir,
+        imagesDir: path.join(remoteDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mediaDir },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const child = spawn(
+        process.execPath,
+        ['--require', './scripts/register-test-paths.cjs', '--import', 'tsx', thisFile],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '',
+            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
+            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(remoteConfig),
+            JAVDEX_TEST_HOST_WORKER: workerEntry,
+            JAVDEX_TEST_USER_DATA: remoteDir,
+            JAVDEX_TEST_UMOUNT_SCAN: stallPath
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+
+      const remote = createRemoteCatalogBackend({
+        baseUrl: base,
+        appVersion: SERVER_APP_VERSION,
+        credentials: memoryCredentials(new Map([[hello.identity.catalogId, secret]]))
+      })
+      try {
+        let library = (await remote.libraries.get({ libraryId: 1 })) as MediaLibraryDetail
+        await remote.libraries.updateConfig(
+          { libraryId: 1, patch: { minImportDurationMinutes: 0, autoImportLocalNfo: false } },
+          ipcMutation(undefined, versionsFrom(library))
+        )
+        library = (await remote.libraries.get({ libraryId: 1 })) as MediaLibraryDetail
+        await remote.libraries.addRoot(
+          { libraryId: 1, root: { mountSelectionId: 'media' } },
+          ipcMutation(undefined, versionsFrom(library))
+        )
+      } finally {
+        await remote.dispose()
+      }
+
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        JAVDEX_TEST_USER_DATA: desktopDir,
+        JAVDEX_TEST_REMOTE_BASE: base,
+        JAVDEX_TEST_WRITER_SECRET: secret,
+        JAVDEX_TEST_CATALOG_ID: hello.identity.catalogId,
+        JAVDEX_TEST_APP_VERSION: SERVER_APP_VERSION,
+        JAVDEX_TEST_STALL_PATH: stallPath
+      }
+      delete env.ELECTRON_RUN_AS_NODE
+      const result = spawnSync(resolveElectronBin(), ['scripts/test-d05-scan-console-window-close.cjs'], {
+        env,
+        encoding: 'utf8',
+        timeout: 80_000,
+        windowsHide: true
+      })
+      assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`)
+      assert.match(result.stdout, /D05_SCAN_CONSOLE_WINDOW_CLOSE_OK/)
+      assert.match(result.stdout, /rendererClicked":true/)
+      assert.match(result.stdout, /扫描并导入/)
+    })
+
+    it('rolls back videos.edit when catalog pwrite or fsync returns EIO', {
+      timeout: 60_000,
+      skip: process.platform === 'linux' ? false : 'LD_PRELOAD fsync fault is Linux-only'
+    }, async () => {
+      const hostDir = path.join(root, 'm05-fsync-host')
+      const mount = path.join(root, 'm05-fsync-media')
+      const faultPath = path.join(root, 'm05-fsync-fault')
+      const soPath = path.join(root, 'javdex-fsync-fault.so')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const compiled = spawnSync(
+        'gcc',
+        [
+          '-shared',
+          '-fPIC',
+          '-O2',
+          `-Wl,--version-script=${path.resolve('scripts/javdex-fsync-fault.map')}`,
+          '-o',
+          soPath,
+          path.resolve('scripts/javdex-fsync-fault.c'),
+          '-ldl'
+        ],
+        { encoding: 'utf8' }
+      )
+      assert.equal(compiled.status, 0, compiled.stderr || compiled.stdout)
+      const clip = path.join(mount, 'M05-FSYNC.mp4')
+      fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      let videoId = 0
+      try {
+        const rootId = insertRoot(seeded, mount)
+        videoId = insertTestVideoWithFile(seeded, {
+          code: 'M05-FSYNC',
+          title: 'original',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        }).videoId
+      } finally {
+        seeded.close()
+      }
+
+      const child = spawnHost(remoteConfig, {
+        LD_PRELOAD: [soPath, process.env.LD_PRELOAD].filter(Boolean).join(':'),
+        JAVDEX_TEST_FSYNC_FAULT: faultPath
+      })
+      let hostErr = ''
+      child.stderr?.on('data', (chunk: Buffer) => {
+        hostErr += chunk.toString('utf8')
+      })
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+      const writerEpoch = (claim.json as { writerEpoch: number }).writerEpoch
+      const operationId = randomUUID()
+      fs.writeFileSync(faultPath, '1')
+      let failed: { status: number; json: unknown }
+      try {
+        failed = await postManage(
+          base,
+          'videos.edit',
+          {
+            operationId,
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: { V: { generation: 1, revision: 1 } },
+            input: { videoId, fields: { title: 'should-rollback' } }
+          },
+          secret
+        )
+      } catch (error) {
+        failed = { status: 0, json: error instanceof Error ? error.message : String(error) }
+      }
+      assert.notEqual(failed.status, 200, `fsync fault must reject the edit\n${JSON.stringify(failed)}\n${hostErr}`)
+      assert.match(hostErr, /JAVDEX_FSYNC_FAULT/)
+      if (fs.existsSync(faultPath)) fs.unlinkSync(faultPath)
+      if (child.exitCode == null && child.signalCode == null) {
+        const current = await postManage(
+          base,
+          'videos.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { scope: { kind: 'all' }, videoId }
+          },
+          secret
+        )
+        assert.equal(current.status, 200, JSON.stringify(current.json))
+        assert.equal((current.json as { title?: string }).title, 'original')
+      }
+      await stopChild(child)
+
+      const rolledBack = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = rolledBack.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'original')
+        assert.equal(row.revision, 1)
+        const receipt = rolledBack
+          .prepare('SELECT operation_id FROM catalog_operation_receipts WHERE operation_id = ?')
+          .get(operationId)
+        assert.equal(receipt, undefined)
+      } finally {
+        rolledBack.close()
+      }
+
+      const restarted = spawnHost(remoteConfig)
+      const restartPort = await waitListening(restarted)
+      const restartBase = `http://127.0.0.1:${restartPort}`
+      try {
+        const unknown = await postManage(
+          restartBase,
+          'operations.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            input: { operationId }
+          },
+          secret
+        )
+        assert.equal(unknown.status, 200, JSON.stringify(unknown.json))
+        assert.equal((unknown.json as { status?: string }).status, 'unknown')
+        const retry = await postManage(
+          restartBase,
+          'videos.edit',
+          {
+            operationId,
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: { V: { generation: 1, revision: 1 } },
+            input: { videoId, fields: { title: 'after-fsync' } }
+          },
+          secret
+        )
+        assert.equal(retry.status, 200, JSON.stringify(retry.json))
+        assert.equal((retry.json as { receipt?: { status?: string } }).receipt?.status, 'applied')
+      } finally {
+        await stopChild(restarted)
+      }
+
+      const applied = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = applied.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'after-fsync')
+        assert.equal(row.revision, 2)
+      } finally {
+        applied.close()
+      }
+    })
+
+    it('keeps three frozen target pages without stitching a deleted id into the next slot', { timeout: 60_000 }, async () => {
+      Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+      const hostDir = path.join(root, 'm07-host')
+      const mount = path.join(root, 'm07-media')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      const videoIds: number[] = []
+      try {
+        const rootId = insertRoot(seeded, mount)
+        for (const [index, code] of ['M07-001', 'M07-002', 'M07-003'].entries()) {
+          const clip = path.join(mount, `${code}.mp4`)
+          fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+          videoIds.push(
+            insertTestVideoWithFile(seeded, {
+              code,
+              title: code,
+              filePath: clip,
+              libraryId: 1,
+              rootId,
+              addTime: `2026-01-01T00:00:0${index + 1}.000Z`
+            }).videoId
+          )
+        }
+      } finally {
+        seeded.close()
+      }
+      const digest = createHash('sha256')
+        .update(JSON.stringify({ kind: 'videos.status:all', ids: videoIds }))
+        .digest('hex')
+
+      const child = spawnHost(remoteConfig)
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+      const writerEpoch = (claim.json as { writerEpoch: number }).writerEpoch
+      const created = await postManage(
+        base,
+        'targetLists.create',
+        {
+          operationId: randomUUID(),
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          writerEpoch,
+          expectedVersions: {},
+          input: { kind: 'videos.status:all', filterDigest: digest }
+        },
+        secret
+      )
+      assert.equal(created.status, 200, JSON.stringify(created.json))
+      const targetListId = (created.json as { targetListId: string }).targetListId
+      const frozenVictim = videoIds[1]!
+
+      type Row = { id: number; code: string; title?: string }
+      const readPage = async (offset: number, limit: number): Promise<{ ids: number[] }> => {
+        const page = await postManage(
+          base,
+          'targetLists.page',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { targetListId, limit, offset }
+          },
+          secret
+        )
+        assert.equal(page.status, 200, JSON.stringify(page.json))
+        return { ids: (page.json as { ids: number[] }).ids }
+      }
+      const readOne = async (id: number): Promise<Row | null> => {
+        const got = await postManage(
+          base,
+          'videos.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { scope: { kind: 'all' }, videoId: id }
+          },
+          secret
+        )
+        assert.equal(got.status, 200, JSON.stringify(got.json))
+        return (got.json ?? null) as Row | null
+      }
+
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      let hook!: ReturnType<typeof useFrozenTargetWindow<Row>>
+      function Harness(): null {
+        hook = useFrozenTargetWindow<Row>(targetListId, videoIds.length, 1, readPage, readOne)
+        return null
+      }
+      const renderer = TestRenderer.create(
+        createElement(QueryClientProvider, { client }, createElement(Harness))
+      )
+      const settle = async (check: () => boolean): Promise<void> => {
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          if (check()) return
+          await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 20))
+          })
+        }
+        assert.fail('frozen target window did not settle against the live host')
+      }
+      try {
+        await settle(() => hook.window.getItem(0)?.status === 'ready')
+        act(() => hook.window.onVisibleRange(0, 2))
+        await settle(() => hook.window.getItem(2)?.status === 'ready')
+        assert.equal(hook.total, 3)
+        assert.equal(hook.window.getItem(1)?.status, 'ready')
+        assert.equal(hook.window.getItem(1)?.id, frozenVictim)
+
+        const preview = await postManage(
+          base,
+          'videos.previewDeleteGlobal',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            input: { videoId: frozenVictim }
+          },
+          secret
+        )
+        assert.equal(preview.status, 200, JSON.stringify(preview.json))
+        const deleted = await postManage(
+          base,
+          'videos.deleteGlobal',
+          {
+            operationId: randomUUID(),
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: {},
+            input: {
+              videoId: frozenVictim,
+              planId: randomUUID(),
+              planDigest: (preview.json as { revision: string }).revision
+            }
+          },
+          secret
+        )
+        assert.equal(deleted.status, 200, JSON.stringify(deleted.json))
+
+        const live = await postManage(
+          base,
+          'videos.list',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { scope: { kind: 'all' }, query: { limit: 50, offset: 0 } }
+          },
+          secret
+        )
+        assert.equal(live.status, 200, JSON.stringify(live.json))
+        const liveIds = ((live.json as { items?: Array<{ id: number }> }).items ?? []).map((item) => item.id)
+        assert.equal(liveIds.includes(frozenVictim), false)
+        assert.equal(liveIds.length, 2)
+
+        const resolved = await resolveFrozenTargetSlots(videoIds, readOne)
+        assert.deepEqual(
+          resolved.map((slot) => slot.status),
+          ['ready', 'missing', 'ready']
+        )
+        act(() => hook.retry())
+        await settle(() => hook.window.getItem(1)?.status === 'missing')
+        assert.equal(hook.window.getItem(0)?.status, 'ready')
+        assert.equal(hook.window.getItem(2)?.status, 'ready')
+        assert.equal(hook.window.getItem(1)?.id, frozenVictim)
+        assert.equal(hook.total, 3)
+        assert.equal(hook.items.length, 3)
+      } finally {
+        await act(async () => renderer.unmount())
+        client.clear()
+        await stopChild(child)
+      }
+    })
+
+    it('drops in-flight videos.get across a veth netns then reconnects', {
+      timeout: 40_000,
+      skip: process.platform === 'linux' ? false : 'veth/iptables packet drop is Linux-only'
+    }, async () => {
+      const ns = 'jdxd04n'
+      const serverDev = 'jdxd04s'
+      const clientDev = 'jdxd04c'
+      const serverIp = '10.67.71.1'
+      const clientIp = '10.67.71.2'
+      const hostDir = path.join(root, 'd04-loss-host')
+      const mount = path.join(root, 'd04-loss-media')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const clip = path.join(mount, 'D04-LOSS.mp4')
+      fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+
+      spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+      spawnSync('sudo', ['-n', 'ip', 'netns', 'delete', ns])
+      spawnSync('sudo', ['-n', 'ip', 'link', 'delete', clientDev])
+      sudoRun(['ip', 'netns', 'add', ns])
+      sudoRun(['ip', 'link', 'add', serverDev, 'type', 'veth', 'peer', 'name', clientDev])
+      sudoRun(['ip', 'link', 'set', serverDev, 'netns', ns])
+      sudoRun(['ip', 'netns', 'exec', ns, 'ip', 'addr', 'add', `${serverIp}/24`, 'dev', serverDev])
+      sudoRun(['ip', 'netns', 'exec', ns, 'ip', 'link', 'set', serverDev, 'up'])
+      sudoRun(['ip', 'netns', 'exec', ns, 'ip', 'link', 'set', 'lo', 'up'])
+      sudoRun(['ip', 'addr', 'add', `${clientIp}/24`, 'dev', clientDev])
+      sudoRun(['ip', 'link', 'set', clientDev, 'up'])
+
+      const remoteConfig: ServerConfig = {
+        listenHost: serverIp,
+        port: 0,
+        accessHosts: [serverIp],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      let videoId = 0
+      try {
+        const rootId = insertRoot(seeded, mount)
+        videoId = insertTestVideoWithFile(seeded, {
+          code: 'D04-LOSS',
+          title: 'packet-loss',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        }).videoId
+      } finally {
+        seeded.close()
+      }
+
+      const child = spawnNetnsHost(ns, remoteConfig)
+      try {
+        const remotePort = await waitListening(child)
+        const base = `http://${serverIp}:${remotePort}`
+        const handshake = await postManage(base, 'handshake.get', { input: {} })
+        assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+        const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+        const secret = generateSecret()
+        const claim = await postManage(base, 'writer.claim', {
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          input: {
+            kind: 'initialBind',
+            oneTimeToken: issued.oneTimeToken,
+            candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+          }
+        })
+        assert.equal(claim.status, 200, JSON.stringify(claim.json))
+
+        const remote = createRemoteCatalogBackend({
+          baseUrl: base,
+          appVersion: SERVER_APP_VERSION,
+          timeoutMs: 4_000,
+          credentials: memoryCredentials(new Map([[hello.identity.catalogId, secret]]))
+        })
+        try {
+          const warmup = (await remote.queries.getVideo({
+            scope: { kind: 'all' },
+            videoId
+          })) as { title: string }
+          assert.equal(warmup.title, 'packet-loss')
+          const generationBefore = remote.generation
+          sudoRun(['iptables', '-I', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+          const lost = await remote.queries
+            .getVideo({ scope: { kind: 'all' }, videoId }, { signal: AbortSignal.timeout(4_000) })
+            .then(
+              () => {
+                throw new Error('packet-loss query resolved')
+              },
+              (error: unknown) => error
+            )
+          assert.equal(isStructuredError(lost), true, JSON.stringify(lost))
+          assert.equal((lost as { code?: string }).code, 'CONNECTION_UNAVAILABLE')
+          spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+          const next = await remote.reconnect()
+          assert.ok(next.generation > generationBefore, `${generationBefore} -> ${next.generation}`)
+          const fresh = (await remote.queries.getVideo({
+            scope: { kind: 'all' },
+            videoId
+          })) as { title: string }
+          assert.equal(fresh.title, 'packet-loss')
+          assert.equal(remote.session().state, 'available')
+        } finally {
+          spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+          await remote.dispose()
+        }
+      } finally {
+        spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+        await stopNetnsHost(ns, clientDev, child)
       }
     })
   })

@@ -615,6 +615,43 @@ describe('ScanCoordinator', () => {
     assert.deepEqual(reconciledRoots, [[]])
   })
 
+  it('keeps resources when a root goes offline after the post-traversal inspect and before cleanup', async () => {
+    let inspections = 0
+    const local = resource({
+      id: 1,
+      video_id: 1,
+      kind: 'local',
+      locator: '/online/A-001.mp4',
+      is_primary: 1
+    })
+    const removed: number[] = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => {
+        inspections += 1
+        return inspections <= 2
+      },
+      scanFolders: async () => emptyScanResult(),
+      listLocalResources: () => [{ video_id: 1, resource_id: 1, locator: local.locator }],
+      getResourceById: () => local,
+      listResources: () => [local],
+      removeResourceRecord: (id) => removed.push(id),
+      inspectPath: () => 'missing',
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        throw new Error('offline scans must not auto-delete videos')
+      }
+    })
+
+    const result = await coordinator.run()
+
+    assert.ok(inspections >= 3)
+    assert.deepEqual(result.offlineFolders, ['/online'])
+    assert.deepEqual(removed, [])
+    assert.equal(result.removed, 0)
+  })
+
   it('rechecks the frozen root identity immediately before cleanup writes', async () => {
     let scanFinished = false
     let cleanupReads = 0

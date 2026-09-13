@@ -1,10 +1,33 @@
 import type Database from 'better-sqlite3'
+import fs from 'node:fs'
 import { AGENT_METADATA_SCHEMA_SQL, AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
 import {
   AGENT_WORK_TABLES,
   configureAgentWorkTablePrefix,
   qualifyAgentSql
 } from '@library/runtime/host'
+
+/** Test-only: pause inside the open copy SQL transaction so a test can SIGKILL before commit. */
+function stallCopySqlForTests(): void {
+  const instructionPath = process.env.JAVDEX_TEST_STALL_COPY_SQL
+  if (!instructionPath || !fs.existsSync(instructionPath)) return
+  try {
+    fs.unlinkSync(instructionPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  fs.writeFileSync(`${instructionPath}.ready`, '1')
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    if (fs.existsSync(`${instructionPath}.done`)) return
+    const slice = Date.now() + 20
+    while (Date.now() < slice) {
+      // Keep the INSERT OR REPLACE transaction open until the test SIGKILLs this process.
+    }
+  }
+  throw new Error('JAVDEX_TEST_STALL_COPY_SQL timed out inside the copy transaction')
+}
 
 export function sqlitePathLiteral(filePath: string): string {
   return `'${filePath.replaceAll("'", "''")}'`
@@ -38,6 +61,7 @@ export function copyAgentWorkTables(
       for (const table of AGENT_WORK_TABLES) {
         dest.exec(`INSERT OR REPLACE INTO ${table} SELECT * FROM catalog.${table}`)
       }
+      stallCopySqlForTests()
     })()
     dest.pragma('foreign_keys = ON')
   } finally {

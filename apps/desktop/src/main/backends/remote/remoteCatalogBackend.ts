@@ -261,14 +261,17 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
 
   const trackSignal = (external?: AbortSignal): { signal: AbortSignal; done: () => void } => {
     const controller = new AbortController()
+    const timeout = AbortSignal.timeout(client.timeoutMs)
     const onAbort = (): void => controller.abort()
     external?.addEventListener('abort', onAbort)
+    timeout.addEventListener('abort', onAbort)
     inFlight.add(controller)
     return {
       signal: controller.signal,
       done: () => {
         inFlight.delete(controller)
         external?.removeEventListener('abort', onAbort)
+        timeout.removeEventListener('abort', onAbort)
       }
     }
   }

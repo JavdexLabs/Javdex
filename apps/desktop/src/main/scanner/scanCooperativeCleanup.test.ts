@@ -13,7 +13,7 @@ import { readScanAuditSource } from '@library/db/scanAuditSource'
 import { removeResourceLessMembershipPage } from '@library/db/libraryMembershipRepo'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { createScanCoordinator } from './scanCoordinator'
-import { createScanCleanupPages, type CleanupCandidates } from '@library/scan/scanCleanupPages'
+import { createScanCleanupPages, SCAN_CLEANUP_PAGE_SIZE, type CleanupCandidates } from '@library/scan/scanCleanupPages'
 
 let db:Database.Database,directory:string,libraryId:number,previousUserData:string|undefined
 const count=260
@@ -245,4 +245,36 @@ it('uses the injected cooperative membership remover inside the page transaction
   const retry = createScanCoordinator({ createRunId: () => 'injected-membership-retry', scanFolders: async scope => empty(scope) })
   assert.equal((await retry.run({ libraryId })).deletedVideos, count - 128)
   assert.deepEqual(audit('injected-membership-retry').deletedVideos, expected().slice(128))
+})
+
+it('keeps the next resource cleanup page when a root goes offline between committed pages', async () => {
+  const media = path.join(directory, 'media')
+  const rootId = (db.prepare('SELECT id AS id FROM media_library_roots WHERE library_id=?').get(libraryId) as { id: number }).id
+  for (let id = 1; id <= SCAN_CLEANUP_PAGE_SIZE + 1; id++) {
+    insertLocalVideoResource({
+      libraryId,
+      videoId: id,
+      rootId,
+      locator: path.join(media, `gone-${id}.mp4`),
+      sizeBytes: 1
+    })
+  }
+  let inspections = 0
+  const coordinator = createScanCoordinator({
+    createRunId: () => 'umount-between-pages',
+    scanFolders: async (scope) => empty(scope),
+    inspectRoot: async () => {
+      inspections += 1
+      return inspections < 6
+    }
+  })
+  const result = await coordinator.run({ libraryId })
+  assert.ok(inspections >= 6, `inspections=${inspections}`)
+  assert.equal(result.removed, SCAN_CLEANUP_PAGE_SIZE)
+  assert.equal(result.offlineFolders.length, 1)
+  assert.equal(
+    (db.prepare('SELECT COUNT(*) AS n FROM video_resources WHERE library_id=?').get(libraryId) as { n: number }).n,
+    1
+  )
+  assert.equal(result.deletedVideos, 0)
 })

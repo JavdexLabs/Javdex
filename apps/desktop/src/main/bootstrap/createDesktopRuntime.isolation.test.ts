@@ -83,8 +83,10 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       const store = openDesktopWorkStore(workStorePath(root))
       store.beginCopy()
       fs.writeFileSync(path.join(root, 'd03-sentinel'), 'copying')
-      const holdMs = Number(process.env.JAVDEX_D03_HOLD_MS ?? '2000')
-      await new Promise((resolve) => setTimeout(resolve, Number.isFinite(holdMs) ? holdMs : 2000))
+      if (!process.env.JAVDEX_TEST_STALL_COPY_SQL) {
+        const holdMs = Number(process.env.JAVDEX_D03_HOLD_MS ?? '2000')
+        await new Promise((resolve) => setTimeout(resolve, Number.isFinite(holdMs) ? holdMs : 2000))
+      }
       copyAgentWorkTables(catalog, store.database())
       store.markReady()
       process.stdout.write('ready\n')
@@ -679,6 +681,100 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         assert.equal(
           (resumed.workStore.database().prepare("SELECT id FROM agent_runs").get() as { id: string }).id,
           'run-d03-kill'
+        )
+      } finally {
+        await resumed.dispose()
+      }
+    })
+
+    it('keeps source agent rows when SIGKILL hits the open copy SQL transaction', async () => {
+      const root = tempDir()
+      fs.mkdirSync(path.join(root, 'data'), { recursive: true })
+      const catalog = initDatabaseAtPath(localCatalogDatabasePath(root))
+      insertAgentRun(catalog, 'run-d03-sql-kill')
+      closeDatabase()
+
+      const instruction = path.join(root, 'd03-copy-sql')
+      fs.writeFileSync(instruction, '1')
+      const child = spawn(
+        process.execPath,
+        [
+          '--require',
+          './scripts/register-test-paths.cjs',
+          '--import',
+          './scripts/register-test-styles.mjs',
+          '--import',
+          'tsx',
+          '--import',
+          './scripts/register-library-test-host.ts',
+          thisFile
+        ],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '1',
+            JAVDEX_D03_CHILD: '1',
+            JAVDEX_TEST_STALL_COPY_SQL: instruction,
+            JAVDEX_TEST_USER_DATA: root
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      await waitForFile(`${instruction}.ready`)
+      const killed = child.kill('SIGKILL')
+      assert.equal(killed, true)
+      await new Promise<void>((resolve) => {
+        if (child.exitCode != null || child.signalCode) {
+          resolve()
+          return
+        }
+        child.once('exit', () => resolve())
+      })
+      const index = children.indexOf(child)
+      if (index >= 0) children.splice(index, 1)
+
+      const interrupted = openDesktopWorkStore(workStorePath(root))
+      try {
+        assert.equal(interrupted.prepStatus(), 'copying')
+        assert.equal(
+          (interrupted.database().prepare('SELECT COUNT(*) AS n FROM agent_runs').get() as { n: number }).n,
+          0
+        )
+      } finally {
+        interrupted.close()
+      }
+
+      const source = initDatabaseAtPath(localCatalogDatabasePath(root))
+      assert.equal(
+        (source.prepare("SELECT id FROM agent_runs WHERE id = 'run-d03-sql-kill'").get() as { id: string }).id,
+        'run-d03-sql-kill'
+      )
+      closeDatabase()
+
+      const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+      await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+      const blocked = await createDesktopRuntime(root, '0.7.0')
+      try {
+        assert.equal(blocked.backend.session().state, 'modePrepRequired')
+        assert.equal(blocked.openedCatalog, false)
+        assert.throws(() => getDb(), /Database not initialised/)
+      } finally {
+        await blocked.dispose()
+      }
+
+      await settings.write({ mode: 'local', remoteBaseUrl: null })
+      const resumed = await createDesktopRuntime(root, '0.7.0')
+      try {
+        assert.equal(resumed.workStore.prepStatus(), 'ready')
+        assert.equal(
+          (getDb().prepare("SELECT id FROM main.agent_runs").get() as { id: string } | undefined)?.id,
+          'run-d03-sql-kill'
+        )
+        assert.equal(
+          (resumed.workStore.database().prepare("SELECT id FROM agent_runs").get() as { id: string }).id,
+          'run-d03-sql-kill'
         )
       } finally {
         await resumed.dispose()

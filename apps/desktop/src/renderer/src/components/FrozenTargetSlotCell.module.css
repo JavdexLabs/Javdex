@@ -1,0 +1,31 @@
+.ready,
+.missing,
+.failed {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: var(--control-h-md);
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 var(--control-pad-x);
+  border-radius: var(--radius-sm);
+}
+
+.missing,
+.failed {
+  background: var(--surface-control);
+}
+
+.missing {
+  color: var(--text-muted);
+}
+
+.failed {
+  color: var(--text-primary);
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -63,7 +63,7 @@
 | S10 | 刮削确认/候选应用、清单 applyImport、命名目标列表与 Agent findReady/apply/discard 已落地；采集/Playwright/裁切 UI 与远程 start/plan 仍桌面 | 见本文件 S10 实施记录 |
 | S11 | play.grant、Range 原文件流、manage 图片 GET、media:// 代理、远程 mpv 与按 catalog 隔离的临时磁盘 LRU 已落地 | 见本文件 S11 实施记录 |
 | S12 | 双向整库迁移协议/library/HTTP 已落地；M12 首次扫描与 M14 孤立暂存在 S13 补齐 | 见本文件 S12 实施记录 |
-| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start 隔离、M13/M15 mpv、全量 Electron 3040 通过；Docker/安装包未做 | 见本文件 S13 实施记录 |
+| S13 | 进行中：D01 `/proc`、D03 SIGKILL 复制窗、D02 双后端扫描/NFO/presence、M10 远程采集/助手/裁切/清单 start 隔离、M13/M15 mpv、全量 Electron 3040 通过；Docker 容器烟测仍未跑通 | 见本文件 S13 实施记录 |
 | S14 | 进行中：ADR-0029、操作文档与用户/开发入口已写；同版本安装包与镜像烟测未做 | 见本文件 S14 实施记录 |
 
 ## 阶段顺序与工作分配
@@ -637,6 +637,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
 **S13 实施记录（进行中）**
 
 - 本环境 `docker` 不存在（`command not found`，无 `/var/run/docker.sock`）。容器镜像烟测仍按设计失败，不能用 Node 进程冒充镜像验收。
+- 2026-09-13 跟进会话（`12f325e`，含 `.cursor/Dockerfile` 与 `.cursor/environment.json`）：`docker version`/`docker info` 均为 127 `command not found`；`sudo service docker start` 一次后仍是 `docker: unrecognized service`。`start` 脚本 `/tmp/cursor/start-user/start-user.status=1`（`docker daemon did not become ready`）。Cloud `environment-info.build` 为 `null`（未从 Dockerfile Build 启动）；已保存 Environment「Javdex」`9743f8b0-8c3a-11f1-a7d1-d6b4613131ce` 的 `environmentJsonPath` 为 null（旧快照/数据库配置，不是本仓库镜像）。未跑 `server:build` / `server:smoke`，也未把 Node 宿主冒充容器验收。S13 Docker 缺口仍在：需停用该保存 Environment 或强制用仓库 Dockerfile 出镜像后重开会话。
 - 已用两个独立 OS 进程（各自 `getDb()`）做源→空目标 HTTP 迁库，并在目标 `ready` 后并发 `enable`/`abandon`：终态互斥，迟到 enable 在 abandoned 时 401 `AUTH_REQUIRED`。启用成功后 SIGTERM 两端再拉起：源仍 `frozen`，目标仍 `enabled`。第三例在 `ready` 后丢弃 enable/abandon HTTP 响应再 SIGTERM，拉起后以 `migration.status` 为准，终态仍互斥（`e700e3f`）。不是 Docker 两端。
 - M12：启用后对目标 `library.db` 做真实 `scanCoordinator.run`。未映射孤儿片无本地资源、自动清理关闭时成员保留；把 `remove_resource_less_memberships` 改回 1 再扫才会删成员（`e05c165`）。
 - S02D：`SCAN_RUN` / `SCAN_LATEST_GET` / 远程 NFO / `FILE_IMPORT_MANUAL` / `PENDING_SCAN_RESOLVE` / `PENDING_RESOURCE_IDENTITY_RESOLVE` / `PENDING_SCAN_GET|LIST|QUEUE` / `PENDING_RESOURCE_IDENTITY_GET|LIST` / `PENDING_AUDIT_PRESENCE` / `SCAN_AUDIT_GET` / `SCAN_AUDIT_HEADER` / 远程 `SCAN_AUDIT_PAGE` / 远程 `SCAN_AUDIT_VIEW_PAGE` 走 `CatalogBackend`。本地 PAGE/VIEW 仍走 `catalogReadService` worker，保留 snapshot 身份、section 与 attention。冻结 `scans.auditPage` 无 section/attention，远程 HTTP 会剥掉；冻结 `scans.auditViewPage` 无 IPC `anchor`，远程同样剥掉。待确认解析在本地后端与服务端 HTTP 都传入 `fs.existsSync` 主资源回退（helper 在 `scan/accessiblePrimaryResource.ts`，不进 db 模块）。本地队列页仍带 IPC `anchor`；远程冻结 `pendingScan.queuePage` 无该字段，HTTP 映射会剥掉。本地 Electron NFO 封面导出仍走 `nfoExportTaskController`。采集 Playwright/plan 仍桌面单例：远程 `agentMetadataCollection.start` 经 CatalogBackend 描述目标；`libraryCurator` 概览经 `catalog.overviewStats`；远程裁切快照经 `actresses.listPage`；清单导入 start 经 `libraries.get`/`playlists.get`，远程会话写 workStore。远程 `FILE_RENAME` 因 IPC 无 `resourceId` 且 digest 必须指纹服务端活文件而拒绝；未识别路径仍走桌面 `renameAndImport`。冻结 `pendingAudit.presence` 仍是空输入的目录级计数；桌面 IPC 是 libraryId+ids，本地包装 `getPendingAuditPresence`，远程用 `libraries.get` 加 pending list 求交，不调用冻结 presence。
@@ -692,7 +693,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 **S14 实施记录（进行中）**
 
 - 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、冻结备份与拷图失败不自动回滚。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
-- 验证：文档提交；本环境 `npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**（本轮复跑）；`server:smoke` 仍因本环境无 docker 失败。未跑安装包或容器烟测。
+- 验证：文档提交；本环境 `npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**（本轮复跑）；`server:smoke` 仍因本环境无 docker 失败。2026-09-13 跟进会话在已提交 DinD 文件后仍无 Docker 二进制（见 S13），未伪装容器成功。未跑安装包或容器烟测。
 - 未做：同版本桌面安装包 + 服务镜像真实安装与图片烟测；CHANGELOG 发布条目（当前仍为 0.7.0）；自动公开发布（本文件不授权）。S13 剩余矩阵见上一节。
 
 ## 接手环境与验证命令

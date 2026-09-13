@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { createScanCleanupPages } from '@library/scan/scanCleanupPages'
+import { createScanCleanupPages, type CleanupCandidates } from '@library/scan/scanCleanupPages'
 import { createProgressPublisher } from '@library/scan/progressPublisher'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -182,6 +182,41 @@ function inspectLocalPath(filePath: string): LocalPathState {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unknown'
+  }
+}
+
+type TestScanUnmountPhase = 'afterEnumerate' | 'beforeCleanupPage'
+
+/** Test-only: if `JAVDEX_TEST_UMOUNT_SCAN` names an instruction file, pause so the test can umount. */
+async function waitForTestScanUnmount(
+  phase: TestScanUnmountPhase,
+  context?: { kind?: string; pageIndex?: number }
+): Promise<void> {
+  const instructionPath = process.env.JAVDEX_TEST_UMOUNT_SCAN
+  if (!instructionPath || !fs.existsSync(instructionPath)) return
+  let parsed: { phase?: string; kind?: string; afterPages?: number }
+  try {
+    parsed = JSON.parse(fs.readFileSync(instructionPath, 'utf8')) as typeof parsed
+  } catch {
+    return
+  }
+  if (parsed.phase !== phase) return
+  if (parsed.kind != null && parsed.kind !== context?.kind) return
+  if (parsed.afterPages != null && parsed.afterPages !== (context?.pageIndex ?? 0)) return
+  try {
+    fs.unlinkSync(instructionPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  fs.writeFileSync(`${instructionPath}.ready`, phase)
+  const donePath = `${instructionPath}.done`
+  const deadline = Date.now() + 15_000
+  while (!fs.existsSync(donePath)) {
+    if (Date.now() > deadline) {
+      throw new Error(`JAVDEX_TEST_UMOUNT_SCAN timed out waiting for ${phase}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20))
   }
 }
 
@@ -377,8 +412,9 @@ export class ScanCoordinator {
           })
         }
       )
+      await waitForTestScanUnmount('afterEnumerate')
 
-      const safeRoots: Readonly<MediaLibraryRoot>[] = []
+      let safeRoots: Readonly<MediaLibraryRoot>[] = []
       for (const root of accessibleRoots) {
         if (await this.dependencies.inspectRoot(root)) safeRoots.push(root)
         else if (!offlineRoots.some((offline) => offline.id === root.id)) offlineRoots.push(root)
@@ -408,9 +444,37 @@ export class ScanCoordinator {
         !request.rootIds?.length &&
         selectedRoots.length === snapshot.roots.length &&
         selectedRoots.every((root) => snapshot?.roots.some((item) => item.id === root.id))
-      const safeRootIds = new Set(safeRoots.map((root) => root.id))
-      const safeRootsById = new Map(safeRoots.map((root) => [root.id, root] as const))
-      const matchPendingRoot = createLibraryRootMatcher(safeRoots, true)
+      let safeRootIds = new Set(safeRoots.map((root) => root.id))
+      let safeRootsById = new Map(safeRoots.map((root) => [root.id, root] as const))
+      let matchPendingRoot = createLibraryRootMatcher(safeRoots, true)
+      const refreshSafeRoots = (): void => {
+        safeRootIds = new Set(safeRoots.map((root) => root.id))
+        safeRootsById = new Map(safeRoots.map((root) => [root.id, root] as const))
+        matchPendingRoot = createLibraryRootMatcher(safeRoots, true)
+        result.offlineFolders = offlineRoots.map((root) => root.path)
+      }
+      const dropUnsafeRoots = async (): Promise<void> => {
+        const stillSafe: Readonly<MediaLibraryRoot>[] = []
+        for (const root of safeRoots) {
+          if (await this.dependencies.inspectRoot(root)) stillSafe.push(root)
+          else if (!offlineRoots.some((offline) => offline.id === root.id)) offlineRoots.push(root)
+        }
+        if (
+          stillSafe.length === safeRoots.length &&
+          stillSafe.every((root, index) => root.id === safeRoots[index]?.id)
+        ) {
+          return
+        }
+        safeRoots = stillSafe
+        refreshSafeRoots()
+      }
+      const cleanupPageIndex = new Map<string, number>()
+      const beforeCleanupPage = async (kind: CleanupCandidates | 'atomic'): Promise<void> => {
+        const pageIndex = cleanupPageIndex.get(kind) ?? 0
+        cleanupPageIndex.set(kind, pageIndex + 1)
+        await waitForTestScanUnmount('beforeCleanupPage', { kind, pageIndex })
+        await dropUnsafeRoots()
+      }
       const recordCleanupAudit = (event: ScanCleanupAuditEvent): void => {
         if (writer) persist(() => {
           if (event.section === 'deletedVideos') writer!.writeBatch('deletedVideos', [event.entry])
@@ -447,11 +511,11 @@ export class ScanCoordinator {
           await pages.each('pendingScan', controller.signal, transaction, ids => {
             authorize()
             this.dependencies.reconcilePendingScanResources(request.libraryId, [...safeRootIds], inspect, ids)
-          }, noop)
+          }, noop, () => beforeCleanupPage('pendingScan'))
           await pages.each('pendingIdentity', controller.signal, transaction, ids => {
             authorize()
             this.dependencies.reconcilePendingResourceIdentities(request.libraryId, [...safeRootIds], inspect, ids)
-          }, noop)
+          }, noop, () => beforeCleanupPage('pendingIdentity'))
           await pages.each('resources', controller.signal, transaction, ids => {
             authorize()
             const refs: LocalVideoResourceRef[] = []
@@ -463,25 +527,29 @@ export class ScanCoordinator {
               })
             }
             return this.removeMissingAccessibleResources(request.libraryId, safeRootsById, recordCleanupAudit, false, refs)
-          }, value => { result.removed += value.removed; result.promoted += value.promoted })
+          }, value => { result.removed += value.removed; result.promoted += value.promoted }, () => beforeCleanupPage('resources'))
           if (!controller.signal.aborted && isFullScan && pendingPathCleanups.length) {
             const deferred = createPendingLibraryPathCleanupPages(pendingPathCleanups, pages.resourceHighWater)
             await pages.each('resources', controller.signal, transaction,
               ids => deferred.resources(ids, recordCleanupAudit),
-              value => { result.removed += value.removed; result.promoted += value.promoted })
+              value => { result.removed += value.removed; result.promoted += value.promoted },
+              () => beforeCleanupPage('resources'))
             for (const kind of ['pendingScan', 'pendingIdentity', 'unrecognized'] as const) {
-              await pages.each(kind, controller.signal, transaction, ids => deferred.pending(kind, ids), noop)
+              await pages.each(kind, controller.signal, transaction, ids => deferred.pending(kind, ids), noop,
+                () => beforeCleanupPage(kind))
             }
-            await pages.each('pendingGroups', controller.signal, transaction, ids => deferred.emptyGroups(ids), noop)
+            await pages.each('pendingGroups', controller.signal, transaction, ids => deferred.emptyGroups(ids), noop,
+              () => beforeCleanupPage('pendingGroups'))
             if (!controller.signal.aborted) transaction(() => deferred.finish())
           }
-          if (isFullScan && offlineRoots.length === 0 && snapshot.config.removeResourceLessMemberships) {
+          if (isFullScan && snapshot.config.removeResourceLessMemberships) {
             await pages.each('memberships', controller.signal, transaction, ids => {
+              if (offlineRoots.length > 0) return 0
               authorize()
               return this.dependencies.removeResourceLessMembershipPage(request.libraryId, ids, video => recordCleanupAudit({
                 section: 'deletedVideos', entry: { ...video, reason: 'resource_less' }
               }))
-            }, count => { result.deletedVideos += count })
+            }, count => { result.deletedVideos += count }, () => beforeCleanupPage('memberships'))
           }
         } catch (error) { cleanupFailure = true; cleanupError = error }
         finally {
@@ -496,6 +564,7 @@ export class ScanCoordinator {
           return toScanCompletionResult(result)
         }
       } else {
+      await beforeCleanupPage('atomic')
       const cleanup = this.dependencies.runCleanupTransaction(() => {
         for (const root of safeRoots) {
           this.dependencies.authorizeRoot(request.libraryId, root.id, root)

@@ -179,6 +179,57 @@ async function waitForPath(filePath: string, timeoutMs = 10_000): Promise<void> 
   throw new Error(`missing ${filePath}`)
 }
 
+function decodeMountPath(value: string): string {
+  return value.replace(/\\([0-7]{3})/g, (_match, oct: string) => String.fromCharCode(Number.parseInt(oct, 8)))
+}
+
+function isBindMounted(mountPoint: string): boolean {
+  let real = mountPoint
+  try {
+    real = fs.realpathSync.native(mountPoint)
+  } catch {
+    // The mount point should still exist after umount; ignore a vanished path.
+  }
+  const mounts = fs.readFileSync('/proc/self/mounts', 'utf8')
+  return mounts.split('\n').some((line) => {
+    const target = line.split(' ')[1]
+    if (!target) return false
+    const decoded = decodeMountPath(target)
+    return decoded === mountPoint || decoded === real
+  })
+}
+
+function bindMount(backing: string, mountPoint: string): void {
+  fs.mkdirSync(backing, { recursive: true })
+  fs.mkdirSync(mountPoint, { recursive: true })
+  const result = spawnSync('sudo', ['-n', 'mount', '--bind', backing, mountPoint], { encoding: 'utf8' })
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `mount --bind failed for ${mountPoint}`)
+  }
+  if (!isBindMounted(mountPoint)) {
+    throw new Error(`bind mount missing from /proc/self/mounts: ${mountPoint}`)
+  }
+}
+
+function unmountBind(mountPoint: string): void {
+  if (!isBindMounted(mountPoint)) return
+  const result = spawnSync('sudo', ['-n', 'umount', '--', mountPoint], { encoding: 'utf8' })
+  if (result.status !== 0 && isBindMounted(mountPoint)) {
+    spawnSync('sudo', ['-n', 'umount', '-l', '--', mountPoint], { encoding: 'utf8' })
+  }
+  if (isBindMounted(mountPoint)) {
+    throw new Error(result.stderr || result.stdout || `umount failed for ${mountPoint}`)
+  }
+}
+
+async function watchTestUnmount(instructionPath: string, mountPoint: string): Promise<void> {
+  await waitForPath(`${instructionPath}.ready`, 30_000)
+  unmountBind(mountPoint)
+  assert.equal(isBindMounted(mountPoint), false)
+  assert.equal(fs.existsSync(mountPoint), true)
+  fs.writeFileSync(`${instructionPath}.done`, 'unmounted')
+}
+
 async function mpvRpc(
   socketPath: string,
   command: unknown[],
@@ -311,6 +362,7 @@ describe('server runtime lifecycle', () => {
     closeDatabase()
     resetLibraryHostForTests()
     delete process.env.JAVDEX_TEST_USER_DATA
+    delete process.env.JAVDEX_TEST_UMOUNT_SCAN
   })
 
   after(() => {
@@ -1890,6 +1942,229 @@ describe('server runtime lifecycle', () => {
     } finally {
       await remote.dispose()
       await local.dispose()
+    }
+  })
+
+  it('treats a real bind-mount umount as offline, distinct from marker loss and missing files', async () => {
+    const backing = path.join(root, 'm08-backing')
+    const mountPoint = path.join(root, 'm08-mnt')
+    bindMount(backing, mountPoint)
+    const dataDir = path.join(root, 'm08-bind-umount')
+    const instructionDir = path.join(dataDir, 'unmount-instructions')
+    fs.mkdirSync(instructionDir, { recursive: true })
+    const previousUnmount = process.env.JAVDEX_TEST_UMOUNT_SCAN
+    const { base, config } = await boot(dataDir, { m08: mountPoint })
+    const writer = await claimInitialWriter(base, config)
+
+    const versions = (library: { revision: number; config: { revision: number } }) => ({
+      L: { generation: 1, revision: library.revision },
+      C: { generation: 1, revision: library.config.revision },
+      G: { generation: 1, revision: 1 },
+      V: { generation: 1, revision: 1 },
+      R: { generation: 1, revision: 1 }
+    })
+    const envelope = (operationId: string, expectedVersions: unknown, input: unknown) => ({
+      operationId,
+      serverId: writer.serverId,
+      catalogId: writer.catalogId,
+      writerEpoch: writer.writerEpoch,
+      expectedVersions,
+      input
+    })
+    const write = async (operation: string, expectedVersions: unknown, input: unknown) =>
+      postManage(base, operation, envelope(randomUUID(), expectedVersions, input), { bearer: writer.secret })
+    const read = async (operation: string, input: unknown) =>
+      postManage(base, operation, {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input
+      }, { bearer: writer.secret })
+    const pollTask = async (taskId: string, timeoutMs = 60_000) => {
+      const startedAt = Date.now()
+      let last: { state: string } | undefined
+      while (Date.now() - startedAt < timeoutMs) {
+        const result = await read('tasks.get', { taskId })
+        assert.equal(result.status, 200)
+        last = result.json as { state: string }
+        if (['succeeded', 'failed', 'cancelled', 'needsInspection'].includes(last.state)) return last
+        await new Promise((resolve) => setTimeout(resolve, 40))
+      }
+      throw new Error(`task ${taskId} did not finish: ${last?.state ?? 'missing'}`)
+    }
+    const latestOffline = async (): Promise<string[]> => {
+      const latest = (await read('scans.getLatest', { libraryId: 1 })).json as {
+        summary?: { offlineFolders?: string[] }
+        offlineFolders?: string[]
+      }
+      return latest.summary?.offlineFolders ?? latest.offlineFolders ?? []
+    }
+    const resourceCount = (code: string) =>
+      (
+        getDb()
+          .prepare(
+            `SELECT COUNT(*) AS n
+               FROM video_resources resource
+               JOIN videos video ON video.id = resource.video_id
+              WHERE video.code = ? AND resource.library_id = 1`
+          )
+          .get(code) as { n: number }
+      ).n
+    const armUnmount = async (
+      instructionName: string,
+      body: { phase: string; kind?: string; afterPages?: number }
+    ) => {
+      const instructionPath = path.join(instructionDir, instructionName)
+      fs.rmSync(instructionPath, { force: true })
+      fs.rmSync(`${instructionPath}.ready`, { force: true })
+      fs.rmSync(`${instructionPath}.done`, { force: true })
+      fs.writeFileSync(instructionPath, JSON.stringify(body))
+      process.env.JAVDEX_TEST_UMOUNT_SCAN = instructionPath
+      return { instructionPath, watch: watchTestUnmount(instructionPath, mountPoint) }
+    }
+    const runScan = async () => {
+      library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+      const started = await write('scans.run', versions(library), { libraryId: 1 })
+      assert.equal(started.status, 200, JSON.stringify(started.json))
+      const task = await pollTask((started.json as { taskId: string }).taskId)
+      assert.equal(task.state, 'succeeded', JSON.stringify(task))
+      return task
+    }
+
+    let library = (await read('libraries.get', { libraryId: 1 })).json as {
+      revision: number
+      config: { revision: number }
+      roots: Array<{ id: number; path: string }>
+    }
+    try {
+      const configUpdated = await write('libraries.updateConfig', versions(library), {
+        libraryId: 1,
+        patch: { minImportDurationMinutes: 0 }
+      })
+      assert.equal(configUpdated.status, 200)
+      library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+
+      const added = await write('libraries.addRoot', versions(library), {
+        libraryId: 1,
+        root: { mountSelectionId: 'm08' }
+      })
+      assert.equal(added.status, 200, JSON.stringify(added.json))
+      const addedRoot = added.json as { id: number; path: string }
+      assert.equal(isBindMounted(mountPoint), true)
+      assert.equal(fs.existsSync(path.join(mountPoint, JAVDEX_ROOT_MARKER)), true)
+      assert.equal(fs.existsSync(path.join(backing, JAVDEX_ROOT_MARKER)), true)
+      fs.writeFileSync(path.join(mountPoint, 'KEEP-001.mp4'), Buffer.from('0123456789abcdef'))
+      fs.writeFileSync(path.join(mountPoint, 'GONE-001.mp4'), Buffer.from('0123456789abcdef'))
+      const markerStat = fs.statSync(path.join(backing, JAVDEX_ROOT_MARKER))
+
+      await runScan()
+      assert.equal(
+        (getDb().prepare("SELECT code FROM videos WHERE code = 'KEEP-001'").get() as { code: string } | undefined)?.code,
+        'KEEP-001'
+      )
+      assert.equal(
+        (getDb().prepare("SELECT code FROM videos WHERE code = 'GONE-001'").get() as { code: string } | undefined)?.code,
+        'GONE-001'
+      )
+      assert.equal(resourceCount('KEEP-001'), 1)
+      assert.equal(resourceCount('GONE-001'), 1)
+      assert.equal((await latestOffline()).length, 0)
+
+      const afterEnumerate = await armUnmount('after-enumerate.json', { phase: 'afterEnumerate' })
+      await runScan()
+      await afterEnumerate.watch
+      const afterEnumerateOffline = await latestOffline()
+      assert.equal(
+        afterEnumerateOffline.some((folder) => folder === addedRoot.path || folder === mountPoint),
+        true,
+        JSON.stringify(afterEnumerateOffline)
+      )
+      assert.equal(isBindMounted(mountPoint), false)
+      assert.equal(fs.existsSync(mountPoint), true)
+      assert.equal(fs.existsSync(path.join(mountPoint, JAVDEX_ROOT_MARKER)), false)
+      assert.equal(fs.existsSync(path.join(backing, JAVDEX_ROOT_MARKER)), true)
+      assert.equal(resourceCount('KEEP-001'), 1)
+      assert.equal(resourceCount('GONE-001'), 1)
+      bindMount(backing, mountPoint)
+      const remountedMarker = fs.statSync(path.join(backing, JAVDEX_ROOT_MARKER))
+      assert.equal(remountedMarker.ino, markerStat.ino)
+      assert.equal(Math.round(remountedMarker.mtimeMs), Math.round(markerStat.mtimeMs))
+
+      fs.unlinkSync(path.join(backing, 'GONE-001.mp4'))
+      const beforeCleanup = await armUnmount('before-cleanup.json', {
+        phase: 'beforeCleanupPage',
+        kind: 'resources',
+        afterPages: 0
+      })
+      await runScan()
+      await beforeCleanup.watch
+      const beforeCleanupOffline = await latestOffline()
+      assert.equal(
+        beforeCleanupOffline.some((folder) => folder === addedRoot.path || folder === mountPoint),
+        true,
+        JSON.stringify(beforeCleanupOffline)
+      )
+      assert.equal(isBindMounted(mountPoint), false)
+      assert.equal(fs.existsSync(mountPoint), true)
+      assert.equal(resourceCount('KEEP-001'), 1)
+      assert.equal(resourceCount('GONE-001'), 1, 'unmount before cleanup must not treat backing files as deleted')
+      bindMount(backing, mountPoint)
+
+      await runScan()
+      assert.equal((await latestOffline()).length, 0)
+      assert.equal(resourceCount('KEEP-001'), 1)
+      assert.equal(resourceCount('GONE-001'), 0)
+      assert.equal(fs.existsSync(path.join(backing, JAVDEX_ROOT_MARKER)), true)
+      const afterMissingMarker = fs.statSync(path.join(backing, JAVDEX_ROOT_MARKER))
+      assert.equal(afterMissingMarker.ino, markerStat.ino)
+
+      const keepResource = getDb()
+        .prepare(
+          `SELECT resource.id AS id, resource.locator AS locator
+             FROM video_resources resource
+             JOIN videos video ON video.id = resource.video_id
+            WHERE resource.library_id = 1 AND video.code = 'KEEP-001'
+            LIMIT 1`
+        )
+        .get() as { id: number; locator: string }
+      const location = {
+        rootId: addedRoot.id,
+        relativePath: path.relative(mountPoint, keepResource.locator) || path.basename(keepResource.locator)
+      }
+      const digest = filesRenameDigest({
+        libraryId: 1,
+        resourceId: keepResource.id,
+        location,
+        newFileName: 'KEEP-001-renamed.mp4'
+      })
+      unmountBind(mountPoint)
+      library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+      const renamedWhileUnmounted = await write('files.rename', versions(library), {
+        libraryId: 1,
+        resourceId: keepResource.id,
+        location,
+        newFileName: 'KEEP-001-renamed.mp4',
+        planId: randomUUID(),
+        planDigest: digest
+      })
+      assert.equal(renamedWhileUnmounted.status, 409, JSON.stringify(renamedWhileUnmounted.json))
+      assert.equal((renamedWhileUnmounted.json as { code?: string }).code, 'VERSION_CONFLICT')
+      assert.equal(fs.existsSync(path.join(backing, 'KEEP-001.mp4')), true)
+      assert.equal(fs.existsSync(path.join(backing, 'KEEP-001-renamed.mp4')), false)
+      assert.equal(resourceCount('KEEP-001'), 1)
+      bindMount(backing, mountPoint)
+      const recoveredMarker = fs.statSync(path.join(backing, JAVDEX_ROOT_MARKER))
+      assert.equal(recoveredMarker.ino, markerStat.ino)
+      assert.equal(fs.existsSync(path.join(mountPoint, JAVDEX_ROOT_MARKER)), true)
+      assert.equal(fs.existsSync(path.join(mountPoint, 'KEEP-001.mp4')), true)
+    } finally {
+      if (previousUnmount === undefined) delete process.env.JAVDEX_TEST_UMOUNT_SCAN
+      else process.env.JAVDEX_TEST_UMOUNT_SCAN = previousUnmount
+      try {
+        unmountBind(mountPoint)
+      } catch {
+        // Keep the suite able to delete the temp tree even if umount already ran.
+      }
     }
   })
 

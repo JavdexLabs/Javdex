@@ -50,8 +50,14 @@ export function createScanCleanupPages(db: Database.Database, libraryId: number)
   let disposed = false
   return {
     resourceHighWater: high.resources,
-    async each<T>(kind: CleanupCandidates, signal: AbortSignal, transaction: <R>(fn: () => R) => R,
-      apply: (ids: number[]) => T, committed: (value: T) => void): Promise<boolean> {
+    async each<T>(
+      kind: CleanupCandidates,
+      signal: AbortSignal,
+      transaction: <R>(fn: () => R) => R,
+      apply: (ids: number[]) => T,
+      committed: (value: T) => void,
+      beforePage?: () => Promise<void>
+    ): Promise<boolean> {
       const [table, key] = tables[kind]
       const exclusion = kind === 'memberships' ? 'CAST(candidate.video_id AS TEXT)'
         : kind === 'unrecognized' ? 'candidate.normalized_path' : undefined
@@ -61,6 +67,8 @@ export function createScanCleanupPages(db: Database.Database, libraryId: number)
         ORDER BY candidate.${key} LIMIT ${SCAN_CLEANUP_PAGE_SIZE}`)
       let after = 0
       while (true) {
+        if (signal.aborted) return false
+        if (beforePage) await beforePage()
         if (signal.aborted) return false
         if (disposed || !db.open || db.inTransaction) throw new Error('Cleanup page lifecycle violation')
         let ids: number[] = []

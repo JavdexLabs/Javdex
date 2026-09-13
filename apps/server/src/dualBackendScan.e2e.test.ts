@@ -6,7 +6,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, before, describe, it } from 'node:test'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import React, { createElement } from 'react'
+import TestRenderer, { act } from 'react-test-renderer'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useFrozenTargetWindow } from '../../desktop/src/renderer/src/query/useFrozenTargetWindow'
+import { resolveFrozenTargetSlots } from '../../desktop/src/renderer/src/query/resolveFrozenTargetSlots'
 import { buildSync } from 'esbuild'
 import Database from 'better-sqlite3'
 import { hashPassword } from '@http/auth'
@@ -1021,6 +1026,378 @@ if (hostConfigRaw) {
       assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`)
       assert.match(result.stdout, /D05_TASK_WINDOW_CLOSE_OK/)
       assert.match(result.stdout, new RegExp(operationId.replaceAll('-', '\\-')))
+    })
+
+    it('rolls back videos.edit when catalog fsync returns EIO', {
+      timeout: 60_000,
+      skip: process.platform === 'linux' ? false : 'LD_PRELOAD fsync fault is Linux-only'
+    }, async () => {
+      const hostDir = path.join(root, 'm05-fsync-host')
+      const mount = path.join(root, 'm05-fsync-media')
+      const faultPath = path.join(root, 'm05-fsync-fault')
+      const soPath = path.join(root, 'javdex-fsync-fault.so')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const compiled = spawnSync(
+        'gcc',
+        ['-shared', '-fPIC', '-O2', '-o', soPath, path.resolve('scripts/javdex-fsync-fault.c'), '-ldl'],
+        { encoding: 'utf8' }
+      )
+      assert.equal(compiled.status, 0, compiled.stderr || compiled.stdout)
+      const clip = path.join(mount, 'M05-FSYNC.mp4')
+      fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      let videoId = 0
+      try {
+        const rootId = insertRoot(seeded, mount)
+        videoId = insertTestVideoWithFile(seeded, {
+          code: 'M05-FSYNC',
+          title: 'original',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        }).videoId
+      } finally {
+        seeded.close()
+      }
+
+      const child = spawnHost(remoteConfig, {
+        LD_PRELOAD: [soPath, process.env.LD_PRELOAD].filter(Boolean).join(':'),
+        JAVDEX_TEST_FSYNC_FAULT: faultPath
+      })
+      let hostErr = ''
+      child.stderr?.on('data', (chunk: Buffer) => {
+        hostErr += chunk.toString('utf8')
+      })
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+      const writerEpoch = (claim.json as { writerEpoch: number }).writerEpoch
+      const operationId = randomUUID()
+      fs.writeFileSync(faultPath, '1')
+      let failed: { status: number; json: unknown }
+      try {
+        failed = await postManage(
+          base,
+          'videos.edit',
+          {
+            operationId,
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: { V: { generation: 1, revision: 1 } },
+            input: { videoId, fields: { title: 'should-rollback' } }
+          },
+          secret
+        )
+      } catch (error) {
+        failed = { status: 0, json: error instanceof Error ? error.message : String(error) }
+      }
+      assert.notEqual(failed.status, 200, `fsync fault must reject the edit\n${JSON.stringify(failed)}\n${hostErr}`)
+      assert.match(hostErr, /JAVDEX_FSYNC_FAULT/)
+      if (fs.existsSync(faultPath)) fs.unlinkSync(faultPath)
+      if (child.exitCode == null && child.signalCode == null) {
+        const current = await postManage(
+          base,
+          'videos.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { scope: { kind: 'all' }, videoId }
+          },
+          secret
+        )
+        assert.equal(current.status, 200, JSON.stringify(current.json))
+        assert.equal((current.json as { title?: string }).title, 'original')
+      }
+      await stopChild(child)
+
+      const rolledBack = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = rolledBack.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'original')
+        assert.equal(row.revision, 1)
+        const receipt = rolledBack
+          .prepare('SELECT operation_id FROM catalog_operation_receipts WHERE operation_id = ?')
+          .get(operationId)
+        assert.equal(receipt, undefined)
+      } finally {
+        rolledBack.close()
+      }
+
+      const restarted = spawnHost(remoteConfig)
+      const restartPort = await waitListening(restarted)
+      const restartBase = `http://127.0.0.1:${restartPort}`
+      try {
+        const unknown = await postManage(
+          restartBase,
+          'operations.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            input: { operationId }
+          },
+          secret
+        )
+        assert.equal(unknown.status, 200, JSON.stringify(unknown.json))
+        assert.equal((unknown.json as { status?: string }).status, 'unknown')
+        const retry = await postManage(
+          restartBase,
+          'videos.edit',
+          {
+            operationId,
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: { V: { generation: 1, revision: 1 } },
+            input: { videoId, fields: { title: 'after-fsync' } }
+          },
+          secret
+        )
+        assert.equal(retry.status, 200, JSON.stringify(retry.json))
+        assert.equal((retry.json as { receipt?: { status?: string } }).receipt?.status, 'applied')
+      } finally {
+        await stopChild(restarted)
+      }
+
+      const applied = new Database(path.join(hostDir, 'library.db'), { fileMustExist: true })
+      try {
+        const row = applied.prepare('SELECT title, revision FROM videos WHERE id = ?').get(videoId) as {
+          title: string
+          revision: number
+        }
+        assert.equal(row.title, 'after-fsync')
+        assert.equal(row.revision, 2)
+      } finally {
+        applied.close()
+      }
+    })
+
+    it('keeps three frozen target pages without stitching a deleted id into the next slot', { timeout: 60_000 }, async () => {
+      Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+      const hostDir = path.join(root, 'm07-host')
+      const mount = path.join(root, 'm07-media')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const remoteConfig: ServerConfig = {
+        listenHost: '127.0.0.1',
+        port: 0,
+        accessHosts: ['127.0.0.1'],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      const videoIds: number[] = []
+      try {
+        const rootId = insertRoot(seeded, mount)
+        for (const [index, code] of ['M07-001', 'M07-002', 'M07-003'].entries()) {
+          const clip = path.join(mount, `${code}.mp4`)
+          fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+          videoIds.push(
+            insertTestVideoWithFile(seeded, {
+              code,
+              title: code,
+              filePath: clip,
+              libraryId: 1,
+              rootId,
+              addTime: `2026-01-01T00:00:0${index + 1}.000Z`
+            }).videoId
+          )
+        }
+      } finally {
+        seeded.close()
+      }
+      const digest = createHash('sha256')
+        .update(JSON.stringify({ kind: 'videos.status:all', ids: videoIds }))
+        .digest('hex')
+
+      const child = spawnHost(remoteConfig)
+      const remotePort = await waitListening(child)
+      const base = `http://127.0.0.1:${remotePort}`
+      const handshake = await postManage(base, 'handshake.get', { input: {} })
+      assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+      const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+      const secret = generateSecret()
+      const claim = await postManage(base, 'writer.claim', {
+        serverId: hello.identity.serverId,
+        catalogId: hello.identity.catalogId,
+        input: {
+          kind: 'initialBind',
+          oneTimeToken: issued.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+        }
+      })
+      assert.equal(claim.status, 200, JSON.stringify(claim.json))
+      const writerEpoch = (claim.json as { writerEpoch: number }).writerEpoch
+      const created = await postManage(
+        base,
+        'targetLists.create',
+        {
+          operationId: randomUUID(),
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          writerEpoch,
+          expectedVersions: {},
+          input: { kind: 'videos.status:all', filterDigest: digest }
+        },
+        secret
+      )
+      assert.equal(created.status, 200, JSON.stringify(created.json))
+      const targetListId = (created.json as { targetListId: string }).targetListId
+      const frozenVictim = videoIds[1]!
+
+      type Row = { id: number; code: string; title?: string }
+      const readPage = async (offset: number, limit: number): Promise<{ ids: number[] }> => {
+        const page = await postManage(
+          base,
+          'targetLists.page',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { targetListId, limit, offset }
+          },
+          secret
+        )
+        assert.equal(page.status, 200, JSON.stringify(page.json))
+        return { ids: (page.json as { ids: number[] }).ids }
+      }
+      const readOne = async (id: number): Promise<Row | null> => {
+        const got = await postManage(
+          base,
+          'videos.get',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { scope: { kind: 'all' }, videoId: id }
+          },
+          secret
+        )
+        assert.equal(got.status, 200, JSON.stringify(got.json))
+        return (got.json ?? null) as Row | null
+      }
+
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      let hook!: ReturnType<typeof useFrozenTargetWindow<Row>>
+      function Harness(): null {
+        hook = useFrozenTargetWindow<Row>(targetListId, videoIds.length, 1, readPage, readOne)
+        return null
+      }
+      const renderer = TestRenderer.create(
+        createElement(QueryClientProvider, { client }, createElement(Harness))
+      )
+      const settle = async (check: () => boolean): Promise<void> => {
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          if (check()) return
+          await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 20))
+          })
+        }
+        assert.fail('frozen target window did not settle against the live host')
+      }
+      try {
+        await settle(() => hook.window.getItem(0)?.status === 'ready')
+        act(() => hook.window.onVisibleRange(0, 2))
+        await settle(() => hook.window.getItem(2)?.status === 'ready')
+        assert.equal(hook.total, 3)
+        assert.equal(hook.window.getItem(1)?.status, 'ready')
+        assert.equal(hook.window.getItem(1)?.id, frozenVictim)
+
+        const preview = await postManage(
+          base,
+          'videos.previewDeleteGlobal',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            input: { videoId: frozenVictim }
+          },
+          secret
+        )
+        assert.equal(preview.status, 200, JSON.stringify(preview.json))
+        const deleted = await postManage(
+          base,
+          'videos.deleteGlobal',
+          {
+            operationId: randomUUID(),
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            writerEpoch,
+            expectedVersions: {},
+            input: {
+              videoId: frozenVictim,
+              planId: randomUUID(),
+              planDigest: (preview.json as { revision: string }).revision
+            }
+          },
+          secret
+        )
+        assert.equal(deleted.status, 200, JSON.stringify(deleted.json))
+
+        const live = await postManage(
+          base,
+          'videos.list',
+          {
+            serverId: hello.identity.serverId,
+            catalogId: hello.identity.catalogId,
+            input: { scope: { kind: 'all' }, query: { limit: 50, offset: 0 } }
+          },
+          secret
+        )
+        assert.equal(live.status, 200, JSON.stringify(live.json))
+        const liveIds = ((live.json as { items?: Array<{ id: number }> }).items ?? []).map((item) => item.id)
+        assert.equal(liveIds.includes(frozenVictim), false)
+        assert.equal(liveIds.length, 2)
+
+        const resolved = await resolveFrozenTargetSlots(videoIds, readOne)
+        assert.deepEqual(
+          resolved.map((slot) => slot.status),
+          ['ready', 'missing', 'ready']
+        )
+        act(() => hook.retry())
+        await settle(() => hook.window.getItem(1)?.status === 'missing')
+        assert.equal(hook.window.getItem(0)?.status, 'ready')
+        assert.equal(hook.window.getItem(2)?.status, 'ready')
+        assert.equal(hook.window.getItem(1)?.id, frozenVictim)
+        assert.equal(hook.total, 3)
+        assert.equal(hook.items.length, 3)
+      } finally {
+        await act(async () => renderer.unmount())
+        client.clear()
+        await stopChild(child)
+      }
     })
   })
 }

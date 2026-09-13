@@ -174,6 +174,10 @@ describe('RemoteCatalogBackend image disk cache', () => {
         releaseLate = resolve
       })
       const pending = backend.assets.readImage({ relPath: 'covers/reconnect.png' })
+      const rejected = assert.rejects(
+        () => pending,
+        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
+      )
       const started = Date.now()
       while (assetGets < 1 && Date.now() - started < 2000) {
         await new Promise((resolve) => setTimeout(resolve, 10))
@@ -182,10 +186,7 @@ describe('RemoteCatalogBackend image disk cache', () => {
       const session = await backend.reconnect()
       assert.ok(session.generation > generationBefore, `${generationBefore} -> ${session.generation}`)
       releaseLate()
-      await assert.rejects(
-        pending,
-        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
-      )
+      await rejected
       const cacheDir = remoteImageCacheCatalogDir(root, 'catalog-cache')
       assert.equal(
         fs.existsSync(cacheDir)

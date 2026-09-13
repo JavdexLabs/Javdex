@@ -830,7 +830,9 @@ describe('server runtime lifecycle', () => {
         .prepare('SELECT generation, revision FROM videos WHERE id = ?')
         .get(videoId) as { generation: number; revision: number }
     const expiredVersion = versionOf(expired.videoId)
-    getDb().prepare('UPDATE videos SET title = ? WHERE id = ?').run('M07-EXPIRE-NOW', expired.videoId)
+    getDb()
+      .prepare('UPDATE videos SET title = ?, revision = revision + 1 WHERE id = ?')
+      .run('M07-EXPIRE-NOW', expired.videoId)
     const stale = await postManage(
       base,
       'videos.edit',

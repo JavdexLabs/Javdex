@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { structuredError } from '@shared/protocol/errors'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { ManageOperationId } from '@shared/manage/operations'
@@ -87,6 +88,21 @@ function runMaintenance<T>(work: () => T): T {
   } catch (error) {
     return mapMaintenanceError(error)
   }
+}
+
+/** Test-only: if `JAVDEX_TEST_STALL_TASKS_GET` names an existing file, consume it and delay. */
+function stallCatalogTaskGetForTests(): Promise<void> | null {
+  const stallPath = process.env.JAVDEX_TEST_STALL_TASKS_GET
+  if (!stallPath) return null
+  try {
+    fs.unlinkSync(stallPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  fs.writeFileSync(`${stallPath}.started`, '1')
+  const delayMs = Number(process.env.JAVDEX_TEST_STALL_TASKS_GET_MS ?? 8_000)
+  return new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : 8_000))
 }
 
 function requireVersionField(
@@ -370,9 +386,13 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
   },
   'tasks.get'(args) {
     const input = args.envelope.input as { taskId: string }
-    const task = readCatalogTask(input.taskId)
-    if (!task) throw structuredError('INVALID_INPUT', '任务不存在')
-    return task
+    const read = () => {
+      const task = readCatalogTask(input.taskId)
+      if (!task) throw structuredError('INVALID_INPUT', '任务不存在')
+      return task
+    }
+    const stalled = stallCatalogTaskGetForTests()
+    return stalled ? stalled.then(read) : read()
   },
   'tasks.list'(args) {
     const input = args.envelope.input as { libraryId?: number; limit?: number; offset?: number }

@@ -233,9 +233,54 @@ if (hostConfigRaw) {
     }
   }
 
+  async function waitPath(filePath: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (!fs.existsSync(filePath)) {
+      if (Date.now() >= deadline) throw new Error(`missing ${filePath}`)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+
+  async function waitForCatalogTaskAfterInFlightAbort(
+    remote: ReturnType<typeof createRemoteCatalogBackend>,
+    taskId: string,
+    stallPath: string
+  ): Promise<CatalogTaskSnapshot> {
+    fs.writeFileSync(stallPath, '1')
+    const generationBeforeReconnect = remote.generation
+    const applied: CatalogTaskSnapshot[] = []
+    const pending = waitForCatalogTask({
+      backend: remote,
+      taskId,
+      timeoutMs: 60_000,
+      intervalMs: 50,
+      onApplied: (snapshot) => applied.push(snapshot)
+    })
+    await waitPath(`${stallPath}.started`, 10_000)
+    const reconnectAt = Date.now()
+    await remote.reconnect()
+    assert.ok(
+      remote.generation > generationBeforeReconnect,
+      `reconnect must advance generation (${generationBeforeReconnect} -> ${remote.generation})`
+    )
+    const snapshot = await pending
+    assert.ok(
+      Date.now() - reconnectAt < 3_000,
+      'in-flight tasks.get must abort on reconnect instead of waiting out the server stall'
+    )
+    assert.equal(applied.length >= 1, true, 'a later generation poll must apply a live snapshot')
+    assert.equal(
+      ['succeeded', 'needsInspection'].includes(snapshot.state),
+      true,
+      JSON.stringify(snapshot)
+    )
+    return snapshot
+  }
+
   describe('local CatalogBackend vs Node host scan/NFO', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-d02-'))
     const workerEntry = path.join(root, 'webCatalogWorker.js')
+    const stallPath = path.join(root, 'stall-tasks-get')
     const staticRoot = path.join(root, 'web')
     const children: ChildProcess[] = []
     let passwordHash = ''
@@ -325,7 +370,9 @@ if (hostConfigRaw) {
             TSX_TSCONFIG_PATH: 'tsconfig.server.json',
             JAVDEX_TEST_HOST_CONFIG: JSON.stringify(remoteConfig),
             JAVDEX_TEST_HOST_WORKER: workerEntry,
-            JAVDEX_TEST_USER_DATA: remoteDir
+            JAVDEX_TEST_USER_DATA: remoteDir,
+            JAVDEX_TEST_STALL_TASKS_GET: stallPath,
+            JAVDEX_TEST_STALL_TASKS_GET_MS: '8000'
           },
           stdio: ['ignore', 'pipe', 'pipe']
         }
@@ -406,6 +453,7 @@ if (hostConfigRaw) {
         const remoteProgress = await waitForRemoteScanAfterLateReconnect(remote, remoteScan.taskId)
         const remoteTask = remoteProgress.snapshot
         assert.equal(['succeeded', 'needsInspection'].includes(remoteTask.state), true, JSON.stringify(remoteTask))
+        await waitForCatalogTaskAfterInFlightAbort(remote, remoteScan.taskId, stallPath)
 
         const localLatest = (await local.libraries.latestScan({ libraryId: 1 })) as LibraryScanLatestSnapshot
         const remoteLatest = (await remote.libraries.latestScan({ libraryId: 1 })) as LibraryScanLatestSnapshot

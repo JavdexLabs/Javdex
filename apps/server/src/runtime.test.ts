@@ -760,6 +760,206 @@ describe('server runtime lifecycle', () => {
     assert.equal(cover.poster_path, null)
   })
 
+  it('rejects escaped relative paths on files.importManual without leaking host paths', async () => {
+    const dataDir = path.join(root, 'm02-import-escape')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const { videoId } = await insertBoundVideo('M02-BOUND')
+    const rootRow = getDb()
+      .prepare('SELECT id, real_path, path FROM media_library_roots WHERE library_id = 1')
+      .get() as { id: number; real_path: string | null; path: string }
+    const outside = path.join(root, 'm02-outside.mp4')
+    fs.writeFileSync(outside, Buffer.from('outside-bytes'))
+    const videosBefore = (
+      getDb().prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }
+    ).n
+    const escaped = await postManage(
+      base,
+      'files.importManual',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {
+          V: getDb()
+            .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+            .get(videoId) as { generation: number; revision: number },
+          R: { generation: 1, revision: 1 },
+          G: { generation: 1, revision: 1 }
+        },
+        input: {
+          libraryId: 1,
+          location: { rootId: rootRow.id, relativePath: '../m02-outside.mp4' },
+          code: 'M02-ESCAPE',
+          target: { kind: 'new' }
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(escaped.status, 400, JSON.stringify(escaped.json))
+    assert.equal((escaped.json as { code?: string }).code, 'INVALID_INPUT')
+    const message = JSON.stringify(escaped.json)
+    assert.doesNotMatch(message, /m02-outside/)
+    assert.doesNotMatch(message, new RegExp(dataDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.doesNotMatch(message, /\/tmp\/|\/home\/|\/opt\//)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n,
+      videosBefore
+    )
+    assert.equal(
+      getDb().prepare('SELECT id FROM videos WHERE code = ?').get('M02-ESCAPE') as { id: number } | undefined,
+      undefined
+    )
+    assert.equal(fs.existsSync(outside), true)
+  })
+
+  it('returns per-target expire, success, and disconnect receipts without auto-overwriting', async () => {
+    const dataDir = path.join(root, 'm07-partial')
+    const stallPath = path.join(root, 'stall-videos-edit')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const expired = await insertBoundVideo('M07-EXPIRE', path.join(mediaRoot, 'm07-expire.mp4'))
+    fs.writeFileSync(path.join(mediaRoot, 'm07-expire.mp4'), Buffer.from('expire'))
+    const success = await insertBoundVideo('M07-OK', path.join(mediaRoot, 'm07-ok.mp4'))
+    fs.writeFileSync(path.join(mediaRoot, 'm07-ok.mp4'), Buffer.from('ok-file'))
+    const dropped = await insertBoundVideo('M07-DROP', path.join(mediaRoot, 'm07-drop.mp4'))
+    fs.writeFileSync(path.join(mediaRoot, 'm07-drop.mp4'), Buffer.from('drop'))
+    const versionOf = (videoId: number) =>
+      getDb()
+        .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+        .get(videoId) as { generation: number; revision: number }
+    const expiredVersion = versionOf(expired.videoId)
+    getDb().prepare('UPDATE videos SET title = ? WHERE id = ?').run('M07-EXPIRE-NOW', expired.videoId)
+    const stale = await postManage(
+      base,
+      'videos.edit',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: expiredVersion },
+        input: { videoId: expired.videoId, fields: { title: 'M07 should not apply' } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(stale.status, 409, JSON.stringify(stale.json))
+    assert.equal((stale.json as { code?: string }).code, 'VERSION_CONFLICT')
+    assert.equal(
+      (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(expired.videoId) as { title: string }).title,
+      'M07-EXPIRE-NOW'
+    )
+
+    const successVersion = versionOf(success.videoId)
+    const successOp = randomUUID()
+    const ok = await postManage(
+      base,
+      'videos.edit',
+      {
+        operationId: successOp,
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: successVersion },
+        input: { videoId: success.videoId, fields: { title: 'M07 success' } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(ok.status, 200, JSON.stringify(ok.json))
+    const retryOk = await postManage(
+      base,
+      'videos.edit',
+      {
+        operationId: successOp,
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: successVersion },
+        input: { videoId: success.videoId, fields: { title: 'M07 success' } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(retryOk.status, 200, JSON.stringify(retryOk.json))
+    assert.equal((retryOk.json as { receipt?: { status?: string } }).receipt?.status, 'duplicate')
+    assert.equal(
+      (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(success.videoId) as { title: string }).title,
+      'M07 success'
+    )
+
+    const credentials = {
+      async isAvailable() {
+        return true
+      },
+      async readWriterSecret(catalogId: string) {
+        return catalogId === writer.catalogId ? writer.secret : null
+      },
+      async writeWriterSecret() {
+        return
+      },
+      async deleteWriterSecret() {
+        return
+      }
+    }
+    const backend = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials
+    })
+    const previousStall = process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT
+    const previousStallMs = process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_MS
+    process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT = stallPath
+    process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_MS = '800'
+    fs.writeFileSync(stallPath, '1')
+    const dropOp = randomUUID()
+    const dropVersion = versionOf(dropped.videoId)
+    const abort = new AbortController()
+    try {
+      const pending = backend.videos.edit(
+        { videoId: dropped.videoId, fields: { title: 'M07 after disconnect' } },
+        { operationId: dropOp, expectedVersions: { V: dropVersion }, signal: abort.signal }
+      )
+      await waitForPath(`${stallPath}.started`, 10_000)
+      abort.abort()
+      await assert.rejects(
+        () => pending,
+        (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
+      )
+      const receipt = (await backend.tasks.getOperation({ operationId: dropOp })) as {
+        status: string
+        operationId: string
+      }
+      assert.equal(receipt.operationId, dropOp)
+      assert.equal(receipt.status, 'applied')
+      assert.equal(
+        (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(dropped.videoId) as { title: string })
+          .title,
+        'M07 after disconnect'
+      )
+      const retryDrop = await backend.videos.edit(
+        { videoId: dropped.videoId, fields: { title: 'M07 after disconnect' } },
+        { operationId: dropOp, expectedVersions: { V: dropVersion } }
+      )
+      assert.equal(retryDrop, true)
+      assert.equal(
+        (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(dropped.videoId) as { title: string })
+          .title,
+        'M07 after disconnect'
+      )
+      assert.equal(
+        (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(expired.videoId) as { title: string }).title,
+        'M07-EXPIRE-NOW'
+      )
+      await new Promise((resolve) => setTimeout(resolve, 900))
+    } finally {
+      if (previousStall === undefined) delete process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT
+      else process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT = previousStall
+      if (previousStallMs === undefined) delete process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_MS
+      else process.env.JAVDEX_TEST_STALL_VIDEOS_EDIT_MS = previousStallMs
+      await backend.dispose()
+    }
+  })
+
   function memoryCredentials(entries: Map<string, string>) {
     return {
       async isAvailable(): Promise<boolean> {
@@ -888,7 +1088,7 @@ describe('server runtime lifecycle', () => {
     }
   })
 
-  it('lets manage read hidden videos and archived libraries that web cannot', async () => {
+  it('lets manage read hidden, archived, memberless, actress, playlist, and pending images that web cannot', async () => {
     const dataDir = path.join(root, 'm01-scope')
     const { base, config } = await boot(dataDir)
     const writer = await claimInitialWriter(base, config)
@@ -902,18 +1102,108 @@ describe('server runtime lifecycle', () => {
         .run().lastInsertRowid
     )
     getDb().prepare('INSERT INTO media_library_configs (library_id) VALUES (?)').run(archivedId)
+    const orphanId = Number(
+      getDb()
+        .prepare(
+          `INSERT INTO videos (code, title, scraped_status, add_time)
+           VALUES ('M01-ORPHAN', 'M01-ORPHAN', 0, ?)`
+        )
+        .run(new Date().toISOString()).lastInsertRowid
+    )
+    const independentId = upsertActressFromScrape('Independent Star', null, 'female')
+    const png = await sharp({
+      create: { width: 10, height: 8, channels: 3, background: { r: 20, g: 40, b: 80 } }
+    })
+      .png()
+      .toBuffer()
+    const staged = mediaAssetStore.stageVideoScrapeImages([
+      { field: 'cover', position: 0, remoteUrl: 'https://example.test/m01-cover.png', data: png }
+    ])
+    const pending = replacePendingVideoScrape({
+      videoId,
+      selectedFields: ['cover'],
+      applicableFields: ['cover'],
+      updateMode: 'replace',
+      request: { source: 'm01-scope' },
+      warnings: [],
+      sources: [
+        {
+          pluginName: 'm01',
+          pluginSource: 'builtin',
+          pluginVersion: '1',
+          pluginConfig: {},
+          sourceName: 'm01',
+          selectedFields: ['cover'],
+          candidates: [
+            {
+              result: { code: 'M01-HIDDEN', coverUrl: 'https://example.test/m01-cover.png' },
+              sourceUrl: 'https://example.test/m01-hidden',
+              normalizedSourceUrl: 'https://example.test/m01-hidden',
+              resources: staged.map((item) => ({
+                field: item.field,
+                position: item.position,
+                remoteUrl: item.remoteUrl,
+                stagedPath: item.stagedPath,
+                width: item.width,
+                height: item.height,
+                sizeBytes: item.sizeBytes
+              }))
+            }
+          ]
+        }
+      ]
+    })
+    const stagedPath = staged[0]!.stagedPath
 
     const cookie = (await login(base, password, true)).cookie
     const webDetail = await fetch(`${base}/api/videos/${videoId}`, { headers: { Cookie: cookie } })
     assert.equal(webDetail.status, 404)
+    const webOrphan = await fetch(`${base}/api/videos/${orphanId}`, { headers: { Cookie: cookie } })
+    assert.equal(webOrphan.status, 404)
     const webBrowse = await fetch(`${base}/api/videos?q=M01-HIDDEN`, { headers: { Cookie: cookie } })
     assert.equal(webBrowse.status, 200)
     const browseBody = (await webBrowse.json()) as { items?: Array<{ id: number }> }
     assert.equal((browseBody.items ?? []).some((item) => item.id === videoId), false)
+    const webOrphanBrowse = await fetch(`${base}/api/videos?q=M01-ORPHAN`, { headers: { Cookie: cookie } })
+    assert.equal(webOrphanBrowse.status, 200)
+    const orphanBrowse = (await webOrphanBrowse.json()) as { items?: Array<{ id: number }> }
+    assert.equal((orphanBrowse.items ?? []).some((item) => item.id === orphanId), false)
+    const webActress = await fetch(`${base}/api/videos?q=${encodeURIComponent('Independent Star')}`, {
+      headers: { Cookie: cookie }
+    })
+    assert.equal(webActress.status, 200)
+    const actressBrowse = (await webActress.json()) as { items?: Array<{ id: number }> }
+    assert.equal((actressBrowse.items ?? []).length, 0)
     const collections = await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })
     assert.equal(collections.status, 200)
-    const collectionBody = (await collections.json()) as { libraries: Array<{ id: number; name: string }> }
+    const collectionBody = (await collections.json()) as {
+      libraries: Array<{ id: number; name: string }>
+      playlists: Array<{ id: number; name: string }>
+    }
     assert.equal(collectionBody.libraries.some((library) => library.id === archivedId), false)
+    const webPendingImage = await fetch(`${base}/api/videos/${videoId}/images/cover`, {
+      headers: { Cookie: cookie }
+    })
+    assert.equal(webPendingImage.status, 404)
+    const cookiePendingAsset = await fetch(`${base}/manage/v1/assets/${stagedPath}`, {
+      headers: {
+        Origin: base,
+        Cookie: cookie,
+        'X-Javdex-App-Version': SERVER_APP_VERSION
+      }
+    })
+    assert.equal(cookiePendingAsset.status, 401)
+    const cookieManage = await postManage(
+      base,
+      'videos.get',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { scope: { kind: 'all' }, videoId }
+      },
+      { cookie }
+    )
+    assert.equal(cookieManage.status, 401)
 
     const backend = createRemoteCatalogBackend({
       baseUrl: base,
@@ -927,11 +1217,66 @@ describe('server runtime lifecycle', () => {
       })) as { id: number; title: string }
       assert.equal(detail.id, videoId)
       assert.equal(detail.title, 'M01-HIDDEN')
+      const orphan = (await backend.queries.getVideo({
+        scope: { kind: 'all' },
+        videoId: orphanId
+      })) as { id: number; title: string; code?: string }
+      assert.equal(orphan.id, orphanId)
+      assert.equal(orphan.title, 'M01-ORPHAN')
       const libraries = (await backend.libraries.list({ includeArchived: true })) as Array<{
         id: number
         status: string
       }>
       assert.equal(libraries.some((library) => library.id === archivedId && library.status === 'archived'), true)
+      const actress = (await backend.actresses.get({ actressId: independentId })) as {
+        id: number
+        main_name: string
+      }
+      assert.equal(actress.id, independentId)
+      assert.equal(actress.main_name, 'Independent Star')
+      const playlist = (await backend.playlists.create(
+        { name: 'M01 Hidden List' },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )) as { playlistId: number }
+      await backend.playlists.addVideo(
+        { playlistId: playlist.playlistId, videoId },
+        {
+          operationId: randomUUID(),
+          expectedVersions: {
+            P: getDb()
+              .prepare('SELECT generation, revision FROM playlists WHERE id = ?')
+              .get(playlist.playlistId) as { generation: number; revision: number }
+          }
+        }
+      )
+      const created = (await backend.playlists.get({ playlistId: playlist.playlistId })) as {
+        name?: string
+        videos?: Array<{ id: number }>
+      }
+      assert.equal(created?.name, 'M01 Hidden List', JSON.stringify(created))
+      assert.equal(created?.videos?.some((video) => video.id === videoId), true, JSON.stringify(created))
+      const collectionsAfter = await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })
+      assert.equal(collectionsAfter.status, 200)
+      const collectionsAfterBody = (await collectionsAfter.json()) as {
+        playlists: Array<{ id: number; name: string }>
+      }
+      assert.equal(
+        collectionsAfterBody.playlists.some((row) => row.id === playlist.playlistId),
+        false
+      )
+      const pendingRow = (await backend.pendingVideoScrapes.get({
+        pendingScrapeId: pending.pendingScrapeId
+      })) as { id?: number } | null
+      assert.equal(pendingRow?.id, pending.pendingScrapeId, JSON.stringify(pendingRow))
+      const managePendingImage = await fetch(`${base}/manage/v1/assets/${stagedPath}`, {
+        headers: {
+          Origin: base,
+          Authorization: `Bearer ${writer.secret}`,
+          'X-Javdex-App-Version': SERVER_APP_VERSION
+        }
+      })
+      assert.equal(managePendingImage.status, 200, await managePendingImage.text())
+      assert.match(managePendingImage.headers.get('content-type') ?? '', /image\/png/)
     } finally {
       await backend.dispose()
     }
@@ -2066,6 +2411,80 @@ describe('server runtime lifecycle', () => {
           .get(extraLibraryId, second.videoId) as { ok: number } | undefined
       )?.ok,
       1
+    )
+
+    const resourcePreview = await postManage(
+      base,
+      'videos.previewDeleteGlobal',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: { videoId: second.videoId }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(resourcePreview.status, 200, JSON.stringify(resourcePreview.json))
+    const resourceImpact = resourcePreview.json as { revision: string }
+    const membershipsBefore = (
+      getDb()
+        .prepare('SELECT COUNT(*) AS n FROM library_video_memberships WHERE video_id = ?')
+        .get(second.videoId) as { n: number }
+    ).n
+    const resourceVersion = getDb()
+      .prepare('SELECT generation, revision FROM videos WHERE id = ?')
+      .get(second.videoId) as { generation: number; revision: number }
+    const linked = await postManage(
+      base,
+      'videos.importResource',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { V: resourceVersion },
+        input: {
+          libraryId: 1,
+          code: 'S10-002',
+          target: { kind: 'existing', videoId: second.videoId },
+          url: 'https://example.test/s10-resource-only',
+          kind: 'web',
+          displayName: 'S10 resource only'
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(linked.status, 200, JSON.stringify(linked.json))
+    assert.equal(
+      (
+        getDb()
+          .prepare('SELECT COUNT(*) AS n FROM library_video_memberships WHERE video_id = ?')
+          .get(second.videoId) as { n: number }
+      ).n,
+      membershipsBefore
+    )
+    const resourceStale = await postManage(
+      base,
+      'videos.deleteGlobal',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: {
+          videoId: second.videoId,
+          planId: randomUUID(),
+          planDigest: resourceImpact.revision
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(resourceStale.status, 409, JSON.stringify(resourceStale.json))
+    assert.equal((resourceStale.json as { code?: string }).code, 'VERSION_CONFLICT')
+    assert.equal(
+      (getDb().prepare('SELECT id FROM videos WHERE id = ?').get(second.videoId) as { id: number } | undefined)?.id,
+      second.videoId
     )
 
     const digest = targetListFilterDigest('videos.status:all')

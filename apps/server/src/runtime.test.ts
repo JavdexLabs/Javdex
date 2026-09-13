@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:net'
+import { spawn, spawnSync } from 'node:child_process'
+import { createConnection, createServer } from 'node:net'
 import { createServer as createHttpServer } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -11,6 +12,7 @@ import sharp from 'sharp'
 import { hashPassword } from '@http/auth'
 import { closeDatabase, getDb } from '@library/db/database'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
 import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
 import { resetLibraryHostForTests } from '@library/runtime/host'
 import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
@@ -33,7 +35,9 @@ import {
   replacePendingVideoScrape
 } from '@library/db/pendingVideoScrapeRepo'
 import { targetListFilterDigest } from '@library/catalog/catalogTargetLists'
-import { inspectPlayStream, resourceLocatorRevision } from '@library/catalog/catalogPlay'
+import { inspectPlayStream, resourceLocatorRevision, type StoredPlayGrant } from '@library/catalog/catalogPlay'
+import { readCatalogSetting, writeCatalogSetting } from '@library/catalog/catalogSettings'
+import { closePlayStreams } from '@http/play'
 import { PLAY_GRANT_TTL_MS } from '@shared/protocol/limits'
 import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 
@@ -132,6 +136,137 @@ async function claimInitialWriter(
     catalogId: result.identity.catalogId,
     writerEpoch: claimed.writerEpoch
   }
+}
+
+function encodeTestMedia(filePath: string): void {
+  const result = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=duration=6:size=320x240:rate=24',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=6',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-shortest',
+      filePath
+    ],
+    { encoding: 'utf8' }
+  )
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `ffmpeg failed for ${filePath}`)
+  }
+}
+
+async function waitForPath(filePath: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (fs.existsSync(filePath)) return
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error(`missing ${filePath}`)
+}
+
+async function mpvRpc(
+  socketPath: string,
+  command: unknown[],
+  timeoutMs = 8_000
+): Promise<{ error: string; data?: unknown }> {
+  const requestId = Date.now() + Math.floor(Math.random() * 1_000)
+  const payload = `${JSON.stringify({ command, request_id: requestId })}\n`
+  return await new Promise((resolve, reject) => {
+    const socket = createConnection(socketPath)
+    let buffer = ''
+    const timer = setTimeout(() => {
+      socket.destroy()
+      reject(new Error(`mpv timeout ${JSON.stringify(command)}`))
+    }, timeoutMs)
+    socket.on('connect', () => socket.write(payload))
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8')
+      for (const line of buffer.split('\n')) {
+        if (!line.trim()) continue
+        try {
+          const parsed = JSON.parse(line) as { request_id?: number; error?: string; data?: unknown }
+          if (parsed.request_id === requestId) {
+            clearTimeout(timer)
+            socket.end()
+            resolve({ error: parsed.error ?? 'success', data: parsed.data })
+            return
+          }
+        } catch {
+          // Partial JSON line; wait for the rest.
+        }
+      }
+      buffer = buffer.includes('\n') ? buffer.slice(buffer.lastIndexOf('\n') + 1) : buffer
+    })
+    socket.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+  })
+}
+
+async function startMpv(socketPath: string): Promise<{
+  child: ReturnType<typeof spawn>
+  log: () => string
+}> {
+  fs.rmSync(socketPath, { force: true })
+  const child = spawn(
+    '/usr/bin/mpv',
+    [
+      '--vo=null',
+      '--ao=null',
+      '--idle=yes',
+      '--force-window=no',
+      '--keep-open=yes',
+      '--no-config',
+      '--osc=no',
+      `--input-ipc-server=${socketPath}`
+    ],
+    { shell: false, stdio: ['ignore', 'pipe', 'pipe'] }
+  )
+  const stderr: string[] = []
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderr.push(chunk.toString('utf8'))
+  })
+  child.on('exit', () => {
+    fs.rmSync(socketPath, { force: true })
+  })
+  await waitForPath(socketPath)
+  return { child, log: () => stderr.join('') }
+}
+
+async function mpvTimePos(socketPath: string): Promise<number | null> {
+  const result = await mpvRpc(socketPath, ['get_property', 'time-pos'])
+  return typeof result.data === 'number' ? result.data : null
+}
+
+async function waitMpvTimePos(
+  socketPath: string,
+  predicate: (value: number) => boolean,
+  timeoutMs = 8_000
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs
+  let last: number | null = null
+  while (Date.now() < deadline) {
+    last = await mpvTimePos(socketPath)
+    if (last != null && predicate(last)) return last
+    await new Promise((resolve) => setTimeout(resolve, 80))
+  }
+  throw new Error(`mpv time-pos ${last} did not match`)
 }
 
 describe('server runtime lifecycle', () => {
@@ -1854,6 +1989,72 @@ describe('server runtime lifecycle', () => {
       second.videoId
     )
 
+    const extraLibrary = await postManage(
+      base,
+      'libraries.create',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: { name: 'S10 Extra' }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(extraLibrary.status, 200, JSON.stringify(extraLibrary.json))
+    const extraLibraryId = (extraLibrary.json as { id: number }).id
+    const memberPreview = await postManage(
+      base,
+      'videos.previewDeleteGlobal',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: { videoId: second.videoId }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(memberPreview.status, 200, JSON.stringify(memberPreview.json))
+    const memberImpact = memberPreview.json as { revision: string; libraryIds?: number[] }
+    assert.equal(
+      ensureVideoMembership({ libraryId: extraLibraryId, videoId: second.videoId, addedVia: 'shared' }),
+      true
+    )
+    const memberStale = await postManage(
+      base,
+      'videos.deleteGlobal',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: {
+          videoId: second.videoId,
+          planId: randomUUID(),
+          planDigest: memberImpact.revision
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(memberStale.status, 409, JSON.stringify(memberStale.json))
+    assert.equal((memberStale.json as { code?: string }).code, 'VERSION_CONFLICT')
+    assert.equal(
+      (getDb().prepare('SELECT id FROM videos WHERE id = ?').get(second.videoId) as { id: number } | undefined)?.id,
+      second.videoId
+    )
+    assert.equal(
+      (
+        getDb()
+          .prepare(
+            'SELECT 1 AS ok FROM library_video_memberships WHERE library_id = ? AND video_id = ?'
+          )
+          .get(extraLibraryId, second.videoId) as { ok: number } | undefined
+      )?.ok,
+      1
+    )
+
     const digest = targetListFilterDigest('videos.status:all')
     const createdList = await postManage(
       base,
@@ -1925,6 +2126,66 @@ describe('server runtime lifecycle', () => {
     )
     assert.equal(afterInsert.status, 200, JSON.stringify(afterInsert.json))
     assert.deepEqual((afterInsert.json as { ids: number[] }).ids, ids)
+    const frozenVictim = ids.find((id) => id !== firstIds[0])
+    assert.ok(frozenVictim)
+    const deletePreview = await postManage(
+      base,
+      'videos.previewDeleteGlobal',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: { videoId: frozenVictim }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(deletePreview.status, 200, JSON.stringify(deletePreview.json))
+    const deleted = await postManage(
+      base,
+      'videos.deleteGlobal',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: {
+          videoId: frozenVictim,
+          planId: randomUUID(),
+          planDigest: (deletePreview.json as { revision: string }).revision
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.json))
+    assert.equal(
+      getDb().prepare('SELECT id FROM videos WHERE id = ?').get(frozenVictim) as { id: number } | undefined,
+      undefined
+    )
+    const afterDeletePage = await postManage(
+      base,
+      'targetLists.page',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { targetListId, limit: 1, offset: 1 }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(afterDeletePage.status, 200, JSON.stringify(afterDeletePage.json))
+    assert.deepEqual((afterDeletePage.json as { ids: number[] }).ids, [ids[1]])
+    const afterDeleteFull = await postManage(
+      base,
+      'targetLists.page',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: { targetListId }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(afterDeleteFull.status, 200, JSON.stringify(afterDeleteFull.json))
+    assert.deepEqual((afterDeleteFull.json as { ids: number[] }).ids, ids)
     const stale = await postManage(
       base,
       'targetLists.create',
@@ -2165,6 +2426,169 @@ describe('server runtime lifecycle', () => {
     )
     const expired = await fetch(nextPlay.playbackHandle, { method: 'HEAD' })
     assert.equal(expired.status, 404)
+  })
+
+  it('plays real mpv Range grants through disconnect, expiry, and writer handoff', { timeout: 120_000 }, async () => {
+    assert.equal(fs.existsSync('/usr/bin/mpv'), true)
+    const dataDir = path.join(root, 's13-m15-mpv')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const mp4 = path.join(mediaRoot, 'S15-001.mp4')
+    const mkv = path.join(mediaRoot, 'S15-002.mkv')
+    encodeTestMedia(mp4)
+    encodeTestMedia(mkv)
+    const first = await insertBoundVideo('S15-001', mp4)
+    const second = await insertBoundVideo('S15-002', mkv)
+    const resource = getDb()
+      .prepare('SELECT * FROM video_resources WHERE id = ?')
+      .get(first.fileId) as {
+        kind: 'local'
+        locator: string
+        source_identity: string | null
+        root_id: number | null
+        size_bytes: number | null
+        file_mtime_ms: number | null
+      }
+    const locatorRevision = resourceLocatorRevision(resource)
+    const granted = await postManage(
+      base,
+      'play.grant',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: {
+          libraryId: 1,
+          videoId: first.videoId,
+          resourceId: first.fileId,
+          locatorRevision
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(granted.status, 200, JSON.stringify(granted.json))
+    const play = granted.json as { grantId: string; playbackHandle: string }
+    const socketPath = path.join(dataDir, 'mpv.sock')
+    const mpv = await startMpv(socketPath)
+    try {
+      const loaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'])
+      assert.equal(loaded.error, 'success', JSON.stringify(loaded))
+      const started = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
+      assert.ok(started >= 0.2, String(started))
+      closePlayStreams([play.grantId])
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      const reloaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'])
+      assert.equal(reloaded.error, 'success', JSON.stringify(reloaded))
+      const resumed = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
+      assert.ok(resumed >= 0.2, String(resumed))
+      const stored = readCatalogSetting<StoredPlayGrant | null>(`play-grant:${play.grantId}`, null)
+      assert.ok(stored)
+      writeCatalogSetting(`play-grant:${play.grantId}`, {
+        ...stored,
+        expiresAt: new Date(Date.now() - 1_000).toISOString()
+      })
+      await mpvRpc(socketPath, ['stop'])
+      await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'])
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      const expiredHead = await fetch(play.playbackHandle, { method: 'HEAD' })
+      assert.equal(expiredHead.status, 404)
+      assert.match(mpv.log(), /404|HTTP error/i)
+
+      const mkvResource = getDb()
+        .prepare('SELECT * FROM video_resources WHERE id = ?')
+        .get(second.fileId) as {
+          kind: 'local'
+          locator: string
+          source_identity: string | null
+          root_id: number | null
+          size_bytes: number | null
+          file_mtime_ms: number | null
+        }
+      const nextGranted = await postManage(
+        base,
+        'play.grant',
+        {
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          input: {
+            libraryId: 1,
+            videoId: first.videoId,
+            resourceId: first.fileId,
+            locatorRevision
+          }
+        },
+        { bearer: writer.secret }
+      )
+      assert.equal(nextGranted.status, 200, JSON.stringify(nextGranted.json))
+      const nextPlay = nextGranted.json as { grantId: string; playbackHandle: string }
+      const seekLoad = await mpvRpc(socketPath, ['loadfile', nextPlay.playbackHandle, 'replace'])
+      assert.equal(seekLoad.error, 'success', JSON.stringify(seekLoad))
+      await waitMpvTimePos(socketPath, (value) => value >= 0.15)
+      const seeked = await mpvRpc(socketPath, ['seek', 2.2, 'absolute'])
+      assert.equal(seeked.error, 'success', JSON.stringify(seeked))
+      const seekPos = await waitMpvTimePos(socketPath, (value) => value >= 2.05 && value < 3.4)
+      assert.ok(seekPos >= 2.05, String(seekPos))
+
+      const mkvGrant = await postManage(
+        base,
+        'play.grant',
+        {
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          input: {
+            libraryId: 1,
+            videoId: second.videoId,
+            resourceId: second.fileId,
+            locatorRevision: resourceLocatorRevision(mkvResource)
+          }
+        },
+        { bearer: writer.secret }
+      )
+      assert.equal(mkvGrant.status, 200, JSON.stringify(mkvGrant.json))
+      const mkvPlay = mkvGrant.json as { playbackHandle: string }
+      const mkvLoad = await mpvRpc(socketPath, ['loadfile', mkvPlay.playbackHandle, 'replace'])
+      assert.equal(mkvLoad.error, 'success', JSON.stringify(mkvLoad))
+      const mkvPos = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
+      assert.ok(mkvPos >= 0.2, String(mkvPos))
+      const seekDuring = await mpvRpc(socketPath, ['seek', 2.2, 'absolute'])
+      assert.equal(seekDuring.error, 'success', JSON.stringify(seekDuring))
+      await waitMpvTimePos(socketPath, (value) => value >= 2.05 && value < 3.4)
+
+      const handoff = await postManage(
+        base,
+        'writer.handoffBegin',
+        {
+          operationId: randomUUID(),
+          serverId: writer.serverId,
+          catalogId: writer.catalogId,
+          writerEpoch: writer.writerEpoch,
+          expectedVersions: {},
+          input: {}
+        },
+        { bearer: writer.secret }
+      )
+      assert.equal(handoff.status, 200, JSON.stringify(handoff.json))
+      const nextSecret = generateSecret()
+      const consumed = await postManage(base, 'writer.claim', {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        input: {
+          kind: 'handoff',
+          oneTimeToken: (handoff.json as { oneTimeToken: string }).oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(nextSecret) }
+        }
+      })
+      assert.equal(consumed.status, 200, JSON.stringify(consumed.json))
+      await mpvRpc(socketPath, ['seek', 3.1, 'absolute'])
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      const revoked = await fetch(mkvPlay.playbackHandle, { method: 'HEAD' })
+      assert.equal(revoked.status, 404)
+      assert.match(mpv.log(), /404|HTTP error/i)
+    } finally {
+      mpv.child.kill('SIGKILL')
+    }
   })
 
   it('authorizes migration ops with a CLI token, freezes source writes, and ignores cookies', async () => {

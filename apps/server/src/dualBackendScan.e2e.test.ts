@@ -357,6 +357,17 @@ if (hostConfigRaw) {
         assert.equal(localAuditView.total >= 1, true, JSON.stringify(localAuditView))
         assert.equal(remoteAuditView.total >= 1, true, JSON.stringify(remoteAuditView))
 
+        const presenceInput = {
+          libraryId: 1,
+          groupIds: [999_001],
+          identityIds: [999_002],
+          scrapeIds: [999_003]
+        }
+        const localPresence = await local.libraries.pendingAuditPresence(presenceInput)
+        const remotePresence = await remote.libraries.pendingAuditPresence(presenceInput)
+        assert.deepEqual(localPresence, { groupIds: [], identityIds: [], scrapeIds: [] })
+        assert.deepEqual(remotePresence, localPresence)
+
         const localVideos = (await local.queries.listVideos({ scope: { kind: 'all' } })) as ScopedVideoListResult
         const remoteVideos = (await remote.queries.listVideos({ scope: { kind: 'all' } })) as ScopedVideoListResult
         assert.equal(localVideos.items.some((item) => item.code === 'ABC-001'), true, JSON.stringify(localVideos))

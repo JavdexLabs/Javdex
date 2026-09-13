@@ -40,6 +40,7 @@ import { issueDeployToken } from './identity'
 import { startJavdexServer } from './runtime'
 import type { ServerConfig } from './config'
 import { SERVER_APP_VERSION } from './appVersion'
+import { isStructuredError } from '@shared/protocol/errors'
 
 const hostConfigRaw = process.env.JAVDEX_TEST_HOST_CONFIG
 if (hostConfigRaw) {
@@ -386,6 +387,66 @@ if (hostConfigRaw) {
       )
       children.push(child)
       return child
+    }
+
+    function sudoRun(args: string[]): void {
+      const result = spawnSync('sudo', ['-n', ...args], { encoding: 'utf8' })
+      assert.equal(result.status, 0, `sudo ${args.join(' ')}\n${result.stderr}\n${result.stdout}`)
+    }
+
+    function spawnNetnsHost(ns: string, config: ServerConfig): ChildProcess {
+      const child = spawn(
+        'sudo',
+        [
+          '-n',
+          '-E',
+          'ip',
+          'netns',
+          'exec',
+          ns,
+          'sudo',
+          '-n',
+          '-u',
+          os.userInfo().username,
+          '-E',
+          process.execPath,
+          '--require',
+          './scripts/register-test-paths.cjs',
+          '--import',
+          'tsx',
+          thisFile
+        ],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '',
+            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
+            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(config),
+            JAVDEX_TEST_HOST_WORKER: workerEntry,
+            JAVDEX_TEST_USER_DATA: config.dataDir
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
+      children.push(child)
+      return child
+    }
+
+    async function stopNetnsHost(ns: string, clientDev: string, child: ChildProcess): Promise<void> {
+      const pids = spawnSync('sudo', ['-n', 'ip', 'netns', 'pids', ns], { encoding: 'utf8' })
+      for (const pid of (pids.stdout ?? '').trim().split(/\s+/).filter(Boolean)) {
+        const n = Number(pid)
+        if (!Number.isInteger(n)) continue
+        try {
+          process.kill(n, 'SIGTERM')
+        } catch {
+          spawnSync('sudo', ['-n', 'kill', '-TERM', pid])
+        }
+      }
+      await stopChild(child)
+      spawnSync('sudo', ['-n', 'ip', 'netns', 'delete', ns], { encoding: 'utf8' })
+      spawnSync('sudo', ['-n', 'ip', 'link', 'delete', clientDev], { encoding: 'utf8' })
     }
 
     after(async () => {
@@ -1511,6 +1572,122 @@ if (hostConfigRaw) {
         await act(async () => renderer.unmount())
         client.clear()
         await stopChild(child)
+      }
+    })
+
+    it('drops in-flight videos.get across a veth netns then reconnects', {
+      timeout: 40_000,
+      skip: process.platform === 'linux' ? false : 'veth/iptables packet drop is Linux-only'
+    }, async () => {
+      const ns = 'jdxd04n'
+      const serverDev = 'jdxd04s'
+      const clientDev = 'jdxd04c'
+      const serverIp = '10.67.71.1'
+      const clientIp = '10.67.71.2'
+      const hostDir = path.join(root, 'd04-loss-host')
+      const mount = path.join(root, 'd04-loss-media')
+      for (const dir of [hostDir, mount]) fs.mkdirSync(dir)
+      fs.mkdirSync(path.join(hostDir, 'media_assets'), { recursive: true })
+      const clip = path.join(mount, 'D04-LOSS.mp4')
+      fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+
+      spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+      spawnSync('sudo', ['-n', 'ip', 'netns', 'delete', ns])
+      spawnSync('sudo', ['-n', 'ip', 'link', 'delete', clientDev])
+      sudoRun(['ip', 'netns', 'add', ns])
+      sudoRun(['ip', 'link', 'add', serverDev, 'type', 'veth', 'peer', 'name', clientDev])
+      sudoRun(['ip', 'link', 'set', serverDev, 'netns', ns])
+      sudoRun(['ip', 'netns', 'exec', ns, 'ip', 'addr', 'add', `${serverIp}/24`, 'dev', serverDev])
+      sudoRun(['ip', 'netns', 'exec', ns, 'ip', 'link', 'set', serverDev, 'up'])
+      sudoRun(['ip', 'netns', 'exec', ns, 'ip', 'link', 'set', 'lo', 'up'])
+      sudoRun(['ip', 'addr', 'add', `${clientIp}/24`, 'dev', clientDev])
+      sudoRun(['ip', 'link', 'set', clientDev, 'up'])
+
+      const remoteConfig: ServerConfig = {
+        listenHost: serverIp,
+        port: 0,
+        accessHosts: [serverIp],
+        dataDir: hostDir,
+        imagesDir: path.join(hostDir, 'media_assets'),
+        staticRoot,
+        mediaMounts: { media: mount },
+        web: { username: 'viewer', passwordHash }
+      }
+      const issued = issueDeployToken(remoteConfig, 'initialBind')
+      const seeded = new Database(path.join(hostDir, 'library.db'))
+      let videoId = 0
+      try {
+        const rootId = insertRoot(seeded, mount)
+        videoId = insertTestVideoWithFile(seeded, {
+          code: 'D04-LOSS',
+          title: 'packet-loss',
+          filePath: clip,
+          libraryId: 1,
+          rootId
+        }).videoId
+      } finally {
+        seeded.close()
+      }
+
+      const child = spawnNetnsHost(ns, remoteConfig)
+      try {
+        const remotePort = await waitListening(child)
+        const base = `http://${serverIp}:${remotePort}`
+        const handshake = await postManage(base, 'handshake.get', { input: {} })
+        assert.equal(handshake.status, 200, JSON.stringify(handshake.json))
+        const hello = handshake.json as { identity: { serverId: string; catalogId: string } }
+        const secret = generateSecret()
+        const claim = await postManage(base, 'writer.claim', {
+          serverId: hello.identity.serverId,
+          catalogId: hello.identity.catalogId,
+          input: {
+            kind: 'initialBind',
+            oneTimeToken: issued.oneTimeToken,
+            candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+          }
+        })
+        assert.equal(claim.status, 200, JSON.stringify(claim.json))
+
+        const remote = createRemoteCatalogBackend({
+          baseUrl: base,
+          appVersion: SERVER_APP_VERSION,
+          timeoutMs: 4_000,
+          credentials: memoryCredentials(new Map([[hello.identity.catalogId, secret]]))
+        })
+        try {
+          const warmup = (await remote.queries.getVideo({
+            scope: { kind: 'all' },
+            videoId
+          })) as { title: string }
+          assert.equal(warmup.title, 'packet-loss')
+          const generationBefore = remote.generation
+          sudoRun(['iptables', '-I', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+          const lost = await remote.queries
+            .getVideo({ scope: { kind: 'all' }, videoId })
+            .then(
+              () => {
+                throw new Error('packet-loss query resolved')
+              },
+              (error: unknown) => error
+            )
+          assert.equal(isStructuredError(lost), true, JSON.stringify(lost))
+          assert.equal((lost as { code?: string }).code, 'CONNECTION_UNAVAILABLE')
+          spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+          const next = await remote.reconnect()
+          assert.ok(next.generation > generationBefore, `${generationBefore} -> ${next.generation}`)
+          const fresh = (await remote.queries.getVideo({
+            scope: { kind: 'all' },
+            videoId
+          })) as { title: string }
+          assert.equal(fresh.title, 'packet-loss')
+          assert.equal(remote.session().state, 'available')
+        } finally {
+          spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+          await remote.dispose()
+        }
+      } finally {
+        spawnSync('sudo', ['-n', 'iptables', '-D', 'OUTPUT', '-o', clientDev, '-j', 'DROP'])
+        await stopNetnsHost(ns, clientDev, child)
       }
     })
   })

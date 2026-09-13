@@ -34,6 +34,7 @@ import {
   pagePendingVideoScrapes
 } from '@library/db/pendingVideoScrapeRepo'
 import { mediaAssetStore } from '@library/mediaAssetStore'
+import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import {
   enqueueLibraryScan,
   requestLibraryScanCancel,
@@ -282,7 +283,9 @@ export function createLocalCatalogBackend(
       return queries.listYears(input.scope)
     },
     async getResource(input) {
-      return queries.getResource(input.libraryId, input.videoId, input.resourceId)
+      const resource = queries.getResource(input.libraryId, input.videoId, input.resourceId)
+      if (!resource) return null
+      return { ...resource, locatorRevision: resourceLocatorRevision(resource) }
     },
     async listTags() {
       return tagQueryService.list()
@@ -1330,7 +1333,12 @@ export function createLocalCatalogBackend(
         return result.data
       }
     },
-    assets: unsupportedSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
+    assets: {
+      ...unsupportedSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
+      async readImage(input, ctx) {
+        return mediaAssetStore.readForServeAsync(input.relPath, ctx?.signal, input.size)
+      }
+    },
     migration: unsupportedSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),
     async dispose(): Promise<void> {
       return

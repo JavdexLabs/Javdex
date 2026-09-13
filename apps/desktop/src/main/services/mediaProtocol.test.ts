@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { resolveMediaAssetPath, toStoredAssetPath, serveMediaAssetRequest } from './mediaProtocol'
 import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
+import { structuredError } from '@shared/protocol/errors'
 
 describe('mediaProtocol', () => {
   it('forwards a finite variant and rejects invalid size without reading', async () => {
@@ -82,6 +83,19 @@ describe('mediaProtocol', () => {
       const response = await serveMediaAssetRequest(new Request(url, { method: 'HEAD' }), reader)
       assert.equal(response.status, status)
       assert.equal(await response.text(), '')
+    }
+  })
+
+  it('returns 503 when the remote catalog is unavailable or unauthorized', async () => {
+    for (const code of ['CONNECTION_UNAVAILABLE', 'AUTH_REQUIRED'] as const) {
+      const response = await serveMediaAssetRequest(new Request('media://covers/a.jpg'), {
+        rootPath: () => path.resolve('tmp-assets'),
+        readForServeAsync: async () => {
+          throw structuredError(code, 'unavailable')
+        }
+      })
+      assert.equal(response.status, 503)
+      assert.equal(await response.text(), 'Unavailable')
     }
   })
 

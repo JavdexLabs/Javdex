@@ -819,6 +819,33 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         } finally {
           tracked.done()
         }
+      },
+      async grantPlayback(input, ctx) {
+        const grant = (await query('play.grant', input, ctx?.signal)) as {
+          playbackHandle?: string
+        }
+        if (
+          grant &&
+          typeof grant.playbackHandle === 'string' &&
+          grant.playbackHandle.startsWith('/')
+        ) {
+          grant.playbackHandle = `${client.origin}${grant.playbackHandle}`
+        }
+        return grant
+      },
+      async readImage(input, ctx) {
+        const tracked = trackSignal(ctx?.signal)
+        try {
+          await ensureConnected(tracked.signal)
+          if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
+          return await client.getAsset(input.relPath, {
+            bearer: secret,
+            signal: tracked.signal,
+            size: input.size
+          })
+        } finally {
+          tracked.done()
+        }
       }
     },
     migration: rejectSlice(MIGRATION_KEYS, (key) => unsupported(`migration.${String(key)}`)),

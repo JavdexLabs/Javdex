@@ -5,6 +5,8 @@ import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { recoverInterruptedLibraryScanRuns } from '@library/db/libraryScanRepo'
 import { recoverCatalogImages } from '@library/catalog/catalogImageRecovery'
 import { recoverCatalogMaintenance } from '@library/catalog/catalogMaintenanceRecover'
+import { inspectPlayStream, setPlayGrantListener } from '@library/catalog/catalogPlay'
+import { closePlayStreams } from '@http/play'
 import { scanCoordinator } from '@library/scan/scanCoordinator'
 import { isWriterBound } from '@library/catalog/catalogIdentity'
 import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
@@ -16,7 +18,7 @@ import type { ServerConfig } from './config'
 import { acquireDataDirLock, ensureLocalDataDir, ensureMediaMounts } from './filesystem'
 import { configureServerLibraryHost, ensureServerCatalog } from './identity'
 import { assertSharpDecode } from './imageCodec'
-import { dispatchManageOperation, putManageUpload } from './manageDispatch'
+import { dispatchManageOperation, putManageUpload, getManageAsset } from './manageDispatch'
 import { SERVER_APP_VERSION } from './appVersion'
 import { WebCatalogWorkerClient } from './webCatalogWorkerClient'
 import {
@@ -127,6 +129,7 @@ export async function startJavdexServer(
   let ready = false
   let stopping = false
   const fail = async (error: unknown): Promise<never> => {
+    setPlayGrantListener(null)
     setManageBrowserSurface(null)
     try {
       await http?.stop()
@@ -177,10 +180,19 @@ export async function startJavdexServer(
       manage: {
         appVersion: SERVER_APP_VERSION,
         dispatch: (context) => dispatchManageOperation(context, database),
-        putUpload: (context) => putManageUpload(context, database)
+        putUpload: (context) => putManageUpload(context, database),
+        getAsset: (context) => getManageAsset(context, database)
+      },
+      play: {
+        inspect: (input) => inspectPlayStream(input, database)
       }
     })
     http.setBrowserEnabled(loadBrowserEnabled(config.dataDir))
+    setPlayGrantListener({
+      onRevoke(grantIds) {
+        closePlayStreams(grantIds)
+      }
+    })
     const port = await http.start(config.port, config.listenHost)
     setManageBrowserSurface(createBrowserSurface(http, config, port))
     ready = true
@@ -198,6 +210,7 @@ export async function startJavdexServer(
         try {
           await http?.stop()
         } finally {
+          setPlayGrantListener(null)
           setManageBrowserSurface(null)
           await worker?.dispose()
           closeDatabase()

@@ -31,6 +31,8 @@ import {
   commitManageImageMutation
 } from '@library/catalog/catalogImageApply'
 import { maybeCrashImageFlow } from '@library/catalog/catalogImageCrash'
+import { grantCatalogPlayback } from '@library/catalog/catalogPlay'
+import { readManageCatalogImage } from '@library/catalog/catalogManageImages'
 import {
   completeCatalogUploadFromStream,
   createCatalogUpload,
@@ -40,7 +42,7 @@ import type { CatalogImageRef, UploadPurpose } from '@shared/protocol/uploads'
 import type { ManageImageContentType } from '@shared/protocol/limits'
 import { MANAGE_OPERATIONS, type ManageOperationId } from '@shared/manage/operations'
 import { parseManageRequest } from '@shared/manage/parse'
-import type { ManageHttpContext, ManageUploadPutContext } from '@http/manage'
+import type { ManageHttpContext, ManageUploadPutContext, ManageAssetGetContext } from '@http/manage'
 import { structuredError } from '@shared/protocol/errors'
 import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { ExpectedVersions } from '@shared/protocol/versions'
@@ -129,6 +131,18 @@ export async function putManageUpload(
     },
     database
   )
+}
+
+export async function getManageAsset(
+  context: ManageAssetGetContext,
+  _database?: Database.Database
+): Promise<{ body: Buffer; mime: string }> {
+  const identity = requireIdentity()
+  requireBearer(context, {
+    serverId: identity.serverId!,
+    catalogId: identity.catalogId
+  })
+  return readManageCatalogImage(context.relPath, context.signal, context.size)
 }
 
 export function dispatchManageOperation(context: ManageHttpContext, database?: Database.Database): unknown {
@@ -238,6 +252,16 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     }
     if (operation === 'uploads.inspect') {
       return inspectCatalogUpload((envelope.input as { uploadId: string }).uploadId, {}, database)
+    }
+    if (operation === 'play.grant') {
+      const input = envelope.input as {
+        libraryId: number
+        videoId: number
+        resourceId: number
+        locatorRevision: string
+      }
+      const origin = context.host ? `http://${context.host}` : undefined
+      return grantCatalogPlayback(input, { publicOrigin: origin }, catalogDb(database))
     }
     if (operation === 'uploads.create') {
       const mutation = requireMutation(envelope)

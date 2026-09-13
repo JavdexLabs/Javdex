@@ -837,8 +837,8 @@ const api = {
       invokeApp(IPC.PLAYER_PLAY, libraryId, videoId),
     reveal: (libraryId: number, videoId: number) =>
       invokeApp(IPC.PLAYER_REVEAL, libraryId, videoId),
-    openResource: (libraryId: number, resourceId: number) =>
-      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId),
+    openResource: (libraryId: number, resourceId: number, videoId?: number) =>
+      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId, videoId),
     revealResource: (libraryId: number, resourceId: number) =>
       invokeApp(IPC.PLAYER_REVEAL_RESOURCE, libraryId, resourceId)
   },

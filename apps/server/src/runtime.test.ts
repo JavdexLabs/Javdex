@@ -33,6 +33,8 @@ import {
   replacePendingVideoScrape
 } from '@library/db/pendingVideoScrapeRepo'
 import { targetListFilterDigest } from '@library/catalog/catalogTargetLists'
+import { inspectPlayStream, resourceLocatorRevision } from '@library/catalog/catalogPlay'
+import { PLAY_GRANT_TTL_MS } from '@shared/protocol/limits'
 import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 
 const previousUserData = process.env.JAVDEX_TEST_USER_DATA
@@ -265,7 +267,8 @@ describe('server runtime lifecycle', () => {
             body: { input: {} },
             bearerSecret: null,
             remoteAddress: '192.168.1.10',
-            isLoopback: false
+            isLoopback: false,
+            host: null
           },
           getDb()
         ),
@@ -1844,6 +1847,210 @@ describe('server runtime lifecycle', () => {
       await remote.dispose()
       await local.dispose()
     }
+  })
+
+  it('grants a 12-hour play token, streams Range, and serves manage images without cookies', async () => {
+    const dataDir = path.join(root, 's11-play')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const clip = path.join(mediaRoot, 'S11-001.mp4')
+    fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+    const { videoId, fileId } = await insertBoundVideo('S11-001', clip)
+    const resource = getDb()
+      .prepare('SELECT * FROM video_resources WHERE id = ?')
+      .get(fileId) as {
+        kind: 'local'
+        locator: string
+        source_identity: string | null
+        root_id: number | null
+        size_bytes: number | null
+        file_mtime_ms: number | null
+      }
+    const locatorRevision = resourceLocatorRevision(resource)
+    const granted = await postManage(
+      base,
+      'play.grant',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: {
+          libraryId: 1,
+          videoId,
+          resourceId: fileId,
+          locatorRevision
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(granted.status, 200, JSON.stringify(granted.json))
+    const play = granted.json as {
+      grantId: string
+      expiresAt: string
+      playbackHandle: string
+      methods: string[]
+      range: boolean
+    }
+    assert.equal(play.range, true)
+    assert.deepEqual(play.methods, ['HEAD', 'GET'])
+    assert.match(play.playbackHandle, /^http:\/\/127\.0\.0\.1:\d+\/play\/v1\//)
+    const ttlMs = Date.parse(play.expiresAt) - Date.now()
+    assert.ok(ttlMs > PLAY_GRANT_TTL_MS - 60_000)
+    assert.ok(ttlMs <= PLAY_GRANT_TTL_MS + 5_000)
+    const handle = new URL(play.playbackHandle)
+    const head = await fetch(play.playbackHandle, { method: 'HEAD' })
+    assert.equal(head.status, 200)
+    assert.equal(head.headers.get('accept-ranges'), 'bytes')
+    const ranged = await fetch(play.playbackHandle, { headers: { Range: 'bytes=0-3' } })
+    assert.equal(ranged.status, 206)
+    assert.equal(Buffer.from(await ranged.arrayBuffer()).toString(), '0123')
+    const cookiePlay = await fetch(`http://${handle.host}${handle.pathname}`, {
+      headers: { Cookie: 'javdex_web_session=not-a-grant' }
+    })
+    assert.equal(cookiePlay.status, 404)
+    const badToken = await fetch(`${handle.origin}${handle.pathname}?t=not-the-grant`)
+    assert.equal(badToken.status, 404)
+    const staleGrant = await postManage(
+      base,
+      'play.grant',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: {
+          libraryId: 1,
+          videoId,
+          resourceId: fileId,
+          locatorRevision: '0'.repeat(64)
+        }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(staleGrant.status, 409)
+    assert.equal((staleGrant.json as { code?: string }).code, 'VERSION_CONFLICT')
+
+    getDb().prepare('UPDATE videos SET title = ? WHERE id = ?').run('S11 title only', videoId)
+    const stillPlaying = await fetch(play.playbackHandle, { headers: { Range: 'bytes=4-7' } })
+    assert.equal(stillPlaying.status, 206)
+    assert.equal(Buffer.from(await stillPlaying.arrayBuffer()).toString(), '4567')
+
+    const png = await sharp({
+      create: { width: 10, height: 8, channels: 3, background: { r: 9, g: 18, b: 27 } }
+    })
+      .png()
+      .toBuffer()
+    const coverRel = 'covers/s11-cover.png'
+    fs.mkdirSync(path.join(dataDir, 'media_assets', 'covers'), { recursive: true })
+    fs.writeFileSync(path.join(dataDir, 'media_assets', coverRel), png)
+    getDb().prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, videoId)
+    const image = await fetch(`${base}/manage/v1/assets/${coverRel}`, {
+      headers: {
+        Origin: base,
+        Authorization: `Bearer ${writer.secret}`,
+        'X-Javdex-App-Version': SERVER_APP_VERSION
+      }
+    })
+    assert.equal(image.status, 200, await image.text())
+    assert.match(image.headers.get('content-type') ?? '', /image\/png/)
+    const cookieImage = await fetch(`${base}/manage/v1/assets/${coverRel}`, {
+      headers: {
+        Origin: base,
+        Cookie: 'javdex_web_session=browser',
+        'X-Javdex-App-Version': SERVER_APP_VERSION
+      }
+    })
+    assert.equal(cookieImage.status, 401)
+    const traversal = await fetch(`${base}/manage/v1/assets/covers/../../library.db`, {
+      headers: {
+        Origin: base,
+        Authorization: `Bearer ${writer.secret}`,
+        'X-Javdex-App-Version': SERVER_APP_VERSION
+      }
+    })
+    assert.equal(traversal.status, 400)
+
+    const credentials = memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    const remote = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials
+    })
+    try {
+      const remoteGrant = (await remote.assets.grantPlayback({
+        libraryId: 1,
+        videoId,
+        resourceId: fileId,
+        locatorRevision
+      })) as { playbackHandle: string }
+      assert.match(remoteGrant.playbackHandle, /^http:\/\/127\.0\.0\.1:\d+\/play\/v1\//)
+      const remoteImage = await remote.assets.readImage({ relPath: coverRel })
+      assert.equal(remoteImage.mime, 'image/png')
+      assert.ok(remoteImage.body.length > 0)
+    } finally {
+      await remote.dispose()
+    }
+
+    const handoff = await postManage(
+      base,
+      'writer.handoffBegin',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: {},
+        input: {}
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(handoff.status, 200, JSON.stringify(handoff.json))
+    const nextSecret = generateSecret()
+    const consumed = await postManage(base, 'writer.claim', {
+      serverId: writer.serverId,
+      catalogId: writer.catalogId,
+      input: {
+        kind: 'handoff',
+        oneTimeToken: (handoff.json as { oneTimeToken: string }).oneTimeToken,
+        candidate: { claimId: randomUUID(), secretDigest: digestToken(nextSecret) }
+      }
+    })
+    assert.equal(consumed.status, 200, JSON.stringify(consumed.json))
+    const revokedPlay = await fetch(play.playbackHandle, { headers: { Range: 'bytes=0-3' } })
+    assert.equal(revokedPlay.status, 404)
+
+    const nextEpoch = (consumed.json as { writerEpoch: number }).writerEpoch
+    const nextGrant = await postManage(
+      base,
+      'play.grant',
+      {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: nextEpoch,
+        input: {
+          libraryId: 1,
+          videoId,
+          resourceId: fileId,
+          locatorRevision
+        }
+      },
+      { bearer: nextSecret }
+    )
+    assert.equal(nextGrant.status, 200, JSON.stringify(nextGrant.json))
+    const nextPlay = nextGrant.json as { grantId: string; playbackHandle: string; expiresAt: string }
+    const nextHandle = new URL(nextPlay.playbackHandle)
+    const live = await fetch(nextPlay.playbackHandle, { method: 'HEAD' })
+    assert.equal(live.status, 200)
+    assert.throws(
+      () =>
+        inspectPlayStream({
+          grantId: nextPlay.grantId,
+          token: nextHandle.searchParams.get('t') ?? '',
+          now: new Date(Date.parse(nextPlay.expiresAt) + 1)
+        }),
+      (error: unknown) => isStructuredError(error) && error.code === 'AUTH_REQUIRED'
+    )
+    const expired = await fetch(nextPlay.playbackHandle, { method: 'HEAD' })
+    assert.equal(expired.status, 404)
   })
 })
 

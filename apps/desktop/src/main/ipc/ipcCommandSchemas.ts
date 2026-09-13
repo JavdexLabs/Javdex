@@ -686,7 +686,8 @@ export const appIpcSchemas = {
     z
       .object({
         mode: z.enum(['local', 'remote']).optional(),
-        remoteBaseUrl: z.string().max(2048).nullable().optional()
+        remoteBaseUrl: z.string().max(2048).nullable().optional(),
+        playerPath: z.string().max(4096).nullable().optional()
       })
       .strict()
   ]),
@@ -935,7 +936,7 @@ export const appIpcSchemas = {
   [IPC.PLAYLIST_IMPORT_CONTROL]: z.tuple([nonEmptyText, playlistImportControl]),
   [IPC.PLAYER_PLAY]: z.tuple([id, id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id, id]),
-  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id]),
+  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id, id.optional()]),
   [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id, id]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),

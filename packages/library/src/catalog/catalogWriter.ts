@@ -5,6 +5,7 @@ import type { WriterClaimKind, WriterClaimResult, WriterStatus } from '@shared/p
 import { getDb } from '@library/db/database'
 import { digestEquals, digestToken, generateSecret } from './catalogSecrets'
 import { ensureCatalogIdentity, readCatalogIdentity, type CatalogIdentityState } from './catalogIdentity'
+import { notifyPlayGrantsRevoked, revokeAllPlayGrants } from './catalogPlay'
 
 const CLAIM_KINDS = new Set<WriterClaimKind>(['initialBind', 'handoff', 'deployRecover'])
 
@@ -209,7 +210,8 @@ export function claimWriter(
     throw structuredError('INVALID_INPUT', '候选凭据摘要无效', { field: 'candidate.secretDigest' })
   }
   const now = options.now ?? (() => new Date())
-  return database.transaction(() => {
+  let revoked: string[] = []
+  const result = database.transaction(() => {
     const identity = requireIdentity(database)
     const existing = database
       .prepare(
@@ -332,6 +334,9 @@ export function claimWriter(
         createdAt,
         createdAt
       )
+    revoked = revokeAllPlayGrants(database)
     return result
   })()
+  notifyPlayGrantsRevoked(revoked)
+  return result
 }

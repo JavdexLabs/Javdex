@@ -3,6 +3,7 @@ import { getDb } from '@library/db/database'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
 import { getVideoResourceInLibrary } from '@library/db/videoRepo'
+import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import { getMediaLibraryDetail, MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
 import {
   addVideoToPlaylist,
@@ -207,7 +208,8 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'videos.getResource'(args) {
     const input = args.envelope.input as { libraryId: number; videoId: number; resourceId: number }
     const resource = getVideoResourceInLibrary(input.libraryId, input.resourceId)
-    return resource?.video_id === input.videoId ? resource : null
+    if (!resource || resource.video_id !== input.videoId) return null
+    return { ...resource, locatorRevision: resourceLocatorRevision(resource) }
   },
   'videos.setRating'(args) {
     const input = args.envelope.input as { videoId: number; rating: number }

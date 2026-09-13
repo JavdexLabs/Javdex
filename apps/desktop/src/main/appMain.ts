@@ -12,7 +12,7 @@ import { mediaAssetStore } from '@library/mediaAssetStore'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
-import { serveMediaAssetRequest } from './services/mediaProtocol'
+import { serveMediaAssetRequest, createRemoteAssetReader } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
 import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
@@ -138,9 +138,15 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   })
 }
 
-/** Serve files from the media_assets directory through the media:// scheme. */
+/** Serve catalog images through the media:// scheme. Remote mode proxies with manage credentials. */
 function registerAssetProtocol(): void {
-  protocol.handle('media', (request) => serveMediaAssetRequest(request, mediaAssetStore))
+  protocol.handle('media', (request) => {
+    const runtime = desktopRuntime
+    if (!runtime || runtime.mode !== 'remote') {
+      return serveMediaAssetRequest(request, mediaAssetStore)
+    }
+    return serveMediaAssetRequest(request, createRemoteAssetReader(runtime.backend))
+  })
 }
 
 if (gotSingleInstanceLock) {

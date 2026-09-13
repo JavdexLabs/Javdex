@@ -20,6 +20,7 @@ import {
   type HttpSurface
 } from './surfaces'
 import { handleManageHttpRequest, type ManageHttpSurface } from './manage'
+import { handlePlayHttpRequest, closePlayStreams, type PlayHttpSurface } from './play'
 
 const COOKIE = 'javdex_web_session'
 export function isLocalPeer(address: string): boolean {
@@ -138,6 +139,8 @@ export class WebServer {
       probes?: WebHealthProbes
       /** Server host only. Desktop LAN browse must omit this so /manage/v1 stays 404. */
       manage?: ManageHttpSurface
+      /** Server host only. Resource-scoped playback; independent of browser sessions. */
+      play?: PlayHttpSurface
     }
   ) {
     if ((options.surface ?? BROWSER_HTTP_SURFACE) === MANAGE_HTTP_SURFACE) {
@@ -222,6 +225,7 @@ export class WebServer {
     this.epoch++
     this.deliveries.clear()
     this.pairing.clear()
+    closePlayStreams('all')
     const server = this.server
     this.server = null
     try {
@@ -271,6 +275,9 @@ export class WebServer {
       throw new WebError(400, '请求地址无效')
     const originOk = !request.headers.origin || request.headers.origin === `http://${authority}`
     if (await handleManageHttpRequest(request, response, url, this.options.manage, originOk)) {
+      return
+    }
+    if (await handlePlayHttpRequest(request, response, url, this.options.play)) {
       return
     }
     const method = request.method ?? 'GET'

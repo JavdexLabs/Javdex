@@ -246,6 +246,10 @@ export interface CatalogAssetCommands {
     ctx?: CatalogQueryContext
   ) => Promise<CatalogPortValue>
   grantPlayback: Query<'play.grant'>
+  readImage: (
+    input: { relPath: string; size?: 320 | 640 | 1280 },
+    ctx?: CatalogQueryContext
+  ) => Promise<{ body: Buffer; mime: string }>
 }
 
 export interface CatalogMigrationCommands {

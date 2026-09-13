@@ -446,7 +446,7 @@ export interface AppIpcContract {
     result: PlayResult
   }
   [IPC.PLAYER_OPEN_RESOURCE]: {
-    args: [libraryId: number, resourceId: number]
+    args: [libraryId: number, resourceId: number, videoId?: number]
     result: PlayResult
   }
   [IPC.PLAYER_REVEAL_RESOURCE]: {

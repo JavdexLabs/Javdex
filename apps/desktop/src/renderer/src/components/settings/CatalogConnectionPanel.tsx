@@ -11,14 +11,19 @@ import { useSettingsDraft } from '../../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import styles from './NetworkSettingsPanel.module.css'
 
-type ConnectionDraft = { mode: 'local' | 'remote'; remoteBaseUrl: string }
+type ConnectionDraft = {
+  mode: 'local' | 'remote'
+  remoteBaseUrl: string
+  playerPath: string
+}
 
 export default function CatalogConnectionPanel(): JSX.Element {
   const { session, reconnect, claimWriter } = useDesktopSession()
   const [savedSettings, setSavedSettings] = useState<ThisComputerSettings | null>(null)
   const saved: ConnectionDraft = {
     mode: savedSettings?.mode ?? 'local',
-    remoteBaseUrl: savedSettings?.remoteBaseUrl ?? ''
+    remoteBaseUrl: savedSettings?.remoteBaseUrl ?? '',
+    playerPath: savedSettings?.playerPath ?? ''
   }
   const form = useSettingsDraft(saved)
   const [restartRequired, setRestartRequired] = useState(false)
@@ -37,13 +42,15 @@ export default function CatalogConnectionPanel(): JSX.Element {
     try {
       const result = await api.thisComputer.update({
         mode: draft.mode,
-        remoteBaseUrl: draft.mode === 'remote' ? draft.remoteBaseUrl.trim() || null : null
+        remoteBaseUrl: draft.mode === 'remote' ? draft.remoteBaseUrl.trim() || null : null,
+        playerPath: draft.playerPath.trim() || null
       })
       setSavedSettings(result.settings)
       setRestartRequired(result.restartRequired)
       form.accept({
         mode: result.settings.mode,
-        remoteBaseUrl: result.settings.remoteBaseUrl ?? ''
+        remoteBaseUrl: result.settings.remoteBaseUrl ?? '',
+        playerPath: result.settings.playerPath ?? ''
       })
       return true
     } catch (reason) {
@@ -92,6 +99,19 @@ export default function CatalogConnectionPanel(): JSX.Element {
               />
             </AppFormField>
           ) : null}
+          <AppFormField
+            label="播放器程序"
+            hint="远程播放本地影片时用参数数组启动该程序，不拼接 shell。可填 mpv 的绝对路径。"
+          >
+            <input
+              className="text-input"
+              value={draft.playerPath}
+              disabled={busy}
+              spellCheck={false}
+              placeholder="/usr/bin/mpv"
+              onChange={(event) => form.setDraft({ ...draft, playerPath: event.target.value })}
+            />
+          </AppFormField>
         </div>
         <SettingsFormActions
           dirty={form.dirty}

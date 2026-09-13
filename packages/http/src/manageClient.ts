@@ -102,6 +102,39 @@ export class ManageHttpClient {
       throw networkError(error)
     }
   }
+
+  async getAsset(
+    relPath: string,
+    options: ManageHttpCallOptions & { size?: number } = {}
+  ): Promise<{ body: Buffer; mime: string }> {
+    const headers: Record<string, string> = {
+      Origin: this.origin,
+      [APP_VERSION_HEADER]: this.appVersion
+    }
+    if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
+    const encoded = relPath
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/')
+    const search = options.size ? `?size=${options.size}` : ''
+    try {
+      const response = await fetch(joinUrl(this.baseUrl, `/manage/v1/assets/${encoded}${search}`), {
+        method: 'GET',
+        headers,
+        signal: options.signal ?? AbortSignal.timeout(this.timeoutMs)
+      })
+      if (response.status >= 400) {
+        const json: unknown = await response.json().catch(() => null)
+        throwIfStructured(response.status, json)
+      }
+      const mime = response.headers.get('content-type') ?? 'application/octet-stream'
+      const body = Buffer.from(await response.arrayBuffer())
+      return { body, mime }
+    } catch (error) {
+      throw networkError(error)
+    }
+  }
 }
 
 export function asStructuredManageError(error: unknown): StructuredError {

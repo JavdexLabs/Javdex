@@ -25,7 +25,11 @@ afterEach(() => {
 describe('this-computer settings store', () => {
   it('defaults to local mode and persists a remote URL only for remote mode', async () => {
     const store = createThisComputerSettingsStore(thisComputerSettingsPath(tempDir()))
-    assert.equal((await store.read()).mode, 'local')
+    const defaults = await store.read()
+    assert.equal(defaults.mode, 'local')
+    assert.equal(defaults.playerPath, null)
+    const withPlayer = await store.write({ playerPath: ' /usr/bin/mpv ' })
+    assert.equal(withPlayer.playerPath, '/usr/bin/mpv')
     const remote = await store.write({
       mode: 'remote',
       remoteBaseUrl: ' https://library.example:8443 '

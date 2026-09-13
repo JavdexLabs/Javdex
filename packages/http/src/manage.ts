@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
+import { parseImageThumbnailSize, type ImageThumbnailSize } from '@shared/imageVariants'
 import { MANAGE_OPERATIONS, type ManageOperationId } from '@shared/manage/operations'
 import type { ManageErrorCode } from '@shared/protocol/errorCodes'
 import { isStructuredError, structuredError, toStructuredError } from '@shared/protocol/errors'
@@ -8,6 +10,7 @@ import { json, readJson, WebError } from './http'
 const MANAGE_PREFIX = '/manage/v1/'
 const APP_VERSION_HEADER = 'x-javdex-app-version'
 const UPLOAD_PATH = /^\/manage\/v1\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+const ASSET_PREFIX = '/manage/v1/assets/'
 
 export interface ManageHttpContext {
   operation: ManageOperationId
@@ -15,6 +18,7 @@ export interface ManageHttpContext {
   bearerSecret: string | null
   remoteAddress: string
   isLoopback: boolean
+  host: string | null
 }
 
 export interface ManageUploadPutContext {
@@ -25,10 +29,21 @@ export interface ManageUploadPutContext {
   isLoopback: boolean
 }
 
+export interface ManageAssetGetContext {
+  relPath: string
+  size?: ImageThumbnailSize
+  request: IncomingMessage
+  bearerSecret: string | null
+  remoteAddress: string
+  isLoopback: boolean
+  signal?: AbortSignal
+}
+
 export interface ManageHttpSurface {
   appVersion: string
   dispatch: (context: ManageHttpContext) => unknown | Promise<unknown>
   putUpload?: (context: ManageUploadPutContext) => unknown | Promise<unknown>
+  getAsset?: (context: ManageAssetGetContext) => Promise<{ body: Buffer; mime: string }>
 }
 
 export function isLoopbackPeer(address: string): boolean {
@@ -117,20 +132,64 @@ export async function handleManageHttpRequest(
   if (!manage) throw new WebError(404, '页面不存在')
   if (request.headers.origin && !originOk) throw new WebError(403, '不允许跨站请求')
   const uploadMatch = UPLOAD_PATH.exec(url.pathname)
+  const remoteAddress = request.socket.remoteAddress ?? ''
+  const peer = {
+    bearerSecret: bearerSecret(request),
+    remoteAddress,
+    isLoopback: isLoopbackPeer(remoteAddress)
+  }
   if (uploadMatch) {
     if ((request.method ?? '') !== 'PUT') throw new WebError(405, '上传内容请使用 PUT')
     if (!manage.putUpload) throw new WebError(404, '页面不存在')
     if (!requireAppVersion(request, manage, response)) return true
-    const remoteAddress = request.socket.remoteAddress ?? ''
     await sendManageResult(response, () =>
       manage.putUpload!({
         uploadId: uploadMatch[1],
         request,
-        bearerSecret: bearerSecret(request),
-        remoteAddress,
-        isLoopback: isLoopbackPeer(remoteAddress)
+        ...peer
       })
     )
+    return true
+  }
+  if (url.pathname.startsWith(ASSET_PREFIX)) {
+    const method = request.method ?? 'GET'
+    if (method !== 'GET' && method !== 'HEAD') throw new WebError(405, '管理图片请使用 GET')
+    if (!manage.getAsset) throw new WebError(404, '页面不存在')
+    if (!requireAppVersion(request, manage, response)) return true
+    let size: ImageThumbnailSize | undefined
+    try {
+      size = parseImageThumbnailSize(url.searchParams.get('size'))
+    } catch {
+      throw new WebError(400, '图片尺寸参数无效')
+    }
+    const relPath = decodeURIComponent(url.pathname.slice(ASSET_PREFIX.length))
+    const controller = new AbortController()
+    const abort = (): void => controller.abort()
+    response.once('close', abort)
+    try {
+      const image = await manage.getAsset({
+        relPath,
+        size,
+        request,
+        ...peer,
+        signal: controller.signal
+      })
+      if (response.destroyed || controller.signal.aborted) return true
+      response.setHeader('Content-Type', image.mime)
+      response.setHeader('Content-Length', String(image.body.length))
+      response.statusCode = 200
+      response.end(method === 'HEAD' ? undefined : image.body)
+    } catch (error) {
+      if (response.destroyed || controller.signal.aborted) return true
+      if (error instanceof AssetReadQueueFullError) throw new WebError(503, '图片读取繁忙，请稍后重试')
+      if (error instanceof AssetReadTooLargeError || error instanceof AssetPixelLimitError) {
+        throw new WebError(413, '图片过大')
+      }
+      const structured = isStructuredError(error) ? error : toStructuredError(error)
+      json(response, manageErrorStatus(structured.code), structured)
+    } finally {
+      response.off('close', abort)
+    }
     return true
   }
   if ((request.method ?? 'GET') !== 'POST') throw new WebError(405, '管理接口仅接受 POST')
@@ -138,14 +197,12 @@ export async function handleManageHttpRequest(
   if (!operation) throw new WebError(404, '页面不存在')
   if (operation !== 'handshake.get' && !requireAppVersion(request, manage, response)) return true
   const body = await readJson(request, JSON_REQUEST_MAX_BYTES)
-  const remoteAddress = request.socket.remoteAddress ?? ''
   await sendManageResult(response, () =>
     manage.dispatch({
       operation,
       body,
-      bearerSecret: bearerSecret(request),
-      remoteAddress,
-      isLoopback: isLoopbackPeer(remoteAddress)
+      ...peer,
+      host: request.headers.host ?? null
     })
   )
   return true

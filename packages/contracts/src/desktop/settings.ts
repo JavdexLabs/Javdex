@@ -15,6 +15,7 @@ export interface ThisComputerSettings {
 export interface ThisComputerSettingsPatch {
   mode?: 'local' | 'remote'
   remoteBaseUrl?: string | null
+  playerPath?: string | null
 }
 
 export interface ThisComputerSettingsUpdateResult {

@@ -356,7 +356,7 @@ export default function DetailPage(): JSX.Element {
   const handleOpenResource = async (resourceId: number): Promise<void> => {
     if (!video) return
     try {
-      const result = await api.player.openResource(video.activeLibraryId, resourceId)
+      const result = await api.player.openResource(video.activeLibraryId, resourceId, videoId)
       if (result.ok) {
         toast.show('已交给系统打开', 'success')
       } else if (result.fileMissing) {

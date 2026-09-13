@@ -56,5 +56,5 @@ export function registerIpcHandlers(
   registerLibraryCuratorHandlers()
   registerAgentMetadataHandlers(ctx, options.backend)
   registerPlaylistImportHandlers(ctx)
-  registerPlayerHandlers()
+  registerPlayerHandlers(options.backend, options.settings)
 }

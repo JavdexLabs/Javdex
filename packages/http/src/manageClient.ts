@@ -103,6 +103,32 @@ export class ManageHttpClient {
     }
   }
 
+  async putMigrationPackage(
+    migrationId: string,
+    body: Buffer,
+    options: ManageHttpCallOptions = {}
+  ): Promise<unknown> {
+    const headers: Record<string, string> = {
+      Origin: this.origin,
+      'Content-Type': 'application/octet-stream',
+      [APP_VERSION_HEADER]: this.appVersion
+    }
+    if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
+    try {
+      const response = await fetch(joinUrl(this.baseUrl, `/manage/v1/migration/packages/${migrationId}`), {
+        method: 'PUT',
+        headers,
+        body: new Uint8Array(body),
+        signal: options.signal ?? AbortSignal.timeout(this.timeoutMs)
+      })
+      const json: unknown = await response.json().catch(() => null)
+      throwIfStructured(response.status, json)
+      return json
+    } catch (error) {
+      throw networkError(error)
+    }
+  }
+
   async getAsset(
     relPath: string,
     options: ManageHttpCallOptions & { size?: number } = {}

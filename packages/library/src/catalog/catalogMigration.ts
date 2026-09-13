@@ -1,0 +1,790 @@
+import { randomUUID } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import Database from 'better-sqlite3'
+import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
+import type {
+  MigrationControlInput,
+  MigrationPreview,
+  MigrationPreviewInput,
+  MigrationStatus,
+  RootMapping
+} from '@shared/protocol/migration'
+import { CURRENT_SCHEMA_VERSION, migrateDatabase } from '@library/db/migrations'
+import { MANAGE_PROTOCOL_VERSION } from '@shared/protocol/identity'
+import { MIGRATION_PACKAGE_MAX_BYTES } from '@shared/protocol/limits'
+import { ASSET_MEDIA_SUBDIRS, resolveMediaAssetsRoot } from '@library/assetStoragePaths'
+import {
+  resolveLibraryMediaMounts,
+  resolveLibraryUserDataPath
+} from '@library/runtime/host'
+import { structuredError } from '@shared/protocol/errors'
+import { getDb } from '@library/db/database'
+import { digestEquals, digestRequest } from './catalogSecrets'
+import { readCatalogIdentity, setCatalogFrozen } from './catalogIdentity'
+import { readCatalogSetting, writeCatalogSetting } from './catalogSettings'
+import { MIGRATION_AUTH_KEY } from './catalogMigrationAuth'
+import { putCatalogTask } from './catalogTasks'
+import {
+  MIGRATION_FINAL_PREFIX,
+  MIGRATION_STATE_KEY,
+  catalogLooksEmpty,
+  type StoredMigrationState
+} from './catalogMigrationState'
+import { computeMigrationPreview } from './catalogMigrationPreview'
+import { applyMigrationTransforms, stripExportSecrets } from './catalogMigrationApply'
+import {
+  MIGRATION_FORMAT_VERSION,
+  packMigrationArchive,
+  posixRel,
+  sha256File,
+  unpackMigrationArchive,
+  walkFiles,
+  type MigrationManifest
+} from './catalogMigrationArchive'
+
+const ENC_MAGIC = Buffer.from('AVPK\x01')
+
+export interface CatalogMigrationHost {
+  appVersion: string
+  userDataPath?: string
+  imagesDir?: string
+  mediaMounts?: Readonly<Record<string, string>>
+  now?: () => Date
+}
+
+function hostPaths(host: CatalogMigrationHost): {
+  userDataPath: string
+  imagesDir: string
+  mediaMounts: Readonly<Record<string, string>>
+} {
+  const userDataPath = host.userDataPath ?? resolveLibraryUserDataPath()
+  return {
+    userDataPath,
+    imagesDir: host.imagesDir ?? resolveMediaAssetsRoot(),
+    mediaMounts: host.mediaMounts ?? resolveLibraryMediaMounts()
+  }
+}
+
+export function openIsolatedCatalog(dbPath: string): Database.Database {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+  const connection = new Database(dbPath)
+  connection.pragma('journal_mode = WAL')
+  connection.pragma('foreign_keys = ON')
+  migrateDatabase(connection)
+  return connection
+}
+
+function readState(database: Database.Database): StoredMigrationState | null {
+  return readCatalogSetting<StoredMigrationState | null>(MIGRATION_STATE_KEY, null, database)
+}
+
+function writeState(state: StoredMigrationState, database: Database.Database): void {
+  writeCatalogSetting(MIGRATION_STATE_KEY, state, database)
+}
+
+function writeFinal(state: StoredMigrationState, database: Database.Database): void {
+  writeCatalogSetting(`${MIGRATION_FINAL_PREFIX}${state.migrationId}`, state, database)
+}
+
+function countEncryptedAssets(imagesDir: string): number {
+  if (!fs.existsSync(imagesDir)) return 0
+  let count = 0
+  for (const rel of walkOfficialImages(imagesDir)) {
+    const abs = path.join(imagesDir, rel)
+    const fd = fs.openSync(abs, 'r')
+    try {
+      const buf = Buffer.alloc(ENC_MAGIC.length)
+      const read = fs.readSync(fd, buf, 0, buf.length, 0)
+      if (read >= ENC_MAGIC.length && buf.equals(ENC_MAGIC)) count += 1
+    } finally {
+      fs.closeSync(fd)
+    }
+  }
+  return count
+}
+
+function walkOfficialImages(imagesDir: string): string[] {
+  const files: string[] = []
+  for (const subdir of ASSET_MEDIA_SUBDIRS) {
+    const root = path.join(imagesDir, subdir)
+    if (!fs.existsSync(root)) continue
+    for (const abs of walkFiles(root)) {
+      files.push(posixRel(imagesDir, abs))
+    }
+  }
+  return files.sort()
+}
+
+function availableBytes(dir: string): number {
+  fs.mkdirSync(dir, { recursive: true })
+  const stat = fs.statfsSync(dir)
+  return Number(stat.bavail) * Number(stat.bsize)
+}
+
+function digestImages(imagesDir: string, rels: string[]): { count: number; digest: string } {
+  const payload = rels.map((rel) => {
+    const abs = path.join(imagesDir, rel)
+    const stat = fs.statSync(abs)
+    return { rel, size: stat.size, sha256: sha256File(abs) }
+  })
+  return { count: rels.length, digest: digestRequest(payload) }
+}
+
+function packagePath(userDataPath: string, migrationId: string): string {
+  return path.join(userDataPath, 'migration-packages', `${migrationId}.tar.gz`)
+}
+
+function stagingDir(userDataPath: string, migrationId: string): string {
+  return path.join(userDataPath, 'migration-staging', migrationId)
+}
+
+function copyOfficialImages(fromDir: string, toDir: string): void {
+  for (const rel of walkOfficialImages(fromDir)) {
+    const dest = path.join(toDir, rel)
+    fs.mkdirSync(path.dirname(dest), { recursive: true })
+    fs.copyFileSync(path.join(fromDir, rel), dest)
+  }
+}
+
+function listUserTables(database: Database.Database): string[] {
+  return (
+    database
+      .prepare(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+          ORDER BY name`
+      )
+      .all() as Array<{ name: string }>
+  ).map((row) => row.name)
+}
+
+function copyAttachedCatalog(dest: Database.Database, alias: string): void {
+  dest.pragma('defer_foreign_keys = ON')
+  for (const name of listUserTables(dest)) {
+    dest.exec(`DELETE FROM "${name}"`)
+  }
+  const names = dest
+    .prepare(
+      `SELECT name FROM ${alias}.sqlite_master
+        WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`
+    )
+    .all() as Array<{ name: string }>
+  for (const { name } of names) {
+    dest.exec(`INSERT INTO "${name}" SELECT * FROM ${alias}."${name}"`)
+  }
+  dest.pragma('defer_foreign_keys = OFF')
+}
+
+export function previewCatalogMigration(
+  input: MigrationPreviewInput,
+  host: CatalogMigrationHost,
+  database: Database.Database = getDb()
+): MigrationPreview {
+  const identity = readCatalogIdentity(database)
+  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  const existing = readState(database)
+  if (existing && existing.role === 'source' && !['prepare', 'abandoned', 'enabled'].includes(existing.sourcePhase)) {
+    throw structuredError('MAINTENANCE_BUSY', '已有迁移尚未结束')
+  }
+  if (existing && existing.role === 'target' && !['prepare', 'abandoned', 'enabled'].includes(existing.targetPhase)) {
+    throw structuredError('MAINTENANCE_BUSY', '已有迁移尚未结束')
+  }
+  const { imagesDir, mediaMounts } = hostPaths(host)
+  if (catalogLooksEmpty(database)) {
+    for (const mapping of input.mappings) {
+      if (!mediaMounts[mapping.targetMountSelectionId]) {
+        throw structuredError('INVALID_INPUT', '目标挂载不存在，不能降级为不映射', {
+          field: 'targetMountSelectionId'
+        })
+      }
+    }
+    return {
+      migrationId: existing?.migrationId ?? randomUUID(),
+      sourceServerId: identity.serverId,
+      sourceCatalogId: identity.catalogId,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      appVersion: host.appVersion,
+      localResourceRemovals: 0,
+      strmConversions: 0,
+      strmConflicts: [],
+      omittedRoots: [],
+      autoCleanupDisabledLibraryIds: [],
+      pendingBlockers: [],
+      digest: digestRequest({ mappings: input.mappings, role: 'target' })
+    }
+  }
+  const preview = computeMigrationPreview(
+    input.mappings,
+    {
+      appVersion: host.appVersion,
+      encryptedAssetCount: countEncryptedAssets(imagesDir)
+    },
+    database
+  )
+  const role: StoredMigrationState['role'] = catalogLooksEmpty(database) ? 'target' : 'source'
+  writeState(
+    {
+      migrationId: preview.migrationId,
+      role,
+      sourcePhase: role === 'source' ? 'prepare' : 'prepare',
+      targetPhase: role === 'target' ? 'prepare' : 'prepare',
+      digest: preview.digest,
+      mappings: input.mappings,
+      preview,
+      sourcePlatform: process.platform,
+      sourceServerId: identity.serverId,
+      sourceCatalogId: identity.catalogId,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      appVersion: host.appVersion,
+      packageRel: null
+    },
+    database
+  )
+  return preview
+}
+
+function requireState(
+  input: MigrationControlInput,
+  database: Database.Database
+): StoredMigrationState {
+  const state = readState(database)
+  if (!state || state.migrationId !== input.migrationId) {
+    throw structuredError('INVALID_INPUT', '迁移编号不匹配')
+  }
+  if (!digestEquals(state.digest, input.digest)) {
+    throw structuredError('VERSION_CONFLICT', '迁移摘要已变化，请重新预览')
+  }
+  return state
+}
+
+async function exportSourcePackage(
+  state: StoredMigrationState,
+  host: CatalogMigrationHost,
+  database: Database.Database
+): Promise<string> {
+  const { userDataPath, imagesDir } = hostPaths(host)
+  const dbPath = database.name
+  if (!dbPath || dbPath === ':memory:') {
+    throw structuredError('UNSUPPORTED_CAPABILITY', '内存资料库不能导出迁移包')
+  }
+  const imageRelsLive = walkOfficialImages(imagesDir)
+  const estimated =
+    fs.statSync(dbPath).size +
+    imageRelsLive.reduce((sum, rel) => sum + fs.statSync(path.join(imagesDir, rel)).size, 0)
+  if (availableBytes(userDataPath) < estimated * 2) {
+    throw structuredError('LIMIT_EXCEEDED', '磁盘空间不足导出迁移数据')
+  }
+  database.pragma('wal_checkpoint(TRUNCATE)')
+  const workDir = path.join(userDataPath, 'migration-work', state.migrationId)
+  fs.rmSync(workDir, { recursive: true, force: true })
+  fs.mkdirSync(path.join(workDir, 'catalog'), { recursive: true })
+  fs.mkdirSync(path.join(workDir, 'images'), { recursive: true })
+  const copiedDb = path.join(workDir, 'catalog', 'library.db')
+  fs.copyFileSync(dbPath, copiedDb)
+  const copy = openIsolatedCatalog(copiedDb)
+  try {
+    stripExportSecrets(copy)
+    copy.pragma('wal_checkpoint(TRUNCATE)')
+  } finally {
+    copy.close()
+  }
+  copyOfficialImages(imagesDir, path.join(workDir, 'images'))
+  const imageRels = walkOfficialImages(path.join(workDir, 'images'))
+  const imageDigest = digestImages(path.join(workDir, 'images'), imageRels)
+  const dataDigest = sha256File(copiedDb)
+  const videoCount = (
+    database.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }
+  ).n
+  const manifest: MigrationManifest = {
+    formatVersion: MIGRATION_FORMAT_VERSION,
+    protocolVersion: MANAGE_PROTOCOL_VERSION,
+    appVersion: host.appVersion,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    sourcePlatform: state.sourcePlatform,
+    sourceServerId: state.sourceServerId,
+    sourceCatalogId: state.sourceCatalogId,
+    migrationId: state.migrationId,
+    previewDigest: state.digest,
+    mappings: state.mappings,
+    autoCleanupDisabledLibraryIds: state.preview.autoCleanupDisabledLibraryIds,
+    dataCount: videoCount,
+    dataDigest,
+    imageCount: imageDigest.count,
+    imageDigest: imageDigest.digest,
+    mappingDigest: digestRequest(state.mappings),
+    createdAt: (host.now ?? (() => new Date()))().toISOString()
+  }
+  const manifestPath = path.join(workDir, 'manifest.json')
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  const members = [
+    { name: 'manifest.json', absPath: manifestPath },
+    { name: 'catalog/library.db', absPath: copiedDb },
+    ...imageRels.map((rel) => ({
+      name: `images/${rel}`,
+      absPath: path.join(workDir, 'images', rel)
+    }))
+  ]
+  const dest = packagePath(userDataPath, state.migrationId)
+  await packMigrationArchive(members, dest)
+  return dest
+}
+
+async function importTargetPackage(
+  input: MigrationControlInput,
+  host: CatalogMigrationHost,
+  database: Database.Database
+): Promise<StoredMigrationState> {
+  const { userDataPath, mediaMounts } = hostPaths(host)
+  const identity = readCatalogIdentity(database)
+  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  if (!catalogLooksEmpty(database)) {
+    throw structuredError('INVALID_INPUT', '只能迁入空目标资料库')
+  }
+  if (identity.writerEpoch > 0) {
+    throw structuredError('AUTH_REQUIRED', '已认主的目标不能接收迁移')
+  }
+  const archive = packagePath(userDataPath, input.migrationId)
+  if (!fs.existsSync(archive)) {
+    throw structuredError('INVALID_INPUT', '目标尚未暂存迁移包')
+  }
+  const dest = stagingDir(userDataPath, input.migrationId)
+  fs.rmSync(dest, { recursive: true, force: true })
+  await unpackMigrationArchive(archive, dest, { availableBytes: availableBytes(userDataPath) })
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(dest, 'manifest.json'), 'utf8')
+  ) as MigrationManifest
+  if (manifest.formatVersion !== MIGRATION_FORMAT_VERSION) {
+    throw structuredError('VERSION_MISMATCH', '迁移包格式版本不支持')
+  }
+  if (manifest.appVersion !== host.appVersion) {
+    throw structuredError('VERSION_MISMATCH', '桌面与服务器应用版本不一致')
+  }
+  if (manifest.schemaVersion !== CURRENT_SCHEMA_VERSION) {
+    throw structuredError('VERSION_MISMATCH', '迁移包 schema 版本不一致')
+  }
+  if (manifest.migrationId !== input.migrationId) {
+    throw structuredError('INVALID_INPUT', '迁移编号与数据包不一致')
+  }
+  if (!digestEquals(manifest.previewDigest, input.digest)) {
+    throw structuredError('VERSION_CONFLICT', '迁移摘要与数据包不一致')
+  }
+  const stagedDbPath = path.join(dest, 'catalog', 'library.db')
+  if (sha256File(stagedDbPath) !== manifest.dataDigest) {
+    throw structuredError('VERSION_CONFLICT', '数据包校验失败')
+  }
+  const stagedImages = path.join(dest, 'images')
+  const imageRels = walkOfficialImages(stagedImages)
+  const imageDigest = digestImages(stagedImages, imageRels)
+  if (imageDigest.count !== manifest.imageCount || imageDigest.digest !== manifest.imageDigest) {
+    throw structuredError('VERSION_CONFLICT', '图片包校验失败')
+  }
+  if (countEncryptedAssets(stagedImages) > 0) {
+    throw structuredError('INVALID_INPUT', '加密存量阻止迁入')
+  }
+  const staged = openIsolatedCatalog(stagedDbPath)
+  try {
+    applyMigrationTransforms(
+      staged,
+      manifest.mappings,
+      mediaMounts,
+      manifest.sourcePlatform,
+      manifest.autoCleanupDisabledLibraryIds
+    )
+    staged.pragma('wal_checkpoint(TRUNCATE)')
+  } finally {
+    staged.close()
+  }
+  copyOfficialImages(stagedImages, path.join(dest, 'applied-images'))
+  return {
+    migrationId: manifest.migrationId,
+    role: 'target',
+    sourcePhase: 'frozen',
+    targetPhase: 'ready',
+    digest: manifest.previewDigest,
+    mappings: manifest.mappings,
+    preview: {
+      migrationId: manifest.migrationId,
+      sourceServerId: manifest.sourceServerId,
+      sourceCatalogId: manifest.sourceCatalogId,
+      schemaVersion: manifest.schemaVersion,
+      appVersion: manifest.appVersion,
+      localResourceRemovals: 0,
+      strmConversions: 0,
+      strmConflicts: [],
+      omittedRoots: [],
+      autoCleanupDisabledLibraryIds: manifest.autoCleanupDisabledLibraryIds,
+      pendingBlockers: [],
+      digest: manifest.previewDigest
+    },
+    sourcePlatform: manifest.sourcePlatform,
+    sourceServerId: manifest.sourceServerId,
+    sourceCatalogId: manifest.sourceCatalogId,
+    schemaVersion: manifest.schemaVersion,
+    appVersion: manifest.appVersion,
+    packageRel: path.relative(userDataPath, archive)
+  }
+}
+
+export async function startCatalogMigration(
+  input: MigrationControlInput,
+  host: CatalogMigrationHost,
+  database: Database.Database = getDb()
+): Promise<CatalogTaskSnapshot | MigrationPreview> {
+  if (catalogLooksEmpty(database)) {
+    return startTargetMigration(input, host, database)
+  }
+  const identity = readCatalogIdentity(database)
+  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  const state = requireState(input, database)
+  const { imagesDir } = hostPaths(host)
+  if (state.role === 'source') {
+    const recomputed = computeMigrationPreview(
+      state.mappings,
+      { appVersion: host.appVersion, encryptedAssetCount: countEncryptedAssets(imagesDir) },
+      database
+    )
+    if (recomputed.digest !== state.digest) {
+      throw structuredError('VERSION_CONFLICT', '冻结后影响已变化，请重新预览')
+    }
+    if (recomputed.pendingBlockers.length > 0 || recomputed.strmConflicts.length > 0) {
+      throw structuredError('INVALID_INPUT', '迁移预检未通过')
+    }
+    setCatalogFrozen(true, database)
+    const taskId = state.taskId ?? randomUUID()
+    const snapshot: CatalogTaskSnapshot = {
+      owner: 'catalog',
+      taskId,
+      catalogId: identity.catalogId,
+      kind: 'migration.start',
+      state: 'running',
+      taskRevision: 1,
+      progressSeq: 0,
+      label: '冻结并导出迁移包'
+    }
+    putCatalogTask(snapshot, {}, database)
+    try {
+      const packageFile = await exportSourcePackage(state, host, database)
+      const next: StoredMigrationState = {
+        ...state,
+        sourcePhase: 'frozen',
+        packageRel: path.relative(hostPaths(host).userDataPath, packageFile),
+        taskId
+      }
+      writeState(next, database)
+      const done: CatalogTaskSnapshot = {
+        ...snapshot,
+        state: 'succeeded',
+        taskRevision: 2,
+        progressSeq: 1
+      }
+      putCatalogTask(done, {}, database)
+      return done
+    } catch (error) {
+      setCatalogFrozen(false, database)
+      putCatalogTask(
+        {
+          ...snapshot,
+          state: 'failed',
+          taskRevision: 2,
+          progressSeq: 1,
+          errorCode: 'RECOVERY_REQUIRED'
+        },
+        {},
+        database
+      )
+      throw error
+    }
+  }
+
+  throw structuredError('INVALID_INPUT', '源端迁移状态无效')
+}
+
+async function startTargetMigration(
+  input: MigrationControlInput,
+  host: CatalogMigrationHost,
+  database: Database.Database
+): Promise<CatalogTaskSnapshot> {
+  const identity = readCatalogIdentity(database)
+  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  setCatalogFrozen(true, database)
+  try {
+    const next = await importTargetPackage(input, host, database)
+    writeState(next, database)
+    const snapshot: CatalogTaskSnapshot = {
+      owner: 'catalog',
+      taskId: randomUUID(),
+      catalogId: identity.catalogId,
+      kind: 'migration.start',
+      state: 'succeeded',
+      taskRevision: 1,
+      progressSeq: 1,
+      label: '校验迁移暂存'
+    }
+    putCatalogTask(snapshot, {}, database)
+    return snapshot
+  } catch (error) {
+    setCatalogFrozen(false, database)
+    throw error
+  }
+}
+
+export function statusCatalogMigration(
+  input: { migrationId: string },
+  database: Database.Database = getDb()
+): MigrationStatus {
+  const live = readState(database)
+  const final = readCatalogSetting<StoredMigrationState | null>(
+    `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
+    null,
+    database
+  )
+  const state = live?.migrationId === input.migrationId ? live : final
+  if (!state) throw structuredError('INVALID_INPUT', '迁移不存在')
+  return {
+    migrationId: state.migrationId,
+    sourcePhase: state.sourcePhase,
+    targetPhase: state.targetPhase,
+    digest: state.digest
+  }
+}
+
+export function allowEnableCatalogMigration(
+  input: MigrationControlInput,
+  database: Database.Database = getDb()
+): MigrationStatus {
+  const state = requireState(input, database)
+  if (state.role !== 'source') {
+    throw structuredError('INVALID_INPUT', '只有源端可以持久发出启用许可')
+  }
+  if (state.sourcePhase !== 'frozen' && state.sourcePhase !== 'enableAuthorized') {
+    throw structuredError('INVALID_INPUT', '源端尚未冻结，不能发出启用许可')
+  }
+  const next: StoredMigrationState = {
+    ...state,
+    sourcePhase: 'enableAuthorized',
+    allowEnableAt: new Date().toISOString()
+  }
+  writeState(next, database)
+  return statusCatalogMigration({ migrationId: input.migrationId }, database)
+}
+
+export function enableCatalogMigration(
+  input: MigrationControlInput,
+  host: CatalogMigrationHost,
+  database: Database.Database = getDb()
+): MigrationStatus {
+  const identity = readCatalogIdentity(database)
+  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  const existingFinal = readCatalogSetting<StoredMigrationState | null>(
+    `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
+    null,
+    database
+  )
+  if (existingFinal?.targetPhase === 'abandoned') {
+    throw structuredError('AUTH_REQUIRED', '该迁移已放弃，迟到的启用许可无效')
+  }
+  if (existingFinal?.targetPhase === 'enabled') {
+    return {
+      migrationId: existingFinal.migrationId,
+      sourcePhase: existingFinal.sourcePhase,
+      targetPhase: existingFinal.targetPhase,
+      digest: existingFinal.digest
+    }
+  }
+  const { userDataPath, imagesDir } = hostPaths(host)
+  const stagedDb = path.join(stagingDir(userDataPath, input.migrationId), 'catalog', 'library.db')
+  const appliedImages = path.join(stagingDir(userDataPath, input.migrationId), 'applied-images')
+  if (!fs.existsSync(stagedDb)) {
+    throw structuredError('RECOVERY_REQUIRED', '迁移暂存不完整，不能发布')
+  }
+  const savedAuth = readCatalogSetting<unknown>(MIGRATION_AUTH_KEY, null, database)
+  database.exec(`ATTACH DATABASE ${sqlLiteral(stagedDb)} AS migsrc`)
+  try {
+    const result = database.transaction(() => {
+      const final = readCatalogSetting<StoredMigrationState | null>(
+        `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
+        null,
+        database
+      )
+      if (final?.targetPhase === 'abandoned') {
+        throw structuredError('AUTH_REQUIRED', '该迁移已放弃，迟到的启用许可无效')
+      }
+      if (final?.targetPhase === 'enabled') {
+        return {
+          migrationId: final.migrationId,
+          sourcePhase: final.sourcePhase,
+          targetPhase: final.targetPhase,
+          digest: final.digest
+        }
+      }
+      const state = requireState(input, database)
+      if (state.role !== 'target') {
+        throw structuredError('INVALID_INPUT', '只有目标可以启用迁入结果')
+      }
+      if (state.targetPhase === 'enabled') {
+        return statusCatalogMigration({ migrationId: input.migrationId }, database)
+      }
+      if (state.targetPhase !== 'ready') {
+        throw structuredError('INVALID_INPUT', '目标尚未就绪')
+      }
+      copyAttachedCatalog(database, 'migsrc')
+      const newCatalogId = randomUUID()
+      const now = (host.now ?? (() => new Date()))().toISOString()
+      database
+        .prepare(
+          `UPDATE catalog_identity
+              SET catalog_id = ?, server_id = ?, writer_epoch = 0, frozen = 0, updated_at = ?
+            WHERE id = 1`
+        )
+        .run(newCatalogId, identity.serverId, now)
+      if (savedAuth) writeCatalogSetting(MIGRATION_AUTH_KEY, savedAuth, database)
+      const next: StoredMigrationState = {
+        ...state,
+        targetPhase: 'enabled',
+        sourcePhase: 'frozen',
+        newCatalogId,
+        enabledAt: now
+      }
+      writeState(next, database)
+      writeFinal(next, database)
+      return {
+        migrationId: next.migrationId,
+        sourcePhase: next.sourcePhase,
+        targetPhase: next.targetPhase,
+        digest: next.digest
+      }
+    })()
+    if (result.targetPhase === 'enabled' && fs.existsSync(appliedImages)) {
+      copyOfficialImages(appliedImages, imagesDir)
+    }
+    return result
+  } finally {
+    try {
+      database.exec('DETACH DATABASE migsrc')
+    } catch {
+      // Detach after a rolled-back attach is optional.
+    }
+  }
+}
+
+export function abandonCatalogMigration(
+  input: MigrationControlInput,
+  host: CatalogMigrationHost,
+  database: Database.Database = getDb()
+): MigrationStatus {
+  const identity = readCatalogIdentity(database)
+  if (!identity) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  return database.transaction(() => {
+    const final = readCatalogSetting<StoredMigrationState | null>(
+      `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
+      null,
+      database
+    )
+    if (final?.targetPhase === 'enabled') {
+      return {
+        migrationId: final.migrationId,
+        sourcePhase: final.sourcePhase,
+        targetPhase: final.targetPhase,
+        digest: final.digest
+      }
+    }
+    if (final?.targetPhase === 'abandoned') {
+      return {
+        migrationId: final.migrationId,
+        sourcePhase: final.sourcePhase,
+        targetPhase: final.targetPhase,
+        digest: final.digest
+      }
+    }
+    const state = requireState(input, database)
+    const now = (host.now ?? (() => new Date()))().toISOString()
+    if (state.role === 'target') {
+      const next: StoredMigrationState = {
+        ...state,
+        targetPhase: 'abandoned',
+        abandonedAt: now
+      }
+      writeState(next, database)
+      writeFinal(next, database)
+      setCatalogFrozen(false, database)
+      const { userDataPath } = hostPaths(host)
+      fs.rmSync(stagingDir(userDataPath, state.migrationId), { recursive: true, force: true })
+      return {
+        migrationId: next.migrationId,
+        sourcePhase: next.sourcePhase,
+        targetPhase: next.targetPhase,
+        digest: next.digest
+      }
+    }
+    const next: StoredMigrationState = {
+      ...state,
+      sourcePhase: 'abandoned',
+      targetPhase: 'abandoned',
+      abandonedAt: now
+    }
+    writeState(next, database)
+    writeFinal(next, database)
+    setCatalogFrozen(false, database)
+    return {
+      migrationId: next.migrationId,
+      sourcePhase: next.sourcePhase,
+      targetPhase: next.targetPhase,
+      digest: next.digest
+    }
+  })()
+}
+
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+export function recoverCatalogMigration(database: Database.Database = getDb()): void {
+  const state = readState(database)
+  if (!state) return
+  const identity = readCatalogIdentity(database)
+  if (state.role === 'source' && state.sourcePhase === 'prepare' && identity?.frozen) {
+    setCatalogFrozen(false, database)
+    return
+  }
+  if (state.role === 'target' && state.targetPhase !== 'enabled' && state.targetPhase !== 'abandoned') {
+    if (identity && !identity.frozen) setCatalogFrozen(true, database)
+  }
+}
+
+export function stageMigrationPackageFile(
+  migrationId: string,
+  sourceFile: string,
+  host: CatalogMigrationHost
+): string {
+  const { userDataPath } = hostPaths(host)
+  const dest = packagePath(userDataPath, migrationId)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.copyFileSync(sourceFile, dest)
+  return dest
+}
+
+export function writeMigrationPackageBytes(
+  migrationId: string,
+  body: Buffer,
+  host: CatalogMigrationHost
+): { ok: true; bytes: number } {
+  if (body.length > MIGRATION_PACKAGE_MAX_BYTES) {
+    throw structuredError('LIMIT_EXCEEDED', '迁移包超过大小上限', {
+      limit: MIGRATION_PACKAGE_MAX_BYTES,
+      actual: body.length
+    })
+  }
+  const dest = packagePath(hostPaths(host).userDataPath, migrationId)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.writeFileSync(dest, body)
+  return { ok: true, bytes: body.length }
+}
+
+export function migrationPackagePath(migrationId: string, host: CatalogMigrationHost): string {
+  return packagePath(hostPaths(host).userDataPath, migrationId)
+}
+
+export function readStoredMigrationMappings(database: Database.Database = getDb()): RootMapping[] {
+  return readState(database)?.mappings ?? []
+}

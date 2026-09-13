@@ -53,13 +53,16 @@ function requireAbsolute(label: string, value: string): string {
   return path.resolve(value)
 }
 
-function parseArgs(argv: string[]): { configPath?: string; command: 'start' | 'bind' | 'recover' } {
+function parseArgs(argv: string[]): {
+  configPath?: string
+  command: 'start' | 'bind' | 'recover' | 'migrate-auth'
+} {
   const args = argv.slice(2)
-  let command: 'start' | 'bind' | 'recover' = 'start'
+  let command: 'start' | 'bind' | 'recover' | 'migrate-auth' = 'start'
   let configPath: string | undefined
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]
-    if (arg === 'start' || arg === 'bind' || arg === 'recover') {
+    if (arg === 'start' || arg === 'bind' || arg === 'recover' || arg === 'migrate-auth') {
       command = arg
       continue
     }
@@ -93,7 +96,7 @@ export async function loadServerConfig(
   env: NodeJS.ProcessEnv,
   argv: string[],
   defaults?: { staticRoot?: string }
-): Promise<{ command: 'start' | 'bind' | 'recover'; config: ServerConfig }> {
+): Promise<{ command: 'start' | 'bind' | 'recover' | 'migrate-auth'; config: ServerConfig }> {
   const { configPath, command } = parseArgs(argv)
   const resolvedConfigPath = configPath ?? env.JAVDEX_SERVER_CONFIG
   if (!resolvedConfigPath) {

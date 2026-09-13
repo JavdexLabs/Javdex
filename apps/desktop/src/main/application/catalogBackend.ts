@@ -259,6 +259,10 @@ export interface CatalogMigrationCommands {
   allowEnable: Command<'migration.allowEnable'>
   enable: Command<'migration.enable'>
   abandon: Command<'migration.abandon'>
+  putPackage: (
+    input: { migrationId: string; body: Buffer },
+    ctx?: CatalogQueryContext
+  ) => Promise<{ ok: true; bytes: number }>
 }
 
 export interface CatalogBackend {

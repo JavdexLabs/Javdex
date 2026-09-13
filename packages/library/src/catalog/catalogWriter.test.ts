@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { MANAGE_PROTOCOL_VERSION } from '@shared/protocol/identity'
-import { ensureCatalogIdentity, isWriterBound, readCatalogIdentity } from './catalogIdentity'
+import { ensureCatalogIdentity, isWriterBound, readCatalogIdentity, setCatalogFrozen } from './catalogIdentity'
 import { readHandshake } from './catalogHandshake'
 import {
   authenticateWriter,
@@ -130,6 +130,39 @@ describe('catalog writer protocol', () => {
       (error: unknown) => isStructuredError(error) && error.code === 'AUTH_REQUIRED'
     )
     authenticateWriter(nextSecret, { serverId, catalogId: readCatalogIdentity()!.catalogId, writerEpoch: 2 })
+  })
+
+  it('rejects claim and writer auth while the catalog is frozen', () => {
+    setup()
+    const serverId = randomUUID()
+    ensureCatalogIdentity({ serverId })
+    const issued = issueOneTimeToken('initialBind')
+    const secret = generateSecret()
+    claimWriter({
+      kind: 'initialBind',
+      oneTimeToken: issued.oneTimeToken,
+      candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
+    })
+    setCatalogFrozen(true)
+    assert.throws(
+      () =>
+        authenticateWriter(secret, {
+          serverId,
+          catalogId: readCatalogIdentity()!.catalogId,
+          writerEpoch: 1
+        }),
+      (error: unknown) => isStructuredError(error) && error.code === 'CATALOG_FROZEN'
+    )
+    const handoff = issueOneTimeToken('handoff')
+    assert.throws(
+      () =>
+        claimWriter({
+          kind: 'handoff',
+          oneTimeToken: handoff.oneTimeToken,
+          candidate: { claimId: randomUUID(), secretDigest: digestToken(generateSecret()) }
+        }),
+      (error: unknown) => isStructuredError(error) && error.code === 'CATALOG_FROZEN'
+    )
   })
 
   it('ignores bootstrap after the instance is already bound', () => {

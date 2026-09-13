@@ -3,6 +3,7 @@ import path from 'node:path'
 import { closeDatabase, initDatabaseAtPath, isDatabaseOpen } from '@library/db/database'
 import { ensureCatalogIdentity, isWriterBound } from '@library/catalog/catalogIdentity'
 import { issueOneTimeToken, type IssuedOneTimeToken } from '@library/catalog/catalogWriter'
+import { issueCatalogMigrationToken, type IssuedMigrationToken } from '@library/catalog/catalogMigrationAuth'
 import { configureLibraryHost } from '@library/runtime/host'
 import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
 import { configureLocalNfoScanService } from '@library/scan/nfoScanPort'
@@ -54,6 +55,26 @@ export function issueDeployToken(
       return issueOneTimeToken('initialBind', { token: options.bootstrapToken })
     }
     return issueOneTimeToken(kind)
+  } finally {
+    if (owned) closeDatabase()
+  }
+}
+
+/** One-time empty-target migration credential. Not a writer bearer and not an HTTP op. */
+export function issueMigrationToken(
+  config: ServerConfig,
+  options: { token?: string } = {}
+): IssuedMigrationToken {
+  const owned = !isDatabaseOpen()
+  if (owned) {
+    ensureLocalDataDir(config.dataDir)
+    configureServerLibraryHost(config)
+    ensureMediaAssetDirsAt(config.imagesDir)
+    initDatabaseAtPath(path.join(config.dataDir, 'library.db'))
+  }
+  try {
+    ensureCatalogIdentity({ serverId: randomUUID() })
+    return issueCatalogMigrationToken({ token: options.token })
   } finally {
     if (owned) closeDatabase()
   }

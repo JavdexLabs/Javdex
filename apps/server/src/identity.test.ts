@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { closeDatabase } from '@library/db/database'
 import { resetLibraryHostForTests } from '@library/runtime/host'
 import { hashPassword } from '@http/auth'
-import { issueDeployToken } from './identity'
+import { issueDeployToken, issueMigrationToken } from './identity'
 import type { ServerConfig } from './config'
 
 describe('deploy one-time tokens', () => {
@@ -38,6 +38,36 @@ describe('deploy one-time tokens', () => {
       assert.equal(sameUnbound.oneTimeToken, bootstrap)
       assert.equal(sameUnbound.catalogId, first.catalogId)
       assert.equal(fs.existsSync(path.join(dataDir, 'instance-bind.json')), false)
+    } finally {
+      closeDatabase()
+      resetLibraryHostForTests()
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('issues a CLI migration token without an HTTP issue-token op', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-token-'))
+    const dataDir = path.join(root, 'data')
+    const imagesDir = path.join(root, 'images')
+    const staticRoot = path.join(root, 'web')
+    fs.mkdirSync(staticRoot)
+    fs.writeFileSync(path.join(staticRoot, 'index.html'), '<!doctype html>')
+    const passwordHash = await hashPassword('correct horse battery')
+    const config: ServerConfig = {
+      listenHost: '127.0.0.1',
+      port: 0,
+      accessHosts: ['127.0.0.1'],
+      dataDir,
+      imagesDir,
+      staticRoot,
+      mediaMounts: {},
+      web: { username: 'viewer', passwordHash }
+    }
+    try {
+      const issued = issueMigrationToken(config)
+      assert.ok(issued.oneTimeToken.length >= 32)
+      assert.equal(issued.serverId.length, 36)
+      assert.equal(issued.catalogId.length, 36)
     } finally {
       closeDatabase()
       resetLibraryHostForTests()

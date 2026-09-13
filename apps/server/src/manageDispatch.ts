@@ -1,4 +1,8 @@
 import type Database from 'better-sqlite3'
+import { pipeline } from 'node:stream/promises'
+import { Transform } from 'node:stream'
+import fs from 'node:fs'
+import path from 'node:path'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
 import { getVideoDetail } from '@library/db/videoRepo'
 import { listMediaLibraries } from '@library/db/mediaLibraryRepo'
@@ -33,19 +37,30 @@ import {
 import { maybeCrashImageFlow } from '@library/catalog/catalogImageCrash'
 import { grantCatalogPlayback } from '@library/catalog/catalogPlay'
 import { readManageCatalogImage } from '@library/catalog/catalogManageImages'
+import { authenticateMigration } from '@library/catalog/catalogMigrationAuth'
+import {
+  abandonCatalogMigration,
+  allowEnableCatalogMigration,
+  enableCatalogMigration,
+  migrationPackagePath,
+  previewCatalogMigration,
+  startCatalogMigration,
+  statusCatalogMigration
+} from '@library/catalog/catalogMigration'
 import {
   completeCatalogUploadFromStream,
   createCatalogUpload,
   inspectCatalogUpload
 } from '@library/catalog/catalogUploads'
 import type { CatalogImageRef, UploadPurpose } from '@shared/protocol/uploads'
-import type { ManageImageContentType } from '@shared/protocol/limits'
+import { MIGRATION_PACKAGE_MAX_BYTES, type ManageImageContentType } from '@shared/protocol/limits'
 import { MANAGE_OPERATIONS, type ManageOperationId } from '@shared/manage/operations'
 import { parseManageRequest } from '@shared/manage/parse'
-import type { ManageHttpContext, ManageUploadPutContext, ManageAssetGetContext } from '@http/manage'
+import type { ManageHttpContext, ManageUploadPutContext, ManageAssetGetContext, ManageMigrationPackagePutContext } from '@http/manage'
 import { structuredError } from '@shared/protocol/errors'
 import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { ExpectedVersions } from '@shared/protocol/versions'
+import type { MigrationControlInput, MigrationPreviewInput } from '@shared/protocol/migration'
 import { SERVER_APP_VERSION } from './appVersion'
 import { CATALOG_NOT_HANDLED, dispatchCatalogManage } from './manageCatalogHandlers'
 import { readManageBrowserEnabled } from './manageBrowser'
@@ -133,6 +148,42 @@ export async function putManageUpload(
   )
 }
 
+export async function putManageMigrationPackage(
+  context: ManageMigrationPackagePutContext,
+  database?: Database.Database
+): Promise<{ ok: true; bytes: number }> {
+  const db = catalogDb(database)
+  authenticateMigration(context.bearerSecret, db)
+  const dest = migrationPackagePath(context.migrationId, { appVersion: SERVER_APP_VERSION })
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  let written = 0
+  const output = fs.createWriteStream(dest)
+  const counting = new Transform({
+    transform(chunk, _enc, callback) {
+      written += chunk.length
+      if (written > MIGRATION_PACKAGE_MAX_BYTES) {
+        callback(new Error('LIMIT_EXCEEDED:migration-package'))
+        return
+      }
+      callback(null, chunk)
+    }
+  })
+  try {
+    await pipeline(context.request, counting, output)
+  } catch (error) {
+    output.destroy()
+    fs.rmSync(dest, { force: true })
+    if (error instanceof Error && error.message === 'LIMIT_EXCEEDED:migration-package') {
+      throw structuredError('LIMIT_EXCEEDED', '迁移包超过大小上限', {
+        limit: MIGRATION_PACKAGE_MAX_BYTES,
+        actual: written
+      })
+    }
+    throw error
+  }
+  return { ok: true, bytes: written }
+}
+
 export async function getManageAsset(
   context: ManageAssetGetContext,
   _database?: Database.Database
@@ -187,7 +238,42 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     return issueOneTimeToken('deployRecover', {}, database)
   }
   if (meta.auth === 'migration') {
-    throw structuredError('UNSUPPORTED_CAPABILITY', `S12 尚未实现 ${operation}`)
+    const parsed = parseManageRequest(operation, context.body)
+    if (!parsed.success) throw structuredError('INVALID_INPUT', '请求格式无效')
+    authenticateMigration(context.bearerSecret, catalogDb(database))
+    const envelope = parsed.data as {
+      migrationId?: string
+      digest?: string
+      input: Record<string, unknown>
+    }
+    const input = envelope.input
+    if (
+      typeof input.migrationId === 'string' &&
+      envelope.migrationId &&
+      envelope.migrationId !== input.migrationId
+    ) {
+      throw structuredError('INVALID_INPUT', '迁移编号不一致')
+    }
+    const host = { appVersion: SERVER_APP_VERSION }
+    if (operation === 'migration.preview') {
+      return previewCatalogMigration(input as unknown as MigrationPreviewInput, host, catalogDb(database))
+    }
+    if (operation === 'migration.start') {
+      return startCatalogMigration(input as unknown as MigrationControlInput, host, catalogDb(database))
+    }
+    if (operation === 'migration.status') {
+      return statusCatalogMigration(input as unknown as { migrationId: string }, catalogDb(database))
+    }
+    if (operation === 'migration.allowEnable') {
+      return allowEnableCatalogMigration(input as unknown as MigrationControlInput, catalogDb(database))
+    }
+    if (operation === 'migration.enable') {
+      return enableCatalogMigration(input as unknown as MigrationControlInput, host, catalogDb(database))
+    }
+    if (operation === 'migration.abandon') {
+      return abandonCatalogMigration(input as unknown as MigrationControlInput, host, catalogDb(database))
+    }
+    throw structuredError('UNSUPPORTED_CAPABILITY', `尚未实现 ${operation}`)
   }
   if (meta.auth === 'publicHandshake') {
     throw structuredError('UNSUPPORTED_CAPABILITY', `尚未实现 ${operation}`)

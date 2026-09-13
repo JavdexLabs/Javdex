@@ -238,7 +238,7 @@ export function createUnconfiguredRemoteBackend(
     ]),
     agentMetadata: rejectSlice(['findReady', 'apply', 'discard']),
     assets: rejectSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback', 'readImage']),
-    migration: rejectSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),
+    migration: rejectSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon', 'putPackage']),
     async dispose(): Promise<void> {
       return
     }

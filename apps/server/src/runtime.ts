@@ -18,7 +18,7 @@ import type { ServerConfig } from './config'
 import { acquireDataDirLock, ensureLocalDataDir, ensureMediaMounts } from './filesystem'
 import { configureServerLibraryHost, ensureServerCatalog } from './identity'
 import { assertSharpDecode } from './imageCodec'
-import { dispatchManageOperation, putManageUpload, getManageAsset } from './manageDispatch'
+import { dispatchManageOperation, putManageUpload, getManageAsset, putManageMigrationPackage } from './manageDispatch'
 import { SERVER_APP_VERSION } from './appVersion'
 import { WebCatalogWorkerClient } from './webCatalogWorkerClient'
 import {
@@ -181,6 +181,7 @@ export async function startJavdexServer(
         appVersion: SERVER_APP_VERSION,
         dispatch: (context) => dispatchManageOperation(context, database),
         putUpload: (context) => putManageUpload(context, database),
+        putMigrationPackage: (context) => putManageMigrationPackage(context, database),
         getAsset: (context) => getManageAsset(context, database)
       },
       play: {

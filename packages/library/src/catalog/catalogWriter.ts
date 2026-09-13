@@ -213,6 +213,7 @@ export function claimWriter(
   let revoked: string[] = []
   const result = database.transaction(() => {
     const identity = requireIdentity(database)
+    if (identity.frozen) throw structuredError('CATALOG_FROZEN', '资料库已冻结')
     const existing = database
       .prepare(
         `SELECT claim_id, kind, candidate_secret_digest, status, writer_epoch, result_json

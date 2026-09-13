@@ -36,6 +36,15 @@ import {
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import {
+  abandonCatalogMigration,
+  allowEnableCatalogMigration,
+  enableCatalogMigration,
+  writeMigrationPackageBytes,
+  previewCatalogMigration,
+  startCatalogMigration,
+  statusCatalogMigration
+} from '@library/catalog/catalogMigration'
+import {
   enqueueLibraryScan,
   requestLibraryScanCancel,
   startLibraryScan
@@ -1339,7 +1348,31 @@ export function createLocalCatalogBackend(
         return mediaAssetStore.readForServeAsync(input.relPath, ctx?.signal, input.size)
       }
     },
-    migration: unsupportedSlice(['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon']),
+    migration: {
+      async preview(input) {
+        return previewCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async start(input) {
+        return startCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async status(input) {
+        return statusCatalogMigration(input)
+      },
+      async allowEnable(input) {
+        return allowEnableCatalogMigration(input)
+      },
+      async enable(input) {
+        return enableCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async abandon(input) {
+        return abandonCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async putPackage(input) {
+        return writeMigrationPackageBytes(input.migrationId, input.body, {
+          appVersion: dependencies.appVersion ?? '0.7.0'
+        })
+      }
+    },
     async dispose(): Promise<void> {
       return
     }

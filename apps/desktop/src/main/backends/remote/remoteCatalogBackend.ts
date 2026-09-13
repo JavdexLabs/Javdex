@@ -22,6 +22,7 @@ export interface RemoteCatalogBackendOptions {
   generation?: number
   timeoutMs?: number
   workStore?: { putVerification(operationId: string, catalogId: string): void }
+  migrationSecret?: string | null
 }
 
 const QUERY_KEYS = [
@@ -191,7 +192,6 @@ const BROWSER_KEYS = [
 ] as const
 
 const ASSET_KEYS = ['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback'] as const
-const MIGRATION_KEYS = ['preview', 'start', 'status', 'allowEnable', 'enable', 'abandon'] as const
 
 function rejectSlice<T extends object>(
   keys: readonly (keyof T)[],
@@ -358,6 +358,18 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         },
         { bearer: secret, signal: tracked.signal }
       )
+    } finally {
+      tracked.done()
+    }
+  }
+
+  const migrate = async (operation: string, input: unknown, signal?: AbortSignal): Promise<unknown> => {
+    const tracked = trackSignal(signal)
+    try {
+      if (!options.migrationSecret) {
+        throw structuredError('AUTH_REQUIRED', '缺少迁移凭据')
+      }
+      return await client.post(operation, { input }, { bearer: options.migrationSecret, signal: tracked.signal })
     } finally {
       tracked.done()
     }
@@ -848,7 +860,28 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         }
       }
     },
-    migration: rejectSlice(MIGRATION_KEYS, (key) => unsupported(`migration.${String(key)}`)),
+    migration: {
+      preview: (input, ctx) => migrate('migration.preview', input, ctx?.signal),
+      start: (input, ctx) => migrate('migration.start', input, ctx?.signal),
+      status: (input, ctx) => migrate('migration.status', input, ctx?.signal),
+      allowEnable: (input, ctx) => migrate('migration.allowEnable', input, ctx?.signal),
+      enable: (input, ctx) => migrate('migration.enable', input, ctx?.signal),
+      abandon: (input, ctx) => migrate('migration.abandon', input, ctx?.signal),
+      async putPackage(input, ctx) {
+        const tracked = trackSignal(ctx?.signal)
+        try {
+          if (!options.migrationSecret) {
+            throw structuredError('AUTH_REQUIRED', '缺少迁移凭据')
+          }
+          return (await client.putMigrationPackage(input.migrationId, input.body, {
+            bearer: options.migrationSecret,
+            signal: tracked.signal
+          })) as { ok: true; bytes: number }
+        } finally {
+          tracked.done()
+        }
+      }
+    },
     async dispose(): Promise<void> {
       abortInFlight()
       handshake = null

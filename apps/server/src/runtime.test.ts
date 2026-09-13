@@ -15,7 +15,7 @@ import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
 import { resetLibraryHostForTests } from '@library/runtime/host'
 import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
 import { isStructuredError } from '@shared/protocol/errors'
-import { issueDeployToken } from './identity'
+import { issueDeployToken, issueMigrationToken } from './identity'
 import { dispatchManageOperation } from './manageDispatch'
 import { startJavdexServer, type JavdexServerHandle } from './runtime'
 import type { ServerConfig } from './config'
@@ -2054,6 +2054,97 @@ describe('server runtime lifecycle', () => {
     )
     const expired = await fetch(nextPlay.playbackHandle, { method: 'HEAD' })
     assert.equal(expired.status, 404)
+  })
+
+  it('authorizes migration ops with a CLI token, freezes source writes, and ignores cookies', async () => {
+    const dataDir = path.join(root, 's12-migration')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const clip = path.join(mediaRoot, 'S12-HTTP.mp4')
+    fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
+    await insertBoundVideo('S12-HTTP', clip)
+    const rootId = (
+      getDb().prepare('SELECT id FROM media_library_roots LIMIT 1').get() as { id: number }
+    ).id
+    const cookie = (await login(base, password)).cookie
+    const issued = issueMigrationToken(config)
+    const dummyId = randomUUID()
+    const putHeaders = (extra: Record<string, string>): Record<string, string> => ({
+      Origin: base,
+      'Content-Type': 'application/octet-stream',
+      'X-Javdex-App-Version': SERVER_APP_VERSION,
+      ...extra
+    })
+    const cookiePut = await fetch(`${base}/manage/v1/migration/packages/${dummyId}`, {
+      method: 'PUT',
+      headers: putHeaders({ Cookie: cookie }),
+      body: Buffer.from('pkg')
+    })
+    assert.equal(cookiePut.status, 401)
+    const writerPut = await fetch(`${base}/manage/v1/migration/packages/${dummyId}`, {
+      method: 'PUT',
+      headers: putHeaders({ Authorization: `Bearer ${writer.secret}` }),
+      body: Buffer.from('pkg')
+    })
+    assert.equal(writerPut.status, 401)
+    const tokenPut = await fetch(`${base}/manage/v1/migration/packages/${dummyId}`, {
+      method: 'PUT',
+      headers: putHeaders({ Authorization: `Bearer ${issued.oneTimeToken}` }),
+      body: Buffer.from('pkg')
+    })
+    assert.equal(tokenPut.status, 200, await tokenPut.text())
+    const cookiePreview = await postManage(
+      base,
+      'migration.preview',
+      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
+      { cookie }
+    )
+    assert.equal(cookiePreview.status, 401)
+    const writerPreview = await postManage(
+      base,
+      'migration.preview',
+      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
+      { bearer: writer.secret }
+    )
+    assert.equal(writerPreview.status, 401)
+    const preview = await postManage(
+      base,
+      'migration.preview',
+      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
+      { bearer: issued.oneTimeToken }
+    )
+    assert.equal(preview.status, 200, JSON.stringify(preview.json))
+    const body = preview.json as { migrationId: string; digest: string }
+    const started = await postManage(
+      base,
+      'migration.start',
+      { input: { migrationId: body.migrationId, digest: body.digest } },
+      { bearer: issued.oneTimeToken }
+    )
+    assert.equal(started.status, 200, JSON.stringify(started.json))
+    assert.equal((started.json as { state?: string }).state, 'succeeded')
+    const frozenEdit = await postManage(
+      base,
+      'videos.list',
+      { serverId: writer.serverId, catalogId: writer.catalogId, input: { scope: { kind: 'all' } } },
+      { bearer: writer.secret }
+    )
+    assert.equal(frozenEdit.status, 403)
+    assert.equal((frozenEdit.json as { code?: string }).code, 'CATALOG_FROZEN')
+    const remote = createRemoteCatalogBackend({
+      baseUrl: base,
+      appVersion: SERVER_APP_VERSION,
+      credentials: memoryCredentials(new Map()),
+      migrationSecret: issued.oneTimeToken
+    })
+    try {
+      const status = (await remote.migration.status({ migrationId: body.migrationId })) as {
+        sourcePhase: string
+      }
+      assert.equal(status.sourcePhase, 'frozen')
+    } finally {
+      await remote.dispose()
+    }
   })
 })
 

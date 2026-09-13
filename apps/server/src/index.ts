@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadServerConfig } from './config'
-import { issueDeployToken } from './identity'
+import { issueDeployToken, issueMigrationToken } from './identity'
 import { startJavdexServer } from './runtime'
 
 function defaultStaticRoot(): string {
@@ -25,6 +25,11 @@ async function main(): Promise<void> {
   }
   if (command === 'recover') {
     const issued = issueDeployToken(config, 'deployRecover')
+    process.stdout.write(`${JSON.stringify(issued)}\n`)
+    return
+  }
+  if (command === 'migrate-auth') {
+    const issued = issueMigrationToken(config)
     process.stdout.write(`${JSON.stringify(issued)}\n`)
     return
   }

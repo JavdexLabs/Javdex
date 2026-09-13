@@ -10,6 +10,8 @@ import { json, readJson, WebError } from './http'
 const MANAGE_PREFIX = '/manage/v1/'
 const APP_VERSION_HEADER = 'x-javdex-app-version'
 const UPLOAD_PATH = /^\/manage\/v1\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+const MIGRATION_PACKAGE_PATH =
+  /^\/manage\/v1\/migration\/packages\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
 const ASSET_PREFIX = '/manage/v1/assets/'
 
 export interface ManageHttpContext {
@@ -39,10 +41,19 @@ export interface ManageAssetGetContext {
   signal?: AbortSignal
 }
 
+export interface ManageMigrationPackagePutContext {
+  migrationId: string
+  request: IncomingMessage
+  bearerSecret: string | null
+  remoteAddress: string
+  isLoopback: boolean
+}
+
 export interface ManageHttpSurface {
   appVersion: string
   dispatch: (context: ManageHttpContext) => unknown | Promise<unknown>
   putUpload?: (context: ManageUploadPutContext) => unknown | Promise<unknown>
+  putMigrationPackage?: (context: ManageMigrationPackagePutContext) => unknown | Promise<unknown>
   getAsset?: (context: ManageAssetGetContext) => Promise<{ body: Buffer; mime: string }>
 }
 
@@ -145,6 +156,20 @@ export async function handleManageHttpRequest(
     await sendManageResult(response, () =>
       manage.putUpload!({
         uploadId: uploadMatch[1],
+        request,
+        ...peer
+      })
+    )
+    return true
+  }
+  const packageMatch = MIGRATION_PACKAGE_PATH.exec(url.pathname)
+  if (packageMatch) {
+    if ((request.method ?? '') !== 'PUT') throw new WebError(405, '迁移包请使用 PUT')
+    if (!manage.putMigrationPackage) throw new WebError(404, '页面不存在')
+    if (!requireAppVersion(request, manage, response)) return true
+    await sendManageResult(response, () =>
+      manage.putMigrationPackage!({
+        migrationId: packageMatch[1],
         request,
         ...peer
       })

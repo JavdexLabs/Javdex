@@ -57,19 +57,19 @@ describe('videoBatchScrapeQueue feedback', () => {
     )
   })
 
-  it('revalidates every frozen scoped target immediately before scraping', () => {
+  it('revalidates every frozen scoped target immediately before scraping', async () => {
     const request = { libraryId: 7, status: 'all' as const, fields: ['title' as const] }
     const checks: Array<[number, number]> = []
 
     assert.equal(
-      validateVideoBatchTargetScope(request, 11, (libraryId, videoId) => {
+      await validateVideoBatchTargetScope(request, 11, (libraryId, videoId) => {
         checks.push([libraryId, videoId])
         return true
       }),
       null
     )
     assert.deepEqual(
-      validateVideoBatchTargetScope(request, 12, (libraryId, videoId) => {
+      await validateVideoBatchTargetScope(request, 12, (libraryId, videoId) => {
         checks.push([libraryId, videoId])
         return false
       }),
@@ -86,7 +86,7 @@ describe('videoBatchScrapeQueue feedback', () => {
 
     let globalChecked = false
     assert.equal(
-      validateVideoBatchTargetScope(
+      await validateVideoBatchTargetScope(
         { status: 'all', fields: ['title'] },
         13,
         () => {

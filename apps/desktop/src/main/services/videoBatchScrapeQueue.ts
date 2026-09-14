@@ -5,7 +5,10 @@ import {
   resolveVideoScrapeFieldSources,
   type ScrapeOutcome
 } from '../scrapers/scraperManager'
-import { scrapeVideoBound } from './scrapeCatalogBinding'
+import { scrapeVideoBound, scrapeCatalog } from './scrapeCatalogBinding'
+import {
+  freezeRemoteVideoTargets
+} from './catalogRemoteBatch'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import {
   CheckpointedSequentialBatchQueue,
@@ -52,6 +55,15 @@ function resolveVideoTargets(request: VideoBatchScrapeRequest): VideoTarget[] {
   })
 }
 
+async function resolveVideoQueueTargets(request: VideoBatchScrapeRequest): Promise<VideoTarget[]> {
+  const catalog = scrapeCatalog()
+  if (catalog) {
+    const fieldSources = resolveVideoScrapeFieldSources(request.scraperName)
+    return freezeRemoteVideoTargets(catalog, { ...request, ...fieldSources })
+  }
+  return resolveVideoTargets(request)
+}
+
 export function formatVideoBatchStatusLabel(
   request: VideoBatchScrapeRequest,
   libraryName?: string | null
@@ -73,6 +85,7 @@ export function assertVideoBatchResumeScope(
   job: PersistedBatchScrapeJob,
   resolveTargets: typeof resolveVideoBatchTargets = resolveVideoBatchTargets
 ): PersistedBatchScrapeJob {
+  if (scrapeCatalog()) return job
   const request = job.request as VideoBatchScrapeRequest
   if (request.libraryId === undefined) return job
 
@@ -96,13 +109,25 @@ export function assertVideoBatchResumeScope(
 }
 
 /** Guard every frozen target immediately before a scoped scrape performs external work. */
-export function validateVideoBatchTargetScope(
+export async function validateVideoBatchTargetScope(
   request: VideoBatchScrapeRequest,
   videoId: number,
-  hasMembership: typeof hasActiveVisibleVideoMembership = hasActiveVisibleVideoMembership
-): QueueItemOutcome | null {
+  hasMembership: (
+    libraryId: number,
+    videoId: number
+  ) => boolean | Promise<boolean> = hasActiveVisibleVideoMembership
+): Promise<QueueItemOutcome | null> {
   if (request.libraryId === undefined) return null
-  if (hasMembership(request.libraryId, videoId)) return null
+  const catalog = scrapeCatalog()
+  const inScope = catalog
+    ? Boolean(
+        await catalog.queries.getVideo({
+          scope: { kind: 'library', libraryId: request.libraryId },
+          videoId
+        })
+      )
+    : await hasMembership(request.libraryId, videoId)
+  if (inScope) return null
   return {
     status: 'failure',
     level: 'error',
@@ -151,7 +176,7 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
   kind: 'video',
   missingResumeError: '没有可继续的影片批量任务',
   invalidRunPlanError: '请至少选择一个影片更新字段',
-  resolveTargets: resolveVideoTargets,
+  resolveTargets: resolveVideoQueueTargets,
   labelOf: (target) => target.code,
   restoreTarget: (item) => ({ id: item.id, code: item.label }),
   beforeResume: (job) => assertVideoBatchResumeScope(job),
@@ -179,7 +204,7 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
       getCode: (target) => target.code,
       browserRecycleInterval: 50,
       runTarget: async ({ id, code }) => {
-        const scopeFailure = validateVideoBatchTargetScope(request, id)
+        const scopeFailure = await validateVideoBatchTargetScope(request, id)
         if (scopeFailure) return scopeFailure
         const itemOutcome = await scrapeVideoBound(id, request.scraperName, {
           closeBrowser: false,

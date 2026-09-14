@@ -223,6 +223,14 @@ test('C1-C7 contract expansions accept intended fields and reject unbounded dump
     true
   )
   assert.equal(
+    parseManageInput('targetLists.create', {
+      kind: 'videos.filter',
+      filterDigest: 'a'.repeat(64),
+      videoFilter: { status: 0, missingFields: ['title'] }
+    }).success,
+    true
+  )
+  assert.equal(
     parseManageInput('pendingVideoScrapes.replace', {
       videoId: 8,
       selectedFields: ['title'],

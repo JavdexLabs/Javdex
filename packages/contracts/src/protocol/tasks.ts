@@ -45,6 +45,7 @@ export interface TargetListCreateInput {
   actressFilter?: {
     scope?: 'all' | 'female' | 'male'
     scrapeStatus?: 'all' | 'unscraped' | 'success' | 'failed'
+    missingFields?: string[]
   }
 }
 

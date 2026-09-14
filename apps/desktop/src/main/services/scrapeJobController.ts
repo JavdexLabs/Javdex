@@ -57,7 +57,11 @@ import {
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
-import { scrapeActressBound, scrapeVideoBound, bindScrapeCatalog } from './scrapeCatalogBinding'
+import { bindScrapeCatalog, scrapeActressBound, scrapeVideoBound } from './scrapeCatalogBinding'
+import {
+  countRemoteActressTargets,
+  countRemoteVideoTargets
+} from './catalogRemoteBatch'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { getActressDetail } from '@library/db/actressRepo'
 import { hasActiveVisibleVideoMembership } from '@library/db/libraryMembershipRepo'
@@ -529,9 +533,18 @@ export function createDefaultScrapeJobController(
             })
           )
       : hasActiveVisibleVideoMembership,
-    countVideos: (filter) => resolveVideoBatchTargets(filter).length,
-    countRematches: countVideosForRematch,
-    countActresses: estimateActressBatchScrapeTargetCount,
+    countVideos: remote
+      ? (filter) => countRemoteVideoTargets(remote, filter as VideoBatchScrapeFilter)
+      : (filter) => resolveVideoBatchTargets(filter).length,
+    countRematches: remote
+      ? (scope) =>
+          countRemoteVideoTargets(remote, {
+            status: rematchScopeToBatchStatus(scope)
+          })
+      : countVideosForRematch,
+    countActresses: remote
+      ? (filter) => countRemoteActressTargets(remote, filter)
+      : estimateActressBatchScrapeTargetCount,
     resolveVideoFieldSources: resolveVideoScrapeFieldSources,
     pendingVideoScrapes: videoPendingScrapeService,
     checkpoints: defaultBatchScrapeCheckpoints,

@@ -831,7 +831,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
             scrapeIds: local.scrapeIds ?? []
           },
           ctx?.signal
-        )
+        ) as Promise<{ groupIds: number[]; identityIds: number[]; scrapeIds: number[] }>
       },
       previewRenameFile: q('files.renamePreview'),
       renameFile: mPlan('files.rename'),

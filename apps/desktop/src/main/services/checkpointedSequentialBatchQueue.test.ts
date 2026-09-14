@@ -243,6 +243,38 @@ describe('CheckpointedSequentialBatchQueue', () => {
     assert.deepEqual(browserClosedAt, [50, 100, 101])
   })
 
+  it('awaits async target resolution before creating the checkpoint', async () => {
+    const checkpoints = createMemoryCheckpoints()
+    const processed: string[] = []
+    const queue = new CheckpointedSequentialBatchQueue<Target, Request>({
+      kind: 'video',
+      missingResumeError: '没有可继续的影片批量任务',
+      invalidRunPlanError: '请选择更新字段',
+      resolveTargets: async (request) => {
+        await Promise.resolve()
+        return request.labels.map((code, index) => ({ id: index + 1, code }))
+      },
+      labelOf: (target) => target.code,
+      restoreTarget: (item) => ({ id: item.id, code: item.label }),
+      planRun: () => ({
+        resumeMessage: 'resume',
+        startMessage: () => 'start',
+        pausedMessage: 'paused',
+        cancelledMessage: 'cancelled',
+        doneMessage: () => 'done',
+        getCode: (target) => target.code,
+        runTarget: async (target) => {
+          processed.push(target.code)
+          return { status: 'success', level: 'success', message: 'ok' }
+        },
+        exceptionMessage: () => 'error'
+      })
+    })
+    queue.setCheckpointPort(checkpoints)
+    await queue.start({ fields: ['title'], labels: ['A', 'B'] })
+    assert.deepEqual(processed, ['A', 'B'])
+  })
+
   it('rejects an invalid run plan without leaving a resumable checkpoint', async () => {
     const checkpoints = createMemoryCheckpoints()
     const queue = new CheckpointedSequentialBatchQueue<Target, Request>({

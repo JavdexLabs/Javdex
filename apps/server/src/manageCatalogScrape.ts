@@ -192,7 +192,7 @@ export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> 
     )
   },
   'targetLists.create'(args) {
-    const input = args.envelope.input as { kind: string; filterDigest: string }
+    const input = args.envelope.input as import('@shared/protocol/tasks').TargetListCreateInput
     return commit(args, () => createCatalogTargetList(input, args.database))
   },
   'targetLists.page'(args) {

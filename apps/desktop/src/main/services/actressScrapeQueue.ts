@@ -23,7 +23,8 @@ import {
   resolveActressBatchScrapeTargets,
   type NormalizedActressBatchScrapeRequest
 } from './actressBatchScrapeTargets'
-import { scrapeActressBound } from './scrapeCatalogBinding'
+import { scrapeActressBound, scrapeCatalog } from './scrapeCatalogBinding'
+import { freezeRemoteActressTargets } from './catalogRemoteBatch'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import {
   CheckpointedSequentialBatchQueue,
@@ -88,7 +89,11 @@ class ActressScrapeQueue {
       kind: 'actress',
       missingResumeError: '没有可继续的演员批量任务',
       invalidRunPlanError: '请至少选择一个演员更新字段',
-      resolveTargets: (request) => resolveActressBatchScrapeTargets(request),
+      resolveTargets: async (request) => {
+        const catalog = scrapeCatalog()
+        if (catalog) return freezeRemoteActressTargets(catalog, request)
+        return resolveActressBatchScrapeTargets(request)
+      },
       labelOf: (target) => target.main_name,
       restoreTarget: (item) => ({ id: item.id, main_name: item.label }),
       beforeResume: (job, port) => port.assertActressRecoverable(job),

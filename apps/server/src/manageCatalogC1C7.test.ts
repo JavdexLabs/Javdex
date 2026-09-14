@@ -9,6 +9,7 @@ import { addMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
 import { readActressAggregateVersion, readVideoAggregateVersion } from '@library/catalog/catalogAggregateVersion'
+import { targetListRequestDigest } from '@library/catalog/catalogTargetLists'
 import { isStructuredError } from '@shared/protocol/errors'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import { dispatchCatalogManage } from './manageCatalogHandlers'
@@ -204,5 +205,30 @@ describe('C1-C7 catalog manage handlers', () => {
         .scraped_status,
       2
     )
+  })
+
+  it('T6 freezes target lists by ids and filter and reports deleted placeholders', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-t6-'))
+    roots.push(root)
+    initDatabaseAtPath(path.join(root, 'catalog.db'))
+    ensureCatalogIdentity({ catalogId: randomUUID() })
+    const db = getDb()
+    const first = Number(db.prepare("INSERT INTO videos (code) VALUES ('C6-A')").run().lastInsertRowid)
+    const second = Number(db.prepare("INSERT INTO videos (code) VALUES ('C6-B')").run().lastInsertRowid)
+    const digest = targetListRequestDigest({ kind: 'videos.ids', ids: [first, second] })
+    const created = mutate(
+      'targetLists.create',
+      { kind: 'videos.ids', filterDigest: digest, ids: [first, second] },
+      {}
+    ) as { targetListId: string; count: number }
+    assert.equal(created.count, 2)
+    db.prepare('DELETE FROM videos WHERE id = ?').run(second)
+    const page = dispatch('targetLists.page', { targetListId: created.targetListId }) as {
+      ids: number[]
+      entries: Array<{ id: number; present: boolean; label?: string | null }>
+    }
+    assert.deepEqual(page.ids, [first, second])
+    assert.equal(page.entries[1]?.present, false)
+    assert.equal(page.entries[1]?.label, 'C6-B')
   })
 })

@@ -47,20 +47,22 @@ export async function applyPlaylistImportThroughCatalog(
         name: plan.name,
         videoIds: plan.videoIds,
         libraryId: plan.libraryId,
-        ...(plan.sourceUrl ? { sourceUrl: plan.sourceUrl } : {})
+        ...(plan.sourceUrl ? { sourceUrl: plan.sourceUrl } : {}),
+        ...(plan.videoLinks ? { videoLinks: plan.videoLinks } : {})
       },
       ipcMutation(operationId, {
         L: { generation: 1, revision: library.revision },
         V: { generation: first.generation ?? 1, revision: first.revision ?? 1 }
       })
-    )) as { playlistId: number; added?: number }
+    )) as { playlistId: number; added?: number; relatedLinksAdded?: number }
     const created = (await catalog.playlists.get({ playlistId: result.playlistId })) as {
       name?: string
     } | null
     return repository.commitRemoteApply(runId, applyIdempotencyKey, {
       playlistId: result.playlistId,
       added: result.added ?? plan.videoIds.length,
-      playlistName: created?.name ?? plan.name
+      playlistName: created?.name ?? plan.name,
+      relatedLinksAdded: result.relatedLinksAdded
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'IMPORT_PREVIEW_STALE') throw error

@@ -2922,6 +2922,7 @@ export class PlaylistImportRepository {
     videoIds: number[]
     libraryId: number
     sourceUrl?: string
+    videoLinks?: Array<{ videoId: number; label: string; url: string }>
     job: JobRow
     items: ApplyItemRow[]
   } {
@@ -2977,11 +2978,24 @@ export class PlaylistImportRepository {
       throw new Error('清单导入一次最多 200 个影片 ID；远程冻结 applyImport 不接受更长列表。')
     }
     const fallbackName = `${job.source_host} · ${new Date().toISOString().slice(0, 10)}`
+    const videoLinks =
+      job.save_detail_links === 1
+        ? items.flatMap((item) => {
+            if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') return []
+            if (item.resolved_video_id == null || !item.detail_url) return []
+            return [{
+              videoId: item.resolved_video_id,
+              label: job.source_host || '来源',
+              url: item.detail_url
+            }]
+          })
+        : undefined
     return {
       name: job.requested_playlist_name || job.agent_suggested_playlist_name || fallbackName,
       videoIds,
       libraryId: job.target_library_id,
       ...(job.save_source_playlist_link === 1 ? { sourceUrl: job.normalized_source_url } : {}),
+      ...(videoLinks?.length ? { videoLinks } : {}),
       job,
       items
     }
@@ -2990,7 +3004,7 @@ export class PlaylistImportRepository {
   commitRemoteApply(
     runId: string,
     applyIdempotencyKey: string,
-    result: { playlistId: number; added: number; playlistName?: string }
+    result: { playlistId: number; added: number; playlistName?: string; relatedLinksAdded?: number }
   ): PlaylistImportOutcome {
     const plan = this.prepareRemoteApply(runId, applyIdempotencyKey)
     const at = now()
@@ -3032,7 +3046,7 @@ export class PlaylistImportRepository {
       skippedVideos,
       addedToPlaylist: result.added,
       alreadyInPlaylist: Math.max(0, plan.videoIds.length - result.added),
-      relatedLinksAdded: 0,
+      relatedLinksAdded: result.relatedLinksAdded ?? 0,
       playlistRelatedLinksAdded: plan.sourceUrl ? 1 : 0,
       externalDuplicateItems: Math.max(0, sourceItems - plan.items.length),
       convergedExternalItems: plan.videoIds.length - new Set(plan.videoIds).size,

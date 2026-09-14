@@ -3,6 +3,7 @@ import { getDb } from '@library/db/database'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
 import { getVideoResourceInLibrary } from '@library/db/videoRepo'
+import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import { getMediaLibraryDetail, MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
 import {
@@ -204,6 +205,9 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'videos.years'(args) {
     const input = args.envelope.input as { scope: CatalogScope }
     return scopedVideoCatalogRepo.listYears(input.scope)
+  },
+  'videos.sources'(args) {
+    return listCatalogVideoSources(args.envelope.input as Parameters<typeof listCatalogVideoSources>[0])
   },
   'videos.getResource'(args) {
     const input = args.envelope.input as { libraryId: number; videoId: number; resourceId: number }

@@ -57,6 +57,7 @@ export function createUnconfiguredRemoteBackend(
       'listVideos',
       'getVideo',
       'listVideoYears',
+      'listVideoSources',
       'getResource',
       'listTags',
       'listManualTags',

@@ -42,7 +42,16 @@ describe('playlistImportCatalogLookup', () => {
             libraries: [],
             links: []
           }
-        }
+        },
+        listVideoSources: async (input: { videoIds?: number[] }) => ({
+          items: (input.videoIds ?? []).map((videoId) => ({
+            videoId,
+            sources:
+              videoId === 11
+                ? [{ source: 'JavBus', externalCode: 'ABC-001', url: 'https://javbus.com/abc-001' }]
+                : []
+          }))
+        })
       }
     } as unknown as CatalogBackend
     await lookup.ingestCodes(catalog, ['abc-001'])
@@ -52,6 +61,13 @@ describe('playlistImportCatalogLookup', () => {
     assert.equal(matches[0]?.videoId, 11)
     assert.deepEqual(matches[0]?.libraryIds, [1])
     assert.deepEqual(matches[0]?.resourceKinds, ['local'])
+    assert.deepEqual(matches[0]?.sources, [
+      { source: 'JavBus', externalCode: 'ABC-001', url: 'https://javbus.com/abc-001' }
+    ])
+    assert.equal(
+      lookup.videosBySourceIdentity({ source: 'javbus', externalCode: 'abc-001' })[0]?.videoId,
+      11
+    )
     assert.equal(
       lookup.videosByDetailUrl('https://example.test/video/abc-001').length,
       1
@@ -73,6 +89,52 @@ describe('playlistImportCatalogLookup', () => {
       /影片列表响应无效/
     )
   })
+
+  it('rejects an invalid videos.sources payload instead of matching empty sources', async () => {
+    const lookup = createMemoryPlaylistImportCatalogLookup()
+    await assert.rejects(
+      () =>
+        lookup.ingestCodes(
+          {
+            queries: {
+              listVideos: async () => ({ items: [{ id: 11, code: 'ABC-001' }] }),
+              getVideo: async () => ({ id: 11, code: 'ABC-001', libraries: [], links: [] }),
+              listVideoSources: async () => ({ protocolVersion: 1 })
+            }
+          } as unknown as CatalogBackend,
+          ['ABC-001']
+        ),
+      /来源查询响应无效/
+    )
+  })
+
+  it('ingests source identity from videos.sources without opening a local library', async () => {
+    const lookup = createMemoryPlaylistImportCatalogLookup()
+    await lookup.ingestSourceIdentity(
+      {
+        queries: {
+          listVideoSources: async (input: { source?: string; externalCode?: string }) => {
+            assert.equal(input.source, 'JavBus')
+            assert.equal(input.externalCode, 'ABC-001')
+            return {
+              items: [
+                {
+                  videoId: 31,
+                  code: 'ABC-001',
+                  sources: [{ source: 'JavBus', externalCode: 'ABC-001', url: null }]
+                }
+              ]
+            }
+          }
+        }
+      } as unknown as CatalogBackend,
+      { source: 'JavBus', externalCode: 'ABC-001' }
+    )
+    assert.equal(
+      lookup.videosBySourceIdentity({ source: 'javbus', externalCode: 'abc-001' })[0]?.videoId,
+      31
+    )
+  })
 })
 
 describe('playlistImport catalog apply', () => {
@@ -91,7 +153,8 @@ describe('playlistImport catalog apply', () => {
             revision: 3,
             libraries: [{ libraryId: 1, name: '主库' }],
             links: []
-          })
+          }),
+          listVideoSources: async () => ({ items: [{ videoId: 20, sources: [] }] })
         }
       } as unknown as CatalogBackend,
       ['AAA-1']
@@ -129,9 +192,17 @@ describe('playlistImport catalog apply', () => {
         getVideo: async () => ({ id: 20, generation: 1, revision: 3 })
       },
       playlists: {
-        applyImport: async (input: { videoIds: number[] }, ctx: { operationId: string }) => {
+        applyImport: async (
+          input: {
+            videoIds: number[]
+            videoLinks?: Array<{ videoId: number; label: string; url: string }>
+          },
+          ctx: { operationId: string }
+        ) => {
           calls.push(`apply:${input.videoIds.join(',')}:${ctx.operationId}`)
-          return { playlistId: 99, added: 1 }
+          assert.equal(input.videoLinks?.[0]?.videoId, 20)
+          assert.equal(input.videoLinks?.[0]?.url, 'https://example.test/video/aaa-1')
+          return { playlistId: 99, added: 1, relatedLinksAdded: 1 }
         },
         get: async () => ({ id: 99, name: '导入清单' })
       },
@@ -148,6 +219,7 @@ describe('playlistImport catalog apply', () => {
     assert.equal(outcome.playlistId, 99)
     assert.equal(outcome.reusedVideos, 1)
     assert.equal(outcome.createdVideos, 0)
+    assert.equal(outcome.relatedLinksAdded, 1)
     assert.equal(calls.length, 1)
     assert.equal(repository.snapshot('run-remote-apply')?.phase, 'completed')
   })
@@ -167,7 +239,8 @@ describe('playlistImport catalog apply', () => {
             libraries: [{ libraryId: 1, name: '主库' }],
             links: [],
             resources: [{ kind: 'local' }]
-          })
+          }),
+          listVideoSources: async () => ({ items: [{ videoId: 20, sources: [] }] })
         }
       } as unknown as CatalogBackend,
       ['AAA-1']

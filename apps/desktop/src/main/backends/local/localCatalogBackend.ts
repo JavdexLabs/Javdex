@@ -48,6 +48,7 @@ import {
 } from '@library/db/pendingVideoScrapeRepo'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
+import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import {
   abandonCatalogMigration,
   allowEnableCatalogMigration,
@@ -309,6 +310,9 @@ export function createLocalCatalogBackend(
     },
     async listVideoYears(input) {
       return queries.listYears(input.scope)
+    },
+    async listVideoSources(input) {
+      return listCatalogVideoSources(input)
     },
     async getResource(input) {
       const resource = queries.getResource(input.libraryId, input.videoId, input.resourceId)
@@ -932,7 +936,8 @@ export function createLocalCatalogBackend(
             sourceUrl: input.sourceUrl,
             expected: ctx.expectedVersions,
             operationId: ctx.operationId,
-            expectedLibraryRevision: expectedL.revision
+            expectedLibraryRevision: expectedL.revision,
+            videoLinks: input.videoLinks
           })
       )
       return result.data

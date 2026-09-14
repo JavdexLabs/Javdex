@@ -43,6 +43,7 @@ export interface CatalogQueries {
   listVideos: Query<'videos.list'>
   getVideo: Query<'videos.get'>
   listVideoYears: Query<'videos.years'>
+  listVideoSources: Query<'videos.sources'>
   getResource: Query<'videos.getResource'>
   listTags: Query<'tags.list'>
   listManualTags: Query<'tags.listManual'>

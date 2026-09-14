@@ -139,4 +139,28 @@ describe('C1-C7 catalog manage handlers', () => {
     assert.match(preview.planDigest, /^[a-f0-9]{64}$/)
     assert.ok(!JSON.stringify(preview).includes(mount))
   })
+
+  it('T3 returns restricted unique video sources', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-t3t4-'))
+    roots.push(root)
+    const db = initDatabaseAtPath(path.join(root, 'catalog.db'))
+    db.exec(`
+      INSERT INTO videos(id, code) VALUES (11,'ABC-001'),(12,'ABC-002');
+      INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(1,11,1),(1,12,2);
+      INSERT INTO video_sources(video_id, source, external_code, url)
+        VALUES (11,'JavBus','ABC-001','https://javbus.com/abc-001');
+    `)
+    const sources = dispatch('videos.sources', { videoIds: [11, 12] }) as {
+      items: Array<{ videoId: number; sources: unknown[] }>
+      total: number
+    }
+    assert.equal(sources.total, 2)
+    assert.equal(sources.items.find((item) => item.videoId === 11)?.sources.length, 1)
+    assert.equal(sources.items.find((item) => item.videoId === 12)?.sources.length, 0)
+    const missing = dispatch('videos.sources', { source: 'JavBus', externalCode: 'NOPE' }) as {
+      items: unknown[]
+      total: number
+    }
+    assert.equal(missing.total, 0)
+  })
 })

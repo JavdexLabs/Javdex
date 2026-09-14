@@ -145,6 +145,7 @@ export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> 
       libraryId: number
       cover?: CatalogImageRef
       sourceUrl?: string
+      videoLinks?: Array<{ videoId: number; label: string; url: string }>
     }
     const mutation = requireMutation(args.envelope)
     return commitImage(args, () =>

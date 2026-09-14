@@ -3,9 +3,9 @@ import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode }
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/videoScrapeTypes'
 import {
   resolveVideoScrapeFieldSources,
-  scrapeVideo,
   type ScrapeOutcome
 } from '../scrapers/scraperManager'
+import { scrapeVideoBound } from './scrapeCatalogBinding'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import {
   CheckpointedSequentialBatchQueue,
@@ -181,7 +181,7 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
       runTarget: async ({ id, code }) => {
         const scopeFailure = validateVideoBatchTargetScope(request, id)
         if (scopeFailure) return scopeFailure
-        const itemOutcome = await scrapeVideo(id, request.scraperName, {
+        const itemOutcome = await scrapeVideoBound(id, request.scraperName, {
           closeBrowser: false,
           fields,
           mode,

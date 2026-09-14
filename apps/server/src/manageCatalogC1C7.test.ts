@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -6,7 +7,10 @@ import { afterEach, describe, it } from 'node:test'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { addMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
+import { readActressAggregateVersion, readVideoAggregateVersion } from '@library/catalog/catalogAggregateVersion'
 import { isStructuredError } from '@shared/protocol/errors'
+import type { ExpectedVersions } from '@shared/protocol/versions'
 import { dispatchCatalogManage } from './manageCatalogHandlers'
 
 function dispatch(
@@ -14,6 +18,23 @@ function dispatch(
   input: unknown
 ): unknown {
   return dispatchCatalogManage(operation, { input }, { epoch: 1 })
+}
+
+function mutate(
+  operation: Parameters<typeof dispatchCatalogManage>[0],
+  input: unknown,
+  expectedVersions: ExpectedVersions
+): unknown {
+  return dispatchCatalogManage(
+    operation,
+    {
+      input,
+      operationId: randomUUID(),
+      writerEpoch: 0,
+      expectedVersions
+    },
+    { epoch: 0 }
+  )
 }
 
 function asError(error: unknown): { code: string; message: string } {
@@ -162,5 +183,26 @@ describe('C1-C7 catalog manage handlers', () => {
       total: number
     }
     assert.equal(missing.total, 0)
+  })
+
+  it('T5 marks remote scrape failures without writing collected metadata', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-t5-'))
+    roots.push(root)
+    initDatabaseAtPath(path.join(root, 'catalog.db'))
+    ensureCatalogIdentity({ catalogId: randomUUID() })
+    const db = getDb()
+    const videoId = Number(db.prepare("INSERT INTO videos (code, scraped_status) VALUES ('C6-001', 0)").run().lastInsertRowid)
+    const actressId = Number(db.prepare("INSERT INTO actresses (main_name, scraped_status) VALUES ('C6 One', 0)").run().lastInsertRowid)
+    mutate('videos.markScrapeFailed', { videoId }, { V: readVideoAggregateVersion(videoId)! })
+    mutate('actresses.markScrapeFailed', { actressId }, { A: readActressAggregateVersion(actressId)! })
+    assert.equal(
+      (db.prepare('SELECT scraped_status FROM videos WHERE id = ?').get(videoId) as { scraped_status: number }).scraped_status,
+      2
+    )
+    assert.equal(
+      (db.prepare('SELECT scraped_status FROM actresses WHERE id = ?').get(actressId) as { scraped_status: number })
+        .scraped_status,
+      2
+    )
   })
 })

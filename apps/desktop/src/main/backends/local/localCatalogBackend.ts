@@ -1,4 +1,6 @@
 import { getDb } from '@library/db/database'
+import { markScrapeFailed } from '@library/db/videoRepo'
+import { recordActressScrapeFailure } from '@library/db/actressRepo'
 import {
   PendingScanRepoError,
   getPendingScanGroup,
@@ -27,7 +29,7 @@ import {
   commitManageImageMutation
 } from '@library/catalog/catalogImageApply'
 import { bumpRowRevision } from '@library/catalog/catalogAggregateVersion'
-import { applyActressScrapeCandidate, applyVideoScrapeCandidate } from '@library/catalog/catalogScrapeApply'
+import { applyActressScrapeCandidate, applyVideoScrapeCandidate, replacePendingVideoScrapeFromUploads, submitActressScrapeConflict } from '@library/catalog/catalogScrapeApply'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
 import { createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
@@ -377,6 +379,10 @@ export function createLocalCatalogBackend(
     async markScrapeSuccess(input) {
       return videos.markScrapeSucceeded(input.videoId)
     },
+    async markScrapeFailed(input) {
+      markScrapeFailed(input.videoId)
+      return true
+    },
     async setRating(input, ctx: MutationContext) {
       const result = commitCatalogMutation(
         {
@@ -532,6 +538,9 @@ export function createLocalCatalogBackend(
             candidate: input.candidate,
             cover: input.cover,
             samples: input.samples,
+            actressAvatars: input.actressAvatars,
+            directorSelectionId: input.directorSelectionId,
+            directorAmbiguity: input.directorAmbiguity,
             expected: ctx.expectedVersions,
             operationId: ctx.operationId
           })
@@ -647,6 +656,10 @@ export function createLocalCatalogBackend(
     async markScrapeSuccess(input) {
       return actressMaintenanceService.markScrapeSucceeded(input.actressId)
     },
+    async markScrapeFailed(input) {
+      recordActressScrapeFailure(input.actressId)
+      return true
+    },
     applyCrop: async (input, ctx) => {
       const result = commitManageImageMutation(
         {
@@ -675,6 +688,26 @@ export function createLocalCatalogBackend(
             candidate: input.candidate,
             avatar: input.avatar,
             gallery: input.gallery,
+            fields: input.fields,
+            mode: input.mode,
+            expected: ctx.expectedVersions,
+            operationId: ctx.operationId
+          })
+      )
+      return result.data
+    },
+    submitConflict: async (input, ctx) => {
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'actressConflicts.submit',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () =>
+          submitActressScrapeConflict({
+            ...input,
             expected: ctx.expectedVersions,
             operationId: ctx.operationId
           })
@@ -1438,6 +1471,24 @@ export function createLocalCatalogBackend(
       },
       async list() {
         return listPendingVideoScrapes()
+      },
+      async replace(input, ctx) {
+        const result = commitManageImageMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'pendingVideoScrapes.replace',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () =>
+            replacePendingVideoScrapeFromUploads({
+              ...input,
+              expected: ctx.expectedVersions,
+              operationId: ctx.operationId
+            })
+        )
+        return result.data
       },
       async confirm(input, ctx) {
         const expectedRevision = ctx.expectedVersions.Q?.revision

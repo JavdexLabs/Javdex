@@ -124,7 +124,8 @@ const targetVideoFilterSchema = z
 const targetActressFilterSchema = z
   .object({
     scope: z.enum(['all', 'female', 'male']).optional(),
-    scrapeStatus: z.enum(['all', 'unscraped', 'success', 'failed']).optional()
+    scrapeStatus: z.enum(['all', 'unscraped', 'success', 'failed']).optional(),
+    missingFields: actressScrapeFieldsSchema.optional()
   })
   .strict()
 const resourceFilterSchema = z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])
@@ -436,7 +437,20 @@ export const MANAGE_OPERATION_INPUTS = {
       mode: scrapeModeSchema,
       candidate: z.unknown(),
       cover: catalogImageRefSchema.optional(),
-      samples: z.array(catalogImageRefSchema).max(40).optional()
+      samples: z.array(catalogImageRefSchema).max(40).optional(),
+      actressAvatars: z
+        .array(
+          z
+            .object({
+              name: limitedTextSchema.min(1),
+              image: catalogImageRefSchema
+            })
+            .strict()
+        )
+        .max(40)
+        .optional(),
+      directorSelectionId: idSchema.optional(),
+      directorAmbiguity: z.enum(['choice', 'preserve']).optional()
     })
     .strict(),
   'pendingVideoScrapes.count': emptyInput,
@@ -610,7 +624,9 @@ export const MANAGE_OPERATION_INPUTS = {
       actressId: idSchema,
       candidate: z.unknown(),
       avatar: catalogImageRefSchema.optional(),
-      gallery: z.array(catalogImageRefSchema).max(40).optional()
+      gallery: z.array(catalogImageRefSchema).max(40).optional(),
+      fields: actressScrapeFieldsSchema.optional(),
+      mode: scrapeModeSchema.optional()
     })
     .strict(),
   'actressConflicts.list': emptyInput,

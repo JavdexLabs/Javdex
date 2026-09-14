@@ -5,7 +5,7 @@ import type { PendingVideoScrapeConfirmInput } from '@shared/videoScrapeTypes'
 import { structuredError, isStructuredError } from '@shared/protocol/errors'
 import { getPendingVideoScrapeResolutionSnapshot } from '@library/db/pendingVideoScrapeRepo'
 import { confirmPendingVideoScrape } from '@library/catalog/catalogPendingVideoScrapes'
-import { applyActressScrapeCandidate, applyVideoScrapeCandidate } from '@library/catalog/catalogScrapeApply'
+import { applyActressScrapeCandidate, applyVideoScrapeCandidate, replacePendingVideoScrapeFromUploads, submitActressScrapeConflict } from '@library/catalog/catalogScrapeApply'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
 import { createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
@@ -110,10 +110,25 @@ export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> 
       candidate: unknown
       cover?: CatalogImageRef
       samples?: CatalogImageRef[]
+      actressAvatars?: Array<{ name: string; image: CatalogImageRef }>
+      directorSelectionId?: number
+      directorAmbiguity?: 'choice' | 'preserve'
     }
     const mutation = requireMutation(args.envelope)
     return commitImage(args, () =>
       applyVideoScrapeCandidate({
+        ...input,
+        expected: mutation.expectedVersions,
+        operationId: mutation.operationId,
+        database: args.database
+      })
+    )
+  },
+  'pendingVideoScrapes.replace'(args) {
+    const input = args.envelope.input as Parameters<typeof replacePendingVideoScrapeFromUploads>[0]
+    const mutation = requireMutation(args.envelope)
+    return commitImage(args, () =>
+      replacePendingVideoScrapeFromUploads({
         ...input,
         expected: mutation.expectedVersions,
         operationId: mutation.operationId,
@@ -127,10 +142,24 @@ export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> 
       candidate: unknown
       avatar?: CatalogImageRef
       gallery?: CatalogImageRef[]
+      fields?: import('@shared/actressScrapeTypes').ActressScrapeField[]
+      mode?: import('@shared/actressScrapeTypes').ActressScrapeUpdateMode
     }
     const mutation = requireMutation(args.envelope)
     return commitImage(args, () =>
       applyActressScrapeCandidate({
+        ...input,
+        expected: mutation.expectedVersions,
+        operationId: mutation.operationId,
+        database: args.database
+      })
+    )
+  },
+  'actressConflicts.submit'(args) {
+    const input = args.envelope.input as Parameters<typeof submitActressScrapeConflict>[0]
+    const mutation = requireMutation(args.envelope)
+    return commitImage(args, () =>
+      submitActressScrapeConflict({
         ...input,
         expected: mutation.expectedVersions,
         operationId: mutation.operationId,

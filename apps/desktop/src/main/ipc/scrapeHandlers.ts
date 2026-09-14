@@ -20,6 +20,7 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
       return Boolean(window && !window.isDestroyed() && !window.webContents.isDestroyed())
     },
     emit: (channel, payload) => sendScrapeEvent(ctx.getWindow()?.webContents, channel, payload),
+    backend,
     avatarAutoCropOptions:
       backend.mode === 'remote'
         ? { createBatchTargets: () => loadCatalogActressAvatarCropSnapshot(backend) }

@@ -314,6 +314,87 @@ export function resolveVideoScrapeFieldSources(scraperName?: string): {
 export { videoScrapeApplyBridge } from '../services/videoScrapeApplyService'
 
 /**
+ * Collect plugin/Playwright candidates without reading or writing the official catalog.
+ */
+export async function collectVideoScrape(input: {
+  videoId: number
+  code: string
+  scraperName?: string
+  fields: VideoScrapeField[]
+  delayController?: ScrapeVideoOptions['delayController']
+}): Promise<{
+  resolvedScraperName: string
+  descriptor: ScraperPluginDescriptor | undefined
+  source: VideoMetadataSource | null
+  sourceName: string
+  ratingSourceName: string
+  collected: MetadataCandidateBatch
+  compositeOutcome: CompositeVideoOutcome | null
+  requested: VideoScrapeField[]
+}> {
+  const settings = getSettings()
+  const resolvedScraperName = input.scraperName || settings.defaultScraper
+  const descriptor = assertVideoScraperRunnable(resolvedScraperName)
+  const supportedFields = new Set<VideoScrapeField>(
+    (descriptor?.supportedFields ?? ALL_VIDEO_SCRAPE_FIELDS).filter(
+      (field): field is VideoScrapeField =>
+        (ALL_VIDEO_SCRAPE_FIELDS as readonly string[]).includes(field)
+    )
+  )
+  const requested = input.fields.filter((field) => supportedFields.has(field))
+  const proxy = resolveScrapeProxyUrl(settings)
+  const sourceRegistry = buildSourceRegistry(proxy, input.delayController)
+  const source = findCompositeScraper('video', resolvedScraperName)
+    ? null
+    : sourceForName(sourceRegistry, resolvedScraperName)
+  const { sourceName, ratingSourceName } = resolveVideoFieldSourceNames(
+    source ? { scraperName: source.descriptor.name } : null,
+    input.scraperName,
+    settings.defaultScraper
+  )
+  const compositeOutcome = source
+    ? null
+    : await scrapeCompositeVideo(
+        input.videoId,
+        input.code,
+        resolvedScraperName,
+        requested,
+        sourceRegistry
+      )
+  const collected: MetadataCandidateBatch = source
+    ? await source.collect({
+        target: { kind: 'video', videoId: input.videoId, code: input.code },
+        fields: requested
+      })
+    : {
+        candidates: compositeOutcome?.result
+          ? [
+              {
+                result: compositeOutcome.result,
+                assets: compositeOutcome.assets,
+                evidence: {
+                  kind: 'web-scraper',
+                  sourceId: `composite:${encodeURIComponent(resolvedScraperName)}`,
+                  sourceName: resolvedScraperName
+                }
+              }
+            ]
+          : [],
+        warnings: compositeOutcome?.warnings ?? []
+      }
+  return {
+    resolvedScraperName,
+    descriptor,
+    source,
+    sourceName,
+    ratingSourceName,
+    collected,
+    compositeOutcome,
+    requested
+  }
+}
+
+/**
  * Scrape a single video by id: run the plugin, then deliver assets/apply via
  * videoScrapeApplyService (download + DB apply use separate coordinated changes).
  */
@@ -338,16 +419,7 @@ export async function scrapeVideo(
   const requested = (options?.fields ?? ALL_VIDEO_SCRAPE_FIELDS).filter((field) =>
     supportedFields.has(field)
   )
-  const proxy = resolveScrapeProxyUrl(settings)
-  const sourceRegistry = buildSourceRegistry(proxy, options?.delayController)
-  const source = findCompositeScraper('video', scraperName || settings.defaultScraper)
-    ? null
-    : sourceForName(sourceRegistry, resolvedScraperName)
-  const { sourceName, ratingSourceName } = resolveVideoFieldSourceNames(
-    source ? { scraperName: source.descriptor.name } : null,
-    scraperName,
-    settings.defaultScraper
-  )
+  const { sourceName, ratingSourceName } = resolveVideoScrapeFieldSources(resolvedScraperName)
   const effective = resolveEffectiveVideoScrapeFields(
     videoId,
     requested,
@@ -361,36 +433,14 @@ export async function scrapeVideo(
   }
 
   try {
-    const compositeOutcome = source
-      ? null
-      : await scrapeCompositeVideo(
-          videoId,
-          video.code,
-          scraperName || settings.defaultScraper,
-          effective,
-          sourceRegistry
-        )
-    const collected: MetadataCandidateBatch = source
-      ? await source.collect({
-          target: { kind: 'video', videoId, code: video.code },
-          fields: effective
-        })
-      : {
-          candidates: compositeOutcome?.result
-            ? [
-                {
-                  result: compositeOutcome.result,
-                  assets: compositeOutcome.assets,
-                  evidence: {
-                    kind: 'web-scraper',
-                    sourceId: `composite:${encodeURIComponent(resolvedScraperName)}`,
-                    sourceName: resolvedScraperName
-                  }
-                }
-              ]
-            : [],
-          warnings: compositeOutcome?.warnings ?? []
-        }
+    const collectedRun = await collectVideoScrape({
+      videoId,
+      code: video.code,
+      scraperName: resolvedScraperName,
+      fields: effective,
+      delayController: options?.delayController
+    })
+    const { collected, compositeOutcome, source, descriptor: runDescriptor } = collectedRun
     const candidate = collected.candidates[0]
     const result = candidate?.result
     if (!result) {
@@ -410,7 +460,7 @@ export async function scrapeVideo(
 
     const hasAmbiguousSource = source
       ? collected.candidates.length > 1
-      : compositeOutcome?.sources.some((source) => source.candidates.length > 1) ?? false
+      : compositeOutcome?.sources.some((item) => item.candidates.length > 1) ?? false
     const fieldsToApply = compositeOutcome?.matchedFields ?? requested
     const identityConflictVideoId =
       !hasAmbiguousSource
@@ -437,9 +487,9 @@ export async function scrapeVideo(
         const stagedSources = source
           ? [
               {
-                pluginName: resolvedScraperName,
-                pluginSource: descriptor?.source ?? ('builtin' as const),
-                pluginVersion: descriptor?.version ?? null,
+                pluginName: collectedRun.resolvedScraperName,
+                pluginSource: runDescriptor?.source ?? ('builtin' as const),
+                pluginVersion: runDescriptor?.version ?? null,
                 pluginConfig: { supportedFields: [...supportedFields] },
                 sourceName,
                 selectedFields: effective,
@@ -447,14 +497,14 @@ export async function scrapeVideo(
               }
             ]
           : await Promise.all(
-              (compositeOutcome?.sources ?? []).map(async (source) => ({
-                pluginName: source.pluginName,
-                pluginSource: source.descriptor?.source ?? ('builtin' as const),
-                pluginVersion: source.descriptor?.version ?? null,
-                pluginConfig: { supportedFields: [...source.supportedFields] },
-                sourceName: source.pluginName,
-                selectedFields: source.selectedFields,
-                staged: await candidateStager.stageForPending(source.candidates)
+              (compositeOutcome?.sources ?? []).map(async (item) => ({
+                pluginName: item.pluginName,
+                pluginSource: item.descriptor?.source ?? ('builtin' as const),
+                pluginVersion: item.descriptor?.version ?? null,
+                pluginConfig: { supportedFields: [...item.supportedFields] },
+                sourceName: item.pluginName,
+                selectedFields: item.selectedFields,
+                staged: await candidateStager.stageForPending(item.candidates)
               }))
             )
         return replacePendingVideoScrape({
@@ -463,23 +513,23 @@ export async function scrapeVideo(
           applicableFields: fieldsToApply,
           updateMode: mode,
           request: {
-            scraperName: resolvedScraperName,
+            scraperName: collectedRun.resolvedScraperName,
             fields: requested,
             mode,
-            fieldPluginMap: findCompositeScraper('video', resolvedScraperName)?.fieldPluginMap
+            fieldPluginMap: findCompositeScraper('video', collectedRun.resolvedScraperName)?.fieldPluginMap
           },
           warnings: [
             ...pendingWarnings,
-            ...stagedSources.flatMap((source) => source.staged.warnings)
+            ...stagedSources.flatMap((item) => item.staged.warnings)
           ],
-          sources: stagedSources.map((source) => ({
-            pluginName: source.pluginName,
-            pluginSource: source.pluginSource,
-            pluginVersion: source.pluginVersion,
-            pluginConfig: source.pluginConfig,
-            sourceName: source.sourceName,
-            selectedFields: source.selectedFields,
-            candidates: source.staged.candidates
+          sources: stagedSources.map((item) => ({
+            pluginName: item.pluginName,
+            pluginSource: item.pluginSource,
+            pluginVersion: item.pluginVersion,
+            pluginConfig: item.pluginConfig,
+            sourceName: item.sourceName,
+            selectedFields: item.selectedFields,
+            candidates: item.staged.candidates
           }))
         })
       })

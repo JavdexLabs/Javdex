@@ -1051,6 +1051,7 @@ export class ActressIdentityConflictWorkflow {
     result: ActressScrapeResult
     warnings: string[]
     resources: PendingActressScrapeResource[]
+    batchJobId?: string | null
   }): { pendingId: number; obsoleteStagedPaths: string[] } {
     const db = getDb()
     const actress = db
@@ -1079,7 +1080,7 @@ export class ActressIdentityConflictWorkflow {
            actress_id, target_actress_revision, plugin_name, plugin_source, plugin_version,
            query_name, selected_fields_json, applicable_fields_json, update_mode,
            result_json, warnings_json, batch_job_id, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         input.actressId,
         actress.revision,
@@ -1092,6 +1093,7 @@ export class ActressIdentityConflictWorkflow {
         input.mode,
         JSON.stringify(input.result),
         JSON.stringify(input.warnings),
+        input.batchJobId ?? null,
         createdAt
       ).lastInsertRowid)
       const insertConflict = db.prepare(

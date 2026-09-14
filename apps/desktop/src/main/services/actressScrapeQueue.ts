@@ -23,7 +23,7 @@ import {
   resolveActressBatchScrapeTargets,
   type NormalizedActressBatchScrapeRequest
 } from './actressBatchScrapeTargets'
-import { scrapeActress } from '../scrapers/actressScraperManager'
+import { scrapeActressBound } from './scrapeCatalogBinding'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import {
   CheckpointedSequentialBatchQueue,
@@ -122,7 +122,7 @@ class ActressScrapeQueue {
             `演员批量刮削完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
           getCode: (target) => target.main_name,
           runTarget: async ({ id, main_name }) => {
-            const itemOutcome = await scrapeActress(id, request.scraperName, {
+            const itemOutcome = await scrapeActressBound(id, request.scraperName, {
               closeBrowser: false,
               fields,
               mode,

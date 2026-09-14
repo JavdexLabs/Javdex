@@ -253,7 +253,7 @@ describe('ScrapeJobController', () => {
     )
 
     assert.equal(
-      controller.countVideoBatch({ libraryId: 7, status: 0, missingFields: ['summary'] }),
+      await controller.countVideoBatch({ libraryId: 7, status: 0, missingFields: ['summary'] }),
       3
     )
     assert.deepEqual(countedFilter, {

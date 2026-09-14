@@ -41,6 +41,7 @@ import {
 } from '@library/catalog/catalogPendingVideoScrapes'
 import {
   countPendingVideoScrapes,
+  existingPendingVideoScrapeIds,
   getPendingVideoScrapeById,
   listPendingVideoScrapes,
   pagePendingVideoScrapes
@@ -1395,7 +1396,20 @@ export function createLocalCatalogBackend(
       async count() {
         return countPendingVideoScrapes()
       },
-      async existingIds() {
+      async existingIds(input) {
+        if (input.scrapeIds) return existingPendingVideoScrapeIds(input.scrapeIds)
+        if (input.videoIds?.length) {
+          const unique = [...new Set(input.videoIds)]
+          return (
+            getDb()
+              .prepare(
+                `SELECT video_id FROM pending_video_scrapes
+                 WHERE video_id IN (${unique.map(() => '?').join(',')})
+                 ORDER BY video_id`
+              )
+              .all(...unique) as Array<{ video_id: number }>
+          ).map((row) => row.video_id)
+        }
         return (
           getDb()
             .prepare('SELECT video_id FROM pending_video_scrapes ORDER BY video_id')
@@ -1405,7 +1419,9 @@ export function createLocalCatalogBackend(
       async page(input) {
         return pagePendingVideoScrapes({
           offset: input.offset,
-          limit: Math.min(input.limit ?? 50, 100)
+          limit: Math.min(input.limit ?? 50, 100),
+          ...(input.anchorId != null ? { anchorId: input.anchorId } : {}),
+          ...(input.videoId != null ? { videoId: input.videoId } : {})
         })
       },
       async get(input) {

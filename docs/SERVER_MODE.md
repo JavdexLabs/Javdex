@@ -41,12 +41,12 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 ## 当前实现限制（本阶段已确认补齐）
 
-> 2026-09-14：用户已逐项确认 C1–C7 全部补齐，C6 包含单条和批量刮削，采集仍在桌面执行。该决定覆盖此前“不扩合同”的限制；以下列表描述尚未补齐的当前代码行为，不代表目标范围。实施顺序见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。当前阶段不做全面自动化/完整 GUI 验收、故障测试、跨平台安装或 0.8 发布候选，E1/E2 仅保留历史说明。
+> 2026-09-14：用户已逐项确认 C1–C7 全部补齐，C6 包含单条和批量刮削，采集仍在桌面执行。该决定覆盖此前“不扩合同”的限制。实施顺序见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。当前阶段不做全面自动化/完整 GUI 验收、故障测试、跨平台安装或 0.8 发布候选，E1/E2 仅保留历史说明。
 
-- **C1** 远程 `FILE_RENAME` 仍 UNSUPPORTED（冻结 IPC 无 `resourceId`，不扩 resourceId 合同）
-- **C2** `pendingScan.queuePage` 远程不支持 IPC `anchor`，仅本地队列页保留
-- **C3** 冻结 `pendingAudit.presence` 保持空输入的目录级计数；桌面适配器本地包装 / 远程用 `libraries.get` 与 pending list 求交
-- **C4** 远程 `scans.auditPage` 仅 `{libraryId}` + page，无 section/attention
+- **C1** 远程 `FILE_RENAME` 仍 UNSUPPORTED（桌面 IPC 尚未经 `files.renamePreview` 解析资源编号）
+- **C2** `pendingScan.queuePage` 已转发 IPC `anchor`；失效锚点回落到首页，与本地队列语义一致
+- **C3** `pendingAudit.presence` 按媒体库和指定 group/identity/scrape ids 精确返回存在项，不再做目录级计数或 list 求交
+- **C4** 远程 `scans.auditPage` 保留 `section`/`outcome`/`attention`
 - **C5** 无细粒度远程 `video_sources` 匹配 API，远程 sources 可为空
 - **C6** 远程刮削单条不支持；刮削仍仅本地模式
 - **C7** 远程 `playlists.applyImport` 不写 per-video `video_links`

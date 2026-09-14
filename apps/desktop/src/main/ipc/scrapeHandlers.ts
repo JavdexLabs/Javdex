@@ -105,7 +105,9 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_COUNT, () =>
     backend.pendingVideoScrapes.count({})
   )
-  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, (ids) => jobs.existingPendingVideoScrapeIds(ids))
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, (ids) =>
+    backend.pendingVideoScrapes.existingIds({ scrapeIds: ids })
+  )
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_PAGE, (query) => backend.pendingVideoScrapes.page(query ?? {}))
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_GET, (id) =>
     backend.pendingVideoScrapes.get({ pendingScrapeId: id })

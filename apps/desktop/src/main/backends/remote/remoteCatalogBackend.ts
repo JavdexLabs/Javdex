@@ -767,18 +767,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       latestScan: q('scans.getLatest'),
       auditGet: q('scans.auditGet'),
       auditHeader: q('scans.auditHeader'),
-      auditPage: (input, ctx) => {
-        const local = (input ?? {}) as { libraryId: number; limit?: number; offset?: number }
-        return query(
-          'scans.auditPage',
-          {
-            libraryId: local.libraryId,
-            ...(local.limit != null ? { limit: local.limit } : {}),
-            ...(local.offset != null ? { offset: local.offset } : {})
-          },
-          ctx?.signal
-        )
-      },
+      auditPage: q('scans.auditPage'),
       auditViewPage: (input, ctx) => {
         const local = (input ?? {}) as {
           libraryId: number
@@ -808,18 +797,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       getPendingScan: (input, ctx) =>
         query('pendingScan.get', { groupId: (input as { groupId: number }).groupId }, ctx?.signal),
       listPendingScans: q('pendingScan.list'),
-      pagePendingScanQueue: (input, ctx) => {
-        const local = (input ?? {}) as { libraryId?: number; limit?: number; offset?: number }
-        return query(
-          'pendingScan.queuePage',
-          {
-            ...(local.libraryId != null ? { libraryId: local.libraryId } : {}),
-            ...(local.limit != null ? { limit: local.limit } : {}),
-            ...(local.offset != null ? { offset: local.offset } : {})
-          },
-          ctx?.signal
-        )
-      },
+      pagePendingScanQueue: q('pendingScan.queuePage'),
       countPendingScanQueue: q('pendingScan.queueCount'),
       getPendingResourceIdentity: (input, ctx) =>
         query(
@@ -828,41 +806,23 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           ctx?.signal
         ),
       listPendingResourceIdentities: q('pendingResourceIdentity.list'),
-      pendingAuditPresence: async (input, ctx) => {
+      pendingAuditPresence: (input, ctx) => {
         const local = (input ?? {}) as {
           libraryId: number
           groupIds?: number[]
           identityIds?: number[]
           scrapeIds?: number[]
         }
-        await query('libraries.get', { libraryId: local.libraryId }, ctx?.signal)
-        const groupIds = local.groupIds ?? []
-        const identityIds = local.identityIds ?? []
-        const scrapeIds = local.scrapeIds ?? []
-        const [groups, identities, scrapes] = await Promise.all([
-          groupIds.length
-            ? (query('pendingScan.list', { libraryId: local.libraryId }, ctx?.signal) as Promise<
-                Array<{ id: number }>
-              >)
-            : Promise.resolve([]),
-          identityIds.length
-            ? (query('pendingResourceIdentity.list', { libraryId: local.libraryId }, ctx?.signal) as Promise<
-                Array<{ id: number }>
-              >)
-            : Promise.resolve([]),
-          scrapeIds.length
-            ? (query('pendingVideoScrapes.list', {}, ctx?.signal) as Promise<Array<{ id: number }>>)
-            : Promise.resolve([])
-        ])
-        const pick = (wanted: number[], rows: Array<{ id: number }>) => {
-          const have = new Set(rows.map((row) => row.id))
-          return [...new Set(wanted)].filter((id) => have.has(id)).sort((a, b) => a - b)
-        }
-        return {
-          groupIds: pick(groupIds, groups),
-          identityIds: pick(identityIds, identities),
-          scrapeIds: pick(scrapeIds, scrapes)
-        }
+        return query(
+          'pendingAudit.presence',
+          {
+            libraryId: local.libraryId,
+            groupIds: local.groupIds ?? [],
+            identityIds: local.identityIds ?? [],
+            scrapeIds: local.scrapeIds ?? []
+          },
+          ctx?.signal
+        )
       },
       renameFile: mPlan('files.rename'),
       importManual: m('files.importManual'),

@@ -293,8 +293,21 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
     return catalogScanAuditHeader(input.libraryId)
   },
   'scans.auditPage'(args) {
-    const input = args.envelope.input as { libraryId: number; limit?: number; offset?: number }
-    return catalogScanAuditPage(input.libraryId, { limit: input.limit, offset: input.offset })
+    const input = args.envelope.input as {
+      libraryId: number
+      section?: 'files' | 'removedResources' | 'promotedResources' | 'deletedVideos' | 'pendingGroups'
+      outcome?: 'added' | 'updated' | 'pending' | 'skipped' | 'unrecognized' | 'strm_failure' | 'processing_failure'
+      attention?: boolean
+      limit?: number
+      offset?: number
+    }
+    return catalogScanAuditPage(input.libraryId, {
+      section: input.section,
+      outcome: input.outcome,
+      attention: input.attention,
+      limit: input.limit,
+      offset: input.offset
+    })
   },
   'scans.auditViewPage'(args) {
     const input = args.envelope.input as ScanAuditViewQuery & { libraryId: number }

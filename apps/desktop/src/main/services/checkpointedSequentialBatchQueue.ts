@@ -32,7 +32,7 @@ export interface CheckpointedBatchPolicy<TTarget extends { id: number }, TReques
   kind: BatchScrapeJobKind
   missingResumeError: string
   invalidRunPlanError: string
-  resolveTargets(request: TRequest): TTarget[]
+  resolveTargets(request: TRequest): TTarget[] | Promise<TTarget[]>
   labelOf(target: TTarget): string
   restoreTarget(item: { id: number; label: string }): TTarget
   beforeResume?(
@@ -111,7 +111,7 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
   }
 
   async start(request: TRequest): Promise<void> {
-    const targets = this.policy.resolveTargets(request)
+    const targets = await this.policy.resolveTargets(request)
     const job = this.checkpointPort().create(
       this.policy.kind,
       request as PersistedBatchScrapeJob['request'],

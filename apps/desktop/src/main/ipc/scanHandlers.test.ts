@@ -381,11 +381,39 @@ it('runs FILE_IMPORT_MANUAL through the catalog backend with a root-relative loc
   )
 })
 
-it('refuses remote FILE_RENAME until the IPC carries a resource id', async () => {
-  const backend = { mode: 'remote', generation: 1, libraries: {} } as unknown as CatalogBackend
+it('resolves remote FILE_RENAME through files.renamePreview without host paths', async () => {
+  const calls: unknown[] = []
+  const backend = {
+    mode: 'remote',
+    generation: 2,
+    libraries: {
+      previewRenameFile: async (input: unknown) => {
+        calls.push(['preview', input])
+        return { resourceId: 44, planDigest: 'd'.repeat(64) }
+      },
+      renameFile: async (input: unknown, ctx: unknown) => {
+        calls.push(['rename', input, ctx])
+        return { outcome: 'imported' }
+      }
+    }
+  } as unknown as CatalogBackend
+  assert.deepEqual(await renameThroughBackend(backend, 3, 8, 'clip.mp4', 'renamed.mp4'), {
+    outcome: 'imported'
+  })
+  const [, previewInput] = calls[0] as [string, { libraryId: number; location: { rootId: number; relativePath: string } }]
+  const [, renameInput] = calls[1] as [
+    string,
+    { resourceId?: number; location: { relativePath: string }; planDigest: string }
+  ]
+  assert.equal(previewInput.libraryId, 3)
+  assert.equal(previewInput.location.rootId, 8)
+  assert.equal(previewInput.location.relativePath, 'clip.mp4')
+  assert.equal(renameInput.resourceId, 44)
+  assert.equal(renameInput.location.relativePath, 'clip.mp4')
+  assert.equal(renameInput.planDigest, 'd'.repeat(64))
   await assert.rejects(
-    () => renameThroughBackend(backend, 3, 8, 'clip.mp4', 'renamed.mp4'),
-    (error: unknown) => isStructuredError(error) && error.code === 'UNSUPPORTED_CAPABILITY'
+    () => renameThroughBackend(backend, 3, 8, '/abs/clip.mp4', 'renamed.mp4'),
+    (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
   )
 })
 

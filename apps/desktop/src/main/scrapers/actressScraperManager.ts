@@ -172,6 +172,146 @@ function resolveActressScrapeQuery(
   return { queryName: trimmed, aliases: fallback }
 }
 
+export interface CollectedActressScrape {
+  selectedScraperName: string
+  descriptor: ScraperPluginDescriptor | undefined
+  queryName: string
+  result: ActressScrapeResult | null
+  sourceWarnings: string[]
+  fieldsToApply: ActressScrapeField[]
+  resources: PreparedActressScrapeResource[]
+}
+
+/** Collect plugin/Playwright actress profile data without writing the official catalog. */
+export async function collectActressScrape(input: {
+  mainName: string
+  aliases: string[]
+  nameZh?: string | null
+  nameEn?: string | null
+  scraperName?: string
+  fields: ActressScrapeField[]
+  requested: ActressScrapeField[]
+  queryName?: string
+  useAliases?: boolean
+  delayController?: ScrapeActressOptions['delayController']
+}): Promise<CollectedActressScrape> {
+  const settings = getSettings()
+  const proxyUrl = resolveScrapeProxyUrl(settings)
+  const selectedScraperName = input.scraperName || settings.defaultActressScraper
+  const descriptor = assertActressScraperRunnable(selectedScraperName)
+  const composite = findCompositeScraper('actress', selectedScraperName)
+  const scraper = composite ? null : getActressScraper(input.scraperName)
+  const selected = new Set(input.fields)
+  const gfriendsSelected =
+    scraper?.scraperName === 'Gfriends' ||
+    input.fields.some((field) => composite?.fieldPluginMap[field] === 'Gfriends')
+  const { queryName, aliases } = resolveActressScrapeQuery(
+    input.mainName,
+    input.aliases,
+    input.queryName,
+    [input.nameZh, input.nameEn].filter((name): name is string => Boolean(name?.trim())),
+    (input.useAliases ?? false) || gfriendsSelected
+  )
+  let rawResult: ActressScrapeResult | null
+  let sourceWarnings: string[] = []
+  let fieldsToApply = input.requested
+  if (scraper) {
+    rawResult = input.delayController
+      ? await input.delayController.run('actress', scraper.scraperName, () =>
+          scraper.parseTask(queryName, aliases, proxyUrl)
+        )
+      : await scraper.parseTask(queryName, aliases, proxyUrl)
+  } else {
+    const compositeOutcome = await scrapeCompositeActress(
+      selectedScraperName,
+      input.fields,
+      queryName,
+      aliases,
+      proxyUrl,
+      input.delayController
+    )
+    rawResult = compositeOutcome.result
+    sourceWarnings = compositeOutcome.warnings
+    fieldsToApply = compositeOutcome.matchedFields
+  }
+  const result = normalizeActressScrapeResult(rawResult)
+  const resources: PreparedActressScrapeResource[] = []
+  if (!result) {
+    return {
+      selectedScraperName,
+      descriptor,
+      queryName,
+      result: null,
+      sourceWarnings,
+      fieldsToApply,
+      resources
+    }
+  }
+  if (selected.has('avatar') && result.avatarUrl) {
+    try {
+      const data = await scrapeBrowser.fetchBuffer(result.avatarUrl)
+      if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+      const dimensions = mediaAssetStore.readImageDimensions(data)
+      resources.push({
+        field: 'avatar',
+        position: 0,
+        remoteUrl: result.avatarUrl,
+        data,
+        width: dimensions?.width ?? null,
+        height: dimensions?.height ?? null
+      })
+    } catch {
+      const sourceName = composite?.fieldPluginMap.avatar
+      sourceWarnings.push(
+        sourceName ? `字段源「${sourceName}」失败：头像下载失败` : '头像下载失败'
+      )
+    }
+  }
+
+  const galleryUrls = dedupeUrls(result.galleryImageUrls ?? [])
+  if (selected.has('gallery') && galleryUrls.length) {
+    let failedDownloads = 0
+    for (let index = 0; index < galleryUrls.length; index++) {
+      try {
+        const data = await scrapeBrowser.fetchBuffer(galleryUrls[index])
+        if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+        const dimensions = mediaAssetStore.readImageDimensions(data)
+        resources.push({
+          field: 'gallery',
+          position: index,
+          remoteUrl: galleryUrls[index],
+          data,
+          width: dimensions?.width ?? null,
+          height: dimensions?.height ?? null
+        })
+      } catch {
+        failedDownloads += 1
+      }
+    }
+    const sourceName = composite?.fieldPluginMap.gallery
+    if (failedDownloads > 0) {
+      sourceWarnings.push(
+        sourceName
+          ? `字段源「${sourceName}」失败：${failedDownloads} 张写真下载失败`
+          : `${failedDownloads} 张写真下载失败`
+      )
+    }
+    if (failedDownloads === galleryUrls.length) {
+      fieldsToApply = fieldsToApply.filter((field) => field !== 'gallery')
+    }
+  }
+
+  return {
+    selectedScraperName,
+    descriptor,
+    queryName,
+    result: { ...result, galleryImageUrls: galleryUrls },
+    sourceWarnings,
+    fieldsToApply,
+    resources
+  }
+}
+
 /** Scrape a single actress profile and persist avatar / fields / aliases. */
 export async function scrapeActress(
   actressId: number,
@@ -188,133 +328,45 @@ export async function scrapeActress(
   if (effective.length === 0) {
     return { status: 'success', ok: true, result: {}, skipped: true }
   }
-  const selected = new Set(effective)
 
   try {
-    const settings = getSettings()
-    const proxyUrl = resolveScrapeProxyUrl(settings)
-    const selectedScraperName = scraperName || settings.defaultActressScraper
-    assertActressScraperRunnable(selectedScraperName)
-    const composite = findCompositeScraper('actress', selectedScraperName)
-    const scraper = composite ? null : getActressScraper(scraperName)
-    const gfriendsSelected =
-      scraper?.scraperName === 'Gfriends' ||
-      effective.some((field) => composite?.fieldPluginMap[field] === 'Gfriends')
-
-    const { queryName, aliases } = resolveActressScrapeQuery(
-      detail.main_name,
-      detail.aliases,
-      options?.queryName,
-      [detail.name_zh, detail.name_en].filter((name): name is string =>
-        Boolean(name?.trim())
-      ),
-      (options?.useAliases ?? false) || gfriendsSelected
-    )
-
-    let rawResult: ActressScrapeResult | null
-    let sourceWarnings: string[] = []
-    let fieldsToApply = requested
-    if (scraper) {
-      rawResult = options?.delayController
-        ? await options.delayController.run('actress', scraper.scraperName, () =>
-            scraper.parseTask(queryName, aliases, proxyUrl)
-          )
-        : await scraper.parseTask(queryName, aliases, proxyUrl)
-    } else {
-      const compositeOutcome = await scrapeCompositeActress(
-        selectedScraperName,
-        effective,
-        queryName,
-        aliases,
-        proxyUrl,
-        options?.delayController
-      )
-      rawResult = compositeOutcome.result
-      sourceWarnings = compositeOutcome.warnings
-      fieldsToApply = compositeOutcome.matchedFields
-    }
-    const result = normalizeActressScrapeResult(rawResult)
-    if (!result) {
+    const collected = await collectActressScrape({
+      mainName: detail.main_name,
+      aliases: detail.aliases,
+      nameZh: detail.name_zh,
+      nameEn: detail.name_en,
+      scraperName,
+      fields: effective,
+      requested,
+      queryName: options?.queryName,
+      useAliases: options?.useAliases,
+      delayController: options?.delayController
+    })
+    if (!collected.result) {
       recordActressScrapeFailure(actressId)
       return {
         status: 'failure',
         ok: false,
         error: '未找到匹配的演员资料',
-        warnings: sourceWarnings.length > 0 ? sourceWarnings : undefined
+        warnings: collected.sourceWarnings.length > 0 ? collected.sourceWarnings : undefined
       }
     }
-    const preparedResources: PreparedActressScrapeResource[] = []
-    if (selected.has('avatar') && result.avatarUrl) {
-      try {
-        const data = await scrapeBrowser.fetchBuffer(result.avatarUrl)
-        if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
-        const dimensions = mediaAssetStore.readImageDimensions(data)
-        preparedResources.push({
-          field: 'avatar',
-          position: 0,
-          remoteUrl: result.avatarUrl,
-          data,
-          width: dimensions?.width ?? null,
-          height: dimensions?.height ?? null
-        })
-      } catch {
-        const sourceName = composite?.fieldPluginMap.avatar
-        sourceWarnings.push(
-          sourceName ? `字段源「${sourceName}」失败：头像下载失败` : '头像下载失败'
-        )
-      }
-    }
-
-    const galleryUrls = dedupeUrls(result.galleryImageUrls ?? [])
-    if (selected.has('gallery') && galleryUrls.length) {
-      let failedDownloads = 0
-      for (let index = 0; index < galleryUrls.length; index++) {
-        try {
-          const data = await scrapeBrowser.fetchBuffer(galleryUrls[index])
-          if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
-          const dimensions = mediaAssetStore.readImageDimensions(data)
-          preparedResources.push({
-            field: 'gallery',
-            position: index,
-            remoteUrl: galleryUrls[index],
-            data,
-            width: dimensions?.width ?? null,
-            height: dimensions?.height ?? null
-          })
-        } catch {
-          failedDownloads += 1
-        }
-      }
-      const sourceName = composite?.fieldPluginMap.gallery
-      if (failedDownloads > 0) {
-        sourceWarnings.push(
-          sourceName
-            ? `字段源「${sourceName}」失败：${failedDownloads} 张写真下载失败`
-            : `${failedDownloads} 张写真下载失败`
-        )
-      }
-      if (failedDownloads === galleryUrls.length) {
-        fieldsToApply = fieldsToApply.filter((field) => field !== 'gallery')
-      }
-    }
-
-    const descriptor = listActressScraperPlugins().find(
-      (plugin) => plugin.name === selectedScraperName
-    )
     return actressIdentityConflictWorkflow.processPreparedScrape({
       actressId,
       plugin: {
-        name: selectedScraperName,
-        source: descriptor?.source ?? (composite ? 'composite' : 'builtin'),
-        ...(descriptor?.version ? { version: descriptor.version } : {})
+        name: collected.selectedScraperName,
+        source: collected.descriptor?.source ?? (
+          findCompositeScraper('actress', collected.selectedScraperName) ? 'composite' : 'builtin'
+        ),
+        ...(collected.descriptor?.version ? { version: collected.descriptor.version } : {})
       },
-      queryName,
+      queryName: collected.queryName,
       selectedFields: requested,
-      applicableFields: fieldsToApply.filter((field) => effective.includes(field)),
+      applicableFields: collected.fieldsToApply.filter((field) => effective.includes(field)),
       mode,
-      result: { ...result, galleryImageUrls: galleryUrls },
-      warnings: sourceWarnings,
-      resources: preparedResources,
+      result: collected.result,
+      warnings: collected.sourceWarnings,
+      resources: collected.resources,
       ...(options?.batchJobId ? { batchJobId: options.batchJobId } : {})
     })
   } catch (err) {

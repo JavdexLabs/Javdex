@@ -34,6 +34,26 @@ export interface TaskCancelInput {
 export interface TargetListCreateInput {
   kind: string
   filterDigest: string
+  ids?: number[]
+  videoFilter?: {
+    libraryId?: number
+    status?: 0 | 1 | 2 | 'all'
+    missingFields?: string[]
+    sourceName?: string
+    ratingSourceName?: string
+  }
+  actressFilter?: {
+    scope?: 'all' | 'female' | 'male'
+    scrapeStatus?: 'all' | 'unscraped' | 'success' | 'failed'
+    missingFields?: string[]
+  }
+}
+
+export interface TargetListEntry {
+  id: number
+  present: boolean
+  label?: string | null
+  revision?: number | null
 }
 
 export interface TargetListPage {
@@ -41,4 +61,5 @@ export interface TargetListPage {
   ids: number[]
   offset: number
   hasMore: boolean
+  entries: TargetListEntry[]
 }

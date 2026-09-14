@@ -41,14 +41,14 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 ## 当前实现限制（本阶段已确认补齐）
 
-> 2026-09-14：用户已逐项确认 C1–C7 全部补齐，C6 包含单条和批量刮削，采集仍在桌面执行。该决定覆盖此前“不扩合同”的限制；以下列表描述尚未补齐的当前代码行为，不代表目标范围。实施顺序见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。当前阶段不做全面自动化/完整 GUI 验收、故障测试、跨平台安装或 0.8 发布候选，E1/E2 仅保留历史说明。
+> 2026-09-14：用户已逐项确认 C1–C7 全部补齐，C6 包含单条和批量刮削，采集仍在桌面执行。该决定覆盖此前“不扩合同”的限制。实施顺序见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。当前阶段不做全面自动化/完整 GUI 验收、故障测试、跨平台安装或 0.8 发布候选，E1/E2 仅保留历史说明。
 
-- **C1** 远程 `FILE_RENAME` 仍 UNSUPPORTED（冻结 IPC 无 `resourceId`，不扩 resourceId 合同）
-- **C2** `pendingScan.queuePage` 远程不支持 IPC `anchor`，仅本地队列页保留
-- **C3** 冻结 `pendingAudit.presence` 保持空输入的目录级计数；桌面适配器本地包装 / 远程用 `libraries.get` 与 pending list 求交
-- **C4** 远程 `scans.auditPage` 仅 `{libraryId}` + page，无 section/attention
-- **C5** 无细粒度远程 `video_sources` 匹配 API，远程 sources 可为空
-- **C6** 远程刮削单条不支持；刮削仍仅本地模式
-- **C7** 远程 `playlists.applyImport` 不写 per-video `video_links`
+- **C1** 远程 `FILE_RENAME` 经 `files.renamePreview` 在服务端解析资源编号与活文件指纹；桌面只发送根相对路径，绝对路径被拒绝
+- **C2** `pendingScan.queuePage` 已转发 IPC `anchor`；失效锚点回落到首页，与本地队列语义一致
+- **C3** `pendingAudit.presence` 按媒体库和指定 group/identity/scrape ids 精确返回存在项，不再做目录级计数或 list 求交
+- **C4** 远程 `scans.auditPage` 保留 `section`/`outcome`/`attention`
+- **C5** 远程 `videos.sources` 按 codes/videoIds/source+identity 分页返回唯一影片及其来源；空结果表示未匹配，无效响应当查询失败。清单匹配不再用空 sources 代替
+- **C6** 远程单条与批量刮削已接线：桌面运行插件/Playwright 采集，服务端持有正式资料并接收 `applyScrapeCandidate` / 待确认提交。批量启动时冻结 ids 或筛选条件；分页 `entries` 对已删除 id 占位。远程已选 ID 上限 200，更大范围用 `videoFilter`/`actressFilter`。取消只停止桌面采集，不回滚已受理写入。远程 `fillEmpty` 按详情 DTO 近似（头像以路径存在视为已填）。count 可能留下 `catalog_settings` 的 target-list 孤儿记录。尚未做完整 GUI/故障验收
+- **C7** 远程 `playlists.applyImport` 按本地语义写入 per-video `video_links`（INSERT OR IGNORE 去重），不扩大自动建片或追加到已有清单
 - **E1** 单容器 `server:smoke` 已通过（#107）。Docker 两端迁库见 `server:smoke:migration` / 执行计划 S13。Linux 同版本 `deb`/`AppImage` + 镜像安装见 `smoke:same-version-install` / 执行计划 S14。不是 Windows/macOS 安装包，也不是完整 GUI 产品流
 - **E2** 第一版发布路径已解锁：S14 剩余门闩通过后可升 0.8、写 CHANGELOG、准备合并 main。不得在剩余门闩通过前宣称 S13/S14 完成；本文件不授权自动合并 main，也不在本阶段升版本或写 CHANGELOG

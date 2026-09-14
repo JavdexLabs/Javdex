@@ -243,10 +243,29 @@ export async function renameThroughBackend(
 ): Promise<RenameImportResult> {
   assertFileNameOnly(newName)
   if (backend.mode === 'remote') {
-    throw structuredError(
-      'UNSUPPORTED_CAPABILITY',
-      '远程重命名仍需要资料库资源编号；当前桌面 IPC 只有根目录相对/绝对路径。'
-    )
+    if (path.isAbsolute(oldPath)) {
+      throw structuredError('INVALID_INPUT', '远程文件位置必须是根目录相对路径')
+    }
+    const location = { rootId, relativePath: oldPath }
+    const preview = (await backend.libraries.previewRenameFile({
+      libraryId,
+      location,
+      newFileName: newName
+    })) as { resourceId?: number; planDigest?: string }
+    if (!preview || typeof preview.planDigest !== 'string' || !preview.planDigest) {
+      throw structuredError('INVALID_INPUT', '重命名预览响应无效')
+    }
+    return backend.libraries.renameFile(
+      {
+        libraryId,
+        ...(preview.resourceId != null ? { resourceId: preview.resourceId } : {}),
+        location,
+        newFileName: newName,
+        planId: randomUUID(),
+        planDigest: preview.planDigest
+      },
+      ipcMutation(undefined, fileMaintenanceVersions(backend))
+    ) as Promise<RenameImportResult>
   }
   const root = requireActiveRoot(libraryId, rootId)
   const relativePath = toRootRelativePath(libraryId, rootId, oldPath)

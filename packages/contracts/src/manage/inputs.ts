@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '../videoScrapeTypes'
+import { ALL_ACTRESS_SCRAPE_FIELDS } from '../actressScrapeTypes'
 import { NFO_EXPORT_PROFILE_IDS } from '../nfoExportTypes'
+import { SCAN_AUDIT_OUTCOMES, SCAN_AUDIT_SECTIONS } from '../scanAuditReadTypes'
 import { DIRECT_ID_BATCH_MAX, PAGE_SIZE_MAX } from '../protocol/limits'
 import type { ManageOperationId } from './operations'
 import {
@@ -36,6 +38,96 @@ const videoScrapeFieldsSchema = z
   .max(16)
   .refine((values) => new Set(values).size === values.length, 'scrape fields must be unique')
 const scrapeModeSchema = z.enum(['replace', 'fillEmpty', 'replaceIfPresent'])
+const actressScrapeFieldSchema = z.enum(
+  ALL_ACTRESS_SCRAPE_FIELDS as unknown as [string, ...string[]]
+)
+const actressScrapeFieldsSchema = z
+  .array(actressScrapeFieldSchema)
+  .min(1)
+  .max(20)
+  .refine((values) => new Set(values).size === values.length, 'actress scrape fields must be unique')
+const pendingScanAnchorSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('group'), id: idSchema }).strict(),
+  z.object({ kind: z.literal('identity'), id: idSchema }).strict()
+])
+const pendingAuditIdListsSchema = z
+  .object({
+    groupIds: z.array(idSchema).max(100).default([]),
+    identityIds: z.array(idSchema).max(100).default([]),
+    scrapeIds: z.array(idSchema).max(100).default([])
+  })
+  .strict()
+const videoSourceQuerySchema = z
+  .object({
+    source: z.string().min(1).max(200).optional(),
+    externalCode: z.string().min(1).max(200).optional(),
+    url: z.string().url().max(2048).optional(),
+    videoIds: idListSchema.optional(),
+    codes: z.array(codeSchema).max(50).optional(),
+    ...pageQuerySchema.shape
+  })
+  .strict()
+  .refine(
+    (value) =>
+      Boolean(value.videoIds?.length) ||
+      Boolean(value.codes?.length) ||
+      Boolean(value.source && value.externalCode) ||
+      Boolean(value.source && value.url),
+    'videos.sources requires codes, videoIds, or source plus externalCode/url'
+  )
+const pendingVideoScrapeCandidateSchema = z
+  .object({
+    result: z.unknown(),
+    sourceUrl: z.string().url().max(2048).nullable().optional(),
+    cover: catalogImageRefSchema.optional(),
+    samples: z.array(catalogImageRefSchema).max(40).optional(),
+    actressAvatars: z
+      .array(
+        z
+          .object({
+            name: limitedTextSchema.min(1),
+            image: catalogImageRefSchema
+          })
+          .strict()
+      )
+      .max(40)
+      .optional()
+  })
+  .strict()
+const pendingVideoScrapeSourceSchema = z
+  .object({
+    pluginName: limitedTextSchema.min(1),
+    pluginSource: z.enum(['builtin', 'user', 'composite']),
+    pluginVersion: z.string().max(80).nullable().optional(),
+    pluginConfig: z.unknown().optional(),
+    sourceName: limitedTextSchema.min(1),
+    selectedFields: videoScrapeFieldsSchema,
+    candidates: z.array(pendingVideoScrapeCandidateSchema).min(1).max(20)
+  })
+  .strict()
+const playlistImportVideoLinkSchema = z
+  .object({
+    videoId: idSchema,
+    label: limitedTextSchema.min(1),
+    url: z.string().url().max(2048)
+  })
+  .strict()
+const targetVideoFilterSchema = z
+  .object({
+    libraryId: idSchema.optional(),
+    status: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal('all')]).optional(),
+    missingFields: videoScrapeFieldsSchema.optional(),
+    sourceName: limitedTextSchema.max(200).optional(),
+    ratingSourceName: limitedTextSchema.max(200).optional()
+  })
+  .strict()
+const targetActressFilterSchema = z
+  .object({
+    scope: z.enum(['all', 'female', 'male']).optional(),
+    scrapeStatus: z.enum(['all', 'unscraped', 'success', 'failed']).optional(),
+    missingFields: actressScrapeFieldsSchema.optional()
+  })
+  .strict()
 const resourceFilterSchema = z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])
 const lastResourceModeSchema = z.enum(['retain-video'])
 const scrapedStatusSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal('all')])
@@ -191,7 +283,10 @@ export const MANAGE_OPERATION_INPUTS = {
   'targetLists.create': z
     .object({
       kind: z.string().min(1).max(100),
-      filterDigest: digestSchema
+      filterDigest: digestSchema,
+      ids: idListSchema.optional(),
+      videoFilter: targetVideoFilterSchema.optional(),
+      actressFilter: targetActressFilterSchema.optional()
     })
     .strict(),
   'targetLists.page': z
@@ -235,10 +330,12 @@ export const MANAGE_OPERATION_INPUTS = {
     })
     .strict(),
   'videos.get': z.object({ scope: catalogScopeSchema, videoId: idSchema }).strict(),
+  'videos.sources': videoSourceQuerySchema,
   'videos.years': z.object({ scope: catalogScopeSchema }).strict(),
   'videos.edit': z.object({ videoId: idSchema, fields: videoEditFields }).strict(),
   'videos.clearMeta': z.object({ videoId: idSchema }).strict(),
   'videos.markScrapeSuccess': z.object({ videoId: idSchema }).strict(),
+  'videos.markScrapeFailed': z.object({ videoId: idSchema }).strict(),
   'videos.setRating': z.object({ videoId: idSchema, rating: z.number().min(0).max(5) }).strict(),
   'videos.correctImport': z
     .object({
@@ -340,14 +437,57 @@ export const MANAGE_OPERATION_INPUTS = {
       mode: scrapeModeSchema,
       candidate: z.unknown(),
       cover: catalogImageRefSchema.optional(),
-      samples: z.array(catalogImageRefSchema).max(40).optional()
+      samples: z.array(catalogImageRefSchema).max(40).optional(),
+      actressAvatars: z
+        .array(
+          z
+            .object({
+              name: limitedTextSchema.min(1),
+              image: catalogImageRefSchema
+            })
+            .strict()
+        )
+        .max(40)
+        .optional(),
+      directorSelectionId: idSchema.optional(),
+      directorAmbiguity: z.enum(['choice', 'preserve']).optional()
     })
     .strict(),
   'pendingVideoScrapes.count': emptyInput,
-  'pendingVideoScrapes.existingIds': emptyInput,
-  'pendingVideoScrapes.page': pageQuerySchema,
+  'pendingVideoScrapes.existingIds': z
+    .object({
+      scrapeIds: z.array(idSchema).max(100).optional(),
+      videoIds: idListSchema.optional()
+    })
+    .strict()
+    .refine(
+      (value) => !(value.scrapeIds != null && value.videoIds != null),
+      'pending scrape existingIds cannot combine scrapeIds and videoIds'
+    ),
+  'pendingVideoScrapes.page': pageQuerySchema
+    .extend({
+      anchorId: idSchema.optional(),
+      videoId: idSchema.optional()
+    })
+    .strict()
+    .refine(
+      (value) => !(value.anchorId != null && value.videoId != null),
+      'pending scrape page cannot combine anchorId and videoId'
+    ),
   'pendingVideoScrapes.get': z.object({ pendingScrapeId: idSchema }).strict(),
   'pendingVideoScrapes.list': emptyInput,
+  'pendingVideoScrapes.replace': z
+    .object({
+      videoId: idSchema,
+      selectedFields: videoScrapeFieldsSchema,
+      applicableFields: videoScrapeFieldsSchema,
+      updateMode: scrapeModeSchema,
+      request: z.unknown().optional(),
+      warnings: z.array(z.string().max(2000)).max(50).optional(),
+      batchJobId: z.string().max(200).nullable().optional(),
+      sources: z.array(pendingVideoScrapeSourceSchema).min(1).max(20)
+    })
+    .strict(),
   'pendingVideoScrapes.confirm': z
     .object({
       pendingScrapeId: idSchema,
@@ -469,6 +609,7 @@ export const MANAGE_OPERATION_INPUTS = {
     })
     .strict(),
   'actresses.markScrapeSuccess': z.object({ actressId: idSchema }).strict(),
+  'actresses.markScrapeFailed': z.object({ actressId: idSchema }).strict(),
   'actresses.applyCrop': z
     .object({
       actressId: idSchema,
@@ -483,7 +624,9 @@ export const MANAGE_OPERATION_INPUTS = {
       actressId: idSchema,
       candidate: z.unknown(),
       avatar: catalogImageRefSchema.optional(),
-      gallery: z.array(catalogImageRefSchema).max(40).optional()
+      gallery: z.array(catalogImageRefSchema).max(40).optional(),
+      fields: actressScrapeFieldsSchema.optional(),
+      mode: scrapeModeSchema.optional()
     })
     .strict(),
   'actressConflicts.list': emptyInput,
@@ -492,6 +635,23 @@ export const MANAGE_OPERATION_INPUTS = {
   'actressConflicts.count': emptyInput,
   'actressConflicts.summary': emptyInput,
   'actressConflicts.inspectName': z.object({ name: limitedTextSchema.min(1) }).strict(),
+  'actressConflicts.submit': z
+    .object({
+      actressId: idSchema,
+      pluginName: limitedTextSchema.min(1),
+      pluginSource: z.enum(['builtin', 'user', 'composite']),
+      pluginVersion: z.string().max(80).nullable().optional(),
+      queryName: limitedTextSchema.min(1),
+      selectedFields: actressScrapeFieldsSchema,
+      applicableFields: actressScrapeFieldsSchema,
+      mode: scrapeModeSchema,
+      candidate: z.unknown(),
+      warnings: z.array(z.string().max(2000)).max(50).optional(),
+      batchJobId: z.string().max(200).nullable().optional(),
+      avatar: catalogImageRefSchema.optional(),
+      gallery: z.array(catalogImageRefSchema).max(40).optional()
+    })
+    .strict(),
   'actressConflicts.discard': z.object({ pendingId: idSchema }).strict(),
   'actressConflicts.validateIllegal': z.object({ pendingId: idSchema, replacements: z.unknown() }).strict(),
   'actressConflicts.resolve': z.object({ pendingId: idSchema, choices: z.unknown() }).strict(),
@@ -628,7 +788,8 @@ export const MANAGE_OPERATION_INPUTS = {
       videoIds: idListSchema.min(1),
       libraryId: idSchema,
       cover: catalogImageRefSchema.optional(),
-      sourceUrl: z.string().url().max(2048).optional()
+      sourceUrl: z.string().url().max(2048).optional(),
+      videoLinks: z.array(playlistImportVideoLinkSchema).max(DIRECT_ID_BATCH_MAX).optional()
     })
     .strict(),
   'libraries.list': z.object({ includeArchived: z.boolean().optional() }).strict(),
@@ -699,7 +860,15 @@ export const MANAGE_OPERATION_INPUTS = {
   'scans.getLatest': z.object({ libraryId: idSchema }).strict(),
   'scans.auditGet': z.object({ libraryId: idSchema }).strict(),
   'scans.auditHeader': z.object({ libraryId: idSchema }).strict(),
-  'scans.auditPage': z.object({ libraryId: idSchema }).extend(pageQuerySchema.shape).strict(),
+  'scans.auditPage': z
+    .object({
+      libraryId: idSchema,
+      section: z.enum(SCAN_AUDIT_SECTIONS).optional(),
+      outcome: z.enum(SCAN_AUDIT_OUTCOMES).optional(),
+      attention: z.boolean().optional(),
+      ...pageQuerySchema.shape
+    })
+    .strict(),
   'scans.auditViewPage': z
     .object({
       libraryId: idSchema,
@@ -713,10 +882,17 @@ export const MANAGE_OPERATION_INPUTS = {
       ...pageQuerySchema.shape
     })
     .strict(),
+  'files.renamePreview': z
+    .object({
+      libraryId: idSchema,
+      location: rootRelativeSchema,
+      newFileName: z.string().min(1).max(512)
+    })
+    .strict(),
   'files.rename': z
     .object({
       libraryId: idSchema,
-      resourceId: idSchema,
+      resourceId: idSchema.optional(),
       location: rootRelativeSchema,
       newFileName: z.string().min(1).max(512)
     })
@@ -730,10 +906,20 @@ export const MANAGE_OPERATION_INPUTS = {
       target: resourceTargetSchema
     })
     .strict(),
-  'pendingAudit.presence': emptyInput,
+  'pendingAudit.presence': z
+    .object({
+      libraryId: idSchema,
+      ...pendingAuditIdListsSchema.shape
+    })
+    .strict()
+    .refine(
+      (value) => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100,
+      'pending audit ids must total at most 100'
+    ),
   'pendingScan.queuePage': z
     .object({
       libraryId: idSchema.optional(),
+      anchor: pendingScanAnchorSchema.optional(),
       ...pageQuerySchema.shape
     })
     .strict(),

@@ -284,6 +284,15 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     await this.catalogLookup.ingestCodes(this.catalog, codes)
   }
 
+  private async refreshCatalogSourceIdentity(identity: Record<string, unknown>): Promise<void> {
+    if (this.catalog?.mode !== 'remote' || !this.catalogLookup?.ingestSourceIdentity) return
+    await this.catalogLookup.ingestSourceIdentity(this.catalog, {
+      source: typeof identity.source === 'string' ? identity.source : undefined,
+      externalCode: typeof identity.externalCode === 'string' ? identity.externalCode : undefined,
+      sourceUrl: typeof identity.sourceUrl === 'string' ? identity.sourceUrl : undefined
+    })
+  }
+
   private timeline(runId: string, initial: PlaylistImportActivity[] = []): AgentMetadataActivityTimeline {
     let timeline = this.timelines.get(runId)
     if (!timeline) {
@@ -1182,6 +1191,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
             viewRevision
           })
           await this.refreshCatalogIdentities([checkpoint.detailCode])
+          await this.refreshCatalogSourceIdentity(checkpoint.identity)
           return this.result(runId, repository.checkpointDetailIdentity(checkpoint))
         }
       })

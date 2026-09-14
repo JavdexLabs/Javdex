@@ -34,6 +34,7 @@ run([
   'apps/server/src/filesystem.test.ts',
   'apps/server/src/imageCodec.test.ts',
   'apps/server/src/catalogGate.test.ts',
+  'apps/server/src/manageCatalogC1C7.test.ts',
   'apps/server/src/runtime.test.ts'
 ])
 run([

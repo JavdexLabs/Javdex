@@ -2,7 +2,7 @@
 
 更新时间：2026-09-14。核对代码：`96e37a7`（`origin/codex/server-mode-feasibility`）。当前版本：0.7.0。
 
-本文件是当前阶段的工作入口；[原执行计划](SERVER_MODE_EXECUTION_PLAN.md) 保留 S00–S14 历史要求与证据，[部署说明](SERVER_MODE.md) 记录当前产品行为。用户已在本轮逐项确认：C1–C7 全部补齐，C6 包括单条及批量刮削；此次决定覆盖历史“接受限制、不扩合同”的记录。当前交付是可执行计划，不代表功能已经实现。
+本文件是当前阶段的工作入口；[原执行计划](SERVER_MODE_EXECUTION_PLAN.md) 保留 S00–S14 历史要求与证据，[部署说明](SERVER_MODE.md) 记录当前产品行为。用户已在本轮逐项确认：C1–C7 全部补齐，C6 包括单条及批量刮削；此次决定覆盖历史“接受限制、不扩合同”的记录。当前交付是可执行计划；T0–T7 已完成（阶段性实现完成，不是 S13/S14）。
 
 ## 本阶段范围
 
@@ -79,23 +79,69 @@ C6 已包含批量，实施清单包含冻结目标 targetListId、分页、已�
 
 ## 交接记录
 
-当前已完成：旧计划过时入口修正、当前阶段范围调整、C1–C7 逐项确认、首轮入口核对与实施单元拆分。
-
-当前待办：按下列实施单元完成 P1 细节核对，随后在实施任务中推进 P2。此阶段不自动创建远程工单、提交代码、建立标签或合并 main。
+当前已完成：旧计划过时入口修正、当前阶段范围调整、C1–C7 逐项确认、首轮入口核对与实施单元拆分、T0–T7。此阶段不自动合并 main，不宣称 S13/S14 完成。
 
 ## 已确认的实施单元与依赖
 
-下列单元均为待实施；已核对关键 handler 存在，不代表完成详细设计或功能开发。顺序为 T0 → T1 → T2 → T3 → T4 → T5 → T6 → T7。T2 与 T3 在各自合同确定后可以并行。
+顺序为 T0 → T1 → T2 → T3 → T4 → T5 → T6 → T7。T2 与 T3 在各自合同确定后可以并行。
 
-| 单元 | 对应范围 | 实现内容与入口 | 完成行为 |
-|---|---|---|---|
-| T0 合同整理 | C1–C7 | 核对 `packages/contracts/src/manage/`、`application/catalogBackend.ts` 及本地/远程后端；逐单元补 DTO、输入 schema、版本依赖、错误和能力定义，并更新合同清点 | 明确每项缺口，字段贯穿调用链；不要求先完成全部合同才做简单功能 |
-| T1 精确查询与分页 | C2/C3/C4 | `manageCatalogRemainder.ts` 的 queuePage/presence、`manageCatalogMaintenance.ts` 的 auditPage、`remoteCatalogBackend.ts`、`ipc/scanHandlers.ts`；复用 library 的队列定位与审计读取 | 指定条目定位有效；按媒体库/影片 IDs 返回真实状态；section/attention 不再被剥离；空页及失效锚点沿用本地语义 |
-| T2 远程文件重命名 | C1 | 复用已有 `files.rename`/library 维护实现，补桌面资源标识及服务端生成预览/指纹的路径，接入现有文件操作入口 | 用户可重命名服务端资源；预览与提交均基于服务端活文件、资源版本及根保护，桌面不访问服务端绝对路径 |
-| T3 来源查询与匹配 | C5 | 增加受限、可分页的来源查询；接入 `playlistImportCatalogLookup.ts` 和相关采集匹配端口 | 匹配使用服务端真实来源信息，不以空 sources 代替、不回查本地 library.db；区别来源缺失与查询失败 |
-| T4 清单关联链接 | C7，依赖 T3 | 扩展 `playlists.applyImport`、`manageCatalogScrape.ts`、`catalogPlaylistImport.ts`、`playlistImportCatalogApply.ts` | 按本地已有语义写影片关联链接，与清单应用共同保持事务/幂等；URL 校验及去重不退化，不顺带扩大自动建片/append 等其它范围 |
-| T5 单条远程刮削 | C6，依赖 T3 | 核对 `ipc/scrapeHandlers.ts`、`scrapeJobController.ts`、应用工作流与后端 apply；覆盖现有影片/演员入口 | 桌面采集与选择 → 服务端图片暂存 → 带原版本提交；支持候选与待确认处理，工作记录按 catalog 隔离；正式资料不写本地库 |
-| T6 批量远程刮削 | C6，依赖 T5 | 扩展已有 targetLists 的实际目标选择与分页合同，接入现有批次 start/进度/取消；复用既有冻结槽位组件 | 启动时冻结选中/筛选目标，后新增目标不混入；删除项占位；成功、冲突、待确认及结果待核实分项准确；取消采集不伪称已受理提交撤销 |
-| T7 阶段交接 | 全部 | 按实现结果同步本计划、SERVER_MODE、合同清点与相关操作说明，清理已失效的限制描述 | C1–C7 每项列清实现文件、常规定向检查和未验证范围；只报告阶段实现结果 |
+| 单元 | 对应范围 | 实现内容与入口 | 完成行为 | 状态 |
+|---|---|---|---|---|
+| T0 合同整理 | C1–C7 | 核对 `packages/contracts/src/manage/`、`application/catalogBackend.ts` 及本地/远程后端；逐单元补 DTO、输入 schema、版本依赖、错误和能力定义，并更新合同清点 | 明确每项缺口，字段贯穿调用链；不要求先完成全部合同才做简单功能 | 已完成 |
+| T1 精确查询与分页 | C2/C3/C4 | `manageCatalogRemainder.ts` 的 queuePage/presence、`manageCatalogMaintenance.ts` 的 auditPage、`remoteCatalogBackend.ts`、`ipc/scanHandlers.ts`；复用 library 的队列定位与审计读取 | 指定条目定位有效；按媒体库/影片 IDs 返回真实状态；section/attention 不再被剥离；空页及失效锚点沿用本地语义 | 已完成 |
+| T2 远程文件重命名 | C1 | 复用已有 `files.rename`/library 维护实现，补桌面资源标识及服务端生成预览/指纹的路径，接入现有文件操作入口 | 用户可重命名服务端资源；预览与提交均基于服务端活文件、资源版本及根保护，桌面不访问服务端绝对路径 | 已完成 |
+| T3 来源查询与匹配 | C5 | 增加受限、可分页的来源查询；接入 `playlistImportCatalogLookup.ts` 和相关采集匹配端口 | 匹配使用服务端真实来源信息，不以空 sources 代替、不回查本地 library.db；区别来源缺失与查询失败 | 已完成 |
+| T4 清单关联链接 | C7，依赖 T3 | 扩展 `playlists.applyImport`、`manageCatalogScrape.ts`、`catalogPlaylistImport.ts`、`playlistImportCatalogApply.ts` | 按本地已有语义写影片关联链接，与清单应用共同保持事务/幂等；URL 校验及去重不退化，不顺带扩大自动建片/append 等其它范围 | 已完成 |
+| T5 单条远程刮削 | C6，依赖 T3 | 核对 `ipc/scrapeHandlers.ts`、`scrapeJobController.ts`、应用工作流与后端 apply；覆盖现有影片/演员入口 | 桌面采集与选择 → 服务端图片暂存 → 带原版本提交；支持候选与待确认处理，工作记录按 catalog 隔离；正式资料不写本地库 | 已完成 |
+| T6 批量远程刮削 | C6，依赖 T5 | 扩展已有 targetLists 的实际目标选择与分页合同，接入现有批次 start/进度/取消；复用既有冻结槽位组件 | 启动时冻结选中/筛选目标，后新增目标不混入；删除项占位；成功、冲突、待确认及结果待核实分项准确；取消采集不伪称已受理提交撤销 | 已完成 |
+| T7 阶段交接 | 全部 | 按实现结果同步本计划、SERVER_MODE、合同清点与相关操作说明，清理已失效的限制描述 | C1–C7 每项列清实现文件、常规定向检查和未验证范围；只报告阶段实现结果 | 已完成 |
 
 实施前在相关文件中继续核对已有本地语义；简单接口/模块选择自主决定。仅遇到删除行为、权限、来源匹配规则或其它用户可见语义需要改变时，再就具体取舍询问用户。T1–T7 不引入全量验收、故障注入、跨平台安装或发布任务。
+
+## 实施记录
+
+### T0 合同
+
+实现：`packages/contracts/src/manage/` 与 `ipcDisposition.ts`。检查：`packages/contracts/src/manage/schemas.test.ts`、`packages/contracts/src/inventory/ipcDisposition.test.ts`。未验证：桌面/服务端接线。
+
+### T1 精确查询与分页（C2/C3/C4）
+
+实现：服务端 `pendingScan.queuePage`/`pendingAudit.presence`/`pendingVideoScrapes.existingIds|page`/`scans.auditPage` 转发锚点与筛选；远程适配器不再剥离 `anchor`/`section`/`attention`，presence 改为精确查询；`PENDING_VIDEO_SCRAPE_EXISTING_IDS` 走 catalog backend。
+
+检查：`apps/server/src/manageCatalogC1C7.test.ts`（queue 定位、presence 精确集合、scrape ids、无快照时 audit 保留 section）；既有 `scanHandlers.test.ts` 路由断言。未验证：真实扫描审计快照筛选、GUI 待确认队列跳转。
+
+### T2 远程文件重命名（C1）
+
+实现：`previewRenameCatalogFile` / 可选 `resourceId` 的 `files.rename`；远程 IPC 先 preview 再提交，拒绝绝对路径，不打开本地根目录。
+
+检查：`catalogFileMaintenance.test.ts`、`manageCatalogC1C7.test.ts` T2、`scanHandlers.test.ts` 远程 rename 路由。未验证：真实挂载上的 renameAndImport 端到端、GUI 文件操作。
+
+### T3 来源查询与匹配（C5）
+
+实现：`listCatalogVideoSources`、`videos.sources`、catalog `listVideoSources`；清单 ingest 用该查询填 sources，并在详情 checkpoint 时 ingest source identity。空 items 为未匹配；非法 payload 当查询失败。
+
+检查：`catalogVideoSources.test.ts`、`playlistImportCatalogLookup.test.ts`、`manageCatalogC1C7.test.ts` T3。未验证：真实采集站点详情匹配、GUI 清单导入。
+
+### T4 清单关联链接（C7）
+
+实现：`appendRelatedLinks` + `playlists.applyImport.videoLinks`；远程 apply 在 `save_detail_links` 时带上每条详情 URL；重复 URL INSERT OR IGNORE。
+
+检查：`catalogPlaylistImport.test.ts`、catalog apply 测试断言 videoLinks。未验证：完整远程清单导入 GUI。
+
+### T5 单条远程刮削（C6）
+
+实现：桌面 `collectVideoScrape`/`collectActressScrape` 只采集；远程路径经 `catalogRemoteScrape` 用 catalog `videos.get`/`actresses.get` 取正式资料，上传图片后 `applyScrapeCandidate`；业务身份/名称冲突改为 `pendingVideoScrapes.replace`/`actressConflicts.submit`。服务端 apply 在消费上传前检查冲突并要求影片待确认 Q；演员待确认 Q 仅在提供时校验。工作记录仍在桌面 `desktop-work.db`。远程 `fillEmpty` 按详情 DTO 近似，头像以路径存在视为已填。批量目标解析仍走本地库，见 T6。
+
+检查：`catalogScrapeApply.test.ts`、`manageCatalogC1C7.test.ts` T5、`catalogRemoteScrape.test.ts`、`scrapeCatalogBinding.test.ts`、`scrapeJobController.test.ts`。未验证：真实插件/Playwright 远程采集、GUI 刮削、待确认确认后的端到端图片交割。
+
+### T6 批量远程刮削（C6）
+
+实现：`targetLists.create` 支持 ids / videoFilter / actressFilter（互斥）；digest 对 ids 与筛选载荷哈希，命名 kind 仍按评估结果哈希。分页返回 `entries`（含已删除占位）。远程批次 start/count 经 catalog 冻结目标，不再 `listVideosForBatchScrape` / 本地 membership。已选 ID 超过 200 拒绝。取消只停桌面采集。count 会留下 `catalog_settings` 中的 target-list 孤儿记录。
+
+检查：`catalogTargetLists.test.ts`、`catalogRemoteBatch.test.ts`、`manageCatalogC1C7.test.ts` T6、`checkpointedSequentialBatchQueue.test.ts` 异步 resolve、`videoBatchScrapeQueue.test.ts`。未验证：真实远程批量 GUI、FrozenTargetSlot 窗口与刮削进度联调、取消后的部分提交现场。
+
+### T7 阶段交接
+
+实现：同步本计划、`SERVER_MODE.md` C1–C7 产品行为、合同清点扩展说明、`USER_GUIDE.md` 远程刮削操作句。不升版本、不写 CHANGELOG、不合并 main。
+
+检查：定向类型/边界/功能测试见 T0–T6 各节。未验证：全面自动化/GUI 验收、故障测试、跨平台安装、0.8 RC。S13/S14 仍未完成。

@@ -57,6 +57,12 @@ import {
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
+import { bindScrapeCatalog, scrapeActressBound, scrapeVideoBound } from './scrapeCatalogBinding'
+import {
+  countRemoteActressTargets,
+  countRemoteVideoTargets
+} from './catalogRemoteBatch'
+import type { CatalogBackend } from '../application/catalogBackend'
 import { getActressDetail } from '@library/db/actressRepo'
 import { hasActiveVisibleVideoMembership } from '@library/db/libraryMembershipRepo'
 import { countVideosForRematch } from '@library/db/videoRepo'
@@ -129,11 +135,11 @@ export interface ScrapeJobControllerDependencies {
       useAliases?: boolean
     }
   ): Promise<ActressScrapeDisposition>
-  getActress(id: number): ActressDetail | null
-  hasVideoInLibraryScope(libraryId: number, videoId: number): boolean
-  countVideos(filter: VideoBatchScrapeFilter & Record<string, unknown>): number
-  countRematches(scope: VideoRematchScope): number
-  countActresses(filter: ActressBatchScrapeFilter): number
+  getActress(id: number): ActressDetail | null | Promise<ActressDetail | null>
+  hasVideoInLibraryScope(libraryId: number, videoId: number): boolean | Promise<boolean>
+  countVideos(filter: VideoBatchScrapeFilter & Record<string, unknown>): number | Promise<number>
+  countRematches(scope: VideoRematchScope): number | Promise<number>
+  countActresses(filter: ActressBatchScrapeFilter): number | Promise<number>
   resolveVideoFieldSources(scraperName?: string): Record<string, unknown>
   emit<Channel extends ScrapeIpcEventChannel>(
     channel: Channel,
@@ -217,7 +223,7 @@ export class ScrapeJobController {
   ): Promise<VideoScrapeOneResult> {
     if (
       libraryId !== undefined &&
-      !this.dependencies.hasVideoInLibraryScope(libraryId, videoId)
+      !(await this.dependencies.hasVideoInLibraryScope(libraryId, videoId))
     ) {
       throw new Error('影片不属于当前活动媒体库，无法刮削')
     }
@@ -266,7 +272,7 @@ export class ScrapeJobController {
         result.avatarUpdated &&
         !result.skipped
       ) {
-        const actress = this.dependencies.getActress(actressId)
+        const actress = await this.dependencies.getActress(actressId)
         if (actress) {
           await this.avatarAutoCrop.request({ actressId, mainName: actress.main_name })
         }
@@ -309,18 +315,18 @@ export class ScrapeJobController {
     return this.dependencies.pendingVideoScrapes.discard(pendingScrapeId)
   }
 
-  countVideoBatch(filter: VideoBatchScrapeFilter): number {
+  async countVideoBatch(filter: VideoBatchScrapeFilter): Promise<number> {
     return this.dependencies.countVideos({
       ...filter,
       ...this.dependencies.resolveVideoFieldSources(filter.scraperName)
     })
   }
 
-  countRematches(scope: VideoRematchScope): number {
+  async countRematches(scope: VideoRematchScope): Promise<number> {
     return this.dependencies.countRematches(scope)
   }
 
-  countActressBatch(filter: ActressBatchScrapeFilter): number {
+  async countActressBatch(filter: ActressBatchScrapeFilter): Promise<number> {
     return this.dependencies.countActresses(filter)
   }
 
@@ -497,21 +503,48 @@ export function createScrapeJobController(
 export function createDefaultScrapeJobController(
   boundary: Pick<ScrapeJobControllerDependencies, 'emit' | 'rendererAvailable'> & {
     avatarAutoCropOptions?: ScrapeJobControllerDependencies['avatarAutoCropOptions']
+    backend?: CatalogBackend
   }
 ): ScrapeJobController {
+  bindScrapeCatalog(boundary.backend ?? null)
+  const remote = boundary.backend?.mode === 'remote' ? boundary.backend : null
   return createScrapeJobController({
     coordinator: scrapeRunCoordinator,
     assertBatchAvailable: assertBatchScrapeAvailable,
     getBatchState: getBatchScrapeState,
     videoQueue: videoBatchScrapeQueue,
     actressQueue: actressScrapeQueue,
-    scrapeVideo,
-    scrapeActress,
-    getActress: getActressDetail,
-    hasVideoInLibraryScope: hasActiveVisibleVideoMembership,
-    countVideos: (filter) => resolveVideoBatchTargets(filter).length,
-    countRematches: countVideosForRematch,
-    countActresses: estimateActressBatchScrapeTargetCount,
+    scrapeVideo: remote
+      ? (videoId, scraperName, options) => scrapeVideoBound(videoId, scraperName, options)
+      : scrapeVideo,
+    scrapeActress: remote
+      ? (actressId, scraperName, options) => scrapeActressBound(actressId, scraperName, options)
+      : scrapeActress,
+    getActress: remote
+      ? async (id) =>
+          (await remote.actresses.get({ actressId: id })) as ActressDetail | null
+      : getActressDetail,
+    hasVideoInLibraryScope: remote
+      ? async (libraryId, videoId) =>
+          Boolean(
+            await remote.queries.getVideo({
+              scope: { kind: 'library', libraryId },
+              videoId
+            })
+          )
+      : hasActiveVisibleVideoMembership,
+    countVideos: remote
+      ? (filter) => countRemoteVideoTargets(remote, filter as VideoBatchScrapeFilter)
+      : (filter) => resolveVideoBatchTargets(filter).length,
+    countRematches: remote
+      ? (scope) =>
+          countRemoteVideoTargets(remote, {
+            status: rematchScopeToBatchStatus(scope)
+          })
+      : countVideosForRematch,
+    countActresses: remote
+      ? (filter) => countRemoteActressTargets(remote, filter)
+      : estimateActressBatchScrapeTargetCount,
     resolveVideoFieldSources: resolveVideoScrapeFieldSources,
     pendingVideoScrapes: videoPendingScrapeService,
     checkpoints: defaultBatchScrapeCheckpoints,

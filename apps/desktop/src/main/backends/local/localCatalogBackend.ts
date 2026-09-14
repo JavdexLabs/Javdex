@@ -1,4 +1,6 @@
 import { getDb } from '@library/db/database'
+import { markScrapeFailed } from '@library/db/videoRepo'
+import { recordActressScrapeFailure } from '@library/db/actressRepo'
 import {
   PendingScanRepoError,
   getPendingScanGroup,
@@ -27,7 +29,7 @@ import {
   commitManageImageMutation
 } from '@library/catalog/catalogImageApply'
 import { bumpRowRevision } from '@library/catalog/catalogAggregateVersion'
-import { applyActressScrapeCandidate, applyVideoScrapeCandidate } from '@library/catalog/catalogScrapeApply'
+import { applyActressScrapeCandidate, applyVideoScrapeCandidate, replacePendingVideoScrapeFromUploads, submitActressScrapeConflict } from '@library/catalog/catalogScrapeApply'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
 import { createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
@@ -41,12 +43,14 @@ import {
 } from '@library/catalog/catalogPendingVideoScrapes'
 import {
   countPendingVideoScrapes,
+  existingPendingVideoScrapeIds,
   getPendingVideoScrapeById,
   listPendingVideoScrapes,
   pagePendingVideoScrapes
 } from '@library/db/pendingVideoScrapeRepo'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
+import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import {
   abandonCatalogMigration,
   allowEnableCatalogMigration,
@@ -72,6 +76,7 @@ import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import {
   filesRenameDigest,
   importCatalogManualFile,
+  previewRenameCatalogFile,
   renameCatalogFile
 } from '@library/catalog/catalogFileMaintenance'
 import {
@@ -308,6 +313,9 @@ export function createLocalCatalogBackend(
     async listVideoYears(input) {
       return queries.listYears(input.scope)
     },
+    async listVideoSources(input) {
+      return listCatalogVideoSources(input)
+    },
     async getResource(input) {
       const resource = queries.getResource(input.libraryId, input.videoId, input.resourceId)
       if (!resource) return null
@@ -370,6 +378,10 @@ export function createLocalCatalogBackend(
     },
     async markScrapeSuccess(input) {
       return videos.markScrapeSucceeded(input.videoId)
+    },
+    async markScrapeFailed(input) {
+      markScrapeFailed(input.videoId)
+      return true
     },
     async setRating(input, ctx: MutationContext) {
       const result = commitCatalogMutation(
@@ -526,6 +538,9 @@ export function createLocalCatalogBackend(
             candidate: input.candidate,
             cover: input.cover,
             samples: input.samples,
+            actressAvatars: input.actressAvatars,
+            directorSelectionId: input.directorSelectionId,
+            directorAmbiguity: input.directorAmbiguity,
             expected: ctx.expectedVersions,
             operationId: ctx.operationId
           })
@@ -641,6 +656,10 @@ export function createLocalCatalogBackend(
     async markScrapeSuccess(input) {
       return actressMaintenanceService.markScrapeSucceeded(input.actressId)
     },
+    async markScrapeFailed(input) {
+      recordActressScrapeFailure(input.actressId)
+      return true
+    },
     applyCrop: async (input, ctx) => {
       const result = commitManageImageMutation(
         {
@@ -669,6 +688,26 @@ export function createLocalCatalogBackend(
             candidate: input.candidate,
             avatar: input.avatar,
             gallery: input.gallery,
+            fields: input.fields,
+            mode: input.mode,
+            expected: ctx.expectedVersions,
+            operationId: ctx.operationId
+          })
+      )
+      return result.data
+    },
+    submitConflict: async (input, ctx) => {
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'actressConflicts.submit',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () =>
+          submitActressScrapeConflict({
+            ...input,
             expected: ctx.expectedVersions,
             operationId: ctx.operationId
           })
@@ -930,7 +969,8 @@ export function createLocalCatalogBackend(
             sourceUrl: input.sourceUrl,
             expected: ctx.expectedVersions,
             operationId: ctx.operationId,
-            expectedLibraryRevision: expectedL.revision
+            expectedLibraryRevision: expectedL.revision,
+            videoLinks: input.videoLinks
           })
       )
       return result.data
@@ -1131,10 +1171,13 @@ export function createLocalCatalogBackend(
         scrapeIds: local.scrapeIds
       })
     },
+    async previewRenameFile(input) {
+      return previewRenameCatalogFile(input)
+    },
     async renameFile(input, ctx) {
       const local = input as {
         libraryId: number
-        resourceId: number
+        resourceId?: number
         location: { rootId: number; relativePath: string }
         newFileName: string
         planDigest?: string
@@ -1395,7 +1438,20 @@ export function createLocalCatalogBackend(
       async count() {
         return countPendingVideoScrapes()
       },
-      async existingIds() {
+      async existingIds(input) {
+        if (input.scrapeIds) return existingPendingVideoScrapeIds(input.scrapeIds)
+        if (input.videoIds?.length) {
+          const unique = [...new Set(input.videoIds)]
+          return (
+            getDb()
+              .prepare(
+                `SELECT video_id FROM pending_video_scrapes
+                 WHERE video_id IN (${unique.map(() => '?').join(',')})
+                 ORDER BY video_id`
+              )
+              .all(...unique) as Array<{ video_id: number }>
+          ).map((row) => row.video_id)
+        }
         return (
           getDb()
             .prepare('SELECT video_id FROM pending_video_scrapes ORDER BY video_id')
@@ -1405,7 +1461,9 @@ export function createLocalCatalogBackend(
       async page(input) {
         return pagePendingVideoScrapes({
           offset: input.offset,
-          limit: Math.min(input.limit ?? 50, 100)
+          limit: Math.min(input.limit ?? 50, 100),
+          ...(input.anchorId != null ? { anchorId: input.anchorId } : {}),
+          ...(input.videoId != null ? { videoId: input.videoId } : {})
         })
       },
       async get(input) {
@@ -1413,6 +1471,24 @@ export function createLocalCatalogBackend(
       },
       async list() {
         return listPendingVideoScrapes()
+      },
+      async replace(input, ctx) {
+        const result = commitManageImageMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'pendingVideoScrapes.replace',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () =>
+            replacePendingVideoScrapeFromUploads({
+              ...input,
+              expected: ctx.expectedVersions,
+              operationId: ctx.operationId
+            })
+        )
+        return result.data
       },
       async confirm(input, ctx) {
         const expectedRevision = ctx.expectedVersions.Q?.revision

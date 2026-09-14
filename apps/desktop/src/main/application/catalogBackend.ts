@@ -43,6 +43,7 @@ export interface CatalogQueries {
   listVideos: Query<'videos.list'>
   getVideo: Query<'videos.get'>
   listVideoYears: Query<'videos.years'>
+  listVideoSources: Query<'videos.sources'>
   getResource: Query<'videos.getResource'>
   listTags: Query<'tags.list'>
   listManualTags: Query<'tags.listManual'>
@@ -56,6 +57,7 @@ export interface CatalogVideoCommands {
   edit: Command<'videos.edit'>
   clearMeta: Command<'videos.clearMeta'>
   markScrapeSuccess: Command<'videos.markScrapeSuccess'>
+  markScrapeFailed: Command<'videos.markScrapeFailed'>
   setRating: Command<'videos.setRating'>
   setPoster: Command<'videos.setPoster'>
   importSamples: Command<'videos.importSamples'>
@@ -102,8 +104,10 @@ export interface CatalogActressCommands {
   setPoster: Command<'actresses.setPoster'>
   merge: Command<'actresses.merge'>
   markScrapeSuccess: Command<'actresses.markScrapeSuccess'>
+  markScrapeFailed: Command<'actresses.markScrapeFailed'>
   applyCrop: Command<'actresses.applyCrop'>
   applyScrapeCandidate: Command<'actresses.applyScrapeCandidate'>
+  submitConflict: Command<'actressConflicts.submit'>
   testTargetPage: Query<'actresses.testTargetPage'>
   conflictList: Query<'actressConflicts.list'>
   conflictQueuePage: Query<'actressConflicts.queuePage'>
@@ -204,6 +208,7 @@ export interface CatalogLibraryCommands {
     },
     ctx?: CatalogQueryContext
   ) => Promise<{ groupIds: number[]; identityIds: number[]; scrapeIds: number[] }>
+  previewRenameFile: Query<'files.renamePreview'>
   renameFile: Command<'files.rename'>
   importManual: Command<'files.importManual'>
   resolvePendingScan: Command<'pendingScan.resolve'>
@@ -247,6 +252,7 @@ export interface CatalogPendingVideoScrapeCommands {
   page: Query<'pendingVideoScrapes.page'>
   get: Query<'pendingVideoScrapes.get'>
   list: Query<'pendingVideoScrapes.list'>
+  replace: Command<'pendingVideoScrapes.replace'>
   confirm: Command<'pendingVideoScrapes.confirm'>
   discard: Command<'pendingVideoScrapes.discard'>
 }

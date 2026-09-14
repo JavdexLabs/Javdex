@@ -43,10 +43,12 @@ import { assertExpectedVideoVersion } from '@library/catalog/catalogVideoVersion
 import {
   countPendingVideoScrapes,
   deletePendingVideoScrape,
+  existingPendingVideoScrapeIds,
   getPendingVideoScrapeById,
   listPendingVideoScrapes,
   pagePendingVideoScrapes
 } from '@library/db/pendingVideoScrapeRepo'
+import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
 import { markScrapeFailed } from '@library/db/videoRepo'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
@@ -194,6 +196,20 @@ function runDomain<T>(work: () => T): T {
     }
     throw structuredError('INVALID_INPUT', message)
   }
+}
+
+function existingPendingVideoScrapeIdsByVideo(videoIds: number[], database: Database.Database): number[] {
+  const unique = [...new Set(videoIds)]
+  if (!unique.length) return []
+  return (
+    database
+      .prepare(
+        `SELECT video_id FROM pending_video_scrapes
+         WHERE video_id IN (${unique.map(() => '?').join(',')})
+         ORDER BY video_id`
+      )
+      .all(...unique) as Array<{ video_id: number }>
+  ).map((row) => row.video_id)
 }
 
 function lookupScanGroupLibrary(groupId: number, database = catalogDb()): number | null {
@@ -461,19 +477,35 @@ export const remainderHandlers: Partial<Record<ManageOperationId, CatalogHandler
   'pendingVideoScrapes.count'() {
     return countPendingVideoScrapes()
   },
-  'pendingVideoScrapes.existingIds'() {
-    return (
-      catalogDb()
-        .prepare('SELECT video_id FROM pending_video_scrapes ORDER BY video_id')
-        .all() as Array<{ video_id: number }>
-    ).map((row) => row.video_id)
+  'pendingVideoScrapes.existingIds'(args) {
+    const input = args.envelope.input as { scrapeIds?: number[]; videoIds?: number[] }
+    return runDomain(() => {
+      if (input.scrapeIds) return existingPendingVideoScrapeIds(input.scrapeIds)
+      if (input.videoIds?.length) {
+        return existingPendingVideoScrapeIdsByVideo(input.videoIds, catalogDb(args.database))
+      }
+      return (
+        catalogDb(args.database)
+          .prepare('SELECT video_id FROM pending_video_scrapes ORDER BY video_id')
+          .all() as Array<{ video_id: number }>
+      ).map((row) => row.video_id)
+    })
   },
   'pendingVideoScrapes.page'(args) {
-    const input = args.envelope.input as { limit?: number; offset?: number }
-    return pagePendingVideoScrapes({
-      offset: input.offset,
-      limit: Math.min(input.limit ?? 50, 100)
-    })
+    const input = args.envelope.input as {
+      limit?: number
+      offset?: number
+      anchorId?: number
+      videoId?: number
+    }
+    return runDomain(() =>
+      pagePendingVideoScrapes({
+        offset: input.offset,
+        limit: Math.min(input.limit ?? 50, 100),
+        ...(input.anchorId != null ? { anchorId: input.anchorId } : {}),
+        ...(input.videoId != null ? { videoId: input.videoId } : {})
+      })
+    )
   },
   'pendingVideoScrapes.get'(args) {
     const input = args.envelope.input as { pendingScrapeId: number }
@@ -662,29 +694,36 @@ export const remainderHandlers: Partial<Record<ManageOperationId, CatalogHandler
       )
     )
   },
-  'pendingAudit.presence'() {
-    const database = catalogDb()
-    const pendingScanGroups = (
-      database.prepare('SELECT COUNT(*) AS n FROM pending_scan_groups').get() as { n: number }
-    ).n
-    const pendingResourceIdentities = (
-      database.prepare('SELECT COUNT(*) AS n FROM pending_resource_identities').get() as { n: number }
-    ).n
-    const pendingVideoScrapes = countPendingVideoScrapes()
-    return {
-      present: pendingScanGroups + pendingResourceIdentities + pendingVideoScrapes > 0,
-      pendingScanGroups,
-      pendingResourceIdentities,
-      pendingVideoScrapes
+  'pendingAudit.presence'(args) {
+    const input = args.envelope.input as {
+      libraryId: number
+      groupIds?: number[]
+      identityIds?: number[]
+      scrapeIds?: number[]
     }
+    return runDomain(() =>
+      getPendingAuditPresence(input.libraryId, {
+        groupIds: input.groupIds ?? [],
+        identityIds: input.identityIds ?? [],
+        scrapeIds: input.scrapeIds ?? []
+      })
+    )
   },
   'pendingScan.queuePage'(args) {
-    const input = args.envelope.input as { libraryId?: number; limit?: number; offset?: number }
-    return pagePendingScanQueue({
-      libraryId: input.libraryId,
-      offset: input.offset,
-      limit: Math.min(input.limit ?? 50, 100)
-    })
+    const input = args.envelope.input as {
+      libraryId?: number
+      limit?: number
+      offset?: number
+      anchor?: { kind: 'group' | 'identity'; id: number }
+    }
+    return runDomain(() =>
+      pagePendingScanQueue({
+        libraryId: input.libraryId,
+        offset: input.offset,
+        limit: Math.min(input.limit ?? 50, 100),
+        ...(input.anchor ? { anchor: input.anchor } : {})
+      })
+    )
   },
   'pendingScan.queueCount'(args) {
     const input = args.envelope.input as { libraryId?: number }

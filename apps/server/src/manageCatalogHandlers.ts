@@ -2,7 +2,8 @@ import type Database from 'better-sqlite3'
 import { getDb } from '@library/db/database'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
-import { getVideoResourceInLibrary } from '@library/db/videoRepo'
+import { getVideoById, getVideoResourceInLibrary, markScrapeFailed } from '@library/db/videoRepo'
+import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import { getMediaLibraryDetail, MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
 import {
@@ -19,6 +20,7 @@ import { listPlaylistBrowsePage } from '@library/db/playlistListPageRepo'
 import { tagQueryService } from '@library/catalog/tagQueryService'
 import { actressQueryService } from '@library/catalog/actressQueryService'
 import { actressMaintenanceService } from '@library/catalog/actressMaintenanceService'
+import { recordActressScrapeFailure } from '@library/db/actressRepo'
 import { actressIdentityConflictWorkflow } from '@library/catalog/actressIdentityConflictWorkflow'
 import { classificationQueryService } from '@library/catalog/classificationQueryService'
 import { classificationMaintenanceService } from '@library/catalog/classificationMaintenanceService'
@@ -205,6 +207,9 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
     const input = args.envelope.input as { scope: CatalogScope }
     return scopedVideoCatalogRepo.listYears(input.scope)
   },
+  'videos.sources'(args) {
+    return listCatalogVideoSources(args.envelope.input as Parameters<typeof listCatalogVideoSources>[0])
+  },
   'videos.getResource'(args) {
     const input = args.envelope.input as { libraryId: number; videoId: number; resourceId: number }
     const resource = getVideoResourceInLibrary(input.libraryId, input.resourceId)
@@ -222,6 +227,15 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'videos.markScrapeSuccess'(args) {
     const input = args.envelope.input as { videoId: number }
     return videoMutation(args, input.videoId, () => videoMaintenanceService.markScrapeSucceeded(input.videoId))
+  },
+  'videos.markScrapeFailed'(args) {
+    const input = args.envelope.input as { videoId: number }
+    return videoMutation(args, input.videoId, () => {
+      const video = getVideoById(input.videoId)
+      if (!video) throw new Error('影片不存在')
+      markScrapeFailed(input.videoId)
+      return true
+    })
   },
   'videos.deleteSample'(args) {
     const input = args.envelope.input as { videoId: number; assetId: number }
@@ -428,6 +442,23 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
       const ok = actressMaintenanceService.markScrapeSucceeded(input.actressId)
       return {
         ok,
+        versions: { A: readActressAggregateVersion(input.actressId, args.database)! }
+      }
+    })
+  },
+  'actresses.markScrapeFailed'(args) {
+    const input = args.envelope.input as { actressId: number }
+    const mutation = requireMutation(args.envelope)
+    return commit(args, () => {
+      assertExpectedActressVersion(
+        input.actressId,
+        mutation.expectedVersions,
+        mutation.operationId,
+        args.database
+      )
+      recordActressScrapeFailure(input.actressId)
+      return {
+        ok: true,
         versions: { A: readActressAggregateVersion(input.actressId, args.database)! }
       }
     })

@@ -73,6 +73,35 @@ export function replaceRelatedLinks(
   writeRelatedLinks(database, table, entityIdColumn, entityId, prepareRelatedLinks(inputs))
 }
 
+export function appendRelatedLinks(
+  database: Database.Database,
+  table: string,
+  entityIdColumn: string,
+  entityId: number,
+  inputs: readonly RelatedLinkInput[]
+): number {
+  const prepared = prepareRelatedLinks(inputs)
+  const insert = database.prepare(
+    `INSERT OR IGNORE INTO ${table} (
+       ${entityIdColumn}, label, url, normalized_url, position
+     ) VALUES (
+       ?, ?, ?, ?,
+       COALESCE((SELECT MAX(position) + 1 FROM ${table} WHERE ${entityIdColumn} = ?), 0)
+     )`
+  )
+  let added = 0
+  for (const link of prepared) {
+    added += insert.run(
+      entityId,
+      link.label,
+      link.url,
+      normalizeRelatedLinkUrl(link.url),
+      entityId
+    ).changes
+  }
+  return added
+}
+
 export function mergeRelatedLinks(
   targetLinks: readonly RelatedMergeLink[],
   sourceLinks: readonly RelatedMergeLink[]

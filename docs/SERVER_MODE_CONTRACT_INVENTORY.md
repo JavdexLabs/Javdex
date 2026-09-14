@@ -80,3 +80,7 @@
 | `compatMerged` | `VIDEO_UPDATE` → `videos.edit` |
 
 282 项均有去向。兼容入口不要求一对一 HTTP 路由。
+
+## 本阶段合同扩展（C1–C7）
+
+2026-09-14 用户确认补齐后，管理 schema 已增加远程文件重命名预览、队列锚点、精确 presence、审计筛选、受限 `videos.sources`、刮削失败标记、pending scrape replace、actress conflict submit、清单 `videoLinks`，以及 `targetLists.create` 的 ids/videoFilter/actressFilter。`TargetListPage.entries` 含已删除占位。同版本客户端必须发送这些字段；旧客户端会在握手或 schema 校验失败。字段形状以 `packages/contracts/src/manage/inputs.ts` 为准。

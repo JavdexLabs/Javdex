@@ -38,6 +38,10 @@ export interface PlaylistImportCatalogLookup {
   playlistName?(playlistId: number): string | null
   rememberPlaylist?(playlistId: number, name: string): void
   ingestCodes?(catalog: CatalogBackend, codes: Array<string | null | undefined>): Promise<void>
+  ingestSourceIdentity?(
+    catalog: CatalogBackend,
+    identity: { source?: string; externalCode?: string; sourceUrl?: string }
+  ): Promise<void>
 }
 
 function normalizedCode(code: string): string {
@@ -69,6 +73,10 @@ export function catalogIdentityRevision(record: PlaylistImportCatalogVideoRecord
 
 export function createMemoryPlaylistImportCatalogLookup(): PlaylistImportCatalogLookup & {
   ingestCodes(catalog: CatalogBackend, codes: Array<string | null | undefined>): Promise<void>
+  ingestSourceIdentity(
+    catalog: CatalogBackend,
+    identity: { source?: string; externalCode?: string; sourceUrl?: string }
+  ): Promise<void>
 } {
   const byId = new Map<number, PlaylistImportCatalogVideoRecord>()
   const playlistNames = new Map<number, string>()
@@ -170,6 +178,7 @@ export function createMemoryPlaylistImportCatalogLookup(): PlaylistImportCatalog
             .map((value) => normalizedCode(value))
         )
       ]
+      const details: PlaylistImportCatalogVideoRecord[] = []
       for (const code of unique) {
         const page = (await catalog.queries.listVideos({
           scope: { kind: 'all' },
@@ -200,7 +209,7 @@ export function createMemoryPlaylistImportCatalogLookup(): PlaylistImportCatalog
             label: link.label,
             url: link.url
           }))
-          ingest({
+          details.push({
             videoId: detail.id,
             code: detail.code,
             title: detail.title ?? null,
@@ -225,6 +234,83 @@ export function createMemoryPlaylistImportCatalogLookup(): PlaylistImportCatalog
           })
         }
       }
+      const sourcesByVideo = await loadCatalogSources(
+        catalog,
+        details.map((detail) => detail.videoId)
+      )
+      for (const detail of details) {
+        ingest({
+          ...detail,
+          sources: sourcesByVideo.get(detail.videoId) ?? []
+        })
+      }
+    },
+    async ingestSourceIdentity(catalog, identity) {
+      const source = identity.source?.trim()
+      if (!source) return
+      const query = identity.externalCode?.trim()
+        ? { source, externalCode: identity.externalCode.trim(), limit: 50, offset: 0 }
+        : identity.sourceUrl?.trim()
+          ? { source, url: identity.sourceUrl.trim(), limit: 50, offset: 0 }
+          : null
+      if (!query) return
+      const page = (await catalog.queries.listVideoSources(query)) as {
+        items?: Array<{
+          videoId: number
+          code?: string
+          sources?: PlaylistImportCatalogVideoRecord['sources']
+        }>
+      }
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error('来源查询响应无效。')
+      }
+      for (const item of page.items) {
+        const sources = item.sources ?? []
+        const existing = byId.get(item.videoId)
+        if (existing) {
+          byId.set(item.videoId, { ...existing, sources })
+          continue
+        }
+        ingest({
+          videoId: item.videoId,
+          code: item.code ?? '',
+          title: null,
+          publisher: null,
+          publisherOrganizationId: null,
+          releaseDate: null,
+          libraryIds: [],
+          libraryNames: [],
+          relatedUrls: [],
+          relatedLinks: [],
+          sources,
+          resourceKinds: []
+        })
+      }
     }
   }
+}
+
+async function loadCatalogSources(
+  catalog: CatalogBackend,
+  videoIds: number[]
+): Promise<Map<number, PlaylistImportCatalogVideoRecord['sources']>> {
+  const sourcesByVideo = new Map<number, PlaylistImportCatalogVideoRecord['sources']>()
+  const unique = [...new Set(videoIds)]
+  for (let index = 0; index < unique.length; index += 200) {
+    const chunk = unique.slice(index, index + 200)
+    const page = (await catalog.queries.listVideoSources({
+      videoIds: chunk,
+      limit: 200,
+      offset: 0
+    })) as {
+      items?: Array<{ videoId: number; sources?: PlaylistImportCatalogVideoRecord['sources'] }>
+    }
+    if (!page || !Array.isArray(page.items)) {
+      throw new Error('来源查询响应无效。')
+    }
+    for (const item of page.items) {
+      sourcesByVideo.set(item.videoId, item.sources ?? [])
+    }
+  }
+  return sourcesByVideo
 }

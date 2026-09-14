@@ -142,3 +142,110 @@ test('correct-import requires an explicit pending-scrape choice', () => {
     true
   )
 })
+
+test('C1-C7 contract expansions accept intended fields and reject unbounded dumps', () => {
+  assert.equal(
+    parseManageInput('pendingScan.queuePage', {
+      libraryId: 3,
+      anchor: { kind: 'group', id: 9 },
+      limit: 50,
+      offset: 0
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('pendingAudit.presence', {
+      libraryId: 3,
+      groupIds: [1, 2],
+      identityIds: [4],
+      scrapeIds: [8]
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('pendingAudit.presence', { libraryId: 3, groupIds: Array.from({ length: 101 }, (_, i) => i + 1) })
+      .success,
+    false
+  )
+  assert.equal(
+    parseManageInput('scans.auditPage', {
+      libraryId: 4,
+      section: 'files',
+      attention: true,
+      limit: 20,
+      offset: 5
+    }).success,
+    true
+  )
+  assert.equal(parseManageInput('videos.sources', { limit: 50, offset: 0 }).success, false)
+  assert.equal(
+    parseManageInput('videos.sources', {
+      source: 'javlibrary',
+      externalCode: 'ABC-001',
+      limit: 50,
+      offset: 0
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('files.renamePreview', {
+      libraryId: 1,
+      location: { rootId: 2, relativePath: 'clip.mp4' },
+      newFileName: 'renamed.mp4'
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('files.rename', {
+      libraryId: 1,
+      location: { rootId: 2, relativePath: 'clip.mp4' },
+      newFileName: 'renamed.mp4',
+      planId: operationId,
+      planDigest: 'a'.repeat(64)
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('playlists.applyImport', {
+      name: 'list',
+      videoIds: [11],
+      libraryId: 1,
+      videoLinks: [{ videoId: 11, label: 'source', url: 'https://example.test/abc-001' }]
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('targetLists.create', {
+      kind: 'videos.ids',
+      filterDigest: 'a'.repeat(64),
+      ids: [1, 2]
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('pendingVideoScrapes.replace', {
+      videoId: 8,
+      selectedFields: ['title'],
+      applicableFields: ['title'],
+      updateMode: 'replace',
+      sources: [
+        {
+          pluginName: 'Test',
+          pluginSource: 'builtin',
+          sourceName: 'Test',
+          selectedFields: ['title'],
+          candidates: [{ result: { code: 'ABC-001' } }]
+        }
+      ]
+    }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('pendingVideoScrapes.existingIds', { scrapeIds: [1, 2] }).success,
+    true
+  )
+  assert.equal(
+    parseManageInput('pendingVideoScrapes.existingIds', { scrapeIds: [1], videoIds: [2] }).success,
+    false
+  )
+})

@@ -5,7 +5,7 @@ import type { ManualImportResult, RenameImportResult } from '@shared/libraryType
 import type { VideoResourceImportTarget } from '@shared/videoTypes'
 import { structuredError } from '@shared/protocol/errors'
 import { getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
-import { getVideoResourceInLibrary } from '@library/db/videoRepo'
+import { getLocalVideoResourceByLocator, getVideoResourceInLibrary } from '@library/db/videoRepo'
 import { getDb } from '@library/db/database'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import { isPathUnderRoot } from '@library/scan/libraryPathUtils'
@@ -56,31 +56,56 @@ function fileFingerprint(filePath: string): { size: number; mtimeMs: number } | 
 
 export function filesRenameDigest(input: {
   libraryId: number
-  resourceId: number
+  resourceId?: number
   location: { rootId: number; relativePath: string }
   newFileName: string
 }): string {
   const { filePath } = resolveLocation(input.libraryId, input.location)
   return sha256({
     libraryId: input.libraryId,
-    resourceId: input.resourceId,
+    resourceId: input.resourceId ?? null,
     location: input.location,
     newFileName: input.newFileName,
     fingerprint: fileFingerprint(filePath)
   })
 }
 
+export function previewRenameCatalogFile(input: {
+  libraryId: number
+  location: { rootId: number; relativePath: string }
+  newFileName: string
+}): { resourceId?: number; planDigest: string } {
+  const { filePath } = resolveLocation(input.libraryId, input.location)
+  const resource = getLocalVideoResourceByLocator(input.libraryId, filePath)
+  const resourceId = resource?.id
+  return {
+    ...(resourceId != null ? { resourceId } : {}),
+    planDigest: filesRenameDigest({
+      libraryId: input.libraryId,
+      ...(resourceId != null ? { resourceId } : {}),
+      location: input.location,
+      newFileName: input.newFileName
+    })
+  }
+}
+
 function assertResourceOrUnrecognized(
   libraryId: number,
-  resourceId: number,
+  resourceId: number | undefined,
   filePath: string
 ): void {
-  const resource = getVideoResourceInLibrary(libraryId, resourceId)
-  if (resource) {
-    if (normalizeLocalPathIdentity(resource.locator) !== normalizeLocalPathIdentity(filePath)) {
-      throw structuredError('INVALID_INPUT', '资源定位与文件位置不一致')
+  if (resourceId != null) {
+    const resource = getVideoResourceInLibrary(libraryId, resourceId)
+    if (resource) {
+      if (normalizeLocalPathIdentity(resource.locator) !== normalizeLocalPathIdentity(filePath)) {
+        throw structuredError('INVALID_INPUT', '资源定位与文件位置不一致')
+      }
+      return
     }
-    return
+    throw structuredError('INVALID_INPUT', '文件不是该媒体库中的资源或未识别项')
+  }
+  if (getLocalVideoResourceByLocator(libraryId, filePath)) {
+    throw structuredError('INVALID_INPUT', '文件已登记为资源，缺少资源编号')
   }
   const unrecognized = getDb()
     .prepare(
@@ -95,7 +120,7 @@ function assertResourceOrUnrecognized(
 
 export async function renameCatalogFile(input: {
   libraryId: number
-  resourceId: number
+  resourceId?: number
   location: { rootId: number; relativePath: string }
   newFileName: string
   planDigest: string

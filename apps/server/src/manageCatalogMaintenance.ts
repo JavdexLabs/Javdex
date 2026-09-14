@@ -21,6 +21,11 @@ import {
   catalogScanLatest
 } from '@library/catalog/catalogAuditRead'
 import {
+  importCatalogManualFile,
+  previewRenameCatalogFile,
+  renameCatalogFile
+} from '@library/catalog/catalogFileMaintenance'
+import {
   enqueueLibraryScan,
   requestLibraryScanCancel,
   startLibraryScan
@@ -36,10 +41,6 @@ import {
   terminateCatalogNfoExport,
   updateCatalogNfoPreferences
 } from '@library/catalog/catalogNfoExport'
-import {
-  importCatalogManualFile,
-  renameCatalogFile
-} from '@library/catalog/catalogFileMaintenance'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
@@ -314,10 +315,18 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
     const { libraryId, ...query } = input
     return catalogScanAuditViewPage(libraryId, query)
   },
+  'files.renamePreview'(args) {
+    const input = args.envelope.input as {
+      libraryId: number
+      location: { rootId: number; relativePath: string }
+      newFileName: string
+    }
+    return previewRenameCatalogFile(input)
+  },
   async 'files.rename'(args) {
     const input = args.envelope.input as {
       libraryId: number
-      resourceId: number
+      resourceId?: number
       location: { rootId: number; relativePath: string }
       newFileName: string
       planId: string
@@ -328,7 +337,7 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
     requireVersionField(mutation.expectedVersions, 'R', mutation.operationId)
     const result = await renameCatalogFile({
       libraryId: input.libraryId,
-      resourceId: input.resourceId,
+      ...(input.resourceId != null ? { resourceId: input.resourceId } : {}),
       location: input.location,
       newFileName: input.newFileName,
       planDigest: input.planDigest

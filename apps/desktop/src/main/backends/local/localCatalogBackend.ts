@@ -73,6 +73,7 @@ import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import {
   filesRenameDigest,
   importCatalogManualFile,
+  previewRenameCatalogFile,
   renameCatalogFile
 } from '@library/catalog/catalogFileMaintenance'
 import {
@@ -1132,10 +1133,13 @@ export function createLocalCatalogBackend(
         scrapeIds: local.scrapeIds
       })
     },
+    async previewRenameFile(input) {
+      return previewRenameCatalogFile(input)
+    },
     async renameFile(input, ctx) {
       const local = input as {
         libraryId: number
-        resourceId: number
+        resourceId?: number
         location: { rootId: number; relativePath: string }
         newFileName: string
         planDigest?: string

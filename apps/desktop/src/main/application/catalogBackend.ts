@@ -204,6 +204,7 @@ export interface CatalogLibraryCommands {
     },
     ctx?: CatalogQueryContext
   ) => Promise<{ groupIds: number[]; identityIds: number[]; scrapeIds: number[] }>
+  previewRenameFile: Query<'files.renamePreview'>
   renameFile: Command<'files.rename'>
   importManual: Command<'files.importManual'>
   resolvePendingScan: Command<'pendingScan.resolve'>

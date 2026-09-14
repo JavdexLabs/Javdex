@@ -3,7 +3,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
-import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { addMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { isStructuredError } from '@shared/protocol/errors'
 import { dispatchCatalogManage } from './manageCatalogHandlers'
 
@@ -108,5 +110,33 @@ describe('C1-C7 catalog manage handlers', () => {
     assert.equal(audit.snapshot, null)
     assert.equal(audit.section, 'files')
     assert.deepEqual(audit.items, [])
+  })
+
+  it('T2 previews remote rename from the live catalog file', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-t2-'))
+    roots.push(root)
+    initDatabaseAtPath(path.join(root, 'catalog.db'))
+    const mount = path.join(root, 'media')
+    fs.mkdirSync(mount)
+    const clip = path.join(mount, 'clip.mp4')
+    fs.writeFileSync(clip, 'video')
+    const libraryRoot = addMediaLibraryRoot({
+      libraryId: 1,
+      expectedRevision: 1,
+      root: { path: mount }
+    })
+    const inserted = insertTestVideoWithFile(getDb(), {
+      code: 'ABC-001',
+      filePath: clip,
+      rootId: libraryRoot.id
+    })
+    const preview = dispatch('files.renamePreview', {
+      libraryId: 1,
+      location: { rootId: libraryRoot.id, relativePath: 'clip.mp4' },
+      newFileName: 'renamed.mp4'
+    }) as { resourceId?: number; planDigest: string }
+    assert.equal(preview.resourceId, inserted.fileId)
+    assert.match(preview.planDigest, /^[a-f0-9]{64}$/)
+    assert.ok(!JSON.stringify(preview).includes(mount))
   })
 })

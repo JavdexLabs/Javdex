@@ -189,6 +189,7 @@ const LIBRARY_KEYS = [
   'getPendingResourceIdentity',
   'listPendingResourceIdentities',
   'pendingAuditPresence',
+  'previewRenameFile',
   'renameFile',
   'importManual',
   'resolvePendingScan',
@@ -824,6 +825,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           ctx?.signal
         )
       },
+      previewRenameFile: q('files.renamePreview'),
       renameFile: mPlan('files.rename'),
       importManual: m('files.importManual'),
       resolvePendingScan: (input, ctx) => {

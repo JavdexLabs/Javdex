@@ -205,6 +205,7 @@ export function createUnconfiguredRemoteBackend(
       'getPendingResourceIdentity',
       'listPendingResourceIdentities',
       'pendingAuditPresence',
+      'previewRenameFile',
       'renameFile',
       'importManual',
       'resolvePendingScan',

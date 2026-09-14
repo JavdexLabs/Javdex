@@ -43,7 +43,7 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 > 2026-09-14：用户已逐项确认 C1–C7 全部补齐，C6 包含单条和批量刮削，采集仍在桌面执行。该决定覆盖此前“不扩合同”的限制。实施顺序见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。当前阶段不做全面自动化/完整 GUI 验收、故障测试、跨平台安装或 0.8 发布候选，E1/E2 仅保留历史说明。
 
-- **C1** 远程 `FILE_RENAME` 仍 UNSUPPORTED（桌面 IPC 尚未经 `files.renamePreview` 解析资源编号）
+- **C1** 远程 `FILE_RENAME` 经 `files.renamePreview` 在服务端解析资源编号与活文件指纹；桌面只发送根相对路径，绝对路径被拒绝
 - **C2** `pendingScan.queuePage` 已转发 IPC `anchor`；失效锚点回落到首页，与本地队列语义一致
 - **C3** `pendingAudit.presence` 按媒体库和指定 group/identity/scrape ids 精确返回存在项，不再做目录级计数或 list 求交
 - **C4** 远程 `scans.auditPage` 保留 `section`/`outcome`/`attention`

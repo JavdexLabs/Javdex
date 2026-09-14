@@ -113,7 +113,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | UI、样式和交互 | [UI 设计规范](UI_DESIGN_GUIDELINES.md)、[组件契约](UI_COMPONENT_CONTRACTS.md) |
 | 局域网 Web 移动端 | [移动端 Web 规范](MOBILE_WEB_GUIDELINES.md) |
 | 服务端模式部署与双模式 | [服务端模式](SERVER_MODE.md)、[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) |
-| 服务端模式研究与执行交接 | [可行性研究](SERVER_MODE_FEASIBILITY_RESEARCH.md)、[阶段计划与验收门槛](SERVER_MODE_EXECUTION_PLAN.md)、[管理合同与验收](SERVER_MODE_API_RESEARCH.md) |
+| 服务端模式推进与历史依据 | [当前收尾推进计划](SERVER_MODE_NEXT_STEPS.md)、[原阶段要求与实施记录](SERVER_MODE_EXECUTION_PLAN.md)、[可行性研究](SERVER_MODE_FEASIBILITY_RESEARCH.md)、[管理合同与验收研究](SERVER_MODE_API_RESEARCH.md) |
 | 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |
 | 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |
 | 插件开发助手与 MCP | [插件开发 Agent](PLUGIN_DEV_AGENT.md) |

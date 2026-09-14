@@ -1,8 +1,10 @@
 # 服务端模式执行与 Agent 交接计划
 
-> 状态：S00 结构准备已实施；S01 合同已冻结（见 [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)）。桌面架构重构及服务端产品功能待实施。用户本轮要求将桌面架构并入计划，本轮仅更新文档。此文件是本次用户要求的本地执行交接材料，不替代 GitHub Issues 中的正式 PRD/任务记录，也不代表已发布工单。
+> 2026-09-14 阶段范围调整：用户明确暂不做全面自动化/完整 GUI 验收、跨平台安装、0.8 发布候选及故障测试；已逐项确认 C1–C7 全部补齐，包含单条和批量远程刮削（采集仍在桌面）。此次决定覆盖下文历史“不扩合同”的限制。当前只推进实现缺口核对与这些功能的补齐，见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。下文 S13/S14 保留为历史整体计划，不是当前阶段执行任务。
+
+> 当前状态（2026-09-14，核对代码 `96e37a7`）：服务端与远程桌面的主要功能已落地，S02/S02D 尚需架构收口，S13 全面验收、S14 发布准备未完成。后续执行从 [服务端收尾推进计划](SERVER_MODE_NEXT_STEPS.md) 开始；本文件保留原始阶段要求和历史实施证据，不要求从 S01 重新实施。本文及新计划是本地交接材料，不替代 GitHub Issues，也不代表已发布工单。
 >
-> 起点：远程分支 `origin/codex/server-mode-feasibility` 中包含本文件及 S00 结构调整的交接提交。原研究代码基线为 `cac9f6982eaef6afc34f86f9a51486f8ff10dd2b`，不能从该旧基线直接开工。接手先 fetch 并核对交接提交，再从该提交建立实施分支；具体提交哈希随交接提示提供。
+> 历史起点：S00 交接位于 `origin/codex/server-mode-feasibility`；研究基线 `cac9f6982eaef6afc34f86f9a51486f8ff10dd2b` 仅用于追溯。当前接手先核对远程最新提交、工作区和新计划，不回退到研究或 S00 基线。下文“本轮”“未做”“待实施”均需结合所属阶段日期/提交阅读，后续记录可能已补齐；当前剩余项以新计划为入口。
 
 ## 给接手 Agent 的执行指令
 
@@ -748,7 +750,7 @@ npm run smoke:same-version-install
 
 特定领域测试用移动后的真实路径，例如 `node scripts/run-electron-tests.mjs packages/library/src/db/migrationsV16.test.ts`；后续 S02 移动该文件时更新命令。S04 建立的 server 命令须写入根 scripts 并在 Docker/CI 实际运行后才可作为完成依据。
 
-当前工作区的 `node_modules` 是指向 `D:/Project/JavdexLabs/Javdex/node_modules` 的已有 junction。本次没有在其目标执行安装或重建；只更新仓库 lockfile。接手不要在这个共享依赖目录上运行会破坏其它任务的重建；需要独立依赖时使用新的真实检出。不要复制 Electron node_modules 到容器。
+历史 S00 Windows 会话的 `node_modules` 曾是指向 `D:/Project/JavdexLabs/Javdex/node_modules` 的 junction，不代表当前环境。每次接手先核对实际依赖目录；共享目录上不要运行会影响其它任务的重建，需要独立依赖时使用独立检出。不要复制 Electron node_modules 到容器。
 
 ## 每个阶段的交付格式
 
@@ -756,4 +758,4 @@ npm run smoke:same-version-install
 
 可以直接交给下一位 Agent 的提示：
 
-> 请实施 `docs/SERVER_MODE_EXECUTION_PLAN.md`，以远程交接分支及指定交接提交为起点，创建实施分支。先核对 S00 和已有检查结果，从 S01 开始按依赖阶段推进，包含 S02 后的必需阶段 S02D（桌面本地后端重构）；允许修改代码、测试和文档，简单技术细节自主决定。产品取舍遵守主方案和已确认事项，遇到冲突问我。不得省略阶段或把研究探针通过当正式产品验收；最终覆盖 M01–M15 及 D01–D07，每阶段记录证据，完整范围完成前不要宣称第一版完成。
+> 请按 `docs/SERVER_MODE_NEXT_STEPS.md` 继续服务端工作，先核对最新提交和用户已确认的范围，再从首个未完成推进项开始。本文件用于追溯 S00–S14 要求和历史证据，不从 S01 重做。仅当用户要求实施时修改产品代码；未决范围不得自行放宽，已接受限制不重复当作新增功能。记录真实提交、环境、命令、结果与剩余项，不将旧提交通过视为当前候选版本通过，不自动发布或合并 main。

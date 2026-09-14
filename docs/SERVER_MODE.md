@@ -39,7 +39,9 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 先停服务，备份 `dataDir` 与 `imagesDir`，再换同版本产物。版本不符时桌面不会写入远程。冻结中的源库不能领取 writer。
 
-## 本版已知限制（已接受，不扩合同）
+## 当前实现限制（本阶段已确认补齐）
+
+> 2026-09-14：用户已逐项确认 C1–C7 全部补齐，C6 包含单条和批量刮削，采集仍在桌面执行。该决定覆盖此前“不扩合同”的限制；以下列表描述尚未补齐的当前代码行为，不代表目标范围。实施顺序见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。当前阶段不做全面自动化/完整 GUI 验收、故障测试、跨平台安装或 0.8 发布候选，E1/E2 仅保留历史说明。
 
 - **C1** 远程 `FILE_RENAME` 仍 UNSUPPORTED（冻结 IPC 无 `resourceId`，不扩 resourceId 合同）
 - **C2** `pendingScan.queuePage` 远程不支持 IPC `anchor`，仅本地队列页保留

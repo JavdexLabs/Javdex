@@ -51,6 +51,22 @@ describe('C1-C7 catalog manage handlers', () => {
     for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
   })
 
+  it('counts without writes and resolves fillEmpty using authoritative avatar availability', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-fields-'))
+    roots.push(root)
+    const db = initDatabaseAtPath(path.join(root, 'catalog.db'))
+    db.exec("INSERT INTO videos(id, code, title) VALUES(1, 'FIELDS-001', 'Saved'); INSERT INTO actresses(id,main_name,avatar_path) VALUES(1,'Actress','avatars/missing.jpg')")
+    const input = { kind: 'videos.filter', videoFilter: { status: 'all' as const } }
+    const before = db.prepare('SELECT * FROM catalog_settings').all()
+    assert.deepEqual(dispatch('targetLists.count', { ...input, filterDigest: targetListRequestDigest(input) }), { count: 1 })
+    assert.deepEqual(db.prepare('SELECT * FROM catalog_settings').all(), before)
+    assert.deepEqual(dispatch('scrape.fields', { kind: 'actress', id: 1, fields: ['avatar', 'nameZh'] }), { fields: ['avatar', 'nameZh'] })
+    assert.deepEqual(dispatch('scrape.fields', { kind: 'video', id: 1, fields: ['title', 'summary', 'source'], sourceName: 'Site' }), { fields: ['summary', 'source'] })
+    db.exec("INSERT INTO video_sources(video_id,source,external_code,url) VALUES(1,'Other','FIELDS-001','https://example.test/other')")
+    assert.deepEqual(dispatch('scrape.fields', { kind: 'video', id: 1, fields: ['source'], sourceName: 'Site' }), { fields: ['source'] })
+    assert.deepEqual(dispatch('scrape.fields', { kind: 'video', id: 1, fields: ['source'], sourceName: 'Other' }), { fields: [] })
+  })
+
   it('T1 locates queue pages, exact pending presence, scrape ids, and audit filters', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-t1-'))
     roots.push(root)
@@ -135,7 +151,8 @@ describe('C1-C7 catalog manage handlers', () => {
   })
 
   it('T2 previews remote rename from the live catalog file', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-t2-'))
+    // Roots resolve symlinks; store the same canonical locator in this fixture (macOS /var).
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-c1c7-t2-')))
     roots.push(root)
     initDatabaseAtPath(path.join(root, 'catalog.db'))
     const mount = path.join(root, 'media')

@@ -1,3 +1,4 @@
+import { resolveCatalogScrapeFields } from '@library/catalog/catalogScrapeFields'
 import { getDb } from '@library/db/database'
 import { markScrapeFailed } from '@library/db/videoRepo'
 import { recordActressScrapeFailure } from '@library/db/actressRepo'
@@ -31,7 +32,7 @@ import {
 import { bumpRowRevision } from '@library/catalog/catalogAggregateVersion'
 import { applyActressScrapeCandidate, applyVideoScrapeCandidate, replacePendingVideoScrapeFromUploads, submitActressScrapeConflict } from '@library/catalog/catalogScrapeApply'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
-import { createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
+import { countCatalogTargets, createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
   applyAgentMetadataDraft,
   discardAgentMetadataDraft,
@@ -312,6 +313,9 @@ export function createLocalCatalogBackend(
     },
     async listVideoYears(input) {
       return queries.listYears(input.scope)
+    },
+    async resolveScrapeFields(input) {
+      return resolveCatalogScrapeFields(input)
     },
     async listVideoSources(input) {
       return listCatalogVideoSources(input)
@@ -1429,6 +1433,9 @@ export function createLocalCatalogBackend(
           () => createCatalogTargetList(input)
         )
         return result.data
+      },
+      async countTargets(input) {
+        return countCatalogTargets(input)
       },
       async pageTargetList(input) {
         return pageCatalogTargetList(input)

@@ -257,3 +257,20 @@ test('C1-C7 contract expansions accept intended fields and reject unbounded dump
     false
   )
 })
+
+test('scrape field queries validate entity fields and target counts are read-only', () => {
+  assert.equal(MANAGE_OPERATIONS['targetLists.count'].auth, 'manageRead')
+  assert.equal(MANAGE_OPERATIONS['scrape.fields'].auth, 'manageRead')
+  assert.equal(parseManageInput('scrape.fields', {
+    kind: 'actress', id: 1, fields: ['avatar']
+  }).success, true)
+  assert.equal(parseManageInput('scrape.fields', {
+    kind: 'actress', id: 1, fields: ['title']
+  }).success, false)
+  assert.equal(parseManageInput('scrape.fields', {
+    kind: 'video', id: 1, fields: ['source'], sourceName: 'Site'
+  }).success, true)
+  assert.equal(parseManageInput('targetLists.count', {
+    kind: 'videos.ids', ids: Array.from({ length: 201 }, (_, i) => i + 1), filterDigest: 'a'.repeat(64)
+  }).success, false)
+})

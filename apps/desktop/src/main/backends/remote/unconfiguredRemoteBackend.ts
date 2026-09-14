@@ -57,6 +57,7 @@ export function createUnconfiguredRemoteBackend(
       'listVideos',
       'getVideo',
       'listVideoYears',
+      'resolveScrapeFields',
       'listVideoSources',
       'getResource',
       'listTags',
@@ -241,6 +242,7 @@ export function createUnconfiguredRemoteBackend(
       'cancel',
       'getOperation',
       'createTargetList',
+      'countTargets',
       'pageTargetList'
     ]),
     pendingVideoScrapes: rejectSlice([

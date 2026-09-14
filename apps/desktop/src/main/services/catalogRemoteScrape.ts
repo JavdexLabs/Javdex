@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { CatalogBackend, MutationContext } from '../application/catalogBackend'
 import { ipcMutation } from '../application/mutationContext'
 import type { ActressDetail } from '@shared/actressTypes'
-import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
+import type { ActressScrapeDisposition, ActressScrapeField } from '@shared/actressScrapeTypes'
 import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 import type { VideoDetail } from '@shared/videoTypes'
 import type { CatalogImageRef, UploadPurpose } from '@shared/protocol/uploads'
@@ -21,12 +21,8 @@ import {
   collectActressScrape,
   type ScrapeActressOptions
 } from '../scrapers/actressScraperManager'
-import { ALL_VIDEO_SCRAPE_FIELDS, type VideoScrapeField, type VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS, type VideoScrapeField } from '@shared/videoScrapeTypes'
 import { resolveVideoScrapeFieldSources } from '../scrapers/scraperManager'
-
-function isBlank(value: string | null | undefined): boolean {
-  return value == null || value.trim() === ''
-}
 
 function videoVersions(video: { generation?: number; revision?: number }, generation: number) {
   return {
@@ -39,112 +35,17 @@ function actressVersions(actress: { revision?: number }, generation: number) {
   return { generation, revision: actress.revision ?? 1 }
 }
 
-export function resolveEffectiveFromVideoDetail(
-  video: VideoDetail,
-  fields: VideoScrapeField[],
-  mode: VideoScrapeUpdateMode,
-  sourceName?: string,
-  ratingSourceName?: string
-): VideoScrapeField[] {
-  if (mode !== 'fillEmpty') return fields
-  const actresses = video.actresses ?? []
-  const tags = video.tags ?? []
-  const assets = video.assets ?? []
-  const links = video.links ?? []
-  const stats = video.external_stats ?? []
-  const femaleCount = actresses.filter((actress) => (actress.gender ?? 'female') === 'female').length
-  const maleCount = actresses.filter((actress) => actress.gender === 'male').length
-  const tagCount = tags.filter((tag) => tag.origin === 'scraped').length
-  const hasSample = assets.some(
-    (asset) =>
-      asset.type === 'sample' &&
-      ((!isBlank(asset.local_path) || !isBlank(asset.remote_url)))
-  )
-  const hasSource = sourceName
-    ? links.some((link) => link.label === sourceName) || Boolean(stats.some((row) => row.source === sourceName))
-    : false
-  const ratingSource = ratingSourceName ?? sourceName
-  const hasRating = ratingSource
-    ? stats.some((row) => row.source === ratingSource)
-    : false
-  return fields.filter((field) => {
-    switch (field) {
-      case 'title':
-        return isBlank(video.title)
-      case 'summary':
-        return isBlank(video.summary)
-      case 'cover':
-        return isBlank(video.cover_path)
-      case 'releaseDate':
-        return isBlank(video.release_date)
-      case 'maker':
-        return video.maker_organization_id == null
-      case 'publisher':
-        return video.publisher_organization_id == null
-      case 'series':
-        return video.series_id == null
-      case 'director':
-        return video.director_id == null
-      case 'duration':
-        return video.duration_seconds == null
-      case 'actressesFemale':
-        return femaleCount === 0
-      case 'actressesMale':
-        return maleCount === 0
-      case 'tags':
-        return tagCount === 0
-      case 'source':
-        return !hasSource
-      case 'rating':
-        return !hasRating
-      case 'samples':
-        return !hasSample
-      default:
-        return false
-    }
-  })
-}
-
-export function resolveEffectiveFromActressDetail(
-  detail: ActressDetail,
-  fields: ActressScrapeField[],
-  mode: ActressScrapeUpdateMode
-): ActressScrapeField[] {
-  if (mode !== 'fillEmpty') return fields
-  return fields.filter((field) => {
-    switch (field) {
-      case 'avatar':
-        return isBlank(detail.avatar_path)
-      case 'gallery':
-        return (detail.gallery ?? []).length === 0
-      case 'birthDate':
-        return isBlank(detail.birth_date)
-      case 'nameZh':
-        return isBlank(detail.name_zh)
-      case 'nameEn':
-        return isBlank(detail.name_en)
-      case 'debutDate':
-        return isBlank(detail.debut_date)
-      case 'heightCm':
-        return detail.height_cm == null
-      case 'measurements':
-        return detail.bust_cm == null || detail.waist_cm == null || detail.hip_cm == null
-      case 'cupSize':
-        return isBlank(detail.cup_size)
-      case 'bloodType':
-        return isBlank(detail.blood_type)
-      case 'zodiac':
-        return isBlank(detail.zodiac)
-      case 'nationality':
-        return isBlank(detail.nationality)
-      case 'profileSummary':
-        return isBlank(detail.profile_summary)
-      case 'aliases':
-        return (detail.aliases ?? []).length === 0
-      default:
-        return false
-    }
-  })
+export async function resolveRemoteScrapeFields<T extends VideoScrapeField | ActressScrapeField>(
+  backend: CatalogBackend,
+  input: { kind: 'video' | 'actress'; id: number; fields: T[]; sourceName?: string; ratingSourceName?: string }
+): Promise<T[]> {
+  if (input.fields.length === 0) return []
+  const result = await backend.queries.resolveScrapeFields(input)
+  if (!result || !Array.isArray(result.fields) ||
+      result.fields.some((field: unknown) => !input.fields.includes(field as T))) {
+    throw new Error('远程刮削字段响应无效')
+  }
+  return input.fields.filter((field) => result.fields.includes(field))
 }
 
 async function readAsset(asset: MetadataAssetRef): Promise<Buffer> {
@@ -244,20 +145,11 @@ export async function scrapeVideoThroughCatalog(
   const mode = options?.mode ?? 'replace'
   const requested = options?.fields ?? ALL_VIDEO_SCRAPE_FIELDS
   const fieldSources = resolveVideoScrapeFieldSources(scraperName)
-  let effective = resolveEffectiveFromVideoDetail(
-    video,
-    requested,
-    mode,
-    fieldSources.sourceName,
-    fieldSources.ratingSourceName
-  )
-  if (mode === 'fillEmpty' && requested.includes('source')) {
-    const sources = (await backend.queries.listVideoSources({ videoIds: [videoId], limit: 20 })) as {
-      items?: Array<{ videoId: number; sources: unknown[] }>
-    }
-    const sourceCount = sources.items?.find((item) => item.videoId === videoId)?.sources.length ?? 0
-    if (sourceCount > 0) effective = effective.filter((field) => field !== 'source')
-  }
+  const effective = mode === 'fillEmpty'
+    ? await resolveRemoteScrapeFields(backend, {
+        kind: 'video', id: videoId, fields: requested, ...fieldSources
+      })
+    : requested
   if (effective.length === 0) {
     return { ok: true, result: { code: video.code }, skipped: true, warnings: [] }
   }
@@ -546,7 +438,9 @@ export async function scrapeActressThroughCatalog(
   if (!detail) return { status: 'failure', ok: false, error: '演员不存在' }
   const requested = options?.fields ?? ALL_ACTRESS_SCRAPE_FIELDS
   const mode = options?.mode ?? 'replace'
-  const effective = resolveEffectiveFromActressDetail(detail, requested, mode)
+  const effective = mode === 'fillEmpty'
+    ? await resolveRemoteScrapeFields(backend, { kind: 'actress', id: actressId, fields: requested })
+    : requested
   if (effective.length === 0) {
     return { status: 'success', ok: true, result: {}, skipped: true }
   }

@@ -188,7 +188,7 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
     const mode = request.mode ?? 'replace'
     const missingFields = request.missingFields ?? []
     const delayController = helpers.createDelayController()
-    const libraryName = request.libraryId ? getMediaLibrary(request.libraryId)?.name : null
+    const libraryName = request.libraryId && !scrapeCatalog() ? getMediaLibrary(request.libraryId)?.name : null
     const statusLabel = formatVideoBatchStatusLabel(request, libraryName)
     const missingLabel =
       missingFields.length > 0 ? `缺少任一：${fieldListLabel(missingFields)}` : '不按缺失字段筛选'

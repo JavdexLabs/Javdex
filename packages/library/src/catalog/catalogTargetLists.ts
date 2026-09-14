@@ -174,10 +174,10 @@ function selectorCount(input: TargetListCreateInput): number {
   return [input.ids, input.videoFilter, input.actressFilter].filter((value) => value != null).length
 }
 
-export function createCatalogTargetList(
+function resolveCatalogTargetSelection(
   input: TargetListCreateInput,
   database: Database.Database = getDb()
-): { targetListId: string; count: number } {
+): { ids: number[]; digest: string } {
   if (selectorCount(input) > 1) {
     throw structuredError(
       'INVALID_INPUT',
@@ -218,6 +218,21 @@ export function createCatalogTargetList(
     )
   }
 
+  return { ids, digest }
+}
+
+export function countCatalogTargets(
+  input: TargetListCreateInput,
+  database: Database.Database = getDb()
+): { count: number } {
+  return { count: resolveCatalogTargetSelection(input, database).ids.length }
+}
+
+export function createCatalogTargetList(
+  input: TargetListCreateInput,
+  database: Database.Database = getDb()
+): { targetListId: string; count: number } {
+  const { ids, digest } = resolveCatalogTargetSelection(input, database)
   const id = randomUUID()
   const stored: StoredTargetList = {
     id,

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { isStructuredError } from '@shared/protocol/errors'
 import {
+  countCatalogTargets,
   createCatalogTargetList,
   pageCatalogTargetList,
   targetListFilterDigest,
@@ -31,6 +32,24 @@ function insertVideo(code: string): number {
 }
 
 describe('catalog target lists', () => {
+  it('counts live selections without storing target lists', () => {
+    const db = setup()
+    const id = insertVideo('COUNT-001')
+    const selector = { kind: 'videos.filter', videoFilter: { status: 'all' as const } }
+    const input = { ...selector, filterDigest: targetListRequestDigest(selector) }
+    const before = db.prepare('SELECT * FROM catalog_settings').all()
+    assert.equal(countCatalogTargets(input).count, 1)
+    insertVideo('COUNT-002')
+    assert.equal(countCatalogTargets(input).count, 2)
+    const frozen = createCatalogTargetList(input)
+    const afterFreeze = db.prepare('SELECT * FROM catalog_settings').all()
+    assert.equal(afterFreeze.length, before.length + 1)
+    db.prepare('DELETE FROM videos WHERE id = ?').run(id)
+    assert.equal(countCatalogTargets(input).count, 1)
+    assert.deepEqual(db.prepare('SELECT * FROM catalog_settings').all(), afterFreeze)
+    assert.equal(pageCatalogTargetList({ targetListId: frozen.targetListId }).ids.length, 2)
+  })
+
   it('freezes explicit ids and keeps deleted placeholders', () => {
     setup()
     const first = insertVideo('C6-A')

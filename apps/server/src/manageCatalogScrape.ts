@@ -1,3 +1,5 @@
+import { resolveCatalogScrapeFields } from '@library/catalog/catalogScrapeFields'
+import type { ManageOperationInput } from '@shared/manage/inputs'
 import type { CatalogImageRef } from '@shared/protocol/uploads'
 import type { ManageOperationId } from '@shared/manage/operations'
 import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
@@ -7,7 +9,7 @@ import { getPendingVideoScrapeResolutionSnapshot } from '@library/db/pendingVide
 import { confirmPendingVideoScrape } from '@library/catalog/catalogPendingVideoScrapes'
 import { applyActressScrapeCandidate, applyVideoScrapeCandidate, replacePendingVideoScrapeFromUploads, submitActressScrapeConflict } from '@library/catalog/catalogScrapeApply'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
-import { createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
+import { countCatalogTargets, createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
   applyAgentMetadataDraft,
   discardAgentMetadataDraft,
@@ -194,6 +196,12 @@ export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> 
   'targetLists.create'(args) {
     const input = args.envelope.input as import('@shared/protocol/tasks').TargetListCreateInput
     return commit(args, () => createCatalogTargetList(input, args.database))
+  },
+  'targetLists.count'(args) {
+    return countCatalogTargets(args.envelope.input as ManageOperationInput<'targetLists.count'>, args.database)
+  },
+  'scrape.fields'(args) {
+    return resolveCatalogScrapeFields(args.envelope.input as ManageOperationInput<'scrape.fields'>)
   },
   'targetLists.page'(args) {
     const input = args.envelope.input as { targetListId: string; limit?: number; offset?: number }

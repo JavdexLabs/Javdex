@@ -289,6 +289,29 @@ export const MANAGE_OPERATION_INPUTS = {
       actressFilter: targetActressFilterSchema.optional()
     })
     .strict(),
+  'targetLists.count': z
+    .object({
+      kind: z.string().min(1).max(100),
+      filterDigest: digestSchema,
+      ids: idListSchema.optional(),
+      videoFilter: targetVideoFilterSchema.optional(),
+      actressFilter: targetActressFilterSchema.optional()
+    })
+    .strict(),
+  'scrape.fields': z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('video'),
+      id: idSchema,
+      fields: videoScrapeFieldsSchema,
+      sourceName: limitedTextSchema.optional(),
+      ratingSourceName: limitedTextSchema.optional()
+    }).strict(),
+    z.object({
+      kind: z.literal('actress'),
+      id: idSchema,
+      fields: actressScrapeFieldsSchema
+    }).strict()
+  ]),
   'targetLists.page': z
     .object({
       targetListId: uuidSchema,

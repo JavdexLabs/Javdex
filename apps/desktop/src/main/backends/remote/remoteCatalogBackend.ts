@@ -523,6 +523,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       listVideos: q('videos.list'),
       getVideo: q('videos.get'),
       listVideoYears: q('videos.years'),
+      resolveScrapeFields: q('scrape.fields'),
       listVideoSources: q('videos.sources'),
       getResource: q('videos.getResource'),
       listTags: q('tags.list'),
@@ -895,6 +896,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         return query('operations.get', input, ctx?.signal)
       },
       createTargetList: m('targetLists.create'),
+      countTargets: q('targetLists.count'),
       pageTargetList: q('targetLists.page')
     },
     pendingVideoScrapes: {

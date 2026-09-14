@@ -31,6 +31,8 @@ export const MANAGE_OPERATIONS = {
   'tasks.cancel': { auth: 'manageWrite', versions: [], completion: 'task', summary: 'Request cancel; waits for a safe boundary' },
   'operations.get': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Persistent operation receipt' },
   'targetLists.create': { auth: 'manageWrite', versions: [], completion: 'sync', summary: 'Freeze selected or filtered target ids for batch work' },
+  'targetLists.count': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Count matching targets without storing a snapshot' },
+  'scrape.fields': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Resolve empty scrape fields from authoritative catalog data and images' },
   'targetLists.page': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Page a frozen target list' },
   'migration.preview': { auth: 'migration', versions: [], completion: 'preview', summary: 'Compute freeze-ready migration impact' },
   'migration.start': { auth: 'migration', versions: [], completion: 'task', summary: 'Freeze source and transfer into an empty target' },

@@ -59,13 +59,13 @@ async function pageAllTargetEntries(
   return entries
 }
 
-function presentTargets<T extends { id: number }>(
+function frozenTargets<T extends { id: number }>(
   entries: NonNullable<TargetListPage['entries']>,
   toTarget: (id: number, label: string | null | undefined) => T
 ): T[] {
-  return entries
-    .filter((entry) => entry.present !== false)
-    .map((entry) => toTarget(entry.id, entry.label))
+  return entries.map((entry) =>
+    toTarget(entry.id, entry.present === false ? `已删除 · ${entry.label ?? `#${entry.id}`}` : entry.label)
+  )
 }
 
 export function remoteVideoTargetListInput(filter: VideoBatchScrapeFilter): TargetListCreateInput {
@@ -108,7 +108,7 @@ export async function freezeRemoteVideoTargets(
 ): Promise<Array<{ id: number; code: string }>> {
   const created = await createRemoteTargetList(backend, remoteVideoTargetListInput(filter))
   const entries = await pageAllTargetEntries(backend, created.targetListId)
-  return presentTargets(entries, (id, label) => ({ id, code: label?.trim() || `#${id}` }))
+  return frozenTargets(entries, (id, label) => ({ id, code: label?.trim() || `#${id}` }))
 }
 
 export async function freezeRemoteActressTargets(
@@ -117,21 +117,21 @@ export async function freezeRemoteActressTargets(
 ): Promise<Array<{ id: number; main_name: string }>> {
   const created = await createRemoteTargetList(backend, remoteActressTargetListInput(filter))
   const entries = await pageAllTargetEntries(backend, created.targetListId)
-  return presentTargets(entries, (id, label) => ({ id, main_name: label?.trim() || `#${id}` }))
+  return frozenTargets(entries, (id, label) => ({ id, main_name: label?.trim() || `#${id}` }))
 }
 
 export async function countRemoteVideoTargets(
   backend: CatalogBackend,
   filter: VideoBatchScrapeFilter
 ): Promise<number> {
-  const created = await createRemoteTargetList(backend, remoteVideoTargetListInput(filter))
-  return created.count
+  const result = await backend.tasks.countTargets(remoteVideoTargetListInput(filter))
+  return result.count
 }
 
 export async function countRemoteActressTargets(
   backend: CatalogBackend,
   filter: ActressBatchScrapeFilter
 ): Promise<number> {
-  const created = await createRemoteTargetList(backend, remoteActressTargetListInput(filter))
-  return created.count
+  const result = await backend.tasks.countTargets(remoteActressTargetListInput(filter))
+  return result.count
 }

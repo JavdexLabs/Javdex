@@ -43,6 +43,7 @@ export interface CatalogQueries {
   listVideos: Query<'videos.list'>
   getVideo: Query<'videos.get'>
   listVideoYears: Query<'videos.years'>
+  resolveScrapeFields: Query<'scrape.fields'>
   listVideoSources: Query<'videos.sources'>
   getResource: Query<'videos.getResource'>
   listTags: Query<'tags.list'>
@@ -243,6 +244,7 @@ export interface CatalogTaskCommands {
   cancel: Command<'tasks.cancel'>
   getOperation: Query<'operations.get'>
   createTargetList: Command<'targetLists.create'>
+  countTargets: Query<'targetLists.count'>
   pageTargetList: Query<'targetLists.page'>
 }
 

@@ -1,118 +1,38 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ActressDetail } from '@shared/actressTypes'
-import type { VideoDetail } from '@shared/videoTypes'
-import {
-  resolveEffectiveFromActressDetail,
-  resolveEffectiveFromVideoDetail
-} from './catalogRemoteScrape'
-
-function video(overrides: Partial<VideoDetail> = {}): VideoDetail {
-  return {
-    id: 1,
-    code: 'C6-001',
-    title: null,
-    summary: null,
-    cover_path: null,
-    poster_path: null,
-    original_title: null,
-    rating: 0,
-    release_date: null,
-    maker: null,
-    publisher: null,
-    maker_organization_id: null,
-    publisher_organization_id: null,
-    series: null,
-    director: null,
-    series_id: null,
-    director_id: null,
-    duration_seconds: null,
-    scraped_status: 0,
-    last_scraped_at: null,
-    updated_at: null,
-    add_time: '2026',
-    resources: [],
-    actresses: [],
-    tags: [],
-    assets: [],
-    external_stats: [],
-    links: [],
-    ...overrides
-  }
-}
-
-function actress(overrides: Partial<ActressDetail> = {}): ActressDetail {
-  return {
-    id: 1,
-    main_name: 'One',
-    avatar_path: null,
-    avatar_source_path: null,
-    avatar_crop_json: null,
-    poster_path: null,
-    birth_date: null,
-    debut_date: null,
-    height_cm: null,
-    bust_cm: null,
-    waist_cm: null,
-    hip_cm: null,
-    cup_size: null,
-    blood_type: null,
-    zodiac: null,
-    nationality: null,
-    profile_summary: null,
-    scraped_status: 0,
-    last_scraped_at: null,
-    updated_at: null,
-    gender: 'female',
-    name_zh: null,
-    name_en: null,
-    aliases: [],
-    names: [],
-    gallery: [],
-    videos: [],
-    links: [],
-    ...overrides
-  }
-}
+import type { CatalogBackend } from '../application/catalogBackend'
+import { resolveRemoteScrapeFields } from './catalogRemoteScrape'
 
 describe('catalog remote scrape field selection', () => {
-  it('keeps requested fields for replace and drops filled fields for fillEmpty', () => {
-    const filled = video({
-      title: 'Has title',
-      cover_path: 'covers/a.jpg',
-      actresses: [{ gender: 'female' } as VideoDetail['actresses'][number]]
-    })
-    assert.deepEqual(
-      resolveEffectiveFromVideoDetail(filled, ['title', 'summary', 'cover'], 'replace'),
-      ['title', 'summary', 'cover']
-    )
-    assert.deepEqual(
-      resolveEffectiveFromVideoDetail(filled, ['title', 'summary', 'cover'], 'fillEmpty'),
-      ['summary']
-    )
-    assert.deepEqual(
-      resolveEffectiveFromVideoDetail(video(), ['title', 'source'], 'fillEmpty', 'Site'),
-      ['title', 'source']
-    )
-    assert.deepEqual(
-      resolveEffectiveFromVideoDetail(
-        video({ links: [{ label: 'Site', url: 'https://example.test/a', position: 0 }] }),
-        ['title', 'source'],
-        'fillEmpty',
-        'Site'
-      ),
-      ['title']
-    )
+  it('uses authoritative image and source facts rather than detail DTO guesses', async () => {
+    const calls: unknown[] = []
+    const backend = {
+      queries: {
+        resolveScrapeFields: async (input: { kind: string }) => {
+          calls.push(input)
+          return { fields: input.kind === 'actress' ? ['avatar'] : ['source'] }
+        }
+      }
+    } as unknown as CatalogBackend
+    assert.deepEqual(await resolveRemoteScrapeFields(backend, {
+      kind: 'actress', id: 1, fields: ['avatar', 'nameZh']
+    }), ['avatar'])
+    assert.deepEqual(await resolveRemoteScrapeFields(backend, {
+      kind: 'video', id: 2, fields: ['title', 'source'], sourceName: 'Site'
+    }), ['source'])
+    assert.equal(calls.length, 2)
   })
 
-  it('treats a present actress avatar path as filled for remote fillEmpty', () => {
-    assert.deepEqual(
-      resolveEffectiveFromActressDetail(actress({ avatar_path: 'avatars/a.jpg' }), ['avatar', 'nameZh'], 'fillEmpty'),
-      ['nameZh']
-    )
-    assert.deepEqual(
-      resolveEffectiveFromActressDetail(actress(), ['avatar', 'nameZh'], 'replace'),
-      ['avatar', 'nameZh']
-    )
+  it('does not turn invalid responses or request failures into empty fields', async () => {
+    const backend = {
+      queries: { resolveScrapeFields: async () => ({ fields: ['not-requested'] }) }
+    } as unknown as CatalogBackend
+    await assert.rejects(resolveRemoteScrapeFields(backend, {
+      kind: 'actress', id: 1, fields: ['avatar']
+    }), /响应无效/)
+    backend.queries.resolveScrapeFields = async () => { throw new Error('unavailable') }
+    await assert.rejects(resolveRemoteScrapeFields(backend, {
+      kind: 'actress', id: 1, fields: ['avatar']
+    }), /unavailable/)
   })
 })

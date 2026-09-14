@@ -1452,7 +1452,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
           : helper.page.locator('body')
         if (command.target) await assertUniqueTarget('html', command.target, locator)
         const maxLength = Math.max(200, Math.min(MAX_AGENT_HTML_LENGTH, command.maxLength ?? 12_000))
-        const raw = await locator.evaluate((element) => element.outerHTML)
+        const raw = await locator.evaluate((element) =>
+          (element as { outerHTML: string }).outerHTML
+        )
         const limited = byteLimited(raw, maxLength)
         return {
           action: 'html',

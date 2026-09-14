@@ -84,3 +84,8 @@
 ## 本阶段合同扩展（C1–C7）
 
 2026-09-14 用户确认补齐后，管理 schema 已增加远程文件重命名预览、队列锚点、精确 presence、审计筛选、受限 `videos.sources`、刮削失败标记、pending scrape replace、actress conflict submit、清单 `videoLinks`，以及 `targetLists.create` 的 ids/videoFilter/actressFilter。`TargetListPage.entries` 含已删除占位。同版本客户端必须发送这些字段；旧客户端会在握手或 schema 校验失败。字段形状以 `packages/contracts/src/manage/inputs.ts` 为准。
+
+### C6 收尾查询补充（2026-09-14）
+
+- `targetLists.count`：manageRead；与 create 共用选择条件和摘要校验，只返回 count，不持久化目标列表。
+- `scrape.fields`：manageRead；输入区分 video/actress、目标 ID、所选字段以及影片来源，权威宿主使用本地同款 fillEmpty 规则返回有效字段；不传客户端磁盘路径，不替代提交时的版本检查。

@@ -48,7 +48,7 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 - **C3** `pendingAudit.presence` 按媒体库和指定 group/identity/scrape ids 精确返回存在项，不再做目录级计数或 list 求交
 - **C4** 远程 `scans.auditPage` 保留 `section`/`outcome`/`attention`
 - **C5** 远程 `videos.sources` 按 codes/videoIds/source+identity 分页返回唯一影片及其来源；空结果表示未匹配，无效响应当查询失败。清单匹配不再用空 sources 代替
-- **C6** 远程刮削单条不支持；刮削仍仅本地模式
+- **C6** 远程单条与批量刮削已接线：桌面运行插件/Playwright 采集，服务端持有正式资料并接收 `applyScrapeCandidate` / 待确认提交。批量启动时冻结 ids 或筛选条件；分页 `entries` 对已删除 id 占位。远程已选 ID 上限 200，更大范围用 `videoFilter`/`actressFilter`。取消只停止桌面采集，不回滚已受理写入。远程 `fillEmpty` 按详情 DTO 近似（头像以路径存在视为已填）。count 可能留下 `catalog_settings` 的 target-list 孤儿记录。尚未做完整 GUI/故障验收
 - **C7** 远程 `playlists.applyImport` 按本地语义写入 per-video `video_links`（INSERT OR IGNORE 去重），不扩大自动建片或追加到已有清单
 - **E1** 单容器 `server:smoke` 已通过（#107）。Docker 两端迁库见 `server:smoke:migration` / 执行计划 S13。Linux 同版本 `deb`/`AppImage` + 镜像安装见 `smoke:same-version-install` / 执行计划 S14。不是 Windows/macOS 安装包，也不是完整 GUI 产品流
 - **E2** 第一版发布路径已解锁：S14 剩余门闩通过后可升 0.8、写 CHANGELOG、准备合并 main。不得在剩余门闩通过前宣称 S13/S14 完成；本文件不授权自动合并 main，也不在本阶段升版本或写 CHANGELOG

@@ -242,10 +242,14 @@ describe('C1-C7 catalog manage handlers', () => {
     db.prepare('DELETE FROM videos WHERE id = ?').run(second)
     const page = dispatch('targetLists.page', { targetListId: created.targetListId }) as {
       ids: number[]
-      entries: Array<{ id: number; present: boolean; label?: string | null }>
+      entries: Array<{ id: number; present: boolean; label?: string | null; revision?: number | null }>
     }
     assert.deepEqual(page.ids, [first, second])
     assert.equal(page.entries[1]?.present, false)
     assert.equal(page.entries[1]?.label, 'C6-B')
+    assert.equal(page.entries[0]?.revision, 1)
+    db.prepare('UPDATE videos SET revision = revision + 1 WHERE id = ?').run(first)
+    const afterChange = dispatch('targetLists.page', { targetListId: created.targetListId }) as typeof page
+    assert.equal(afterChange.entries[0]?.revision, 1)
   })
 })

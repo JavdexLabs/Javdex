@@ -27,11 +27,23 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 `bind` 在尚未认主时签发一次性令牌；桌面用该令牌领取 writer，秘密只存在本机安全存储。`recover` 在丢失 writer 秘密后签发恢复令牌。`JAVDEX_BOOTSTRAP_TOKEN` 仅用于首次启动写入引导令牌，不是 occupancy 文件。网页账号使用 `web.passwordHash` 或环境变量 `JAVDEX_WEB_PASSWORD`；Cookie 不能调用管理接口。
 
+交接/恢复领取遇到扫描、维护任务或未完成的文件操作时返回 `MAINTENANCE_BUSY`。请求不排队、不占用交接资格，也不消耗一次性令牌；操作者应完成或取消任务后重试（令牌过期需重新签发）。原 writer 在交接成功前保持有效，新维护任务不会因一次失败的交接而被禁止。成功领取仍是原子操作，同一成功 claim 的重试不增加写入代次。`writer.status.maintenanceBusy` 表示当前有维护任务，不表示有人排队。
+
 桌面在“此电脑”中选择远程地址后重启生效。远程模式只使用桌面设置、凭据与 `desktop-work.db`，不打开原 `library.db`。工作记录未复制完成时拒绝远程启动。
 
 ## 迁库
 
-双向整库迁移只接受空目标。视频文件不复制，只按挂载映射改写定位。CLI `migrate-auth` 签发独立 migration Bearer（不是 writer）。源在 start 后冻结；目标 enable 与 abandon 互斥。启用成功后源保持冻结备份，除非操作者再对源调用 abandon。源端加密图片在 start/导出时自动解密到迁移包（明文进目标）；解密使用当前 LibraryHost 机器密钥（hostname + 用户名 + userDataPath）及源 `imagesDir` 路径别名，不改源正式图。缺少别名或密钥不匹配时 start 失败并解冻。目标 enable 在 ATTACH 提交后若拷图失败（`EACCES`/`ENOSPC` 等）会回滚启用状态并尽量删除已拷文件，不留下安静的 `enabled` 半状态。孤立 `uploads/` 不会成为目标封面。丢响应或重启后以 `migration.status` 为准，不要重复猜测 enable/abandon。
+迁库采用离线包和人工切换，不做双端协调；本地→服务端及服务端→本地均保留。目标必须是未认主的空资料库；仅有清单、标签或分类资料也不算空库。视频文件不复制，只按挂载映射改写定位。CLI `migrate-auth` 签发独立 migration Bearer（不是 writer）。
+
+1. 在源端 `migration.preview` 确认映射和预检，调用 `migration.start` 冻结写入并导出包。完成后停止使用源库，保留其数据库与正式图片作为冻结备份。
+2. 人工复制 `{dataDir}/migration-packages/{migrationId}.tar.gz` 到目标，或使用迁移凭据上传到 `PUT /manage/v1/migration/packages/:migrationId`；随后在目标调用 `migration.start` 校验并暂存。源端此时可以完全离线，无需网络可达或签发启用许可。
+3. 确认源库已停用，在目标调用 `migration.enable`，输入除 `migrationId` / `digest` 外必须包含 `confirmSourceStopped: true`。启用生成新的 catalogId；操作者重新认主并人工切换桌面连接，不自动切换或回退。
+
+`migration.status` 只返回本端的 `role`（source/target）、`phase` 和摘要，不再返回推测的 `sourcePhase` / `targetPhase`；`migration.allowEnable` 已移除。目标 `enable` 与 `abandon` 仍是互斥本端终态，重复启用只回放结果。导出期间或目标暂存未处理时不能开始另一迁移。
+
+放弃目标暂存可在目标调用 `migration.abandon`。恢复已冻结的源库则必须先停用目标，并在源端调用 `migration.abandon` 时传 `confirmTargetStopped: true`。这些确认是操作者声明，不是跨端验证。目标已产生的新数据不会自动回流旧库；不能把恢复旧库当作无损回退，也不能同时写入两个副本。
+
+源端加密图片在导出时自动解密到迁移包（明文进目标）；解密使用当前 LibraryHost 机器密钥及源图片路径别名，不改源正式图。图片校验、路径映射和导入失败保护保留；孤立 `uploads/` 不会成为目标封面。丢响应后查询本端 `migration.status`，不要猜测启用结果。旧版双端状态会按本端角色读取，旧源启用许可只解释为源仍冻结，不自动解冻。
 
 桌面远程模式的 `migrateCatalog` 与本地同一入口；远程走现有 HTTP migration，不打开本机 `library.db`。调用仍需要 CLI `migrate-auth` 签发的 migration Bearer。
 

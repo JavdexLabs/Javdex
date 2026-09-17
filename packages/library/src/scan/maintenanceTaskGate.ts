@@ -1,3 +1,5 @@
+import { structuredError } from '@shared/protocol/errors'
+
 export type MaintenanceTaskKind = 'scan' | 'resource-maintenance' | 'nfo-export'
 
 export interface MaintenanceTaskLease {
@@ -28,7 +30,7 @@ export class MaintenanceTaskGate {
 
   runSync<T>(kind: MaintenanceTaskKind, work: () => T): T {
     const lease = this.tryAcquire(kind)
-    if (!lease) throw new Error('已有扫描或资源维护任务正在运行')
+    if (!lease) throw structuredError('MAINTENANCE_BUSY', '已有扫描或资源维护任务正在运行')
     try {
       return work()
     } finally {
@@ -38,7 +40,7 @@ export class MaintenanceTaskGate {
 
   async run<T>(kind: MaintenanceTaskKind, work: () => Promise<T>): Promise<T> {
     const lease = this.tryAcquire(kind)
-    if (!lease) throw new Error('已有扫描或资源维护任务正在运行')
+    if (!lease) throw structuredError('MAINTENANCE_BUSY', '已有扫描或资源维护任务正在运行')
     try {
       return await work()
     } finally {

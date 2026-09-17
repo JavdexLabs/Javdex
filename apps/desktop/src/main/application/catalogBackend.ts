@@ -4,7 +4,8 @@ import type {
   DesktopWriterClaimRequest,
   DesktopWriterClaimResult
 } from '@shared/desktop/session'
-import type { ManageOperationInput } from '@shared/manage/inputs'
+import type { CatalogOperationInput } from './catalogOperationInputs'
+import type { CatalogOperationResults } from './catalogOperationResults'
 import type { HandshakeResult } from '@shared/protocol/handshake'
 import type { CatalogIdentity } from '@shared/protocol/identity'
 import type { ExpectedVersions } from '@shared/protocol/versions'
@@ -21,21 +22,14 @@ export interface CatalogQueryContext {
   signal?: AbortSignal
 }
 
-/* Existing domain objects and IPC extras until S08 projects manage DTOs. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CatalogPortInput = any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CatalogPortValue = any
-
-type Query<_K extends keyof ManageOperationInputMap> = (
-  input: CatalogPortInput,
+type Query<K extends keyof CatalogOperationResults> = (
+  input: CatalogOperationInput<K>,
   ctx?: CatalogQueryContext
-) => Promise<CatalogPortValue>
-type Command<_K extends keyof ManageOperationInputMap> = (
-  input: CatalogPortInput,
+) => Promise<CatalogOperationResults[K]>
+type Command<K extends keyof CatalogOperationResults> = (
+  input: CatalogOperationInput<K>,
   ctx: MutationContext
-) => Promise<CatalogPortValue>
-type ManageOperationInputMap = { [K in import('@shared/manage/operations').ManageOperationId]: ManageOperationInput<K> }
+) => Promise<CatalogOperationResults[K]>
 
 export interface CatalogQueries {
   homeLoad: Query<'home.load'>
@@ -271,7 +265,7 @@ export interface CatalogAssetCommands {
   putUpload: (
     input: { uploadId: string; body: Buffer; contentType: string },
     ctx?: CatalogQueryContext
-  ) => Promise<CatalogPortValue>
+  ) => Promise<import('@shared/protocol/uploads').UploadInspectResult>
   grantPlayback: Query<'play.grant'>
   readImage: (
     input: { relPath: string; size?: 320 | 640 | 1280 },
@@ -283,7 +277,6 @@ export interface CatalogMigrationCommands {
   preview: Query<'migration.preview'>
   start: Command<'migration.start'>
   status: Query<'migration.status'>
-  allowEnable: Command<'migration.allowEnable'>
   enable: Command<'migration.enable'>
   abandon: Command<'migration.abandon'>
   putPackage: (

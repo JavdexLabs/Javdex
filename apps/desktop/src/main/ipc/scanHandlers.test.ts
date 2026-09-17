@@ -354,6 +354,15 @@ it('runs FILE_IMPORT_MANUAL through the catalog backend with a root-relative loc
     mode: 'remote',
     generation: 1,
     libraries: {
+      previewRenameFile: async (input: unknown) => {
+        calls.push(['preview', input])
+        return {
+          expectedVersions: {
+            G: { generation: 1, revision: 2 },
+            R: { generation: 1, revision: 3 }
+          }
+        }
+      },
       importManual: async (input: unknown, ctx: unknown) => {
         calls.push(['importManual', input, ctx])
         return { imported: true, code: 'D02-001' }
@@ -369,9 +378,13 @@ it('runs FILE_IMPORT_MANUAL through the catalog backend with a root-relative loc
     { kind: 'new' }
   )
   assert.equal(result.imported, true)
-  assert.equal((calls[0] as [string, { location: { relativePath: string } }])[0], 'importManual')
+  const importCall = calls.find((call) => Array.isArray(call) && call[0] === 'importManual') as [
+    string,
+    { location: { relativePath: string } }
+  ]
+  assert.equal(importCall[0], 'importManual')
   assert.equal(
-    ((calls[0] as [string, { location: { relativePath: string } }])[1]).location.relativePath,
+    importCall[1].location.relativePath,
     'clip.mp4'
   )
   await assert.rejects(
@@ -389,7 +402,14 @@ it('resolves remote FILE_RENAME through files.renamePreview without host paths',
     libraries: {
       previewRenameFile: async (input: unknown) => {
         calls.push(['preview', input])
-        return { resourceId: 44, planDigest: 'd'.repeat(64) }
+        return {
+          resourceId: 44,
+          planDigest: 'd'.repeat(64),
+          expectedVersions: {
+            G: { generation: 1, revision: 2 },
+            R: { generation: 1, revision: 3 }
+          }
+        }
       },
       renameFile: async (input: unknown, ctx: unknown) => {
         calls.push(['rename', input, ctx])
@@ -489,20 +509,22 @@ it('routes SCAN_AUDIT_GET through the catalog backend', async () => {
 
 it('routes remote SCAN_AUDIT_PAGE and VIEW_PAGE through the catalog backend', async () => {
   const calls: unknown[] = []
+  const snapshot = { libraryId: 4, runId: 'run-4', finishedAt: 'now' }
+  const page = { snapshot, section: 'files' as const, items: [], total: 0, limit: 20, offset: 5 }
+  const view = { snapshot, items: [], total: 0, auditAvailable: true, attentionBadgeCount: 0, limit: 50, offset: 0, anchorOffset: null }
   const backend = {
     mode: 'remote',
     libraries: {
       auditPage: async (input: unknown) => {
         calls.push(['page', input])
-        return { items: [], total: 0 }
+        return page
       },
       auditViewPage: async (input: unknown) => {
         calls.push(['view', input])
-        return { items: [], total: 0, auditAvailable: true }
+        return view
       }
     }
   } as unknown as CatalogBackend
-  const snapshot = { libraryId: 4, runId: 'run-4', finishedAt: 'now' }
   assert.deepEqual(
     await auditPageThroughBackend(backend, snapshot, {
       section: 'files',
@@ -510,7 +532,7 @@ it('routes remote SCAN_AUDIT_PAGE and VIEW_PAGE through the catalog backend', as
       limit: 20,
       offset: 5
     }),
-    { items: [], total: 0 }
+    page
   )
   assert.deepEqual(
     await auditViewPageThroughBackend(backend, snapshot, {
@@ -520,9 +542,9 @@ it('routes remote SCAN_AUDIT_PAGE and VIEW_PAGE through the catalog backend', as
       locale: 'zh-hans-cn',
       limit: 50,
       offset: 0,
-      anchor: { kind: 'path', value: '/media/ABC-001.mp4' }
+      anchor: { kind: 'path', value: '/media/ABC-001.mp4', rootId: 7 }
     }),
-    { items: [], total: 0, auditAvailable: true }
+    view
   )
   assert.deepEqual(calls, [
     [
@@ -545,7 +567,7 @@ it('routes remote SCAN_AUDIT_PAGE and VIEW_PAGE through the catalog backend', as
         locale: 'zh-hans-cn',
         limit: 50,
         offset: 0,
-        anchor: { kind: 'path', value: '/media/ABC-001.mp4' }
+        anchor: { kind: 'path', value: '/media/ABC-001.mp4', rootId: 7 }
       }
     ]
   ])

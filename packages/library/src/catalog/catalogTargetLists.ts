@@ -16,6 +16,7 @@ export interface StoredTargetList {
   kind: string
   filterDigest: string
   ids: number[]
+  generations?: number[]
   revisions: number[]
   labels: Array<string | null>
   createdAt: string
@@ -135,14 +136,22 @@ function isActressKind(kind: string): boolean {
   return kind.startsWith('actresses')
 }
 
-function capturedRevisions(kind: string, ids: number[], database: Database.Database): number[] {
+function capturedVersions(
+  kind: string,
+  ids: number[],
+  database: Database.Database
+): { generations: number[]; revisions: number[] } {
   const stmt = isActressKind(kind)
-    ? database.prepare('SELECT revision FROM actresses WHERE id = ?')
-    : database.prepare('SELECT revision FROM videos WHERE id = ?')
-  return ids.map((id) => {
-    const row = stmt.get(id) as { revision: number } | undefined
-    return row?.revision ?? 1
-  })
+    ? database.prepare('SELECT generation, revision FROM actresses WHERE id = ?')
+    : database.prepare('SELECT generation, revision FROM videos WHERE id = ?')
+  const generations: number[] = []
+  const revisions: number[] = []
+  for (const id of ids) {
+    const row = stmt.get(id) as { generation: number; revision: number } | undefined
+    generations.push(row?.generation ?? 1)
+    revisions.push(row?.revision ?? 1)
+  }
+  return { generations, revisions }
 }
 
 function capturedLabels(kind: string, ids: number[], database: Database.Database): Array<string | null> {
@@ -159,14 +168,14 @@ function liveEntry(
   kind: string,
   id: number,
   database: Database.Database
-): { label: string; revision: number } | null {
+): { label: string; generation: number; revision: number } | null {
   const row = isActressKind(kind)
     ? (database
-        .prepare('SELECT main_name AS label, revision FROM actresses WHERE id = ?')
-        .get(id) as { label: string; revision: number } | undefined)
+        .prepare('SELECT main_name AS label, generation, revision FROM actresses WHERE id = ?')
+        .get(id) as { label: string; generation: number; revision: number } | undefined)
     : (database
-        .prepare('SELECT code AS label, revision FROM videos WHERE id = ?')
-        .get(id) as { label: string; revision: number } | undefined)
+        .prepare('SELECT code AS label, generation, revision FROM videos WHERE id = ?')
+        .get(id) as { label: string; generation: number; revision: number } | undefined)
   return row ?? null
 }
 
@@ -234,12 +243,14 @@ export function createCatalogTargetList(
 ): { targetListId: string; count: number } {
   const { ids, digest } = resolveCatalogTargetSelection(input, database)
   const id = randomUUID()
+  const versions = capturedVersions(input.kind, ids, database)
   const stored: StoredTargetList = {
     id,
     kind: input.kind,
     filterDigest: digest,
     ids,
-    revisions: capturedRevisions(input.kind, ids, database),
+    generations: versions.generations,
+    revisions: versions.revisions,
     labels: capturedLabels(input.kind, ids, database),
     createdAt: new Date().toISOString()
   }
@@ -266,8 +277,11 @@ export function pageCatalogTargetList(
     return {
       id,
       present: live != null,
-      label: live?.label ?? stored.labels?.[storedIndex] ?? null,
-      revision: live?.revision ?? stored.revisions[storedIndex] ?? null
+      // A target list is a frozen work plan.  Keep the label and row revision
+      // captured when it was created even if the live row has since changed.
+      label: stored.labels?.[storedIndex] ?? live?.label ?? null,
+      generation: stored.generations?.[storedIndex] ?? live?.generation ?? null,
+      revision: stored.revisions[storedIndex] ?? null
     }
   })
   return {

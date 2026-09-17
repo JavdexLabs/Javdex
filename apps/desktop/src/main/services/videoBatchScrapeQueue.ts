@@ -5,13 +5,17 @@ import {
   resolveVideoScrapeFieldSources,
   type ScrapeOutcome
 } from '../scrapers/scraperManager'
-import { scrapeVideoBound, scrapeCatalog } from './scrapeCatalogBinding'
+import {
+  createScrapeCatalogBinding,
+  type ScrapeCatalogBinding
+} from './scrapeCatalogBinding'
 import {
   freezeRemoteVideoTargets
 } from './catalogRemoteBatch'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import {
   CheckpointedSequentialBatchQueue,
+  type CatalogKeyProvider,
   type CheckpointedBatchPolicy
 } from './checkpointedSequentialBatchQueue'
 import { resolveVideoBatchTargets } from './videoScrapeApplyService'
@@ -19,9 +23,10 @@ import { getMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { hasActiveVisibleVideoMembership } from '@library/db/libraryMembershipRepo'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import type { QueueItemOutcome } from './sequentialBatchQueue'
+import type { CatalogBackend } from '../application/catalogBackend'
 
 type ProgressListener = (progress: BatchProgress) => void
-type VideoTarget = { id: number; code: string }
+type VideoTarget = { id: number; code: string; generation?: number | null; revision?: number | null }
 
 const MODE_LABEL: Record<VideoScrapeUpdateMode, string> = {
   replace: '覆盖更新',
@@ -55,8 +60,10 @@ function resolveVideoTargets(request: VideoBatchScrapeRequest): VideoTarget[] {
   })
 }
 
-async function resolveVideoQueueTargets(request: VideoBatchScrapeRequest): Promise<VideoTarget[]> {
-  const catalog = scrapeCatalog()
+async function resolveVideoQueueTargets(
+  request: VideoBatchScrapeRequest,
+  catalog: CatalogBackend | null
+): Promise<VideoTarget[]> {
   if (catalog) {
     const fieldSources = resolveVideoScrapeFieldSources(request.scraperName)
     return freezeRemoteVideoTargets(catalog, { ...request, ...fieldSources })
@@ -83,9 +90,10 @@ export function formatVideoBatchStatusLabel(
 /** Re-check a paused scoped job before using its frozen target snapshot. */
 export function assertVideoBatchResumeScope(
   job: PersistedBatchScrapeJob,
-  resolveTargets: typeof resolveVideoBatchTargets = resolveVideoBatchTargets
+  resolveTargets: typeof resolveVideoBatchTargets = resolveVideoBatchTargets,
+  catalog: CatalogBackend | null = null
 ): PersistedBatchScrapeJob {
-  if (scrapeCatalog()) return job
+  if (catalog) return job
   const request = job.request as VideoBatchScrapeRequest
   if (request.libraryId === undefined) return job
 
@@ -115,10 +123,10 @@ export async function validateVideoBatchTargetScope(
   hasMembership: (
     libraryId: number,
     videoId: number
-  ) => boolean | Promise<boolean> = hasActiveVisibleVideoMembership
+  ) => boolean | Promise<boolean> = hasActiveVisibleVideoMembership,
+  catalog: CatalogBackend | null = null
 ): Promise<QueueItemOutcome | null> {
   if (request.libraryId === undefined) return null
-  const catalog = scrapeCatalog()
   const inScope = catalog
     ? Boolean(
         await catalog.queries.getVideo({
@@ -172,56 +180,79 @@ export function formatVideoBatchScrapeOutcome(
   }
 }
 
-const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeRequest> = {
-  kind: 'video',
-  missingResumeError: '没有可继续的影片批量任务',
-  invalidRunPlanError: '请至少选择一个影片更新字段',
-  resolveTargets: resolveVideoQueueTargets,
-  labelOf: (target) => target.code,
-  restoreTarget: (item) => ({ id: item.id, code: item.label }),
-  beforeResume: (job) => assertVideoBatchResumeScope(job),
-  planRun: (job, _targets, helpers) => {
-    const request = job.request as VideoBatchScrapeRequest
-    const fields = request.fields
-    if (fields.length === 0) return null
+function createVideoBatchPolicy(
+  binding: ScrapeCatalogBinding
+): CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeRequest> {
+  return {
+    kind: 'video',
+    missingResumeError: '没有可继续的影片批量任务',
+    invalidRunPlanError: '请至少选择一个影片更新字段',
+    resolveTargets: (request) => resolveVideoQueueTargets(request, binding.catalog),
+    labelOf: (target) => target.code,
+    restoreTarget: (item) => ({ id: item.id, code: item.label, generation: item.generation, revision: item.revision }),
+    beforeResume: (job) => assertVideoBatchResumeScope(job, resolveVideoBatchTargets, binding.catalog),
+    planRun: (job, _targets, helpers) => {
+      const request = job.request as VideoBatchScrapeRequest
+      const fields = request.fields
+      if (fields.length === 0) return null
 
-    const mode = request.mode ?? 'replace'
-    const missingFields = request.missingFields ?? []
-    const delayController = helpers.createDelayController()
-    const libraryName = request.libraryId && !scrapeCatalog() ? getMediaLibrary(request.libraryId)?.name : null
-    const statusLabel = formatVideoBatchStatusLabel(request, libraryName)
-    const missingLabel =
-      missingFields.length > 0 ? `缺少任一：${fieldListLabel(missingFields)}` : '不按缺失字段筛选'
+      const mode = request.mode ?? 'replace'
+      const missingFields = request.missingFields ?? []
+      const delayController = helpers.createDelayController()
+      const libraryName = request.libraryId && !binding.catalog
+        ? getMediaLibrary(request.libraryId)?.name
+        : null
+      const statusLabel = formatVideoBatchStatusLabel(request, libraryName)
+      const missingLabel =
+        missingFields.length > 0 ? `缺少任一：${fieldListLabel(missingFields)}` : '不按缺失字段筛选'
 
-    return {
-      resumeMessage: `影片批量更新从第 ${job.nextIndex + 1}/${job.total} 项继续`,
-      startMessage: (total) =>
-        `影片批量更新开始（${statusLabel}，${missingLabel}，${MODE_LABEL[mode]}），共 ${total} 部，更新 ${fields.length} 个字段`,
-      pausedMessage: '用户暂停了影片批量更新',
-      cancelledMessage: '用户终止了影片批量更新',
-      doneMessage: (progress) =>
-        `影片批量更新完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
-      getCode: (target) => target.code,
-      browserRecycleInterval: 50,
-      runTarget: async ({ id, code }) => {
-        const scopeFailure = await validateVideoBatchTargetScope(request, id)
-        if (scopeFailure) return scopeFailure
-        const itemOutcome = await scrapeVideoBound(id, request.scraperName, {
-          closeBrowser: false,
-          fields,
-          mode,
-          delayController
-        })
-        return formatVideoBatchScrapeOutcome(itemOutcome, code)
-      },
-      exceptionMessage: (_target, err) => `更新异常：${err.message}`
+      return {
+        resumeMessage: `影片批量更新从第 ${job.nextIndex + 1}/${job.total} 项继续`,
+        startMessage: (total) =>
+          `影片批量更新开始（${statusLabel}，${missingLabel}，${MODE_LABEL[mode]}），共 ${total} 部，更新 ${fields.length} 个字段`,
+        pausedMessage: '用户暂停了影片批量更新',
+        cancelledMessage: '用户终止了影片批量更新',
+        doneMessage: (progress) =>
+          `影片批量更新完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
+        getCode: (target) => target.code,
+        browserRecycleInterval: 50,
+        runTarget: async ({ id, code, generation, revision }) => {
+          const scopeFailure = await validateVideoBatchTargetScope(
+            request,
+            id,
+            hasActiveVisibleVideoMembership,
+            binding.catalog
+          )
+          if (scopeFailure) return scopeFailure
+          const itemOutcome = await binding.scrapeVideo(id, request.scraperName, {
+            closeBrowser: false,
+            fields,
+            mode,
+            expectedVersion: generation == null || revision == null ? undefined : { generation, revision },
+            delayController
+          })
+          return formatVideoBatchScrapeOutcome(itemOutcome, code)
+        },
+        exceptionMessage: (_target, err) => `更新异常：${err.message}`
+      }
     }
   }
 }
 
 /** Sequential batch queue for video metadata scraping/updating. */
 class VideoBatchScrapeQueue {
-  private readonly lifecycle = new CheckpointedSequentialBatchQueue(videoBatchPolicy)
+  private readonly lifecycle: CheckpointedSequentialBatchQueue<VideoTarget, VideoBatchScrapeRequest>
+
+  constructor(
+    binding: ScrapeCatalogBinding = createScrapeCatalogBinding(),
+    catalogKey: CatalogKeyProvider = 'local'
+  ) {
+    this.lifecycle = new CheckpointedSequentialBatchQueue(
+      createVideoBatchPolicy(binding),
+      undefined,
+      catalogKey
+    )
+  }
 
   setCheckpointPort(port: BatchScrapeCheckpointPort): void {
     this.lifecycle.setCheckpointPort(port)
@@ -258,6 +289,13 @@ class VideoBatchScrapeQueue {
   async start(request: VideoBatchScrapeRequest): Promise<void> {
     await this.lifecycle.start(request)
   }
+}
+
+export function createVideoBatchScrapeQueue(
+  backend?: CatalogBackend,
+  catalogKey: CatalogKeyProvider = 'local'
+): VideoBatchScrapeQueue {
+  return new VideoBatchScrapeQueue(createScrapeCatalogBinding(backend), catalogKey)
 }
 
 export const videoBatchScrapeQueue = new VideoBatchScrapeQueue()

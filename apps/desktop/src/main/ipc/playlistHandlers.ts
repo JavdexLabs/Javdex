@@ -14,7 +14,7 @@ export function registerPlaylistHandlers(backend: CatalogBackend): void {
       playlistId: id,
       sortBy,
       sortDir
-    } as never)
+    })
   )
   appCommandAdapter.register(IPC.PLAYLIST_VIDEO_PAGE, (id, query) =>
     backend.playlists.videoPage({ playlistId: id, ...query })
@@ -27,15 +27,15 @@ export function registerPlaylistHandlers(backend: CatalogBackend): void {
   appCommandAdapter.register(
     IPC.PLAYLIST_GET,
     (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
-      backend.playlists.get({ playlistId: id, sortBy, sortDir } as never)
+      backend.playlists.get({ playlistId: id, sortBy, sortDir })
   )
 
   appCommandAdapter.register(IPC.PLAYLIST_CREATE, (input) =>
-    backend.playlists.create(input as never, ipcMutation())
+    backend.playlists.create(input, ipcMutation())
   )
 
   appCommandAdapter.register(IPC.PLAYLIST_UPDATE, (id, input) =>
-    backend.playlists.update({ playlistId: id, ...input } as never, ipcMutation())
+    backend.playlists.update({ playlistId: id, ...input }, ipcMutation())
   )
 
   appCommandAdapter.register(IPC.PLAYLIST_DELETE, (id) =>

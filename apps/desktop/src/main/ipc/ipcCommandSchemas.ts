@@ -27,7 +27,7 @@ const scanAuditViewQuery = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   anchor: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('path'), value: z.string().min(1).max(32768) }).strict(),
+    z.object({ kind: z.literal('path'), value: z.string().min(1).max(32768), rootId: positiveSafeInteger.optional() }).strict(),
     z.object({ kind: z.literal('group'), id: positiveSafeInteger }).strict()
   ]).optional()
 }).strict().refine(query => query.anchor === undefined || query.tab === 'failed', 'Only failed supports anchors')

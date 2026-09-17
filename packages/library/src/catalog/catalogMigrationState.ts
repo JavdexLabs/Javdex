@@ -3,23 +3,22 @@ import type { MigrationPhase, MigrationPreview, RootMapping } from '@shared/prot
 
 export const MIGRATION_STATE_KEY = 'migration-state'
 export const MIGRATION_FINAL_PREFIX = 'migration-final:'
+export const MIGRATION_TARGET_INTENT_PREFIX = 'migration-target-intent:'
 
 export interface StoredMigrationState {
   migrationId: string
   role: 'source' | 'target'
-  sourcePhase: MigrationPhase
-  targetPhase: MigrationPhase
+  phase: MigrationPhase
   digest: string
   mappings: RootMapping[]
   preview: MigrationPreview
   sourcePlatform: string
-  sourceServerId: string
+  sourceServerId: string | null
   sourceCatalogId: string
   schemaVersion: number
   appVersion: string
   packageRel: string | null
   newCatalogId?: string
-  allowEnableAt?: string
   enabledAt?: string
   abandonedAt?: string
   taskId?: string
@@ -34,15 +33,11 @@ const BLOCKER_ACTIVE_TASK = 'active-task'
 const BLOCKER_ENCRYPTED = 'encrypted-assets'
 
 export function catalogLooksEmpty(database: Database.Database): boolean {
-  const videos = (database.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n
-  const actresses = (database.prepare('SELECT COUNT(*) AS n FROM actresses').get() as { n: number }).n
-  const roots = (
-    database.prepare('SELECT COUNT(*) AS n FROM media_library_roots').get() as { n: number }
-  ).n
-  const extraLibraries = (
-    database.prepare('SELECT COUNT(*) AS n FROM media_libraries WHERE id != 1').get() as { n: number }
-  ).n
-  return videos === 0 && actresses === 0 && roots === 0 && extraLibraries === 0
+  // A target with only a manually created playlist/tag/classification is not empty.
+  for (const table of ['videos', 'actresses', 'media_library_roots', 'playlists', 'tags', 'organizations', 'directors', 'series']) {
+    if (database.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) return false
+  }
+  return !database.prepare('SELECT 1 FROM media_libraries WHERE id != 1 LIMIT 1').get()
 }
 
 export function countPendingBlockers(database: Database.Database): string[] {

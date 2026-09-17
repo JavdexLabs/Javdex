@@ -1,3 +1,4 @@
+import { catalogVideoCommands } from '@library/catalog/catalogVideoCommands'
 import type Database from 'better-sqlite3'
 import { pipeline } from 'node:stream/promises'
 import { Transform } from 'node:stream'
@@ -9,8 +10,6 @@ import { listMediaLibraries } from '@library/db/mediaLibraryRepo'
 import { getLibraryOverviewStats } from '@library/db/overviewRepo'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { getDb } from '@library/db/database'
-import { videoMaintenanceService } from '@library/catalog/videoMaintenanceService'
-import { videoEditInputFromManageFields } from '@library/catalog/videoEditFields'
 import { readHandshake } from '@library/catalog/catalogHandshake'
 import { readCatalogIdentity } from '@library/catalog/catalogIdentity'
 import {
@@ -22,14 +21,12 @@ import {
   type WriterClaimRequest
 } from '@library/catalog/catalogWriter'
 import { commitCatalogMutation, readOperationReceipt } from '@library/catalog/catalogOperations'
-import { assertExpectedVideoVersion, readVideoAggregateVersion } from '@library/catalog/catalogVideoVersion'
 import {
   applyActressAvatarRef,
   applyActressCropRef,
   applyActressGalleryRefs,
   applyClassificationImageRef,
   applyPlaylistCoverRef,
-  applyVideoCoverRef,
   applyVideoPosterRef,
   applyVideoSampleRefs,
   commitManageImageMutation
@@ -40,7 +37,6 @@ import { readManageCatalogImage } from '@library/catalog/catalogManageImages'
 import { authenticateMigration } from '@library/catalog/catalogMigrationAuth'
 import {
   abandonCatalogMigration,
-  allowEnableCatalogMigration,
   enableCatalogMigration,
   migrationPackagePath,
   previewCatalogMigration,
@@ -60,7 +56,7 @@ import type { ManageHttpContext, ManageUploadPutContext, ManageAssetGetContext, 
 import { structuredError } from '@shared/protocol/errors'
 import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { ExpectedVersions } from '@shared/protocol/versions'
-import type { MigrationControlInput, MigrationPreviewInput } from '@shared/protocol/migration'
+import type { MigrationAbandonInput, MigrationControlInput, MigrationEnableInput, MigrationPreviewInput } from '@shared/protocol/migration'
 import { SERVER_APP_VERSION } from './appVersion'
 import { CATALOG_NOT_HANDLED, dispatchCatalogManage } from './manageCatalogHandlers'
 import { readManageBrowserEnabled } from './manageBrowser'
@@ -302,14 +298,11 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     if (operation === 'migration.status') {
       return statusCatalogMigration(input as unknown as { migrationId: string }, catalogDb(database))
     }
-    if (operation === 'migration.allowEnable') {
-      return allowEnableCatalogMigration(input as unknown as MigrationControlInput, catalogDb(database))
-    }
     if (operation === 'migration.enable') {
-      return enableCatalogMigration(input as unknown as MigrationControlInput, host, catalogDb(database))
+      return enableCatalogMigration(input as unknown as MigrationEnableInput, host, catalogDb(database))
     }
     if (operation === 'migration.abandon') {
-      return abandonCatalogMigration(input as unknown as MigrationControlInput, host, catalogDb(database))
+      return abandonCatalogMigration(input as unknown as MigrationAbandonInput, host, catalogDb(database))
     }
     throw structuredError('UNSUPPORTED_CAPABILITY', `尚未实现 ${operation}`)
   }
@@ -414,44 +407,10 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       return { receipt: result.receipt, ...result.data }
     }
     if (operation === 'videos.edit') {
-      const input = envelope.input as {
-        videoId: number
-        fields: Parameters<typeof videoEditInputFromManageFields>[0] & { cover?: CatalogImageRef }
-      }
+      const input = envelope.input as Parameters<typeof catalogVideoCommands.edit>[0]
       const mutation = requireMutation(envelope)
       const run = () => {
-        const result = commitManageImageMutation(
-          {
-            operationId: mutation.operationId,
-            operation: 'videos.edit',
-            expectedVersions: mutation.expectedVersions,
-            input,
-            writerEpoch: auth.epoch
-          },
-          () => {
-            assertExpectedVideoVersion(input.videoId, mutation.expectedVersions, mutation.operationId, database)
-            if (input.fields.cover) {
-              applyVideoCoverRef(
-                input.videoId,
-                input.fields.cover,
-                mutation.expectedVersions,
-                mutation.operationId,
-                database,
-                { bumpRevision: false }
-              )
-            }
-            const ok = videoMaintenanceService.edit(
-              input.videoId,
-              videoEditInputFromManageFields(input.fields)
-            )
-            return {
-              ok,
-              videoId: input.videoId,
-              versions: { V: readVideoAggregateVersion(input.videoId, database)! }
-            }
-          },
-          database
-        )
+        const result = catalogVideoCommands.edit(input, { ...mutation, writerEpoch: auth.epoch, database })
         const payload = { receipt: result.receipt, ...result.data }
         const stalled = stallVideosEditForTests()
         return stalled ? stalled.then(() => payload) : payload

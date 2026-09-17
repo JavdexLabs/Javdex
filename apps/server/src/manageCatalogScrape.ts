@@ -1,13 +1,9 @@
+import { confirmPendingVideoScrapeCommand, applyVideoScrapeCommand, replacePendingVideoScrapeCommand, applyActressScrapeCommand, submitActressScrapeConflictCommand } from '@library/catalog/catalogScrapeCommands'
 import { resolveCatalogScrapeFields } from '@library/catalog/catalogScrapeFields'
 import type { ManageOperationInput } from '@shared/manage/inputs'
 import type { CatalogImageRef } from '@shared/protocol/uploads'
 import type { ManageOperationId } from '@shared/manage/operations'
-import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
-import type { PendingVideoScrapeConfirmInput } from '@shared/videoScrapeTypes'
-import { structuredError, isStructuredError } from '@shared/protocol/errors'
-import { getPendingVideoScrapeResolutionSnapshot } from '@library/db/pendingVideoScrapeRepo'
-import { confirmPendingVideoScrape } from '@library/catalog/catalogPendingVideoScrapes'
-import { applyActressScrapeCandidate, applyVideoScrapeCandidate, replacePendingVideoScrapeFromUploads, submitActressScrapeConflict } from '@library/catalog/catalogScrapeApply'
+import { structuredError } from '@shared/protocol/errors'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
 import { countCatalogTargets, createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
@@ -15,11 +11,6 @@ import {
   discardAgentMetadataDraft,
   findReadyAgentMetadata
 } from '@library/catalog/catalogAgentMetadata'
-import {
-  assertExpectedVideoVersion,
-  bumpRowRevision,
-  readVideoAggregateVersion
-} from '@library/catalog/catalogAggregateVersion'
 import { commitManageImageMutation } from '@library/catalog/catalogImageApply'
 import {
   commit,
@@ -28,23 +19,6 @@ import {
   type CatalogHandler,
   type HandlerArgs
 } from './manageCatalogHandlers'
-
-function mapDomainError(error: unknown): never {
-  if (isStructuredError(error)) throw error
-  const message = error instanceof Error ? error.message : String(error)
-  if (message.includes('已变化') || message.includes('已过期') || message.includes('版本')) {
-    throw structuredError('VERSION_CONFLICT', message)
-  }
-  throw structuredError('INVALID_INPUT', message)
-}
-
-function runDomain<T>(work: () => T): T {
-  try {
-    return work()
-  } catch (error) {
-    return mapDomainError(error)
-  }
-}
 
 function requireQRevision(args: HandlerArgs): number {
   const mutation = requireMutation(args.envelope)
@@ -81,93 +55,29 @@ function commitImage<T>(args: HandlerArgs, work: () => T): unknown {
 
 export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'pendingVideoScrapes.confirm'(args) {
-    const input = args.envelope.input as PendingVideoScrapeConfirmInput
     const mutation = requireMutation(args.envelope)
-    const expectedRevision = requireQRevision(args)
-    return commitImage(args, () =>
-      runDomain(() => {
-        const snapshot = getPendingVideoScrapeResolutionSnapshot(input.pendingScrapeId)
-        if (!snapshot) throw new Error('待确认影片刮削结果不存在')
-        assertExpectedVideoVersion(
-          snapshot.pending.videoId,
-          mutation.expectedVersions,
-          mutation.operationId,
-          args.database
-        )
-        const result = confirmPendingVideoScrape(input, { expectedRevision })
-        const videoId = input.mergeRetainedVideoId ?? snapshot.pending.videoId
-        if (result.applied) bumpRowRevision('videos', videoId, args.database)
-        return {
-          ...result,
-          versions: { V: readVideoAggregateVersion(videoId, args.database) }
-        }
-      })
-    )
+    const result = confirmPendingVideoScrapeCommand(args.envelope.input as Parameters<typeof confirmPendingVideoScrapeCommand>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.applyScrapeCandidate'(args) {
-    const input = args.envelope.input as {
-      videoId: number
-      fields: VideoScrapeField[]
-      mode: VideoScrapeUpdateMode
-      candidate: unknown
-      cover?: CatalogImageRef
-      samples?: CatalogImageRef[]
-      actressAvatars?: Array<{ name: string; image: CatalogImageRef }>
-      directorSelectionId?: number
-      directorAmbiguity?: 'choice' | 'preserve'
-    }
     const mutation = requireMutation(args.envelope)
-    return commitImage(args, () =>
-      applyVideoScrapeCandidate({
-        ...input,
-        expected: mutation.expectedVersions,
-        operationId: mutation.operationId,
-        database: args.database
-      })
-    )
+    const result = applyVideoScrapeCommand(args.envelope.input as Parameters<typeof applyVideoScrapeCommand>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'pendingVideoScrapes.replace'(args) {
-    const input = args.envelope.input as Parameters<typeof replacePendingVideoScrapeFromUploads>[0]
     const mutation = requireMutation(args.envelope)
-    return commitImage(args, () =>
-      replacePendingVideoScrapeFromUploads({
-        ...input,
-        expected: mutation.expectedVersions,
-        operationId: mutation.operationId,
-        database: args.database
-      })
-    )
+    const result = replacePendingVideoScrapeCommand(args.envelope.input as Parameters<typeof replacePendingVideoScrapeCommand>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'actresses.applyScrapeCandidate'(args) {
-    const input = args.envelope.input as {
-      actressId: number
-      candidate: unknown
-      avatar?: CatalogImageRef
-      gallery?: CatalogImageRef[]
-      fields?: import('@shared/actressScrapeTypes').ActressScrapeField[]
-      mode?: import('@shared/actressScrapeTypes').ActressScrapeUpdateMode
-    }
     const mutation = requireMutation(args.envelope)
-    return commitImage(args, () =>
-      applyActressScrapeCandidate({
-        ...input,
-        expected: mutation.expectedVersions,
-        operationId: mutation.operationId,
-        database: args.database
-      })
-    )
+    const result = applyActressScrapeCommand(args.envelope.input as Parameters<typeof applyActressScrapeCommand>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'actressConflicts.submit'(args) {
-    const input = args.envelope.input as Parameters<typeof submitActressScrapeConflict>[0]
     const mutation = requireMutation(args.envelope)
-    return commitImage(args, () =>
-      submitActressScrapeConflict({
-        ...input,
-        expected: mutation.expectedVersions,
-        operationId: mutation.operationId,
-        database: args.database
-      })
-    )
+    const result = submitActressScrapeConflictCommand(args.envelope.input as Parameters<typeof submitActressScrapeConflictCommand>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'playlists.applyImport'(args) {
     const input = args.envelope.input as {

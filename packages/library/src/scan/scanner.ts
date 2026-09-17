@@ -1607,7 +1607,20 @@ export interface ManualImportOptions {
   expectedRoot?: Readonly<MediaLibraryRoot>
 }
 
-export type RenameAndImportOptions = Pick<ManualImportOptions, 'readDurationSeconds'>
+export type RenameAndImportOptions = Pick<ManualImportOptions, 'readDurationSeconds'> & {
+  /** Called immediately after the physical rename, before rediscovery starts. */
+  onRenamed?: (newPath: string) => void
+}
+
+export interface PreparedManualImport {
+  input: ManualImportRequest
+  expectedRoot: Readonly<MediaLibraryRoot>
+  code: string
+  fileDurationSeconds: number | null
+  fingerprint: VideoFileFingerprint | null
+  parsedStrm: ReturnType<typeof readStrmFile> | null
+  skipPath: boolean
+}
 
 function assertManagedImportPath(
   libraryId: number,
@@ -1652,7 +1665,20 @@ export async function renameAndImport(
   if (!sameFile) {
     assertManagedImportPath(libraryId, rootId, oldPath, expectedRoot)
     fs.renameSync(oldPath, newPath)
+    options.onRenamed?.(newPath)
   }
+
+  return rediscoverRenamedPath({ libraryId, rootId, newPath }, expectedRoot, options)
+}
+
+async function rediscoverRenamedPath(
+  input: { libraryId: number; rootId: number; newPath: string },
+  expectedRoot: Readonly<MediaLibraryRoot>,
+  options: Pick<RenameAndImportOptions, 'readDurationSeconds'> = {}
+): Promise<RenameImportResult> {
+  const { libraryId, rootId, newPath } = input
+  const config = getMediaLibraryConfig(libraryId)
+  if (!config) throw new Error('媒体库配置不存在')
 
   // Renaming is the requested operation. A failed recognition must not undo it.
   const response: RenameImportResult = {
@@ -1690,91 +1716,149 @@ export async function renameAndImport(
   return response
 }
 
+/** Rediscover a file after its physical rename has already been completed. */
+export async function rediscoverRenamedFile(
+  input: { libraryId: number; rootId: number; newPath: string },
+  options: Pick<RenameAndImportOptions, 'readDurationSeconds'> = {}
+): Promise<RenameImportResult> {
+  if (!fs.existsSync(input.newPath)) throw new Error('重命名后的文件不存在')
+  const expectedRoot = assertManagedImportPath(input.libraryId, input.rootId, input.newPath)
+  return rediscoverRenamedPath(input, expectedRoot, options)
+}
+
 /**
  * Import a file with a user-supplied code. Does not rename the file and does not
  * validate code format beyond the shared trim-and-uppercase identity rule.
  */
-export async function importManual(
+export async function prepareManualImport(
   input: ManualImportRequest,
   options: ManualImportOptions = {}
-): Promise<ManualImportResult> {
+): Promise<PreparedManualImport> {
   const { libraryId, rootId, filePath, target } = input
   if (!fs.existsSync(filePath)) throw new Error('原文件不存在或已被移动')
-  const expectedRoot = assertManagedImportPath(
-    libraryId,
-    rootId,
-    filePath,
-    options.expectedRoot
-  )
-
+  const expectedRoot = assertManagedImportPath(libraryId, rootId, filePath, options.expectedRoot)
   const code = normalizeVideoCode(input.code)
+  const fingerprint = statFileFingerprint(filePath)
 
   if (isStrmFile(filePath)) {
-    const parsed = readStrmFile(filePath)
+    const parsedStrm = readStrmFile(filePath)
     if (getStrmVideoResourceBySourcePath(libraryId, filePath)) {
-      return { code, imported: false, skippedPath: true }
+      return { input, expectedRoot, code, fileDurationSeconds: null, fingerprint, parsedStrm, skipPath: true }
     }
-    if (target.kind === 'existing') {
-      const existing = listVideosByCode(code).find((video) => video.id === target.videoId)
-      if (!existing) throw new Error('所选影片不存在或番号已经变化')
-      assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
-      const resourceId = insertStrmVideoResource({
-        libraryId,
-        videoId: existing.id,
-        rootId,
-        sourcePath: filePath,
-        kind: parsed.kind,
-        locator: parsed.locator,
-        displayName: path.basename(filePath)
-      })
-      return { code, imported: resourceId !== null }
+    if (target.kind === 'existing' && !listVideosByCode(code).some((video) => video.id === target.videoId)) {
+      throw new Error('所选影片不存在或番号已经变化')
     }
-    assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
-    const videoId = insertNewScannedStrmVideo({
-      libraryId,
-      rootId,
-      code,
-      sourcePath: filePath,
-      kind: parsed.kind,
-      locator: parsed.locator,
-      displayName: path.basename(filePath)
-    })
-    return { code, imported: videoId !== null }
+    return { input, expectedRoot, code, fileDurationSeconds: null, fingerprint, parsedStrm, skipPath: false }
   }
 
   if (getLocalVideoResourceByLocator(libraryId, filePath)) {
-    return { code, imported: false, skippedPath: true }
+    return { input, expectedRoot, code, fileDurationSeconds: null, fingerprint, parsedStrm: null, skipPath: true }
   }
-
   const fileDurationSeconds = await (
     options.readDurationSeconds ?? readLocalVideoDurationSeconds
   )(filePath)
   assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
-  const fingerprint = statFileFingerprint(filePath)
+  const currentFingerprint = statFileFingerprint(filePath)
+  if (
+    !currentFingerprint ||
+    currentFingerprint.file_size !== fingerprint?.file_size ||
+    currentFingerprint.file_mtime_ms !== fingerprint?.file_mtime_ms
+  ) {
+    throw new Error('源文件已发生变化，请重新扫描后再处理。')
+  }
+  if (target.kind === 'existing' && !listVideosByCode(code).some((video) => video.id === target.videoId)) {
+    throw new Error('所选影片不存在或番号已经变化')
+  }
+  return {
+    input,
+    expectedRoot,
+    code,
+    fileDurationSeconds,
+    fingerprint: currentFingerprint,
+    parsedStrm: null,
+    skipPath: false
+  }
+}
+
+function assertPreparedManualFile(prepared: PreparedManualImport): void {
+  const { input, expectedRoot, fingerprint } = prepared
+  assertManagedImportPath(input.libraryId, input.rootId, input.filePath, expectedRoot)
+  const current = statFileFingerprint(input.filePath)
+  if (
+    !current ||
+    current.file_size !== fingerprint?.file_size ||
+    current.file_mtime_ms !== fingerprint?.file_mtime_ms
+  ) {
+    throw new Error('源文件已发生变化，请重新扫描后再处理。')
+  }
+  if (prepared.parsedStrm) {
+    const parsed = readStrmFile(input.filePath)
+    if (
+      parsed.kind !== prepared.parsedStrm.kind ||
+      parsed.locator !== prepared.parsedStrm.locator ||
+      parsed.targetKey !== prepared.parsedStrm.targetKey
+    ) {
+      throw new Error('STRM 目标已发生变化，请重新扫描后再处理。')
+    }
+  }
+}
+
+/** Apply a fully inspected manual import without another asynchronous probe. */
+export function applyPreparedManualImport(prepared: PreparedManualImport): ManualImportResult {
+  const { input, code, parsedStrm, fileDurationSeconds, fingerprint } = prepared
+  const target = input.target
+  assertPreparedManualFile(prepared)
+  if (prepared.skipPath) return { code, imported: false, skippedPath: true }
+
+  if (parsedStrm) {
+    if (target.kind === 'existing') {
+      const existing = listVideosByCode(code).find((video) => video.id === target.videoId)
+      if (!existing) throw new Error('所选影片不存在或番号已经变化')
+      const resourceId = insertStrmVideoResource({
+        libraryId: input.libraryId,
+        videoId: existing.id,
+        rootId: input.rootId,
+        sourcePath: input.filePath,
+        kind: parsedStrm.kind,
+        locator: parsedStrm.locator,
+        displayName: path.basename(input.filePath)
+      })
+      return { code, imported: resourceId !== null }
+    }
+    const videoId = insertNewScannedStrmVideo({
+      libraryId: input.libraryId,
+      rootId: input.rootId,
+      code,
+      sourcePath: input.filePath,
+      kind: parsedStrm.kind,
+      locator: parsedStrm.locator,
+      displayName: path.basename(input.filePath)
+    })
+    return { code, imported: videoId !== null }
+  }
+
   if (target.kind === 'existing') {
     const existing = listVideosByCode(code).find((video) => video.id === target.videoId)
     if (!existing) throw new Error('所选影片不存在或番号已经变化')
-    const localResource = getPreferredLocalVideoResource(libraryId, existing.id)
+    const localResource = getPreferredLocalVideoResource(input.libraryId, existing.id)
     if (localResource && !fs.existsSync(localResource.locator)) {
-      assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
       relocateLocalVideoResource(
-        libraryId,
+        input.libraryId,
         existing.id,
-        rootId,
-        filePath,
+        input.rootId,
+        input.filePath,
         fingerprint?.file_size ?? null,
         fileDurationSeconds,
         fingerprint?.file_mtime_ms ?? null
       )
       return { code, imported: true, relocated: true }
     }
-    if (!getLocalVideoResourceByLocator(libraryId, filePath)) {
-      assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
+    if (!getLocalVideoResourceByLocator(input.libraryId, input.filePath)) {
       const resourceId = insertLocalVideoResource({
-        libraryId,
+        libraryId: input.libraryId,
         videoId: existing.id,
-        rootId,
-        locator: filePath,
+        rootId: input.rootId,
+        locator: input.filePath,
         sizeBytes: fingerprint?.file_size ?? null,
         durationSeconds: fileDurationSeconds,
         fileMtimeMs: fingerprint?.file_mtime_ms ?? null
@@ -1784,16 +1868,23 @@ export async function importManual(
     return { code, imported: false, skippedPath: false }
   }
 
-  assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
   const id = insertNewScannedVideo(
     buildScannedVideoImport(
-      libraryId,
-      rootId,
+      input.libraryId,
+      input.rootId,
       code,
-      filePath,
+      input.filePath,
       fileDurationSeconds,
       fingerprint
     )
   )
   return { code, imported: id !== null }
+}
+
+export async function importManual(
+  input: ManualImportRequest,
+  options: ManualImportOptions = {}
+): Promise<ManualImportResult> {
+  const prepared = await prepareManualImport(input, options)
+  return applyPreparedManualImport(prepared)
 }

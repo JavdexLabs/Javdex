@@ -23,7 +23,6 @@ import {
 import { readCatalogSetting, writeCatalogSetting } from './catalogSettings'
 import { hasOpenCatalogMaintenance, putCatalogTask, readCatalogTask } from './catalogTasks'
 import { readCatalogIdentity } from './catalogIdentity'
-import { handoffWaitingBlocksNewMaintenance } from './catalogWriter'
 import { nfoExportRepository } from '@library/nfo/export/nfoExportRepository'
 import {
   NFO_EXPORT_PROFILES,
@@ -101,9 +100,6 @@ function atomicWrite(targetPath: string, bytes: Buffer): void {
 }
 
 export function planCatalogNfoExport(request: NfoExportPlanRequest): NfoExportPlanPreview {
-  if (handoffWaitingBlocksNewMaintenance()) {
-    throw structuredError('MAINTENANCE_BUSY', '交接等待期间不能开始新的维护')
-  }
   const lease = maintenanceTaskGate.tryAcquire('nfo-export')
   if (!lease) throw structuredError('MAINTENANCE_BUSY', '已有扫描或资源维护任务正在运行')
   try {
@@ -252,9 +248,6 @@ export function enqueueCatalogNfoExport(
   planDigest: string,
   operationId: string
 ): NfoExportStartResult {
-  if (handoffWaitingBlocksNewMaintenance()) {
-    throw structuredError('MAINTENANCE_BUSY', '交接等待期间不能开始新的维护')
-  }
   if (maintenanceTaskGate.active || hasOpenCatalogMaintenance()) {
     throw structuredError('MAINTENANCE_BUSY', '已有扫描或资源维护任务正在运行')
   }

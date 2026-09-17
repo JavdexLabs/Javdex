@@ -1,11 +1,16 @@
 import type Database from 'better-sqlite3'
+import path from 'node:path'
 import { getDb } from '@library/db/database'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
-import { getVideoById, getVideoResourceInLibrary, markScrapeFailed } from '@library/db/videoRepo'
+import { getVideoResourceInLibrary } from '@library/db/videoRepo'
 import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
-import { getMediaLibraryDetail, MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
+import {
+  getMediaLibraryDetail,
+  getMediaLibraryRoot,
+  MediaLibraryRepoError
+} from '@library/db/mediaLibraryRepo'
 import {
   addVideoToPlaylist,
   getPlaylistDetail,
@@ -24,28 +29,29 @@ import { recordActressScrapeFailure } from '@library/db/actressRepo'
 import { actressIdentityConflictWorkflow } from '@library/catalog/actressIdentityConflictWorkflow'
 import { classificationQueryService } from '@library/catalog/classificationQueryService'
 import { classificationMaintenanceService } from '@library/catalog/classificationMaintenanceService'
-import { videoMaintenanceService } from '@library/catalog/videoMaintenanceService'
+import { catalogVideoCommands } from '@library/catalog/catalogVideoCommands'
 import { deletePlaylist } from '@library/catalog/playlistService'
 import {
   createMediaLibraryService,
   createMediaLibraryServiceDependencies
 } from '@library/catalog/mediaLibraryService'
-import { commitCatalogMutation } from '@library/catalog/catalogOperations'
+import {
+  commitCatalogMutation
+} from '@library/catalog/catalogOperations'
 import { commitManageImageMutation, applyActressAvatarRef } from '@library/catalog/catalogImageApply'
 import {
   assertExpectedActressVersion,
   assertExpectedClassificationVersion,
   assertExpectedPlaylistVersion,
-  assertExpectedVideoVersion,
   readActressAggregateVersion,
   readClassificationAggregateVersion,
-  readPlaylistAggregateVersion,
-  readVideoAggregateVersion
+  readPlaylistAggregateVersion
 } from '@library/catalog/catalogAggregateVersion'
 import { structuredError } from '@shared/protocol/errors'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { ManageOperationId } from '@shared/manage/operations'
 import type { CatalogImageRef } from '@shared/protocol/uploads'
+import type { VideoResource } from '@shared/videoTypes'
 import type { ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy } from '@shared/actressTypes'
 import type { TagOptionsQuery, SortDir } from '@shared/commonTypes'
 import type { GlobalSearchInput } from '@shared/catalogTypes'
@@ -123,6 +129,41 @@ function spreadMutation<T>(receipt: unknown, data: T): unknown {
   return { receipt, data }
 }
 
+function projectRemoteResourcePath(
+  libraryId: number,
+  rootId: number | null,
+  value: string | null
+): string | null {
+  if (!value || !path.isAbsolute(value)) return value
+  const root = rootId == null ? null : getMediaLibraryRoot(libraryId, rootId)
+  if (!root) return path.basename(value)
+  const relative = [root.path, root.realPath]
+    .filter((base): base is string => Boolean(base))
+    .map((base) => path.relative(base, value))
+    .find((candidate) =>
+      candidate &&
+      !path.isAbsolute(candidate) &&
+      candidate !== '..' &&
+      !candidate.startsWith(`..${path.sep}`)
+    )
+  if (relative) return relative.split(path.sep).join('/')
+  return path.basename(value)
+}
+
+function projectRemoteResource(libraryId: number, resource: VideoResource): VideoResource {
+  if (resource.kind === 'local') {
+    return {
+      ...resource,
+      locator: projectRemoteResourcePath(libraryId, resource.root_id, resource.locator) ?? resource.locator,
+      strm_source_path: projectRemoteResourcePath(libraryId, resource.root_id, resource.strm_source_path)
+    }
+  }
+  return {
+    ...resource,
+    strm_source_path: projectRemoteResourcePath(libraryId, resource.root_id, resource.strm_source_path)
+  }
+}
+
 export function commit<T>(args: HandlerArgs, work: () => T): unknown {
   const mutation = requireMutation(args.envelope)
   const result = commitCatalogMutation(
@@ -138,6 +179,7 @@ export function commit<T>(args: HandlerArgs, work: () => T): unknown {
   )
   return spreadMutation(result.receipt, result.data)
 }
+
 
 function commitImage<T>(args: HandlerArgs, work: () => T): unknown {
   const mutation = requireMutation(args.envelope)
@@ -182,21 +224,6 @@ export function requireLibraryRevision(expected: ExpectedVersions, scope: 'L' | 
   return version.revision
 }
 
-export function videoMutation(
-  args: HandlerArgs,
-  videoId: number,
-  work: () => boolean
-): unknown {
-  const mutation = requireMutation(args.envelope)
-  return commit(args, () => {
-    assertExpectedVideoVersion(videoId, mutation.expectedVersions, mutation.operationId, args.database)
-    const ok = work()
-    return {
-      ok,
-      versions: { V: readVideoAggregateVersion(videoId, args.database)! }
-    }
-  })
-}
 
 const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'home.search'(args) {
@@ -214,50 +241,50 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
     const input = args.envelope.input as { libraryId: number; videoId: number; resourceId: number }
     const resource = getVideoResourceInLibrary(input.libraryId, input.resourceId)
     if (!resource || resource.video_id !== input.videoId) return null
-    return { ...resource, locatorRevision: resourceLocatorRevision(resource) }
+    return {
+      ...projectRemoteResource(input.libraryId, resource),
+      locatorRevision: resourceLocatorRevision(resource)
+    }
   },
   'videos.setRating'(args) {
-    const input = args.envelope.input as { videoId: number; rating: number }
-    return videoMutation(args, input.videoId, () => videoMaintenanceService.setRating(input.videoId, input.rating))
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.setRating(args.envelope.input as Parameters<typeof catalogVideoCommands.setRating>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.clearMeta'(args) {
-    const input = args.envelope.input as { videoId: number }
-    return videoMutation(args, input.videoId, () => videoMaintenanceService.clearMetadata(input.videoId))
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.clearMeta(args.envelope.input as Parameters<typeof catalogVideoCommands.clearMeta>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.markScrapeSuccess'(args) {
-    const input = args.envelope.input as { videoId: number }
-    return videoMutation(args, input.videoId, () => videoMaintenanceService.markScrapeSucceeded(input.videoId))
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.markScrapeSuccess(args.envelope.input as Parameters<typeof catalogVideoCommands.markScrapeSuccess>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.markScrapeFailed'(args) {
-    const input = args.envelope.input as { videoId: number }
-    return videoMutation(args, input.videoId, () => {
-      const video = getVideoById(input.videoId)
-      if (!video) throw new Error('影片不存在')
-      markScrapeFailed(input.videoId)
-      return true
-    })
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.markScrapeFailed(args.envelope.input as Parameters<typeof catalogVideoCommands.markScrapeFailed>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.deleteSample'(args) {
-    const input = args.envelope.input as { videoId: number; assetId: number }
-    return videoMutation(args, input.videoId, () =>
-      videoMaintenanceService.deleteSample(input.videoId, input.assetId)
-    )
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.deleteSample(args.envelope.input as Parameters<typeof catalogVideoCommands.deleteSample>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.addManualTag'(args) {
-    const input = args.envelope.input as { videoId: number; name: string }
-    return videoMutation(args, input.videoId, () => videoMaintenanceService.addManualTag(input.videoId, input.name))
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.addManualTag(args.envelope.input as Parameters<typeof catalogVideoCommands.addManualTag>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.addExistingManualTag'(args) {
-    const input = args.envelope.input as { videoId: number; tagId: number }
-    return videoMutation(args, input.videoId, () =>
-      videoMaintenanceService.addExistingManualTag(input.videoId, input.tagId)
-    )
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.addExistingManualTag(args.envelope.input as Parameters<typeof catalogVideoCommands.addExistingManualTag>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'videos.removeManualTag'(args) {
-    const input = args.envelope.input as { videoId: number; tagId: number }
-    return videoMutation(args, input.videoId, () =>
-      videoMaintenanceService.removeManualTag(input.videoId, input.tagId)
-    )
+    const mutation = requireMutation(args.envelope)
+    const result = catalogVideoCommands.removeManualTag(args.envelope.input as Parameters<typeof catalogVideoCommands.removeManualTag>[0], { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'tags.list'() {
     return tagQueryService.list()

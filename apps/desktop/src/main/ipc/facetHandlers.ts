@@ -128,7 +128,7 @@ export function registerFacetHandlers(
   adapter.register(IPC.SERIES_PAGE, (query) => backend.classifications.pageSeries(query))
   adapter.register(IPC.ORGANIZATION_LIST, (query) => backend.classifications.listOrganizations(query))
   adapter.register(IPC.ORGANIZATION_GET, (id, role) =>
-    backend.classifications.getOrganization({ organizationId: id, role } as never)
+    backend.classifications.getOrganization({ organizationId: id, role })
   )
   adapter.register(IPC.ORGANIZATION_OPTIONS, (search) =>
     backend.classifications.organizationOptions({ search })
@@ -152,13 +152,13 @@ export function registerFacetHandlers(
     backend.classifications.organizationRoleRemovePreview({ organizationId: id, role })
   )
   adapter.register(IPC.ORGANIZATION_ROLE_REMOVE, (id, role) =>
-    backend.classifications.organizationRoleRemove({ organizationId: id, role } as never, ipcMutation())
+    backend.classifications.organizationRoleRemove({ organizationId: id, role }, ipcMutation())
   )
   adapter.register(IPC.ORGANIZATION_DELETE_PREVIEW, (id) =>
     backend.classifications.organizationDeletePreview({ organizationId: id })
   )
   adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
-    backend.classifications.deleteOrganization({ organizationId: id } as never, ipcMutation())
+    backend.classifications.deleteOrganization({ organizationId: id }, ipcMutation())
   )
   adapter.register(IPC.DIRECTOR_PAGE, (query) => backend.classifications.pageDirectors(query))
   adapter.register(IPC.DIRECTOR_LIST, (query) => backend.classifications.listDirectors(query ?? {}))
@@ -179,7 +179,7 @@ export function registerFacetHandlers(
     backend.classifications.directorDeletePreview({ directorId: id })
   )
   adapter.register(IPC.DIRECTOR_DELETE, (id) =>
-    backend.classifications.deleteDirector({ directorId: id } as never, ipcMutation())
+    backend.classifications.deleteDirector({ directorId: id }, ipcMutation())
   )
   adapter.register(IPC.SERIES_LIST, (query) => backend.classifications.listSeries(query ?? {}))
   adapter.register(IPC.SERIES_GET, (id) => backend.classifications.getSeries({ seriesId: id }))
@@ -199,7 +199,7 @@ export function registerFacetHandlers(
     backend.classifications.seriesDeletePreview({ seriesId: id })
   )
   adapter.register(IPC.SERIES_DELETE, (id) =>
-    backend.classifications.deleteSeries({ seriesId: id } as never, ipcMutation())
+    backend.classifications.deleteSeries({ seriesId: id }, ipcMutation())
   )
   adapter.register(IPC.CLASSIFICATION_IMAGE_PAGE, (entity, query) =>
     backend.classifications.imagePage({ entity, ...query })
@@ -208,6 +208,6 @@ export function registerFacetHandlers(
     backend.classifications.imageCandidates({ entity })
   )
   adapter.register(IPC.CLASSIFICATION_IMAGE_SET, (entity, input) =>
-    backend.classifications.setImage({ entity, image: input as never }, ipcMutation())
+    backend.classifications.setImage({ entity, image: input }, ipcMutation())
   )
 }

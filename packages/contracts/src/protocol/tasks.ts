@@ -53,6 +53,7 @@ export interface TargetListEntry {
   id: number
   present: boolean
   label?: string | null
+  generation?: number | null
   revision?: number | null
 }
 

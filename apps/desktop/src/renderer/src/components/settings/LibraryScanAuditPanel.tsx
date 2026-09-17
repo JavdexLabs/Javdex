@@ -353,7 +353,9 @@ export default function LibraryScanAuditPanel({
     handleTabChange('failed')
     const anchor: ScanAuditViewQuery['anchor'] = item.groupId
       ? { kind: 'group', id: item.groupId }
-      : item.path ? { kind: 'path', value: item.path } : undefined
+      : item.path
+        ? { kind: 'path', value: item.path, ...(item.rootId != null ? { rootId: item.rootId } : {}) }
+        : undefined
     setPageState({
       scope: JSON.stringify([snapshot, 'failed', search, outcome, changesFilter, locale]),
       offset: 0, anchor, focusKey: auditItemAnchor(item), focusOrigin

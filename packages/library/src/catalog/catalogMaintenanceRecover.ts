@@ -5,6 +5,7 @@ import { recoverCatalogTasks } from './catalogTasks'
 import { resetCatalogNfoRuntime } from './catalogNfoExport'
 import { resetCatalogScanRuntime } from './catalogScanRuntime'
 import { recoverCatalogMigration } from './catalogMigration'
+import { recoverCatalogFileMaintenance } from './catalogFileMaintenance'
 
 export function recoverCatalogMaintenance(database: Database.Database = getDb()): {
   discardedPlans: number
@@ -16,5 +17,6 @@ export function recoverCatalogMaintenance(database: Database.Database = getDb())
   const discardedPlans = discardAllMaintenancePlans(database)
   const tasks = recoverCatalogTasks(database)
   recoverCatalogMigration(database)
+  recoverCatalogFileMaintenance(database)
   return { discardedPlans, ...tasks }
 }

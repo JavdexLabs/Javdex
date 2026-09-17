@@ -13,7 +13,6 @@ import { recoverCatalogImages } from './catalogImageRecovery'
 import { ensureCatalogIdentity, readCatalogIdentity } from './catalogIdentity'
 import { issueCatalogMigrationToken, authenticateMigration } from './catalogMigrationAuth'
 import {
-  allowEnableCatalogMigration,
   enableCatalogMigration,
   openIsolatedCatalog,
   previewCatalogMigration,
@@ -128,10 +127,6 @@ describe('catalog migration first scan and orphan staging', { concurrency: false
         sourceHost,
         sourceDb
       )
-      allowEnableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
-        sourceDb
-      )
       configureLibraryHost({
         userDataPath: () => targetDir,
         assets: { assetEncryption: () => false, mediaAssetsPath: () => targetImages },
@@ -152,11 +147,11 @@ describe('catalog migration first scan and orphan staging', { concurrency: false
         targetDb
       )
       const enabled = enableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
         targetHost,
         targetDb
       )
-      assert.equal(enabled.targetPhase, 'enabled')
+      assert.equal(enabled.phase, 'enabled')
     } finally {
       sourceDb.close()
       targetDb.close()
@@ -301,7 +296,7 @@ describe('catalog migration first scan and orphan staging', { concurrency: false
         targetDb
       )
       enableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
         targetHost,
         targetDb
       )

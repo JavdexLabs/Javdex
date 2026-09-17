@@ -40,6 +40,7 @@ export interface Actress {
   last_scraped_at: string | null
   updated_at: string | null
   gender: ActressGender | null
+  generation?: number
   revision?: number
 }
 

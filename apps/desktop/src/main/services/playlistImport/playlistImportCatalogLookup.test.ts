@@ -135,6 +135,113 @@ describe('playlistImportCatalogLookup', () => {
       31
     )
   })
+
+  it('queries and merges external-code and source-url identities when both are present', async () => {
+    const lookup = createMemoryPlaylistImportCatalogLookup()
+    const queries: unknown[] = []
+    await lookup.ingestSourceIdentity(
+      {
+        queries: {
+          listVideoSources: async (input: {
+            source?: string
+            externalCode?: string
+            url?: string
+          }) => {
+            queries.push(input)
+            if (input.externalCode) {
+              return {
+                items: [{
+                  videoId: 41,
+                  code: 'BOTH-041',
+                  sources: [{ source: 'JavBus', externalCode: 'BOTH-041', url: null }]
+                }]
+              }
+            }
+            return {
+              items: [
+                {
+                  videoId: 41,
+                  code: 'BOTH-041',
+                  sources: [{ source: 'JavBus', externalCode: 'BOTH-041', url: 'https://javbus.com/both-041' }]
+                },
+                {
+                  videoId: 42,
+                  code: 'BOTH-042',
+                  sources: [{ source: 'JavBus', externalCode: 'BOTH-042', url: 'https://javbus.com/both-041' }]
+                }
+              ]
+            }
+          }
+        }
+      } as unknown as CatalogBackend,
+      {
+        source: 'JavBus',
+        externalCode: 'BOTH-041',
+        sourceUrl: 'https://javbus.com/both-041'
+      }
+    )
+    assert.deepEqual(queries, [
+      { source: 'JavBus', externalCode: 'BOTH-041', limit: 50, offset: 0 },
+      { source: 'JavBus', url: 'https://javbus.com/both-041', limit: 50, offset: 0 }
+    ])
+    assert.deepEqual(
+      lookup.videoById(41)?.sources,
+      [
+        { source: 'JavBus', externalCode: 'BOTH-041', url: null },
+        { source: 'JavBus', externalCode: 'BOTH-041', url: 'https://javbus.com/both-041' }
+      ]
+    )
+    assert.equal(lookup.videoById(42)?.code, 'BOTH-042')
+  })
+
+  it('walks every source page when a source identity has more than one page of matches', async () => {
+    const lookup = createMemoryPlaylistImportCatalogLookup()
+    const pages: Array<{ limit?: number; offset?: number }> = []
+    await lookup.ingestSourceIdentity(
+      {
+        queries: {
+          listVideoSources: async (input: {
+            source?: string
+            externalCode?: string
+            limit?: number
+            offset?: number
+          }) => {
+            pages.push({ limit: input.limit, offset: input.offset })
+            assert.equal(input.source, 'JavBus')
+            assert.equal(input.externalCode, 'MANY-001')
+            const offset = input.offset ?? 0
+            const count = offset === 0 ? 50 : 1
+            return {
+              total: 51,
+              items: Array.from({ length: count }, (_, index) => {
+                const videoId = offset + index + 1
+                return {
+                  videoId,
+                  code: videoId === 51 ? 'MANY-001' : `MANY-${String(videoId).padStart(3, '0')}`,
+                  sources: [{
+                    source: 'JavBus',
+                    externalCode: videoId === 51 ? 'MANY-001' : `MANY-${String(videoId).padStart(3, '0')}`,
+                    url: null
+                  }]
+                }
+              })
+            }
+          }
+        }
+      } as unknown as CatalogBackend,
+      { source: 'JavBus', externalCode: 'MANY-001' }
+    )
+    assert.deepEqual(pages, [
+      { limit: 50, offset: 0 },
+      { limit: 50, offset: 50 }
+    ])
+    assert.equal(lookup.videoById(51)?.code, 'MANY-001')
+    assert.equal(
+      lookup.videosBySourceIdentity({ source: 'javbus', externalCode: 'many-001' })
+        .some((video) => video.videoId === 51),
+      true
+    )
+  })
 })
 
 describe('playlistImport catalog apply', () => {

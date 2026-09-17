@@ -11,7 +11,7 @@ export interface WriterClaimInput {
   candidate: WriterCandidate
 }
 
-export type WriterClaimStatus = 'pending' | 'waitingMaintenance' | 'consumed' | 'expired' | 'superseded'
+export type WriterClaimStatus = 'pending' | 'consumed' | 'expired' | 'superseded'
 
 export interface WriterClaimResult {
   claimId: string
@@ -24,5 +24,5 @@ export interface WriterStatus {
   writerEpoch: number
   bound: boolean
   claimId: string | null
-  waitingMaintenance: boolean
+  maintenanceBusy: boolean
 }

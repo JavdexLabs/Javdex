@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { getDb } from '@library/db/database'
-import { structuredError } from '@shared/protocol/errors'
+import { structuredError, toStructuredError, isStructuredError } from '@shared/protocol/errors'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { ManageOperationId } from '@shared/manage/operations'
-import { commitCatalogMutation } from '@library/catalog/catalogOperations'
+import { commitCatalogMutation, readCatalogMutation } from '@library/catalog/catalogOperations'
 import { MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
 import type {
   LastVideoResourceRemovalMode,
@@ -19,11 +19,13 @@ import type {
 } from '@shared/actressConflictTypes'
 import type {
   PendingScanGroupResolution,
-  PendingResourceIdentityChoice
+  PendingResourceIdentityChoice,
+  PendingResourceIdentityResolutionResult
 } from '@shared/libraryTypes'
 import { normalizeActressName } from '@library/db/actressNameNormalization'
 import { videoMaintenanceService } from '@library/catalog/videoMaintenanceService'
 import { videoLifecycleService } from '@library/catalog/videoLifecycleService'
+import { VideoLifecycleRepoError } from '@library/db/videoLifecycleRepo'
 import { actressIdentityConflictWorkflow } from '@library/catalog/actressIdentityConflictWorkflow'
 import { organizationMergeService } from '@library/catalog/organizationMergeService'
 import { directorMergeService } from '@library/catalog/directorMergeService'
@@ -66,10 +68,17 @@ import {
   getPendingResourceIdentity,
   listPendingResourceIdentities
 } from '@library/db/pendingResourceIdentityRepo'
-import { resolvePendingResourceIdentity } from '@library/scan/pendingResourceIdentityService'
+import {
+  applyPreparedPendingResourceIdentityResolution,
+  finishPreparedPendingResourceIdentityResolution,
+  preparePendingResourceIdentityResolution
+} from '@library/scan/pendingResourceIdentityService'
 import { listMediaLibraries } from '@library/db/mediaLibraryRepo'
-import { readOperationReceipt } from '@library/catalog/catalogOperations'
-import type { CatalogHandler, HandlerArgs, ManageEnvelope } from './manageCatalogHandlers'
+import {
+  type CatalogHandler,
+  type HandlerArgs,
+  type ManageEnvelope
+} from './manageCatalogHandlers'
 
 function catalogDb(database?: Database.Database): Database.Database {
   return database ?? getDb()
@@ -185,16 +194,14 @@ function runDomain<T>(work: () => T): T {
       }
       throw structuredError('INVALID_INPUT', error.message)
     }
-    if (error && typeof error === 'object' && 'code' in error) throw error
-    const message = error instanceof Error ? error.message : String(error)
-    if (
-      message.includes('预览已过期') ||
-      message.includes('已变化') ||
-      message.includes('已过期')
-    ) {
-      throw structuredError('VERSION_CONFLICT', message)
+    if (error instanceof VideoLifecycleRepoError) {
+      if (error.code === 'REVISION_CONFLICT') {
+        throw structuredError('VERSION_CONFLICT', error.message)
+      }
+      throw structuredError('INVALID_INPUT', error.message)
     }
-    throw structuredError('INVALID_INPUT', message)
+    if (isStructuredError(error)) throw error
+    throw toStructuredError(error)
   }
 }
 
@@ -783,14 +790,44 @@ export const remainderHandlers: Partial<Record<ManageOperationId, CatalogHandler
       choice: PendingResourceIdentityChoice
     }
     const mutation = requireMutation(args.envelope)
-    const existing = readOperationReceipt(mutation.operationId, args.database)
-    if (existing) return { receipt: existing }
+    const request = {
+      operationId: mutation.operationId,
+      operation: args.operation,
+      expectedVersions: mutation.expectedVersions,
+      input: args.envelope.input,
+      writerEpoch: args.auth.epoch
+    }
+    const duplicate = readCatalogMutation<PendingResourceIdentityResolutionResult>(request, args.database)
+    if (duplicate) return spreadMutation(duplicate.receipt, duplicate.data)
     const libraryId = lookupIdentityLibrary(input.identityId, catalogDb(args.database))
     if (libraryId == null) throw structuredError('INVALID_INPUT', '资源身份待办不存在')
-    const data = await resolvePendingResourceIdentity(libraryId, input.identityId, {
+    const prepared = await preparePendingResourceIdentityResolution(libraryId, input.identityId, {
       expectedRevision: requireQRevision(mutation.expectedVersions, mutation.operationId),
       choice: input.choice
     })
-    return commit(args, () => data)
+    const committed = commit(args, () => {
+      const assignment = applyPreparedPendingResourceIdentityResolution(prepared)
+      return {
+        ...assignment,
+        warnings: prepared.choice === 'discard' ? [] : prepared.inspection.warnings
+      }
+    })
+    const committedResult = committed as {
+      receipt: unknown
+      status: 'assigned' | 'pending' | 'discarded'
+      videoId?: number
+      pendingGroupId?: number
+    }
+    const assignment = committedResult.status === 'assigned'
+      ? committedResult.videoId == null
+        ? (() => { throw new Error('资源归属提交结果缺少影片编号。') })()
+        : { status: 'assigned' as const, videoId: committedResult.videoId }
+      : committedResult.status === 'pending'
+        ? committedResult.pendingGroupId == null
+          ? (() => { throw new Error('资源归属提交结果缺少待确认组编号。') })()
+          : { status: 'pending' as const, pendingGroupId: committedResult.pendingGroupId }
+        : { status: 'discarded' as const }
+    const finished = await finishPreparedPendingResourceIdentityResolution(prepared, assignment)
+    return { receipt: committedResult.receipt, ...finished }
   }
 }

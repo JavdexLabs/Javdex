@@ -1,6 +1,13 @@
+import {
+  applyVideoScrapeCommand,
+  applyActressScrapeCommand,
+  replacePendingVideoScrapeCommand,
+  submitActressScrapeConflictCommand,
+  confirmPendingVideoScrapeCommand
+} from '@library/catalog/catalogScrapeCommands'
 import { resolveCatalogScrapeFields } from '@library/catalog/catalogScrapeFields'
+import { createCatalogVideoCommands } from '@library/catalog/catalogVideoCommands'
 import { getDb } from '@library/db/database'
-import { markScrapeFailed } from '@library/db/videoRepo'
 import { recordActressScrapeFailure } from '@library/db/actressRepo'
 import {
   PendingScanRepoError,
@@ -15,22 +22,29 @@ import {
 } from '@library/db/pendingResourceIdentityRepo'
 import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
 import { selectAccessibleFallbackPrimaryResourceId } from '@library/scan/accessiblePrimaryResource'
-import { resolvePendingResourceIdentity } from '@library/scan/pendingResourceIdentityService'
+import {
+  applyPreparedPendingResourceIdentityResolution,
+  finishPreparedPendingResourceIdentityResolution,
+  preparePendingResourceIdentityResolution
+} from '@library/scan/pendingResourceIdentityService'
 import type {
   PendingResourceIdentityChoice,
+  PendingResourceIdentityResolutionResult,
   PendingScanGroupResolution
 } from '@shared/libraryTypes'
 import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { structuredError } from '@shared/protocol/errors'
 import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
-import { acceptCatalogTask, commitCatalogMutation, readOperationReceipt } from '@library/catalog/catalogOperations'
+import {
+  acceptCatalogTask,
+  commitCatalogMutation,
+  readCatalogMutation,
+  readOperationReceipt
+} from '@library/catalog/catalogOperations'
 import {
   applyActressCropRef,
-  applyVideoCoverRef,
   commitManageImageMutation
 } from '@library/catalog/catalogImageApply'
-import { bumpRowRevision } from '@library/catalog/catalogAggregateVersion'
-import { applyActressScrapeCandidate, applyVideoScrapeCandidate, replacePendingVideoScrapeFromUploads, submitActressScrapeConflict } from '@library/catalog/catalogScrapeApply'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
 import { countCatalogTargets, createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
@@ -39,7 +53,6 @@ import {
   findReadyAgentMetadata
 } from '@library/catalog/catalogAgentMetadata'
 import {
-  confirmPendingVideoScrape,
   discardPendingVideoScrapeRecord
 } from '@library/catalog/catalogPendingVideoScrapes'
 import {
@@ -54,7 +67,6 @@ import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import {
   abandonCatalogMigration,
-  allowEnableCatalogMigration,
   enableCatalogMigration,
   writeMigrationPackageBytes,
   previewCatalogMigration,
@@ -75,10 +87,8 @@ import {
 } from '@library/catalog/catalogAuditRead'
 import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import {
-  filesRenameDigest,
-  importCatalogManualFile,
-  previewRenameCatalogFile,
-  renameCatalogFile
+  executeCatalogFileMaintenance,
+  previewRenameCatalogFile
 } from '@library/catalog/catalogFileMaintenance'
 import {
   discardCatalogNfoPlan,
@@ -92,12 +102,6 @@ import {
   updateCatalogNfoPreferences
 } from '@library/catalog/catalogNfoExport'
 import { listCatalogTasks, readCatalogTask } from '@library/catalog/catalogTasks'
-import type { CatalogImageRef } from '@shared/protocol/uploads'
-import {
-  assertExpectedVideoVersion,
-  readVideoAggregateVersion
-} from '@library/catalog/catalogVideoVersion'
-import { videoEditInputFromManageFields } from '@library/catalog/videoEditFields'
 import type { DesktopSession } from '@shared/desktop/session'
 import type { CatalogIdentity } from '@shared/protocol/identity'
 import type {
@@ -118,7 +122,6 @@ import type {
 import type {
   AddMediaLibraryRootInput,
   UpdateMediaLibraryConfigInput,
-  UpdateMediaLibraryInput,
   UpdateMediaLibraryRootInput
 } from '@shared/mediaLibraryIpcContract'
 import type { CreateMediaLibraryInput } from '@shared/mediaLibraryTypes'
@@ -132,7 +135,6 @@ import type {
 import type { SortDir } from '@shared/commonTypes'
 import type {
   LastVideoResourceRemovalMode,
-  VideoEditInput,
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
   VideoMergeInput,
@@ -212,36 +214,11 @@ export async function unsupportedCatalogUseCase(name: string): Promise<never> {
 export function unsupportedSlice<T extends object>(keys: readonly (keyof T)[]): T {
   return Object.fromEntries(keys.map((key) => [key, () => unsupportedCatalogUseCase(String(key))])) as T
 }
-
-function toVideoEditInput(
-  fields: {
-    title?: string | null
-    summary?: string | null
-    release_date?: string | null
-    makerOrganization?: VideoEditInput['makerOrganization']
-    publisherOrganization?: VideoEditInput['publisherOrganization']
-    directorAssignment?: VideoEditInput['directorAssignment']
-    seriesAssignment?: VideoEditInput['seriesAssignment']
-    duration_seconds?: number | null
-    rating?: number
-    tags?: string[]
-    actressesFemale?: string[]
-    actressesMale?: string[]
-    cover?: { kind: string }
-    coverSourcePath?: string
-    links?: VideoEditInput['links']
-  }
-): VideoEditInput {
-  const input = videoEditInputFromManageFields(fields)
-  if ('coverSourcePath' in fields) input.coverSourcePath = fields.coverSourcePath
-  return input
-}
-
 export interface LocalCatalogReadPort {
-  homeLoad(input: HomeDiscoveryInput): unknown | Promise<unknown>
-  homeSearch(input: GlobalSearchInput): unknown | Promise<unknown>
-  tagFilterOptions(query: TagOptionsQuery): unknown | Promise<unknown>
-  imagePage(entity: ClassificationEntityRef, query?: ClassificationPageQuery): unknown | Promise<unknown>
+  homeLoad(input: HomeDiscoveryInput): import('@shared/catalogTypes').HomeSnapshot | Promise<import('@shared/catalogTypes').HomeSnapshot>
+  homeSearch(input: GlobalSearchInput): import('@shared/catalogTypes').GlobalSearchResult | Promise<import('@shared/catalogTypes').GlobalSearchResult>
+  tagFilterOptions(query: TagOptionsQuery): ReturnType<typeof tagQueryService.filterOptions> | Promise<ReturnType<typeof tagQueryService.filterOptions>>
+  imagePage(entity: ClassificationEntityRef, query?: ClassificationPageQuery): ReturnType<typeof classificationQueryService.listImageCandidatesPage> | Promise<ReturnType<typeof classificationQueryService.listImageCandidatesPage>>
 }
 
 export interface LocalCatalogBackendDependencies {
@@ -279,6 +256,7 @@ export function createLocalCatalogBackend(
   ensureCatalogIdentity({ catalogId: dependencies.identity.catalogId })
   const queries = dependencies.queries ?? createVideoQueryService()
   const videos = dependencies.videos ?? videoMaintenanceService
+  const writes = createCatalogVideoCommands(videos)
   const lifecycle = dependencies.lifecycle ?? videoLifecycleService
   const actresses = dependencies.actresses ?? actressQueryService
   const reads = dependencies.reads ?? defaultReads
@@ -346,67 +324,20 @@ export function createLocalCatalogBackend(
   }
 
   const videoCommands: CatalogVideoCommands = {
-    async edit(input, ctx: MutationContext) {
-      const result = commitManageImageMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'videos.edit',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () => {
-          assertExpectedVideoVersion(input.videoId, ctx.expectedVersions, ctx.operationId)
-          if (input.fields.cover) {
-            applyVideoCoverRef(
-              input.videoId,
-              input.fields.cover as CatalogImageRef,
-              ctx.expectedVersions,
-              ctx.operationId,
-              undefined,
-              { bumpRevision: false }
-            )
-          }
-          const ok = videos.edit(input.videoId, toVideoEditInput(input.fields))
-          return {
-            ok,
-            videoId: input.videoId,
-            versions: { V: readVideoAggregateVersion(input.videoId)! }
-          }
-        }
-      )
-      return result.data.ok
+    async edit(input, ctx) {
+      return writes.edit(input, { ...ctx, writerEpoch: 0 }).data.ok
     },
-    async clearMeta(input) {
-      return videos.clearMetadata(input.videoId)
+    async clearMeta(input, ctx) {
+      return writes.clearMeta(input, { ...ctx, writerEpoch: 0 }, true).data.ok
     },
-    async markScrapeSuccess(input) {
-      return videos.markScrapeSucceeded(input.videoId)
+    async markScrapeSuccess(input, ctx) {
+      return writes.markScrapeSuccess(input, { ...ctx, writerEpoch: 0 }, true).data.ok
     },
-    async markScrapeFailed(input) {
-      markScrapeFailed(input.videoId)
-      return true
+    async markScrapeFailed(input, ctx) {
+      return writes.markScrapeFailed(input, { ...ctx, writerEpoch: 0 }, true).data.ok
     },
-    async setRating(input, ctx: MutationContext) {
-      const result = commitCatalogMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'videos.setRating',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () => {
-          assertExpectedVideoVersion(input.videoId, ctx.expectedVersions, ctx.operationId)
-          videos.setRating(input.videoId, input.rating)
-          return {
-            ok: true,
-            videoId: input.videoId,
-            versions: { V: readVideoAggregateVersion(input.videoId)! }
-          }
-        }
-      )
-      return result.data.ok
+    async setRating(input, ctx) {
+      return writes.setRating(input, { ...ctx, writerEpoch: 0 }).data.ok
     },
     async setPoster(input, _ctx: MutationContext) {
       if (input.image.kind === 'clear') return videos.setPoster(input.videoId, null)
@@ -429,17 +360,17 @@ export function createLocalCatalogBackend(
         '本地样张导入仍使用本机文件入口；上传引用等 S06。'
       )
     },
-    async deleteSample(input) {
-      return videos.deleteSample(input.videoId, input.assetId)
+    async deleteSample(input, ctx) {
+      return writes.deleteSample(input, { ...ctx, writerEpoch: 0 }, true).data.ok
     },
-    async addManualTag(input) {
-      return videos.addManualTag(input.videoId, input.name)
+    async addManualTag(input, ctx) {
+      return writes.addManualTag(input, { ...ctx, writerEpoch: 0 }, true).data.ok
     },
-    async addExistingManualTag(input) {
-      return videos.addExistingManualTag(input.videoId, input.tagId)
+    async addExistingManualTag(input, ctx) {
+      return writes.addExistingManualTag(input, { ...ctx, writerEpoch: 0 }, true).data.ok
     },
-    async removeManualTag(input) {
-      return videos.removeManualTag(input.videoId, input.tagId)
+    async removeManualTag(input, ctx) {
+      return writes.removeManualTag(input, { ...ctx, writerEpoch: 0 }, true).data.ok
     },
     async correctImport(input) {
       return videos.correctImport(input.videoId, input.code, input.discardPendingScrape)
@@ -525,32 +456,7 @@ export function createLocalCatalogBackend(
     async splitResource(input) {
       return videos.splitResource(input.libraryId, input.videoId, input.resourceId)
     },
-    applyScrapeCandidate: async (input, ctx) => {
-      const result = commitManageImageMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'videos.applyScrapeCandidate',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () =>
-          applyVideoScrapeCandidate({
-            videoId: input.videoId,
-            fields: input.fields,
-            mode: input.mode,
-            candidate: input.candidate,
-            cover: input.cover,
-            samples: input.samples,
-            actressAvatars: input.actressAvatars,
-            directorSelectionId: input.directorSelectionId,
-            directorAmbiguity: input.directorAmbiguity,
-            expected: ctx.expectedVersions,
-            operationId: ctx.operationId
-          })
-      )
-      return result.data
-    }
+    applyScrapeCandidate: async (input, ctx) => applyVideoScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data
   }
 
   const actressCommands: CatalogActressCommands = {
@@ -677,47 +583,8 @@ export function createLocalCatalogBackend(
       )
       return result.data
     },
-    applyScrapeCandidate: async (input, ctx) => {
-      const result = commitManageImageMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'actresses.applyScrapeCandidate',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () =>
-          applyActressScrapeCandidate({
-            actressId: input.actressId,
-            candidate: input.candidate,
-            avatar: input.avatar,
-            gallery: input.gallery,
-            fields: input.fields,
-            mode: input.mode,
-            expected: ctx.expectedVersions,
-            operationId: ctx.operationId
-          })
-      )
-      return result.data
-    },
-    submitConflict: async (input, ctx) => {
-      const result = commitManageImageMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'actressConflicts.submit',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () =>
-          submitActressScrapeConflict({
-            ...input,
-            expected: ctx.expectedVersions,
-            operationId: ctx.operationId
-          })
-      )
-      return result.data
-    },
+    applyScrapeCandidate: async (input, ctx) => applyActressScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data,
+    submitConflict: async (input, ctx) => submitActressScrapeConflictCommand(input, { ...ctx, writerEpoch: 0 }).data,
     async conflictList() {
       return actressIdentityConflictWorkflow.listConflictGroups()
     },
@@ -992,12 +859,11 @@ export function createLocalCatalogBackend(
       return libraries.create(input as CreateMediaLibraryInput)
     },
     async update(input) {
-      const local = input as UpdateMediaLibraryInput
-      if (local.patch && local.expectedRevision !== undefined) {
+      if ('patch' in input) {
         return libraries.update({
-          libraryId: local.libraryId,
-          expectedRevision: local.expectedRevision,
-          patch: local.patch
+          libraryId: input.libraryId,
+          expectedRevision: input.expectedRevision,
+          patch: input.patch
         })
       }
       return libraries.update({
@@ -1115,7 +981,7 @@ export function createLocalCatalogBackend(
         locale?: string
         limit?: number
         offset?: number
-        anchor?: { kind: 'path'; value: string } | { kind: 'group'; id: number }
+        anchor?: { kind: 'path'; value: string; rootId?: number } | { kind: 'group'; id: number }
       }
       const { libraryId, ...query } = local
       return catalogScanAuditViewPage(libraryId, query)
@@ -1179,38 +1045,22 @@ export function createLocalCatalogBackend(
       return previewRenameCatalogFile(input)
     },
     async renameFile(input, ctx) {
-      const local = input as {
-        libraryId: number
-        resourceId?: number
-        location: { rootId: number; relativePath: string }
-        newFileName: string
-        planDigest?: string
-      }
-      const planDigest = local.planDigest ?? filesRenameDigest(local)
-      const result = await renameCatalogFile({ ...local, planDigest })
-      return commitCatalogMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'files.rename',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () => result
-      ).data
+      return (await executeCatalogFileMaintenance({
+        operationId: ctx.operationId,
+        operation: 'files.rename',
+        expectedVersions: ctx.expectedVersions,
+        input,
+        writerEpoch: 0
+      })).data
     },
     async importManual(input, ctx) {
-      const result = await importCatalogManualFile(input)
-      return commitCatalogMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'files.importManual',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () => result
-      ).data
+      return (await executeCatalogFileMaintenance({
+        operationId: ctx.operationId,
+        operation: 'files.importManual',
+        expectedVersions: ctx.expectedVersions,
+        input,
+        writerEpoch: 0
+      })).data
     },
     resolvePendingScan: async (input, ctx) => {
       const local = input as {
@@ -1284,22 +1134,42 @@ export function createLocalCatalogBackend(
       if (expectedRevision == null) {
         throw structuredError('INVALID_INPUT', '资源身份待办需要 Q 版本')
       }
-      const result = await maintenanceTaskGate.run('resource-maintenance', () =>
-        resolvePendingResourceIdentity(libraryId, local.identityId, {
+      const request = {
+        operationId: ctx.operationId,
+        operation: 'pendingResourceIdentity.resolve',
+        expectedVersions: ctx.expectedVersions,
+        input,
+        writerEpoch: 0
+      } as const
+      const duplicate = readCatalogMutation<PendingResourceIdentityResolutionResult>(request)
+      if (duplicate) return duplicate.data
+
+      return maintenanceTaskGate.run('resource-maintenance', async () => {
+        const prepared = await preparePendingResourceIdentityResolution(libraryId, local.identityId, {
           expectedRevision,
           choice: local.choice
         })
-      )
-      return commitCatalogMutation(
-        {
-          operationId: ctx.operationId,
-          operation: 'pendingResourceIdentity.resolve',
-          expectedVersions: ctx.expectedVersions,
-          input,
-          writerEpoch: 0
-        },
-        () => result
-      ).data
+        const committed = commitCatalogMutation(request, () => {
+          const assignment = applyPreparedPendingResourceIdentityResolution(prepared)
+          return {
+            ...assignment,
+            warnings: prepared.choice === 'discard' ? [] : prepared.inspection.warnings
+          }
+        })
+        if (committed.outcome === 'duplicate') return committed.data
+
+        const committedData = committed.data
+        const assignment = committedData.status === 'assigned'
+          ? committedData.videoId == null
+            ? (() => { throw new Error('资源归属提交结果缺少影片编号。') })()
+            : { status: 'assigned' as const, videoId: committedData.videoId }
+          : committedData.status === 'pending'
+            ? committedData.pendingGroupId == null
+              ? (() => { throw new Error('资源归属提交结果缺少待确认组编号。') })()
+              : { status: 'pending' as const, pendingGroupId: committedData.pendingGroupId }
+            : { status: 'discarded' as const }
+        return finishPreparedPendingResourceIdentityResolution(prepared, assignment)
+      })
     }
   }
 
@@ -1480,50 +1350,10 @@ export function createLocalCatalogBackend(
         return listPendingVideoScrapes()
       },
       async replace(input, ctx) {
-        const result = commitManageImageMutation(
-          {
-            operationId: ctx.operationId,
-            operation: 'pendingVideoScrapes.replace',
-            expectedVersions: ctx.expectedVersions,
-            input,
-            writerEpoch: 0
-          },
-          () =>
-            replacePendingVideoScrapeFromUploads({
-              ...input,
-              expected: ctx.expectedVersions,
-              operationId: ctx.operationId
-            })
-        )
-        return result.data
+        return replacePendingVideoScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data
       },
       async confirm(input, ctx) {
-        const expectedRevision = ctx.expectedVersions.Q?.revision
-        if (expectedRevision == null) {
-          throw structuredError('INVALID_INPUT', '待确认操作需要 Q 版本', {
-            field: 'expectedVersions.Q'
-          })
-        }
-        const pending = getPendingVideoScrapeById(input.pendingScrapeId)
-        if (!pending) throw structuredError('INVALID_INPUT', '待确认影片刮削结果不存在')
-        assertExpectedVideoVersion(pending.videoId, ctx.expectedVersions, ctx.operationId)
-        const result = commitManageImageMutation(
-          {
-            operationId: ctx.operationId,
-            operation: 'pendingVideoScrapes.confirm',
-            expectedVersions: ctx.expectedVersions,
-            input,
-            writerEpoch: 0
-          },
-          () => {
-            const confirmed = confirmPendingVideoScrape(input, { expectedRevision })
-            if (confirmed.applied) {
-              bumpRowRevision('videos', input.mergeRetainedVideoId ?? pending.videoId)
-            }
-            return confirmed
-          }
-        )
-        return result.data
+        return confirmPendingVideoScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data
       },
       async discard(input, ctx) {
         const expectedRevision =
@@ -1609,9 +1439,6 @@ export function createLocalCatalogBackend(
       },
       async status(input) {
         return statusCatalogMigration(input)
-      },
-      async allowEnable(input) {
-        return allowEnableCatalogMigration(input)
       },
       async enable(input) {
         return enableCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })

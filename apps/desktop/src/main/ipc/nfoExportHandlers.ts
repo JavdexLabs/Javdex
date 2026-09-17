@@ -62,7 +62,7 @@ function registerDesktopNfoExportHandlers(ctx: IpcContext): void {
   nfoExportCommandAdapter.register(IPC.NFO_EXPORT_START, (planId) =>
     nfoExportTaskController.start(planId)
   )
-  nfoExportCommandAdapter.register(IPC.NFO_EXPORT_TERMINATE, (taskId) => {
+  nfoExportCommandAdapter.register(IPC.NFO_EXPORT_TERMINATE, async (taskId) => {
     nfoExportTaskController.terminate(taskId)
   })
   nfoExportTaskController.onEvent((event) => {
@@ -168,9 +168,9 @@ function registerCatalogNfoExportHandlers(ctx: IpcContext, backend: CatalogBacke
     void emitRemoteNfoFinished(backend, started.taskId, webContents)
     return { taskId: started.taskId }
   })
-  nfoExportCommandAdapter.register(IPC.NFO_EXPORT_TERMINATE, (taskId) => {
+  nfoExportCommandAdapter.register(IPC.NFO_EXPORT_TERMINATE, async (taskId) => {
     remoteNfoWaits.get(taskId)?.abort()
-    return backend.nfo.terminate({ taskId }, ipcMutation())
+    await backend.nfo.terminate({ taskId }, ipcMutation())
   })
 }
 

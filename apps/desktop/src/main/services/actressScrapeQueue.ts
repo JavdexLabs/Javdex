@@ -23,11 +23,16 @@ import {
   resolveActressBatchScrapeTargets,
   type NormalizedActressBatchScrapeRequest
 } from './actressBatchScrapeTargets'
-import { scrapeActressBound, scrapeCatalog } from './scrapeCatalogBinding'
+import {
+  createScrapeCatalogBinding,
+  type ScrapeCatalogBinding
+} from './scrapeCatalogBinding'
 import { freezeRemoteActressTargets } from './catalogRemoteBatch'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
+import type { CatalogBackend } from '../application/catalogBackend'
 import {
   CheckpointedSequentialBatchQueue,
+  type CatalogKeyProvider,
   type CheckpointedBatchPolicy
 } from './checkpointedSequentialBatchQueue'
 
@@ -68,7 +73,7 @@ function defaultRequest(scraperName?: string): ActressBatchScrapeRequest {
   }
 }
 
-type ActressTarget = { id: number; main_name: string }
+type ActressTarget = { id: number; main_name: string; generation?: number | null; revision?: number | null }
 
 /**
  * Sequential batch actress-profile scrape queue.
@@ -76,10 +81,21 @@ type ActressTarget = { id: number; main_name: string }
  */
 class ActressScrapeQueue {
   private avatarAutoCropListener: AvatarAutoCropListener | null = null
-  private readonly lifecycle = new CheckpointedSequentialBatchQueue<
+  private readonly lifecycle: CheckpointedSequentialBatchQueue<
     ActressTarget,
     NormalizedActressBatchScrapeRequest
-  >(this.createPolicy())
+  >
+
+  constructor(
+    private readonly binding: ScrapeCatalogBinding = createScrapeCatalogBinding(),
+    catalogKey: CatalogKeyProvider = 'local'
+  ) {
+    this.lifecycle = new CheckpointedSequentialBatchQueue(
+      this.createPolicy(),
+      undefined,
+      catalogKey
+    )
+  }
 
   private createPolicy(): CheckpointedBatchPolicy<
     ActressTarget,
@@ -90,12 +106,11 @@ class ActressScrapeQueue {
       missingResumeError: '没有可继续的演员批量任务',
       invalidRunPlanError: '请至少选择一个演员更新字段',
       resolveTargets: async (request) => {
-        const catalog = scrapeCatalog()
-        if (catalog) return freezeRemoteActressTargets(catalog, request)
+        if (this.binding.catalog) return freezeRemoteActressTargets(this.binding.catalog, request)
         return resolveActressBatchScrapeTargets(request)
       },
       labelOf: (target) => target.main_name,
-      restoreTarget: (item) => ({ id: item.id, main_name: item.label }),
+      restoreTarget: (item) => ({ id: item.id, main_name: item.label, generation: item.generation, revision: item.revision }),
       beforeResume: (job, port) => port.assertActressRecoverable(job),
       planRun: (job, targets, helpers) => {
         const request = job.request as NormalizedActressBatchScrapeRequest
@@ -126,11 +141,12 @@ class ActressScrapeQueue {
           doneMessage: (progress) =>
             `演员批量刮削完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
           getCode: (target) => target.main_name,
-          runTarget: async ({ id, main_name }) => {
-            const itemOutcome = await scrapeActressBound(id, request.scraperName, {
+          runTarget: async ({ id, main_name, generation, revision }) => {
+            const itemOutcome = await this.binding.scrapeActress(id, request.scraperName, {
               closeBrowser: false,
               fields,
               mode,
+              expectedVersion: generation == null || revision == null ? undefined : { generation, revision },
               useAliases: request.useAliases ?? false,
               batchJobId: job.jobId,
               delayController
@@ -243,6 +259,13 @@ class ActressScrapeQueue {
     )
     await this.lifecycle.start(request)
   }
+}
+
+export function createActressScrapeQueue(
+  backend?: CatalogBackend,
+  catalogKey: CatalogKeyProvider = 'local'
+): ActressScrapeQueue {
+  return new ActressScrapeQueue(createScrapeCatalogBinding(backend), catalogKey)
 }
 
 export const actressScrapeQueue = new ActressScrapeQueue()

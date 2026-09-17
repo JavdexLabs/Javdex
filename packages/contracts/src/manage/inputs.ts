@@ -50,6 +50,10 @@ const pendingScanAnchorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('group'), id: idSchema }).strict(),
   z.object({ kind: z.literal('identity'), id: idSchema }).strict()
 ])
+const scanAuditViewAnchorSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('path'), value: z.string().min(1).max(32768), rootId: idSchema.optional() }).strict(),
+  z.object({ kind: z.literal('group'), id: idSchema }).strict()
+])
 const pendingAuditIdListsSchema = z
   .object({
     groupIds: z.array(idSchema).max(100).default([]),
@@ -334,9 +338,8 @@ export const MANAGE_OPERATION_INPUTS = {
     .strict(),
   'migration.start': z.object({ migrationId: uuidSchema, digest: digestSchema }).strict(),
   'migration.status': z.object({ migrationId: uuidSchema }).strict(),
-  'migration.allowEnable': z.object({ migrationId: uuidSchema, digest: digestSchema }).strict(),
-  'migration.enable': z.object({ migrationId: uuidSchema, digest: digestSchema }).strict(),
-  'migration.abandon': z.object({ migrationId: uuidSchema, digest: digestSchema }).strict(),
+  'migration.enable': z.object({ migrationId: uuidSchema, digest: digestSchema, confirmSourceStopped: z.literal(true) }).strict(),
+  'migration.abandon': z.object({ migrationId: uuidSchema, digest: digestSchema, confirmTargetStopped: z.boolean().optional() }).strict(),
   'home.load': z
     .object({
       seed: z.string().min(1).max(200),
@@ -459,6 +462,8 @@ export const MANAGE_OPERATION_INPUTS = {
       fields: videoScrapeFieldsSchema,
       mode: scrapeModeSchema,
       candidate: z.unknown(),
+      sourceName: limitedTextSchema.max(200).optional(),
+      ratingSourceName: limitedTextSchema.max(200).optional(),
       cover: catalogImageRefSchema.optional(),
       samples: z.array(catalogImageRefSchema).max(40).optional(),
       actressAvatars: z
@@ -902,6 +907,7 @@ export const MANAGE_OPERATION_INPUTS = {
       changesFilter: z.enum(['all', 'removed', 'promoted', 'deleted']).optional(),
       search: searchTextSchema.optional(),
       locale: z.string().min(1).max(100).optional(),
+      anchor: scanAuditViewAnchorSchema.optional(),
       ...pageQuerySchema.shape
     })
     .strict(),

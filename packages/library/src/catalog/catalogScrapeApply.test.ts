@@ -150,7 +150,7 @@ describe('catalog scrape apply (C6 unique/pending)', () => {
         }),
       (error: unknown) =>
         isStructuredError(error) &&
-        error.code === 'INVALID_INPUT' &&
+        error.code === 'IDENTITY_CONFLICT' &&
         error.message.includes('业务身份冲突')
     )
     assert.equal(

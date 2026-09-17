@@ -10,6 +10,7 @@ import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
 import { MANAGE_PROTOCOL_VERSION } from '@shared/protocol/identity'
 import { ensureCatalogIdentity, isWriterBound, readCatalogIdentity, setCatalogFrozen } from './catalogIdentity'
 import { readHandshake } from './catalogHandshake'
+import { abortCatalogMutation, beginCatalogMutation } from './catalogOperations'
 import {
   authenticateWriter,
   claimWriter,
@@ -83,7 +84,7 @@ describe('catalog writer protocol', () => {
     )
   })
 
-  it('waits for file maintenance before consuming a handoff token, then switches epoch', () => {
+  it('rejects busy handoff without reserving a claim or consuming its token, then switches epoch', () => {
     setup()
     const serverId = randomUUID()
     ensureCatalogIdentity({ serverId })
@@ -105,17 +106,17 @@ describe('catalog writer protocol', () => {
     const handoff = issueOneTimeToken('handoff')
     const nextSecret = generateSecret()
     const nextClaim = randomUUID()
-    const waiting = claimWriter({
+    assert.throws(() => claimWriter({
       kind: 'handoff',
       oneTimeToken: handoff.oneTimeToken,
       candidate: { claimId: nextClaim, secretDigest: digestToken(nextSecret) }
-    })
-    assert.equal(waiting.status, 'waitingMaintenance')
+    }), (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
+    assert.equal(readWriterClaim(nextClaim), null)
+    assert.equal(getDb().prepare('SELECT claim_id FROM catalog_writer_claims WHERE claim_id = ?').get(nextClaim), undefined)
+    const token = getDb().prepare('SELECT consumed_at, claim_id FROM catalog_one_time_tokens WHERE token_digest = ?').get(digestToken(handoff.oneTimeToken))
+    assert.deepEqual(token, { consumed_at: null, claim_id: null })
+    assert.equal(readWriterStatus().maintenanceBusy, true)
     assert.equal(readCatalogIdentity()?.writerEpoch, 1)
-    assert.throws(
-      () => issueOneTimeToken('handoff'),
-      (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY'
-    )
     authenticateWriter(firstSecret, { serverId, catalogId: readCatalogIdentity()!.catalogId, writerEpoch: 1 })
     getDb().prepare("UPDATE library_scan_runs SET status = 'completed' WHERE id = 'blocking-scan'").run()
     const consumed = claimWriter({
@@ -130,6 +131,55 @@ describe('catalog writer protocol', () => {
       (error: unknown) => isStructuredError(error) && error.code === 'AUTH_REQUIRED'
     )
     authenticateWriter(nextSecret, { serverId, catalogId: readCatalogIdentity()!.catalogId, writerEpoch: 2 })
+  })
+
+  it('treats an in-flight async mutation intent as file maintenance during handoff', () => {
+    setup()
+    const serverId = randomUUID()
+    ensureCatalogIdentity({ serverId })
+    const bind = issueOneTimeToken('initialBind')
+    const firstSecret = generateSecret()
+    claimWriter({
+      kind: 'initialBind',
+      oneTimeToken: bind.oneTimeToken,
+      candidate: { claimId: randomUUID(), secretDigest: digestToken(firstSecret) }
+    })
+
+    const operationId = randomUUID()
+    const mutation = {
+      operationId,
+      operation: 'files.rename',
+      expectedVersions: {
+        G: { generation: 1, revision: 1 },
+        R: { generation: 1, revision: 1 }
+      },
+      input: { libraryId: 1, location: { rootId: 1, relativePath: 'clip.mp4' } },
+      writerEpoch: 1
+    } as const
+    beginCatalogMutation(mutation)
+
+    const handoff = issueOneTimeToken('handoff')
+    const nextSecret = generateSecret()
+    const nextClaim = randomUUID()
+    assert.throws(() => claimWriter({
+      kind: 'handoff',
+      oneTimeToken: handoff.oneTimeToken,
+      candidate: { claimId: nextClaim, secretDigest: digestToken(nextSecret) }
+    }), (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
+    assert.equal(readWriterClaim(nextClaim), null)
+    const token = getDb().prepare('SELECT consumed_at, claim_id FROM catalog_one_time_tokens WHERE token_digest = ?').get(digestToken(handoff.oneTimeToken))
+    assert.deepEqual(token, { consumed_at: null, claim_id: null })
+    assert.equal(readWriterStatus().maintenanceBusy, true)
+    assert.equal(readCatalogIdentity()?.writerEpoch, 1)
+
+    abortCatalogMutation(mutation)
+    const consumed = claimWriter({
+      kind: 'handoff',
+      oneTimeToken: handoff.oneTimeToken,
+      candidate: { claimId: nextClaim, secretDigest: digestToken(nextSecret) }
+    })
+    assert.equal(consumed.status, 'consumed')
+    assert.equal(consumed.writerEpoch, 2)
   })
 
   it('rejects claim and writer auth while the catalog is frozen', () => {

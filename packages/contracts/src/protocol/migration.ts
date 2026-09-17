@@ -2,7 +2,6 @@ export type MigrationPhase =
   | 'prepare'
   | 'frozen'
   | 'ready'
-  | 'enableAuthorized'
   | 'enabled'
   | 'abandoned'
 
@@ -17,7 +16,7 @@ export interface MigrationPreviewInput {
 
 export interface MigrationPreview {
   migrationId: string
-  sourceServerId: string
+  sourceServerId: string | null
   sourceCatalogId: string
   schemaVersion: number
   appVersion: string
@@ -35,9 +34,19 @@ export interface MigrationControlInput {
   digest: string
 }
 
+export interface MigrationAbandonInput extends MigrationControlInput {
+  /** Required only when resuming a frozen source; no peer state is inferred. */
+  confirmTargetStopped?: boolean
+}
+
+export interface MigrationEnableInput extends MigrationControlInput {
+  /** Operator confirmation, not a claim about remotely verified peer state. */
+  confirmSourceStopped: true
+}
+
 export interface MigrationStatus {
   migrationId: string
-  sourcePhase: MigrationPhase
-  targetPhase: MigrationPhase
+  role: 'source' | 'target'
+  phase: MigrationPhase
   digest: string
 }

@@ -8,6 +8,10 @@ import { ensureCatalogIdentity, readCatalogIdentity, type CatalogIdentityState }
 import { notifyPlayGrantsRevoked, revokeAllPlayGrants } from './catalogPlay'
 
 const CLAIM_KINDS = new Set<WriterClaimKind>(['initialBind', 'handoff', 'deployRecover'])
+const ASYNC_MAINTENANCE_KEYS = [
+  'catalog-mutation-intent:%',
+  'catalog-file-maintenance:%'
+] as const
 
 export interface IssuedOneTimeToken {
   kind: WriterClaimKind
@@ -35,7 +39,7 @@ interface ClaimRow {
   claim_id: string
   kind: WriterClaimKind
   candidate_secret_digest: string
-  status: WriterClaimResult['status']
+  status: WriterClaimResult['status'] | 'waitingMaintenance'
   writer_epoch: number | null
   result_json: string
 }
@@ -62,17 +66,17 @@ export function fileMaintenanceBlocksHandoff(database: Database.Database = getDb
         LIMIT 1`
     )
     .get() as { busy: number } | undefined
-  return Boolean(task)
+  if (task) return true
+  const asyncMaintenance = database
+    .prepare(
+      `SELECT 1 AS busy FROM catalog_settings
+        WHERE key LIKE ? OR key LIKE ?
+        LIMIT 1`
+    )
+    .get(...ASYNC_MAINTENANCE_KEYS) as { busy: number } | undefined
+  return Boolean(asyncMaintenance)
 }
 
-export function handoffWaitingBlocksNewMaintenance(database: Database.Database = getDb()): boolean {
-  const waiting = database
-    .prepare(
-      `SELECT 1 AS busy FROM catalog_writer_claims WHERE status = 'waitingMaintenance' LIMIT 1`
-    )
-    .get() as { busy: number } | undefined
-  return Boolean(waiting)
-}
 
 export function issueOneTimeToken(
   kind: WriterClaimKind,
@@ -95,20 +99,11 @@ export function issueOneTimeToken(
     const issuedAt = now()
     const expiresAt = new Date(issuedAt.getTime() + CLAIM_CREDENTIAL_TTL_MS).toISOString()
     const oneTimeToken = options.token ?? generateSecret()
-    const waiting = database
-      .prepare(
-        `SELECT 1 AS busy FROM catalog_writer_claims
-         WHERE kind = ? AND status = 'waitingMaintenance' LIMIT 1`
-      )
-      .get(kind) as { busy: number } | undefined
-    if (waiting) {
-      throw structuredError('MAINTENANCE_BUSY', '已有领取正在等待文件维护结束')
-    }
     const tokenDigest = digestToken(oneTimeToken)
     database
       .prepare(
         `DELETE FROM catalog_one_time_tokens
-         WHERE kind = ? AND consumed_at IS NULL AND claim_id IS NULL`
+         WHERE kind = ? AND consumed_at IS NULL`
       )
       .run(kind)
     database
@@ -131,7 +126,7 @@ export function issueOneTimeToken(
 
 export function readWriterStatus(database: Database.Database = getDb()): WriterStatus {
   const identity = readCatalogIdentity(database)
-  const waiting = fileMaintenanceBlocksHandoff(database)
+  const maintenanceBusy = fileMaintenanceBlocksHandoff(database)
   const claim = database
     .prepare(
       `SELECT claim_id FROM catalog_writer_credentials
@@ -143,7 +138,7 @@ export function readWriterStatus(database: Database.Database = getDb()): WriterS
     writerEpoch: identity?.writerEpoch ?? 0,
     bound: Boolean(identity && identity.writerEpoch > 0),
     claimId: claim?.claim_id ?? null,
-    waitingMaintenance: waiting
+    maintenanceBusy
   }
 }
 
@@ -157,7 +152,7 @@ export function readWriterClaim(
        FROM catalog_writer_claims WHERE claim_id = ?`
     )
     .get(claimId) as ClaimRow | undefined
-  if (!row) return null
+  if (!row || row.status === 'waitingMaintenance') return null
   return JSON.parse(row.result_json) as WriterClaimResult
 }
 
@@ -227,9 +222,6 @@ export function claimWriter(
       if (existing.status !== 'waitingMaintenance') {
         return JSON.parse(existing.result_json) as WriterClaimResult
       }
-      if (fileMaintenanceBlocksHandoff(database)) {
-        return JSON.parse(existing.result_json) as WriterClaimResult
-      }
       database.prepare('DELETE FROM catalog_writer_claims WHERE claim_id = ?').run(existing.claim_id)
     }
 
@@ -257,33 +249,7 @@ export function claimWriter(
       throw structuredError('AUTH_REQUIRED', '实例尚未认主')
     }
     if (input.kind !== 'initialBind' && fileMaintenanceBlocksHandoff(database)) {
-      const waiting: WriterClaimResult = {
-        claimId: input.candidate.claimId,
-        status: 'waitingMaintenance',
-        writerEpoch: identity.writerEpoch,
-        bound: identity.writerEpoch > 0
-      }
-      database
-        .prepare(
-          `INSERT INTO catalog_writer_claims (
-             claim_id, kind, candidate_secret_digest, status, writer_epoch, result_json, created_at, updated_at
-           ) VALUES (?, ?, ?, 'waitingMaintenance', ?, ?, ?, ?)`
-        )
-        .run(
-          input.candidate.claimId,
-          input.kind,
-          input.candidate.secretDigest,
-          identity.writerEpoch,
-          JSON.stringify(waiting),
-          at.toISOString(),
-          at.toISOString()
-        )
-      database
-        .prepare(
-          `UPDATE catalog_one_time_tokens SET claim_id = ? WHERE token_digest = ? AND consumed_at IS NULL`
-        )
-        .run(input.candidate.claimId, tokenDigest)
-      return waiting
+      throw structuredError('MAINTENANCE_BUSY', '当前有维护任务，请完成或取消任务后重新交接')
     }
 
     const nextEpoch = identity.writerEpoch + 1

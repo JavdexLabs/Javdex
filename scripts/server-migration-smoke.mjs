@@ -287,13 +287,13 @@ async function importPackageToReady({
 }
 
 async function enableMigration(base, migrationId, digest, token) {
-  return postManage(base, 'migration.enable', { input: { migrationId, digest } }, token)
+  return postManage(base, 'migration.enable', { input: { confirmSourceStopped: true, migrationId, digest } }, token)
 }
 
 async function assertTargetReady(base, migrationId, token, label) {
   const status = await postManage(base, 'migration.status', { input: { migrationId } }, token)
   assert.equal(status.status, 200, `${label} ${JSON.stringify(status.json)}`)
-  assert.equal(status.json.targetPhase, 'ready', `${label} phase=${status.json.targetPhase}`)
+  assert.equal(status.json.phase, 'ready', `${label} phase=${status.json.phase}`)
 }
 
 requireDocker()
@@ -404,11 +404,11 @@ try {
   const enabled = await postManage(
     targetBase,
     'migration.enable',
-    { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+    { input: { confirmSourceStopped: true, migrationId: mapped.migrationId, digest: mapped.digest } },
     targetToken
   )
   assert.equal(enabled.status, 200, JSON.stringify(enabled.json))
-  assert.equal(enabled.json.targetPhase, 'enabled')
+  assert.equal(enabled.json.phase, 'enabled')
 
   const sourceStatus = await postManage(
     sourceBase,
@@ -424,8 +424,8 @@ try {
   )
   assert.equal(sourceStatus.status, 200, JSON.stringify(sourceStatus.json))
   assert.equal(targetStatus.status, 200, JSON.stringify(targetStatus.json))
-  assert.equal(sourceStatus.json.sourcePhase, 'frozen')
-  assert.equal(targetStatus.json.targetPhase, 'enabled')
+  assert.equal(sourceStatus.json.phase, 'frozen')
+  assert.equal(targetStatus.json.phase, 'enabled')
 
   const sourceAfter = readFrozenAndCodes(path.join(sourceData, 'library.db'))
   const targetAfter = readFrozenAndCodes(path.join(targetData, 'library.db'))
@@ -457,7 +457,7 @@ try {
     postManage(
       raceBase,
       'migration.enable',
-      { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+      { input: { confirmSourceStopped: true, migrationId: mapped.migrationId, digest: mapped.digest } },
       raceToken
     ),
     postManage(
@@ -478,7 +478,7 @@ try {
     200,
     JSON.stringify({ raceStatus: raceStatus.json, raceEnabled, raceAbandoned })
   )
-  const racePhase = raceStatus.json.targetPhase
+  const racePhase = raceStatus.json.phase
   assert.ok(racePhase === 'enabled' || racePhase === 'abandoned', racePhase)
   if (racePhase === 'enabled') {
     const raceAfter = readFrozenAndCodes(path.join(raceData, 'library.db'))
@@ -492,12 +492,12 @@ try {
       raceToken
     )
     assert.equal(lateAbandon.status, 200, JSON.stringify(lateAbandon.json))
-    assert.equal(lateAbandon.json.targetPhase, 'enabled')
+    assert.equal(lateAbandon.json.phase, 'enabled')
   } else {
     const lateEnable = await postManage(
       raceBase,
       'migration.enable',
-      { input: { migrationId: mapped.migrationId, digest: mapped.digest } },
+      { input: { confirmSourceStopped: true, migrationId: mapped.migrationId, digest: mapped.digest } },
       raceToken
     )
     assert.equal(lateEnable.status, 401, JSON.stringify(lateEnable.json))
@@ -536,7 +536,7 @@ try {
     eaccesToken
   )
   assert.equal(eaccesRetried.status, 200, JSON.stringify(eaccesRetried.json))
-  assert.equal(eaccesRetried.json.targetPhase, 'enabled')
+  assert.equal(eaccesRetried.json.phase, 'enabled')
   assert.equal(fs.existsSync(path.join(eaccesImages, COVER_REL)), true)
 
   mountTmpfs(enospcImages, 'size=256k')
@@ -599,7 +599,7 @@ try {
     enospcToken
   )
   assert.equal(enospcRetried.status, 200, JSON.stringify(enospcRetried.json))
-  assert.equal(enospcRetried.json.targetPhase, 'enabled')
+  assert.equal(enospcRetried.json.phase, 'enabled')
   assert.equal(fs.existsSync(path.join(enospcImages, COVER_REL)), true)
 
   console.log(

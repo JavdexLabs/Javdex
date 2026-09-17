@@ -94,6 +94,16 @@ interface StoredOperationRow {
   result_json: string
 }
 
+export class VideoLifecycleRepoError extends Error {
+  constructor(
+    readonly code: 'REVISION_CONFLICT' | 'INVALID_INPUT',
+    message: string
+  ) {
+    super(message)
+    this.name = 'VideoLifecycleRepoError'
+  }
+}
+
 function requireId(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} 必须是正整数`)
   return value
@@ -615,7 +625,9 @@ export function createVideoLifecycleRepo(
         const replay = replayOrThrow(database, operationId, inputHash)
         if (replay) return replay
         const preview = previewRemoveFromLibrary(input.libraryId, input.videoId)
-        if (preview.revision !== input.expectedRevision) throw new Error('生命周期预览已过期')
+        if (preview.revision !== input.expectedRevision) {
+          throw new VideoLifecycleRepoError('REVISION_CONFLICT', '生命周期预览已过期')
+        }
         database
           .prepare(
             'DELETE FROM library_video_memberships WHERE library_id = ? AND video_id = ?'
@@ -652,7 +664,9 @@ export function createVideoLifecycleRepo(
           input.targetLibraryId,
           input.resourceId
         )
-        if (preview.revision !== input.expectedRevision) throw new Error('生命周期预览已过期')
+        if (preview.revision !== input.expectedRevision) {
+          throw new VideoLifecycleRepoError('REVISION_CONFLICT', '生命周期预览已过期')
+        }
         const resource = database
           .prepare('SELECT * FROM video_resources WHERE id = ? AND library_id = ?')
           .get(input.resourceId, input.sourceLibraryId) as VideoResource
@@ -732,7 +746,9 @@ export function createVideoLifecycleRepo(
         const videoId = requireId(input.videoId, '影片 ID')
         const snapshot = readGlobalDeleteSnapshot(database, videoId)
         const preview = buildGlobalDeleteImpact(snapshot)
-        if (preview.revision !== input.expectedRevision) throw new Error('生命周期预览已过期')
+        if (preview.revision !== input.expectedRevision) {
+          throw new VideoLifecycleRepoError('REVISION_CONFLICT', '生命周期预览已过期')
+        }
         database
           .prepare("DELETE FROM agent_metadata_drafts WHERE entity_kind = 'video' AND entity_id = ?")
           .run(videoId)

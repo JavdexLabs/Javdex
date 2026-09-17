@@ -5,6 +5,8 @@ import Database from 'better-sqlite3'
 import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
 import type {
   MigrationControlInput,
+  MigrationAbandonInput,
+  MigrationEnableInput,
   MigrationPreview,
   MigrationPreviewInput,
   MigrationStatus,
@@ -24,12 +26,18 @@ import { getPathAlias } from '@library/assetPathAliases'
 import { getDb } from '@library/db/database'
 import { digestEquals, digestRequest } from './catalogSecrets'
 import { readCatalogIdentity, setCatalogFrozen } from './catalogIdentity'
-import { readCatalogSetting, writeCatalogSetting } from './catalogSettings'
+import {
+  deleteCatalogSetting,
+  listCatalogSettingKeys,
+  readCatalogSetting,
+  writeCatalogSetting
+} from './catalogSettings'
 import { MIGRATION_AUTH_KEY } from './catalogMigrationAuth'
 import { putCatalogTask } from './catalogTasks'
 import {
   MIGRATION_FINAL_PREFIX,
   MIGRATION_STATE_KEY,
+  MIGRATION_TARGET_INTENT_PREFIX,
   catalogLooksEmpty,
   type StoredMigrationState
 } from './catalogMigrationState'
@@ -78,11 +86,36 @@ export function openIsolatedCatalog(dbPath: string): Database.Database {
 }
 
 function readState(database: Database.Database): StoredMigrationState | null {
-  return readCatalogSetting<StoredMigrationState | null>(MIGRATION_STATE_KEY, null, database)
+  return normalizeStoredMigration(readCatalogSetting<StoredMigrationState | null>(MIGRATION_STATE_KEY, null, database))
+}
+
+/** Preserve the local freeze when reading a pre-offline migration record. */
+function normalizeStoredMigration(state: StoredMigrationState | null): StoredMigrationState | null {
+  if (!state || state.phase) return state
+  const legacy = state as StoredMigrationState & {
+    sourcePhase?: string; targetPhase?: string; allowEnableAt?: string
+  }
+  const { sourcePhase, targetPhase, allowEnableAt: _obsoletePermission, ...local } = legacy
+  const prior = local.role === 'source' ? sourcePhase : targetPhase
+  const phase = prior === 'enableAuthorized' ? 'frozen' : prior
+  if (!phase || !['prepare', 'frozen', 'ready', 'enabled', 'abandoned'].includes(phase)) {
+    throw structuredError('RECOVERY_REQUIRED', '旧迁移状态无法识别，请检查本端资料库')
+  }
+  return { ...local, phase: phase as StoredMigrationState['phase'] }
+}
+
+function migrationStatus(state: StoredMigrationState): MigrationStatus {
+  return { migrationId: state.migrationId, role: state.role, phase: state.phase, digest: state.digest }
 }
 
 function writeState(state: StoredMigrationState, database: Database.Database): void {
   writeCatalogSetting(MIGRATION_STATE_KEY, state, database)
+}
+
+function readFinal(migrationId: string, database: Database.Database): StoredMigrationState | null {
+  return normalizeStoredMigration(readCatalogSetting<StoredMigrationState | null>(
+    `${MIGRATION_FINAL_PREFIX}${migrationId}`, null, database
+  ))
 }
 
 function writeFinal(state: StoredMigrationState, database: Database.Database): void {
@@ -266,12 +299,10 @@ export function previewCatalogMigration(
   database: Database.Database = getDb()
 ): MigrationPreview {
   const identity = readCatalogIdentity(database)
-  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  if (!identity) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
   const existing = readState(database)
-  if (existing && existing.role === 'source' && !['prepare', 'abandoned', 'enabled'].includes(existing.sourcePhase)) {
-    throw structuredError('MAINTENANCE_BUSY', '已有迁移尚未结束')
-  }
-  if (existing && existing.role === 'target' && !['prepare', 'abandoned', 'enabled'].includes(existing.targetPhase)) {
+  if (identity.frozen) throw structuredError('MAINTENANCE_BUSY', '当前资料库已冻结，请先处理本端迁移')
+  if (existing && !['prepare', 'abandoned', 'enabled'].includes(existing.phase)) {
     throw structuredError('MAINTENANCE_BUSY', '已有迁移尚未结束')
   }
   const { imagesDir, mediaMounts } = hostPaths(host)
@@ -306,13 +337,11 @@ export function previewCatalogMigration(
     },
     database
   )
-  const role: StoredMigrationState['role'] = catalogLooksEmpty(database) ? 'target' : 'source'
   writeState(
     {
       migrationId: preview.migrationId,
-      role,
-      sourcePhase: role === 'source' ? 'prepare' : 'prepare',
-      targetPhase: role === 'target' ? 'prepare' : 'prepare',
+      role: 'source',
+      phase: 'prepare',
       digest: preview.digest,
       mappings: input.mappings,
       preview,
@@ -422,7 +451,7 @@ async function importTargetPackage(
 ): Promise<StoredMigrationState> {
   const { userDataPath, mediaMounts } = hostPaths(host)
   const identity = readCatalogIdentity(database)
-  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  if (!identity) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
   if (!catalogLooksEmpty(database)) {
     throw structuredError('INVALID_INPUT', '只能迁入空目标资料库')
   }
@@ -484,8 +513,7 @@ async function importTargetPackage(
   return {
     migrationId: manifest.migrationId,
     role: 'target',
-    sourcePhase: 'frozen',
-    targetPhase: 'ready',
+    phase: 'ready',
     digest: manifest.previewDigest,
     mappings: manifest.mappings,
     preview: {
@@ -516,11 +544,16 @@ export async function startCatalogMigration(
   host: CatalogMigrationHost,
   database: Database.Database = getDb()
 ): Promise<CatalogTaskSnapshot | MigrationPreview> {
+  const final = readFinal(input.migrationId, database)
+  if (final) throw structuredError('INVALID_INPUT', '该迁移已结束，请创建新的导出/导入操作')
+  if (readCatalogIdentity(database)?.frozen) {
+    throw structuredError('MAINTENANCE_BUSY', '当前迁移尚未结束，请查看本端状态，不要重复开始')
+  }
   if (catalogLooksEmpty(database)) {
     return startTargetMigration(input, host, database)
   }
   const identity = readCatalogIdentity(database)
-  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  if (!identity) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
   const state = requireState(input, database)
   const { imagesDir } = hostPaths(host)
   if (state.role === 'source') {
@@ -552,7 +585,7 @@ export async function startCatalogMigration(
       const packageFile = await exportSourcePackage(state, host, database)
       const next: StoredMigrationState = {
         ...state,
-        sourcePhase: 'frozen',
+        phase: 'frozen',
         packageRel: path.relative(hostPaths(host).userDataPath, packageFile),
         taskId
       }
@@ -591,11 +624,18 @@ async function startTargetMigration(
   database: Database.Database
 ): Promise<CatalogTaskSnapshot> {
   const identity = readCatalogIdentity(database)
-  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  if (!identity) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  const intentKey = `${MIGRATION_TARGET_INTENT_PREFIX}${input.migrationId}`
+  writeCatalogSetting(intentKey, {
+    migrationId: input.migrationId,
+    digest: input.digest,
+    createdAt: new Date().toISOString()
+  }, database)
   setCatalogFrozen(true, database)
   try {
     const next = await importTargetPackage(input, host, database)
     writeState(next, database)
+    deleteCatalogSetting(intentKey, database)
     const snapshot: CatalogTaskSnapshot = {
       owner: 'catalog',
       taskId: randomUUID(),
@@ -610,6 +650,7 @@ async function startTargetMigration(
     return snapshot
   } catch (error) {
     setCatalogFrozen(false, database)
+    deleteCatalogSetting(intentKey, database)
     throw error
   }
 }
@@ -619,63 +660,32 @@ export function statusCatalogMigration(
   database: Database.Database = getDb()
 ): MigrationStatus {
   const live = readState(database)
-  const final = readCatalogSetting<StoredMigrationState | null>(
-    `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
-    null,
-    database
-  )
+  const final = readFinal(input.migrationId, database)
   const state = live?.migrationId === input.migrationId ? live : final
   if (!state) throw structuredError('INVALID_INPUT', '迁移不存在')
-  return {
-    migrationId: state.migrationId,
-    sourcePhase: state.sourcePhase,
-    targetPhase: state.targetPhase,
-    digest: state.digest
-  }
+  return migrationStatus(state)
 }
 
-export function allowEnableCatalogMigration(
-  input: MigrationControlInput,
-  database: Database.Database = getDb()
-): MigrationStatus {
-  const state = requireState(input, database)
-  if (state.role !== 'source') {
-    throw structuredError('INVALID_INPUT', '只有源端可以持久发出启用许可')
-  }
-  if (state.sourcePhase !== 'frozen' && state.sourcePhase !== 'enableAuthorized') {
-    throw structuredError('INVALID_INPUT', '源端尚未冻结，不能发出启用许可')
-  }
-  const next: StoredMigrationState = {
-    ...state,
-    sourcePhase: 'enableAuthorized',
-    allowEnableAt: new Date().toISOString()
-  }
-  writeState(next, database)
-  return statusCatalogMigration({ migrationId: input.migrationId }, database)
-}
 
 export function enableCatalogMigration(
-  input: MigrationControlInput,
+  input: MigrationEnableInput,
   host: CatalogMigrationHost,
   database: Database.Database = getDb()
 ): MigrationStatus {
-  const identity = readCatalogIdentity(database)
-  if (!identity?.serverId) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
-  const existingFinal = readCatalogSetting<StoredMigrationState | null>(
-    `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
-    null,
-    database
-  )
-  if (existingFinal?.targetPhase === 'abandoned') {
-    throw structuredError('AUTH_REQUIRED', '该迁移已放弃，迟到的启用许可无效')
+  if (input.confirmSourceStopped !== true) {
+    throw structuredError('INVALID_INPUT', '启用导入前必须确认源库已停止使用', { field: 'confirmSourceStopped' })
   }
-  if (existingFinal?.targetPhase === 'enabled') {
-    return {
-      migrationId: existingFinal.migrationId,
-      sourcePhase: existingFinal.sourcePhase,
-      targetPhase: existingFinal.targetPhase,
-      digest: existingFinal.digest
-    }
+  const identity = readCatalogIdentity(database)
+  if (!identity) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
+  const existingFinal = readFinal(input.migrationId, database)
+  if (existingFinal && !digestEquals(existingFinal.digest, input.digest)) {
+    throw structuredError('VERSION_CONFLICT', '导入摘要与已完成记录不一致')
+  }
+  if (existingFinal?.phase === 'abandoned') {
+    throw structuredError('AUTH_REQUIRED', '该迁移已放弃，不能再次启用该导入')
+  }
+  if (existingFinal?.phase === 'enabled') {
+    return migrationStatus(existingFinal)
   }
   const { userDataPath, imagesDir } = hostPaths(host)
   const workStaging = stagingDir(userDataPath, input.migrationId)
@@ -692,31 +702,25 @@ export function enableCatalogMigration(
   database.exec(`ATTACH DATABASE ${sqlLiteral(stagedDb)} AS migsrc`)
   try {
     const result = database.transaction(() => {
-      const final = readCatalogSetting<StoredMigrationState | null>(
-        `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
-        null,
-        database
-      )
-      if (final?.targetPhase === 'abandoned') {
-        throw structuredError('AUTH_REQUIRED', '该迁移已放弃，迟到的启用许可无效')
+      const final = readFinal(input.migrationId, database)
+      if (final?.phase === 'abandoned') {
+        throw structuredError('AUTH_REQUIRED', '该迁移已放弃，不能再次启用该导入')
       }
-      if (final?.targetPhase === 'enabled') {
-        return {
-          migrationId: final.migrationId,
-          sourcePhase: final.sourcePhase,
-          targetPhase: final.targetPhase,
-          digest: final.digest
-        }
+      if (final?.phase === 'enabled') {
+        return migrationStatus(final)
       }
       const state = requireState(input, database)
       if (state.role !== 'target') {
         throw structuredError('INVALID_INPUT', '只有目标可以启用迁入结果')
       }
-      if (state.targetPhase === 'enabled') {
+      if (state.phase === 'enabled') {
         return statusCatalogMigration({ migrationId: input.migrationId }, database)
       }
-      if (state.targetPhase !== 'ready') {
+      if (state.phase !== 'ready') {
         throw structuredError('INVALID_INPUT', '目标尚未就绪')
+      }
+      if (!catalogLooksEmpty(database) || identity.writerEpoch > 0) {
+        throw structuredError('INVALID_INPUT', '只能启用到未认主的空目标资料库')
       }
       copyAttachedCatalog(database, 'migsrc')
       const newCatalogId = randomUUID()
@@ -731,22 +735,16 @@ export function enableCatalogMigration(
       if (savedAuth) writeCatalogSetting(MIGRATION_AUTH_KEY, savedAuth, database)
       const next: StoredMigrationState = {
         ...state,
-        targetPhase: 'enabled',
-        sourcePhase: 'frozen',
+        phase: 'enabled',
         newCatalogId,
         enabledAt: now
       }
       writeState(next, database)
       writeFinal(next, database)
       justEnabled = true
-      return {
-        migrationId: next.migrationId,
-        sourcePhase: next.sourcePhase,
-        targetPhase: next.targetPhase,
-        digest: next.digest
-      }
+      return migrationStatus(next)
     })()
-    if (result.targetPhase === 'enabled' && fs.existsSync(appliedImages)) {
+    if (result.phase === 'enabled' && fs.existsSync(appliedImages)) {
       try {
         copiedRels = copyOfficialImages(appliedImages, imagesDir)
       } catch (error) {
@@ -777,69 +775,41 @@ export function enableCatalogMigration(
 }
 
 export function abandonCatalogMigration(
-  input: MigrationControlInput,
+  input: MigrationAbandonInput,
   host: CatalogMigrationHost,
   database: Database.Database = getDb()
 ): MigrationStatus {
   const identity = readCatalogIdentity(database)
   if (!identity) throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
   return database.transaction(() => {
-    const final = readCatalogSetting<StoredMigrationState | null>(
-      `${MIGRATION_FINAL_PREFIX}${input.migrationId}`,
-      null,
-      database
-    )
-    if (final?.targetPhase === 'enabled') {
-      return {
-        migrationId: final.migrationId,
-        sourcePhase: final.sourcePhase,
-        targetPhase: final.targetPhase,
-        digest: final.digest
-      }
+    const final = readFinal(input.migrationId, database)
+    if (final && !digestEquals(final.digest, input.digest)) {
+      throw structuredError('VERSION_CONFLICT', '迁移摘要与已完成记录不一致')
     }
-    if (final?.targetPhase === 'abandoned') {
-      return {
-        migrationId: final.migrationId,
-        sourcePhase: final.sourcePhase,
-        targetPhase: final.targetPhase,
-        digest: final.digest
-      }
+    if (final?.phase === 'enabled') {
+      return migrationStatus(final)
+    }
+    if (final?.phase === 'abandoned') {
+      return migrationStatus(final)
     }
     const state = requireState(input, database)
+    if ((state.role === 'source' && state.phase === 'prepare' && identity.frozen) ||
+      listCatalogSettingKeys(MIGRATION_TARGET_INTENT_PREFIX, database).length > 0) {
+      throw structuredError('MAINTENANCE_BUSY', '导出或导入仍在执行，请等待本端操作完成')
+    }
+    if (state.role === 'source' && state.phase === 'frozen' && input.confirmTargetStopped !== true) {
+      throw structuredError('INVALID_INPUT', '恢复源库前必须确认目标已停用；不支持双库并行写入', { field: 'confirmTargetStopped' })
+    }
     const now = (host.now ?? (() => new Date()))().toISOString()
-    if (state.role === 'target') {
-      const next: StoredMigrationState = {
-        ...state,
-        targetPhase: 'abandoned',
-        abandonedAt: now
-      }
-      writeState(next, database)
-      writeFinal(next, database)
-      setCatalogFrozen(false, database)
-      const { userDataPath } = hostPaths(host)
-      fs.rmSync(stagingDir(userDataPath, state.migrationId), { recursive: true, force: true })
-      return {
-        migrationId: next.migrationId,
-        sourcePhase: next.sourcePhase,
-        targetPhase: next.targetPhase,
-        digest: next.digest
-      }
-    }
-    const next: StoredMigrationState = {
-      ...state,
-      sourcePhase: 'abandoned',
-      targetPhase: 'abandoned',
-      abandonedAt: now
-    }
+    const next: StoredMigrationState = { ...state, phase: 'abandoned', abandonedAt: now }
     writeState(next, database)
     writeFinal(next, database)
     setCatalogFrozen(false, database)
-    return {
-      migrationId: next.migrationId,
-      sourcePhase: next.sourcePhase,
-      targetPhase: next.targetPhase,
-      digest: next.digest
+    if (state.role === 'target') {
+      const { userDataPath } = hostPaths(host)
+      fs.rmSync(stagingDir(userDataPath, state.migrationId), { recursive: true, force: true })
     }
+    return migrationStatus(next)
   })()
 }
 
@@ -849,13 +819,25 @@ function sqlLiteral(value: string): string {
 
 export function recoverCatalogMigration(database: Database.Database = getDb()): void {
   const state = readState(database)
-  if (!state) return
   const identity = readCatalogIdentity(database)
-  if (state.role === 'source' && state.sourcePhase === 'prepare' && identity?.frozen) {
+  for (const key of listCatalogSettingKeys(MIGRATION_TARGET_INTENT_PREFIX, database)) {
+    const intent = readCatalogSetting<{ migrationId?: string } | null>(key, null, database)
+    const matches = Boolean(intent?.migrationId && state?.migrationId === intent.migrationId)
+    const targetReady = matches && state?.role === 'target' && state.phase === 'ready'
+    // Only an intent belonging to the current migration (or an otherwise
+    // state-less empty target) may release the freeze. A stale key must not
+    // unfreeze an unrelated source/target migration.
+    if ((!state || matches) && !targetReady && identity?.frozen) {
+      setCatalogFrozen(false, database)
+    }
+    deleteCatalogSetting(key, database)
+  }
+  if (!state) return
+  if (state.role === 'source' && state.phase === 'prepare' && identity?.frozen) {
     setCatalogFrozen(false, database)
     return
   }
-  if (state.role === 'target' && state.targetPhase !== 'enabled' && state.targetPhase !== 'abandoned') {
+  if (state.role === 'target' && state.phase !== 'enabled' && state.phase !== 'abandoned') {
     if (identity && !identity.frozen) setCatalogFrozen(true, database)
   }
 }

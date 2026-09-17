@@ -146,6 +146,8 @@ export function applyVideoScrapeCandidate(input: {
   fields: VideoScrapeField[]
   mode: VideoScrapeUpdateMode
   candidate: unknown
+  sourceName?: string
+  ratingSourceName?: string
   cover?: CatalogImageRef
   samples?: CatalogImageRef[]
   actressAvatars?: Array<{ name: string; image: CatalogImageRef }>
@@ -177,7 +179,7 @@ export function applyVideoScrapeCandidate(input: {
   )
   if (conflictVideoId != null) {
     throw structuredError(
-      'INVALID_INPUT',
+      'IDENTITY_CONFLICT',
       `候选会与影片 ID ${conflictVideoId} 的业务身份冲突，请改为待确认提交`,
       { entityKind: 'video', entityId: conflictVideoId, field: 'candidate' },
       input.operationId
@@ -237,9 +239,9 @@ export function applyVideoScrapeCandidate(input: {
     actressAvatars,
     samplePaths,
     input.fields,
-    undefined,
+    input.sourceName,
     input.mode,
-    undefined,
+    input.ratingSourceName,
     classificationOptions
   )
   if (applied.applied) {
@@ -294,7 +296,7 @@ export function applyActressScrapeCandidate(input: {
   const conflicts = findActressScrapeNameConflicts(input.actressId, fields, result)
   if (conflicts.length > 0) {
     throw structuredError(
-      'INVALID_INPUT',
+      'IDENTITY_CONFLICT',
       '存在名称归属冲突，请改为冲突提交',
       { entityKind: 'actress', entityId: input.actressId, field: 'candidate' },
       input.operationId

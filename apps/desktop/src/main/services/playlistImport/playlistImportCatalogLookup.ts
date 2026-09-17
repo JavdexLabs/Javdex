@@ -71,6 +71,53 @@ export function catalogIdentityRevision(record: PlaylistImportCatalogVideoRecord
     .digest('hex')
 }
 
+const SOURCE_LOOKUP_PAGE_SIZE = 50
+
+async function listAllCatalogSourceItems(
+  catalog: CatalogBackend,
+  query: { source: string; externalCode?: string; url?: string }
+): Promise<Array<{
+  videoId: number
+  code?: string
+  sources?: PlaylistImportCatalogVideoRecord['sources']
+}>> {
+  const items: Array<{
+    videoId: number
+    code?: string
+    sources?: PlaylistImportCatalogVideoRecord['sources']
+  }> = []
+  let offset = 0
+  for (;;) {
+    const page = (await catalog.queries.listVideoSources({
+      ...query,
+      limit: SOURCE_LOOKUP_PAGE_SIZE,
+      offset
+    })) as {
+      items?: Array<{
+        videoId: number
+        code?: string
+        sources?: PlaylistImportCatalogVideoRecord['sources']
+      }>
+      total?: number
+    }
+    if (!page || !Array.isArray(page.items)) {
+      throw new Error('来源查询响应无效。')
+    }
+    items.push(...page.items)
+    const nextOffset = offset + page.items.length
+    if (
+      page.items.length === 0 ||
+      page.items.length < SOURCE_LOOKUP_PAGE_SIZE ||
+      (typeof page.total === 'number' && nextOffset >= page.total)
+    ) {
+      break
+    }
+    if (nextOffset > 1_000_000) throw new Error('来源查询结果超过支持范围。')
+    offset = nextOffset
+  }
+  return items
+}
+
 export function createMemoryPlaylistImportCatalogLookup(): PlaylistImportCatalogLookup & {
   ingestCodes(catalog: CatalogBackend, codes: Array<string | null | undefined>): Promise<void>
   ingestSourceIdentity(
@@ -248,43 +295,60 @@ export function createMemoryPlaylistImportCatalogLookup(): PlaylistImportCatalog
     async ingestSourceIdentity(catalog, identity) {
       const source = identity.source?.trim()
       if (!source) return
-      const query = identity.externalCode?.trim()
-        ? { source, externalCode: identity.externalCode.trim(), limit: 50, offset: 0 }
-        : identity.sourceUrl?.trim()
-          ? { source, url: identity.sourceUrl.trim(), limit: 50, offset: 0 }
-          : null
-      if (!query) return
-      const page = (await catalog.queries.listVideoSources(query)) as {
-        items?: Array<{
-          videoId: number
-          code?: string
-          sources?: PlaylistImportCatalogVideoRecord['sources']
-        }>
-      }
-      if (!page || !Array.isArray(page.items)) {
-        throw new Error('来源查询响应无效。')
-      }
-      for (const item of page.items) {
-        const sources = item.sources ?? []
-        const existing = byId.get(item.videoId)
-        if (existing) {
-          byId.set(item.videoId, { ...existing, sources })
-          continue
+      const queries = [
+        ...(identity.externalCode?.trim()
+          ? [{ source, externalCode: identity.externalCode.trim(), limit: 50, offset: 0 }]
+          : []),
+        ...(identity.sourceUrl?.trim()
+          ? [{ source, url: identity.sourceUrl.trim(), limit: 50, offset: 0 }]
+          : [])
+      ]
+      if (queries.length === 0) return
+
+      const mergeSources = (
+        current: PlaylistImportCatalogVideoRecord['sources'],
+        incoming: PlaylistImportCatalogVideoRecord['sources']
+      ): PlaylistImportCatalogVideoRecord['sources'] => {
+        const merged = [...current]
+        for (const next of incoming) {
+          const duplicate = merged.some((entry) =>
+            entry.source.trim().toLowerCase() === next.source.trim().toLowerCase() &&
+            (entry.externalCode ?? '').trim().toUpperCase() ===
+              (next.externalCode ?? '').trim().toUpperCase() &&
+            (entry.url ?? '').trim() === (next.url ?? '').trim()
+          )
+          if (!duplicate) merged.push(next)
         }
-        ingest({
-          videoId: item.videoId,
-          code: item.code ?? '',
-          title: null,
-          publisher: null,
-          publisherOrganizationId: null,
-          releaseDate: null,
-          libraryIds: [],
-          libraryNames: [],
-          relatedUrls: [],
-          relatedLinks: [],
-          sources,
-          resourceKinds: []
-        })
+        return merged
+      }
+
+      for (const query of queries) {
+        const items = await listAllCatalogSourceItems(catalog, query)
+        for (const item of items) {
+          const sources = item.sources ?? []
+          const existing = byId.get(item.videoId)
+          if (existing) {
+            byId.set(item.videoId, {
+              ...existing,
+              sources: mergeSources(existing.sources, sources)
+            })
+            continue
+          }
+          ingest({
+            videoId: item.videoId,
+            code: item.code ?? '',
+            title: null,
+            publisher: null,
+            publisherOrganizationId: null,
+            releaseDate: null,
+            libraryIds: [],
+            libraryNames: [],
+            relatedUrls: [],
+            relatedLinks: [],
+            sources,
+            resourceKinds: []
+          })
+        }
       }
     }
   }

@@ -15,7 +15,6 @@ import { ensureCatalogIdentity, readCatalogIdentity } from './catalogIdentity'
 import { issueCatalogMigrationToken, authenticateMigration } from './catalogMigrationAuth'
 import {
   abandonCatalogMigration,
-  allowEnableCatalogMigration,
   enableCatalogMigration,
   openIsolatedCatalog,
   previewCatalogMigration,
@@ -66,7 +65,8 @@ describe('catalogMigration protocol', () => {
     for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
   })
 
-  it('previews unmapped STRM conversion, rejects mapping errors, and round-trips into an empty target', async () => {
+  for (const sourceLocal of [false, true]) {
+  it(`exports an offline package ${sourceLocal ? 'local to server' : 'server to local'} without the source running`, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s12-mig-'))
     roots.push(root)
     const sourceDir = path.join(root, 'source')
@@ -85,10 +85,10 @@ describe('catalogMigration protocol', () => {
     const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
     const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
     try {
-      const sourceId = ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
-      const targetId = ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
-      assert.ok(sourceId.serverId)
-      assert.ok(targetId.serverId)
+      const sourceId = ensureCatalogIdentity({ serverId: sourceLocal ? null : randomUUID() }, sourceDb)
+      const targetId = ensureCatalogIdentity({ serverId: sourceLocal ? randomUUID() : null }, targetDb)
+      assert.equal(sourceId.serverId === null, sourceLocal)
+      assert.equal(targetId.serverId === null, !sourceLocal)
 
       const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
       const unmappedRootId = insertRoot(sourceDb, 1, unmappedMount)
@@ -173,20 +173,26 @@ describe('catalogMigration protocol', () => {
       assert.deepEqual(preview.autoCleanupDisabledLibraryIds, [1])
       assert.deepEqual(preview.pendingBlockers, [])
 
-      const started = await startCatalogMigration(
+      const exporting = startCatalogMigration(
         { migrationId: preview.migrationId, digest: preview.digest },
         sourceHost,
         sourceDb
       )
+      assert.throws(() => previewCatalogMigration({ mappings: [] }, sourceHost, sourceDb),
+        (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
+      assert.throws(() => abandonCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest, confirmTargetStopped: true }, sourceHost, sourceDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
+      const started = await exporting
       assert.equal((started as { state?: string }).state, 'succeeded')
       assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
       const pkg = migrationPackagePath(preview.migrationId, sourceHost)
       assert.equal(fs.existsSync(pkg), true)
-      const allowed = allowEnableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
-        sourceDb
-      )
-      assert.equal(allowed.sourcePhase, 'enableAuthorized')
+      const sourceStatus = statusCatalogMigration({ migrationId: preview.migrationId }, sourceDb)
+      assert.equal(sourceStatus.role, 'source')
+      assert.equal(sourceStatus.phase, 'frozen')
+      assert.equal('targetPhase' in sourceStatus, false)
+      sourceDb.close() // The target must not need source reachability or permission.
 
       configureLibraryHost({
         userDataPath: () => targetDir,
@@ -199,8 +205,10 @@ describe('catalogMigration protocol', () => {
         imagesDir: targetImages,
         mediaMounts: { mapped: targetMount }
       }
-      const issued = issueCatalogMigrationToken({}, targetDb)
-      authenticateMigration(issued.oneTimeToken, targetDb)
+      if (targetId.serverId) {
+        const issued = issueCatalogMigrationToken({}, targetDb)
+        authenticateMigration(issued.oneTimeToken, targetDb)
+      }
       stageMigrationPackageFile(preview.migrationId, pkg, targetHost)
       const imported = await startCatalogMigration(
         { migrationId: preview.migrationId, digest: preview.digest },
@@ -208,12 +216,27 @@ describe('catalogMigration protocol', () => {
         targetDb
       )
       assert.equal((imported as { state?: string }).state, 'succeeded')
+      const ready = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
+      assert.equal(ready.role, 'target')
+      assert.equal(ready.phase, 'ready')
+      assert.equal('sourcePhase' in ready, false)
+      await assert.rejects(startCatalogMigration(
+        { migrationId: randomUUID(), digest: preview.digest }, targetHost, targetDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
       const enabled = enableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
         targetHost,
         targetDb
       )
-      assert.equal(enabled.targetPhase, 'enabled')
+      assert.equal(enabled.phase, 'enabled')
+      assert.deepEqual(enableCatalogMigration(
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
+        targetHost, targetDb
+      ), enabled)
+      assert.throws(() => enableCatalogMigration(
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: '0'.repeat(64) },
+        targetHost, targetDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT')
       const newIdentity = readCatalogIdentity(targetDb)
       assert.ok(newIdentity)
       assert.notEqual(newIdentity.catalogId, sourceId.catalogId)
@@ -247,17 +270,17 @@ describe('catalogMigration protocol', () => {
         targetDb.prepare('SELECT COUNT(*) AS n FROM media_library_roots').get() as { n: number }
       ).n
       assert.equal(rootsOnTarget, 1)
-      const sourceStillFrozen = readCatalogIdentity(sourceDb)
-      assert.equal(sourceStillFrozen?.frozen, true)
       const mappedLocal = targetDb
         .prepare("SELECT locator FROM video_resources WHERE kind = 'local'")
         .get() as { locator: string }
       assert.equal(mappedLocal.locator.startsWith(targetMount), true)
     } finally {
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
       targetDb.close()
     }
   })
+
+  }
 
   it('serializes target enable versus abandon and rejects late enable', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s12-race-'))
@@ -322,25 +345,25 @@ describe('catalogMigration protocol', () => {
         targetHost,
         targetDb
       )
-      assert.equal(abandoned.targetPhase, 'abandoned')
+      assert.equal(abandoned.phase, 'abandoned')
       assert.throws(
         () =>
           enableCatalogMigration(
-            { migrationId: preview.migrationId, digest: preview.digest },
+            { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
             targetHost,
             targetDb
           ),
         (error: unknown) => isStructuredError(error) && error.code === 'AUTH_REQUIRED'
       )
       const status = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
-      assert.equal(status.targetPhase, 'abandoned')
+      assert.equal(status.phase, 'abandoned')
     } finally {
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
       targetDb.close()
     }
   })
 
-  it('lets the source coordinator abandon a frozen catalog that never enabled', async () => {
+  it('requires explicit target-stopped confirmation to resume an exported source', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s12-abandon-src-'))
     roots.push(root)
     const sourceDir = path.join(root, 'source')
@@ -377,15 +400,19 @@ describe('catalogMigration protocol', () => {
         sourceDb
       )
       assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
+      assert.throws(() => abandonCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest }, sourceHost, sourceDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
       const abandoned = abandonCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
+        { migrationId: preview.migrationId, digest: preview.digest, confirmTargetStopped: true },
         sourceHost,
         sourceDb
       )
-      assert.equal(abandoned.sourcePhase, 'abandoned')
+      assert.equal(abandoned.phase, 'abandoned')
       assert.equal(readCatalogIdentity(sourceDb)?.frozen, false)
     } finally {
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
     }
   })
 
@@ -443,7 +470,7 @@ describe('catalogMigration protocol', () => {
       )
       assert.equal(readCatalogIdentity(sourceDb)?.frozen, false)
     } finally {
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
     }
   })
 
@@ -516,7 +543,7 @@ describe('catalogMigration protocol', () => {
         packedDb.close()
       }
     } finally {
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
     }
   })
 
@@ -573,7 +600,7 @@ describe('catalogMigration protocol', () => {
       )
       assert.equal(readCatalogIdentity(sourceDb)?.frozen, false)
     } finally {
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
     }
   })
 
@@ -622,10 +649,6 @@ describe('catalogMigration protocol', () => {
         sourceHost,
         sourceDb
       )
-      allowEnableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
-        sourceDb
-      )
       const targetHost = {
         appVersion: '0.7.0',
         userDataPath: targetDir,
@@ -649,7 +672,7 @@ describe('catalogMigration protocol', () => {
         assert.throws(
           () =>
             enableCatalogMigration(
-              { migrationId: preview.migrationId, digest: preview.digest },
+              { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
               targetHost,
               targetDb
             ),
@@ -660,15 +683,15 @@ describe('catalogMigration protocol', () => {
         fs.chmodSync(targetImages, 0o755)
       }
       const status = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
-      assert.equal(status.targetPhase, 'ready')
+      assert.equal(status.phase, 'ready')
       assert.equal(fs.existsSync(path.join(targetImages, coverRel)), false)
       assert.equal(catalogLooksEmpty(targetDb), true)
       const retried = enableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
         targetHost,
         targetDb
       )
-      assert.equal(retried.targetPhase, 'enabled')
+      assert.equal(retried.phase, 'enabled')
       assert.equal(fs.existsSync(path.join(targetImages, coverRel)), true)
     } finally {
       try {
@@ -676,7 +699,7 @@ describe('catalogMigration protocol', () => {
       } catch {
         // Directory may already be writable.
       }
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
       targetDb.close()
     }
   })
@@ -724,10 +747,6 @@ describe('catalogMigration protocol', () => {
       await startCatalogMigration(
         { migrationId: preview.migrationId, digest: preview.digest },
         sourceHost,
-        sourceDb
-      )
-      allowEnableCatalogMigration(
-        { migrationId: preview.migrationId, digest: preview.digest },
         sourceDb
       )
       const targetHost = {
@@ -789,23 +808,23 @@ describe('catalogMigration protocol', () => {
       assert.ok(line, `enospc child failed: exit=${result.status}\n${result.stdout}\n${result.stderr}`)
       const report = JSON.parse(line) as {
         code: string | null
-        targetPhase: string
+        phase: string
         coverExists: boolean
       }
       assert.equal(report.code, 'ENOSPC', JSON.stringify(report))
-      assert.equal(report.targetPhase, 'ready')
+      assert.equal(report.phase, 'ready')
       assert.equal(report.coverExists, false)
       const reopened = openIsolatedCatalog(path.join(targetDir, 'library.db'))
       try {
         const status = statusCatalogMigration({ migrationId: preview.migrationId }, reopened)
-        assert.equal(status.targetPhase, 'ready')
+        assert.equal(status.phase, 'ready')
         assert.equal(fs.existsSync(path.join(targetImages, coverRel)), false)
         assert.equal(catalogLooksEmpty(reopened), true)
       } finally {
         reopened.close()
       }
     } finally {
-      sourceDb.close()
+      if (sourceDb.open) sourceDb.close()
       try {
         targetDb.close()
       } catch {

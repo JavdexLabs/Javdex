@@ -1242,7 +1242,7 @@ describe('server runtime lifecycle', () => {
     }
   })
 
-  it('holds a handoff claim at waitingMaintenance until the running scan finishes', async () => {
+  it('rejects handoff while a scan runs and lets the user retry after completion', async () => {
     const mount = path.join(root, 'm06-scan-media')
     fs.mkdirSync(mount, { recursive: true })
     fs.writeFileSync(path.join(mount, 'M06-001.mp4'), Buffer.from('0123456789abcdef'))
@@ -1336,9 +1336,8 @@ describe('server runtime lifecycle', () => {
           candidate
         }
       })
-      assert.equal(waiting.status, 200, JSON.stringify(waiting.json))
-      assert.equal((waiting.json as { status: string }).status, 'waitingMaintenance')
-      assert.equal((waiting.json as { writerEpoch: number }).writerEpoch, epoch)
+      assert.equal(waiting.status, 409, JSON.stringify(waiting.json))
+      assert.equal((waiting.json as { code: string }).code, 'MAINTENANCE_BUSY')
       const overlap = await write('scans.run', versions(library), { libraryId: 1 })
       assert.equal(overlap.status, 409, JSON.stringify(overlap.json))
       assert.equal((overlap.json as { code?: string }).code, 'MAINTENANCE_BUSY')
@@ -1348,13 +1347,9 @@ describe('server runtime lifecycle', () => {
       const status = await read('writer.status', {})
       assert.equal(status.status, 200, JSON.stringify(status.json))
       library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
-      const blocked = await write('scans.run', versions(library), { libraryId: 1 })
-      assert.equal(blocked.status, 409, JSON.stringify(blocked.json))
-      assert.equal((blocked.json as { code?: string }).code, 'MAINTENANCE_BUSY')
-      assert.equal(
-        (blocked.json as { message?: string }).message,
-        '交接等待期间不能开始新的维护'
-      )
+      const unblocked = await write('scans.run', versions(library), { libraryId: 1 })
+      assert.equal(unblocked.status, 200, JSON.stringify(unblocked.json))
+      assert.equal((await pollTask((unblocked.json as { taskId: string }).taskId)).state, 'succeeded')
       const consumed = await postManage(base, 'writer.claim', {
         serverId: writer.serverId,
         catalogId: writer.catalogId,
@@ -1686,10 +1681,10 @@ describe('server runtime lifecycle', () => {
       }
       assert.equal(actress.id, independentId)
       assert.equal(actress.main_name, 'Independent Star')
-      const playlist = (await backend.playlists.create(
+      const playlist = { playlistId: await backend.playlists.create(
         { name: 'M01 Hidden List' },
         { operationId: randomUUID(), expectedVersions: {} }
-      )) as { playlistId: number }
+      ) }
       await backend.playlists.addVideo(
         { playlistId: playlist.playlistId, videoId },
         {
@@ -1892,10 +1887,10 @@ describe('server runtime lifecycle', () => {
       assert.equal(orgs.some((row) => row.id === orgId && row.mainName === 'S08 Studio'), true)
       assert.equal(localOrgs.some((row) => row.id === orgId && row.mainName === 'S08 Studio'), true)
 
-      const playlist = (await remote.playlists.create(
+      const playlist = { playlistId: await remote.playlists.create(
         { name: 'S08 List' },
         { operationId: randomUUID(), expectedVersions: {} }
-      )) as { playlistId: number }
+      ) }
       const added = await remote.playlists.addVideo(
         { playlistId: playlist.playlistId, videoId },
         {
@@ -4146,9 +4141,9 @@ describe('server runtime lifecycle', () => {
     })
     try {
       const status = (await remote.migration.status({ migrationId: body.migrationId })) as {
-        sourcePhase: string
+        phase: string
       }
-      assert.equal(status.sourcePhase, 'frozen')
+      assert.equal(status.phase, 'frozen')
     } finally {
       await remote.dispose()
     }

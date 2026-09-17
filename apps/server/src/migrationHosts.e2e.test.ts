@@ -334,7 +334,7 @@ if (hostConfigRaw) {
         postManage(
           targetBase,
           'migration.enable',
-          { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+          { input: { confirmSourceStopped: true, migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
           targetToken
         ),
         postManage(
@@ -351,7 +351,7 @@ if (hostConfigRaw) {
         targetToken
       )
       assert.equal(status.status, 200, JSON.stringify({ status: status.json, enabled, abandoned }))
-      const phase = (status.json as { targetPhase: string }).targetPhase
+      const phase = (status.json as { phase: string }).phase
       assert.ok(phase === 'enabled' || phase === 'abandoned', phase)
       if (phase === 'enabled') {
         const live = new Database(path.join(targetDir, 'library.db'), { readonly: true, fileMustExist: true })
@@ -373,12 +373,12 @@ if (hostConfigRaw) {
           targetToken
         )
         assert.equal(lateAbandon.status, 200)
-        assert.equal((lateAbandon.json as { targetPhase: string }).targetPhase, 'enabled')
+        assert.equal((lateAbandon.json as { phase: string }).phase, 'enabled')
       } else {
         const lateEnable = await postManage(
           targetBase,
           'migration.enable',
-          { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+          { input: { confirmSourceStopped: true, migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
           targetToken
         )
         assert.equal(lateEnable.status, 401)
@@ -464,11 +464,11 @@ if (hostConfigRaw) {
       const enabled = await postManage(
         targetBase,
         'migration.enable',
-        { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+        { input: { confirmSourceStopped: true, migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
         targetToken
       )
       assert.equal(enabled.status, 200, JSON.stringify(enabled.json))
-      assert.equal((enabled.json as { targetPhase: string }).targetPhase, 'enabled')
+      assert.equal((enabled.json as { phase: string }).phase, 'enabled')
 
       await stopChild(sourceChild)
       await stopChild(targetChild)
@@ -494,8 +494,8 @@ if (hostConfigRaw) {
       )
       assert.equal(sourceStatus.status, 200, JSON.stringify(sourceStatus.json))
       assert.equal(targetStatus.status, 200, JSON.stringify(targetStatus.json))
-      assert.equal((sourceStatus.json as { sourcePhase: string }).sourcePhase, 'frozen')
-      assert.equal((targetStatus.json as { targetPhase: string }).targetPhase, 'enabled')
+      assert.equal((sourceStatus.json as { phase: string }).phase, 'frozen')
+      assert.equal((targetStatus.json as { phase: string }).phase, 'enabled')
       const live = new Database(path.join(targetDir, 'library.db'), { readonly: true, fileMustExist: true })
       try {
         const identity = readCatalogIdentity(live)
@@ -512,11 +512,11 @@ if (hostConfigRaw) {
       const lateEnable = await postManage(
         targetBase,
         'migration.enable',
-        { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+        { input: { confirmSourceStopped: true, migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
         targetToken
       )
       assert.equal(lateEnable.status, 200, JSON.stringify(lateEnable.json))
-      assert.equal((lateEnable.json as { targetPhase: string }).targetPhase, 'enabled')
+      assert.equal((lateEnable.json as { phase: string }).phase, 'enabled')
     })
 
     it('re-reads exclusive terminal state after dropping enable and abandon responses and restarting both hosts', async () => {
@@ -606,7 +606,7 @@ if (hostConfigRaw) {
       const enableRequest = fetch(`${targetBase}/manage/v1/migration.enable`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } })
+        body: JSON.stringify({ input: { confirmSourceStopped: true, migrationId: mappedBody.migrationId, digest: mappedBody.digest } })
       })
       const abandonRequest = fetch(`${targetBase}/manage/v1/migration.abandon`, {
         method: 'POST',
@@ -639,15 +639,15 @@ if (hostConfigRaw) {
       )
       assert.equal(sourceStatus.status, 200, JSON.stringify(sourceStatus.json))
       assert.equal(targetStatus.status, 200, JSON.stringify(targetStatus.json))
-      assert.equal((sourceStatus.json as { sourcePhase: string }).sourcePhase, 'frozen')
-      let phase = (targetStatus.json as { targetPhase: string }).targetPhase
+      assert.equal((sourceStatus.json as { phase: string }).phase, 'frozen')
+      let phase = (targetStatus.json as { phase: string }).phase
       assert.ok(['ready', 'enabled', 'abandoned'].includes(phase), phase)
       if (phase === 'ready') {
         const [enabled, abandoned] = await Promise.all([
           postManage(
             targetBase,
             'migration.enable',
-            { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+            { input: { confirmSourceStopped: true, migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
             targetToken
           ),
           postManage(
@@ -664,7 +664,7 @@ if (hostConfigRaw) {
           targetToken
         )
         assert.equal(after.status, 200, JSON.stringify({ after: after.json, enabled, abandoned }))
-        phase = (after.json as { targetPhase: string }).targetPhase
+        phase = (after.json as { phase: string }).phase
       }
       assert.ok(phase === 'enabled' || phase === 'abandoned', phase)
       if (phase === 'enabled') {
@@ -687,12 +687,12 @@ if (hostConfigRaw) {
           targetToken
         )
         assert.equal(lateAbandon.status, 200)
-        assert.equal((lateAbandon.json as { targetPhase: string }).targetPhase, 'enabled')
+        assert.equal((lateAbandon.json as { phase: string }).phase, 'enabled')
       } else {
         const lateEnable = await postManage(
           targetBase,
           'migration.enable',
-          { input: { migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
+          { input: { confirmSourceStopped: true, migrationId: mappedBody.migrationId, digest: mappedBody.digest } },
           targetToken
         )
         assert.equal(lateEnable.status, 401)
@@ -925,11 +925,11 @@ if (hostConfigRaw) {
         const enabled = await postManage(
           targetBase,
           'migration.enable',
-          { input: { migrationId: body.migrationId, digest: body.digest } },
+          { input: { confirmSourceStopped: true, migrationId: body.migrationId, digest: body.digest } },
           targetToken
         )
         assert.equal(enabled.status, 200, JSON.stringify(enabled.json))
-        assert.equal((enabled.json as { targetPhase: string }).targetPhase, 'enabled')
+        assert.equal((enabled.json as { phase: string }).phase, 'enabled')
 
         const targetLive = new Database(path.join(targetDir, 'library.db'), {
           readonly: true,

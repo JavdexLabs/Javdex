@@ -81,13 +81,23 @@ export function createBatchScrapeJob<TTarget extends { id: number }>(
   kind: BatchScrapeJobKind,
   request: PersistedBatchScrapeJob['request'],
   targets: TTarget[],
-  getLabel: (target: TTarget) => string
+  getLabel: (target: TTarget) => string,
+  catalogKey = 'local'
 ): PersistedBatchScrapeJob {
   return {
     jobId: randomUUID(),
     kind,
     request,
-    targets: targets.map((target) => ({ id: target.id, label: getLabel(target) })),
+    targets: targets.map((target) => ({
+      id: target.id,
+      label: getLabel(target),
+      ...('generation' in target
+        ? { generation: (target as { generation?: number | null }).generation ?? null }
+        : {}),
+      ...('revision' in target
+        ? { revision: (target as { revision?: number | null }).revision ?? null }
+        : {})
+    })),
     nextIndex: 0,
     success: 0,
     pending: 0,
@@ -95,7 +105,8 @@ export function createBatchScrapeJob<TTarget extends { id: number }>(
     logs: [],
     total: targets.length,
     status: 'running',
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    catalogKey
   }
 }
 

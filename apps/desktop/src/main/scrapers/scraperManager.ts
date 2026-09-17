@@ -40,6 +40,7 @@ import {
 import { getSettings } from '../settings/settingsStore'
 import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
 import { mediaAssetStore } from '@library/mediaAssetStore'
+import { runVideoCandidateWorkflow } from '../services/scrapeCandidateWorkflow'
 
 /** Registry imports — see file bottom for registration. */
 import type { BaseScraper } from './BaseScraper'
@@ -163,6 +164,7 @@ export interface ScrapeOutcome {
   ok: boolean
   result?: ScrapeResult
   error?: string
+  errorDetails?: import('@shared/protocol/errors').StructuredError
   /** True when the plugin matched but no selected field could be applied. */
   skipped?: boolean
   warnings?: string[]
@@ -178,6 +180,8 @@ export interface ScrapeVideoOptions {
   mode?: VideoScrapeUpdateMode
   directorSelectionId?: number
   directorAmbiguity?: 'choice' | 'preserve'
+  /** Optional row revision captured before a batch began. */
+  expectedVersion?: { generation?: number; revision: number }
   delayController?: {
     run<T>(kind: 'video', pluginName: string, task: () => Promise<T>): Promise<T>
   }
@@ -433,174 +437,139 @@ export async function scrapeVideo(
   }
 
   try {
-    const collectedRun = await collectVideoScrape({
+    return await runVideoCandidateWorkflow({
       videoId,
       code: video.code,
       scraperName: resolvedScraperName,
       fields: effective,
+      singleSourceFieldsToApply: requested,
       delayController: options?.delayController
-    })
-    const { collected, compositeOutcome, source, descriptor: runDescriptor } = collectedRun
-    const candidate = collected.candidates[0]
-    const result = candidate?.result
-    if (!result) {
-      if (
-        source?.descriptor.kind === 'local-nfo' ||
-        compositeOutcome?.quietNoMatch
-      ) {
-        return { ok: true, skipped: true, warnings: collected.warnings }
-      }
-      markScrapeFailed(videoId)
-      return {
-        ok: false,
-        error: '未找到匹配的元数据',
-        warnings: collected.warnings
-      }
-    }
-
-    const hasAmbiguousSource = source
-      ? collected.candidates.length > 1
-      : compositeOutcome?.sources.some((item) => item.candidates.length > 1) ?? false
-    const fieldsToApply = compositeOutcome?.matchedFields ?? requested
-    const identityConflictVideoId =
-      !hasAmbiguousSource
-        ? findVideoBusinessIdentityConflictForScrape(
-            videoId,
-            result,
-            fieldsToApply,
-            mode
+    }, {
+      collect: collectVideoScrape,
+      markFailed: () => { markScrapeFailed(videoId) },
+      prepare: ({ ambiguous, candidate, fieldsToApply }) =>
+        ambiguous ? null : findVideoBusinessIdentityConflictForScrape(
+          videoId, candidate.result, fieldsToApply, mode
+        ),
+      reviewWarnings: (_plan, conflictId) => conflictId == null ? null : [
+        `候选会与影片 ID ${conflictId} 的业务身份冲突，请选择合并或放弃`
+      ],
+      pending: async ({ run: collectedRun, fieldsToApply, sources }, _conflictId, pendingWarnings) => {
+        const { collected } = collectedRun
+        const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
+          const candidateStager = createVideoMetadataCandidateStager({
+            fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
+            readManagedRootFile: async (capability) =>
+              getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
+          })
+          const stagedSources = await Promise.all(
+            sources.map(async (item) => ({
+              ...item,
+              sourceName: collectedRun.source ? sourceName : item.sourceName,
+              pluginConfig: {
+                supportedFields: collectedRun.source ? [...supportedFields] : item.supportedFields
+              },
+              staged: await candidateStager.stageForPending(item.candidates)
+            }))
           )
-        : null
-    if (hasAmbiguousSource || identityConflictVideoId != null) {
-      const pendingWarnings = identityConflictVideoId == null
-        ? collected.warnings
-        : [
-            ...collected.warnings,
-            `候选会与影片 ID ${identityConflictVideoId} 的业务身份冲突，请选择合并或放弃`
-          ]
-      const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
+          return replacePendingVideoScrape({
+            videoId,
+            selectedFields: requested,
+            applicableFields: fieldsToApply,
+            updateMode: mode,
+            request: {
+              scraperName: collectedRun.resolvedScraperName,
+              fields: requested,
+              mode,
+              fieldPluginMap: findCompositeScraper('video', collectedRun.resolvedScraperName)?.fieldPluginMap
+            },
+            warnings: [
+              ...pendingWarnings,
+              ...stagedSources.flatMap((item) => item.staged.warnings)
+            ],
+            sources: stagedSources.map((item) => ({
+              pluginName: item.pluginName,
+              pluginSource: item.pluginSource,
+              pluginVersion: item.pluginVersion,
+              pluginConfig: item.pluginConfig,
+              sourceName: item.sourceName,
+              selectedFields: item.selectedFields,
+              candidates: item.staged.candidates
+            }))
+          })
+        })
+        mediaAssetStore.cleanupVideoScrapeStagingPaths(persisted.obsoletePaths)
+        return {
+          ok: true,
+          pending: true,
+          pendingScrapeId: persisted.pendingScrapeId,
+          skipped: true,
+          warnings: getPendingVideoScrapeForVideo(videoId)?.warnings ?? collected.warnings,
+          classifications: []
+        }
+      },
+      apply: async ({ run: collectedRun, candidate, fieldsToApply }) => {
+        const { collected } = collectedRun
+        const result = candidate.result
+        const classificationOptions = {
+          directorSelectionId: options?.directorSelectionId,
+          directorAmbiguity: options?.directorAmbiguity ?? ('preserve' as const)
+        }
+        const classificationPreflight = videoScrapeApplyService.preflightClassifications(
+          videoId,
+          result,
+          fieldsToApply,
+          mode,
+          classificationOptions
+        )
+        if (classificationPreflight.directorChoice) {
+          return {
+            ok: true,
+            result,
+            skipped: true,
+            warnings: classificationPreflight.warnings,
+            classifications: classificationPreflight.classifications,
+            directorChoice: classificationPreflight.directorChoice
+          }
+        }
+        const previousPending = getPendingVideoScrapeForVideo(videoId)
+        let replacedPendingStagedPaths: string[] = []
         const candidateStager = createVideoMetadataCandidateStager({
           fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
           readManagedRootFile: async (capability) =>
             getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
         })
-        const stagedSources = source
-          ? [
-              {
-                pluginName: collectedRun.resolvedScraperName,
-                pluginSource: runDescriptor?.source ?? ('builtin' as const),
-                pluginVersion: runDescriptor?.version ?? null,
-                pluginConfig: { supportedFields: [...supportedFields] },
-                sourceName,
-                selectedFields: effective,
-                staged: await candidateStager.stageForPending(collected.candidates)
-              }
-            ]
-          : await Promise.all(
-              (compositeOutcome?.sources ?? []).map(async (item) => ({
-                pluginName: item.pluginName,
-                pluginSource: item.descriptor?.source ?? ('builtin' as const),
-                pluginVersion: item.descriptor?.version ?? null,
-                pluginConfig: { supportedFields: [...item.supportedFields] },
-                sourceName: item.pluginName,
-                selectedFields: item.selectedFields,
-                staged: await candidateStager.stageForPending(item.candidates)
-              }))
-            )
-        return replacePendingVideoScrape({
+        const delivery = await videoScrapeApplyService.deliverCandidate({
           videoId,
-          selectedFields: requested,
-          applicableFields: fieldsToApply,
-          updateMode: mode,
-          request: {
-            scraperName: collectedRun.resolvedScraperName,
-            fields: requested,
-            mode,
-            fieldPluginMap: findCompositeScraper('video', collectedRun.resolvedScraperName)?.fieldPluginMap
-          },
-          warnings: [
-            ...pendingWarnings,
-            ...stagedSources.flatMap((item) => item.staged.warnings)
-          ],
-          sources: stagedSources.map((item) => ({
-            pluginName: item.pluginName,
-            pluginSource: item.pluginSource,
-            pluginVersion: item.pluginVersion,
-            pluginConfig: item.pluginConfig,
-            sourceName: item.sourceName,
-            selectedFields: item.selectedFields,
-            candidates: item.staged.candidates
-          }))
+          code: video.code,
+          candidate,
+          candidateStager,
+          selectedFields: effective,
+          fieldsToApply,
+          mode,
+          sourceName,
+          ratingSourceName,
+          classificationOptions,
+          afterSuccessfulApply: previousPending
+            ? () => {
+              const deleted = deletePendingVideoScrape(previousPending.id)
+              if (!deleted) throw new Error('待确认影片刮削结果已发生变化')
+              replacedPendingStagedPaths = deleted.stagedPaths
+            }
+            : undefined
         })
-      })
-      mediaAssetStore.cleanupVideoScrapeStagingPaths(persisted.obsoletePaths)
-      return {
-        ok: true,
-        pending: true,
-        pendingScrapeId: persisted.pendingScrapeId,
-        skipped: true,
-        warnings: getPendingVideoScrapeForVideo(videoId)?.warnings ?? collected.warnings,
-        classifications: []
-      }
-    }
+        mediaAssetStore.cleanupVideoScrapeStagingPaths(replacedPendingStagedPaths)
 
-    const classificationOptions = {
-      directorSelectionId: options?.directorSelectionId,
-      directorAmbiguity: options?.directorAmbiguity ?? ('preserve' as const)
-    }
-    const classificationPreflight = videoScrapeApplyService.preflightClassifications(
-      videoId,
-      result,
-      fieldsToApply,
-      mode,
-      classificationOptions
-    )
-    if (classificationPreflight.directorChoice) {
-      return {
-        ok: true,
-        result,
-        skipped: true,
-        warnings: classificationPreflight.warnings,
-        classifications: classificationPreflight.classifications,
-        directorChoice: classificationPreflight.directorChoice
+        return {
+          ok: true,
+          result,
+          skipped: !delivery.applied,
+          warnings: [...collected.warnings, ...delivery.warnings],
+          classifications: delivery.classifications,
+          directorChoice: delivery.directorChoice
+        }
       }
-    }
-    const previousPending = getPendingVideoScrapeForVideo(videoId)
-    let replacedPendingStagedPaths: string[] = []
-    const candidateStager = createVideoMetadataCandidateStager({
-      fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
-      readManagedRootFile: async (capability) =>
-        getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
     })
-    const delivery = await videoScrapeApplyService.deliverCandidate({
-      videoId,
-      code: video.code,
-      candidate,
-      candidateStager,
-      selectedFields: effective,
-      fieldsToApply,
-      mode,
-      sourceName,
-      ratingSourceName,
-      classificationOptions,
-      afterSuccessfulApply: previousPending
-        ? () => {
-            const deleted = deletePendingVideoScrape(previousPending.id)
-            if (!deleted) throw new Error('待确认影片刮削结果已发生变化')
-            replacedPendingStagedPaths = deleted.stagedPaths
-          }
-        : undefined
-    })
-    mediaAssetStore.cleanupVideoScrapeStagingPaths(replacedPendingStagedPaths)
-
-    return {
-      ok: true,
-      result,
-      skipped: !delivery.applied,
-      warnings: [...collected.warnings, ...delivery.warnings],
-      classifications: delivery.classifications,
-      directorChoice: delivery.directorChoice
-    }
   } catch (err) {
     if (!isScrapeBrowserBusyError(err)) markScrapeFailed(videoId)
     return { ok: false, error: (err as Error).message }

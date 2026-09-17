@@ -1,17 +1,22 @@
 import fs from 'node:fs'
-import { structuredError } from '@shared/protocol/errors'
+import path from 'node:path'
+import { isStructuredError, structuredError, toStructuredError } from '@shared/protocol/errors'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { ManageOperationId } from '@shared/manage/operations'
 import type { NfoExportPlanRequest, NfoExportPreferences } from '@shared/nfoExportTypes'
 import type { VideoResourceImportTarget } from '@shared/videoTypes'
 import type { ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
-import { getMediaLibraryDetail, MediaLibraryRepoError } from '@library/db/mediaLibraryRepo'
+import type { LibraryScanAudit } from '@shared/libraryTypes'
+import {
+  getMediaLibraryDetail,
+  getMediaLibraryRoot,
+  MediaLibraryRepoError
+} from '@library/db/mediaLibraryRepo'
 import {
   createMediaLibraryService,
   createMediaLibraryServiceDependencies
 } from '@library/catalog/mediaLibraryService'
 import { acceptCatalogTask } from '@library/catalog/catalogOperations'
-import { handoffWaitingBlocksNewMaintenance } from '@library/catalog/catalogWriter'
 import { listCatalogTasks, readCatalogTask } from '@library/catalog/catalogTasks'
 import {
   catalogScanAuditGet,
@@ -21,9 +26,8 @@ import {
   catalogScanLatest
 } from '@library/catalog/catalogAuditRead'
 import {
-  importCatalogManualFile,
-  previewRenameCatalogFile,
-  renameCatalogFile
+  executeCatalogFileMaintenance,
+  previewRenameCatalogFile
 } from '@library/catalog/catalogFileMaintenance'
 import {
   enqueueLibraryScan,
@@ -64,7 +68,137 @@ const mediaLibraries = createMediaLibraryService(
   })
 )
 
+function relativeAuditPath(
+  filePath: string,
+  roots: Array<{ path: string; realPath?: string | null }>
+): string | null {
+  for (const root of roots) {
+    for (const base of [root.realPath, root.path].filter((value): value is string => Boolean(value))) {
+      const relative = path.relative(base, filePath)
+      if (
+        relative &&
+        !path.isAbsolute(relative) &&
+        relative !== '..' &&
+        !relative.startsWith(`..${path.sep}`)
+      ) {
+        return relative.split(path.sep).join('/')
+      }
+    }
+  }
+  return null
+}
+
+function projectRemoteAuditPath(
+  libraryId: number,
+  value: string | null,
+  rootId?: number | null
+): string | null {
+  if (value == null || !path.isAbsolute(value)) return value
+  const detail = getMediaLibraryDetail(libraryId)
+  const roots = detail?.roots ?? []
+  const root = rootId == null ? null : getMediaLibraryRoot(libraryId, rootId)
+  const relative = relativeAuditPath(value, root ? [root] : roots)
+  return relative ?? path.basename(value)
+}
+
+function projectRemoteAudit(libraryId: number, audit: LibraryScanAudit | null): LibraryScanAudit | null {
+  if (!audit) return null
+  return {
+    ...audit,
+    files: audit.files.map((entry) => ({
+      ...entry,
+      filePath: projectRemoteAuditPath(libraryId, entry.filePath, entry.rootId) ?? entry.filePath
+    })),
+    removedResources: audit.removedResources.map((entry) => ({
+      ...entry,
+      sourcePath: projectRemoteAuditPath(libraryId, entry.sourcePath)
+    })),
+    promotedResources: audit.promotedResources.map((entry) => ({
+      ...entry,
+      sourcePath: projectRemoteAuditPath(libraryId, entry.sourcePath)
+    }))
+  }
+}
+
+function projectRemoteAuditPage(
+  libraryId: number,
+  page: ReturnType<typeof catalogScanAuditPage>
+): ReturnType<typeof catalogScanAuditPage> {
+  if (!page.snapshot) return page
+  const detail = getMediaLibraryDetail(libraryId)
+  const roots = detail?.roots ?? []
+  return {
+    ...page,
+    items: page.items.map((item) => {
+      const entry = { ...item.entry }
+      const rootId = typeof entry.rootId === 'number' ? entry.rootId : undefined
+      for (const key of ['filePath', 'sourcePath', 'path']) {
+        const value = entry[key]
+        if (typeof value !== 'string') continue
+        if (!path.isAbsolute(value)) continue
+        const root = rootId == null ? null : getMediaLibraryRoot(libraryId, rootId)
+        const relative = relativeAuditPath(value, root ? [root] : roots)
+        entry[key] = relative ?? path.basename(value)
+      }
+      return { ...item, entry }
+    })
+  }
+}
+
+function projectRemoteAuditHeader(
+  libraryId: number,
+  header: ReturnType<typeof catalogScanAuditHeader>
+): ReturnType<typeof catalogScanAuditHeader> {
+  if (!header.summary) return header
+  return {
+    ...header,
+    summary: {
+      ...header.summary,
+      offlineFolders: header.summary.offlineFolders.map(
+        (folder) => projectRemoteAuditPath(libraryId, folder) ?? folder
+      )
+    }
+  }
+}
+
+/** Remote clients must never receive server-local absolute file paths. */
+function projectRemoteAuditViewPage(
+  libraryId: number,
+  page: ReturnType<typeof catalogScanAuditViewPage>
+): ReturnType<typeof catalogScanAuditViewPage> {
+  const detail = getMediaLibraryDetail(libraryId)
+  const roots = detail?.roots ?? []
+  return {
+    ...page,
+    items: page.items.map((item) => {
+      if (!item.path) return item
+      const root = item.rootId == null ? null : getMediaLibraryRoot(libraryId, item.rootId)
+      const relative = relativeAuditPath(
+        item.path,
+        root ? [root] : roots
+      )
+      return relative ? { ...item, path: relative } : { ...item, path: undefined }
+    })
+  }
+}
+
+function resolveRemoteAuditAnchor(
+  libraryId: number,
+  anchor: ScanAuditViewQuery['anchor']
+): ScanAuditViewQuery['anchor'] {
+  if (!anchor || anchor.kind !== 'path' || anchor.rootId == null || path.isAbsolute(anchor.value)) {
+    return anchor
+  }
+  const root = getMediaLibraryRoot(libraryId, anchor.rootId)
+  if (!root) return anchor
+  return {
+    ...anchor,
+    value: path.resolve(root.path, anchor.value)
+  }
+}
+
 function mapMaintenanceError(error: unknown): never {
+  if (isStructuredError(error)) throw error
   if (error instanceof MediaLibraryRepoError) {
     if (error.code === 'REVISION_CONFLICT') {
       throw structuredError('VERSION_CONFLICT', error.message)
@@ -74,16 +208,10 @@ function mapMaintenanceError(error: unknown): never {
     }
     throw structuredError('INVALID_INPUT', error.message)
   }
-  if (error instanceof Error && /已有扫描或资源维护/.test(error.message)) {
-    throw structuredError('MAINTENANCE_BUSY', error.message)
-  }
-  throw error
+  throw toStructuredError(error)
 }
 
 function runMaintenance<T>(work: () => T): T {
-  if (handoffWaitingBlocksNewMaintenance()) {
-    throw structuredError('MAINTENANCE_BUSY', '交接等待期间不能开始新的维护')
-  }
   try {
     return work()
   } catch (error) {
@@ -287,11 +415,11 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
   },
   'scans.auditGet'(args) {
     const input = args.envelope.input as { libraryId: number }
-    return catalogScanAuditGet(input.libraryId)
+    return projectRemoteAudit(input.libraryId, catalogScanAuditGet(input.libraryId))
   },
   'scans.auditHeader'(args) {
     const input = args.envelope.input as { libraryId: number }
-    return catalogScanAuditHeader(input.libraryId)
+    return projectRemoteAuditHeader(input.libraryId, catalogScanAuditHeader(input.libraryId))
   },
   'scans.auditPage'(args) {
     const input = args.envelope.input as {
@@ -302,18 +430,24 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
       limit?: number
       offset?: number
     }
-    return catalogScanAuditPage(input.libraryId, {
+    return projectRemoteAuditPage(input.libraryId, catalogScanAuditPage(input.libraryId, {
       section: input.section,
       outcome: input.outcome,
       attention: input.attention,
       limit: input.limit,
       offset: input.offset
-    })
+    }))
   },
   'scans.auditViewPage'(args) {
     const input = args.envelope.input as ScanAuditViewQuery & { libraryId: number }
     const { libraryId, ...query } = input
-    return catalogScanAuditViewPage(libraryId, query)
+    return projectRemoteAuditViewPage(
+      libraryId,
+      catalogScanAuditViewPage(libraryId, {
+        ...query,
+        anchor: resolveRemoteAuditAnchor(libraryId, query.anchor)
+      })
+    )
   },
   'files.renamePreview'(args) {
     const input = args.envelope.input as {
@@ -333,16 +467,13 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
       planDigest: string
     }
     const mutation = requireMutation(args.envelope)
-    requireRootGeneration(mutation.expectedVersions, mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'R', mutation.operationId)
-    const result = await renameCatalogFile({
-      libraryId: input.libraryId,
-      ...(input.resourceId != null ? { resourceId: input.resourceId } : {}),
-      location: input.location,
-      newFileName: input.newFileName,
-      planDigest: input.planDigest
-    })
-    return commit(args, () => result)
+    const result = await executeCatalogFileMaintenance({
+      ...mutation,
+      operation: 'files.rename',
+      input,
+      writerEpoch: args.auth.epoch
+    }, { database: args.database, remoteSafe: true })
+    return { receipt: result.receipt, ...result.data }
   },
   async 'files.importManual'(args) {
     const input = args.envelope.input as {
@@ -352,11 +483,13 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
       target: VideoResourceImportTarget
     }
     const mutation = requireMutation(args.envelope)
-    requireRootGeneration(mutation.expectedVersions, mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'R', mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'V', mutation.operationId)
-    const result = await importCatalogManualFile(input)
-    return commit(args, () => result)
+    const result = await executeCatalogFileMaintenance({
+      ...mutation,
+      operation: 'files.importManual',
+      input,
+      writerEpoch: args.auth.epoch
+    }, { database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'nfo.getOptions'() {
     return getCatalogNfoOptions()

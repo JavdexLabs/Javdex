@@ -8,32 +8,32 @@ import {
 import { scrapeActressThroughCatalog, scrapeVideoThroughCatalog } from './catalogRemoteScrape'
 import type { ActressScrapeDisposition } from '@shared/actressScrapeTypes'
 
-let catalog: CatalogBackend | null = null
-
-export function bindScrapeCatalog(backend: CatalogBackend | null): void {
-  catalog = backend?.mode === 'remote' ? backend : null
+/** Per-controller catalog-aware scrape operations; intentionally no global binding. */
+export interface ScrapeCatalogBinding {
+  readonly catalog: CatalogBackend | null
+  scrapeVideo(
+    videoId: number,
+    scraperName?: string,
+    options?: ScrapeVideoOptions
+  ): Promise<ScrapeOutcome>
+  scrapeActress(
+    actressId: number,
+    scraperName?: string,
+    options?: ScrapeActressOptions
+  ): Promise<ActressScrapeDisposition>
 }
 
-export function scrapeCatalog(): CatalogBackend | null {
-  return catalog
-}
-
-export function scrapeVideoBound(
-  videoId: number,
-  scraperName?: string,
-  options?: ScrapeVideoOptions
-): Promise<ScrapeOutcome> {
-  return catalog
-    ? scrapeVideoThroughCatalog(catalog, videoId, scraperName, options)
-    : scrapeVideo(videoId, scraperName, options)
-}
-
-export function scrapeActressBound(
-  actressId: number,
-  scraperName?: string,
-  options?: ScrapeActressOptions
-): Promise<ActressScrapeDisposition> {
-  return catalog
-    ? scrapeActressThroughCatalog(catalog, actressId, scraperName, options)
-    : scrapeActress(actressId, scraperName, options)
+export function createScrapeCatalogBinding(backend?: CatalogBackend): ScrapeCatalogBinding {
+  const catalog = backend?.mode === 'remote' ? backend : null
+  return {
+    catalog,
+    scrapeVideo: (videoId, scraperName, options) =>
+      catalog
+        ? scrapeVideoThroughCatalog(catalog, videoId, scraperName, options)
+        : scrapeVideo(videoId, scraperName, options),
+    scrapeActress: (actressId, scraperName, options) =>
+      catalog
+        ? scrapeActressThroughCatalog(catalog, actressId, scraperName, options)
+        : scrapeActress(actressId, scraperName, options)
+  }
 }

@@ -35,7 +35,7 @@ export interface ScanAuditViewQuery {
   locale?: string
   limit?: number
   offset?: number
-  anchor?: {kind:'path';value:string}|{kind:'group';id:number}
+  anchor?: { kind: 'path'; value: string; rootId?: number } | { kind: 'group'; id: number }
 }
 export interface ScanAuditViewPage {
   auditAvailable: boolean

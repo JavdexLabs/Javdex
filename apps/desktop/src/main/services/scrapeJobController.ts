@@ -36,8 +36,14 @@ import type {
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
 import type { ActressDetail } from '@shared/actressTypes'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
-import { actressScrapeQueue } from './actressScrapeQueue'
-import { videoBatchScrapeQueue } from './videoBatchScrapeQueue'
+import {
+  actressScrapeQueue,
+  createActressScrapeQueue
+} from './actressScrapeQueue'
+import {
+  createVideoBatchScrapeQueue,
+  videoBatchScrapeQueue
+} from './videoBatchScrapeQueue'
 import { scrapeRunCoordinator } from './scrapeRunCoordinator'
 import {
   assertActressBatchJobRecoverable,
@@ -54,15 +60,17 @@ import {
   jobToBatchProgress,
   loadBatchScrapeJob
 } from './batchScrapeJobStore'
+import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
-import { scrapeActress } from '../scrapers/actressScraperManager'
-import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
-import { bindScrapeCatalog, scrapeActressBound, scrapeVideoBound } from './scrapeCatalogBinding'
+import { resolveVideoScrapeFieldSources } from '../scrapers/scraperManager'
+import { createScrapeCatalogBinding } from './scrapeCatalogBinding'
 import {
   countRemoteActressTargets,
   countRemoteVideoTargets
 } from './catalogRemoteBatch'
 import type { CatalogBackend } from '../application/catalogBackend'
+import { DesktopIpcError } from '@shared/protocol/errors'
+import type { StructuredError } from '@shared/protocol/errors'
 import { getActressDetail } from '@library/db/actressRepo'
 import { hasActiveVisibleVideoMembership } from '@library/db/libraryMembershipRepo'
 import { countVideosForRematch } from '@library/db/videoRepo'
@@ -107,6 +115,7 @@ interface VideoScrapeOutcome {
   pending?: boolean
   pendingScrapeId?: number
   error?: string
+  errorDetails?: StructuredError
 }
 
 export interface ScrapeJobControllerDependencies {
@@ -236,7 +245,10 @@ export class ScrapeJobController {
         directorAmbiguity: 'choice'
       })
     )
-    if (!outcome.ok) throw new Error(outcome.error)
+    if (!outcome.ok) {
+      if (outcome.errorDetails) throw new DesktopIpcError(outcome.errorDetails)
+      throw new Error(outcome.error)
+    }
     return {
       result: outcome.result ?? undefined,
       applied: !outcome.skipped,
@@ -506,20 +518,21 @@ export function createDefaultScrapeJobController(
     backend?: CatalogBackend
   }
 ): ScrapeJobController {
-  bindScrapeCatalog(boundary.backend ?? null)
+  const binding = createScrapeCatalogBinding(boundary.backend)
   const remote = boundary.backend?.mode === 'remote' ? boundary.backend : null
+  const catalogKey = remote ? () => catalogKeyFor(boundary.backend) : 'local'
   return createScrapeJobController({
     coordinator: scrapeRunCoordinator,
     assertBatchAvailable: assertBatchScrapeAvailable,
     getBatchState: getBatchScrapeState,
-    videoQueue: videoBatchScrapeQueue,
-    actressQueue: actressScrapeQueue,
-    scrapeVideo: remote
-      ? (videoId, scraperName, options) => scrapeVideoBound(videoId, scraperName, options)
-      : scrapeVideo,
-    scrapeActress: remote
-      ? (actressId, scraperName, options) => scrapeActressBound(actressId, scraperName, options)
-      : scrapeActress,
+    videoQueue: remote
+      ? createVideoBatchScrapeQueue(remote, catalogKey)
+      : videoBatchScrapeQueue,
+    actressQueue: remote
+      ? createActressScrapeQueue(remote, catalogKey)
+      : actressScrapeQueue,
+    scrapeVideo: binding.scrapeVideo,
+    scrapeActress: binding.scrapeActress,
     getActress: remote
       ? async (id) =>
           (await remote.actresses.get({ actressId: id })) as ActressDetail | null
@@ -547,23 +560,41 @@ export function createDefaultScrapeJobController(
       : estimateActressBatchScrapeTargetCount,
     resolveVideoFieldSources: resolveVideoScrapeFieldSources,
     pendingVideoScrapes: videoPendingScrapeService,
-    checkpoints: defaultBatchScrapeCheckpoints,
+    checkpoints: createDefaultBatchScrapeCheckpoints(),
     avatarAutoCropOptions: boundary.avatarAutoCropOptions,
     emit: boundary.emit,
     rendererAvailable: boundary.rendererAvailable
   })
 }
 
-const defaultBatchScrapeCheckpoints: BatchScrapeCheckpointPort = {
-  load: loadBatchScrapeJob,
-  create: createBatchScrapeJob,
-  persist: persistBatchScrapeCheckpoint,
-  markPaused: markBatchScrapePaused,
-  finish: finishBatchScrapeJob,
-  discard: discardBatchScrapeJob,
-  toProgress: jobToBatchProgress,
-  restoreTargets: restoreTargetsFromJob,
-  assertActressRecoverable: assertActressBatchJobRecoverable
+async function catalogKeyFor(backend?: CatalogBackend): Promise<string> {
+  if (!backend) return 'local'
+  if (backend.mode === 'remote' && !backend.identity.catalogId) {
+    await backend.reconnect()
+  }
+  const identity = backend.identity
+  if (!identity.catalogId) throw new Error('远程资料库身份尚未就绪，无法恢复批量任务')
+  return [identity.mode, identity.serverId ?? '-', identity.catalogId].join(':')
+}
+
+function createDefaultBatchScrapeCheckpoints(): BatchScrapeCheckpointPort {
+  return {
+    load: loadBatchScrapeJob,
+    create: <TTarget extends { id: number }>(
+      kind: PersistedBatchScrapeJob['kind'],
+      request: PersistedBatchScrapeJob['request'],
+      targets: TTarget[],
+      getLabel: (target: TTarget) => string,
+      catalogKey?: string
+    ) => createBatchScrapeJob(kind, request, targets, getLabel, catalogKey ?? 'local'),
+    persist: persistBatchScrapeCheckpoint,
+    markPaused: markBatchScrapePaused,
+    finish: finishBatchScrapeJob,
+    discard: discardBatchScrapeJob,
+    toProgress: jobToBatchProgress,
+    restoreTargets: restoreTargetsFromJob,
+    assertActressRecoverable: assertActressBatchJobRecoverable
+  }
 }
 
 function rematchScopeToBatchStatus(scope: VideoRematchScope): VideoBatchScrapeStatus {

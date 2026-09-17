@@ -48,9 +48,11 @@ export function registerVideoHandlers(
   adapter.register(IPC.VIDEO_YEARS, (scope) =>
     backend.queries.listVideoYears({ scope })
   )
-  adapter.register(IPC.VIDEO_SAMPLE_IMPORT, (id, input) =>
-    backend.videos.importSamples({ videoId: id, images: [], ...input }, ipcMutation())
-  )
+  adapter.register(IPC.VIDEO_SAMPLE_IMPORT, async (id, input) => {
+    const result = await backend.videos.importSamples({ videoId: id, ...input }, ipcMutation())
+    if (!('id' in result)) throw structuredError('INVALID_INPUT', '本机样张导入未返回媒体资源')
+    return result
+  })
   adapter.register(IPC.VIDEO_SAMPLE_DELETE, (id, assetId) =>
     backend.videos.deleteSample({ videoId: id, assetId }, ipcMutation())
   )
@@ -60,7 +62,7 @@ export function registerVideoHandlers(
         videoId: id,
         image: posterPath == null ? { kind: 'clear' } : { kind: 'asset', assetId: 1 },
         posterPath
-      } as never,
+      },
       ipcMutation()
     )
   )
@@ -124,7 +126,7 @@ export function registerVideoHandlers(
     backend.videos.previewRemoveFromLibrary({ libraryId, videoId })
   )
   adapter.register(IPC.VIDEO_REMOVE_FROM_LIBRARY, (input) =>
-    backend.videos.removeFromLibrary(input as never, ipcMutation(input.operationId))
+    backend.videos.removeFromLibrary(input, ipcMutation(input.operationId))
   )
   adapter.register(
     IPC.VIDEO_RESOURCE_MOVE_PREVIEW,
@@ -136,13 +138,13 @@ export function registerVideoHandlers(
       })
   )
   adapter.register(IPC.VIDEO_RESOURCE_MOVE, (input) =>
-    backend.videos.moveResource(input as never, ipcMutation(input.operationId))
+    backend.videos.moveResource(input, ipcMutation(input.operationId))
   )
   adapter.register(IPC.VIDEO_DELETE_GLOBAL_PREVIEW, (videoId) =>
     backend.videos.previewDeleteGlobal({ videoId })
   )
   adapter.register(IPC.VIDEO_DELETE_GLOBAL, (input) =>
-    backend.videos.deleteGlobal(input as never, ipcMutation(input.operationId))
+    backend.videos.deleteGlobal(input, ipcMutation(input.operationId))
   )
   adapter.register(IPC.VIDEO_MERGE, (input) =>
     backend.videos.merge(input, ipcMutation())

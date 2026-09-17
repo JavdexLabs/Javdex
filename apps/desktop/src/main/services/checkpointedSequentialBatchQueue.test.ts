@@ -16,7 +16,7 @@ function createMemoryCheckpoints(): BatchScrapeCheckpointPort & {
   const port: BatchScrapeCheckpointPort & { jobs: PersistedBatchScrapeJob[] } = {
     jobs,
     load: () => job,
-    create: (kind, request, targets, getLabel) => {
+    create: (kind, request, targets, getLabel, catalogKey = 'local') => {
       job = {
         jobId: 'job-1',
         kind,
@@ -29,7 +29,8 @@ function createMemoryCheckpoints(): BatchScrapeCheckpointPort & {
         logs: [],
         total: targets.length,
         status: 'running',
-        updatedAt: '2026-01-01T00:00:00.000Z'
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        catalogKey
       }
       jobs.push(structuredClone(job))
       return job
@@ -83,6 +84,32 @@ function createMemoryCheckpoints(): BatchScrapeCheckpointPort & {
 }
 
 describe('CheckpointedSequentialBatchQueue', () => {
+  it('rejects resuming a checkpoint created for another catalog', async () => {
+    const checkpoints = createMemoryCheckpoints()
+    checkpoints.create(
+      'video',
+      { fields: ['title'] } as never,
+      [{ id: 1, code: 'REMOTE-001' }],
+      (target) => target.code,
+      'remote:server-a:catalog-a'
+    )
+    const queue = new CheckpointedSequentialBatchQueue<Target, Request>(
+      {
+        kind: 'video',
+        missingResumeError: 'missing',
+        invalidRunPlanError: 'invalid',
+        resolveTargets: () => [],
+        labelOf: (target) => target.code,
+        restoreTarget: (item) => ({ id: item.id, code: item.label }),
+        planRun: () => null
+      },
+      undefined,
+      'remote:server-b:catalog-b'
+    )
+    queue.setCheckpointPort(checkpoints)
+    await assert.rejects(queue.resume(), /其他资料库/)
+  })
+
   it('persists checkpoints, pauses, and resumes from the next index', async () => {
     const checkpoints = createMemoryCheckpoints()
     const processed: string[] = []

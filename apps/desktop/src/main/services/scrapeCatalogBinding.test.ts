@@ -1,20 +1,17 @@
-import { afterEach, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { CatalogBackend } from '../application/catalogBackend'
-import { bindScrapeCatalog, scrapeCatalog } from './scrapeCatalogBinding'
-
-afterEach(() => {
-  bindScrapeCatalog(null)
-})
+import { createScrapeCatalogBinding } from './scrapeCatalogBinding'
 
 describe('scrape catalog binding', () => {
-  it('binds only a remote catalog backend', () => {
-    bindScrapeCatalog({ mode: 'local' } as CatalogBackend)
-    assert.equal(scrapeCatalog(), null)
+  it('captures only a remote catalog backend per binding instance', () => {
+    const local = createScrapeCatalogBinding({ mode: 'local' } as CatalogBackend)
+    assert.equal(local.catalog, null)
     const remote = { mode: 'remote' } as CatalogBackend
-    bindScrapeCatalog(remote)
-    assert.equal(scrapeCatalog(), remote)
-    bindScrapeCatalog(null)
-    assert.equal(scrapeCatalog(), null)
+    const first = createScrapeCatalogBinding(remote)
+    const second = createScrapeCatalogBinding({ mode: 'remote' } as CatalogBackend)
+    assert.equal(first.catalog, remote)
+    assert.notEqual(first, second)
+    assert.equal(local.catalog, null)
   })
 })

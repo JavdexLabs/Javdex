@@ -11,6 +11,9 @@ export type BatchScrapeJobKind = 'video' | 'actress'
 export interface BatchScrapeJobTarget {
   id: number
   label: string
+  /** Row revision captured when the batch target was frozen. */
+  generation?: number | null
+  revision?: number | null
 }
 
 export interface PersistedBatchScrapeJob {
@@ -26,6 +29,8 @@ export interface PersistedBatchScrapeJob {
   total: number
   status: 'running' | 'paused'
   updatedAt: string
+  /** Stable catalog identity; legacy local checkpoints default to `local`. */
+  catalogKey?: string
 }
 
 let cache: PersistedBatchScrapeJob | null | undefined
@@ -109,7 +114,10 @@ function readJobFile(): PersistedBatchScrapeJob | null {
     ) {
       throw new Error('Invalid batch checkpoint contents')
     }
-    if (parsed.targets.some(target => !target || !Number.isSafeInteger(target.id) || target.id <= 0 || typeof target.label !== 'string') ||
+    if (parsed.targets.some(target => !target || !Number.isSafeInteger(target.id) || target.id <= 0 ||
+        typeof target.label !== 'string' ||
+        (target.generation != null && (!Number.isSafeInteger(target.generation) || target.generation < 1)) ||
+        (target.revision != null && (!Number.isSafeInteger(target.revision) || target.revision < 0))) ||
         ![parsed.nextIndex, parsed.success, parsed.failed, parsed.total, parsed.pending ?? 0]
           .every(value => Number.isSafeInteger(value) && value! >= 0) ||
         parsed.total !== parsed.targets.length || parsed.nextIndex > parsed.total) {
@@ -122,6 +130,10 @@ function readJobFile(): PersistedBatchScrapeJob | null {
       .update(raw)
       .digest('hex')
       .slice(0, 16)}`
+    const catalogKey =
+      typeof parsed.catalogKey === 'string' && parsed.catalogKey.trim()
+        ? parsed.catalogKey
+        : undefined
     return {
       jobId:
         typeof parsed.jobId === 'string' && parsed.jobId.trim()
@@ -138,7 +150,8 @@ function readJobFile(): PersistedBatchScrapeJob | null {
       logs: parsed.logs as BatchLogEntry[],
       total: Math.max(0, Math.floor(parsed.total)),
       status: parsed.status === 'running' ? 'running' : 'paused',
-      updatedAt
+      updatedAt,
+      ...(catalogKey ? { catalogKey } : {})
     }
   } catch (cause) {
     throw new Error('无法读取批量任务检查点，请保留任务文件后检查原因', { cause })

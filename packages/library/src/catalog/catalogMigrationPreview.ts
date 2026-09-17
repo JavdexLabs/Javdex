@@ -63,7 +63,7 @@ export function computeMigrationPreview(
   database: Database.Database
 ): MigrationPreview {
   const identity = readCatalogIdentity(database)
-  if (!identity?.serverId) {
+  if (!identity) {
     throw structuredError('INSTANCE_MISMATCH', '资料库身份尚未初始化')
   }
   const roots = database

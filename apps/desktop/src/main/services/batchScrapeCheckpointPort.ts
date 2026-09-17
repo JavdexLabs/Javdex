@@ -11,7 +11,8 @@ export interface BatchScrapeCheckpointPort {
     kind: BatchScrapeJobKind,
     request: PersistedBatchScrapeJob['request'],
     targets: TTarget[],
-    getLabel: (target: TTarget) => string
+    getLabel: (target: TTarget) => string,
+    catalogKey?: string
   ): PersistedBatchScrapeJob
   persist(
     job: PersistedBatchScrapeJob,

@@ -80,7 +80,7 @@ export function registerActressHandlers(
     backend.actresses.avatarSourceInfo({ actressId: id })
   )
   registerActressHandler(IPC.ACTRESS_EDIT, (id, input) =>
-    backend.actresses.edit({ actressId: id, fields: input as never }, ipcMutation())
+    backend.actresses.edit({ actressId: id, fields: input }, ipcMutation())
   )
   registerActressHandler(IPC.ACTRESS_DELETE_PREVIEW, (ids) =>
     backend.actresses.deletePreview({ ids })
@@ -95,7 +95,7 @@ export function registerActressHandlers(
     backend.actresses.clearMeta({ actressId: id }, ipcMutation())
   )
   registerActressHandler(IPC.ACTRESS_MERGE, (input) =>
-    backend.actresses.merge(input as never, ipcMutation())
+    backend.actresses.merge(input, ipcMutation())
   )
   registerActressHandler(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, (id) =>
     backend.actresses.markScrapeSuccess({ actressId: id }, ipcMutation())
@@ -107,7 +107,7 @@ export function registerActressHandlers(
     backend.actresses.conflictQueuePage(query)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_GET, (normalizedName) =>
-    backend.actresses.conflictGet({ normalizedName } as never)
+    backend.actresses.conflictGet({ normalizedName })
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_COUNT, () =>
     backend.actresses.conflictCount({})
@@ -116,20 +116,22 @@ export function registerActressHandlers(
     backend.actresses.conflictSummary({})
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_INSPECT_NAME, (input) =>
-    backend.actresses.inspectName(input as never)
+    backend.actresses.inspectName(input)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_DISCARD, (input) =>
-    backend.actresses.discardConflict(input as never, ipcMutation())
+    backend.actresses.discardConflict(input, ipcMutation())
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_VALIDATE_ILLEGAL, (input) =>
-    backend.actresses.validateIllegal(input as never, ipcMutation())
+    backend.actresses.validateIllegal(input, ipcMutation())
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_RESOLVE, (input) =>
-    backend.actresses.resolveConflict(input as never, ipcMutation())
+    backend.actresses.resolveConflict(input, ipcMutation())
   )
-  registerActressHandler(IPC.ACTRESS_GALLERY_IMPORT, (id, input) =>
-    backend.actresses.importGallery({ actressId: id, images: [], ...input }, ipcMutation())
-  )
+  registerActressHandler(IPC.ACTRESS_GALLERY_IMPORT, async (id, input) => {
+    const result = await backend.actresses.importGallery({ actressId: id, ...input }, ipcMutation())
+    if (!('id' in result)) throw structuredError('INVALID_INPUT', '本机图库导入未返回媒体资源')
+    return result
+  })
   registerActressHandler(IPC.ACTRESS_GALLERY_DELETE, (id, assetId) =>
     backend.actresses.deleteGallery({ actressId: id, assetId }, ipcMutation())
   )
@@ -139,7 +141,7 @@ export function registerActressHandlers(
         actressId: id,
         image: posterPath == null ? { kind: 'clear' } : { kind: 'asset', assetId: 1 },
         posterPath
-      } as never,
+      },
       ipcMutation()
     )
   )

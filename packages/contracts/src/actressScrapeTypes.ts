@@ -4,6 +4,7 @@ import {
   type ActressScrapeStatusFilter
 } from './actressTypes'
 import type { ScrapeUpdateModeOption } from './videoScrapeTypes'
+import type { StructuredError } from './protocol/errors'
 
 export interface ActressScrapeResult {
   mainName?: string
@@ -94,7 +95,7 @@ export interface ActressScrapePluginRef {
 export type ActressScrapeDisposition =
   | { status: 'success'; ok: true; result: ActressScrapeResult; warnings?: string[]; skipped?: boolean; avatarUpdated?: boolean; pendingId?: never; error?: never }
   | { status: 'pending'; ok: true; pendingId: number; result: ActressScrapeResult; warnings?: string[]; skipped?: false; avatarUpdated?: false; error?: never }
-  | { status: 'failure'; ok: false; error: string; warnings?: string[]; result?: never; skipped?: false; avatarUpdated?: false; pendingId?: never }
+  | { status: 'failure'; ok: false; error: string; errorDetails?: StructuredError; warnings?: string[]; result?: never; skipped?: false; avatarUpdated?: false; pendingId?: never }
 
 export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressScrapeUpdateMode>[] = [
   { id: 'fillEmpty', label: '空字段补齐', description: '只写入库内尚未填写的字段，已有内容保持不变' },

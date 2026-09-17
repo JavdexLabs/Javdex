@@ -10,7 +10,6 @@ import {
   readCatalogTask,
   readCatalogTaskByRunId
 } from '@library/catalog/catalogTasks'
-import { handoffWaitingBlocksNewMaintenance } from '@library/catalog/catalogWriter'
 import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { scanCoordinator } from '@library/scan/scanCoordinator'
 import type { LibraryScanEvent } from '@shared/libraryTypes'
@@ -25,9 +24,6 @@ function identityCatalogId(): string {
 }
 
 function requireNoHandoffWait(): void {
-  if (handoffWaitingBlocksNewMaintenance()) {
-    throw structuredError('MAINTENANCE_BUSY', '交接等待期间不能开始新的维护')
-  }
 }
 
 function bump(snapshot: CatalogTaskSnapshot, patch: Partial<CatalogTaskSnapshot>): CatalogTaskSnapshot {

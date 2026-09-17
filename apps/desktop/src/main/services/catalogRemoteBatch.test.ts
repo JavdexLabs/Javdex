@@ -73,9 +73,9 @@ describe('catalog remote batch freeze', () => {
             offset: 0,
             hasMore: false,
             entries: [
-              { id: 1, present: true, label: 'A-001' },
-              { id: 2, present: false, label: 'GONE' },
-              { id: 3, present: true, label: 'A-003' }
+              { id: 1, present: true, label: 'A-001', revision: 7 },
+              { id: 2, present: false, label: 'GONE', revision: 8 },
+              { id: 3, present: true, label: 'A-003', revision: 9 }
             ]
           }) satisfies TargetListPage
       }
@@ -83,15 +83,15 @@ describe('catalog remote batch freeze', () => {
 
     const targets = await freezeRemoteVideoTargets(backend, { status: 'all', videoIds: [1, 2, 3] })
     assert.deepEqual(targets, [
-      { id: 1, code: 'A-001' },
-      { id: 2, code: '已删除 · GONE' },
-      { id: 3, code: 'A-003' }
+      { id: 1, code: 'A-001', revision: 7 },
+      { id: 2, code: '已删除 · GONE', revision: 8 },
+      { id: 3, code: 'A-003', revision: 9 }
     ])
     assert.equal(created.length, 1)
     assert.deepEqual(await freezeRemoteActressTargets(backend, { scope: 'all', scrapeStatus: 'all' }), [
-      { id: 1, main_name: 'A-001' },
-      { id: 2, main_name: '已删除 · GONE' },
-      { id: 3, main_name: 'A-003' }
+      { id: 1, main_name: 'A-001', revision: 7 },
+      { id: 2, main_name: '已删除 · GONE', revision: 8 },
+      { id: 3, main_name: 'A-003', revision: 9 }
     ])
   })
 })

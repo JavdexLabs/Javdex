@@ -31,3 +31,19 @@ export function writeCatalogSetting(
     )
     .run(key, JSON.stringify(value), updatedAt)
 }
+
+export function deleteCatalogSetting(
+  key: string,
+  database: Database.Database = getDb()
+): void {
+  database.prepare('DELETE FROM catalog_settings WHERE key = ?').run(key)
+}
+
+export function listCatalogSettingKeys(
+  prefix: string,
+  database: Database.Database = getDb()
+): string[] {
+  return (database
+    .prepare('SELECT key FROM catalog_settings ORDER BY key')
+    .all() as Array<{ key: string }>).map((row) => row.key).filter((key) => key.startsWith(prefix))
+}

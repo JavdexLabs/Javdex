@@ -30,6 +30,7 @@ import {
 } from './scraperPluginService'
 import { normalizeActressScrapeResult } from './scraperResultValidation'
 import { projectActressScrapeResult } from './actressScrapeFieldProjection'
+import { runActressCandidateWorkflow } from '../services/scrapeCandidateWorkflow'
 
 function buildRegistry(): Map<string, BaseActressScraper> {
   return buildPluginRegistry(loadUserActressScrapers, loadBundledActressScrapers)
@@ -84,6 +85,8 @@ export interface ScrapeActressOptions {
   queryName?: string
   /** When true, scrapers also try stored aliases / zh / en names. Default false. */
   useAliases?: boolean
+  /** Optional row revision captured before a batch began. */
+  expectedVersion?: { generation?: number; revision: number }
   /** Stable persisted batch identifier, retained on pending snapshots. */
   batchJobId?: string
   delayController?: {
@@ -329,54 +332,50 @@ export async function scrapeActress(
     return { status: 'success', ok: true, result: {}, skipped: true }
   }
 
-  try {
-    const collected = await collectActressScrape({
-      mainName: detail.main_name,
-      aliases: detail.aliases,
-      nameZh: detail.name_zh,
-      nameEn: detail.name_en,
-      scraperName,
-      fields: effective,
-      requested,
-      queryName: options?.queryName,
-      useAliases: options?.useAliases,
-      delayController: options?.delayController
-    })
-    if (!collected.result) {
-      recordActressScrapeFailure(actressId)
-      return {
-        status: 'failure',
-        ok: false,
-        error: '未找到匹配的演员资料',
-        warnings: collected.sourceWarnings.length > 0 ? collected.sourceWarnings : undefined
+  return runActressCandidateWorkflow({
+    mainName: detail.main_name,
+    aliases: detail.aliases,
+    nameZh: detail.name_zh,
+    nameEn: detail.name_en,
+    scraperName,
+    fields: effective,
+    requested,
+    queryName: options?.queryName,
+    useAliases: options?.useAliases,
+    delayController: options?.delayController
+  }, {
+    collect: collectActressScrape,
+    markFailed: () => { recordActressScrapeFailure(actressId) },
+    persist: (collected) => {
+      return actressIdentityConflictWorkflow.processPreparedScrape({
+        actressId,
+        plugin: {
+          name: collected.selectedScraperName,
+          source: collected.descriptor?.source ?? (
+            findCompositeScraper('actress', collected.selectedScraperName) ? 'composite' : 'builtin'
+          ),
+          ...(collected.descriptor?.version ? { version: collected.descriptor.version } : {})
+        },
+        queryName: collected.queryName,
+        selectedFields: requested,
+        applicableFields: collected.applicableFields,
+        mode,
+        result: collected.result,
+        warnings: collected.sourceWarnings,
+        resources: collected.resources,
+        ...(options?.batchJobId ? { batchJobId: options.batchJobId } : {})
+      })
+    },
+    onError: (err) => {
+      if (!isScrapeBrowserBusyError(err)) recordActressScrapeFailure(actressId)
+      return { status: 'failure', ok: false, error: (err as Error).message }
+    },
+    close: () => {
+      if (options?.closeBrowser !== false) {
+        scrapeBrowser.close()
       }
     }
-    return actressIdentityConflictWorkflow.processPreparedScrape({
-      actressId,
-      plugin: {
-        name: collected.selectedScraperName,
-        source: collected.descriptor?.source ?? (
-          findCompositeScraper('actress', collected.selectedScraperName) ? 'composite' : 'builtin'
-        ),
-        ...(collected.descriptor?.version ? { version: collected.descriptor.version } : {})
-      },
-      queryName: collected.queryName,
-      selectedFields: requested,
-      applicableFields: collected.fieldsToApply.filter((field) => effective.includes(field)),
-      mode,
-      result: collected.result,
-      warnings: collected.sourceWarnings,
-      resources: collected.resources,
-      ...(options?.batchJobId ? { batchJobId: options.batchJobId } : {})
-    })
-  } catch (err) {
-    if (!isScrapeBrowserBusyError(err)) recordActressScrapeFailure(actressId)
-    return { status: 'failure', ok: false, error: (err as Error).message }
-  } finally {
-    if (options?.closeBrowser !== false) {
-      scrapeBrowser.close()
-    }
-  }
+  })
 }
 
 function dedupeUrls(urls: string[]): string[] {

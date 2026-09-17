@@ -20,7 +20,7 @@ export interface MigrationManifest {
   appVersion: string
   schemaVersion: number
   sourcePlatform: string
-  sourceServerId: string
+  sourceServerId: string | null
   sourceCatalogId: string
   migrationId: string
   previewDigest: string

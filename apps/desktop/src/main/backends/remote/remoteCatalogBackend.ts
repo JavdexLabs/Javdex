@@ -1,3 +1,7 @@
+import { catalogRemoteResult } from './catalogRemoteResults'
+import { parseManageInput } from '@shared/manage/parse'
+import type { CatalogOperationInput, CatalogWireInput } from '../../application/catalogOperationInputs'
+import type { CatalogOperationResults } from '../../application/catalogOperationResults'
 import { randomUUID } from 'node:crypto'
 import { ManageHttpClient } from '@http/manageClient'
 import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
@@ -30,200 +34,11 @@ export interface RemoteCatalogBackendOptions {
   userDataPath?: string
 }
 
-const QUERY_KEYS = [
-  'homeLoad',
-  'homeSearch',
-  'listVideos',
-  'getVideo',
-  'listVideoYears',
-  'listVideoSources',
-  'getResource',
-  'listTags',
-  'listManualTags',
-  'tagLabels',
-  'tagFilterOptions',
-  'tagManualOptions',
-  'overviewStats'
-] as const
-
-const VIDEO_KEYS = [
-  'edit',
-  'clearMeta',
-  'markScrapeSuccess',
-  'markScrapeFailed',
-  'setRating',
-  'setPoster',
-  'importSamples',
-  'deleteSample',
-  'addManualTag',
-  'addExistingManualTag',
-  'removeManualTag',
-  'correctImport',
-  'importResource',
-  'updateResource',
-  'updateLocalResourceLabel',
-  'setPrimaryResource',
-  'removeResource',
-  'previewRemoveFromLibrary',
-  'removeFromLibrary',
-  'previewMoveResource',
-  'moveResource',
-  'previewDeleteGlobal',
-  'deleteGlobal',
-  'merge',
-  'splitResource',
-  'applyScrapeCandidate'
-] as const
-
-const ACTRESS_KEYS = [
-  'list',
-  'listPage',
-  'pickerPage',
-  'pickerGet',
-  'get',
-  'profile',
-  'metadata',
-  'videoPage',
-  'galleryPage',
-  'avatarSourceInfo',
-  'mergeCandidates',
-  'edit',
-  'delete',
-  'deleteBatch',
-  'deletePreview',
-  'clearMeta',
-  'importGallery',
-  'deleteGallery',
-  'setPoster',
-  'merge',
-  'markScrapeSuccess',
-  'markScrapeFailed',
-  'applyCrop',
-  'applyScrapeCandidate',
-  'submitConflict',
-  'testTargetPage',
-  'conflictList',
-  'conflictQueuePage',
-  'conflictGet',
-  'conflictCount',
-  'conflictSummary',
-  'inspectName',
-  'discardConflict',
-  'validateIllegal',
-  'resolveConflict'
-] as const
-
-const CLASSIFICATION_KEYS = [
-  'listOrganizations',
-  'pageOrganizations',
-  'getOrganization',
-  'createOrganization',
-  'updateOrganization',
-  'mergeOrganizations',
-  'deleteOrganization',
-  'organizationOptions',
-  'organizationMergeOptions',
-  'organizationRoleRemovePreview',
-  'organizationRoleRemove',
-  'organizationDeletePreview',
-  'listDirectors',
-  'pageDirectors',
-  'getDirector',
-  'createDirector',
-  'updateDirector',
-  'mergeDirectors',
-  'deleteDirector',
-  'directorOptions',
-  'directorDeletePreview',
-  'listSeries',
-  'pageSeries',
-  'getSeries',
-  'createSeries',
-  'updateSeries',
-  'mergeSeries',
-  'deleteSeries',
-  'seriesOptions',
-  'seriesDeletePreview',
-  'imagePage',
-  'imageCandidates',
-  'setImage'
-] as const
-
-const PLAYLIST_KEYS = [
-  'list',
-  'listPage',
-  'get',
-  'getPage',
-  'metadata',
-  'videoPage',
-  'listForVideo',
-  'create',
-  'update',
-  'delete',
-  'addVideo',
-  'removeVideo',
-  'applyImport'
-] as const
-
-const LIBRARY_KEYS = [
-  'list',
-  'get',
-  'create',
-  'update',
-  'updateConfig',
-  'addRoot',
-  'updateRoot',
-  'removeRoot',
-  'cancelRootRemoval',
-  'archive',
-  'restore',
-  'deletePreview',
-  'delete',
-  'runScan',
-  'cancelScan',
-  'latestScan',
-  'auditGet',
-  'auditHeader',
-  'auditPage',
-  'auditViewPage',
-  'getPendingScan',
-  'listPendingScans',
-  'pagePendingScanQueue',
-  'countPendingScanQueue',
-  'getPendingResourceIdentity',
-  'listPendingResourceIdentities',
-  'pendingAuditPresence',
-  'previewRenameFile',
-  'renameFile',
-  'importManual',
-  'resolvePendingScan',
-  'resolveResourceIdentity'
-] as const
-
-const BROWSER_KEYS = [
-  'status',
-  'setEnabled',
-  'pairOpen',
-  'pairInspect',
-  'pairDecide',
-  'deviceRemove',
-  'deviceRename',
-  'deviceReset',
-  'revokeSessions'
-] as const
-
-const ASSET_KEYS = ['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback'] as const
-
-function rejectSlice<T extends object>(
-  keys: readonly (keyof T)[],
-  run: (key: keyof T) => Promise<never>
-): T {
-  return Object.fromEntries(keys.map((key) => [key, () => run(key)])) as T
+function requirePendingId(id: number | undefined): number {
+  if (id == null) throw structuredError('INVALID_INPUT', '缺少待确认结果 ID')
+  return id
 }
 
-/**
- * HTTP CatalogBackend. Does not import or open library.db.
- */
 export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions): CatalogBackend {
   const client = new ManageHttpClient({
     baseUrl: options.baseUrl,
@@ -348,12 +163,18 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     }
   }
 
-  const query = async (operation: string, input: unknown, signal?: AbortSignal): Promise<unknown> => {
+  const wire = <K extends keyof CatalogOperationResults>(operation: K, input: unknown): CatalogWireInput<K> => {
+    const parsed = parseManageInput(operation, input)
+    if (!parsed.success) throw structuredError('INVALID_INPUT', `Invalid input for ${operation}`)
+    return parsed.data as CatalogWireInput<K>
+  }
+
+  const query = async <K extends keyof CatalogOperationResults>(operation: K, input: CatalogWireInput<K>, signal?: AbortSignal): Promise<CatalogOperationResults[K]> => {
     const tracked = trackSignal(signal)
     try {
       const hello = await ensureConnected(tracked.signal)
       if (!secret) throw structuredError('RECOVERY_REQUIRED', '缺少写入凭据')
-      return await client.post(
+      return catalogRemoteResult(operation, await client.post(
         operation,
         {
           serverId: hello.identity.serverId,
@@ -362,17 +183,17 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           input
         },
         { bearer: secret, signal: tracked.signal }
-      )
+      ))
     } finally {
       tracked.done()
     }
   }
 
-  const mutate = async (
-    operation: string,
-    input: unknown,
-    ctx: { operationId: string; expectedVersions: unknown; signal?: AbortSignal }
-  ): Promise<unknown> => {
+  const mutate = async <K extends keyof CatalogOperationResults>(
+    operation: K,
+    input: CatalogWireInput<K>,
+    ctx: MutationContext
+  ): Promise<CatalogOperationResults[K]> => {
     const tracked = trackSignal(ctx.signal)
     try {
       const hello = await ensureConnected(tracked.signal)
@@ -383,7 +204,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       if (hello.identity.catalogId) {
         options.workStore?.putVerification(ctx.operationId, hello.identity.catalogId)
       }
-      return await client.post(
+      return catalogRemoteResult(operation, await client.post(
         operation,
         {
           operationId: ctx.operationId,
@@ -394,40 +215,31 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           input
         },
         { bearer: secret, signal: tracked.signal }
-      )
+      ))
     } finally {
       tracked.done()
     }
   }
 
-  const migrate = async (operation: string, input: unknown, signal?: AbortSignal): Promise<unknown> => {
+  const migrate = async <K extends keyof CatalogOperationResults>(operation: K, input: CatalogWireInput<K>, signal?: AbortSignal): Promise<CatalogOperationResults[K]> => {
     const tracked = trackSignal(signal)
     try {
       if (!options.migrationSecret) {
         throw structuredError('AUTH_REQUIRED', '缺少迁移凭据')
       }
-      return await client.post(operation, { input }, { bearer: options.migrationSecret, signal: tracked.signal })
+      return catalogRemoteResult(operation, await client.post(operation, { input }, { bearer: options.migrationSecret, signal: tracked.signal }))
     } finally {
       tracked.done()
     }
   }
 
-  const unsupported = async (label: string): Promise<never> => {
-    await ensureConnected()
-    throw structuredError('UNSUPPORTED_CAPABILITY', `远程尚未实现 ${label}`)
-  }
 
-  const q = (operation: string) => (input: unknown, ctx?: CatalogQueryContext) =>
-    query(operation, input ?? {}, ctx?.signal)
-  const m = (operation: string) => (input: unknown, ctx: MutationContext) => mutate(operation, input, ctx)
-  const mOk = (operation: string) => async (input: unknown, ctx: MutationContext) => {
-    const result = (await mutate(operation, input, ctx)) as { ok?: boolean }
-    return result.ok ?? result
-  }
-  const mId = (operation: string) => async (input: unknown, ctx: MutationContext) => {
-    const result = (await mutate(operation, input, ctx)) as { id?: number }
-    return result.id ?? result
-  }
+  const q = <K extends keyof CatalogOperationResults>(operation: K) =>
+    (input: CatalogOperationInput<K>, ctx?: CatalogQueryContext) =>
+      query(operation, wire(operation, input), ctx?.signal)
+  const m = <K extends keyof CatalogOperationResults>(operation: K) =>
+    (input: CatalogOperationInput<K>, ctx: MutationContext) =>
+      mutate(operation, wire(operation, input), ctx)
   const withPlan = (input: Record<string, unknown>, ctx: MutationContext): Record<string, unknown> => {
     const planDigest =
       typeof input.planDigest === 'string'
@@ -449,8 +261,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       ...(planDigest ? { planDigest } : {})
     }
   }
-  const mPlan = (operation: string) => (input: unknown, ctx: MutationContext) =>
-    mutate(operation, withPlan((input ?? {}) as Record<string, unknown>, ctx), ctx)
+  const mPlan = <K extends keyof CatalogOperationResults>(operation: K) => (input: CatalogOperationInput<K>, ctx: MutationContext) =>
+    mutate(operation, wire(operation, withPlan(input as Record<string, unknown>, ctx)), ctx)
   const qPending = (qRev: number | undefined, ctx: MutationContext): MutationContext => ({
     ...ctx,
     expectedVersions: {
@@ -517,7 +329,6 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     reconnect,
     claimWriter,
     queries: {
-      ...rejectSlice(QUERY_KEYS, (key) => unsupported(`queries.${String(key)}`)),
       homeLoad: q('home.load'),
       homeSearch: q('home.search'),
       listVideos: q('videos.list'),
@@ -534,21 +345,20 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       overviewStats: (input, ctx) => query('catalog.overviewStats', input ?? {}, ctx?.signal)
     },
     videos: {
-      ...rejectSlice(VIDEO_KEYS, (key) => unsupported(`videos.${String(key)}`)),
-      edit: mOk('videos.edit'),
-      setRating: mOk('videos.setRating'),
-      clearMeta: mOk('videos.clearMeta'),
-      markScrapeSuccess: mOk('videos.markScrapeSuccess'),
-      markScrapeFailed: mOk('videos.markScrapeFailed'),
-      deleteSample: mOk('videos.deleteSample'),
-      addManualTag: mOk('videos.addManualTag'),
-      addExistingManualTag: mOk('videos.addExistingManualTag'),
-      removeManualTag: mOk('videos.removeManualTag'),
+      edit: m('videos.edit'),
+      setRating: m('videos.setRating'),
+      clearMeta: m('videos.clearMeta'),
+      markScrapeSuccess: m('videos.markScrapeSuccess'),
+      markScrapeFailed: m('videos.markScrapeFailed'),
+      deleteSample: m('videos.deleteSample'),
+      addManualTag: m('videos.addManualTag'),
+      addExistingManualTag: m('videos.addExistingManualTag'),
+      removeManualTag: m('videos.removeManualTag'),
       correctImport: m('videos.correctImport'),
       importResource: m('videos.importResource'),
       updateResource: m('videos.updateResource'),
       updateLocalResourceLabel: m('videos.updateLocalResourceLabel'),
-      setPrimaryResource: mOk('videos.setPrimaryResource'),
+      setPrimaryResource: m('videos.setPrimaryResource'),
       removeResource: m('videos.removeResource'),
       previewRemoveFromLibrary: q('videos.previewRemoveFromLibrary'),
       removeFromLibrary: mPlan('videos.removeFromLibrary'),
@@ -563,7 +373,6 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       applyScrapeCandidate: m('videos.applyScrapeCandidate')
     },
     actresses: {
-      ...rejectSlice(ACTRESS_KEYS, (key) => unsupported(`actresses.${String(key)}`)),
       list: q('actresses.list'),
       listPage: q('actresses.listPage'),
       pickerPage: q('actresses.pickerPage'),
@@ -577,14 +386,14 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       mergeCandidates: q('actresses.mergeCandidates'),
       testTargetPage: q('actresses.testTargetPage'),
       deletePreview: q('actresses.deletePreview'),
-      edit: mOk('actresses.edit'),
+      edit: m('actresses.edit'),
       delete: m('actresses.delete'),
       deleteBatch: m('actresses.deleteBatch'),
-      clearMeta: mOk('actresses.clearMeta'),
-      merge: mOk('actresses.merge'),
-      markScrapeSuccess: mOk('actresses.markScrapeSuccess'),
-      markScrapeFailed: mOk('actresses.markScrapeFailed'),
-      deleteGallery: mOk('actresses.deleteGallery'),
+      clearMeta: m('actresses.clearMeta'),
+      merge: m('actresses.merge'),
+      markScrapeSuccess: m('actresses.markScrapeSuccess'),
+      markScrapeFailed: m('actresses.markScrapeFailed'),
+      deleteGallery: m('actresses.deleteGallery'),
       setPoster: m('actresses.setPoster'),
       importGallery: m('actresses.importGallery'),
       applyCrop: m('actresses.applyCrop'),
@@ -607,10 +416,10 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         mutate(
           'actressConflicts.validateIllegal',
           {
-            pendingId:
+            pendingId: requirePendingId(
               (input as { pendingId?: number }).pendingId ??
               (input as { snapshot?: { candidates?: Array<{ pendingId: number }> } }).snapshot
-                ?.candidates?.[0]?.pendingId,
+                ?.candidates?.[0]?.pendingId),
             replacements: input
           },
           ctx
@@ -620,7 +429,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         return mutate(
           'actressConflicts.resolve',
           {
-            pendingId: body.pendingId ?? body.snapshot?.candidates?.[0]?.pendingId,
+            pendingId: requirePendingId(body.pendingId ?? body.snapshot?.candidates?.[0]?.pendingId),
             choices: input
           },
           ctx
@@ -628,14 +437,13 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       }
     },
     classifications: {
-      ...rejectSlice(CLASSIFICATION_KEYS, (key) => unsupported(`classifications.${String(key)}`)),
       listOrganizations: q('organizations.list'),
       pageOrganizations: q('organizations.page'),
       getOrganization: q('organizations.get'),
       organizationOptions: q('organizations.options'),
       organizationMergeOptions: q('organizations.mergeOptions'),
-      createOrganization: mId('organizations.create'),
-      updateOrganization: mOk('organizations.update'),
+      createOrganization: m('organizations.create'),
+      updateOrganization: m('organizations.update'),
       mergeOrganizations: m('organizations.merge'),
       organizationRoleRemovePreview: q('organizations.roleRemovePreview'),
       organizationRoleRemove: mPlan('organizations.roleRemove'),
@@ -645,8 +453,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       pageDirectors: q('directors.page'),
       getDirector: q('directors.get'),
       directorOptions: q('directors.options'),
-      createDirector: mId('directors.create'),
-      updateDirector: mOk('directors.update'),
+      createDirector: m('directors.create'),
+      updateDirector: m('directors.update'),
       mergeDirectors: m('directors.merge'),
       directorDeletePreview: q('directors.deletePreview'),
       deleteDirector: mPlan('directors.delete'),
@@ -654,8 +462,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       pageSeries: q('series.page'),
       getSeries: q('series.get'),
       seriesOptions: q('series.options'),
-      createSeries: mId('series.create'),
-      updateSeries: mOk('series.update'),
+      createSeries: m('series.create'),
+      updateSeries: m('series.update'),
       mergeSeries: m('series.merge'),
       seriesDeletePreview: q('series.deletePreview'),
       deleteSeries: mPlan('series.delete'),
@@ -664,7 +472,6 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       setImage: m('classificationImages.set')
     },
     playlists: {
-      ...rejectSlice(PLAYLIST_KEYS, (key) => unsupported(`playlists.${String(key)}`)),
       list: q('playlists.list'),
       listPage: q('playlists.listPage'),
       get: q('playlists.get'),
@@ -674,13 +481,12 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       listForVideo: q('playlists.listForVideo'),
       create: m('playlists.create'),
       update: m('playlists.update'),
-      delete: mOk('playlists.delete'),
-      addVideo: mOk('playlists.addVideo'),
-      removeVideo: mOk('playlists.removeVideo'),
+      delete: m('playlists.delete'),
+      addVideo: m('playlists.addVideo'),
+      removeVideo: m('playlists.removeVideo'),
       applyImport: m('playlists.applyImport')
     },
     libraries: {
-      ...rejectSlice(LIBRARY_KEYS, (key) => unsupported(`libraries.${String(key)}`)),
       list: (input, ctx) => query('libraries.list', input ?? {}, ctx?.signal),
       get: q('libraries.get'),
       create: m('libraries.create'),
@@ -699,14 +505,14 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         }
         return mutate(
           'libraries.delete',
-          withPlan(
+          wire('libraries.delete', withPlan(
             {
               libraryId: local.libraryId,
               planId: local.planId,
               planDigest: local.planDigest ?? local.expectedImpactRevision
             },
             ctx
-          ),
+          )),
           {
             ...ctx,
             expectedVersions: {
@@ -723,7 +529,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       addRoot: (input, ctx) => {
         const local = input as {
           libraryId: number
-          root: { mountSelectionId?: string; path?: string; position?: number; state?: string }
+          root: { mountSelectionId?: string; path?: string; position?: number; state?: 'active' | 'disabled' | 'pending_removal' }
         }
         if (local.root.path) {
           throw structuredError('INVALID_INPUT', '远程添加根目录不能发送主机路径')
@@ -749,8 +555,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           libraryId: number
           rootId: number
           position?: number
-          state?: string
-          patch?: { position?: number; state?: string; path?: string }
+          state?: 'active' | 'disabled' | 'pending_removal'
+          patch?: { position?: number; state?: 'active' | 'disabled' | 'pending_removal'; path?: string }
         }
         if (local.patch?.path) {
           throw structuredError('INVALID_INPUT', '远程不能重绑根目录路径')
@@ -779,16 +585,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       auditHeader: q('scans.auditHeader'),
       auditPage: q('scans.auditPage'),
       auditViewPage: (input, ctx) => {
-        const local = (input ?? {}) as {
-          libraryId: number
-          tab: string
-          outcome?: string
-          changesFilter?: string
-          search?: string
-          locale?: string
-          limit?: number
-          offset?: number
-        }
+        const local = input
         return query(
           'scans.auditViewPage',
           {
@@ -799,7 +596,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
             ...(local.search != null ? { search: local.search } : {}),
             ...(local.locale != null ? { locale: local.locale } : {}),
             ...(local.limit != null ? { limit: local.limit } : {}),
-            ...(local.offset != null ? { offset: local.offset } : {})
+            ...(local.offset != null ? { offset: local.offset } : {}),
+            ...(local.anchor != null ? { anchor: local.anchor } : {})
           },
           ctx?.signal
         )
@@ -832,7 +630,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
             scrapeIds: local.scrapeIds ?? []
           },
           ctx?.signal
-        ) as Promise<{ groupIds: number[]; identityIds: number[]; scrapeIds: number[] }>
+        )
       },
       previewRenameFile: q('files.renamePreview'),
       renameFile: mPlan('files.rename'),
@@ -840,7 +638,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       resolvePendingScan: (input, ctx) => {
         const local = input as {
           groupId: number
-          assignments: unknown
+          assignments: CatalogWireInput<'pendingScan.resolve'>['assignments']
           primaryResourceIds?: Record<string, number>
           expectedRevision?: number
         }
@@ -877,7 +675,6 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       state: q('nfo.state')
     },
     browser: {
-      ...rejectSlice(BROWSER_KEYS, (key) => unsupported(`browser.${String(key)}`)),
       status: (input, ctx) => query('browser.status', input ?? {}, ctx?.signal),
       setEnabled: m('browser.setEnabled'),
       pairOpen: m('browser.pairOpen'),
@@ -915,9 +712,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       discard: m('agentMetadata.discard')
     },
     assets: {
-      ...rejectSlice(ASSET_KEYS, (key) => unsupported(`assets.${String(key)}`)),
       async createUpload(input, ctx) {
-        const result = (await mutate('uploads.create', input, ctx)) as { uploadId: string }
+        const result = await mutate('uploads.create', wire('uploads.create', input), ctx)
         return result
       },
       async inspectUpload(input, ctx) {
@@ -931,15 +727,13 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           return await client.putUpload(input.uploadId, input.body, input.contentType, {
             bearer: secret,
             signal: tracked.signal
-          })
+          }) as import('@shared/protocol/uploads').UploadInspectResult
         } finally {
           tracked.done()
         }
       },
       async grantPlayback(input, ctx) {
-        const grant = (await query('play.grant', input, ctx?.signal)) as {
-          playbackHandle?: string
-        }
+        const grant = await query('play.grant', input, ctx?.signal)
         if (
           grant &&
           typeof grant.playbackHandle === 'string' &&
@@ -975,7 +769,6 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       preview: (input, ctx) => migrate('migration.preview', input, ctx?.signal),
       start: (input, ctx) => migrate('migration.start', input, ctx?.signal),
       status: (input, ctx) => migrate('migration.status', input, ctx?.signal),
-      allowEnable: (input, ctx) => migrate('migration.allowEnable', input, ctx?.signal),
       enable: (input, ctx) => migrate('migration.enable', input, ctx?.signal),
       abandon: (input, ctx) => migrate('migration.abandon', input, ctx?.signal),
       async putPackage(input, ctx) {

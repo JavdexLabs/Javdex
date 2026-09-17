@@ -4,11 +4,13 @@ import type {
   PendingResourceIdentityResolution,
   PendingResourceIdentityResolutionResult
 } from '@shared/libraryTypes'
+import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import { normalizeVideoCode } from '@shared/videoCode'
 import {
   deletePendingResourceIdentity,
   getPendingResourceIdentityRecord,
-  selectedPendingResourceIdentityCode
+  selectedPendingResourceIdentityCode,
+  type PendingResourceIdentityRecord
 } from '@library/db/pendingResourceIdentityRepo'
 import { getDb } from '@library/db/database'
 import { getMediaLibraryConfig, getMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
@@ -35,6 +37,37 @@ export interface PendingResourceIdentityServiceOptions {
   readDurationSeconds?: (filePath: string) => Promise<number | null>
   nfoService?: LocalNfoScanService
 }
+
+type IdentityInspection = ReturnType<LocalNfoScanService['inspectIdentity']>
+
+export type PendingResourceIdentityAssignment =
+  | { status: 'assigned'; videoId: number }
+  | { status: 'pending'; pendingGroupId: number }
+  | { status: 'discarded' }
+
+export type PreparedPendingResourceIdentityResolution =
+  | {
+      choice: 'discard'
+      libraryId: number
+      identityId: number
+      resolution: PendingResourceIdentityResolution
+      initial: PendingResourceIdentityRecord
+    }
+  | {
+      choice: 'filename' | 'nfo'
+      libraryId: number
+      identityId: number
+      resolution: PendingResourceIdentityResolution
+      initial: PendingResourceIdentityRecord
+      root: Readonly<MediaLibraryRoot>
+      code: string
+      nfoService: LocalNfoScanService
+      anchor: LocalNfoAnchor
+      inspection: IdentityInspection
+      currentNfoMatches: boolean
+      durationSeconds: number | null
+      preparedStrm: ReturnType<typeof readStrmFile> | null
+    }
 
 function directoryCodes(anchorPath: string): Array<string | null> {
   try {
@@ -71,16 +104,16 @@ function assertCurrentRecord(libraryId: number, identityId: number, expectedRevi
   return record
 }
 
-export async function resolvePendingResourceIdentity(
+/** Read and validate all filesystem/NFO inputs without changing catalog rows. */
+export async function preparePendingResourceIdentityResolution(
   libraryId: number,
   identityId: number,
   resolution: PendingResourceIdentityResolution,
   options: PendingResourceIdentityServiceOptions = {}
-): Promise<PendingResourceIdentityResolutionResult> {
+): Promise<PreparedPendingResourceIdentityResolution> {
   const initial = assertCurrentRecord(libraryId, identityId, resolution.expectedRevision)
   if (resolution.choice === 'discard') {
-    deletePendingResourceIdentity(libraryId, identityId, resolution.expectedRevision)
-    return { status: 'discarded', warnings: [] }
+    return { choice: 'discard', libraryId, identityId, resolution, initial }
   }
 
   const root = getMediaLibraryRoot(libraryId, initial.rootId)
@@ -94,7 +127,7 @@ export async function resolvePendingResourceIdentity(
     anchorPath: initial.filePath,
     directoryVideoCodes: directoryCodes(initial.filePath)
   }
-  let inspection
+  let inspection: IdentityInspection
   try {
     inspection = nfoService.inspectIdentity(anchor)
   } catch {
@@ -126,7 +159,48 @@ export async function resolvePendingResourceIdentity(
     throw new Error('STRM 目标已发生变化，请重新扫描后再处理。')
   }
 
-  const assignment = getDb().transaction(() => {
+  return {
+    choice: resolution.choice,
+    libraryId,
+    identityId,
+    resolution,
+    initial,
+    root,
+    code,
+    nfoService,
+    anchor,
+    inspection,
+    currentNfoMatches,
+    durationSeconds,
+    preparedStrm
+  }
+}
+
+/** Apply a prepared resolution in the caller's mutation transaction. */
+export function applyPreparedPendingResourceIdentityResolution(
+  prepared: PreparedPendingResourceIdentityResolution
+): PendingResourceIdentityAssignment {
+  if (prepared.choice === 'discard') {
+    if (!deletePendingResourceIdentity(
+      prepared.libraryId,
+      prepared.identityId,
+      prepared.resolution.expectedRevision
+    )) {
+      throw new Error('资源身份待办不存在或已经处理。')
+    }
+    return { status: 'discarded' }
+  }
+
+  const {
+    libraryId,
+    identityId,
+    resolution,
+    root,
+    code,
+    durationSeconds,
+    preparedStrm
+  } = prepared
+  return getDb().transaction(() => {
     const current = assertCurrentRecord(libraryId, identityId, resolution.expectedRevision)
     authorizeMediaLibraryRootFile(libraryId, root.id, current.filePath, root)
     const fingerprint = assertFingerprint(current.filePath, current)
@@ -134,9 +208,7 @@ export async function resolvePendingResourceIdentity(
     const config = getMediaLibraryConfig(libraryId)
     if (!config) throw new Error('媒体库扫描配置不存在。')
 
-    let result:
-      | { status: 'assigned'; videoId: number }
-      | { status: 'pending'; pendingGroupId: number }
+    let result: Exclude<PendingResourceIdentityAssignment, { status: 'discarded' }>
     if (videos.length > 1 || (videos.length === 1 && !config.autoMergeSameCodeResources)) {
       const pending = upsertPendingScanResources(libraryId, code, [
         {
@@ -204,18 +276,31 @@ export async function resolvePendingResourceIdentity(
     }
     return result
   }).immediate()
+}
 
-  const warnings = [...inspection.warnings]
+/** Apply the secondary NFO action only after the catalog assignment is durable. */
+export async function finishPreparedPendingResourceIdentityResolution(
+  prepared: PreparedPendingResourceIdentityResolution,
+  assignment: PendingResourceIdentityAssignment
+): Promise<PendingResourceIdentityResolutionResult> {
+  if (prepared.choice === 'discard' || assignment.status === 'discarded') {
+    return { status: 'discarded', warnings: [] }
+  }
+  const warnings = [...prepared.inspection.warnings]
   if (assignment.status === 'pending') {
     warnings.push('资源已进入归属待确认；完成归属后可手动导入本地 NFO。')
     return { ...assignment, warnings }
   }
-  if (!currentNfoMatches) {
+  if (!prepared.currentNfoMatches) {
     warnings.push('当前 NFO 已缺失、不可用或番号已变化；资源归属已完成，但未应用 NFO 元数据。')
     return { ...assignment, warnings }
   }
   try {
-    const applied = await nfoService.apply(assignment.videoId, code, [anchor])
+    const applied = await prepared.nfoService.apply(
+      assignment.videoId,
+      prepared.code,
+      [prepared.anchor]
+    )
     return { ...assignment, warnings: [...warnings, ...applied.warnings] }
   } catch {
     return {
@@ -223,4 +308,20 @@ export async function resolvePendingResourceIdentity(
       warnings: [...warnings, '资源归属已完成，但 NFO 元数据应用失败。']
     }
   }
+}
+
+export async function resolvePendingResourceIdentity(
+  libraryId: number,
+  identityId: number,
+  resolution: PendingResourceIdentityResolution,
+  options: PendingResourceIdentityServiceOptions = {}
+): Promise<PendingResourceIdentityResolutionResult> {
+  const prepared = await preparePendingResourceIdentityResolution(
+    libraryId,
+    identityId,
+    resolution,
+    options
+  )
+  const assignment = applyPreparedPendingResourceIdentityResolution(prepared)
+  return finishPreparedPendingResourceIdentityResolution(prepared, assignment)
 }

@@ -50,7 +50,7 @@ async function pageAllTargetEntries(
     })) as TargetListPage
     const pageEntries =
       page.entries ??
-      page.ids.map((id) => ({ id, present: true as const, label: null, revision: null }))
+      page.ids.map((id) => ({ id, present: true as const, label: null, generation: null, revision: null }))
     entries.push(...pageEntries)
     if (!page.hasMore) break
     offset += page.ids.length
@@ -61,11 +61,14 @@ async function pageAllTargetEntries(
 
 function frozenTargets<T extends { id: number }>(
   entries: NonNullable<TargetListPage['entries']>,
-  toTarget: (id: number, label: string | null | undefined) => T
+  toTarget: (entry: NonNullable<TargetListPage['entries']>[number], label: string | null | undefined) => T
 ): T[] {
-  return entries.map((entry) =>
-    toTarget(entry.id, entry.present === false ? `已删除 · ${entry.label ?? `#${entry.id}`}` : entry.label)
-  )
+  return entries.map((entry) => {
+    const label = entry.present === false
+      ? `已删除 · ${entry.label ?? `#${entry.id}`}`
+      : entry.label
+    return toTarget(entry, label)
+  })
 }
 
 export function remoteVideoTargetListInput(filter: VideoBatchScrapeFilter): TargetListCreateInput {
@@ -105,19 +108,29 @@ export function remoteActressTargetListInput(filter: ActressBatchScrapeFilter): 
 export async function freezeRemoteVideoTargets(
   backend: CatalogBackend,
   filter: VideoBatchScrapeFilter
-): Promise<Array<{ id: number; code: string }>> {
+): Promise<Array<{ id: number; code: string; generation?: number | null; revision?: number | null }>> {
   const created = await createRemoteTargetList(backend, remoteVideoTargetListInput(filter))
   const entries = await pageAllTargetEntries(backend, created.targetListId)
-  return frozenTargets(entries, (id, label) => ({ id, code: label?.trim() || `#${id}` }))
+  return frozenTargets(entries, (entry, label) => ({
+    id: entry.id,
+    code: label?.trim() || `#${entry.id}`,
+    ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
+    ...(entry.revision !== undefined ? { revision: entry.revision } : {})
+  }))
 }
 
 export async function freezeRemoteActressTargets(
   backend: CatalogBackend,
   filter: ActressBatchScrapeFilter
-): Promise<Array<{ id: number; main_name: string }>> {
+): Promise<Array<{ id: number; main_name: string; generation?: number | null; revision?: number | null }>> {
   const created = await createRemoteTargetList(backend, remoteActressTargetListInput(filter))
   const entries = await pageAllTargetEntries(backend, created.targetListId)
-  return frozenTargets(entries, (id, label) => ({ id, main_name: label?.trim() || `#${id}` }))
+  return frozenTargets(entries, (entry, label) => ({
+    id: entry.id,
+    main_name: label?.trim() || `#${entry.id}`,
+    ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
+    ...(entry.revision !== undefined ? { revision: entry.revision } : {})
+  }))
 }
 
 export async function countRemoteVideoTargets(

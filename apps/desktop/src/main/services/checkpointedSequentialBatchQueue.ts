@@ -9,6 +9,7 @@ import {
 } from './sequentialBatchQueue'
 
 type ProgressListener = (progress: BatchProgress) => void
+export type CatalogKeyProvider = string | (() => string | Promise<string>)
 
 export interface CheckpointedBatchRunPlan<TTarget extends { id: number }> {
   resumeMessage: string
@@ -34,7 +35,7 @@ export interface CheckpointedBatchPolicy<TTarget extends { id: number }, TReques
   invalidRunPlanError: string
   resolveTargets(request: TRequest): TTarget[] | Promise<TTarget[]>
   labelOf(target: TTarget): string
-  restoreTarget(item: { id: number; label: string }): TTarget
+  restoreTarget(item: { id: number; label: string; generation?: number | null; revision?: number | null }): TTarget
   beforeResume?(
     job: PersistedBatchScrapeJob,
     port: BatchScrapeCheckpointPort
@@ -57,7 +58,8 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
 
   constructor(
     private readonly policy: CheckpointedBatchPolicy<TTarget, TRequest>,
-    private readonly closeBrowser: () => void = () => scrapeBrowser.close()
+    private readonly closeBrowser: () => void = () => scrapeBrowser.close(),
+    private readonly catalogKey: CatalogKeyProvider = 'local'
   ) {}
 
   setCheckpointPort(port: BatchScrapeCheckpointPort): void {
@@ -104,6 +106,9 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
     if (!job || job.kind !== this.policy.kind) {
       throw new Error(this.policy.missingResumeError)
     }
+    if ((job.catalogKey ?? 'local') !== await this.resolveCatalogKey()) {
+      throw new Error('当前批量任务属于其他资料库，无法继续；请终止任务后重新开始')
+    }
     const recoverable = this.policy.beforeResume
       ? this.policy.beforeResume(job, this.checkpointPort())
       : job
@@ -112,11 +117,13 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
 
   async start(request: TRequest): Promise<void> {
     const targets = await this.policy.resolveTargets(request)
+    const catalogKey = await this.resolveCatalogKey()
     const job = this.checkpointPort().create(
       this.policy.kind,
       request as PersistedBatchScrapeJob['request'],
       targets,
-      (target) => this.policy.labelOf(target)
+      (target) => this.policy.labelOf(target),
+      catalogKey
     )
     this.activeJob = job
     this.checkpointPort().persist(job, this.checkpointPort().toProgress(job), 0, 'running')
@@ -219,5 +226,9 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
   private checkpointPort(): BatchScrapeCheckpointPort {
     if (!this.checkpoints) throw new Error('批量刮削检查点尚未初始化')
     return this.checkpoints
+  }
+
+  private async resolveCatalogKey(): Promise<string> {
+    return typeof this.catalogKey === 'function' ? await this.catalogKey() : this.catalogKey
   }
 }

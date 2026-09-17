@@ -27,11 +27,11 @@ function main(): void {
   }
   try {
     try {
-      const enabled = enableCatalogMigration({ migrationId, digest }, host, database)
+      const enabled = enableCatalogMigration({ confirmSourceStopped: true, migrationId, digest }, host, database)
       process.stdout.write(
         `${JSON.stringify({
           code: null,
-          targetPhase: enabled.targetPhase,
+          phase: enabled.phase,
           coverExists: fs.existsSync(path.join(imagesDir, coverRel))
         })}\n`
       )
@@ -41,7 +41,7 @@ function main(): void {
         `${JSON.stringify({
           code: error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code ?? '') : '',
           message: error instanceof Error ? error.message : String(error),
-          targetPhase: status.targetPhase,
+          phase: status.phase,
           coverExists: fs.existsSync(path.join(imagesDir, coverRel))
         })}\n`
       )

@@ -31,19 +31,19 @@ export function registerMediaLibraryHandlers(
     backend.libraries.create(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_UPDATE, (input) =>
-    backend.libraries.update(input as never, ipcMutation())
+    backend.libraries.update(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_CONFIG_UPDATE, (input) =>
-    backend.libraries.updateConfig(input as never, ipcMutation())
+    backend.libraries.updateConfig(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_ROOT_ADD, (input) =>
-    backend.libraries.addRoot(input as never, ipcMutation())
+    backend.libraries.addRoot(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_ROOT_UPDATE, (input) =>
-    backend.libraries.updateRoot(input as never, ipcMutation())
+    backend.libraries.updateRoot(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE, (input) =>
-    backend.libraries.removeRoot(input as never, ipcMutation())
+    backend.libraries.removeRoot(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL, (input) =>
     backend.libraries.cancelRootRemoval(input, ipcMutation())
@@ -61,16 +61,16 @@ export function registerMediaLibraryHandlers(
     return desktop.migrateRoot(input)
   })
   adapter.register(IPC.MEDIA_LIBRARY_ARCHIVE, (input) =>
-    backend.libraries.archive(input as never, ipcMutation())
+    backend.libraries.archive(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_RESTORE, (input) =>
-    backend.libraries.restore(input as never, ipcMutation())
+    backend.libraries.restore(input, ipcMutation())
   )
   adapter.register(IPC.MEDIA_LIBRARY_DELETE_PREVIEW, (input) =>
     backend.libraries.deletePreview({ libraryId: input.libraryId })
   )
   adapter.register(IPC.MEDIA_LIBRARY_DELETE, (input) =>
-    backend.libraries.delete(input as never, ipcMutation())
+    backend.libraries.delete(input, ipcMutation())
   )
   adapter.register(IPC.HOME_LOAD, (input) => backend.queries.homeLoad(input))
   adapter.register(IPC.HOME_SEARCH, (input) => backend.queries.homeSearch(input))

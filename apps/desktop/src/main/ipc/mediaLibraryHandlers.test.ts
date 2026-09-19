@@ -230,6 +230,15 @@ function createDependencies(calls: string[]): MediaLibraryHandlerTestDependencie
 }
 
 describe('media-library IPC schemas', () => {
+  it('accepts a remote mount name and rejects mixed host-path authority', () => {
+    const schema = mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_ROOT_ADD]
+    const input = { libraryId: 1, expectedRevision: 3, root: { mountSelectionId: 'library', state: 'active' } }
+    assert.deepEqual(schema.parse([input]), [input])
+    for (const root of [{ mountSelectionId: '' }, { mountSelectionId: 'library', path: '/private/media' }]) {
+      assert.equal(schema.safeParse([{ ...input, root }]).success, false)
+    }
+  })
+
   it('accepts the complete default config sent by the create wizard, including local NFO import', () => {
     for (const autoImportLocalNfo of [true, false]) {
       const input = {

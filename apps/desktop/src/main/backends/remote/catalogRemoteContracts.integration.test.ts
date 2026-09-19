@@ -62,3 +62,42 @@ test('HTTP wire envelopes normalize to catalog values and local paths never cros
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
   }
 })
+
+test('maps desktop library revisions into HTTP versions without replacing explicit stale versions', async () => {
+  const requests: Array<{ operation: string; body: { input: unknown; expectedVersions: unknown } }> = []
+  const server = createServer(async (req, res) => {
+    const operation = (req.url ?? '').split('/').at(-1) ?? ''
+    let body = ''
+    for await (const chunk of req) body += chunk
+    requests.push({ operation, body: JSON.parse(body) })
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify(operation === 'handshake.get' ? {
+      protocolVersion: 1, appVersion: '0.7.1', schemaVersion: 19,
+      identity: { serverId: 'server', catalogId: 'catalog' }, writerEpoch: 1, ready: 'ready'
+    } : {}))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const backend = createRemoteCatalogBackend({
+    baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, appVersion: '0.7.1',
+    credentials: { isAvailable: async () => true, readWriterSecret: async () => 'secret',
+      writeWriterSecret: async () => {}, deleteWriterSecret: async () => {} }
+  })
+  try {
+    const context = { operationId: 'operation', expectedVersions: {} }
+    await backend.libraries.updateConfig({ libraryId: 1, expectedRevision: 3, patch: { autoImportLocalNfo: true } }, context)
+    assert.deepEqual(requests.at(-1)?.body.input, { libraryId: 1, patch: { autoImportLocalNfo: true } })
+    assert.deepEqual(requests.at(-1)?.body.expectedVersions, { C: { generation: 1, revision: 3 } })
+    await backend.libraries.updateConfig({ libraryId: 1, expectedRevision: 3, patch: { autoImportLocalNfo: false } },
+      { ...context, expectedVersions: { C: { generation: 1, revision: 2 } } })
+    assert.deepEqual(requests.at(-1)?.body.expectedVersions, { C: { generation: 1, revision: 2 } })
+    await backend.libraries.update({ libraryId: 1, expectedRevision: 4, patch: { name: 'Renamed' } }, context)
+    assert.deepEqual(requests.at(-1)?.body.input, { libraryId: 1, name: 'Renamed' })
+    assert.deepEqual(requests.at(-1)?.body.expectedVersions, { L: { generation: 1, revision: 4 } })
+    await backend.libraries.addRoot({ libraryId: 1, expectedRevision: 4, root: { mountSelectionId: 'media' } } as Parameters<typeof backend.libraries.addRoot>[0], context)
+    assert.deepEqual(requests.at(-1)?.body.input, { libraryId: 1, root: { mountSelectionId: 'media' } })
+    assert.deepEqual(requests.at(-1)?.body.expectedVersions, { L: { generation: 1, revision: 4 }, G: { generation: 1, revision: 1 } })
+  } finally {
+    await backend.dispose()
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  }
+})

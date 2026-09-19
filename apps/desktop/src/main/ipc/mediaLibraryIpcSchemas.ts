@@ -109,7 +109,11 @@ export const mediaLibraryIpcSchemas = {
     revisionInput.extend({ patch: mediaLibraryConfigPatch }).strict()
   ]),
   [IPC.MEDIA_LIBRARY_ROOT_ADD]: z.tuple([
-    revisionInput.extend({ root: createRoot }).strict()
+    revisionInput.extend({ root: z.union([createRoot, z.object({
+      mountSelectionId: nonEmptyText.max(200),
+      position: nonNegativeSafeInteger.optional(),
+      state: ordinaryRootState.optional()
+    }).strict()]) }).strict()
   ]),
   [IPC.MEDIA_LIBRARY_ROOT_UPDATE]: z.tuple([
     revisionInput.extend({ rootId: positiveSafeInteger, patch: rootPatch }).strict()

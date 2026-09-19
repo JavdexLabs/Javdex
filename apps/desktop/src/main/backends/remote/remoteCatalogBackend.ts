@@ -240,6 +240,27 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
   const m = <K extends keyof CatalogOperationResults>(operation: K) =>
     (input: CatalogOperationInput<K>, ctx: MutationContext) =>
       mutate(operation, wire(operation, input), ctx)
+  const libraryMutation = (
+    ctx: MutationContext,
+    expectedRevision: number | undefined,
+    field: 'L' | 'C',
+    rootOperation = false
+  ): MutationContext => ({
+    ...ctx,
+    expectedVersions: {
+      ...ctx.expectedVersions,
+      ...(expectedRevision == null ? {} : {
+        [field]: ctx.expectedVersions[field] ?? { generation: 1, revision: expectedRevision }
+      }),
+      ...(rootOperation ? { G: ctx.expectedVersions.G ?? { generation: 1, revision: 1 } } : {})
+    }
+  })
+  const libraryRevisionCommand = <K extends 'libraries.updateConfig' | 'libraries.archive' | 'libraries.restore' | 'libraries.cancelRootRemoval'>(operation: K) =>
+    (input: CatalogOperationInput<K>, ctx: MutationContext) => {
+      const { expectedRevision, ...rest } = input as CatalogOperationInput<K> & { expectedRevision?: number }
+      return mutate(operation, wire(operation, rest), libraryMutation(ctx, expectedRevision,
+        operation === 'libraries.updateConfig' ? 'C' : 'L', operation === 'libraries.cancelRootRemoval'))
+    }
   const withPlan = (input: Record<string, unknown>, ctx: MutationContext): Record<string, unknown> => {
     const planDigest =
       typeof input.planDigest === 'string'
@@ -490,10 +511,14 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       list: (input, ctx) => query('libraries.list', input ?? {}, ctx?.signal),
       get: q('libraries.get'),
       create: m('libraries.create'),
-      update: m('libraries.update'),
-      updateConfig: m('libraries.updateConfig'),
-      archive: m('libraries.archive'),
-      restore: m('libraries.restore'),
+      update: (input, ctx) => {
+        const { expectedRevision, ...rest } = input as CatalogOperationInput<'libraries.update'> & { expectedRevision?: number }
+        const payload = 'patch' in rest ? { libraryId: rest.libraryId, ...rest.patch } : rest
+        return mutate('libraries.update', wire('libraries.update', payload), libraryMutation(ctx, expectedRevision, 'L'))
+      },
+      updateConfig: libraryRevisionCommand('libraries.updateConfig'),
+      archive: libraryRevisionCommand('libraries.archive'),
+      restore: libraryRevisionCommand('libraries.restore'),
       deletePreview: q('libraries.deletePreview'),
       delete: (input, ctx) => {
         const local = (input ?? {}) as {
@@ -529,6 +554,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       addRoot: (input, ctx) => {
         const local = input as {
           libraryId: number
+          expectedRevision?: number
           root: { mountSelectionId?: string; path?: string; position?: number; state?: 'active' | 'disabled' | 'pending_removal' }
         }
         if (local.root.path) {
@@ -547,12 +573,13 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
               ...(local.root.state != null ? { state: local.root.state } : {})
             }
           },
-          ctx
+          libraryMutation(ctx, local.expectedRevision, 'L', true)
         )
       },
       updateRoot: (input, ctx) => {
         const local = input as {
           libraryId: number
+          expectedRevision?: number
           rootId: number
           position?: number
           state?: 'active' | 'disabled' | 'pending_removal'
@@ -573,11 +600,11 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
               ? { state: local.state ?? local.patch?.state }
               : {})
           },
-          ctx
+          libraryMutation(ctx, local.expectedRevision, 'L', true)
         )
       },
       removeRoot: mPlan('libraries.removeRoot'),
-      cancelRootRemoval: m('libraries.cancelRootRemoval'),
+      cancelRootRemoval: libraryRevisionCommand('libraries.cancelRootRemoval'),
       runScan: m('scans.run'),
       cancelScan: m('scans.cancel'),
       latestScan: q('scans.getLatest'),

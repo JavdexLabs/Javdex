@@ -45,7 +45,7 @@ export interface UpdateMediaLibraryConfigInput {
 export interface AddMediaLibraryRootInput {
   libraryId: number
   expectedRevision: number
-  root: CreateMediaLibraryRootInput
+  root: CreateMediaLibraryRootInput | { mountSelectionId: string; position?: number; state?: 'active' | 'disabled' }
 }
 
 export interface UpdateMediaLibraryRootInput {

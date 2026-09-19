@@ -19,6 +19,9 @@ import { useSettingsDraft } from '../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../settings/SettingsLeaveGuard'
 import SettingsFormActions from '../components/settings/SettingsFormActions'
 import Button from '../components/Button'
+import ConfirmModal from '../components/ConfirmModal'
+import { AppFormField } from '../components/FormPrimitives'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import EmptyState from '../components/EmptyState'
 import { NavIcon } from '../components/NavIcons'
 import SelectControl from '../components/SelectControl'
@@ -93,6 +96,9 @@ export function MediaLibrarySettingsContent({
   onTabKeyDown: KeyboardEventHandler<HTMLDivElement>
 }): JSX.Element {
   const navigate = useNavigate()
+  const { session } = useDesktopSession()
+  const [remoteRootOpen, setRemoteRootOpen] = useState(false)
+  const [remoteMountName, setRemoteMountName] = useState('')
   const toast = useToast()
   const queryClient = useQueryClient()
   const { scrapers, defaultScraper } = useScraperPluginCatalog('video')
@@ -235,6 +241,11 @@ export function MediaLibrarySettingsContent({
 
   const addRoots = async (): Promise<void> => {
     if (!library || busy) return
+    if (session.mode === 'remote') {
+      setRemoteMountName('')
+      setRemoteRootOpen(true)
+      return
+    }
     setBusy('add-root')
     let added = 0
     try {
@@ -715,6 +726,24 @@ export function MediaLibrarySettingsContent({
           ) : null}
         </section>
       </div>
+
+      {remoteRootOpen ? (
+        <ConfirmModal title="添加服务端来源目录" confirmText="添加" busy={busy === 'add-root'}
+          confirmDisabled={!remoteMountName.trim() || session.state !== 'available'}
+          onCancel={() => setRemoteRootOpen(false)}
+          onConfirm={() => void (async () => {
+            const added = await runMutation('add-root', '来源目录已添加', () => api.mediaLibraries.addRoot({
+              libraryId, expectedRevision: library.revision,
+              root: { mountSelectionId: remoteMountName.trim(), state: 'active' }
+            }))
+            if (added) setRemoteRootOpen(false)
+          })()}>
+          <AppFormField label="挂载名称" hint="输入服务端部署配置中的挂载名称，例如 library。">
+            <input className="text-input" aria-label="挂载名称" autoFocus value={remoteMountName}
+              disabled={busy !== null} onChange={event => setRemoteMountName(event.target.value)} />
+          </AppFormField>
+        </ConfirmModal>
+      ) : null}
 
       <MediaLibrarySettingsDialogs
         rootRemoval={rootRemoval}

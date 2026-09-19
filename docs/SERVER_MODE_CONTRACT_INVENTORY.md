@@ -126,6 +126,8 @@ C6 的最终语义集中如下，不再采用旧实施记录中的中间状态�
 
 `videos.importResource` 的 url 可选，支持仅资料、最多 20 条 resources 及相关 links；每项资源仍由严格 schema 校验。见 [inputs.ts](../packages/contracts/src/manage/inputs.ts)、[合同测试](../packages/contracts/src/manage/schemas.test.ts) 与共享 [videoMaintenanceService.ts](../packages/library/src/catalog/videoMaintenanceService.ts)。客户端和服务端必须同版本；新增字段不意味着兼容旧客户端。
 
+远程媒体库设置将桌面 `expectedRevision` 转成 HTTP 信封中的 L/C 版本；不把桌面兼容字段送入严格 HTTP 输入，也不以刷新后的版本覆盖用户提交的旧版本。添加来源目录的 IPC 接受互斥的本机路径或服务端挂载名称，远程只接受后者。
+
 ## 扫描与 NFO 的版本边界
 
 影片 V 保护正式元数据，文件维护 R 由资源定位、指纹等状态生成摘要。扫描刷新 STRM 目标会使旧文件维护版本失效；仅新增/刷新资源、不改影片元数据时，不额外递增 V。

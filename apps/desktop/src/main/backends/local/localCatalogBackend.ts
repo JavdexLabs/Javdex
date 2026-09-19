@@ -896,7 +896,7 @@ export function createLocalCatalogBackend(
       return libraries.addRoot({
         libraryId: local.libraryId,
         expectedRevision: local.expectedRevision,
-        root: local.root
+        root: { ...local.root, path: local.root.path }
       })
     },
     async updateRoot(input) {

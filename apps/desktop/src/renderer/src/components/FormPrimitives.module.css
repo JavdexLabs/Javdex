@@ -116,6 +116,7 @@
 }
 
 .editHint {
+  margin: 0;
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 400;

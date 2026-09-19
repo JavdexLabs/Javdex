@@ -29,6 +29,7 @@ export interface ScrapeBrowserHelloFrame {
   parentPid: number
   cdpPort: number
   targetId: string
+  toolbarTargetId?: string
 }
 
 export interface ScrapeBrowserRequestFrame {

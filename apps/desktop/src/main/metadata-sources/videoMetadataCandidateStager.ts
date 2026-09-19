@@ -3,7 +3,7 @@ import { mediaAssetStore, type MediaAssetStore } from '@library/mediaAssetStore'
 import type { MetadataAssetRef, VideoMetadataCandidateStager } from './types'
 
 interface VideoMetadataCandidateStagerDependencies {
-  fetchRemote: (url: string) => Promise<Buffer>
+  fetchRemote: (url: string, sourceUrl?: string) => Promise<Buffer>
   readManagedRootFile?: (
     capability: Extract<MetadataAssetRef, { kind: 'managed-root-file' }>['capability']
   ) => Promise<Buffer>
@@ -33,19 +33,27 @@ export function createVideoMetadataCandidateStager(
 ): VideoMetadataCandidateStager {
   const assetStore = dependencies.assetStore ?? mediaAssetStore
 
-  const readAsset = async (asset: MetadataAssetRef): Promise<Buffer> => {
-    if (asset.kind === 'remote-url') return dependencies.fetchRemote(asset.url)
+  const readAsset = async (asset: MetadataAssetRef, sourceUrl?: string): Promise<Buffer> => {
+    if (asset.kind === 'remote-url') return dependencies.fetchRemote(asset.url, sourceUrl)
     if (!dependencies.readManagedRootFile) {
       throw new Error('本地候选资源读取能力不可用')
     }
     return dependencies.readManagedRootFile(asset.capability)
   }
 
-  const readUsableAsset = async (asset: MetadataAssetRef): Promise<Buffer | null> => {
+  const readUsableAsset = async (asset: MetadataAssetRef, sourceUrl?: string): Promise<Buffer | null> => {
     try {
-      const data = await readAsset(asset)
-      return assetStore.isUsableImageBuffer(data) ? data : null
-    } catch {
+      const data = await readAsset(asset, sourceUrl)
+      if (!assetStore.isUsableImageBuffer(data)) {
+        console.warn(`[video-image] ${asset.field}[${asset.position}] 暂存失败：响应不是有效图片`)
+        return null
+      }
+      return data
+    } catch (error) {
+      // Do not include URLs, signed query strings or arbitrary server error messages.
+      const message = error instanceof Error ? error.message : ''
+      const reason = message.match(/net::ERR_[A-Z_]+|HTTP \d{3}|SCRAPE_BROWSER_BUSY/)?.[0] ?? '资源读取失败'
+      console.warn(`[video-image] ${asset.field}[${asset.position}] 暂存失败：${reason}`)
       return null
     }
   }
@@ -58,7 +66,7 @@ export function createVideoMetadataCandidateStager(
         const resources: Parameters<typeof assetStore.stageVideoScrapeImages>[0] = []
         const cover = candidate.assets.find((asset) => asset.field === 'cover')
         if (cover) {
-          const data = await readUsableAsset(cover)
+          const data = await readUsableAsset(cover, candidate.result.sourceUrl)
           if (data) {
             resources.push({
               field: 'cover',
@@ -75,7 +83,7 @@ export function createVideoMetadataCandidateStager(
           .filter((asset) => asset.field === 'samples')
           .sort((left, right) => left.position - right.position)
         if (samples.length > 0) {
-          const sampleBuffers = await Promise.all(samples.map(readUsableAsset))
+          const sampleBuffers = await Promise.all(samples.map((asset) => readUsableAsset(asset, candidate.result.sourceUrl)))
           if (sampleBuffers.every((data): data is Buffer => data !== null)) {
             sampleBuffers.forEach((data, position) => {
               resources.push({
@@ -94,7 +102,7 @@ export function createVideoMetadataCandidateStager(
           .filter((asset) => asset.field === 'actressAvatar')
           .sort((left, right) => left.position - right.position)
         for (const avatar of avatars) {
-          const data = await readUsableAsset(avatar)
+          const data = await readUsableAsset(avatar, candidate.result.sourceUrl)
           const actress = candidate.result.actresses?.[avatar.position]
           if (data) {
             resources.push({
@@ -143,7 +151,7 @@ export function createVideoMetadataCandidateStager(
         coverRel = await assetStore.downloadCover(
           candidate.result.code || fallbackCode,
           reference,
-          () => readAsset(cover)
+          () => readAsset(cover, candidate.result.sourceUrl)
         )
       }
 
@@ -164,7 +172,7 @@ export function createVideoMetadataCandidateStager(
             await assetStore.downloadAvatar(
               actress.name,
               safeAssetReference(avatar),
-              () => readAsset(avatar)
+              () => readAsset(avatar, candidate.result.sourceUrl)
             )
           )
         }
@@ -183,7 +191,7 @@ export function createVideoMetadataCandidateStager(
             (reference) => {
               const asset = byReference.get(reference)
               if (!asset) throw new Error('候选资源引用无效')
-              return readAsset(asset)
+              return readAsset(asset, candidate.result.sourceUrl)
             }
           )
           if (sampleRels.some((assetPath) => !assetPath)) {

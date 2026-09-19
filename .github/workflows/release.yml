@@ -104,6 +104,7 @@ jobs:
           fi
 
       - name: Upload packaged artifacts
+        # Keep builder diagnostics and update metadata in CI, not in public release assets.
         uses: actions/upload-artifact@v4
         with:
           name: Javdex-${{ matrix.platform }}
@@ -147,6 +148,18 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
+      - name: Generate SHA-256 checksums
+        shell: bash
+        working-directory: release-artifacts
+        run: |
+          set -euo pipefail
+          mapfile -d '' packages < <(find . -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.exe' -o -name '*.zip' \) -printf '%f\0' | LC_ALL=C sort -z)
+          if [[ ${#packages[@]} -eq 0 ]]; then
+            echo "No release packages were found." >&2
+            exit 1
+          fi
+          sha256sum -- "${packages[@]}" > SHA256SUMS.txt
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -161,6 +174,4 @@ jobs:
             release-artifacts/*.dmg
             release-artifacts/*.exe
             release-artifacts/*.zip
-            release-artifacts/*.blockmap
-            release-artifacts/*.yml
-            release-artifacts/*.yaml
+            release-artifacts/SHA256SUMS.txt

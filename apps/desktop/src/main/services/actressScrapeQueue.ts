@@ -1,3 +1,4 @@
+import { createScraperPreLoginSession } from '../scrapers/scraperPreLogin'
 import type {
   ActressAvatarAutoCropOutcome,
   ActressAvatarAutoCropTarget
@@ -120,6 +121,11 @@ class ActressScrapeQueue {
         const mode = request.mode ?? 'replace'
         const missingFields = request.missingFields ?? []
         const delayController = helpers.createDelayController()
+        const preLogin = createScraperPreLoginSession({
+          onWaiting: ({ pluginName }) => {
+            helpers.addLog('-', 'info', `等待登入完成后继续刮削（${pluginName}）`)
+          }
+        })
         const scopeLabel = request.actressIds
           ? `已选 ${targets.length} 位演员`
           : (SCOPE_LABEL.get(request.scope) ?? request.scope)
@@ -149,7 +155,8 @@ class ActressScrapeQueue {
               expectedVersion: generation == null || revision == null ? undefined : { generation, revision },
               useAliases: request.useAliases ?? false,
               batchJobId: job.jobId,
-              delayController
+              delayController,
+              preLogin
             })
             if (itemOutcome.status === 'pending') {
               return {

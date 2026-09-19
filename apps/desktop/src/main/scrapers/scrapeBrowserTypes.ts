@@ -9,6 +9,7 @@ export interface ScrapeBrowserFetchPageOptions {
 }
 
 export interface ScrapeBrowserFetchBufferOptions {
+  /** Defaults to the live page origin; absent for non-web pages, HTTPS downgrades and cross-origin local services. */
   referer?: 'omit' | 'session' | string
   headers?: Readonly<Record<string, string>>
   /** Abort the response before buffering more than this many bytes. */

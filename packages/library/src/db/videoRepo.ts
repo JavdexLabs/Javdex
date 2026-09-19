@@ -38,8 +38,11 @@ import { buildStrmResourceKey } from '@library/strmResource'
 import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 import { ensureVideoMembership, removeVideoMembership } from './libraryMembershipRepo'
 import { MediaLibraryRepoError } from './mediaLibraryRepo'
+import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
+import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
 import {
   mergeRelatedLinks,
+  prepareRelatedLinks,
   readRelatedLinks,
   readRelatedMergeLinks,
   replaceRelatedLinks,
@@ -960,27 +963,73 @@ export function removeSourceManagedVideoResourcesBatch(
   })()
 }
 
-export function importVideoLinkResourceRecord(input: {
-  libraryId: number
-  code: string
-  target: { kind: 'new' } | { kind: 'existing'; videoId: number }
+type ImportedLinkResourceFields = {
   kind: ExternalVideoResourceKind
   locator: string
   resourceKey: string
   displayName: string | null
   sizeBytes: number | null
+}
+
+function resolveImportedLinkResources(input: {
+  kind?: ExternalVideoResourceKind
+  locator?: string
+  resourceKey?: string
+  displayName?: string | null
+  sizeBytes?: number | null
+  resources?: readonly ImportedLinkResourceFields[]
+}): ImportedLinkResourceFields[] {
+  if (input.resources?.length) return [...input.resources]
+  if (input.kind != null && input.locator != null && input.resourceKey != null) {
+    return [
+      {
+        kind: input.kind,
+        locator: input.locator,
+        resourceKey: input.resourceKey,
+        displayName: input.displayName ?? null,
+        sizeBytes: input.sizeBytes ?? null
+      }
+    ]
+  }
+  return []
+}
+
+export function importVideoLinkResourceRecord(input: {
+  libraryId: number
+  code: string
+  target: { kind: 'new' } | { kind: 'existing'; videoId: number }
+  kind?: ExternalVideoResourceKind
+  locator?: string
+  resourceKey?: string
+  displayName?: string | null
+  sizeBytes?: number | null
+  resources?: readonly ImportedLinkResourceFields[]
+  links?: readonly RelatedLinkInput[]
 }): VideoResourceImportResult | { duplicateOwnerCode: string } {
   const db = getDb()
   return db.transaction(() => {
-    const duplicate = db
-      .prepare(
-        `SELECT v.code
-         FROM video_resources vr
-         JOIN videos v ON v.id = vr.video_id
-         WHERE vr.library_id = ? AND vr.resource_key = ?`
-      )
-      .get(input.libraryId, input.resourceKey) as { code: string } | undefined
-    if (duplicate) return { duplicateOwnerCode: duplicate.code }
+    const importedResources = resolveImportedLinkResources(input)
+    const relatedLinks = input.links?.length ? prepareRelatedLinks(input.links) : []
+    if (
+      importedResources.length === 0 &&
+      input.target.kind === 'existing' &&
+      relatedLinks.length === 0
+    ) {
+      throw new Error('请至少添加资源链接或相关链接')
+    }
+
+    const duplicateLookup = db.prepare(
+      `SELECT v.code
+       FROM video_resources vr
+       JOIN videos v ON v.id = vr.video_id
+       WHERE vr.library_id = ? AND vr.resource_key = ?`
+    )
+    for (const item of importedResources) {
+      const duplicate = duplicateLookup.get(input.libraryId, item.resourceKey) as
+        | { code: string }
+        | undefined
+      if (duplicate) return { duplicateOwnerCode: duplicate.code }
+    }
 
     let video: Pick<Video, 'id' | 'code'> | null = null
     let createdVideo = false
@@ -1003,35 +1052,58 @@ export function importVideoLinkResourceRecord(input: {
       },
       db
     )
-    const resourceCount = (
-      db
-        .prepare(
-          'SELECT COUNT(*) AS count FROM video_resources WHERE library_id = ? AND video_id = ?'
-        )
-        .get(input.libraryId, video.id) as {
-        count: number
-      }
-    ).count
-    const info = db
-      .prepare(
+    let resource: VideoResource | null = null
+    if (importedResources.length > 0) {
+      let resourceCount = (
+        db
+          .prepare(
+            'SELECT COUNT(*) AS count FROM video_resources WHERE library_id = ? AND video_id = ?'
+          )
+          .get(input.libraryId, video.id) as {
+          count: number
+        }
+      ).count
+      const insert = db.prepare(
         `INSERT INTO video_resources (
            library_id, video_id, kind, locator, resource_key, source_identity,
            size_bytes, display_name, is_primary, add_time
          ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`
       )
-      .run(
-        input.libraryId,
+      for (const item of importedResources) {
+        const info = insert.run(
+          input.libraryId,
+          video.id,
+          item.kind,
+          item.locator,
+          item.resourceKey,
+          item.sizeBytes,
+          item.displayName,
+          resourceCount === 0 ? 1 : 0,
+          nowIso()
+        )
+        const written = getVideoResourceInLibrary(input.libraryId, Number(info.lastInsertRowid))
+        if (!written) throw new Error('影片资源写入失败')
+        resource ??= written
+        resourceCount += 1
+      }
+    }
+    if (relatedLinks.length > 0) {
+      writeRelatedLinks(
+        db,
+        'video_links',
+        'video_id',
         video.id,
-        input.kind,
-        input.locator,
-        input.resourceKey,
-        input.sizeBytes,
-        input.displayName,
-        resourceCount === 0 ? 1 : 0,
-        nowIso()
+        createdVideo
+          ? relatedLinks
+          : mergeRelatedLinks(
+              readRelatedMergeLinks(db, 'video_links', 'video_id', video.id),
+              relatedLinks.map((link) => ({
+                ...link,
+                normalized_url: normalizeRelatedLinkUrl(link.url)
+              }))
+            )
       )
-    const resource = getVideoResourceInLibrary(input.libraryId, Number(info.lastInsertRowid))
-    if (!resource) throw new Error('影片资源写入失败')
+    }
     return { videoId: video.id, resource, createdVideo }
   })()
 }

@@ -106,6 +106,7 @@ function addWebResource(libraryId: number, videoId: number, code: string): numbe
     sizeBytes: null
   })
   assert.ok(!('duplicateOwnerCode' in result))
+  assert.ok(result.resource)
   return result.resource.id
 }
 

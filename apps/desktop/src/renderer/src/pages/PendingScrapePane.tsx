@@ -23,7 +23,7 @@ import { navigateToVideoDetail } from '../listView/listNavigation'
 import { videoKeys } from '../query/queryKeys'
 import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import {
-  PendingAlert,
+  PendingWarnings,
   PendingConfirmBar,
   PendingImpactCard,
   PendingImpactCards,
@@ -330,13 +330,7 @@ export default function PendingScrapePane({
       status={complete ? '可应用' : '待确认'}
       statusTone={complete ? 'ok' : 'waiting'}
       alert={
-        pending.warnings.length > 0 ? (
-          <PendingAlert>
-            {pending.warnings.map((warning, index) => (
-              <span key={`${warning}-${index}`}>{warning}</span>
-            ))}
-          </PendingAlert>
-        ) : null
+        <PendingWarnings key={`${pending.id}-${pending.revision}`} warnings={pending.warnings} />
       }
       confirm={
         <PendingConfirmBar

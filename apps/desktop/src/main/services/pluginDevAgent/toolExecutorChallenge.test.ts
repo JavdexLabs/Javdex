@@ -88,6 +88,10 @@ describe('plugin developer Cloudflare handoff', () => {
           url: 'https://example.test/cdn-cgi/challenge',
           title: 'Just a moment...'
         }),
+        waitPreLogin: async () => ({
+          url: 'https://example.test/cdn-cgi/challenge',
+          title: 'Just a moment...'
+        }),
         agentAction: async (command) => {
           browserCommand = command
           throw new ScrapeBrowserChallengeError({
@@ -186,6 +190,7 @@ describe('plugin developer Cloudflare handoff', () => {
           presented += 1
           return { url: 'https://example.test/login', title: 'Sign in' }
         },
+        waitPreLogin: async () => ({ url: 'https://example.test/login', title: 'Sign in' }),
         recycle: async () => undefined,
         release: async () => undefined
       })
@@ -260,6 +265,7 @@ describe('plugin developer Cloudflare handoff', () => {
         fetchBufferResponse: async () => ({ statusCode: 200, body: Buffer.alloc(0) }),
         pluginAction: async () => ({}),
         presentToUser: async () => ({ url: 'https://example.test/detail', title: 'Detail' }),
+        waitPreLogin: async () => ({ url: 'https://example.test/detail', title: 'Detail' }),
         agentAction: async () => { throw nextError },
         recycle: async () => undefined,
         release: async () => undefined

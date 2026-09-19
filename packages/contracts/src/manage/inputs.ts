@@ -386,10 +386,17 @@ export const MANAGE_OPERATION_INPUTS = {
       libraryId: idSchema,
       code: codeSchema,
       target: resourceTargetSchema,
-      url: z.string().min(1).max(4096),
+      url: z.string().min(1).max(4096).optional(),
       kind: z.enum(['direct', 'web', 'magnet', 'ed2k']).optional(),
       displayName: limitedTextSchema.nullable().optional(),
-      sizeBytes: z.number().nonnegative().nullable().optional()
+      sizeBytes: z.number().nonnegative().nullable().optional(),
+      resources: z.array(z.object({
+        url: z.string().min(1).max(4096),
+        kind: z.enum(['direct', 'web', 'magnet', 'ed2k']).optional(),
+        displayName: limitedTextSchema.nullable().optional(),
+        sizeBytes: z.number().nonnegative().nullable().optional()
+      }).strict()).max(20).optional(),
+      links: relatedLinksSchema.optional()
     })
     .strict(),
   'videos.getResource': z

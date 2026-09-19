@@ -19,7 +19,8 @@ import {
   loadUserVideoScrapers,
   migrateUserPluginsAwayFromBuiltInNames,
   readScraperPluginPackage,
-  readScraperPluginPackageForExport
+  readScraperPluginPackageForExport,
+  updateScraperPluginConfig
 } from './scraperPluginService'
 import { normalizeVideoScrapeResult } from './scraperResultValidation'
 import { getSettings, resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
@@ -135,6 +136,20 @@ describe('scraperPluginService', () => {
     assert.deepEqual(gfriends.delay, { minMs: 0, maxMs: 0 })
     assert.equal(gfriends.debuggable, false)
     assert.equal(builtInDescriptor('actress', 'Xslist').debuggable, true)
+  })
+
+  it('exposes pre-login only for website scrapers with a usable homepage', () => {
+    assert.equal(builtInDescriptor('video', 'JavDB').preLoginAvailable, true)
+    assert.equal(builtInDescriptor('video', 'JavLibrary').preLoginAvailable, true)
+    assert.equal(builtInDescriptor('video', 'MetaTube').preLoginAvailable, false)
+    assert.equal(builtInDescriptor('actress', 'Xslist').preLoginAvailable, true)
+    assert.equal(builtInDescriptor('actress', 'Gfriends').preLoginAvailable, false)
+    updateScraperPluginConfig('video', 'JavDB', { preLogin: true })
+    assert.equal(builtInDescriptor('video', 'JavDB').preLogin, true)
+    assert.throws(
+      () => updateScraperPluginConfig('video', 'MetaTube', { preLogin: true }),
+      /网站主页/
+    )
   })
 
   it('drops unknown actress supported field ids from packages', async () => {
@@ -269,6 +284,10 @@ describe('scraperPluginService', () => {
         video: { JavDB: { minMs: 1000, maxMs: 2000 } },
         actress: { Xslist: { minMs: 500, maxMs: 800 } }
       },
+      scraperPluginPreLogin: {
+        video: { JavDB: true },
+        actress: { Xslist: true }
+      },
       compositeScrapers: {
         video: [
           {
@@ -309,6 +328,9 @@ describe('scraperPluginService', () => {
       maxMs: 2000
     })
     assert.equal(settings.scraperPluginDelays.video.JavDB, undefined)
+    assert.equal(settings.scraperPluginPreLogin.video['JavDB-custom'], true)
+    assert.equal(settings.scraperPluginPreLogin.video.JavDB, undefined)
+    assert.equal(settings.scraperPluginPreLogin.actress['Xslist-custom'], true)
     assert.equal(settings.compositeScrapers.video[0]?.fieldPluginMap.title, 'JavDB-custom')
     assert.equal(settings.compositeScrapers.video[0]?.fieldPluginMap.cover, 'JavDB')
     assert.equal(settings.compositeScrapers.actress[0]?.fieldPluginMap.avatar, 'Xslist-custom')

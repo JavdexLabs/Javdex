@@ -62,7 +62,7 @@ describe('scraperManager plugin availability gates', () => {
 
     updateSettings({
       scraperServiceConfigs: {
-        metatube: { serverUrl: 'https://server.test/prefix', useScrapeProxy: false }
+        metatube: { serverUrl: 'https://server.test/prefix', useScrapeProxy: false, keepFirstCandidate: false }
       }
     })
     const configured = listScraperPlugins().find((plugin) => plugin.name === 'MetaTube')

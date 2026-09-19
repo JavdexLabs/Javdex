@@ -1,3 +1,4 @@
+import { createScraperPreLoginSession } from '../scrapers/scraperPreLogin'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/videoScrapeTypes'
@@ -199,6 +200,11 @@ function createVideoBatchPolicy(
       const mode = request.mode ?? 'replace'
       const missingFields = request.missingFields ?? []
       const delayController = helpers.createDelayController()
+      const preLogin = createScraperPreLoginSession({
+        onWaiting: ({ pluginName }) => {
+          helpers.addLog('-', 'info', `等待登入完成后继续刮削（${pluginName}）`)
+        }
+      })
       const libraryName = request.libraryId && !binding.catalog
         ? getMediaLibrary(request.libraryId)?.name
         : null
@@ -229,7 +235,8 @@ function createVideoBatchPolicy(
             fields,
             mode,
             expectedVersion: generation == null || revision == null ? undefined : { generation, revision },
-            delayController
+            delayController,
+            preLogin
           })
           return formatVideoBatchScrapeOutcome(itemOutcome, code)
         },

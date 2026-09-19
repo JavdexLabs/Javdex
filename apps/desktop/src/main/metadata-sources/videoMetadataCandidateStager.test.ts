@@ -34,6 +34,7 @@ describe('videoMetadataCandidateStager', () => {
     const candidate: VideoMetadataCandidate = {
       result: {
         code: 'TEST-001',
+        sourceUrl: 'https://example.test/item',
         coverUrl: 'https://image.example/cover.jpg',
         sampleImageUrls: ['managed sample'],
         actresses: [{ name: 'Example Actress', gender: 'female', avatarUrl: 'managed avatar' }]
@@ -68,7 +69,10 @@ describe('videoMetadataCandidateStager', () => {
       ]
     }
     const stager = createVideoMetadataCandidateStager({
-      fetchRemote: async () => MINIMAL_JPEG,
+      fetchRemote: async (_url, sourceUrl) => {
+        assert.equal(sourceUrl, 'https://example.test/item')
+        return MINIMAL_JPEG
+      },
       readManagedRootFile: async () => MINIMAL_JPEG
     })
 

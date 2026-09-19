@@ -4,9 +4,9 @@ import { useMatch, useLocation, useNavigate, useSearchParams } from 'react-route
 import {
   ChevronDown,
   Archive,
+  Plus,
   Film,
   FolderMinus,
-  Link2,
   ListPlus,
   SearchCheck,
   SearchX,
@@ -944,8 +944,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                   size="sm"
                   onClick={() => setShowResourceImport(true)}
                 >
-                  <Link2 {...UI_ICON_SM} aria-hidden />
-                  导入链接
+                  <Plus {...UI_ICON_SM} aria-hidden />
+                  添加影片
                 </Button>
 
                 <Button
@@ -1091,7 +1091,14 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           onCancel={() => setShowResourceImport(false)}
           onImported={(result) => {
             setShowResourceImport(false)
-            toast.show(result.createdVideo ? '影片已导入' : '资源已添加', 'success')
+            toast.show(
+              result.createdVideo
+                ? '影片已导入'
+                : result.resource
+                  ? '资源已添加'
+                  : '相关链接已添加',
+              'success'
+            )
             invalidateVideoLibraryQueries(queryClient)
           }}
         />

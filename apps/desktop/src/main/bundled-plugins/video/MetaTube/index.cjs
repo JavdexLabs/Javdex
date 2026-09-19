@@ -123,7 +123,8 @@ function mapDetail(ctx, queryCode, searchIdentity, payload) {
     throw new Error('MetaTube 影片详情番号与查询番号不一致')
   }
 
-  const runtime = optionalNumber(detail.runtime, 'runtime')
+  const rawRuntime = optionalNumber(detail.runtime, 'runtime')
+  const runtime = rawRuntime === 0 ? undefined : rawRuntime
   if (runtime !== undefined && (!Number.isInteger(runtime) || runtime <= 0)) {
     throw new Error('MetaTube 字段 runtime 必须为正整数分钟')
   }
@@ -137,12 +138,19 @@ function mapDetail(ctx, queryCode, searchIdentity, payload) {
     console.warn(`MetaTube 样张超过 ${MAX_SAMPLE_IMAGES} 张，已截断`)
   }
 
-  const imagePath = `/v1/images/primary/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`
+  const encodedProvider = encodeURIComponent(provider)
+  const encodedId = encodeURIComponent(id)
+  const sampleImagePath = `/v1/images/primary/${encodedProvider}/${encodedId}`
+  // MovieInfo.IsValid requires cover_url, and backdrop uses big_cover_url or cover_url
+  // without cropping. Primary is only a 2:3 poster crop of the same record.
+  const coverUrl = ctx.service.publicUrl(`/v1/images/backdrop/${encodedProvider}/${encodedId}`, {
+    quality: 90
+  })
   const result = {
     code: normalizedResultCode(queryCode),
     title: ctx.helpers.normalizeText(title),
     summary: optionalText(detail.summary, 'summary', ctx.helpers),
-    coverUrl: ctx.service.publicUrl(imagePath, { quality: 90 }),
+    coverUrl,
     releaseDate: validDate(detail.release_date),
     maker: optionalText(detail.maker, 'maker', ctx.helpers),
     publisher: optionalText(detail.label, 'label', ctx.helpers),
@@ -156,7 +164,7 @@ function mapDetail(ctx, queryCode, searchIdentity, payload) {
       ? Math.round(score * 10) / 10
       : undefined,
     sampleImageUrls: previewImages.slice(0, MAX_SAMPLE_IMAGES).map((url) =>
-      ctx.service.publicUrl(imagePath, {
+      ctx.service.publicUrl(sampleImagePath, {
         url,
         ratio: 0,
         pos: 0,
@@ -206,16 +214,25 @@ module.exports = {
     }
 
     if (exact.length === 0) return []
-    if (exact.length > MAX_EXACT_CANDIDATES) {
+    const selected = ctx.service.keepFirstCandidate ? exact.slice(0, 1) : exact
+    if (selected.length > MAX_EXACT_CANDIDATES) {
       throw new Error(`MetaTube 返回超过 ${MAX_EXACT_CANDIDATES} 个精确候选，请缩小服务端 Provider 范围`)
     }
 
-    return mapLimit(exact, DETAIL_CONCURRENCY, async (identity) => {
-      const payload = await ctx.service.getJson(
-        `/v1/movies/${encodeURIComponent(identity.provider)}/${encodeURIComponent(identity.id)}`,
-        { query: { lazy: true } }
-      )
-      return mapDetail(ctx, queryCode, identity, payload)
+    const outcomes = await mapLimit(selected, DETAIL_CONCURRENCY, async (identity) => {
+      try {
+        const payload = await ctx.service.getJson(
+          `/v1/movies/${encodeURIComponent(identity.provider)}/${encodeURIComponent(identity.id)}`,
+          { query: { lazy: true } }
+        )
+        return { result: mapDetail(ctx, queryCode, identity, payload) }
+      } catch (error) {
+        console.warn(`MetaTube 候选 ${identity.provider}/${identity.id} 获取失败：${error.message}`)
+        return { error }
+      }
     })
+    const results = outcomes.filter((outcome) => outcome.result).map((outcome) => outcome.result)
+    if (results.length === 0) throw outcomes[0].error
+    return results
   }
 }

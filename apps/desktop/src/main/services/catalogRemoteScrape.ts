@@ -59,14 +59,14 @@ export async function resolveRemoteScrapeFields<T extends VideoScrapeField | Act
   return input.fields.filter((field) => result.fields.includes(field))
 }
 
-async function readAsset(asset: MetadataAssetRef): Promise<Buffer> {
-  if (asset.kind === 'remote-url') return scrapeBrowser.fetchBuffer(asset.url)
+async function readAsset(asset: MetadataAssetRef, sourceUrl?: string): Promise<Buffer> {
+  if (asset.kind === 'remote-url') return scrapeBrowser.fetchBuffer(asset.url, { referer: sourceUrl || 'omit' })
   return getDefaultNfoFileStore().readBytes(asset.capability, 64 * 1024 * 1024)
 }
 
-async function readUsableAsset(asset: MetadataAssetRef): Promise<Buffer | null> {
+async function readUsableAsset(asset: MetadataAssetRef, sourceUrl?: string): Promise<Buffer | null> {
   try {
-    const data = await readAsset(asset)
+    const data = await readAsset(asset, sourceUrl)
     return mediaAssetStore.isUsableImageBuffer(data) ? data : null
   } catch {
     return null
@@ -146,13 +146,13 @@ async function candidateImages(
   const coverAsset = (!selectedFields || selectedFields.has('cover'))
     ? candidate.assets.find((asset) => asset.field === 'cover')
     : undefined
-  const cover = coverAsset ? (await readUsableAsset(coverAsset)) ?? undefined : undefined
+  const cover = coverAsset ? (await readUsableAsset(coverAsset, candidate.result.sourceUrl)) ?? undefined : undefined
   const sampleAssets = (!selectedFields || selectedFields.has('samples'))
     ? candidate.assets
       .filter((asset) => asset.field === 'samples')
       .sort((left, right) => left.position - right.position)
     : []
-  const sampleBuffers = await Promise.all(sampleAssets.map(readUsableAsset))
+  const sampleBuffers = await Promise.all(sampleAssets.map((asset) => readUsableAsset(asset, candidate.result.sourceUrl)))
   const samples = sampleBuffers.every((data): data is Buffer => data !== null) ? sampleBuffers : []
   const actressAvatars: Array<{ name: string; data: Buffer }> = []
   const wantsFemale = !selectedFields || selectedFields.has('actressesFemale')
@@ -163,7 +163,7 @@ async function candidateImages(
       if (!actress) continue
       const gender = actress.gender ?? 'female'
       if ((gender === 'female' && !wantsFemale) || (gender === 'male' && !wantsMale)) continue
-      const data = await readUsableAsset(asset)
+      const data = await readUsableAsset(asset, candidate.result.sourceUrl)
       if (data) actressAvatars.push({ name: actress.name, data })
     }
   }
@@ -227,7 +227,8 @@ export async function scrapeVideoThroughCatalog(
       code: video.code,
       scraperName,
       fields: effective,
-      delayController: options?.delayController
+      delayController: options?.delayController,
+      preLogin: options?.preLogin
     }, {
       collect: collectVideoScrape,
       markFailed: async () => {
@@ -446,7 +447,8 @@ export async function scrapeActressThroughCatalog(
     requested,
     queryName: options?.queryName,
     useAliases: options?.useAliases,
-    delayController: options?.delayController
+    delayController: options?.delayController,
+    preLogin: options?.preLogin
   }, {
     collect: collectActressScrape,
     markFailed: async () => {

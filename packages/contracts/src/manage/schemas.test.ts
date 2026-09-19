@@ -293,3 +293,23 @@ test('scrape field queries validate entity fields and target counts are read-onl
     kind: 'videos.ids', ids: Array.from({ length: 201 }, (_, i) => i + 1), filterDigest: 'a'.repeat(64)
   }).success, false)
 })
+
+
+test('resource import supports metadata-only registration and multiple resources from desktop', () => {
+  const base = { libraryId: 1, code: 'TEST-001', target: { kind: 'new' } }
+  assert.equal(parseManageInput('videos.importResource', base).success, true)
+  const input = {
+    ...base,
+    resources: [{ url: 'https://example.test/video.mp4', kind: 'direct' }],
+    links: [{ label: 'Details', url: 'https://example.test/details' }]
+  }
+  const parsed = parseManageInput('videos.importResource', input)
+  assert.equal(parsed.success, true)
+  if (parsed.success) assert.deepEqual(parsed.data, input)
+  assert.equal(parseManageInput('videos.importResource', {
+    ...input, resources: Array.from({ length: 21 }, () => input.resources[0])
+  }).success, false)
+  assert.equal(parseManageInput('videos.importResource', {
+    ...input, resources: [{ url: 'https://example.test/video.mp4', sourcePath: '/private/video.mp4' }]
+  }).success, false)
+})

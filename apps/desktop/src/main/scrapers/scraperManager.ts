@@ -38,6 +38,7 @@ import {
   videoScrapeApplyService
 } from '../services/videoScrapeApplyService'
 import { getSettings } from '../settings/settingsStore'
+import { createScraperPreLoginSession, type ScraperPreLoginSession } from './scraperPreLogin'
 import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { runVideoCandidateWorkflow } from '../services/scrapeCandidateWorkflow'
@@ -47,6 +48,7 @@ import type { BaseScraper } from './BaseScraper'
 import { buildPluginRegistry } from './compositeScrapeRun'
 import {
   findCompositeScraper,
+  delayForPlugin,
   listMergedPluginDescriptors,
   listCompositePluginDescriptors,
   loadBundledVideoScrapers,
@@ -63,7 +65,8 @@ function buildRegistry(): Map<string, BaseScraper> {
 
 function buildSourceRegistry(
   proxyUrl: string,
-  delayController?: ScrapeVideoOptions['delayController']
+  delayController?: ScrapeVideoOptions['delayController'],
+  preLogin?: ScraperPreLoginSession
 ): VideoMetadataSourceRegistry {
   const scrapers = buildRegistry()
   const descriptors = listMergedPluginDescriptors('video')
@@ -79,6 +82,9 @@ function buildSourceRegistry(
         proxyUrl,
         runWithDelay: delayController
           ? (pluginName, task) => delayController.run('video', pluginName, task)
+          : undefined,
+        ensurePreLogin: preLogin
+          ? (pluginName) => preLogin.ensure('video', pluginName, proxyUrl)
           : undefined
       })
     )
@@ -100,6 +106,7 @@ function localNfoPluginDescriptor(): ScraperPluginDescriptor {
     editable: false,
     debuggable: false,
     configured: true,
+    delay: delayForPlugin('video', LOCAL_NFO_SOURCE_NAME),
     supportedFields: [...LOCAL_NFO_SUPPORTED_FIELDS]
   }
 }
@@ -185,6 +192,7 @@ export interface ScrapeVideoOptions {
   delayController?: {
     run<T>(kind: 'video', pluginName: string, task: () => Promise<T>): Promise<T>
   }
+  preLogin?: ScraperPreLoginSession
 }
 
 interface CompositeVideoCandidateSource {
@@ -326,6 +334,7 @@ export async function collectVideoScrape(input: {
   scraperName?: string
   fields: VideoScrapeField[]
   delayController?: ScrapeVideoOptions['delayController']
+  preLogin?: ScraperPreLoginSession
 }): Promise<{
   resolvedScraperName: string
   descriptor: ScraperPluginDescriptor | undefined
@@ -347,7 +356,7 @@ export async function collectVideoScrape(input: {
   )
   const requested = input.fields.filter((field) => supportedFields.has(field))
   const proxy = resolveScrapeProxyUrl(settings)
-  const sourceRegistry = buildSourceRegistry(proxy, input.delayController)
+  const sourceRegistry = buildSourceRegistry(proxy, input.delayController, input.preLogin ?? createScraperPreLoginSession())
   const source = findCompositeScraper('video', resolvedScraperName)
     ? null
     : sourceForName(sourceRegistry, resolvedScraperName)
@@ -443,7 +452,8 @@ export async function scrapeVideo(
       scraperName: resolvedScraperName,
       fields: effective,
       singleSourceFieldsToApply: requested,
-      delayController: options?.delayController
+      delayController: options?.delayController,
+      preLogin: options?.preLogin
     }, {
       collect: collectVideoScrape,
       markFailed: () => { markScrapeFailed(videoId) },
@@ -458,7 +468,7 @@ export async function scrapeVideo(
         const { collected } = collectedRun
         const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
           const candidateStager = createVideoMetadataCandidateStager({
-            fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
+            fetchRemote: (url, sourceUrl) => scrapeBrowser.fetchBuffer(url, { referer: sourceUrl || 'omit' }),
             readManagedRootFile: async (capability) =>
               getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
           })
@@ -535,7 +545,7 @@ export async function scrapeVideo(
         const previousPending = getPendingVideoScrapeForVideo(videoId)
         let replacedPendingStagedPaths: string[] = []
         const candidateStager = createVideoMetadataCandidateStager({
-          fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
+          fetchRemote: (url, sourceUrl) => scrapeBrowser.fetchBuffer(url, { referer: sourceUrl || 'omit' }),
           readManagedRootFile: async (capability) =>
             getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
         })

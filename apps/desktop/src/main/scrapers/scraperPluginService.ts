@@ -6,6 +6,10 @@ import { ActressScrapeResult, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS
 import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
 import type { ScraperServiceId } from '@shared/scraperServiceTypes'
 import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
+import { PLUGIN_DEFAULT_DELAYS } from '@shared/scraperDefaultDelays'
+import {
+  scraperPluginPreLoginAvailable
+} from '@shared/scraperPluginPreLogin'
 import type { BaseScraper } from './BaseScraper'
 import type { BaseActressScraper } from './BaseActressScraper'
 import {
@@ -29,13 +33,6 @@ import {
 const PLUGIN_SCHEMA_VERSION = 1
 const RETIRED_PLUGIN_NAMES: Partial<Record<ScraperPluginKind, readonly string[]>> = {
   video: ['JAV8']
-}
-const PLUGIN_DEFAULT_DELAYS: Partial<
-  Record<ScraperPluginKind, Record<string, ScraperPluginDelay>>
-> = {
-  actress: {
-    Gfriends: { minMs: 0, maxMs: 0 }
-  }
 }
 
 interface StoredPluginManifest {
@@ -100,7 +97,7 @@ export function builtInDescriptor(
 ): ScraperPluginDescriptor {
   const bundled = findBundledPluginRecord(kind, name)
   if (bundled) return toBundledDescriptor(bundled.manifest)
-  return {
+  return withPluginPreLogin({
     kind,
     name,
     version: '1.0.0',
@@ -112,7 +109,7 @@ export function builtInDescriptor(
     debuggable: true,
     supportedFields: [...defaultSupportedFields(kind)],
     delay: delayForPlugin(kind, name)
-  }
+  })
 }
 
 export function listBundledPluginDescriptors(kind: ScraperPluginKind): ScraperPluginDescriptor[] {
@@ -298,6 +295,12 @@ export function updateScraperPluginConfig(
     }
     fs.writeFileSync(path.join(stored.dir, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf-8')
     if (input.delay) updatePluginDelay(kind, name, input.delay)
+    if (input.preLogin !== undefined) {
+      updatePluginPreLogin(kind, name, input.preLogin, {
+        source: 'user',
+        homepage: manifest.homepage
+      })
+    }
     return toDescriptor(manifest)
   }
 
@@ -305,6 +308,14 @@ export function updateScraperPluginConfig(
     throw new Error('插件不存在')
   }
   if (input.delay) updatePluginDelay(kind, name, input.delay)
+  if (input.preLogin !== undefined) {
+    const bundled = findBundledPluginRecord(kind, name)
+    updatePluginPreLogin(kind, name, input.preLogin, {
+      source: 'builtin',
+      requiresConfiguration: Boolean(bundled?.manifest.serviceBinding),
+      homepage: bundled?.manifest.homepage
+    })
+  }
   return builtInDescriptor(kind, name)
 }
 
@@ -515,13 +526,24 @@ function remapSettingsPluginNames(
     video: { ...settings.scraperPluginDelays.video },
     actress: { ...settings.scraperPluginDelays.actress }
   }
+  const nextPreLogin = {
+    video: { ...settings.scraperPluginPreLogin.video },
+    actress: { ...settings.scraperPluginPreLogin.actress }
+  }
   for (const { kind, from, to } of renames) {
-    const bucket = nextDelays[kind]
-    if (Object.prototype.hasOwnProperty.call(bucket, from)) {
-      if (!Object.prototype.hasOwnProperty.call(bucket, to)) {
-        bucket[to] = bucket[from]!
+    const delayBucket = nextDelays[kind]
+    if (Object.prototype.hasOwnProperty.call(delayBucket, from)) {
+      if (!Object.prototype.hasOwnProperty.call(delayBucket, to)) {
+        delayBucket[to] = delayBucket[from]!
       }
-      delete bucket[from]
+      delete delayBucket[from]
+    }
+    const preLoginBucket = nextPreLogin[kind]
+    if (Object.prototype.hasOwnProperty.call(preLoginBucket, from)) {
+      if (!Object.prototype.hasOwnProperty.call(preLoginBucket, to)) {
+        preLoginBucket[to] = preLoginBucket[from]!
+      }
+      delete preLoginBucket[from]
     }
   }
 
@@ -550,6 +572,7 @@ function remapSettingsPluginNames(
     defaultScraper: mapName('video', settings.defaultScraper),
     defaultActressScraper: mapName('actress', settings.defaultActressScraper),
     scraperPluginDelays: nextDelays,
+    scraperPluginPreLogin: nextPreLogin,
     compositeScrapers: nextComposites
   })
 }
@@ -590,7 +613,7 @@ function toBundledDescriptor(manifest: StoredPluginManifest): ScraperPluginDescr
     : requiresConfiguration
       ? '待配置'
       : undefined
-  return {
+  return withPluginPreLogin({
     kind: manifest.kind,
     name: manifest.name,
     version: manifest.version,
@@ -609,7 +632,7 @@ function toBundledDescriptor(manifest: StoredPluginManifest): ScraperPluginDescr
     disabledReason: configured ? undefined : '请先配置 MetaTube 服务端地址',
     supportedFields: [...normalizeSupportedFields(manifest.kind, manifest.supportedFields)],
     delay: delayForPlugin(manifest.kind, manifest.name)
-  }
+  })
 }
 
 function findStoredPlugin(
@@ -700,7 +723,7 @@ function validatePluginCode(pkg: ScraperPluginPackage): Promise<void> {
 }
 
 function toDescriptor(manifest: StoredPluginManifest): ScraperPluginDescriptor {
-  return {
+  return withPluginPreLogin({
     kind: manifest.kind,
     name: manifest.name,
     version: manifest.version,
@@ -715,7 +738,7 @@ function toDescriptor(manifest: StoredPluginManifest): ScraperPluginDescriptor {
     overridesBuiltIn: isBuiltInScraperName(manifest.kind, manifest.name),
     supportedFields: normalizeSupportedFields(manifest.kind, manifest.supportedFields),
     delay: delayForPlugin(manifest.kind, manifest.name)
-  }
+  })
 }
 
 function compositeDescriptor(definition: {
@@ -759,7 +782,9 @@ function compositeDescriptor(definition: {
     supportedFields: Object.keys(definition.fieldPluginMap) as Array<
       VideoScrapeField | ActressScrapeField
     >,
-    fieldPluginMap: definition.fieldPluginMap
+    fieldPluginMap: definition.fieldPluginMap,
+    preLoginAvailable: false,
+    preLogin: false
   }
 }
 
@@ -856,7 +881,7 @@ function normalizeCompositeFieldMap(
   return out
 }
 
-function delayForPlugin(kind: ScraperPluginKind, name: string): ScraperPluginDelay {
+export function delayForPlugin(kind: ScraperPluginKind, name: string): ScraperPluginDelay {
   const settings = getSettings()
   return (
     settings.scraperPluginDelays[kind][name] ??
@@ -865,6 +890,19 @@ function delayForPlugin(kind: ScraperPluginKind, name: string): ScraperPluginDel
       maxMs: settings.batchDelayMaxMs
     }
   )
+}
+
+export function preLoginEnabledForPlugin(kind: ScraperPluginKind, name: string): boolean {
+  return getSettings().scraperPluginPreLogin[kind][name] === true
+}
+
+function withPluginPreLogin(descriptor: ScraperPluginDescriptor): ScraperPluginDescriptor {
+  const preLoginAvailable = scraperPluginPreLoginAvailable(descriptor)
+  return {
+    ...descriptor,
+    preLoginAvailable,
+    preLogin: preLoginAvailable && preLoginEnabledForPlugin(descriptor.kind, descriptor.name)
+  }
 }
 
 function updatePluginDelay(kind: ScraperPluginKind, name: string, delay: ScraperPluginDelay): void {
@@ -878,6 +916,31 @@ function updatePluginDelay(kind: ScraperPluginKind, name: string, delay: Scraper
         ...settings.scraperPluginDelays[kind],
         [name]: { minMs, maxMs }
       }
+    }
+  })
+}
+
+function updatePluginPreLogin(
+  kind: ScraperPluginKind,
+  name: string,
+  enabled: boolean,
+  eligibility: {
+    source: ScraperPluginDescriptor['source']
+    requiresConfiguration?: boolean
+    homepage?: string
+  }
+): void {
+  if (enabled && !scraperPluginPreLoginAvailable(eligibility)) {
+    throw new Error('该插件没有可用的网站主页，无法开启预登入')
+  }
+  const settings = getSettings()
+  const next = { ...settings.scraperPluginPreLogin[kind] }
+  if (enabled) next[name] = true
+  else delete next[name]
+  updateSettings({
+    scraperPluginPreLogin: {
+      ...settings.scraperPluginPreLogin,
+      [kind]: next
     }
   })
 }

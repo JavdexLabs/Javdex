@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 import { EditFormSection } from './FormPrimitives'
 import { UI_ICON_SM } from './iconDefaults'
@@ -9,17 +10,19 @@ import { moveClassificationLink, useClassificationLinkKeys } from './classificat
 export default function RelatedLinksEditor({
   links,
   disabled = false,
+  hint,
   onChange
 }: {
   links: RelatedLinkInput[]
   disabled?: boolean
+  hint?: ReactNode
   onChange: (links: RelatedLinkInput[]) => void
 }): JSX.Element {
   const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } = useClassificationLinkKeys(
     links.length
   )
   return (
-    <EditFormSection title="相关链接">
+    <EditFormSection title="相关链接" hint={hint}>
       <div className="organization-link-editor">
         {links.map((link, index) => (
           <div className="organization-link-editor-row" key={linkKeys[index]}>

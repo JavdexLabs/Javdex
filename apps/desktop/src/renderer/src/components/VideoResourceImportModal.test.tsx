@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { MemoryRouter } from 'react-router-dom'
 import type { VideoResource } from '@shared/videoTypes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
@@ -69,8 +70,76 @@ describe('VideoResourceImportModal', () => {
     assert.ok(
       mounted.root
         .findAllByType('button')
-        .some((button) => button.children.includes('检测链接'))
+        .some((button) => button.children.includes('读取大小'))
     )
     assert.match(JSON.stringify(mounted.toJSON()), /请修改源文件内容并重新扫描/)
+  })
+
+  it('explains library import versus file scan and allows a resource-less video', async () => {
+    const { default: VideoResourceImportModal } = await import('./VideoResourceImportModal')
+    act(() => {
+      renderer = TestRenderer.create(
+        <MemoryRouter>
+          <VideoResourceImportModal libraryId={3} onCancel={() => undefined} />
+        </MemoryRouter>
+      )
+    })
+    const mounted = renderer!
+    const json = JSON.stringify(mounted.toJSON())
+    assert.match(json, /添加影片/)
+    assert.match(json, /不会扫描本地文件/)
+    assert.match(json, /设置 → 来源与扫描/)
+    assert.match(json, /扫描并导入/)
+    assert.match(json, /相关链接/)
+    assert.match(json, /商品页、资料页/)
+    assert.match(json, /新建影片/)
+    assert.equal(mounted.root.findByProps({ id: 'resource-target-new' }).props['aria-pressed'], true)
+    assert.equal(mounted.root.findAllByProps({ id: 'resource-url' }).length, 0)
+    assert.ok(
+      mounted.root
+        .findAllByType('button')
+        .some((button) => button.children.includes('添加链接'))
+    )
+  })
+
+  it('shows a playback resource editor only after adding a link', async () => {
+    const { default: VideoResourceImportModal } = await import('./VideoResourceImportModal')
+    act(() => {
+      renderer = TestRenderer.create(
+        <MemoryRouter>
+          <VideoResourceImportModal libraryId={3} onCancel={() => undefined} />
+        </MemoryRouter>
+      )
+    })
+    const mounted = renderer!
+    assert.equal(
+      mounted.root.findAll((node) => node.props.placeholder === 'https://…').length,
+      0
+    )
+    const addResource = mounted.root
+      .findAllByType('button')
+      .find((button) => button.children.includes('添加链接'))
+    assert.ok(addResource)
+    act(() => {
+      addResource.props.onClick()
+    })
+    assert.equal(
+      mounted.root.findAll((node) => node.props.placeholder === 'https://…').length,
+      1
+    )
+    const urlInput = mounted.root.find((node) => node.props.placeholder === 'https://…')
+    act(() => {
+      urlInput.props.onChange({ target: { value: 'https://github.com/JavdexLabs/Javdex' } })
+    })
+    assert.equal(
+      mounted.root.findAllByType('button').some((button) => button.children.includes('读取大小')),
+      false
+    )
+    act(() => {
+      urlInput.props.onChange({ target: { value: 'https://cdn.example/movie.mp4' } })
+    })
+    assert.ok(
+      mounted.root.findAllByType('button').some((button) => button.children.includes('读取大小'))
+    )
   })
 })

@@ -48,7 +48,7 @@ describe('trusted scraper service sandbox bridge', () => {
   it('exposes service methods only to a trusted binding while keeping the token in main', async () => {
     updateSettings({
       scraperServiceConfigs: {
-        metatube: { serverUrl: 'https://service.test/prefix', useScrapeProxy: false }
+        metatube: { serverUrl: 'https://service.test/prefix', useScrapeProxy: false, keepFirstCandidate: false }
       }
     })
     saveScraperServiceToken('metatube', 'main-only-token')

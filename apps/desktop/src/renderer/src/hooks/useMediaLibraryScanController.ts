@@ -107,6 +107,7 @@ export function useMediaLibraryScanController(
   useEffect(
     () =>
       api.scan.onProgress((event) => {
+        if (handledRunIdsRef.current.has(event.runId)) return
         if (!matchesMediaLibraryScanRun(libraryId, activeRunIdRef.current, event)) return
         if (activeRunIdRef.current == null) setRunId(event.runId)
         setRunning(true)
@@ -119,6 +120,7 @@ export function useMediaLibraryScanController(
     () =>
       api.scan.onStateChanged((event) => {
         if (event.libraryId !== libraryId) return
+        if (handledRunIdsRef.current.has(event.runId)) return
         if (event.phase === 'started') {
           if (activeRunIdRef.current != null && activeRunIdRef.current !== event.runId) return
           setRunId(event.runId)

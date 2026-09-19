@@ -45,14 +45,26 @@ export interface VideoResourceDetail
   display_locator: string
 }
 
-export interface VideoLinkResourceImportInput {
-  libraryId: number
-  code: string
-  target: VideoResourceImportTarget
+export interface VideoLinkResourceFields {
   url: string
   kind?: ExternalVideoResourceKind
   displayName?: string | null
   sizeBytes?: number | null
+}
+
+export interface VideoLinkResourceImportInput {
+  libraryId: number
+  code: string
+  target: VideoResourceImportTarget
+  /** Playable resource URL. Omit to register a video without a playback resource. */
+  url?: string
+  kind?: ExternalVideoResourceKind
+  displayName?: string | null
+  sizeBytes?: number | null
+  /** Additional playback resources created in the same import. */
+  resources?: VideoLinkResourceFields[]
+  /** Related HTTP(S) links; merged into the video, not used for playback. */
+  links?: RelatedLinkInput[]
 }
 
 export interface VideoLinkResourceUpdateInput {
@@ -64,7 +76,7 @@ export interface VideoLinkResourceUpdateInput {
 
 export interface VideoResourceImportResult {
   videoId: number
-  resource: VideoResource
+  resource: VideoResource | null
   createdVideo: boolean
 }
 

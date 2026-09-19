@@ -791,7 +791,11 @@ export const MANAGE_OPERATION_INPUTS = {
     })
     .strict(),
   'playlists.list': emptyInput,
-  'playlists.listPage': pageQuerySchema,
+  'playlists.listPage': pageQuerySchema.extend({
+    search: searchTextSchema.optional(),
+    videoId: idSchema.optional(),
+    locale: z.string().max(100).optional()
+  }).strict(),
   'playlists.get': z.object({ playlistId: idSchema }).strict(),
   'playlists.getPage': z.object({ playlistId: idSchema }).extend(pageQuerySchema.shape).strict(),
   'playlists.metadata': z.object({ playlistId: idSchema }).strict(),

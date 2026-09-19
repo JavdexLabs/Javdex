@@ -63,7 +63,7 @@ test('HTTP wire envelopes normalize to catalog values and local paths never cros
   }
 })
 
-test('maps desktop library revisions into HTTP versions without replacing explicit stale versions', async () => {
+test('preserves playlist query fields and maps library revisions without replacing explicit stale versions', async () => {
   const requests: Array<{ operation: string; body: { input: unknown; expectedVersions: unknown } }> = []
   const server = createServer(async (req, res) => {
     const operation = (req.url ?? '').split('/').at(-1) ?? ''
@@ -84,6 +84,8 @@ test('maps desktop library revisions into HTTP versions without replacing explic
   })
   try {
     const context = { operationId: 'operation', expectedVersions: {} }
+    await backend.playlists.listPage({ search: '', videoId: 3, locale: 'en', limit: 60, offset: 0 })
+    assert.deepEqual(requests.at(-1)?.body.input, { search: '', videoId: 3, locale: 'en', limit: 60, offset: 0 })
     await backend.libraries.updateConfig({ libraryId: 1, expectedRevision: 3, patch: { autoImportLocalNfo: true } }, context)
     assert.deepEqual(requests.at(-1)?.body.input, { libraryId: 1, patch: { autoImportLocalNfo: true } })
     assert.deepEqual(requests.at(-1)?.body.expectedVersions, { C: { generation: 1, revision: 3 } })

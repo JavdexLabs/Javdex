@@ -18,6 +18,7 @@ import type {
   PlaylistImportSnapshot
 } from '@shared/playlistImportTypes'
 import { api } from '../../api'
+import { useDesktopSession } from '../../desktop/DesktopSessionContext'
 import {
   AgentWorkspaceModal,
   AgentWorkspacePane,
@@ -105,6 +106,7 @@ function previewStatus(item: PlaylistImportPreviewItem): string {
 
 export function PlaylistImportProvider({ children }: { children: ReactNode }): JSX.Element {
   const navigate = useNavigate()
+  const { session } = useDesktopSession()
   const queryClient = useQueryClient()
   const toast = useToast()
   const [visible, setVisible] = useState(false)
@@ -179,7 +181,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
     setSourceUrl('')
     setRequestedName('')
     setTargetLibraryId('')
-    setAutoCreateUnmatchedVideos(true)
+    setAutoCreateUnmatchedVideos(session.mode !== 'remote')
     setSaveDetailLinks(true)
     setSaveSourcePlaylistLink(false)
     setDestinationKind(input?.destination?.kind ?? 'create')
@@ -204,7 +206,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
       })
       .catch((loadError) => { if(generation===optionsGeneration.current)setError(loadError instanceof Error ? loadError.message : String(loadError)) })
       .finally(() => { if(generation===optionsGeneration.current)setBusy(false) })
-  }, [snapshot])
+  }, [snapshot, session.mode])
 
   const start = async (): Promise<void> => {
     if (!sourceUrl.trim() || !targetLibraryId || (destinationKind === 'append' && !playlistId)) return
@@ -215,7 +217,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
         idempotencyKey: `renderer-playlist-import:${crypto.randomUUID()}`,
         sourceUrl: sourceUrl.trim(),
         targetLibraryId: Number(targetLibraryId),
-        autoCreateUnmatchedVideos,
+        autoCreateUnmatchedVideos: session.mode !== 'remote' && autoCreateUnmatchedVideos,
         saveDetailLinks,
         saveSourcePlaylistLink,
         destination: destinationKind === 'append'
@@ -455,8 +457,9 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                         <div className={styles.setupOptions}>
                           <SettingsSwitchRow
                             title="自动创建无资源影片"
-                            description="未匹配到已有影片时，在目标媒体库创建无资源影片；关闭后跳过这些条目。"
-                            checked={autoCreateUnmatchedVideos}
+                            description={session.mode === 'remote' ? '远程导入只匹配已有影片，未匹配条目会跳过。' : '未匹配到已有影片时，在目标媒体库创建无资源影片；关闭后跳过这些条目。'}
+                            checked={session.mode !== 'remote' && autoCreateUnmatchedVideos}
+                            disabled={session.mode === 'remote'}
                             onChange={setAutoCreateUnmatchedVideos}
                           />
                           <SettingsSwitchRow

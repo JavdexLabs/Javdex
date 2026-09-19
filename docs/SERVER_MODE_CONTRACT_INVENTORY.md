@@ -144,3 +144,5 @@ C6 的最终语义集中如下，不再采用旧实施记录中的中间状态�
 - 能力按会话状态控制，见 [desktopCapabilities.ts](../apps/desktop/src/main/application/desktopCapabilities.ts)。当前远程 `manageBrowserPairing` 能力为不可用；有服务端接口不等于所有桌面 UI 动作均开放。冻结时不可编辑，但保留迁库能力，仍需 migration Bearer。
 - 工作存储准备未完成、凭据失效、版本不符或断线，不自动回退本地权威库。桌面工具可保留可用状态，正式查询/提交仍受远程会话约束。
 - 完整验收缺口和暂缓范围只维护在 [当前状态](SERVER_MODE_NEXT_STEPS.md)，不以“接口存在”替代验收。
+
+清单分页的管理输入保留桌面使用的 `search`、`videoId`、`locale`，并沿用有界分页；远程导入界面关闭且禁用“自动创建无资源影片”，未匹配条目跳过，避免默认提交宿主不支持的选项。

@@ -83,7 +83,7 @@ describe('PlaylistImportProvider workspace', () => {
     assert.match(source, /已存在的链接不会重复添加/)
     assert.match(source, /title="保存来源清单链接"/)
     assert.match(source, /开启后，将本次外部清单页保存到目标清单的“相关链接”/)
-    assert.match(source, /targetLibraryId: Number\(targetLibraryId\),\s*autoCreateUnmatchedVideos,\s*saveDetailLinks,\s*saveSourcePlaylistLink,/)
+    assert.match(source, /targetLibraryId: Number\(targetLibraryId\),\s*autoCreateUnmatchedVideos: session.mode !== 'remote' && autoCreateUnmatchedVideos,\s*saveDetailLinks,\s*saveSourcePlaylistLink,/)
   })
 
   it('selects the active default media library when opening the importer', () => {

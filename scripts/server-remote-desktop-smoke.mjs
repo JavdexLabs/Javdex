@@ -1,4 +1,4 @@
-// Real Electron settings and pairing against the production Docker server.
+// Real Electron remote workflows against the production Docker server.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -6,6 +6,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { _electron as electron } from 'playwright-core'
 import sharp from 'sharp'
+
+for (const flag of ['SCRAPE', 'PENDING', 'RENAME', 'BATCH', 'CANCEL']) {
+  if (process.env[`JAVDEX_REMOTE_SMOKE_${flag}`] === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_NFO, '1', `${flag} requires JAVDEX_REMOTE_SMOKE_NFO=1`)
+}
+if (process.env.JAVDEX_REMOTE_SMOKE_BATCH === '1' || process.env.JAVDEX_REMOTE_SMOKE_PENDING === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_SCRAPE, '1', 'batch/pending requires the scraper fixture')
+if (process.env.JAVDEX_REMOTE_SMOKE_CANCEL === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_BATCH, '1', 'cancel requires a batch')
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-remote-desktop-'))
 const userData = path.join(root, 'desktop')
@@ -30,6 +36,10 @@ if (process.env.JAVDEX_REMOTE_SMOKE_SCRAPE === '1') {
   fs.mkdirSync(pluginDir, { recursive: true })
   fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({ schemaVersion: 1, kind: 'video', name: 'GUI Fixture', version: '1.0.0', entry: 'index.cjs', supportedFields: ['title', 'summary'] }))
   fs.writeFileSync(path.join(pluginDir, 'index.cjs'), "module.exports = { async parseVideo(ctx) { return { code: ctx.code, title: 'GUI scraped title', summary: 'GUI scraped summary' } } }")
+  const slowDir = path.join(userData, 'scraper_plugins', 'video', 'GUI Slow')
+  fs.mkdirSync(slowDir, { recursive: true })
+  fs.writeFileSync(path.join(slowDir, 'plugin.json'), JSON.stringify({ schemaVersion: 1, kind: 'video', name: 'GUI Slow', version: '1.0.0', entry: 'index.cjs', supportedFields: ['title', 'summary'] }))
+  fs.writeFileSync(path.join(slowDir, 'index.cjs'), "module.exports = { async parseVideo(ctx) { await new Promise(resolve => setTimeout(resolve, 8000)); return { code: ctx.code, title: 'GUI partial title', summary: 'GUI partial summary' } } }")
   const pendingDir = path.join(userData, 'scraper_plugins', 'video', 'GUI Pending')
   fs.mkdirSync(pendingDir, { recursive: true })
   fs.writeFileSync(path.join(pendingDir, 'plugin.json'), JSON.stringify({ schemaVersion: 1, kind: 'video', name: 'GUI Pending', version: '1.0.0', entry: 'index.cjs', supportedFields: ['title', 'summary'] }))
@@ -59,6 +69,10 @@ try {
   const launch = async () => {
     const executablePath = process.env.JAVDEX_DESKTOP_EXECUTABLE
     application = await electron.launch({ ...(executablePath ? { executablePath, args: process.env.JAVDEX_REMOTE_SMOKE_NO_SANDBOX === '1' ? ['--no-sandbox'] : [] } : { args: ['.'] }), env })
+    application.process().stderr?.on('data', chunk => {
+      const line = chunk.toString()
+      if (line.includes('[scraper-helper]')) console.error(line.trim())
+    })
     const page = await application.firstWindow()
     page.setDefaultTimeout(20000)
     await page.waitForFunction(() => Boolean(window.api?.webAccess))
@@ -72,6 +86,7 @@ try {
   if (process.env.JAVDEX_REMOTE_SMOKE_NFO === '1') {
     const media = path.join(root, 'media')
     fs.mkdirSync(media)
+    if (process.env.JAVDEX_REMOTE_SMOKE_BATCH === '1') fs.writeFileSync(path.join(media, 'GUI-903.strm'), 'https://example.test/batch.mp4')
     if (process.env.JAVDEX_REMOTE_SMOKE_RENAME === '1') fs.writeFileSync(path.join(media, 'unidentified.strm'), 'https://example.test/unidentified.mp4')
     fs.writeFileSync(path.join(media, 'GUI-901.strm'), 'https://example.test/fixture.mp4')
     fs.writeFileSync(path.join(media, 'GUI-901.nfo'), '<movie><num>GUI-901</num><title>GUI imported title</title><plot>GUI imported summary</plot><thumb aspect="poster">poster.png</thumb><actor><name>GUI actor</name></actor></movie>')
@@ -128,6 +143,40 @@ try {
         await page.evaluate(id => { window.location.hash = `/libraries/1/video/${id}` }, video.id)
         await page.getByText('GUI chosen summary', { exact: true }).waitFor()
         console.log('PASS: remote GUI selects and applies a staged scrape candidate')
+      }
+    }
+    if (process.env.JAVDEX_REMOTE_SMOKE_BATCH === '1') {
+      const beforeBatch = await page.evaluate(() => window.api.videos.list({ kind: 'library', libraryId: 1 }))
+      await page.evaluate(() => { window.location.hash = '/libraries/1' })
+      for (const code of ['GUI-901', 'GUI-903']) {
+        await page.locator('.poster-card').filter({ hasText: code }).hover()
+        await page.getByRole('button', { name: `选择 ${code}`, exact: true }).click()
+      }
+      await page.getByRole('button', { name: '刮削元数据', exact: true }).click()
+      await page.getByRole('dialog').getByTitle('刮削站点', { exact: true }).click()
+      await page.getByRole('option', { name: process.env.JAVDEX_REMOTE_SMOKE_CANCEL === '1' ? 'GUI Slow' : 'GUI Fixture', exact: true }).click()
+      await page.getByRole('dialog').getByText('覆盖更新', { exact: true }).click()
+      await page.getByRole('dialog').getByRole('button', { name: '全选', exact: true }).first().click()
+      await page.getByRole('dialog').getByRole('button', { name: '开始批量刮削', exact: true }).click()
+      if (process.env.JAVDEX_REMOTE_SMOKE_CANCEL === '1') {
+        await page.waitForFunction(async () => (await window.api.videos.list({ kind: 'library', libraryId: 1 })).items.some(item => item.title === 'GUI partial title'))
+        await page.evaluate(() => { window.location.hash = '/settings/overview' })
+        await page.getByRole('button', { name: '终止影片批量任务', exact: true }).click()
+        await page.waitForFunction(async () => (await window.api.batchScrape.getState()).status === 'cancelled')
+        await new Promise(resolve => setTimeout(resolve, 9000))
+        const after = await page.evaluate(() => window.api.videos.list({ kind: 'library', libraryId: 1 }))
+        assert.equal(after.items.filter(item => item.title === 'GUI partial title').length, 1)
+        assert.deepEqual(after.items.map(item => item.id).sort(), beforeBatch.items.map(item => item.id).sort())
+        for (const item of after.items.filter(item => item.title !== 'GUI partial title')) assert.equal(item.title, beforeBatch.items.find(before => before.id === item.id)?.title)
+        await page.screenshot({ path: path.join(output, 'remote-batch-cancel.png'), fullPage: true })
+        console.log('PASS: GUI cancels a batch after one commit; committed metadata remains and remaining item is unchanged')
+      } else {
+      await page.waitForFunction(async () => {
+        const result = await window.api.videos.list({ kind: 'library', libraryId: 1 })
+        return ['GUI-901', 'GUI-903'].every(code => result.items.some(item => item.code === code && item.title === 'GUI scraped title'))
+      })
+      await page.screenshot({ path: path.join(output, 'remote-batch-scrape.png'), fullPage: true })
+      console.log('PASS: remote GUI batch scrape commits metadata for both selected videos')
       }
     }
     if (process.env.JAVDEX_REMOTE_SMOKE_RENAME === '1') {

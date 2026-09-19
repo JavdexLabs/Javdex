@@ -49,7 +49,7 @@
 | 尚未闭合的事项 | 后续处理方式 |
 |---|---|
 | 服务端 NFO 资料导入与远程配对 | 代码已接线；真实 Node 直接/待确认导入及浏览配对测试通过，完整产品流验收继续推进 |
-| 完整远程 GUI | 已通过单条采集、待确认应用、真实服务端文件改名、NFO 导入和配对；批量采集、清单匹配、取消与部分提交仍待验证 |
+| 完整远程 GUI | 已通过单条采集、待确认应用、真实服务端文件改名、NFO 导入和配对；批量采集、取消与部分提交已通过；清单匹配仍待验证 |
 | 变更后协议的故障与恢复验收 | 本轮 55 项 Linux 测试与 Docker 双宿主迁库故障验收通过；旧 waitingMaintenance、双端迁库许可的历史结果不作为现行协议证据 |
 | 同源码版本的安装与发布 | 历史 0.7.0 Linux 结果不代表当前 0.7.1，也不代表 Windows/macOS；版本和发布目标需在启动发布工作时重新确定 |
 
@@ -99,10 +99,10 @@
 | macOS 安装 | 两架构 DMG 已构建；arm64 从 DMG 复制到隔离目录后，上述远程 GUI 流程通过。钥匙串授权由操作者在系统提示完成；x64 启动返回系统错误 -86（本机无 Rosetta），不计通过；含 `ebbae81` 的 arm64 最终安装副本已通过 NFO、真实文件重命名、认主、配对、重启和撤销 GUI 验收 |
 | Linux 服务端完整测试 | 当前源码 `server:test` 共 55 项通过、0 失败、0 跳过（runtime 43、双宿主迁库 5、双后端扫描 7）；包含真实 mpv、bind mount/umount、SIGKILL、EIO、网络命名空间断网及窗口关闭 |
 | Docker 生产与迁库故障 | `server:smoke`、`server:smoke:migration` 通过；双宿主离线包、启用/放弃竞争、正式图片与 EACCES/ENOSPC 回滚均真实执行。故障目录使用原生 Linux 存储和共享挂载传播；没有放宽 FUSE/SQLite 检查 |
-| Linux 同版本安装 | 当前源码桌面/Web/server build 和 Electron 原生依赖构建通过；arm64 deb 打包与 `smoke:same-version-install` 通过（解包校验、Xvfb 存活检查与同版本 Docker 镜像，额外 GUI 实测已启动到远程认主页，但容器无安全凭据存储，产品拒绝保存 writer，后续流程未计通过，未降低产品安全要求）。容器中的源码副本没有 Git 远端元数据，打包显式传入当前仓库主页；Electron 下载中断后使用已安装的相同 43.4.1 运行时；容器缺少 xz，deb 改用构建参数 `deb.compression=gz` |
+| Linux 同版本安装 | 当前源码桌面/Web/server build 和 Electron 原生依赖构建通过；arm64 deb 打包与 `smoke:same-version-install` 通过（解包校验、Xvfb 存活检查与同版本 Docker 镜像，随后在同一隔离容器安装 gnome-keyring/DBus 并用 apt 正式安装 deb；`/opt/Javdex/javdex` 的 NFO、采集、待确认、终止、改名、配对与重启 GUI 均通过）。容器中的源码副本没有 Git 远端元数据，打包显式传入当前仓库主页；Electron 下载中断后使用已安装的相同 43.4.1 运行时；容器缺少 xz，deb 改用构建参数 `deb.compression=gz` |
 | 远程目录修复回归 | 11 项 IPC/HTTP 合同测试、`typecheck`、`pretest` 通过；显式旧版本仍保留并交由服务端拒绝 |
 
-远程批量采集/清单匹配/取消与部分提交 GUI、完整 Linux GUI 及 Windows/macOS x64 安装仍未闭合。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
+远程清单匹配 GUI 及 Windows/macOS x64 安装仍未闭合。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
 
 ## 后续验证命令
 
@@ -132,4 +132,10 @@ JAVDEX_REMOTE_SMOKE_NFO=1 JAVDEX_REMOTE_SMOKE_RENAME=1 JAVDEX_REMOTE_SMOKE_SCRAP
 
 `JAVDEX_DESKTOP_EXECUTABLE` 可指向实际安装的桌面程序，`JAVDEX_REMOTE_SMOKE_PORT` 可覆盖默认 18095，`JAVDEX_WEB_QA_OUTPUT` 可指定截图目录。Linux Xvfb 隔离容器可显式使用 `JAVDEX_REMOTE_SMOKE_NO_SANDBOX=1`；这仅是测试进程参数，不改变产品打包配置，也不会绕过安全凭据存储检查。
 
-本轮故障测试适配已提交为 `d3c15b5`。Windows 无运行宿主，macOS x64 无 Rosetta，Linux 测试容器无可用系统密钥环，相关完整 GUI 安装验收保持未完成。最终版本发布、推送和合并 main 仍不执行。
+本轮故障测试适配已提交为 `d3c15b5`。
+
+2026-09-19 后续实测补充：`JAVDEX_REMOTE_SMOKE_BATCH=1` 验证 GUI 选择两部影片并批量提交，两部服务端标题均更新；再加 `JAVDEX_REMOTE_SMOKE_CANCEL=1` 使用每项延迟 8 秒的确定性沙箱插件，在首项提交后通过设置页终止。任务进入 `cancelled` 后继续等待 9 秒，确认只有一部更新、另一部标题及影片集合保持原状。两种场景均通过，不能用批量成功代替中途终止证据。
+
+Windows 无运行宿主，macOS x64 无 Rosetta，相关安装验收保持未完成。Linux 密钥环与沙箱运行条件已补齐，当前实测不再以缺少环境为阻塞。最终版本发布、推送和合并 main 仍不执行。
+
+Linux GUI 补充环境：使用 `dbus-run-session`、`XDG_CURRENT_DESKTOP=GNOME`、临时测试密钥环和 Xvfb。容器中的非 root Chromium 子进程需 root 所有且模式为 4755 的 `chrome-sandbox`；正式 deb 的安装脚本以 root 探测 user namespace，当前容器探测结果与非 root 运行条件不一致，因此在容器安装目录显式配置该权限。最终 `/opt/Javdex/javdex` 验收未传 `--no-sandbox`，也未绕过 writer 安全存储。该结果针对本机 Colima Linux arm64 测试环境，不推断所有 Linux 桌面发行版或其他架构通过。

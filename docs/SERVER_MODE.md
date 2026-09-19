@@ -1,6 +1,8 @@
 # 服务端模式：部署、认主与迁库
 
-桌面日常操作见 [使用指南](USER_GUIDE.md)。局域网只读网页见 [LAN_WEB.md](LAN_WEB.md)。本页说明独立 Node 宿主、桌面远程模式、认主与整库迁移。第一版范围仍以 [执行计划](SERVER_MODE_EXECUTION_PLAN.md) 为准。单容器生产镜像 `server:smoke` 已通过（#107：bind + writer.claim + restart）。Docker 两端迁库烟测见 `server:smoke:migration` / 执行计划 S13。Linux 同版本桌面包 + 镜像安装烟测见 `smoke:same-version-install` / 执行计划 S14。这些烟测不能替代完整源码验收，不得据此宣称 S13 / S14 / M–D 矩阵完成。
+本页维护当前部署与操作方式。实现、合同和功能边界见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，进度与验证结果见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。桌面日常操作见 [使用指南](USER_GUIDE.md)，只读网页见 [LAN Web](LAN_WEB.md)。
+
+当前代码基线为 `76a871e` / `0.7.1`；服务端阶段性实现完成，完整验收与发布准备尚未完成。历史容器或 Linux 安装烟测不代表当前版本已验收。
 
 ## 版本
 
@@ -14,9 +16,38 @@
 - 以专用 UID/GID 运行进程；数据目录与挂载应对该用户可读写。不要用桌面用户数据目录充当服务 `dataDir`。
 - 同一 `dataDir` 同时只允许一个宿主进程。
 
+## 构建与配置
+
+从仓库根目录构建：
+
+```bash
+npm ci
+npm run server:build
+```
+
+产物为 `out/server`，包含网页和服务端入口。独立部署时在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动；不需要 Electron rebuild。仓库的 Dockerfile 同样使用该产物，镜像内以 `node` 用户运行，不会替你生成配置或挂载媒体目录。
+
+配置示例（目录及地址替换为服务机器实际值）：
+
+```json
+{
+  "listenHost": "0.0.0.0",
+  "port": 8096,
+  "accessHosts": ["192.168.1.10"],
+  "dataDir": "/data/javdex",
+  "imagesDir": "/data/javdex/media_assets",
+  "mediaMounts": { "media": "/media/videos" },
+  "web": { "username": "viewer" }
+}
+```
+
+此示例需通过环境变量 `JAVDEX_WEB_PASSWORD` 提供网页密码，或在 web 中配置 `passwordHash`。`accessHosts` 填客户端访问的主机名/IP，不是监听地址。`staticRoot` 可省略，CLI 默认使用产物旁的 web 目录；手动指定时必须是含 index.html 的绝对目录。
+
+环境覆盖项为 `JAVDEX_DATA_DIR`、`JAVDEX_IMAGES_DIR`、`JAVDEX_STATIC_ROOT`、`JAVDEX_LISTEN_HOST`、`JAVDEX_LISTEN_PORT`、`JAVDEX_ACCESS_HOSTS`（逗号分隔）、`JAVDEX_WEB_USERNAME`、`JAVDEX_WEB_PASSWORD`。配置文件仍为必需；字段及默认值以 [config.ts](../apps/server/src/config.ts) 为准。日常部署使用固定端口；端口 0 仅用于需要系统分配端口的场景。
+
 ## 启动与认主
 
-配置文件经 `--config` 或 `JAVDEX_SERVER_CONFIG` 提供。命令：
+配置文件经 `--config` 或 `JAVDEX_SERVER_CONFIG` 提供。安装了 `javdex-server` 命令时使用下列形式；运行构建产物时将命令名替换为 `node /部署目录/index.js`，Docker 中使用镜像的 Node 入口：
 
 ```bash
 javdex-server start --config /etc/javdex/server.json
@@ -51,16 +82,10 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 先停服务，备份 `dataDir` 与 `imagesDir`，再换同版本产物。版本不符时桌面不会写入远程。冻结中的源库不能领取 writer。
 
-## 当前实现限制（本阶段已确认补齐）
+## 功能与使用边界
 
-> 2026-09-14：用户已逐项确认 C1–C7 全部补齐，C6 包含单条和批量刮削，采集仍在桌面执行。该决定覆盖此前“不扩合同”的限制。实施顺序见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。当前阶段不做全面自动化/完整 GUI 验收、故障测试、跨平台安装或 0.8 发布候选，E1/E2 仅保留历史说明。
+远程资料管理、文件重命名、待确认队列定位与精确查询、审计筛选、来源匹配、单条/批量刮削及清单影片链接已接线。刮削插件、浏览器登录和网络采集仍在桌面运行；服务端保存权威资料和正式图片。批量直接选择最多 200 个 ID，更大范围用筛选；取消采集不会撤回已经受理的写入。
 
-- **C1** 远程 `FILE_RENAME` 经 `files.renamePreview` 在服务端解析资源编号与活文件指纹；桌面只发送根相对路径，绝对路径被拒绝
-- **C2** `pendingScan.queuePage` 已转发 IPC `anchor`；失效锚点回落到首页，与本地队列语义一致
-- **C3** `pendingAudit.presence` 按媒体库和指定 group/identity/scrape ids 精确返回存在项，不再做目录级计数或 list 求交
-- **C4** 远程 `scans.auditPage` 保留 `section`/`outcome`/`attention`
-- **C5** 远程 `videos.sources` 按 codes/videoIds/source+identity 分页返回唯一影片及其来源；空结果表示未匹配，无效响应当查询失败。清单匹配不再用空 sources 代替
-- **C6** 远程单条与批量刮削已接线：桌面运行插件/Playwright 采集，服务端持有正式资料并接收 `applyScrapeCandidate` / 待确认提交。批量启动时冻结 ids 或筛选条件；分页 `entries` 对已删除 id 占位，桌面队列保留该项与总数并报告不存在，不静默过滤。远程已选 ID 上限 200，更大范围用 `videoFilter`/`actressFilter`。取消只停止桌面采集，不回滚已受理写入。远程 `fillEmpty` 经 `scrape.fields` 调用权威宿主的本地同款字段判断（含头像可用性及按来源判断）。count 经只读 `targetLists.count`，不创建冻结目标记录。尚未做完整 GUI/故障验收
-- **C7** 远程 `playlists.applyImport` 按本地语义写入 per-video `video_links`（INSERT OR IGNORE 去重），不扩大自动建片或追加到已有清单
-- **E1** 单容器 `server:smoke` 已通过（#107）。Docker 两端迁库见 `server:smoke:migration` / 执行计划 S13。Linux 同版本 `deb`/`AppImage` + 镜像安装见 `smoke:same-version-install` / 执行计划 S14。不是 Windows/macOS 安装包，也不是完整 GUI 产品流
-- **E2** 第一版发布路径已解锁：S14 剩余门闩通过后可升 0.8、写 CHANGELOG、准备合并 main。不得在剩余门闩通过前宣称 S13/S14 完成；本文件不授权自动合并 main，也不在本阶段升版本或写 CHANGELOG
+服务端扫描当前只检查本地 NFO 的番号身份，不导入其中的标题、演员、封面等资料；NFO 导出支持 XML。桌面本地模式的 NFO 元数据导入能力不等于远程服务端也支持。
+
+远程不支持本机文件夹操作、根重绑、图片加密或资产目录搬迁。服务端首版无转码，挂载使用固定标记保护，不识别换卷。能力细节和代码入口统一见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)。

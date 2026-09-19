@@ -10,7 +10,7 @@
 
 ## 按任务阅读
 
-本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（S01 起含 browser/manage/desktop/protocol 分组），Node 路径身份与资料库数据库在 `packages/library/src`，局域网浏览 HTTP 在 `packages/http/src`，共用 Checkbox 在 `packages/ui/src`。`apps/server` 已包含独立 Node 宿主与管理接口，服务端仍处于验收和发布收尾。后续推进先读 `docs/SERVER_MODE_NEXT_STEPS.md`，阶段要求及历史证据见 `docs/SERVER_MODE_EXECUTION_PLAN.md`。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
+本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（S01 起含 browser/manage/desktop/protocol 分组），Node 路径身份与资料库数据库在 `packages/library/src`，局域网浏览 HTTP 在 `packages/http/src`，共用 Checkbox 在 `packages/ui/src`。`apps/server` 已包含独立 Node 宿主与管理接口，服务端仍处于验收和发布收尾。后续推进先读 `docs/SERVER_MODE_NEXT_STEPS.md`，实现与合同见 `docs/SERVER_MODE_CONTRACT_INVENTORY.md`，阶段要求及历史证据见 `docs/archive/server-mode/README.md`。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
 
 | 你在改什么 | 必读 | 可选 |
 |------------|------|------|

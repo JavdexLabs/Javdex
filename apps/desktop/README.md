@@ -7,4 +7,4 @@ Workspace equivalents: `npm run dev -w @javdex/desktop`, `npm run build -w @javd
 
 The root remains the Electron packaging application and owns `out/`, release metadata and the transitional production dependency manifest. Desktop workspace scripts deliberately execute from the repository root. Do not change the process cwd or move `out/` without updating runtime asset/worker and packaging checks.
 
-LAN browser HTTP, pairing/auth storage, browse DTO projection and static serving live in `packages/http`. `src/main/web/webAccess.ts` remains the Electron lifecycle adapter. Extract remaining desktop-only assembly according to [the execution plan](../../docs/SERVER_MODE_EXECUTION_PLAN.md).
+LAN browser HTTP, pairing/auth storage, browse DTO projection and static serving live in `packages/http`. `src/main/web/webAccess.ts` remains the Electron lifecycle adapter. For host boundaries, see [current implementation and contracts](../../docs/SERVER_MODE_CONTRACT_INVENTORY.md).

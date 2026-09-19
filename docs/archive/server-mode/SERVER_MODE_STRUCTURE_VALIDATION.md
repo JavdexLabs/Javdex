@@ -1,5 +1,7 @@
 # Monorepo 结构准备验证记录
 
+> 历史归档（2026-09-19）：本文保留当时的方案、指令与验证结果，不作为当前执行入口。现状及后续范围见 [当前状态](../../SERVER_MODE_NEXT_STEPS.md)，操作见 [部署说明](../../SERVER_MODE.md)，代码导航见 [实现与合同](../../SERVER_MODE_CONTRACT_INVENTORY.md)。文中的“当前”“未实施”“下一步”均指记录当时；测试通过只适用于各自记录的提交和环境。
+
 本记录仅验证目录、工作区与现有桌面/Web 构建行为，不能作为服务端功能验收。执行交接见 [S00–S14 计划](SERVER_MODE_EXECUTION_PLAN.md)。代码基线 `cac9f6982eaef6afc34f86f9a51486f8ff10dd2b`，当前分支 `codex/server-mode-feasibility`，验证平台 Windows、Node `22.22.1`。
 
 ## 已完成的结构工作

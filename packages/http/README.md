@@ -8,4 +8,4 @@ Desktop `webAccess` still owns Electron lifecycle, `userData` session files, and
 
 HTTP may import contracts, `packages/library` public modules, and Node builtins. It must not import Electron, desktop settings, Playwright, or `apps/server`.
 
-See [the execution plan](../../docs/SERVER_MODE_EXECUTION_PLAN.md).
+See [current implementation and contracts](../../docs/SERVER_MODE_CONTRACT_INVENTORY.md).

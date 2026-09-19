@@ -1,10 +1,12 @@
 # 服务端模式执行与 Agent 交接计划
 
-> 2026-09-17 后续取舍覆盖：交接遇维护任务直接拒绝，不再持久 `waitingMaintenance` 或阻挡新维护；迁库改为离线包、空目标导入与人工切换，移除源启用许可及双端状态投影。下文对应状态机和测试结果保留作历史证据，不代表现行合同。当前合同及操作方式见 [SERVER_MODE.md](SERVER_MODE.md)，当前推进见 [SERVER_MODE_NEXT_STEPS.md](SERVER_MODE_NEXT_STEPS.md)。
+> 历史归档（2026-09-19）：本文保留当时的方案、指令与验证结果，不作为当前执行入口。现状及后续范围见 [当前状态](../../SERVER_MODE_NEXT_STEPS.md)，操作见 [部署说明](../../SERVER_MODE.md)，代码导航见 [实现与合同](../../SERVER_MODE_CONTRACT_INVENTORY.md)。文中的“当前”“未实施”“下一步”均指记录当时；测试通过只适用于各自记录的提交和环境。
 
-> 2026-09-14 阶段范围调整：用户明确暂不做全面自动化/完整 GUI 验收、跨平台安装、0.8 发布候选及故障测试；已逐项确认 C1–C7 全部补齐，包含单条和批量远程刮削（采集仍在桌面）。此次决定覆盖下文历史“不扩合同”的限制。当前只推进实现缺口核对与这些功能的补齐，见 [阶段性推进计划](SERVER_MODE_NEXT_STEPS.md)。下文 S13/S14 保留为历史整体计划，不是当前阶段执行任务。
+> 2026-09-17 后续取舍覆盖：交接遇维护任务直接拒绝，不再持久 `waitingMaintenance` 或阻挡新维护；迁库改为离线包、空目标导入与人工切换，移除源启用许可及双端状态投影。下文对应状态机和测试结果保留作历史证据，不代表现行合同。当前合同及操作方式见 [SERVER_MODE.md](../../SERVER_MODE.md)，当前推进见 [SERVER_MODE_NEXT_STEPS.md](../../SERVER_MODE_NEXT_STEPS.md)。
 
-> 当前状态（2026-09-14，核对代码 `96e37a7`）：服务端与远程桌面的主要功能已落地，S02/S02D 尚需架构收口，S13 全面验收、S14 发布准备未完成。后续执行从 [服务端收尾推进计划](SERVER_MODE_NEXT_STEPS.md) 开始；本文件保留原始阶段要求和历史实施证据，不要求从 S01 重新实施。本文及新计划是本地交接材料，不替代 GitHub Issues，也不代表已发布工单。
+> 2026-09-14 阶段范围调整：用户明确暂不做全面自动化/完整 GUI 验收、跨平台安装、0.8 发布候选及故障测试；已逐项确认 C1–C7 全部补齐，包含单条和批量远程刮削（采集仍在桌面）。此次决定覆盖下文历史“不扩合同”的限制。当前只推进实现缺口核对与这些功能的补齐，见 [阶段性推进计划](../../SERVER_MODE_NEXT_STEPS.md)。下文 S13/S14 保留为历史整体计划，不是当前阶段执行任务。
+
+> 当前状态（2026-09-14，核对代码 `96e37a7`）：服务端与远程桌面的主要功能已落地，S02/S02D 尚需架构收口，S13 全面验收、S14 发布准备未完成。后续执行从 [服务端收尾推进计划](../../SERVER_MODE_NEXT_STEPS.md) 开始；本文件保留原始阶段要求和历史实施证据，不要求从 S01 重新实施。本文及新计划是本地交接材料，不替代 GitHub Issues，也不代表已发布工单。
 >
 > 历史起点：S00 交接位于 `origin/codex/server-mode-feasibility`；研究基线 `cac9f6982eaef6afc34f86f9a51486f8ff10dd2b` 仅用于追溯。当前接手先核对远程最新提交、工作区和新计划，不回退到研究或 S00 基线。下文“本轮”“未做”“待实施”均需结合所属阶段日期/提交阅读，后续记录可能已补齐；当前剩余项以新计划为入口。
 
@@ -54,7 +56,7 @@
 | 阶段 | 状态 | 记录 |
 |---|---|---|
 | S00 | 已完成（交接提交 `f706402`） | [结构准备验证记录](SERVER_MODE_STRUCTURE_VALIDATION.md) |
-| S01 | 合同已冻结 | [合同清点](SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
+| S01 | 合同已冻结 | [合同清点](../../SERVER_MODE_CONTRACT_INVENTORY.md)。282 项 IPC 均有去向；管理用例均有 Zod schema。验证：`npx tsx --test packages/contracts/src/inventory/ipcDisposition.test.ts packages/contracts/src/manage/schemas.test.ts packages/contracts/src/browser/dto.test.ts`（13 通过）；`npm run typecheck`；`npm run check:workspaces`。未实现业务、未改 schema 16、未接线 IPC。剩余：管理结果 DTO 在接入后端时从现有领域类型投影 |
 | S02 | 进行中（library 已含 db、图片、公网图片 HTTP、扫描编排/调度、扫描审计读取、分类查询/维护/主图、演员查询/冲突/图库/维护、标签查询、清单与媒体库维护、影片维护/生命周期、资源迁移、待确认资源身份、NFO、维护闸门与路径清理、刮削确认/候选应用/清单 applyImport/目标列表/Agent findReady·apply·discard） | schema 已到 19。`getDb()` 单例仍保留。剩余：Electron NFO 封面导出、catalog 查询 worker 入口仍在 desktop；采集/deliver 仍桌面 |
 | S02D | 本地架构门槛已验证；刮削确认/Agent apply/player/SCAN_RUN 已走 CatalogBackend。本地 Electron NFO 封面导出仍桌面；采集 Playwright/plan 仍桌面单例，但远程 start/匹配/apply 不再打开 `library.db` | 见本文件 S02D 实施记录 |
 | S03 | 局域网浏览 HTTP 已抽到 `packages/http`；管理面未装配；纯 Node 可加载 | 见本文件 S03 实施记录 |
@@ -98,7 +100,7 @@
 
 ### 桌面目标架构与实施约束（适用于 S01/S02D/S07/S10）
 
-本节为本轮确定的架构细节，尚未改代码。现状依据为 [appMain](../apps/desktop/src/main/appMain.ts)、[影片 IPC](../apps/desktop/src/main/ipc/videoHandlers.ts)、[IPC 注册](../apps/desktop/src/main/ipc/index.ts)、[IPC 错误处理](../apps/desktop/src/main/ipc/shared.ts)。当前主启动直接导入本地数据库与后台服务，影片修改直接使用单例，IPC 将多数失败压成字符串；这些不能直接作为远程适配基础。
+本节为本轮确定的架构细节，尚未改代码。现状依据为 [appMain](../../../apps/desktop/src/main/appMain.ts)、[影片 IPC](../../../apps/desktop/src/main/ipc/videoHandlers.ts)、[IPC 注册](../../../apps/desktop/src/main/ipc/index.ts)、[IPC 错误处理](../../../apps/desktop/src/main/ipc/shared.ts)。当前主启动直接导入本地数据库与后台服务，影片修改直接使用单例，IPC 将多数失败压成字符串；这些不能直接作为远程适配基础。
 
 目标调用链：renderer → preload/IPC → 桌面 application/workflow → CatalogBackend；LocalCatalogBackend → library，RemoteCatalogBackend → 管理 API。桌面系统能力由 application/workflow 显式协调，不能混入 library 或让服务端调用 Electron。
 
@@ -675,7 +677,7 @@ HTTP 等待取消与业务任务取消分别表示：AbortSignal 只停止当前
   - Linux 同版本安装包+镜像烟测见 S14（`bc-5e834a3f-586f-520f-8029-8ce75378a04f`）。不是 Windows/macOS 安装包；不是完整 M/D 矩阵。
   - 本会话 `bc-0428fa2d-2d80-5b88-9a24-3803823e9244`：`tsc --noEmit` `tsconfig.server.json` / `tsconfig.node.json` 通过。定向 `runtime.test.ts` M01/M02/M04/M07 **4 通过**。`dualBackendScan.e2e.test.ts` **1 通过**（含迟到 `videos.get` 与取消等待后 `operations.get`）。`remoteImageDiskCache.integration.test.ts` **2 通过**。`npm run server:test` 其余宿主项通过；本机无 `/usr/bin/mpv`，既有 M15 mpv 项失败且未伪装绿灯。未重跑全量 Electron。
   - 本会话 `bc-59bde151-be0b-4c9e-8ca2-12376b967412`：`tsc --noEmit` `tsconfig.server.json` / `tsconfig.web.json` 通过。`dualBackendScan.e2e.test.ts` **6 通过**（含 HTTP 宿主 `videos.edit` SIGKILL、原生 `BrowserWindow` 在远程扫描 stall 期间关闭再创建、渲染器点「扫描并导入」后关窗再建、catalog `pwrite64`/`fsync` `EIO` 回滚，以及冻结目标列表三页窗口在删除中间 id 后保持 missing 占位）。定向 Electron：`scanHandlers` + `MediaLibraryScanRunButton` **25 通过**；`resolveFrozenTargetSlots` / `useFrozenTargetWindow` / `FrozenTargetSlotCell` **4 通过**。`migrationHosts.e2e.test.ts` **5 通过**。`sg docker npm run server:smoke:migration` **EXIT 0**（含拷图 `EACCES`/`ENOSPC` 回滚）。未重跑全量 Electron 或 Windows/macOS 安装包。
-- 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](SERVER_MODE.md) C1–C7。E2 已改为解锁第一版发布路径（S14 剩余门闩通过后可升 0.8 / 写 CHANGELOG / 准备合并 main）；本轮仍不升版本、不写 CHANGELOG、不合并 main。单容器 `server:smoke` 已通过（#107）。Linux 同版本安装烟测见 S14，不是完整桌面 GUI 产品流，也不是 Windows/macOS 安装包。
+- 产品已锁定并落地（本轮）：`setRating` 递增 V；enable 拷图失败整笔回滚；远程 `migrateCatalog` 能力放开并走原 HTTP migration；源端加密图在迁库导出时自动解密。已接受且本版不扩合同的限制见 [SERVER_MODE.md](../../SERVER_MODE.md) C1–C7。E2 已改为解锁第一版发布路径（S14 剩余门闩通过后可升 0.8 / 写 CHANGELOG / 准备合并 main）；本轮仍不升版本、不写 CHANGELOG、不合并 main。单容器 `server:smoke` 已通过（#107）。Linux 同版本安装烟测见 S14，不是完整桌面 GUI 产品流，也不是 Windows/macOS 安装包。
 - 未做：Windows NSIS/ZIP 与 macOS DMG 安装包烟测（本 Linux VM 不能诚实构建/签署）；远程 FILE_RENAME（C1）；D04 WAN 丢包后再重连；完整 sources 设置页 ScanConsole chrome（扫描按钮关窗已覆盖）；M07 刮削批次 start 仍未走冻结 `targetListId`（需产品决定筛选载荷/批次入口）；M05 整机断电；M15 WAN 丢包；完整 M01–M15 / D01–D07。不得把 mock 当完成证据。不得宣称 S13/S14 或 M/D 矩阵已全部完成。
 
 S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该编号的全部安排）：
@@ -713,7 +715,7 @@ S13 验收矩阵（核心项；“部分”表示有真实证据但未覆盖该�
 
 **S14 实施记录（进行中）**
 
-- 范围：[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、源端导出自动解密、enable 拷图失败回滚，以及 C1–C7 已知限制。E2 已解锁第一版发布路径，仍须 S14 剩余门闩（含 Windows/macOS 安装包与 CHANGELOG）通过后才升 0.8 / 准备合并 main。单容器 `server:smoke` 已通过（#107）；Docker 两端迁库见 S13 `server:smoke:migration`。Linux 同版本桌面包 + 服务镜像安装烟测见本轮 `smoke:same-version-install`。[USER_GUIDE.md](USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
+- 范围：[ADR-0029](../../adr/0029-server-mode-extends-root-and-web-isolation.md) 写明服务端扩展 ADR-0024/0027、本机原合同不变、Cookie 不能授权 manage/play/管理图片。操作页 [SERVER_MODE.md](../../SERVER_MODE.md) 写 dataDir/imagesDir/挂载、UID、`start|bind|recover|migrate-auth`、源端导出自动解密、enable 拷图失败回滚，以及 C1–C7 已知限制。E2 已解锁第一版发布路径，仍须 S14 剩余门闩（含 Windows/macOS 安装包与 CHANGELOG）通过后才升 0.8 / 准备合并 main。单容器 `server:smoke` 已通过（#107）；Docker 两端迁库见 S13 `server:smoke:migration`。Linux 同版本桌面包 + 服务镜像安装烟测见本轮 `smoke:same-version-install`。[USER_GUIDE.md](../../USER_GUIDE.md) 增加“资料库连接”入口。[DEVELOPMENT.md](../../DEVELOPMENT.md) 索引改为实施中而非“可行性未实施”。[VERSIONING_AND_RELEASE.md](../../VERSIONING_AND_RELEASE.md) 增加桌面/服务/网页同版本约束。
 - 验证：文档提交；`npm run server:build` 写出 `out/server`（version `0.7.0`，依赖仅 better-sqlite3/sharp，无 electron import）；`npm run test:packaging` **8 通过**（先前记录）；后续 Docker-in-Docker 会话 `server:smoke` **EXIT 0**（单容器 bind+claim+restart，见 S13）。`server:smoke:node` 仍只是宿主进程检查。
 - Linux 同版本安装烟测（本会话 `bc-5e834a3f-586f-520f-8029-8ce75378a04f`；Engine 28.5.2 / fuse-overlayfs；snapshot `bld-20260913-35f7dd31-…` 仍未写入 `.cursor/Dockerfile`，按仓库配方现装 Docker CE 后跑通，不是静默跳过）：
   - 源码版本保持 **0.7.0**（根与全部 workspace；未升 0.8，未写 CHANGELOG）

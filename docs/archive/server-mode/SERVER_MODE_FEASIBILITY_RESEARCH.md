@@ -1,5 +1,7 @@
 # 服务端模式可行性研究
 
+> 历史归档（2026-09-19）：本文保留当时的方案、指令与验证结果，不作为当前执行入口。现状及后续范围见 [当前状态](../../SERVER_MODE_NEXT_STEPS.md)，操作见 [部署说明](../../SERVER_MODE.md)，代码导航见 [实现与合同](../../SERVER_MODE_CONTRACT_INVENTORY.md)。文中的“当前”“未实施”“下一步”均指记录当时；测试通过只适用于各自记录的提交和环境。
+
 > 状态：第一版产品边界已确认；此前功能实验已撤回，服务端功能未实施。本次按用户明确授权完成 monorepo 结构准备，交接执行见 [完整执行计划](SERVER_MODE_EXECUTION_PLAN.md)，未替代既有 ADR。
 >
 > 研究日期：2026-09-12。代码基线：`cac9f6982eaef6afc34f86f9a51486f8ff10dd2b`。
@@ -18,22 +20,22 @@
 
 | 区域 | 代码证据 | 判断与所需改动 |
 |---|---|---|
-| 数据库 | [`database.ts`](../packages/library/src/db/database.ts) 提供 `initDatabaseAtPath`，开启 WAL、外键并执行迁移；当前 schema 为 16，与研究基线一致 | 初始化已经不依赖 Electron。可以复用 SQLite 与仓库逻辑，但需由服务端入口唯一负责升级和恢复 |
-| HTTP 与网页 | [`server.ts`](../apps/desktop/src/main/web/server.ts)、[`http.ts`](../apps/desktop/src/main/web/http.ts)、`apps/web/src` | 会话、配对、静态资源、Range 可复用；认证角色、部署地址与文件授权需适配 |
-| 网页目录 | [`catalog.ts`](../apps/desktop/src/main/web/catalog.ts)、[`webTypes.ts`](../packages/contracts/src/webTypes.ts) | 明确只展示活动库的未隐藏成员，固定简化 DTO。适合浏览器，不足以承接完整桌面查询 |
-| 桌面生命周期 | [`appMain.ts`](../apps/desktop/src/main/appMain.ts) | 当前先打开本地数据库，恢复扫描、Agent 与删除任务，清理暂存图片，再启动 IPC、Web 和自动扫描。模式选择必须前移到这些操作之前 |
-| 图片与配置 | [`assetStoragePaths.ts`](../apps/desktop/src/main/services/assetStoragePaths.ts)、[`assetCrypto.ts`](../apps/desktop/src/main/services/assetCrypto.ts)、[`settingsStore.ts`](../apps/desktop/src/main/settings/settingsStore.ts) | 仍导入 Electron；路径、配置、加密策略需变成运行时注入项。仅替换 `webAccess.ts` 不够 |
-| 目录 worker | [`catalogReadService.ts`](../apps/desktop/src/main/services/catalogReadService.ts)、[`catalogReadWorkerTransport.ts`](../apps/desktop/src/main/services/catalogReadWorkerTransport.ts) | worker transport 使用标准 Node；默认入口路径仍由 `app.getAppPath()` 拼接，需要独立构建和注入 |
-| 扫描与 NFO | [`scanCoordinator.ts`](../apps/desktop/src/main/scanner/scanCoordinator.ts)、[`localNfoScanService.ts`](../apps/desktop/src/main/services/localNfoScanService.ts)、[`nfoExportTaskController.ts`](../apps/desktop/src/main/nfo/export/nfoExportTaskController.ts) | 可以在文件所在端执行，但包括建成员、应用 NFO、待确认处理、清理等写入，不能把扫描理解为纯枚举 |
-| 刮削应用 | [`videoScrapeApplyService.ts`](../apps/desktop/src/main/services/videoScrapeApplyService.ts)、[`videoPendingScrapeService.ts`](../apps/desktop/src/main/services/videoPendingScrapeService.ts) | 当前同时处理实体关联、事务、图片交割和待确认项。应把采集与权威应用拆开，后者留在数据库所在端 |
-| 维护互斥 | [`maintenanceTaskGate.ts`](../apps/desktop/src/main/services/maintenanceTaskGate.ts) | 单进程互斥可复用；它不是跨桌面写入锁，也不是持久任务队列 |
-| 播放与 UI | [`playerService.ts`](../apps/desktop/src/main/services/playerService.ts)、[`apps/desktop/src/renderer/index.html`](../apps/desktop/src/renderer/index.html) | 当前由系统打开本地文件；renderer CSP 的图片源不允许任意 HTTP。Range API 本身不能自动替代播放器和图片认证 |
+| 数据库 | [`database.ts`](../../../packages/library/src/db/database.ts) 提供 `initDatabaseAtPath`，开启 WAL、外键并执行迁移；当前 schema 为 16，与研究基线一致 | 初始化已经不依赖 Electron。可以复用 SQLite 与仓库逻辑，但需由服务端入口唯一负责升级和恢复 |
+| HTTP 与网页 | [`server.ts`](../../../apps/desktop/src/main/web/server.ts)、[`http.ts`](../../../apps/desktop/src/main/web/http.ts)、`apps/web/src` | 会话、配对、静态资源、Range 可复用；认证角色、部署地址与文件授权需适配 |
+| 网页目录 | [`catalog.ts`](../../../apps/desktop/src/main/web/catalog.ts)、[`webTypes.ts`](../../../packages/contracts/src/webTypes.ts) | 明确只展示活动库的未隐藏成员，固定简化 DTO。适合浏览器，不足以承接完整桌面查询 |
+| 桌面生命周期 | [`appMain.ts`](../../../apps/desktop/src/main/appMain.ts) | 当前先打开本地数据库，恢复扫描、Agent 与删除任务，清理暂存图片，再启动 IPC、Web 和自动扫描。模式选择必须前移到这些操作之前 |
+| 图片与配置 | [`assetStoragePaths.ts`](../../../packages/library/src/assetStoragePaths.ts)、[`assetCrypto.ts`](../../../packages/library/src/assetCrypto.ts)、[`settingsStore.ts`](../../../apps/desktop/src/main/settings/settingsStore.ts) | 仍导入 Electron；路径、配置、加密策略需变成运行时注入项。仅替换 `webAccess.ts` 不够 |
+| 目录 worker | [`catalogReadService.ts`](../../../apps/desktop/src/main/services/catalogReadService.ts)、[`catalogReadWorkerTransport.ts`](../../../apps/desktop/src/main/services/catalogReadWorkerTransport.ts) | worker transport 使用标准 Node；默认入口路径仍由 `app.getAppPath()` 拼接，需要独立构建和注入 |
+| 扫描与 NFO | [`scanCoordinator.ts`](../../../apps/desktop/src/main/scanner/scanCoordinator.ts)、[`localNfoScanService.ts`](../../../apps/desktop/src/main/services/localNfoScanService.ts)、[`nfoExportTaskController.ts`](../../../apps/desktop/src/main/nfo/export/nfoExportTaskController.ts) | 可以在文件所在端执行，但包括建成员、应用 NFO、待确认处理、清理等写入，不能把扫描理解为纯枚举 |
+| 刮削应用 | [`videoScrapeApplyService.ts`](../../../apps/desktop/src/main/services/videoScrapeApplyService.ts)、[`videoPendingScrapeService.ts`](../../../apps/desktop/src/main/services/videoPendingScrapeService.ts) | 当前同时处理实体关联、事务、图片交割和待确认项。应把采集与权威应用拆开，后者留在数据库所在端 |
+| 维护互斥 | [`maintenanceTaskGate.ts`](../../../packages/library/src/scan/maintenanceTaskGate.ts) | 单进程互斥可复用；它不是跨桌面写入锁，也不是持久任务队列 |
+| 播放与 UI | [`playerService.ts`](../../../apps/desktop/src/main/services/playerService.ts)、[`apps/desktop/src/renderer/index.html`](../../../apps/desktop/src/renderer/index.html) | 当前由系统打开本地文件；renderer CSP 的图片源不允许任意 HTTP。Range API 本身不能自动替代播放器和图片认证 |
 
 ## 实施前必须补齐的设计
 
 ### 1. 挂载卸载保护（第一版范围已确认）
 
-用户于 2026-09-12 确认：第一版只处理路径卸载造成的不可用与误清理，不处理更换挂载目录、同路径换卷或复制卷的身份识别。补充证据见 [开源项目的挂载与身份处理对照](MOUNT_IDENTITY_REFERENCE_RESEARCH.md)。
+用户于 2026-09-12 确认：第一版只处理路径卸载造成的不可用与误清理，不处理更换挂载目录、同路径换卷或复制卷的身份识别。补充证据见 [开源项目的挂载与身份处理对照](../../MOUNT_IDENTITY_REFERENCE_RESEARCH.md)。
 
 - 每个受管根使用固定标记文件（例如 `.javdex-root`），检查可读性，不引入目录 UUID 或显式重绑流程。标记必须位于实际挂载的存储内；独立挂载的子目录应单独注册为根。
 - 首次添加根时初始化标记，并在数据库记录已经初始化。只读挂载由管理员预置标记；已初始化的根在标记缺失后不得自动补建，否则会把卸载后的空目录误认作正常存储。
@@ -41,7 +43,7 @@
 - 原路径的标记重新可读后自动恢复，不要求人工重绑。仍需通过扫描中卸载、空挂载点及重新挂载实验验证提交与清理保护。
 - 服务端不要求跨重启保持相同 inode；继续保留路径包含关系、符号链接逃逸防护、普通文件检查、打开后描述符校验和写入父目录检查。这些文件操作保护不能随挂载判断一起删除。
 
-**范围边界：**另一个目录只要带有同名可读标记，第一版也会视为可用；不承诺检测此类替换。该策略是服务端第一版的明确范围取舍，本地模式继续遵守 [ADR-0024](adr/0024-preserve-media-library-root-identity-continuity.md)。实施时需补充记录服务端适用范围，不能直接放宽本地 guard。以上是已确认设计，尚未实施。
+**范围边界：**另一个目录只要带有同名可读标记，第一版也会视为可用；不承诺检测此类替换。该策略是服务端第一版的明确范围取舍，本地模式继续遵守 [ADR-0024](../../adr/0024-preserve-media-library-root-identity-continuity.md)。实施时需补充记录服务端适用范围，不能直接放宽本地 guard。以上是已确认设计，尚未实施。
 
 ### 2. 管理查询与网页查询必须分权（已确认）
 
@@ -57,7 +59,7 @@
 - 管理 DTO 也不需要暴露服务器绝对磁盘路径。返回根 ID、相对路径、文件名、在线状态、可执行动作与 revision；数据合同应与当前桌面业务字段逐项对照。
 - 不将整个 IPC 注册表、任意 SQL、任意路径访问或通用方法调用直接暴露到 HTTP。复用类型不代表现有 IPC 验证可以原样充当远程边界，例如当前 `VIDEO_EDIT` 的 schema 使用通用 object，网络端仍需完整字段验证。
 
-这是对 [ADR-0027](adr/0027-isolate-read-only-lan-web-access.md)“管理只走可信桌面 IPC”的显式扩展：浏览器只读合同保持，新增具备独立凭据的管理 HTTP 表面。以上是已确认设计，尚未实施；接口字段、校验规则和业务覆盖仍需在实施时逐项落实。
+这是对 [ADR-0027](../../adr/0027-isolate-read-only-lan-web-access.md)“管理只走可信桌面 IPC”的显式扩展：浏览器只读合同保持，新增具备独立凭据的管理 HTTP 表面。以上是已确认设计，尚未实施；接口字段、校验规则和业务覆盖仍需在实施时逐项落实。
 
 ### 3. “刮削在桌面”需要细分采集与提交（已确认）
 
@@ -150,7 +152,7 @@ HTTP 是原方案接受的可信 LAN 前提，writer 凭据也会经明文链路
 
 确认目标尚未启用时，失败或取消可丢弃目标暂存结果并解除源库冻结；断网导致结果不明时，先核实目标是否启用，核实前源库保持冻结，不自动恢复写入。目标已经启用后不自动解冻源库，回迁应以当前目标库重新执行反向迁移。第一版不要求传输断点续传，可重新迁移，但必须持久保存迁移阶段和结果，重启后仍能确定可写端；取消/失败恢复与目标启用须协调，不能仅凭一次状态查询同时开放两端写入。以上尚未实施；迁移后的设备授权见下文已确认规则。
 
-当前路径身份包括 `video_resources.locator/resource_key/source_identity/strm_source_path`、无法识别快照和审计等数据。图片也不仅是封面，还包括头像源图、裁切图、演员图库、分类图、清单封面与样张。待确认扫描、资源身份和刮削项必须在迁移前处理完毕；未提交上传不作为正式资产迁入。应以 [`schema.ts`](../packages/library/src/db/schema.ts) 及各存储模块制作完整清单，区分活跃路径与历史审计文本，不能全库字符串替换。
+当前路径身份包括 `video_resources.locator/resource_key/source_identity/strm_source_path`、无法识别快照和审计等数据。图片也不仅是封面，还包括头像源图、裁切图、演员图库、分类图、清单封面与样张。待确认扫描、资源身份和刮削项必须在迁移前处理完毕；未提交上传不作为正式资产迁入。应以 [`schema.ts`](../../../packages/library/src/db/schema.ts) 及各存储模块制作完整清单，区分活跃路径与历史审计文本，不能全库字符串替换。
 
 按已确认规则展开的执行步骤与工程建议如下：
 
@@ -159,7 +161,7 @@ HTTP 是原方案接受的可信 LAN 前提，writer 凭据也会经明文链路
 3. **生成一致快照**：使用 SQLite Backup API 或正确停库后的快照，并同步冻结图片及网页配置。数据库快照与图片拷贝需要同一个业务冻结窗口；不能在线只复制 `library.db` 而忽略 WAL。SQLite 官方说明见 [WAL](https://www.sqlite.org/wal.html)、[Backup API](https://www.sqlite.org/backup.html)。
 4. **目标暂存导入**：带 manifest、版本、数量、摘要和根映射；重建路径派生身份、验证唯一索引、外键、图片引用及待确认数据为空；失败不得替换目标当前库。
 5. **提交切换**：校验完成后启用目标，源端保留冻结备份。迁移后的设备授权遵守下文已确认规则；建议发布新 catalog 身份，以隔离旧客户端引用和请求。
-6. **回迁**：反向执行同样的可选映射与校验；映射到本地目录时，在目标桌面重新绑定本地物理根身份，不映射则保留影片并移除相应本地文件资源记录。Windows/macOS/Linux 的大小写和分隔符不同，路径冲突必须预检；[`localPathIdentity.ts`](../packages/library/src/localPathIdentity.ts) 当前按运行平台规范化，不能直接拿 Linux `path` 解析旧 Windows 路径。
+6. **回迁**：反向执行同样的可选映射与校验；映射到本地目录时，在目标桌面重新绑定本地物理根身份，不映射则保留影片并移除相应本地文件资源记录。Windows/macOS/Linux 的大小写和分隔符不同，路径冲突必须预检；[`localPathIdentity.ts`](../../../packages/library/src/localPathIdentity.ts) 当前按运行平台规范化，不能直接拿 Linux `path` 解析旧 Windows 路径。
 
 #### 迁移后的设备授权（已确认）
 
@@ -239,7 +241,7 @@ HTTP 是原方案接受的可信 LAN 前提，writer 凭据也会经明文链路
 
 #### STRM 迁移的来源解绑（已确认）
 
-已确认“不映射根也保留非本地资源”，但 STRM 不能简单清空路径字段：[ADR-0019](adr/0019-identify-strm-resources-by-source-file.md) 允许不同源文件指向同一链接并保持独立资源，普通手动链接则按目标去重；当前 [`schema.ts`](../packages/library/src/db/schema.ts) 的资源唯一键作用于整个媒体库，而非单部影片。解绑会触及现有身份规则，属于需要用户决定的产品取舍。
+已确认“不映射根也保留非本地资源”，但 STRM 不能简单清空路径字段：[ADR-0019](../../adr/0019-identify-strm-resources-by-source-file.md) 允许不同源文件指向同一链接并保持独立资源，普通手动链接则按目标去重；当前 [`schema.ts`](../../../packages/library/src/db/schema.ts) 的资源唯一键作用于整个媒体库，而非单部影片。解绑会触及现有身份规则，属于需要用户决定的产品取舍。
 
 例：同一媒体库的 `a.strm` 与 `b.strm` 指向相同 URL，分别归属影片甲、乙；同库还可能有该 URL 的手动链接。把它们全部转成普通链接将产生唯一键冲突，不能自动选择一部影片接收、自动合并影片或丢弃某条资源。
 
@@ -272,7 +274,7 @@ HTTP 是原方案接受的可信 LAN 前提，writer 凭据也会经明文链路
 
 #### 无资源成员后续保护（已确认）
 
-现有扫描允许按媒体库设置自动移除无资源成员，但固定成员受到保护，见 [ADR-0028](adr/0028-batch-scan-cleanup-at-commit-boundaries.md)。迁移当下保留成员还不足以保证下一次扫描保留。
+现有扫描允许按媒体库设置自动移除无资源成员，但固定成员受到保护，见 [ADR-0028](../../adr/0028-batch-scan-cleanup-at-commit-boundaries.md)。迁移当下保留成员还不足以保证下一次扫描保留。
 
 用户选择在目标端关闭受影响媒体库的“自动移除无资源成员”设置，不自动将成员设为固定。受影响指至少一个成员因本次不映射/移除本地资源而从有资源变为无资源；只有目录配置被省略、但成员仍有其它资源时不触发该设置转换。原本已关闭的设置继续关闭，无此类变化的媒体库保持原设置。固定状态、隐藏状态及成员关系均按源库保留。
 
@@ -384,7 +386,7 @@ node scripts/run-electron-tests.mjs apps/desktop/src/main/services/videoScrapeAp
 
 环境：Docker Desktop `4.84.0`、Engine `29.6.2`、context `desktop-linux`，运行 `linux/amd64` 容器。基础镜像为 `node:22-bookworm`，本次解析摘要 `sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d`，容器内 Node `v22.23.2`。
 
-探针：[容器脚本](../scripts/research/server-mode-docker-probe.sh)、[验证代码](../scripts/research/server-mode-docker-probe.cts)。挂载源码只读，拷贝所需源码到容器内执行；没有安装 Electron 或提供 Electron stub，没有挂载用户资料库，没有开放端口。
+探针：[容器脚本](../../../scripts/research/server-mode-docker-probe.sh)、[验证代码](../../../scripts/research/server-mode-docker-probe.cts)。挂载源码只读，拷贝所需源码到容器内执行；没有安装 Electron 或提供 Electron stub，没有挂载用户资料库，没有开放端口。
 
 | 检查 | 实测结果 |
 |---|---|

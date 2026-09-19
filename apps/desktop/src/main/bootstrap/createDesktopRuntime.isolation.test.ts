@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -40,6 +40,13 @@ function catalogArtifacts(catalogPath: string): string[] {
 }
 
 function listLibraryDbFds(pid: number, catalogPath: string): string[] {
+  if (process.platform === 'darwin') {
+    const result = spawnSync('/usr/sbin/lsof', ['-nP', '-a', '-p', String(pid), '-Fn'], { encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    const artifacts = catalogArtifacts(catalogPath)
+    return result.stdout.split('\n').filter(line => line.startsWith('n')).map(line => line.slice(1))
+      .filter(target => artifacts.some(artifact => target === artifact || target.startsWith(`${artifact} `)))
+  }
   const hits: string[] = []
   const dir = `/proc/${pid}/fd`
   if (!fs.existsSync(dir)) return hits
@@ -221,7 +228,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
   const children: ChildProcess[] = []
 
   function tempDir(): string {
-    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-d01-'))
+    tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-d01-')))
     return tempRoot
   }
 

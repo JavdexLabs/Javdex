@@ -9,6 +9,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(__aarch64__)
+#define JAVDEX_GLIBC_VERSION "GLIBC_2.17"
+#else
+#define JAVDEX_GLIBC_VERSION "GLIBC_2.2.5"
+#endif
+
 static int (*real_fsync)(int);
 static int (*real_fdatasync)(int);
 static ssize_t (*real_write)(int, const void *, size_t);
@@ -22,12 +28,12 @@ __attribute__((constructor)) static void onload(void) {
 
 static void bind_reals(void) {
   if (ready) return;
-  real_fsync = dlvsym(RTLD_NEXT, "fsync", "GLIBC_2.2.5");
+  real_fsync = dlvsym(RTLD_NEXT, "fsync", JAVDEX_GLIBC_VERSION);
   if (!real_fsync) real_fsync = dlsym(RTLD_NEXT, "fsync");
   real_fdatasync = dlsym(RTLD_NEXT, "fdatasync");
-  real_write = dlvsym(RTLD_NEXT, "write", "GLIBC_2.2.5");
+  real_write = dlvsym(RTLD_NEXT, "write", JAVDEX_GLIBC_VERSION);
   if (!real_write) real_write = dlsym(RTLD_NEXT, "write");
-  real_pwrite64 = dlvsym(RTLD_NEXT, "pwrite64", "GLIBC_2.2.5");
+  real_pwrite64 = dlvsym(RTLD_NEXT, "pwrite64", JAVDEX_GLIBC_VERSION);
   if (!real_pwrite64) real_pwrite64 = dlsym(RTLD_NEXT, "pwrite64");
   ready = 1;
 }
@@ -81,6 +87,8 @@ ssize_t pwrite64(int fd, const void *buf, size_t count, off_t offset) {
   return real_pwrite64(fd, buf, count, offset);
 }
 
-__asm__(".symver fsync,fsync@GLIBC_2.2.5");
-__asm__(".symver write,write@GLIBC_2.2.5");
-__asm__(".symver pwrite64,pwrite64@GLIBC_2.2.5");
+__asm__(".symver fsync,fsync@" JAVDEX_GLIBC_VERSION);
+__asm__(".symver write,write@" JAVDEX_GLIBC_VERSION);
+__asm__(".symver pwrite64,pwrite64@" JAVDEX_GLIBC_VERSION);
+
+__asm__(".symver fdatasync,fdatasync@" JAVDEX_GLIBC_VERSION);

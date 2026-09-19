@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { after, before, describe, it } from 'node:test'
+import { after, afterEach, before, describe, it } from 'node:test'
 import { createHash, randomUUID } from 'node:crypto'
 import React, { createElement } from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
@@ -296,7 +296,7 @@ if (hostConfigRaw) {
   }
 
   describe('local CatalogBackend vs Node host scan/NFO', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-d02-'))
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-d02-')))
     const workerEntry = path.join(root, 'webCatalogWorker.js')
     const stallPath = path.join(root, 'stall-tasks-get')
     const staticRoot = path.join(root, 'web')
@@ -324,6 +324,14 @@ if (hostConfigRaw) {
           js: `require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});`
         }
       })
+    })
+
+    afterEach(async () => {
+      await scanCoordinator.stopAndDrain()
+      scanCoordinator.resetAfterStop()
+      resetCatalogScanRuntime()
+      closeDatabase()
+      resetLibraryHostForTests()
     })
 
     function insertRoot(db: Database.Database, dir: string): number {
@@ -621,7 +629,7 @@ if (hostConfigRaw) {
         const remoteAuditPage = (await remote.libraries.auditPage({
           libraryId: 1,
           section: 'files',
-          attention: true,
+          attention: false,
           limit: 50,
           offset: 0
         })) as { total: number }

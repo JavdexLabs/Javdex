@@ -21,6 +21,8 @@ if (docker.status !== 0) {
   process.exit(1)
 }
 
+const port = Number(process.env.JAVDEX_SMOKE_PORT ?? 8096)
+assert.ok(Number.isInteger(port) && port > 0 && port <= 65535, 'invalid JAVDEX_SMOKE_PORT')
 const image = 'javdex-server:smoke'
 const build = spawnSync('docker', ['build', '-t', image, '.'], { cwd: root, stdio: 'inherit' })
 if (build.status !== 0) process.exit(build.status ?? 1)
@@ -34,7 +36,7 @@ fs.writeFileSync(
   `${JSON.stringify(
     {
       listenHost: '0.0.0.0',
-      port: 8096,
+      port,
       accessHosts: ['127.0.0.1'],
       dataDir: '/data',
       imagesDir: '/data/media_assets',
@@ -52,12 +54,11 @@ const run = spawnSync(
   'docker',
   [
     'run',
-    '--rm',
     '-d',
     '--name',
     'javdex-server-smoke',
     '-p',
-    '8096:8096',
+    `${port}:${port}`,
     '-v',
     `${volume}:/data`,
     '-v',
@@ -78,7 +79,7 @@ if (run.status !== 0) {
   process.exit(run.status ?? 1)
 }
 
-const base = 'http://127.0.0.1:8096'
+const base = `http://127.0.0.1:${port}`
 try {
   let live = null
   for (let i = 0; i < 40; i += 1) {
@@ -90,7 +91,10 @@ try {
     }
     await delay(250)
   }
-  assert.ok(live?.ok, 'container /live did not become ready')
+  if (!live?.ok) {
+    const logs = spawnSync('docker', ['logs', 'javdex-server-smoke'], { encoding: 'utf8' })
+    assert.fail(`container /live did not become ready: ${logs.stdout}${logs.stderr}`)
+  }
   assert.deepEqual(await live.json(), { status: 'live' })
   assert.equal((await fetch(`${base}/ready`)).status, 200)
 

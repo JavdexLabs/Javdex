@@ -7,3 +7,11 @@ GLIBC_2.2.5 {
   local:
     *;
 };
+
+GLIBC_2.17 {
+  global:
+    fsync;
+    fdatasync;
+    write;
+    pwrite64;
+};

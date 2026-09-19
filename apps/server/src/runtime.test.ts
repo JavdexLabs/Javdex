@@ -377,15 +377,15 @@ async function startMpv(socketPath: string): Promise<{
     ],
     { shell: false, stdio: ['ignore', 'pipe', 'pipe'] }
   )
-  const stderr: string[] = []
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderr.push(chunk.toString('utf8'))
-  })
+  const output: string[] = []
+  for (const stream of [child.stdout, child.stderr]) {
+    stream?.on('data', (chunk: Buffer) => output.push(chunk.toString('utf8')))
+  }
   child.on('exit', () => {
     fs.rmSync(socketPath, { force: true })
   })
   await waitForPath(socketPath)
-  return { child, log: () => stderr.join('') }
+  return { child, log: () => output.join('') }
 }
 
 async function mpvTimePos(socketPath: string): Promise<number | null> {

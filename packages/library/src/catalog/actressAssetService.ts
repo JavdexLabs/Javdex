@@ -341,30 +341,27 @@ export function applyActressScrapeResult(
   })
 }
 
+/** Join the caller's transaction and media ledger (for pending candidate confirmation). */
+export function adoptDownloadedAvatarInTransaction(id: number, downloadedPath: string): void {
+  if (!getDb().inTransaction) throw new Error('Avatar adoption requires an active transaction')
+  clearBrokenActressAvatarIfNeeded(id)
+  const current = getActressAvatarRecord(id)
+  if (!current || mediaAssetStore.isUsableImage(current.avatar_path)) {
+    mediaAssetStore.deleteBestEffort(downloadedPath)
+    return
+  }
+  const bytes = mediaAssetStore.readBytes(downloadedPath)
+  const bundle = createDefaultAvatarBundle(id, current.main_name, bytes, mediaAssetStore.extensionOf(downloadedPath))
+  const result = updateActressAvatarRecord(id, bundle)
+  for (const storedPath of [...result.obsoletePaths, downloadedPath]) {
+    if (storedPath !== bundle.displayPath && storedPath !== bundle.sourcePath) mediaAssetStore.deleteBestEffort(storedPath)
+  }
+}
+
 export function adoptDownloadedAvatarIfMissing(id: number, downloadedPath: string): void {
   // Isolated: avatar DB commits independently of any outer video-scrape media ledger.
   mediaAssetStore.coordinateDatabaseChangeIsolated(() => {
-    getDb().transaction(() => {
-      clearBrokenActressAvatarIfNeeded(id)
-      const current = getActressAvatarRecord(id)
-      if (!current || mediaAssetStore.isUsableImage(current.avatar_path)) {
-        mediaAssetStore.deleteBestEffort(downloadedPath)
-        return
-      }
-      const bytes = mediaAssetStore.readBytes(downloadedPath)
-      const bundle = createDefaultAvatarBundle(
-        id,
-        current.main_name,
-        bytes,
-        mediaAssetStore.extensionOf(downloadedPath)
-      )
-      const result = updateActressAvatarRecord(id, bundle)
-      for (const storedPath of [...result.obsoletePaths, downloadedPath]) {
-        if (storedPath !== bundle.displayPath && storedPath !== bundle.sourcePath) {
-          mediaAssetStore.deleteBestEffort(storedPath)
-        }
-      }
-    })()
+    getDb().transaction(() => adoptDownloadedAvatarInTransaction(id, downloadedPath))()
   })
 }
 

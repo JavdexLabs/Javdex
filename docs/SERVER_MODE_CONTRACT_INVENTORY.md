@@ -130,7 +130,9 @@ C6 的最终语义集中如下，不再采用旧实施记录中的中间状态�
 
 影片 V 保护正式元数据，文件维护 R 由资源定位、指纹等状态生成摘要。扫描刷新 STRM 目标会使旧文件维护版本失效；仅新增/刷新资源、不改影片元数据时，不额外递增 V。
 
-桌面 [localNfoScanService.ts](../apps/desktop/src/main/services/localNfoScanService.ts) 正式应用 NFO 时，在元数据和审计同一事务中递增 V；待确认候选和跳过不递增。服务端 [libraryLocalNfoScanService.ts](../packages/library/src/nfo/libraryLocalNfoScanService.ts) 当前只做身份检查，明确跳过 sidecar 元数据导入。NFO 导出写文件而不修改影片资料，因此不递增 V。不能将“服务端可扫描/导出 NFO”解释为“服务端支持 NFO 元数据导入”。
+桌面与服务端共用 [libraryLocalNfoScanService.ts](../packages/library/src/nfo/libraryLocalNfoScanService.ts)、NFO 来源解析与图片交割。正式应用 NFO 时，在元数据和审计同一事务中递增 V；待确认候选和跳过不递增。候选确认同时交割封面、样张和演员头像；NFO 导出写文件而不修改影片资料，因此不递增 V。
+
+远程 `manageBrowserPairing` 在可用会话中开放；冻结、断开及权限错误时禁用。现有 `browser.*` 管理接口承接配对和设备管理，浏览 Cookie 不能替代 writer 凭据。
 
 ## 保留的边界与限制
 

@@ -409,7 +409,7 @@ async function waitMpvTimePos(
 }
 
 describe('server runtime lifecycle', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-runtime-'))
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-runtime-')))
   const workerEntry = path.join(root, 'webCatalogWorker.js')
   const staticRoot = path.join(root, 'web')
   const mediaRoot = path.join(root, 'media')
@@ -2044,6 +2044,127 @@ describe('server runtime lifecycle', () => {
     }
   })
 
+  for (const pending of [false, true]) it(`imports NFO metadata and local images through a real server scan (pending=${pending}) and rejects stale edits`, async () => {
+    const mount = fs.realpathSync(fs.mkdtempSync(path.join(root, 'nfo-import-')))
+    fs.writeFileSync(path.join(mount, 'NFO-901.strm'), 'https://example.test/movie.mp4')
+    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#336699' } }).png().toBuffer()
+    for (const name of ['poster.png', 'sample.png', 'actor.png']) fs.writeFileSync(path.join(mount, name), png)
+    fs.writeFileSync(path.join(mount, 'NFO-901.nfo'), `<movie><num>NFO-901</num><title>Imported title</title>
+      <plot>Imported summary</plot><tag>NFO tag</tag><thumb aspect="poster">poster.png</thumb>
+      <fanart><thumb>sample.png</thumb></fanart><actor><name>NFO actor</name><thumb>actor.png</thumb></actor></movie>`)
+    if (pending) {
+      fs.copyFileSync(path.join(mount, 'NFO-901.strm'), path.join(mount, 'NFO-901-CD2.strm'))
+      fs.copyFileSync(path.join(mount, 'NFO-901.nfo'), path.join(mount, 'NFO-901-CD2.nfo'))
+    }
+    const { base, config } = await boot(path.join(root, `nfo-import-data-${pending}`), { nfo: mount })
+    const writer = await claimInitialWriter(base, config)
+    const remote = createRemoteCatalogBackend({ baseUrl: base, appVersion: SERVER_APP_VERSION,
+      credentials: memoryCredentials(new Map([[writer.catalogId, writer.secret]])) })
+    await remote.reconnect()
+    const write = (operation: string, input: unknown, expectedVersions: unknown = {}) => postManage(base, operation, {
+      serverId: writer.serverId, catalogId: writer.catalogId, writerEpoch: writer.writerEpoch,
+      operationId: randomUUID(), expectedVersions, input
+    }, { bearer: writer.secret })
+    const library = getDb().prepare('SELECT revision FROM media_libraries WHERE id=1').get() as { revision: number }
+    const cfg = getDb().prepare('SELECT revision FROM media_library_configs WHERE library_id=1').get() as { revision: number }
+    const versions = { L: { generation: 1, revision: library.revision }, C: { generation: 1, revision: cfg.revision }, G: { generation: 1, revision: 1 } }
+    try {
+      const changed = await write('libraries.updateConfig', { libraryId: 1, patch: { autoImportLocalNfo: true, autoMergeSameCodeResources: true, minImportDurationMinutes: 0 } }, versions)
+      assert.equal(changed.status, 200, JSON.stringify(changed.json))
+      const current = await remote.libraries.get({ libraryId: 1 })
+      assert.ok(current)
+      const updatedVersions = { ...versions, L: { generation: 1, revision: current.revision }, C: { generation: 1, revision: current.config.revision } }
+      const added = await write('libraries.addRoot', { libraryId: 1, root: { mountSelectionId: 'nfo' } }, updatedVersions)
+      assert.equal(added.status, 200, JSON.stringify(added.json))
+      const id = Number(getDb().prepare("INSERT INTO videos(code) VALUES ('NFO-901')").run().lastInsertRowid)
+      const old = getDb().prepare('SELECT generation,revision FROM videos WHERE id=?').get(id)
+      const fresh = await remote.libraries.get({ libraryId: 1 })
+      assert.ok(fresh)
+      const started = await write('scans.run', { libraryId: 1 }, { ...updatedVersions, L: { generation: 1, revision: fresh.revision }, C: { generation: 1, revision: fresh.config.revision } })
+      assert.equal(started.status, 200, JSON.stringify(started.json))
+      const taskId = (started.json as { taskId: string }).taskId
+      let state = ''
+      for (let n = 0; n < 250; n++) {
+        const task = await remote.tasks.get({ taskId })
+        state = task.state
+        if (['succeeded', 'failed', 'cancelled', 'needsInspection'].includes(state)) break
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      assert.equal(state, 'succeeded')
+      if (pending) {
+        const row = getDb().prepare('SELECT id FROM pending_video_scrapes WHERE video_id=?').get(id) as { id: number }
+        const candidate = getPendingVideoScrapeById(row.id)!
+        assert.equal(candidate.sources[0].candidates.length, 2)
+        assert.equal((getDb().prepare('SELECT title FROM videos WHERE id=?').get(id) as { title: string | null }).title, null)
+        const confirmed = await write('pendingVideoScrapes.confirm', {
+          pendingScrapeId: row.id, selections: [{ sourceId: candidate.sources[0].id, candidateId: candidate.sources[0].candidates[0].id }]
+        }, { V: old, Q: { generation: 1, revision: candidate.revision } })
+        assert.equal(confirmed.status, 200, JSON.stringify(confirmed.json))
+        assert.equal((confirmed.json as { applied: boolean }).applied, true)
+      }
+      const video = getDb().prepare('SELECT title,summary,cover_path,revision FROM videos WHERE id=?').get(id) as { title: string; summary: string; cover_path: string; revision: number }
+      assert.equal(video.title, 'Imported title')
+      assert.equal(video.summary, 'Imported summary')
+      assert.ok(fs.existsSync(path.join(config.imagesDir, video.cover_path)))
+      const samples = getDb().prepare("SELECT local_path FROM video_assets WHERE video_id=? AND type='sample'").all(id) as { local_path: string }[]
+      assert.equal(samples.length, 1)
+      assert.ok(fs.existsSync(path.join(config.imagesDir, samples[0].local_path)))
+      const actor = getDb().prepare("SELECT avatar_path FROM actresses WHERE main_name='NFO actor'").get() as { avatar_path: string }
+      assert.ok(fs.existsSync(path.join(config.imagesDir, actor.avatar_path)))
+      const stale = await write('videos.edit', { videoId: id, fields: { title: 'Stale title' } }, { V: old })
+      assert.equal(stale.status, 409, JSON.stringify(stale.json))
+      assert.equal((stale.json as { code: string }).code, 'VERSION_CONFLICT')
+    } finally { remote.dispose() }
+  })
+
+  it('pairs a browser through the remote backend, persists its device and revokes access', async () => {
+    const { base, config } = await boot(path.join(root, 'remote-pairing'))
+    const writer = await claimInitialWriter(base, config)
+    const remote = createRemoteCatalogBackend({ baseUrl: base, appVersion: SERVER_APP_VERSION,
+      credentials: memoryCredentials(new Map([[writer.catalogId, writer.secret]])) })
+    await remote.reconnect()
+    const mutation = () => ({ operationId: randomUUID(), expectedVersions: {} })
+    const web = (endpoint: string, body: unknown, cookie?: string) => fetch(`${base}${endpoint}`, {
+      method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json', 'X-Javdex-Client': 'web', ...(cookie ? { Cookie: cookie } : {}) },
+      body: JSON.stringify(body)
+    })
+    try {
+      await remote.browser.pairOpen({}, mutation())
+      const denied = await web('/api/pair/start', { name: 'Denied device', remember: true })
+      const deniedCookie = denied.headers.get('set-cookie')!.split(';')[0]
+      const deniedPair = await denied.json() as { code: string }
+      await remote.browser.pairDecide({ code: deniedPair.code, decision: 'deny' }, mutation())
+      const deniedPoll = await web('/api/pair/poll', {}, deniedCookie)
+      assert.notEqual((await deniedPoll.json() as { authenticated?: boolean }).authenticated, true)
+      const requested = await web('/api/pair/start', { name: 'Test phone', remember: true })
+      assert.equal(requested.status, 200)
+      const pairCookie = requested.headers.get('set-cookie')!.split(';')[0]
+      const pair = await requested.json() as { code: string }
+      const inspected = await remote.browser.pairInspect({ code: pair.code })
+      assert.match(inspected.name, /Test phone/)
+      await remote.browser.pairDecide({ code: pair.code, decision: 'approve' }, mutation())
+      const poll = await web('/api/pair/poll', {}, pairCookie)
+      assert.equal(poll.status, 200)
+      assert.equal((await poll.json() as { authenticated: boolean }).authenticated, true)
+      const cookie = poll.headers.get('set-cookie')!.split(';')[0]
+      assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 200)
+      assert.equal((await postManage(base, 'browser.pairOpen', {
+        serverId: writer.serverId, catalogId: writer.catalogId, writerEpoch: writer.writerEpoch,
+        operationId: randomUUID(), expectedVersions: {}, input: {}
+      }, { cookie })).status, 401)
+      const device = (await remote.browser.status({})).devices[0]
+      assert.ok(device)
+      await remote.browser.deviceRename({ deviceId: device.id, name: 'Paired phone' }, mutation())
+      await server!.stop()
+      server = await startJavdexServer(config, { workerEntry })
+      await remote.reconnect()
+      assert.equal((await remote.browser.status({})).devices[0].name, 'Paired phone')
+      assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 200)
+      await remote.browser.deviceRemove({ deviceId: device.id }, mutation())
+      assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 401)
+    } finally { remote.dispose() }
+  })
+
   it('scans a real mount, writes XML-only NFO, and keeps marker vs unmount distinct', async () => {
     const s09Mount = path.join(root, 's09-media')
     const extraMount = path.join(root, 's09-unmount')
@@ -2258,19 +2379,20 @@ describe('server runtime lifecycle', () => {
       })
       assert.equal(staleRename.status, 409, JSON.stringify(staleRename.json))
       assert.equal((staleRename.json as { code?: string }).code, 'VERSION_CONFLICT')
-      const digest = filesRenameDigest({
+      const previewResult = await read('files.renamePreview', {
         libraryId: 1,
-        resourceId: resource.id,
         location,
         newFileName: 'ABC-001-renamed.mp4'
       })
-      const renamed = await write('files.rename', versions(library), {
+      assert.equal(previewResult.status, 200, JSON.stringify(previewResult.json))
+      const preview = previewResult.json as { planDigest: string; expectedVersions: unknown }
+      const renamed = await write('files.rename', preview.expectedVersions, {
         libraryId: 1,
         resourceId: resource.id,
         location,
         newFileName: 'ABC-001-renamed.mp4',
         planId: randomUUID(),
-        planDigest: digest
+        planDigest: preview.planDigest
       })
       assert.equal(renamed.status, 200, JSON.stringify(renamed.json))
       assert.equal(fs.existsSync(path.join(s09Mount, 'ABC-001-renamed.mp4')), true)

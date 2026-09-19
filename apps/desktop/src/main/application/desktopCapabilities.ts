@@ -50,7 +50,7 @@ export function createRemoteDesktopCapabilities(options: { frozen?: boolean } = 
   const frozen = options.frozen === true
   return Object.fromEntries(
     DESKTOP_CAPABILITY_ACTIONS.map((action) => {
-      if (action === 'editCatalog') {
+      if (action === 'editCatalog' || action === 'manageBrowserPairing') {
         return [action, capability(action, !frozen, frozen ? 'catalogFrozen' : 'available')]
       }
       if (action === 'migrateCatalog') {

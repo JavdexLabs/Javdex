@@ -15,6 +15,16 @@ import Modal from "../Modal";
 import { useDesktopSession } from "../../desktop/DesktopSessionContext";
 
 export default function WebAccessPanel(): JSX.Element {
+  const { session, capabilities } = useDesktopSession();
+  if (!capabilities.manageBrowserPairing.allowed) {
+    return <div role="status">{session.state === "frozen"
+      ? "资料库已冻结，暂时无法管理网页访问与配对。"
+      : session.message || "请先连接服务端并取得写入权限，再管理网页访问与配对。"}</div>;
+  }
+  return <ConnectedWebAccessPanel key={`${session.catalogId}:${session.generation}`} />;
+}
+
+function ConnectedWebAccessPanel(): JSX.Element {
   const [status, setStatus] = useState<WebAccessStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = (): void => {

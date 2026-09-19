@@ -1,83 +1,177 @@
-import { authorizeMediaLibraryRootFile } from '@library/scan/mediaLibraryRootFileGuard'
-import { createNfoFileStore } from './nfoFileStore'
-import { locateNfoSidecar } from './nfoSidecarLocator'
-import { parseNfoArtifact } from './nfoArtifactCodec'
-import type { LocalNfoAnchor, LocalNfoIdentityInspection } from './localNfoTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS, type VideoScrapeField } from '@shared/videoScrapeTypes'
+import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
+import { getDb } from '@library/db/database'
+import { bumpRowRevision } from '@library/catalog/catalogAggregateVersion'
+import { getVideoById } from '@library/db/videoRepo'
+import { replacePendingVideoScrape } from '@library/db/pendingVideoScrapeRepo'
+import {
+  createDefaultLocalNfoSourceAdapter,
+  getDefaultNfoFileStore,
+  LOCAL_NFO_SUPPORTED_FIELDS,
+  type LocalNfoSourceAdapter
+} from './localNfoSourceAdapter'
+import { createVideoMetadataCandidateStager } from '@library/catalog/videoMetadataCandidateStager'
+import { mediaAssetStore } from '@library/mediaAssetStore'
 import type { LocalNfoScanApplyResult, LocalNfoScanService } from '@library/scan/nfoScanPort'
+import {
+  findVideoBusinessIdentityConflictForScrape,
+  resolveEffectiveVideoScrapeFields,
+  videoScrapeApplyService
+} from '@library/catalog/videoMetadataDeliveryService'
 
-const fileStore = createNfoFileStore({
-  authorize: (filePath, root) => {
-    authorizeMediaLibraryRootFile(root.libraryId, root.id, filePath, root)
-  }
-})
+export type {
+  LocalNfoScanApplyResult,
+  LocalNfoScanDisposition,
+  LocalNfoScanService
+} from '@library/scan/nfoScanPort'
 
-function notifyApply(
-  beforeCommit: ((result: LocalNfoScanApplyResult) => void) | undefined,
-  result: LocalNfoScanApplyResult
-): LocalNfoScanApplyResult {
-  const returned: unknown = beforeCommit?.(result)
-  if (
-    returned != null &&
-    typeof returned === 'object' &&
-    typeof (returned as { then?: unknown }).then === 'function'
-  ) {
-    void Promise.resolve(returned).catch(() => {})
-    throw new Error('NFO commit callback must be synchronous')
-  }
-  return result
-}
+const SCAN_FIELDS = ALL_VIDEO_SCRAPE_FIELDS.filter((field) =>
+  (LOCAL_NFO_SUPPORTED_FIELDS as readonly VideoScrapeField[]).includes(field)
+)
 
-/** Node/server NFO scan port: identity inspect only. Sidecar field apply stays desktop/S10. */
-export function createLibraryLocalNfoScanService(): LocalNfoScanService {
-  const service: LocalNfoScanService = {
-    inspectIdentity(anchor: LocalNfoAnchor): LocalNfoIdentityInspection {
-      const located = locateNfoSidecar({
-        anchorPath: anchor.anchorPath,
-        root: anchor.root,
-        directoryVideoCodes: anchor.directoryVideoCodes,
-        directorySidecars: anchor.directorySidecars,
-        fileStore
-      })
-      const warnings = located.warnings.map((warning) => warning.message)
-      if (located.status === 'missing') return { status: 'missing', code: null, warnings: [] }
-      if (located.status !== 'found' || !located.capability) {
-        return { status: 'warning', code: null, warnings }
-      }
-      try {
-        const parsed = parseNfoArtifact(fileStore.readBytes(located.capability))
-        return {
-          status: 'found',
-          code: parsed.model.code,
-          warnings: [...warnings, ...parsed.warnings.map((warning) => warning.message)]
+export function createLocalNfoScanService(
+  source: LocalNfoSourceAdapter = createDefaultLocalNfoSourceAdapter(getDefaultNfoFileStore())
+): LocalNfoScanService {
+  return {
+    inspectIdentity: (anchor) => source.inspectIdentity(anchor),
+
+    async apply(videoId, code, anchors, beforeCommit) {
+      const notify = (result: LocalNfoScanApplyResult): LocalNfoScanApplyResult => {
+        const returned: unknown = beforeCommit?.(result)
+        if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
+            typeof (returned as { then?: unknown }).then === 'function') {
+          void Promise.resolve(returned).catch(() => {})
+          throw new Error('NFO commit callback must be synchronous')
         }
-      } catch (error) {
-        return {
-          status: 'warning',
-          code: null,
-          warnings: [...warnings, error instanceof Error ? error.message : 'NFO 文件无法读取']
-        }
+        return result
       }
-    },
+      const video = getVideoById(videoId)
+      if (!video) return notify({ disposition: 'warning', warnings: ['NFO 目标影片不存在'] })
+      if (video.scraped_status === 1) return notify({ disposition: 'skipped', warnings: [] })
 
-    async apply(_videoId, _code, anchors, beforeCommit) {
-      const warnings: string[] = []
-      let found = false
-      for (const anchor of anchors) {
-        const inspection = service.inspectIdentity(anchor)
-        warnings.push(...inspection.warnings)
-        if (inspection.status === 'found') found = true
+      const effective = resolveEffectiveVideoScrapeFields(
+        videoId,
+        SCAN_FIELDS,
+        'fillEmpty',
+        LOCAL_NFO_SOURCE_NAME,
+        LOCAL_NFO_SOURCE_NAME
+      )
+      if (effective.length === 0) return notify({ disposition: 'skipped', warnings: [] })
+      const collected = await source.collectFromAnchors(
+        {
+          target: { kind: 'video', videoId, code },
+          fields: effective
+        },
+        anchors
+      )
+      if (collected.candidates.length === 0) {
+        return notify({
+          disposition: collected.warnings.length > 0 ? 'warning' : 'none',
+          warnings: collected.warnings
+        })
       }
-      if (!found) return notifyApply(beforeCommit, { disposition: 'none', warnings })
-      return notifyApply(beforeCommit, {
-        disposition: 'skipped',
-        warnings: [
-          ...warnings,
-          '服务端扫描只做本地 NFO 身份检查，不应用 sidecar 资料（封面/刮削应用仍在桌面）。'
-        ]
+
+      const identityConflictVideoId =
+        collected.candidates.length === 1
+          ? findVideoBusinessIdentityConflictForScrape(
+              videoId,
+              collected.candidates[0].result,
+              effective,
+              'fillEmpty'
+            )
+          : null
+      if (collected.candidates.length > 1 || identityConflictVideoId != null) {
+        const candidateStager = createVideoMetadataCandidateStager({
+          fetchRemote: async () => {
+            throw new Error('本地 NFO 不允许下载远程图片')
+          },
+          readManagedRootFile: async (capability) =>
+            getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
+        })
+        const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
+          const staged = await candidateStager.stageForPending(collected.candidates)
+          return getDb().transaction(() => {
+            const pending = replacePendingVideoScrape({
+              videoId,
+              selectedFields: SCAN_FIELDS,
+              applicableFields: effective,
+              updateMode: 'fillEmpty',
+              request: {
+                scraperName: LOCAL_NFO_SOURCE_NAME,
+                fields: SCAN_FIELDS,
+                mode: 'fillEmpty'
+              },
+              warnings: [
+                ...collected.warnings,
+                ...(identityConflictVideoId == null
+                  ? []
+                  : [`候选会与影片 ID ${identityConflictVideoId} 的业务身份冲突`]),
+                ...staged.warnings
+              ],
+              sources: [
+                {
+                  pluginName: LOCAL_NFO_SOURCE_NAME,
+                  pluginSource: 'builtin',
+                  pluginVersion: '1',
+                  pluginConfig: { sourceId: 'local-nfo', supportedFields: SCAN_FIELDS },
+                  sourceName: LOCAL_NFO_SOURCE_NAME,
+                  selectedFields: effective,
+                  candidates: staged.candidates
+                }
+              ]
+            })
+            const result = notify({
+              disposition: 'pending-candidate',
+              warnings: [...collected.warnings, ...staged.warnings],
+              pendingScrapeId: pending.pendingScrapeId
+            })
+            return { pending, result }
+          })()
+
+        })
+        try {
+          mediaAssetStore.cleanupVideoScrapeStagingPaths(persisted.pending.obsoletePaths)
+        } catch (error) {
+          persisted.result.warnings.push(`NFO 旧候选资源清理失败：${(error as Error).message}`)
+        }
+        return persisted.result
+      }
+
+      const candidateStager = createVideoMetadataCandidateStager({
+        fetchRemote: async () => {
+          throw new Error('本地 NFO 不允许下载远程图片')
+        },
+        readManagedRootFile: async (capability) =>
+          getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
       })
+      const delivery = await videoScrapeApplyService.deliverCandidate({
+        videoId,
+        code,
+        candidate: collected.candidates[0],
+        candidateStager,
+        selectedFields: SCAN_FIELDS,
+        fieldsToApply: effective,
+        mode: 'fillEmpty',
+        sourceName: LOCAL_NFO_SOURCE_NAME,
+        ratingSourceName: LOCAL_NFO_SOURCE_NAME,
+        classificationOptions: { directorAmbiguity: 'preserve' },
+        beforeCommit: (result) => {
+          // NFO bypasses catalogScrapeCommands; invalidate open edits in the
+          // same transaction as the metadata and scan audit writes.
+          if (result.applied) bumpRowRevision('videos', videoId)
+          notify({ disposition: result.applied ? 'imported' : 'skipped',
+            warnings: [...collected.warnings, ...result.warnings] })
+        }
+      })
+      return {
+        disposition: delivery.applied ? 'imported' : 'skipped',
+        warnings: [...collected.warnings, ...delivery.warnings]
+      }
     }
   }
-  return service
 }
 
-export const libraryLocalNfoScanService = createLibraryLocalNfoScanService()
+export const localNfoScanService = createLocalNfoScanService()
+
+export const createLibraryLocalNfoScanService = createLocalNfoScanService
+export const libraryLocalNfoScanService = localNfoScanService

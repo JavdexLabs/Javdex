@@ -65,7 +65,7 @@ it('rejects stale file versions after a scan refreshes a STRM target without inv
   }).outcome, 'applied')
 })
 
-it('server NFO identity inspection does not import metadata or invalidate an open edit', async () => {
+it('server NFO import changes metadata and invalidates an open edit', async () => {
   const { mount, scan } = fixture()
   const videoId = Number(getDb().prepare("INSERT INTO videos(code) VALUES ('VER-002')").run().lastInsertRowid)
   const before = readVideoAggregateVersion(videoId)!
@@ -73,9 +73,9 @@ it('server NFO identity inspection does not import metadata or invalidate an ope
   fs.writeFileSync(path.join(mount, 'VER-002.nfo'), '<movie><num>VER-002</num><title>NFO title</title></movie>')
   assert.equal((await scan()).imported, 1)
   const video = getDb().prepare('SELECT title, scraped_status FROM videos WHERE id=?').get(videoId)
-  assert.deepEqual(video, { title: null, scraped_status: 0 })
-  assert.deepEqual(readVideoAggregateVersion(videoId), before)
-  assert.equal(catalogVideoCommands.edit({ videoId, fields: { title: 'User title' } }, {
+  assert.deepEqual(video, { title: 'NFO title', scraped_status: 1 })
+  assert.notDeepEqual(readVideoAggregateVersion(videoId), before)
+  assert.throws(() => catalogVideoCommands.edit({ videoId, fields: { title: 'User title' } }, {
     operationId: randomUUID(), writerEpoch: 0, expectedVersions: { V: before }
-  }).outcome, 'applied')
+  }), (error: unknown) => (error as { code?: string }).code === 'VERSION_CONFLICT')
 })

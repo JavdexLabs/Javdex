@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import { findActressByNameOrAlias } from '@library/db/actressRepo'
+import { adoptDownloadedAvatarInTransaction } from './actressAssetService'
 import type {
   PendingVideoScrapeConfirmInput,
   PendingVideoScrapeResolutionResult,
@@ -268,6 +270,14 @@ export function confirmPendingVideoScrape(
         { directorSelectionId: input.directorSelectionId, directorAmbiguity: 'choice' }
       )
       if (applied.directorChoice) throw new Error('导演选择仍未完成')
+      if (applied.applied) {
+        for (const [name, avatarPath] of resources.actressAvatars) {
+          if (!avatarPath) continue
+          const actressId = findActressByNameOrAlias(name)
+          if (actressId == null) mediaAssetStore.deleteBestEffort(avatarPath)
+          else adoptDownloadedAvatarInTransaction(actressId, avatarPath)
+        }
+      }
       for (const obsoletePath of applied.obsoleteAssetPaths) {
         mediaAssetStore.deleteBestEffort(obsoletePath)
       }

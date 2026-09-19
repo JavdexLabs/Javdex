@@ -146,8 +146,8 @@ describe('LocalNfoSourceAdapter', () => {
     const candidate = collected.candidates[0]
     assert.equal(candidate.result.title, 'Local title')
     assert.deepEqual(candidate.result.actresses, [
-      { name: 'Alice', gender: 'female' },
-      { name: 'Bob', gender: 'male' }
+      { name: 'Alice', gender: 'female', avatarUrl: 'managed-root-file:actressAvatar-0:Alice.jpg' },
+      { name: 'Bob', gender: 'male', avatarUrl: 'managed-root-file:actressAvatar-1:Bob.jpg' }
     ])
     assert.deepEqual(
       candidate.assets.map((asset) => [
@@ -222,7 +222,7 @@ describe('LocalNfoSourceAdapter', () => {
     })
 
     assert.deepEqual(collected.candidates[0].result.actresses, [
-      { name: 'Bob', gender: 'male' }
+      { name: 'Bob', gender: 'male', avatarUrl: 'managed-root-file:actressAvatar-0:Bob.jpg' }
     ])
     assert.deepEqual(
       collected.candidates[0].assets.map((asset) => [

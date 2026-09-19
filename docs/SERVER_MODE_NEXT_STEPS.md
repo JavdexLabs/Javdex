@@ -102,7 +102,7 @@
 | Linux 同版本安装 | 当前源码桌面/Web/server build 和 Electron 原生依赖构建通过；arm64 deb 打包与 `smoke:same-version-install` 通过（解包校验、Xvfb 存活检查与同版本 Docker 镜像，随后在同一隔离容器安装 gnome-keyring/DBus 并用 apt 正式安装 deb；`/opt/Javdex/javdex` 的 NFO、采集、待确认、终止、改名、配对与重启 GUI 均通过）。容器中的源码副本没有 Git 远端元数据，打包显式传入当前仓库主页；Electron 下载中断后使用已安装的相同 43.4.1 运行时；容器缺少 xz，deb 改用构建参数 `deb.compression=gz` |
 | 远程目录修复回归 | 11 项 IPC/HTTP 合同测试、`typecheck`、`pretest` 通过；显式旧版本仍保留并交由服务端拒绝 |
 
-Windows/macOS x64 安装及最终 macOS DMG 的钥匙串授权复测仍未闭合。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
+Windows/macOS x64 安装及目标平台升级检查仍未闭合。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
 
 ## 后续验证命令
 
@@ -146,9 +146,9 @@ Linux GUI 补充环境：使用 `dbus-run-session`、`XDG_CURRENT_DESKTOP=GNOME`
 |---|---|---|
 | 1. 提交既有成果 | 文档整理 `99953b1`、NFO 版本修复 `c0d9655` 分开提交 | 无 |
 | 2. 首版 NFO 与远程网页配对 | `dd72ab3`，真实 Node 元数据/图片/待确认回归和 macOS/Linux GUI | 无已知功能缺口 |
-| 3. 真实远程 GUI 主流程 | NFO、单条/批量采集、待确认、文件改名、终止与部分提交、配对、清单唯一已有影片复用及结果页已通过 | 原建议明确要求的编辑冲突、点击播放、桌面采集图片交割还需 GUI 证据；模型传输是夹具，不作为真实模型质量证据 |
+| 3. 真实远程 GUI 主流程 | NFO、单条/批量采集、待确认、文件改名、终止与部分提交、配对、清单唯一已有影片复用及结果页已通过 | 编辑冲突及刷新后重试已通过；原建议明确要求的点击播放、桌面采集图片交割还需 GUI 证据；模型传输是夹具，不作为真实模型质量证据 |
 | 4. 现行协议恢复与故障 | 本轮真实测试覆盖忙时拒绝/重试、丢响应回执、迁库启用/放弃、图片 EACCES/ENOSPC 回滚、卸载后保留数据，55 项 Linux 回归与 Docker 迁库通过 | 原建议指定的重点已覆盖；历史全矩阵和整机断电不是该项定向验证的完成声明 |
-| 5. 同版本安装部署 | `9c2942c` 之前的 macOS arm64 DMG 与 Linux arm64 deb 已验证 | 包含清单修复的 Linux deb 已安装并通过完整脚本；macOS 新 DMG 正等待系统钥匙串授权复测；Windows 与 macOS x64 缺运行环境 |
+| 5. 同版本安装部署 | `9c2942c` 之前的 macOS arm64 DMG 与 Linux arm64 deb 已验证 | 包含清单修复的 Linux deb 已安装并通过完整脚本；macOS 新 DMG 已通过 NFO、单条/批量刮削、候选确认、改名、认主、配对、重启和撤销复测；Windows 与 macOS x64 缺运行环境 |
 
 清单列表修复 `b60ece1`：管理合同保留搜索/影片筛选/语言参数，远程界面禁用自动建片。15 项合同和界面结构回归、类型与 pretest 通过。随后真实流程又发现详情/元数据/影片分页漏接排序和资源筛选，修复 `56fb293` 已通过 HTTP 合同回归及桌面/Web/server 类型检查，修改文件 lint 通过。清单模型使用本地确定性 HTTP 夹具，浏览器提取和远程 catalog 匹配/写入均为真实链路；该验收不评估模型生成策略或外部站点变化。
 
@@ -162,7 +162,13 @@ Linux GUI 补充环境：使用 `dbus-run-session`、`XDG_CURRENT_DESKTOP=GNOME`
 
 - Linux arm64 最终 deb 经 `dpkg -i` 安装到 `/opt/Javdex` 后，以真实 Docker 服务运行完整 GUI 脚本：NFO、单条采集、多候选、批量中途终止/保留部分结果、实际文件改名、清单复用及结果页、网页配对、重启和撤销均退出 0。密钥环、沙箱和固定模型传输边界同上。
 - 最终源码 `server:test` 再次通过 43 + 5 + 7 = 55 项，0 失败、0 跳过。桌面/Web/server 类型、pretest、定向合同检查通过。
-- 产物版本仍为 `0.7.1`。最终 deb SHA-256：`0d3cd7b9997517e8e3e15b30580da4d9d187e4bae1fba849b88843ab0a7ac87e`。新 arm64 DMG SHA-256：`bebcc1e846d93946f87a8a23b55fb3b8fa4da39d2270cc59ed089aaa9729e03b`，已从 DMG 复制至隔离安装目录；系统钥匙串提示尚待操作者处理，未把旧 DMG 结果替代本次验收。
+- 产物版本仍为 `0.7.1`。最终 deb SHA-256：`0d3cd7b9997517e8e3e15b30580da4d9d187e4bae1fba849b88843ab0a7ac87e`。新 arm64 DMG SHA-256：`bebcc1e846d93946f87a8a23b55fb3b8fa4da39d2270cc59ed089aaa9729e03b`，已从 DMG 复制至隔离安装目录；操作者完成系统钥匙串授权后，使用同一安装二进制重新运行，NFO、单条/批量刮削、多候选确认、实际文件改名、认主、配对、重启及撤销全部通过（退出 0）。日志 `/tmp/javdex-final-mac-all-gui.log`，截图目录 `/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-CeduDc/evidence`。这次未运行 macOS 清单导入及取消分支；对应证据来自上面的 Linux 最终安装测试。
 - 已移除本轮 Linux 夹具测试地址。没有发布、推送、升级版本或合并 main。
 
 范围校准：以上 1–5 依据本任务中“后续事项及建议顺序”的原始列表，不把历史 S13 M/D 全部扩展场景额外改成这次定向可靠性验证的门槛，也不以本次通过宣称全部 S13/S14 已完成。原第 5 项还要求目标平台升级检查，不能仅凭首次安装计为完成。
+
+### 最终 macOS 安装副本：编辑冲突恢复
+
+同一最终 DMG 安装二进制运行 `JAVDEX_REMOTE_SMOKE_NFO=1 JAVDEX_REMOTE_SMOKE_EDIT_CONFLICT=1`，脚本退出 0。GUI 打开编辑表单后，通过真实桌面管理 API 提交一次竞争修改，再点击旧表单的保存：界面显示版本冲突，旧草稿保留，服务端仍是竞争修改结果。取消并刷新后重新编辑、保存成功。未模拟版本验证或 catalog 写入。
+
+证据日志 `/tmp/javdex-final-edit-conflict-gui.log`，冲突截图目录 `/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-O0zA5S/evidence`。测试脚本同时再次通过认主、配对、重启与撤销；新增脚本语法检查和 `git diff --check` 通过。

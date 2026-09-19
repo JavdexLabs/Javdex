@@ -8,7 +8,7 @@ import { _electron as electron } from 'playwright-core'
 import sharp from 'sharp'
 import { startPlaylistFixture } from './remote-playlist-fixture.mjs'
 
-for (const flag of ['SCRAPE', 'PENDING', 'RENAME', 'BATCH', 'CANCEL', 'PLAYLIST']) {
+for (const flag of ['SCRAPE', 'PENDING', 'RENAME', 'BATCH', 'CANCEL', 'PLAYLIST', 'EDIT_CONFLICT']) {
   if (process.env[`JAVDEX_REMOTE_SMOKE_${flag}`] === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_NFO, '1', `${flag} requires JAVDEX_REMOTE_SMOKE_NFO=1`)
 }
 if (process.env.JAVDEX_REMOTE_SMOKE_BATCH === '1' || process.env.JAVDEX_REMOTE_SMOKE_PENDING === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_SCRAPE, '1', 'batch/pending requires the scraper fixture')
@@ -120,6 +120,28 @@ try {
     await page.getByText('GUI imported summary', { exact: true }).waitFor()
     await page.screenshot({ path: path.join(output, 'remote-nfo-detail.png'), fullPage: true })
     console.log('PASS: remote sources GUI starts a container scan and opens imported NFO detail')
+    if (process.env.JAVDEX_REMOTE_SMOKE_EDIT_CONFLICT === '1') {
+      await page.getByRole('button', { name: '编辑', exact: true }).click()
+      await page.getByRole('dialog').locator('#video-edit-title').fill('GUI stale draft')
+      await page.evaluate(async id => {
+        const current = await window.api.videos.get({ kind: 'library', libraryId: 1 }, id)
+        await window.api.videos.edit(id, { title: 'GUI competing edit' }, { V: { generation: current.generation, revision: current.revision } })
+      }, video.id)
+      await page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }).click()
+      await page.getByText(/影片.*变化|影片.*更新|VERSION_CONFLICT/).first().waitFor()
+      assert.equal(await page.getByRole('dialog').locator('#video-edit-title').inputValue(), 'GUI stale draft')
+      assert.equal(await page.evaluate(async id => (await window.api.videos.get({ kind: 'library', libraryId: 1 }, id)).title, video.id), 'GUI competing edit')
+      await page.screenshot({ path: path.join(output, 'remote-edit-conflict.png'), fullPage: true })
+      await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click()
+      await page.reload()
+      await page.getByRole('button', { name: '编辑', exact: true }).click()
+      assert.equal(await page.getByRole('dialog').locator('#video-edit-title').inputValue(), 'GUI competing edit')
+      await page.getByRole('dialog').locator('#video-edit-title').fill('GUI recovered edit')
+      await page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }).click()
+      await page.getByRole('dialog').waitFor({ state: 'hidden' })
+      assert.equal(await page.evaluate(async id => (await window.api.videos.get({ kind: 'library', libraryId: 1 }, id)).title, video.id), 'GUI recovered edit')
+      console.log('PASS: GUI stale edit is rejected without overwriting newer metadata; refresh and confirmed retry succeeds')
+    }
     if (process.env.JAVDEX_REMOTE_SMOKE_SCRAPE === '1') {
       await page.getByRole('button', { name: '修正匹配', exact: true }).click()
       await page.getByRole('dialog').getByTitle('刮削站点', { exact: true }).click()

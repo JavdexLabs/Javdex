@@ -5,6 +5,8 @@ import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
 import { getVideoResourceInLibrary } from '@library/db/videoRepo'
 import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
+import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
+import { resolveVideoDisplayDurationSeconds } from '@library/scan/videoDuration'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import {
   getMediaLibraryDetail,
@@ -135,7 +137,7 @@ function projectRemoteResourcePath(
   value: string | null
 ): string | null {
   if (!value || !path.isAbsolute(value)) return value
-  const root = rootId == null ? null : getMediaLibraryRoot(libraryId, rootId)
+  const root = rootId == null || libraryId < 1 ? null : getMediaLibraryRoot(libraryId, rootId)
   if (!root) return path.basename(value)
   const relative = [root.path, root.realPath]
     .filter((base): base is string => Boolean(base))
@@ -161,6 +163,32 @@ function projectRemoteResource(libraryId: number, resource: VideoResource): Vide
   return {
     ...resource,
     strm_source_path: projectRemoteResourcePath(libraryId, resource.root_id, resource.strm_source_path)
+  }
+}
+
+/** Match desktop detail fields while keeping server paths out of presentation data. */
+export function projectRemoteVideoDetail<T extends {
+  activeLibraryId: number
+  duration_seconds: number | null
+  resources: VideoResource[]
+}>(detail: T) {
+  const primary = detail.resources.find(resource => resource.is_primary === 1)
+  return {
+    ...detail,
+    resolved_duration_seconds: resolveVideoDisplayDurationSeconds({
+      duration_seconds: detail.duration_seconds,
+      primary_resource_duration_seconds: primary?.duration_seconds ?? null
+    }),
+    resources: detail.resources.map(resource => {
+      const { locator, resource_key: _resourceKey, source_identity: _sourceIdentity, ...projected } =
+        projectRemoteResource(detail.activeLibraryId, resource)
+      return {
+        ...projected,
+        display_locator: resource.kind === 'local'
+          ? locator
+          : maskVideoResourceLocator(locator, resource.kind)
+      }
+    })
   }
 }
 

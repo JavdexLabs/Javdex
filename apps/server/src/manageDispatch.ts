@@ -58,7 +58,7 @@ import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { MigrationAbandonInput, MigrationControlInput, MigrationEnableInput, MigrationPreviewInput } from '@shared/protocol/migration'
 import { SERVER_APP_VERSION } from './appVersion'
-import { CATALOG_NOT_HANDLED, dispatchCatalogManage } from './manageCatalogHandlers'
+import { CATALOG_NOT_HANDLED, dispatchCatalogManage, projectRemoteVideoDetail } from './manageCatalogHandlers'
 import { readManageBrowserEnabled } from './manageBrowser'
 
 interface ManageEnvelope {
@@ -341,15 +341,15 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
         videoId: number
       }
       const scoped = scopedVideoCatalogRepo.get(input.scope, input.videoId)
-      if (scoped) return scoped
+      if (scoped) return projectRemoteVideoDetail(scoped)
       const detail = getVideoDetail(input.videoId, catalogDb(database))
       if (!detail) return null
-      return {
+      return projectRemoteVideoDetail({
         ...detail,
         activeLibraryId: 0,
         membershipAddedAt: '',
         libraries: []
-      }
+      })
     }
     if (operation === 'libraries.list') {
       const input = envelope.input as { includeArchived?: boolean }

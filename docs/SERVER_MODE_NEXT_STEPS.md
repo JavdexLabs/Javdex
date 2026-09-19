@@ -146,7 +146,7 @@ Linux GUI 补充环境：使用 `dbus-run-session`、`XDG_CURRENT_DESKTOP=GNOME`
 |---|---|---|
 | 1. 提交既有成果 | 文档整理 `99953b1`、NFO 版本修复 `c0d9655` 分开提交 | 无 |
 | 2. 首版 NFO 与远程网页配对 | `dd72ab3`，真实 Node 元数据/图片/待确认回归和 macOS/Linux GUI | 无已知功能缺口 |
-| 3. 真实远程 GUI 主流程 | NFO、单条/批量采集、待确认、文件改名、终止与部分提交、配对、清单唯一已有影片复用及结果页已通过 | 编辑冲突及刷新后重试已通过；原建议明确要求的点击播放、桌面采集图片交割还需 GUI 证据；模型传输是夹具，不作为真实模型质量证据 |
+| 3. 真实远程 GUI 主流程 | NFO、单条/批量采集、待确认、文件改名、终止与部分提交、配对、清单唯一已有影片复用及结果页已通过 | 编辑冲突、点击播放及真实 mpv 解码、桌面采集封面和样图交割均已通过；仍不以夹具结果证明外部模型质量；模型传输是夹具，不作为真实模型质量证据 |
 | 4. 现行协议恢复与故障 | 本轮真实测试覆盖忙时拒绝/重试、丢响应回执、迁库启用/放弃、图片 EACCES/ENOSPC 回滚、卸载后保留数据，55 项 Linux 回归与 Docker 迁库通过 | 原建议指定的重点已覆盖；历史全矩阵和整机断电不是该项定向验证的完成声明 |
 | 5. 同版本安装部署 | `9c2942c` 之前的 macOS arm64 DMG 与 Linux arm64 deb 已验证 | 包含清单修复的 Linux deb 已安装并通过完整脚本；macOS 新 DMG 已通过 NFO、单条/批量刮削、候选确认、改名、认主、配对、重启和撤销复测；Windows 与 macOS x64 缺运行环境 |
 
@@ -172,3 +172,17 @@ Linux GUI 补充环境：使用 `dbus-run-session`、`XDG_CURRENT_DESKTOP=GNOME`
 同一最终 DMG 安装二进制运行 `JAVDEX_REMOTE_SMOKE_NFO=1 JAVDEX_REMOTE_SMOKE_EDIT_CONFLICT=1`，脚本退出 0。GUI 打开编辑表单后，通过真实桌面管理 API 提交一次竞争修改，再点击旧表单的保存：界面显示版本冲突，旧草稿保留，服务端仍是竞争修改结果。取消并刷新后重新编辑、保存成功。未模拟版本验证或 catalog 写入。
 
 证据日志 `/tmp/javdex-final-edit-conflict-gui.log`，冲突截图目录 `/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-O0zA5S/evidence`。测试脚本同时再次通过认主、配对、重启与撤销；新增脚本语法检查和 `git diff --check` 通过。
+
+### GUI 播放与刮削图片交付
+
+真实 MP4 用例暴露服务端 `videos.get` 未投影资源展示字段，远程详情页在 `display_locator.trim()` 崩溃。HTTP 回归先失败（期望文件名，实际 undefined），修复后通过：统一详情展示字段、相对路径及解析时长，移除原始定位/身份字段；无归属影片走文件名回退。既有 STRM 用例无法覆盖这一分支。
+
+Linux 最终已安装桌面 `/opt/Javdex/javdex` 配合更新后的生产 Docker 服务，在 `NFO=1 PLAY=1 EDIT_CONFLICT=1 SCRAPE=1 IMAGES=1` 下通过：GUI 点击播放启动真实 mpv，读取服务端 grant 并解码 160×90 视频；GUI 沙箱插件采集新的 32×24 封面和样图，上传正式资源并在详情页显示；服务端/桌面重启后资源记录保留，浏览端实际读取的新封面尺寸正确。mpv 包装脚本仅固定无窗口输出、帧数和日志，不替代解码器或服务端网络请求。
+
+日志 `/tmp/javdex-linux-play-images-final.log`；证据位于 Linux 容器 `/var/tmp/javdex-acceptance/javdex-remote-desktop-tj9liP/evidence`。服务端回归 43 + 5 项通过，另在 Xvfb 下完整补跑双后端 7 项，均 0 失败、0 跳过；日志 `/tmp/javdex-resource-server-test.log`、`/tmp/javdex-resource-dual-backend.log`（前一日志包含首次无 DISPLAY 导致的两项跳过，以后一日志补齐）。类型检查、修改文件 lint 和脚本语法检查通过。
+
+### 服务端保留数据升级
+
+使用真实旧镜像 `02856b068cad`（清单修复后候选）创建资料、刮削图片和网页配对，正常 `docker stop` 后移除旧容器；新镜像 `3f5e95646f23`（资源详情投影修复）接管相同的命名 `/data` 与 `/media` 卷。已安装桌面保留原 userData，能够继续使用写入凭据；浏览会话仍可用；影片、封面、样图记录及实际封面文件保持，最后通过 GUI 撤销配对。版本号均为 `0.7.1`，这是本次候选之间的同版本更新验收，不是跨发布版本数据库迁移声明。
+
+脚本 `JAVDEX_REMOTE_SMOKE_BASE_IMAGE=02856b068cad JAVDEX_REMOTE_SMOKE_UPGRADE_IMAGE=javdex-server:smoke`，配合 `NFO=1 SCRAPE=1 IMAGES=1` 退出 0。日志 `/tmp/javdex-server-upgrade-gui.log`，证据 `/var/tmp/javdex-acceptance/javdex-remote-desktop-m703dm/evidence`。首次强制删除旧容器的探查未在等待期内就绪，不计通过；上述通过仅证明正常停机升级。桌面安装包替换时保留 userData 的升级检查仍待补齐，Windows/macOS x64 环境仍缺。

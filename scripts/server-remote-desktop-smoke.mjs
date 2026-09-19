@@ -2,13 +2,14 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { _electron as electron } from 'playwright-core'
 import sharp from 'sharp'
 import { startPlaylistFixture } from './remote-playlist-fixture.mjs'
 
-for (const flag of ['SCRAPE', 'PENDING', 'RENAME', 'BATCH', 'CANCEL', 'PLAYLIST', 'EDIT_CONFLICT']) {
+for (const flag of ['SCRAPE', 'PENDING', 'RENAME', 'BATCH', 'CANCEL', 'PLAYLIST', 'EDIT_CONFLICT', 'PLAY', 'IMAGES']) {
   if (process.env[`JAVDEX_REMOTE_SMOKE_${flag}`] === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_NFO, '1', `${flag} requires JAVDEX_REMOTE_SMOKE_NFO=1`)
 }
 if (process.env.JAVDEX_REMOTE_SMOKE_BATCH === '1' || process.env.JAVDEX_REMOTE_SMOKE_PENDING === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_SCRAPE, '1', 'batch/pending requires the scraper fixture')
@@ -19,6 +20,13 @@ const userData = path.join(root, 'desktop')
 const config = path.join(root, 'config')
 const output = process.env.JAVDEX_WEB_QA_OUTPUT || path.join(root, 'evidence')
 for (const dir of [userData, config, output]) fs.mkdirSync(dir, { recursive: true })
+const playerLog = path.join(output, 'mpv.log')
+const playerPath = path.join(root, 'fixture-player')
+if (process.env.JAVDEX_REMOTE_SMOKE_PLAY === '1') {
+  assert.equal(process.platform, 'linux', 'real GUI playback fixture requires Linux ffmpeg/mpv')
+  // This wrapper only selects deterministic output/logging; real mpv fetches and decodes the grant.
+  fs.writeFileSync(playerPath, '#!/bin/sh\nexec /usr/bin/mpv --no-config --vo=null --ao=null --frames=20 --log-file=' + "'" + playerLog.replaceAll("'", "'\\''") + "'" + ' "$@"\n', { mode: 0o755 })
+}
 const name = `javdex-remote-gui-${process.pid}`
 const port = Number(process.env.JAVDEX_REMOTE_SMOKE_PORT ?? 18095)
 assert.ok(Number.isInteger(port) && port > 0 && port <= 65535, 'invalid JAVDEX_REMOTE_SMOKE_PORT')
@@ -32,11 +40,22 @@ fs.writeFileSync(path.join(config, 'server.json'), JSON.stringify({
   dataDir: '/data', imagesDir: '/data/media_assets', staticRoot: '/app/web', mediaMounts: { library: '/media' },
   web: { username: 'viewer' }
 }))
+let imageFixture
+let imageBase
+if (process.env.JAVDEX_REMOTE_SMOKE_IMAGES === '1') {
+  assert.equal(process.env.JAVDEX_REMOTE_SMOKE_SCRAPE, '1', 'images requires the scraper fixture')
+  const bytes = await sharp({ create: { width: 32, height: 24, channels: 3, background: '#cc6633' } }).png().toBuffer()
+  imageFixture = http.createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'image/png' }); response.end(bytes) })
+  await new Promise(resolve => imageFixture.listen(0, '127.0.0.1', resolve))
+  imageBase = `http://127.0.0.1:${imageFixture.address().port}`
+}
 if (process.env.JAVDEX_REMOTE_SMOKE_SCRAPE === '1') {
   const pluginDir = path.join(userData, 'scraper_plugins', 'video', 'GUI Fixture')
   fs.mkdirSync(pluginDir, { recursive: true })
-  fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({ schemaVersion: 1, kind: 'video', name: 'GUI Fixture', version: '1.0.0', entry: 'index.cjs', supportedFields: ['title', 'summary'] }))
-  fs.writeFileSync(path.join(pluginDir, 'index.cjs'), "module.exports = { async parseVideo(ctx) { return { code: ctx.code, title: 'GUI scraped title', summary: 'GUI scraped summary' } } }")
+  fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({ schemaVersion: 1, kind: 'video', name: 'GUI Fixture', version: '1.0.0', entry: 'index.cjs', supportedFields: ['title', 'summary', ...(imageBase ? ['cover', 'samples'] : [])] }))
+  const imageFields = imageBase ? { coverUrl: `${imageBase}/cover.png`, sampleImageUrls: [`${imageBase}/sample.png`] } : {}
+  fs.writeFileSync(path.join(pluginDir, 'index.cjs'), `module.exports = { async parseVideo(ctx) { return { code: ctx.code, title: 'GUI scraped title', summary: 'GUI scraped summary', ...${JSON.stringify(imageFields)} } } }`)
+
   const slowDir = path.join(userData, 'scraper_plugins', 'video', 'GUI Slow')
   fs.mkdirSync(slowDir, { recursive: true })
   fs.writeFileSync(path.join(slowDir, 'plugin.json'), JSON.stringify({ schemaVersion: 1, kind: 'video', name: 'GUI Slow', version: '1.0.0', entry: 'index.cjs', supportedFields: ['title', 'summary'] }))
@@ -48,12 +67,20 @@ if (process.env.JAVDEX_REMOTE_SMOKE_SCRAPE === '1') {
 }
 if (process.env.JAVDEX_REMOTE_SMOKE_PLAYLIST === '1') assert.ok(process.env.JAVDEX_PLAYLIST_FIXTURE_HOST, 'playlist GUI needs an isolated public-classified test address; loopback sources are rejected by the product')
 const playlistFixture = process.env.JAVDEX_REMOTE_SMOKE_PLAYLIST === '1' ? await startPlaylistFixture(output) : null
+const upgradeImage = process.env.JAVDEX_REMOTE_SMOKE_UPGRADE_IMAGE
+const initialImage = process.env.JAVDEX_REMOTE_SMOKE_BASE_IMAGE || 'javdex-server:smoke'
+const upgradeVolume = `${name}-upgrade-data`
+let upgradeVolumeCreated = false
+let imageVideoId
+let deliveredImages
 let application
 let started = false
 try {
+  if (upgradeImage) { docker('volume', 'create', upgradeVolume); docker('volume', 'create', `${upgradeVolume}-media`); upgradeVolumeCreated = true }
   docker('create', '--name', name, '-p', `${port}:${port}`,
     '-e', 'JAVDEX_WEB_PASSWORD=remote desktop smoke password',
-    'javdex-server:smoke', 'start', '--config', '/app/gui-server.json')
+    ...(upgradeImage ? ['-v', `${upgradeVolume}:/data`, '-v', `${upgradeVolume}-media:/media`] : []),
+    initialImage, 'start', '--config', '/app/gui-server.json')
   started = true
   docker('cp', path.join(config, 'server.json'), `${name}:/app/gui-server.json`)
   docker('start', name)
@@ -66,7 +93,7 @@ try {
   }
   assert.ok(ready, `${readinessError}; ${docker('logs', name)}`)
   const token = JSON.parse(docker('exec', name, 'node', 'index.js', 'bind', '--config', '/app/gui-server.json')).oneTimeToken
-  fs.writeFileSync(path.join(userData, 'this-computer.json'), JSON.stringify({ mode: 'remote', remoteBaseUrl: base }))
+  fs.writeFileSync(path.join(userData, 'this-computer.json'), JSON.stringify({ mode: 'remote', remoteBaseUrl: base, ...(process.env.JAVDEX_REMOTE_SMOKE_PLAY === '1' ? { playerPath } : {}) }))
   const env = { ...process.env, JAVDEX_TEST_USER_DATA: userData }
   delete env.ELECTRON_RUN_AS_NODE
   const launch = async () => {
@@ -91,7 +118,10 @@ try {
     fs.mkdirSync(media)
     if (process.env.JAVDEX_REMOTE_SMOKE_BATCH === '1') fs.writeFileSync(path.join(media, 'GUI-903.strm'), 'https://example.test/batch.mp4')
     if (process.env.JAVDEX_REMOTE_SMOKE_RENAME === '1') fs.writeFileSync(path.join(media, 'unidentified.strm'), 'https://example.test/unidentified.mp4')
-    fs.writeFileSync(path.join(media, 'GUI-901.strm'), 'https://example.test/fixture.mp4')
+    if (process.env.JAVDEX_REMOTE_SMOKE_PLAY === '1') {
+      const generated = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10', '-t', '4', '-c:v', 'mpeg4', '-pix_fmt', 'yuv420p', path.join(media, 'GUI-901.mp4')], { encoding: 'utf8' })
+      assert.equal(generated.status, 0, generated.stderr)
+    } else fs.writeFileSync(path.join(media, 'GUI-901.strm'), 'https://example.test/fixture.mp4')
     fs.writeFileSync(path.join(media, 'GUI-901.nfo'), '<movie><num>GUI-901</num><title>GUI imported title</title><plot>GUI imported summary</plot><thumb aspect="poster">poster.png</thumb><actor><name>GUI actor</name></actor></movie>')
     fs.writeFileSync(path.join(media, 'poster.png'), await sharp({ create: { width: 8, height: 8, channels: 3, background: '#336699' } }).png().toBuffer())
     docker('cp', `${media}/.`, `${name}:/media/`)
@@ -120,6 +150,17 @@ try {
     await page.getByText('GUI imported summary', { exact: true }).waitFor()
     await page.screenshot({ path: path.join(output, 'remote-nfo-detail.png'), fullPage: true })
     console.log('PASS: remote sources GUI starts a container scan and opens imported NFO detail')
+    if (process.env.JAVDEX_REMOTE_SMOKE_PLAY === '1') {
+      await page.getByRole('button', { name: '播放', exact: true }).click()
+      let decoded = false
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const log = fs.existsSync(playerLog) ? fs.readFileSync(playerLog, 'utf8') : ''
+        if (log.includes('Exiting... (End of file)') && /VO:.*160x90/.test(log)) { decoded = true; break }
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      assert.ok(decoded, 'GUI-launched real mpv must decode the server media and exit successfully; inspect mpv.log')
+      console.log('PASS: GUI play issues a real server grant and launches mpv, which fetches and decodes video frames')
+    }
     if (process.env.JAVDEX_REMOTE_SMOKE_EDIT_CONFLICT === '1') {
       await page.getByRole('button', { name: '编辑', exact: true }).click()
       await page.getByRole('dialog').locator('#video-edit-title').fill('GUI stale draft')
@@ -152,6 +193,18 @@ try {
       await page.getByText('GUI scraped summary', { exact: true }).waitFor()
       await page.screenshot({ path: path.join(output, 'remote-single-scrape.png'), fullPage: true })
       console.log('PASS: remote GUI applies metadata from a real desktop sandbox plugin')
+      if (imageBase) {
+        const detail = await page.evaluate(id => window.api.videos.get({ kind: 'library', libraryId: 1 }, id), video.id)
+        imageVideoId = video.id
+        deliveredImages = { cover: detail.cover_path, samples: detail.assets.filter(asset => asset.type === 'sample').map(asset => asset.local_path) }
+        assert.ok(detail.cover_path && detail.cover_path !== video.cover_path, 'scrape must replace the NFO cover')
+        assert.ok(detail.assets.some(asset => asset.type === 'sample' && asset.local_path), 'scrape must deliver a stored sample')
+        // The rendered cover is loaded through the desktop remote asset cache, not the fixture URL.
+        await page.waitForFunction(() => [...document.images].some(img => img.complete && img.naturalWidth === 32 && img.naturalHeight === 24))
+        await page.screenshot({ path: path.join(output, 'remote-scrape-images.png'), fullPage: true })
+        console.log('PASS: GUI scraper delivers replacement cover and sample to server storage; remote image renders')
+      }
+
       if (process.env.JAVDEX_REMOTE_SMOKE_PENDING === '1') {
         await page.getByRole('button', { name: '修正匹配', exact: true }).click()
         await page.getByRole('dialog').getByTitle('刮削站点', { exact: true }).click()
@@ -268,15 +321,40 @@ try {
   await page.screenshot({ path: path.join(output, 'remote-pairing.png'), fullPage: true })
   await application.close()
   application = null
-  docker('restart', name)
+  if (upgradeImage) {
+    docker('stop', name)
+    docker('rm', name)
+    docker('create', '--name', name, '-p', `${port}:${port}`,
+      '-e', 'JAVDEX_WEB_PASSWORD=remote desktop smoke password',
+      '-v', `${upgradeVolume}:/data`, '-v', `${upgradeVolume}-media:/media`, upgradeImage, 'start', '--config', '/app/gui-server.json')
+    docker('cp', path.join(config, 'server.json'), `${name}:/app/gui-server.json`)
+    docker('start', name)
+    let ready = false
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await fetch(base + '/live').then(response => response.ok).catch(() => false)) { ready = true; break }
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.ok(ready, `replacement server must start with the existing data volume: ${docker('logs', name)}`)
+  } else docker('restart', name)
   page = await launch()
   await page.evaluate(() => { window.location.hash = '/settings/network/web' })
   await page.getByText(/Remote GUI phone/).first().waitFor()
   assert.equal((await fetch(base + '/api/videos', { headers: { Cookie: browserCookie } })).status, 200)
+  if (imageVideoId) {
+    const detail = await page.evaluate(id => window.api.videos.get({ kind: 'library', libraryId: 1 }, id), imageVideoId)
+    assert.deepEqual({ cover: detail.cover_path, samples: detail.assets.filter(asset => asset.type === 'sample').map(asset => asset.local_path) }, deliveredImages)
+    const coverResponse = await fetch(`${base}/api/videos/${imageVideoId}/images/cover`, { headers: { Cookie: browserCookie } })
+    assert.equal(coverResponse.status, 200)
+    const storedCover = await sharp(Buffer.from(await coverResponse.arrayBuffer())).metadata()
+    assert.equal(storedCover.width, 32)
+    assert.equal(storedCover.height, 24)
+    console.log('PASS: scraped images survive server/desktop restart; browser reads the new stored cover')
+  }
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'hidden' })
   assert.equal((await fetch(base + '/api/videos', { headers: { Cookie: browserCookie } })).status, 401)
+  if (upgradeImage) console.log(`PASS: server image replacement ${initialImage} -> ${upgradeImage} preserves writer, browser pairing and catalog data`)
   assert.equal(fs.existsSync(path.join(userData, 'library.db')), false, 'remote desktop must not open a local catalog')
   console.log(`PASS: production container + native remote desktop writer claim, pairing, restart, revoke; evidence ${output}`)
 } catch (error) {
@@ -290,6 +368,8 @@ try {
 } finally {
   if (application) await application.close()
   if (playlistFixture) await playlistFixture.close()
+  if (imageFixture) await new Promise(resolve => imageFixture.close(resolve))
   if (started) docker('rm', '-fv', name)
+  if (upgradeVolumeCreated) docker('volume', 'rm', upgradeVolume, `${upgradeVolume}-media`)
   // Keep isolated fixture and screenshots for inspection; never touches the user's library.
 }

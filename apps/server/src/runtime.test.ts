@@ -3750,6 +3750,17 @@ describe('server runtime lifecycle', () => {
     const clip = path.join(mediaRoot, 'S11-001.mp4')
     fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
     const { videoId, fileId } = await insertBoundVideo('S11-001', clip)
+    const detailResponse = await postManage(base, 'videos.get', {
+      serverId: writer.serverId, catalogId: writer.catalogId,
+      input: { scope: { kind: 'library', libraryId: 1 }, videoId }
+    }, { bearer: writer.secret })
+    assert.equal(detailResponse.status, 200)
+    const detailResource = (detailResponse.json as { resources: Array<Record<string, unknown>> }).resources[0]
+    assert.equal(detailResource.display_locator, 'S11-001.mp4')
+    assert.equal('locator' in detailResource, false)
+    assert.equal('resource_key' in detailResource, false)
+    assert.equal('source_identity' in detailResource, false)
+
     const resource = getDb()
       .prepare('SELECT * FROM video_resources WHERE id = ?')
       .get(fileId) as {

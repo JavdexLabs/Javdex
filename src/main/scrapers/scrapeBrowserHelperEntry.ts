@@ -88,7 +88,6 @@ export async function startScrapeBrowserHelper(): Promise<void> {
   app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests')
 
   await app.whenReady()
-  app.dock?.hide()
 
   let shuttingDown = false
   const socket = net.createConnection(env.pipe)
@@ -207,7 +206,7 @@ export async function startScrapeBrowserHelper(): Promise<void> {
     socket.once('error', reject)
   })
 
-  const { targetId } = await runtime.initialize()
+  const { targetId, toolbarTargetId } = await runtime.initialize()
   framed.send({
     type: 'hello',
     protocolVersion: SCRAPE_BROWSER_PROTOCOL_VERSION,
@@ -215,7 +214,8 @@ export async function startScrapeBrowserHelper(): Promise<void> {
     pid: process.pid,
     parentPid: env.parentPid,
     cdpPort: env.cdpPort,
-    targetId
+    targetId,
+    toolbarTargetId
   })
 
   const parentWatch = setInterval(() => {

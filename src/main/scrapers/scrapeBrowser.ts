@@ -63,7 +63,6 @@ const MAX_AGENT_HTML_LENGTH = 20_000
 const DEFAULT_AGENT_RESULT_SNAPSHOT_LENGTH = 2_600
 const POST_ACTION_OBSERVATION_TIMEOUT_MS = 3_000
 const POST_ACTION_OBSERVATION_ATTEMPTS = 3
-
 interface RunningHelper {
   generation: number
   child: ChildProcess
@@ -132,7 +131,7 @@ export interface ScrapeBrowserLease {
   extractList?(plan: ScrapeBrowserListExtractionPlan): Promise<ScrapeBrowserListExtraction>
   /** Make the helper window visible and focused for an explicit user handoff. */
   presentToUser(): Promise<ScrapeBrowserPresentation>
-  /** Open a site homepage and wait until the user confirms login in the helper toolbar. */
+  /** Open a site homepage and wait until the user confirms login from the helper banner. */
   waitPreLogin(url: string, pluginName?: string): Promise<ScrapeBrowserPresentation>
   recycle(): Promise<void>
   release(): Promise<void>
@@ -685,13 +684,26 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
 
       const targets = await this.readCdpTargets(cdpPort)
       const pages = targets.filter((target) => target.type === 'page')
-      if (pages.length !== 1 || pages[0].id !== hello.targetId) {
+      const helperPageTarget = pages.find((target) => target.id === hello.targetId)
+      const unexpectedPageTarget = pages.some(
+        (target) => target.id !== hello.targetId && target.id !== hello.toolbarTargetId
+      )
+      if (!helperPageTarget || unexpectedPageTarget) {
         throw new Error('Scraper helper CDP target 校验失败')
       }
       const { chromium } = await import('playwright-core')
       const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`)
       const contexts = browser.contexts()
-      const playwrightPages = contexts.flatMap((context) => context.pages())
+      const identifiedPages = await Promise.all(contexts.flatMap((context) => context.pages()).map(async (page) => {
+        const connection = await page.context().newCDPSession(page)
+        try {
+          const { targetInfo } = await connection.send('Target.getTargetInfo')
+          return { page, id: targetInfo.targetId }
+        } finally {
+          await connection.detach()
+        }
+      }))
+      const playwrightPages = identifiedPages.filter(({ id }) => id === hello.targetId).map(({ page }) => page)
       if (contexts.length !== 1 || playwrightPages.length !== 1) {
         await browser.close()
         throw new Error('Scraper helper 只允许一个页面 target')
@@ -725,7 +737,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       page.on('close', () => this.markHelperFatal(helper, 'Scraper helper page target closed'))
       for (const context of contexts) {
         context.on('page', (newPage) => {
-          if (newPage !== page) this.markHelperFatal(helper, 'Scraper helper created an extra page target')
+          if (!identifiedPages.some((known) => known.page === newPage)) {
+            this.markHelperFatal(helper, 'Scraper helper created an extra page target')
+          }
         })
       }
       browser.on('disconnected', () => this.markHelperFatal(helper, 'Scraper helper CDP disconnected'))
@@ -740,13 +754,15 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     }
   }
 
-  private async readCdpTargets(cdpPort: number): Promise<Array<{ id: string; type: string }>> {
+  private async readCdpTargets(
+    cdpPort: number
+  ): Promise<Array<{ id: string; type: string; url?: string }>> {
     let lastError: unknown
     for (let attempt = 0; attempt < 20; attempt += 1) {
       try {
         const response = await fetch(`http://127.0.0.1:${cdpPort}/json/list`)
         if (!response.ok) throw new Error(`CDP HTTP ${response.status}`)
-        return await response.json() as Array<{ id: string; type: string }>
+        return await response.json() as Array<{ id: string; type: string; url?: string }>
       } catch (error) {
         lastError = error
         await new Promise((resolve) => setTimeout(resolve, 100))

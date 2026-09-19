@@ -492,7 +492,7 @@ export function PluginConfigModal({
               <div className="settings-toggle-list settings-toggle-list--compact">
                 <SettingsSwitchRow
                   title="刮削前预登入"
-                  description="开启后，该插件每次刮削任务会先打开主页。请在当前页登入或通过验证，再点窗口菜单栏「登入完成」。不支持弹出新窗口的登入。批量刮削同一插件只询问一次。组合来源会按字段源依次打开需要登入的主页。"
+                  description="开启后，该插件每次刮削任务会先打开主页。请在当前页登入或通过验证，再点窗口顶部操作栏「登入完成」。不支持弹出新窗口的登入。批量刮削同一插件只询问一次。组合来源会按字段源依次打开需要登入的主页。"
                   checked={preLogin}
                   disabled={saving}
                   onChange={setPreLogin}

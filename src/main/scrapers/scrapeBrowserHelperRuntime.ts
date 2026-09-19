@@ -1,10 +1,10 @@
 import {
-  BrowserWindow,
+  app,
+  BaseWindow,
   dialog,
-  Menu,
   session,
+  WebContentsView,
   net,
-  type MenuItemConstructorOptions,
   type Session,
   type WebContents
 } from 'electron'
@@ -51,14 +51,180 @@ const DEFAULT_CONTENT_SELECTOR = 'main, article, .movie-list .item, .movie-panel
 const DOM_SETTLE_MIN_ELAPSED_MS = 1500
 const DOM_SETTLE_STABLE_MS = 1000
 const VERIFICATION_TIMEOUT_MS = 180_000
+const HELPER_TOOLBAR_HEIGHT = 46
+const HELPER_TOOLBAR_ACTION_PROTOCOL = 'javdex-helper-action:'
 
-const REMOVE_TOOLBAR_JS = `
-(function(){
-  var bar = document.getElementById('__cf_helper_bar__');
-  if (bar) bar.remove();
-  if (document.body) document.body.style.paddingTop = '';
-})();
-`
+type HelperBannerKind = 'none' | 'preLogin' | 'challenge'
+
+// Own the page view explicitly: BrowserWindow's internal page cannot be laid out
+// through contentView.children or adopted into another WebContentsView.
+type ScraperHelperWindow = BaseWindow & {
+  webContents: WebContents
+  loadURL(url: string): Promise<void>
+}
+
+function createScraperHelperWindow(
+  options: Electron.BrowserWindowConstructorOptions
+): ScraperHelperWindow {
+  class HelperWindow extends BaseWindow {
+    readonly webContents: WebContents
+
+    constructor(options: Electron.BrowserWindowConstructorOptions) {
+      super(options)
+      const page = new WebContentsView({ webPreferences: options.webPreferences })
+      this.webContents = page.webContents
+      this.contentView.addChildView(page)
+      const layout = (): void => {
+        const { width, height } = this.contentView.getBounds()
+        page.setBounds({ x: 0, y: 0, width, height: Math.max(1, height) })
+      }
+      layout()
+      this.on('resize', layout)
+      this.on('closed', () => {
+        if (!this.webContents.isDestroyed()) this.webContents.close()
+      })
+    }
+
+    loadURL(url: string): Promise<void> {
+      return this.webContents.loadURL(url)
+    }
+  }
+  return new HelperWindow(options)
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+export function buildHelperToolbarHtml(
+  kind: HelperBannerKind,
+  pluginName = ''
+): string {
+  const pluginLabel = pluginName.trim() ? `插件【${pluginName.trim()}】` : '插件'
+  const status = (() => {
+    if (kind === 'preLogin') {
+      return `⚠️ ${pluginLabel}开启了预登入，当前刮削已暂停，请在页面中完成登入后点击右侧的登入完成按钮`
+    }
+    if (kind === 'challenge') {
+      return '⚠️ 检测到 Cloudflare 人机验证，当前刮削已暂停，请在页面中完成验证后点击右侧的验证通过按钮'
+    }
+    return '刮削窗口'
+  })()
+  const actions = (() => {
+    if (kind === 'preLogin') {
+      return `
+        <a class="toolbar-action" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//refresh">↻ 刷新页面</a>
+        <a class="toolbar-action toolbar-action--primary" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//pre-login-done">✅ 登入完成</a>`
+    }
+    if (kind === 'challenge') {
+      return `
+        <a class="toolbar-action" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//refresh">↻ 刷新页面</a>
+        <a class="toolbar-action" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//save">💾 保存页面</a>
+        <a class="toolbar-action toolbar-action--primary" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//challenge-passed">✅ 验证通过</a>`
+    }
+    return ''
+  })()
+
+  return `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        --surface-banner: rgba(246, 246, 247, 0.96);
+        --surface-control: rgba(0, 0, 0, 0.06);
+        --surface-control-hover: rgba(0, 0, 0, 0.12);
+        --surface-selected: #2878d7;
+        --text-primary: #29292d;
+        --text-secondary: #66666d;
+        --text-on-accent: #ffffff;
+        --border-subtle: rgba(0, 0, 0, 0.13);
+        --focus-ring: #2878d7;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body {
+        color: var(--text-primary);
+        background: var(--surface-banner);
+        border-bottom: 1px solid var(--border-subtle);
+        font: 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        user-select: none;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+        padding: 0 12px;
+        gap: 10px;
+      }
+      .toolbar-status {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        flex: 1;
+        height: 100%;
+        gap: 8px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .toolbar-message {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-secondary);
+        text-overflow: ellipsis;
+      }
+      .toolbar-actions {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 6px;
+      }
+      .toolbar-action {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 0 9px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+        color: var(--text-primary);
+        background: var(--surface-control);
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .toolbar-action:hover { background: var(--surface-control-hover); }
+      .toolbar-action:active { transform: translateY(1px); }
+      .toolbar-action:focus-visible {
+        outline: 2px solid var(--focus-ring);
+        outline-offset: 1px;
+      }
+      .toolbar-action--primary {
+        color: var(--text-on-accent);
+        border-color: var(--surface-selected);
+        background: var(--surface-selected);
+      }
+      .toolbar-action--primary:hover { filter: brightness(0.94); }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar" role="toolbar" aria-label="刮削操作">
+      <div class="toolbar-status">
+        <span class="toolbar-message" title="${escapeHtml(status)}">${escapeHtml(status)}</span>
+      </div>
+      <nav class="toolbar-actions" aria-label="刮削操作">
+        ${actions}
+      </nav>
+    </div>
+  </body>
+</html>`
+}
 
 interface Brand {
   brand: string
@@ -117,15 +283,15 @@ function injectGoogleChrome(existing: string | undefined, major: string, full = 
  * requests, which resolve automatically.
  */
 export class ScrapeBrowserHelperRuntime {
-  private win: BrowserWindow | null = null
+  private win: ScraperHelperWindow | null = null
+  private helperToolbarView: WebContentsView | null = null
+  private toolbarReady: Promise<void> = Promise.resolve()
   private ses: Session | null = null
   private manualPass = false
   private preLoginMode = false
   private preLoginDone = false
   private preLoginPluginName = ''
-  private helperMenuKind: 'none' | 'preLogin' | 'challenge' = 'none'
-  /** Captured only while a helper overlay menu is installed on Darwin. */
-  private darwinApplicationMenuBeforeHelper: Menu | null | undefined = undefined
+  private helperBannerKind: HelperBannerKind = 'none'
   private stealthApplied = false
   private headerStealthInstalled = false
   private currentMainFrameCfMitigated = false
@@ -168,12 +334,16 @@ export class ScrapeBrowserHelperRuntime {
 
   constructor(private readonly onWindowClosed?: () => void) {}
 
-  async initialize(signal?: AbortSignal): Promise<{ targetId: string }> {
+  async initialize(signal?: AbortSignal): Promise<{ targetId: string; toolbarTargetId: string }> {
     signal?.throwIfAborted()
     const win = this.ensureWindow()
+    await this.toolbarReady
     await this.ensureStealth(win)
     signal?.throwIfAborted()
-    return { targetId: win.webContents.getOrCreateDevToolsTargetId() }
+    return {
+      targetId: win.webContents.getOrCreateDevToolsTargetId(),
+      toolbarTargetId: this.helperToolbarView!.webContents.getOrCreateDevToolsTargetId()
+    }
   }
 
   private getSession(): Session {
@@ -254,14 +424,15 @@ export class ScrapeBrowserHelperRuntime {
     signal?.throwIfAborted()
   }
 
-  private ensureWindow(): BrowserWindow {
+  private ensureWindow(): ScraperHelperWindow {
     if (this.win && !this.win.isDestroyed()) return this.win
 
     const ua = cleanUserAgent()
     this.getSession()
 
-    const win = new BrowserWindow({
+    const win = createScraperHelperWindow({
       width: 1080,
+      minWidth: 800,
       height: 820,
       // Resource-only plugins need the session, but no visible verification UI.
       show: false,
@@ -276,31 +447,25 @@ export class ScrapeBrowserHelperRuntime {
     })
     win.setMenu(null)
     win.setMenuBarVisibility(false)
+    this.createHelperToolbar(win)
     win.webContents.setUserAgent(ua)
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     win.webContents.on('will-attach-webview', (event) => event.preventDefault())
 
-    // Show the Cloudflare helper toolbar only on real challenge pages.
-    const syncToolbar = (): void => {
-      void this.syncChallengeToolbar(win)
+    // Keep the banner in sync with login and challenge state.
+    const syncBanner = (): void => {
+      this.layoutHelperToolbar(win)
+      void this.syncHelperBanner(win)
     }
-    win.webContents.on('dom-ready', syncToolbar)
-    win.webContents.on('did-finish-load', syncToolbar)
-
-    // Listen for toolbar button clicks signalled via console.log.
-    win.webContents.on('console-message', (event) => {
-      const message = event.message
-      if (message.includes('__CF_ACTION__:refresh')) {
-        win.webContents.reload()
-      } else if (message.includes('__CF_ACTION__:save')) {
-        void this.savePageDebug(win)
-      } else if (message.includes('__CF_ACTION__:pass')) {
-        this.manualPass = true
-      }
-    })
+    win.webContents.on('dom-ready', syncBanner)
+    win.webContents.on('did-finish-load', syncBanner)
+    win.on('show', () => this.layoutHelperToolbar(win))
 
     win.on('closed', () => {
       if (this.win !== win) return
+      const toolbar = this.helperToolbarView
+      this.helperToolbarView = null
+      if (toolbar && !toolbar.webContents.isDestroyed()) toolbar.webContents.close()
       this.teardownNetworkBodyCapture()
       this.clearNetworkImageCache()
       this.win = null
@@ -308,13 +473,102 @@ export class ScrapeBrowserHelperRuntime {
       this.preLoginMode = false
       this.preLoginDone = false
       this.preLoginPluginName = ''
-      this.helperMenuKind = 'none'
-      this.restoreDarwinApplicationMenu()
+      this.helperBannerKind = 'none'
       this.onWindowClosed?.()
     })
 
     this.win = win
     return win
+  }
+
+  private createHelperToolbar(win: ScraperHelperWindow): void {
+    const toolbar = new WebContentsView({
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    })
+    this.helperToolbarView = toolbar
+    win.contentView.addChildView(toolbar)
+    toolbar.setVisible(false)
+    this.layoutHelperToolbar(win)
+
+    toolbar.webContents.on('will-navigate', (event, url) => {
+      if (url.startsWith('data:text/html')) return
+      event.preventDefault()
+      this.handleHelperToolbarAction(url, win)
+    })
+    toolbar.webContents.setWindowOpenHandler(({ url }) => {
+      this.handleHelperToolbarAction(url, win)
+      return { action: 'deny' }
+    })
+    win.on('resize', () => this.layoutHelperToolbar(win))
+    this.toolbarReady = toolbar.webContents.loadURL(this.buildHelperToolbarDataUrl('none'))
+    void this.toolbarReady.catch(() => {}) // initialize() propagates startup failures.
+  }
+
+  private layoutHelperToolbar(win: ScraperHelperWindow): void {
+    const toolbar = this.helperToolbarView
+    if (!toolbar || toolbar.webContents.isDestroyed()) return
+    const bounds = win.contentView.getBounds()
+    const top = this.helperBannerKind === 'none' ? 0 : HELPER_TOOLBAR_HEIGHT
+    toolbar.setVisible(top > 0)
+
+    const pageView = win.contentView.children.find(
+      (child): child is WebContentsView =>
+        child instanceof WebContentsView && child.webContents === win.webContents
+    )
+    pageView?.setBounds({
+      x: 0,
+      y: top,
+      width: Math.max(1, bounds.width),
+      height: Math.max(1, bounds.height - top)
+    })
+    toolbar.setBounds({
+      x: 0,
+      y: 0,
+      width: Math.max(1, bounds.width),
+      height: HELPER_TOOLBAR_HEIGHT
+    })
+  }
+
+  private buildHelperToolbarDataUrl(kind: HelperBannerKind, pluginName = ''): string {
+    return `data:text/html;charset=utf-8,${encodeURIComponent(buildHelperToolbarHtml(kind, pluginName))}`
+  }
+
+  private renderHelperToolbar(kind: HelperBannerKind, pluginName = ''): void {
+    const toolbar = this.helperToolbarView
+    if (!toolbar || toolbar.webContents.isDestroyed()) return
+    if (this.win && !this.win.isDestroyed()) this.layoutHelperToolbar(this.win)
+    if (kind === 'none') return
+    void toolbar.webContents.loadURL(this.buildHelperToolbarDataUrl(kind, pluginName)).catch(() => {})
+  }
+
+  private handleHelperToolbarAction(url: string, win: ScraperHelperWindow): void {
+    if (!url.startsWith(HELPER_TOOLBAR_ACTION_PROTOCOL)) return
+    let action = ''
+    try {
+      const parsed = new URL(url)
+      action = parsed.hostname || parsed.pathname.replace(/^\//, '')
+    } catch {
+      return
+    }
+
+    switch (action) {
+      case 'refresh':
+        if (!win.isDestroyed()) win.webContents.reload()
+        break
+      case 'save':
+        if (!win.isDestroyed()) void this.savePageDebug(win)
+        break
+      case 'pre-login-done':
+        this.completePreLogin(win)
+        break
+      case 'challenge-passed':
+        this.manualPass = true
+        break
+    }
   }
 
   /**
@@ -456,7 +710,7 @@ export class ScrapeBrowserHelperRuntime {
     }
   }
 
-  private async applyStealthViaCdp(win: BrowserWindow): Promise<void> {
+  private async applyStealthViaCdp(win: ScraperHelperWindow): Promise<void> {
     const wc = win.webContents
     const profile = getScrapeUaProfile()
 
@@ -542,7 +796,7 @@ export class ScrapeBrowserHelperRuntime {
     })
   }
 
-  private async ensureStealth(win: BrowserWindow): Promise<void> {
+  private async ensureStealth(win: ScraperHelperWindow): Promise<void> {
     if (this.stealthApplied) return
     const wc = win.webContents
 
@@ -566,24 +820,20 @@ export class ScrapeBrowserHelperRuntime {
     )
   }
 
-  private async readPageChallengeSample(win: BrowserWindow): Promise<string> {
+  private async readPageChallengeSample(win: ScraperHelperWindow): Promise<string> {
     return win.webContents
       .executeJavaScript(
         `(() => {
           const title = document.title || '';
-          const bar = document.getElementById('__cf_helper_bar__');
-          const barParent = bar && bar.parentNode;
-          if (bar) bar.remove();
           const bodyText = ((document.body && document.body.innerText) || '').slice(0, 8000);
           const html = (document.documentElement && document.documentElement.outerHTML || '').slice(0, 30000);
-          if (bar && barParent) barParent.appendChild(bar);
           return title + '\\n' + bodyText + '\\n' + html;
         })()`
       )
       .catch(() => '')
   }
 
-  private async savePageDebug(win: BrowserWindow): Promise<void> {
+  private async savePageDebug(win: ScraperHelperWindow): Promise<void> {
     const sample = await this.readPageChallengeSample(win)
     const diagnosis = diagnoseCloudflareChallenge(sample, {
       cfMitigated: this.currentMainFrameCfMitigated,
@@ -635,7 +885,7 @@ export class ScrapeBrowserHelperRuntime {
     })
   }
 
-  private async isPageChallenge(win: BrowserWindow): Promise<boolean> {
+  private async isPageChallenge(win: ScraperHelperWindow): Promise<boolean> {
     const sample = await this.readPageChallengeSample(win)
     const challenge = isCloudflareChallengeText(sample, {
       cfMitigated: this.currentMainFrameCfMitigated,
@@ -645,127 +895,55 @@ export class ScrapeBrowserHelperRuntime {
     return challenge
   }
 
-  private helperRefreshMenuItem(win: BrowserWindow): MenuItemConstructorOptions {
-    return {
-      label: '🔄 刷新页面',
-      click: () => {
-        if (!win.isDestroyed()) win.webContents.reload()
-      }
-    }
-  }
-
-  private helperSaveMenuItem(win: BrowserWindow): MenuItemConstructorOptions {
-    return {
-      label: '💾 保存页面',
-      click: () => {
-        if (!win.isDestroyed()) void this.savePageDebug(win)
-      }
-    }
-  }
-
-  private preLoginMenuTemplate(
-    win: BrowserWindow,
-    pluginName: string
-  ): MenuItemConstructorOptions[] {
-    const pluginLabel = pluginName ? `插件【${pluginName}】` : '插件'
-    return [
-      {
-        label: `⚠️ ${pluginLabel}开启了预登入，当前刮削已暂停，请在页面中完成登入后点击右侧的登入完成按钮`,
-        click: () => undefined
-      },
-      this.helperRefreshMenuItem(win),
-      {
-        label: '✅ 登入完成',
-        click: () => {
-          this.preLoginDone = true
-          this.preLoginMode = false
-          this.removeHelperMenu(win)
-        }
-      }
-    ]
-  }
-
-  private challengeMenuTemplate(win: BrowserWindow): MenuItemConstructorOptions[] {
-    return [
-      {
-        label: '⚠️ 检测到 Cloudflare 人机验证，当前刮削已暂停，请在页面中完成验证后点击右侧的验证通过按钮',
-        click: () => undefined
-      },
-      this.helperRefreshMenuItem(win),
-      this.helperSaveMenuItem(win),
-      {
-        label: '✅ 验证通过',
-        click: () => {
-          this.manualPass = true
-        }
-      }
-    ]
-  }
-
-  private applyHelperMenu(
-    win: BrowserWindow,
-    kind: 'preLogin' | 'challenge',
-    template: MenuItemConstructorOptions[]
-  ): void {
+  private applyHelperBanner(win: ScraperHelperWindow, kind: 'preLogin' | 'challenge'): void {
     if (win.isDestroyed()) return
-    const menu = Menu.buildFromTemplate(template)
-    win.setMenu(menu)
-    win.setAutoHideMenuBar(false)
-    win.setMenuBarVisibility(true)
-    this.applyDarwinHelperApplicationMenu(menu)
-    this.helperMenuKind = kind
+    this.helperBannerKind = kind
+    this.renderHelperToolbar(kind, this.preLoginPluginName)
   }
 
-  private applyDarwinHelperApplicationMenu(menu: Menu): void {
-    if (process.platform !== 'darwin') return
-    if (this.darwinApplicationMenuBeforeHelper === undefined) {
-      this.darwinApplicationMenuBeforeHelper = Menu.getApplicationMenu()
-    }
-    Menu.setApplicationMenu(menu)
-  }
-
-  private restoreDarwinApplicationMenu(): void {
-    if (process.platform !== 'darwin') return
-    if (this.darwinApplicationMenuBeforeHelper === undefined) return
-    Menu.setApplicationMenu(this.darwinApplicationMenuBeforeHelper)
-    this.darwinApplicationMenuBeforeHelper = undefined
-  }
-
-  private installPreLoginMenu(win: BrowserWindow, pluginName: string): void {
+  private installPreLoginBanner(win: ScraperHelperWindow, pluginName: string): void {
     this.preLoginPluginName = pluginName
-    this.applyHelperMenu(win, 'preLogin', this.preLoginMenuTemplate(win, pluginName))
+    this.applyHelperBanner(win, 'preLogin')
   }
 
-  private installChallengeMenu(win: BrowserWindow): void {
-    if (this.helperMenuKind === 'challenge') return
-    this.applyHelperMenu(win, 'challenge', this.challengeMenuTemplate(win))
+  private completePreLogin(win: ScraperHelperWindow): void {
+    this.preLoginDone = true
+    this.preLoginMode = false
+    this.removeHelperBanner(win)
   }
 
-  private removeHelperMenu(win: BrowserWindow): void {
+  private installChallengeBanner(win: ScraperHelperWindow): void {
+    if (this.helperBannerKind === 'challenge') return
+    this.applyHelperBanner(win, 'challenge')
+  }
+
+  private removeHelperBanner(win: ScraperHelperWindow): void {
     if (win.isDestroyed()) return
-    win.setMenu(null)
-    win.setMenuBarVisibility(false)
-    this.restoreDarwinApplicationMenu()
-    this.helperMenuKind = 'none'
+    this.helperBannerKind = 'none'
+    this.renderHelperToolbar('none')
   }
 
-  private async syncChallengeToolbar(win: BrowserWindow): Promise<void> {
-    await win.webContents.executeJavaScript(REMOVE_TOOLBAR_JS).catch(() => {})
+  private async syncHelperBanner(win: ScraperHelperWindow): Promise<void> {
     if (this.preLoginMode && !this.preLoginDone) {
-      if (this.helperMenuKind !== 'preLogin') {
-        this.installPreLoginMenu(win, this.preLoginPluginName)
+      if (this.helperBannerKind !== 'preLogin') {
+        this.installPreLoginBanner(win, this.preLoginPluginName)
       }
       if (!win.isVisible()) win.show()
+      this.layoutHelperToolbar(win)
+      app.focus({ steal: true })
+      win.focus()
       return
     }
     const challenge = await this.isPageChallenge(win)
     if (challenge) {
-      this.installChallengeMenu(win)
+      this.installChallengeBanner(win)
       if (!win.isVisible()) win.show()
+      this.layoutHelperToolbar(win)
+      app.focus({ steal: true })
       win.focus()
       return
     }
-    if (this.helperMenuKind !== 'none') this.removeHelperMenu(win)
+    if (this.helperBannerKind !== 'none') this.removeHelperBanner(win)
   }
 
   /**
@@ -884,10 +1062,10 @@ export class ScrapeBrowserHelperRuntime {
       }
       if (waitStatus === 'page-timeout') break
       if (isChallenge && !focusedForChallenge) {
-        await this.syncChallengeToolbar(win)
+        await this.syncHelperBanner(win)
         focusedForChallenge = true
       } else if (!isChallenge && focusedForChallenge) {
-        await this.syncChallengeToolbar(win)
+        await this.syncHelperBanner(win)
         focusedForChallenge = false
       }
       if (isChallenge && returnOnChallenge) {
@@ -931,12 +1109,12 @@ export class ScrapeBrowserHelperRuntime {
     throw new Error('页面加载超时：请检查 URL 或网络连接后重试')
   }
 
-  private async readHtml(win: BrowserWindow): Promise<string> {
+  private async readHtml(win: ScraperHelperWindow): Promise<string> {
     return win.webContents.executeJavaScript('document.documentElement.outerHTML')
   }
 
   private async htmlRegion(
-    win: BrowserWindow,
+    win: ScraperHelperWindow,
     params: Record<string, unknown>
   ): Promise<{ url: string; selector: string; html: string; truncated: boolean }> {
     const selector =
@@ -962,7 +1140,7 @@ export class ScrapeBrowserHelperRuntime {
     )
   }
 
-  private async evaluate(win: BrowserWindow, params: Record<string, unknown>): Promise<unknown> {
+  private async evaluate(win: ScraperHelperWindow, params: Record<string, unknown>): Promise<unknown> {
     const expression =
       typeof params.expression === 'string' ? params.expression.trim() : ''
     const prepared = prepareBrowserEvaluate(
@@ -980,7 +1158,7 @@ export class ScrapeBrowserHelperRuntime {
   }
 
   private async pageStatus(
-    win: BrowserWindow
+    win: ScraperHelperWindow
   ): Promise<{ url: string; title: string; isChallenge: boolean; imageCacheEntries: number }> {
     const url = win.webContents.getURL()
     const title = await win.webContents.executeJavaScript(`document.title || ''`).catch(() => '')
@@ -1044,7 +1222,7 @@ export class ScrapeBrowserHelperRuntime {
   }
 
   private async waitPreLogin(
-    win: BrowserWindow,
+    win: ScraperHelperWindow,
     params: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<{ url: string; title: string }> {
@@ -1061,14 +1239,14 @@ export class ScrapeBrowserHelperRuntime {
     const pluginName = typeof params.pluginName === 'string' ? params.pluginName.trim() : ''
     this.preLoginMode = true
     this.preLoginDone = false
-    this.installPreLoginMenu(win, pluginName)
+    this.installPreLoginBanner(win, pluginName)
     if (!win.isVisible()) win.show()
     win.setTitle(pluginName ? `刮削登入 · ${pluginName}` : '刮削登入')
     win.focus()
     await win.loadURL(parsed.toString()).catch(() => {
       /* navigation errors are tolerated; the user can refresh from the window menu */
     })
-    await this.syncChallengeToolbar(win)
+    await this.syncHelperBanner(win)
     try {
       while (true) {
         signal?.throwIfAborted()
@@ -1084,14 +1262,14 @@ export class ScrapeBrowserHelperRuntime {
       this.preLoginDone = false
       this.preLoginPluginName = ''
       if (!win.isDestroyed()) {
-        await this.syncChallengeToolbar(win)
+        await this.syncHelperBanner(win)
         win.setTitle('元数据刮削 · 浏览器')
       }
     }
   }
 
   private async snapshot(
-    win: BrowserWindow,
+    win: ScraperHelperWindow,
     params: Record<string, unknown>
   ): Promise<{ url: string; title: string; text: string }> {
     const maxTextLength =
@@ -1110,7 +1288,7 @@ export class ScrapeBrowserHelperRuntime {
     )
   }
 
-  private async inspect(win: BrowserWindow, params: Record<string, unknown>): Promise<unknown> {
+  private async inspect(win: ScraperHelperWindow, params: Record<string, unknown>): Promise<unknown> {
     const maxLinks =
       typeof params.maxLinks === 'number' && Number.isFinite(params.maxLinks)
         ? Math.max(10, Math.min(160, Math.round(params.maxLinks)))
@@ -1395,7 +1573,7 @@ export class ScrapeBrowserHelperRuntime {
     return facts
   }
 
-  private async click(win: BrowserWindow, selector: string): Promise<boolean> {
+  private async click(win: ScraperHelperWindow, selector: string): Promise<boolean> {
     return win.webContents.executeJavaScript(
       `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
@@ -1408,7 +1586,7 @@ export class ScrapeBrowserHelperRuntime {
   }
 
   private async type(
-    win: BrowserWindow,
+    win: ScraperHelperWindow,
     selector: string,
     text: string,
     clear: boolean
@@ -1428,14 +1606,14 @@ export class ScrapeBrowserHelperRuntime {
     )
   }
 
-  private async press(win: BrowserWindow, key: string): Promise<boolean> {
+  private async press(win: ScraperHelperWindow, key: string): Promise<boolean> {
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key })
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key })
     return true
   }
 
   private async waitForSelector(
-    win: BrowserWindow,
+    win: ScraperHelperWindow,
     selector: string,
     timeoutMs: number
   ): Promise<boolean> {
@@ -1453,15 +1631,15 @@ export class ScrapeBrowserHelperRuntime {
 
       const waitStatus = waitBudget.update(Date.now(), isChallenge)
       if (waitStatus === 'verification-timeout') {
-        await this.syncChallengeToolbar(win)
+        await this.syncHelperBanner(win)
         throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
       }
       if (waitStatus === 'page-timeout') break
       if (isChallenge && !focusedForChallenge) {
-        await this.syncChallengeToolbar(win)
+        await this.syncHelperBanner(win)
         focusedForChallenge = true
       } else if (!isChallenge && focusedForChallenge) {
-        await this.syncChallengeToolbar(win)
+        await this.syncHelperBanner(win)
         focusedForChallenge = false
       }
 
@@ -1596,7 +1774,6 @@ export class ScrapeBrowserHelperRuntime {
     // Keep the persistent Session so cookies and Cloudflare clearance survive window recycling.
     this.clearNetworkImageCache()
     const win = this.win
-    this.win = null
     this.stealthApplied = false
     if (win && !win.isDestroyed()) {
       this.detachDebugger(win.webContents)

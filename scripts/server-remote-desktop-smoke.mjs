@@ -125,7 +125,7 @@ try {
       const line = chunk.toString()
       if (line.includes('[scraper-helper]')) console.error(line.trim())
     })
-    const page = await application.firstWindow()
+    const page = await application.firstWindow({ timeout: process.platform === 'darwin' ? 180000 : 30000 })
     page.setDefaultTimeout(20000)
     await page.waitForFunction(() => Boolean(window.api?.webAccess))
     return page

@@ -12,7 +12,7 @@
 - 已提交：服务端 NFO 完整导入与远程配对 `dd72ab3`。
 - 按用户后续要求，容器验收使用本机 Colima / Docker（Linux arm64），不再限定 Cloud 会话。
 - 已提交：远程媒体库版本映射和按挂载名称添加目录 `ebbae81`。
-- 已验证原第 3 项的主要 GUI 流程与第 4 项定向恢复条件；macOS/Linux arm64 安装及保留数据替换已通过。最终产物核对继续，Windows/macOS x64 无运行环境，不能声明跨平台全部完成。历史结果不代替本轮。
+- 已验证原第 3 项的主要 GUI 流程与第 4 项定向恢复条件；macOS/Linux arm64 安装及保留数据替换已通过。最终 arm64 产物核对通过，Windows/macOS x64 无运行环境，不能声明跨平台全部完成。历史结果不代替本轮。
 
 ## 文档入口与维护职责
 
@@ -51,7 +51,7 @@
 | 服务端 NFO 导入与远程配对 | 功能及真实 Node、GUI 验收通过，详见下方证据 |
 | 原建议中的远程 GUI 主流程 | 编辑冲突、扫描/改名、单条/批量刮削、候选与图片交付、清单导入、播放、取消/重连均有实际证据；模型传输使用夹具，不评估外部模型质量 |
 | 现行协议定向故障恢复 | 55 项 Linux 回归与 Docker 双宿主迁库故障验收通过；不声明历史 M/D 全矩阵关闭 |
-| 安装及保留数据更新 | macOS/Linux arm64 安装与同版本候选替换已通过；最终产物核对继续，Windows/macOS x64 运行验收缺环境 |
+| 安装及保留数据更新 | macOS/Linux arm64 安装与同版本候选替换已通过；最终 arm64 产物核对通过，Windows/macOS x64 运行验收缺环境 |
 | 发布、推送、合并 main、升级版本号 | 原第 6 项明确不执行 |
 
 原 1–5 的实际范围以本页“范围复核”及用户原指令为准，不把历史全矩阵自动扩展为本次额外门槛。下方保留各轮证据及明确的未覆盖边界。
@@ -196,3 +196,19 @@ Linux 最终已安装桌面 `/opt/Javdex/javdex` 配合更新后的生产 Docker
 - macOS arm64：将先前 DMG 安装副本复制到隔离程序目录，测试中替换为最终 DMG 的应用副本（两者均已完成安装验证）。旧 ASAR SHA-256 `b84405ba89ee60e31f3e4358bc2afebf6508b5372ced9ab381e28caf6decf298`，新 ASAR `8800387a48a2d9090f169c95eece6a2ab744abd1336bbe74a53cc0af8faaacfa`。日志 `/tmp/javdex-mac-upgrade-gui.log`，证据 `/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-NMrwJm/evidence`。
 
 两条脚本均退出 0。可通过 `JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_DEB`（仅隔离 Linux 容器）或 `JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_APP`（macOS 隔离副本）复跑。两端版本号仍为 0.7.1；这证明本次候选间替换保留数据，不代表跨发布版本迁移或自动更新器验收。
+
+### 当前最终产物（覆盖前文候选哈希）
+
+功能代码包含 `40860d0`，桌面/Web 与 Node 宿主重新构建，版本仍为 `0.7.1`。前文旧哈希保留为历史验收证据，交付应使用此处最终文件：
+
+| 产物 | SHA-256 / 镜像 ID | 当前证据 |
+|---|---|---|
+| `dist/Javdex-0.7.1-arm64.dmg` | `1d97b3ee3f67373ad90f51d2568c857ae5bd78bfb197119b934e44c8d2bfef56` | DMG 挂载后复制安装；从上一候选替换升级，设置/凭据/资料/图片保留，配对撤销成功 |
+| `dist/Javdex-0.7.1-arm64.deb` | `859dd8528db83ad6dff329f6701c1af19fac0c2554efc3c10c249ef436baec2a` | dpkg 替换安装成功，保留同一 userData；完整远程 GUI 流程及图片重启验证通过 |
+| `javdex-server:smoke` | `3f5e95646f23` | 生产 Docker 构建；保留数据镜像替换及最新同版本安装烟测通过 |
+
+Linux 完整脚本包括 NFO、播放/真实 mpv 解码、编辑冲突、单条图片采集、候选确认、批量部分提交后取消、实际改名、清单匹配/结果页、桌面替换升级、配对/重启/撤销。macOS 本次脚本包括 NFO、编辑冲突、单条图片采集、桌面替换升级、配对/重启/撤销。原 macOS 30 秒首次窗口等待曾超时；延长测试等待到 180 秒后同一产物通过，不将前次超时记为通过或据此声称产品修复。
+
+最终日志：`/tmp/javdex-final-candidate-linux-upgrade.log`、`/tmp/javdex-final-candidate-mac-upgrade.log`、`/tmp/javdex-final-candidate-install-smoke.log`；三项均退出 0。Linux 截图/播放器日志：`/var/tmp/javdex-acceptance/javdex-remote-desktop-yNJqwk/evidence`；macOS：`/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-RMXIkU/evidence`。Linux 测试地址已移除。
+
+当前完成边界：原 1–4 已有对应证据；第 5 项已完成本地可运行的 macOS/Linux arm64 构建、安装、同版本候选替换保留数据。Windows/macOS x64 尚无运行验收证据，不能把第 5 项扩展为跨平台全部通过；没有修改版本号、发布、推送或合并 main。

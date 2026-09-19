@@ -33,7 +33,7 @@ export default function UnrecognizedRow({
   const [code, setCode] = useState('')
   const [renameBase, setRenameBase] = useState(baseName)
   const [busy, setBusy] = useState<'import' | 'rename' | null>(null)
-  const [targetValue, setTargetValue] = useState('')
+  const [targetValue, setTargetValue] = useState('new')
   const [matchingVideos, setMatchingVideos] = useState<Array<Pick<Video, 'id' | 'code' | 'title'>>>([])
   const [loadingTargets, setLoadingTargets] = useState(false)
 
@@ -44,7 +44,7 @@ export default function UnrecognizedRow({
 
   useEffect(() => {
     const normalized = normalizeOptionalVideoCode(code)
-    setTargetValue('')
+    setTargetValue('new')
     if (!normalized) {
       setMatchingVideos([])
       return
@@ -208,14 +208,13 @@ export default function UnrecognizedRow({
             disabled={busy !== null || loadingTargets || !codeTrimmed}
             aria-label={`${fullName} 导入目标`}
           >
-            <option value="">{loadingTargets ? '查找中…' : '选择目标'}</option>
+            <option value="new">新建独立影片</option>
             {matchingVideos.map((video) => (
               <option key={video.id} value={`existing:${video.id}`}>
                 ID {video.id} · {video.code}
                 {video.title ? ` · ${video.title}` : ''}
               </option>
             ))}
-            <option value="new">新建独立影片</option>
           </SelectControl>
           <Button
             type="button"

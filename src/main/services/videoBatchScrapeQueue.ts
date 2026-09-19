@@ -6,6 +6,7 @@ import {
   scrapeVideo,
   type ScrapeOutcome
 } from '../scrapers/scraperManager'
+import { createScraperPreLoginSession } from '../scrapers/scraperPreLogin'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import {
   CheckpointedSequentialBatchQueue,
@@ -163,6 +164,11 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
     const mode = request.mode ?? 'replace'
     const missingFields = request.missingFields ?? []
     const delayController = helpers.createDelayController()
+    const preLogin = createScraperPreLoginSession({
+      onWaiting: ({ pluginName }) => {
+        helpers.addLog('-', 'info', `等待登入完成后继续刮削（${pluginName}）`)
+      }
+    })
     const libraryName = request.libraryId ? getMediaLibrary(request.libraryId)?.name : null
     const statusLabel = formatVideoBatchStatusLabel(request, libraryName)
     const missingLabel =
@@ -185,7 +191,8 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
           closeBrowser: false,
           fields,
           mode,
-          delayController
+          delayController,
+          preLogin
         })
         return formatVideoBatchScrapeOutcome(itemOutcome, code)
       },

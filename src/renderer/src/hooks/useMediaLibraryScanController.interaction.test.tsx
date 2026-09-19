@@ -4,16 +4,19 @@ import React from 'react'
 import TestRenderer,{act} from 'react-test-renderer'
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import type {ScanAuditReadHeader} from '@shared/scanAuditReadTypes'
-import type {LibraryScanEvent,ScanCompletionResult} from '@shared/libraryTypes'
+import type {LibraryScanEvent,LibraryScanProgressEvent,ScanCompletionResult} from '@shared/libraryTypes'
 
 type Request={id:number;resolve:(value:ScanAuditReadHeader)=>void;reject:(error:Error)=>void}
 const requests:Request[]=[]
 let stateListener:((event:LibraryScanEvent)=>void)|undefined
+let progressListener:((event:LibraryScanProgressEvent)=>void)|undefined
 Object.defineProperty(globalThis,'React',{configurable:true,value:React})
 Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{scan:{
  getLatest:()=>{throw new Error('Full scan snapshot forbidden')},
  getAuditHeader:(id:number)=>new Promise<ScanAuditReadHeader>((resolve,reject)=>requests.push({id,resolve,reject})),
- onProgress:()=>()=>undefined,onStateChanged:(listener:(event:LibraryScanEvent)=>void)=>{
+ onProgress:(listener:(event:LibraryScanProgressEvent)=>void)=>{
+  progressListener=listener;return()=>{if(progressListener===listener)progressListener=undefined}
+ },onStateChanged:(listener:(event:LibraryScanEvent)=>void)=>{
   stateListener=listener;return()=>{if(stateListener===listener)stateListener=undefined}
  }
 }}}})
@@ -86,6 +89,38 @@ it('accepts compact IPC completion without loading full results or hidden audit 
  assert.equal(Object.hasOwn(current.result!,'unrecognizedFiles'),false)
  assert.equal(Object.hasOwn(current.result!,'newCodes'),false)
  assert.equal(requests.length,0)
+})
+it('does not reopen a finished run when invoke settles before started and progress events',async()=>{
+ const value=completion('invoke-first')
+ const lastFile={scanned:13,imported:0,currentFile:'D:\\\\Downloads\\\\DDT310.avi'}
+ window.api.scan.run=async()=>value
+ await show(1,false)
+ await act(async()=>current.start())
+ assert.equal(current.running,false)
+ await act(async()=>stateListener?.({phase:'started',libraryId:1,runId:value.runId,trigger:'manual'}))
+ await act(async()=>progressListener?.({libraryId:1,runId:value.runId,progress:lastFile}))
+ await act(async()=>stateListener?.({phase:'progress',libraryId:1,runId:value.runId,trigger:'manual',progress:lastFile}))
+ await act(async()=>stateListener?.({phase:'completed',libraryId:1,runId:value.runId,trigger:'manual',result:value}))
+ assert.equal(current.running,false)
+ assert.equal(current.progress,null)
+ assert.equal(current.activeRunId,null)
+})
+it('ignores a late progress event after the completed event',async()=>{
+ const value=completion('late-progress')
+ let resolve!:(result:ScanCompletionResult)=>void
+ window.api.scan.run=()=>new Promise<ScanCompletionResult>(done=>{resolve=done})
+ await show(1,false)
+ let started:Promise<void>|undefined
+ await act(async()=>{started=current.start()})
+ await act(async()=>stateListener?.({phase:'started',libraryId:1,runId:value.runId,trigger:'manual'}))
+ await act(async()=>stateListener?.({phase:'completed',libraryId:1,runId:value.runId,trigger:'manual',result:value}))
+ assert.equal(current.running,false)
+ await act(async()=>progressListener?.({libraryId:1,runId:value.runId,progress:{scanned:13,imported:0,currentFile:'DDT310.avi'}}))
+ assert.equal(current.running,false)
+ assert.equal(current.progress,null)
+ resolve(value)
+ await act(async()=>started)
+ assert.equal(current.running,false)
 })
 it('accepts compact completion events and ignores a duplicate IPC completion for the same run',async()=>{
  const value=completion('event-compact')

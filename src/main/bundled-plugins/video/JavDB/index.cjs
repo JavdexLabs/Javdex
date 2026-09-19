@@ -1,3 +1,19 @@
+const SEARCH_BASE = 'https://javdb.com/search?q=';
+const SITE_BASE = 'https://javdb.com';
+
+const PANEL_LABELS = {
+  code: ['番號', '番号', '品番'],
+  date: ['日期', '発売日', '配信開始日'],
+  duration: ['時長', '时长', '収録時間', '片長', '片长'],
+  director: ['導演', '导演', '監督', '监督'],
+  maker: ['片商', 'メーカー', '製作商', '制作商'],
+  publisher: ['發行', '发行', '發行商', '发行商'],
+  series: ['系列', 'シリーズ'],
+  rating: ['評分', '评分', '評価'],
+  tags: ['類別', '类别', 'ジャンル'],
+  actors: ['演員', '演员', '出演者']
+};
+
 function normalizeCode(value) {
   return String(value || '').trim().toUpperCase();
 }
@@ -5,10 +21,76 @@ function normalizeCode(value) {
 function absoluteJavdbUrl(href) {
   if (!href) return null;
   try {
-    return new URL(href, 'https://javdb.com').toString();
+    return new URL(href, SITE_BASE).toString();
   } catch {
     return null;
   }
+}
+
+function panelMap($detail) {
+  const map = new Map();
+  $detail('.panel-block').each((i, panel) => {
+    const $panel = $detail(panel);
+    const label = $panel.find('strong').first().text().trim().replace(/[:：]\s*$/, '');
+    if (!label || map.has(label)) return;
+    const $value = $panel.find('.value').first();
+    map.set(label, $value.length ? $value : $panel);
+  });
+  return map;
+}
+
+function pickPanel(map, key) {
+  for (const alias of PANEL_LABELS[key] || []) {
+    const $panel = map.get(alias);
+    if ($panel) return $panel;
+  }
+  return null;
+}
+
+function findByContent($detail, pattern) {
+  return $detail('.panel-block').filter((i, panel) =>
+    $detail(panel).find(pattern).length > 0
+  ).first();
+}
+
+function cleanPersonName(raw) {
+  return String(raw || '')
+    .replace(/[（(][^（()）]*[)）]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseActresses($detail, map) {
+  let $panel = pickPanel(map, 'actors');
+  if (!$panel || !$panel.find('a').length) {
+    $panel = findByContent($detail, 'a[href*="/actors/"]');
+  }
+  if (!$panel.length) return [];
+
+  const actresses = [];
+  $panel.find('a').each((i, link) => {
+    const $link = $detail(link);
+    const name = cleanPersonName($link.text());
+    if (!name) return;
+    actresses.push({ name, gender: $link.hasClass('actor-female') ? 'female' : 'male' });
+  });
+  return actresses;
+}
+
+function parseTags($detail, map) {
+  const $panel = pickPanel(map, 'tags') || findByContent($detail, 'a[href*="/tags/"]');
+  if (!$panel.length) return [];
+
+  if ($panel.find('a[href*="/tags/"]').length) {
+    const tags = [];
+    $panel.find('a[href*="/tags/"]').each((i, link) => {
+      const name = $detail(link).text().trim();
+      if (name) tags.push(name);
+    });
+    return tags;
+  }
+
+  return $panel.text().split(/[,，]/).map((raw) => raw.trim()).filter(Boolean);
 }
 
 function searchItemCode($search, item) {
@@ -21,7 +103,7 @@ function searchItemCode($search, item) {
 
 async function parseVideo(ctx) {
   const requestedCode = normalizeCode(ctx.code);
-  const searchUrl = `https://javdb.com/search?q=${encodeURIComponent(requestedCode)}&f=all`;
+  const searchUrl = `${SEARCH_BASE}${encodeURIComponent(requestedCode)}&f=all`;
   const searchHtml = await ctx.fetchPage(searchUrl, { readySelector: '.movie-list' });
   const $search = ctx.cheerio.load(searchHtml);
   const detailUrls = [];
@@ -36,78 +118,51 @@ async function parseVideo(ctx) {
 
   // Promise.all is intentional: one failed exact-match detail invalidates the whole candidate set.
   return Promise.all(detailUrls.map(async (detailUrl) => {
-    const detailHtml = await ctx.fetchPage(detailUrl, { readySelector: '.video-detail' });
+    const detailHtml = await ctx.fetchPage(detailUrl, { readySelector: '.movie-panel-info' });
     return parseDetail(ctx, detailHtml, detailUrl, requestedCode);
   }));
 }
 
 function parseDetail(ctx, detailHtml, detailUrl, requestedCode) {
   const $detail = ctx.cheerio.load(detailHtml);
-  const metadata = {};
-  $detail('.video-detail .panel-block').each((i, panel) => {
-    const $panel = $detail(panel);
-    const label = $panel.find('strong').first().text().trim().replace(/[:：]$/, '');
-    const value = $panel.find('.value').text().trim();
-    metadata[label] = value;
-  });
+  const map = panelMap($detail);
+  const labelText = (key) => {
+    const $panel = pickPanel(map, key);
+    return $panel ? $panel.text().trim() : '';
+  };
 
-  const currentTitle = $detail('.video-detail h2.title .current-title').text().trim();
-  const originTitle = $detail('.video-detail h2.title .origin-title').text().trim();
+  const currentTitle = $detail('h2.title .current-title').first().text().trim();
+  const originTitle = $detail('h2.title .origin-title').first().text().trim();
   const title = originTitle || currentTitle;
-  const detailCode = normalizeCode(metadata['番號'] || metadata['番号'] || requestedCode);
+  const codePanel = pickPanel(map, 'code');
+  const detailCode = normalizeCode((codePanel ? codePanel.text() : '') || requestedCode);
 
-  let coverUrl = '';
-  const coverImg = $detail('.video-detail .video-cover');
-  if (coverImg.length) coverUrl = coverImg.attr('src');
+  const $cover = $detail('img.video-cover').first().length
+    ? $detail('img.video-cover').first()
+    : $detail('.video-cover').first();
+  const coverUrl = $cover.attr('src') || '';
 
-  const releaseDate = (metadata['日期'] || '').trim();
+  const rawDate = labelText('date');
+  const releaseDate = (ctx.helpers.normalizeDate(rawDate) || rawDate).trim();
   let durationSeconds = 0;
-  if (metadata['時長']) {
-    const durationMatch = metadata['時長'].match(/(\d+)/);
-    if (durationMatch) durationSeconds = parseInt(durationMatch[1]) * 60;
-  }
+  const durationMatch = labelText('duration').match(/(\d+)/);
+  if (durationMatch) durationSeconds = parseInt(durationMatch[1], 10) * 60;
 
-  const maker = (metadata['片商'] || '').trim();
-  const publisher = (metadata['發行'] || '').trim();
-  const series = (metadata['系列'] || '').trim();
-  const director = (metadata['導演'] || '').trim();
+  const maker = labelText('maker');
+  const publisher = labelText('publisher');
+  const series = labelText('series');
+  const director = labelText('director');
 
   let ratingAverage = 0;
   let ratingCount = 0;
-  if (metadata['評分']) {
-    const avgMatch = metadata['評分'].match(/([\d.]+)分/);
+  const rawRating = labelText('rating');
+  if (rawRating) {
+    const avgMatch = rawRating.match(/([\d.]+)\s*分/);
     if (avgMatch) ratingAverage = parseFloat(avgMatch[1]);
-    const countMatch = metadata['評分'].match(/由(\d+)人評價/);
-    if (countMatch) ratingCount = parseInt(countMatch[1]);
+    const countMatch = rawRating.match(/(\d+)\s*人/);
+    if (countMatch) ratingCount = parseInt(countMatch[1], 10);
   }
 
-  const tags = [];
-  if (metadata['類別']) {
-    metadata['類別'].split(',').forEach((raw) => {
-      const tag = raw.trim();
-      if (tag) tags.push(tag);
-    });
-  }
-
-  const actresses = [];
-  const actorPanel = $detail('.panel-block').filter((i, panel) =>
-    $detail(panel).find('strong').first().text().trim().includes('演員')
-  );
-  if (actorPanel.length) {
-    actorPanel.find('.value').contents().each((i, node) => {
-      if (node.type !== 'tag' || node.name !== 'a') return;
-      const name = $detail(node).text().trim();
-      if (!name) return;
-      const next = $detail(node).next();
-      let gender;
-      if (next.length && next.is('strong.symbol')) {
-        const symbol = next.text().trim();
-        if (symbol === '♀') gender = 'female';
-        else if (symbol === '♂') gender = 'male';
-      }
-      actresses.push({ name, gender });
-    });
-  }
 
   const sampleImageUrls = [];
   $detail('a[data-fancybox="gallery"]').each((i, link) => {
@@ -128,8 +183,8 @@ function parseDetail(ctx, detailHtml, detailUrl, requestedCode) {
     series,
     director,
     durationSeconds,
-    actresses,
-    tags,
+    actresses: parseActresses($detail, map),
+    tags: parseTags($detail, map),
     sourceUrl: detailUrl,
     ratingAverage,
     ratingCount,

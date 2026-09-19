@@ -146,19 +146,40 @@ const catalogScope = z.discriminatedUnion('kind', [
     .strict()
 ])
 
+const videoLinkResourceFields = {
+  url: nonEmptyText,
+  kind: z.enum(['direct', 'web', 'magnet', 'ed2k']).optional(),
+  displayName: nullableText.optional(),
+  sizeBytes: finiteNumber.nonnegative().nullable().optional()
+}
+
+const videoLinkResourceDraft = z.object(videoLinkResourceFields).strict()
+
 const videoLinkImport = z
   .object({
     libraryId: id,
     code: nonEmptyText,
     target: videoResourceImportTarget,
-    url: nonEmptyText,
+    url: nonEmptyText.optional(),
     kind: z.enum(['direct', 'web', 'magnet', 'ed2k']).optional(),
     displayName: nullableText.optional(),
-    sizeBytes: finiteNumber.nonnegative().nullable().optional()
+    sizeBytes: finiteNumber.nonnegative().nullable().optional(),
+    resources: z.array(videoLinkResourceDraft).max(20).optional(),
+    links: z
+      .array(
+        z
+          .object({
+            label: text,
+            url: text
+          })
+          .strict()
+      )
+      .max(50)
+      .optional()
   })
   .strict()
 
-const videoLinkUpdate = videoLinkImport.omit({ libraryId: true, code: true, target: true })
+const videoLinkUpdate = z.object(videoLinkResourceFields).strict()
 
 const lifecycleCommit = {
   operationId: nonEmptyText.max(200),
@@ -213,6 +234,7 @@ const settingsPatch = z
     showVideoResourceTypeBadges: z.boolean().optional(),
     coverDisplayMode: z.enum(['portrait', 'landscape']).optional(),
     scraperPluginDelays: object.optional(),
+    scraperPluginPreLogin: object.optional(),
     compositeScrapers: object.optional()
   })
   .strict()
@@ -552,7 +574,8 @@ const pluginUpdate = z
     author: text.optional(),
     homepage: text.optional(),
     supportedFields: scrapeFields.optional(),
-    delay: object.optional()
+    delay: object.optional(),
+    preLogin: z.boolean().optional()
   })
   .strict()
 
@@ -570,6 +593,7 @@ const scraperServiceConfig = z
   .object({
     serverUrl: text,
     useScrapeProxy: z.boolean(),
+    keepFirstCandidate: z.boolean().optional(),
     tokenUpdate: scraperServiceTokenUpdate,
     acknowledgeInsecureHttp: z.boolean().optional()
   })

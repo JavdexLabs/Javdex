@@ -14,6 +14,11 @@ export interface ScraperPluginDelaySettings {
   actress: Record<string, ScraperPluginDelay>
 }
 
+export interface ScraperPluginPreLoginSettings {
+  video: Record<string, boolean>
+  actress: Record<string, boolean>
+}
+
 export interface CompositeScraperDefinition {
   kind: ScraperPluginKind
   name: string
@@ -40,6 +45,8 @@ export interface ScraperPluginDescriptor {
   disabledReason?: string
   supportedFields: Array<VideoScrapeField | ActressScrapeField>
   delay?: ScraperPluginDelay
+  preLogin?: boolean
+  preLoginAvailable?: boolean
   fieldPluginMap?: Partial<Record<VideoScrapeField | ActressScrapeField, string>>
 }
 
@@ -65,6 +72,7 @@ export interface ScraperPluginUpdateInput {
   homepage?: string
   supportedFields?: Array<VideoScrapeField | ActressScrapeField>
   delay?: ScraperPluginDelay
+  preLogin?: boolean
 }
 
 export interface CompositeScraperInput {

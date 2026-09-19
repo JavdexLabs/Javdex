@@ -10,4 +10,5 @@ todo.md
 /example
 release-artifacts-*/
 .agents/
+.tmp-*/
 skills-lock.json

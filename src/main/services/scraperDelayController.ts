@@ -1,4 +1,5 @@
 import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
+import { PLUGIN_DEFAULT_DELAYS } from '@shared/scraperDefaultDelays'
 import { getSettings } from '../settings/settingsStore'
 
 export interface ScraperDelayWaitEvent {
@@ -59,7 +60,7 @@ export class ScraperDelayController {
 
   private randomDelay(kind: ScraperPluginKind, pluginName: string): number {
     const settings = getSettings()
-    const configured = settings.scraperPluginDelays[kind][pluginName]
+    const configured = settings.scraperPluginDelays[kind][pluginName] ?? PLUGIN_DEFAULT_DELAYS[kind]?.[pluginName]
     const min = Math.max(0, configured?.minMs ?? settings.batchDelayMinMs)
     const max = Math.max(min, configured?.maxMs ?? settings.batchDelayMaxMs)
     return Math.floor(min + this.random() * (max - min))

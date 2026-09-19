@@ -38,6 +38,7 @@ import {
   videoScrapeApplyService
 } from '../services/videoScrapeApplyService'
 import { getSettings } from '../settings/settingsStore'
+import { createScraperPreLoginSession, type ScraperPreLoginSession } from './scraperPreLogin'
 import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
 import { mediaAssetStore } from '../services/mediaAssetStore'
 
@@ -46,6 +47,7 @@ import type { BaseScraper } from './BaseScraper'
 import { buildPluginRegistry } from './compositeScrapeRun'
 import {
   findCompositeScraper,
+  delayForPlugin,
   listMergedPluginDescriptors,
   listCompositePluginDescriptors,
   loadBundledVideoScrapers,
@@ -62,7 +64,8 @@ function buildRegistry(): Map<string, BaseScraper> {
 
 function buildSourceRegistry(
   proxyUrl: string,
-  delayController?: ScrapeVideoOptions['delayController']
+  delayController?: ScrapeVideoOptions['delayController'],
+  preLogin?: ScraperPreLoginSession
 ): VideoMetadataSourceRegistry {
   const scrapers = buildRegistry()
   const descriptors = listMergedPluginDescriptors('video')
@@ -78,6 +81,9 @@ function buildSourceRegistry(
         proxyUrl,
         runWithDelay: delayController
           ? (pluginName, task) => delayController.run('video', pluginName, task)
+          : undefined,
+        ensurePreLogin: preLogin
+          ? (pluginName) => preLogin.ensure('video', pluginName, proxyUrl)
           : undefined
       })
     )
@@ -99,6 +105,7 @@ function localNfoPluginDescriptor(): ScraperPluginDescriptor {
     editable: false,
     debuggable: false,
     configured: true,
+    delay: delayForPlugin('video', LOCAL_NFO_SOURCE_NAME),
     supportedFields: [...LOCAL_NFO_SUPPORTED_FIELDS]
   }
 }
@@ -181,6 +188,7 @@ export interface ScrapeVideoOptions {
   delayController?: {
     run<T>(kind: 'video', pluginName: string, task: () => Promise<T>): Promise<T>
   }
+  preLogin?: ScraperPreLoginSession
 }
 
 interface CompositeVideoCandidateSource {
@@ -339,7 +347,8 @@ export async function scrapeVideo(
     supportedFields.has(field)
   )
   const proxy = resolveScrapeProxyUrl(settings)
-  const sourceRegistry = buildSourceRegistry(proxy, options?.delayController)
+  const preLogin = options?.preLogin ?? createScraperPreLoginSession()
+  const sourceRegistry = buildSourceRegistry(proxy, options?.delayController, preLogin)
   const source = findCompositeScraper('video', scraperName || settings.defaultScraper)
     ? null
     : sourceForName(sourceRegistry, resolvedScraperName)
@@ -430,7 +439,7 @@ export async function scrapeVideo(
           ]
       const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
         const candidateStager = createVideoMetadataCandidateStager({
-          fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
+          fetchRemote: (url, sourceUrl) => scrapeBrowser.fetchBuffer(url, { referer: sourceUrl || 'omit' }),
           readManagedRootFile: async (capability) =>
             getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
         })
@@ -518,7 +527,7 @@ export async function scrapeVideo(
     const previousPending = getPendingVideoScrapeForVideo(videoId)
     let replacedPendingStagedPaths: string[] = []
     const candidateStager = createVideoMetadataCandidateStager({
-      fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
+      fetchRemote: (url, sourceUrl) => scrapeBrowser.fetchBuffer(url, { referer: sourceUrl || 'omit' }),
       readManagedRootFile: async (capability) =>
         getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
     })

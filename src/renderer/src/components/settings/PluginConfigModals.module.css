@@ -55,6 +55,15 @@
   font-size: 12px;
 }
 
+.switchBlock {
+  display: grid;
+  gap: 6px;
+}
+
+.switchHint {
+  margin: 0;
+}
+
 .warning,
 .error,
 .success {

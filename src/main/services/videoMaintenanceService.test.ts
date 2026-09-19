@@ -19,7 +19,9 @@ import { createVideoQueryService as createScopedVideoQueryService } from './vide
 import type {
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
-  VideoQuery
+  VideoQuery,
+  VideoResource,
+  VideoResourceImportResult
 } from '../../shared/videoTypes'
 import { classificationQueryService } from './classificationQueryService'
 import { recoverPendingLocalFileDeletions } from './pendingLocalFileDeletionService'
@@ -43,7 +45,10 @@ function createVideoMaintenanceService(dependencies?: unknown) {
   return {
     ...service,
     importLinkResource(input: Omit<VideoLinkResourceImportInput, 'libraryId'>) {
-      return service.importLinkResource({ ...input, libraryId: DEFAULT_SCOPE.libraryId })
+      return service.importLinkResource({
+        ...input,
+        libraryId: DEFAULT_SCOPE.libraryId
+      }) as VideoResourceImportResult & { resource: VideoResource }
     },
     updateLinkResource(
       videoId: number,
@@ -251,9 +256,9 @@ describe('VideoMaintenanceService', () => {
     })
 
     assert.equal(appended.createdVideo, false)
-    assert.equal(appended.resource.is_primary, 0)
+    assert.equal(appended.resource?.is_primary, 0)
     assert.equal(created.createdVideo, true)
-    assert.equal(created.resource.is_primary, 1)
+    assert.equal(created.resource?.is_primary, 1)
     assert.equal(query.get(created.videoId)?.scraped_status, 0)
     assert.deepEqual(
       query.get(1)?.resources.map((resource) => [resource.kind, resource.display_name]),
@@ -261,6 +266,86 @@ describe('VideoMaintenanceService', () => {
         ['local', null],
         ['direct', 'Remote copy']
       ]
+    )
+  })
+
+  it('creates a resource-less video and can add related links without a playback url', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+
+    const created = videos.importLinkResource({
+      code: 'EMPTY-001',
+      target: { kind: 'new' }
+    })
+    assert.equal(created.createdVideo, true)
+    assert.equal(created.resource, null)
+    assert.deepEqual(query.get(created.videoId)?.resources, [])
+    assert.deepEqual(query.get(created.videoId)?.links, [])
+
+    const withLinks = videos.importLinkResource({
+      code: 'LINK-001',
+      target: { kind: 'new' },
+      links: [{ label: 'JavDB', url: 'https://javdb.com/v/LINK-001' }]
+    })
+    assert.equal(withLinks.resource, null)
+    assert.deepEqual(
+      query.get(withLinks.videoId)?.links.map((link) => [link.label, link.url, link.position]),
+      [['JavDB', 'https://javdb.com/v/LINK-001', 0]]
+    )
+
+    const appended = videos.importLinkResource({
+      code: 'APP-001',
+      target: { kind: 'existing', videoId: 1 },
+      url: 'https://cdn.example/APP-001-extra.mp4',
+      kind: 'direct',
+      links: [{ label: 'Shop', url: 'https://shop.example/APP-001' }]
+    })
+    assert.equal(appended.createdVideo, false)
+    assert.equal(appended.resource?.kind, 'direct')
+    assert.deepEqual(
+      query.get(1)?.links.map((link) => [link.label, link.url]),
+      [['Shop', 'https://shop.example/APP-001']]
+    )
+  })
+
+  it('imports multiple playback resources onto a new video in one request', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+    const created = videos.importLinkResource({
+      code: 'MULTI-001',
+      target: { kind: 'new' },
+      resources: [
+        { url: 'https://cdn.example/a.mp4', kind: 'direct', displayName: 'A' },
+        { url: 'https://example.com/watch', kind: 'web', displayName: 'B' }
+      ]
+    })
+    assert.equal(created.createdVideo, true)
+    assert.equal(created.resource?.display_name, 'A')
+    assert.deepEqual(
+      query.get(created.videoId)?.resources.map((item) => [
+        item.kind,
+        item.display_name,
+        item.is_primary
+      ]),
+      [
+        ['direct', 'A', 1],
+        ['web', 'B', 0]
+      ]
+    )
+  })
+
+  it('rejects appending to an existing video with neither a resource nor related links', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    assert.throws(
+      () =>
+        videos.importLinkResource({
+          code: 'APP-001',
+          target: { kind: 'existing', videoId: 1 }
+        }),
+      /请至少添加资源链接或相关链接/
     )
   })
 
@@ -788,14 +873,16 @@ describe('VideoMaintenanceService', () => {
     setupDb()
     const database = getDb()
     const service = createScopedVideoMaintenanceService()
-    const link = service.importLinkResource({
+    const imported = service.importLinkResource({
       libraryId: 1,
       code: 'APP-001',
       target: { kind: 'existing', videoId: 1 },
       url: 'https://example.com/original',
       kind: 'web',
       displayName: 'Original'
-    }).resource
+    })
+    assert.ok(imported.resource)
+    const link = imported.resource
     const before = database
       .prepare(
         `SELECT id, video_id, locator, display_name, is_primary

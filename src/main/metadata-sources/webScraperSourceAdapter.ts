@@ -25,6 +25,7 @@ export interface WebScraperSourceAdapterOptions {
   plugin: ScraperPluginDescriptor
   proxyUrl: string
   runWithDelay?: <T>(pluginName: string, task: () => Promise<T>) => Promise<T>
+  ensurePreLogin?: (pluginName: string) => Promise<void>
 }
 
 function supportedVideoFields(plugin: ScraperPluginDescriptor): VideoScrapeField[] {
@@ -130,6 +131,7 @@ export class WebScraperSourceAdapter implements VideoMetadataSource {
     const requestedCode = request.target.code
     const normalizedCode = normalizeVideoCode(requestedCode)
     const task = () => this.options.scraper.parseTask(requestedCode, this.options.proxyUrl)
+    if (this.options.ensurePreLogin) await this.options.ensurePreLogin(this.options.plugin.name)
     const rawResult = this.options.runWithDelay
       ? await this.options.runWithDelay(this.options.plugin.name, task)
       : await task()

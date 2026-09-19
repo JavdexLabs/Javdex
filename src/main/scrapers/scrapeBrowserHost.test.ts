@@ -194,7 +194,7 @@ describe('ScrapeBrowserHost leases', () => {
       calls.filter((call) =>
         call.command === 'performAction' && call.payload.action === 'present'
       ).length,
-      1
+      0
     )
     await first.release()
     await second.fetchPage('https://example.com')
@@ -238,6 +238,20 @@ describe('ScrapeBrowserHost leases', () => {
     assert.deepEqual(stops, ['host session closed', 'lease released'])
   })
 
+  for (const purpose of ['scrape', 'plugin-check'] as const) {
+    it(`does not present the helper for resource-only ${purpose} sessions`, async () => {
+      const { host, calls } = fakeHost()
+      const lease = await host.acquire({
+        ownerId: 'resource-only', purpose, signal: new AbortController().signal
+      })
+      await lease.fetchBuffer('https://example.test/image.jpg')
+      assert.equal(calls.some((call) =>
+        call.command === 'performAction' && call.payload.action === 'present'
+      ), false)
+      await lease.release()
+    })
+  }
+
   it('presents the helper through the lease without exposing it as a plugin browser action', async () => {
     const { host, calls } = fakeHost()
     const lease = await host.acquire({
@@ -256,6 +270,24 @@ describe('ScrapeBrowserHost leases', () => {
     assert.deepEqual(calls.at(-1), {
       command: 'performAction',
       payload: { action: 'present', params: {} }
+    })
+    await lease.release()
+  })
+
+  it('opens a pre-login homepage through the lease without exposing it as a plugin browser action', async () => {
+    const { host, calls } = fakeHost()
+    const lease = await host.acquire({
+      ownerId: 'scrape',
+      purpose: 'scrape',
+      signal: new AbortController().signal
+    })
+    assert.deepEqual(await lease.waitPreLogin('https://javdb.com/', 'JavDB'), {
+      url: '',
+      title: ''
+    })
+    assert.deepEqual(calls.at(-1), {
+      command: 'performAction',
+      payload: { action: 'waitPreLogin', params: { url: 'https://javdb.com/', pluginName: 'JavDB' } }
     })
     await lease.release()
   })

@@ -55,7 +55,7 @@ beforeEach(() => {
   resetSettingsCacheForTests()
   updateSettings({
     scraperServiceConfigs: {
-      metatube: { serverUrl: 'https://service.test/base', useScrapeProxy: false }
+      metatube: { serverUrl: 'https://service.test/base', useScrapeProxy: false, keepFirstCandidate: false }
     }
   })
   pluginCode = fs.readFileSync(
@@ -123,7 +123,7 @@ describe('MetaTube bundled video plugin', () => {
       code: 'ABC-123',
       title: 'First title',
       summary: 'Summary text',
-      coverUrl: 'https://service.test/base/v1/images/primary/P%2F1/id%2F1?quality=90',
+      coverUrl: 'https://service.test/base/v1/images/backdrop/P%2F1/id%2F1?quality=90',
       releaseDate: '2024-02-29',
       maker: 'Maker',
       publisher: 'Approximate publisher',
@@ -194,9 +194,8 @@ describe('MetaTube bundled video plugin', () => {
     assert.equal(detailRequests, 0)
   })
 
-  it('fails the entire scrape if one exact detail request fails', async () => {
-    await assert.rejects(
-      () => runMetaTube(async (request) => {
+  it('keeps valid candidates if one exact detail request fails', async () => {
+    const result = await runMetaTube(async (request) => {
         const url = new URL(request.url)
         if (url.pathname.endsWith('/search')) {
           return json(200, {
@@ -209,9 +208,35 @@ describe('MetaTube bundled video plugin', () => {
         return url.pathname.includes('/Broken/')
           ? json(503, { error: { message: 'offline' } })
           : json(200, detail('Good', '1'))
-      }),
-      /暂时不可用/
-    )
+      })
+    assert.deepEqual((result as ScrapeResult[]).map((candidate) => candidate.title), ['Good title'])
+  })
+
+  it('omits unknown duration and isolates invalid duration candidates', async () => {
+    const runtimes = [0, 137, -1, 1.5, '137']
+    const result = await runMetaTube(async (request) => {
+      const url = new URL(request.url)
+      if (url.pathname.endsWith('/search')) {
+        return json(200, { data: runtimes.map((_, index) => ({
+          provider: `Duration-${index}`, id: String(index), number: 'ABC-123'
+        })) })
+      }
+      const id = url.pathname.split('/').at(-1)!
+      return json(200, detail(`Duration-${id}`, id, { runtime: runtimes[Number(id)] }))
+    })
+    const candidates = result as ScrapeResult[]
+    assert.equal(candidates.length, 2)
+    assert.equal(Object.hasOwn(candidates[0]!, 'durationSeconds'), false)
+    assert.equal(candidates[1]!.durationSeconds, 137 * 60)
+  })
+
+  it('reports an error when all exact detail requests fail', async () => {
+    await assert.rejects(() => runMetaTube(async (request) => {
+      const url = new URL(request.url)
+      return url.pathname.endsWith('/search')
+        ? json(200, { data: [{ provider: 'Broken', id: '1', number: 'ABC-123' }] })
+        : json(503, { error: { message: 'offline' } })
+    }), /暂时不可用/)
   })
 
   it('caps public sample proxy URLs at forty without putting credentials in them', async () => {
@@ -271,5 +296,37 @@ describe('MetaTube bundled video plugin', () => {
       }),
       /actors 类型不兼容/
     )
+  })
+
+  it('keeps only the first exact search candidate when configured', async () => {
+    updateSettings({
+      scraperServiceConfigs: {
+        metatube: {
+          serverUrl: 'https://service.test/base',
+          useScrapeProxy: false,
+          keepFirstCandidate: true
+        }
+      }
+    })
+    let detailRequests = 0
+    const result = await runMetaTube(async (request) => {
+      const url = new URL(request.url)
+      if (url.pathname.endsWith('/search')) {
+        return json(200, {
+          data: Array.from({ length: 9 }, (_, index) => ({
+            provider: `Provider-${index}`,
+            id: String(index),
+            number: 'ABC-123'
+          }))
+        })
+      }
+      detailRequests += 1
+      const segments = url.pathname.split('/').map(decodeURIComponent)
+      return json(200, detail(segments.at(-2)!, segments.at(-1)!))
+    })
+    assert.equal(detailRequests, 1)
+    const candidates = result as ScrapeResult[]
+    assert.equal(candidates.length, 1)
+    assert.equal(candidates[0]?.title, 'Provider-0 title')
   })
 })

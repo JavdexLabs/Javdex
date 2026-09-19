@@ -69,7 +69,8 @@ describe('configuredScraperService', () => {
     const normalized = getSettings()
     assert.deepEqual(normalized.scraperServiceConfigs.metatube, {
       serverUrl: '',
-      useScrapeProxy: false
+      useScrapeProxy: false,
+      keepFirstCandidate: false
     })
     assert.equal(normalized.defaultScraper, 'JavDB')
   })
@@ -104,6 +105,7 @@ describe('configuredScraperService', () => {
     })
     assert.equal(saved.serverUrl, 'http://example.test/base')
     assert.equal(saved.hasToken, true)
+    assert.equal(saved.keepFirstCandidate, false)
     assert.equal(getScraperServiceToken('metatube'), 'secret-token')
     assert.equal(
       fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8').includes('secret-token'),
@@ -138,6 +140,7 @@ describe('configuredScraperService', () => {
     updateSettings({ compositeScrapers: { video: [], actress: [] } })
     clearScraperServiceConfig('metatube')
     assert.equal(getScraperServicePublicConfig('metatube').serverUrl, '')
+    assert.equal(getScraperServicePublicConfig('metatube').keepFirstCandidate, false)
     assert.equal(getScraperServiceToken('metatube'), '')
   })
 
@@ -146,7 +149,7 @@ describe('configuredScraperService', () => {
       proxyUrl: 'http://127.0.0.1:7890',
       proxyUrlEnabled: true,
       scraperServiceConfigs: {
-        metatube: { serverUrl: 'https://example.test/meta', useScrapeProxy: true }
+        metatube: { serverUrl: 'https://example.test/meta', useScrapeProxy: true, keepFirstCandidate: false }
       }
     })
     saveScraperServiceConfig('metatube', {
@@ -199,10 +202,30 @@ describe('configuredScraperService', () => {
     assert.equal(requests[0]?.proxyUrl, undefined)
   })
 
+  it('persists keepFirstCandidate and snapshots it for an in-flight scrape', () => {
+    saveScraperServiceConfig('metatube', {
+      serverUrl: 'https://first.test/base',
+      useScrapeProxy: false,
+      keepFirstCandidate: true,
+      tokenUpdate: { mode: 'keep' }
+    })
+    const snapshot = createConfiguredScraperServiceClient('metatube')
+    assert.equal(snapshot.keepFirstCandidate, true)
+
+    saveScraperServiceConfig('metatube', {
+      serverUrl: 'https://second.test/next',
+      useScrapeProxy: false,
+      keepFirstCandidate: false,
+      tokenUpdate: { mode: 'keep' }
+    })
+    assert.equal(snapshot.keepFirstCandidate, true)
+    assert.equal(createConfiguredScraperServiceClient('metatube').keepFirstCandidate, false)
+  })
+
   it('rejects cross-origin redirects before sending credentials to the target', async () => {
     updateSettings({
       scraperServiceConfigs: {
-        metatube: { serverUrl: 'https://example.test/meta', useScrapeProxy: false }
+        metatube: { serverUrl: 'https://example.test/meta', useScrapeProxy: false, keepFirstCandidate: false }
       }
     })
     const requests: ScraperServiceTransportRequest[] = []
@@ -221,7 +244,7 @@ describe('configuredScraperService', () => {
   it('rejects HTTPS downgrade redirects', async () => {
     updateSettings({
       scraperServiceConfigs: {
-        metatube: { serverUrl: 'https://example.test/meta', useScrapeProxy: false }
+        metatube: { serverUrl: 'https://example.test/meta', useScrapeProxy: false, keepFirstCandidate: false }
       }
     })
     setScraperServiceTransportForTests(async () =>
@@ -236,7 +259,7 @@ describe('configuredScraperService', () => {
   it('classifies authentication, rate-limit, server, malformed, and oversized responses', async () => {
     updateSettings({
       scraperServiceConfigs: {
-        metatube: { serverUrl: 'https://example.test', useScrapeProxy: false }
+        metatube: { serverUrl: 'https://example.test', useScrapeProxy: false, keepFirstCandidate: false }
       }
     })
     for (const [status, code] of [

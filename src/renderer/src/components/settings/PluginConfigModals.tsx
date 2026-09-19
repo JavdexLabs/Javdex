@@ -1,4 +1,5 @@
 import Switch from '../Switch'
+import SettingsSwitchRow from '../SettingsSwitchRow'
 import { useMemo, useRef, useState } from 'react'
 import type {
   ActressScrapeField,
@@ -75,7 +76,9 @@ export function PluginConfigModal({
     minSeconds: Math.round(delay.minMs / 1000),
     maxSeconds: Math.round(delay.maxMs / 1000),
     serverUrl: serviceConfig?.serverUrl ?? '',
-    useScrapeProxy: serviceConfig?.useScrapeProxy ?? false
+    useScrapeProxy: serviceConfig?.useScrapeProxy ?? false,
+    keepFirstCandidate: serviceConfig?.keepFirstCandidate ?? false,
+    preLogin: plugin.preLogin ?? false
   })
   const [description, setDescription] = useState(initialRef.current.description)
   const [minSeconds, setMinSeconds] = useState(initialRef.current.minSeconds)
@@ -85,6 +88,8 @@ export function PluginConfigModal({
   const [clearToken, setClearToken] = useState(false)
   const [showToken, setShowToken] = useState(false)
   const [useScrapeProxy, setUseScrapeProxy] = useState(initialRef.current.useScrapeProxy)
+  const [keepFirstCandidate, setKeepFirstCandidate] = useState(initialRef.current.keepFirstCandidate)
+  const [preLogin, setPreLogin] = useState(initialRef.current.preLogin)
   const [testingService, setTestingService] = useState(false)
   const [testResult, setTestResult] = useState<ScraperServiceConnectionResult | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
@@ -100,19 +105,24 @@ export function PluginConfigModal({
     const initial = initialRef.current
     const metaDirty = editableMeta && description !== initial.description
     const delayDirty = minSeconds !== initial.minSeconds || maxSeconds !== initial.maxSeconds
+    const preLoginDirty = Boolean(plugin.preLoginAvailable) && preLogin !== initial.preLogin
     const serviceDirty =
       Boolean(serviceConfig) &&
       (serverUrl !== initial.serverUrl ||
         useScrapeProxy !== initial.useScrapeProxy ||
+        keepFirstCandidate !== initial.keepFirstCandidate ||
         Boolean(token.trim()) ||
         clearToken)
-    return metaDirty || delayDirty || serviceDirty
+    return metaDirty || delayDirty || preLoginDirty || serviceDirty
   }, [
     clearToken,
     description,
     editableMeta,
+    keepFirstCandidate,
     maxSeconds,
     minSeconds,
+    preLogin,
+    plugin.preLoginAvailable,
     serverUrl,
     serviceConfig,
     token,
@@ -122,6 +132,7 @@ export function PluginConfigModal({
   const serviceInput = (acknowledgeInsecureHttp = false): ScraperServiceConfigInput => ({
     serverUrl,
     useScrapeProxy,
+    keepFirstCandidate,
     tokenUpdate: clearToken
       ? { mode: 'clear' }
       : token.trim()
@@ -172,7 +183,8 @@ export function PluginConfigModal({
         delay: {
           minMs: Math.max(0, minSeconds) * 1000,
           maxMs: Math.max(minSeconds, maxSeconds) * 1000
-        }
+        },
+        ...(plugin.preLoginAvailable ? { preLogin } : {})
       },
       serviceConfig ? serviceInput(acknowledgeInsecureHttp) : undefined
     )
@@ -215,7 +227,7 @@ export function PluginConfigModal({
                 <p className="plugin-config-hint">
                   {plugin.requiresConfiguration
                     ? '此内置插件连接你指定的服务端；服务凭证仅由主进程安全保存。'
-                    : '内置插件仅可调整访问间隔；查看或调试代码请使用卡片菜单「AI 调试」。'}
+                    : '内置插件可调整访问间隔；需要登入的网站可开启刮削前预登入。查看或调试代码请使用卡片菜单「AI 调试」。'}
                 </p>
               )}
             </header>
@@ -364,6 +376,21 @@ export function PluginConfigModal({
                   />
                   <span>使用 Javdex 刮削代理连接此服务</span>
                 </label>
+                <div className={styles.switchBlock}>
+                  <label className={styles.checkboxField}>
+                    <Switch
+                      checked={keepFirstCandidate}
+                      disabled={saving}
+                      aria-label="只保留第一个候选"
+                      aria-describedby="metatube-first-candidate-hint"
+                      onChange={(event) => setKeepFirstCandidate(event.target.checked)}
+                    />
+                    <span>只保留第一个候选</span>
+                  </label>
+                  <p id="metatube-first-candidate-hint" className={`${styles.fieldHint} ${styles.switchHint}`}>
+                    多个来源返回同番号时，只刮削搜索结果中的第一个，不再进入待确认。
+                  </p>
+                </div>
               </div>
 
               {serviceConfig.secretProtection !== 'secure' && (
@@ -455,6 +482,24 @@ export function PluginConfigModal({
               </label>
             </div>
           </section>
+
+          {plugin.preLoginAvailable ? (
+            <section className="plugin-config-panel">
+              <h4 className="plugin-config-panel-title">预登入</h4>
+              <p className="plugin-config-panel-caption plugin-config-panel-caption--block">
+                刮削前打开网站主页，由你在当前页完成登入
+              </p>
+              <div className="settings-toggle-list settings-toggle-list--compact">
+                <SettingsSwitchRow
+                  title="刮削前预登入"
+                  description="开启后，该插件每次刮削任务会先打开主页。请在当前页登入或通过验证，再点窗口顶部操作栏「登入完成」。不支持弹出新窗口的登入。批量刮削同一插件只询问一次。组合来源会按字段源依次打开需要登入的主页。"
+                  checked={preLogin}
+                  disabled={saving}
+                  onChange={setPreLogin}
+                />
+              </div>
+            </section>
+          ) : null}
 
           <section className="plugin-config-panel">
             <div className="plugin-config-panel-head">

@@ -125,4 +125,48 @@ describe('video query IPC schemas', () => {
     }
     assert.equal(getSchema.safeParse([libraryScope, 42, 'unexpected']).success, false)
   })
+
+  it('accepts a video import without a playback url while resource updates still require one', () => {
+    const importSchema = videoIpcSchemas[IPC.VIDEO_RESOURCE_IMPORT]
+    const updateSchema = videoIpcSchemas[IPC.VIDEO_RESOURCE_UPDATE]
+    assert.equal(
+      importSchema.safeParse([
+        { libraryId: 3, code: 'EMPTY-001', target: { kind: 'new' } }
+      ]).success,
+      true
+    )
+    assert.equal(
+      importSchema.safeParse([
+        {
+          libraryId: 3,
+          code: 'EMPTY-001',
+          target: { kind: 'new' },
+          links: [{ label: 'JavDB', url: 'https://javdb.com/v/EMPTY-001' }]
+        }
+      ]).success,
+      true
+    )
+    assert.equal(
+      updateSchema.safeParse([3, 1, 2, { displayName: 'label only' }]).success,
+      false
+    )
+    assert.equal(
+      updateSchema.safeParse([3, 1, 2, { url: 'https://cdn.example/movie.mp4' }]).success,
+      true
+    )
+    assert.equal(
+      importSchema.safeParse([
+        {
+          libraryId: 3,
+          code: 'MULTI-001',
+          target: { kind: 'new' },
+          resources: [
+            { url: 'https://cdn.example/a.mp4', kind: 'direct' },
+            { url: 'https://example.com/watch', kind: 'web' }
+          ]
+        }
+      ]).success,
+      true
+    )
+  })
 })

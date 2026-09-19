@@ -6,6 +6,7 @@ import { ScraperServiceConfiguration } from './scraperServiceConfiguration'
 const publicConfig: ScraperServicePublicConfig = {
   serverUrl: 'https://server.test',
   useScrapeProxy: false,
+  keepFirstCandidate: false,
   hasToken: true,
   secretProtection: 'secure'
 }

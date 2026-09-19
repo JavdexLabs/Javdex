@@ -401,6 +401,10 @@ describe('settingsStore retired video scrapers', () => {
         video: { JAV8: { minMs: 1000, maxMs: 2000 } },
         actress: {}
       },
+      scraperPluginPreLogin: {
+        video: { JAV8: true, JavDB: true },
+        actress: {}
+      },
       compositeScrapers: {
         video: [
           {
@@ -416,6 +420,8 @@ describe('settingsStore retired video scrapers', () => {
     migrateRetiredVideoScraperSettings()
     const settings = getSettings()
     assert.equal(settings.scraperPluginDelays.video.JAV8, undefined)
+    assert.equal(settings.scraperPluginPreLogin.video.JAV8, undefined)
+    assert.equal(settings.scraperPluginPreLogin.video.JavDB, true)
     assert.deepEqual(settings.compositeScrapers.video[0]?.fieldPluginMap, {
       title: 'JavLibrary',
       cover: 'JavDB'

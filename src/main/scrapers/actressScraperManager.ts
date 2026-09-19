@@ -20,6 +20,7 @@ import {
 } from '../services/actressIdentityConflictWorkflow'
 import { getSettings } from '../settings/settingsStore'
 import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
+import { createScraperPreLoginSession, type ScraperPreLoginSession } from './scraperPreLogin'
 import { buildPluginRegistry, runCompositeFieldGroups } from './compositeScrapeRun'
 import {
   findCompositeScraper,
@@ -89,6 +90,18 @@ export interface ScrapeActressOptions {
   delayController?: {
     run<T>(kind: 'actress', pluginName: string, task: () => Promise<T>): Promise<T>
   }
+  preLogin?: ScraperPreLoginSession
+}
+
+async function runActressPluginTask<T>(
+  pluginName: string,
+  proxyUrl: string,
+  delayController: ScrapeActressOptions['delayController'] | undefined,
+  preLogin: ScraperPreLoginSession | undefined,
+  task: () => Promise<T>
+): Promise<T> {
+  if (preLogin) await preLogin.ensure('actress', pluginName, proxyUrl)
+  return delayController ? delayController.run('actress', pluginName, task) : task()
 }
 
 function mergeActressResults(
@@ -115,7 +128,8 @@ async function scrapeCompositeActress(
   queryName: string,
   aliases: string[],
   proxyUrl: string,
-  delayController?: ScrapeActressOptions['delayController']
+  delayController?: ScrapeActressOptions['delayController'],
+  preLogin?: ScraperPreLoginSession
 ): Promise<CompositeActressScrapeOutcome> {
   const composite = findCompositeScraper('actress', compositeName)
   if (!composite) return { result: null, warnings: [], matchedFields: [] }
@@ -125,11 +139,13 @@ async function scrapeCompositeActress(
     onPluginError: 'collect',
     runPlugin: async (pluginName) => {
       const scraper = getActressScraper(pluginName)
-      const rawResult = delayController
-        ? await delayController.run('actress', pluginName, () =>
-            scraper.parseTask(queryName, aliases, proxyUrl)
-          )
-        : await scraper.parseTask(queryName, aliases, proxyUrl)
+      const rawResult = await runActressPluginTask(
+        pluginName,
+        proxyUrl,
+        delayController,
+        preLogin,
+        () => scraper.parseTask(queryName, aliases, proxyUrl)
+      )
       return normalizeActressScrapeResult(rawResult)
     },
     pick: (result, pluginFields) => projectActressScrapeResult(result, new Set(pluginFields)),
@@ -193,6 +209,7 @@ export async function scrapeActress(
   try {
     const settings = getSettings()
     const proxyUrl = resolveScrapeProxyUrl(settings)
+    const preLogin = options?.preLogin ?? createScraperPreLoginSession()
     const selectedScraperName = scraperName || settings.defaultActressScraper
     assertActressScraperRunnable(selectedScraperName)
     const composite = findCompositeScraper('actress', selectedScraperName)
@@ -215,11 +232,13 @@ export async function scrapeActress(
     let sourceWarnings: string[] = []
     let fieldsToApply = requested
     if (scraper) {
-      rawResult = options?.delayController
-        ? await options.delayController.run('actress', scraper.scraperName, () =>
-            scraper.parseTask(queryName, aliases, proxyUrl)
-          )
-        : await scraper.parseTask(queryName, aliases, proxyUrl)
+      rawResult = await runActressPluginTask(
+        scraper.scraperName,
+        proxyUrl,
+        options?.delayController,
+        preLogin,
+        () => scraper.parseTask(queryName, aliases, proxyUrl)
+      )
     } else {
       const compositeOutcome = await scrapeCompositeActress(
         selectedScraperName,
@@ -227,7 +246,8 @@ export async function scrapeActress(
         queryName,
         aliases,
         proxyUrl,
-        options?.delayController
+        options?.delayController,
+        preLogin
       )
       rawResult = compositeOutcome.result
       sourceWarnings = compositeOutcome.warnings

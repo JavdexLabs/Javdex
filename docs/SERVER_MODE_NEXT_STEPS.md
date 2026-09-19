@@ -12,7 +12,7 @@
 - 已提交：服务端 NFO 完整导入与远程配对 `dd72ab3`。
 - 按用户后续要求，容器验收使用本机 Colima / Docker（Linux arm64），不再限定 Cloud 会话。
 - 已提交：远程媒体库版本映射和按挂载名称添加目录 `ebbae81`。
-- 正在执行：完整 GUI 与同版本安装验收；现行 Linux 服务端、容器及迁库故障验收已通过，范围见下表。历史结果不代替本轮。
+- 已验证原第 3 项的主要 GUI 流程与第 4 项定向恢复条件；macOS/Linux arm64 安装及保留数据替换已通过。最终产物核对继续，Windows/macOS x64 无运行环境，不能声明跨平台全部完成。历史结果不代替本轮。
 
 ## 文档入口与维护职责
 
@@ -46,14 +46,15 @@
 
 当前没有尚未实施的 C1–C7 任务。后续功能工作先定位具体缺口，再更新合同、共享业务和宿主接线；不要把历史矩阵中的旧限制重新当成待开发功能。
 
-| 尚未闭合的事项 | 后续处理方式 |
+| 当前事项 | 状态与后续处理 |
 |---|---|
-| 服务端 NFO 资料导入与远程配对 | 代码已接线；真实 Node 直接/待确认导入及浏览配对测试通过，完整产品流验收继续推进 |
-| 完整远程 GUI | 已通过单条采集、待确认应用、真实服务端文件改名、NFO 导入和配对；批量采集、取消与部分提交已通过；清单唯一已有影片匹配及结果页已通过固定页面/模型传输夹具验收 |
-| 变更后协议的故障与恢复验收 | 本轮 55 项 Linux 测试与 Docker 双宿主迁库故障验收通过；旧 waitingMaintenance、双端迁库许可的历史结果不作为现行协议证据 |
-| 同源码版本的安装与发布 | 历史 0.7.0 Linux 结果不代表当前 0.7.1，也不代表 Windows/macOS；版本和发布目标需在启动发布工作时重新确定 |
+| 服务端 NFO 导入与远程配对 | 功能及真实 Node、GUI 验收通过，详见下方证据 |
+| 原建议中的远程 GUI 主流程 | 编辑冲突、扫描/改名、单条/批量刮削、候选与图片交付、清单导入、播放、取消/重连均有实际证据；模型传输使用夹具，不评估外部模型质量 |
+| 现行协议定向故障恢复 | 55 项 Linux 回归与 Docker 双宿主迁库故障验收通过；不声明历史 M/D 全矩阵关闭 |
+| 安装及保留数据更新 | macOS/Linux arm64 安装与同版本候选替换已通过；最终产物核对继续，Windows/macOS x64 运行验收缺环境 |
+| 发布、推送、合并 main、升级版本号 | 原第 6 项明确不执行 |
 
-此前暂缓、现已获准执行的范围（发布除外）：全面自动化与完整 GUI 验收、M/D 全矩阵关闭、跨平台安装部署、进程崩溃/磁盘/挂载/网络等故障注入、版本升级和发布。当前授权以本页顶部为准；版本升级和发布仍不执行。
+原 1–5 的实际范围以本页“范围复核”及用户原指令为准，不把历史全矩阵自动扩展为本次额外门槛。下方保留各轮证据及明确的未覆盖边界。
 
 ## 扫描/NFO 版本保护核对（2026-09-19，工作区改动）
 
@@ -102,7 +103,7 @@
 | Linux 同版本安装 | 当前源码桌面/Web/server build 和 Electron 原生依赖构建通过；arm64 deb 打包与 `smoke:same-version-install` 通过（解包校验、Xvfb 存活检查与同版本 Docker 镜像，随后在同一隔离容器安装 gnome-keyring/DBus 并用 apt 正式安装 deb；`/opt/Javdex/javdex` 的 NFO、采集、待确认、终止、改名、配对与重启 GUI 均通过）。容器中的源码副本没有 Git 远端元数据，打包显式传入当前仓库主页；Electron 下载中断后使用已安装的相同 43.4.1 运行时；容器缺少 xz，deb 改用构建参数 `deb.compression=gz` |
 | 远程目录修复回归 | 11 项 IPC/HTTP 合同测试、`typecheck`、`pretest` 通过；显式旧版本仍保留并交由服务端拒绝 |
 
-Windows/macOS x64 安装及目标平台升级检查仍未闭合。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
+Windows/macOS x64 安装仍未闭合；macOS/Linux arm64 保留数据更新已补齐，见末尾。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
 
 ## 后续验证命令
 
@@ -185,4 +186,13 @@ Linux 最终已安装桌面 `/opt/Javdex/javdex` 配合更新后的生产 Docker
 
 使用真实旧镜像 `02856b068cad`（清单修复后候选）创建资料、刮削图片和网页配对，正常 `docker stop` 后移除旧容器；新镜像 `3f5e95646f23`（资源详情投影修复）接管相同的命名 `/data` 与 `/media` 卷。已安装桌面保留原 userData，能够继续使用写入凭据；浏览会话仍可用；影片、封面、样图记录及实际封面文件保持，最后通过 GUI 撤销配对。版本号均为 `0.7.1`，这是本次候选之间的同版本更新验收，不是跨发布版本数据库迁移声明。
 
-脚本 `JAVDEX_REMOTE_SMOKE_BASE_IMAGE=02856b068cad JAVDEX_REMOTE_SMOKE_UPGRADE_IMAGE=javdex-server:smoke`，配合 `NFO=1 SCRAPE=1 IMAGES=1` 退出 0。日志 `/tmp/javdex-server-upgrade-gui.log`，证据 `/var/tmp/javdex-acceptance/javdex-remote-desktop-m703dm/evidence`。首次强制删除旧容器的探查未在等待期内就绪，不计通过；上述通过仅证明正常停机升级。桌面安装包替换时保留 userData 的升级检查仍待补齐，Windows/macOS x64 环境仍缺。
+脚本 `JAVDEX_REMOTE_SMOKE_BASE_IMAGE=02856b068cad JAVDEX_REMOTE_SMOKE_UPGRADE_IMAGE=javdex-server:smoke`，配合 `NFO=1 SCRAPE=1 IMAGES=1` 退出 0。日志 `/tmp/javdex-server-upgrade-gui.log`，证据 `/var/tmp/javdex-acceptance/javdex-remote-desktop-m703dm/evidence`。首次强制删除旧容器的探查未在等待期内就绪，不计通过；上述通过仅证明正常停机升级。桌面安装包保留 userData 的替换检查随后已补齐（见下节），Windows/macOS x64 环境仍缺。
+
+### 桌面保留数据替换验收
+
+两平台均在旧应用中创建远程连接、NFO 影片、刮削封面/样图和浏览配对，退出应用后替换程序，保持同一隔离 userData 与钥匙串，再重新启动。检查 `this-computer.json` 原样保留、影片列表内容及 ID 不变、写入凭据无需重新认主、图片仍可读取、原浏览会话有效并可在 GUI 撤销。列表 `readRevision` 含进程身份，重启会变化，故比较持久内容而非该临时标记。
+
+- Linux arm64：用此前保存的已解包安装副本重新封装旧 deb（应用内容不改），先 `dpkg -i` 安装，再在测试中用当前最终 deb 替换。旧 ASAR SHA-256 `2af1252b70f7c7749a5a9787a2de6c524275aabd4b3a611f12541142c6ac2e39`，新 ASAR `c41716752d501c54bef70817c2ed3a30d688d504e221d3037ab1cd05499fb704`；新 deb 仍为 `0d3cd7b9997517e8e3e15b30580da4d9d187e4bae1fba849b88843ab0a7ac87e`。日志 `/tmp/javdex-desktop-upgrade-gui.log`，证据 `/var/tmp/javdex-acceptance/javdex-remote-desktop-SOTw98/evidence`，含 dpkg 安装日志。
+- macOS arm64：将先前 DMG 安装副本复制到隔离程序目录，测试中替换为最终 DMG 的应用副本（两者均已完成安装验证）。旧 ASAR SHA-256 `b84405ba89ee60e31f3e4358bc2afebf6508b5372ced9ab381e28caf6decf298`，新 ASAR `8800387a48a2d9090f169c95eece6a2ab744abd1336bbe74a53cc0af8faaacfa`。日志 `/tmp/javdex-mac-upgrade-gui.log`，证据 `/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-NMrwJm/evidence`。
+
+两条脚本均退出 0。可通过 `JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_DEB`（仅隔离 Linux 容器）或 `JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_APP`（macOS 隔离副本）复跑。两端版本号仍为 0.7.1；这证明本次候选间替换保留数据，不代表跨发布版本迁移或自动更新器验收。

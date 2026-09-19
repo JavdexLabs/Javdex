@@ -67,6 +67,28 @@ if (process.env.JAVDEX_REMOTE_SMOKE_SCRAPE === '1') {
 }
 if (process.env.JAVDEX_REMOTE_SMOKE_PLAYLIST === '1') assert.ok(process.env.JAVDEX_PLAYLIST_FIXTURE_HOST, 'playlist GUI needs an isolated public-classified test address; loopback sources are rejected by the product')
 const playlistFixture = process.env.JAVDEX_REMOTE_SMOKE_PLAYLIST === '1' ? await startPlaylistFixture(output) : null
+const desktopUpgradeApp = process.env.JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_APP
+let desktopExecutable = process.env.JAVDEX_DESKTOP_EXECUTABLE
+const desktopUpgradeDeb = process.env.JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_DEB
+if (desktopUpgradeDeb) {
+  assert.equal(process.platform, 'linux')
+  assert.ok(fs.existsSync('/.dockerenv'), 'package replacement is restricted to an isolated Linux container')
+  assert.ok(path.isAbsolute(desktopUpgradeDeb) && desktopUpgradeDeb.endsWith('.deb') && fs.existsSync(desktopUpgradeDeb))
+  assert.equal(process.env.JAVDEX_DESKTOP_EXECUTABLE, '/opt/Javdex/javdex')
+}
+const isolatedMacApp = path.join(root, 'installed', 'Javdex.app')
+if (desktopUpgradeApp) {
+  assert.equal(process.platform, 'darwin')
+  assert.ok(!desktopUpgradeDeb)
+  assert.ok(path.isAbsolute(desktopUpgradeApp) && desktopUpgradeApp.endsWith('.app'))
+  assert.ok(desktopExecutable?.endsWith('/Contents/MacOS/Javdex'))
+  const baselineApp = desktopExecutable.slice(0, -'/Contents/MacOS/Javdex'.length)
+  fs.mkdirSync(path.dirname(isolatedMacApp), { recursive: true })
+  const copied = spawnSync('ditto', [baselineApp, isolatedMacApp], { encoding: 'utf8' })
+  assert.equal(copied.status, 0, copied.stderr)
+  desktopExecutable = path.join(isolatedMacApp, 'Contents', 'MacOS', 'Javdex')
+}
+const desktopUpgrade = Boolean(desktopUpgradeDeb || desktopUpgradeApp)
 const upgradeImage = process.env.JAVDEX_REMOTE_SMOKE_UPGRADE_IMAGE
 const initialImage = process.env.JAVDEX_REMOTE_SMOKE_BASE_IMAGE || 'javdex-server:smoke'
 const upgradeVolume = `${name}-upgrade-data`
@@ -97,7 +119,7 @@ try {
   const env = { ...process.env, JAVDEX_TEST_USER_DATA: userData }
   delete env.ELECTRON_RUN_AS_NODE
   const launch = async () => {
-    const executablePath = process.env.JAVDEX_DESKTOP_EXECUTABLE
+    const executablePath = desktopExecutable
     application = await electron.launch({ ...(executablePath ? { executablePath, args: process.env.JAVDEX_REMOTE_SMOKE_NO_SANDBOX === '1' ? ['--no-sandbox'] : [] } : { args: ['.'] }), env })
     application.process().stderr?.on('data', chunk => {
       const line = chunk.toString()
@@ -319,8 +341,28 @@ try {
   await page.getByRole('button', { name: '刷新', exact: true }).click()
   await page.getByText(/Remote GUI phone ·/).waitFor()
   await page.screenshot({ path: path.join(output, 'remote-pairing.png'), fullPage: true })
+  const settingsBeforeUpgrade = fs.readFileSync(path.join(userData, 'this-computer.json'), 'utf8')
+  const videosBeforeUpgrade = desktopUpgrade
+    ? await page.evaluate(() => window.api.videos.list({ kind: 'library', libraryId: 1 })) : null
   await application.close()
   application = null
+  if (desktopUpgradeDeb) {
+    const installed = spawnSync('sudo', ['-n', 'dpkg', '-i', desktopUpgradeDeb], { encoding: 'utf8' })
+    fs.writeFileSync(path.join(output, 'desktop-upgrade-install.log'), installed.stdout + installed.stderr)
+    assert.equal(installed.status, 0, installed.stderr)
+    // The isolated privileged container needs the setuid helper for its unprivileged test user.
+    for (const args of [['chown', 'root:root', '/opt/Javdex/chrome-sandbox'], ['chmod', '4755', '/opt/Javdex/chrome-sandbox']]) {
+      const prepared = spawnSync('sudo', ['-n', ...args], { encoding: 'utf8' })
+      assert.equal(prepared.status, 0, prepared.stderr)
+    }
+    assert.equal(fs.readFileSync(path.join(userData, 'this-computer.json'), 'utf8'), settingsBeforeUpgrade)
+  }
+  if (desktopUpgradeApp) {
+    fs.rmSync(isolatedMacApp, { recursive: true })
+    const replaced = spawnSync('ditto', [desktopUpgradeApp, isolatedMacApp], { encoding: 'utf8' })
+    assert.equal(replaced.status, 0, replaced.stderr)
+    assert.equal(fs.readFileSync(path.join(userData, 'this-computer.json'), 'utf8'), settingsBeforeUpgrade)
+  }
   if (upgradeImage) {
     docker('stop', name)
     docker('rm', name)
@@ -340,6 +382,13 @@ try {
   await page.evaluate(() => { window.location.hash = '/settings/network/web' })
   await page.getByText(/Remote GUI phone/).first().waitFor()
   assert.equal((await fetch(base + '/api/videos', { headers: { Cookie: browserCookie } })).status, 200)
+  if (desktopUpgrade) {
+    const after = await page.evaluate(() => window.api.videos.list({ kind: 'library', libraryId: 1 }))
+    // readRevision includes the restarted process identity; compare persistent catalog content.
+    assert.deepEqual({ items: after.items, total: after.total }, { items: videosBeforeUpgrade.items, total: videosBeforeUpgrade.total })
+    assert.equal(fs.readFileSync(path.join(userData, 'this-computer.json'), 'utf8'), settingsBeforeUpgrade)
+    console.log('PASS: desktop package replacement preserves userData settings, writer credentials and catalog view')
+  }
   if (imageVideoId) {
     const detail = await page.evaluate(id => window.api.videos.get({ kind: 'library', libraryId: 1 }, id), imageVideoId)
     assert.deepEqual({ cover: detail.cover_path, samples: detail.assets.filter(asset => asset.type === 'sample').map(asset => asset.local_path) }, deliveredImages)

@@ -1,6 +1,7 @@
 import { ALL_VIDEO_SCRAPE_FIELDS, type VideoScrapeField } from '@shared/videoScrapeTypes'
 import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
 import { getDb } from '@library/db/database'
+import { bumpRowRevision } from '@library/catalog/catalogAggregateVersion'
 import { getVideoById } from '@library/db/videoRepo'
 import { replacePendingVideoScrape } from '@library/db/pendingVideoScrapeRepo'
 import {
@@ -155,6 +156,9 @@ export function createLocalNfoScanService(
         ratingSourceName: LOCAL_NFO_SOURCE_NAME,
         classificationOptions: { directorAmbiguity: 'preserve' },
         beforeCommit: (result) => {
+          // NFO bypasses catalogScrapeCommands; invalidate open edits in the
+          // same transaction as the metadata and scan audit writes.
+          if (result.applied) bumpRowRevision('videos', videoId)
           notify({ disposition: result.applied ? 'imported' : 'skipped',
             warnings: [...collected.warnings, ...result.warnings] })
         }

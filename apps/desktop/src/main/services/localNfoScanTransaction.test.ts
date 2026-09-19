@@ -3,11 +3,15 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
+import { catalogVideoCommands } from '@library/catalog/catalogVideoCommands'
 import { initDatabaseAtPath, closeDatabase, getDb } from '@library/db/database'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createDefaultLocalNfoSourceAdapter, getDefaultNfoFileStore, type VideoMetadataCandidate } from '../metadata-sources'
 import { createLocalNfoScanService } from './localNfoScanService'
 import { createVideoScrapeApplyService } from './videoScrapeApplyService'
+import { assertExpectedVideoVersion, readVideoAggregateVersion } from '@library/catalog/catalogVideoVersion'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 
 const JPEG_1X1 = Buffer.from(
@@ -25,6 +29,7 @@ beforeEach(() => {
   previousUserData = process.env.JAVDEX_TEST_USER_DATA
   process.env.JAVDEX_TEST_USER_DATA = directory
   const db = initDatabaseAtPath(path.join(directory, 'catalog.db'))
+  ensureCatalogIdentity()
   insertTestVideoWithFile(db, { code: 'NFO-001', filePath: '/synthetic/NFO-001.mp4', scrapedStatus: 0 })
   videoId = (db.prepare("SELECT id FROM videos WHERE code='NFO-001'").get() as { id: number }).id
   db.exec('CREATE TABLE test_nfo_audit (outcome TEXT NOT NULL)')
@@ -227,4 +232,43 @@ it('keeps committed pending disposition when obsolete staging cleanup fails afte
   assert.equal(initial.length, 1)
   assert.equal(initial[0].some((warning) => warning.includes('cleanup unavailable')), false)
   assert.ok(result.warnings.some((warning) => warning.includes('cleanup unavailable')))
+})
+
+it('rejects the pre-import video version after NFO changes formal metadata', async () => {
+  const before = readVideoAggregateVersion(videoId)!
+  assertExpectedVideoVersion(videoId, { V: before })
+  assert.equal((await service().apply(videoId, 'NFO-001', [])).disposition, 'imported')
+  assert.equal((videoSnapshot() as { title: string }).title, 'Title 0')
+  const after = readVideoAggregateVersion(videoId)!
+  assert.deepEqual(after, { generation: before.generation, revision: before.revision + 1 })
+  assert.throws(() => catalogVideoCommands.edit({ videoId, fields: { title: 'Stale title' } }, {
+    operationId: randomUUID(), writerEpoch: 0, expectedVersions: { V: before }
+  }), (error: unknown) => (error as { code?: string }).code === 'VERSION_CONFLICT')
+  assert.equal((videoSnapshot() as { title: string }).title, 'Title 0')
+  const input = { videoId, fields: { title: 'Fresh title' } }
+  const context = { operationId: randomUUID(), writerEpoch: 0, expectedVersions: { V: after } }
+  assert.equal(catalogVideoCommands.edit(input, context).outcome, 'applied')
+  assert.equal(catalogVideoCommands.edit(input, context).outcome, 'duplicate')
+})
+
+it('does not invalidate video edits for pending candidates or a skipped import', async () => {
+  const before = readVideoAggregateVersion(videoId)!
+  assert.equal((await service(2).apply(videoId, 'NFO-001', [])).disposition, 'pending-candidate')
+  assert.deepEqual(readVideoAggregateVersion(videoId), before)
+  assert.equal((await service().apply(videoId, 'NFO-001', [])).disposition, 'imported')
+  const applied = readVideoAggregateVersion(videoId)!
+  assert.equal((await service().apply(videoId, 'NFO-001', [])).disposition, 'skipped')
+  assert.deepEqual(readVideoAggregateVersion(videoId), applied)
+})
+
+it('invalidates edits for relation-only NFO application', async () => {
+  const before = readVideoAggregateVersion(videoId)!
+  const source = createDefaultLocalNfoSourceAdapter(getDefaultNfoFileStore())
+  source.collectFromAnchors = async () => ({ candidates: [{
+    ...candidate(''), result: { code: 'NFO-001', tags: ['NFO tag'] }
+  }], warnings: [] })
+  assert.equal((await createLocalNfoScanService(source).apply(videoId, 'NFO-001', [])).disposition, 'imported')
+  assert.ok(getDb().prepare('SELECT 1 FROM video_tag WHERE video_id=?').get(videoId))
+  assert.throws(() => assertExpectedVideoVersion(videoId, { V: before }),
+    (error: unknown) => (error as { code?: string }).code === 'VERSION_CONFLICT')
 })

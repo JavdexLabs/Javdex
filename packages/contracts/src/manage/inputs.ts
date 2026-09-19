@@ -133,6 +133,15 @@ const targetActressFilterSchema = z
   })
   .strict()
 const resourceFilterSchema = z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])
+const playlistSortSchema = z.object({
+  playlistId: idSchema,
+  sortBy: z.enum(['added_at', 'release_date']).optional(),
+  sortDir: sortDirSchema.optional()
+}).strict()
+const playlistPageSchema = playlistSortSchema.extend({
+  ...pageQuerySchema.shape,
+  resourceKinds: z.array(resourceFilterSchema).max(6).optional()
+}).strict()
 const lastResourceModeSchema = z.enum(['retain-video'])
 const scrapedStatusSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal('all')])
 const videoQuerySchema = z
@@ -796,10 +805,10 @@ export const MANAGE_OPERATION_INPUTS = {
     videoId: idSchema.optional(),
     locale: z.string().max(100).optional()
   }).strict(),
-  'playlists.get': z.object({ playlistId: idSchema }).strict(),
-  'playlists.getPage': z.object({ playlistId: idSchema }).extend(pageQuerySchema.shape).strict(),
-  'playlists.metadata': z.object({ playlistId: idSchema }).strict(),
-  'playlists.videoPage': z.object({ playlistId: idSchema }).extend(pageQuerySchema.shape).strict(),
+  'playlists.get': playlistSortSchema,
+  'playlists.getPage': playlistPageSchema,
+  'playlists.metadata': playlistSortSchema,
+  'playlists.videoPage': playlistPageSchema,
   'playlists.create': z
     .object({
       name: limitedTextSchema.min(1),

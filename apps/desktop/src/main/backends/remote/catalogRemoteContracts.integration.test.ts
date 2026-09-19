@@ -84,6 +84,11 @@ test('preserves playlist query fields and maps library revisions without replaci
   })
   try {
     const context = { operationId: 'operation', expectedVersions: {} }
+    for (const operation of ['get', 'metadata', 'getPage', 'videoPage'] as const) {
+      const query = { playlistId: 9, sortBy: 'release_date' as const, sortDir: 'asc' as const }
+      await backend.playlists[operation](query)
+      assert.deepEqual(requests.at(-1)?.body.input, { ...query, ...(['getPage', 'videoPage'].includes(operation) ? { limit: 50, offset: 0 } : {}) })
+    }
     await backend.playlists.listPage({ search: '', videoId: 3, locale: 'en', limit: 60, offset: 0 })
     assert.deepEqual(requests.at(-1)?.body.input, { search: '', videoId: 3, locale: 'en', limit: 60, offset: 0 })
     await backend.libraries.updateConfig({ libraryId: 1, expectedRevision: 3, patch: { autoImportLocalNfo: true } }, context)

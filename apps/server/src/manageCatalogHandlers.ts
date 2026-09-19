@@ -705,16 +705,16 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
     return listPlaylistBrowsePage(args.envelope.input as PlaylistListQuery, catalogDb(args.database))
   },
   'playlists.get'(args) {
-    const input = args.envelope.input as { playlistId: number }
-    return getPlaylistDetail(input.playlistId)
+    const input = args.envelope.input as { playlistId: number } & PlaylistPageQuery
+    return getPlaylistDetail(input.playlistId, input)
   },
   'playlists.getPage'(args) {
     const input = args.envelope.input as { playlistId: number } & PlaylistPageQuery
     return getPlaylistPage(input.playlistId, input)
   },
   'playlists.metadata'(args) {
-    const input = args.envelope.input as { playlistId: number }
-    return getPlaylistMetadata(input.playlistId)
+    const input = args.envelope.input as { playlistId: number } & PlaylistPageQuery
+    return getPlaylistMetadata(input.playlistId, input)
   },
   'playlists.videoPage'(args) {
     const input = args.envelope.input as { playlistId: number } & PlaylistPageQuery

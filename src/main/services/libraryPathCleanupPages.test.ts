@@ -38,7 +38,9 @@ function fixture(withLink = false) {
   if (withLink) {
     const link = importVideoLinkResourceRecord({ libraryId: library.id, code: 'AAA-001', target: { kind: 'existing', videoId },
       kind: 'web', locator: 'https://example.test/video', resourceKey: 'http:https://example.test/video', displayName: null, sizeBytes: null })
-    assert.ok(!('duplicateOwnerCode' in link)); linkId = link.resource.id
+    assert.ok(!('duplicateOwnerCode' in link))
+    assert.ok(link.resource)
+    linkId = link.resource.id
     // Ordinary links with a root ID are not source-managed deletion targets.
     db.prepare('UPDATE video_resources SET root_id=? WHERE id=?').run(library.roots[0].id, linkId)
   }

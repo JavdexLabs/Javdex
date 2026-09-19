@@ -132,6 +132,8 @@ export interface ScrapeBrowserLease {
   extractList?(plan: ScrapeBrowserListExtractionPlan): Promise<ScrapeBrowserListExtraction>
   /** Make the helper window visible and focused for an explicit user handoff. */
   presentToUser(): Promise<ScrapeBrowserPresentation>
+  /** Open a site homepage and wait until the user confirms login in the helper toolbar. */
+  waitPreLogin(url: string, pluginName?: string): Promise<ScrapeBrowserPresentation>
   recycle(): Promise<void>
   release(): Promise<void>
 }
@@ -399,15 +401,8 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     const pending = { ownerId, purpose: input.purpose, proxyUrl, promise }
     this.pendingAcquire = pending
     try {
-      const lease = this.createLease(await promise, input.signal)
-      if (input.purpose === 'scrape' || input.purpose === 'plugin-check') {
-        try {
-          await lease.presentToUser()
-        } catch {
-          // Show is best-effort; the scrape lease is already live.
-        }
-      }
-      return lease
+      // Page navigation presents the window on demand; API/image-only scrapes stay hidden.
+      return this.createLease(await promise, input.signal)
     } catch (error) {
       if (!this.activeLease && sessionEpoch === this.sessionEpoch && !this.disposed) {
         void this.stopHelper('acquire failed')
@@ -491,6 +486,13 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       .pluginAction(action as PluginBrowserAction, params)
   }
 
+  async waitPreLogin(url: string, pluginName?: string): Promise<ScrapeBrowserPresentation> {
+    return (this.leaseContext.getStore() ?? await this.ensureLegacyLease()).waitPreLogin(
+      url,
+      pluginName
+    )
+  }
+
   close(): void {
     const lease = this.legacyLease
     this.legacyLease = null
@@ -539,6 +541,16 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         const status = await rpc<{ url?: unknown; title?: unknown }>('performAction', {
           action: 'present',
           params: {}
+        })
+        return {
+          url: typeof status.url === 'string' ? status.url : '',
+          title: typeof status.title === 'string' ? status.title : ''
+        }
+      },
+      waitPreLogin: async (url, pluginName) => {
+        const status = await rpc<{ url?: unknown; title?: unknown }>('performAction', {
+          action: 'waitPreLogin',
+          params: { url, ...(pluginName ? { pluginName } : {}) }
         })
         return {
           url: typeof status.url === 'string' ? status.url : '',

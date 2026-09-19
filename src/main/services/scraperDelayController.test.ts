@@ -6,6 +6,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { updateSettings } from '../settings/settingsStore'
 import { ScraperDelayController } from './scraperDelayController'
+import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
 
 let tempRoot: string | null = null
 let oldUserData: string | null = null
@@ -38,6 +39,25 @@ afterEach(() => {
 })
 
 describe('ScraperDelayController', () => {
+  it('uses zero defaults for API/local sources while preserving explicit delays', async () => {
+    const sleeps: number[] = []
+    const controller = new ScraperDelayController({
+      now: () => 0, random: () => 0,
+      sleep: async (ms) => { sleeps.push(ms) }
+    })
+    for (const name of ['MetaTube', LOCAL_NFO_SOURCE_NAME]) {
+      await controller.run('video', name, async () => null)
+      await controller.run('video', name, async () => null)
+    }
+    assert.deepEqual(sleeps, [])
+    updateSettings({ scraperPluginDelays: {
+      video: { MetaTube: { minMs: 2000, maxMs: 2000 } }, actress: {}
+    } })
+    await controller.run('video', 'MetaTube', async () => null)
+    await controller.run('video', 'MetaTube', async () => null)
+    assert.deepEqual(sleeps, [2000])
+  })
+
   it('starts the next same-site interval after the previous access finishes', async () => {
     let now = 0
     const sleeps: number[] = []

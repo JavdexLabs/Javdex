@@ -10,6 +10,7 @@ import type {
   ScraperServiceTokenUpdate
 } from '@shared/scraperServiceTypes'
 import {
+  DEFAULT_SCRAPER_SERVICE_CONFIGS,
   isLoopbackScraperServiceUrl,
   normalizeScraperServiceServerUrl
 } from '@shared/scraperServiceTypes'
@@ -75,6 +76,7 @@ export type ScraperServiceTransport = (
 export interface ConfiguredScraperServiceClient {
   readonly serviceId: ScraperServiceId
   readonly baseUrl: string
+  readonly keepFirstCandidate: boolean
   getJson(relativePath: string, options?: { query?: ScraperServiceQuery }): Promise<unknown>
   publicUrl(relativePath: string, query?: ScraperServiceQuery): string
 }
@@ -85,6 +87,7 @@ interface ScraperServiceSnapshot {
   token: string
   proxyUrl: string
   timeoutMs: number
+  keepFirstCandidate: boolean
 }
 
 class TransportTimeoutError extends Error {}
@@ -332,6 +335,7 @@ function createClient(snapshot: ScraperServiceSnapshot): ConfiguredScraperServic
   return {
     serviceId: snapshot.serviceId,
     baseUrl: snapshot.baseUrl,
+    keepFirstCandidate: snapshot.keepFirstCandidate,
     getJson: (relativePath, options) => requestJson(relativePath, options?.query),
     publicUrl: (relativePath, query) => buildServiceUrl(snapshot.baseUrl, relativePath, query).toString()
   }
@@ -358,7 +362,8 @@ function storedServiceSnapshot(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): ScraperS
     baseUrl: config.serverUrl,
     token: getScraperServiceToken('metatube'),
     proxyUrl: config.useScrapeProxy ? resolveScrapeProxyUrl(settings) : '',
-    timeoutMs
+    timeoutMs,
+    keepFirstCandidate: config.keepFirstCandidate === true
   }
 }
 
@@ -428,7 +433,13 @@ export function saveScraperServiceConfig(
   assertInsecureHttpAcknowledged(serverUrl, nextToken, input.acknowledgeInsecureHttp)
 
   const previous = { ...getSettings().scraperServiceConfigs.metatube }
-  updateStoredMetaTubeConfig({ serverUrl, useScrapeProxy: input.useScrapeProxy === true })
+  updateStoredMetaTubeConfig({
+    serverUrl,
+    useScrapeProxy: input.useScrapeProxy === true,
+    keepFirstCandidate: input.keepFirstCandidate === undefined
+      ? previous.keepFirstCandidate === true
+      : input.keepFirstCandidate === true
+  })
   try {
     if (input.tokenUpdate.mode === 'set') saveScraperServiceToken(serviceId, nextToken)
     if (input.tokenUpdate.mode === 'clear') deleteScraperServiceToken(serviceId)
@@ -465,7 +476,7 @@ export function clearScraperServiceConfig(serviceId: ScraperServiceId): void {
     throw new Error(`MetaTube 仍被以下配置引用，请先修改：${references.join('；')}`)
   }
   const previous = { ...getSettings().scraperServiceConfigs.metatube }
-  updateStoredMetaTubeConfig({ serverUrl: '', useScrapeProxy: false })
+  updateStoredMetaTubeConfig({ ...DEFAULT_SCRAPER_SERVICE_CONFIGS.metatube })
   try {
     deleteScraperServiceToken(serviceId)
   } catch (error) {
@@ -508,7 +519,8 @@ export async function testScraperServiceConnection(
     baseUrl: serverUrl,
     token: resolveTokenUpdate(input.tokenUpdate),
     proxyUrl: input.useScrapeProxy ? resolveScrapeProxyUrl(settings) : '',
-    timeoutMs: CONNECTION_TEST_TIMEOUT_MS
+    timeoutMs: CONNECTION_TEST_TIMEOUT_MS,
+    keepFirstCandidate: false
   })
 
   const root = envelopeData(await client.getJson('/'), '根端点')

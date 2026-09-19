@@ -122,6 +122,31 @@ describe('WebScraperSourceAdapter', () => {
     assert.equal(batch.warnings.length, 1)
     assert.match(batch.warnings[0], /OTHER-001/)
   })
+
+  it('runs pre-login before the delayed parse', async () => {
+    const calls: string[] = []
+    const scraper: BaseScraper = {
+      scraperName: descriptor.name,
+      async parseTask() {
+        calls.push('parse')
+        return { code: 'TEST-001', title: 'Ready' }
+      }
+    }
+    const source = new WebScraperSourceAdapter({
+      scraper,
+      plugin: descriptor,
+      proxyUrl: '',
+      ensurePreLogin: async (pluginName) => {
+        calls.push(`login:${pluginName}`)
+      },
+      runWithDelay: async (_pluginName, task) => {
+        calls.push('delay')
+        return task()
+      }
+    })
+    await source.collect({ target: { kind: 'code', code: 'TEST-001' }, fields: ['title'] })
+    assert.deepEqual(calls, ['login:Contract Source', 'delay', 'parse'])
+  })
 })
 
 describe('VideoMetadataSourceRegistry', () => {

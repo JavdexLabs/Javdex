@@ -655,21 +655,53 @@ export function createVideoMaintenanceService(
       return withResourceMaintenance(() => {
         requireActiveMediaLibrary(input.libraryId)
         const code = normalizeVideoCode(input.code)
-        const normalized = normalizeExternalVideoResource(input.url, input.kind)
-        const displayName = input.displayName?.trim() || normalized.suggestedDisplayName
-        const sizeBytes = input.sizeBytes ?? null
-        if (sizeBytes != null && (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)) {
-          throw new Error('文件大小必须是大于 0 的整数字节数')
+        const drafts = [
+          ...(input.url?.trim()
+            ? [
+                {
+                  url: input.url,
+                  kind: input.kind,
+                  displayName: input.displayName,
+                  sizeBytes: input.sizeBytes
+                }
+              ]
+            : []),
+          ...(input.resources ?? [])
+        ]
+        const resources: Array<{
+          kind: NonNullable<typeof input.kind>
+          locator: string
+          resourceKey: string
+          displayName: string | null
+          sizeBytes: number | null
+        }> = []
+        const seenKeys = new Set<string>()
+        for (const draft of drafts) {
+          const url = draft.url.trim()
+          if (!url) continue
+          const sizeBytes = draft.sizeBytes ?? null
+          if (sizeBytes != null && (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)) {
+            throw new Error('文件大小必须是大于 0 的整数字节数')
+          }
+          const normalized = normalizeExternalVideoResource(url, draft.kind)
+          if (seenKeys.has(normalized.resourceKey)) {
+            throw new Error('资源链接不能重复')
+          }
+          seenKeys.add(normalized.resourceKey)
+          resources.push({
+            kind: normalized.kind,
+            locator: normalized.locator,
+            resourceKey: normalized.resourceKey,
+            displayName: draft.displayName?.trim() || normalized.suggestedDisplayName,
+            sizeBytes
+          })
         }
         const result = importLinkResourceRecord({
           libraryId: input.libraryId,
           code,
           target: input.target,
-          kind: normalized.kind,
-          locator: normalized.locator,
-          resourceKey: normalized.resourceKey,
-          displayName,
-          sizeBytes
+          resources,
+          ...(input.links?.length ? { links: input.links } : {})
         })
         if ('duplicateOwnerCode' in result) {
           throw new Error(`该资源链接已属于影片 ${result.duplicateOwnerCode}`)

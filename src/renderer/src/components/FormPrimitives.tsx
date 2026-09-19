@@ -69,16 +69,21 @@ export function AppFormSection({
 /** Bordered section inside entity edit modals (actress / video metadata). */
 export function EditFormSection({
   title,
+  hint,
   className = '',
   children
 }: {
   title: string
+  hint?: ReactNode
   className?: string
   children: ReactNode
 }): JSX.Element {
   return (
     <section className={`${styles.editSection} entity-edit-section${className ? ` ${className}` : ''}`}>
       <h4 className={`${styles.editSectionTitle} entity-edit-section-title`}>{title}</h4>
+      {hint ? (
+        <p className={`${styles.editHint} entity-edit-section-hint`}>{hint}</p>
+      ) : null}
       {children}
     </section>
   )

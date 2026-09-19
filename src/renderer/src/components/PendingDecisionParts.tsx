@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, TriangleAlert } from 'lucide-react'
 import Button from './Button'
 import FloatingLayer from './FloatingLayer'
 import { useEscapeKey } from '../hooks/useEscapeKey'
@@ -53,6 +53,24 @@ export function PendingWorkspace({
       {confirm}
       {overlays}
     </section>
+  )
+}
+
+export function PendingWarnings({ warnings }: { warnings: string[] }): JSX.Element | null {
+  if (warnings.length === 0) return null
+  return (
+    <details className={styles.warnings}>
+      <summary className={styles.warningsSummary}>
+        <TriangleAlert {...UI_ICON_SM} />
+        <span>处理提示 · {warnings.length} 条</span>
+        <ChevronDown className={styles.warningsChevron} {...UI_ICON_SM} />
+      </summary>
+      <div className={styles.warningsBody} tabIndex={0} role="region" aria-label="处理提示详情">
+        <ul className={styles.warningsList}>
+          {warnings.map((warning, index) => <li className={styles.warningsItem} key={`${index}-${warning}`}>{warning}</li>)}
+        </ul>
+      </div>
+    </details>
   )
 }
 

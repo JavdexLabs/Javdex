@@ -38,8 +38,21 @@ describe('VideoResourceLinkService', () => {
 
     assert.deepEqual(await service.check('https://cdn.example/movie.mp4'), {
       ok: false,
-      error: '无法连接到该链接，请检查网络或稍后重试'
+      error: '未能读取大小。站点可能拒绝探测请求，仍可导入。'
     })
     assert.deepEqual(requested, ['https://cdn.example/movie.mp4'])
+  })
+
+  it('reports HTTP failures without implying the resource cannot be imported', async () => {
+    const service = createVideoResourceLinkService({
+      requestHead: async () => ({ ok: false, status: 403, sizeBytes: null })
+    })
+
+    assert.deepEqual(await service.check('https://cdn.example/movie.mp4'), {
+      ok: false,
+      status: 403,
+      sizeBytes: null,
+      error: '探测返回 HTTP 403；不代表无法导入。'
+    })
   })
 })

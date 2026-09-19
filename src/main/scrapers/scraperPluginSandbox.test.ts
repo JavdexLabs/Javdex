@@ -154,4 +154,23 @@ module.exports = {
       fs.rmSync(userData, { recursive: true, force: true })
     }
   })
+
+  it('does not expose host-only pre-login or present actions on ctx.browser', async () => {
+    const result = await runUserActressPlugin(
+      'prelogin-hidden',
+      `module.exports = {
+        async parseActress(ctx) {
+          if ('waitPreLogin' in ctx.browser || 'presentToUser' in ctx.browser || 'present' in ctx.browser) {
+            throw new Error('host browser action leaked')
+          }
+          return { profileSummary: Object.keys(ctx.browser).sort().join(',') }
+        }
+      };`,
+      'Test Actress',
+      []
+    )
+    assert.equal(result?.profileSummary?.includes('waitPreLogin'), false)
+    assert.equal(result?.profileSummary?.includes('present'), false)
+    assert.match(String(result?.profileSummary), /snapshot/)
+  })
 })

@@ -110,14 +110,20 @@ const imageUrl = ctx.service.publicUrl('/v1/images/primary/provider/id', {
 
 - `getJson(relativePath, { query })` 仅接受配置 origin 和反向代理 base path 内的相对路径。主进程负责可选 Bearer Token、代理、同源重定向、超时、2 MiB 响应上限和错误分类；Token 不进入 Worker。
 - `publicUrl(relativePath, query)` 只生成同一服务范围内的公开 URL，不添加 Token，适合 MetaTube 的公开图片路由。
-- 用户每次开始刮削时，主进程快照地址、代理和 Token；任务运行中修改配置不会改变该任务的连接参数。
+- 用户每次开始刮削时，主进程快照地址、代理、Token 以及 MetaTube 的 `keepFirstCandidate`；任务运行中修改配置不会改变该任务的连接参数与候选策略。绑定插件可通过 `ctx.service.keepFirstCandidate` 读取该快照。
 - 服务地址必须由用户配置。未配置的绑定插件不会进入可执行插件列表，也不能成为默认源或组合字段源。
 
 ### 共享浏览器窗口
 
+helper 启动与建立租约时不显示窗口；实际加载网页或显式展示浏览器时才显示。仅使用服务接口、索引和图片请求的插件（如内置 MetaTube、Gfriends）在后台运行，网页刮削与人工验证仍使用可见窗口。
+
+用户可在插件设置开启「刮削前预登入」。开启后，宿主在调用 `parseVideo` / `parseActress` 之前打开 `plugin.json` 的 `homepage`，由用户在当前页完成登入或验证，点窗口菜单栏「登入完成」后才进入插件解析。预登入与 Cloudflare 人机验证都使用刮削窗口菜单栏，不覆盖网页；两套菜单分开，预登入期间只显示登入菜单。插件无需实现该流程，`ctx.browser` 也不包含预登入接口。helper 拒绝 `window.open` 与 popup，仅支持同页表单登入；需要弹出新窗口登入的站点本期无法用此开关覆盖。`homepage` 须为站点 HTTP(S) 地址；GitHub / GitHub Pages、组合插件、以及需要单独配置服务端的插件（如 MetaTube）不会出现此开关。
+
+图片下载默认使用浏览器当前实际网页的 origin 作为 `Referer`，不预设站点；尚未打开网页时不发送。HTTPS 到 HTTP 的请求、跨来源访问回环或私有 IP 地址时省略来源。手工导入及明确指定 `referer: 'omit'` 的内部调用始终不发送；显式来源也遵循同样规则，不携带路径、查询参数或凭证。
+
 `ctx.fetchPage` 与 `ctx.browser.*` 共用独立 Electron scraper helper 里的唯一页面。一次刮削从解析到图片下载持有同一独占租约，代理在租约建立时冻结；Cookie、Cloudflare clearance、本地存储和图片响应缓存不会被其他任务串扰。跨任务冲突立即返回 `SCRAPE_BROWSER_BUSY`，不会排队或改写当前页面。
 
-租约内部的 `fetchPage` 仍按顺序执行，因此 `Promise.all(urls.map(ctx.fetchPage))` 不会让单页 target 并发导航；总耗时仍接近各页之和。helper 使用 Electron 内置 Chromium和既有 `Partitions/scraper` profile，不要求系统浏览器或 Playwright 浏览器下载。
+租约内部的 `fetchPage` 与宿主预登入共用同一页面队列，按顺序执行，因此 `Promise.all(urls.map(ctx.fetchPage))` 不会让单页 target 并发导航，也不会在登入未完成时抢走当前页；总耗时仍接近各页之和。helper 使用 Electron 内置 Chromium和既有 `Partitions/scraper` profile，不要求系统浏览器或 Playwright 浏览器下载。
 
 `ctx.browser.*` 保持既有返回契约，但一串 `click` / `type` / `snapshot` 仍依赖页面在调用之间保持不动，所以动作序列必须顺序 `await`，且不可与 `fetchPage` 交叉。
 

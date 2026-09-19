@@ -1,6 +1,10 @@
 import { DEFAULT_AVATAR_FACE_RATIO, DEFAULT_AVATAR_FACE_SCALE_PRESET, type AvatarFaceScalePreset } from './avatarFaceScale'
 import { DEFAULT_AVATAR_CENTERING_MODE, type AvatarCenteringMode } from './avatarCentering'
-import type { CompositeScraperDefinition, ScraperPluginDelaySettings } from './scraperPluginTypes'
+import type {
+  CompositeScraperDefinition,
+  ScraperPluginDelaySettings,
+  ScraperPluginPreLoginSettings
+} from './scraperPluginTypes'
 import type { LibraryScanSummary } from './libraryTypes'
 import {
   DEFAULT_SCRAPER_SERVICE_CONFIGS,
@@ -125,6 +129,8 @@ export interface AppSettings {
   mediaAssetsPath: string
   /** Per scraper random interval ranges used by batch scraping. */
   scraperPluginDelays: ScraperPluginDelaySettings
+  /** Per plugin: open the site homepage and wait for login before scraping. */
+  scraperPluginPreLogin: ScraperPluginPreLoginSettings
   /** Non-secret configuration for trusted scraper services. */
   scraperServiceConfigs: ScraperServiceConfigs
   /** Field-level virtual scraper definitions. */
@@ -277,6 +283,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   assetEncryption: false,
   mediaAssetsPath: '',
   scraperPluginDelays: {
+    video: {},
+    actress: {}
+  },
+  scraperPluginPreLogin: {
     video: {},
     actress: {}
   },

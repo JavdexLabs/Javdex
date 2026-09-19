@@ -101,6 +101,66 @@
   gap: 7px;
 }
 
+.warnings {
+  flex-shrink: 0;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-warning);
+  background: var(--surface-warning);
+  color: var(--text-warning);
+  font-size: 12px;
+}
+
+.warningsSummary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--control-h-md);
+  padding: 4px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.warningsSummary::-webkit-details-marker {
+  display: none;
+}
+
+.warningsSummary:hover {
+  background: var(--surface-control-hover);
+}
+
+.warningsSummary:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -3px;
+}
+
+.warningsChevron {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.warnings[open] > :where(summary) > .warningsChevron {
+  transform: rotate(180deg);
+}
+
+.warningsBody {
+  max-height: min(120px, 18vh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 4px 12px 8px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.warningsList {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
+.warningsItem + .warningsItem {
+  margin-top: 4px;
+}
+
 .alert {
   flex-shrink: 0;
   min-height: 32px;
@@ -418,4 +478,9 @@
     align-items: flex-start;
     flex-wrap: wrap;
   }
+}
+
+.warningsBody:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -3px;
 }

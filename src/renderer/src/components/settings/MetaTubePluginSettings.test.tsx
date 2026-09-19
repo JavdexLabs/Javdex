@@ -46,6 +46,7 @@ const metaTube: ScraperPluginDescriptor = {
 const publicConfig: ScraperServicePublicConfig = {
   serverUrl: 'https://server.test/prefix',
   useScrapeProxy: false,
+  keepFirstCandidate: false,
   hasToken: true,
   secretProtection: 'secure'
 }
@@ -186,5 +187,69 @@ describe('MetaTube plugin settings', () => {
     })
     assert.deepEqual(tested[0]?.tokenUpdate, { mode: 'keep' })
     assert.match(text(), /连接成功 · v1.4.0 · DB 42 · 3 个影片源/)
+  })
+
+  it('defaults keepFirstCandidate off and saves the switch', () => {
+    const saved: ScraperServiceConfigInput[] = []
+    renderEditor(publicConfig, (input) => {
+      if (input) saved.push(input)
+    })
+
+    assert.match(text(), /只保留第一个候选/)
+    assert.match(text(), /不再进入待确认/)
+    const toggle = renderer?.root
+      .findAllByType('input')
+      .find((item) => item.props['aria-label'] === '只保留第一个候选')
+    assert.ok(toggle)
+    assert.equal(toggle.props.checked, false)
+
+    act(() => button('保存').props.onClick())
+    assert.equal(saved[0]?.keepFirstCandidate, false)
+
+    act(() => toggle.props.onChange({ target: { checked: true } }))
+    act(() => button('保存').props.onClick())
+    assert.equal(saved[1]?.keepFirstCandidate, true)
+    assert.equal(
+      renderer?.root.findAllByType('input').some((item) => item.props['aria-label'] === '刮削前预登入'),
+      false
+    )
+    assert.doesNotMatch(text(), /预登入/)
+  })
+
+  it('saves the pre-login switch for website plugins', () => {
+    const javdb: ScraperPluginDescriptor = {
+      kind: 'video',
+      name: 'JavDB',
+      version: 'built-in',
+      description: 'JavDB fixture',
+      source: 'builtin',
+      removable: false,
+      exportable: true,
+      editable: false,
+      debuggable: true,
+      homepage: 'https://javdb.com/',
+      supportedFields: ['title'],
+      delay: { minMs: 0, maxMs: 0 },
+      preLoginAvailable: true,
+      preLogin: false
+    }
+    const saved: Array<{ preLogin?: boolean }> = []
+    act(() => {
+      renderer = TestRenderer.create(
+        <PluginConfigModal
+          state={{ kind: 'video', plugin: javdb }}
+          onSave={(_kind, _name, input) => saved.push(input)}
+          onCancel={() => {}}
+        />
+      )
+    })
+    const toggle = renderer?.root
+      .findAllByType('input')
+      .find((item) => item.props['aria-label'] === '刮削前预登入')
+    assert.ok(toggle)
+    assert.equal(toggle.props.checked, false)
+    act(() => toggle.props.onChange({ target: { checked: true } }))
+    act(() => button('保存').props.onClick())
+    assert.equal(saved[0]?.preLogin, true)
   })
 })

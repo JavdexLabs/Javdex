@@ -66,6 +66,7 @@ function installFakeBrowserLease(
       return { action: command.action }
     },
     presentToUser: async () => ({ url: 'https://example.test', title: 'Example' }),
+    waitPreLogin: async () => ({ url: 'https://example.test', title: 'Example' }),
     recycle: async () => undefined,
     release: async () => undefined
   }

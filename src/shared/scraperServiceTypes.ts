@@ -8,6 +8,7 @@ export type ScraperServiceQuery = Record<string, ScraperServiceQueryValue>
 export interface ScraperServiceStoredConfig {
   serverUrl: string
   useScrapeProxy: boolean
+  keepFirstCandidate: boolean
 }
 
 export interface ScraperServiceConfigs {
@@ -22,6 +23,7 @@ export type ScraperServiceTokenUpdate =
 export interface ScraperServiceConfigInput {
   serverUrl: string
   useScrapeProxy: boolean
+  keepFirstCandidate?: boolean
   tokenUpdate: ScraperServiceTokenUpdate
   acknowledgeInsecureHttp?: boolean
 }
@@ -41,7 +43,8 @@ export interface ScraperServiceConnectionResult {
 export const DEFAULT_SCRAPER_SERVICE_CONFIGS: ScraperServiceConfigs = {
   metatube: {
     serverUrl: '',
-    useScrapeProxy: false
+    useScrapeProxy: false,
+    keepFirstCandidate: false
   }
 }
 
@@ -89,7 +92,8 @@ export function normalizeScraperServiceConfigs(value: unknown): ScraperServiceCo
   return {
     metatube: {
       serverUrl,
-      useScrapeProxy: rawMetaTube.useScrapeProxy === true
+      useScrapeProxy: rawMetaTube.useScrapeProxy === true,
+      keepFirstCandidate: rawMetaTube.keepFirstCandidate === true
     }
   }
 }

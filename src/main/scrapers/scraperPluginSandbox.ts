@@ -44,6 +44,7 @@ interface SandboxWorkerData {
   service?: {
     id: ScraperServiceId
     baseUrl: string
+    keepFirstCandidate: boolean
   }
   task?: {
     code?: string
@@ -233,7 +234,11 @@ function runSandboxWorkerInternal<T = void>(
   const payload: SandboxWorkerData = serviceClient
     ? {
         ...initialPayload,
-        service: { id: serviceClient.serviceId, baseUrl: serviceClient.baseUrl }
+        service: {
+          id: serviceClient.serviceId,
+          baseUrl: serviceClient.baseUrl,
+          keepFirstCandidate: serviceClient.keepFirstCandidate
+        }
       }
     : initialPayload
 
@@ -481,11 +486,17 @@ function getResourceCache(): ScraperResourceCache {
   return resourceCache
 }
 
+const HOST_ONLY_BROWSER_ACTIONS = new Set(['present', 'waitPreLogin'])
+
 function parseBrowserAction(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error('Browser action must be a non-empty string')
   }
-  return value.trim()
+  const action = value.trim()
+  if (HOST_ONLY_BROWSER_ACTIONS.has(action)) {
+    throw new Error(`Unsupported browser action: ${action}`)
+  }
+  return action
 }
 
 function parseBrowserActionParams(value: unknown): Record<string, unknown> {
@@ -740,7 +751,8 @@ async function main() {
   const helpers = { absoluteUrl, normalizeDate, normalizeText, unique };
   const service = workerData.service ? {
     getJson: serviceGetJson,
-    publicUrl: servicePublicUrl
+    publicUrl: servicePublicUrl,
+    keepFirstCandidate: workerData.service.keepFirstCandidate === true
   } : undefined;
   let result;
   if (workerData.kind === 'video') {

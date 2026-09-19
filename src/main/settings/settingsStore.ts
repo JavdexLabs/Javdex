@@ -3,7 +3,12 @@ import path from 'node:path'
 import fs from 'node:fs'
 import process from 'node:process'
 import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizeCoverDisplayMode, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxTurns, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
-import { expandActressScrapeFields, type CompositeScraperDefinition, type ScraperPluginDelaySettings } from '@shared/scrapeTypes'
+import {
+  expandActressScrapeFields,
+  type CompositeScraperDefinition,
+  type ScraperPluginDelaySettings,
+  type ScraperPluginPreLoginSettings
+} from '@shared/scrapeTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
   isReservedLlmProviderId,
@@ -282,6 +287,9 @@ export function migrateRetiredVideoScraperSettings(): void {
   const videoDelays = Object.fromEntries(
     Object.entries(settings.scraperPluginDelays.video).filter(([name]) => name !== retiredName)
   )
+  const videoPreLogin = Object.fromEntries(
+    Object.entries(settings.scraperPluginPreLogin.video).filter(([name]) => name !== retiredName)
+  )
   const videoComposites = settings.compositeScrapers.video.map((item) => ({
     ...item,
     fieldPluginMap: Object.fromEntries(
@@ -294,6 +302,7 @@ export function migrateRetiredVideoScraperSettings(): void {
   const hasRetiredReference =
     settings.defaultScraper === retiredName ||
     Object.prototype.hasOwnProperty.call(settings.scraperPluginDelays.video, retiredName) ||
+    Object.prototype.hasOwnProperty.call(settings.scraperPluginPreLogin.video, retiredName) ||
     settings.compositeScrapers.video.some((item) =>
       Object.values(item.fieldPluginMap).includes(retiredName)
     )
@@ -304,6 +313,10 @@ export function migrateRetiredVideoScraperSettings(): void {
     scraperPluginDelays: {
       ...settings.scraperPluginDelays,
       video: videoDelays
+    },
+    scraperPluginPreLogin: {
+      ...settings.scraperPluginPreLogin,
+      video: videoPreLogin
     },
     compositeScrapers: {
       ...settings.compositeScrapers,
@@ -430,6 +443,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     ),
     nfoExportPreferences: normalizeNfoExportPreferences(parsed.nfoExportPreferences),
     scraperPluginDelays: normalizeDelaySettings(parsed.scraperPluginDelays),
+    scraperPluginPreLogin: normalizePreLoginSettings(parsed.scraperPluginPreLogin),
     scraperServiceConfigs,
     compositeScrapers: {
       video: normalizeCompositeScrapers(parsed.compositeScrapers?.video, 'video'),
@@ -588,6 +602,23 @@ function normalizeDelaySettings(value: unknown): ScraperPluginDelaySettings {
     video: normalizeDelayMap(input.video),
     actress: normalizeDelayMap(input.actress)
   }
+}
+
+function normalizePreLoginSettings(value: unknown): ScraperPluginPreLoginSettings {
+  const input = value && typeof value === 'object' ? (value as Partial<ScraperPluginPreLoginSettings>) : {}
+  return {
+    video: normalizePreLoginMap(input.video),
+    actress: normalizePreLoginMap(input.actress)
+  }
+}
+
+function normalizePreLoginMap(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object') return {}
+  const out: Record<string, boolean> = {}
+  for (const [name, enabled] of Object.entries(value as Record<string, unknown>)) {
+    if (enabled === true) out[name] = true
+  }
+  return out
 }
 
 function normalizeDelayMap(value: unknown): ScraperPluginDelaySettings['video'] {

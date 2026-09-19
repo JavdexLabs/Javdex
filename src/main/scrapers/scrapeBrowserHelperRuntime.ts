@@ -1,4 +1,13 @@
-import { BrowserWindow, dialog, session, net, type Session, type WebContents } from 'electron'
+import {
+  BrowserWindow,
+  dialog,
+  Menu,
+  session,
+  net,
+  type MenuItemConstructorOptions,
+  type Session,
+  type WebContents
+} from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
 import { diagnoseCloudflareChallenge, isCloudflareChallengeText } from './challenge'
@@ -9,6 +18,7 @@ import {
   normalizeNetworkUrl
 } from './scrapeBrowserImageCache'
 import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
+import { resolveFetchReferer } from './scrapeBrowserReferer'
 import { ActionNetworkCapture } from './scrapeBrowserActionNetwork'
 import {
   INSPECT_INLINE_SCRIPT_TEXT_LIMIT,
@@ -41,48 +51,6 @@ const DEFAULT_CONTENT_SELECTOR = 'main, article, .movie-list .item, .movie-panel
 const DOM_SETTLE_MIN_ELAPSED_MS = 1500
 const DOM_SETTLE_STABLE_MS = 1000
 const VERIFICATION_TIMEOUT_MS = 180_000
-
-/** Toolbar injected into challenge pages so the user can drive verification. */
-const TOOLBAR_JS = `
-(function(){
-  var BAR_H = 48;
-  var existing = document.getElementById('__cf_helper_bar__');
-  if (existing) existing.remove();
-
-  var host = document.createElement('div');
-  host.id = '__cf_helper_bar__';
-  host.style.cssText =
-    'position:fixed;top:0;left:0;right:0;z-index:2147483647;width:100%;height:' + BAR_H + 'px';
-
-  var shadow = host.attachShadow({ mode: 'open' });
-  shadow.innerHTML =
-    '<style>'
-    + '.bar{display:flex;align-items:center;gap:12px;width:100%;height:' + BAR_H + 'px;padding:0 16px;box-sizing:border-box;background:#101014;border-bottom:1px solid #2c2c38;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.6)}'
-    + '.tip{flex:1 1 auto;min-width:0;margin:0;color:#b6b6c2;font-size:13px;line-height:1.4}'
-    + '.actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}'
-    + '.btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:32px;padding:0 16px;margin:0;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;line-height:1;white-space:nowrap}'
-    + '.btn-refresh{background:#23232e;color:#f2f2f5;border:1px solid #2c2c38}'
-    + '.btn-save{background:#23232e;color:#d6d6de;border:1px solid #2c2c38}'
-    + '.btn-pass{background:#6c5ce7;color:#fff;border:1px solid #6c5ce7;font-weight:600}'
-    + '.btn:hover{filter:brightness(1.08)}'
-    + '</style>'
-    + '<div class="bar">'
-    + '<p class="tip">请在下方完成 Cloudflare 人机验证，完成后点击「验证通过」继续</p>'
-    + '<div class="actions">'
-    + '<button type="button" class="btn btn-refresh" id="cf-refresh">刷新</button>'
-    + '<button type="button" class="btn btn-save" id="cf-save">保存页面</button>'
-    + '<button type="button" class="btn btn-pass" id="cf-pass">验证通过</button>'
-    + '</div>'
-    + '</div>';
-
-  shadow.getElementById('cf-refresh').onclick = function(){ console.log('__CF_ACTION__:refresh'); };
-  shadow.getElementById('cf-save').onclick = function(){ console.log('__CF_ACTION__:save'); };
-  shadow.getElementById('cf-pass').onclick = function(){ console.log('__CF_ACTION__:pass'); };
-
-  (document.documentElement || document.body).appendChild(host);
-  if (document.body) document.body.style.paddingTop = BAR_H + 'px';
-})();
-`
 
 const REMOVE_TOOLBAR_JS = `
 (function(){
@@ -144,25 +112,38 @@ function injectGoogleChrome(existing: string | undefined, major: string, full = 
 
 /**
  * Manages a single visible "verification" browser window used to fetch JavDB
- * pages. The user solves Cloudflare manually (refresh / 验证通过 buttons); the
- * persistent session then carries the clearance cookie for subsequent requests,
- * which resolve automatically.
+ * pages. The user solves Cloudflare manually (refresh / 验证通过 in the window
+ * menu); the persistent session then carries the clearance cookie for subsequent
+ * requests, which resolve automatically.
  */
 export class ScrapeBrowserHelperRuntime {
   private win: BrowserWindow | null = null
   private ses: Session | null = null
   private manualPass = false
+  private preLoginMode = false
+  private preLoginDone = false
+  private preLoginPluginName = ''
+  private helperMenuKind: 'none' | 'preLogin' | 'challenge' = 'none'
+  /** Captured only while a helper overlay menu is installed on Darwin. */
+  private darwinApplicationMenuBeforeHelper: Menu | null | undefined = undefined
   private stealthApplied = false
   private headerStealthInstalled = false
   private currentMainFrameCfMitigated = false
-  /** Origin of the most recently loaded page, used as the image Referer. */
-  private lastOrigin = 'https://javdb.com'
   /**
    * All page loads share the single scraper window, so a second navigation
    * cancels the first and both callers would read back the same DOM. Page
-   * fetches therefore run one at a time.
+   * fetches and pre-login therefore run one at a time.
    */
   private pageQueue: Promise<void> = Promise.resolve()
+
+  private enqueuePageWork<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.pageQueue.then(work, work)
+    this.pageQueue = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
 
   /** Image bodies captured from the scraper window via CDP Network. */
   private readonly imageBodyCache = new ImageBodyLruCache()
@@ -192,7 +173,6 @@ export class ScrapeBrowserHelperRuntime {
     const win = this.ensureWindow()
     await this.ensureStealth(win)
     signal?.throwIfAborted()
-    win.show()
     return { targetId: win.webContents.getOrCreateDevToolsTargetId() }
   }
 
@@ -283,7 +263,8 @@ export class ScrapeBrowserHelperRuntime {
     const win = new BrowserWindow({
       width: 1080,
       height: 820,
-      show: true,
+      // Resource-only plugins need the session, but no visible verification UI.
+      show: false,
       title: '元数据刮削 · 浏览器',
       backgroundColor: '#101014',
       webPreferences: {
@@ -293,6 +274,7 @@ export class ScrapeBrowserHelperRuntime {
         nodeIntegration: false
       }
     })
+    win.setMenu(null)
     win.setMenuBarVisibility(false)
     win.webContents.setUserAgent(ua)
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -323,6 +305,11 @@ export class ScrapeBrowserHelperRuntime {
       this.clearNetworkImageCache()
       this.win = null
       this.stealthApplied = false
+      this.preLoginMode = false
+      this.preLoginDone = false
+      this.preLoginPluginName = ''
+      this.helperMenuKind = 'none'
+      this.restoreDarwinApplicationMenu()
       this.onWindowClosed?.()
     })
 
@@ -658,15 +645,127 @@ export class ScrapeBrowserHelperRuntime {
     return challenge
   }
 
+  private helperRefreshMenuItem(win: BrowserWindow): MenuItemConstructorOptions {
+    return {
+      label: '🔄 刷新页面',
+      click: () => {
+        if (!win.isDestroyed()) win.webContents.reload()
+      }
+    }
+  }
+
+  private helperSaveMenuItem(win: BrowserWindow): MenuItemConstructorOptions {
+    return {
+      label: '💾 保存页面',
+      click: () => {
+        if (!win.isDestroyed()) void this.savePageDebug(win)
+      }
+    }
+  }
+
+  private preLoginMenuTemplate(
+    win: BrowserWindow,
+    pluginName: string
+  ): MenuItemConstructorOptions[] {
+    const pluginLabel = pluginName ? `插件【${pluginName}】` : '插件'
+    return [
+      {
+        label: `⚠️ ${pluginLabel}开启了预登入，当前刮削已暂停，请在页面中完成登入后点击右侧的登入完成按钮`,
+        click: () => undefined
+      },
+      this.helperRefreshMenuItem(win),
+      {
+        label: '✅ 登入完成',
+        click: () => {
+          this.preLoginDone = true
+          this.preLoginMode = false
+          this.removeHelperMenu(win)
+        }
+      }
+    ]
+  }
+
+  private challengeMenuTemplate(win: BrowserWindow): MenuItemConstructorOptions[] {
+    return [
+      {
+        label: '⚠️ 检测到 Cloudflare 人机验证，当前刮削已暂停，请在页面中完成验证后点击右侧的验证通过按钮',
+        click: () => undefined
+      },
+      this.helperRefreshMenuItem(win),
+      this.helperSaveMenuItem(win),
+      {
+        label: '✅ 验证通过',
+        click: () => {
+          this.manualPass = true
+        }
+      }
+    ]
+  }
+
+  private applyHelperMenu(
+    win: BrowserWindow,
+    kind: 'preLogin' | 'challenge',
+    template: MenuItemConstructorOptions[]
+  ): void {
+    if (win.isDestroyed()) return
+    const menu = Menu.buildFromTemplate(template)
+    win.setMenu(menu)
+    win.setAutoHideMenuBar(false)
+    win.setMenuBarVisibility(true)
+    this.applyDarwinHelperApplicationMenu(menu)
+    this.helperMenuKind = kind
+  }
+
+  private applyDarwinHelperApplicationMenu(menu: Menu): void {
+    if (process.platform !== 'darwin') return
+    if (this.darwinApplicationMenuBeforeHelper === undefined) {
+      this.darwinApplicationMenuBeforeHelper = Menu.getApplicationMenu()
+    }
+    Menu.setApplicationMenu(menu)
+  }
+
+  private restoreDarwinApplicationMenu(): void {
+    if (process.platform !== 'darwin') return
+    if (this.darwinApplicationMenuBeforeHelper === undefined) return
+    Menu.setApplicationMenu(this.darwinApplicationMenuBeforeHelper)
+    this.darwinApplicationMenuBeforeHelper = undefined
+  }
+
+  private installPreLoginMenu(win: BrowserWindow, pluginName: string): void {
+    this.preLoginPluginName = pluginName
+    this.applyHelperMenu(win, 'preLogin', this.preLoginMenuTemplate(win, pluginName))
+  }
+
+  private installChallengeMenu(win: BrowserWindow): void {
+    if (this.helperMenuKind === 'challenge') return
+    this.applyHelperMenu(win, 'challenge', this.challengeMenuTemplate(win))
+  }
+
+  private removeHelperMenu(win: BrowserWindow): void {
+    if (win.isDestroyed()) return
+    win.setMenu(null)
+    win.setMenuBarVisibility(false)
+    this.restoreDarwinApplicationMenu()
+    this.helperMenuKind = 'none'
+  }
+
   private async syncChallengeToolbar(win: BrowserWindow): Promise<void> {
+    await win.webContents.executeJavaScript(REMOVE_TOOLBAR_JS).catch(() => {})
+    if (this.preLoginMode && !this.preLoginDone) {
+      if (this.helperMenuKind !== 'preLogin') {
+        this.installPreLoginMenu(win, this.preLoginPluginName)
+      }
+      if (!win.isVisible()) win.show()
+      return
+    }
     const challenge = await this.isPageChallenge(win)
     if (challenge) {
-      await win.webContents.executeJavaScript(TOOLBAR_JS).catch(() => {})
+      this.installChallengeMenu(win)
       if (!win.isVisible()) win.show()
       win.focus()
       return
     }
-    await win.webContents.executeJavaScript(REMOVE_TOOLBAR_JS).catch(() => {})
+    if (this.helperMenuKind !== 'none') this.removeHelperMenu(win)
   }
 
   /**
@@ -684,15 +783,7 @@ export class ScrapeBrowserHelperRuntime {
   ): Promise<string> {
     // The timeout budget starts inside loadPageExclusively, so queueing never
     // eats into a caller's timeoutMs.
-    const run = this.pageQueue.then(
-      () => this.loadPageExclusively(url, options, signal),
-      () => this.loadPageExclusively(url, options, signal)
-    )
-    this.pageQueue = run.then(
-      () => undefined,
-      () => undefined
-    )
-    return run
+    return this.enqueuePageWork(() => this.loadPageExclusively(url, options, signal))
   }
 
   private async loadPageExclusively(
@@ -715,12 +806,6 @@ export class ScrapeBrowserHelperRuntime {
 
     // Align client hints with a real Chrome before hitting Cloudflare.
     await this.ensureStealth(win)
-
-    try {
-      this.lastOrigin = new URL(url).origin
-    } catch {
-      /* keep previous origin */
-    }
 
     if (!win.isVisible()) win.show()
 
@@ -801,6 +886,9 @@ export class ScrapeBrowserHelperRuntime {
       if (isChallenge && !focusedForChallenge) {
         await this.syncChallengeToolbar(win)
         focusedForChallenge = true
+      } else if (!isChallenge && focusedForChallenge) {
+        await this.syncChallengeToolbar(win)
+        focusedForChallenge = false
       }
       if (isChallenge && returnOnChallenge) {
         throw new ScrapeBrowserChallengeError({
@@ -915,6 +1003,13 @@ export class ScrapeBrowserHelperRuntime {
         win.show()
         win.focus()
         return this.pageStatus(win)
+      case 'waitPreLogin':
+        return this.enqueuePageWork(async () => {
+          const queued = this.ensureWindow()
+          await this.ensureStealth(queued)
+          if (!queued.isVisible()) queued.show()
+          return this.waitPreLogin(queued, params, signal)
+        })
       case 'snapshot':
         return this.snapshot(win, params)
       case 'beginNetworkCapture':
@@ -945,6 +1040,53 @@ export class ScrapeBrowserHelperRuntime {
         return win.webContents.getURL()
       default:
         throw new Error(`Unsupported browser action: ${action}`)
+    }
+  }
+
+  private async waitPreLogin(
+    win: BrowserWindow,
+    params: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<{ url: string; title: string }> {
+    const rawUrl = typeof params.url === 'string' ? params.url.trim() : ''
+    let parsed: URL
+    try {
+      parsed = new URL(rawUrl)
+    } catch {
+      throw new Error('预登入地址无效')
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('预登入地址必须是 HTTP 或 HTTPS')
+    }
+    const pluginName = typeof params.pluginName === 'string' ? params.pluginName.trim() : ''
+    this.preLoginMode = true
+    this.preLoginDone = false
+    this.installPreLoginMenu(win, pluginName)
+    if (!win.isVisible()) win.show()
+    win.setTitle(pluginName ? `刮削登入 · ${pluginName}` : '刮削登入')
+    win.focus()
+    await win.loadURL(parsed.toString()).catch(() => {
+      /* navigation errors are tolerated; the user can refresh from the window menu */
+    })
+    await this.syncChallengeToolbar(win)
+    try {
+      while (true) {
+        signal?.throwIfAborted()
+        if (!this.win || this.win.isDestroyed()) {
+          throw new Error('登入窗口已关闭，已取消刮削')
+        }
+        if (this.preLoginDone) break
+        await this.sleep(250, signal)
+      }
+      return this.pageStatus(win)
+    } finally {
+      this.preLoginMode = false
+      this.preLoginDone = false
+      this.preLoginPluginName = ''
+      if (!win.isDestroyed()) {
+        await this.syncChallengeToolbar(win)
+        win.setTitle('元数据刮削 · 浏览器')
+      }
     }
   }
 
@@ -1318,7 +1460,8 @@ export class ScrapeBrowserHelperRuntime {
       if (isChallenge && !focusedForChallenge) {
         await this.syncChallengeToolbar(win)
         focusedForChallenge = true
-      } else if (!isChallenge) {
+      } else if (!isChallenge && focusedForChallenge) {
+        await this.syncChallengeToolbar(win)
         focusedForChallenge = false
       }
 
@@ -1374,7 +1517,9 @@ export class ScrapeBrowserHelperRuntime {
     signal?.throwIfAborted()
     const ses = this.getSession()
     const profile = getScrapeUaProfile()
-    const referer = resolveFetchReferer(options?.referer, this.lastOrigin)
+    const pageUrl = this.win && !this.win.isDestroyed() ? this.win.webContents.getURL() : undefined
+    const headerReferer = Object.entries(options?.headers ?? {}).find(([name]) => name.toLowerCase() === 'referer')?.[1]
+    const referer = resolveFetchReferer(options?.referer ?? headerReferer, pageUrl, url)
     const maxBytes = options?.maxBytes
     if (maxBytes != null && (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)) {
       throw new Error('资源体积上限无效')
@@ -1405,6 +1550,7 @@ export class ScrapeBrowserHelperRuntime {
       request.setHeader('User-Agent', profile.userAgent)
       if (referer) request.setHeader('Referer', referer)
       for (const [name, value] of Object.entries(options?.headers ?? {})) {
+        if (name.toLowerCase() === 'referer') continue
         request.setHeader(name, value)
       }
       const chunks: Buffer[] = []
@@ -1459,23 +1605,6 @@ export class ScrapeBrowserHelperRuntime {
       this.teardownNetworkBodyCapture()
     }
   }
-}
-
-function resolveFetchReferer(
-  mode: 'omit' | 'session' | string | undefined,
-  sessionOrigin: string
-): string | null {
-  if (mode === 'omit') return null
-  if (mode === 'session' || mode === undefined) {
-    const origin = sessionOrigin.replace(/\/$/, '')
-    return `${origin}/`
-  }
-  if (typeof mode === 'string' && mode.trim()) {
-    const trimmed = mode.trim()
-    return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
-  }
-  const origin = sessionOrigin.replace(/\/$/, '')
-  return `${origin}/`
 }
 
 function readSelector(params: Record<string, unknown>): string {

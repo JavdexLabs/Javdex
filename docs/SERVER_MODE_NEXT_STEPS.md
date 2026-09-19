@@ -49,7 +49,7 @@
 | 尚未闭合的事项 | 后续处理方式 |
 |---|---|
 | 服务端 NFO 资料导入与远程配对 | 代码已接线；真实 Node 直接/待确认导入及浏览配对测试通过，完整产品流验收继续推进 |
-| 完整远程 GUI | 已通过单条采集、待确认应用、真实服务端文件改名、NFO 导入和配对；批量采集、取消与部分提交已通过；清单匹配仍待验证 |
+| 完整远程 GUI | 已通过单条采集、待确认应用、真实服务端文件改名、NFO 导入和配对；批量采集、取消与部分提交已通过；清单唯一已有影片匹配及结果页已通过固定页面/模型传输夹具验收 |
 | 变更后协议的故障与恢复验收 | 本轮 55 项 Linux 测试与 Docker 双宿主迁库故障验收通过；旧 waitingMaintenance、双端迁库许可的历史结果不作为现行协议证据 |
 | 同源码版本的安装与发布 | 历史 0.7.0 Linux 结果不代表当前 0.7.1，也不代表 Windows/macOS；版本和发布目标需在启动发布工作时重新确定 |
 
@@ -102,7 +102,7 @@
 | Linux 同版本安装 | 当前源码桌面/Web/server build 和 Electron 原生依赖构建通过；arm64 deb 打包与 `smoke:same-version-install` 通过（解包校验、Xvfb 存活检查与同版本 Docker 镜像，随后在同一隔离容器安装 gnome-keyring/DBus 并用 apt 正式安装 deb；`/opt/Javdex/javdex` 的 NFO、采集、待确认、终止、改名、配对与重启 GUI 均通过）。容器中的源码副本没有 Git 远端元数据，打包显式传入当前仓库主页；Electron 下载中断后使用已安装的相同 43.4.1 运行时；容器缺少 xz，deb 改用构建参数 `deb.compression=gz` |
 | 远程目录修复回归 | 11 项 IPC/HTTP 合同测试、`typecheck`、`pretest` 通过；显式旧版本仍保留并交由服务端拒绝 |
 
-远程清单匹配 GUI 及 Windows/macOS x64 安装仍未闭合。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
+Windows/macOS x64 安装以及新增修复后的候选产物刷新仍未闭合。上述证据不代表 S13/S14 全矩阵完成；未改版本、发布、推送或合并 main。
 
 ## 后续验证命令
 
@@ -138,4 +138,22 @@ JAVDEX_REMOTE_SMOKE_NFO=1 JAVDEX_REMOTE_SMOKE_RENAME=1 JAVDEX_REMOTE_SMOKE_SCRAP
 
 Windows 无运行宿主，macOS x64 无 Rosetta，相关安装验收保持未完成。Linux 密钥环与沙箱运行条件已补齐，当前实测不再以缺少环境为阻塞。最终版本发布、推送和合并 main 仍不执行。
 
-Linux GUI 补充环境：使用 `dbus-run-session`、`XDG_CURRENT_DESKTOP=GNOME`、临时测试密钥环和 Xvfb。容器中的非 root Chromium 子进程需 root 所有且模式为 4755 的 `chrome-sandbox`；正式 deb 的安装脚本以 root 探测 user namespace，当前容器探测结果与非 root 运行条件不一致，因此在容器安装目录显式配置该权限。最终 `/opt/Javdex/javdex` 验收未传 `--no-sandbox`，也未绕过 writer 安全存储。该结果针对本机 Colima Linux arm64 测试环境，不推断所有 Linux 桌面发行版或其他架构通过。
+Linux GUI 补充环境：使用 `dbus-run-session`、`XDG_CURRENT_DESKTOP=GNOME`、临时测试密钥环和 Xvfb。容器中的非 root Chromium 子进程需 root 所有且模式为 4755 的 `chrome-sandbox`；正式 deb 的安装脚本以 root 探测 user namespace，当前容器探测结果与非 root 运行条件不一致，因此在容器安装目录显式配置该权限。最终 `/opt/Javdex/javdex` 验收未显式设置烟测脚本的 `JAVDEX_REMOTE_SMOKE_NO_SANDBOX`，未绕过 writer 安全存储；Playwright 仍可能附加自动化启动参数，该结果不用于证明 Chromium 的全部安全配置。该结果针对本机 Colima Linux arm64 测试环境，不推断所有 Linux 桌面发行版或其他架构通过。
+
+## 交付范围复核（本轮进行中）
+
+| 原执行项 | 当前证据 | 尚未闭合 |
+|---|---|---|
+| 1. 提交既有成果 | 文档整理 `99953b1`、NFO 版本修复 `c0d9655` 分开提交 | 无 |
+| 2. 首版 NFO 与远程网页配对 | `dd72ab3`，真实 Node 元数据/图片/待确认回归和 macOS/Linux GUI | 无已知功能缺口 |
+| 3. 完整远程 GUI | NFO、单条/批量采集、待确认、文件改名、终止与部分提交、配对均有真实桌面和容器证据；清单提取已复用原影片且未新建 | 唯一已有影片复用及结果页已通过；模型传输是夹具，不作为真实模型质量证据 |
+| 4. 现行协议恢复与故障 | 55 项 Linux 测试和 Docker 迁库故障通过 | 历史 M/D 每一行仍需按当前协议逐项核对，不能以总数直接宣告全矩阵完成 |
+| 5. 同版本安装部署 | `9c2942c` 之前的 macOS arm64 DMG 与 Linux arm64 deb 已验证 | 清单新增修复后需刷新候选产物；Windows 与 macOS x64 缺运行环境 |
+
+清单列表修复 `b60ece1`：管理合同保留搜索/影片筛选/语言参数，远程界面禁用自动建片。15 项合同和界面结构回归、类型与 pretest 通过。随后真实流程又发现详情/元数据/影片分页漏接排序和资源筛选，修复 `56fb293` 已通过 HTTP 合同回归及桌面/Web/server 类型检查，修改文件 lint 通过。清单模型使用本地确定性 HTTP 夹具，浏览器提取和远程 catalog 匹配/写入均为真实链路；该验收不评估模型生成策略或外部站点变化。
+
+### 清单 GUI 验收补充
+
+`JAVDEX_REMOTE_SMOKE_PLAYLIST=1` 验证单页清单复用既有 `GUI-901`，同时检查服务端影片 ID 与清单成员一致、该番号仍只有一条影片，并从完成界面的“查看清单”打开真实结果页。连同 NFO、配对、重启、撤销整条脚本退出 0。服务端使用生产 Docker 镜像，桌面使用包含 `56fb293` 的 Linux arm64 打包目录。
+
+`remote-playlist-fixture.mjs` 只固定模型 HTTP 响应（打开页面、读取快照、提交 selector 检查点）；不替换浏览器提取、影片匹配、管理 HTTP 或资料库写入。为保持产品对本机/内网来源的拒绝，夹具在隔离 Colima VM 的 loopback 上绑定文档测试地址 `198.51.100.2/32`，设置 `JAVDEX_PLAYLIST_FIXTURE_HOST=198.51.100.2`；这是测试网络布置，不是产品允许内网来源的变更。结束该组验证后移除测试地址。真实站点、模型推理质量和身份冲突人工选择不由这个单页用例证明。

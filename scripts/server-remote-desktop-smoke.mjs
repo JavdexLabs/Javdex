@@ -6,8 +6,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { _electron as electron } from 'playwright-core'
 import sharp from 'sharp'
+import { startPlaylistFixture } from './remote-playlist-fixture.mjs'
 
-for (const flag of ['SCRAPE', 'PENDING', 'RENAME', 'BATCH', 'CANCEL']) {
+for (const flag of ['SCRAPE', 'PENDING', 'RENAME', 'BATCH', 'CANCEL', 'PLAYLIST']) {
   if (process.env[`JAVDEX_REMOTE_SMOKE_${flag}`] === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_NFO, '1', `${flag} requires JAVDEX_REMOTE_SMOKE_NFO=1`)
 }
 if (process.env.JAVDEX_REMOTE_SMOKE_BATCH === '1' || process.env.JAVDEX_REMOTE_SMOKE_PENDING === '1') assert.equal(process.env.JAVDEX_REMOTE_SMOKE_SCRAPE, '1', 'batch/pending requires the scraper fixture')
@@ -45,6 +46,8 @@ if (process.env.JAVDEX_REMOTE_SMOKE_SCRAPE === '1') {
   fs.writeFileSync(path.join(pendingDir, 'plugin.json'), JSON.stringify({ schemaVersion: 1, kind: 'video', name: 'GUI Pending', version: '1.0.0', entry: 'index.cjs', supportedFields: ['title', 'summary'] }))
   fs.writeFileSync(path.join(pendingDir, 'index.cjs'), "module.exports = { async parseVideo(ctx) { return [{ code: ctx.code, title: 'GUI candidate A', summary: 'GUI chosen summary', sourceUrl: 'https://example.test/a' }, { code: ctx.code, title: 'GUI candidate B', summary: 'GUI other summary', sourceUrl: 'https://example.test/b' }] } }")
 }
+if (process.env.JAVDEX_REMOTE_SMOKE_PLAYLIST === '1') assert.ok(process.env.JAVDEX_PLAYLIST_FIXTURE_HOST, 'playlist GUI needs an isolated public-classified test address; loopback sources are rejected by the product')
+const playlistFixture = process.env.JAVDEX_REMOTE_SMOKE_PLAYLIST === '1' ? await startPlaylistFixture(output) : null
 let application
 let started = false
 try {
@@ -191,6 +194,36 @@ try {
       console.log('PASS: remote GUI renames an actual server file and imports its new identity')
     }
   }
+  if (playlistFixture) {
+    await page.evaluate(async url => {
+      let snapshot = await window.api.settings.getModelManagement()
+      const apply = async command => { const result = await window.api.settings.applyModelManagement({ expectedRevision: snapshot.revision, command }); if (!result.ok) throw new Error(JSON.stringify(result.error)); snapshot = result.snapshot }
+      await apply({ type: 'save-connection', connection: { providerId: 'gui-fixture', name: 'GUI Fixture', source: 'custom', protocol: 'openai-chat', baseUrl: `${url}/v1`, apiKeyAction: 'replace', apiKey: 'fixture-only' } })
+      const connection = snapshot.connections.find(item => item.providerId === 'gui-fixture')
+      await apply({ type: 'add-model', connectionId: connection.id, modelId: 'gui-fixture', name: 'GUI Fixture' })
+      await apply({ type: 'set-default-model', modelRef: snapshot.models.find(item => item.connectionId === connection.id).id })
+      window.location.hash = '/playlists'
+    }, playlistFixture.url)
+    await page.getByRole('button', { name: '导入外部清单', exact: true }).click()
+    await page.getByPlaceholder('https://example.com/list/...').fill(`${playlistFixture.url}/list`)
+    await page.locator('.entity-edit-field').filter({ has: page.getByText('目标媒体库', { exact: true }) }).getByRole('button').click()
+    await page.getByRole('option', { name: '默认媒体库', exact: true }).click()
+    await page.getByRole('button', { name: '开始导入', exact: true }).click()
+    await page.getByText('导入完成', { exact: true }).waitFor({ timeout: 45000 })
+    const imported = await page.evaluate(async () => {
+      const lists = await window.api.playlists.listPage({ search: 'GUI matching list', limit: 10, offset: 0 })
+      const videos = await window.api.videos.list({ kind: 'library', libraryId: 1 })
+      return { lists, videos, detail: await window.api.playlists.get(lists.items[0].id) }
+    })
+    assert.equal(imported.lists.items.length, 1)
+    assert.equal(imported.detail.videos.length, 1)
+    assert.equal(imported.detail.videos[0].id, imported.videos.items.find(item => item.code === 'GUI-901').id)
+    assert.equal(imported.videos.items.filter(item => item.code === 'GUI-901').length, 1)
+    await page.getByRole('button', { name: '查看清单', exact: true }).click()
+    await page.locator('.poster-card').filter({ hasText: 'GUI-901' }).waitFor()
+    await page.screenshot({ path: path.join(output, 'remote-playlist-match.png'), fullPage: true })
+    console.log('PASS: remote playlist import GUI reuses the existing server video and opens its playlist')
+  }
   await page.evaluate(() => { window.location.hash = '/settings/network/web' })
   await page.getByRole('button', { name: '开启配对', exact: true }).click()
   assert.equal(await page.getByLabel('端口', { exact: true }).count(), 0)
@@ -234,6 +267,7 @@ try {
   throw error
 } finally {
   if (application) await application.close()
+  if (playlistFixture) await playlistFixture.close()
   if (started) docker('rm', '-fv', name)
   // Keep isolated fixture and screenshots for inspection; never touches the user's library.
 }

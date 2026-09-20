@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import type { AgentProfile, AgentToolEffect } from '@shared/aiConfigurationTypes'
+import type { AgentPolicy, AgentToolEffect } from '@shared/aiConfigurationTypes'
 import type { AgentOperationId, AgentRunId, HostedToolBinding, HostedToolResult } from './types'
 import { AgentRunStore, agentRunStore } from './agentRunStore'
 
@@ -35,7 +35,7 @@ export type ToolHandler = (context: ToolHandlerContext) => Promise<HostedToolRes
 interface RegisteredRun {
   status: () => string
   handlers: ReadonlyMap<string, ToolHandler>
-  profile: AgentProfile
+  policy: AgentPolicy
   operationId: () => AgentOperationId | undefined
   permits: Map<string, { requestId: string; permit: string }>
   onApprovalRequired?: (request: {
@@ -177,7 +177,7 @@ export class ToolHost {
 
   registerRun(input: {
     runId: AgentRunId
-    profile: AgentProfile
+    policy: AgentPolicy
     status: () => string
     operationId: () => AgentOperationId | undefined
     handlers: ReadonlyMap<string, ToolHandler>
@@ -194,7 +194,7 @@ export class ToolHost {
     )
     const run: RegisteredRun = { ...input, permits }
     this.runs.set(input.runId, run)
-    const declarations = input.profile.toolPackRefs.flatMap((ref) => {
+    const declarations = input.policy.toolPackRefs.flatMap((ref) => {
       const pack = this.packs.get(ref)
       if (!pack) throw new Error(`ToolPack 不存在：${ref}`)
       return pack.tools
@@ -259,12 +259,12 @@ export class ToolHost {
       effect: declaration.effect
     })
     if (!created) throw new Error(`工具调用 ${callId} 已存在，拒绝重复副作用`)
-    if (!run.profile.capabilityGrants.includes(declaration.capability)) {
+    if (!run.policy.capabilityGrants.includes(declaration.capability)) {
       this.store.completeToolCall(callId, 'denied', { reason: 'capability-denied' })
-      throw new Error(`Profile 未授权能力：${declaration.capability}`)
+      throw new Error(`Agent 未授权能力：${declaration.capability}`)
     }
 
-    if (run.profile.approvalRequiredEffects.includes(declaration.effect)) {
+    if (run.policy.approvalRequiredEffects.includes(declaration.effect)) {
       const permitKey = `${declaration.name}\0${argsDigest}`
       const requestId = this.approvalRequestId(runId, callId, declaration.name, argsDigest)
       const approved = run.permits.get(permitKey)

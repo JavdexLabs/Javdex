@@ -80,21 +80,16 @@ async function main(): Promise<void> {
   const runStore = new AgentRunStore(() => database)
   const host = new ToolHost(runStore)
   host.registerToolPack(PLUGIN_DEVELOPER_TOOL_PACK)
-  const profile = {
-    id: 'profile:mcp-plugin-developer',
-    name: 'MCP Plugin Developer',
-    definitionId: 'plugin-developer',
-    routes: { primary: 'mcp:primary', verifier: 'mcp:verifier', summarizer: 'mcp:summarizer' },
+  const policy = {
     toolPackRefs: [PLUGIN_DEVELOPER_TOOL_PACK.ref],
     capabilityGrants: ['plugin.write', 'plugin.test', 'browser.interact'],
     approvalRequiredEffects: [],
-    compaction: { enabled: false, reserveTokens: 0, keepRecentTokens: 0 }
   }
   const prompt = 'MCP PluginDeveloper ToolHost session'
   const resolved: ResolvedRunConfiguration = {
     revision: 'mcp-v1',
     definitionId: 'plugin-developer',
-    profile,
+    policy,
     model: {
       credentialRef: 'llm-provider:mcp-unused',
       model: {
@@ -118,7 +113,7 @@ async function main(): Promise<void> {
     systemPrompt: { text: prompt, sha256: createHash('sha256').update(prompt).digest('hex') },
     tools: [],
     settings: {
-      compaction: profile.compaction,
+      compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 },
       retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 }
     },
     sessionDirectory: workspaceDirectory
@@ -126,7 +121,7 @@ async function main(): Promise<void> {
   runStore.createRun({ runId: sessionId, useCase: 'mcp-plugin-developer', resolved, productState: {} })
   const bindings = host.registerRun({
     runId: sessionId,
-    profile,
+    policy,
     status: () => runStore.getRun(sessionId)?.status ?? 'closed',
     operationId: () => undefined,
     handlers: createPluginDeveloperToolHandlers({

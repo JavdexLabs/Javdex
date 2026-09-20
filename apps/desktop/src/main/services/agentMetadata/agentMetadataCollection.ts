@@ -1,3 +1,4 @@
+import { agentCompactionPolicy } from '../../agent-platform/agentRuntimePolicy'
 import { app } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -181,10 +182,10 @@ export class AgentMetadataCollection {
     this.emit(runId, active.state.revision)
   }
 
-  private registerTools(runId: string, profile: PersistedRunConfigurationSnapshot['profile']) {
+  private registerTools(runId: string, policy: PersistedRunConfigurationSnapshot['policy']) {
     return toolHost.registerRun({
       runId,
-      profile,
+      policy,
       status: () => agentRunStore.getRun(runId)?.status ?? 'closed',
       operationId: () => agentRunStore.getRun(runId)?.activeOperationId,
       handlers: createAgentMetadataToolHandlers({
@@ -245,15 +246,15 @@ export class AgentMetadataCollection {
   }
 
   private resolveConfiguration(runId: string): ResolvedRunConfiguration {
-    const { revision, profile, definition, workload } = agentConfiguration.getProfile(
-      'profile:metadata-collector:default'
+    const { revision, policy, definition, workload } = agentConfiguration.getConfiguration(
+      'metadata-collector'
     )
     const primary = modelControlPlane.resolveWorkloadModel('library-curator')
-    const tools = this.registerTools(runId, profile)
+    const tools = this.registerTools(runId, policy)
     return {
       revision,
       definitionId: definition.id,
-      profile,
+      policy,
       model: primary,
       cache: {
         primaryAffinityId: createCacheAffinityId(runId, 'primary', primary.routeRevision),
@@ -271,7 +272,7 @@ export class AgentMetadataCollection {
       },
       tools,
       settings: {
-        compaction: profile.compaction,
+        compaction: agentCompactionPolicy(primary.model.contextWindow),
         retry: { enabled: true, maxRetries: 2, baseDelayMs: 1_000 },
         maxTurns: workload.limits.maxTurns
       },

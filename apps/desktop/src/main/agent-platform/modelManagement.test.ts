@@ -126,13 +126,13 @@ describe('ModelManagementModule', () => {
     assert.match(serialized, /api\.example\.test/)
   })
 
-  it('migrates released settings once and then reads the same v2 revision', () => {
+  it('migrates released settings once and then reads the same current revision', () => {
     const { module, store } = harness()
 
     const first = module.read()
     const second = module.read()
 
-    assert.equal(first.schemaVersion, 2)
+    assert.equal(first.schemaVersion, 3)
     assert.equal(first.revision, 'revision-1')
     assert.equal(second.revision, first.revision)
     assert.equal(store.backups, 1)
@@ -157,7 +157,7 @@ describe('ModelManagementModule', () => {
     assert.equal(store.writes, 0)
   })
 
-  it('fails closed for malformed nested v2 data and embedding catalog entries', () => {
+  it('fails closed for malformed nested configuration and embedding catalog entries', () => {
     const valid = migrateModelManagementDocument(
       DEFAULT_SETTINGS,
       'valid-revision',
@@ -169,7 +169,6 @@ describe('ModelManagementModule', () => {
     }
     malformed.models[0]!.baseline.capabilities.tools = 'yes'
     malformed.assignments[0]!.runtime.cacheRetention = 'forever'
-    malformed.assignments[0]!.compaction.reserveTokens = -1
     const malformedHarness = harness({ stored: malformed })
 
     assert.throws(() => malformedHarness.module.read(), /读取模型配置失败/)
@@ -274,7 +273,7 @@ describe('ModelManagementModule', () => {
         workloadId: 'plugin-developer',
         model: { mode: 'explicit', modelRef: deepseekModels[1]!.id },
         runtime: assignment(snapshot, 'plugin-developer').runtime,
-        compaction: assignment(snapshot, 'plugin-developer').compaction,
+
         limits: assignment(snapshot, 'plugin-developer').limits
       }
     })
@@ -302,7 +301,7 @@ describe('ModelManagementModule', () => {
         workloadId: 'plugin-developer',
         model: current.model,
         runtime: current.runtime,
-        compaction: current.compaction,
+
         limits: { ...current.limits, maxContextTokens: 64_000 }
       }
     })
@@ -345,7 +344,7 @@ describe('ModelManagementModule', () => {
         workloadId: 'plugin-developer',
         model: { mode: 'explicit', modelRef: customModel.id },
         runtime: assignment(snapshot, 'plugin-developer').runtime,
-        compaction: assignment(snapshot, 'plugin-developer').compaction,
+
         limits: assignment(snapshot, 'plugin-developer').limits
       }
     })
@@ -440,7 +439,7 @@ describe('ModelManagementModule', () => {
     assert.equal(reset.effective.contextWindow, reset.baseline.contextWindow)
   })
 
-  it('rejects non-tool Agent models and unsupported long cache', () => {
+  it('rejects non-tool Agent models', () => {
     const { module } = harness()
     let snapshot = module.read()
     const target = snapshot.models.find((item) =>
@@ -462,26 +461,50 @@ describe('ModelManagementModule', () => {
           workloadId: 'plugin-developer',
           model: { mode: 'explicit', modelRef: target.id },
           runtime: assignment(snapshot, 'plugin-developer').runtime,
-          compaction: assignment(snapshot, 'plugin-developer').compaction,
+
           limits: assignment(snapshot, 'plugin-developer').limits
         }
       }),
       (error) => error instanceof ModelManagementError && error.code === 'MODEL_NOT_TOOL_CAPABLE'
     )
 
-    assert.throws(
-      () => module.apply({
-        expectedRevision: snapshot.revision,
-        command: {
-          type: 'set-workload-assignment',
-          workloadId: 'plugin-developer',
-          model: assignment(snapshot, 'plugin-developer').model,
-          runtime: { ...assignment(snapshot, 'plugin-developer').runtime, cacheRetention: 'long' },
-          compaction: assignment(snapshot, 'plugin-developer').compaction,
-          limits: assignment(snapshot, 'plugin-developer').limits
-        }
-      }),
-      (error) => error instanceof ModelManagementError && error.code === 'LONG_CACHE_UNSUPPORTED'
-    )
+
   })
+})
+
+it('migrates v2 policies once while retaining connections, model choices and user limits', () => {
+  const initial = harness()
+  initial.module.read()
+  const current = initial.store.value as ModelManagementDocument
+  const legacy = { ...current, schemaVersion: 2, assignments: current.assignments.map(item => ({
+    ...item, runtime: { ...item.runtime, cacheRetention: 'long' },
+    compaction: { enabled: false, reserveTokens: 123, keepRecentTokens: 456 }
+  })) }
+  const { module, store, credentials } = harness({ stored: legacy })
+  const after = module.read()
+  assert.equal(after.schemaVersion, 3)
+  const migrated = store.value as ModelManagementDocument
+  assert.deepEqual(migrated.connections, current.connections)
+  assert.deepEqual(migrated.models, current.models)
+  assert.deepEqual(migrated.assignments, current.assignments)
+  assert.equal(credentials.writes, 0)
+  assert.equal(store.writes, 1)
+  module.read()
+  assert.equal(store.writes, 1)
+})
+
+it('keeps the legacy model file unchanged if policy migration cannot be persisted', () => {
+  const initial = harness()
+  initial.module.read()
+  const current = initial.store.value as ModelManagementDocument
+  const legacy = { ...current, schemaVersion: 2, assignments: current.assignments.map(item => ({
+    ...item, runtime: { ...item.runtime, cacheRetention: 'short' },
+    compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 200 }
+  })) }
+  const { module, store } = harness({ stored: legacy })
+  store.failWrite = true
+  assert.throws(() => module.read(), /disk full/)
+  assert.deepEqual(store.value, legacy)
+  store.failWrite = false
+  assert.equal(module.read().schemaVersion, 3)
 })

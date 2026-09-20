@@ -12,15 +12,12 @@ import type {
 import type {
   AgentOperationId,
   AgentRuntimePort,
-  ExecutionHistoryFrame,
   MessageAuditView,
   NormalizedModelUsage,
   OpaqueRuntimeSessionRef,
   RuntimeDurableObservation,
   RuntimeObserver,
-  RuntimeRecoveryFrame,
   RuntimeSessionInit,
-  RuntimeSessionInitWithoutResume,
   RuntimeSessionPort
 } from '../../agent-platform/types'
 
@@ -96,10 +93,7 @@ function workspaceGuardExtension(root: string): InlineExtension {
   }
 }
 
-function recovery(kind: 'message' | 'tool-result', value: unknown): RuntimeRecoveryFrame {
-  const payload = JSON.stringify({ kind, value })
-  return { codecVersion: RECOVERY_CODEC_VERSION, payload, contentHash: sha256(payload) }
-}
+
 
 function messageAudit(message: unknown): MessageAuditView {
   const record = message && typeof message === 'object' ? message as Record<string, unknown> : {}
@@ -442,11 +436,10 @@ function toolDefinitions(
             onUpdate?.({ content: [{ type: 'text', text: summary }], details: { summary } })
           }
         })
-        const frame = recovery('tool-result', { toolCallId, toolName: binding.name, result })
+
         await queue.enqueue({
           type: 'tool.completed',
-          result: { callId: toolCallId, toolName: binding.name, ok: result.ok, summary: result.summary },
-          recovery: frame
+          result: { callId: toolCallId, toolName: binding.name, ok: result.ok, summary: result.summary }
         })
         committedToolCalls.add(toolCallId)
         // A terminating control result (for example waiting_user or a loop breaker) must reach Pi
@@ -461,11 +454,10 @@ function toolDefinitions(
       } catch (error) {
         if (!committedToolCalls.has(toolCallId)) {
           const message = error instanceof Error ? error.message : String(error)
-          const frame = recovery('tool-result', { toolCallId, toolName: binding.name, error: message })
+
           await queue.enqueue({
             type: 'tool.completed',
-            result: { callId: toolCallId, toolName: binding.name, ok: false, summary: truncateUnicode(message, 240) },
-            recovery: frame
+            result: { callId: toolCallId, toolName: binding.name, ok: false, summary: truncateUnicode(message, 240) }
           })
           committedToolCalls.add(toolCallId)
         }
@@ -596,8 +588,8 @@ class PiRuntimeSession implements RuntimeSessionPort {
       }
       case 'message_end': {
         const audit = messageAudit(event.message)
-        const frame = recovery('message', event.message)
-        this.enqueue({ type: 'message.completed', audit, recovery: frame })
+
+        this.enqueue({ type: 'message.completed', audit })
         const usage = usageFromMessage(event.message)
         const normalized = usage ? normalizedUsage(this.input, 'primary', usage) : undefined
         if (usage) {
@@ -633,7 +625,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
       }
       case 'tool_execution_end':
         if (!this.committedToolCalls.has(event.toolCallId)) {
-          const frame = recovery('tool-result', event.result)
+
           this.enqueue({
             type: 'tool.completed',
             result: {
@@ -641,8 +633,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
               toolName: event.toolName,
               ok: !event.isError,
               summary: event.isError ? 'Pi 原生工具执行失败' : 'Pi 原生工具执行完成'
-            },
-            recovery: frame
+            }
           })
           this.committedToolCalls.add(event.toolCallId)
         }
@@ -805,8 +796,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
 async function openSession(
   input: RuntimeSessionInit,
   observer: RuntimeObserver,
-  source: 'created' | 'restored',
-  rebuildHistory?: readonly ExecutionHistoryFrame[]
+  source: 'created' | 'restored'
 ): Promise<PiRuntimeSession> {
   const { SessionManager, createAgentSession } = await loadPi()
   fs.mkdirSync(input.sessionDirectory, { recursive: true })
@@ -825,18 +815,7 @@ async function openSession(
     }
   } else {
     sessionManager = SessionManager.create(input.sessionDirectory, input.sessionDirectory)
-    if (rebuildHistory) {
-      for (const frame of rebuildHistory) {
-        if (frame.runtimeId !== 'pi' || frame.codecVersion !== RECOVERY_CODEC_VERSION) {
-          throw new Error(`checkpoint-incompatible: unsupported history codec at ${frame.seq}`)
-        }
-        if (sha256(frame.recovery.payload) !== frame.contentHash) {
-          throw new Error(`checkpoint-corrupt: invalid history frame ${frame.seq}`)
-        }
-        const decoded = JSON.parse(frame.recovery.payload) as { kind?: string; value?: unknown }
-        if (decoded.kind === 'message') sessionManager.appendMessage(decoded.value as never)
-      }
-    }
+
   }
   const queue = new DurableObservationQueue(observer)
   const committedToolCalls = new Set<string>()
@@ -870,13 +849,6 @@ class PiRuntimePort implements AgentRuntimePort {
     return { source, session: await openSession(input, observer, source) }
   }
 
-  async rebuild(
-    input: RuntimeSessionInitWithoutResume,
-    history: readonly ExecutionHistoryFrame[],
-    observer: RuntimeObserver
-  ): Promise<RuntimeSessionPort> {
-    return openSession(input, observer, 'created', history)
-  }
 }
 
 export function createPiRuntimePort(): AgentRuntimePort {

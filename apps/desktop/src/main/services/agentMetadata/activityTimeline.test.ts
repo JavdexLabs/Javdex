@@ -16,7 +16,6 @@ describe('AgentMetadataActivityTimeline', () => {
     timeline.observe({
       type: 'message.completed',
       audit: { role: 'assistant', textPreview: '', contentHash: 'hash', reasoningChars: 12 },
-      recovery: { codecVersion: 1, payload: '{}', contentHash: 'recovery' }
     })
     const completed = timeline.snapshot()[0]
     assert.equal(completed?.status, 'success')
@@ -46,7 +45,6 @@ describe('AgentMetadataActivityTimeline', () => {
     timeline.observe({
       type: 'tool.completed',
       result: { callId: 'call-1', toolName: 'browser', ok: true, summary: '已读取页面结构' },
-      recovery: { codecVersion: 1, payload: '{}', contentHash: 'recovery' }
     })
 
     assert.deepEqual(timeline.snapshot(), [{
@@ -99,7 +97,6 @@ describe('AgentMetadataActivityTimeline', () => {
     timeline.observe({
       type: 'message.completed',
       audit: { role: 'assistant', textPreview: '', contentHash: 'hash', reasoningChars: 7 },
-      recovery: { codecVersion: 1, payload: '{}', contentHash: 'recovery' }
     })
     for (let index = 0; index < 300; index += 1) {
       timeline.describeTool(`call-${index}`, 'browser', { action: 'snapshot' })

@@ -1,13 +1,12 @@
 import type {
   ModelCacheCompatibility,
-  ModelCacheRetention,
   ModelCapabilityState
 } from './aiConfigurationTypes'
 import type { LlmApiKeyAction, LlmProviderProtocol } from './llmProviders'
 
 export type ModelWorkloadId = 'app-default' | 'plugin-developer' | 'library-curator'
 export type ModelCandidateKind = 'chat' | 'embedding'
-export const MODEL_MANAGEMENT_SCHEMA_VERSION = 2 as const
+export const MODEL_MANAGEMENT_SCHEMA_VERSION = 3 as const
 
 export interface ManagedModelConnection {
   id: string
@@ -60,13 +59,6 @@ export interface WorkloadRuntimeSettings {
   /** 0 means use the selected model's declared maximum. */
   maxTokens: number
   timeoutMs: number
-  cacheRetention: ModelCacheRetention
-}
-
-export interface WorkloadCompactionSettings {
-  enabled: boolean
-  reserveTokens: number
-  keepRecentTokens: number
 }
 
 export interface WorkloadLimits {
@@ -83,7 +75,6 @@ export interface ModelWorkloadAssignment {
   workloadId: ModelWorkloadId
   model: WorkloadModelSelection
   runtime: WorkloadRuntimeSettings
-  compaction: WorkloadCompactionSettings
   limits: WorkloadLimits
 }
 
@@ -152,7 +143,6 @@ export type ModelManagementCommand =
       workloadId: Exclude<ModelWorkloadId, 'app-default'>
       model: WorkloadModelSelection
       runtime: WorkloadRuntimeSettings
-      compaction: WorkloadCompactionSettings
       limits: WorkloadLimits
     }
   | { type: 'save-connection'; connection: SaveModelConnectionInput }
@@ -173,7 +163,6 @@ export type ModelManagementErrorCode =
   | 'CONNECTION_IN_USE'
   | 'CONNECTION_NOT_READY'
   | 'MODEL_NOT_TOOL_CAPABLE'
-  | 'LONG_CACHE_UNSUPPORTED'
   | 'VALIDATION_FAILED'
   | 'MODEL_CONFIG_PARTIAL_WRITE'
 

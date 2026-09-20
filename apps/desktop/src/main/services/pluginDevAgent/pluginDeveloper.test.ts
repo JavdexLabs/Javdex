@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { AgentProfile } from '@shared/aiConfigurationTypes'
+import type { AgentPolicy } from '@shared/aiConfigurationTypes'
 import type {
   PluginDevAgentEvent,
   PluginDevAgentStartInput,
@@ -61,16 +61,11 @@ const packageValue: ScraperPluginPackage = {
   code: 'async function scrape(ctx) { return { title: "Example" }; }'
 }
 
-function profile(): AgentProfile {
+function policy(): AgentPolicy {
   return {
-    id: 'profile:plugin-developer:test',
-    name: 'Plugin Developer Test',
-    definitionId: 'plugin-developer',
-    routes: { primary: 'primary', verifier: 'verifier', summarizer: 'summarizer' },
     toolPackRefs: [],
     capabilityGrants: [],
     approvalRequiredEffects: ['install'],
-    compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 }
   }
 }
 
@@ -104,13 +99,13 @@ function access(role: string, routeRevision = `route:${role}`): ResolvedModelAcc
   }
 }
 
-function frozenSnapshot(inputProfile = profile()): PersistedRunConfigurationSnapshot {
+function frozenSnapshot(inputProfile = policy()): PersistedRunConfigurationSnapshot {
   const primary = access('primary')
   const prompt = 'stable plugin developer prompt'
   return {
     revision: 'configuration:legacy',
     definitionId: 'plugin-developer',
-    profile: inputProfile,
+    policy: inputProfile,
     model: {
       credentialRef: primary.credentialRef,
       descriptor: primary.model,
@@ -130,7 +125,7 @@ function frozenSnapshot(inputProfile = profile()): PersistedRunConfigurationSnap
     },
     tools: [],
     settings: {
-      compaction: inputProfile.compaction,
+      compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 },
       retry: { enabled: true, maxRetries: 1, baseDelayMs: 10 },
       maxTurns: 4
     }
@@ -403,6 +398,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     const developer = new PluginDeveloper()
     const records = [
       { id: 'plugin-settled', useCase: 'plugin-developer', status: 'settled' as const },
+      { id: 'plugin-blocked', useCase: 'plugin-developer', status: 'failed' as const },
       { id: 'plugin-failed', useCase: 'plugin-developer', status: 'failed' as const },
       { id: 'plugin-cancelled', useCase: 'plugin-developer', status: 'cancelled' as const },
       { id: 'plugin-waiting', useCase: 'plugin-developer', status: 'waiting_user' as const },
@@ -412,7 +408,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       configRevision: 'test',
       configSnapshot: frozenSnapshot(),
       recoveryGeneration: 0,
-      productState: {},
+      productState: item.id === 'plugin-blocked' ? { recoveryBlocked: true } : {},
       createdAt: '2026-08-20T00:00:00.000Z',
       updatedAt: '2026-08-20T00:00:00.000Z'
     })) satisfies AgentRunRecord[]
@@ -421,6 +417,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     for (const id of [
       'plugin-settled',
       'plugin-failed',
+      'plugin-blocked',
       'plugin-cancelled',
       'plugin-waiting',
       'plugin-running',
@@ -444,6 +441,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       'getRunStatus',
       ((runId: string) => records.find((record) => record.id === runId)?.status ?? null) as typeof agentRunStore.getRunStatus
     )
+    const restoreRecord = replaceMethod(agentRunStore, 'getRun', ((runId: string) => records.find(record => record.id === runId) ?? null) as typeof agentRunStore.getRun)
     const restoreCleanupPending = replaceMethod(agentRunStore, 'setResourceCleanupPending', () => {})
     const restoreClose = replaceMethod(agentExecution, 'closeRun', (async (runId) => {
       closed.push(runId)
@@ -453,6 +451,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     try {
       const count = await developer.discardUnrecoverableSessions()
 
+      assert.equal(fs.existsSync(path.join(historyRoot, 'plugin-blocked', 'history.txt')), true)
       assert.equal(count, 3)
       assert.deepEqual(closed.sort(), ['plugin-cancelled', 'plugin-failed', 'plugin-settled'])
       assert.equal(testable(developer).active.has(waiting.id), true)
@@ -466,6 +465,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       restoreDiscard()
       restoreClose()
       restoreCleanupPending()
+      restoreRecord()
       restoreGet()
       restoreList()
       testable(developer).active.delete(waiting.id)
@@ -642,14 +642,12 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'native-read', toolName: 'read', ok: true, summary: 'read index.js' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'read-hash' }
       })
       assert.doesNotMatch(active.session.package.code, /Edited/, 'read must not rescan the draft')
 
       const projection = testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'native-edit', toolName: 'edit', ok: true, summary: 'updated index.js' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'edit-hash' }
       })
       assert.notEqual(projection.state.status, 'failed')
       assert.match(active.session.package.code, /Edited/)
@@ -688,7 +686,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'native-1', toolName: 'edit', ok: true, summary: 'updated index.js' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'hash' }
       })
       assert.deepEqual(events.map((event) => event.type), ['tool_start', 'tool_result'])
       assert.equal(events[0]?.type === 'tool_start' ? events[0].tool : '', 'edit')
@@ -830,7 +827,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       const invalidProjection = testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'invalid-edit', toolName: 'edit', ok: true, summary: 'edited plugin.json' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'invalid-edit' }
       })
 
       assert.equal(session.status, 'running')
@@ -842,7 +838,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       const repairedProjection = testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'repair-write', toolName: 'write', ok: true, summary: 'rewrote plugin.json' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'repair-write' }
       })
 
       assert.equal(session.status, 'running')
@@ -902,7 +897,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
           toolCallCount: 0,
           contentTypes: ['thinking']
         },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'reasoning-recovery' }
       })
 
       assert.deepEqual(events.map((event) => event.type), [
@@ -974,7 +968,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
           toolCallCount: 0,
           contentTypes: ['thinking']
         },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'reasoning-limit-recovery' }
       })
 
       const reasoning = events.find(
@@ -1326,7 +1319,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'notes-edit', toolName: 'edit', ok: true, summary: 'updated dev notes' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'notes-edit' }
       })
 
       assert.deepEqual(session.lastExecution, originalExecution)
@@ -1347,7 +1339,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'name-edit', toolName: 'edit', ok: true, summary: 'updated plugin name' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'name-edit' }
       })
 
       assert.deepEqual(session.lastExecution, originalExecution)
@@ -1362,7 +1353,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       testable(developer).runtimeProject(active, {
         type: 'tool.completed',
         result: { callId: 'code-edit', toolName: 'edit', ok: true, summary: 'updated index.js' },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'code-edit' }
       })
 
       assert.equal(session.lastExecution, undefined)

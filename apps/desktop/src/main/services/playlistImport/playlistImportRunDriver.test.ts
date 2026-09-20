@@ -1055,7 +1055,6 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
           ok: false,
           summary: 'page checkpoint required'
         },
-        recovery: { codecVersion: 1, payload: '{}', contentHash: 'test' }
       })
       assert.equal(projection.status, 'running')
 

@@ -1,5 +1,5 @@
 import type {
-  AgentProfile,
+  AgentPolicy,
   AgentToolEffect,
   ModelCacheCompatibility,
   ModelCacheRetention,
@@ -71,7 +71,7 @@ export interface RuntimeCachePolicy {
 }
 
 export interface PiRuntimeSettingsProjection {
-  compaction: AgentProfile['compaction']
+  compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number }
   retry: { enabled: boolean; maxRetries: number; baseDelayMs: number }
   /** Per product operation; 0/undefined means unlimited. */
   maxTurns?: number
@@ -127,7 +127,6 @@ export interface RuntimeSessionInit {
   sessionDirectory: string
 }
 
-export type RuntimeSessionInitWithoutResume = Omit<RuntimeSessionInit, 'resume'>
 
 export interface MessageAuditView {
   role: 'user' | 'assistant' | 'tool' | 'other'
@@ -142,12 +141,6 @@ export interface MessageAuditView {
   reasoningChars?: number
   toolCallCount?: number
   contentTypes?: string[]
-}
-
-export interface RuntimeRecoveryFrame {
-  codecVersion: 1
-  payload: string
-  contentHash: string
 }
 
 export interface ToolCallAuditView {
@@ -202,10 +195,10 @@ export type RuntimeFaultCategory =
 export type RuntimeObservation =
   | { type: 'assistant.delta'; text: string }
   | { type: 'reasoning.delta'; text: string }
-  | { type: 'message.completed'; audit: MessageAuditView; recovery: RuntimeRecoveryFrame }
+  | { type: 'message.completed'; audit: MessageAuditView }
   | { type: 'tool.started'; call: ToolCallAuditView }
   | { type: 'tool.progress'; callId: string; summary: string }
-  | { type: 'tool.completed'; result: ToolResultAuditView; recovery: RuntimeRecoveryFrame }
+  | { type: 'tool.completed'; result: ToolResultAuditView }
   | { type: 'queue.changed'; steering: number; followUp: number }
   | { type: 'retry.changed'; phase: 'start' | 'end'; attempt: number }
   | { type: 'compaction.changed'; phase: 'start' | 'end'; result?: CompactionAuditView }
@@ -246,26 +239,13 @@ export interface AgentRuntimePort {
     input: RuntimeSessionInit,
     observer: RuntimeObserver
   ): Promise<{ source: 'created' | 'restored'; session: RuntimeSessionPort }>
-  rebuild(
-    input: RuntimeSessionInitWithoutResume,
-    history: readonly ExecutionHistoryFrame[],
-    observer: RuntimeObserver
-  ): Promise<RuntimeSessionPort>
-}
 
-export interface ExecutionHistoryFrame {
-  seq: number
-  runtimeId: 'pi'
-  codecVersion: 1
-  audit: Record<string, unknown>
-  recovery: RuntimeRecoveryFrame
-  contentHash: string
 }
 
 export interface ResolvedRunConfiguration {
   revision: string
   definitionId: string
-  profile: AgentProfile
+  policy: AgentPolicy
   model: ResolvedModelAccess
   /** Frozen separately because verifier requests do not flow through the Pi primary runtime. */
   verifierModel?: ResolvedModelAccess
@@ -288,7 +268,7 @@ export interface FrozenModelAccessSnapshot {
 export interface PersistedRunConfigurationSnapshot {
   revision: string
   definitionId: string
-  profile: AgentProfile
+  policy: AgentPolicy
   model: FrozenModelAccessSnapshot
   /** Missing only on legacy snapshots created before verifier routes were frozen. */
   verifierModel?: FrozenModelAccessSnapshot

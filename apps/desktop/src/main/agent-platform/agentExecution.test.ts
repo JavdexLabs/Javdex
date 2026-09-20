@@ -12,7 +12,6 @@ import type {
   ResolvedRunConfiguration,
   RuntimeObserver,
   RuntimeSessionInit,
-  RuntimeSessionInitWithoutResume,
   RuntimeSessionPort
 } from './types'
 
@@ -20,11 +19,8 @@ function resolved(): ResolvedRunConfiguration {
   const prompt = 'stable prompt'
   return {
     revision: 'rev', definitionId: 'test',
-    profile: {
-      id: 'profile:test', name: 'Test', definitionId: 'test',
-      routes: { primary: 'r1', verifier: 'r2', summarizer: 'r3' },
+    policy: {
       toolPackRefs: [], capabilityGrants: [], approvalRequiredEffects: [],
-      compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 }
     },
     model: {
       credentialRef: 'llm-provider:test',
@@ -65,7 +61,6 @@ function storeHarness() {
 class FakeRuntime implements AgentRuntimePort {
   readonly runtimeId = 'pi' as const
   openCount = 0
-  rebuildCount = 0
   disposeCount = 0
   observer?: RuntimeObserver
   failOpen: Error | null = null
@@ -102,16 +97,6 @@ class FakeRuntime implements AgentRuntimePort {
     return { source: input.resume ? 'restored' as const : 'created' as const, session }
   }
 
-  async rebuild(
-    input: RuntimeSessionInitWithoutResume,
-    _history: readonly import('./types').ExecutionHistoryFrame[],
-    observer: RuntimeObserver
-  ): Promise<RuntimeSessionPort> {
-    this.rebuildCount += 1
-    this.observer = observer
-    if (this.failRebuild) throw this.failRebuild
-    return this.session(input)
-  }
 }
 
 afterEach(() => setAgentPayloadCipherForTests(null))
@@ -174,7 +159,7 @@ describe('AgentExecution', () => {
     const runtime = new FakeRuntime()
     const execution = new AgentExecution(store, async () => runtime)
     const configuration = resolved()
-    configuration.profile.capabilityGrants = ['plugin.workspace.read', 'plugin.write']
+    configuration.policy.capabilityGrants = ['plugin.workspace.read', 'plugin.write']
     configuration.resources = {
       nativeTools: ['read', 'write'],
       skillNames: []
@@ -191,15 +176,9 @@ describe('AgentExecution', () => {
         type: 'tool.started',
         call: { callId: 'native-read', toolName: 'read', argsDigest: 'read-digest' }
       })
-      const payload = JSON.stringify({ kind: 'tool-result', value: 'private file content' })
       await runtime.observer!.commit({
         type: 'tool.completed',
         result: { callId: 'native-read', toolName: 'read', ok: true, summary: 'private file content' },
-        recovery: {
-          codecVersion: 1,
-          payload,
-          contentHash: createHash('sha256').update(payload).digest('hex')
-        }
       })
 
       const row = db.prepare(
@@ -241,8 +220,6 @@ describe('AgentExecution', () => {
       await first.openRun({ runId: 'run-restore', useCase: 'test', resolved: resolved(), productState: {} })
       await first.dispose()
       const record = store.getRun('run-restore')!
-      const original = store.readExecutionHistory.bind(store)
-      store.readExecutionHistory = () => { throw new Error('normal restore must not read history') }
       const restoredRuntime = new FakeRuntime()
       const restored = new AgentExecution(store, async () => restoredRuntime)
       const opened = await restored.openRun({
@@ -250,47 +227,7 @@ describe('AgentExecution', () => {
       })
       assert.equal(opened.source, 'restored')
       assert.equal(restoredRuntime.openCount, 1)
-      store.readExecutionHistory = original
       await restored.dispose()
-    } finally {
-      db.close()
-    }
-  })
-
-  it('rebuilds only for typed checkpoint corruption and only once per generation', async () => {
-    const { db, store } = storeHarness()
-    setAgentPayloadCipherForTests({
-      encrypt: (value) => Buffer.from(value, 'utf8'),
-      decrypt: (value) => value.toString('utf8')
-    })
-    try {
-      store.createRun({ runId: 'run-corrupt', useCase: 'test', resolved: resolved(), productState: {} })
-      store.commitRuntimeObservation('run-corrupt', {
-        type: 'session.saved',
-        ref: { runtimeId: 'pi', sessionId: 'bad', sessionFile: '/tmp/bad.jsonl', codecVersion: 1 }
-      })
-      const payload = JSON.stringify({ kind: 'message', value: { role: 'user', content: 'hello' } })
-      store.commitRuntimeObservation('run-corrupt', {
-        type: 'message.completed',
-        audit: { role: 'user', textPreview: 'hello', contentHash: 'audit' },
-        recovery: {
-          codecVersion: 1, payload,
-          contentHash: createHash('sha256').update(payload).digest('hex')
-        }
-      })
-      const runtime = new FakeRuntime()
-      runtime.failOpen = new Error('checkpoint-corrupt: broken')
-      runtime.failRebuild = new Error('rebuild failed')
-      const first = new AgentExecution(store, async () => runtime)
-      await assert.rejects(() => first.openRun({
-        useCase: 'test', resolved: resolved(), productState: {}, resume: store.getRun('run-corrupt')!
-      }), /rebuild failed/)
-      assert.equal(runtime.rebuildCount, 1)
-      const second = new AgentExecution(store, async () => runtime)
-      await assert.rejects(() => second.openRun({
-        useCase: 'test', resolved: resolved(), productState: {}, resume: store.getRun('run-corrupt')!
-      }), /已尝试过重建/)
-      assert.equal(runtime.rebuildCount, 1)
     } finally {
       db.close()
     }
@@ -357,12 +294,11 @@ it('preserves newer product log references when aborting after a domain-only sta
 })
 
 
-for (const scenario of ['success', 'hash-failure', 'rebuild-failure', 'unreconciled-tool'] as const) {
-  it(`preserves append-only plugin history during checkpoint recovery: ${scenario}`, async (t) => {
+for (const scenario of ['corrupt', 'unreconciled-tool'] as const) {
+  it(`preserves append-only plugin history during checkpoint recovery: ${scenario}`, async () => {
     const { db, store } = storeHarness()
     const runtime = new FakeRuntime()
     runtime.failOpen = new Error('checkpoint-corrupt: test checkpoint')
-    if (scenario === 'rebuild-failure') runtime.failRebuild = new Error('rebuild failed')
     const execution = new AgentExecution(store, async () => runtime)
     setAgentPayloadCipherForTests({
       encrypt: (value) => Buffer.from(`test-cipher:${value}`),
@@ -381,50 +317,24 @@ for (const scenario of ['success', 'hash-failure', 'rebuild-failure', 'unreconci
       const committed = store.updateProductStateFrom<State>('recovery-log', 'waiting_user', (current) => ({
         schemaVersion: 2, workLog: appendPluginWorkLog('recovery-log', current.productState.workLog, entries, store)
       }))
-      const payload = JSON.stringify({ kind: 'message', value: { role: 'user', content: 'restore me' } })
       store.commitRuntimeObservation('recovery-log', {
         type: 'message.completed', audit: { role: 'user', textPreview: 'restore me', contentHash: 'audit' },
-        recovery: { codecVersion: 1, payload, contentHash: createHash('sha256').update(payload).digest('hex') }
       })
-      if (scenario === 'hash-failure') db.prepare("UPDATE agent_execution_history SET content_hash = 'wrong'").run()
       if (scenario === 'unreconciled-tool') store.beginToolCall({
         runId: 'recovery-log', callId: 'pending-write', toolName: 'write', argsDigest: 'args', effect: 'write'
       })
       const historyBefore = db.prepare('SELECT * FROM agent_execution_history').all()
       const ledgerBefore = db.prepare('SELECT * FROM agent_tool_ledger').all()
-      const rebuild = t.mock.method(runtime, 'rebuild')
       const open = () => execution.openRun({ useCase: 'plugin-developer', resolved: resolved(),
         productState: committed, resume: store.getRun('recovery-log')! })
-      if (scenario === 'success') {
-        assert.equal((await open()).source, 'rebuilt')
-        assert.equal(store.getRun('recovery-log')?.recoveryGeneration, 1)
-        assert.equal(rebuild.mock.callCount(), 1)
-        const frames = rebuild.mock.calls[0].arguments[1]
-        assert.equal(frames.length, 1)
-        assert.equal(frames[0].recovery.payload, payload)
-        assert.equal(frames[0].codecVersion, 1)
-      } else {
-        const reason = scenario === 'hash-failure' ? /完整性校验失败/ : scenario === 'rebuild-failure' ? /rebuild failed/ : /未对账/
-        await assert.rejects(open, reason)
-        assert.equal(store.getRun('recovery-log')?.recoveryGeneration, 0)
-        const attempts = rebuild.mock.callCount()
-        assert.equal(attempts, scenario === 'rebuild-failure' ? 1 : 0)
-        await assert.rejects(open, /已尝试过重建/)
-        assert.equal(rebuild.mock.callCount(), attempts)
-      }
+      await assert.rejects(open, /已有成果和操作记录已保留/ )
+      assert.equal(runtime.openCount, 1)
       assert.deepEqual(store.getRun<State>('recovery-log')!.productState, committed)
       assert.deepEqual(readPluginWorkLog('recovery-log', committed.workLog, store), entries)
       assert.deepEqual(db.prepare('SELECT * FROM agent_execution_history').all(), historyBefore)
       assert.deepEqual(db.prepare('SELECT * FROM agent_tool_ledger').all(), ledgerBefore)
-      if (scenario === 'success') {
-        entries.push({ at: '2026-09-10T00:00:01Z', kind: 'user_message', sessionId: 'recovery-log', source: 'continue', text: 'after rebuild' })
-        const next = store.updateProductStateFrom<State>('recovery-log', 'waiting_user', (current) => ({
-          schemaVersion: 2, workLog: appendPluginWorkLog('recovery-log', current.productState.workLog, entries, store)
-        }))
-        assert.deepEqual(readPluginWorkLog('recovery-log', next.workLog, store), entries)
-      }
+
     } finally {
-      t.mock.restoreAll()
       await execution.dispose()
       db.close()
     }

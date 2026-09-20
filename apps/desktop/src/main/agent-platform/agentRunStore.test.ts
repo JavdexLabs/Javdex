@@ -4,21 +4,16 @@ import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
 import { AgentRunStore, agentRunStore, configureAgentRunDatabase, clearAgentRunDatabase, setAgentPayloadCipherForTests } from './agentRunStore'
-import type { ResolvedRunConfiguration, RuntimeRecoveryFrame } from './types'
+import type { ResolvedRunConfiguration } from './types'
 
 function resolved(): ResolvedRunConfiguration {
   return {
     revision: 'revision-1',
     definitionId: 'test-agent',
-    profile: {
-      id: 'profile:test',
-      name: 'Test',
-      definitionId: 'test-agent',
-      routes: { primary: 'r1', verifier: 'r2', summarizer: 'r3' },
+    policy: {
       toolPackRefs: [],
       capabilityGrants: [],
       approvalRequiredEffects: [],
-      compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 }
     },
     model: {
       credentialRef: 'llm-provider:test',
@@ -117,41 +112,17 @@ describe('AgentRunStore', () => {
     }
   })
 
-  it('encrypts recovery payloads and fails closed on integrity damage', () => {
+  it('retains audit events without writing cold-recovery payloads', () => {
     const { db, store } = createStore()
-    setAgentPayloadCipherForTests({
-      encrypt: (value) => Buffer.from(value.split('').reverse().join(''), 'utf8'),
-      decrypt: (value) => value.toString('utf8').split('').reverse().join('')
-    })
     try {
-      store.createRun({ runId: 'run-2', useCase: 'test-agent', resolved: resolved(), productState: {} })
-      const payload = JSON.stringify({ kind: 'message', value: { role: 'user', content: 'private' } })
-      const recovery: RuntimeRecoveryFrame = {
-        codecVersion: 1,
-        payload,
-        contentHash: createHash('sha256').update(payload).digest('hex')
-      }
-      store.commitRuntimeObservation('run-2', {
-        type: 'message.completed',
-        audit: { role: 'user', textPreview: 'private', contentHash: 'audit-hash' },
-        recovery
-      })
-      const ciphertext = (db.prepare('SELECT recovery_ciphertext AS value FROM agent_execution_history').get() as { value: Buffer }).value
-      assert.doesNotMatch(ciphertext.toString('utf8'), /private/)
-      const journal = db.prepare(
-        "SELECT payload_json AS value FROM agent_product_journal WHERE event_type = 'runtime.message.completed'"
-      ).get() as { value: string }
-      assert.doesNotMatch(journal.value, /recovery|payload|"content"/)
-      assert.deepEqual(JSON.parse(journal.value), {
-        type: 'message.completed',
-        audit: { role: 'user', textPreview: 'private', contentHash: 'audit-hash' }
-      })
-      assert.equal(store.readExecutionHistory('run-2')[0]?.recovery.payload, payload)
-      db.prepare("UPDATE agent_execution_history SET content_hash = 'damaged'").run()
-      assert.throws(() => store.readExecutionHistory('run-2'), /完整性校验失败/)
-    } finally {
-      db.close()
-    }
+      store.createRun({ runId: 'audit', useCase: 'test', resolved: resolved(), productState: {} })
+      const event = { type: 'message.completed' as const,
+        audit: { role: 'user' as const, textPreview: 'hello', contentHash: 'hash' } }
+      store.commitRuntimeObservation('audit', event)
+      assert.equal((db.prepare('SELECT COUNT(*) AS n FROM agent_execution_history').get() as { n: number }).n, 0)
+      const row = db.prepare("SELECT payload_json FROM agent_product_journal WHERE event_type='runtime.message.completed'").get() as { payload_json: string }
+      assert.deepEqual(JSON.parse(row.payload_json), event)
+    } finally { db.close() }
   })
 
   it('accepts an idempotent operation once and settles only named command ids', () => {
@@ -258,21 +229,6 @@ describe('AgentRunStore', () => {
     }
   })
 
-  it('allows one rebuild attempt per recovery generation', () => {
-    const { db, store } = createStore()
-    try {
-      store.createRun({ runId: 'run-4', useCase: 'test-agent', resolved: resolved(), productState: {} })
-      assert.equal(store.beginRecoveryAttempt('run-4', 0), true)
-      assert.equal(store.beginRecoveryAttempt('run-4', 0), false)
-      store.commitRebuild('run-4', {
-        runtimeId: 'pi', sessionId: 'session', sessionFile: '/tmp/session.jsonl', codecVersion: 1
-      })
-      assert.equal(store.getRun('run-4')?.recoveryGeneration, 1)
-      assert.equal(store.beginRecoveryAttempt('run-4', 1), true)
-    } finally {
-      db.close()
-    }
-  })
 
   it('records artifact refs in the product journal and fails closed on damaged refs', () => {
     const { db, store } = createStore()
@@ -458,4 +414,20 @@ it('requires an explicit work connection and clears it when the host closes', ()
     database.close()
   }
   assert.throws(() => agentRunStore.getRun('missing'), /work database is not configured/)
+})
+
+it('reads legacy profile snapshots without changing frozen model, cache or compaction settings', () => {
+  const { db, store } = createStore()
+  try {
+    store.createRun({ runId: 'legacy-config', useCase: 'test', resolved: resolved(), productState: { result: 'preserved' } })
+    const current = store.getRun('legacy-config')!.configSnapshot
+    const { policy, ...rest } = current
+    const legacy = { ...rest, profile: { ...policy, id: 'old-profile', name: 'Old', definitionId: 'test',
+      routes: { primary: 'old', verifier: 'old', summarizer: 'old' }, compaction: rest.settings.compaction } }
+    db.prepare('UPDATE agent_runs SET config_snapshot_json=? WHERE id=?').run(JSON.stringify(legacy), 'legacy-config')
+    const restored = store.getRun('legacy-config')!
+    assert.deepEqual(restored.configSnapshot, current)
+    assert.deepEqual(restored.productState, { result: 'preserved' })
+    assert.deepEqual(JSON.parse((db.prepare('SELECT config_snapshot_json FROM agent_runs WHERE id=?').get('legacy-config') as { config_snapshot_json: string }).config_snapshot_json), legacy)
+  } finally { db.close() }
 })

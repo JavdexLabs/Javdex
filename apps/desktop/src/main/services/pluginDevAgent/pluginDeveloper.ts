@@ -1,3 +1,4 @@
+import { agentCompactionPolicy } from '../../agent-platform/agentRuntimePolicy'
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -821,12 +822,12 @@ export class PluginDeveloper {
     session: PluginDevSession,
     emit: (event: PluginDevAgentEvent) => void
   ) {
-    const { revision, profile, definition } = agentConfiguration.getProfile('profile:plugin-developer:default')
+    const { revision, policy, definition } = agentConfiguration.getConfiguration('plugin-developer')
     const primary = modelControlPlane.resolveWorkloadModel('plugin-developer')
     const summarizer = primary
     const tools = toolHost.registerRun({
       runId,
-      profile,
+      policy,
       status: () => agentRunStore.getRun(runId)?.status ?? 'created',
       operationId: () => agentRunStore.getRun(runId)?.activeOperationId,
       handlers: createPluginDeveloperToolHandlers({
@@ -865,7 +866,7 @@ export class PluginDeveloper {
     return {
       revision,
       definitionId: 'plugin-developer',
-      profile,
+      policy,
       model: primary,
       cache,
       systemPrompt: {
@@ -874,7 +875,7 @@ export class PluginDeveloper {
       },
       tools,
       settings: {
-        compaction: profile.compaction,
+        compaction: agentCompactionPolicy(primary.model.contextWindow),
         retry: { enabled: true, maxRetries: 3, baseDelayMs: 1_000 },
         maxTurns: session.limits.maxSteps
       },
@@ -942,7 +943,7 @@ export class PluginDeveloper {
     }
     const tools = toolHost.registerRun({
       runId,
-      profile: snapshot.profile,
+      policy: snapshot.policy,
       status: () => agentRunStore.getRun(runId)?.status ?? 'closed',
       operationId: () => agentRunStore.getRun(runId)?.activeOperationId,
       handlers: createPluginDeveloperToolHandlers({
@@ -976,7 +977,7 @@ export class PluginDeveloper {
     return {
       revision: snapshot.revision,
       definitionId: snapshot.definitionId,
-      profile: structuredClone(snapshot.profile),
+      policy: structuredClone(snapshot.policy),
       model: modelControlPlane.restoreAgentModel(snapshot.model),
       cache: structuredClone(snapshot.cache),
       systemPrompt: structuredClone(snapshot.systemPrompt),
@@ -1025,7 +1026,7 @@ export class PluginDeveloper {
         // required to emit another durable observation, so relying on runtime projection here can
         // leave legacy verification/loop state in the durable product snapshot indefinitely.
         persistProductState(session, state.input, active.summary)
-        const opened = await agentExecution.openRun({
+        await agentExecution.openRun({
           useCase: 'plugin-developer',
           resolved,
           productState: persistProductState(session, state.input, active.summary),
@@ -1033,13 +1034,11 @@ export class PluginDeveloper {
           notify: (event) => this.runtimeNotify(active!, event),
           project: (event) => this.runtimeProject(active!, event)
         })
-        if (record.status === 'created' || record.status === 'running' || record.status === 'recovering' || opened.source === 'rebuilt') {
+        if (record.status === 'created' || record.status === 'running' || record.status === 'recovering') {
           agentRunStore.interruptAcceptedOperations(record.id, 'app-restart')
           session.status = 'waiting_user'
           session.phase = 'waiting_user'
-          active.summary = opened.source === 'rebuilt'
-            ? 'checkpoint 已从 ExecutionHistory 重建，请确认后继续'
-            : '应用已恢复会话，请确认后继续'
+          active.summary = '应用已恢复会话，请确认后继续'
           this.emitDomainEvent(active, {
             type: 'waiting_user',
             sessionId: record.id,
@@ -1578,6 +1577,8 @@ ${continuationPrompt}`
       return true
     }
     const status = agentRunStore.getRunStatus(runId)
+    // Keep blocked workspaces until the user explicitly clears them.
+    if (status === 'failed' && agentRunStore.getRun<{ recoveryBlocked?: boolean }>(runId)?.productState.recoveryBlocked) return true
     return Boolean(status && isRecoverablePluginDevRunStatus(status))
   }
 

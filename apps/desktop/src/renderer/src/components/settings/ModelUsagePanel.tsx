@@ -65,7 +65,6 @@ function AgentAssignmentCard({
   const form = useSettingsDraft({
     model: assignment.model,
     runtime: assignment.runtime,
-    compaction: assignment.compaction,
     limits: assignment.limits
   })
   const { draft, setDraft } = form
@@ -99,7 +98,7 @@ function AgentAssignmentCard({
   }
   useSettingsFormGuard({ label: title, dirty: form.dirty, busy: saving, save, discard: form.reset })
   const setNumber = (
-    section: 'runtime' | 'limits' | 'compaction',
+    section: 'runtime' | 'limits',
     key: string,
     value: number
   ): void =>
@@ -158,7 +157,7 @@ function AgentAssignmentCard({
         </label>
         <details className={styles.advanced}>
           <summary>
-            运行参数 <span>思考、缓存、超时与上下文</span>
+            运行参数 <span>思考、超时与上下文</span>
           </summary>
           <div className={styles.gridTwo}>
             <label className={styles.field}>
@@ -179,25 +178,6 @@ function AgentAssignmentCard({
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
-              </SelectControl>
-            </label>
-            <label className={styles.field}>
-              <span>缓存保留</span>
-              <SelectControl
-                value={draft.runtime.cacheRetention}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    runtime: {
-                      ...current.runtime,
-                      cacheRetention: event.target.value as typeof current.runtime.cacheRetention
-                    }
-                  }))
-                }
-              >
-                <option value="none">不保留</option>
-                <option value="short">短期</option>
-                <option value="long">长期</option>
               </SelectControl>
             </label>
             <label className={styles.field}>
@@ -244,46 +224,7 @@ function AgentAssignmentCard({
                 }
               />
             </label>
-            <label className={styles.field}>
-              <span>上下文压缩</span>
-              <SelectControl
-                value={draft.compaction.enabled ? 'enabled' : 'disabled'}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    compaction: { ...current.compaction, enabled: event.target.value === 'enabled' }
-                  }))
-                }
-              >
-                <option value="enabled">启用</option>
-                <option value="disabled">关闭</option>
-              </SelectControl>
-            </label>
-            <div className={styles.field}>
-              <span>压缩预留 / 保留最近内容（Token）</span>
-              <div className={styles.inlineInputs}>
-                <input
-                  className={styles.controlInput}
-                  type="number"
-                  min="0"
-                  value={draft.compaction.reserveTokens}
-                  aria-label="压缩预留 Token 数"
-                  onChange={(event) =>
-                    setNumber('compaction', 'reserveTokens', Number(event.target.value))
-                  }
-                />
-                <input
-                  className={styles.controlInput}
-                  type="number"
-                  min="0"
-                  value={draft.compaction.keepRecentTokens}
-                  aria-label="保留最近内容 Token 数"
-                  onChange={(event) =>
-                    setNumber('compaction', 'keepRecentTokens', Number(event.target.value))
-                  }
-                />
-              </div>
-            </div>
+
           </div>
         </details>
       </div>

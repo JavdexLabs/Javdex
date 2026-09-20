@@ -2,11 +2,9 @@ import { safeStorage } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type {
-  ExecutionHistoryFrame,
   OpaqueRuntimeSessionRef,
   ResolvedRunConfiguration,
   RuntimeDurableObservation,
-  RuntimeRecoveryFrame,
   PersistedRunConfigurationSnapshot
 } from './types'
 
@@ -119,6 +117,16 @@ interface RunRow {
   closed_at: string | null
 }
 
+function readConfigurationSnapshot(raw: string): PersistedRunConfigurationSnapshot {
+  const snapshot = parse<PersistedRunConfigurationSnapshot & { profile?: PersistedRunConfigurationSnapshot['policy'] }>(raw)
+  // Old runs keep their frozen model/settings, but no longer need virtual routes.
+  const policy = snapshot.policy ?? snapshot.profile
+  if (!policy) return snapshot
+  const { profile: _legacyProfile, ...rest } = snapshot
+  return { ...rest, policy: { toolPackRefs: policy.toolPackRefs,
+    capabilityGrants: policy.capabilityGrants, approvalRequiredEffects: policy.approvalRequiredEffects } }
+}
+
 function toRun<ProductState>(row: RunRow): AgentRunRecord<ProductState> {
   return {
     id: row.id,
@@ -126,7 +134,7 @@ function toRun<ProductState>(row: RunRow): AgentRunRecord<ProductState> {
     status: row.status,
     activeOperationId: row.active_operation_id ?? undefined,
     configRevision: row.config_revision,
-    configSnapshot: parse(row.config_snapshot_json),
+    configSnapshot: readConfigurationSnapshot(row.config_snapshot_json),
     runtimeSessionRef: row.runtime_session_ref_json ? parse(row.runtime_session_ref_json) : undefined,
     recoveryGeneration: row.recovery_generation,
     productState: parse(row.product_state_json),
@@ -150,7 +158,7 @@ export class AgentRunStore {
     const configSnapshot = {
       revision: input.resolved.revision,
       definitionId: input.resolved.definitionId,
-      profile: input.resolved.profile,
+      policy: input.resolved.policy,
       model: {
         credentialRef: input.resolved.model.credentialRef,
         descriptor: input.resolved.model.model,
@@ -483,23 +491,6 @@ export class AgentRunStore {
           ? { type: event.type, result: event.result }
           : event
       this.appendProductEvent(runId, undefined, `runtime.${event.type}`, auditEvent)
-      if (event.type === 'message.completed' || event.type === 'tool.completed') {
-        const recovery = event.recovery
-        const plaintext = json(recovery)
-        db.prepare(`
-          INSERT INTO agent_execution_history (
-            run_id, runtime_id, codec_version, audit_json, recovery_ciphertext,
-            content_hash, created_at
-          ) VALUES (?, 'pi', ?, ?, ?, ?, ?)
-        `).run(
-          runId,
-          recovery.codecVersion,
-          json(event.type === 'message.completed' ? event.audit : event.result),
-          activeCipher().encrypt(plaintext),
-          recovery.contentHash,
-          at
-        )
-      }
       if (event.type === 'session.saved') {
         db.prepare(`
           UPDATE agent_runs SET runtime_session_ref_json = ?, updated_at = ? WHERE id = ?
@@ -535,28 +526,7 @@ export class AgentRunStore {
     })()
   }
 
-  readExecutionHistory(runId: string): ExecutionHistoryFrame[] {
-    const rows = this.database().prepare(`
-      SELECT seq, runtime_id, codec_version, audit_json, recovery_ciphertext, content_hash
-      FROM agent_execution_history WHERE run_id = ? ORDER BY seq ASC
-    `).all(runId) as Array<{
-      seq: number; runtime_id: 'pi'; codec_version: 1; audit_json: string; recovery_ciphertext: Buffer; content_hash: string
-    }>
-    return rows.map((row) => {
-      const recovery = parse<RuntimeRecoveryFrame>(activeCipher().decrypt(row.recovery_ciphertext))
-      if (recovery.contentHash !== row.content_hash || hash(recovery.payload) !== row.content_hash) {
-        throw new Error(`ExecutionHistory frame ${row.seq} 完整性校验失败`)
-      }
-      return {
-        seq: row.seq,
-        runtimeId: row.runtime_id,
-        codecVersion: row.codec_version,
-        audit: parse(row.audit_json),
-        recovery,
-        contentHash: row.content_hash
-      }
-    })
-  }
+
 
   beginToolCall(input: {
     callId: string
@@ -708,29 +678,6 @@ export class AgentRunStore {
 
   markRecovering(runId: string): void {
     this.database().prepare(`UPDATE agent_runs SET status = 'recovering', updated_at = ? WHERE id = ?`).run(now(), runId)
-  }
-
-  beginRecoveryAttempt(runId: string, generation: number): boolean {
-    const result = this.database().prepare(`
-      UPDATE agent_runs SET recovery_attempted_generation = ?, status = 'recovering', updated_at = ?
-      WHERE id = ? AND recovery_attempted_generation < ?
-    `).run(generation, now(), runId, generation)
-    return result.changes === 1
-  }
-
-  commitRebuild(runId: string, ref: OpaqueRuntimeSessionRef): void {
-    const db = this.database()
-    db.transaction(() => {
-      db.prepare(`
-        UPDATE agent_runs SET status = 'settled', runtime_session_ref_json = ?,
-          recovery_generation = recovery_generation + 1, updated_at = ? WHERE id = ?
-      `).run(json(ref), now(), runId)
-      this.appendProductEvent(runId, undefined, 'runtime.rebuilt', {
-        ref,
-        breakReason: 'runtime-rebuild',
-        expectedFirstCacheMiss: true
-      })
-    })()
   }
 
   closeRun(runId: string): void {

@@ -4,6 +4,7 @@
 - 日期：2026-08-22
 - 修订：2026-08-24
 - 替代：ADR-0020 中面向用户的 ModelPreset、AIRoute 与 AgentProfile 配置方案
+- 部分替代：2026-09-20 [ADR-0030](0030-simplify-agent-recovery-and-model-configuration.md) 将文档升级为 v3，删除用途缓存/压缩调参及内部 Profile 投影；单配置源、用途选择、凭据处理和冻结语义保留。
 
 ## 背景
 

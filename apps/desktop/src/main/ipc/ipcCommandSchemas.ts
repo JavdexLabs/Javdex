@@ -243,13 +243,7 @@ const settingsPatch = z
 const workloadRuntime = z.object({
   thinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']),
   maxTokens: z.number().int().nonnegative(),
-  timeoutMs: z.number().int().positive(),
-  cacheRetention: z.enum(['none', 'short', 'long'])
-}).strict()
-const workloadCompaction = z.object({
-  enabled: z.boolean(),
-  reserveTokens: z.number().int().nonnegative(),
-  keepRecentTokens: z.number().int().nonnegative()
+  timeoutMs: z.number().int().positive()
 }).strict()
 const workloadLimits = z.object({
   maxTurns: z.number().int().nonnegative(),
@@ -301,7 +295,6 @@ const modelManagementCommand = z.discriminatedUnion('type', [
     workloadId: z.enum(['plugin-developer', 'library-curator']),
     model: workloadSelection,
     runtime: workloadRuntime,
-    compaction: workloadCompaction,
     limits: workloadLimits
   }).strict(),
   z.object({ type: z.literal('save-connection'), connection: saveConnection }).strict(),

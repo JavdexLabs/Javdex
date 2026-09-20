@@ -17,19 +17,11 @@ export interface ModelCacheCompatibility {
   evidence: ModelProbeEvidence
 }
 
-export interface AgentProfile {
-  id: string
-  name: string
-  definitionId: string
-  routes: Record<ModelRole, string>
+/** Code-owned tool permissions; independent of model selection. */
+export interface AgentPolicy {
   toolPackRefs: string[]
   capabilityGrants: string[]
   approvalRequiredEffects: AgentToolEffect[]
-  compaction: {
-    enabled: boolean
-    reserveTokens: number
-    keepRecentTokens: number
-  }
 }
 
 export type AgentToolEffect = 'read' | 'write' | 'network' | 'install' | 'credential-sensitive'

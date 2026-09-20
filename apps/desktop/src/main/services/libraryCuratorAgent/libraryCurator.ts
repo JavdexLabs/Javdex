@@ -1,3 +1,4 @@
+import { agentCompactionPolicy } from '../../agent-platform/agentRuntimePolicy'
 import { app } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -79,10 +80,10 @@ export class LibraryCurator {
     this.catalog = backend
   }
 
-  private registerTools(runId: string, profile: PersistedRunConfigurationSnapshot['profile']) {
+  private registerTools(runId: string, policy: PersistedRunConfigurationSnapshot['policy']) {
     return toolHost.registerRun({
       runId,
-      profile,
+      policy,
       status: () => agentRunStore.getRun(runId)?.status ?? 'closed',
       operationId: () => agentRunStore.getRun(runId)?.activeOperationId,
       handlers: createLibraryCuratorToolHandlers(async () => readCuratorOverview(this.catalog))
@@ -90,17 +91,17 @@ export class LibraryCurator {
   }
 
   private resolveConfiguration(runId: string): ResolvedRunConfiguration {
-    const { revision, profile, definition, workload } = agentConfiguration.getProfile(
-      'profile:library-curator:default'
+    const { revision, policy, definition, workload } = agentConfiguration.getConfiguration(
+      'library-curator'
     )
     const primary = modelControlPlane.resolveWorkloadModel('library-curator')
     const summarizer = primary
-    const tools = this.registerTools(runId, profile)
+    const tools = this.registerTools(runId, policy)
     const systemText = definition.systemPrompt
     return {
       revision,
       definitionId: definition.id,
-      profile,
+      policy,
       model: primary,
       cache: {
         primaryAffinityId: createCacheAffinityId(runId, 'primary', primary.routeRevision),
@@ -118,7 +119,7 @@ export class LibraryCurator {
       },
       tools,
       settings: {
-        compaction: profile.compaction,
+        compaction: agentCompactionPolicy(primary.model.contextWindow),
         retry: { enabled: true, maxRetries: 3, baseDelayMs: 1_000 },
         maxTurns: workload.limits.maxTurns
       },
@@ -133,7 +134,7 @@ export class LibraryCurator {
     if (snapshot.definitionId !== 'library-curator') {
       throw new Error(`无法用 LibraryCurator 恢复 Definition ${snapshot.definitionId}`)
     }
-    const tools = this.registerTools(runId, snapshot.profile)
+    const tools = this.registerTools(runId, snapshot.policy)
     const expected = snapshot.tools.map((tool) => `${tool.name}:${tool.schemaHash}`)
     const actual = tools.map((tool) => `${tool.name}:${tool.schemaHash}`)
     if (JSON.stringify(expected) !== JSON.stringify(actual)) {
@@ -143,7 +144,7 @@ export class LibraryCurator {
     return {
       revision: snapshot.revision,
       definitionId: snapshot.definitionId,
-      profile: structuredClone(snapshot.profile),
+      policy: structuredClone(snapshot.policy),
       model: modelControlPlane.restoreAgentModel(snapshot.model),
       cache: structuredClone(snapshot.cache),
       systemPrompt: structuredClone(snapshot.systemPrompt),
@@ -279,7 +280,7 @@ export class LibraryCurator {
         const active: ActiveCuratorRun = { state: structuredClone(state), assistantText: '' }
         this.active.set(record.id, active)
         const resolved = this.restoreConfiguration(record.id, record.configSnapshot)
-        const opened = await agentExecution.openRun({
+        await agentExecution.openRun({
           useCase: 'library-curator',
           resolved,
           productState: active.state,
@@ -287,12 +288,10 @@ export class LibraryCurator {
           notify: (event) => this.notify(active, event),
           project: (event) => this.project(record.id, active, event)
         })
-        if (record.status === 'created' || record.status === 'running' || record.status === 'recovering' || opened.source === 'rebuilt') {
+        if (record.status === 'created' || record.status === 'running' || record.status === 'recovering') {
           agentRunStore.interruptAcceptedOperations(record.id, 'app-restart')
           active.state.status = 'waiting_user'
-          active.state.summary = opened.source === 'rebuilt'
-            ? 'checkpoint 已重建，请确认后继续'
-            : '应用已恢复会话，请确认后继续'
+          active.state.summary = '应用已恢复会话，请确认后继续'
           agentRunStore.updateProductState(record.id, 'waiting_user', active.state)
         }
       } catch (error) {

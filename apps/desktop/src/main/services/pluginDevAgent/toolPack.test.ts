@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
-import type { AgentProfile } from '@shared/aiConfigurationTypes'
+import type { AgentPolicy } from '@shared/aiConfigurationTypes'
 import { AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
 import { AgentRunStore } from '../../agent-platform/agentRunStore'
 import { ToolHost } from '../../agent-platform/toolHost'
@@ -10,25 +10,20 @@ import type { ResolvedRunConfiguration } from '../../agent-platform/types'
 import { PLUGIN_DEV_TOOL_SCHEMAS } from './toolSchemas'
 import { PLUGIN_DEVELOPER_TOOL_PACK } from './toolPack'
 
-function profile(capabilityGrants: string[]): AgentProfile {
+function policy(capabilityGrants: string[]): AgentPolicy {
   return {
-    id: 'profile:toolpack-fixture',
-    name: 'ToolPack fixture',
-    definitionId: 'plugin-developer',
-    routes: { primary: 'primary', verifier: 'verifier', summarizer: 'summarizer' },
     toolPackRefs: [PLUGIN_DEVELOPER_TOOL_PACK.ref],
     capabilityGrants,
     approvalRequiredEffects: [],
-    compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 }
   }
 }
 
-function resolved(profileValue: AgentProfile): ResolvedRunConfiguration {
+function resolved(profileValue: AgentPolicy): ResolvedRunConfiguration {
   const systemText = 'toolpack fixture'
   return {
     revision: 'fixture',
     definitionId: 'plugin-developer',
-    profile: profileValue,
+    policy: profileValue,
     model: {
       credentialRef: 'llm-provider:fixture',
       model: {
@@ -54,7 +49,7 @@ function resolved(profileValue: AgentProfile): ResolvedRunConfiguration {
     },
     tools: [],
     settings: {
-      compaction: profileValue.compaction,
+      compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 },
       retry: { enabled: true, maxRetries: 1, baseDelayMs: 10 }
     },
     sessionDirectory: '/tmp/javdex-toolpack-fixture'
@@ -111,10 +106,10 @@ describe('PluginDeveloper ToolPack v1', () => {
       async () => ({ ok: true, content: 'ok', summary: 'ok' })
     ]))
     try {
-      const allowedProfile = profile(capabilities)
+      const allowedProfile = policy(capabilities)
       store.createRun({ runId: 'all-tools', useCase: 'plugin-developer', resolved: resolved(allowedProfile), productState: {} })
       const allowed = host.registerRun({
-        runId: 'all-tools', profile: allowedProfile,
+        runId: 'all-tools', policy: allowedProfile,
         status: () => store.getRun('all-tools')!.status,
         operationId: () => undefined,
         handlers
@@ -131,10 +126,10 @@ describe('PluginDeveloper ToolPack v1', () => {
         WHERE run_id = 'all-tools' AND status = 'completed'
       `).get() as { count: number }).count, count)
 
-      const deniedProfile = profile([])
+      const deniedProfile = policy([])
       store.createRun({ runId: 'denied-tools', useCase: 'plugin-developer', resolved: resolved(deniedProfile), productState: {} })
       const denied = host.registerRun({
-        runId: 'denied-tools', profile: deniedProfile,
+        runId: 'denied-tools', policy: deniedProfile,
         status: () => store.getRun('denied-tools')!.status,
         operationId: () => undefined,
         handlers

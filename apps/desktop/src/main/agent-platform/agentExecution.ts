@@ -30,10 +30,10 @@ function validateNativeToolPolicy(resolved: ResolvedRunConfiguration): Set<PiNat
   const nativeTools = new Set(resolved.resources?.nativeTools ?? [])
   for (const toolName of nativeTools) {
     const policy = NATIVE_TOOL_POLICIES[toolName]
-    if (!resolved.profile.capabilityGrants.includes(policy.capability)) {
-      throw new Error(`Profile 未授权 Pi 原生工具能力：${policy.capability}`)
+    if (!resolved.policy.capabilityGrants.includes(policy.capability)) {
+      throw new Error(`Agent 未授权 Pi 原生工具能力：${policy.capability}`)
     }
-    if (resolved.profile.approvalRequiredEffects.includes(policy.effect)) {
+    if (resolved.policy.approvalRequiredEffects.includes(policy.effect)) {
       throw new Error(`Pi 原生工具 ${toolName} 缺少可持久审批通道，拒绝启用`)
     }
   }
@@ -94,7 +94,7 @@ export class AgentExecution {
     return this.runtimePort
   }
 
-  async openRun(input: OpenAgentRunInput): Promise<{ runId: string; source: 'created' | 'restored' | 'rebuilt' }> {
+  async openRun(input: OpenAgentRunInput): Promise<{ runId: string; source: 'created' | 'restored' }> {
     const runId = input.resume?.id ?? input.runId ?? randomUUID()
     if (this.active.has(runId)) return { runId, source: 'restored' }
     const nativeTools = validateNativeToolPolicy(input.resolved)
@@ -193,19 +193,7 @@ export class AgentExecution {
     } catch (error) {
       const category = input.resume ? recoveryCategory(error) : null
       if (!category) throw error
-      if (!this.store.beginRecoveryAttempt(runId, input.resume!.recoveryGeneration)) {
-        throw new Error(`checkpoint generation ${input.resume!.recoveryGeneration} 已尝试过重建，拒绝重复执行`)
-      }
-      if (this.store.hasUnreconciledSideEffects(runId)) {
-        throw new Error('checkpoint 恢复被阻止：存在未对账的工具副作用')
-      }
-      const history = this.store.readExecutionHistory(runId)
-      if (history.length === 0) throw new Error('checkpoint 恢复被阻止：ExecutionHistory 为空')
-      const { resume: _resume, ...rebuildInput } = runtimeInput
-      const runtime = await port.rebuild(rebuildInput, history, observer)
-      this.store.commitRebuild(runId, runtime.ref)
-      this.active.set(runId, { ...activeBase, runtime })
-      return { runId, source: 'rebuilt' }
+      throw new Error('Agent 检查点损坏或不兼容，无法继续此会话。已有成果和操作记录已保留，请新建任务。', { cause: error })
     }
   }
 

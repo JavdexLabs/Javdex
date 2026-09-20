@@ -1,5 +1,7 @@
 # Javdex Agent 控制面与 Pi 数据面接入执行计划
 
+> 2026-09-20：[ADR-0030](adr/0030-simplify-agent-recovery-and-model-configuration.md) 已取消历史冷重建，并移除内部 Profile/虚拟 Route 与用户缓存/压缩调参。本文相应内容仅作为历史接入计划保留。
+
 > 模型连接、模型目录和用途运行参数的用户配置已由
 > [ADR-0022：模型管理 v2](adr/0022-model-management-v2.md) 取代。本文件中的
 > Connection / Model / Preset / Route / Profile 配置章节仅保留为历史设计记录，不再描述当前设置界面或运行时配置源。

@@ -281,10 +281,9 @@ describe('typed IPC adapter', () => {
         runtime: {
           thinkingLevel: 'medium',
           maxTokens: 0,
-          timeoutMs: 120_000,
-          cacheRetention: 'short'
+          timeoutMs: 120_000
         },
-        compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 },
+
         limits: { maxTurns: 0, maxContextTokens: 128_000 }
       }
     }]).success, true)

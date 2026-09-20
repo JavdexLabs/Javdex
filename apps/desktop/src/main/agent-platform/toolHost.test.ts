@@ -3,21 +3,16 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
-import type { AgentProfile } from '@shared/aiConfigurationTypes'
+import type { AgentPolicy } from '@shared/aiConfigurationTypes'
 import { AgentRunStore, setAgentPayloadCipherForTests } from './agentRunStore'
 import { ApprovalRequiredError, ToolHost, type ToolDeclaration } from './toolHost'
 import type { ResolvedRunConfiguration } from './types'
 
-function profile(input: Partial<AgentProfile> = {}): AgentProfile {
+function policy(input: Partial<AgentPolicy> = {}): AgentPolicy {
   return {
-    id: 'profile:test',
-    name: 'Test',
-    definitionId: 'test',
-    routes: { primary: 'r1', verifier: 'r2', summarizer: 'r3' },
     toolPackRefs: ['pack:test'],
     capabilityGrants: ['test.read', 'test.write'],
     approvalRequiredEffects: [],
-    compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 },
     ...input
   }
 }
@@ -38,10 +33,10 @@ function declaration(input: Partial<ToolDeclaration> = {}): ToolDeclaration {
   }
 }
 
-function resolved(profileValue: AgentProfile): ResolvedRunConfiguration {
+function resolved(profileValue: AgentPolicy): ResolvedRunConfiguration {
   const prompt = 'test'
   return {
-    revision: 'rev', definitionId: 'test', profile: profileValue,
+    revision: 'rev', definitionId: 'test', policy: profileValue,
     model: {
       credentialRef: 'llm-provider:test',
       model: {
@@ -64,14 +59,14 @@ function resolved(profileValue: AgentProfile): ResolvedRunConfiguration {
     systemPrompt: { text: prompt, sha256: createHash('sha256').update(prompt).digest('hex') },
     tools: [],
     settings: {
-      compaction: profileValue.compaction,
+      compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 },
       retry: { enabled: true, maxRetries: 1, baseDelayMs: 10 }
     },
     sessionDirectory: '/tmp/test'
   }
 }
 
-function harness(profileValue = profile(), tool = declaration()) {
+function harness(profileValue = policy(), tool = declaration()) {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
   db.exec(AGENT_PLATFORM_SCHEMA_SQL)
@@ -84,11 +79,11 @@ function harness(profileValue = profile(), tool = declaration()) {
 
 describe('ToolHost', () => {
   it('records capability denials before failing closed', async () => {
-    const deniedProfile = profile({ capabilityGrants: [] })
+    const deniedProfile = policy({ capabilityGrants: [] })
     const { db, store, host } = harness(deniedProfile)
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: deniedProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: deniedProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => ({ ok: true, content: 'ok', summary: 'ok' })]])
       })
@@ -106,14 +101,14 @@ describe('ToolHost', () => {
       encrypt: (value) => Buffer.from(value, 'utf8'),
       decrypt: (value) => value.toString('utf8')
     })
-    const approvalProfile = profile({ approvalRequiredEffects: ['install'] })
+    const approvalProfile = policy({ approvalRequiredEffects: ['install'] })
     const install = declaration({ effect: 'install' })
     const { db, store, host } = harness(approvalProfile, install)
     let executions = 0
     let approvalArgs: Record<string, unknown> | undefined
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => {
           executions += 1
@@ -140,7 +135,7 @@ describe('ToolHost', () => {
       const recoveredHost = new ToolHost(store)
       recoveredHost.registerToolPack({ ref: 'pack:test', tools: [install] })
       const recoveredTools = recoveredHost.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => {
           executions += 1
@@ -170,7 +165,7 @@ describe('ToolHost', () => {
     const { db, store, host } = harness()
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async ({ args }) => {
           if (args.fail) throw new Error('secret failure payload')
@@ -208,13 +203,13 @@ describe('ToolHost', () => {
       encrypt: (value) => Buffer.from(value, 'utf8'),
       decrypt: (value) => value.toString('utf8')
     })
-    const approvalProfile = profile({ approvalRequiredEffects: ['install'] })
+    const approvalProfile = policy({ approvalRequiredEffects: ['install'] })
     const install = declaration({ effect: 'install' })
     const { db, store, host } = harness(approvalProfile, install)
     let executions = 0
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => {
           executions += 1
@@ -252,11 +247,11 @@ describe('ToolHost', () => {
       encrypt: (value) => Buffer.from(value, 'utf8'),
       decrypt: (value) => value.toString('utf8')
     })
-    const approvalProfile = profile({ approvalRequiredEffects: ['install'] })
+    const approvalProfile = policy({ approvalRequiredEffects: ['install'] })
     const { db, store, host } = harness(approvalProfile, declaration({ effect: 'install' }))
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         singlePendingApproval: true,
         handlers: new Map([['test_tool', async () => ({ ok: true, content: 'ok', summary: 'ok' })]])
@@ -285,13 +280,13 @@ describe('ToolHost', () => {
       encrypt: (value) => Buffer.from(value, 'utf8'),
       decrypt: (value) => value.toString('utf8')
     })
-    const approvalProfile = profile({ approvalRequiredEffects: ['install'] })
+    const approvalProfile = policy({ approvalRequiredEffects: ['install'] })
     const install = declaration({ effect: 'install' })
     const { db, store, host } = harness(approvalProfile, install)
     let executions = 0
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => {
           executions += 1
@@ -310,7 +305,7 @@ describe('ToolHost', () => {
       const recoveredHost = new ToolHost(store)
       recoveredHost.registerToolPack({ ref: 'pack:test', tools: [install] })
       const recoveredTools = recoveredHost.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => {
           executions += 1
@@ -334,11 +329,11 @@ describe('ToolHost', () => {
       encrypt: (value) => Buffer.from(value, 'utf8'),
       decrypt: (value) => value.toString('utf8')
     })
-    const approvalProfile = profile({ approvalRequiredEffects: ['install'] })
+    const approvalProfile = policy({ approvalRequiredEffects: ['install'] })
     const { db, store, host } = harness(approvalProfile, declaration({ effect: 'install' }))
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => ({ ok: true, content: 'ok', summary: 'ok' })]])
       })
@@ -368,14 +363,14 @@ describe('ToolHost', () => {
       encrypt: (value) => Buffer.from(value, 'utf8'),
       decrypt: (value) => value.toString('utf8')
     })
-    const approvalProfile = profile({ approvalRequiredEffects: ['install'] })
+    const approvalProfile = policy({ approvalRequiredEffects: ['install'] })
     const install = declaration({ effect: 'install' })
     const { db, store, host } = harness(approvalProfile, install)
     let packageFingerprint = 'package-a'
     let executions = 0
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: approvalProfile, status: () => store.getRun('run')!.status,
+        runId: 'run', policy: approvalProfile, status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         approvalScope: () => ({ packageFingerprint }),
         handlers: new Map([['test_tool', async () => {
@@ -407,7 +402,7 @@ describe('ToolHost', () => {
     let maximum = 0
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => {
           concurrent += 1
@@ -428,7 +423,7 @@ describe('ToolHost', () => {
     const { db, store, host } = harness()
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async ({ signal }) => {
           if (signal.aborted) throw new Error('aborted')
@@ -453,11 +448,11 @@ describe('ToolHost', () => {
 
   it('does not start an unkeyed handler when its signal is already aborted', async () => {
     const unkeyed = declaration({ resourceKey: () => undefined })
-    const { db, store, host } = harness(profile(), unkeyed)
+    const { db, store, host } = harness(policy(), unkeyed)
     let executions = 0
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => {
           executions += 1
@@ -476,10 +471,10 @@ describe('ToolHost', () => {
 
   it('enforces deadlines even when a handler ignores AbortSignal', async () => {
     const readTool = declaration({ effect: 'read', capability: 'test.read', timeoutMs: 20 })
-    const { db, store, host } = harness(profile(), readTool)
+    const { db, store, host } = harness(policy(), readTool)
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => new Promise<never>(() => undefined)]])
       })
@@ -501,11 +496,11 @@ describe('ToolHost', () => {
 
   it('does not let a late handler result overwrite an uncertain timeout', async () => {
     const writeTool = declaration({ timeoutMs: 20 })
-    const { db, store, host } = harness(profile(), writeTool)
+    const { db, store, host } = harness(policy(), writeTool)
     let resolveHandler: ((value: { ok: boolean; content: string; summary: string }) => void) | undefined
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async () => new Promise((resolve) => {
           resolveHandler = resolve
@@ -527,7 +522,7 @@ describe('ToolHost', () => {
 
   it('keeps the resource locked until a timed-out non-cooperative handler really settles', async () => {
     const writeTool = declaration({ timeoutMs: 50 })
-    const { db, store, host } = harness(profile(), writeTool)
+    const { db, store, host } = harness(policy(), writeTool)
     let releaseFirst!: () => void
     const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
     const entered: string[] = []
@@ -535,7 +530,7 @@ describe('ToolHost', () => {
     let maximum = 0
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async ({ args }) => {
           const id = String(args.id)
@@ -577,7 +572,7 @@ describe('ToolHost', () => {
     const entered: string[] = []
     try {
       const tools = host.registerRun({
-        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        runId: 'run', policy: policy(), status: () => store.getRun('run')!.status,
         operationId: () => undefined,
         handlers: new Map([['test_tool', async ({ args }) => {
           const id = String(args.id)

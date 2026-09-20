@@ -5,7 +5,7 @@ import { AgentConfiguration } from './agentConfiguration'
 
 function snapshot(): ModelManagementSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: 'model-management:r1',
     updatedAt: '2026-08-22T00:00:00.000Z',
     connections: [],
@@ -17,10 +17,9 @@ function snapshot(): ModelManagementSnapshot {
         runtime: {
           thinkingLevel: 'medium',
           maxTokens: 0,
-          timeoutMs: 120_000,
-          cacheRetention: 'short'
+          timeoutMs: 120_000
         },
-        compaction: { enabled: false, reserveTokens: 16_384, keepRecentTokens: 20_000 },
+
         limits: { maxTurns: 0, maxContextTokens: 128_000 },
         resolution: { ready: true, modelRef: 'model:test:default' }
       },
@@ -30,10 +29,9 @@ function snapshot(): ModelManagementSnapshot {
         runtime: {
           thinkingLevel: 'high',
           maxTokens: 0,
-          timeoutMs: 240_000,
-          cacheRetention: 'short'
+          timeoutMs: 240_000
         },
-        compaction: { enabled: true, reserveTokens: 12_000, keepRecentTokens: 18_000 },
+
         limits: { maxTurns: 0, maxContextTokens: 96_000 },
         resolution: { ready: true, modelRef: 'model:test:default' }
       },
@@ -43,10 +41,9 @@ function snapshot(): ModelManagementSnapshot {
         runtime: {
           thinkingLevel: 'medium',
           maxTokens: 0,
-          timeoutMs: 120_000,
-          cacheRetention: 'short'
+          timeoutMs: 120_000
         },
-        compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 },
+
         limits: { maxTurns: 0, maxContextTokens: 128_000 },
         resolution: { ready: true, modelRef: 'model:test:default' }
       }
@@ -56,63 +53,56 @@ function snapshot(): ModelManagementSnapshot {
 }
 
 describe('AgentConfiguration', () => {
-  it('projects code-owned tools and permissions while injecting workload compaction', () => {
+  it('projects code-owned tool permissions independently of model selection', () => {
     const configuration = new AgentConfiguration({ read: snapshot })
-    const { revision, profile, definition } = configuration.getProfile(
-      'profile:plugin-developer:default'
+    const { revision, policy, definition } = configuration.getConfiguration(
+      'plugin-developer'
     )
 
     assert.equal(revision, 'model-management:r1')
     assert.equal(definition.id, 'plugin-developer')
-    assert.deepEqual(profile.toolPackRefs, ['toolpack:plugin-developer:v1'])
-    assert.deepEqual(profile.capabilityGrants, [
+    assert.deepEqual(policy.toolPackRefs, ['toolpack:plugin-developer:v1'])
+    assert.deepEqual(policy.capabilityGrants, [
       'plugin.test',
       'plugin.workspace.read',
       'plugin.write',
       'browser.read',
       'browser.interact'
     ])
-    assert.deepEqual(profile.approvalRequiredEffects, ['credential-sensitive'])
-    assert.deepEqual(profile.compaction, {
-      enabled: true,
-      reserveTokens: 12_000,
-      keepRecentTokens: 18_000
-    })
-    assert.equal(profile.routes.primary, 'workload:plugin-developer')
-    assert.equal(profile.routes.verifier, profile.routes.primary)
-    assert.equal(profile.routes.summarizer, profile.routes.primary)
+    assert.deepEqual(policy.approvalRequiredEffects, ['credential-sensitive'])
+
   })
 
   it('binds metadata collection to the curator workload and explicit staging capabilities', () => {
     const configuration = new AgentConfiguration({ read: snapshot })
-    const { profile, definition, workload } = configuration.getProfile(
-      'profile:metadata-collector:default'
+    const { policy, definition, workload } = configuration.getConfiguration(
+      'metadata-collector'
     )
 
     assert.equal(definition.id, 'metadata-collector')
     assert.equal(workload.workloadId, 'library-curator')
-    assert.deepEqual(profile.toolPackRefs, ['toolpack:metadata-collector:v1'])
-    assert.deepEqual(profile.capabilityGrants, [
+    assert.deepEqual(policy.toolPackRefs, ['toolpack:metadata-collector:v1'])
+    assert.deepEqual(policy.capabilityGrants, [
       'browser.read',
       'metadata.stage-remote-candidate'
     ])
-    assert.deepEqual(profile.approvalRequiredEffects, [])
+    assert.deepEqual(policy.approvalRequiredEffects, [])
   })
 
   it('registers playlist import as an independent least-privilege use case', () => {
     const configuration = new AgentConfiguration({ read: snapshot })
-    const { profile, definition, workload } = configuration.getProfile(
-      'profile:playlist-importer:default'
+    const { policy, definition, workload } = configuration.getConfiguration(
+      'playlist-importer'
     )
 
     assert.equal(definition.id, 'playlist-importer')
     assert.equal(workload.workloadId, 'library-curator')
-    assert.deepEqual(profile.toolPackRefs, ['toolpack:playlist-importer:v1'])
-    assert.deepEqual(profile.capabilityGrants, [
+    assert.deepEqual(policy.toolPackRefs, ['toolpack:playlist-importer:v1'])
+    assert.deepEqual(policy.capabilityGrants, [
       'browser.interact',
       'playlist-import.stage-page',
       'playlist-import.stage-identity'
     ])
-    assert.deepEqual(profile.approvalRequiredEffects, [])
+    assert.deepEqual(policy.approvalRequiredEffects, [])
   })
 })

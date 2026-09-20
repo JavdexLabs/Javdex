@@ -57,12 +57,10 @@ const SETTINGS_BACKUP_FILE = 'settings.llm-v1.backup.json'
 const MODEL_CONTEXT_DEFAULT = 128_000
 const MODEL_OUTPUT_DEFAULT = 16_384
 const LEASE_TTL_MS = 5 * 60 * 1000
-const DEFAULT_COMPACTION = { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 }
 const DEFAULT_RUNTIME = {
   thinkingLevel: 'medium' as const,
   maxTokens: 0,
-  timeoutMs: 120_000,
-  cacheRetention: 'short' as const
+  timeoutMs: 120_000
 }
 
 const safePositiveInteger = z.number().int().positive().refine(Number.isSafeInteger)
@@ -135,13 +133,7 @@ const assignmentSchema = z.object({
   runtime: z.object({
     thinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']),
     maxTokens: safeNonNegativeInteger,
-    timeoutMs: safePositiveInteger,
-    cacheRetention: z.enum(['none', 'short', 'long'])
-  }).strict(),
-  compaction: z.object({
-    enabled: z.boolean(),
-    reserveTokens: safeNonNegativeInteger,
-    keepRecentTokens: safeNonNegativeInteger
+    timeoutMs: safePositiveInteger
   }).strict(),
   limits: z.object({
     maxTurns: safeNonNegativeInteger,
@@ -156,6 +148,15 @@ const modelManagementDocumentSchema = z.object({
   models: z.array(modelSchema),
   assignments: z.array(assignmentSchema)
 }).strict()
+
+// Accept only the previous persisted format; new IPC writes cannot configure these policies.
+const legacyModelDocumentSchema = modelManagementDocumentSchema.extend({
+  schemaVersion: z.literal(2),
+  assignments: z.array(assignmentSchema.extend({
+    runtime: assignmentSchema.shape.runtime.extend({ cacheRetention: z.enum(['none', 'short', 'long']) }),
+    compaction: z.object({ enabled: z.boolean(), reserveTokens: safeNonNegativeInteger, keepRecentTokens: safeNonNegativeInteger }).strict()
+  }))
+})
 
 export interface ModelConfigurationStore {
   read(): unknown | null
@@ -322,7 +323,6 @@ function workloadAssignment(
     workloadId,
     model: { mode: 'inherit-default' },
     runtime: { ...DEFAULT_RUNTIME },
-    compaction: { ...DEFAULT_COMPACTION },
     limits: workloadId === 'plugin-developer'
       ? {
           maxTurns: settings.pluginDevAgentMaxTurns,
@@ -393,7 +393,6 @@ export function migrateModelManagementDocument(
       workloadId: 'app-default',
       model: { mode: 'explicit', modelRef: defaultRef },
       runtime: { ...DEFAULT_RUNTIME },
-      compaction: { ...DEFAULT_COMPACTION, enabled: false },
       limits: { maxTurns: 0, maxContextTokens: MODEL_CONTEXT_DEFAULT }
     },
     workloadAssignment('plugin-developer', settings),
@@ -522,12 +521,7 @@ export function validateModelManagementDocument(document: ModelManagementDocumen
     if (!Number.isSafeInteger(assignment.limits.maxContextTokens) || assignment.limits.maxContextTokens <= 0) {
       errors.push(`用途 ${assignment.workloadId} 的 maxContextTokens 必须是正整数`)
     }
-    if (!Number.isSafeInteger(assignment.compaction.reserveTokens) || assignment.compaction.reserveTokens < 0) {
-      errors.push(`用途 ${assignment.workloadId} 的 reserveTokens 必须是非负整数`)
-    }
-    if (!Number.isSafeInteger(assignment.compaction.keepRecentTokens) || assignment.compaction.keepRecentTokens < 0) {
-      errors.push(`用途 ${assignment.workloadId} 的 keepRecentTokens 必须是非负整数`)
-    }
+
   }
   return errors
 }
@@ -678,7 +672,7 @@ export class ModelManagementModule {
         thinkingLevel: assignment.runtime.thinkingLevel,
         maxTokens,
         timeoutMs: assignment.runtime.timeoutMs,
-        cacheRetention: assignment.runtime.cacheRetention
+        cacheRetention: effective.cache.supportsPromptCache === true ? 'short' : 'none'
       },
       cacheCompatibility: structuredClone(effective.cache),
       getCredentialLease: async () => this.issueCredentialLease(connection),
@@ -690,13 +684,25 @@ export class ModelManagementModule {
     if (this.cache) return structuredClone(this.cache)
     const raw = this.dependencies.store.read()
     if (raw !== null) {
-      const parsed = modelManagementDocumentSchema.safeParse(raw)
+      const legacy = legacyModelDocumentSchema.safeParse(raw)
+      const candidate = legacy.success ? {
+        ...legacy.data,
+        schemaVersion: MODEL_MANAGEMENT_SCHEMA_VERSION,
+        revision: this.dependencies.nextRevision(),
+        updatedAt: this.dependencies.now().toISOString(),
+        assignments: legacy.data.assignments.map(({ compaction: _compaction, runtime, ...assignment }) => {
+          const { cacheRetention: _cacheRetention, ...settings } = runtime
+          return { ...assignment, runtime: settings }
+        })
+      } : raw
+      const parsed = modelManagementDocumentSchema.safeParse(candidate)
       if (!parsed.success) {
         throw new Error(`读取模型配置失败：${formatSchemaIssues(parsed.error).join('；')}`)
       }
       const document = parsed.data as ModelManagementDocument
       const errors = validateModelManagementDocument(document)
       if (errors.length > 0) throw new Error(`读取模型配置失败：${errors.join('；')}`)
+      if (legacy.success) this.dependencies.store.write(document)
       this.cache = structuredClone(document)
       return structuredClone(document)
     }
@@ -811,12 +817,7 @@ export class ModelManagementModule {
         `模型「${model.name}」没有明确的工具调用能力`
       )
     }
-    if (assignment.runtime.cacheRetention === 'long' && !effective.cache.supportsLongCacheRetention) {
-      throw new ModelManagementError(
-        'LONG_CACHE_UNSUPPORTED',
-        `模型「${model.name}」没有明确支持长期缓存`
-      )
-    }
+
     return { assignment, model, connection, effective }
   }
 
@@ -843,7 +844,6 @@ export class ModelManagementModule {
       const target = document.assignments.find((item) => item.workloadId === command.workloadId)!
       target.model = structuredClone(command.model)
       target.runtime = structuredClone(command.runtime)
-      target.compaction = structuredClone(command.compaction)
       target.limits = structuredClone(command.limits)
       return undefined
     }

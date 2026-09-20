@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { AgentProfile, AgentToolEffect } from '@shared/aiConfigurationTypes'
+import type { AgentPolicy, AgentToolEffect } from '@shared/aiConfigurationTypes'
 import type { ModelWorkloadId } from '@shared/modelManagementTypes'
 import { PLUGIN_DEVELOPER_SYSTEM_PROMPT } from '../services/pluginDevAgent/pluginDevInstructions'
 import { AGENT_METADATA_COLLECTOR_SYSTEM_PROMPT } from '../services/agentMetadata/agentMetadataInstructions'
@@ -60,14 +60,6 @@ const DEFINITIONS: readonly AgentDefinition[] = [
   }
 ]
 
-function definitionIdForProfile(profileId: string): AgentDefinition['id'] {
-  if (profileId.includes('plugin-developer')) return 'plugin-developer'
-  if (profileId.includes('library-curator')) return 'library-curator'
-  if (profileId.includes('metadata-collector')) return 'metadata-collector'
-  if (profileId.includes('playlist-importer')) return 'playlist-importer'
-  throw new Error(`Agent Profile 不存在：${profileId}`)
-}
-
 function workloadIdForDefinition(definitionId: AgentDefinition['id']): ModelWorkloadId {
   return definitionId === 'metadata-collector' || definitionId === 'playlist-importer'
     ? 'library-curator'
@@ -85,37 +77,20 @@ export class AgentConfiguration {
     return definition
   }
 
-  getProfile(profileId: string) {
-    const definition = this.getDefinition(definitionIdForProfile(profileId))
+  getConfiguration(definitionId: AgentDefinition['id']) {
+    const definition = this.getDefinition(definitionId)
     const snapshot = this.management.read()
     const workloadId = workloadIdForDefinition(definition.id)
     const assignment = snapshot.assignments.find((item) => item.workloadId === workloadId)
     if (!assignment) throw new Error(`缺少 Agent 用途配置：${workloadId}`)
-    const virtualRoute = `workload:${workloadId}`
-    const profile: AgentProfile = {
-      id: profileId,
-      name:
-        definition.id === 'plugin-developer'
-          ? '插件开发'
-          : definition.id === 'metadata-collector'
-            ? '外部元数据采集'
-            : definition.id === 'playlist-importer'
-              ? '外部清单导入'
-              : '媒体库整理',
-      definitionId: definition.id,
-      routes: {
-        primary: virtualRoute,
-        verifier: virtualRoute,
-        summarizer: virtualRoute
-      },
+    const policy: AgentPolicy = {
       toolPackRefs: [...definition.toolPackRefs],
       capabilityGrants: [...definition.capabilityGrants],
-      approvalRequiredEffects: [...definition.approvalRequiredEffects],
-      compaction: structuredClone(assignment.compaction)
+      approvalRequiredEffects: [...definition.approvalRequiredEffects]
     }
     return {
       revision: snapshot.revision,
-      profile,
+      policy,
       definition,
       workload: structuredClone(assignment)
     }

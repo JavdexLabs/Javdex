@@ -36,7 +36,7 @@ function snapshot(): ModelManagementSnapshot {
   const first = metadata(true)
   const second = metadata(true)
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: 'revision-1',
     updatedAt: '2026-08-22T00:00:00.000Z',
     validationErrors: [],
@@ -98,24 +98,24 @@ function snapshot(): ModelManagementSnapshot {
       {
         workloadId: 'app-default',
         model: { mode: 'explicit', modelRef: 'model:ready:first' },
-        runtime: { thinkingLevel: 'medium', maxTokens: 0, timeoutMs: 120_000, cacheRetention: 'short' },
-        compaction: { enabled: true, reserveTokens: 16_000, keepRecentTokens: 32_000 },
+        runtime: { thinkingLevel: 'medium', maxTokens: 0, timeoutMs: 120_000 },
+
         limits: { maxTurns: 0, maxContextTokens: 128_000 },
         resolution: { ready: true, modelRef: 'model:ready:first', providerName: 'Ready Provider', modelName: 'First Model' }
       },
       {
         workloadId: 'plugin-developer',
         model: { mode: 'inherit-default' },
-        runtime: { thinkingLevel: 'medium', maxTokens: 0, timeoutMs: 120_000, cacheRetention: 'short' },
-        compaction: { enabled: true, reserveTokens: 16_000, keepRecentTokens: 32_000 },
+        runtime: { thinkingLevel: 'medium', maxTokens: 0, timeoutMs: 120_000 },
+
         limits: { maxTurns: 0, maxContextTokens: 128_000 },
         resolution: { ready: true, modelRef: 'model:ready:first', providerName: 'Ready Provider', modelName: 'First Model' }
       },
       {
         workloadId: 'library-curator',
         model: { mode: 'inherit-default' },
-        runtime: { thinkingLevel: 'medium', maxTokens: 0, timeoutMs: 120_000, cacheRetention: 'short' },
-        compaction: { enabled: true, reserveTokens: 16_000, keepRecentTokens: 32_000 },
+        runtime: { thinkingLevel: 'medium', maxTokens: 0, timeoutMs: 120_000 },
+
         limits: { maxTurns: 0, maxContextTokens: 128_000 },
         resolution: { ready: true, modelRef: 'model:ready:first', providerName: 'Ready Provider', modelName: 'First Model' }
       }

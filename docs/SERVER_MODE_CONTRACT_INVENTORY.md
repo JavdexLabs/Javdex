@@ -53,7 +53,18 @@
 - 清单正式应用共同调用 [playlistImportWrite.ts](../packages/library/src/catalog/playlistImportWrite.ts)，桌面 Repository 保留工作状态与预览校验，不再自行写正式清单/影片/链接。宿主固定保留本地追加/自动建片与远程限制，以及复用影片的归属策略差异。
 - 清单详情和分页字段见 [playlistSchemas.ts](../packages/contracts/src/playlistSchemas.ts)，导入结果见 [playlistImportCommit.ts](../packages/contracts/src/playlistImportCommit.ts)，远程均解析实际 JSON。
 
-其余操作仍按现有合同执行；工作库的运行时 SQL 改写尚未移除，不应把三组用例的完成理解为整个架构方案完成。
+其余操作仍按现有合同执行；本次没有重写全量协议。工作库运行时 SQL 改写已移除，完整验收状态以实施方案为准。
+
+## 桌面工作存储与恢复
+
+桌面启动显式绑定 `AgentRunStore` 和 `AgentMetadataDraftRepo` 到 workStore；本地模式另行绑定 catalog 提交协调器，远程模式不打开本机 catalog。未配置工作连接时拒绝访问，退出时解除绑定。Node 管理入口仍将自己的 catalog 连接显式传给草稿仓储，不将服务端草稿当成桌面工作记录。
+
+- [agentWorkCopy.ts](../apps/desktop/src/main/desktop/agentWorkCopy.ts) 仅在首次复制旧工作记录时使用 ATTACH；复制校验内容、关系及加密数据，ready 后不再覆盖工作记录。旧 catalog 源记录保留。正常运行不附加 work 库，不替换 prepare/exec，也不改写 SQL 表名。
+- [draftApplyCommit.ts](../apps/desktop/src/main/services/agentMetadata/draftApplyCommit.ts) 先保存不可变提交意图和 catalog 身份，再提交正式资料及回执，最后更新工作草稿并清理暂存资源。重试优先读取原回执，不重复更新正式版本；清理失败保留待恢复状态。
+- [draftDiscardCommit.ts](../apps/desktop/src/main/services/agentMetadata/draftDiscardCommit.ts) 同样先取得 catalog 回执再丢弃工作草稿。启动时只在同 catalog、无回执且草稿仍为原状态/版本时释放未提交意图；未知读取错误或状态不一致不能当作未提交成功处理。
+- 影片删除在 catalog 回执中保留工作草稿快照，由桌面在正式删除后清理；草稿变化或 catalog 身份不符时拒绝清理，重复恢复不误删新草稿。暂存图片清理显式读取工作仓储，迁库导出脱敏使用独立导出连接。
+
+这些流程是有持久回执的分步提交，不是两个 SQLite 数据库之间的原子事务。调用者不得重新建立全局表名前缀或依靠 catalog 连接读取桌面工作表。
 
 ## 通用包络
 

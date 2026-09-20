@@ -7,7 +7,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
-import { configureAgentWorkTablePrefix } from '@library/runtime/host'
 import { clearAgentRunDatabase } from '../agent-platform/agentRunStore'
 import {
   createDesktopRuntime,
@@ -250,7 +249,6 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
   }
 
   afterEach(async () => {
-    configureAgentWorkTablePrefix('')
     clearAgentRunDatabase()
     closeDatabase()
     await Promise.all(children.splice(0).map((child) => stopChild(child)))

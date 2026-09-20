@@ -25,12 +25,13 @@ import { applyActressScrapeCandidate, applyVideoScrapeCandidate } from '@library
 
 export function findReadyAgentMetadata(
   target: AgentMetadataTarget,
-  database: Database.Database = getDb()
+  database: Database.Database = getDb(),
+  repo: AgentMetadataDraftRepo = new AgentMetadataDraftRepo(() => database)
 ): {
   draft: AgentMetadataDraft | null
   versions: ExpectedVersions
 } {
-  const draft = new AgentMetadataDraftRepo(() => database).findReadyForTarget(target)
+  const draft = repo.findReadyForTarget(target)
   const versions: ExpectedVersions = {}
   if (target.kind === 'video') {
     const version = readVideoAggregateVersion(target.id, database)
@@ -63,18 +64,39 @@ export function discardAgentMetadataDraft(
   return { ok: true }
 }
 
-export function applyAgentMetadataDraft(input: {
+export interface AgentMetadataCatalogApplyInput {
   draftId: string
   reviewToken: string
   uploads?: CatalogImageRef[]
   expected: ExpectedVersions
   operationId: string
   database?: Database.Database
-}): AgentMetadataApplyOutcome & { versions?: ExpectedVersions } {
+}
+
+type CatalogDraftOutcome = Exclude<AgentMetadataApplyOutcome, { status: 'preview_stale' }> & { versions?: ExpectedVersions }
+
+/** Same-store host: the caller owns the catalog transaction and receipt. */
+export function applyAgentMetadataDraft(input: AgentMetadataCatalogApplyInput): CatalogDraftOutcome {
   const database = input.database ?? getDb()
   const repo = new AgentMetadataDraftRepo(() => database)
   const replay = repo.getStoredOutcome({ draftId: input.draftId, idempotencyKey: input.operationId })
-  if (replay) return replay
+  if (replay && replay.status !== 'preview_stale') return replay
+  const draft = repo.require(input.draftId)
+  const result = applyAgentMetadataDraftToCatalog({ ...input, database }, repo)
+  repo.completeApply({ draftId: input.draftId, reviewToken: input.reviewToken,
+    idempotencyKey: input.operationId, outcome: result })
+  const paths = draft.resources.map(resource => resource.stagedPath)
+  if (draft.target.kind === 'video') mediaAssetStore.cleanupVideoScrapeStagingPaths(paths)
+  else mediaAssetStore.cleanupActressScrapeStagingPaths(paths)
+  return result
+}
+
+/** Applies only formal catalog data; the host completes the explicit draft store after commit. */
+export function applyAgentMetadataDraftToCatalog(
+  input: AgentMetadataCatalogApplyInput,
+  repo: AgentMetadataDraftRepo
+): CatalogDraftOutcome {
+  const database = input.database ?? getDb()
   const draft = repo.require(input.draftId)
   const stored = repo.getStoredReview(input.draftId)
   if (draft.status !== 'ready' || !stored || stored.token !== input.reviewToken) {
@@ -118,13 +140,6 @@ export function applyAgentMetadataDraft(input: {
         target: draft.target,
         warnings: [...draft.warnings, ...applied.warnings]
       }
-      repo.completeApply({
-        draftId: input.draftId,
-        reviewToken: input.reviewToken,
-        idempotencyKey: input.operationId,
-        outcome
-      })
-      mediaAssetStore.cleanupVideoScrapeStagingPaths(draft.resources.map((item) => item.stagedPath))
       return { ...outcome, versions: applied.versions }
     }
     const fields = new Set(stored.selection.fields)
@@ -159,13 +174,6 @@ export function applyAgentMetadataDraft(input: {
       target: draft.target,
       warnings: [...draft.warnings, ...applied.warnings]
     }
-    repo.completeApply({
-      draftId: input.draftId,
-      reviewToken: input.reviewToken,
-      idempotencyKey: input.operationId,
-      outcome
-    })
-    mediaAssetStore.cleanupVideoScrapeStagingPaths(draft.resources.map((item) => item.stagedPath))
     return { ...outcome, versions: { V: readVideoAggregateVersion(draft.target.id, database)! } }
   }
 
@@ -193,13 +201,6 @@ export function applyAgentMetadataDraft(input: {
       target: draft.target,
       warnings: [...draft.warnings, ...applied.warnings]
     }
-    repo.completeApply({
-      draftId: input.draftId,
-      reviewToken: input.reviewToken,
-      idempotencyKey: input.operationId,
-      outcome
-    })
-    mediaAssetStore.cleanupActressScrapeStagingPaths(draft.resources.map((item) => item.stagedPath))
     return { ...outcome, versions: applied.versions }
   }
   const fields = new Set(stored.selection.fields)
@@ -245,12 +246,5 @@ export function applyAgentMetadataDraft(input: {
     target: draft.target,
     warnings: [...draft.warnings, ...applied.warnings]
   }
-  repo.completeApply({
-    draftId: input.draftId,
-    reviewToken: input.reviewToken,
-    idempotencyKey: input.operationId,
-    outcome
-  })
-  mediaAssetStore.cleanupActressScrapeStagingPaths(draft.resources.map((item) => item.stagedPath))
   return { ...outcome, versions: { A: readActressAggregateVersion(draft.target.id, database)! } }
 }

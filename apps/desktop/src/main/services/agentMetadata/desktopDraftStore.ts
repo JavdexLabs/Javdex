@@ -4,10 +4,15 @@ import { mediaAssetStore } from '@library/mediaAssetStore'
 import { AgentMetadataApplyCommit } from './draftApplyCommit'
 import type { DeleteVideoGloballyRepoResult } from '@library/db/videoLifecycleRepo'
 import { readCatalogIdentity } from '@library/catalog/catalogIdentity'
+import { applyAgentMetadataDraftToCatalog, findReadyAgentMetadata } from '@library/catalog/catalogAgentMetadata'
+import type { CatalogAgentMetadataCommands } from '../../application/catalogBackend'
+import type { AgentMetadataApplyInput } from '@shared/agentMetadataTypes'
+import { AgentMetadataDiscardCommit } from './draftDiscardCommit'
 
 let workDatabase: Database.Database | null = null
 let applyCommit: AgentMetadataApplyCommit | null = null
 let catalogDatabase: Database.Database | null = null
+let discardCommit: AgentMetadataDiscardCommit | null = null
 
 export const desktopAgentDraftRepo = new AgentMetadataDraftRepo(() => {
   if (!workDatabase) throw new Error('Agent draft work database is not configured')
@@ -18,17 +23,63 @@ export function configureDesktopDraftStore(work: Database.Database, catalog?: Da
   workDatabase = work
   catalogDatabase = catalog ?? null
   applyCommit = catalog ? new AgentMetadataApplyCommit(work, catalog) : null
+  discardCommit = catalog && applyCommit ? new AgentMetadataDiscardCommit(work, catalog, applyCommit) : null
 }
 
 export function clearDesktopDraftStore(): void {
   workDatabase = null
   catalogDatabase = null
   applyCommit = null
+  discardCommit = null
 }
 
 export function desktopDraftApplyCommit(): AgentMetadataApplyCommit | undefined {
   if (!workDatabase) throw new Error('Agent draft work database is not configured')
   return applyCommit ?? undefined
+}
+
+export function findReadyDesktopManagedDraft(...[input]: Parameters<CatalogAgentMetadataCommands['findReady']>) {
+  if (!catalogDatabase) throw new Error('Local draft catalog is not configured')
+  return findReadyAgentMetadata(input.target, catalogDatabase, desktopAgentDraftRepo)
+}
+
+export function applyDesktopManagedDraft(...[input, ctx]: Parameters<CatalogAgentMetadataCommands['apply']>) {
+  if (!catalogDatabase || !applyCommit) throw new Error('Local draft catalog is not configured')
+  const database = catalogDatabase
+  return applyCommit.apply({ draftId: input.draftId, reviewToken: input.reviewToken, idempotencyKey: ctx.operationId }, () => {
+    const draft = desktopAgentDraftRepo.require(input.draftId)
+    const outcome = applyAgentMetadataDraftToCatalog({ ...input, database,
+      expected: ctx.expectedVersions, operationId: ctx.operationId }, desktopAgentDraftRepo)
+    return { outcome, versions: outcome.versions,
+      cleanup: { kind: draft.target.kind, stagedPaths: draft.resources.map(resource => resource.stagedPath) } }
+  }, ({ kind, stagedPaths }) => {
+    if (kind === 'video') mediaAssetStore.cleanupVideoScrapeStagingPaths(stagedPaths)
+    else mediaAssetStore.cleanupActressScrapeStagingPaths(stagedPaths)
+  }, { operationId: ctx.operationId, operation: 'agentMetadata.apply', input,
+    expectedVersions: ctx.expectedVersions, writerEpoch: 0 })
+}
+
+export function resumeDesktopManagedDraft(input: AgentMetadataApplyInput) {
+  if (!applyCommit) throw new Error('Local draft catalog is not configured')
+  return applyCommit.resume(input, ({ kind, stagedPaths }) => {
+    if (kind === 'video') mediaAssetStore.cleanupVideoScrapeStagingPaths(stagedPaths)
+    else mediaAssetStore.cleanupActressScrapeStagingPaths(stagedPaths)
+  })
+}
+
+export function discardDesktopManagedDraft(...[input, ctx]: Parameters<CatalogAgentMetadataCommands['discard']>) {
+  if (!discardCommit) throw new Error('Local draft catalog is not configured')
+  return discardCommit.discard(input.draftId, { operationId: ctx.operationId, operation: 'agentMetadata.discard',
+    input, expectedVersions: ctx.expectedVersions, writerEpoch: 0 }, cleanupDraftStaging)
+}
+
+function cleanupDraftStaging(kind: 'video' | 'actress', paths: string[]): void {
+  if (kind === 'video') mediaAssetStore.cleanupVideoScrapeStagingPaths(paths)
+  else mediaAssetStore.cleanupActressScrapeStagingPaths(paths)
+}
+
+export function recoverDesktopDraftDiscards(): void {
+  discardCommit?.recoverCommitted(cleanupDraftStaging)
 }
 
 export function recoverDesktopDraftCommits(): number {

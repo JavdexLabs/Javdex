@@ -13,7 +13,7 @@ import { classificationMaintenanceService } from '../classificationMaintenanceSe
 import { AgentMetadataBrowserAdapter } from './browserAdapter'
 import { AgentMetadataDraftService } from './draftService'
 import { AgentMetadataApplyCommit } from './draftApplyCommit'
-import { openDesktopWorkStore } from '../../desktop/workStore'
+import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../../desktop/workStore'
 import { copyAgentWorkTables } from '../../desktop/agentWorkCopy'
 import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
 
@@ -23,11 +23,13 @@ const JPEG_1X1 = Buffer.from(
 )
 
 let root: string | null = null
+let fixtureWork: DesktopWorkStoreHandle | undefined
 
 function setup(): AgentMetadataDraftRepo {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-agent-metadata-draft-'))
   process.env.JAVDEX_TEST_USER_DATA = root
   initDatabaseAtPath(path.join(root, 'javdex.db'))
+  ensureCatalogIdentity()
   const db = getDb()
   db.prepare('INSERT INTO videos (id, code, title) VALUES (7, ?, ?)').run('ABC-123', '')
   db.prepare(
@@ -36,10 +38,15 @@ function setup(): AgentMetadataDraftRepo {
        product_state_json, created_at, updated_at
      ) VALUES (?, 'metadata-collector', 'settled', 'test', '{}', 'pi', '{}', ?, ?)`
   ).run('run-1', new Date().toISOString(), new Date().toISOString())
-  return new AgentMetadataDraftRepo(getDb)
+  fixtureWork = openDesktopWorkStore(path.join(root, 'fixture-work.db'))
+  copyAgentWorkTables(db, fixtureWork.database())
+  const workDb = fixtureWork.database()
+  return new AgentMetadataDraftRepo(() => workDb)
 }
 
 afterEach(() => {
+  fixtureWork?.close()
+  fixtureWork = undefined
   closeDatabase()
   if (root) fs.rmSync(root, { recursive: true, force: true })
   root = null
@@ -79,7 +86,7 @@ describe('AgentMetadataDraftService', () => {
     }).draft
     fs.appendFileSync(mediaAssetStore.resolve(resource.stagedPath), Buffer.from([0]))
 
-    const service = new AgentMetadataDraftService(repo)
+    const service = new AgentMetadataDraftService(repo, undefined, new AgentMetadataApplyCommit(fixtureWork!.database(), getDb()))
     assert.throws(() => service.plan({
       kind: 'video',
       draftId: draft.id,
@@ -119,7 +126,7 @@ describe('AgentMetadataDraftService', () => {
       }],
       warnings: []
     }).draft
-    const service = new AgentMetadataDraftService(repo)
+    const service = new AgentMetadataDraftService(repo, undefined, new AgentMetadataApplyCommit(fixtureWork!.database(), getDb()))
     const review = service.plan({
       kind: 'video',
       draftId: draft.id,
@@ -139,6 +146,7 @@ describe('AgentMetadataDraftService', () => {
   it('cleans newly staged resources when persistence fails', async () => {
     setup()
     const repo = {
+      findReadyForTarget: () => null,
       create: () => { throw new Error('database failed') }
     } as unknown as AgentMetadataDraftRepo
     const browser = {
@@ -149,7 +157,7 @@ describe('AgentMetadataDraftService', () => {
       assertEvidenceRefs: () => {},
       fetchBuffer: async () => JPEG_1X1
     } as unknown as AgentMetadataBrowserAdapter
-    const service = new AgentMetadataDraftService(repo, browser)
+    const service = new AgentMetadataDraftService(repo, browser, new AgentMetadataApplyCommit(fixtureWork!.database(), getDb()))
 
     await assert.rejects(service.prepare({
       runId: 'run-1',
@@ -198,7 +206,7 @@ describe('AgentMetadataDraftService', () => {
       resources: [],
       warnings: []
     }).draft
-    const service = new AgentMetadataDraftService(repo)
+    const service = new AgentMetadataDraftService(repo, undefined, new AgentMetadataApplyCommit(fixtureWork!.database(), getDb()))
     const review = service.plan({
       kind: 'actress',
       draftId: draft.id,
@@ -267,7 +275,7 @@ describe('AgentMetadataDraftService', () => {
       }],
       warnings: []
     }).draft
-    const service = new AgentMetadataDraftService(repo)
+    const service = new AgentMetadataDraftService(repo, undefined, new AgentMetadataApplyCommit(fixtureWork!.database(), getDb()))
     const review = service.plan({
       kind: 'video',
       draftId: draft.id,
@@ -309,7 +317,7 @@ describe('AgentMetadataDraftService', () => {
       assertEvidenceRefs: () => {},
       fetchBuffer: async () => JPEG_1X1
     } as unknown as AgentMetadataBrowserAdapter
-    const service = new AgentMetadataDraftService(repo, browser)
+    const service = new AgentMetadataDraftService(repo, browser, new AgentMetadataApplyCommit(fixtureWork!.database(), getDb()))
     await service.prepare({
       runId: 'run-1',
       target: { kind: 'actress', id: 1 },

@@ -1,3 +1,4 @@
+import { applyDesktopManagedDraft, findReadyDesktopManagedDraft, discardDesktopManagedDraft } from '../../services/agentMetadata/desktopDraftStore'
 import { editCatalogActress } from '@library/catalog/catalogActressEdit'
 import {
   applyVideoScrapeCommand,
@@ -48,11 +49,6 @@ import {
 } from '@library/catalog/catalogImageApply'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
 import { countCatalogTargets, createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
-import {
-  applyAgentMetadataDraft,
-  discardAgentMetadataDraft,
-  findReadyAgentMetadata
-} from '@library/catalog/catalogAgentMetadata'
 import {
   discardPendingVideoScrapeRecord
 } from '@library/catalog/catalogPendingVideoScrapes'
@@ -1387,44 +1383,13 @@ export function createLocalCatalogBackend(
     },
     agentMetadata: {
       async findReady(input) {
-        return findReadyAgentMetadata(input.target)
+        return findReadyDesktopManagedDraft(input)
       },
       async apply(input, ctx) {
-        const result = commitManageImageMutation(
-          {
-            operationId: ctx.operationId,
-            operation: 'agentMetadata.apply',
-            expectedVersions: ctx.expectedVersions,
-            input,
-            writerEpoch: 0
-          },
-          () =>
-            applyAgentMetadataDraft({
-              draftId: input.draftId,
-              reviewToken: input.reviewToken,
-              uploads: input.uploads,
-              expected: ctx.expectedVersions,
-              operationId: ctx.operationId
-            })
-        )
-        return result.data
+        return applyDesktopManagedDraft(input, ctx)
       },
       async discard(input, ctx) {
-        const expectedRevision = ctx.expectedVersions.Q?.revision
-        if (expectedRevision == null) {
-          throw structuredError('INVALID_INPUT', '待确认操作需要 Q 版本', { field: 'expectedVersions.Q' })
-        }
-        const result = commitCatalogMutation(
-          {
-            operationId: ctx.operationId,
-            operation: 'agentMetadata.discard',
-            expectedVersions: ctx.expectedVersions,
-            input,
-            writerEpoch: 0
-          },
-          () => discardAgentMetadataDraft(input.draftId, expectedRevision)
-        )
-        return result.data
+        return discardDesktopManagedDraft(input, ctx)
       }
     },
     assets: {

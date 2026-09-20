@@ -36,6 +36,7 @@ import { getActressDetail } from '@library/db/actressRepo'
 import { getVideoById } from '@library/db/videoRepo'
 import { agentMetadataBrowser } from './browserAdapter'
 import { agentMetadataDraftService } from './draftService'
+import { resumeDesktopManagedDraft } from './desktopDraftStore'
 import { createAgentMetadataToolHandlers } from './toolPack'
 import { AgentMetadataActivityTimeline } from './activityTimeline'
 import type { CatalogBackend } from '../../application/catalogBackend'
@@ -530,6 +531,11 @@ export class AgentMetadataCollection {
   ): Promise<AgentMetadataApplyOutcome> {
     const catalog = this.catalog
     if (!catalog) return agentMetadataDraftService.apply(input)
+    if (catalog.mode === 'local') {
+      // A proven commit must be resumed before loading new aggregate versions.
+      const resumed = resumeDesktopManagedDraft(input)
+      if (resumed) return resumed
+    }
     const ready = (await catalog.agentMetadata.findReady({ target: draft.target })) as {
       draft?: AgentMetadataDraft | null
       versions?: ExpectedVersions

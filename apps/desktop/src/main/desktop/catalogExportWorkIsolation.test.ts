@@ -8,8 +8,6 @@ import { migrateDatabase } from '@library/db/migrations'
 import { stripExportSecrets } from '@library/catalog/catalogMigrationApply'
 import { listFormallyReferencedImagePaths } from '@library/catalog/catalogImageRefs'
 import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
-import { configureAgentWorkTablePrefix } from '@library/runtime/host'
-import { attachAgentWorkStore } from './agentWorkCopy'
 import { openDesktopWorkStore } from './workStore'
 
 it('strips only the isolated catalog export while preserving source and live work records', async () => {
@@ -34,7 +32,6 @@ it('strips only the isolated catalog export while preserving source and live wor
     addDraft(catalog, 'old-source-run', 'catalog-staging/cover.jpg')
     addDraft(work.database(), 'active-work-run', 'work-staging/cover.jpg')
     catalog.exec("INSERT INTO videos(id,code,title) VALUES(7,'ABC-007','preserved')")
-    attachAgentWorkStore(catalog, work.filePath)
     const catalogImages = listFormallyReferencedImagePaths(catalog)
     assert.equal(catalogImages.has('catalog-staging/cover.jpg'), true)
     assert.equal(catalogImages.has('work-staging/cover.jpg'), false)
@@ -53,7 +50,6 @@ it('strips only the isolated catalog export while preserving source and live wor
       original.close()
     }
   } finally {
-    configureAgentWorkTablePrefix('')
     exported?.close()
     catalog.close()
     work.close()

@@ -1,3 +1,4 @@
+import { readVideoAggregateVersion } from '@library/catalog/catalogAggregateVersion'
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer as createHttpServer, type Server } from 'node:http'
@@ -5,7 +6,6 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
-import { configureAgentWorkTablePrefix } from '@library/runtime/host'
 import { isStructuredError } from '@shared/protocol/errors'
 import { clearAgentRunDatabase } from '../agent-platform/agentRunStore'
 import {
@@ -46,7 +46,6 @@ function insertAgentRun(database: ReturnType<typeof getDb>, id: string): void {
 }
 
 afterEach(async () => {
-  configureAgentWorkTablePrefix('')
   clearAgentRunDatabase()
   closeDatabase()
   if (handshakeServer) {
@@ -110,6 +109,9 @@ describe('createDesktopRuntime', () => {
       assert.equal(runtime.openedCatalog, true)
       assert.equal(runtime.backend.session().serverId, null)
       assert.equal(runtime.workStore.prepStatus(), 'ready')
+      assert.equal((getDb().prepare('PRAGMA database_list').all() as Array<{ name: string }>).some(row => row.name === 'work'), false)
+      assert.equal(Object.hasOwn(getDb(), 'prepare'), false)
+      assert.equal(Object.hasOwn(getDb(), 'exec'), false)
       assert.equal(
         (runtime.workStore.database().prepare('SELECT COUNT(*) AS n FROM agent_runs').get() as { n: number }).n,
         1
@@ -119,16 +121,16 @@ describe('createDesktopRuntime', () => {
         1
       )
       assert.equal(
-        (getDb().prepare('SELECT COUNT(*) AS n FROM work.agent_runs').get() as { n: number }).n,
+        (runtime.workStore.database().prepare('SELECT COUNT(*) AS n FROM agent_runs').get() as { n: number }).n,
         1
       )
-      insertAgentRun(getDb(), 'run-after-switch')
+      insertAgentRun(runtime.workStore.database(), 'run-after-switch')
       assert.equal(
         (getDb().prepare('SELECT COUNT(*) AS n FROM main.agent_runs').get() as { n: number }).n,
         1
       )
       assert.equal(
-        (getDb().prepare("SELECT id FROM work.agent_runs ORDER BY id").all() as Array<{ id: string }>).map(
+        (runtime.workStore.database().prepare("SELECT id FROM agent_runs ORDER BY id").all() as Array<{ id: string }>).map(
           (row) => row.id
         ).join(','),
         'run-after-switch,run-source'
@@ -178,7 +180,7 @@ describe('createDesktopRuntime', () => {
         'run-interrupted'
       )
       assert.equal(
-        (getDb().prepare("SELECT id FROM work.agent_runs").get() as { id: string }).id,
+        (runtime.workStore.database().prepare("SELECT id FROM agent_runs").get() as { id: string }).id,
         'run-interrupted'
       )
     } finally {
@@ -480,6 +482,85 @@ it('recovers desktop work-draft deletion after catalog commit and does not repea
     await runtime.dispose()
     runtime = await createDesktopRuntime(root, '1.0.0')
     assert.equal((runtime.workStore.database().prepare('SELECT COUNT(*) AS n FROM agent_video_delete_cleanups').get() as { n: number }).n, 1)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+it('applies managed metadata through the explicit work store with a durable catalog receipt', async () => {
+  const { desktopAgentDraftRepo } = await import('../services/agentMetadata/desktopDraftStore')
+  const { randomUUID } = await import('node:crypto')
+  const root = tempDir()
+  const runtime = await createDesktopRuntime(root, '1.0.0')
+  try {
+    const work = runtime.workStore.database()
+    insertAgentRun(work, 'managed-run')
+    getDb().exec("INSERT INTO videos(id,code,title) VALUES(9,'ABC-009','before')")
+    desktopAgentDraftRepo.create({ id: 'managed-draft', runId: 'managed-run', target: { kind: 'video', id: 9 },
+      source: { requestedUrl: 'https://example.test', displayUrl: 'https://example.test' },
+      payload: { kind: 'video', result: { code: 'ABC-009', title: 'managed' },
+        observedFields: ['title'], explicitlyEmptyFields: [], evidenceRefs: [] }, resources: [], warnings: [] })
+    desktopAgentDraftRepo.saveReview({ draftId: 'managed-draft', expectedRevision: 1, review: {
+      kind: 'video', draftId: 'managed-draft', revision: 2, token: 'review',
+      selection: { kind: 'video', draftId: 'managed-draft', expectedRevision: 2, fields: ['title'], mode: 'replace' },
+      impacts: [], warnings: [], classifications: [], canApply: true
+    } })
+    const ready = await runtime.backend.agentMetadata.findReady({ target: { kind: 'video', id: 9 } }) as { draft: { id: string } }
+    assert.equal(ready.draft.id, 'managed-draft')
+    const input = { draftId: 'managed-draft', reviewToken: 'review' }
+    const ctx = { operationId: randomUUID(), expectedVersions: {
+      V: readVideoAggregateVersion(9)!, Q: { generation: 1, revision: 2 }
+    } }
+    work.exec(`CREATE TRIGGER fail_managed_completion BEFORE UPDATE OF status ON agent_metadata_drafts
+      WHEN NEW.status='applied' BEGIN SELECT RAISE(ABORT,'managed completion failed'); END`)
+    await assert.rejects(runtime.backend.agentMetadata.apply(input, ctx), /managed completion failed/)
+    assert.equal(desktopAgentDraftRepo.require('managed-draft').status, 'ready')
+    const committed = getDb().prepare('SELECT title,revision FROM videos WHERE id=9').get()
+    assert.equal((committed as { title: string }).title, 'managed')
+    assert.ok(getDb().prepare('SELECT 1 FROM catalog_operation_receipts WHERE operation_id=?').get(ctx.operationId))
+    work.exec('DROP TRIGGER fail_managed_completion')
+    await runtime.backend.agentMetadata.apply(input, ctx)
+    assert.equal(desktopAgentDraftRepo.require('managed-draft').status, 'applied')
+    assert.deepEqual(getDb().prepare('SELECT title,revision FROM videos WHERE id=9').get(), committed)
+    assert.equal(getDb().prepare('SELECT 1 FROM main.agent_metadata_drafts WHERE id=?').get('managed-draft'), undefined)
+    await assert.rejects(runtime.backend.agentMetadata.apply(input, { ...ctx, expectedVersions: {} }), /原请求重试/)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+it('recovers managed discard after work mutation failure without repeating or changing the request', async () => {
+  const { desktopAgentDraftRepo } = await import('../services/agentMetadata/desktopDraftStore')
+  const { randomUUID } = await import('node:crypto')
+  const root = tempDir()
+  let runtime = await createDesktopRuntime(root, '1.0.0')
+  try {
+    const work = runtime.workStore.database()
+    insertAgentRun(work, 'discard-run')
+    desktopAgentDraftRepo.create({ id: 'discard-draft', runId: 'discard-run', target: { kind: 'video', id: 1 },
+      source: { requestedUrl: 'https://example.test', displayUrl: 'https://example.test' },
+      payload: { kind: 'video', result: { code: 'ABC-001' }, observedFields: [], explicitlyEmptyFields: [], evidenceRefs: [] },
+      resources: [], warnings: [] })
+    const input = { draftId: 'discard-draft' }
+    const ctx = { operationId: randomUUID(), expectedVersions: { Q: { generation: 1, revision: 1 } } }
+    await assert.rejects(runtime.backend.agentMetadata.discard(input, { ...ctx, expectedVersions: {} }))
+    assert.equal(work.prepare('SELECT 1 FROM agent_metadata_discard_intents').get(), undefined)
+    work.exec(`CREATE TRIGGER fail_discard BEFORE UPDATE OF status ON agent_metadata_drafts
+      WHEN NEW.status='discarded' BEGIN SELECT RAISE(ABORT,'discard write failed'); END`)
+    await assert.rejects(runtime.backend.agentMetadata.discard(input, ctx), /discard write failed/)
+    assert.equal(desktopAgentDraftRepo.require(input.draftId).status, 'ready')
+    assert.ok(getDb().prepare('SELECT 1 FROM catalog_operation_receipts WHERE operation_id=?').get(ctx.operationId))
+    const { desktopDraftApplyCommit } = await import('../services/agentMetadata/desktopDraftStore')
+    assert.throws(() => desktopDraftApplyCommit()!.assertMutable(input.draftId), /未核对/)
+    work.exec('DROP TRIGGER fail_discard')
+    await runtime.dispose()
+    runtime = await createDesktopRuntime(root, '1.0.0')
+    assert.equal(desktopAgentDraftRepo.require(input.draftId).status, 'discarded')
+    assert.equal(desktopAgentDraftRepo.require(input.draftId).revision, 2)
+    assert.deepEqual(await runtime.backend.agentMetadata.discard(input, ctx), { ok: true })
+    assert.equal(desktopAgentDraftRepo.require(input.draftId).revision, 2)
+    await assert.rejects(runtime.backend.agentMetadata.discard(input, { ...ctx, operationId: randomUUID() }), /原草稿丢弃请求/)
+    assert.equal((runtime.workStore.database().prepare('SELECT cleaned FROM agent_metadata_discard_intents').get() as { cleaned: number }).cleaned, 1)
   } finally {
     await runtime.dispose()
   }

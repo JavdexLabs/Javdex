@@ -26,7 +26,6 @@ import { normalizeActressName } from '@shared/actressNameNormalization'
 import { getActressDetail } from '@library/db/actressRepo'
 import type { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 import { desktopAgentDraftRepo, desktopDraftApplyCommit } from './desktopDraftStore'
-import { getDb } from '@library/db/database'
 import { replacePendingVideoScrape } from '@library/db/pendingVideoScrapeRepo'
 import { getVideoById } from '@library/db/videoRepo'
 import {
@@ -287,10 +286,9 @@ export class AgentMetadataDraftService {
   }
 
   apply(input: AgentMetadataApplyInput): AgentMetadataApplyOutcome {
-    if (typeof this.commitSource === 'function' && !this.commit) {
-      throw new Error('远程模式不能通过本地草稿入口写入资料库。')
-    }
-    const resumed = this.commit?.resume(input, cleanup => this.cleanupCommittedStaging(cleanup))
+    const commit = this.commit
+    if (!commit) throw new Error('本地草稿提交未配置，不能写入资料库。')
+    const resumed = commit.resume(input, cleanup => this.cleanupCommittedStaging(cleanup))
     if (resumed) {
       this.verifiedResourceManifests.delete(input.draftId)
       return resumed
@@ -324,19 +322,9 @@ export class AgentMetadataDraftService {
           : draft.target.kind === 'actress'
             ? this.applyActress(draft, stored)
             : unsupportedTarget(draft.target)
-      if (this.commit) {
-        const outcome = this.commit.apply(input, applyCatalog, cleanup => this.cleanupCommittedStaging(cleanup))
-        this.verifiedResourceManifests.delete(draft.id)
-        return outcome
-      }
-      const result = mediaAssetStore.coordinateDatabaseChange(() => getDb().transaction(() => {
-        const result = applyCatalog()
-        this.repo.completeApply({ ...input, outcome: result.outcome })
-        return result
-      })())
-      this.cleanupStaging(result.cleanup.kind, result.cleanup.stagedPaths)
+      const outcome = commit.apply(input, applyCatalog, cleanup => this.cleanupCommittedStaging(cleanup))
       this.verifiedResourceManifests.delete(draft.id)
-      return result.outcome
+      return outcome
     } catch (error) {
       if (error instanceof PreviewStaleError) return this.staleOutcome(this.repo.require(draft.id), stored)
       throw error

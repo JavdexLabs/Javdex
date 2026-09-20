@@ -5,9 +5,12 @@ import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 import { readCatalogIdentity } from '@library/catalog/catalogIdentity'
 import { commitCatalogMutation, readCatalogMutation, type CatalogMutationRequest } from '@library/catalog/catalogOperations'
 import { mediaAssetStore } from '@library/mediaAssetStore'
+import type { ExpectedVersions } from '@shared/protocol/versions'
+import { digestCatalogMutation } from '@library/catalog/catalogOperations'
 
 export interface AgentDraftCatalogResult {
-  outcome: Exclude<AgentMetadataApplyOutcome, { status: 'preview_stale' }>
+  outcome: Exclude<AgentMetadataApplyOutcome, { status: 'preview_stale' }> & { versions?: ExpectedVersions }
+  versions?: ExpectedVersions
   cleanup: { kind: AgentMetadataTarget['kind']; stagedPaths: string[] }
 }
 
@@ -49,7 +52,8 @@ export class AgentMetadataApplyCommit {
   }
 
   assertMutable(draftId: string): void {
-    if (this.work.prepare('SELECT 1 FROM agent_metadata_apply_intents WHERE draft_id=? AND cleaned=0').get(draftId)) {
+    if (this.work.prepare(`SELECT 1 FROM agent_metadata_apply_intents WHERE draft_id=? AND cleaned=0
+      UNION ALL SELECT 1 FROM agent_metadata_discard_intents WHERE draft_id=? AND cleaned=0`).get(draftId, draftId)) {
       throw new Error('草稿仍有未核对的提交，请先重试应用再修改或丢弃。')
     }
   }
@@ -73,11 +77,12 @@ export class AgentMetadataApplyCommit {
   apply(
     input: AgentMetadataApplyInput,
     applyCatalog: () => AgentDraftCatalogResult,
-    cleanup: (result: AgentDraftCatalogResult['cleanup']) => void
+    cleanup: (result: AgentDraftCatalogResult['cleanup']) => void,
+    managementRequest?: CatalogMutationRequest
   ): AgentMetadataApplyOutcome {
     const identity = readCatalogIdentity(this.catalog)
     if (!identity) throw new Error('草稿应用缺少资料库身份')
-    const intent = this.reserve(input, identity.catalogId, identity.writerEpoch)
+    const intent = this.reserve(input, identity.catalogId, identity.writerEpoch, managementRequest)
     const request = JSON.parse(intent.request_json) as CatalogMutationRequest
     let result: AgentDraftCatalogResult
     try {
@@ -89,7 +94,7 @@ export class AgentMetadataApplyCommit {
           const draft = this.repo.require(intent.draft_id)
           const review = this.repo.getStoredReview(intent.draft_id)
           const reserved = request.input as { revision: number }
-          if (draft.status !== 'ready' || draft.revision !== reserved.revision ||
+          if (draft.status !== 'ready' || draft.revision !== (request.expectedVersions.Q?.revision ?? reserved.revision) ||
             review?.token !== intent.review_token || !review.canApply) {
             throw new Error('草稿在提交后已变化，请重新检查后再应用。')
           }
@@ -127,7 +132,7 @@ export class AgentMetadataApplyCommit {
     return recovered
   }
 
-  private reserve(input: AgentMetadataApplyInput, catalogId: string, writerEpoch: number): ApplyIntent {
+  private reserve(input: AgentMetadataApplyInput, catalogId: string, writerEpoch: number, managementRequest?: CatalogMutationRequest): ApplyIntent {
     return this.work.transaction(() => {
       const existing = this.work.prepare('SELECT * FROM agent_metadata_apply_intents WHERE draft_id=?')
         .get(input.draftId) as ApplyIntent | undefined
@@ -135,14 +140,21 @@ export class AgentMetadataApplyCommit {
         if (existing.catalog_id !== catalogId || existing.review_token !== input.reviewToken) {
           throw new Error('草稿仍有未核对的提交，不能改用其它资料库或预览')
         }
+        if (managementRequest) {
+          const original = JSON.parse(existing.request_json) as CatalogMutationRequest
+          if (original.operationId !== managementRequest.operationId || digestCatalogMutation(original) !== digestCatalogMutation(managementRequest)) {
+            throw new Error('草稿提交已绑定原操作与请求，请使用原请求重试。')
+          }
+        }
         return existing
       }
+      this.assertMutable(input.draftId)
       const draft = this.repo.require(input.draftId)
       const review = this.repo.getStoredReview(input.draftId)
       if (draft.status !== 'ready' || review?.token !== input.reviewToken || !review.canApply) {
         throw new Error('预览已过期，请重新检查后再应用。')
       }
-      const request: CatalogMutationRequest = {
+      const request: CatalogMutationRequest = managementRequest ?? {
         operationId: randomUUID(), operation: 'agentMetadata.apply', writerEpoch,
         expectedVersions: {}, input: {
           draftId: input.draftId, reviewToken: input.reviewToken,

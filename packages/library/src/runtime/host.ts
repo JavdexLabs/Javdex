@@ -28,7 +28,6 @@ export interface LibraryHost {
 }
 
 let host: LibraryHost | null = null
-let agentPrefix: '' | 'work.' = ''
 
 export const AGENT_WORK_TABLES = [
   'agent_runs',
@@ -43,31 +42,12 @@ export const AGENT_WORK_TABLES = [
   'agent_metadata_draft_resources'
 ] as const
 
-const AGENT_TABLE_PATTERN = new RegExp(
-  `(?<![.\\w])(${AGENT_WORK_TABLES.join('|')})\\b`,
-  'g'
-)
-
 export function configureLibraryHost(next: LibraryHost): void {
   host = next
 }
 
-export function configureAgentWorkTablePrefix(prefix: '' | 'work.'): void {
-  agentPrefix = prefix
-}
-
-export function agentWorkTablePrefix(): '' | 'work.' {
-  return agentPrefix
-}
-
-export function qualifyAgentSql(sql: string): string {
-  if (!agentPrefix) return sql
-  return sql.replace(AGENT_TABLE_PATTERN, (table) => `${agentPrefix}${table}`)
-}
-
 export function resetLibraryHostForTests(): void {
   host = null
-  agentPrefix = ''
 }
 
 export function resolveLibraryUserDataPath(): string {

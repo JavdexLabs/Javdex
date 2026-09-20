@@ -6,7 +6,6 @@ import {
   type InterruptedLibraryScanRecoveryResult
 } from '@library/db/libraryScanRepo'
 import { recoverCatalogMaintenance } from '@library/catalog/catalogMaintenanceRecover'
-import { configureAgentWorkTablePrefix } from '@library/runtime/host'
 import type { CatalogBackend } from '../application/catalogBackend'
 import {
   configureAgentRunDatabase,
@@ -24,12 +23,12 @@ import {
   loadOrCreateLocalCatalogIdentity,
   localCatalogIdentityPath
 } from '../desktop/localCatalogIdentity'
-import { attachAgentWorkStore, copyAgentWorkTables } from '../desktop/agentWorkCopy'
+import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
 import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
 import type { DesktopCredentialStore } from '../application/desktopPorts'
-import { configureDesktopDraftStore, clearDesktopDraftStore, recoverDesktopDraftCommits, recoverDesktopVideoDraftCleanups } from '../services/agentMetadata/desktopDraftStore'
+import { configureDesktopDraftStore, clearDesktopDraftStore, recoverDesktopDraftCommits, recoverDesktopVideoDraftCleanups, recoverDesktopDraftDiscards } from '../services/agentMetadata/desktopDraftStore'
 
 export interface DesktopRuntime {
   mode: 'local' | 'remote'
@@ -55,7 +54,6 @@ export function localCatalogDatabasePath(userDataPath: string): string {
 }
 
 function resetDesktopWorkBindings(): void {
-  configureAgentWorkTablePrefix('')
   clearAgentRunDatabase()
   clearDesktopDraftStore()
 }
@@ -136,7 +134,6 @@ export async function createDesktopRuntime(
     copyAgentWorkTables(database, workStore.database())
     workStore.markReady()
   }
-  attachAgentWorkStore(database, workStore.filePath)
   configureAgentRunDatabase(() => workStore.database())
   const scanRecovery = recoverInterruptedLibraryScanRuns(database)
   recoverCatalogMaintenance(database)
@@ -154,6 +151,11 @@ export async function createDesktopRuntime(
     console.error('Agent draft commit recovery failed:', error)
   }
 
+  try {
+    recoverDesktopDraftDiscards()
+  } catch (error) {
+    console.error('Agent draft discard recovery failed:', error)
+  }
   try {
     recoverDesktopVideoDraftCleanups()
   } catch (error) {

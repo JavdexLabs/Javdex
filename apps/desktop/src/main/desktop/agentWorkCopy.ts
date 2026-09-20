@@ -1,11 +1,7 @@
 import type Database from 'better-sqlite3'
 import fs from 'node:fs'
 import { AGENT_METADATA_SCHEMA_SQL, AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
-import {
-  AGENT_WORK_TABLES,
-  configureAgentWorkTablePrefix,
-  qualifyAgentSql
-} from '@library/runtime/host'
+import { AGENT_WORK_TABLES } from '@library/runtime/host'
 
 /** Test-only: pause inside the open copy SQL transaction so a test can SIGKILL before commit. */
 function stallCopySqlForTests(): void {
@@ -86,33 +82,4 @@ export function copyAgentWorkTables(
       dest.exec('DETACH DATABASE catalog')
     }
   }
-}
-
-function alreadyAttached(database: Database.Database, schema: string): boolean {
-  const rows = database.prepare('SELECT name FROM pragma_database_list').all() as Array<{
-    name: string
-  }>
-  return rows.some((row) => row.name === schema)
-}
-
-function wrapCatalogSqlForAgentPrefix(database: Database.Database): void {
-  const wrapped = database as Database.Database & { __javdexAgentSqlWrapped?: boolean }
-  if (wrapped.__javdexAgentSqlWrapped) return
-  const originalPrepare = database.prepare.bind(database)
-  const originalExec = database.exec.bind(database)
-  database.prepare = ((sql: string) => originalPrepare(qualifyAgentSql(sql))) as typeof database.prepare
-  database.exec = ((sql: string) => originalExec(qualifyAgentSql(sql))) as typeof database.exec
-  wrapped.__javdexAgentSqlWrapped = true
-}
-
-/** Local writer sees workStore agent tables as work.* after this attach. */
-export function attachAgentWorkStore(
-  catalog: Database.Database,
-  workStorePath: string
-): void {
-  if (!alreadyAttached(catalog, 'work')) {
-    catalog.exec(`ATTACH DATABASE ${sqlitePathLiteral(workStorePath)} AS work`)
-  }
-  configureAgentWorkTablePrefix('work.')
-  wrapCatalogSqlForAgentPrefix(catalog)
 }

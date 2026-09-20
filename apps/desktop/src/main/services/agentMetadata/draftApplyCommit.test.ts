@@ -159,3 +159,24 @@ it('releases a locally uncommitted attempt but never releases a proven catalog c
   assert.deepEqual(f.commit.resume(f.input, () => {}), f.result.outcome)
   assert.equal(f.calls(), 1)
 })
+
+it('retries discard cleanup and releases a rejected catalog discard without changing work state', async () => {
+  const { AgentMetadataDiscardCommit } = await import('./draftDiscardCommit')
+  const f = fixture()
+  const discard = new AgentMetadataDiscardCommit(f.db, f.catalog, f.commit)
+  const request = { operationId: randomUUID(), operation: 'agentMetadata.discard',
+    writerEpoch: 0, expectedVersions: { Q: { generation: 1, revision: 2 } }, input: { draftId: 'draft' } }
+  f.catalog.exec('UPDATE catalog_identity SET frozen=1')
+  assert.throws(() => discard.discard('draft', request, () => { throw new Error('cleanup too early') }))
+  assert.equal(f.repo.require('draft').status, 'ready')
+  assert.equal(f.db.prepare('SELECT 1 FROM agent_metadata_discard_intents').get(), undefined)
+  f.catalog.exec('UPDATE catalog_identity SET frozen=0')
+  assert.throws(() => discard.discard('draft', request, () => { throw new Error('cleanup failed') }), /cleanup failed/)
+  assert.equal(f.repo.require('draft').status, 'discarded')
+  assert.throws(() => f.commit.assertMutable('draft'), /未核对/)
+  const cleaned: string[] = []
+  assert.deepEqual(discard.discard('draft', request, (_kind, paths) => cleaned.push(...paths)), { ok: true })
+  assert.equal(f.repo.require('draft').revision, 3)
+  discard.recoverCommitted(() => { throw new Error('cleanup repeated') })
+  assert.equal((f.db.prepare('SELECT cleaned FROM agent_metadata_discard_intents').get() as { cleaned: number }).cleaned, 1)
+})

@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS catalog_tasks (
   catalog_id TEXT NOT NULL,
   snapshot_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_metadata_discard_intents (
+  draft_id TEXT PRIMARY KEY,
+  catalog_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL UNIQUE,
+  request_json TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  staged_paths_json TEXT NOT NULL,
+  cleaned INTEGER NOT NULL DEFAULT 0 CHECK(cleaned IN (0,1))
+);
 CREATE TABLE IF NOT EXISTS agent_video_delete_cleanups (
   catalog_id TEXT NOT NULL,
   operation_id TEXT NOT NULL,

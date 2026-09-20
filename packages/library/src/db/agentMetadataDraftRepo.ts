@@ -8,7 +8,6 @@ import type {
   AgentMetadataSource,
   AgentMetadataTarget
 } from '@shared/agentMetadataTypes'
-import { getDb } from './database'
 
 interface DraftRow {
   id: string
@@ -57,7 +56,7 @@ function nowIso(): string {
 }
 
 export class AgentMetadataDraftRepo {
-  constructor(private readonly database: () => Database.Database = getDb) {}
+  constructor(private readonly database: () => Database.Database) {}
 
   create(input: {
     id: string
@@ -309,5 +308,3 @@ export class AgentMetadataDraftRepo {
     }
   }
 }
-
-export const agentMetadataDraftRepo = new AgentMetadataDraftRepo()

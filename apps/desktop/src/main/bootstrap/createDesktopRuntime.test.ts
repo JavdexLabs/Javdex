@@ -399,3 +399,42 @@ describe('createDesktopRuntime', () => {
     }
   })
 })
+
+it('recovers committed desktop drafts on startup and clears their binding on disposal', async () => {
+  const { desktopAgentDraftRepo } = await import('../services/agentMetadata/desktopDraftStore')
+  const { AgentMetadataApplyCommit } = await import('../services/agentMetadata/draftApplyCommit')
+  const root = tempDir()
+  let runtime = await createDesktopRuntime(root, '1.0.0')
+  try {
+    const work = runtime.workStore.database()
+    insertAgentRun(work, 'draft-run')
+    getDb().exec("INSERT INTO videos(id,code,title) VALUES(7,'ABC-007','before')")
+    const draft = desktopAgentDraftRepo.create({ id: 'recover-draft', runId: 'draft-run',
+      target: { kind: 'video', id: 7 },
+      source: { requestedUrl: 'https://example.test', displayUrl: 'https://example.test' },
+      payload: { kind: 'video', result: { code: 'ABC-007', title: 'after' },
+        observedFields: ['title'], explicitlyEmptyFields: [], evidenceRefs: ['evidence'] },
+      resources: [], warnings: [] }).draft
+    desktopAgentDraftRepo.saveReview({ draftId: draft.id, expectedRevision: 1,
+      review: { kind: 'video', draftId: draft.id, revision: 2, token: 'review',
+        selection: { kind: 'video', draftId: draft.id, expectedRevision: 2, fields: ['title'], mode: 'replace' },
+        impacts: [], warnings: [], classifications: [], canApply: true } })
+    work.exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF status ON agent_metadata_drafts
+      WHEN NEW.status='applied' BEGIN SELECT RAISE(ABORT,'work failed'); END`)
+    const commit = new AgentMetadataApplyCommit(work, getDb())
+    assert.throws(() => commit.apply({ draftId: draft.id, reviewToken: 'review', idempotencyKey: 'caller-key' }, () => {
+      getDb().prepare("UPDATE videos SET title='after', revision=revision+1 WHERE id=7").run()
+      return { outcome: { status: 'applied', target: { kind: 'video', id: 7 }, warnings: [] },
+        cleanup: { kind: 'video', stagedPaths: [] } }
+    }, () => {}), /work failed/)
+    work.exec('DROP TRIGGER fail_completion')
+    await runtime.dispose()
+    assert.throws(() => desktopAgentDraftRepo.get(draft.id), /not configured/)
+    runtime = await createDesktopRuntime(root, '1.0.0')
+    assert.equal(desktopAgentDraftRepo.require(draft.id).status, 'applied')
+    assert.equal((runtime.workStore.database().prepare('SELECT cleaned FROM agent_metadata_apply_intents').get() as { cleaned: number }).cleaned, 1)
+    assert.equal((getDb().prepare('SELECT revision FROM videos WHERE id=7').get() as { revision: number }).revision, 2)
+  } finally {
+    await runtime.dispose()
+  }
+})

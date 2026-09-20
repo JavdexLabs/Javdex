@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS work_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_metadata_apply_intents (
+  draft_id TEXT PRIMARY KEY,
+  catalog_id TEXT NOT NULL,
+  review_token TEXT NOT NULL,
+  operation_id TEXT NOT NULL UNIQUE,
+  request_json TEXT NOT NULL,
+  cleaned INTEGER NOT NULL DEFAULT 0 CHECK(cleaned IN (0,1))
+);
 CREATE TABLE IF NOT EXISTS catalog_tasks (
   task_id TEXT PRIMARY KEY,
   catalog_id TEXT NOT NULL,

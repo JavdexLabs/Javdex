@@ -12,6 +12,10 @@ import { mediaAssetStore } from '@library/mediaAssetStore'
 import { classificationMaintenanceService } from '../classificationMaintenanceService'
 import { AgentMetadataBrowserAdapter } from './browserAdapter'
 import { AgentMetadataDraftService } from './draftService'
+import { AgentMetadataApplyCommit } from './draftApplyCommit'
+import { openDesktopWorkStore } from '../../desktop/workStore'
+import { copyAgentWorkTables } from '../../desktop/agentWorkCopy'
+import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
 
 const JPEG_1X1 = Buffer.from(
   'ffd8ffe000104a4649460000010101004800480000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100ffc4001f00000105010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191082242b1c11552d1f0243362728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f007b941100ffd9',
@@ -32,7 +36,7 @@ function setup(): AgentMetadataDraftRepo {
        product_state_json, created_at, updated_at
      ) VALUES (?, 'metadata-collector', 'settled', 'test', '{}', 'pi', '{}', ?, ?)`
   ).run('run-1', new Date().toISOString(), new Date().toISOString())
-  return new AgentMetadataDraftRepo()
+  return new AgentMetadataDraftRepo(getDb)
 }
 
 afterEach(() => {
@@ -343,4 +347,41 @@ describe('AgentMetadataDraftService', () => {
     if (confirmed.kind !== 'actress') throw new Error('expected actress review')
     assert.equal(confirmed.canApply, true)
   })
+})
+
+
+it('applies through separate work and catalog stores and resumes a failed work completion', () => {
+  setup()
+  ensureCatalogIdentity()
+  const work = openDesktopWorkStore(path.join(root!, 'work.db'))
+  try {
+    copyAgentWorkTables(getDb(), work.database())
+    const repo = new AgentMetadataDraftRepo(() => work.database())
+    const draft = repo.create({
+      id: 'separate-draft', runId: 'run-1', target: { kind: 'video', id: 7 },
+      source: { requestedUrl: 'https://example.test', displayUrl: 'https://example.test' },
+      payload: { kind: 'video', result: { code: 'ABC-123', title: 'Recovered title' },
+        observedFields: ['title'], explicitlyEmptyFields: [], evidenceRefs: ['evidence'] },
+      resources: [], warnings: []
+    }).draft
+    const service = new AgentMetadataDraftService(repo, undefined, new AgentMetadataApplyCommit(work.database(), getDb()))
+    const review = service.plan({ kind: 'video', draftId: draft.id, expectedRevision: draft.revision,
+      fields: ['title'], mode: 'fillEmpty' })
+    const input = { draftId: draft.id, reviewToken: review.token, idempotencyKey: 'separate-apply' }
+    work.database().exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF status ON agent_metadata_drafts
+      WHEN NEW.status='applied' BEGIN SELECT RAISE(ABORT,'work completion failed'); END`)
+    assert.throws(() => service.apply(input), /work completion failed/)
+    assert.equal(repo.require(draft.id).status, 'ready')
+    assert.equal((getDb().prepare('SELECT title FROM videos WHERE id=7').get() as { title: string }).title, 'Recovered title')
+    const committed = getDb().prepare('SELECT revision FROM videos WHERE id=7').get()
+    assert.throws(() => service.discard({ draftId: draft.id, expectedRevision: repo.require(draft.id).revision }), /未核对/)
+    assert.throws(() => service.plan({ ...review.selection }), /未核对/)
+    work.database().exec('DROP TRIGGER fail_completion')
+    assert.equal(service.apply({ ...input, idempotencyKey: 'new-retry-key' }).status, 'applied')
+    assert.equal(repo.require(draft.id).status, 'applied')
+    assert.deepEqual(getDb().prepare('SELECT revision FROM videos WHERE id=7').get(), committed)
+    assert.equal(getDb().prepare('SELECT 1 FROM agent_metadata_drafts WHERE id=?').get(draft.id), undefined)
+  } finally {
+    work.close()
+  }
 })

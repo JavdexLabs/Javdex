@@ -29,6 +29,7 @@ import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
 import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
 import type { DesktopCredentialStore } from '../application/desktopPorts'
+import { configureDesktopDraftStore, clearDesktopDraftStore, recoverDesktopDraftCommits } from '../services/agentMetadata/desktopDraftStore'
 
 export interface DesktopRuntime {
   mode: 'local' | 'remote'
@@ -56,6 +57,7 @@ export function localCatalogDatabasePath(userDataPath: string): string {
 function resetDesktopWorkBindings(): void {
   configureAgentWorkTablePrefix('')
   clearAgentRunDatabase()
+  clearDesktopDraftStore()
 }
 
 /**
@@ -85,6 +87,7 @@ export async function createDesktopRuntime(
     const prepBlocked =
       workStore.prepStatus() === 'copying' || (workStore.prepStatus() !== 'ready' && catalogExists)
     configureAgentRunDatabase(() => workStore.database())
+    configureDesktopDraftStore(workStore.database())
     if (prepBlocked) {
       const backend = createUnconfiguredRemoteBackend({
         state: 'modePrepRequired',
@@ -142,6 +145,14 @@ export async function createDesktopRuntime(
     appVersion,
     ...options.local
   })
+
+  configureDesktopDraftStore(workStore.database(), database)
+  // Recovery failures retain their durable intents and remain retryable from apply.
+  try {
+    recoverDesktopDraftCommits()
+  } catch (error) {
+    console.error('Agent draft commit recovery failed:', error)
+  }
 
   return {
     mode,

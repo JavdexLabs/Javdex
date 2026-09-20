@@ -24,7 +24,8 @@ import {
 import { normalizeVideoCode } from '@shared/videoCode'
 import { normalizeActressName } from '@shared/actressNameNormalization'
 import { getActressDetail } from '@library/db/actressRepo'
-import { agentMetadataDraftRepo, type AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
+import type { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
+import { desktopAgentDraftRepo, desktopDraftApplyCommit } from './desktopDraftStore'
 import { getDb } from '@library/db/database'
 import { replacePendingVideoScrape } from '@library/db/pendingVideoScrapeRepo'
 import { getVideoById } from '@library/db/videoRepo'
@@ -51,6 +52,8 @@ import {
   sanitizeAgentMetadataUrl,
   type AgentMetadataBrowserAdapter
 } from './browserAdapter'
+
+import type { AgentDraftCatalogResult, AgentMetadataApplyCommit } from './draftApplyCommit'
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_TOTAL_IMAGE_BYTES = 200 * 1024 * 1024
@@ -201,9 +204,14 @@ export class AgentMetadataDraftService {
   private readonly verifiedResourceManifests = new Map<string, string>()
 
   constructor(
-    private readonly repo: AgentMetadataDraftRepo = agentMetadataDraftRepo,
-    private readonly browser: AgentMetadataBrowserAdapter = agentMetadataBrowser
+    private readonly repo: AgentMetadataDraftRepo = desktopAgentDraftRepo,
+    private readonly browser: AgentMetadataBrowserAdapter = agentMetadataBrowser,
+    private readonly commitSource?: AgentMetadataApplyCommit | (() => AgentMetadataApplyCommit | undefined)
   ) {}
+
+  private get commit(): AgentMetadataApplyCommit | undefined {
+    return typeof this.commitSource === 'function' ? this.commitSource() : this.commitSource
+  }
 
   async prepare(input: {
     runId: string
@@ -226,6 +234,10 @@ export class AgentMetadataDraftService {
     try {
       sanitizePayloadResourceUrls(payload)
       input.signal.throwIfAborted()
+      if (this.commit) {
+        const previous = this.repo.findReadyForTarget(input.target)
+        if (previous) this.commit.assertMutable(previous.id)
+      }
       const created = this.repo.create({
         id: randomUUID(),
         runId: input.runId,
@@ -257,6 +269,7 @@ export class AgentMetadataDraftService {
   }
 
   plan(selection: AgentMetadataPlanInput): AgentMetadataReview {
+    this.commit?.assertMutable(selection.draftId)
     const draft = this.repo.require(selection.draftId)
     if (draft.status !== 'ready') throw new Error('该元数据草稿已结束，不能重新预览。')
     if (draft.revision !== selection.expectedRevision) throw new Error('草稿已更新，请重新加载。')
@@ -274,6 +287,14 @@ export class AgentMetadataDraftService {
   }
 
   apply(input: AgentMetadataApplyInput): AgentMetadataApplyOutcome {
+    if (typeof this.commitSource === 'function' && !this.commit) {
+      throw new Error('远程模式不能通过本地草稿入口写入资料库。')
+    }
+    const resumed = this.commit?.resume(input, cleanup => this.cleanupCommittedStaging(cleanup))
+    if (resumed) {
+      this.verifiedResourceManifests.delete(input.draftId)
+      return resumed
+    }
     const replay = this.repo.getStoredOutcome({
       draftId: input.draftId,
       idempotencyKey: input.idempotencyKey
@@ -285,17 +306,37 @@ export class AgentMetadataDraftService {
       throw new Error('预览已过期，请重新检查后再应用。')
     }
     if (!stored.canApply) throw new Error('当前预览仍有必须处理的问题。')
-    const current = this.buildReview(draft, stored.selection, stored.revision, true)
-    if (current.token !== stored.token) return this.staleOutcome(draft, stored)
+    let current: AgentMetadataReview
+    try {
+      current = this.buildReview(draft, stored.selection, stored.revision, true)
+    } catch (error) {
+      this.commit?.releaseUncommitted(input)
+      throw error
+    }
+    if (current.token !== stored.token) {
+      this.commit?.releaseUncommitted(input)
+      return this.staleOutcome(draft, stored)
+    }
 
     try {
-      const outcome = draft.target.kind === 'video'
-        ? this.applyVideo(draft, stored, input)
-        : draft.target.kind === 'actress'
-          ? this.applyActress(draft, stored, input)
-          : unsupportedTarget(draft.target)
+      const applyCatalog = (): AgentDraftCatalogResult => draft.target.kind === 'video'
+          ? this.applyVideo(draft, stored)
+          : draft.target.kind === 'actress'
+            ? this.applyActress(draft, stored)
+            : unsupportedTarget(draft.target)
+      if (this.commit) {
+        const outcome = this.commit.apply(input, applyCatalog, cleanup => this.cleanupCommittedStaging(cleanup))
+        this.verifiedResourceManifests.delete(draft.id)
+        return outcome
+      }
+      const result = mediaAssetStore.coordinateDatabaseChange(() => getDb().transaction(() => {
+        const result = applyCatalog()
+        this.repo.completeApply({ ...input, outcome: result.outcome })
+        return result
+      })())
+      this.cleanupStaging(result.cleanup.kind, result.cleanup.stagedPaths)
       this.verifiedResourceManifests.delete(draft.id)
-      return outcome
+      return result.outcome
     } catch (error) {
       if (error instanceof PreviewStaleError) return this.staleOutcome(this.repo.require(draft.id), stored)
       throw error
@@ -303,6 +344,7 @@ export class AgentMetadataDraftService {
   }
 
   discard(input: { draftId: string; expectedRevision: number }): void {
+    this.commit?.assertMutable(input.draftId)
     const draft = this.repo.require(input.draftId)
     const discarded = this.repo.discard(input)
     this.verifiedResourceManifests.delete(draft.id)
@@ -650,282 +692,276 @@ export class AgentMetadataDraftService {
 
   private applyVideo(
     draft: AgentMetadataDraft,
-    stored: Extract<AgentMetadataReview, { kind: 'video' }> | AgentMetadataReview,
-    input: AgentMetadataApplyInput
-  ): AgentMetadataApplyOutcome {
+    stored: Extract<AgentMetadataReview, { kind: 'video' }> | AgentMetadataReview
+  ): AgentDraftCatalogResult {
     if (draft.payload.kind !== 'video' || stored.kind !== 'video') throw new Error('影片草稿类型无效。')
     const payload = draft.payload
     const stagedPaths = draft.resources.map((item) => item.stagedPath)
     let obsoletePendingPaths: string[] = []
-    const outcome = mediaAssetStore.coordinateDatabaseChange(() =>
-      getDb().transaction(() => {
-        const freshDraft = this.repo.require(draft.id)
-        const fresh = this.buildReview(freshDraft, stored.selection, stored.revision)
-        if (fresh.kind !== 'video') throw new Error('影片预览类型无效。')
-        if (fresh.token !== stored.token) throw new PreviewStaleError()
-        if (fresh.identityConflictVideoId) {
-          const applicableFields = [...new Set(
-            fresh.impacts
-              .filter((impact) => impact.action !== 'preserve')
-              .map((impact) => impact.field)
-          )]
-          const persisted = replacePendingVideoScrape({
-            videoId: draft.target.id,
+    const outcome = (() => {
+      const freshDraft = this.repo.require(draft.id)
+      const fresh = this.buildReview(freshDraft, stored.selection, stored.revision)
+      if (fresh.kind !== 'video') throw new Error('影片预览类型无效。')
+      if (fresh.token !== stored.token) throw new PreviewStaleError()
+      if (fresh.identityConflictVideoId) {
+        const applicableFields = [...new Set(
+          fresh.impacts
+            .filter((impact) => impact.action !== 'preserve')
+            .map((impact) => impact.field)
+        )]
+        const persisted = replacePendingVideoScrape({
+          videoId: draft.target.id,
+          selectedFields: stored.selection.fields,
+          applicableFields,
+          updateMode: stored.selection.mode,
+          request: {
+            source: 'agent-metadata',
+            sourceUrl: draft.source.displayUrl,
+            fields: stored.selection.fields,
+            mode: stored.selection.mode
+          },
+          warnings: fresh.warnings,
+          sources: [{
+            pluginName: 'Agent 元数据采集',
+            pluginSource: 'builtin',
+            pluginVersion: null,
+            pluginConfig: { sourceUrl: draft.source.displayUrl },
+            sourceName: draft.source.sourceName ?? 'Agent',
             selectedFields: stored.selection.fields,
-            applicableFields,
-            updateMode: stored.selection.mode,
-            request: {
-              source: 'agent-metadata',
-              sourceUrl: draft.source.displayUrl,
-              fields: stored.selection.fields,
-              mode: stored.selection.mode
-            },
-            warnings: fresh.warnings,
-            sources: [{
-              pluginName: 'Agent 元数据采集',
-              pluginSource: 'builtin',
-              pluginVersion: null,
-              pluginConfig: { sourceUrl: draft.source.displayUrl },
-              sourceName: draft.source.sourceName ?? 'Agent',
-              selectedFields: stored.selection.fields,
-              candidates: [{
-                result: payload.result,
-                sourceUrl: payload.result.sourceUrl ?? null,
-                normalizedSourceUrl: draft.source.displayUrl,
-                resources: draft.resources
-                  .filter((resource) =>
-                    ['cover', 'samples', 'actressAvatar'].includes(resource.field)
-                  )
-                  .map((resource) => ({
-                    field: resource.field as 'cover' | 'samples' | 'actressAvatar',
-                    position: resource.position,
-                    remoteUrl: resource.remoteUrl,
-                    stagedPath: resource.stagedPath,
-                    width: resource.width,
-                    height: resource.height,
-                    sizeBytes: resource.sizeBytes
-                  }))
-              }]
+            candidates: [{
+              result: payload.result,
+              sourceUrl: payload.result.sourceUrl ?? null,
+              normalizedSourceUrl: draft.source.displayUrl,
+              resources: draft.resources
+                .filter((resource) =>
+                  ['cover', 'samples', 'actressAvatar'].includes(resource.field)
+                )
+                .map((resource) => ({
+                  field: resource.field as 'cover' | 'samples' | 'actressAvatar',
+                  position: resource.position,
+                  remoteUrl: resource.remoteUrl,
+                  stagedPath: resource.stagedPath,
+                  width: resource.width,
+                  height: resource.height,
+                  sizeBytes: resource.sizeBytes
+                }))
             }]
-          })
-          obsoletePendingPaths = excludeRetainedStagingDirectories(
-            persisted.obsoletePaths,
-            draft.resources.map((resource) => resource.stagedPath)
-          )
-          const routed: AgentMetadataApplyOutcome = {
-            status: 'routed_to_pending',
-            target: draft.target,
-            pendingKind: 'video',
-            pendingId: persisted.pendingScrapeId,
-            warnings: fresh.warnings
-          }
-          this.repo.completeApply({ ...input, outcome: routed })
-          return routed
-        }
-        const hasChanges = fresh.impacts.some((impact) => impact.action !== 'preserve')
-        if (!hasChanges) {
-          const noOp: AgentMetadataApplyOutcome = {
-            status: 'no_op', target: draft.target, warnings: fresh.warnings
-          }
-          this.repo.completeApply({ ...input, outcome: noOp })
-          return noOp
-        }
-        const video = getVideoById(draft.target.id)
-        if (!video) throw new Error('影片不存在。')
-        const fields = new Set(stored.selection.fields)
-        const coverResource = fields.has('cover')
-          ? draft.resources.find((item) => item.field === 'cover')
-          : undefined
-        const coverPath = coverResource
-          ? mediaAssetStore.importCover(video.code, mediaAssetStore.resolve(coverResource.stagedPath))
-          : null
-        const sampleResources = draft.resources
-          .filter((item) => item.field === 'samples')
-          .sort((left, right) => left.position - right.position)
-        const samplePaths = fields.has('samples') &&
-          sampleResources.length === (payload.result.sampleImageUrls?.length ?? 0)
-          ? sampleResources.map((item) => mediaAssetStore.importSample(video.code, mediaAssetStore.resolve(item.stagedPath)))
-          : (payload.result.sampleImageUrls ?? []).map(() => null)
-        const actressAvatars = new Map<string, string | null>()
-        if (fields.has('actressesFemale') || fields.has('actressesMale')) {
-          for (const resource of draft.resources.filter((item) => item.field === 'actressAvatar')) {
-            const actress: ScrapedActress | undefined = payload.result.actresses?.[resource.position]
-            if (!actress?.avatarUrl) continue
-            const gender = actress.gender ?? 'female'
-            if (gender === 'female' && !fields.has('actressesFemale')) continue
-            if (gender === 'male' && !fields.has('actressesMale')) continue
-            actressAvatars.set(
-              actress.name,
-              mediaAssetStore.storeScrapedActressAvatar(
-                actress.name,
-                actress.avatarUrl,
-                mediaAssetStore.readVideoScrapeStagedImage(resource.stagedPath)
-              )
-            )
-          }
-        }
-        const application = videoScrapeApplyService.apply(
-          draft.target.id,
-          payload.result,
-          coverPath,
-          actressAvatars,
-          samplePaths,
-          stored.selection.fields,
-          draft.source.sourceName,
-          stored.selection.mode,
-          draft.source.sourceName,
-          {
-            directorSelectionId: stored.selection.directorSelectionId,
-            directorAmbiguity: 'choice'
-          }
+          }]
+        })
+        obsoletePendingPaths = excludeRetainedStagingDirectories(
+          persisted.obsoletePaths,
+          draft.resources.map((resource) => resource.stagedPath)
         )
-        if (application.directorChoice) throw new PreviewStaleError()
-        for (const path of application.obsoleteAssetPaths) mediaAssetStore.deleteBestEffort(path)
-        const applied: AgentMetadataApplyOutcome = {
-          status: application.applied ? 'applied' : 'no_op',
+        const routed: AgentMetadataApplyOutcome = {
+          status: 'routed_to_pending',
           target: draft.target,
-          warnings: [...draft.warnings, ...application.warnings]
+          pendingKind: 'video',
+          pendingId: persisted.pendingScrapeId,
+          warnings: fresh.warnings
         }
-        this.repo.completeApply({ ...input, outcome: applied })
-        return applied
-      })()
-    )
-    if (outcome.status === 'routed_to_pending') {
-      this.cleanupStaging('video', obsoletePendingPaths)
-    } else {
-      this.cleanupStaging('video', stagedPaths)
+
+        return routed
+      }
+      const hasChanges = fresh.impacts.some((impact) => impact.action !== 'preserve')
+      if (!hasChanges) {
+        const noOp: AgentMetadataApplyOutcome = {
+          status: 'no_op', target: draft.target, warnings: fresh.warnings
+        }
+
+        return noOp
+      }
+      const video = getVideoById(draft.target.id)
+      if (!video) throw new Error('影片不存在。')
+      const fields = new Set(stored.selection.fields)
+      const coverResource = fields.has('cover')
+        ? draft.resources.find((item) => item.field === 'cover')
+        : undefined
+      const coverPath = coverResource
+        ? mediaAssetStore.importCover(video.code, mediaAssetStore.resolve(coverResource.stagedPath))
+        : null
+      const sampleResources = draft.resources
+        .filter((item) => item.field === 'samples')
+        .sort((left, right) => left.position - right.position)
+      const samplePaths = fields.has('samples') &&
+        sampleResources.length === (payload.result.sampleImageUrls?.length ?? 0)
+        ? sampleResources.map((item) => mediaAssetStore.importSample(video.code, mediaAssetStore.resolve(item.stagedPath)))
+        : (payload.result.sampleImageUrls ?? []).map(() => null)
+      const actressAvatars = new Map<string, string | null>()
+      if (fields.has('actressesFemale') || fields.has('actressesMale')) {
+        for (const resource of draft.resources.filter((item) => item.field === 'actressAvatar')) {
+          const actress: ScrapedActress | undefined = payload.result.actresses?.[resource.position]
+          if (!actress?.avatarUrl) continue
+          const gender = actress.gender ?? 'female'
+          if (gender === 'female' && !fields.has('actressesFemale')) continue
+          if (gender === 'male' && !fields.has('actressesMale')) continue
+          actressAvatars.set(
+            actress.name,
+            mediaAssetStore.storeScrapedActressAvatar(
+              actress.name,
+              actress.avatarUrl,
+              mediaAssetStore.readVideoScrapeStagedImage(resource.stagedPath)
+            )
+          )
+        }
+      }
+      const application = videoScrapeApplyService.apply(
+        draft.target.id,
+        payload.result,
+        coverPath,
+        actressAvatars,
+        samplePaths,
+        stored.selection.fields,
+        draft.source.sourceName,
+        stored.selection.mode,
+        draft.source.sourceName,
+        {
+          directorSelectionId: stored.selection.directorSelectionId,
+          directorAmbiguity: 'choice'
+        }
+      )
+      if (application.directorChoice) throw new PreviewStaleError()
+      for (const path of application.obsoleteAssetPaths) mediaAssetStore.deleteBestEffort(path)
+      const applied: AgentMetadataApplyOutcome = {
+        status: application.applied ? 'applied' : 'no_op',
+        target: draft.target,
+        warnings: [...draft.warnings, ...application.warnings]
+      }
+
+      return applied
+    })()
+    return {
+      outcome,
+      cleanup: { kind: 'video', stagedPaths: outcome.status === 'routed_to_pending' ? obsoletePendingPaths : stagedPaths }
     }
-    return outcome
   }
 
   private applyActress(
     draft: AgentMetadataDraft,
-    stored: Extract<AgentMetadataReview, { kind: 'actress' }> | AgentMetadataReview,
-    input: AgentMetadataApplyInput
-  ): AgentMetadataApplyOutcome {
+    stored: Extract<AgentMetadataReview, { kind: 'actress' }> | AgentMetadataReview
+  ): AgentDraftCatalogResult {
     if (draft.payload.kind !== 'actress' || stored.kind !== 'actress') throw new Error('演员草稿类型无效。')
     const payload = draft.payload
     const stagedPaths = draft.resources.map((item) => item.stagedPath)
     let obsoletePendingPaths: string[] = []
-    const outcome = mediaAssetStore.coordinateDatabaseChange(() =>
-      getDb().transaction(() => {
-        const freshDraft = this.repo.require(draft.id)
-        const fresh = this.buildReview(freshDraft, stored.selection, stored.revision)
-        if (fresh.kind !== 'actress') throw new Error('演员预览类型无效。')
-        if (fresh.token !== stored.token) throw new PreviewStaleError()
-        if (fresh.nameConflicts?.length) {
-          const applicableFields = [...new Set(
-            fresh.impacts
-              .filter((impact) => impact.action !== 'preserve')
-              .map((impact) => impact.field)
-          )]
-          const routed = actressIdentityConflictWorkflow.routeStagedScrape({
-            actressId: draft.target.id,
-            plugin: { name: 'Agent 元数据采集', source: 'builtin' },
-            queryName: payload.result.mainName ?? getActressDetail(draft.target.id)?.main_name ?? '',
-            selectedFields: stored.selection.fields,
-            applicableFields,
-            mode: stored.selection.mode,
-            result: payload.result,
-            warnings: fresh.warnings,
-            resources: draft.resources
-              .filter((resource) => ['avatar', 'gallery'].includes(resource.field))
-              .map((resource) => ({
-                field: resource.field as 'avatar' | 'gallery',
-                position: resource.position,
-                remoteUrl: resource.remoteUrl ?? undefined,
-                stagedPath: resource.stagedPath,
-                width: resource.width,
-                height: resource.height
-              }))
-          })
-          obsoletePendingPaths = excludeRetainedStagingDirectories(
-            routed.obsoleteStagedPaths,
-            draft.resources.map((resource) => resource.stagedPath)
-          )
-          const routedOutcome: AgentMetadataApplyOutcome = {
-            status: 'routed_to_pending',
-            target: draft.target,
-            pendingKind: 'actress',
-            pendingId: routed.pendingId,
-            warnings: fresh.warnings
-          }
-          this.repo.completeApply({ ...input, outcome: routedOutcome })
-          return routedOutcome
-        }
-        const hasChanges = fresh.impacts.some((impact) => impact.action !== 'preserve')
-        if (!hasChanges) {
-          const noOp: AgentMetadataApplyOutcome = {
-            status: 'no_op', target: draft.target, warnings: fresh.warnings
-          }
-          this.repo.completeApply({ ...input, outcome: noOp })
-          return noOp
-        }
-        const actress = getActressDetail(draft.target.id)
-        if (!actress) throw new Error('演员不存在。')
-        const fields = new Set(stored.selection.fields)
-        const avatarResource = fields.has('avatar')
-          ? draft.resources.find((item) => item.field === 'avatar')
-          : undefined
-        const avatarPath = avatarResource
-          ? mediaAssetStore.storeScrapedActressAvatar(
-              actress.main_name,
-              avatarResource.remoteUrl ?? payload.result.avatarUrl ?? '',
-              mediaAssetStore.readActressScrapeStagedImage(avatarResource.stagedPath)
-            )
-          : null
-        const galleryAssets = fields.has('gallery')
-          ? draft.resources
-              .filter((item) => item.field === 'gallery')
-              .sort((left, right) => left.position - right.position)
-              .map((resource) => {
-                const storedImage = mediaAssetStore.storeScrapedActressGalleryImage(
-                  actress.main_name,
-                  actress.id,
-                  resource.remoteUrl ?? '',
-                  mediaAssetStore.readActressScrapeStagedImage(resource.stagedPath)
-                )
-                return {
-                  remoteUrl: resource.remoteUrl,
-                  localPath: storedImage.localPath,
-                  width: storedImage.width,
-                  height: storedImage.height
-                }
-              })
-          : []
-        const application = applyActressScrapeResult(
-          draft.target.id,
-          payload.result,
-          avatarPath,
-          galleryAssets,
-          stored.selection.fields,
-          stored.selection.mode,
-          undefined,
-          { deferFileCleanup: true }
+    const outcome = (() => {
+      const freshDraft = this.repo.require(draft.id)
+      const fresh = this.buildReview(freshDraft, stored.selection, stored.revision)
+      if (fresh.kind !== 'actress') throw new Error('演员预览类型无效。')
+      if (fresh.token !== stored.token) throw new PreviewStaleError()
+      if (fresh.nameConflicts?.length) {
+        const applicableFields = [...new Set(
+          fresh.impacts
+            .filter((impact) => impact.action !== 'preserve')
+            .map((impact) => impact.field)
+        )]
+        const routed = actressIdentityConflictWorkflow.routeStagedScrape({
+          actressId: draft.target.id,
+          plugin: { name: 'Agent 元数据采集', source: 'builtin' },
+          queryName: payload.result.mainName ?? getActressDetail(draft.target.id)?.main_name ?? '',
+          selectedFields: stored.selection.fields,
+          applicableFields,
+          mode: stored.selection.mode,
+          result: payload.result,
+          warnings: fresh.warnings,
+          resources: draft.resources
+            .filter((resource) => ['avatar', 'gallery'].includes(resource.field))
+            .map((resource) => ({
+              field: resource.field as 'avatar' | 'gallery',
+              position: resource.position,
+              remoteUrl: resource.remoteUrl ?? undefined,
+              stagedPath: resource.stagedPath,
+              width: resource.width,
+              height: resource.height
+            }))
+        })
+        obsoletePendingPaths = excludeRetainedStagingDirectories(
+          routed.obsoleteStagedPaths,
+          draft.resources.map((resource) => resource.stagedPath)
         )
-        for (const path of application.fileChanges?.obsoletePaths ?? []) mediaAssetStore.deleteBestEffort(path)
-        const outcome: AgentMetadataApplyOutcome = {
-          status: application.applied ? 'applied' : 'no_op',
+        const routedOutcome: AgentMetadataApplyOutcome = {
+          status: 'routed_to_pending',
           target: draft.target,
-          warnings: [...draft.warnings, ...application.warnings]
+          pendingKind: 'actress',
+          pendingId: routed.pendingId,
+          warnings: fresh.warnings
         }
-        this.repo.completeApply({ ...input, outcome })
-        return outcome
-      })()
-    )
-    if (outcome.status === 'routed_to_pending') {
-      this.cleanupStaging('actress', obsoletePendingPaths)
-    } else {
-      this.cleanupStaging('actress', stagedPaths)
+
+        return routedOutcome
+      }
+      const hasChanges = fresh.impacts.some((impact) => impact.action !== 'preserve')
+      if (!hasChanges) {
+        const noOp: AgentMetadataApplyOutcome = {
+          status: 'no_op', target: draft.target, warnings: fresh.warnings
+        }
+
+        return noOp
+      }
+      const actress = getActressDetail(draft.target.id)
+      if (!actress) throw new Error('演员不存在。')
+      const fields = new Set(stored.selection.fields)
+      const avatarResource = fields.has('avatar')
+        ? draft.resources.find((item) => item.field === 'avatar')
+        : undefined
+      const avatarPath = avatarResource
+        ? mediaAssetStore.storeScrapedActressAvatar(
+            actress.main_name,
+            avatarResource.remoteUrl ?? payload.result.avatarUrl ?? '',
+            mediaAssetStore.readActressScrapeStagedImage(avatarResource.stagedPath)
+          )
+        : null
+      const galleryAssets = fields.has('gallery')
+        ? draft.resources
+            .filter((item) => item.field === 'gallery')
+            .sort((left, right) => left.position - right.position)
+            .map((resource) => {
+              const storedImage = mediaAssetStore.storeScrapedActressGalleryImage(
+                actress.main_name,
+                actress.id,
+                resource.remoteUrl ?? '',
+                mediaAssetStore.readActressScrapeStagedImage(resource.stagedPath)
+              )
+              return {
+                remoteUrl: resource.remoteUrl,
+                localPath: storedImage.localPath,
+                width: storedImage.width,
+                height: storedImage.height
+              }
+            })
+        : []
+      const application = applyActressScrapeResult(
+        draft.target.id,
+        payload.result,
+        avatarPath,
+        galleryAssets,
+        stored.selection.fields,
+        stored.selection.mode,
+        undefined,
+        { deferFileCleanup: true }
+      )
+      for (const path of application.fileChanges?.obsoletePaths ?? []) mediaAssetStore.deleteBestEffort(path)
+      const outcome: AgentMetadataApplyOutcome = {
+        status: application.applied ? 'applied' : 'no_op',
+        target: draft.target,
+        warnings: [...draft.warnings, ...application.warnings]
+      }
+
+      return outcome
+    })()
+    return {
+      outcome,
+      cleanup: { kind: 'actress', stagedPaths: outcome.status === 'routed_to_pending' ? obsoletePendingPaths : stagedPaths }
     }
-    return outcome
+  }
+
+  private cleanupCommittedStaging({ kind, stagedPaths }: AgentDraftCatalogResult['cleanup']): void {
+    if (kind === 'video') mediaAssetStore.cleanupVideoScrapeStagingPaths(stagedPaths)
+    else if (kind === 'actress') mediaAssetStore.cleanupActressScrapeStagingPaths(stagedPaths)
+    else unsupportedTarget(kind)
   }
 
   private cleanupStaging(kind: AgentMetadataTarget['kind'], stagedPaths: string[]): void {
     try {
-      if (kind === 'video') mediaAssetStore.cleanupVideoScrapeStagingPaths(stagedPaths)
-      else if (kind === 'actress') mediaAssetStore.cleanupActressScrapeStagingPaths(stagedPaths)
-      else unsupportedTarget(kind)
+      this.cleanupCommittedStaging({ kind, stagedPaths })
     } catch (error) {
       console.error('Agent metadata staging cleanup failed:', error)
     }
@@ -951,4 +987,4 @@ export class AgentMetadataDraftService {
   }
 }
 
-export const agentMetadataDraftService = new AgentMetadataDraftService()
+export const agentMetadataDraftService = new AgentMetadataDraftService(desktopAgentDraftRepo, agentMetadataBrowser, desktopDraftApplyCommit)

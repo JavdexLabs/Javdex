@@ -3244,7 +3244,7 @@ describe('server runtime lifecycle', () => {
          ) VALUES (?, 'metadata-collector', 'running', 's10', '{}', 'pi', '{}', ?, ?)`
       )
       .run('s10-agent-run', now, now)
-    const drafts = new AgentMetadataDraftRepo()
+    const drafts = new AgentMetadataDraftRepo(getDb)
     const createdDraft = drafts.create({
       id: 's10-agent-draft',
       runId: 's10-agent-run',

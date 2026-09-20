@@ -1,6 +1,6 @@
 # 架构优化方案：共享用例、合同与工作存储
 
-状态：实施中，P1/P2 已落地并完成定向验证，P0 存储核对仍在推进；P3–P5 未完成。日期：2026-09-20。重构前代码基线：`dd13789`。
+状态：实施中，P1–P3 已落地并完成定向验证，P0 存储核对仍在推进；P4/P5 未完成。日期：2026-09-20。重构前代码基线：`dd13789`。
 
 本方案来自本次架构评估中用户明确选定的三项，目标是在不删减业务能力的前提下，减少本地/远程行为漂移、重复合同映射及隐式数据库路由。它是仓库内的实施设计，不替代 GitHub Issue/PRD；本次未创建外部工单。后续“执行架构优化方案”目标已启动；实施证据和未完成项见第 11 节。
 
@@ -204,7 +204,7 @@ renderer → IPC 宿主适配 → CatalogBackend
 | 演员编辑 | 旧 IPC 仅传 ID/fields；头像含本地文件、base64、裁剪包 | HTTP 要求 A 版本；头像为上传/清除引用 | 不强迫旧 IPC 补版本；显式提供的陈旧版本仍应拒绝；头像传输形式分离 |
 | 清单正式应用 | 新建/追加，匹配复用、自动建片、跨库归属、来源/详情链接 | 新建清单、已有影片、最多 200 个 ID | 不削减本地能力、不放宽远程权限；最终正式写入应只有一个业务所有者 |
 
-演员的 `trg_actresses_revision_after_update` 会为未显式修改 revision 的 UPDATE 增版本。重构前资料与头像独立更新；P2 已将编辑中的资料和准备好的头像收拢到一次 UPDATE，仍由触发器增版本，未额外 bump。清单本地 `PlaylistImportRepository.apply` 仍直接写正式表；远程则走 `applyPlaylistImportThroughCatalog` 和 `catalogPlaylistImport`，P3 尚未改造。
+演员的 `trg_actresses_revision_after_update` 会为未显式修改 revision 的 UPDATE 增版本。重构前资料与头像独立更新；P2 已将编辑中的资料和准备好的头像收拢到一次 UPDATE，仍由触发器增版本，未额外 bump。清单本地 `PlaylistImportRepository.apply` 与远程 `catalogPlaylistImport` 已共同调用 `playlistImportWrite`；浏览证据、匹配预览与任务统计仍由桌面流程负责。
 
 ### 工作存储归属核对（C1，连接切换尚未执行）
 
@@ -235,7 +235,7 @@ renderer → IPC 宿主适配 → CatalogBackend
 - `packages/contracts/src/catalogDetailSchemas.ts` 成为影片详情及依赖记录的字段权威定义，现有导出类型从 schema 推导；旧 import 路径保留类型别名，未保留第二份字段表。
 - `ScopedStoredVideoDetail` 移至 contracts，Repo 仅兼容转导出。
 - `catalogRemoteResult` 对 `videos.get` 的实际 JSON 解析；缺必填字段、错误类型和详情资源中泄漏的原始字段明确拒绝，错误仅报告字段位置。现有 optional 字段不新增默认值。
-- 演员详情及编辑结果已在 P2 接入运行时 schema；清单详情随 P3 推进，其余标量操作维持已有转换。
+- 演员详情及编辑结果已在 P2 接入运行时 schema；清单详情及导入结果在 P3 接入，其余标量操作维持已有转换。
 
 验证证据：
 
@@ -261,4 +261,21 @@ renderer → IPC 宿主适配 → CatalogBackend
 - 故障测试确认名称冲突和无效图片不改变旧资料/旧图片、不产生成功回执；上传后的身份冲突保留可重试上传。
 - 根类型检查、独立服务端类型检查、全仓 pretest 及新增测试 lint 通过。这些是阶段检查，尚不代替 P5 的构建、平台 GUI 与迁移验收。
 
-未完成：P0 的跨存储提交失败特征测试、P3 清单共享应用、P4 显式工作库及恢复、P5 全量集成与平台 GUI/升级验证。既有平台验收不算本次重构验收。
+### P3：清单正式应用与分页合同
+
+已落地：
+
+- `playlistImportWrite.ts` 是清单导入正式写入的共同所有者：新建/追加清单、新建/复用影片、目标归属、相关链接、成员顺序及去重均在同一事务内完成。
+- 删除桌面 Repository 和远程用例重复的正式 SQL 编排。桌面保留匹配快照校验、来源证据、任务统计及 TEMP 完成标记；远程保留版本、上传和权限要求。桌面现有原子事务与幂等键、远程持久回执均保留。
+- 明确保留归属差异：本地复用保留已有媒体库归属；远程导入确保加入指定媒体库。策略由宿主固定提供，不在 HTTP 输入中开放。远程仍只允许新建清单、已有影片，且拒绝重复 ID 与超限数组。
+- `playlistImportCommit.ts` 集中共享提交输入及 HTTP 导入结果；`catalogPlaylistImport` 输入从现有管理 schema 推导，桌面结果映射不再手写第二份导入结果字段。
+- `playlistSchemas.ts` 集中详情、metadata、列表/影片分页的字段；远程 JSON 入口执行校验。真实往返发现旧类型遗漏 `generation/revision`，已补入权威合同以保留实际返回的版本。
+
+验证证据：
+
+- 清单 Repository、Module、RunDriver、共享写入、管理应用及远程合同的回归集 94 项通过；远程结果负例定向集 7 项通过，无跳过。
+- 新增共享写入测试覆盖顺序去重、明确的归属差异、本地追加/自动建片/链接去重，以及后续条目失败时清单、影片、归属、链接全部回滚。既有 Repository 测试继续覆盖过期预览及重复提交。
+- Linux Node runtime 集 33 项通过，无跳过。清单详情、排序、筛选、分页、日期/null 与本地读取一致；真实远程导入、重复操作号、版本冲突和重复 ID 拒绝通过。
+- 根类型检查、独立服务端类型检查、定向 lint 与全仓 pretest 通过。
+
+未完成：P0 的跨存储提交失败特征测试、P4 显式工作库及恢复、P5 全量集成与平台 GUI/升级验证。既有平台验收不算本次重构验收。

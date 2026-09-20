@@ -74,7 +74,9 @@ test('preserves playlist query fields and maps library revisions without replaci
     res.end(JSON.stringify(operation === 'handshake.get' ? {
       protocolVersion: 1, appVersion: '0.7.1', schemaVersion: 19,
       identity: { serverId: 'server', catalogId: 'catalog' }, writerEpoch: 1, ready: 'ready'
-    } : {}))
+    } : operation === 'playlists.listPage' ? {
+      items: [], total: 0, offset: 0, limit: 60, hasExactName: false
+    } : operation.startsWith('playlists.') ? null : {}))
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const backend = createRemoteCatalogBackend({

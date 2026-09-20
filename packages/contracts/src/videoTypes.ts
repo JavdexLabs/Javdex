@@ -7,7 +7,8 @@ import type {
   videoExternalStatsSchema,
   videoAssetSchema,
   videoResourceSchema,
-  videoSchema
+  videoSchema,
+  videoCardSchema
 } from './catalogDetailSchemas'
 import type { ScrapedStatus } from './commonTypes'
 import type {
@@ -105,8 +106,7 @@ export type Video = z.infer<typeof videoSchema>
 export type TagOrigin = 'manual' | 'scraped'
 
 /** Fields rendered by a poster card; long descriptions and editing data stay in detail reads. */
-export type VideoCard = Pick<Video,
-  'id' | 'code' | 'title' | 'cover_path' | 'scraped_status' | 'has_pending_scrape' | 'resource_kinds'>
+export type VideoCard = z.infer<typeof videoCardSchema>
 
 export type VideoTag = z.infer<typeof videoTagSchema>
 

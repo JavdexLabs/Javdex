@@ -86,6 +86,11 @@ export const videoSchema = z.object({
   has_pending_scrape: z.boolean().optional()
 })
 
+export const videoCardSchema = videoSchema.pick({
+  id: true, code: true, title: true, cover_path: true, scraped_status: true,
+  has_pending_scrape: true, resource_kinds: true
+})
+
 export const videoResourceSchema = z.object({
   id: z.number(),
   library_id: z.number(),

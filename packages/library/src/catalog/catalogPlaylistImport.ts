@@ -1,13 +1,12 @@
 import type Database from 'better-sqlite3'
-import type { CatalogImageRef } from '@shared/protocol/uploads'
+import type { ManageOperationInput } from '@shared/manage/inputs'
+import type { PlaylistApplyImportResult } from '@shared/playlistImportCommit'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import { structuredError } from '@shared/protocol/errors'
 import { getDb } from '@library/db/database'
 import { getVideoById } from '@library/db/videoRepo'
 import { getMediaLibraryDetail } from '@library/db/mediaLibraryRepo'
-import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
-import { appendRelatedLinks } from '@library/db/relatedLinkStore'
-import { addVideoToPlaylist, createPlaylistRecord } from '@library/db/playlistRepo'
+import { writePlaylistImport } from './playlistImportWrite'
 import { commitPreparedUpload, prepareUploadApply } from '@library/catalog/catalogImageApply'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
@@ -15,27 +14,12 @@ import {
   readVideoAggregateVersion
 } from '@library/catalog/catalogAggregateVersion'
 
-export function applyPlaylistImport(input: {
-  name: string
-  videoIds: number[]
-  libraryId: number
-  cover?: CatalogImageRef
-  sourceUrl?: string
-  videoLinks?: Array<{ videoId: number; label: string; url: string }>
+export function applyPlaylistImport(input: ManageOperationInput<'playlists.applyImport'> & {
   expected: ExpectedVersions
   operationId: string
   expectedLibraryRevision: number
   database?: Database.Database
-}): {
-  playlistId: number
-  added: number
-  relatedLinksAdded: number
-  versions: {
-    P: NonNullable<ReturnType<typeof readPlaylistAggregateVersion>>
-    L: { generation: 1; revision: number }
-    V?: NonNullable<ReturnType<typeof readVideoAggregateVersion>>
-  }
-} {
+}): PlaylistApplyImportResult {
   const database = input.database ?? getDb()
   const library = getMediaLibraryDetail(input.libraryId)
   if (!library) {
@@ -119,27 +103,19 @@ export function applyPlaylistImport(input: {
       }
     }
   }
-  const playlistId = createPlaylistRecord(
-    { name: input.name, links },
-    coverRel
-  )
-  let added = 0
-  for (const videoId of input.videoIds) {
-    ensureVideoMembership({ libraryId: input.libraryId, videoId, addedVia: 'manual' }, database)
-    if (addVideoToPlaylist({ playlistId, videoId })) added += 1
-  }
-  let relatedLinksAdded = 0
-  if (input.videoLinks?.length) {
-    const grouped = new Map<number, Array<{ label: string; url: string }>>()
-    for (const link of input.videoLinks) {
-      const list = grouped.get(link.videoId) ?? []
-      list.push({ label: link.label, url: link.url })
-      grouped.set(link.videoId, list)
-    }
-    for (const [videoId, videoLinks] of grouped) {
-      relatedLinksAdded += appendRelatedLinks(database, 'video_links', 'video_id', videoId, videoLinks)
-    }
-  }
+  const written = writePlaylistImport({
+    destination: { kind: 'create', name: input.name, coverPath: coverRel },
+    libraryId: input.libraryId,
+    reusedMembership: 'ensure-target',
+    sourceLinks: links,
+    entries: input.videoIds.map(videoId => ({
+      kind: 'existing', videoId,
+      links: input.videoLinks?.filter(link => link.videoId === videoId)
+    }))
+  }, database)
+  const playlistId = written.playlistId
+  const added = written.entries.filter(entry => entry.addedToPlaylist).length
+  const relatedLinksAdded = written.entries.reduce((sum, entry) => sum + entry.relatedLinksAdded, 0)
   const lastVideoId = input.videoIds[input.videoIds.length - 1]
   return {
     playlistId,

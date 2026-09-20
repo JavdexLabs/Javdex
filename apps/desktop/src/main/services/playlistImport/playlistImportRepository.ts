@@ -13,7 +13,8 @@ import { normalizeClassificationName } from '@shared/classificationNameNormaliza
 import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { hasSensitiveUrlQuery, isSensitiveUrlQueryKey } from '@shared/urlCredentialPolicy'
-import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
+import { writePlaylistImport } from '@library/catalog/playlistImportWrite'
+import type { PlaylistImportEntry } from '@shared/playlistImportCommit'
 import {
   catalogIdentityRevision,
   type PlaylistImportCatalogLookup,
@@ -3112,43 +3113,28 @@ export class PlaylistImportRepository {
           : !this.isResolutionCurrent(job, item)
       ))) throw new ImportPreviewStaleError()
 
-      let playlistId: number
-      if (job.destination_kind === 'append') {
-        const playlist = this.database.prepare('SELECT id FROM playlists WHERE id = ?')
-          .get(job.requested_playlist_id) as { id: number } | undefined
-        if (!playlist) {
-          throw new PlaylistImportTargetError(
-            'TARGET_PLAYLIST_NOT_FOUND',
-            '目标清单已不存在，无法完成导入。'
-          )
-        }
-        playlistId = playlist.id
-      } else {
-        const fallbackName = `${job.source_host} · ${new Date().toISOString().slice(0, 10)}`
-        playlistId = Number(this.database.prepare(
-          `INSERT INTO playlists (name, created_at, updated_at) VALUES (?, ?, ?)`
-        ).run(
-          job.requested_playlist_name || job.agent_suggested_playlist_name || fallbackName,
-          now(),
-          now()
-        ).lastInsertRowid)
+      if (job.destination_kind === 'append' && !this.database.prepare('SELECT 1 FROM playlists WHERE id = ?').get(job.requested_playlist_id)) {
+        throw new PlaylistImportTargetError('TARGET_PLAYLIST_NOT_FOUND', '目标清单已不存在，无法完成导入。')
       }
-      let playlistRelatedLinksAdded = 0
-      if (job.save_source_playlist_link === 1) {
-        playlistRelatedLinksAdded = this.database.prepare(
-          `INSERT OR IGNORE INTO playlist_links (
-            playlist_id, label, url, normalized_url, position
-          )
-          SELECT ?, ?, ?, ?, COALESCE(MAX(position), -1) + 1
-          FROM playlist_links WHERE playlist_id = ?`
-        ).run(
-          playlistId,
-          job.source_host,
-          job.normalized_source_url,
-          job.normalized_source_url,
-          playlistId
-        ).changes
-      }
+      const appliedItems = items.filter(item => !(item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'))
+      const entries: PlaylistImportEntry[] = appliedItems.map(item => ({
+        ...(item.state === 'planned-reuse'
+          ? { kind: 'existing' as const, videoId: item.resolved_video_id! }
+          : { kind: 'create' as const, code: item.normalized_code ?? '', title: item.title }),
+        links: job.save_detail_links === 1 ? [{ label: job.source_host, url: item.detail_url }] : []
+      }))
+      const written = writePlaylistImport({
+        destination: job.destination_kind === 'append'
+          ? { kind: 'append', playlistId: job.requested_playlist_id! }
+          : { kind: 'create', name: job.requested_playlist_name || job.agent_suggested_playlist_name || `${job.source_host} · ${new Date().toISOString().slice(0, 10)}` },
+        libraryId: job.target_library_id,
+        reusedMembership: 'preserve',
+        sourceLinks: job.save_source_playlist_link === 1
+          ? [{ label: job.source_host, url: job.normalized_source_url }] : [],
+        entries
+      }, this.database)
+      const playlistId = written.playlistId
+      const playlistRelatedLinksAdded = written.playlistRelatedLinksAdded
       const playlist = this.database.prepare(
         'SELECT name FROM playlists WHERE id = ?'
       ).get(playlistId) as { name: string }
@@ -3176,31 +3162,15 @@ export class PlaylistImportRepository {
         number,
         { libraryId: number; libraryName: string; reusedVideos: number }
       >()
-      let nextPosition = (this.database.prepare(
-        'SELECT COALESCE(MAX(position), -1) + 1 AS value FROM playlist_video WHERE playlist_id = ?'
-      ).get(playlistId) as { value: number }).value
-      const initiallyInPlaylist = new Set((this.database.prepare(
-        'SELECT video_id FROM playlist_video WHERE playlist_id = ?'
-      ).all(playlistId) as Array<{ video_id: number }>).map((row) => row.video_id))
-      const insertLink = this.database.prepare(
-        `INSERT OR IGNORE INTO video_links (video_id, label, url, normalized_url, position)
-         SELECT ?, ?, ?, ?, COALESCE(MAX(position), -1) + 1 FROM video_links WHERE video_id = ?`
-      )
-      const insertPlaylistVideo = this.database.prepare(
-        `INSERT OR IGNORE INTO playlist_video (playlist_id, video_id, position, added_at)
-         VALUES (?, ?, ?, ?)`
-      )
+      let appliedIndex = 0
       for (const item of items) {
         if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') {
           skippedVideos += 1
           continue
         }
-        let videoId: number
+        const applied = written.entries[appliedIndex++]
+        const videoId = applied.videoId
         if (item.state === 'planned-reuse') {
-          if (item.resolved_video_id == null || !this.database.prepare('SELECT 1 FROM videos WHERE id = ?').get(item.resolved_video_id)) {
-            throw new Error('MATCH_SNAPSHOT_STALE')
-          }
-          videoId = item.resolved_video_id
           reusedVideos += 1
           if (item.resolution_kind === 'user-existing') {
             userSelectedReuses += 1
@@ -3238,34 +3208,13 @@ export class PlaylistImportRepository {
             }
           }
         } else {
-          videoId = Number(this.database.prepare(
-            `INSERT INTO videos (code, title, scraped_status) VALUES (?, ?, 0)`
-          ).run(item.normalized_code ?? '', item.title).lastInsertRowid)
-          if (ensureVideoMembership({
-            libraryId: job.target_library_id,
-            videoId,
-            addedVia: 'manual'
-          }, this.database)) targetLibraryMembersCreated += 1
+          if (applied.membershipAdded) targetLibraryMembersCreated += 1
           createdVideos += 1
         }
         resolvedVideoIds.push(videoId)
-        if (job.save_detail_links === 1) {
-          const link = insertLink.run(
-            videoId,
-            job.source_host,
-            item.detail_url,
-            item.normalized_detail_url,
-            videoId
-          )
-          relatedLinksAdded += link.changes
-        }
-        const membership = insertPlaylistVideo.run(playlistId, videoId, nextPosition, now())
-        if (membership.changes > 0) {
-          addedToPlaylist += 1
-          nextPosition += 1
-        } else if (initiallyInPlaylist.has(videoId)) {
-          alreadyInPlaylist += 1
-        }
+        relatedLinksAdded += applied.relatedLinksAdded
+        if (applied.addedToPlaylist) addedToPlaylist += 1
+        else if (applied.alreadyInPlaylist) alreadyInPlaylist += 1
         this.database.prepare(
           `UPDATE playlist_import_items SET state = 'applied', resolved_video_id = ?,
            revision = revision + 1, updated_at = ? WHERE id = ?`

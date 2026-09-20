@@ -1,24 +1,24 @@
-import type { Video, VideoCard, VideoResourceFilter } from './videoTypes'
-import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
+import type { z } from 'zod'
+import type {
+  playlistSchema,
+  playlistDetailSchema,
+  playlistMetadataSchema,
+  playlistVideosPageSchema,
+  playlistPageSchema,
+  playlistBrowseItemSchema,
+  playlistListPageSchema
+} from './playlistSchemas'
+import type { VideoResourceFilter } from './videoTypes'
+import type { RelatedLinkInput } from './relatedLinkTypes'
 
-export interface Playlist {
-  id: number
-  name: string
-  description: string | null
-  cover_path: string | null
-  created_at: string
-  updated_at: string | null
-}
+export type Playlist = z.infer<typeof playlistSchema>
 
 export interface PlaylistListItem extends Playlist {
   video_count: number
   preview_cover_path: string | null
 }
 
-export interface PlaylistDetail extends Playlist {
-  videos: Video[]
-  links: RelatedLink[]
-}
+export type PlaylistDetail = z.infer<typeof playlistDetailSchema>
 
 export type PlaylistVideoSortBy = 'added_at' | 'release_date'
 
@@ -48,30 +48,14 @@ export interface PlaylistPageQuery {
   offset?: number
 }
 
-export interface PlaylistMetadata extends Playlist {
-  links: RelatedLink[]
-  preview_cover_path: string | null
-}
+export type PlaylistMetadata = z.infer<typeof playlistMetadataSchema>
 
-export interface PlaylistVideosPage {
-  videos: VideoCard[]
-  total: number
-  filteredTotal: number
-  limit: number
-  offset: number
-}
+export type PlaylistVideosPage = z.infer<typeof playlistVideosPageSchema>
 
-export interface PlaylistPage extends PlaylistMetadata, PlaylistVideosPage {}
+export type PlaylistPage = z.infer<typeof playlistPageSchema>
 
 /** Display-only fields; mutations use IDs or the caller's full create/edit input. */
-export interface PlaylistBrowseItem {
-  id: number
-  name: string
-  description: string | null
-  preview_cover_path: string | null
-  video_count: number
-  contains_video: boolean
-}
+export type PlaylistBrowseItem = z.infer<typeof playlistBrowseItemSchema>
 export interface PlaylistListQuery {
   search?: string
   limit?: number
@@ -80,10 +64,4 @@ export interface PlaylistListQuery {
   /** Picker search historically used locale folding; list-page search did not. */
   locale?: string
 }
-export interface PlaylistListPage {
-  items: PlaylistBrowseItem[]
-  total: number
-  offset: number
-  limit: number
-  hasExactName: boolean
-}
+export type PlaylistListPage = z.infer<typeof playlistListPageSchema>

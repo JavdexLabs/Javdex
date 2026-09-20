@@ -1,3 +1,5 @@
+import { playlistApplyImportResultSchema } from '@shared/playlistImportCommit'
+import { playlistDetailSchema, playlistMetadataSchema, playlistPageSchema, playlistVideosPageSchema, playlistListPageSchema } from '@shared/playlistSchemas'
 import { actressEditResultSchema } from '@shared/actressEditContract'
 import { structuredError } from '@shared/protocol/errors'
 import { scopedVideoDetailSchema, actressDetailSchema, actressProfileSchema, actressMetadataSchema } from '@shared/catalogDetailSchemas'
@@ -40,7 +42,13 @@ const complexResultSchemas = {
   'actresses.get': actressDetailSchema.nullable(),
   'actresses.profile': actressProfileSchema.nullable(),
   'actresses.metadata': actressMetadataSchema.nullable(),
-  'actresses.edit': actressEditResultSchema
+  'actresses.edit': actressEditResultSchema,
+  'playlists.get': playlistDetailSchema.nullable(),
+  'playlists.metadata': playlistMetadataSchema.nullable(),
+  'playlists.getPage': playlistPageSchema.nullable(),
+  'playlists.videoPage': playlistVideosPageSchema.nullable(),
+  'playlists.listPage': playlistListPageSchema,
+  'playlists.applyImport': playlistApplyImportResultSchema
 } satisfies Partial<Record<keyof CatalogOperationResults, import('zod').ZodType>>
 
 /** HTTP envelopes and local primitive results meet at this one adapter boundary. */

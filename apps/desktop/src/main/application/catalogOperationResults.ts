@@ -1,3 +1,4 @@
+import type { PlaylistApplyImportResult } from '@shared/playlistImportCommit'
 import type {
   GlobalSearchResult,
   HomeSnapshot,
@@ -317,19 +318,7 @@ export interface CatalogOperationResults {
   'playlists.delete': boolean
   'playlists.addVideo': boolean
   'playlists.removeVideo': boolean
-  'playlists.applyImport': {
-    playlistId: number
-    added: number
-    relatedLinksAdded: number
-    versions: {
-      P: AggregateVersion
-      L: {
-        generation: 1
-        revision: number
-      }
-      V?: AggregateVersion | undefined
-    }
-  }
+  'playlists.applyImport': PlaylistApplyImportResult
   'libraries.list': MediaLibrarySummary[]
   'libraries.get': MediaLibraryDetail | null
   'libraries.create': MediaLibraryDetail

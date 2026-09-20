@@ -60,3 +60,18 @@ test('validates actress edit versions before adapting the result to the legacy b
     assert.throws(() => catalogRemoteResult('actresses.edit', response), { code: 'INVALID_INPUT' })
   }
 })
+
+test('validates playlist pagination fields and retains declared aggregate versions', () => {
+  const page = { videos: [], total: 3, filteredTotal: 1, limit: 1, offset: 2 }
+  assert.deepEqual(catalogRemoteResult('playlists.videoPage', page), page)
+  for (const response of [
+    { videos: [], total: 3, limit: 1, offset: 2 },
+    { ...page, total: '3' },
+    { ...page, videos: [{}] }
+  ]) {
+    assert.throws(() => catalogRemoteResult('playlists.videoPage', response), { code: 'INVALID_INPUT' })
+  }
+  const detail = { id: 1, name: 'List', description: null, cover_path: null,
+    created_at: '2026-09-20', updated_at: null, generation: 1, revision: 7, videos: [], links: [] }
+  assert.deepEqual(catalogRemoteResult('playlists.get', detail), detail)
+})

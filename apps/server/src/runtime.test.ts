@@ -3743,6 +3743,64 @@ describe('server runtime lifecycle', () => {
     }
   })
 
+  it('round-trips playlist detail and filtered pages through the same contracts as local reads', async () => {
+    const { base, config } = await boot(path.join(root, 'playlist-detail-contract'))
+    const writer = await claimInitialWriter(base, config)
+    const db = getDb()
+    db.exec(`
+      INSERT INTO videos(id,code,title,release_date) VALUES(991,'PL-991',NULL,'2020-01-02'),(992,'PL-992','Second','2024-02-03');
+      INSERT INTO playlists(id,name,created_at) VALUES(991,'Contract playlist','2026-09-20T00:00:00.000Z');
+      INSERT INTO playlist_video(playlist_id,video_id,position,added_at) VALUES(991,991,0,'2026-01-01'),(991,992,1,'2026-01-02');
+    `)
+    const remote = createRemoteCatalogBackend({ baseUrl: base, appVersion: SERVER_APP_VERSION,
+      credentials: memoryCredentials(new Map([[writer.catalogId, writer.secret]])) })
+    const local = createLocalCatalogBackend({ identity: { mode: 'local', catalogId: writer.catalogId } })
+    try {
+      for (const sortDir of ['asc', 'desc'] as const) {
+        for (const operation of ['get', 'metadata'] as const) {
+          const query = { playlistId: 991, sortBy: 'release_date' as const, sortDir }
+          assert.deepEqual(await remote.playlists[operation](query), await local.playlists[operation](query))
+        }
+        for (const operation of ['getPage', 'videoPage'] as const) {
+          for (const offset of [0, 1, 2]) {
+            const query = { playlistId: 991, sortBy: 'release_date' as const, sortDir,
+              resourceKinds: ['none' as const], limit: 1, offset }
+            const page = await remote.playlists[operation](query)
+            assert.deepEqual(page, await local.playlists[operation](query))
+            assert.equal(page?.total, 2)
+            assert.equal(page?.filteredTotal, 2)
+            assert.equal(page?.videos.length, offset < 2 ? 1 : 0)
+          }
+        }
+      }
+      const query = { search: 'Contract', videoId: 991, limit: 1, offset: 0 }
+      assert.deepEqual(await remote.playlists.listPage(query), await local.playlists.listPage(query))
+      assert.equal(await remote.playlists.get({ playlistId: 999999 }), null)
+      const library = await remote.libraries.get({ libraryId: 1 })
+      assert.ok(library)
+      const input = { name: 'Imported contract playlist', libraryId: 1, videoIds: [991, 992],
+        sourceUrl: 'https://example.test/list', videoLinks: [{ videoId: 991, label: 'Detail', url: 'https://example.test/991' }] }
+      const context = { operationId: randomUUID(), expectedVersions: {
+        L: { generation: 1, revision: library.revision }, V: { generation: 1, revision: 1 }
+      } }
+      await assert.rejects(async () => remote.playlists.applyImport({ ...input, videoIds: [991, 992, 991] }, context),
+        (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
+      const applied = await remote.playlists.applyImport(input, context)
+      assert.equal(applied.added, 2)
+      assert.equal(applied.relatedLinksAdded, 1)
+      assert.deepEqual(await remote.playlists.applyImport(input, context), applied)
+      assert.equal((await remote.playlists.get({ playlistId: applied.playlistId }))?.videos.length, 2)
+      await assert.rejects(remote.playlists.applyImport(input, {
+        operationId: randomUUID(), expectedVersions: { ...context.expectedVersions,
+          L: { generation: 1, revision: library.revision - 1 } }
+      }), (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT')
+
+    } finally {
+      await remote.dispose()
+      await local.dispose()
+    }
+  })
+
   it('edits an actress with an uploaded avatar through the shared use case and validates its detail DTO', async () => {
     const { base, config } = await boot(path.join(root, 'actress-edit-contract'))
     const writer = await claimInitialWriter(base, config)

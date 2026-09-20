@@ -42,6 +42,16 @@
 
 页面只提供业务目标、原版本和用户选择。writer token、HTTP 头、任意服务地址不进入 renderer。本地适配器直接调 library，不创建 localhost HTTP，也不模拟 writer token。
 
+## 共享用例与结果校验
+
+2026-09-20 架构优化已接入两组用例，其余阶段见 [实施方案与证据](ARCHITECTURE_SIMPLIFICATION_PLAN.md)：
+
+- 影片详情由 [videoDetailProjection.ts](../packages/library/src/catalog/videoDetailProjection.ts) 统一拼装；本地与服务端只分别提供路径展示策略。播放仍使用资源 ID/定位摘要，不执行展示路径。
+- 演员编辑由 [catalogActressEdit.ts](../packages/library/src/catalog/catalogActressEdit.ts) 统一版本检查、头像准备、单次资料更新与回执。旧本地 IPC 无 A 的兼容只在本地适配器启用，HTTP 的 A 保护不变。
+- [catalogDetailSchemas.ts](../packages/contracts/src/catalogDetailSchemas.ts) 定义影片/演员详情字段并推导类型；[actressEditContract.ts](../packages/contracts/src/actressEditContract.ts) 定义共用编辑字段与结果。远程适配器校验这些实际 JSON，错误报告字段位置，不使用默认值掩盖缺失必填字段。
+
+清单结果和其余操作仍按现有合同执行；工作库的运行时 SQL 改写尚未移除，不应把前两组用例的完成理解为整个架构方案完成。
+
 ## 通用包络
 
 查询：`serverId`、`catalogId`、`input`。

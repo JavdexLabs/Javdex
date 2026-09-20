@@ -1,13 +1,23 @@
-import type { Actress } from './actressTypes'
-import type { ScrapedStatus, Tag } from './commonTypes'
+import type { z } from 'zod'
+import type {
+  videoTagSchema,
+  videoResourceKindSchema,
+  videoDetailSchema,
+  videoResourceDetailSchema,
+  videoExternalStatsSchema,
+  videoAssetSchema,
+  videoResourceSchema,
+  videoSchema
+} from './catalogDetailSchemas'
+import type { ScrapedStatus } from './commonTypes'
 import type {
   DirectorAssignmentInput,
   OrganizationAssignmentInput,
   SeriesAssignmentInput
 } from './classificationTypes'
-import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
+import type { RelatedLinkInput } from './relatedLinkTypes'
 
-export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
+export type VideoResourceKind = z.infer<typeof videoResourceKindSchema>
 export type VideoResourceFilter = VideoResourceKind | 'none'
 export type VideoPendingScrapeFilter = 'all' | 'pending' | 'none'
 export type LinkVideoResourceKind = Extract<VideoResourceKind, 'direct' | 'web'>
@@ -19,31 +29,11 @@ export type VideoResourceImportTarget =
   | { kind: 'new' }
   | { kind: 'existing'; videoId: number }
 
-export interface VideoResource {
-  id: number
-  library_id: number
-  video_id: number
-  root_id: number | null
-  kind: VideoResourceKind
-  locator: string
-  resource_key: string
-  source_identity: string | null
-  strm_source_path: string | null
-  size_bytes: number | null
-  duration_seconds: number | null
-  file_mtime_ms: number | null
-  display_name: string | null
-  is_primary: number
-  add_time: string
-}
+export type VideoResource = z.infer<typeof videoResourceSchema>
 
 export type LocalVideoResource = VideoResource & { kind: 'local' }
 
-export interface VideoResourceDetail
-  extends Omit<VideoResource, 'locator' | 'resource_key' | 'source_identity'> {
-  /** Safe display value; external resource credentials and query parameters are omitted. */
-  display_locator: string
-}
+export type VideoResourceDetail = z.infer<typeof videoResourceDetailSchema>
 
 export interface VideoLinkResourceFields {
   url: string
@@ -110,38 +100,7 @@ export interface VideoResourceRemovalResult {
   promotedResourceId: number | null
 }
 
-export interface Video {
-  id: number
-  code: string
-  title: string | null
-  summary: string | null
-  cover_path: string | null
-  poster_path: string | null
-  original_title: string | null
-  rating: number
-  release_date: string | null
-  maker: string | null
-  publisher: string | null
-  maker_organization_id: number | null
-  publisher_organization_id: number | null
-  series: string | null
-  director: string | null
-  series_id: number | null
-  director_id: number | null
-  duration_seconds: number | null
-  scraped_status: ScrapedStatus
-  last_scraped_at: string | null
-  updated_at: string | null
-  add_time: string
-  generation?: number
-  revision?: number
-  primary_resource_kind?: VideoResourceKind | null
-  resource_count?: number
-  /** Primary kind first, followed by each remaining kind at most once. */
-  resource_kinds?: VideoResourceKind[]
-  /** Independent pending-decision dimension; not part of scraped_status. */
-  has_pending_scrape?: boolean
-}
+export type Video = z.infer<typeof videoSchema>
 
 export type TagOrigin = 'manual' | 'scraped'
 
@@ -149,32 +108,11 @@ export type TagOrigin = 'manual' | 'scraped'
 export type VideoCard = Pick<Video,
   'id' | 'code' | 'title' | 'cover_path' | 'scraped_status' | 'has_pending_scrape' | 'resource_kinds'>
 
-export interface VideoTag extends Tag {
-  origin: TagOrigin
-  source: string | null
-}
+export type VideoTag = z.infer<typeof videoTagSchema>
 
-export interface VideoAsset {
-  id: number
-  video_id: number
-  type: 'cover' | 'poster' | 'sample' | string
-  position: number
-  remote_url: string | null
-  local_path: string | null
-  width: number | null
-  height: number | null
-  is_primary: number
-  created_at: string | null
-}
+export type VideoAsset = z.infer<typeof videoAssetSchema>
 
-export interface VideoExternalStats {
-  id: number
-  video_id: number
-  source: string
-  rating_average: number | null
-  rating_count: number | null
-  fetched_at: string | null
-}
+export type VideoExternalStats = z.infer<typeof videoExternalStatsSchema>
 
 export interface VideoSampleImportInput {
   source: 'file' | 'url'
@@ -182,15 +120,7 @@ export interface VideoSampleImportInput {
   remoteUrl?: string | null
 }
 
-export interface VideoDetail extends Video {
-  resources: VideoResourceDetail[]
-  actresses: Actress[]
-  tags: VideoTag[]
-  assets: VideoAsset[]
-  external_stats: VideoExternalStats[]
-  links: RelatedLink[]
-  resolved_duration_seconds?: number | null
-}
+export type VideoDetail = z.infer<typeof videoDetailSchema>
 
 export type StoredVideoDetail = Omit<VideoDetail, 'resources'> & {
   resources: VideoResource[]

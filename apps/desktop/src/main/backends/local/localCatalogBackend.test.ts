@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { upsertActressFromScrape } from '@library/db/actressRepo'
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -58,6 +60,29 @@ describe('unconfigured remote backend', () => {
 })
 
 describe('LocalCatalogBackend', () => {
+  it('routes legacy actress edits through the shared receipt without requiring an IPC version', async () => {
+    const { root } = setupLibrary()
+    const identity = loadOrCreateLocalCatalogIdentity(localCatalogIdentityPath(root))
+    const backend = createLocalCatalogBackend({ identity })
+    const actressId = upsertActressFromScrape('Before actress', null)
+    const original = await backend.actresses.get({ actressId })
+    assert.ok(original)
+    const input = { actressId, fields: { main_name: 'After actress' } }
+    const context = { operationId: randomUUID(), expectedVersions: {} }
+    try {
+      assert.equal(await backend.actresses.edit(input, context), true)
+      assert.equal(await backend.actresses.edit(input, context), true)
+      const updated = await backend.actresses.get({ actressId })
+      assert.equal(updated?.main_name, 'After actress')
+      assert.equal(updated?.revision, original.revision! + 1)
+      await assert.rejects(backend.actresses.edit(input, {
+        operationId: randomUUID(), expectedVersions: { A: { generation: original.generation!, revision: original.revision! } }
+      }), (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT')
+    } finally {
+      await backend.dispose()
+    }
+  })
+
   it('lists and edits videos through the catalog port without a fake serverId', async () => {
     const { root, libraryId, videoId } = setupLibrary()
     const identity = loadOrCreateLocalCatalogIdentity(localCatalogIdentityPath(root))

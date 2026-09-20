@@ -1,6 +1,15 @@
+import type { ActressProfileEditFields } from './actressEditContract'
+import type { z } from 'zod'
+import type {
+  actressGalleryAssetSchema,
+  actressNameSchema,
+  actressSchema,
+  actressDetailSchema,
+  actressMetadataSchema,
+  actressProfileSchema
+} from './catalogDetailSchemas'
 import type { ScrapedStatus, SortDir } from './commonTypes'
-import type { Video, VideoCard } from './videoTypes'
-import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
+import type { VideoCard } from './videoTypes'
 export type { ActressAvatarCommit, AvatarCropV1 } from './avatarCrop'
 
 // 0-未刮削, 1-刮削成功, 2-刮削失败
@@ -17,54 +26,11 @@ export const ACTRESS_LIST_DEFAULTS = {
   gender: 'female' as ActressGenderFilter
 }
 
-export interface Actress {
-  id: number
-  main_name: string
-  avatar_path: string | null
-  avatar_source_path: string | null
-  avatar_crop_json: string | null
-  poster_path: string | null
-  birth_date: string | null
-  debut_date: string | null
-  height_cm: number | null
-  bust_cm: number | null
-  waist_cm: number | null
-  hip_cm: number | null
-  /** Single cup letter (A–Z); display suffix added in UI. */
-  cup_size: string | null
-  blood_type: string | null
-  zodiac: string | null
-  nationality: string | null
-  profile_summary: string | null
-  scraped_status: ScrapedStatus
-  last_scraped_at: string | null
-  updated_at: string | null
-  gender: ActressGender | null
-  generation?: number
-  revision?: number
-}
+export type Actress = z.infer<typeof actressSchema>
 
-export interface ActressName {
-  id: number
-  actress_id: number
-  name: string
-  type: 'main' | 'alias' | 'former' | 'native' | 'romaji' | 'english' | 'zh' | string
-  locale: string | null
-  source: string | null
-  is_primary: number
-}
+export type ActressName = z.infer<typeof actressNameSchema>
 
-export interface ActressGalleryAsset {
-  id: number
-  actress_id: number
-  type: 'profile' | 'gallery' | string
-  position: number
-  remote_url: string | null
-  local_path: string | null
-  width: number | null
-  height: number | null
-  created_at: string | null
-}
+export type ActressGalleryAsset = z.infer<typeof actressGalleryAssetSchema>
 
 export interface ActressGalleryImportInput {
   source: 'file' | 'url'
@@ -79,15 +45,7 @@ export interface ActressListItem extends Actress {
   avatar_fingerprint?: string | null
 }
 
-export interface ActressDetail extends Actress {
-  name_zh: string | null
-  name_en: string | null
-  aliases: string[]
-  names: ActressName[]
-  gallery: ActressGalleryAsset[]
-  videos: Video[]
-  links: RelatedLink[]
-}
+export type ActressDetail = z.infer<typeof actressDetailSchema>
 
 /** Minimal renderer-session input for local avatar face detection. */
 export interface ActressFaceScanManifestItem {
@@ -194,23 +152,7 @@ export interface ActressMergeInput {
   mainNameFrom: ActressMergeMainNameFrom
 }
 
-export interface ActressEditInput {
-  main_name?: string
-  name_zh?: string | null
-  name_en?: string | null
-  gender?: ActressGender | null
-  birth_date?: string | null
-  debut_date?: string | null
-  height_cm?: number | null
-  bust_cm?: number | null
-  waist_cm?: number | null
-  hip_cm?: number | null
-  cup_size?: string | null
-  blood_type?: string | null
-  zodiac?: string | null
-  nationality?: string | null
-  profile_summary?: string | null
-  aliases?: string[]
+export interface ActressEditInput extends ActressProfileEditFields {
   /** Absolute path to a local image file to import as avatar. */
   avatarSourcePath?: string
   /** JPEG avatar bytes (base64) exported from the crop editor. */
@@ -219,7 +161,6 @@ export interface ActressEditInput {
   avatar?: import('./avatarCrop').ActressAvatarCommit
   /** Clear display/source/crop together. */
   clearAvatar?: boolean
-  links?: RelatedLinkInput[]
 }
 
 
@@ -261,7 +202,7 @@ export interface ActressMergeCandidatePage {
   offset: number
 }
 
-export type ActressMetadata = Omit<ActressDetail, 'videos'>
+export type ActressMetadata = z.infer<typeof actressMetadataSchema>
 
 /** Associated works only; profile and gallery are separate reads. */
 export interface ActressVideoPageQuery {
@@ -295,8 +236,4 @@ export interface ActressGalleryPage {
 }
 
 /** Profile header without complete work/gallery collections. Counts have explicit scopes. */
-export interface ActressProfile extends Omit<ActressMetadata, 'gallery'> {
-  gallery_count: number
-  display_gallery_count: number
-  first_gallery: ActressGalleryAsset | null
-}
+export type ActressProfile = z.infer<typeof actressProfileSchema>

@@ -1194,7 +1194,11 @@ function replacePreparedActressAliases(actressId: number, aliases: string[]): vo
 }
 
 /** Manually edit actress profile fields. Aliases fully replace when supplied. */
-export function editActress(id: number, input: ActressEditInput): void {
+export function editActress(
+  id: number,
+  input: ActressEditInput,
+  avatarBundle?: ActressAvatarBundleRecord
+): void {
   const db = getDb()
   const actress = db
     .prepare('SELECT main_name, avatar_path, avatar_source_path FROM actresses WHERE id = ?')
@@ -1206,6 +1210,15 @@ export function editActress(id: number, input: ActressEditInput): void {
   const txn = db.transaction(() => {
     const assignments: string[] = []
     const bind: Record<string, unknown> = { id }
+
+    // Profile and prepared avatar are one aggregate write. The existing UPDATE
+    // trigger owns the single revision increment for this edit.
+    if (avatarBundle) {
+      assignments.push('avatar_path = @avatar_path', 'avatar_source_path = @avatar_source_path', 'avatar_crop_json = @avatar_crop_json')
+      bind.avatar_path = avatarBundle.displayPath
+      bind.avatar_source_path = avatarBundle.sourcePath
+      bind.avatar_crop_json = avatarBundle.cropJson
+    }
 
     if ('main_name' in input && input.main_name !== undefined) {
       const name = input.main_name.trim()

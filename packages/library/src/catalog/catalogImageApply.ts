@@ -7,7 +7,7 @@ import { createAvatarCropV1 } from '@shared/avatarCrop'
 import { getDb } from '@library/db/database'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { addVideoSampleAsset } from '@library/db/videoRepo'
-import { addActressGalleryAsset, getActressAvatarRecord, updateActressAvatarRecord } from '@library/db/actressRepo'
+import { addActressGalleryAsset, getActressAvatarRecord, updateActressAvatarRecord, type ActressAvatarBundleRecord } from '@library/db/actressRepo'
 import { createPlaylistRecord, getPlaylistById, updatePlaylistRecord } from '@library/db/playlistRepo'
 import {
   consumeReadyUpload,
@@ -257,45 +257,35 @@ export function applyVideoSampleRefs(
   return { assetIds, versions: { V: readVideoAggregateVersion(videoId, database)! } }
 }
 
-export function applyActressAvatarRef(
+/** Prepare upload resources inside the caller's catalog transaction; no actress row write. */
+export function prepareActressAvatarRef(
   actressId: number,
   image: CatalogImageRef,
-  expected: ExpectedVersions,
   operationId: string,
   database: Database.Database = getDb()
-): { versions: { A: NonNullable<ReturnType<typeof readActressAggregateVersion>> } } {
-  assertExpectedActressVersion(actressId, expected, operationId, database)
+): ActressAvatarBundleRecord | undefined {
+  if (!database.inTransaction) throw new Error('Avatar preparation requires an active transaction')
   const current = getActressAvatarRecord(actressId)
   if (!current) throw structuredError('INVALID_INPUT', '演员不存在', { entityKind: 'actress', entityId: actressId })
   if (image.kind === 'asset') {
     throw structuredError('INVALID_INPUT', '不能使用其它对象的资产 ID 作为头像', { field: 'image' }, operationId)
   }
   if (image.kind === 'clear') {
-    const result = updateActressAvatarRecord(actressId, {
-      displayPath: null,
-      sourcePath: null,
-      cropJson: null
-    })
-    for (const oldPath of result.obsoletePaths) {
-      insertImageFileJob({ kind: 'deleteReplaced', relPath: oldPath }, database)
+    for (const oldPath of [current.avatar_path, current.avatar_source_path]) {
+      if (oldPath) insertImageFileJob({ kind: 'deleteReplaced', relPath: oldPath }, database)
     }
-    return { versions: { A: readActressAggregateVersion(actressId, database)! } }
+    return { displayPath: null, sourcePath: null, cropJson: null }
   }
   const prepared = prepareUploadApply(
     image.uploadId,
     'actressAvatar',
     (bytes, upload) => {
       const source = mediaAssetStore.importAvatarSource(
-        current.main_name,
-        actressId,
-        bytes,
-        extensionFromUpload(upload)
+        current.main_name, actressId, bytes, extensionFromUpload(upload)
       )
       const displayPath = mediaAssetStore.importAvatarDisplay(current.main_name, actressId, bytes)
       pendingSourceByUpload.set(image.uploadId, {
-        displayPath,
-        sourcePath: source.relPath,
-        fingerprint: source.fingerprint
+        displayPath, sourcePath: source.relPath, fingerprint: source.fingerprint
       })
       return displayPath
     },
@@ -304,24 +294,31 @@ export function applyActressAvatarRef(
     database
   )
   const pending = pendingSourceByUpload.get(image.uploadId)
-  if (pending) {
-    const result = updateActressAvatarRecord(actressId, {
-      displayPath: pending.displayPath,
-      sourcePath: pending.sourcePath,
-      cropJson: JSON.stringify(
-        createAvatarCropV1({
-          sourceFingerprint: pending.fingerprint,
-          zoom: 1,
-          offsetX: 0,
-          offsetY: 0
-        })
-      )
-    })
-    pendingSourceByUpload.delete(image.uploadId)
-    commitPreparedUpload(prepared, operationId, [...result.obsoletePaths], database)
-  } else {
-    commitPreparedUpload(prepared, operationId, [current.avatar_path, current.avatar_source_path], database)
-  }
+  pendingSourceByUpload.delete(image.uploadId)
+  const retained = new Set([pending?.displayPath, pending?.sourcePath])
+  const obsolete = [current.avatar_path, current.avatar_source_path].filter(
+    oldPath => oldPath && !retained.has(oldPath)
+  )
+  commitPreparedUpload(prepared, operationId, obsolete, database)
+  return pending ? {
+    displayPath: pending.displayPath,
+    sourcePath: pending.sourcePath,
+    cropJson: JSON.stringify(createAvatarCropV1({
+      sourceFingerprint: pending.fingerprint, zoom: 1, offsetX: 0, offsetY: 0
+    }))
+  } : undefined
+}
+
+export function applyActressAvatarRef(
+  actressId: number,
+  image: CatalogImageRef,
+  expected: ExpectedVersions,
+  operationId: string,
+  database: Database.Database = getDb()
+): { versions: { A: NonNullable<ReturnType<typeof readActressAggregateVersion>> } } {
+  assertExpectedActressVersion(actressId, expected, operationId, database)
+  const bundle = prepareActressAvatarRef(actressId, image, operationId, database)
+  if (bundle) updateActressAvatarRecord(actressId, bundle)
   return { versions: { A: readActressAggregateVersion(actressId, database)! } }
 }
 

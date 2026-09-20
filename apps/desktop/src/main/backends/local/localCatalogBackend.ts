@@ -1,3 +1,4 @@
+import { editCatalogActress } from '@library/catalog/catalogActressEdit'
 import {
   applyVideoScrapeCommand,
   applyActressScrapeCommand,
@@ -105,7 +106,6 @@ import { listCatalogTasks, readCatalogTask } from '@library/catalog/catalogTasks
 import type { DesktopSession } from '@shared/desktop/session'
 import type { CatalogIdentity } from '@shared/protocol/identity'
 import type {
-  ActressEditInput,
   ActressGalleryImportInput,
   ActressMergeInput
 } from '@shared/actressTypes'
@@ -501,11 +501,14 @@ export function createLocalCatalogBackend(
     async mergeCandidates(input) {
       return actresses.listMergeCandidates(input)
     },
-    async edit(input) {
-      return actressMaintenanceService.editActress(
-        input.actressId,
-        input.fields as ActressEditInput
-      )
+    async edit(input, ctx) {
+      const { avatar, ...fields } = input.fields
+      const imageInput = avatar && 'kind' in avatar
+        ? { fields, avatarRef: avatar }
+        : { fields: { ...fields, ...(avatar ? { avatar } : {}) } }
+      return editCatalogActress({ actressId: input.actressId, ...imageInput }, {
+        ...ctx, writerEpoch: 0
+      }, true).data.ok
     },
     async delete(input, ctx) {
       return actressCommands.deleteBatch(

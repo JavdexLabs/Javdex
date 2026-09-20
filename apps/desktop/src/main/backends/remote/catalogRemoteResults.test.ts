@@ -51,3 +51,12 @@ test('unconfigured backend implements every method and rejects consistently', as
     }
   }
 })
+
+test('validates actress edit versions before adapting the result to the legacy boolean', () => {
+  assert.equal(catalogRemoteResult('actresses.edit', {
+    ok: false, versions: { A: { generation: 1, revision: 2 } }
+  }), false)
+  for (const response of [true, { ok: true }, { ok: true, versions: { A: { generation: 1, revision: '2' } } }]) {
+    assert.throws(() => catalogRemoteResult('actresses.edit', response), { code: 'INVALID_INPUT' })
+  }
+})

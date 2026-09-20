@@ -1,8 +1,8 @@
+import type { z } from 'zod'
+import type { relatedLinkSchema } from './catalogDetailSchemas'
 export interface RelatedLinkInput {
   label: string
   url: string
 }
 
-export interface RelatedLink extends RelatedLinkInput {
-  position: number
-}
+export type RelatedLink = z.infer<typeof relatedLinkSchema>

@@ -6,6 +6,8 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createVideoQueryService, createAsyncVideoQueryService } from './videoQueryService'
+import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
+import { projectVideoDetail } from '@library/catalog/videoDetailProjection'
 import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 
 const DEFAULT_SCOPE = { kind: 'library', libraryId: 1 } as const
@@ -80,6 +82,42 @@ describe('VideoQueryService', () => {
     assert.deepEqual(fs.readFileSync(imagePath), imageBefore)
     assert.equal(fs.statSync(videoPath).mtimeMs, videoModifiedBefore)
     assert.equal(fs.statSync(imagePath).mtimeMs, imageModifiedBefore)
+  })
+
+  it('shares the detail contract across host path policies without mutating stored resources', () => {
+    const { videoPath } = setupDb()
+    const db = getDb()
+    db.prepare('UPDATE video_resources SET duration_seconds = 123 WHERE video_id = 1').run()
+    const stored = scopedVideoCatalogRepo.get(DEFAULT_SCOPE, 1)!
+    const before = structuredClone(stored)
+    const local = createVideoQueryService().get(DEFAULT_SCOPE, 1)!
+    const remote = projectVideoDetail(stored, {
+      projectResource: resource => ({ ...resource, locator: path.basename(resource.locator) })
+    })
+    assert.equal(local.resources[0].display_locator, videoPath)
+    assert.equal(remote.resources[0].display_locator, 'APP-001.mp4')
+    assert.equal(local.resolved_duration_seconds, 123)
+    assert.deepEqual(remote, {
+      ...local,
+      resources: local.resources.map(resource => ({ ...resource, display_locator: 'APP-001.mp4' }))
+    })
+    assert.deepEqual(stored, before)
+    for (const resource of [...local.resources, ...remote.resources]) {
+      for (const key of ['locator', 'resource_key', 'source_identity']) assert.equal(key in resource, false)
+    }
+  })
+
+  it('uses metadata duration before primary duration and handles memberless resource-free detail', () => {
+    setupDb()
+    const stored = scopedVideoCatalogRepo.get(DEFAULT_SCOPE, 1)!
+    const primary = { ...stored.resources[0], is_primary: 1, duration_seconds: 123 }
+    const secondary = { ...primary, id: primary.id + 1, is_primary: 0, duration_seconds: 999 }
+    assert.equal(projectVideoDetail({ ...stored, duration_seconds: 456, resources: [secondary, primary] }).resolved_duration_seconds, 456)
+    assert.equal(projectVideoDetail({ ...stored, duration_seconds: null, resources: [secondary, primary] }).resolved_duration_seconds, 123)
+    const memberless = projectVideoDetail({ ...stored, activeLibraryId: 0, libraries: [], resources: [], duration_seconds: null })
+    assert.equal(memberless.resolved_duration_seconds, null)
+    assert.deepEqual(memberless.resources, [])
+    assert.equal(memberless.activeLibraryId, 0)
   })
 
   it('redacts external resource locators in detail projections until explicitly requested', () => {

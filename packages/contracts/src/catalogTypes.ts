@@ -1,16 +1,12 @@
+import type { z } from 'zod'
 import type {
-  MediaLibraryColor,
-  MediaLibraryIcon,
-  MediaLibrarySummary
-} from './mediaLibraryTypes'
-import type { Video, VideoDetail, VideoListResult, VideoQuery } from './videoTypes'
+  scopedVideoDetailSchema,
+  mediaLibraryBadgeSchema
+} from './catalogDetailSchemas'
+import type { MediaLibrarySummary } from './mediaLibraryTypes'
+import type { StoredVideoDetail, Video, VideoListResult, VideoQuery } from './videoTypes'
 
-export interface MediaLibraryBadge {
-  libraryId: number
-  name: string
-  icon: MediaLibraryIcon
-  color: MediaLibraryColor
-}
+export type MediaLibraryBadge = z.infer<typeof mediaLibraryBadgeSchema>
 
 export interface ScopedVideo extends Video {
   preferredLibraryId: number
@@ -24,11 +20,14 @@ export interface ScopedVideoListResult extends Omit<VideoListResult, 'items'> {
   readRevision?: string
 }
 
-export interface ScopedVideoDetail extends VideoDetail {
+/** Storage detail before host-specific resource display projection. */
+export interface ScopedStoredVideoDetail extends StoredVideoDetail {
   activeLibraryId: number
   membershipAddedAt: string
   libraries: MediaLibraryBadge[]
 }
+
+export type ScopedVideoDetail = z.infer<typeof scopedVideoDetailSchema>
 
 export interface GlobalSearchInput extends VideoQuery {
   libraryIds?: number[]

@@ -1,3 +1,4 @@
+import { editCatalogActress } from '@library/catalog/catalogActressEdit'
 import type Database from 'better-sqlite3'
 import path from 'node:path'
 import { getDb } from '@library/db/database'
@@ -5,8 +6,8 @@ import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
 import { getVideoResourceInLibrary } from '@library/db/videoRepo'
 import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
-import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
-import { resolveVideoDisplayDurationSeconds } from '@library/scan/videoDuration'
+import type { ScopedStoredVideoDetail } from '@shared/catalogTypes'
+import { projectVideoDetail } from '@library/catalog/videoDetailProjection'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import {
   getMediaLibraryDetail,
@@ -40,7 +41,6 @@ import {
 import {
   commitCatalogMutation
 } from '@library/catalog/catalogOperations'
-import { commitManageImageMutation, applyActressAvatarRef } from '@library/catalog/catalogImageApply'
 import {
   assertExpectedActressVersion,
   assertExpectedClassificationVersion,
@@ -167,29 +167,10 @@ function projectRemoteResource(libraryId: number, resource: VideoResource): Vide
 }
 
 /** Match desktop detail fields while keeping server paths out of presentation data. */
-export function projectRemoteVideoDetail<T extends {
-  activeLibraryId: number
-  duration_seconds: number | null
-  resources: VideoResource[]
-}>(detail: T) {
-  const primary = detail.resources.find(resource => resource.is_primary === 1)
-  return {
-    ...detail,
-    resolved_duration_seconds: resolveVideoDisplayDurationSeconds({
-      duration_seconds: detail.duration_seconds,
-      primary_resource_duration_seconds: primary?.duration_seconds ?? null
-    }),
-    resources: detail.resources.map(resource => {
-      const { locator, resource_key: _resourceKey, source_identity: _sourceIdentity, ...projected } =
-        projectRemoteResource(detail.activeLibraryId, resource)
-      return {
-        ...projected,
-        display_locator: resource.kind === 'local'
-          ? locator
-          : maskVideoResourceLocator(locator, resource.kind)
-      }
-    })
-  }
+export function projectRemoteVideoDetail(detail: ScopedStoredVideoDetail) {
+  return projectVideoDetail(detail, {
+    projectResource: resource => projectRemoteResource(detail.activeLibraryId, resource)
+  })
 }
 
 export function commit<T>(args: HandlerArgs, work: () => T): unknown {
@@ -208,22 +189,6 @@ export function commit<T>(args: HandlerArgs, work: () => T): unknown {
   return spreadMutation(result.receipt, result.data)
 }
 
-
-function commitImage<T>(args: HandlerArgs, work: () => T): unknown {
-  const mutation = requireMutation(args.envelope)
-  const result = commitManageImageMutation(
-    {
-      operationId: mutation.operationId,
-      operation: args.operation,
-      expectedVersions: mutation.expectedVersions,
-      input: args.envelope.input,
-      writerEpoch: args.auth.epoch
-    },
-    work,
-    args.database
-  )
-  return spreadMutation(result.receipt, result.data)
-}
 
 export function runLibrary<T>(work: () => T): T {
   try {
@@ -395,33 +360,14 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'actresses.edit'(args) {
     const input = args.envelope.input as {
       actressId: number
-      fields: ActressEditInput & { avatar?: CatalogImageRef }
+      fields: Omit<ActressEditInput, 'avatar'> & { avatar?: CatalogImageRef }
     }
     const mutation = requireMutation(args.envelope)
     const { avatar, ...fields } = input.fields
-    const apply = (): { ok: boolean; versions: { A: NonNullable<ReturnType<typeof readActressAggregateVersion>> } } => {
-      assertExpectedActressVersion(
-        input.actressId,
-        mutation.expectedVersions,
-        mutation.operationId,
-        args.database
-      )
-      if (avatar) {
-        applyActressAvatarRef(
-          input.actressId,
-          avatar,
-          mutation.expectedVersions,
-          mutation.operationId,
-          args.database
-        )
-      }
-      const ok = actressMaintenanceService.editActress(input.actressId, fields)
-      return {
-        ok,
-        versions: { A: readActressAggregateVersion(input.actressId, args.database)! }
-      }
-    }
-    return avatar ? commitImage(args, apply) : commit(args, apply)
+    const result = editCatalogActress({
+      actressId: input.actressId, fields, ...(avatar ? { avatarRef: avatar } : {})
+    }, { ...mutation, writerEpoch: args.auth.epoch, database: args.database })
+    return { receipt: result.receipt, ...result.data }
   },
   'actresses.delete'(args) {
     const input = args.envelope.input as {

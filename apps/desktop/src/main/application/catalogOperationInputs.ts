@@ -68,7 +68,7 @@ export interface CatalogDesktopInputs {
     candidate: ScrapeResult
   }
   'actresses.listPage': ActressListQuery
-  'actresses.edit': {
+  'actresses.edit': CatalogWireInput<'actresses.edit'> | {
     actressId: number
     fields: ActressEditInput
   }

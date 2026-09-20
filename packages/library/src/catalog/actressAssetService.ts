@@ -19,6 +19,7 @@ import {
   resolveEffectiveActressScrapeFields as resolveEffectiveActressScrapeFieldsRecord,
   updateActressAvatarRecord,
   upsertActressFromScrape as upsertActressRecord,
+  type ActressAvatarBundleRecord,
   type ActressScrapeAssetFacts
 } from '@library/db/actressRepo'
 import { getDb } from '@library/db/database'
@@ -121,66 +122,74 @@ function createDefaultAvatarBundle(id: number, mainName: string, bytes: Buffer, 
   }
 }
 
+function prepareActressAvatarBundle(
+  id: number,
+  mainName: string,
+  commit: ActressAvatarCommit
+): ActressAvatarBundleRecord {
+  const current = getActressAvatarRecord(id)
+  if (!current) throw new Error('演员不存在')
+  const displayBytes = Buffer.from(commit.displayImageBase64, 'base64')
+  if (!mediaAssetStore.readImageDimensions(displayBytes)) throw new Error('头像展示图无效')
+  const source = readCommitSource(commit, current.avatar_source_path)
+  if (!source) throw new Error('缺少头像原图，请重新选择图片后再裁剪保存')
+  const crop = parseAvatarCrop(JSON.stringify(commit.crop), source.fingerprint)
+  if (!crop) throw new Error('头像裁剪参数无效')
+  const changingSource = Boolean(
+    commit.sourceImageBase64 || commit.sourceLocalPath || commit.sourceAssetPath
+  )
+  let sourcePath = current.avatar_source_path
+  const currentMime = sourcePath && mediaAssetStore.isUsableImage(sourcePath)
+    ? mediaAssetStore.readForServe(sourcePath).mime
+    : null
+  const storedFormatMismatch = currentMime !== mediaAssetStore.mimeFromExtension(source.extension)
+  if (
+    changingSource || !sourcePath ||
+    sourceFingerprint(sourcePath) !== source.fingerprint || storedFormatMismatch
+  ) {
+    sourcePath = mediaAssetStore.importAvatarSource(
+      mainName,
+      id,
+      source.bytes,
+      source.extension
+    ).relPath
+  }
+  const displayPath = mediaAssetStore.importAvatarDisplay(mainName, id, displayBytes)
+  return {
+    displayPath,
+    sourcePath,
+    cropJson: JSON.stringify(createAvatarCropV1({
+      sourceFingerprint: source.fingerprint,
+      zoom: crop.zoom,
+      offsetX: crop.offsetX,
+      offsetY: crop.offsetY,
+      viewSize: crop.viewSize,
+      outputSize: crop.outputSize
+    }))
+  }
+}
+
 export function setActressAvatarBundle(id: number, mainName: string, commit: ActressAvatarCommit): void {
   mediaAssetStore.runInCoordinatedChange(() => {
-    const current = getActressAvatarRecord(id)
-    if (!current) throw new Error('演员不存在')
-    const displayBytes = Buffer.from(commit.displayImageBase64, 'base64')
-    if (!mediaAssetStore.readImageDimensions(displayBytes)) throw new Error('头像展示图无效')
-    const source = readCommitSource(commit, current.avatar_source_path)
-    if (!source) throw new Error('缺少头像原图，请重新选择图片后再裁剪保存')
-    const crop = parseAvatarCrop(JSON.stringify(commit.crop), source.fingerprint)
-    if (!crop) throw new Error('头像裁剪参数无效')
-    const changingSource = Boolean(
-      commit.sourceImageBase64 || commit.sourceLocalPath || commit.sourceAssetPath
-    )
-    let sourcePath = current.avatar_source_path
-    const currentMime = sourcePath && mediaAssetStore.isUsableImage(sourcePath)
-      ? mediaAssetStore.readForServe(sourcePath).mime
-      : null
-    const storedFormatMismatch = currentMime !== mediaAssetStore.mimeFromExtension(source.extension)
-    if (
-      changingSource || !sourcePath ||
-      sourceFingerprint(sourcePath) !== source.fingerprint || storedFormatMismatch
-    ) {
-      sourcePath = mediaAssetStore.importAvatarSource(
-        mainName,
-        id,
-        source.bytes,
-        source.extension
-      ).relPath
-    }
-    const displayPath = mediaAssetStore.importAvatarDisplay(mainName, id, displayBytes)
-    const result = updateActressAvatarRecord(id, {
-      displayPath,
-      sourcePath,
-      cropJson: JSON.stringify(createAvatarCropV1({
-        sourceFingerprint: source.fingerprint,
-        zoom: crop.zoom,
-        offsetX: crop.offsetX,
-        offsetY: crop.offsetY,
-        viewSize: crop.viewSize,
-        outputSize: crop.outputSize
-      }))
-    })
+    const result = updateActressAvatarRecord(id, prepareActressAvatarBundle(id, mainName, commit))
     for (const storedPath of result.obsoletePaths) mediaAssetStore.deleteBestEffort(storedPath)
   })
 }
 
-export function editActressWithAssets(id: number, input: ActressEditInput): void {
+export function editActressWithAssets(
+  id: number,
+  input: ActressEditInput,
+  preparedAvatar?: ActressAvatarBundleRecord
+): void {
   mediaAssetStore.coordinateDatabaseChange(() => getDb().transaction(() => {
-    editActressRecord(id, input)
     const current = getActressAvatarRecord(id)
     if (!current) throw new Error('演员不存在')
+    const mainName = input.main_name?.trim() || current.main_name
+    let bundle = preparedAvatar
     if (input.clearAvatar) {
-      const result = updateActressAvatarRecord(id, {
-        displayPath: null,
-        sourcePath: null,
-        cropJson: null
-      })
-      for (const storedPath of result.obsoletePaths) mediaAssetStore.deleteBestEffort(storedPath)
+      bundle = { displayPath: null, sourcePath: null, cropJson: null }
     } else if (input.avatar) {
-      setActressAvatarBundle(id, current.main_name, input.avatar)
+      bundle = prepareActressAvatarBundle(id, mainName, input.avatar)
     } else if (input.avatarImageBase64 || input.avatarSourcePath) {
       const bytes = input.avatarImageBase64
         ? Buffer.from(input.avatarImageBase64, 'base64')
@@ -188,9 +197,14 @@ export function editActressWithAssets(id: number, input: ActressEditInput): void
       const extension = input.avatarSourcePath
         ? mediaAssetStore.extensionOf(input.avatarSourcePath)
         : '.jpg'
-      const bundle = createDefaultAvatarBundle(id, current.main_name, bytes, extension)
-      const result = updateActressAvatarRecord(id, bundle)
-      for (const storedPath of result.obsoletePaths) mediaAssetStore.deleteBestEffort(storedPath)
+      bundle = createDefaultAvatarBundle(id, mainName, bytes, extension)
+    }
+    editActressRecord(id, input, bundle)
+    if (bundle) {
+      const retained = new Set([bundle.displayPath, bundle.sourcePath])
+      for (const oldPath of [current.avatar_path, current.avatar_source_path]) {
+        if (oldPath && !retained.has(oldPath)) mediaAssetStore.deleteBestEffort(oldPath)
+      }
     }
   })())
 }

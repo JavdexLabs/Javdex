@@ -10,10 +10,9 @@ import type { CatalogScope } from '@shared/mediaLibraryTypes'
 import type { ScopedVideoDetail, ScopedVideoListResult } from '@shared/catalogTypes'
 import type {
   VideoQuery,
-  VideoResource,
-  VideoResourceDetail
+  VideoResource
 } from '@shared/videoTypes'
-import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
+import { projectVideoDetail } from '@library/catalog/videoDetailProjection'
 
 export interface VideoQueryService {
   list(scope: CatalogScope, query?: VideoQuery): ScopedVideoListResult
@@ -42,27 +41,7 @@ export function createVideoQueryService(
     get(scope, id): ScopedVideoDetail | null {
       const detail: ScopedStoredVideoDetail | null = catalog.get(scope, id)
       if (!detail) return null
-      const primary = detail.resources.find((resource) => resource.is_primary === 1)
-      const resolved_duration_seconds = resolveDuration({
-        duration_seconds: detail.duration_seconds,
-        primary_resource_duration_seconds: primary?.duration_seconds ?? null
-      })
-      const resources: VideoResourceDetail[] = detail.resources.map((resource) => {
-        const {
-          locator,
-          resource_key: _resourceKey,
-          source_identity: _sourceIdentity,
-          ...projected
-        } = resource
-        return {
-          ...projected,
-          display_locator:
-            resource.kind === 'local'
-              ? locator
-              : maskVideoResourceLocator(locator, resource.kind)
-        }
-      })
-      return { ...detail, resources, resolved_duration_seconds }
+      return projectVideoDetail(detail, { resolveDuration })
     },
     getResource(libraryId, videoId, resourceId): VideoResource | null {
       const resource = readResource(libraryId, resourceId)

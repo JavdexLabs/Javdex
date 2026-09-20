@@ -1,4 +1,6 @@
+import { actressEditResultSchema } from '@shared/actressEditContract'
 import { structuredError } from '@shared/protocol/errors'
+import { scopedVideoDetailSchema, actressDetailSchema, actressProfileSchema, actressMetadataSchema } from '@shared/catalogDetailSchemas'
 import type { CatalogOperationResults } from '../../application/catalogOperationResults'
 
 type OperationsReturning<T> = {
@@ -33,6 +35,14 @@ const booleanOperations = {
   'playlists.removeVideo': true
 } satisfies Record<OperationsReturning<boolean>, true>
 
+const complexResultSchemas = {
+  'videos.get': scopedVideoDetailSchema.nullable(),
+  'actresses.get': actressDetailSchema.nullable(),
+  'actresses.profile': actressProfileSchema.nullable(),
+  'actresses.metadata': actressMetadataSchema.nullable(),
+  'actresses.edit': actressEditResultSchema
+} satisfies Partial<Record<keyof CatalogOperationResults, import('zod').ZodType>>
+
 /** HTTP envelopes and local primitive results meet at this one adapter boundary. */
 export function catalogRemoteResult<K extends keyof CatalogOperationResults>(
   operation: K,
@@ -45,7 +55,15 @@ export function catalogRemoteResult<K extends keyof CatalogOperationResults>(
   }
   const object = response !== null && typeof response === 'object' ? response : null
   let result: unknown = response
-  if (operation in booleanOperations) {
+  const schema = (complexResultSchemas as Partial<Record<keyof CatalogOperationResults, import('zod').ZodType>>)[operation]
+  if (schema) {
+    const parsed = schema.safeParse(response)
+    if (!parsed.success) {
+      const field = parsed.error.issues[0]?.path.join('.') ?? ''
+      throw structuredError('INVALID_INPUT', `Invalid result for ${operation} at ${field}`, { field })
+    }
+    result = operation === 'actresses.edit' ? (parsed.data as { ok: boolean }).ok : parsed.data
+  } else if (operation in booleanOperations) {
     if (typeof response === 'boolean') result = response
     else if (object && 'ok' in object && typeof object.ok === 'boolean') result = object.ok
     else if (
@@ -62,7 +80,7 @@ export function catalogRemoteResult<K extends keyof CatalogOperationResults>(
     else if (object && key in object && typeof Reflect.get(object, key) === 'number') result = Reflect.get(object, key)
     else throw structuredError('INVALID_INPUT', `Invalid id result for ${operation}`)
   }
-  // Other operations share the declared domain DTO. The untyped HTTP client's
-  // JSON result is asserted only here, never inside a caller or a backend port.
+  // Unmigrated operations still share a static DTO; complex result schemas are
+  // introduced per use case, alongside real HTTP round-trip coverage.
   return result as CatalogOperationResults[K]
 }

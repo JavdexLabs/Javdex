@@ -3743,6 +3743,136 @@ describe('server runtime lifecycle', () => {
     }
   })
 
+  it('edits an actress with an uploaded avatar through the shared use case and validates its detail DTO', async () => {
+    const { base, config } = await boot(path.join(root, 'actress-edit-contract'))
+    const writer = await claimInitialWriter(base, config)
+    const actressId = upsertActressFromScrape('Contract actor', null, 'female')
+    const original = getDb().prepare('SELECT generation, revision FROM actresses WHERE id = ?')
+      .get(actressId) as { generation: number; revision: number }
+    const uploaded = await postManage(base, 'uploads.create', {
+      operationId: randomUUID(), serverId: writer.serverId, catalogId: writer.catalogId,
+      writerEpoch: writer.writerEpoch, expectedVersions: {},
+      input: { purpose: 'actressAvatar', contentType: 'image/png' }
+    }, { bearer: writer.secret })
+    assert.equal(uploaded.status, 200)
+    const uploadId = (uploaded.json as { uploadId: string }).uploadId
+    const png = await sharp({ create: { width: 16, height: 16, channels: 3, background: 'blue' } }).png().toBuffer()
+    assert.equal((await putUpload(base, uploadId, png, { bearer: writer.secret })).status, 200)
+    const remote = createRemoteCatalogBackend({
+      baseUrl: base, appVersion: SERVER_APP_VERSION,
+      credentials: memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    })
+    const local = createLocalCatalogBackend({ identity: { mode: 'local', catalogId: writer.catalogId } })
+    try {
+      const input = { actressId, fields: { main_name: 'Contract renamed', birth_date: '1990-01-02',
+        profile_summary: null, avatar: { kind: 'upload' as const, uploadId } } }
+      const context = { operationId: randomUUID(), expectedVersions: { A: original } }
+      assert.equal(await remote.actresses.edit(input, context), true)
+      assert.equal(await remote.actresses.edit(input, context), true)
+      const detail = await remote.actresses.get({ actressId })
+      assert.ok(detail)
+      assert.equal(detail.revision, original.revision + 1)
+      assert.equal(detail.birth_date, '1990-01-02')
+      assert.equal(detail.profile_summary, null)
+      assert.ok(detail.avatar_path)
+      assert.deepEqual(detail, await local.actresses.get({ actressId }))
+      assert.deepEqual(await remote.actresses.profile({ actressId }), await local.actresses.profile({ actressId }))
+      assert.deepEqual(await remote.actresses.metadata({ actressId }), await local.actresses.metadata({ actressId }))
+      await assert.rejects(remote.actresses.edit({ actressId, fields: { main_name: 'Stale' } }, {
+        ...context, operationId: randomUUID()
+      }), (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT')
+      assert.equal(await remote.actresses.edit({ actressId, fields: { avatar: { kind: 'clear' } } }, {
+        operationId: randomUUID(), expectedVersions: { A: { generation: detail.generation!, revision: detail.revision! } }
+      }), true)
+      const cleared = await remote.actresses.get({ actressId })
+      assert.equal(cleared?.avatar_path, null)
+      assert.equal(cleared?.revision, original.revision + 2)
+    } finally {
+      await remote.dispose()
+      await local.dispose()
+    }
+  })
+
+  it('validates real detail JSON through RemoteCatalogBackend and matches the local projection', async () => {
+    const { base, config } = await boot(path.join(root, 'detail-contract'))
+    const writer = await claimInitialWriter(base, config)
+    const clip = path.join(mediaRoot, 'DTO-001.mp4')
+    fs.writeFileSync(clip, 'video')
+    const { videoId } = await insertBoundVideo('DTO-001', clip)
+    getDb().prepare('UPDATE video_resources SET duration_seconds = 123 WHERE video_id = ?').run(videoId)
+    const credentials = memoryCredentials(new Map([[writer.catalogId, writer.secret]]))
+    const remote = createRemoteCatalogBackend({ baseUrl: base, appVersion: SERVER_APP_VERSION, credentials })
+    const local = createLocalCatalogBackend({ identity: { mode: 'local', catalogId: writer.catalogId } })
+    const input = { scope: { kind: 'library' as const, libraryId: 1 }, videoId }
+    // Corrupt actual server JSON, not a hand-written valid fixture. This also
+    // catches additions to the server DTO that its consumers fail to describe.
+    let corrupt: (body: Record<string, unknown>) => void = () => {}
+    const proxy = createHttpServer(async (request, response) => {
+      try {
+        let body = ''
+        for await (const chunk of request) body += chunk
+        const upstream = await fetch(`${base}${request.url}`, {
+          method: 'POST', body,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': request.headers.authorization ?? '',
+            'X-Javdex-App-Version': SERVER_APP_VERSION
+          }
+        })
+        const json = await upstream.json() as Record<string, unknown>
+        if (request.url?.endsWith('/videos.get')) corrupt(json)
+        response.writeHead(upstream.status, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify(json))
+      } catch {
+        response.writeHead(502).end()
+      }
+    })
+    await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve))
+    const address = proxy.address()
+    assert.ok(address && typeof address !== 'string')
+    const throughProxy = createRemoteCatalogBackend({
+      baseUrl: `http://127.0.0.1:${address.port}`, appVersion: SERVER_APP_VERSION, credentials
+    })
+    try {
+      const localDetail = await local.queries.getVideo(input)
+      const remoteDetail = await remote.queries.getVideo(input)
+      assert.ok(localDetail && remoteDetail)
+      assert.equal(remoteDetail.resolved_duration_seconds, 123)
+      assert.deepEqual(remoteDetail, {
+        ...localDetail,
+        resources: localDetail.resources.map(resource => ({
+          ...resource, display_locator: path.basename(resource.display_locator)
+        }))
+      })
+      assert.deepEqual(await throughProxy.queries.getVideo(input), remoteDetail)
+      for (const [field, mutation] of [
+        ['title', (json: Record<string, unknown>) => { delete json.title }],
+        ['rating', (json: Record<string, unknown>) => { json.rating = 'private-invalid-value' }],
+        ['resources.0.display_locator', (json: Record<string, unknown>) => {
+          delete (json.resources as Array<Record<string, unknown>>)[0].display_locator
+        }],
+        ['resources.0', (json: Record<string, unknown>) => {
+          (json.resources as Array<Record<string, unknown>>)[0].locator = '/private/raw/path'
+        }]
+      ] as const) {
+        corrupt = mutation
+        await assert.rejects(throughProxy.queries.getVideo(input), (error: unknown) => {
+          assert.ok(isStructuredError(error))
+          assert.equal(error.code, 'INVALID_INPUT')
+          assert.equal(error.details?.field, field)
+          assert.equal(error.message.includes('private'), false)
+          return true
+        })
+      }
+      assert.equal(await remote.queries.getVideo({ ...input, videoId: 999999 }), null)
+    } finally {
+      await remote.dispose()
+      await local.dispose()
+      await throughProxy.dispose()
+      await new Promise<void>((resolve, reject) => proxy.close(error => error ? reject(error) : resolve()))
+    }
+  })
+
   it('grants a 12-hour play token, streams Range, and serves manage images without cookies', async () => {
     const dataDir = path.join(root, 's11-play')
     const { base, config } = await boot(dataDir)
@@ -4374,11 +4504,10 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
       }
       if (url.endsWith('/videos.get')) {
         videosGetCount += 1
-        const count = videosGetCount
         void hold.then(() => {
           try {
             if (response.writableEnded) return
-            send({ id: 1, title: count === 1 ? 'late-stale' : 'fresh' })
+            send(null)
           } catch {
             // Client already aborted the stale generation.
           }
@@ -4433,8 +4562,8 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
       const fresh = (await backend.queries.getVideo({
         scope: { kind: 'all' },
         videoId: 1
-      })) as { title: string }
-      assert.equal(fresh.title, 'fresh')
+      }))
+      assert.equal(fresh, null)
       assert.equal(backend.session().generation, 2)
       assert.equal(backend.session().state, 'available')
     } finally {

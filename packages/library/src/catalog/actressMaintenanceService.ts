@@ -7,7 +7,6 @@ import {
   setActressPosterPath
 } from '@library/db/actressRepo'
 import {
-  editActressWithAssets,
   mergeActressesWithAssets
 } from './actressAssetService'
 import { mediaAssetStore } from '@library/mediaAssetStore'
@@ -22,14 +21,12 @@ import type {
   ActressDeleteResult
 } from '@shared/actressIpcContract'
 import type {
-  ActressEditInput,
   ActressGalleryAsset,
   ActressGalleryImportInput,
   ActressMergeInput
 } from '@shared/actressTypes'
 
 export interface ActressMaintenanceService {
-  editActress(id: number, input: ActressEditInput): boolean
   previewDelete(input: { ids: number[] }): ActressDeleteImpact
   deleteActresses(input: ActressDeleteRequest): ActressDeleteResult
   clearMetadata(id: number): boolean
@@ -42,7 +39,6 @@ export interface ActressMaintenanceService {
 
 interface ActressMaintenanceServiceDependencies {
   deleteStoredAsset: (path: string) => void
-  editActress: typeof editActressWithAssets
   previewDelete: (ids: number[]) => ActressDeleteImpact
   deleteRecords: typeof deleteActressRecords
   clearMetadata: typeof clearActressMetadataRecord
@@ -58,7 +54,6 @@ export function createActressMaintenanceService(
   dependencies: Partial<ActressMaintenanceServiceDependencies> = {}
 ): ActressMaintenanceService {
   const deleteStoredAsset = dependencies.deleteStoredAsset ?? ((path) => mediaAssetStore.delete(path))
-  const updateActress = dependencies.editActress ?? editActressWithAssets
   const readDeleteImpact = dependencies.previewDelete ?? previewActressDelete
   const removeActressRecords = dependencies.deleteRecords ?? deleteActressRecords
   const clearMetadataRecord = dependencies.clearMetadata ?? clearActressMetadataRecord
@@ -71,10 +66,6 @@ export function createActressMaintenanceService(
     dependencies.repairGalleryDimensions ?? backfillActressGalleryAssetDimensions
 
   return {
-    editActress(id, input): boolean {
-      updateActress(id, input)
-      return true
-    },
     previewDelete(input): ActressDeleteImpact {
       return readDeleteImpact(input.ids)
     },

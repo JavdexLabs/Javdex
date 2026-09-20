@@ -1,8 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { CatalogScope } from '@shared/mediaLibraryTypes'
-import type { MediaLibraryBadge, ScopedVideo, ScopedVideoListResult } from '@shared/catalogTypes'
+import type { MediaLibraryBadge, ScopedStoredVideoDetail, ScopedVideo, ScopedVideoListResult } from '@shared/catalogTypes'
 import type {
-  StoredVideoDetail,
   VideoQuery,
   VideoResource,
   VideoResourceKind
@@ -19,11 +18,7 @@ type ScopedVideoListRow = ScopedVideo & {
   has_pending_scrape: number | boolean
 }
 
-export interface ScopedStoredVideoDetail extends StoredVideoDetail {
-  activeLibraryId: number
-  membershipAddedAt: string
-  libraries: MediaLibraryBadge[]
-}
+export type { ScopedStoredVideoDetail } from '@shared/catalogTypes'
 
 export interface ScopedVideoCatalogRepo {
   list(scope: CatalogScope, query?: VideoQuery): ScopedVideoListResult

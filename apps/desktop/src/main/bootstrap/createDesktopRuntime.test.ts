@@ -427,6 +427,10 @@ it('recovers committed desktop drafts on startup and clears their binding on dis
       return { outcome: { status: 'applied', target: { kind: 'video', id: 7 }, warnings: [] },
         cleanup: { kind: 'video', stagedPaths: [] } }
     }, () => {}), /work failed/)
+    const { videoLifecycleService } = await import('../services/videoLifecycleService')
+    assert.throws(() => videoLifecycleService.deleteGlobally({ videoId: 7, operationId: 'blocked-delete',
+      expectedRevision: 'unused' }), /未核对/)
+    assert.ok(getDb().prepare('SELECT 1 FROM videos WHERE id=7').get())
     work.exec('DROP TRIGGER fail_completion')
     await runtime.dispose()
     assert.throws(() => desktopAgentDraftRepo.get(draft.id), /not configured/)
@@ -434,6 +438,48 @@ it('recovers committed desktop drafts on startup and clears their binding on dis
     assert.equal(desktopAgentDraftRepo.require(draft.id).status, 'applied')
     assert.equal((runtime.workStore.database().prepare('SELECT cleaned FROM agent_metadata_apply_intents').get() as { cleaned: number }).cleaned, 1)
     assert.equal((getDb().prepare('SELECT revision FROM videos WHERE id=7').get() as { revision: number }).revision, 2)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+it('recovers desktop work-draft deletion after catalog commit and does not repeat completed cleanup', async () => {
+  const { desktopAgentDraftRepo } = await import('../services/agentMetadata/desktopDraftStore')
+  const { videoLifecycleService } = await import('../services/videoLifecycleService')
+  const root = tempDir()
+  let runtime = await createDesktopRuntime(root, '1.0.0')
+  try {
+    const work = runtime.workStore.database()
+    insertAgentRun(work, 'delete-run')
+    getDb().exec("INSERT INTO videos(id,code,title) VALUES(8,'ABC-008','delete')")
+    desktopAgentDraftRepo.create({ id: 'delete-draft', runId: 'delete-run', target: { kind: 'video', id: 8 },
+      source: { requestedUrl: 'https://example.test', displayUrl: 'https://example.test' },
+      payload: { kind: 'video', result: { code: 'ABC-008' }, observedFields: [], explicitlyEmptyFields: [], evidenceRefs: [] },
+      resources: [], warnings: [] })
+    const preview = videoLifecycleService.previewDeleteGlobally(8)
+    work.exec(`CREATE TRIGGER fail_delete BEFORE DELETE ON agent_metadata_drafts
+      BEGIN SELECT RAISE(ABORT,'work deletion failed'); END`)
+    assert.throws(() => videoLifecycleService.deleteGlobally({ videoId: 8, operationId: 'delete-work',
+      expectedRevision: preview.revision }), /work deletion failed/)
+    assert.equal(getDb().prepare('SELECT 1 FROM videos WHERE id=8').get(), undefined)
+    assert.ok(desktopAgentDraftRepo.get('delete-draft'))
+    const { recoverDesktopVideoDraftCleanups, completeDesktopVideoDraftCleanup } = await import('../services/agentMetadata/desktopDraftStore')
+    const receipt = getDb().prepare('SELECT result_json FROM video_lifecycle_operations WHERE id=?').get('delete-work') as { result_json: string }
+    const foreign = { ...JSON.parse(receipt.result_json), agentDraftCleanupCatalogId: 'another-catalog' }
+    getDb().prepare('UPDATE video_lifecycle_operations SET result_json=? WHERE id=?').run(JSON.stringify(foreign), 'delete-work')
+    assert.throws(() => completeDesktopVideoDraftCleanup(foreign), /不属于当前资料库/)
+    recoverDesktopVideoDraftCleanups()
+    assert.ok(desktopAgentDraftRepo.get('delete-draft'))
+    assert.equal(work.prepare('SELECT 1 FROM agent_video_delete_cleanups').get(), undefined)
+    getDb().prepare('UPDATE video_lifecycle_operations SET result_json=? WHERE id=?').run(receipt.result_json, 'delete-work')
+    work.exec('DROP TRIGGER fail_delete')
+    await runtime.dispose()
+    runtime = await createDesktopRuntime(root, '1.0.0')
+    assert.equal(desktopAgentDraftRepo.get('delete-draft'), null)
+    assert.equal((runtime.workStore.database().prepare('SELECT COUNT(*) AS n FROM agent_video_delete_cleanups').get() as { n: number }).n, 1)
+    await runtime.dispose()
+    runtime = await createDesktopRuntime(root, '1.0.0')
+    assert.equal((runtime.workStore.database().prepare('SELECT COUNT(*) AS n FROM agent_video_delete_cleanups').get() as { n: number }).n, 1)
   } finally {
     await runtime.dispose()
   }

@@ -63,7 +63,8 @@ describe('video lifecycle service', () => {
       promotedResourceId: null,
       canonicalVideoDeleted: true,
       obsoleteAssetPaths: ['covers/ML-091.jpg', 'samples/ML-091-1.jpg'],
-      pendingStagingPaths: ['video-scrape/pending/cover.jpg', 'video-scrape/agent/sample.jpg']
+      pendingStagingPaths: ['video-scrape/pending/cover.jpg', 'video-scrape/agent/sample.jpg'],
+      agentDraftCleanup: { drafts: [], staging: [] }
     }
     const repo = repoWithDelete(result)
     const service = createVideoLifecycleService({
@@ -97,6 +98,7 @@ describe('video lifecycle service', () => {
     assert.deepEqual(events, ['gate', 'assets', 'cleanup:7'])
     assert.equal('obsoleteAssetPaths' in publicResult, false)
     assert.equal('pendingStagingPaths' in publicResult, false)
+    assert.equal('agentDraftCleanup' in publicResult, false)
   })
 
   it('retries cleanup safely when the repository replays an idempotent result', () => {

@@ -1,3 +1,4 @@
+import type { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 import type { ActressConflictQueueItem, ActressConflictQueuePage, ActressConflictQueueQuery, ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
 import { getDatabaseReadRevision, getDb } from '@library/db/database'
@@ -127,22 +128,13 @@ function cleanupStagedResourcePaths(stagedPaths: string[]): void {
 }
 
 /** Remove crash leftovers while preserving every referenced or recently written staging dir. */
-export function cleanupOrphanedActressScrapeStaging(options?: {
+export function cleanupOrphanedActressScrapeStaging(options: {
   now?: number
   olderThanMs?: number
-}): number {
-  const referencedPaths = (
-    getDb().prepare(
-      `SELECT staged_path FROM pending_actress_scrape_resources
-       UNION
-       SELECT r.staged_path
-         FROM agent_metadata_draft_resources r
-         JOIN agent_metadata_drafts d ON d.id = r.draft_id
-        WHERE d.status = 'ready' AND r.field IN ('avatar', 'gallery')`
-    ).all() as Array<{
-      staged_path: string
-    }>
-  ).map((row) => row.staged_path)
+} | undefined, drafts: AgentMetadataDraftRepo): number {
+  const pendingPaths = (getDb().prepare('SELECT staged_path FROM pending_actress_scrape_resources').all() as Array<{ staged_path: string }>)
+    .map(row => row.staged_path)
+  const referencedPaths = [...pendingPaths, ...drafts.listReadyStagedPaths('actress')]
   return mediaAssetStore.cleanupOrphanedActressScrapeStaging(referencedPaths, options)
 }
 

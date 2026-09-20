@@ -1,3 +1,5 @@
+import { AgentMetadataDraftRepo, type AgentDraftLifecycleSnapshot } from './agentMetadataDraftRepo'
+import { readCatalogIdentity } from '../catalog/catalogIdentity'
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type {
@@ -63,12 +65,7 @@ interface PendingStagingRow {
   staged_path: string
 }
 
-interface AgentDraftRow {
-  id: string
-  revision: number
-  status: string
-  updated_at: string
-}
+
 
 interface VideoDeleteRow {
   id: number
@@ -85,8 +82,8 @@ interface GlobalDeleteSnapshot {
   mediaAssets: MediaAssetRow[]
   pendingScrapes: PendingScrapeRow[]
   pendingScrapeStaging: PendingStagingRow[]
-  agentDrafts: AgentDraftRow[]
-  agentDraftStaging: PendingStagingRow[]
+  agentDrafts: AgentDraftLifecycleSnapshot['drafts']
+  agentDraftStaging: AgentDraftLifecycleSnapshot['staging']
 }
 
 interface StoredOperationRow {
@@ -295,7 +292,8 @@ function buildRevision(input: {
 
 function readGlobalDeleteSnapshot(
   database: Database.Database,
-  videoId: number
+  videoId: number,
+  drafts: AgentMetadataDraftRepo
 ): GlobalDeleteSnapshot {
   const video = database
     .prepare('SELECT id, cover_path, poster_path, updated_at FROM videos WHERE id = ?')
@@ -338,27 +336,8 @@ function readGlobalDeleteSnapshot(
        ORDER BY pending.id, resource.id`
     )
     .all(videoId) as PendingStagingRow[]
-  const agentDrafts = database
-    .prepare(
-      `SELECT id, revision, status, updated_at
-       FROM agent_metadata_drafts
-       WHERE entity_kind = 'video' AND entity_id = ?
-       ORDER BY id`
-    )
-    .all(videoId) as AgentDraftRow[]
-  const agentDraftStaging = database
-    .prepare(
-      `SELECT draft.id AS owner_id,
-              resource.id AS resource_id,
-              resource.field,
-              resource.position,
-              resource.staged_path
-       FROM agent_metadata_drafts draft
-       JOIN agent_metadata_draft_resources resource ON resource.draft_id = draft.id
-       WHERE draft.entity_kind = 'video' AND draft.entity_id = ?
-       ORDER BY draft.id, resource.id`
-    )
-    .all(videoId) as PendingStagingRow[]
+  const { drafts: agentDrafts, staging: agentDraftStaging } =
+    drafts.lifecycleSnapshot({ kind: 'video', id: videoId })
 
   return {
     video,
@@ -496,13 +475,18 @@ export interface VideoLifecycleRepo {
 export interface DeleteVideoGloballyRepoResult extends VideoLifecycleResult {
   obsoleteAssetPaths: string[]
   pendingStagingPaths: string[]
+  /** Absent on historical receipts written before explicit work-store cleanup. */
+  agentDraftCleanup?: AgentDraftLifecycleSnapshot
+  agentDraftWorkStoreCleanup?: true
+  agentDraftCleanupCatalogId?: string
 }
 
 export function createVideoLifecycleRepo(
   database: Database.Database,
-  dependencies: { isLocalAccessible: (path: string) => boolean }
+  dependencies: { isLocalAccessible: (path: string) => boolean; workDrafts?: AgentMetadataDraftRepo }
 ): VideoLifecycleRepo {
   const { isLocalAccessible } = dependencies
+  const drafts = dependencies.workDrafts ?? new AgentMetadataDraftRepo(() => database)
   const previewRemoveFromLibrary = (
     libraryIdRaw: number,
     videoIdRaw: number
@@ -609,7 +593,7 @@ export function createVideoLifecycleRepo(
 
   const previewDeleteGlobally = (videoIdRaw: number): VideoLifecycleImpact => {
     const videoId = requireId(videoIdRaw, '影片 ID')
-    return buildGlobalDeleteImpact(readGlobalDeleteSnapshot(database, videoId))
+    return buildGlobalDeleteImpact(readGlobalDeleteSnapshot(database, videoId, drafts))
   }
 
   return {
@@ -744,14 +728,19 @@ export function createVideoLifecycleRepo(
         )
         if (replay) return replay
         const videoId = requireId(input.videoId, '影片 ID')
-        const snapshot = readGlobalDeleteSnapshot(database, videoId)
+        const cleanupCatalogId = dependencies.workDrafts ? readCatalogIdentity(database)?.catalogId : undefined
+        if (dependencies.workDrafts && !cleanupCatalogId) throw new Error('跨库草稿清理缺少资料库身份')
+        const snapshot = readGlobalDeleteSnapshot(database, videoId, drafts)
         const preview = buildGlobalDeleteImpact(snapshot)
         if (preview.revision !== input.expectedRevision) {
           throw new VideoLifecycleRepoError('REVISION_CONFLICT', '生命周期预览已过期')
         }
-        database
-          .prepare("DELETE FROM agent_metadata_drafts WHERE entity_kind = 'video' AND entity_id = ?")
-          .run(videoId)
+        if (!dependencies.workDrafts) {
+          drafts.deleteLifecycleSnapshot(
+            { kind: 'video', id: videoId },
+            { drafts: snapshot.agentDrafts, staging: snapshot.agentDraftStaging }
+          )
+        }
         const deleted = database.prepare('DELETE FROM videos WHERE id = ?').run(videoId)
         if (deleted.changes !== 1) throw new Error('影片不存在')
         const result: DeleteVideoGloballyRepoResult = {
@@ -764,7 +753,9 @@ export function createVideoLifecycleRepo(
           promotedResourceId: null,
           canonicalVideoDeleted: true,
           obsoleteAssetPaths: obsoleteAssetPaths(snapshot),
-          pendingStagingPaths: pendingStagingPaths(snapshot)
+          pendingStagingPaths: pendingStagingPaths(snapshot),
+          agentDraftCleanup: { drafts: snapshot.agentDrafts, staging: snapshot.agentDraftStaging },
+          ...(dependencies.workDrafts ? { agentDraftWorkStoreCleanup: true as const, agentDraftCleanupCatalogId: cleanupCatalogId } : {})
         }
         recordResult(database, operationId, result.kind, inputHash, result)
         return result

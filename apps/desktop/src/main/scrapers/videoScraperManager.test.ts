@@ -1,3 +1,4 @@
+import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -555,7 +556,7 @@ describe('scraperManager.scrapeVideo', () => {
       const removed = cleanupOrphanedVideoScrapeStaging({
         now,
         olderThanMs: 24 * 60 * 60 * 1000
-      })
+      }, new AgentMetadataDraftRepo(getDb))
 
       assert.equal(removed, 1)
       assert.equal(fs.existsSync(oldOrphan), false)

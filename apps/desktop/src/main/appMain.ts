@@ -1,3 +1,4 @@
+import { desktopAgentDraftRepo } from './services/agentMetadata/desktopDraftStore'
 import { destroyAppTray, hasAppTray, initializeAppTray, setCloseToTrayEnabled } from './appTray'
 import { webAccess } from './web/webAccess'
 import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
@@ -208,8 +209,8 @@ if (gotSingleInstanceLock) {
     if (runtime.mode === 'local') {
       recoverPendingLocalFileDeletions()
       mediaAssetStore.ensureReady()
-      cleanupOrphanedActressScrapeStaging()
-      cleanupOrphanedVideoScrapeStaging()
+      cleanupOrphanedActressScrapeStaging(undefined, desktopAgentDraftRepo)
+      cleanupOrphanedVideoScrapeStaging(undefined, desktopAgentDraftRepo)
     }
     migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()

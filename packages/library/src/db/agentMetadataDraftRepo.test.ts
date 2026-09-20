@@ -123,3 +123,65 @@ describe('AgentMetadataDraftRepo', () => {
     }
   })
 })
+
+it('reads ready staging references only from the explicitly supplied store and target kind', () => {
+  const work = fixture()
+  const catalog = fixture()
+  try {
+    createVideoDraft(catalog.repo, 'catalog-draft', 'catalog/cover.jpg')
+    createVideoDraft(work.repo, 'old-draft', 'work/old.jpg')
+    const current = createVideoDraft(work.repo, 'current-draft', 'work/current.jpg').draft
+    assert.deepEqual(work.repo.listReadyStagedPaths('video'), ['work/current.jpg'])
+    assert.deepEqual(work.repo.listReadyStagedPaths('actress'), [])
+    assert.deepEqual(catalog.repo.listReadyStagedPaths('video'), ['catalog/cover.jpg'])
+    work.repo.discard({ draftId: current.id, expectedRevision: current.revision })
+    assert.deepEqual(work.repo.listReadyStagedPaths('video'), [])
+  } finally {
+    work.db.close()
+    catalog.db.close()
+  }
+})
+
+it('keeps terminal drafts and resource identities in lifecycle snapshots', () => {
+  const { db, repo } = fixture()
+  try {
+    createVideoDraft(repo, 'first', 'work/first.jpg')
+    createVideoDraft(repo, 'second', 'work/second.jpg')
+    const snapshot = repo.lifecycleSnapshot({ kind: 'video', id: 7 })
+    assert.deepEqual(snapshot.drafts.map(({ id, status, revision }) => ({ id, status, revision })), [
+      { id: 'first', status: 'discarded', revision: 2 },
+      { id: 'second', status: 'ready', revision: 1 }
+    ])
+    assert.deepEqual(snapshot.staging.map(({ owner_id, staged_path }) => ({ owner_id, staged_path })), [
+      { owner_id: 'first', staged_path: 'work/first.jpg' },
+      { owner_id: 'second', staged_path: 'work/second.jpg' }
+    ])
+    assert.ok(snapshot.staging.every(row => Number.isInteger(row.resource_id)))
+    assert.deepEqual(repo.lifecycleSnapshot({ kind: 'actress', id: 7 }), { drafts: [], staging: [] })
+    assert.deepEqual(repo.lifecycleSnapshot({ kind: 'video', id: 8 }), { drafts: [], staging: [] })
+  } finally {
+    db.close()
+  }
+})
+
+it('deletes exactly a lifecycle snapshot and makes completed cleanup replayable', () => {
+  const { db, repo } = fixture()
+  try {
+    createVideoDraft(repo, 'first', 'work/first.jpg')
+    const target = { kind: 'video' as const, id: 7 }
+    const original = repo.lifecycleSnapshot(target)
+    db.prepare('UPDATE agent_metadata_draft_resources SET staged_path=? WHERE draft_id=?').run('work/changed.jpg', 'first')
+    assert.throws(() => repo.deleteLifecycleSnapshot(target, original), /草稿已变化/)
+    assert.ok(repo.get('first'))
+    const current = repo.lifecycleSnapshot(target)
+    repo.deleteLifecycleSnapshot(target, current)
+    assert.equal(repo.get('first'), null)
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM agent_metadata_draft_resources').get() as { n: number }).n, 0)
+    repo.deleteLifecycleSnapshot(target, current)
+    createVideoDraft(repo, 'new-draft', 'work/new.jpg')
+    assert.throws(() => repo.deleteLifecycleSnapshot(target, current), /草稿已变化/)
+    assert.ok(repo.get('new-draft'))
+  } finally {
+    db.close()
+  }
+})

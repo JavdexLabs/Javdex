@@ -9,6 +9,11 @@ import type {
   AgentMetadataTarget
 } from '@shared/agentMetadataTypes'
 
+export interface AgentDraftLifecycleSnapshot {
+  drafts: Array<{ id: string; revision: number; status: string; updated_at: string }>
+  staging: Array<{ owner_id: string; resource_id: number; field: string; position: number; staged_path: string }>
+}
+
 interface DraftRow {
   id: string
   run_id: string | null
@@ -57,6 +62,44 @@ function nowIso(): string {
 
 export class AgentMetadataDraftRepo {
   constructor(private readonly database: () => Database.Database) {}
+
+  lifecycleSnapshot(target: AgentMetadataTarget): AgentDraftLifecycleSnapshot {
+    const db = this.database()
+    return db.transaction(() => {
+      const drafts = db.prepare(`SELECT id, revision, status, updated_at FROM agent_metadata_drafts
+        WHERE entity_kind = ? AND entity_id = ? ORDER BY id`).all(target.kind, target.id) as AgentDraftLifecycleSnapshot['drafts']
+      const staging = db.prepare(`SELECT draft.id AS owner_id, resource.id AS resource_id,
+        resource.field, resource.position, resource.staged_path
+        FROM agent_metadata_drafts draft
+        JOIN agent_metadata_draft_resources resource ON resource.draft_id = draft.id
+        WHERE draft.entity_kind = ? AND draft.entity_id = ? ORDER BY draft.id, resource.id`)
+        .all(target.kind, target.id) as AgentDraftLifecycleSnapshot['staging']
+      return { drafts, staging }
+    })()
+  }
+
+  listReadyStagedPaths(kind: AgentMetadataTarget['kind']): string[] {
+    return (this.database().prepare(`SELECT r.staged_path
+      FROM agent_metadata_draft_resources r
+      JOIN agent_metadata_drafts d ON d.id = r.draft_id
+      WHERE d.status = 'ready' AND d.entity_kind = ?`).all(kind) as Array<{ staged_path: string }>)
+      .map(row => row.staged_path)
+  }
+
+  deleteLifecycleSnapshot(target: AgentMetadataTarget, expected: AgentDraftLifecycleSnapshot): void {
+    const db = this.database()
+    db.transaction(() => {
+      const current = this.lifecycleSnapshot(target)
+      // A completed cleanup is safe to replay. Any surviving/new draft must
+      // still match the deletion preview, including its resource identities.
+      if (current.drafts.length === 0) return
+      if (JSON.stringify(current) !== JSON.stringify(expected)) {
+        throw new Error('草稿已变化，不能按旧删除快照清理。')
+      }
+      const remove = db.prepare('DELETE FROM agent_metadata_drafts WHERE id = ? AND entity_kind = ? AND entity_id = ?')
+      for (const draft of expected.drafts) remove.run(draft.id, target.kind, target.id)
+    })()
+  }
 
   create(input: {
     id: string

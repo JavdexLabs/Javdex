@@ -1,3 +1,4 @@
+import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -2490,7 +2491,7 @@ describe('ActressIdentityConflictWorkflow', () => {
     fs.utimesSync(oldOrphan, new Date(now - 48 * 60 * 60 * 1000), new Date(now - 48 * 60 * 60 * 1000))
     fs.utimesSync(recentOrphan, new Date(now - 60 * 1000), new Date(now - 60 * 1000))
 
-    const removed = cleanupOrphanedActressScrapeStaging({ now, olderThanMs: 24 * 60 * 60 * 1000 })
+    const removed = cleanupOrphanedActressScrapeStaging({ now, olderThanMs: 24 * 60 * 60 * 1000 }, new AgentMetadataDraftRepo(getDb))
 
     assert.equal(removed, 1)
     assert.equal(fs.existsSync(oldOrphan), false)

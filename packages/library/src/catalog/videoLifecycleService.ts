@@ -22,6 +22,7 @@ import {
 import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { videoMaintenanceService } from './videoMaintenanceService'
+import type { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 
 export interface VideoLifecycleService {
   previewRemoveFromLibrary(libraryId: number, videoId: number): VideoLifecycleImpact
@@ -37,6 +38,9 @@ export interface VideoLifecycleService {
 }
 
 interface VideoLifecycleServiceDependencies {
+  workDrafts: AgentMetadataDraftRepo
+  completeWorkDraftCleanup: (result: DeleteVideoGloballyRepoResult) => void
+  assertWorkDraftsMutable: (videoId: number) => void
   repo: VideoLifecycleRepo
   isLocalAccessible: (path: string) => boolean
   withResourceMaintenance: <T>(work: () => T) => T
@@ -53,6 +57,9 @@ function publicDeleteResult(result: DeleteVideoGloballyRepoResult): VideoLifecyc
   const {
     obsoleteAssetPaths: _obsoleteAssetPaths,
     pendingStagingPaths: _pendingStagingPaths,
+    agentDraftCleanup: _agentDraftCleanup,
+    agentDraftWorkStoreCleanup: _agentDraftWorkStoreCleanup,
+    agentDraftCleanupCatalogId: _agentDraftCleanupCatalogId,
     ...publicResult
   } = result
   return publicResult
@@ -67,7 +74,7 @@ export function createVideoLifecycleService(
 ): VideoLifecycleService {
   const isLocalAccessible = dependencies.isLocalAccessible ?? existsSync
   const resolveRepo = (): VideoLifecycleRepo =>
-    dependencies.repo ?? createVideoLifecycleRepo(getDb(), { isLocalAccessible })
+    dependencies.repo ?? createVideoLifecycleRepo(getDb(), { isLocalAccessible, workDrafts: dependencies.workDrafts })
   const withResourceMaintenance =
     dependencies.withResourceMaintenance ??
     (<T>(work: () => T): T => maintenanceTaskGate.runSync('resource-maintenance', work))
@@ -116,16 +123,28 @@ export function createVideoLifecycleService(
 
     deleteGlobally(input: DeleteVideoGloballyInput): VideoLifecycleResult {
       return withResourceMaintenance(() => {
+        dependencies.assertWorkDraftsMutable?.(input.videoId)
         const cleanupHints = collectCleanupHints(input.videoId)
         const sourceResources = listSourceResources(input.videoId)
         const result = runInCoordinatedChange(() =>
           deleteManagedSourceFiles(sourceResources, () => {
             const deleted = resolveRepo().deleteGlobally(input)
             for (const storedPath of deleted.obsoleteAssetPaths) deleteOwnedAsset(storedPath)
-            cleanupStaging(deleted.pendingStagingPaths)
             return deleted
           })
         )
+        if (result.agentDraftWorkStoreCleanup) {
+          if (!dependencies.workDrafts || !result.agentDraftCleanup) {
+            throw new Error('影片删除缺少工作草稿清理依赖或快照')
+          }
+          if (dependencies.completeWorkDraftCleanup) dependencies.completeWorkDraftCleanup(result)
+          else {
+            dependencies.workDrafts.deleteLifecycleSnapshot({ kind: 'video', id: result.videoId }, result.agentDraftCleanup)
+            cleanupStaging(result.pendingStagingPaths)
+          }
+        } else {
+          cleanupStaging(result.pendingStagingPaths)
+        }
         try {
           cleanupLibrary(cleanupHints)
         } catch (error) {

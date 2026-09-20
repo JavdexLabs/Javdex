@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import { migrateDatabase } from './migrations'
 import { createVideoLifecycleRepo } from './videoLifecycleRepo'
+import { ensureCatalogIdentity } from '../catalog/catalogIdentity'
 
 const accessibleLocalFiles = { isLocalAccessible: () => true }
 
@@ -288,6 +289,8 @@ describe('video lifecycle repo', () => {
         'video-scrape/pending/cover.jpg',
         'video-scrape/agent/sample.jpg'
       ])
+      assert.deepEqual(result.agentDraftCleanup?.drafts.map(draft => draft.id), ['draft-91'])
+      assert.deepEqual(result.agentDraftCleanup?.staging.map(resource => resource.staged_path), ['video-scrape/agent/sample.jpg'])
       assert.deepEqual(
         lifecycle.deleteGlobally({
           videoId: 91,
@@ -363,4 +366,41 @@ describe('video lifecycle repo', () => {
       database.close()
     }
   })
+})
+
+it('persists work-store cleanup separately from the committed catalog deletion', async () => {
+  const { AgentMetadataDraftRepo } = await import('./agentMetadataDraftRepo')
+  const catalog = fixture()
+  const work = new Database(':memory:')
+  try {
+    migrateDatabase(work)
+    const identity = ensureCatalogIdentity({}, catalog)
+    work.exec(`INSERT INTO agent_runs(id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
+      VALUES('run','metadata-collector','settled','1','{}','pi','{}','before','before')`)
+    const drafts = new AgentMetadataDraftRepo(() => work)
+    drafts.create({ id: 'work-draft', runId: 'run', target: { kind: 'video', id: 91 },
+      source: { requestedUrl: 'https://example.test', displayUrl: 'https://example.test' },
+      payload: { kind: 'video', result: { code: 'ML-091' }, observedFields: [], explicitlyEmptyFields: [], evidenceRefs: [] },
+      resources: [], warnings: [] })
+    const lifecycle = createVideoLifecycleRepo(catalog, { ...accessibleLocalFiles, workDrafts: drafts })
+    const preview = lifecycle.previewDeleteGlobally(91)
+    assert.equal(preview.pendingAgentDraftCount, 1)
+    const input = { videoId: 91, operationId: 'work-delete', expectedRevision: preview.revision }
+    const result = lifecycle.deleteGlobally(input)
+    assert.equal(catalog.prepare('SELECT 1 FROM videos WHERE id=91').get(), undefined)
+    assert.ok(drafts.get('work-draft'))
+    assert.equal(result.agentDraftWorkStoreCleanup, true)
+    assert.equal(result.agentDraftCleanupCatalogId, identity.catalogId)
+    work.exec(`CREATE TRIGGER fail_cleanup BEFORE DELETE ON agent_metadata_drafts
+      BEGIN SELECT RAISE(ABORT,'work cleanup failed'); END`)
+    assert.throws(() => drafts.deleteLifecycleSnapshot({ kind: 'video', id: 91 }, result.agentDraftCleanup!), /work cleanup failed/)
+    assert.deepEqual(lifecycle.deleteGlobally(input), result)
+    work.exec('DROP TRIGGER fail_cleanup')
+    drafts.deleteLifecycleSnapshot({ kind: 'video', id: 91 }, lifecycle.deleteGlobally(input).agentDraftCleanup!)
+    assert.equal(drafts.get('work-draft'), null)
+    assert.deepEqual(lifecycle.deleteGlobally(input), result)
+  } finally {
+    catalog.close()
+    work.close()
+  }
 })

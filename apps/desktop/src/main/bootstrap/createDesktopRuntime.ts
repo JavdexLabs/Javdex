@@ -29,7 +29,7 @@ import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
 import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
 import type { DesktopCredentialStore } from '../application/desktopPorts'
-import { configureDesktopDraftStore, clearDesktopDraftStore, recoverDesktopDraftCommits } from '../services/agentMetadata/desktopDraftStore'
+import { configureDesktopDraftStore, clearDesktopDraftStore, recoverDesktopDraftCommits, recoverDesktopVideoDraftCleanups } from '../services/agentMetadata/desktopDraftStore'
 
 export interface DesktopRuntime {
   mode: 'local' | 'remote'
@@ -152,6 +152,12 @@ export async function createDesktopRuntime(
     recoverDesktopDraftCommits()
   } catch (error) {
     console.error('Agent draft commit recovery failed:', error)
+  }
+
+  try {
+    recoverDesktopVideoDraftCleanups()
+  } catch (error) {
+    console.error('Agent draft deletion recovery failed:', error)
   }
 
   return {

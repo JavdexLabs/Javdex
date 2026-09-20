@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS catalog_tasks (
   catalog_id TEXT NOT NULL,
   snapshot_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_video_delete_cleanups (
+  catalog_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  PRIMARY KEY(catalog_id, operation_id)
+);
 CREATE TABLE IF NOT EXISTS operation_verifications (
   operation_id TEXT PRIMARY KEY,
   catalog_id TEXT NOT NULL,

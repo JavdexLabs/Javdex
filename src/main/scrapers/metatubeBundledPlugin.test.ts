@@ -106,7 +106,7 @@ describe('MetaTube bundled video plugin', () => {
           director: 'Director',
           runtime: 123,
           score: 4.46,
-          release_date: '2024-02-29',
+          release_date: '2024-02-29T00:00:00Z',
           actors: [' Alice ', 'Alice', '', 'Bob'],
           genres: [' Drama ', 'Drama', 'Featured'],
           homepage: 'https://source.test/movie/ABC-123',
@@ -145,6 +145,38 @@ describe('MetaTube bundled video plugin', () => {
     assert.equal(candidates[1]?.ratingAverage, undefined)
     assert.deepEqual(candidates[1]?.actresses, [{ name: 'Carol', gender: 'female' }])
     assert.equal(requests.length, 3)
+  })
+
+  it('normalizes MetaTube date and timestamp formats to a calendar date', async () => {
+    const releaseDates = [
+      '2024-02-29',
+      '2026-08-21T00:00:00Z',
+      '2026-08-21T08:30:15.123+08:00',
+      '2026-02-30T00:00:00Z',
+      '2026-08-21 00:00:00'
+    ]
+    const result = await runMetaTube(async (request) => {
+      const url = new URL(request.url)
+      if (url.pathname.endsWith('/search')) {
+        return json(200, {
+          data: releaseDates.map((_, index) => ({
+            provider: `Date-${index}`,
+            id: String(index),
+            number: 'ABC-123'
+          }))
+        })
+      }
+      const id = url.pathname.split('/').at(-1)!
+      return json(200, detail(`Date-${id}`, id, {
+        release_date: releaseDates[Number(id)]
+      }))
+    })
+
+    const candidates = result as ScrapeResult[]
+    assert.deepEqual(
+      candidates.map((candidate) => candidate.releaseDate),
+      ['2024-02-29', '2026-08-21', '2026-08-21', undefined, undefined]
+    )
   })
 
   it('returns no candidates for search 404 or fuzzy-only search results', async () => {

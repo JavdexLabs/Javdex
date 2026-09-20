@@ -48,7 +48,7 @@ describe('video detail library context layout', () => {
     assert.equal(detailPage.match(/<VideoLibraryMembershipBadges/g)?.length, 1)
   })
 
-  it('keeps membership badges on one bounded line', () => {
+  it('wraps selectable memberships and reserves space for keyboard focus', () => {
     const root = declarationsFor(
       'apps/desktop/src/renderer/src/components/VideoLibraryMembershipBadges.module.css',
       '.root'
@@ -59,8 +59,8 @@ describe('video detail library context layout', () => {
     )
 
     assert.equal(root.get('max-width'), '100%')
-    assert.equal(root.get('flex-wrap'), 'nowrap')
-    assert.equal(root.get('overflow'), 'hidden')
+    assert.equal(root.get('flex-wrap'), 'wrap')
+    assert.equal(root.get('padding'), 'var(--focus-ring-space)')
     assert.equal(name.get('min-width'), '0')
     assert.equal(name.get('text-overflow'), 'ellipsis')
   })

@@ -67,6 +67,7 @@ import VideoResourceImportModal from '../components/VideoResourceImportModal'
 import VideoResourceMoveModal from '../components/VideoResourceMoveModal'
 import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
 import Button from '../components/Button'
+import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
 import VideoLibraryMembershipBadges from '../components/VideoLibraryMembershipBadges'
 import VideoDeleteImpact from '../components/VideoDeleteImpact'
 import { isVideoBusinessIdentityConflictError } from './videoBusinessIdentityConflict'
@@ -144,6 +145,11 @@ export default function DetailPage(): JSX.Element {
   )
   const [video, setVideo] = useState<ScopedVideoDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const detailRequestRef = useRef(0)
+  const detailScopeKey = `${detailRouteSource}:${requestedLibraryId}:${videoId}`
+  const currentDetailScopeRef = useRef(detailScopeKey)
+  currentDetailScopeRef.current = detailScopeKey
   const [scraping, setScraping] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deletePreview, setDeletePreview] = useState<VideoLifecycleImpact | null>(null)
@@ -248,8 +254,14 @@ export default function DetailPage(): JSX.Element {
 
   const load = useCallback(
     async (options?: { silent?: boolean }) => {
+      if (currentDetailScopeRef.current !== detailScopeKey) return
       const silent = options?.silent ?? false
-      if (!silent) setLoading(true)
+      const request = ++detailRequestRef.current
+      if (!silent) {
+        setLoading(true)
+        setVideo(null)
+        setLoadError(null)
+      }
       try {
         const queryOwnedDetail =
           detailRouteSource != null && detailRouteSource !== 'media-library'
@@ -261,15 +273,22 @@ export default function DetailPage(): JSX.Element {
               (scope, id) => api.videos.get(scope, id)
             )
           : await api.videos.get(requestedScope, videoId)
+        if (request !== detailRequestRef.current || currentDetailScopeRef.current !== detailScopeKey) return
+        setLoadError(null)
         if (detail) rememberRecentMediaLibraryId(detail.activeLibraryId)
         setVideo(detail)
       } catch (error) {
-        toastRef.current.show(String((error as Error).message ?? error), 'error')
+        if (request !== detailRequestRef.current || currentDetailScopeRef.current !== detailScopeKey) return
+        const message = String((error as Error).message ?? error)
+        if (!silent) setLoadError(message)
+        toastRef.current.show(message, 'error')
       } finally {
-        if (!silent) setLoading(false)
+        if (request === detailRequestRef.current && currentDetailScopeRef.current === detailScopeKey) {
+          setLoading(false)
+        }
       }
     },
-    [detailRouteSource, requestedLibraryId, requestedScope, videoId]
+    [detailRouteSource, requestedLibraryId, requestedScope, videoId, detailScopeKey]
   )
   const agentMetadata = useAgentMetadataCollector()
 
@@ -279,6 +298,9 @@ export default function DetailPage(): JSX.Element {
 
   useEffect(() => {
     void load()
+    return () => {
+      detailRequestRef.current += 1
+    }
   }, [videoId, load])
 
   useEffect(() => {
@@ -876,9 +898,11 @@ export default function DetailPage(): JSX.Element {
         <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
           <EmptyState
             icon={<SearchX {...UI_ICON} aria-hidden />}
-            title="未找到该影片"
-            description="该影片可能已被删除或移动。"
-          />
+            title={loadError ? '读取影片失败' : '未找到该影片'}
+            description={loadError ?? '该影片可能已被删除或移动。'}
+          >
+            {loadError ? <Button onClick={() => void load()}>重试</Button> : null}
+          </EmptyState>
         </DetailScrollBody>
       </div>
     )
@@ -897,6 +921,9 @@ export default function DetailPage(): JSX.Element {
           <VideoLibraryMembershipBadges
             activeLibraryId={video.activeLibraryId}
             libraries={video.libraries}
+            onSelectLibrary={(libraryId) =>
+              navigate(mediaLibraryVideoDetailPath(libraryId, videoId))
+            }
           />
         }
       >

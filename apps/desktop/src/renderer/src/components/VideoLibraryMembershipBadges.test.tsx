@@ -5,7 +5,10 @@ import TestRenderer from 'react-test-renderer'
 import type { MediaLibraryBadge } from '@shared/catalogTypes'
 import VideoLibraryMembershipBadges from './VideoLibraryMembershipBadges'
 
-Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+Object.defineProperty(globalThis, 'React', {
+  configurable: true,
+  value: React
+})
 
 function library(libraryId: number, name: string): MediaLibraryBadge {
   return { libraryId, name, icon: 'library', color: 'slate' }
@@ -15,6 +18,7 @@ describe('VideoLibraryMembershipBadges', () => {
   it('puts the active resource scope first and names the other memberships accessibly', () => {
     const renderer = TestRenderer.create(
       <VideoLibraryMembershipBadges
+        onSelectLibrary={() => {}}
         activeLibraryId={2}
         libraries={[library(1, '主库'), library(2, '收藏库'), library(3, '离线库')]}
       />
@@ -30,9 +34,11 @@ describe('VideoLibraryMembershipBadges', () => {
     renderer.unmount()
   })
 
-  it('bounds the visible badges and exposes hidden library names in the overflow title', () => {
+  it('keeps every library selectable, including memberships after the third', () => {
+    const selected: number[] = []
     const renderer = TestRenderer.create(
       <VideoLibraryMembershipBadges
+        onSelectLibrary={(id) => selected.push(id)}
         activeLibraryId={4}
         libraries={[
           library(1, '一'),
@@ -45,10 +51,13 @@ describe('VideoLibraryMembershipBadges', () => {
     )
 
     const badges = renderer.root.findAll((node) => node.props['data-library-id'] != null)
-    assert.equal(badges.length, 3)
+    assert.equal(badges.length, 5)
     assert.equal(badges[0]?.props.title, '四（当前资源）')
-    const overflow = renderer.root.find((node) => node.props.title === '三、五')
-    assert.equal(overflow.children.join(''), '+2')
+    badges[0].props.onClick()
+    badges[4].props.onClick()
+    assert.deepEqual(selected, [5])
+    assert.equal(badges[0].props['aria-pressed'], true)
+    assert.equal(badges[4].type, 'button')
     renderer.unmount()
   })
 })

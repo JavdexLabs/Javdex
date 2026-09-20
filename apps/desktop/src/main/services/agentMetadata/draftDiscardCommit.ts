@@ -69,7 +69,18 @@ export class AgentMetadataDiscardCommit {
     const intents = this.work.prepare('SELECT * FROM agent_metadata_discard_intents WHERE catalog_id=? AND cleaned=0')
       .all(identity.catalogId) as DiscardIntent[]
     for (const intent of intents) {
-      if (readCatalogMutation(JSON.parse(intent.request_json) as CatalogMutationRequest, this.catalog)) this.finish(intent, cleanup)
+      if (readCatalogMutation(JSON.parse(intent.request_json) as CatalogMutationRequest, this.catalog)) {
+        this.finish(intent, cleanup)
+      } else {
+        // Startup owns these connections before accepting new operations. A missing
+        // receipt proves the catalog transaction never committed; permit a new request.
+        const draft = this.repo.require(intent.draft_id)
+        if (draft.status !== 'ready' || draft.revision !== intent.revision) {
+          throw new Error('草稿状态与未提交的丢弃不一致，不能释放意图')
+        }
+        this.work.prepare('DELETE FROM agent_metadata_discard_intents WHERE draft_id=? AND operation_id=?')
+          .run(intent.draft_id, intent.operation_id)
+      }
     }
   }
 

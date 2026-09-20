@@ -343,3 +343,10 @@ P4 分步实施记录（按实施顺序，后续记录更新前面的阶段状�
 - `server:smoke:migration` 在 rshared 专用容器通过，覆盖双宿主迁移、正式图片、源库冻结备份、enable/abandon 竞争及 EACCES/ENOSPC 回滚。首次在 rprivate 普通容器运行未向目标传播 tmpfs，ENOSPC 断言失败；该次不计通过。
 - 扩大 Electron 回归运行 879 项，877 项通过；另两项是 Linux 专用 unshare 测试在 macOS 执行，以及结构化错误的旧正则断言。修正测试平台条件和错误码/消息断言后，macOS 定向集 15 项通过、1 项明确转 Linux；Linux 普通用户定向集 15 项通过，受 uid_map 权限限制的 ENOSPC 在专用容器有权限的进程中补跑通过。未修改业务行为或将缺少环境当作通过。
 - 尚待 macOS/Linux 完整应用 GUI 与受存储改动影响的安装升级验收，以及实现文档同步和逐项完成审计。原生窗口专项不能替代这些验收。
+
+### P5 平台验收及恢复审计补充
+
+- `534815e` 对应 macOS arm64 DMG 已构建，从实际 DMG 复制的隔离安装副本通过 `codesign --verify --deep --strict`。真实 GUI 完成远程 NFO 导入、陈旧编辑拒绝和刷新重试、刮削及图片交付、候选确认、文件改名、配对；替换安装后保留 writer 凭据、设置、catalog 视图及图片，重启和撤销配对通过。升级时的系统钥匙串授权由用户完成。证据：`/tmp/javdex-p5-mac-gui.log`、`/tmp/javdex-p5-mac-gui-evidence`。
+- 同源码 Linux arm64 deb 已生成；隔离源码缺少 Git 元数据，打包显式提供仓库主页；补齐容器缺失的 xz-utils 后打包成功。真实已安装 `/opt/Javdex/javdex` 在 DBus、临时密钥环、Xvfb 环境通过上述共同流程，以及 mpv 播放、批量取消、清单导入。随后 dpkg 替换安装、凭据/设置/资料/图片保留与重启通过。证据：`/tmp/javdex-p5-linux-deb-final.log`、`/tmp/javdex-p5-linux-gui.log`；GUI 证据目录位于验证容器 `/tmp/javdex-p5-linux-gui-evidence`。清单夹具使用的临时地址已移除。
+- 随后的恢复审计发现：丢弃意图已持久化而 catalog 尚未提交时退出，启动只恢复有回执项会留下永久修改锁。现已补充同 catalog 无回执且草稿仍为原 ready/revision 时释放意图；状态不一致仍拒绝，回执读取失败不会释放。新增工作库关闭重开、重新生成 operationId 丢弃及重复恢复测试；协调器 9 项通过。
+- 修复后启动/隔离 23 项通过、根类型检查与定向 lint 通过。上述安装产物早于这项恢复修复，不能作为最终源码全部验收的证据。尚待最终产物相关复测、本地存储升级验收、实现文档同步及逐项完成审计。

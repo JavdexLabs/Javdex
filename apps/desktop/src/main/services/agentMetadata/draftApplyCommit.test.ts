@@ -180,3 +180,29 @@ it('retries discard cleanup and releases a rejected catalog discard without chan
   discard.recoverCommitted(() => { throw new Error('cleanup repeated') })
   assert.equal((f.db.prepare('SELECT cleaned FROM agent_metadata_discard_intents').get() as { cleaned: number }).cleaned, 1)
 })
+
+it('releases a discard interrupted before catalog commit after reopening the work store', async () => {
+  const { AgentMetadataDiscardCommit } = await import('./draftDiscardCommit')
+  const f = fixture()
+  const request = { operationId: randomUUID(), operation: 'agentMetadata.discard',
+    writerEpoch: 0, expectedVersions: { Q: { generation: 1, revision: 2 } }, input: { draftId: 'draft' } }
+  f.db.prepare(`INSERT INTO agent_metadata_discard_intents
+    (draft_id,catalog_id,operation_id,request_json,revision,kind,staged_paths_json)
+    VALUES('draft',?,?,?,2,'video','[]')`)
+    .run(f.identity.catalogId, request.operationId, JSON.stringify(request))
+  const workPath = work!.filePath
+  work!.close()
+  work = openDesktopWorkStore(workPath)
+  const db = work.database()
+  const applications = new AgentMetadataApplyCommit(db, f.catalog)
+  const discard = new AgentMetadataDiscardCommit(db, f.catalog, applications)
+  assert.throws(() => applications.assertMutable('draft'), /未核对/)
+  discard.recoverCommitted(() => { throw new Error('uncommitted discard must not clean resources') })
+  applications.assertMutable('draft')
+  const repo = new AgentMetadataDraftRepo(() => db)
+  assert.equal(repo.require('draft').status, 'ready')
+  assert.equal(repo.require('draft').revision, 2)
+  assert.deepEqual(discard.discard('draft', { ...request, operationId: randomUUID() }, () => {}), { ok: true })
+  assert.equal(repo.require('draft').status, 'discarded')
+  discard.recoverCommitted(() => { throw new Error('cleanup repeated') })
+})

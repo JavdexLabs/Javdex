@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { AGENT_PLATFORM_SCHEMA_SQL } from '@library/db/schema'
-import { AgentRunStore, setAgentPayloadCipherForTests } from './agentRunStore'
+import { AgentRunStore, agentRunStore, configureAgentRunDatabase, clearAgentRunDatabase, setAgentPayloadCipherForTests } from './agentRunStore'
 import type { ResolvedRunConfiguration, RuntimeRecoveryFrame } from './types'
 
 function resolved(): ResolvedRunConfiguration {
@@ -442,4 +442,20 @@ describe('Agent recovery enumeration', () => {
         .get() as { total: number }).total, 0)
     } finally { db.close() }
   })
+})
+
+
+it('requires an explicit work connection and clears it when the host closes', () => {
+  clearAgentRunDatabase()
+  assert.throws(() => agentRunStore.getRun('missing'), /work database is not configured/)
+  const database = new Database(':memory:')
+  database.exec(AGENT_PLATFORM_SCHEMA_SQL)
+  configureAgentRunDatabase(() => database)
+  try {
+    assert.equal(agentRunStore.getRun('missing'), null)
+  } finally {
+    clearAgentRunDatabase()
+    database.close()
+  }
+  assert.throws(() => agentRunStore.getRun('missing'), /work database is not configured/)
 })

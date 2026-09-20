@@ -7,7 +7,7 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { configureAgentWorkTablePrefix } from '@library/runtime/host'
 import { isStructuredError } from '@shared/protocol/errors'
-import { resetAgentRunDatabaseForTests } from '../agent-platform/agentRunStore'
+import { clearAgentRunDatabase } from '../agent-platform/agentRunStore'
 import {
   createDesktopRuntime,
   localCatalogDatabasePath,
@@ -47,7 +47,7 @@ function insertAgentRun(database: ReturnType<typeof getDb>, id: string): void {
 
 afterEach(async () => {
   configureAgentWorkTablePrefix('')
-  resetAgentRunDatabaseForTests()
+  clearAgentRunDatabase()
   closeDatabase()
   if (handshakeServer) {
     await new Promise<void>((resolve, reject) =>
@@ -135,6 +135,28 @@ describe('createDesktopRuntime', () => {
       )
     } finally {
       await runtime.dispose()
+    }
+  })
+
+  it('reopens ready local work without overwriting newer state from the original catalog', async () => {
+    const root = tempDir()
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true })
+    const catalog = initDatabaseAtPath(localCatalogDatabasePath(root))
+    insertAgentRun(catalog, 'run-original')
+    closeDatabase()
+    const first = await createDesktopRuntime(root, '0.7.1')
+    first.workStore.database().prepare("UPDATE agent_runs SET product_state_json=? WHERE id='run-original'")
+      .run('{"newer":true}')
+    await first.dispose()
+    const reopened = await createDesktopRuntime(root, '0.7.1')
+    try {
+      assert.equal(reopened.workStore.prepStatus(), 'ready')
+      assert.deepEqual(reopened.workStore.database().prepare("SELECT product_state_json FROM agent_runs WHERE id='run-original'").get(),
+        { product_state_json: '{"newer":true}' })
+      assert.deepEqual(getDb().prepare("SELECT product_state_json FROM main.agent_runs WHERE id='run-original'").get(),
+        { product_state_json: '{}' })
+    } finally {
+      await reopened.dispose()
     }
   })
 

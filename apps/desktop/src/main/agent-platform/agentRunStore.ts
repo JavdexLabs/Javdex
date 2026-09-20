@@ -1,7 +1,6 @@
 import { safeStorage } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import { getDb } from '@library/db/database'
 import type {
   ExecutionHistoryFrame,
   OpaqueRuntimeSessionRef,
@@ -138,7 +137,7 @@ function toRun<ProductState>(row: RunRow): AgentRunRecord<ProductState> {
 }
 
 export class AgentRunStore {
-  constructor(private readonly database: () => Database.Database = getDb) {}
+  constructor(private readonly database: () => Database.Database) {}
 
   createRun<ProductState>(input: {
     runId?: string
@@ -742,17 +741,20 @@ export class AgentRunStore {
   }
 }
 
-let agentDatabase: () => Database.Database = getDb
+let agentDatabase: (() => Database.Database) | null = null
 
 export function configureAgentRunDatabase(factory: () => Database.Database): void {
   agentDatabase = factory
 }
 
-export function resetAgentRunDatabaseForTests(): void {
-  agentDatabase = getDb
+export function clearAgentRunDatabase(): void {
+  agentDatabase = null
 }
 
-export const agentRunStore = new AgentRunStore(() => agentDatabase())
+export const agentRunStore = new AgentRunStore(() => {
+  if (!agentDatabase) throw new Error('Agent work database is not configured')
+  return agentDatabase()
+})
 
 export function setAgentPayloadCipherForTests(cipher: AgentPayloadCipher | null): void {
   cipherOverride = cipher

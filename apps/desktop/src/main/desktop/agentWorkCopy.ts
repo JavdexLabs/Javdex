@@ -54,30 +54,38 @@ export function copyAgentWorkTables(
   dest: Database.Database
 ): AgentWorkCopyResult {
   ensureAgentWorkSchema(dest)
+  const hasMeta = dest.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_meta'").get()
+  if (hasMeta && (dest.prepare("SELECT value FROM work_meta WHERE key = 'prepStatus'").get() as { value: string } | undefined)?.value === 'ready') {
+    throw new Error('工作记录已就绪，不能用旧资料库覆盖')
+  }
+  const foreignKeys = dest.pragma('foreign_keys', { simple: true }) as number
   dest.exec(`ATTACH DATABASE ${sqlitePathLiteral(source.name)} AS catalog`)
   try {
     dest.pragma('foreign_keys = OFF')
-    dest.transaction(() => {
+    return dest.transaction(() => {
       for (const table of AGENT_WORK_TABLES) {
-        dest.exec(`INSERT OR REPLACE INTO ${table} SELECT * FROM catalog.${table}`)
+        dest.exec(`INSERT OR REPLACE INTO main.${table} SELECT * FROM catalog.${table}`)
+      }
+      // Validate the same source snapshot before commit. Equal counts alone
+      // cannot detect changed fields, replaced IDs or corrupted ciphertext.
+      const tables: AgentWorkCopyResult['tables'] = {}
+      for (const table of AGENT_WORK_TABLES) {
+        const mismatch = dest.prepare(`SELECT * FROM catalog.${table} EXCEPT SELECT * FROM main.${table} LIMIT 1`).get()
+        if (mismatch) throw new Error(`工作记录复制内容不一致：${table}`)
+        const invalidReference = dest.prepare(`PRAGMA main.foreign_key_check(${table})`).get()
+        if (invalidReference) throw new Error(`工作记录外键校验失败：${table}`)
+        tables[table] = { source: tableCount(dest, `catalog.${table}`), dest: tableCount(dest, `main.${table}`) }
       }
       stallCopySqlForTests()
+      return { tables }
     })()
-    dest.pragma('foreign_keys = ON')
   } finally {
-    dest.exec('DETACH DATABASE catalog')
-  }
-
-  const tables: AgentWorkCopyResult['tables'] = {}
-  for (const table of AGENT_WORK_TABLES) {
-    const sourceCount = tableCount(source, table)
-    const destCount = tableCount(dest, table)
-    if (destCount < sourceCount) {
-      throw new Error(`工作记录复制不完整：${table} 源 ${sourceCount} 行，目标 ${destCount} 行`)
+    try {
+      dest.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
+    } finally {
+      dest.exec('DETACH DATABASE catalog')
     }
-    tables[table] = { source: sourceCount, dest: destCount }
   }
-  return { tables }
 }
 
 function alreadyAttached(database: Database.Database, schema: string): boolean {

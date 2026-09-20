@@ -13,7 +13,7 @@ import type {
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
 import { AgentExecution, agentExecution } from '../../agent-platform/agentExecution'
 import type { AgentRunRecord } from '../../agent-platform/agentRunStore'
-import { agentRunStore } from '../../agent-platform/agentRunStore'
+import { agentRunStore, configureAgentRunDatabase, clearAgentRunDatabase } from '../../agent-platform/agentRunStore'
 import { setCacheAffinityDeviceKeyForTests } from '../../agent-platform/cacheAffinity'
 import { toolHost } from '../../agent-platform/toolHost'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
@@ -259,11 +259,13 @@ function markMechanicallyReady(session: PluginDevSession, directory: string): vo
 let previousUserData: string | undefined
 
 beforeEach(() => {
+  configureAgentRunDatabase(getDb)
   previousUserData = process.env.JAVDEX_TEST_USER_DATA
   process.env.JAVDEX_TEST_USER_DATA = '/tmp/javdex-plugin-developer-lifecycle-test'
 })
 
 afterEach(() => {
+  clearAgentRunDatabase()
   setCacheAffinityDeviceKeyForTests(null)
   if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previousUserData

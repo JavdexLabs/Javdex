@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { configureAgentWorkTablePrefix } from '@library/runtime/host'
-import { resetAgentRunDatabaseForTests } from '../agent-platform/agentRunStore'
+import { clearAgentRunDatabase } from '../agent-platform/agentRunStore'
 import {
   createDesktopRuntime,
   localCatalogDatabasePath,
@@ -251,7 +251,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
 
   afterEach(async () => {
     configureAgentWorkTablePrefix('')
-    resetAgentRunDatabaseForTests()
+    clearAgentRunDatabase()
     closeDatabase()
     await Promise.all(children.splice(0).map((child) => stopChild(child)))
     if (handshakeServer) {

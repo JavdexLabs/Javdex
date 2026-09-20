@@ -10,7 +10,7 @@ import { configureAgentWorkTablePrefix } from '@library/runtime/host'
 import type { CatalogBackend } from '../application/catalogBackend'
 import {
   configureAgentRunDatabase,
-  resetAgentRunDatabaseForTests
+  clearAgentRunDatabase
 } from '../agent-platform/agentRunStore'
 import {
   createCatalogBackendForMode,
@@ -55,7 +55,7 @@ export function localCatalogDatabasePath(userDataPath: string): string {
 
 function resetDesktopWorkBindings(): void {
   configureAgentWorkTablePrefix('')
-  resetAgentRunDatabaseForTests()
+  clearAgentRunDatabase()
 }
 
 /**

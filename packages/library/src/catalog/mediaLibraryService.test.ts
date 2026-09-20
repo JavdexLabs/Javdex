@@ -333,7 +333,7 @@ describe('media-library service', () => {
 
     assert.throws(
       () => service.archive({ libraryId: 2, expectedRevision: 1 }),
-      /已有扫描或资源维护任务正在运行/
+      { code: 'MAINTENANCE_BUSY', message: '已有扫描或资源维护任务正在运行' }
     )
     assert.deepEqual(harness.calls.lifecycle, [])
 

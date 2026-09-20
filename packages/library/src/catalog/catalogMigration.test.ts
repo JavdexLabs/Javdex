@@ -704,7 +704,9 @@ describe('catalogMigration protocol', () => {
     }
   })
 
-  it('rolls back enable if image copy hits ENOSPC after the transaction commits', async () => {
+  it('rolls back enable if image copy hits ENOSPC after the transaction commits', {
+    skip: process.platform !== 'linux' ? 'Requires Linux unshare and a bounded tmpfs; covered by Linux migration acceptance' : false
+  }, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-enospc-'))
     roots.push(root)
     const sourceDir = path.join(root, 'source')

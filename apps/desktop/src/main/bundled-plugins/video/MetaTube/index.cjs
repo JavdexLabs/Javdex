@@ -59,7 +59,9 @@ function normalizedResultCode(value) {
 function validDate(value) {
   if (value === undefined || value === null || value === '') return undefined
   if (typeof value !== 'string') throw new Error('MetaTube 字段 release_date 类型不兼容')
-  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const match = value.trim().match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/i
+  )
   if (!match) return undefined
   const year = Number(match[1])
   const month = Number(match[2])
@@ -68,7 +70,7 @@ function validDate(value) {
   return date.getUTCFullYear() === year &&
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day
-    ? value.trim()
+    ? `${match[1]}-${match[2]}-${match[3]}`
     : undefined
 }
 

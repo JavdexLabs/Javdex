@@ -27,7 +27,7 @@ function failure(operation: () => unknown, message: RegExp): ScanCodeCountsError
 
 it('matches exact JS Map keys and occurrence counts across multiple flushes', () => {
   const sql = createScanCodeCounts(db), memory = createMemoryScanCodeCounts()
-  const codes = ['', 'abc', 'ABC', ' abc ', '\0', 'a\0b', '\ud800', '\ud801', '\udc00', '�', '😀', 'é', 'é', '"', '\\']
+  const codes = ['', 'abc', 'ABC', ' abc ', '\0', 'a\0b', '\ud800', '\ud801', '\udc00', '\uFFFD', '😀', 'é', 'é', '"', '\\']
   let flushes = 0
   for (let index = 0; index < 900; index++) {
     if (sql.add(codes[index % codes.length])) flushes++

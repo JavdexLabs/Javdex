@@ -42,7 +42,7 @@ it('matches the memory oracle for exact strings, ordered maps, overwrites and fi
   const sql = createScanNfoWorkset(db, [root(), root(2)]), memory = createMemoryScanNfoWorkset([root(), root(2)])
   const outputs = []
   for (const store of [sql, memory]) {
-    const names = new Map([['\ud800', '\0'], ['\ud801', '�'], ['a\0b', '"\\'], ['ABC', 'abc']])
+    const names = new Map([['\ud800', '\0'], ['\ud801', '\uFFFD'], ['a\0b', '"\\'], ['ABC', 'abc']])
     store.setSidecars('dir\ud800', names)
     assert.equal(store.hasSidecars('dir\ud801'), false)
     const old = store.getSidecars('dir\ud800')!

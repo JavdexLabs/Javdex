@@ -122,6 +122,27 @@ describe('catalogTaskProgress', () => {
     assert.equal(polls.length, 0)
   })
 
+  it('can keep a long-running scan poll active until the catalog reports a terminal state', async () => {
+    const polls = [
+      snapshot({ state: 'running', taskRevision: 1 }),
+      snapshot({ state: 'cancelRequested', taskRevision: 2 }),
+      snapshot({ state: 'cancelled', taskRevision: 3 })
+    ]
+    let elapsed = 0
+    const backend = {
+      generation: 1,
+      session: () => ({ catalogId: 'catalog-a' }),
+      tasks: { get: async () => {
+        elapsed += 121_000
+        return polls.shift()!
+      } }
+    } as unknown as Pick<CatalogBackend, 'tasks' | 'generation' | 'session'>
+    const result = await waitForCatalogTask({ backend, taskId: 'task-1', timeoutMs: null,
+      now: () => elapsed, intervalMs: 1, sleep: async () => undefined })
+    assert.equal(result.state, 'cancelled')
+    assert.equal(elapsed, 363_000)
+  })
+
   it('discards a completed snapshot that arrived after reconnect generation advanced', async () => {
     let generation = 1
     let calls = 0

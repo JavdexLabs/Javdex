@@ -183,9 +183,8 @@ async function run() {
       })
     })
   )
-  appCommandAdapter.register(IPC.SCAN_CANCEL, (runId) => {
-    abortRemoteCatalogScanWait(runId)
-    void backend.tasks.cancel({ taskId: runId }, ipcMutation()).catch(() => undefined)
+  appCommandAdapter.register(IPC.SCAN_CANCEL, async (runId) => {
+    await backend.tasks.cancel({ taskId: runId }, ipcMutation())
     return true
   })
   appCommandAdapter.register(IPC.SCAN_AUDIT_HEADER, (libraryId) => backend.libraries.auditHeader({ libraryId }))

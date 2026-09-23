@@ -2,7 +2,6 @@ import type { ScanCompletionResult } from '@shared/libraryTypes'
 import type { CatalogTaskSnapshot } from '@shared/protocol/tasks'
 import type { CatalogBackend } from '../application/catalogBackend'
 import {
-  isAbortError,
   isTerminalCatalogTaskState,
   waitForCatalogTask
 } from '../application/catalogTaskProgress'
@@ -14,6 +13,14 @@ export function abortRemoteCatalogScanWait(taskId: string): boolean {
   const abort = remoteScanWaits.get(taskId)
   if (!abort) return false
   abort.abort()
+  return true
+}
+
+export async function requestRemoteCatalogScanCancel(
+  backend: CatalogBackend,
+  taskId: string
+): Promise<boolean> {
+  await backend.tasks.cancel({ taskId }, ipcMutation())
   return true
 }
 
@@ -63,6 +70,7 @@ async function waitForRemoteScan(
   const task = await waitForCatalogTask({
     backend,
     taskId,
+    timeoutMs: null,
     signal,
     onApplied: (snapshot) => {
       if (!isTerminalCatalogTaskState(snapshot.state)) onProgress?.(snapshot)
@@ -87,19 +95,6 @@ export async function runRemoteScanThroughBackend(
   remoteScanWaits.set(accepted.taskId, abort)
   try {
     return await waitForRemoteScan(backend, libraryId, accepted.taskId, onProgress, abort.signal)
-  } catch (error) {
-    if (isAbortError(error)) {
-      return completionFromTask(libraryId, {
-        owner: 'catalog',
-        taskId: accepted.taskId,
-        catalogId: backend.session().catalogId ?? '',
-        kind: 'scan',
-        state: 'cancelled',
-        taskRevision: 0,
-        progressSeq: 0
-      })
-    }
-    throw error
   } finally {
     remoteScanWaits.delete(accepted.taskId)
   }

@@ -23,11 +23,12 @@ import type { CatalogBackend } from '../application/catalogBackend'
 import { ipcMutation } from '../application/mutationContext'
 import {
   abortRemoteCatalogScanWait,
+  requestRemoteCatalogScanCancel,
   runRemoteScanThroughBackend,
   scanRunMutation
 } from './scanRemoteRun'
 
-export { abortRemoteCatalogScanWait, runRemoteScanThroughBackend }
+export { abortRemoteCatalogScanWait, requestRemoteCatalogScanCancel, runRemoteScanThroughBackend }
 import { structuredError } from '@shared/protocol/errors'
 import { normalizeAbsoluteLocalPath } from '@library/localPathIdentity'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
@@ -437,13 +438,10 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
   )
 
   appCommandAdapter.register(IPC.SCAN_CANCEL, async (runId): Promise<boolean> => {
-    abortRemoteCatalogScanWait(runId)
-    if (scanCoordinator.cancel(runId)) return true
     if (backend.mode === 'remote') {
-      await backend.tasks.cancel({ taskId: runId }, ipcMutation())
-      return true
+      return requestRemoteCatalogScanCancel(backend, runId)
     }
-    return false
+    return scanCoordinator.cancel(runId)
   })
   registerScanLatestHandler(appCommandAdapter, (libraryId) => backend.libraries.latestScan({ libraryId }))
   registerScanAuditReadHandlers(appCommandAdapter, {

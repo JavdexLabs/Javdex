@@ -135,7 +135,7 @@ async function withAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> 
 export async function waitForCatalogTask(options: {
   backend: Pick<CatalogBackend, 'tasks' | 'generation' | 'session'>
   taskId: string
-  timeoutMs?: number
+  timeoutMs?: number | null
   intervalMs?: number
   maxBackoffMs?: number
   now?: () => number
@@ -143,12 +143,11 @@ export async function waitForCatalogTask(options: {
   signal?: AbortSignal
   onApplied?: (snapshot: CatalogTaskSnapshot) => void
 }): Promise<CatalogTaskSnapshot> {
-  const timeoutMs = options.timeoutMs ?? 120_000
   const intervalMs = options.intervalMs ?? CATALOG_TASK_POLL_INTERVAL_MS
   const maxBackoffMs = options.maxBackoffMs ?? CATALOG_TASK_POLL_MAX_BACKOFF_MS
   const now = options.now ?? Date.now
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
-  const deadline = now() + timeoutMs
+  const deadline = options.timeoutMs === null ? Number.POSITIVE_INFINITY : now() + (options.timeoutMs ?? 120_000)
   let current: CatalogTaskSnapshot | null = null
   let delayMs = 0
   let failureBackoffMs = intervalMs

@@ -5,7 +5,7 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
 import type { LibraryScanLatestSnapshot } from '@shared/libraryTypes'
 import { appIpcSchemas } from './ipcCommandSchemas'
-import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, abortRemoteCatalogScanWait, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend, pendingAuditPresenceThroughBackend } from './scanHandlers'
+import { registerScanLatestHandler, registerScanAuditReadHandlers, registerScanAuditRevealHandler, runScanThroughBackend, abortRemoteCatalogScanWait, requestRemoteCatalogScanCancel, importManualThroughBackend, renameThroughBackend, resolvePendingScanThroughBackend, resolveResourceIdentityThroughBackend, auditGetThroughBackend, auditPageThroughBackend, auditViewPageThroughBackend, getPendingScanThroughBackend, listPendingScansThroughBackend, pagePendingScanQueueThroughBackend, countPendingScanQueueThroughBackend, pendingAuditPresenceThroughBackend } from './scanHandlers'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { isStructuredError } from '@shared/protocol/errors'
 import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
@@ -326,7 +326,7 @@ it('runs SCAN_RUN through the catalog backend instead of the local coordinator s
   assert.equal((calls[2] as [string, { taskId: string }])[0], 'tasks.get')
 })
 
-it('cancels the remote SCAN_RUN wait without waiting for a later terminal poll', async () => {
+it('does not turn a stopped local remote-scan wait into a cancelled server result', async () => {
   const taskId = '22222222-2222-2222-2222-222222222222'
   const backend = {
     mode: 'remote',
@@ -343,9 +343,64 @@ it('cancels the remote SCAN_RUN wait without waiting for a later terminal poll',
   const pending = runScanThroughBackend(backend, 3)
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.equal(abortRemoteCatalogScanWait(taskId), true)
+  await assert.rejects(pending, /任务已取消/)
+})
+
+it('keeps polling after the server accepts a scan cancellation until it reports a terminal state', async () => {
+  const taskId = '33333333-3333-3333-3333-333333333333'
+  let resolvePoll!: (value: unknown) => void
+  let finished = false
+  const backend = {
+    mode: 'remote', generation: 1, session: () => ({ catalogId: 'catalog' }),
+    libraries: {
+      get: async () => ({ revision: 1, config: { revision: 1 } }),
+      runScan: async () => ({ taskId, receipt: { operationId: 'op' } })
+    },
+    tasks: {
+      get: async () => new Promise(resolve => { resolvePoll = resolve }),
+      cancel: async () => ({ taskId, state: 'cancelRequested' })
+    }
+  } as unknown as CatalogBackend
+  const pending = runScanThroughBackend(backend, 3).then(result => {
+    finished = true
+    return result
+  })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(await requestRemoteCatalogScanCancel(backend, taskId), true)
+  assert.equal(finished, false)
+  resolvePoll({ owner: 'catalog', taskId, catalogId: 'catalog', kind: 'scan',
+    state: 'cancelled', taskRevision: 2, progressSeq: 1 })
   const result = await pending
   assert.equal(result.cancelled, true)
-  assert.equal(result.runId, taskId)
+})
+
+it('keeps the remote scan running when the cancellation request fails', async () => {
+  const taskId = '44444444-4444-4444-4444-444444444444'
+  let resolvePoll!: (value: unknown) => void
+  let finished = false
+  const backend = {
+    mode: 'remote', generation: 1, session: () => ({ catalogId: 'catalog' }),
+    libraries: {
+      get: async () => ({ revision: 1, config: { revision: 1 } }),
+      runScan: async () => ({ taskId, receipt: { operationId: 'op' } })
+    },
+    tasks: {
+      get: async () => new Promise(resolve => { resolvePoll = resolve }),
+      cancel: async () => { throw new Error('network unavailable') }
+    }
+  } as unknown as CatalogBackend
+  const pending = runScanThroughBackend(backend, 3).then(result => {
+    finished = true
+    return result
+  })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await assert.rejects(requestRemoteCatalogScanCancel(backend, taskId), /network unavailable/)
+  assert.equal(finished, false)
+  resolvePoll({ owner: 'catalog', taskId, catalogId: 'catalog', kind: 'scan',
+    state: 'succeeded', taskRevision: 2, progressSeq: 1, counts: { scanned: 5 } })
+  const result = await pending
+  assert.equal(result.cancelled, undefined)
+  assert.equal(result.scannedFiles, 5)
 })
 
 it('runs FILE_IMPORT_MANUAL through the catalog backend with a root-relative location', async () => {
@@ -437,7 +492,7 @@ it('resolves remote FILE_RENAME through files.renamePreview without host paths',
   )
 })
 
-it('routes PENDING_SCAN_RESOLVE through the catalog backend with Q/V/R/G', async () => {
+it('routes PENDING_SCAN_RESOLVE through the catalog backend with the pending Q revision', async () => {
   const calls: unknown[] = []
   const backend = {
     mode: 'remote',
@@ -463,7 +518,7 @@ it('routes PENDING_SCAN_RESOLVE through the catalog backend with Q/V/R/G', async
   assert.equal(input.libraryId, 1)
   assert.equal(input.groupId, 9)
   assert.equal(input.expectedRevision, 7)
-  assert.deepEqual(ctx.expectedVersions.Q, { generation: 4, revision: 7 })
+  assert.deepEqual(ctx.expectedVersions.Q, { generation: 1, revision: 7 })
 })
 
 it('routes PENDING_RESOURCE_IDENTITY_RESOLVE through the catalog backend', async () => {

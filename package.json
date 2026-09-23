@@ -57,6 +57,7 @@
     "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",
     "server:test": "npm run check:server-boundaries && node scripts/server-test.mjs",
     "server:smoke": "node --import tsx scripts/server-smoke.mjs",
+    "server:smoke:agent": "node scripts/run-electron-tests.mjs apps/desktop/src/main/services/agentMetadata/agentMetadataDocker.smoke.ts",
     "server:smoke:node": "TSX_TSCONFIG_PATH=tsconfig.server.json node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-smoke-node.mjs",
     "server:smoke:migration": "TSX_TSCONFIG_PATH=tsconfig.server.json ELECTRON_RUN_AS_NODE= node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-migration-smoke.mjs",
     "smoke:same-version-install": "node scripts/same-version-install-smoke.mjs",

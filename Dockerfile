@@ -1,5 +1,7 @@
 FROM node:22-bookworm-slim
 
+ARG NPM_CONFIG_REGISTRY
+
 WORKDIR /app
 
 COPY out/server/package.json ./package.json

@@ -224,7 +224,8 @@ export class AgentMetadataDraftRepo {
     const info = this.database()
       .prepare(
         `UPDATE agent_metadata_drafts
-            SET revision = ?, review_json = ?, review_token = ?, updated_at = ?
+            SET revision = ?, review_json = ?, review_token = ?, apply_idempotency_key = NULL,
+                updated_at = ?
           WHERE id = ? AND status = 'ready' AND revision = ?`
       )
       .run(
@@ -244,6 +245,28 @@ export class AgentMetadataDraftRepo {
       .prepare('SELECT review_json FROM agent_metadata_drafts WHERE id = ?')
       .get(draftId) as { review_json: string | null } | undefined
     return row?.review_json ? parseJson<AgentMetadataReview>(row.review_json, 'review_json') : null
+  }
+
+  reserveRemoteApply(input: {
+    draftId: string
+    reviewToken: string
+    idempotencyKey: string
+  }): string {
+    const db = this.database()
+    return db.transaction(() => {
+      const row = db.prepare(`SELECT status, review_token, apply_idempotency_key
+        FROM agent_metadata_drafts WHERE id = ?`).get(input.draftId) as
+        | { status: string; review_token: string | null; apply_idempotency_key: string | null }
+        | undefined
+      if (!row || row.status !== 'ready' || row.review_token !== input.reviewToken) {
+        throw new Error('预览已过期，请重新检查后再应用。')
+      }
+      if (row.apply_idempotency_key) return row.apply_idempotency_key
+      db.prepare(`UPDATE agent_metadata_drafts SET apply_idempotency_key = ?
+        WHERE id = ? AND status = 'ready' AND review_token = ? AND apply_idempotency_key IS NULL`)
+        .run(input.idempotencyKey, input.draftId, input.reviewToken)
+      return input.idempotencyKey
+    })()
   }
 
   getStoredOutcome(input: {

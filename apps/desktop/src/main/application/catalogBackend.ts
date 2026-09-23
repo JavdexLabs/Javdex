@@ -254,6 +254,7 @@ export interface CatalogPendingVideoScrapeCommands {
 }
 
 export interface CatalogAgentMetadataCommands {
+  preview: Query<'agentMetadata.preview'>
   findReady: Query<'agentMetadata.findReady'>
   apply: Command<'agentMetadata.apply'>
   discard: Command<'agentMetadata.discard'>

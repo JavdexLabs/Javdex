@@ -7,10 +7,18 @@ import { structuredError } from '@shared/protocol/errors'
 import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
 import { countCatalogTargets, createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
 import {
+  applyTransferredAgentMetadataCandidate,
   applyAgentMetadataDraft,
   discardAgentMetadataDraft,
   findReadyAgentMetadata
 } from '@library/catalog/catalogAgentMetadata'
+import {
+  buildAgentMetadataReview
+} from '@library/catalog/catalogAgentMetadataReview'
+import type {
+  AgentMetadataApplyTransfer,
+  AgentMetadataPreviewTransferInput
+} from '@shared/agentMetadataTypes'
 import { commitManageImageMutation } from '@library/catalog/catalogImageApply'
 import {
   commit,
@@ -121,20 +129,42 @@ export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> 
     const input = args.envelope.input as { target: { kind: 'video' | 'actress'; id: number } }
     return findReadyAgentMetadata(input.target, args.database)
   },
+  'agentMetadata.preview'(args) {
+    const input = args.envelope.input as AgentMetadataPreviewTransferInput
+    const review = buildAgentMetadataReview(
+      input.candidate,
+      input.selection,
+      input.reviewRevision ?? input.candidate.revision + 1,
+      { includeVersions: true }
+    )
+    return {
+      review,
+      versions: review.previewVersions!
+    }
+  },
   'agentMetadata.apply'(args) {
     const input = args.envelope.input as {
       draftId: string
       reviewToken: string
       uploads?: CatalogImageRef[]
+      transfer?: AgentMetadataApplyTransfer
     }
     const mutation = requireMutation(args.envelope)
     return commitImage(args, () =>
-      applyAgentMetadataDraft({
-        ...input,
-        expected: mutation.expectedVersions,
-        operationId: mutation.operationId,
-        database: args.database
-      })
+      input.transfer
+        ? applyTransferredAgentMetadataCandidate({
+            transfer: input.transfer,
+            reviewToken: input.reviewToken,
+            expected: mutation.expectedVersions,
+            operationId: mutation.operationId,
+            database: args.database
+          })
+        : applyAgentMetadataDraft({
+            ...input,
+            expected: mutation.expectedVersions,
+            operationId: mutation.operationId,
+            database: args.database
+          })
     )
   },
   'agentMetadata.discard'(args) {

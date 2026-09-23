@@ -54,7 +54,7 @@ export function createRemoteDesktopCapabilities(options: { frozen?: boolean } = 
         return [action, capability(action, !frozen, frozen ? 'catalogFrozen' : 'available')]
       }
       if (action === 'migrateCatalog') {
-        return [action, capability(action, true, 'available')]
+        return [action, capability(action, false, 'unsupportedOnServer')]
       }
       if (action === 'playRemoteFile' || DESKTOP_TOOLS.has(action)) {
         return [action, capability(action, true, 'available')]

@@ -207,6 +207,7 @@ export const CATALOG_METHODS = {
     discard: true,
   },
   agentMetadata: {
+    preview: true,
     findReady: true,
     apply: true,
     discard: true,

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const node = process.execPath
-if (path.basename(node) !== 'node') {
+if (!/^node(?:\.exe)?$/iu.test(path.basename(node))) {
   console.error(`server:test must use Node, not ${node}`)
   process.exit(1)
 }

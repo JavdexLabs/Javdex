@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
+import { gzipSync } from 'node:zlib'
 import { packMigrationArchive, unpackMigrationArchive } from './catalogMigrationArchive'
 import { isStructuredError } from '@shared/protocol/errors'
 
@@ -44,6 +45,17 @@ describe('catalogMigrationArchive', () => {
         packMigrationArchive([{ name: 'manifest.json', absPath: file }], path.join(root, 'tiny.tar.gz'), {
           maxBytes: 16
         }),
+      (error: unknown) => isStructuredError(error) && error.code === 'LIMIT_EXCEEDED'
+    )
+  })
+
+  it('rejects excessive decompressed tar padding', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-migration-padding-'))
+    roots.push(root)
+    const archive = path.join(root, 'padding.tar.gz')
+    fs.writeFileSync(archive, gzipSync(Buffer.alloc(4096, 0)))
+    await assert.rejects(
+      unpackMigrationArchive(archive, path.join(root, 'out'), { maxBytes: 32 }),
       (error: unknown) => isStructuredError(error) && error.code === 'LIMIT_EXCEEDED'
     )
   })

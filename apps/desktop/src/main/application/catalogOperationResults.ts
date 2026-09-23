@@ -125,7 +125,11 @@ import type {
   NfoExportPreferences,
   NfoExportStateEvent
 } from '@shared/nfoExportTypes'
-import type { AgentMetadataApplyOutcome, AgentMetadataDraft } from '@shared/agentMetadataTypes'
+import type {
+  AgentMetadataApplyOutcome,
+  AgentMetadataDraft,
+  AgentMetadataPreviewTransferResult
+} from '@shared/agentMetadataTypes'
 import type { UploadCreateResult, UploadInspectResult } from '@shared/protocol/uploads'
 import type { PlayGrant } from '@shared/protocol/play'
 import type { MigrationPreview, MigrationStatus } from '@shared/protocol/migration'
@@ -441,6 +445,7 @@ export interface CatalogOperationResults {
   'pendingVideoScrapes.discard': {
     ok: boolean
   }
+  'agentMetadata.preview': AgentMetadataPreviewTransferResult
   'agentMetadata.findReady': {
     draft: AgentMetadataDraft | null
     versions: ExpectedVersions

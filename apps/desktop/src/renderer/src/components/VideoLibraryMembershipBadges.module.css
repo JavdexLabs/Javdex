@@ -18,6 +18,7 @@
 
 .badge {
   display: inline-flex;
+  flex: 0 1 auto;
   min-width: 0;
   min-height: 24px;
   align-items: center;
@@ -29,10 +30,6 @@
   font-size: 11px;
   line-height: 1;
   gap: 5px;
-}
-
-.badge {
-  flex: 0 1 auto;
   cursor: pointer;
   font-family: inherit;
 }
@@ -69,9 +66,11 @@
   background: var(--surface-control-hover);
   border-color: var(--border-strong);
 }
+
 .badge:active {
   background: var(--surface-selected);
 }
+
 .badge:focus-visible {
   outline: var(--focus-outline);
   box-shadow: var(--focus-ring);

@@ -734,6 +734,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       discard: m('pendingVideoScrapes.discard')
     },
     agentMetadata: {
+      preview: q('agentMetadata.preview'),
       findReady: q('agentMetadata.findReady'),
       apply: m('agentMetadata.apply'),
       discard: m('agentMetadata.discard')

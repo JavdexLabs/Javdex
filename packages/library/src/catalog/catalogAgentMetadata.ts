@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type {
+  AgentMetadataApplyTransfer,
   AgentMetadataApplyOutcome,
   AgentMetadataDraft,
   AgentMetadataTarget
@@ -22,6 +23,12 @@ import {
   readVideoAggregateVersion
 } from '@library/catalog/catalogAggregateVersion'
 import { applyActressScrapeCandidate, applyVideoScrapeCandidate } from '@library/catalog/catalogScrapeApply'
+import {
+  replacePendingVideoScrapeFromUploads,
+  submitActressScrapeConflict
+} from '@library/catalog/catalogScrapeApply'
+import { inspectCatalogUpload } from '@library/catalog/catalogUploads'
+import { buildAgentMetadataReview } from '@library/catalog/catalogAgentMetadataReview'
 
 export function findReadyAgentMetadata(
   target: AgentMetadataTarget,
@@ -74,6 +81,207 @@ export interface AgentMetadataCatalogApplyInput {
 }
 
 type CatalogDraftOutcome = Exclude<AgentMetadataApplyOutcome, { status: 'preview_stale' }> & { versions?: ExpectedVersions }
+
+function verifiedTransferUploads(
+  transfer: AgentMetadataApplyTransfer,
+  database: Database.Database,
+  operationId: string
+): Map<string, Extract<CatalogImageRef, { kind: 'upload' }>> {
+  const resources = new Map(
+    transfer.candidate.resources.map((resource) => [`${resource.field}:${resource.position}`, resource])
+  )
+  const uploads = new Map<string, Extract<CatalogImageRef, { kind: 'upload' }>>()
+  for (const item of transfer.uploads) {
+    const key = `${item.field}:${item.position}`
+    const resource = resources.get(key)
+    if (!resource || uploads.has(key)) {
+      throw structuredError('INVALID_INPUT', '候选图片与上传清单不一致', { field: 'transfer.uploads' }, operationId)
+    }
+    const inspected = inspectCatalogUpload(item.image.uploadId, {}, database)
+    if (
+      inspected.consumed ||
+      inspected.byteLength !== resource.sizeBytes ||
+      inspected.sha256 !== resource.sha256 ||
+      (resource.width != null && inspected.width !== resource.width) ||
+      (resource.height != null && inspected.height !== resource.height)
+    ) {
+      throw structuredError('INVALID_INPUT', '候选图片上传内容与桌面预览不一致', { field: key }, operationId)
+    }
+    uploads.set(key, item.image)
+  }
+  return uploads
+}
+
+/** Apply a desktop-owned candidate without persisting Agent runtime state on the server. */
+export function applyTransferredAgentMetadataCandidate(input: {
+  transfer: AgentMetadataApplyTransfer
+  reviewToken: string
+  expected: ExpectedVersions
+  operationId: string
+  database?: Database.Database
+}): CatalogDraftOutcome {
+  const database = input.database ?? getDb()
+  const { candidate, review } = input.transfer
+  if (
+    candidate.draftId !== review.draftId ||
+    candidate.target.kind !== review.kind ||
+    candidate.revision !== review.revision ||
+    review.token !== input.reviewToken
+  ) {
+    throw structuredError('VERSION_CONFLICT', '预览已过期，请重新检查后再应用。', { field: 'reviewToken' }, input.operationId)
+  }
+  const fresh = buildAgentMetadataReview(candidate, review.selection, review.revision, { includeVersions: true })
+  if (fresh.token !== review.token) {
+    throw structuredError('VERSION_CONFLICT', '资料库内容已变化，请重新检查预览。', { field: 'reviewToken' }, input.operationId)
+  }
+  if (!fresh.canApply) {
+    throw structuredError('INVALID_INPUT', '当前预览仍有必须处理的问题。', { field: 'reviewToken' }, input.operationId)
+  }
+  const uploads = verifiedTransferUploads(input.transfer, database, input.operationId)
+  const image = (field: string, position: number) => uploads.get(`${field}:${position}`)
+
+  if (candidate.target.kind === 'video' && candidate.payload.kind === 'video' && fresh.kind === 'video') {
+    const selected = new Set(fresh.selection.fields)
+    const cover = selected.has('cover') ? image('cover', 0) : undefined
+    const samples = selected.has('samples')
+      ? (candidate.payload.result.sampleImageUrls ?? []).map((_, position) => image('samples', position))
+      : []
+    if (samples.some((item) => !item)) {
+      throw structuredError('INVALID_INPUT', '样例图片上传不完整', { field: 'transfer.uploads' }, input.operationId)
+    }
+    const actressAvatars = candidate.resources
+      .filter((resource) => resource.field === 'actressAvatar')
+      .flatMap((resource) => {
+        const actress = candidate.payload.kind === 'video'
+          ? candidate.payload.result.actresses?.[resource.position]
+          : undefined
+        const uploaded = image('actressAvatar', resource.position)
+        const gender = actress?.gender ?? 'female'
+        const selectedGender = gender === 'male'
+          ? selected.has('actressesMale')
+          : selected.has('actressesFemale')
+        return actress?.name && uploaded && selectedGender ? [{ name: actress.name, image: uploaded }] : []
+      })
+    if (fresh.identityConflictVideoId) {
+      const routed = replacePendingVideoScrapeFromUploads({
+        videoId: candidate.target.id,
+        selectedFields: fresh.selection.fields,
+        applicableFields: [...new Set(fresh.impacts.filter(item => item.action !== 'preserve').map(item => item.field))],
+        updateMode: fresh.selection.mode,
+        request: {
+          source: 'agent-metadata',
+          sourceUrl: candidate.source.displayUrl,
+          fields: fresh.selection.fields,
+          mode: fresh.selection.mode
+        },
+        warnings: fresh.warnings,
+        sources: [{
+          pluginName: 'Agent 元数据采集',
+          pluginSource: 'builtin',
+          sourceName: candidate.source.sourceName ?? 'Agent',
+          selectedFields: fresh.selection.fields,
+          candidates: [{
+            result: candidate.payload.result,
+            sourceUrl: candidate.source.displayUrl,
+            cover,
+            samples: samples.filter((item): item is NonNullable<typeof item> => Boolean(item)),
+            actressAvatars
+          }]
+        }],
+        expected: input.expected,
+        operationId: input.operationId,
+        database
+      })
+      return {
+        status: 'routed_to_pending',
+        target: candidate.target,
+        pendingKind: 'video',
+        pendingId: routed.pendingScrapeId,
+        warnings: fresh.warnings,
+        versions: routed.versions
+      }
+    }
+    const applied = applyVideoScrapeCandidate({
+      videoId: candidate.target.id,
+      fields: fresh.selection.fields,
+      mode: fresh.selection.mode,
+      candidate: candidate.payload.result,
+      sourceName: candidate.source.sourceName,
+      ratingSourceName: candidate.source.sourceName,
+      cover,
+      samples: samples.filter((item): item is NonNullable<typeof item> => Boolean(item)),
+      actressAvatars,
+      directorSelectionId: fresh.selection.directorSelectionId,
+      directorAmbiguity: 'choice',
+      expected: input.expected,
+      operationId: input.operationId,
+      database
+    })
+    return {
+      status: applied.applied ? 'applied' : 'no_op',
+      target: candidate.target,
+      warnings: [...candidate.warnings, ...applied.warnings],
+      versions: applied.versions
+    }
+  }
+
+  if (candidate.target.kind !== 'actress' || candidate.payload.kind !== 'actress' || fresh.kind !== 'actress') {
+    throw structuredError('INVALID_INPUT', '候选与预览类型不一致', { field: 'transfer' }, input.operationId)
+  }
+  const selected = new Set(fresh.selection.fields)
+  const avatar = selected.has('avatar') ? image('avatar', 0) : undefined
+  const gallery = selected.has('gallery')
+    ? (candidate.payload.result.galleryImageUrls ?? []).map((_, position) => image('gallery', position))
+    : []
+  if (gallery.some((item) => !item)) {
+    throw structuredError('INVALID_INPUT', '写真上传不完整', { field: 'transfer.uploads' }, input.operationId)
+  }
+  if (fresh.nameConflicts?.length) {
+    const actress = getActressDetail(candidate.target.id)
+    if (!actress) throw structuredError('INVALID_INPUT', '演员不存在', { entityKind: 'actress', entityId: candidate.target.id }, input.operationId)
+    const routed = submitActressScrapeConflict({
+      actressId: candidate.target.id,
+      pluginName: 'Agent 元数据采集',
+      pluginSource: 'builtin',
+      queryName: candidate.payload.result.mainName ?? actress.main_name,
+      selectedFields: fresh.selection.fields,
+      applicableFields: [...new Set(fresh.impacts.filter(item => item.action !== 'preserve').map(item => item.field))],
+      mode: fresh.selection.mode,
+      candidate: candidate.payload.result,
+      warnings: fresh.warnings,
+      avatar,
+      gallery: gallery.filter((item): item is NonNullable<typeof item> => Boolean(item)),
+      expected: input.expected,
+      operationId: input.operationId,
+      database
+    })
+    return {
+      status: 'routed_to_pending',
+      target: candidate.target,
+      pendingKind: 'actress',
+      pendingId: routed.pendingId,
+      warnings: fresh.warnings,
+      versions: routed.versions
+    }
+  }
+  const applied = applyActressScrapeCandidate({
+    actressId: candidate.target.id,
+    candidate: candidate.payload.result,
+    avatar,
+    gallery: gallery.filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    fields: fresh.selection.fields,
+    mode: fresh.selection.mode,
+    expected: input.expected,
+    operationId: input.operationId,
+    database
+  })
+  return {
+    status: applied.applied ? 'applied' : 'no_op',
+    target: candidate.target,
+    warnings: [...candidate.warnings, ...applied.warnings],
+    versions: applied.versions
+  }
+}
 
 /** Same-store host: the caller owns the catalog transaction and receipt. */
 export function applyAgentMetadataDraft(input: AgentMetadataCatalogApplyInput): CatalogDraftOutcome {

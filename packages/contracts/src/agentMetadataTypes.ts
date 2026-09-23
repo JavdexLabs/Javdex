@@ -11,6 +11,8 @@ import type {
   VideoScrapeField,
   VideoScrapeUpdateMode
 } from './videoScrapeTypes'
+import type { CatalogImageRef } from './protocol/uploads'
+import type { ExpectedVersions } from './protocol/versions'
 
 export type AgentMetadataTarget =
   | { kind: 'video'; id: number }
@@ -117,6 +119,38 @@ export interface AgentMetadataDraft {
   updatedAt: string
 }
 
+/** Desktop-owned candidate data that can be evaluated without exposing local staging paths. */
+export interface AgentMetadataCandidateTransfer {
+  draftId: string
+  target: AgentMetadataTarget
+  revision: number
+  source: AgentMetadataSource
+  payload: AgentMetadataDraftPayload
+  resources: Array<Omit<AgentMetadataDraftResource, 'stagedPath'>>
+  warnings: string[]
+}
+
+export interface AgentMetadataPreviewTransferInput {
+  candidate: AgentMetadataCandidateTransfer
+  selection: AgentMetadataPlanInput
+  reviewRevision?: number
+}
+
+export interface AgentMetadataPreviewTransferResult {
+  review: AgentMetadataReview
+  versions: ExpectedVersions
+}
+
+export interface AgentMetadataApplyTransfer {
+  candidate: AgentMetadataCandidateTransfer
+  review: Pick<AgentMetadataReview, 'kind' | 'draftId' | 'revision' | 'token' | 'selection' | 'previewVersions'>
+  uploads: Array<{
+    field: AgentMetadataDraftResource['field']
+    position: number
+    image: Extract<CatalogImageRef, { kind: 'upload' }>
+  }>
+}
+
 export type AgentMetadataPlanInput =
   | {
       kind: 'video'
@@ -140,6 +174,8 @@ export interface AgentMetadataVideoReview {
   draftId: string
   revision: number
   token: string
+  /** Catalog versions captured by a remote authoritative preview. */
+  previewVersions?: ExpectedVersions
   selection: Extract<AgentMetadataPlanInput, { kind: 'video' }>
   impacts: Array<{
     field: VideoScrapeField
@@ -161,6 +197,8 @@ export interface AgentMetadataActressReview {
   draftId: string
   revision: number
   token: string
+  /** Catalog versions captured by a remote authoritative preview. */
+  previewVersions?: ExpectedVersions
   selection: Extract<AgentMetadataPlanInput, { kind: 'actress' }>
   impacts: ActressScrapeFieldImpact[]
   warnings: string[]

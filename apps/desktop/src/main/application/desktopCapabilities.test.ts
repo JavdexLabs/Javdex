@@ -21,8 +21,8 @@ describe('createRemoteSessionCapabilities', () => {
     assert.equal(frozen.manageBrowserPairing.allowed, false)
     assert.equal(frozen.manageBrowserPairing.reason, 'catalogFrozen')
     assert.equal(frozen.playRemoteFile.allowed, true)
-    assert.equal(frozen.migrateCatalog.allowed, true)
-    assert.equal(frozen.migrateCatalog.reason, 'available')
+    assert.equal(frozen.migrateCatalog.allowed, false)
+    assert.equal(frozen.migrateCatalog.reason, 'unsupportedOnServer')
   })
 
   it('names every capability action for local and remote session states', () => {
@@ -44,8 +44,8 @@ describe('createRemoteSessionCapabilities', () => {
     assert.equal(available.runPlugins.allowed, true)
     assert.equal(available.playLocalFile.allowed, false)
     assert.equal(available.playLocalFile.reason, 'remoteMode')
-    assert.equal(available.migrateCatalog.allowed, true)
-    assert.equal(available.migrateCatalog.reason, 'available')
+    assert.equal(available.migrateCatalog.allowed, false)
+    assert.equal(available.migrateCatalog.reason, 'unsupportedOnServer')
     assert.equal(available.manageBrowserPairing.allowed, true)
     assert.equal(available.manageBrowserPairing.reason, 'available')
 
@@ -55,7 +55,7 @@ describe('createRemoteSessionCapabilities', () => {
     assert.equal(frozen.manageBrowserPairing.allowed, false)
     assert.equal(frozen.manageBrowserPairing.reason, 'catalogFrozen')
     assert.equal(frozen.playRemoteFile.allowed, true)
-    assert.equal(frozen.migrateCatalog.allowed, true)
+    assert.equal(frozen.migrateCatalog.allowed, false)
 
     const expectedFailure: Record<string, string> = {
       disconnected: 'disconnected',

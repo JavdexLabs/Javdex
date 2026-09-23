@@ -31,6 +31,10 @@ import type {
   UpdateMediaLibraryRootInput
 } from '@shared/mediaLibraryIpcContract'
 import type { UploadCreateInput } from '@shared/protocol/uploads'
+import type {
+  AgentMetadataApplyTransfer,
+  AgentMetadataPreviewTransferInput
+} from '@shared/agentMetadataTypes'
 
 import type { z } from 'zod'
 import type { MANAGE_OPERATION_INPUTS } from '@shared/manage/inputs'
@@ -49,6 +53,10 @@ type LocalPlan<K extends ManageOperationId> = Omit<CatalogWireInput<K>, 'planId'
   expectedRevision?: string
 }
 export interface CatalogDesktopInputs {
+  'agentMetadata.preview': AgentMetadataPreviewTransferInput
+  'agentMetadata.apply': Omit<CatalogWireInput<'agentMetadata.apply'>, 'transfer'> & {
+    transfer?: AgentMetadataApplyTransfer
+  }
   'videos.edit': {
     videoId: number
     fields: CatalogWireInput<'videos.edit'>['fields'] & VideoEditInput

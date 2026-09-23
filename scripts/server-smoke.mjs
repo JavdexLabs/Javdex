@@ -12,6 +12,17 @@ function digestToken(token) {
 }
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const requiredBuildFiles = [
+  path.join(root, 'out', 'server', 'index.js'),
+  path.join(root, 'out', 'server', 'package.json'),
+  path.join(root, 'out', 'server', 'web', 'index.html')
+]
+const missingBuildFiles = requiredBuildFiles.filter(file => !fs.existsSync(file))
+if (missingBuildFiles.length > 0) {
+  process.stderr.write('server:smoke requires a complete out/server build. Run npm run server:build first.\n')
+  for (const file of missingBuildFiles) process.stderr.write(`missing: ${path.relative(root, file)}\n`)
+  process.exit(1)
+}
 const docker = spawnSync('docker', ['version'], { encoding: 'utf8' })
 if (docker.status !== 0) {
   process.stderr.write(

@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-assert.equal(path.basename(process.execPath), 'node')
+assert.match(path.basename(process.execPath), /^node(?:\.exe)?$/iu)
 assert.equal(process.versions.electron, undefined)
 
 const outDir = path.join(root, 'out', 'server')
@@ -34,13 +34,16 @@ fs.mkdirSync(dataDir, { recursive: true })
 fs.mkdirSync(mediaDir, { recursive: true })
 fs.writeFileSync(movie, Buffer.from('0123456789abcdef'))
 
-const npmInstall = spawnSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], {
+const npmInstall = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm',
+  ['install', '--omit=dev', '--no-audit', '--no-fund'], {
   cwd: appDir,
-  encoding: 'utf8'
+  encoding: 'utf8',
+  shell: process.platform === 'win32'
 })
 if (npmInstall.status !== 0) {
-  process.stderr.write(npmInstall.stdout)
-  process.stderr.write(npmInstall.stderr)
+  if (npmInstall.stdout) process.stderr.write(npmInstall.stdout)
+  if (npmInstall.stderr) process.stderr.write(npmInstall.stderr)
+  if (npmInstall.error) process.stderr.write(`${npmInstall.error.message}\n`)
   process.exit(npmInstall.status ?? 1)
 }
 
@@ -101,7 +104,8 @@ function startServer() {
       }),
     stop: () =>
       new Promise((resolve) => {
-        child.once('exit', (code) => resolve(code ?? 1))
+        child.once('exit', (code, signal) =>
+          resolve(process.platform === 'win32' && (code === 1 || signal === 'SIGTERM') ? 0 : code ?? 1))
         child.kill('SIGTERM')
       })
   }

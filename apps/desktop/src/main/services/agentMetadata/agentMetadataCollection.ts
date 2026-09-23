@@ -5,6 +5,7 @@ import path from 'node:path'
 import { readTestUserDataPath } from '@shared/appIdentity'
 import type {
   AgentMetadataApplyInput,
+  AgentMetadataApplyTransfer,
   AgentMetadataApplyOutcome,
   AgentMetadataDiscardInput,
   AgentMetadataDraft,
@@ -37,6 +38,9 @@ import { getActressDetail } from '@library/db/actressRepo'
 import { getVideoById } from '@library/db/videoRepo'
 import { agentMetadataBrowser } from './browserAdapter'
 import { agentMetadataDraftService } from './draftService'
+import type { AgentMetadataTargetIdentity } from './draftService'
+import { agentMetadataCandidateFromDraft } from '@library/catalog/catalogAgentMetadataReview'
+import { inspectServedImage, mediaAssetStore } from '@library/mediaAssetStore'
 import { resumeDesktopManagedDraft } from './desktopDraftStore'
 import { createAgentMetadataToolHandlers } from './toolPack'
 import { AgentMetadataActivityTimeline } from './activityTimeline'
@@ -110,6 +114,35 @@ async function describeBoundTarget(
   }
   const names = [...new Set([actress.main_name, ...(actress.names ?? []).map((item) => item.name)])]
   return `当前目标是演员 #${actress.id}，库内已知名称为：${names.map((name) => `「${name}」`).join('、')}。优先用同名核对身份；若页面名称均不匹配，必须提交 identityMatched=false 交由用户确认，不能猜测。`
+}
+
+async function readBoundTargetIdentity(
+  catalog: CatalogBackend,
+  target: AgentMetadataTarget
+): Promise<AgentMetadataTargetIdentity> {
+  if (target.kind === 'video') {
+    const video = (await catalog.queries.getVideo({
+      scope: { kind: 'all' },
+      videoId: target.id
+    })) as { id: number; code: string } | null
+    if (!video?.code) throw new Error('影片不存在。')
+    return { kind: 'video', code: video.code }
+  }
+  const actress = (await catalog.actresses.get({ actressId: target.id })) as {
+    id: number
+    main_name: string
+    names?: Array<{ name: string }>
+  } | null
+  if (!actress?.main_name) throw new Error('演员不存在。')
+  return {
+    kind: 'actress',
+    names: [...new Set([actress.main_name, ...(actress.names ?? []).map((item) => item.name)])]
+  }
+}
+
+function childOperationId(parent: string, field: string, position: number): string {
+  const hex = createHash('sha256').update(`${parent}:${field}:${position}`).digest('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 }
 
 const TARGET_PROMPT_BUILDERS = {
@@ -221,7 +254,10 @@ export class AgentMetadataCollection {
             runId,
             target: active.state.target,
             args,
-            signal
+            signal,
+            ...(this.catalog?.mode === 'remote'
+              ? { targetIdentity: await readBoundTargetIdentity(this.catalog, active.state.target) }
+              : {})
           })
           const draft = agentMetadataDraftService.findReadyForTarget(active.state.target)
           if (!draft || draft.runId !== runId) throw new Error('元数据候选保存后无法读取。')
@@ -473,8 +509,19 @@ export class AgentMetadataCollection {
     }
   }
 
-  plan(input: AgentMetadataPlanInput): AgentMetadataReview {
-    const review = agentMetadataDraftService.plan(input)
+  async plan(input: AgentMetadataPlanInput): Promise<AgentMetadataReview> {
+    let review: AgentMetadataReview
+    if (this.catalog?.mode === 'remote') {
+      const draft = agentMetadataDraftService.getDraft(input.draftId)
+      if (!draft) throw new Error('元数据草稿不存在。')
+      const preview = await this.catalog.agentMetadata.preview({
+        candidate: agentMetadataCandidateFromDraft(draft),
+        selection: input
+      })
+      review = agentMetadataDraftService.saveTransferredReview({ selection: input, review: preview.review })
+    } else {
+      review = agentMetadataDraftService.plan(input)
+    }
     this.syncDraftState(review.draftId, 'ready', '已更新字段影响预览')
     return review
   }
@@ -536,21 +583,140 @@ export class AgentMetadataCollection {
       // A proven commit must be resumed before loading new aggregate versions.
       const resumed = resumeDesktopManagedDraft(input)
       if (resumed) return resumed
+      const ready = (await catalog.agentMetadata.findReady({ target: draft.target })) as {
+        versions?: ExpectedVersions
+      }
+      const versions: ExpectedVersions = { ...(ready.versions ?? {}) }
+      versions.Q = { generation: 1, revision: draft.revision }
+      return (await catalog.agentMetadata.apply(
+        { draftId: input.draftId, reviewToken: input.reviewToken },
+        { operationId: input.idempotencyKey, expectedVersions: versions }
+      )) as AgentMetadataApplyOutcome
     }
-    const ready = (await catalog.agentMetadata.findReady({ target: draft.target })) as {
-      draft?: AgentMetadataDraft | null
-      versions?: ExpectedVersions
+
+    const stored = agentMetadataDraftService.getStoredReview(draft.id)
+    if (!stored || stored.token !== input.reviewToken || draft.revision !== stored.revision || !stored.previewVersions) {
+      throw new Error('预览已过期，请重新检查后再应用。')
     }
-    const versions: ExpectedVersions = { ...(ready.versions ?? {}) }
-    versions.Q = { generation: 1, revision: draft.revision }
-    return (await catalog.agentMetadata.apply(
-      { draftId: input.draftId, reviewToken: input.reviewToken },
-      { operationId: input.idempotencyKey, expectedVersions: versions }
+    const operationId = agentMetadataDraftService.reserveTransferredApply(input)
+    const receipt = await catalog.tasks.getOperation({ operationId })
+    if (receipt?.status === 'rejected') {
+      throw new Error('上次应用已被服务端拒绝，请重新检查预览。')
+    }
+    const candidate = agentMetadataCandidateFromDraft(draft)
+    let checked: { review: AgentMetadataReview; versions: ExpectedVersions }
+    if (receipt?.status === 'applied') {
+      checked = { review: stored, versions: stored.previewVersions }
+    } else {
+      checked = await catalog.agentMetadata.preview({
+        candidate,
+        selection: stored.selection,
+        reviewRevision: stored.revision
+      })
+      if (checked.review.token !== stored.token) {
+        const refreshed = await catalog.agentMetadata.preview({
+          candidate,
+          selection: stored.selection,
+          reviewRevision: draft.revision + 1
+        })
+        const saved = agentMetadataDraftService.saveTransferredReview({
+          selection: stored.selection,
+          review: refreshed.review
+        })
+        return {
+          status: 'preview_stale',
+          target: draft.target,
+          review: saved,
+          warnings: ['媒体库内容在预览后发生变化，请检查更新后的影响后再应用。']
+        }
+      }
+    }
+
+    const transfer: AgentMetadataApplyTransfer = {
+      candidate,
+      review: {
+        kind: checked.review.kind,
+        draftId: checked.review.draftId,
+        revision: checked.review.revision,
+        token: checked.review.token,
+        selection: checked.review.selection,
+        previewVersions: checked.review.previewVersions
+      },
+      uploads: []
+    }
+    const pendingRoute = checked.review.kind === 'video'
+      ? Boolean(checked.review.identityConflictVideoId)
+      : Boolean(checked.review.nameConflicts?.length)
+    for (const resource of draft.resources) {
+      const selected = new Set(checked.review.selection.fields)
+      const resourceSelected = draft.payload.kind === 'video'
+        ? resource.field === 'cover'
+          ? selected.has('cover')
+          : resource.field === 'samples'
+            ? selected.has('samples')
+            : resource.field === 'actressAvatar'
+              ? (draft.payload.result.actresses?.[resource.position]?.gender ?? 'female') === 'male'
+                ? selected.has('actressesMale')
+                : selected.has('actressesFemale')
+              : false
+        : resource.field === 'avatar'
+          ? selected.has('avatar')
+          : resource.field === 'gallery'
+            ? selected.has('gallery')
+            : false
+      if (!resourceSelected) continue
+      const body = draft.target.kind === 'video'
+        ? mediaAssetStore.readVideoScrapeStagedImage(resource.stagedPath)
+        : mediaAssetStore.readActressScrapeStagedImage(resource.stagedPath)
+      if (
+        body.byteLength !== resource.sizeBytes ||
+        createHash('sha256').update(body).digest('hex') !== resource.sha256
+      ) {
+        throw new Error('候选图片已变化，请重新采集。')
+      }
+      const contentType = await inspectServedImage(body)
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'].includes(contentType)) {
+        throw new Error('候选图片格式不受服务端支持。')
+      }
+      const purpose = pendingRoute
+        ? 'pendingScrapeStaging'
+        : resource.field === 'cover'
+          ? 'videoCover'
+          : resource.field === 'samples'
+            ? 'videoSample'
+            : resource.field === 'gallery'
+              ? 'actressGallery'
+              : 'actressAvatar'
+      const slot = await catalog.assets.createUpload({
+        purpose,
+        contentType: contentType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' | 'image/avif'
+      }, { operationId: childOperationId(operationId, resource.field, resource.position), expectedVersions: {} })
+      let uploaded = false
+      try {
+        const inspected = await catalog.assets.inspectUpload({ uploadId: slot.uploadId })
+        uploaded = inspected.consumed || inspected.byteLength === body.byteLength
+      } catch (error) {
+        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'UPLOAD_NOT_READY')) {
+          throw error
+        }
+      }
+      if (!uploaded) await catalog.assets.putUpload({ uploadId: slot.uploadId, body, contentType })
+      transfer.uploads.push({
+        field: resource.field,
+        position: resource.position,
+        image: { kind: 'upload', uploadId: slot.uploadId }
+      })
+    }
+    const outcome = (await catalog.agentMetadata.apply(
+      { draftId: input.draftId, reviewToken: input.reviewToken, transfer },
+      { operationId, expectedVersions: stored.previewVersions }
     )) as AgentMetadataApplyOutcome
+    agentMetadataDraftService.completeTransferredApply({ ...input, idempotencyKey: operationId }, outcome)
+    return outcome
   }
 
   async discard(input: AgentMetadataDiscardInput): Promise<void> {
-    if (this.catalog) {
+    if (this.catalog?.mode === 'local') {
       await this.catalog.agentMetadata.discard(
         { draftId: input.draftId },
         {
@@ -566,7 +732,9 @@ export class AgentMetadataCollection {
   }
 
   async findReady(target: AgentMetadataTarget): Promise<AgentMetadataDraft | null> {
-    if (!this.catalog) return agentMetadataDraftService.findReadyForTarget(target)
+    if (!this.catalog || this.catalog.mode === 'remote') {
+      return agentMetadataDraftService.findReadyForTarget(target)
+    }
     const result = (await this.catalog.agentMetadata.findReady({ target })) as
       | { draft?: AgentMetadataDraft | null }
       | AgentMetadataDraft

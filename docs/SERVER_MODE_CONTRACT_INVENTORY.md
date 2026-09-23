@@ -1,6 +1,6 @@
 # 服务端实现与合同
 
-核对基线：2026-09-19，`76a871e` / workspace `0.7.1`。本页集中维护当前架构、功能接线及合同导航；部署步骤见 [操作说明](SERVER_MODE.md)，进度与验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。
+核对基线：2026-09-23，PR #115 工作分支 / workspace `0.7.1`。本页集中维护当前架构、功能接线及合同导航；部署步骤见 [操作说明](SERVER_MODE.md)，进度与验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。
 
 权威实现是 TypeScript，而不是本文件：
 
@@ -57,11 +57,12 @@
 
 ## 桌面工作存储与恢复
 
-桌面启动显式绑定 `AgentRunStore` 和 `AgentMetadataDraftRepo` 到 workStore；本地模式另行绑定 catalog 提交协调器，远程模式不打开本机 catalog。未配置工作连接时拒绝访问，退出时解除绑定。Node 管理入口仍将自己的 catalog 连接显式传给草稿仓储，不将服务端草稿当成桌面工作记录。
+桌面启动显式绑定 `AgentRunStore` 和 `AgentMetadataDraftRepo` 到 workStore；本地模式另行绑定 catalog 提交协调器，远程模式不打开本机 catalog。未配置工作连接时拒绝访问，退出时解除绑定。Agent 对话、草稿、证据和暂存图片只保存在桌面；服务端的 `agentMetadata.preview` 对桌面候选做权威预览，`agentMetadata.apply` 接收最终候选和已选图片上传并重新校验后应用或转入待确认，不保存桌面运行状态。
 
 - [agentWorkCopy.ts](../apps/desktop/src/main/desktop/agentWorkCopy.ts) 仅在首次复制旧工作记录时使用 ATTACH；复制校验内容、关系及加密数据，ready 后不再覆盖工作记录。旧 catalog 源记录保留。正常运行不附加 work 库，不替换 prepare/exec，也不改写 SQL 表名。
 - [draftApplyCommit.ts](../apps/desktop/src/main/services/agentMetadata/draftApplyCommit.ts) 先保存不可变提交意图和 catalog 身份，再提交正式资料及回执，最后更新工作草稿并清理暂存资源。重试优先读取原回执，不重复更新正式版本；清理失败保留待恢复状态。
 - [draftDiscardCommit.ts](../apps/desktop/src/main/services/agentMetadata/draftDiscardCommit.ts) 同样先取得 catalog 回执再丢弃工作草稿。启动时只在同 catalog、无回执且草稿仍为原状态/版本时释放未提交意图；未知读取错误或状态不一致不能当作未提交成功处理。
+- 远程 Agent 应用不使用本地 catalog 提交协调器：桌面保存服务端预览，提交成功后才终结本地草稿并清理暂存文件。连接结果不确定时依靠服务端 operation receipt 重试同一 operationId。
 - 影片删除在 catalog 回执中保留工作草稿快照，由桌面在正式删除后清理；草稿变化或 catalog 身份不符时拒绝清理，重复恢复不误删新草稿。暂存图片清理显式读取工作仓储，迁库导出脱敏使用独立导出连接。
 
 这些流程是有持久回执的分步提交，不是两个 SQLite 数据库之间的原子事务。调用者不得重新建立全局表名前缀或依靠 catalog 连接读取桌面工作表。
@@ -85,6 +86,8 @@
 | `writer.handoffBegin` / `recoverIssue` | 当前 writer / 部署侧恢复（环回限制） | 签发一次性令牌；不是立即撤销旧 writer |
 | `uploads.create` / `inspect` | 管理写/读 | 上传完成 ≠ 业务受理 |
 | `play.grant` | 管理读 | 12 小时资源凭据 |
+| `agentMetadata.preview` | 管理读 | 对桌面候选生成权威影响、令牌与当前版本；不持久化草稿 |
+| `agentMetadata.apply` | 管理写 | 再校验候选/预览并应用，或转入待确认；Agent runtime 留在桌面 |
 | `tasks.*` / `operations.get` / `targetLists.*` | 读或写 | 取消只到安全边界 |
 | `migration.*` | 独立迁移授权 | 启用/放弃同一决策点 |
 

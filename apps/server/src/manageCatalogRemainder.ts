@@ -521,12 +521,6 @@ export const remainderHandlers: Partial<Record<ManageOperationId, CatalogHandler
   'pendingVideoScrapes.list'() {
     return listPendingVideoScrapes()
   },
-  'pendingVideoScrapes.confirm'() {
-    throw structuredError(
-      'UNSUPPORTED_CAPABILITY',
-      '影片待确认刮削确认依赖桌面刮削应用，S10 再接入'
-    )
-  },
   'pendingVideoScrapes.discard'(args) {
     const input = args.envelope.input as { pendingScrapeId: number }
     const mutation = requireMutation(args.envelope)

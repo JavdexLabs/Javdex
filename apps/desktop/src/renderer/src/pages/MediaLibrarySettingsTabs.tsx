@@ -52,6 +52,7 @@ import {
 } from '../listView/pendingRoutes'
 import styles from './MediaLibrarySettingsPage.module.css'
 import { api } from '../api'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
 const SCAN_TRIGGER_LABEL: Record<LibraryScanSummary['trigger'], string> = {
   manual: '手动',
@@ -144,6 +145,7 @@ function ScanHistorySummary({
   onOpenPending: (target: PendingItemKey) => void
   onOpenVideo: (videoId: number) => void
 }): JSX.Element {
+  const { capabilities } = useDesktopSession()
   return (
     <div className={styles.scanHistorySummary}>
       <div className={styles.scanHistorySummaryHead}>
@@ -188,15 +190,17 @@ function ScanHistorySummary({
               >
                 复制路径
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() =>
-                  void api.scan.revealAuditFile(summary.libraryId, folder)
-                }
-              >
-                在文件夹中显示
-              </Button>
+              {capabilities.revealLocalFile.allowed ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() =>
+                    void api.scan.revealAuditFile(summary.libraryId, folder)
+                  }
+                >
+                  在文件夹中显示
+                </Button>
+              ) : null}
             </div>
           ))}
         </div>

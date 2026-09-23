@@ -12,6 +12,7 @@ import SelectControl from '../SelectControl'
 import { UI_ICON_SM } from '../iconDefaults'
 import styles from './UnrecognizedRow.module.css'
 import { ALL_CATALOG_SCOPE } from '../../query/catalogScopes'
+import { useDesktopSession } from '../../desktop/DesktopSessionContext'
 
 /** One editable resolution card in the audit list: manual import or rename on disk. */
 export default function UnrecognizedRow({
@@ -26,6 +27,7 @@ export default function UnrecognizedRow({
   onResolved: (oldPath: string) => void
 }): JSX.Element {
   const toast = useToast()
+  const { capabilities } = useDesktopSession()
   const fullName = filePath.split(/[\\/]/).pop() || filePath
   const dot = fullName.lastIndexOf('.')
   const baseName = dot > 0 ? fullName.slice(0, dot) : fullName
@@ -175,13 +177,15 @@ export default function UnrecognizedRow({
             label="复制完整路径"
             onClick={() => void copyPath()}
           />
-          <IconButton
-            size="sm"
-            className={styles.iconButton}
-            icon={<FolderOpen {...UI_ICON_SM} />}
-            label="在文件夹中显示"
-            onClick={() => void revealFile()}
-          />
+          {capabilities.revealLocalFile.allowed ? (
+            <IconButton
+              size="sm"
+              className={styles.iconButton}
+              icon={<FolderOpen {...UI_ICON_SM} />}
+              label="在文件夹中显示"
+              onClick={() => void revealFile()}
+            />
+          ) : null}
         </div>
       </div>
 

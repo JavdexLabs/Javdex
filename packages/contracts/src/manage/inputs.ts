@@ -33,15 +33,94 @@ const emptyInput = z.object({}).strict()
 const videoScrapeFieldSchema = z.enum(
   ALL_VIDEO_SCRAPE_FIELDS as unknown as [string, ...string[]]
 )
+const actressScrapeFieldSchema = z.enum(
+  ALL_ACTRESS_SCRAPE_FIELDS as unknown as [string, ...string[]]
+)
+const scrapeModeSchema = z.enum(['replace', 'fillEmpty', 'replaceIfPresent'])
+const agentTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('video'), id: idSchema }).strict(),
+  z.object({ kind: z.literal('actress'), id: idSchema }).strict()
+])
+const agentFieldList = (field: z.ZodType<string>) => z.array(field).max(20)
+const agentVideoResultSchema = z.object({
+  code: z.string().min(1).max(200),
+  title: limitedTextSchema.optional(), summary: limitedTextSchema.optional(),
+  coverUrl: z.string().max(4096).optional(), releaseDate: z.string().max(80).optional(),
+  maker: limitedTextSchema.optional(), publisher: limitedTextSchema.optional(),
+  series: limitedTextSchema.optional(), director: limitedTextSchema.optional(),
+  durationSeconds: z.number().finite().nonnegative().optional(),
+  sourceUrl: z.string().max(4096).optional(), ratingAverage: z.number().finite().optional(),
+  ratingCount: z.number().finite().nonnegative().optional(),
+  sampleImageUrls: z.array(z.string().max(4096)).max(40).optional(),
+  actresses: z.array(z.object({
+    name: limitedTextSchema.min(1), avatarUrl: z.string().max(4096).optional(),
+    gender: z.enum(['female', 'male']).optional()
+  }).strict()).max(100).optional(),
+  tags: z.array(limitedTextSchema).max(100).optional()
+}).strict()
+const agentActressResultSchema = z.object({
+  mainName: limitedTextSchema.optional(), nameZh: limitedTextSchema.optional(),
+  nameEn: limitedTextSchema.optional(), avatarUrl: z.string().max(4096).optional(),
+  birthDate: z.string().max(80).optional(), debutDate: z.string().max(80).optional(),
+  heightCm: z.number().finite().optional(), bustCm: z.number().finite().optional(),
+  waistCm: z.number().finite().optional(), hipCm: z.number().finite().optional(),
+  cupSize: z.string().max(80).optional(), bloodType: z.string().max(80).optional(),
+  zodiac: z.string().max(80).optional(), nationality: limitedTextSchema.optional(),
+  profileSummary: limitedTextSchema.optional(),
+  galleryImageUrls: z.array(z.string().max(4096)).max(40).optional(),
+  aliases: z.array(limitedTextSchema).max(100).optional(),
+  sourceUrl: z.string().max(4096).optional()
+}).strict()
+const agentPayloadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('video'), result: agentVideoResultSchema,
+    observedFields: agentFieldList(videoScrapeFieldSchema),
+    explicitlyEmptyFields: agentFieldList(videoScrapeFieldSchema),
+    evidenceRefs: z.array(z.string().max(4096)).max(100) }).strict(),
+  z.object({ kind: z.literal('actress'), result: agentActressResultSchema,
+    observedFields: agentFieldList(actressScrapeFieldSchema),
+    explicitlyEmptyFields: agentFieldList(actressScrapeFieldSchema),
+    identityMatched: z.boolean(), evidenceRefs: z.array(z.string().max(4096)).max(100) }).strict()
+])
+const agentCandidateSchema = z.object({
+  draftId: z.string().min(1).max(200), target: agentTargetSchema,
+  revision: z.number().int().positive(),
+  source: z.object({ requestedUrl: z.string().max(4096), finalUrl: z.string().max(4096).optional(),
+    displayUrl: z.string().max(4096), sourceName: limitedTextSchema.optional(),
+    pageTitle: limitedTextSchema.optional() }).strict(),
+  payload: agentPayloadSchema,
+  resources: z.array(z.object({
+    field: z.enum(['cover', 'samples', 'actressAvatar', 'avatar', 'gallery']),
+    position: z.number().int().nonnegative().max(100), remoteUrl: z.string().max(4096).nullable(),
+    width: z.number().int().nonnegative().nullable(), height: z.number().int().nonnegative().nullable(),
+    sizeBytes: z.number().int().nonnegative().max(32 * 1024 * 1024),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/)
+  }).strict()).max(100), warnings: z.array(limitedTextSchema).max(100)
+}).strict()
+const agentSelectionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('video'), draftId: z.string().min(1).max(200),
+    expectedRevision: z.number().int().positive(), fields: agentFieldList(videoScrapeFieldSchema),
+    mode: scrapeModeSchema, directorSelectionId: idSchema.optional() }).strict(),
+  z.object({ kind: z.literal('actress'), draftId: z.string().min(1).max(200),
+    expectedRevision: z.number().int().positive(), fields: agentFieldList(actressScrapeFieldSchema),
+    mode: scrapeModeSchema, identityConfirmed: z.boolean().optional() }).strict()
+])
+const agentAggregateVersionSchema = z.object({
+  generation: z.number().int().positive(), revision: z.number().int().positive()
+}).strict()
+const agentPreviewVersionsSchema = z.object({
+  V: agentAggregateVersionSchema.optional(), A: agentAggregateVersionSchema.optional(),
+  Q: agentAggregateVersionSchema.optional()
+}).strict()
+const agentReviewSchema = z.object({
+  kind: z.enum(['video', 'actress']), draftId: z.string().min(1).max(200),
+  revision: z.number().int().positive(), token: z.string().min(1).max(200),
+  selection: agentSelectionSchema, previewVersions: agentPreviewVersionsSchema.optional()
+}).strict()
 const videoScrapeFieldsSchema = z
   .array(videoScrapeFieldSchema)
   .min(1)
   .max(16)
   .refine((values) => new Set(values).size === values.length, 'scrape fields must be unique')
-const scrapeModeSchema = z.enum(['replace', 'fillEmpty', 'replaceIfPresent'])
-const actressScrapeFieldSchema = z.enum(
-  ALL_ACTRESS_SCRAPE_FIELDS as unknown as [string, ...string[]]
-)
 const actressScrapeFieldsSchema = z
   .array(actressScrapeFieldSchema)
   .min(1)
@@ -993,6 +1072,13 @@ export const MANAGE_OPERATION_INPUTS = {
   'browser.deviceReset': z.object({ deviceId: z.string().min(1).max(80) }).strict(),
   'browser.revokeSessions': emptyInput,
   'catalog.overviewStats': emptyInput,
+  'agentMetadata.preview': z
+    .object({
+      candidate: agentCandidateSchema,
+      selection: agentSelectionSchema,
+      reviewRevision: z.number().int().positive().optional()
+    })
+    .strict(),
   'agentMetadata.findReady': z
     .object({
       target: z.discriminatedUnion('kind', [
@@ -1005,7 +1091,16 @@ export const MANAGE_OPERATION_INPUTS = {
     .object({
       draftId: z.string().min(1).max(200),
       reviewToken: z.string().min(1).max(200),
-      uploads: z.array(catalogImageRefSchema).max(40).optional()
+      uploads: z.array(catalogImageRefSchema).max(40).optional(),
+      transfer: z.object({
+        candidate: agentCandidateSchema,
+        review: agentReviewSchema,
+        uploads: z.array(z.object({
+          field: z.enum(['cover', 'samples', 'actressAvatar', 'avatar', 'gallery']),
+          position: z.number().int().nonnegative().max(100),
+          image: z.object({ kind: z.literal('upload'), uploadId: z.string().min(1).max(200) }).strict()
+        }).strict()).max(100)
+      }).strict().optional()
     })
     .strict(),
   'agentMetadata.discard': z.object({ draftId: z.string().min(1).max(200) }).strict()

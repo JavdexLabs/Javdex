@@ -2,7 +2,13 @@
 
 本页维护当前部署与操作方式。实现、合同和功能边界见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，进度与验证结果见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。桌面日常操作见 [使用指南](USER_GUIDE.md)，只读网页见 [LAN Web](LAN_WEB.md)。
 
-当前代码基线为 `76a871e` / `0.7.1`；服务端阶段性实现完成，完整验收与发布准备尚未完成。历史容器或 Linux 安装烟测不代表当前版本已验收。
+当前说明按 2026-09-23 的 PR #115 工作分支 / `0.7.1` 核对；服务端阶段性实现完成，完整验收与发布准备尚未完成。历史容器或 Linux 安装烟测不代表当前版本已验收。
+
+## 网络与凭据边界
+
+首版管理接口和网页面向可信局域网。应用本身不终止 TLS；跨不可信网络访问时，应由部署者在受控反向代理或私有网络入口终止 HTTPS，并限制来源。writer、migration Bearer、网页登录 Cookie 和播放 grant 都应按凭据处理，不写入日志或分享链接。
+
+`play.grant` 生成的资源地址固定有效 12 小时，持有者在期限内可读取对应资源。它是能力链接，不是永久媒体地址；不要转发到群聊、公开播放器列表或外部索引。需要立即收回时应撤销相关访问条件或停止服务，不能只等待网页退出。
 
 ## 版本
 
@@ -25,7 +31,7 @@ npm ci
 npm run server:build
 ```
 
-产物为 `out/server`，包含网页和服务端入口。独立部署时在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动；不需要 Electron rebuild。仓库的 Dockerfile 同样使用该产物，镜像内以 `node` 用户运行，不会替你生成配置或挂载媒体目录。
+产物为 `out/server`，包含网页和服务端入口。独立部署时在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动；不需要 Electron rebuild。仓库的 Dockerfile 只打包已经生成的 `out/server`，因此 `docker build`、`docker compose build` 和 `npm run server:smoke` 前必须先运行 `npm run server:build`；烟测会在产物不完整时直接报错。镜像内以 `node` 用户运行，不会替你生成配置或挂载媒体目录。
 
 配置示例（目录及地址替换为服务机器实际值）：
 
@@ -76,7 +82,7 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 源端加密图片在导出时自动解密到迁移包（明文进目标）；解密使用当前 LibraryHost 机器密钥及源图片路径别名，不改源正式图。图片校验、路径映射和导入失败保护保留；孤立 `uploads/` 不会成为目标封面。丢响应后查询本端 `migration.status`，不要猜测启用结果。旧版双端状态会按本端角色读取，旧源启用许可只解释为源仍冻结，不自动解冻。
 
-桌面远程模式的 `migrateCatalog` 与本地同一入口；远程走现有 HTTP migration，不打开本机 `library.db`。调用仍需要 CLI `migrate-auth` 签发的 migration Bearer。
+当前桌面远程会话不开放 `migrateCatalog` 按钮，因为桌面尚未提供 migration Bearer 的安全输入和保存流程。服务端 HTTP migration 与 CLI `migrate-auth` 仍可由部署操作者使用；该流程不打开桌面本机 `library.db`。
 
 ## 更新与恢复限制
 
@@ -84,7 +90,7 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 ## 功能与使用边界
 
-远程资料管理、文件重命名、待确认队列定位与精确查询、审计筛选、来源匹配、单条/批量刮削及清单影片链接已接线。刮削插件、浏览器登录和网络采集仍在桌面运行；服务端保存权威资料和正式图片。批量直接选择最多 200 个 ID，更大范围用筛选；取消采集不会撤回已经受理的写入。
+远程资料管理、文件重命名、待确认队列定位与精确查询、审计筛选、来源匹配、单条/批量刮削及清单影片链接已接线。刮削插件、Agent、模型调用、浏览器登录、网络采集、候选草稿和暂存图片仍在桌面运行；预览时服务端校验权威资料，最终应用时才接收候选与已选图片，服务端只保存正式资料、正式图片或待确认候选。批量直接选择最多 200 个 ID，更大范围用筛选；取消采集不会撤回已经受理的写入。
 
 远程模式在媒体库的“来源与扫描 → 添加目录”中输入部署配置 `mediaMounts` 的挂载名称（例如 `library`）；服务端将其解析为已允许的目录。此入口不选择桌面本机文件夹。
 

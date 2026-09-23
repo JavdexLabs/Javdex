@@ -19,6 +19,7 @@ import { usePendingAuditPresence } from '../../hooks/usePendingAuditPresence'
 import type { PendingItemKey } from '../../listView/pendingRoutes'
 import { useToast } from '../Toast'
 import styles from './LibraryScanAuditPanel.module.css'
+import { useDesktopSession } from '../../desktop/DesktopSessionContext'
 import {
   auditRowHeight,
   isCompactAuditRow,
@@ -77,6 +78,7 @@ function AuditRowContent({
   onResolvedUnrecognized: (path: string) => void
 }): JSX.Element {
   const toast = useToast()
+  const { capabilities } = useDesktopSession()
 
   if (item.isUnrecognizedPending && item.path && item.rootId) {
     return (
@@ -170,13 +172,15 @@ function AuditRowContent({
                 label="复制完整路径"
                 onClick={() => void copyPath()}
               />
-              <IconButton
-                size="sm"
-                className={styles.rowIconButton}
-                icon={<FolderOpen size={13} aria-hidden />}
-                label="在文件夹中显示"
-                onClick={() => void reveal()}
-              />
+              {capabilities.revealLocalFile.allowed ? (
+                <IconButton
+                  size="sm"
+                  className={styles.rowIconButton}
+                  icon={<FolderOpen size={13} aria-hidden />}
+                  label="在文件夹中显示"
+                  onClick={() => void reveal()}
+                />
+              ) : null}
             </>
           ) : null}
         </div>

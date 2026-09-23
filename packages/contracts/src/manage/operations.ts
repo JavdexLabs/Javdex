@@ -215,6 +215,7 @@ export const MANAGE_OPERATIONS = {
   'browser.deviceReset': { auth: 'manageWrite', versions: ['C'], completion: 'sync', summary: 'Reset a paired device' },
   'browser.revokeSessions': { auth: 'manageWrite', versions: ['C'], completion: 'sync', summary: 'Revoke browser sessions without stopping management HTTP' },
   'catalog.overviewStats': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Catalog overview statistics' },
+  'agentMetadata.preview': { auth: 'manageRead', versions: [], completion: 'preview', summary: 'Authoritatively preview a desktop-owned Agent candidate' },
   'agentMetadata.findReady': { auth: 'manageRead', versions: ['V', 'A', 'F'], completion: 'sync', summary: 'Read-only lookup for desktop metadata collection' },
   'agentMetadata.apply': { auth: 'manageWrite', versions: ['V', 'A', 'F', 'Q'], completion: 'sync', summary: 'Apply structured metadata collection candidates' },
   'agentMetadata.discard': { auth: 'manageWrite', versions: ['Q'], completion: 'sync', summary: 'Discard a metadata collection draft on the catalog' }

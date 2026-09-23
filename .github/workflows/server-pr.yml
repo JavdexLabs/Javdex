@@ -1,0 +1,26 @@
+name: Server PR
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install system test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 mpv
+      - run: npm ci
+      - run: npm run server:build
+      - run: npm run server:test

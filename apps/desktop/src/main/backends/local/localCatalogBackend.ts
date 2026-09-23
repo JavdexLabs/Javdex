@@ -1,4 +1,8 @@
 import { applyDesktopManagedDraft, findReadyDesktopManagedDraft, discardDesktopManagedDraft } from '../../services/agentMetadata/desktopDraftStore'
+import {
+  agentMetadataPreviewVersions,
+  buildAgentMetadataReview
+} from '@library/catalog/catalogAgentMetadataReview'
 import { editCatalogActress } from '@library/catalog/catalogActressEdit'
 import {
   applyVideoScrapeCommand,
@@ -1382,6 +1386,15 @@ export function createLocalCatalogBackend(
       }
     },
     agentMetadata: {
+      async preview(input) {
+        const review = buildAgentMetadataReview(
+          input.candidate,
+          input.selection,
+          input.reviewRevision ?? input.candidate.revision + 1,
+          { includeVersions: true }
+        )
+        return { review, versions: agentMetadataPreviewVersions(input.candidate, getDb()) }
+      },
       async findReady(input) {
         return findReadyDesktopManagedDraft(input)
       },

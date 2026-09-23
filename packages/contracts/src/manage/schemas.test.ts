@@ -3,8 +3,39 @@ import { test } from 'node:test'
 import { MANAGE_OPERATIONS, type ManageOperationId } from './operations'
 import { MANAGE_OPERATION_INPUTS } from './inputs'
 import { parseManageInput, parseManageRequest } from './parse'
+
 import { JSON_REQUEST_MAX_BYTES, PAGE_SIZE_MAX, UPLOAD_STREAM_MAX_BYTES } from '../protocol/limits'
 import { jsonRequestByteLimit } from './primitives'
+
+test('accepts structured Agent transfers and rejects desktop staging paths', () => {
+  const candidate = {
+    draftId: 'draft', target: { kind: 'video', id: 7 }, revision: 1,
+    source: { requestedUrl: 'https://example.test', displayUrl: 'https://example.test' },
+    payload: { kind: 'video', result: { code: 'ABC-007', title: 'new' },
+      observedFields: ['title'], explicitlyEmptyFields: [], evidenceRefs: [] },
+    resources: [], warnings: []
+  }
+  const selection = { kind: 'video', draftId: 'draft', expectedRevision: 1,
+    fields: ['title'], mode: 'replace' }
+  assert.equal(parseManageInput('agentMetadata.preview', { candidate, selection }).success, true)
+  const transfer = { candidate, review: { kind: 'video', draftId: 'draft', revision: 1,
+    token: 'token', selection }, uploads: [] }
+  assert.equal(parseManageInput('agentMetadata.apply', {
+    draftId: 'draft', reviewToken: 'token', transfer
+  }).success, true)
+  assert.equal(parseManageInput('agentMetadata.apply', {
+    draftId: 'draft', reviewToken: 'token',
+    transfer: { ...transfer, review: { ...transfer.review, impacts: [] } }
+  }).success, false)
+  assert.equal(parseManageInput('agentMetadata.preview', {
+    candidate: { ...candidate, resources: [{ field: 'cover', position: 0,
+      remoteUrl: null, stagedPath: 'C:\\private\\image.png', width: null, height: null,
+      sizeBytes: 1, sha256: '0'.repeat(64) }] }, selection
+  }).success, false)
+  assert.equal(parseManageInput('agentMetadata.preview', {
+    candidate: { ...candidate, payload: { ...candidate.payload, observedFields: ['unknown'] } }, selection
+  }).success, false)
+})
 
 const operationId = '11111111-1111-4111-8111-111111111111'
 const serverId = '22222222-2222-4222-8222-222222222222'

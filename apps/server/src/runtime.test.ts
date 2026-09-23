@@ -1508,7 +1508,7 @@ describe('server runtime lifecycle', () => {
       assert.equal(fs.existsSync(path.join(dataDir, 'media_assets', covered.cover_path!)), true)
       assert.equal(backend.session().state, 'available')
       assert.equal(backend.capabilities().editCatalog.allowed, true)
-      assert.equal(backend.capabilities().migrateCatalog.allowed, true)
+      assert.equal(backend.capabilities().migrateCatalog.allowed, false)
       assert.equal(backend.capabilities().playLocalFile.allowed, false)
     } finally {
       await backend.dispose()
@@ -2460,7 +2460,9 @@ describe('server runtime lifecycle', () => {
     }
   })
 
-  it('treats a real bind-mount umount as offline, distinct from marker loss and missing files', async () => {
+  it('treats a real bind-mount umount as offline, distinct from marker loss and missing files', {
+    skip: process.platform !== 'linux'
+  }, async () => {
     const backing = path.join(root, 'm08-backing')
     const mountPoint = path.join(root, 'm08-mnt')
     bindMount(backing, mountPoint)
@@ -2683,7 +2685,9 @@ describe('server runtime lifecycle', () => {
     }
   })
 
-  it('keeps the next cleanup page when a real bind mount is unmounted between pages', async () => {
+  it('keeps the next cleanup page when a real bind mount is unmounted between pages', {
+    skip: process.platform !== 'linux'
+  }, async () => {
     const backing = path.join(root, 'm08-page-backing')
     const mountPoint = path.join(root, 'm08-page-mnt')
     bindMount(backing, mountPoint)
@@ -4149,8 +4153,10 @@ describe('server runtime lifecycle', () => {
     assert.equal(expired.status, 404)
   })
 
-  it('plays real mpv Range grants through disconnect, expiry, and writer handoff', { timeout: 120_000 }, async () => {
-    assert.equal(fs.existsSync('/usr/bin/mpv'), true)
+  it('plays real mpv Range grants through disconnect, expiry, and writer handoff', {
+    timeout: 120_000,
+    skip: !fs.existsSync('/usr/bin/mpv')
+  }, async () => {
     const dataDir = path.join(root, 's13-m15-mpv')
     const { base, config } = await boot(dataDir)
     const writer = await claimInitialWriter(base, config)
@@ -4312,8 +4318,10 @@ describe('server runtime lifecycle', () => {
     }
   })
 
-  it('plays a real mpv Range grant through a non-loopback listen address', { timeout: 60_000 }, async () => {
-    assert.equal(fs.existsSync('/usr/bin/mpv'), true)
+  it('plays a real mpv Range grant through a non-loopback listen address', {
+    timeout: 60_000,
+    skip: process.platform !== 'linux' || !fs.existsSync('/usr/bin/mpv')
+  }, async () => {
     const lan = addNonLoopbackListenHost()
     assert.notEqual(lan.host, '127.0.0.1')
     assert.equal(lan.host.startsWith('127.'), false)

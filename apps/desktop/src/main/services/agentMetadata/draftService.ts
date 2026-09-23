@@ -34,16 +34,12 @@ import {
 } from '../../scrapers/scraperResultValidation'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import {
-  applyActressScrapeResult,
-  planActressScrapeResult,
-  resolveEffectiveActressScrapeFields
+  applyActressScrapeResult
 } from '../actressAssetService'
 import {
-  actressIdentityConflictWorkflow,
-  findActressScrapeNameConflicts
+  actressIdentityConflictWorkflow
 } from '../actressIdentityConflictWorkflow'
 import {
-  findVideoBusinessIdentityConflictForScrape,
   videoScrapeApplyService
 } from '../videoScrapeApplyService'
 import {
@@ -53,9 +49,17 @@ import {
 } from './browserAdapter'
 
 import type { AgentDraftCatalogResult, AgentMetadataApplyCommit } from './draftApplyCommit'
+import {
+  agentMetadataCandidateFromDraft,
+  buildAgentMetadataReview
+} from '@library/catalog/catalogAgentMetadataReview'
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_TOTAL_IMAGE_BYTES = 200 * 1024 * 1024
+
+export type AgentMetadataTargetIdentity =
+  | { kind: 'video'; code: string }
+  | { kind: 'actress'; names: string[] }
 
 class PreviewStaleError extends Error {}
 
@@ -92,15 +96,6 @@ function canonical(value: unknown): string {
       .join(',')}}`
   }
   return JSON.stringify(value)
-}
-
-function reviewToken(
-  review: Omit<AgentMetadataReview, 'token'>,
-  resources: AgentMetadataDraftResource[]
-): string {
-  return createHash('sha256')
-    .update(canonical({ review, resources: resourceManifest(resources) }))
-    .digest('base64url')
 }
 
 function resourceManifest(resources: AgentMetadataDraftResource[]): Array<Record<string, unknown>> {
@@ -217,6 +212,7 @@ export class AgentMetadataDraftService {
     target: AgentMetadataTarget
     args: Record<string, unknown>
     signal: AbortSignal
+    targetIdentity?: AgentMetadataTargetIdentity
   }): Promise<AgentMetadataDraftPayload> {
     if (Buffer.byteLength(JSON.stringify(input.args), 'utf8') > 1024 * 1024) {
       throw new Error('Agent 元数据候选超过 1 MiB 上限。')
@@ -226,7 +222,8 @@ export class AgentMetadataDraftService {
       input.runId,
       input.target,
       input.args,
-      source.finalUrl ?? source.requestedUrl
+      source.finalUrl ?? source.requestedUrl,
+      input.targetIdentity
     )
     const warnings: string[] = []
     const resources = await this.stageResources(input.runId, payload, warnings, input.signal)
@@ -276,13 +273,48 @@ export class AgentMetadataDraftService {
       throw new Error('元数据草稿类型与预览请求不一致。')
     }
     const revision = draft.revision + 1
-    const normalizedSelection = { ...selection, expectedRevision: revision } as AgentMetadataPlanInput
-    const review = this.buildReview(draft, normalizedSelection, revision)
+    const review = this.buildReview(draft, selection, revision)
     return this.repo.saveReview({
       draftId: draft.id,
       expectedRevision: draft.revision,
       review
     })
+  }
+
+  saveTransferredReview(input: {
+    selection: AgentMetadataPlanInput
+    review: AgentMetadataReview
+  }): AgentMetadataReview {
+    const draft = this.repo.require(input.selection.draftId)
+    if (draft.status !== 'ready' || draft.revision !== input.selection.expectedRevision) {
+      throw new Error('草稿已更新，请重新加载。')
+    }
+    return this.repo.saveReview({
+      draftId: draft.id,
+      expectedRevision: draft.revision,
+      review: input.review
+    })
+  }
+
+  getStoredReview(draftId: string): AgentMetadataReview | null {
+    return this.repo.getStoredReview(draftId)
+  }
+
+  reserveTransferredApply(input: AgentMetadataApplyInput): string {
+    return this.repo.reserveRemoteApply(input)
+  }
+
+  completeTransferredApply(input: AgentMetadataApplyInput, outcome: AgentMetadataApplyOutcome): void {
+    if (outcome.status === 'preview_stale') return
+    const draft = this.repo.require(input.draftId)
+    this.repo.completeApply({
+      draftId: input.draftId,
+      reviewToken: input.reviewToken,
+      idempotencyKey: input.idempotencyKey,
+      outcome
+    })
+    this.verifiedResourceManifests.delete(draft.id)
+    this.cleanupStaging(draft.target.kind, draft.resources.map((resource) => resource.stagedPath))
   }
 
   apply(input: AgentMetadataApplyInput): AgentMetadataApplyOutcome {
@@ -356,7 +388,8 @@ export class AgentMetadataDraftService {
     runId: string,
     target: AgentMetadataTarget,
     args: Record<string, unknown>,
-    sourceUrl: string
+    sourceUrl: string,
+    targetIdentity?: AgentMetadataTargetIdentity
   ): AgentMetadataDraftPayload {
     if (args.kind !== target.kind || !isRecord(args.data)) throw new Error('候选类型与当前目标不一致。')
     if (!Array.isArray(args.evidenceRefs) || args.evidenceRefs.length === 0) {
@@ -371,8 +404,10 @@ export class AgentMetadataDraftService {
     if (evidenceRefs.length > 80) throw new Error('浏览器证据引用超过 80 条上限。')
     this.browser.assertEvidenceRefs(runId, evidenceRefs)
     if (target.kind === 'video') {
-      const video = getVideoById(target.id)
-      if (!video) throw new Error('影片不存在。')
+      const videoCode = targetIdentity?.kind === 'video'
+        ? targetIdentity.code
+        : getVideoById(target.id)?.code
+      if (!videoCode) throw new Error('影片不存在。')
       const observedFields = uniqueAllowed(args.observedFields, ALL_VIDEO_SCRAPE_FIELDS, 'observedFields')
       if (observedFields.length === 0) throw new Error('影片候选至少需要一个已观察字段。')
       const explicitlyEmptyFields = uniqueAllowed(
@@ -383,8 +418,8 @@ export class AgentMetadataDraftService {
       if (typeof args.data.code !== 'string' || !args.data.code.trim()) {
         throw new Error('影片候选必须包含页面中观察到的番号。')
       }
-      const result = normalizeVideoScrapeResult(args.data, video.code)
-      if (!result || normalizeVideoCode(result.code) !== normalizeVideoCode(video.code)) {
+      const result = normalizeVideoScrapeResult(args.data, videoCode)
+      if (!result || normalizeVideoCode(result.code) !== normalizeVideoCode(videoCode)) {
         throw new Error('外部页面番号与当前影片不一致。')
       }
       result.sourceUrl = sourceUrl
@@ -398,8 +433,13 @@ export class AgentMetadataDraftService {
 
     if (target.kind !== 'actress') return unsupportedTarget(target)
 
-    const actress = getActressDetail(target.id)
-    if (!actress) throw new Error('演员不存在。')
+    const actressNames = targetIdentity?.kind === 'actress'
+      ? targetIdentity.names
+      : (() => {
+          const actress = getActressDetail(target.id)
+          return actress ? [actress.main_name, ...actress.names.map((name) => name.name)] : null
+        })()
+    if (!actressNames) throw new Error('演员不存在。')
     const observedFields = uniqueAllowed(args.observedFields, ALL_ACTRESS_SCRAPE_FIELDS, 'observedFields')
     if (observedFields.length === 0) throw new Error('演员候选至少需要一个已观察字段。')
     const explicitlyEmptyFields = uniqueAllowed(
@@ -411,7 +451,7 @@ export class AgentMetadataDraftService {
     if (!result) throw new Error('演员候选为空。')
     result.sourceUrl = sourceUrl
     const targetNames = new Set(
-      [actress.main_name, ...actress.names.map((name) => name.name)].map(normalizeActressName)
+      actressNames.map(normalizeActressName)
     )
     const candidateNames = [result.mainName, result.nameZh, result.nameEn, ...(result.aliases ?? [])]
       .filter((name): name is string => Boolean(name?.trim()))
@@ -551,131 +591,7 @@ export class AgentMetadataDraftService {
     forceResourceVerification = false
   ): AgentMetadataReview {
     this.assertResourceIntegrity(draft, forceResourceVerification)
-    if (draft.target.kind === 'video' && draft.payload.kind === 'video' && selection.kind === 'video') {
-      const observed = new Set(draft.payload.observedFields)
-      if (selection.fields.some((field) => !observed.has(field))) {
-        throw new Error('预览选择包含 Agent 未观察的影片字段。')
-      }
-      const cover = draft.resources.find((item) => item.field === 'cover')?.stagedPath ?? null
-      const samples = (draft.payload.result.sampleImageUrls ?? []).map((_, position) =>
-        draft.resources.find((item) => item.field === 'samples' && item.position === position)?.stagedPath ?? null
-      )
-      const plan = videoScrapeApplyService.plan(
-        draft.target.id,
-        draft.payload.result,
-        cover,
-        samples,
-        selection.fields,
-        draft.source.sourceName,
-        selection.mode,
-        draft.source.sourceName,
-        { directorSelectionId: selection.directorSelectionId, directorAmbiguity: 'choice' }
-      )
-      const identityConflictVideoId = findVideoBusinessIdentityConflictForScrape(
-        draft.target.id,
-        draft.payload.result,
-        selection.fields,
-        selection.mode
-      ) ?? undefined
-      const normalizedSelection: Extract<AgentMetadataPlanInput, { kind: 'video' }> = {
-        ...selection,
-        expectedRevision: revision
-      }
-      const value: Omit<Extract<AgentMetadataReview, { kind: 'video' }>, 'token'> = {
-        kind: 'video',
-        draftId: draft.id,
-        revision,
-        selection: normalizedSelection,
-        impacts: plan.impacts,
-        warnings: [
-          ...draft.warnings,
-          ...plan.warnings,
-          ...(identityConflictVideoId
-            ? [`候选会与影片 #${identityConflictVideoId} 形成重复业务身份；确认后将转入待处理中心。`]
-            : [])
-        ],
-        classifications: plan.classifications,
-        ...(plan.directorChoice ? { directorChoice: plan.directorChoice } : {}),
-        ...(identityConflictVideoId ? { identityConflictVideoId } : {}),
-        canApply: !plan.directorChoice
-      }
-      return { ...value, token: reviewToken(value, draft.resources) }
-    }
-
-    if (draft.target.kind !== 'actress' || draft.payload.kind !== 'actress' || selection.kind !== 'actress') {
-      throw new Error('草稿与预览类型不一致。')
-    }
-    const observed = new Set(draft.payload.observedFields)
-    if (selection.fields.some((field) => !observed.has(field))) {
-      throw new Error('预览选择包含 Agent 未观察的演员字段。')
-    }
-    const avatar = draft.resources.find((item) => item.field === 'avatar')?.stagedPath ?? null
-    const gallery = draft.resources
-      .filter((item) => item.field === 'gallery')
-      .sort((left, right) => left.position - right.position)
-      .map((item) => ({
-        remoteUrl: item.remoteUrl,
-        localPath: item.stagedPath,
-        width: item.width,
-        height: item.height
-      }))
-    let impacts: Extract<AgentMetadataReview, { kind: 'actress' }>['impacts'] = []
-    const warnings = [...draft.warnings]
-    let canApply = draft.payload.identityMatched || selection.identityConfirmed === true
-    if (!draft.payload.identityMatched) {
-      warnings.push('页面名称未与库内已知名称匹配；应用前必须由你确认这是同一位演员。')
-    }
-    const galleryComplete =
-      draft.resources.filter((item) => item.field === 'gallery').length ===
-      (draft.payload.result.galleryImageUrls?.length ?? 0)
-    if (selection.fields.includes('gallery') && !galleryComplete) {
-      canApply = false
-      warnings.push('写真暂存不完整；请取消选择“写真”后应用其他字段，或重新采集。')
-    }
-    const effectiveFields = resolveEffectiveActressScrapeFields(
-      draft.target.id,
-      selection.fields,
-      selection.mode
-    )
-    const nameConflictRecords = findActressScrapeNameConflicts(
-      draft.target.id,
-      effectiveFields,
-      draft.payload.result
-    )
-    try {
-      impacts = planActressScrapeResult(
-        draft.target.id,
-        draft.payload.result,
-        avatar,
-        gallery,
-        selection.fields,
-        selection.mode,
-        { releasedNameKeys: nameConflictRecords.map((conflict) => conflict.normalizedName) }
-      ).impacts
-    } catch (error) {
-      canApply = false
-      warnings.push(error instanceof Error ? error.message : String(error))
-    }
-    const nameConflicts = nameConflictRecords.map((conflict) => conflict.name)
-    if (nameConflicts.length > 0) {
-      warnings.push(`名称 ${nameConflicts.map((name) => `「${name}」`).join('、')} 已由其他演员使用；应用时会转入待处理中心。`)
-    }
-    const normalizedSelection: Extract<AgentMetadataPlanInput, { kind: 'actress' }> = {
-      ...selection,
-      expectedRevision: revision
-    }
-    const value: Omit<Extract<AgentMetadataReview, { kind: 'actress' }>, 'token'> = {
-      kind: 'actress',
-      draftId: draft.id,
-      revision,
-      selection: normalizedSelection,
-      impacts,
-      warnings,
-      ...(nameConflicts.length > 0 ? { nameConflicts } : {}),
-      requiresIdentityConfirmation: !draft.payload.identityMatched,
-      canApply
-    }
-    return { ...value, token: reviewToken(value, draft.resources) }
+    return buildAgentMetadataReview(agentMetadataCandidateFromDraft(draft), selection, revision)
   }
 
   private applyVideo(

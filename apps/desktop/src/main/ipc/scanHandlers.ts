@@ -100,12 +100,9 @@ async function previewFileMaintenance(
   return { ...preview, expectedVersions }
 }
 
-function pendingResolveVersions(backend: CatalogBackend, qRevision: number) {
+function pendingResolveVersions(qRevision: number) {
   return {
-    Q: { generation: backend.generation, revision: qRevision },
-    V: { generation: backend.generation, revision: 1 },
-    R: { generation: backend.generation, revision: 1 },
-    G: { generation: backend.generation, revision: 1 }
+    Q: { generation: 1, revision: qRevision }
   }
 }
 
@@ -123,7 +120,7 @@ export async function resolvePendingScanThroughBackend(
       primaryResourceIds: resolution.primaryResourceIds,
       expectedRevision: resolution.expectedRevision
     },
-    ipcMutation(undefined, pendingResolveVersions(backend, resolution.expectedRevision))
+    ipcMutation(undefined, pendingResolveVersions(resolution.expectedRevision))
   )
 }
 
@@ -140,7 +137,7 @@ export async function resolveResourceIdentityThroughBackend(
       choice: resolution.choice,
       expectedRevision: resolution.expectedRevision
     },
-    ipcMutation(undefined, pendingResolveVersions(backend, resolution.expectedRevision))
+    ipcMutation(undefined, pendingResolveVersions(resolution.expectedRevision))
   )
 }
 
@@ -439,11 +436,11 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
     })
   )
 
-  appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => {
+  appCommandAdapter.register(IPC.SCAN_CANCEL, async (runId): Promise<boolean> => {
     abortRemoteCatalogScanWait(runId)
     if (scanCoordinator.cancel(runId)) return true
     if (backend.mode === 'remote') {
-      void backend.tasks.cancel({ taskId: runId }, ipcMutation()).catch(() => undefined)
+      await backend.tasks.cancel({ taskId: runId }, ipcMutation())
       return true
     }
     return false
@@ -455,7 +452,14 @@ export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): 
     readAuditViewPage: (snapshot, query) => auditViewPageThroughBackend(backend, snapshot, query)
   })
   appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) => auditGetThroughBackend(backend, libraryId))
-  registerScanAuditRevealHandler()
+  if (backend.mode === 'remote') {
+    appCommandAdapter.register(IPC.SCAN_AUDIT_REVEAL_FILE, async () => ({
+      ok: false as const,
+      error: '远程模式不能打开服务端文件'
+    }))
+  } else {
+    registerScanAuditRevealHandler()
+  }
   appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) =>
     pendingAuditPresenceThroughBackend(backend, libraryId, ids)
   )

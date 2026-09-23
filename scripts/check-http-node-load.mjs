@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const node = process.execPath
-assert.equal(path.basename(node), 'node', `http node-load must use Node, not ${node}`)
+assert.match(path.basename(node), /^node(?:\.exe)?$/iu, `http node-load must use Node, not ${node}`)
 
 const result = spawnSync(
   node,

@@ -249,6 +249,9 @@ export async function unpackMigrationArchive(
   let pending = Buffer.alloc(0)
   const openFile: { current: { abs: string; left: number; chunks: Buffer[] } | null } = { current: null }
   let unpacked = 0
+  let inflated = 0
+  const archiveOverhead = Math.min(16 * 1024 * 1024, Math.max(1024, Math.ceil(maxBytes / 16)))
+  const inflatedLimit = maxBytes + archiveOverhead
 
   const handleHeader = (block: Buffer): void => {
     const parsed = readHeader(block)
@@ -281,6 +284,13 @@ export async function unpackMigrationArchive(
   const unzipped = input.pipe(gunzip)
   try {
     for await (const chunk of unzipped) {
+      inflated += (chunk as Buffer).byteLength
+      if (inflated > inflatedLimit) {
+        throw structuredError('LIMIT_EXCEEDED', '迁移包解压流超过大小上限', {
+          limit: inflatedLimit,
+          actual: inflated
+        })
+      }
       pending = Buffer.concat([pending, chunk as Buffer])
       while (pending.length >= BLOCK) {
         const block = pending.subarray(0, BLOCK)

@@ -301,6 +301,35 @@ export function planActressScrapeResult(
   )
 }
 
+/** Build a catalog-side preview before desktop-staged image bytes are uploaded. */
+export function planActressScrapeResultWithAvailability(
+  actressId: number,
+  result: ActressScrapeResult,
+  resources: { avatarAvailable: boolean; gallery: GalleryAssetWriteInput[] },
+  fields?: ActressScrapeField[],
+  mode: ActressScrapeUpdateMode = 'replace',
+  options?: { releasedNameKeys?: readonly string[] }
+) {
+  const current = getActressAvatarRecord(actressId)
+  const facts: ActressScrapeAssetFacts = {
+    currentAvatarUsable: Boolean(
+      current?.avatar_path && mediaAssetStore.isUsableImage(current.avatar_path)
+    ),
+    incomingAvatarUsable: resources.avatarAvailable,
+    incomingMatchesExisting: false,
+    preparedAvatar: null
+  }
+  return planActressScrapeResultRecord(
+    actressId,
+    result,
+    resources.avatarAvailable ? 'desktop-upload-pending' : null,
+    resources.gallery,
+    fields,
+    mode,
+    { ...options, assetFacts: facts }
+  )
+}
+
 export function resolveEffectiveActressScrapeFields(
   actressId: number,
   fields: ActressScrapeField[],

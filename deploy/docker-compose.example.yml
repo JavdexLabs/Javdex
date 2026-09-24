@@ -1,9 +1,7 @@
 services:
   javdex:
-    image: javdex-server:local
-    build:
-      context: ..
-      dockerfile: Dockerfile
+    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the desktop version, for example 0.8.0-beta.1}
+    restart: unless-stopped
     ports:
       - "8096:8096"
     environment:

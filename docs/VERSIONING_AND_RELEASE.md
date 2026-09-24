@@ -16,6 +16,12 @@ MAJOR.MINOR.PATCH
 
 正式版本只使用三个非负整数，例如 `0.4.0`。Git 标签必须增加 `v` 前缀，例如 `v0.4.0`。
 
+预发布使用 SemVer 后缀，例如首个 0.8.0 Beta 可用 `0.8.0-beta.1`，对应标签 `v0.8.0-beta.1`；后续递增编号，不覆盖已有标签。发布时必须标记为 Prerelease，不能仅在标题写 Beta。预发布编号在实际发布时统一写入版本与锁文件，文档预告不代表已经发布。
+
+服务端与桌面必须由同一源码版本构建。Release 工作流在桌面打包成功后，分别在 Linux amd64 / arm64 原生 runner 构建服务端并运行容器烟测，将经过检查的镜像上传 GHCR，再合成 `ghcr.io/javdexlabs/javdex-server:<版本>`。两个架构成功后才发布 GitHub Release，并附带 Compose、JSON 配置及校验和。Beta 后缀自动标记 Prerelease，不更新 `latest` 或其他滚动镜像标签。
+
+首次发布后，维护者必须在 GitHub Packages 将 `javdex-server` 的可见性设为 **Public**，并在未登录 GHCR 的环境测试拉取。GHCR 新包默认私有，仓库公开不等于镜像公开，见 [GitHub Container registry 说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。工作流用 `GITHUB_TOKEN` 的 `packages: write` 发布，无需配置 Docker Hub 密码。镜像尚未公开时不要宣称普通用户已可直接拉取。
+
 在 `1.0.0` 之前，可能破坏现有行为的变化通常提升 `MINOR`；稳定后的破坏性变化提升 `MAJOR`。
 
 ## 2. 单一版本来源

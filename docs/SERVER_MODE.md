@@ -2,7 +2,63 @@
 
 本页维护当前部署与操作方式。实现、合同和功能边界见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，进度与验证结果见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。桌面日常操作见 [使用指南](USER_GUIDE.md)，只读网页见 [LAN Web](LAN_WEB.md)。
 
-当前说明按 2026-09-23 的 PR #115 工作分支 / `0.7.1` 核对；服务端阶段性实现完成，完整验收与发布准备尚未完成。历史容器或 Linux 安装烟测不代表当前版本已验收。
+本页按 **0.8.0-beta.1** 说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0-beta.1` 必须成对使用，不要把 0.7.1 安装包接到本版服务端。Beta 不代表全部部署环境已完成验收，首次试用建议使用独立测试资料库。
+
+## 服务端能做什么
+
+- 独立保存影片、演员、分类、清单、正式图片和待确认资料，扫描已配置的媒体目录，导入本地 NFO 与配套图片。
+- 通过同版本桌面应用管理远程资料、处理扫描与刮削结果；桌面关闭后，服务端扫描与网页访问仍可继续。
+- 向同一网络的浏览器提供搜索、浏览、原生播放和本地资源下载，支持密码登录、设备配对与授权撤销。
+- 刮削插件、AI、浏览器会话和采集草稿在桌面运行，服务端接收确认后的资料和图片。不提供网页编辑后台、无人值守云端刮削或视频转码。
+
+## Docker Compose 快速开始
+
+正式发布流程提供 `ghcr.io/javdexlabs/javdex-server` 镜像，支持 Linux amd64 和 arm64，Docker 会自动选择对应架构。用户只需要 Docker 与 Compose 插件，无需 Node.js、npm 或编译源码。`0.8.0-beta.1` 镜像随该预发布条目一起提供，不会更新 `latest`。首次试用建议新建独立资料库。
+
+1. 从所选 Release 下载 `docker-compose.example.yml` 和 `javdex-server.example.json`，放在同一个目录。在该目录创建 `.env`，填写与桌面安装包一致的版本号（不含 `v`）：
+
+   ```dotenv
+   JAVDEX_VERSION=0.8.0-beta.1
+   ```
+
+2. 编辑 [Compose 示例](../deploy/docker-compose.example.yml) 和 [服务配置](../deploy/javdex-server.example.json)：
+   - 将 `JAVDEX_WEB_PASSWORD` 替换为独立的 12–128 字符密码。
+   - 将 `/absolute/path/to/media` 替换为 NAS 上真实媒体目录；这是宿主机路径，容器内统一使用 `/media`。
+   - 将 `accessHosts` 中的 `192.168.1.10` 替换为其他设备实际访问的 NAS IP 或主机名，不填写 `http://` 或端口。
+   - 示例媒体挂载为只读，适合扫描与浏览。需要重命名媒体文件或写出 NFO 时，再为相应目录提供写权限；容器内 `node` 用户必须有对应权限。
+   - `/data` 使用持久数据卷，数据库与图片都保存在其中；不要将 SQLite 数据卷放在 SMB/NFS 共享上。
+
+3. 在配置文件所在目录拉取并启动，再查看启动日志：
+
+   ```bash
+   docker compose -f docker-compose.example.yml pull
+   docker compose -f docker-compose.example.yml up -d
+   docker compose -f docker-compose.example.yml logs --tail=50 javdex
+   ```
+
+4. 在服务机器上生成首次连接令牌：
+
+   ```bash
+   docker compose -f docker-compose.example.yml exec javdex node index.js bind --config /config/server.json
+   ```
+
+   在同版本桌面应用打开“设置 → 网络 → 资料库连接”，选择远程资料库，填写 `http://NAS实际IP:8096`，保存并重启。在“当前会话”填写命令输出的一次性令牌，点击“领取写入凭据”。令牌有效期为 10 分钟，过期后重新生成。网页密码与桌面写入令牌用途不同，首次认主完成前网页不能浏览资料。
+
+5. 在桌面创建媒体库，在“来源与扫描 → 添加目录”填写挂载名称 **`library`**（对应示例 `mediaMounts` 的键），然后启动扫描。不要输入桌面电脑的文件路径。
+6. 其他设备在浏览器打开同一地址，用配置中的账号密码登录；或在连接服务端的桌面中开启网页配对并批准新设备。远程桌面播放可在“资料库连接”设置播放器程序，例如 mpv 的绝对路径。
+
+关闭桌面不会关闭容器。示例已配置 `restart: unless-stopped`，Docker 启动后会恢复非手动停止的容器。服务配置修改后重新创建容器；密码不要提交到公开仓库。部署固定版本，不使用滚动标签，以免与桌面版本不匹配。
+
+### 连接失败时
+
+| 现象 | 先检查 |
+|---|---|
+| 浏览器返回 403 | `accessHosts` 是否包含实际访问地址的主机名/IP |
+| 连接超时 | 容器是否运行、端口是否映射、防火墙是否允许同网设备访问 |
+| 提示尚未认主 | 是否已在桌面领取写入凭据；网页登录不能代替认主 |
+| 桌面提示版本不符 | 桌面安装包与服务端是否来自同一源码版本 |
+| 扫描找不到文件或权限不足 | 宿主机挂载路径、挂载名称及容器用户读取权限 |
+| 能浏览但不能播放 | 浏览器是否支持视频编码；当前不转码，可下载后用本地播放器打开 |
 
 ## 网络与凭据边界
 
@@ -22,7 +78,7 @@
 - 以专用 UID/GID 运行进程；数据目录与挂载应对该用户可读写。不要用桌面用户数据目录充当服务 `dataDir`。
 - 同一 `dataDir` 同时只允许一个宿主进程。
 
-## 构建与配置
+## 开发者源码构建与配置
 
 从仓库根目录构建：
 
@@ -31,7 +87,7 @@ npm ci
 npm run server:build
 ```
 
-产物为 `out/server`，包含网页和服务端入口。独立部署时在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动；不需要 Electron rebuild。仓库的 Dockerfile 只打包已经生成的 `out/server`，因此 `docker build`、`docker compose build` 和 `npm run server:smoke` 前必须先运行 `npm run server:build`；烟测会在产物不完整时直接报错。镜像内以 `node` 用户运行，不会替你生成配置或挂载媒体目录。若 Docker 构建环境无法访问默认 npm 源，可在运行容器烟测前设置 `JAVDEX_SMOKE_NPM_REGISTRY`，脚本会将其传给 Dockerfile 的 `NPM_CONFIG_REGISTRY` 构建参数。
+产物为 `out/server`，包含网页和服务端入口。独立部署时在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动；不需要 Electron rebuild。仓库的 Dockerfile 只打包已经生成的 `out/server`，因此 源码方式的 `docker build` 和 `npm run server:smoke` 前必须先运行 `npm run server:build`；烟测会在产物不完整时直接报错。镜像内以 `node` 用户运行，不会替你生成配置或挂载媒体目录。若 Docker 构建环境无法访问默认 npm 源，可在运行容器烟测前设置 `JAVDEX_SMOKE_NPM_REGISTRY`，脚本会将其传给 Dockerfile 的 `NPM_CONFIG_REGISTRY` 构建参数。
 
 `server:smoke` 在 Windows Docker Desktop 上使用 Docker 数据卷保存 SQLite；`server:smoke:migration` 的双宿主故障注入需要 Linux 宿主文件系统，在 PR 的 Linux CI 或 Linux 开发环境运行。
 
@@ -88,7 +144,9 @@ javdex-server migrate-auth --config /etc/javdex/server.json
 
 ## 更新与恢复限制
 
-先停服务，备份 `dataDir` 与 `imagesDir`，再换同版本产物。版本不符时桌面不会写入远程。冻结中的源库不能领取 writer。
+更新前正常停止服务，完整备份 `dataDir`、`imagesDir` 及部署配置，桌面数据目录也需单独备份。将 `.env` 中的 `JAVDEX_VERSION` 改为新版本，执行上面的 `pull` 和 `up -d`；桌面安装包同时升级到相同版本。保留原数据卷，不要执行 `docker compose down -v`。
+
+Beta 首次启动可能升级数据库。当前 schema 为 19，不应将升级后的库交给旧版应用；回退需恢复升级前完整备份及匹配版本，不可手工降低数据库版本。服务端备份不包含桌面采集草稿和运行记录，后者在桌面 `desktop-work.db` 中。冻结中的源库不能领取写入凭据。
 
 ## 功能与使用边界
 

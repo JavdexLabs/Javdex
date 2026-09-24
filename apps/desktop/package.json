@@ -1,6 +1,6 @@
 {
   "name": "@javdex/desktop",
-  "version": "0.7.1",
+  "version": "0.8.0-beta.1",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -26,9 +26,9 @@
     "undici": "^7.28.0",
     "yet-another-react-lightbox": "^3.32.2",
     "zod": "^4.4.3",
-    "@javdex/contracts": "0.7.1",
-    "@javdex/ui": "0.7.1",
-    "@javdex/library": "0.7.1",
-    "@javdex/http": "0.7.1"
+    "@javdex/contracts": "0.8.0-beta.1",
+    "@javdex/ui": "0.8.0-beta.1",
+    "@javdex/library": "0.8.0-beta.1",
+    "@javdex/http": "0.8.0-beta.1"
   }
 }

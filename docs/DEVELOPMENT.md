@@ -20,9 +20,9 @@ npm run dev
 
 开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../packages/contracts/src/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 
-## 未发布数据库迁移
+## 0.8.0 Beta 数据库迁移
 
-生产版 v0.6.2 使用 schema 15。已发布路径为 **15 → 16**（Agent 清理队列、标签覆盖索引、逐项扫描审计）再 **16 → 17**（catalog 身份、writer 凭据/一次性令牌/领取、操作回执，以及影片 `generation`/`revision`）。正式 17 不是已撤回实验中的上传表。新建数据库与从官方 16 升级后的协议对象相同。
+v0.6.2 使用 schema 15，v0.7.x 使用 schema 16。当前 Beta 源码的目标为 **schema 19**：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。具体迁移以 `packages/library/src/db/migrations.ts` 为准。Beta 尚未发布，不能把 16 → 19 称为已发布升级路径。
 
 已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。正式 17 仍靠协议表结构识别，不能仅靠 `user_version = 17` 接受历史实验快照。
 
@@ -65,6 +65,8 @@ npm run dist:linux           # Linux 目标
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
 
 ## 官网开发
+
+服务端源码构建、Docker 部署及更新备份见 [服务端部署指南](SERVER_MODE.md)。当前能力与接口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，未完成验收和历史测试边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。服务端部署不需要 Electron，也不运行 `setup:desktop`。
 
 官网源码位于 `website/`，图片使用 `docs/images/` 中的资源。
 

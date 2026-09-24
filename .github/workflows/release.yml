@@ -21,8 +21,32 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test scripts/release-metadata.test.mjs
+      - id: meta
+        run: node scripts/release-metadata.mjs
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+
   test:
+    needs: metadata
     name: Typecheck and test
     runs-on: windows-latest
     steps:
@@ -39,7 +63,9 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test
+        # Native modules are prepared explicitly for the desktop runtime.
+        # Root/workspace installs no longer trigger an Electron rebuild.
+        run: npm run setup:desktop && npm test
         env:
           # The complete Windows suite can exceed five minutes on hosted runners.
           JAVDEX_TEST_TIMEOUT_MS: "900000"
@@ -81,7 +107,7 @@ jobs:
         run: npm ci
 
       - name: Package
-        run: npm run dist -- --platform ${{ matrix.platform }}
+        run: npm run setup:desktop && npm run dist -- --platform ${{ matrix.platform }}
 
       - name: Verify packaged Agent runtime
         run: npm run packaging:verify-agent-runtime
@@ -117,28 +143,75 @@ jobs:
             dist/*.yaml
           if-no-files-found: error
 
+  server:
+    name: Server image (${{ matrix.arch }})
+    needs: [metadata, package]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run server:build
+      - run: npm run server:smoke
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified architecture image
+        env:
+          IMAGE: ${{ needs.metadata.outputs.image }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker tag javdex-server:smoke "$IMAGE:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.arch }}"
+          docker push "$IMAGE:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.arch }}"
+
+  server-manifest:
+    needs: [metadata, server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Publish versioned multi-platform image
+        env:
+          IMAGE: ${{ needs.metadata.outputs.image }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create -t "$IMAGE:$VERSION" "$IMAGE:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-amd64" "$IMAGE:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-arm64"
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+
   release:
     name: Publish GitHub release
-    needs: package
+    needs: [metadata, package, server-manifest]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release-')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Resolve release tag
-        id: release
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME}"
-          elif [[ -n "${{ inputs.release_tag }}" ]]; then
-            tag="${{ inputs.release_tag }}"
-          else
-            version="$(node -p "require('./package.json').version")"
-            tag="v${version}"
-          fi
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
@@ -158,13 +231,28 @@ jobs:
           fi
           sha256sum -- "${packages[@]}" > SHA256SUMS.txt
 
+      - name: Attach server deployment files
+        env:
+          IMAGE: ${{ needs.metadata.outputs.image }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cp deploy/docker-compose.example.yml deploy/javdex-server.example.json release-artifacts/
+          cd release-artifacts
+          sha256sum docker-compose.example.yml javdex-server.example.json >> SHA256SUMS.txt
+          cd ..
+          cp ".github/release-notes/$TAG.md" release-body.md
+          printf '\n\n### Docker 服务端\n\n镜像：`%s:%s`（Linux amd64 / arm64）。\n\n下载下方 Compose 和 JSON 配置，部署步骤见 https://github.com/%s/blob/%s/docs/SERVER_MODE.md 。桌面与服务端须使用相同版本。\n' "$IMAGE" "$VERSION" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> release-body.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release.outputs.tag }}
-          name: Javdex ${{ steps.release.outputs.tag }}
-          body_path: .github/release-notes/${{ steps.release.outputs.tag }}.md
-          prerelease: ${{ inputs.prerelease || false }}
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Javdex ${{ needs.metadata.outputs.tag }}
+          body_path: release-body.md
+          prerelease: ${{ needs.metadata.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: false
           files: |
             release-artifacts/*.AppImage
@@ -173,3 +261,5 @@ jobs:
             release-artifacts/*.exe
             release-artifacts/*.zip
             release-artifacts/SHA256SUMS.txt
+            release-artifacts/docker-compose.example.yml
+            release-artifacts/javdex-server.example.json

@@ -4,11 +4,11 @@
 
 ## 决策
 
-1. 新增 [`compositeScrapeRun.ts`](../../src/main/scrapers/compositeScrapeRun.ts)：
+1. 新增 [`compositeScrapeRun.ts`](../../apps/desktop/src/main/scrapers/compositeScrapeRun.ts)：
    - `buildPluginRegistry`：user 覆盖 bundled。
    - `runCompositeFieldGroups`：字段分组编排；用 `onPluginError: 'abort' | 'collect'` 保留 video（失败上抛）与 actress（部分失败 warnings，全失败 throw）行为差。
-2. [`scraperManager`](../../src/main/scrapers/scraperManager.ts) / [`actressScraperManager`](../../src/main/scrapers/actressScraperManager.ts) 只保留 domain pick/merge、host 编排与 apply/conflict 接线。
-3. [`scraperPluginCatalog`](../../src/main/services/scraperPluginCatalog.ts) 明确为 **kind 路由适配器**；**唯一拥有的政策**是 `restoreDefaultIfDeleted`。install/export/composite CRUD 仍在 `scraperPluginService`。
+2. [`scraperManager`](../../apps/desktop/src/main/scrapers/scraperManager.ts) / [`actressScraperManager`](../../apps/desktop/src/main/scrapers/actressScraperManager.ts) 只保留 domain pick/merge、host 编排与 apply/conflict 接线。
+3. [`scraperPluginCatalog`](../../apps/desktop/src/main/services/scraperPluginCatalog.ts) 明确为 **kind 路由适配器**；**唯一拥有的政策**是 `restoreDefaultIfDeleted`。install/export/composite CRUD 仍在 `scraperPluginService`。
 
 ```mermaid
 flowchart LR

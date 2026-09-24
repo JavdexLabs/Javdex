@@ -73,7 +73,7 @@ PoC 还直接证明了权限风险：CLI 可 `tab-select` 到主窗口并读出�
 
 ### 1. CDP 是进程级，不是窗口级
 
-当前 Javdex 主窗口与 [`scrapeBrowser`](../src/main/scrapers/scrapeBrowser.ts) 的隐藏刮削窗口属于同一 Electron browser process。开启 `remote-debugging-port` 后，`/json/list` 会列出两个 renderer。`persist:scraper` 只隔离 cookie/storage，不隔离 CDP target 权限。
+当前 Javdex 主窗口与 [`scrapeBrowser`](../apps/desktop/src/main/scrapers/scrapeBrowser.ts) 的隐藏刮削窗口属于同一 Electron browser process。开启 `remote-debugging-port` 后，`/json/list` 会列出两个 renderer。`persist:scraper` 只隔离 cookie/storage，不隔离 CDP target 权限。
 
 即使 Agent 只看到一个 `browser` wrapper，本机其他进程仍可连接裸端口；如果直接把 endpoint 或完整 CLI 给 Pi，页面 prompt injection 也可能诱导模型切换 tab、读取 storage 或执行 `run-code`。
 

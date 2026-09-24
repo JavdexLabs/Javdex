@@ -125,7 +125,7 @@
 
 - `App.tsx` route tree、route match pattern、path builder、path parser 同步更新。
 - reload reset 逻辑复用 parser 或 route helper，不新增孤立 regex。
-- route match 常量维护在 `src/renderer/src/listView/routePaths.ts`（`ROUTE_MATCH`）。
+- route match 常量维护在 `apps/desktop/src/renderer/src/listView/routePaths.ts`（`ROUTE_MATCH`）。
 - 打开详情时保留 `location.search`，除非明确进入另一类资源。
 - 关闭详情时回到打开来源，而不是统一回到媒体库。
 - 新增嵌套详情时同时补充 background scope、scroll/refetch 行为和返回按钮行为。
@@ -157,3 +157,5 @@
 卡片数据在进入查询缓存前投影并检查单页1 MiB JSON编码预算；宽详情仍由GET读取。仅选中ID独立于卡片缓存。Shift采用半开绝对范围，逐页获取ID并比较读取修订、总数和端点；取消或结果变化不提交部分范围。只读返回仅刷新活动且过期的查询，不遍历已淘汰历史页。
 
 导演、系列、机构、演员作品和清单详情的关联影片使用独立 `relatedVideoOffset`（每页60），滚动 replace URL，筛选或排序变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset` 或清单主列表的 `playlistOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。
+
+影片详情顶部的媒体库标签可点击：打开同一影片在目标媒体库中的详情，侧栏与资源作用域同步切换。该操作进入目标库路径并清空原列表 query；详情返回按钮返回目标库列表，系统后退可回到切换前的详情。全部成员库标签换行展示，不截掉可切换入口。

@@ -1,0 +1,849 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { afterEach, describe, it } from 'node:test'
+import { randomUUID } from 'node:crypto'
+import { isStructuredError } from '@shared/protocol/errors'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
+import { configureLibraryHost, resetLibraryHostForTests } from '@library/runtime/host'
+import { resetAssetKeyCacheForTests } from '@library/assetCrypto'
+import { mediaAssetStore } from '@library/mediaAssetStore'
+import { ensureCatalogIdentity, readCatalogIdentity } from './catalogIdentity'
+import { issueCatalogMigrationToken, authenticateMigration } from './catalogMigrationAuth'
+import {
+  abandonCatalogMigration,
+  enableCatalogMigration,
+  openIsolatedCatalog,
+  previewCatalogMigration,
+  stageMigrationPackageFile,
+  startCatalogMigration,
+  statusCatalogMigration,
+  migrationPackagePath
+} from './catalogMigration'
+import { catalogLooksEmpty } from './catalogMigrationState'
+import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
+
+const supportsPrivateMount = process.platform === 'linux' &&
+  spawnSync('unshare', ['--user', '--map-root-user', '--mount', 'true'], { stdio: 'ignore' }).status === 0
+
+function insertRoot(
+  db: ReturnType<typeof openIsolatedCatalog>,
+  libraryId: number,
+  dir: string
+): number {
+  const identity = resolveMediaLibraryRootIdentity(dir)
+  const timestamp = new Date().toISOString()
+  const row = db
+    .prepare(
+      `INSERT INTO media_library_roots (
+         library_id, path, normalized_path, real_path, normalized_real_path,
+         device_id, inode, position, state, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?)`
+    )
+    .run(
+      libraryId,
+      identity.path,
+      identity.normalizedPath,
+      identity.realPath,
+      identity.normalizedRealPath,
+      identity.deviceId,
+      identity.inode,
+      timestamp,
+      timestamp
+    )
+  return Number(row.lastInsertRowid)
+}
+
+describe('catalogMigration protocol', () => {
+  const roots: string[] = []
+  const previousUserData = process.env.JAVDEX_TEST_USER_DATA
+  afterEach(() => {
+    resetAssetKeyCacheForTests()
+    resetLibraryHostForTests()
+    if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+    else process.env.JAVDEX_TEST_USER_DATA = previousUserData
+    for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  for (const sourceLocal of [false, true]) {
+  it(`exports an offline package ${sourceLocal ? 'local to server' : 'server to local'} without the source running`, async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s12-mig-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const targetDir = path.join(root, 'target')
+    const mappedMount = path.join(root, 'mount-mapped')
+    const unmappedMount = path.join(root, 'mount-unmapped')
+    const targetMount = path.join(root, 'mount-target')
+    for (const dir of [sourceDir, targetDir, mappedMount, unmappedMount, targetMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    const targetImages = path.join(targetDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    fs.mkdirSync(path.join(targetImages, 'covers'), { recursive: true })
+    const coverRel = 'covers/s12.png'
+    fs.writeFileSync(path.join(sourceImages, coverRel), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))
+
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+    try {
+      const sourceId = ensureCatalogIdentity({ serverId: sourceLocal ? null : randomUUID() }, sourceDb)
+      const targetId = ensureCatalogIdentity({ serverId: sourceLocal ? randomUUID() : null }, targetDb)
+      assert.equal(sourceId.serverId === null, sourceLocal)
+      assert.equal(targetId.serverId === null, !sourceLocal)
+
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const unmappedRootId = insertRoot(sourceDb, 1, unmappedMount)
+      sourceDb
+        .prepare('UPDATE media_library_configs SET remove_resource_less_memberships = 1 WHERE library_id = 1')
+        .run()
+      const localFile = path.join(mappedMount, 'S12-001.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S12-001',
+        title: 'Source clip',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+      const strmPath = path.join(unmappedMount, 'S12-001.strm')
+      fs.writeFileSync(strmPath, 'https://example.test/S12-001.mp4')
+      const strmIdentity = buildVideoResourceSourceIdentity({
+        kind: 'direct',
+        locator: 'https://example.test/S12-001.mp4',
+        strmSourcePath: strmPath
+      })
+      sourceDb
+        .prepare(
+          `INSERT INTO video_resources (
+             library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+             strm_source_path, is_primary, add_time
+           ) VALUES (?, ?, ?, 'direct', ?, ?, ?, ?, 0, ?)`
+        )
+        .run(
+          1,
+          inserted.videoId,
+          unmappedRootId,
+          'https://example.test/S12-001.mp4',
+          `strm:${strmPath}`,
+          strmIdentity,
+          strmPath,
+          new Date().toISOString()
+        )
+      const unmappedOnlyFile = path.join(unmappedMount, 'S12-ORPHAN.mp4')
+      fs.writeFileSync(unmappedOnlyFile, 'orphan')
+      insertTestVideoWithFile(sourceDb, {
+        code: 'S12-ORPHAN',
+        title: 'Unmapped only',
+        filePath: unmappedOnlyFile,
+        libraryId: 1,
+        rootId: unmappedRootId
+      })
+      sourceDb
+        .prepare(
+          `INSERT INTO catalog_writer_credentials (
+             writer_epoch, secret_digest, claim_id, created_at
+           ) VALUES (1, ?, ?, ?)`
+        )
+        .run('a'.repeat(64), randomUUID(), new Date().toISOString())
+
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount, unmapped: unmappedMount }
+      }
+      assert.throws(
+        () =>
+          previewCatalogMigration(
+            { mappings: [{ sourceRootId: 999, targetMountSelectionId: 'mapped' }] },
+            sourceHost,
+            sourceDb
+          ),
+        (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+      )
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      assert.equal(preview.strmConversions, 1)
+      assert.equal(preview.localResourceRemovals, 1)
+      assert.equal(preview.omittedRoots.length, 1)
+      assert.equal(preview.omittedRoots[0]?.rootId, unmappedRootId)
+      assert.deepEqual(preview.autoCleanupDisabledLibraryIds, [1])
+      assert.deepEqual(preview.pendingBlockers, [])
+      const retriedPreview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      assert.equal(retriedPreview.migrationId, preview.migrationId)
+      assert.equal(retriedPreview.digest, preview.digest)
+
+      const exporting = startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      assert.throws(() => previewCatalogMigration({ mappings: [] }, sourceHost, sourceDb),
+        (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
+      assert.throws(() => abandonCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest, confirmTargetStopped: true }, sourceHost, sourceDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
+      const started = await exporting
+      assert.equal((started as { state?: string }).state, 'succeeded')
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
+      const pkg = migrationPackagePath(preview.migrationId, sourceHost)
+      assert.equal(fs.existsSync(pkg), true)
+      const sourceStatus = statusCatalogMigration({ migrationId: preview.migrationId }, sourceDb)
+      assert.equal(sourceStatus.role, 'source')
+      assert.equal(sourceStatus.phase, 'frozen')
+      assert.equal('targetPhase' in sourceStatus, false)
+      sourceDb.close() // The target must not need source reachability or permission.
+
+      configureLibraryHost({
+        userDataPath: () => targetDir,
+        assets: { assetEncryption: () => false, mediaAssetsPath: () => targetImages },
+        mediaMounts: () => ({ mapped: targetMount })
+      })
+      const targetHost = {
+        appVersion: '0.7.0',
+        userDataPath: targetDir,
+        imagesDir: targetImages,
+        mediaMounts: { mapped: targetMount }
+      }
+      if (targetId.serverId) {
+        const issued = issueCatalogMigrationToken({}, targetDb)
+        authenticateMigration(issued.oneTimeToken, targetDb)
+      }
+      stageMigrationPackageFile(preview.migrationId, pkg, targetHost)
+      const imported = await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      assert.equal((imported as { state?: string }).state, 'succeeded')
+      const ready = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
+      assert.equal(ready.role, 'target')
+      assert.equal(ready.phase, 'ready')
+      assert.equal('sourcePhase' in ready, false)
+      await assert.rejects(startCatalogMigration(
+        { migrationId: randomUUID(), digest: preview.digest }, targetHost, targetDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY')
+      const enabled = enableCatalogMigration(
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      assert.equal(enabled.phase, 'enabled')
+      assert.deepEqual(enableCatalogMigration(
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
+        targetHost, targetDb
+      ), enabled)
+      assert.throws(() => enableCatalogMigration(
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: '0'.repeat(64) },
+        targetHost, targetDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT')
+      const newIdentity = readCatalogIdentity(targetDb)
+      assert.ok(newIdentity)
+      assert.notEqual(newIdentity.catalogId, sourceId.catalogId)
+      assert.equal(newIdentity.serverId, targetId.serverId)
+      assert.equal(newIdentity.frozen, false)
+      assert.equal(newIdentity.writerEpoch, 0)
+      const videos = targetDb.prepare('SELECT code, cover_path FROM videos ORDER BY code').all() as Array<{
+        code: string
+        cover_path: string | null
+      }>
+      assert.equal(videos.length, 2)
+      assert.equal(videos[0]?.code, 'S12-001')
+      assert.equal(videos[0]?.cover_path, coverRel)
+      assert.equal(videos[1]?.code, 'S12-ORPHAN')
+      assert.equal(fs.existsSync(path.join(targetImages, coverRel)), true)
+      const cleanup = targetDb
+        .prepare('SELECT remove_resource_less_memberships AS flag FROM media_library_configs WHERE library_id = 1')
+        .get() as { flag: number }
+      assert.equal(cleanup.flag, 0)
+      const resources = targetDb
+        .prepare('SELECT kind, strm_source_path, root_id FROM video_resources ORDER BY kind')
+        .all() as Array<{ kind: string; strm_source_path: string | null; root_id: number | null }>
+      assert.equal(resources.length, 2)
+      const strm = resources.find((row) => row.kind === 'direct')
+      assert.equal(strm?.strm_source_path, null)
+      const creds = (
+        targetDb.prepare('SELECT COUNT(*) AS n FROM catalog_writer_credentials').get() as { n: number }
+      ).n
+      assert.equal(creds, 0)
+      const rootsOnTarget = (
+        targetDb.prepare('SELECT COUNT(*) AS n FROM media_library_roots').get() as { n: number }
+      ).n
+      assert.equal(rootsOnTarget, 1)
+      const mappedLocal = targetDb
+        .prepare("SELECT locator FROM video_resources WHERE kind = 'local'")
+        .get() as { locator: string }
+      assert.equal(mappedLocal.locator.startsWith(targetMount), true)
+    } finally {
+      if (sourceDb.open) sourceDb.close()
+      targetDb.close()
+    }
+  })
+
+  }
+
+  it('serializes target enable versus abandon and rejects late enable', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s12-race-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const targetDir = path.join(root, 'target')
+    const mappedMount = path.join(root, 'mount-mapped')
+    const targetMount = path.join(root, 'mount-target')
+    for (const dir of [sourceDir, targetDir, mappedMount, targetMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    const targetImages = path.join(targetDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    fs.mkdirSync(targetImages, { recursive: true })
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+    try {
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S12-002.mp4')
+      fs.writeFileSync(localFile, 'video')
+      insertTestVideoWithFile(sourceDb, {
+        code: 'S12-002',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      const targetHost = {
+        appVersion: '0.7.0',
+        userDataPath: targetDir,
+        imagesDir: targetImages,
+        mediaMounts: { mapped: targetMount }
+      }
+      stageMigrationPackageFile(
+        preview.migrationId,
+        migrationPackagePath(preview.migrationId, sourceHost),
+        targetHost
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      const abandoned = abandonCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      assert.equal(abandoned.phase, 'abandoned')
+      assert.throws(
+        () =>
+          enableCatalogMigration(
+            { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
+            targetHost,
+            targetDb
+          ),
+        (error: unknown) => isStructuredError(error) && error.code === 'AUTH_REQUIRED'
+      )
+      const status = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
+      assert.equal(status.phase, 'abandoned')
+    } finally {
+      if (sourceDb.open) sourceDb.close()
+      targetDb.close()
+    }
+  })
+
+  it('requires explicit target-stopped confirmation to resume an exported source', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s12-abandon-src-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const mappedMount = path.join(root, 'mount-mapped')
+    for (const dir of [sourceDir, mappedMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    try {
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S12-003.mp4')
+      fs.writeFileSync(localFile, 'video')
+      insertTestVideoWithFile(sourceDb, {
+        code: 'S12-003',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
+      assert.throws(() => abandonCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest }, sourceHost, sourceDb
+      ), (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
+      const abandoned = abandonCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest, confirmTargetStopped: true },
+        sourceHost,
+        sourceDb
+      )
+      assert.equal(abandoned.phase, 'abandoned')
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, false)
+    } finally {
+      if (sourceDb.open) sourceDb.close()
+    }
+  })
+
+  it('records pending scrape and encrypted-asset blockers instead of freezing', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s12-block-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const mappedMount = path.join(root, 'mount-mapped')
+    for (const dir of [sourceDir, mappedMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    fs.writeFileSync(path.join(sourceImages, 'covers', 'enc.bin'), Buffer.from('AVPK\x01rest'))
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    try {
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S12-004.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S12-004',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      const now = new Date().toISOString()
+      sourceDb
+        .prepare(
+          `INSERT INTO pending_video_scrapes (
+             video_id, revision, selected_fields_json, applicable_fields_json,
+             update_mode, request_json, warnings_json, created_at, updated_at
+           ) VALUES (?, 1, '[]', '[]', 'replace', '{}', '[]', ?, ?)`
+        )
+        .run(inserted.videoId, now, now)
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      assert.ok(preview.pendingBlockers.includes('pending-video-scrapes'))
+      assert.equal(preview.pendingBlockers.includes('encrypted-assets'), false)
+      await assert.rejects(
+        () =>
+          startCatalogMigration(
+            { migrationId: preview.migrationId, digest: preview.digest },
+            sourceHost,
+            sourceDb
+          ),
+        (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+      )
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, false)
+    } finally {
+      if (sourceDb.open) sourceDb.close()
+    }
+  })
+
+  it('decrypts stored assets automatically during source start', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-decrypt-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const mappedMount = path.join(root, 'mount-mapped')
+    for (const dir of [sourceDir, mappedMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    const coverRel = 'covers/s13-plain.png'
+    fs.writeFileSync(path.join(sourceImages, coverRel), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    try {
+      process.env.JAVDEX_TEST_USER_DATA = sourceDir
+      configureLibraryHost({
+        userDataPath: () => sourceDir,
+        assets: { assetEncryption: () => true, mediaAssetsPath: () => sourceImages }
+      })
+      resetAssetKeyCacheForTests()
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S13-DEC.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S13-DEC',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+      const rewrite = mediaAssetStore.encryptStoredAsset(coverRel)
+      assert.ok(rewrite)
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(rewrite.toRel, inserted.videoId)
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      assert.equal(preview.pendingBlockers.includes('encrypted-assets'), false)
+      const started = await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      assert.equal((started as { state?: string }).state, 'succeeded')
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, true)
+      const liveCover = fs.readFileSync(path.join(sourceImages, rewrite.toRel))
+      assert.equal(liveCover.subarray(0, 5).equals(Buffer.from('AVPK\x01')), true)
+      const packed = fs.readFileSync(
+        path.join(sourceDir, 'migration-work', preview.migrationId, 'images', coverRel)
+      )
+      assert.equal(packed.subarray(0, 5).equals(Buffer.from('AVPK\x01')), false)
+      const packedDb = openIsolatedCatalog(
+        path.join(sourceDir, 'migration-work', preview.migrationId, 'catalog', 'library.db')
+      )
+      try {
+        const packedCover = packedDb
+          .prepare('SELECT cover_path FROM videos WHERE id = ?')
+          .get(inserted.videoId) as { cover_path: string }
+        assert.equal(packedCover.cover_path, coverRel)
+      } finally {
+        packedDb.close()
+      }
+    } finally {
+      if (sourceDb.open) sourceDb.close()
+    }
+  })
+
+  it('fails source start and unfreezes when staged decrypt has no path alias', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-decrypt-fail-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const mappedMount = path.join(root, 'mount-mapped')
+    for (const dir of [sourceDir, mappedMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    const coverRel = 'covers/orphan.enc'
+    const orphanBlob = Buffer.alloc(5 + 1 + 12 + 16, 0)
+    Buffer.from('AVPK\x01').copy(orphanBlob)
+    fs.writeFileSync(path.join(sourceImages, coverRel), orphanBlob)
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    try {
+      process.env.JAVDEX_TEST_USER_DATA = sourceDir
+      configureLibraryHost({
+        userDataPath: () => sourceDir,
+        assets: { assetEncryption: () => true, mediaAssetsPath: () => sourceImages }
+      })
+      resetAssetKeyCacheForTests()
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S13-DEC-FAIL.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S13-DEC-FAIL',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      await assert.rejects(
+        () =>
+          startCatalogMigration(
+            { migrationId: preview.migrationId, digest: preview.digest },
+            sourceHost,
+            sourceDb
+          ),
+        (error: unknown) => isStructuredError(error) && error.code === 'RECOVERY_REQUIRED'
+      )
+      assert.equal(readCatalogIdentity(sourceDb)?.frozen, false)
+    } finally {
+      if (sourceDb.open) sourceDb.close()
+    }
+  })
+
+  it('rolls back enable if image copy hits EACCES after the transaction commits', {
+    skip: process.platform === 'win32' ? 'chmod(0) does not deny writes on Windows; covered by Docker migration smoke' : false
+  }, async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-eacces-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const targetDir = path.join(root, 'target')
+    const mappedMount = path.join(root, 'mount-mapped')
+    const targetMount = path.join(root, 'mount-target')
+    for (const dir of [sourceDir, targetDir, mappedMount, targetMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    const targetImages = path.join(targetDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    fs.mkdirSync(targetImages, { recursive: true })
+    const coverRel = 'covers/s13-perm.png'
+    fs.writeFileSync(path.join(sourceImages, coverRel), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+    try {
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S13-PERM.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S13-PERM',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      const targetHost = {
+        appVersion: '0.7.0',
+        userDataPath: targetDir,
+        imagesDir: targetImages,
+        mediaMounts: { mapped: targetMount }
+      }
+      const issued = issueCatalogMigrationToken({}, targetDb)
+      authenticateMigration(issued.oneTimeToken, targetDb)
+      stageMigrationPackageFile(
+        preview.migrationId,
+        migrationPackagePath(preview.migrationId, sourceHost),
+        targetHost
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      fs.chmodSync(targetImages, 0)
+      try {
+        assert.throws(
+          () =>
+            enableCatalogMigration(
+              { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
+              targetHost,
+              targetDb
+            ),
+          (error: unknown) =>
+            error instanceof Error && (error as NodeJS.ErrnoException).code === 'EACCES'
+        )
+      } finally {
+        fs.chmodSync(targetImages, 0o755)
+      }
+      const status = statusCatalogMigration({ migrationId: preview.migrationId }, targetDb)
+      assert.equal(status.phase, 'ready')
+      assert.equal(fs.existsSync(path.join(targetImages, coverRel)), false)
+      assert.equal(catalogLooksEmpty(targetDb), true)
+      const retried = enableCatalogMigration(
+        { confirmSourceStopped: true, migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      assert.equal(retried.phase, 'enabled')
+      assert.equal(fs.existsSync(path.join(targetImages, coverRel)), true)
+    } finally {
+      try {
+        fs.chmodSync(targetImages, 0o755)
+      } catch {
+        // Directory may already be writable.
+      }
+      if (sourceDb.open) sourceDb.close()
+      targetDb.close()
+    }
+  })
+
+  it('rolls back enable if image copy hits ENOSPC after the transaction commits', {
+    skip: supportsPrivateMount ? false : 'Requires user and mount namespaces; covered by Linux Docker migration smoke'
+  }, async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-enospc-'))
+    roots.push(root)
+    const sourceDir = path.join(root, 'source')
+    const targetDir = path.join(root, 'target')
+    const mappedMount = path.join(root, 'mount-mapped')
+    const targetMount = path.join(root, 'mount-target')
+    for (const dir of [sourceDir, targetDir, mappedMount, targetMount]) fs.mkdirSync(dir)
+    const sourceImages = path.join(sourceDir, 'media_assets')
+    const targetImages = path.join(targetDir, 'media_assets')
+    fs.mkdirSync(path.join(sourceImages, 'covers'), { recursive: true })
+    fs.mkdirSync(targetImages, { recursive: true })
+    const coverRel = 'covers/s13-disk.png'
+    fs.writeFileSync(path.join(sourceImages, coverRel), Buffer.alloc(400 * 1024, 0x7f))
+    const sourceDb = openIsolatedCatalog(path.join(sourceDir, 'library.db'))
+    const targetDb = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+    try {
+      ensureCatalogIdentity({ serverId: randomUUID() }, sourceDb)
+      ensureCatalogIdentity({ serverId: randomUUID() }, targetDb)
+      const mappedRootId = insertRoot(sourceDb, 1, mappedMount)
+      const localFile = path.join(mappedMount, 'S13-DISK.mp4')
+      fs.writeFileSync(localFile, 'video')
+      const inserted = insertTestVideoWithFile(sourceDb, {
+        code: 'S13-DISK',
+        filePath: localFile,
+        libraryId: 1,
+        rootId: mappedRootId
+      })
+      sourceDb.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRel, inserted.videoId)
+      const sourceHost = {
+        appVersion: '0.7.0',
+        userDataPath: sourceDir,
+        imagesDir: sourceImages,
+        mediaMounts: { mapped: mappedMount }
+      }
+      const preview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        sourceHost,
+        sourceDb
+      )
+      const targetHost = {
+        appVersion: '0.7.0',
+        userDataPath: targetDir,
+        imagesDir: targetImages,
+        mediaMounts: { mapped: targetMount }
+      }
+      const issued = issueCatalogMigrationToken({}, targetDb)
+      authenticateMigration(issued.oneTimeToken, targetDb)
+      stageMigrationPackageFile(
+        preview.migrationId,
+        migrationPackagePath(preview.migrationId, sourceHost),
+        targetHost
+      )
+      await startCatalogMigration(
+        { migrationId: preview.migrationId, digest: preview.digest },
+        targetHost,
+        targetDb
+      )
+      targetDb.close()
+      const child = path.resolve('packages/library/src/catalog/catalogMigrationEnospcChild.ts')
+      const quote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`
+      const result = spawnSync(
+        'unshare',
+        [
+          '--user',
+          '--map-root-user',
+          '--mount',
+          'bash',
+          '-c',
+          [
+            `mount -t tmpfs -o size=256k tmpfs ${quote(targetImages)}`,
+            `exec ${quote(process.execPath)} --require ${quote(path.resolve('scripts/register-test-paths.cjs'))} --import tsx --import ${quote(path.resolve('scripts/register-library-test-host.ts'))} ${quote(child)}`
+          ].join(' && ')
+        ],
+        {
+          cwd: process.cwd(),
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '1',
+            JAVDEX_ENOSPC_CHILD: '1',
+            JAVDEX_TEST_USER_DATA: targetDir,
+            JAVDEX_ENOSPC_TARGET_DB: path.join(targetDir, 'library.db'),
+            JAVDEX_ENOSPC_IMAGES: targetImages,
+            JAVDEX_ENOSPC_MIGRATION_ID: preview.migrationId,
+            JAVDEX_ENOSPC_DIGEST: preview.digest,
+            JAVDEX_ENOSPC_COVER_REL: coverRel,
+            JAVDEX_ENOSPC_MOUNT: targetMount
+          }
+        }
+      )
+      const line = (result.stdout ?? '')
+        .split('\n')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.startsWith('{'))
+        .at(-1)
+      assert.ok(line, `enospc child failed: exit=${result.status}\n${result.stdout}\n${result.stderr}`)
+      const report = JSON.parse(line) as {
+        code: string | null
+        phase: string
+        coverExists: boolean
+      }
+      assert.equal(report.code, 'ENOSPC', JSON.stringify(report))
+      assert.equal(report.phase, 'ready')
+      assert.equal(report.coverExists, false)
+      const reopened = openIsolatedCatalog(path.join(targetDir, 'library.db'))
+      try {
+        const status = statusCatalogMigration({ migrationId: preview.migrationId }, reopened)
+        assert.equal(status.phase, 'ready')
+        assert.equal(fs.existsSync(path.join(targetImages, coverRel)), false)
+        assert.equal(catalogLooksEmpty(reopened), true)
+      } finally {
+        reopened.close()
+      }
+    } finally {
+      if (sourceDb.open) sourceDb.close()
+      try {
+        targetDb.close()
+      } catch {
+        // Closed before the child enable.
+      }
+    }
+  })
+})

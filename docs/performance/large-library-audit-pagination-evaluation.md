@@ -52,7 +52,7 @@ TEMP页面分配为temp.page_count×temp.page_size，不是RSS、实际落盘量
 
 ## BX：连接局部原始审计索引模块
 
-新增 `src/main/services/scanAuditReadIndex.ts`。本批实现底层原始集合读模型，**尚未接入worker、IPC、快照解析或页面**；它是同步模块，不能直接在主进程调用。五个section保留原数组ordinal和对象全部字段，支持files的outcome/attention组合过滤，返回总数、原ordinal及最多100项。
+新增 `apps/desktop/src/main/services/scanAuditReadIndex.ts`。本批实现底层原始集合读模型，**尚未接入worker、IPC、快照解析或页面**；它是同步模块，不能直接在主进程调用。五个section保留原数组ordinal和对象全部字段，支持files的outcome/attention组合过滤，返回总数、原ordinal及最多100项。
 
 工厂独占native readonly连接，仅构建期query_only=OFF；TEMP明确FILE、cache8MiB、max_page_count按调用方显式indexBytes预算计算。成功恢复ON后返回只读handle，任何构建异常关闭连接；dispose幂等。sourceBytes先于JSON解析检查；验证schema1/2、libraryId/runId/finishedAt和五个数组类型。条目必须原始object，files的outcome必须已知；这是原始对象索引，不是完整业务字段验证或ViewItem生成。
 
@@ -103,7 +103,7 @@ header在共享reader的同一事务内读取受字节限制的原summary、对�
 
 两个header单元场景验证大/非法audit正文不被解析、库隔离/未识别计数、坏summary及源/包装超限；WAL场景在summary读取中途提交新summary和删除未识别记录，首个header仍旧三项一致，下一次看到新状态。真实worker验证header、结果克隆、非法ID及与tag共用；handler测试验证严格输入和可信固定预算，无renderer提额。
 
-`src/shared/scanAuditView.ts`提取实际面板的fileDetail、fileView、isAttentionFile、hasNfoPendingTarget、resourceView与结构型ViewItem；实际面板改用共享函数，其余筛选/状态/分页逻辑未改。这使后续worker生成展示项可复用相同规则；本批尚未在worker中生成完整合并视图。
+`packages/contracts/src/scanAuditView.ts`提取实际面板的fileDetail、fileView、isAttentionFile、hasNfoPendingTarget、resourceView与结构型ViewItem；实际面板改用共享函数，其余筛选/状态/分页逻辑未改。这使后续worker生成展示项可复用相同规则；本批尚未在worker中生成完整合并视图。
 
 提取前后五个函数体经TypeScript AST逐字核对一致。同一组25项共享测试对旧实际函数及新共享函数均通过，覆盖全部outcome/updateKind/skipReason、五种NFO disposition/warnings和资源原因/空字段；原11项面板回归保留。父任务合并IPC/header/worker/共享函数与实际面板，最终80项定向通过。没有新增浏览器场景或时延基准，因为此批未改变页面布局，也未完成新分页页面链路。
 

@@ -1,0 +1,16 @@
+services:
+  javdex:
+    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the desktop version, for example 0.8.0-beta.1}
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    environment:
+      JAVDEX_WEB_PASSWORD: "replace-with-a-long-password"
+    volumes:
+      - javdex-data:/data
+      - /absolute/path/to/media:/media:ro
+      - ./javdex-server.example.json:/config/server.json:ro
+    command: ["start", "--config", "/config/server.json"]
+
+volumes:
+  javdex-data:

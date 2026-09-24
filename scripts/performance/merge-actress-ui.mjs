@@ -11,20 +11,20 @@ const output=path.resolve(process.env.JAVDEX_MERGE_UI_OUTPUT??path.join(root,'re
 fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
 fs.writeFileSync(path.join(root,'fixture.jsx'),`
 import React from 'react';import {createRoot} from 'react-dom/client';
-import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
+import ${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/styles/global.css'))};
 window.React=React;window.__calls=[];window.__merges=[];window.__merged=0;window.__cancelled=0;
 window.api={actresses:{list:()=>{throw new Error('Full actress list forbidden')},mergeCandidates:async query=>{
  window.__calls.push(query);if(window.__failPage){window.__failPage=false;throw new Error('Page failure')}
  const all=Array.from({length:101},(_,i)=>({id:i+2,main_name:'Candidate-'+(i+2),gender:'female',avatar_path:null,video_count:i+1})).filter(item=>!query.search||item.main_name.includes(query.search));
  return {items:all.slice(query.offset,query.offset+40),hasMore:all.length>query.offset+40,offset:query.offset}
 },merge:async input=>{window.__merges.push(input);if(window.__holdMerge)await new Promise(resolve=>{window.__releaseMerge=resolve});if(window.__failMerge){window.__failMerge=false;throw new Error('Merge failure')}return true}}};
-const Component=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/MergeActressModal.tsx'))})).default;
+const Component=(await import(${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/components/MergeActressModal.tsx'))})).default;
 createRoot(document.getElementById('root')).render(<Component keepVideoCount={0} keepActress={{id:1,main_name:'Keep-1',gender:'female',avatar_path:null,videos:[],gallery:[]}} onCancel={()=>window.__cancelled++} onMerged={()=>window.__merged++}/>);
 `)
 let server,browser;const results=[]
 try {
  server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
-  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
+  '@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
   'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
  }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
  await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})

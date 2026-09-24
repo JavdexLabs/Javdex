@@ -1,0 +1,9 @@
+{
+  "name": "Javdex Cloud (Docker-in-Docker)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "user": "ubuntu",
+  "install": "npm ci",
+  "start": "sudo service docker start && i=0; while [ \"$i\" -lt 30 ]; do docker info >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 1; done; echo 'docker daemon did not become ready' >&2; exit 1"
+}

@@ -18,7 +18,7 @@
 - portable、Jellyfin、Emby 将样张加入 `<fanart><thumb>…</thumb></fanart>`，与详情背景合并。
 - Plex、Infuse 复制图片但不添加样张 NFO 引用，并产生提示。
 
-代码依据：[nfoExportModule.ts](../src/main/nfo/export/nfoExportModule.ts) 的 `includeSamples` 分支及 [nfoExportProfiles.ts](../src/main/nfo/export/nfoExportProfiles.ts) 的 `supportsSampleReferences`、fanart 渲染逻辑。当前标志最多表示“导出器写入引用”，不能视作消费端完整支持证据。
+代码依据：[nfoExportModule.ts](../apps/desktop/src/main/nfo/export/nfoExportModule.ts) 的 `includeSamples` 分支及 [nfoExportProfiles.ts](../apps/desktop/src/main/nfo/export/nfoExportProfiles.ts) 的 `supportsSampleReferences`、fanart 渲染逻辑。当前标志最多表示“导出器写入引用”，不能视作消费端完整支持证据。
 
 ## 消费端对照
 
@@ -58,9 +58,9 @@
 
 使用实际 `renderNfoExportDocument` 输出五种 profile，再通过 `LocalNfoSourceAdapter.collect` 读取。构造“独立背景 + 本影片样张 + 同目录其他影片样张”：修复前 portable/Jellyfin/Emby 通过，Plex/Infuse 仅收到背景，漏掉本影片样张。原因是两种 profile 不写样张引用，而导入器在存在背景引用时停止补查 `extrafanart`。
 
-现已修复为：保留显式引用，并补查本影片文件名前缀的样张；有显式引用时不读取无归属前缀的目录图片，物理文件仍去重。五种格式的回归全部通过，连同既有导入/profile 与扫描回归共 77 项通过，Node 类型检查和变更文件 ESLint 通过。证据见 [localNfoSourceAdapter.test.ts](../src/main/metadata-sources/localNfoSourceAdapter.test.ts)。这验证的是样张候选回读，并不等于所有消费端的显示验证。
+现已修复为：保留显式引用，并补查本影片文件名前缀的样张；有显式引用时不读取无归属前缀的目录图片，物理文件仍去重。五种格式的回归全部通过，连同既有导入/profile 与扫描回归共 77 项通过，Node 类型检查和变更文件 ESLint 通过。证据见 [localNfoSourceAdapter.test.ts](../apps/desktop/src/main/metadata-sources/localNfoSourceAdapter.test.ts)。这验证的是样张候选回读，并不等于所有消费端的显示验证。
 
-另一个独立条件是自动导入只作用于首次发现的资源，并按补空字段策略处理；全局已刮削成功的影片直接跳过。所以在原库导出后再次扫描，或新建媒体库但复用同一全局已刮削影片，均不能用来证明旁路图片不可识别。这个规则此次未改变，见 [localNfoScanService.ts](../src/main/services/localNfoScanService.ts) 与扫描回归。
+另一个独立条件是自动导入只作用于首次发现的资源，并按补空字段策略处理；全局已刮削成功的影片直接跳过。所以在原库导出后再次扫描，或新建媒体库但复用同一全局已刮削影片，均不能用来证明旁路图片不可识别。这个规则此次未改变，见 [localNfoScanService.ts](../apps/desktop/src/main/services/localNfoScanService.ts) 与扫描回归。
 
 ## 建议的产品边界
 

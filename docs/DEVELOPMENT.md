@@ -12,20 +12,21 @@
 git clone https://github.com/JavdexLabs/Javdex.git
 cd Javdex
 npm ci
+npm run setup:desktop
 npm run dev
 ```
 
-`npm ci` 安装锁定版本，并通过 `electron-rebuild` 为 Electron 重新编译 `better-sqlite3` 原生模块。如原生模块构建失败，按安装日志补齐当前系统的编译环境后重试。
+`npm ci` 安装锁定的 workspace 依赖，根安装不再自动触发 Electron rebuild。桌面开发/测试随后显式运行 `npm run setup:desktop`；如原生模块构建失败，按日志补齐开发环境后重试。服务端产物使用独立的生产依赖安装，不运行该桌面准备命令。
 
-开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../src/shared/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
+开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../packages/contracts/src/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 
-## 未发布数据库迁移
+## 0.8.0 Beta 数据库迁移
 
-生产版 v0.6.2 使用 schema 15。本分支此前拆分的开发迁移 16/17/18 已合并为单次 **15 → 16**：建立 Agent 资源清理队列、升级标签覆盖索引、建立逐项扫描审计表及约束。三部分在同一事务内执行，全部成功后才记录版本 16；失败整次回滚。新建数据库与生产版升级后的结构相同。
+v0.6.2 使用 schema 15，v0.7.x 使用 schema 16。当前 Beta 源码的目标为 **schema 19**：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。具体迁移以 `packages/library/src/db/migrations.ts` 为准。Beta 尚未发布，不能把 16 → 19 称为已发布升级路径。
 
-已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。将来正式增加版本 17/18 时，须重新检查旧开发库的结构识别，不能仅靠版本数字接受这些历史快照。
+已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。正式 17 仍靠协议表结构识别，不能仅靠 `user_version = 17` 接受历史实验快照。
 
-旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `src/main/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
+旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `packages/library/src/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
 
 ## 检查与构建
 
@@ -43,7 +44,7 @@ npm start               # 预览生产构建
 需要运行特定 Electron 测试文件时：
 
 ```bash
-node scripts/run-electron-tests.mjs src/main/nfo/nfoArtifactCodec.test.ts
+node scripts/run-electron-tests.mjs apps/desktop/src/main/nfo/nfoArtifactCodec.test.ts
 ```
 
 `npm run build` 生成 `out/`，并校验人脸检测资源与 Pi 运行时。生产构建通过不等于各平台安装包已完成验证。
@@ -65,6 +66,8 @@ npm run dist:linux           # Linux 目标
 
 ## 官网开发
 
+服务端源码构建、Docker 部署及更新备份见 [服务端部署指南](SERVER_MODE.md)。当前能力与接口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，未完成验收和历史测试边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。服务端部署不需要 Electron，也不运行 `setup:desktop`。
+
 官网源码位于 `website/`，图片使用 `docs/images/` 中的资源。
 
 ```bash
@@ -85,15 +88,26 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 | 目录 | 职责 |
 |---|---|
-| `src/main` | 数据库、扫描、刮削、图片资产、AI 工作流与应用生命周期 |
-| `src/preload` | 通过 `contextBridge` 暴露受控 IPC API |
-| `src/renderer` | React 页面、组件、交互与查询状态 |
-| `src/shared` | 跨进程类型和 IPC 通道 |
-| `src/mcp` | 插件开发 MCP 服务 |
+| `apps/desktop/src/main` | 扫描、刮削、图片资产、AI 工作流与应用生命周期；本地装配仍打开资料库连接 |
+| `apps/desktop/src/preload` | 通过 `contextBridge` 暴露受控 IPC API |
+| `apps/desktop/src/renderer` | React 页面、组件、交互与查询状态 |
+| `packages/contracts/src` | 跨进程类型和 IPC 通道 |
+| `apps/desktop/src/mcp` | 插件开发 MCP 服务 |
+| `apps/web/src` | 独立构建的只读浏览页面 |
+| `packages/library/src` | Node 路径/资源身份工具、资料库数据库、图片存储、扫描辅助、NFO、维护闸门与路径清理；扫描编排、Electron 封面导出和业务服务仍在抽离 |
+| `packages/http/src` | 局域网浏览 HTTP、配对/会话、浏览 DTO 与静态资源；桌面 webAccess 生命周期仍在 desktop |
+| `packages/ui/src` | 桌面和网页真实共用的纯展示组件 |
+| `apps/server` | 独立 Node 入口：配置、`dataDir`/`imagesDir`/挂载、SQLite/图片、查询 worker、浏览 HTTP、管理 HTTP、writer 认主、迁库与播放授权；生产闭包 `out/server`。容器烟测 `server:smoke`（单容器）与 `server:smoke:migration`（Docker 两端迁库）取决于本机是否有 Docker；同版本 Linux 桌面包 + 镜像安装烟测 `smoke:same-version-install`（先 `server:build` 与 `dist:linux`）。Cursor Cloud 见根目录 `AGENTS.md` 的 Cursor Cloud specific instructions |
 
-渲染进程不直接访问 Node.js、数据库或文件系统，相关操作通过主进程处理。图片通过应用的 `media://` 协议读取，主进程负责资产路径解析和解密。
+根通过 npm workspaces 管理内部包，统一版本；运行 `npm run check:workspaces` 检查边界。可以用 `npm run build -w @javdex/web` 单独构建网页，或 `npm run build -w @javdex/desktop` 构建桌面及附带网页。根仍暂时持有桌面打包 metadata 与生产依赖，产物目录维持 `out/`；服务端生产闭包由 `npm run server:build` 写入 `out/server`（仅 better-sqlite3 与 sharp）。调整产品版本时必须同时更新所有 workspace 的版本、内部依赖版本和 lockfile。
+
+渲染进程不直接访问 Node.js、数据库或文件系统，相关操作通过主进程处理。图片通过应用的 `media://` 协议读取：本地模式由主进程解析 MediaAssetStore；远程模式由主进程携带管理凭据代理，不把长期凭据拼进页面地址。
 
 插件在 Worker 沙箱中执行，通过受控 `ctx` API 访问宿主能力。内置插件开发助手支持页面探测、生成代码、试运行与验证，也可通过可选 MCP 服务接入外部工具。插件产物规范与助手实现分别查阅下表中的文档。
+
+桌面 Agent 工作记录与正式 catalog 使用独立连接：启动在 composition root 显式绑定运行存储和草稿仓储，远程模式只打开 workStore。远程 Agent 预览发送无本机路径的候选摘要，应用时只上传已选资源；服务端不得接管 Agent runtime 或依赖桌面草稿表。本地影片详情、演员编辑及清单正式写入与 Node 宿主共用 library 用例；传输权限、资源输入及能力差异仍由宿主负责，业务 schema 由 contracts 提供。新增工作记录访问不能回退到 `getDb()`，也不能通过 SQL 表名改写选择数据库。
+
+草稿应用、丢弃和影片删除后的工作清理依靠持久意图、catalog 回执及可重试清理恢复，不依赖跨库原子性。首次旧记录迁移保留源数据，ready 后不再复制。具体连接归属和提交顺序见 [服务端合同中的工作存储说明](SERVER_MODE_CONTRACT_INVENTORY.md#桌面工作存储与恢复)，实施与验收证据见 [架构优化方案](ARCHITECTURE_SIMPLIFICATION_PLAN.md)。涉及这些路径时，用独立 catalog/work 数据库及关闭重开测试验证恢复；同库测试不能代替跨存储验证。
 
 ## 按任务查阅文档
 
@@ -104,12 +118,16 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 领域术语与数据归属 | [领域上下文](../CONTEXT.md)、[多媒体库设计](MULTI_LIBRARY_DESIGN.md) |
 | UI、样式和交互 | [UI 设计规范](UI_DESIGN_GUIDELINES.md)、[组件契约](UI_COMPONENT_CONTRACTS.md) |
 | 局域网 Web 移动端 | [移动端 Web 规范](MOBILE_WEB_GUIDELINES.md) |
+| 服务端模式部署与双模式 | [服务端模式](SERVER_MODE.md)、[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) |
+| 服务端模式现状与实现 | [当前状态与后续范围](SERVER_MODE_NEXT_STEPS.md)、[实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md) |
+| 共享用例、合同与工作存储优化（实施中，含阶段状态与待定范围） | [架构优化方案](ARCHITECTURE_SIMPLIFICATION_PLAN.md) |
+| 服务端历史研究与验收证据 | [归档索引](archive/server-mode/README.md) |
 | 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |
 | 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |
 | 插件开发助手与 MCP | [插件开发 Agent](PLUGIN_DEV_AGENT.md) |
 | NFO 导出格式与验证范围 | [NFO 兼容性](NFO_COMPATIBILITY.md) |
 | 大媒体库性能与优化计划 | [性能审计](performance/large-library-performance-audit.md)、[实施计划](performance/large-library-optimization-plan.md)、[基准复跑](performance/large-library-results/README.md) |
-| 数据库结构与迁移 | [schema.ts](../src/main/db/schema.ts)、[migrations.ts](../src/main/db/migrations.ts) |
+| 数据库结构与迁移 | [schema.ts](../packages/library/src/db/schema.ts)、[migrations.ts](../packages/library/src/db/migrations.ts) |
 | Issue、PRD 与分类标签 | [Issue 约定](agents/issue-tracker.md)、[标签约定](agents/triage-labels.md) |
 | 版本与发布 | [发布规范](VERSIONING_AND_RELEASE.md)、[更新日志](../CHANGELOG.md) |
 | 第三方集成与许可 | [第三方说明](THIRD_PARTY_NOTICES.md)、[MIT License](../LICENSE) |

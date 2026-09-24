@@ -4,12 +4,12 @@
   "branch": "codex/large-library-performance",
   "scope": "Equivalent actor candidate evaluation in desktop/legacy/Web and visible membership candidate evaluation in Web searches",
   "sourceSha256": {
-    "src/main/db/actressSearchSql.ts": "0e47e65b19f4fd36b25b6cf7b2ef23e1d7f5f0391ca6b5f5054dd37e6043c83f",
-    "src/main/db/scopedVideoCatalogRepo.ts": "e90c00bb54da4cd6f79b6107503a4c22cb162ebd771c2e5e34bb4ebbd2e37c4e",
-    "src/main/db/videoRepo.ts": "df55f66c3816dc7995a4c23bac8d685a76a1a1c4dd538c4bc4320c11fa5903c3",
-    "src/main/web/catalogQueryReader.ts": "ec988449d2d66fe76926eb6e9228d9f4947f1f69ee61050a46c3ef116db3c055",
-    "src/main/db/videoSearchOptimization.test.ts": "9019bc33b5f46cc04337ede96859ef35ea07dca4781076508c1b0e753fb652e9",
-    "src/main/web/webSearchOptimization.test.ts": "472cea86fbd9a8d5f24d32b803878d397a5ef8af88c03c179d82465784b0cc05"
+    "apps/desktop/src/main/db/actressSearchSql.ts": "0e47e65b19f4fd36b25b6cf7b2ef23e1d7f5f0391ca6b5f5054dd37e6043c83f",
+    "apps/desktop/src/main/db/scopedVideoCatalogRepo.ts": "e90c00bb54da4cd6f79b6107503a4c22cb162ebd771c2e5e34bb4ebbd2e37c4e",
+    "apps/desktop/src/main/db/videoRepo.ts": "df55f66c3816dc7995a4c23bac8d685a76a1a1c4dd538c4bc4320c11fa5903c3",
+    "apps/desktop/src/main/web/catalogQueryReader.ts": "ec988449d2d66fe76926eb6e9228d9f4947f1f69ee61050a46c3ef116db3c055",
+    "apps/desktop/src/main/db/videoSearchOptimization.test.ts": "9019bc33b5f46cc04337ede96859ef35ea07dca4781076508c1b0e753fb652e9",
+    "apps/desktop/src/main/web/webSearchOptimization.test.ts": "472cea86fbd9a8d5f24d32b803878d397a5ef8af88c03c179d82465784b0cc05"
   },
   "checks": {
     "npm test": {

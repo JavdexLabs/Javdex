@@ -6,7 +6,7 @@ status: accepted
 
 ## Context
 
-`src/shared/scrapeTypes.ts` 曾聚合影片刮削、演员刮削、插件包描述符与头像 auto-crop IPC 形状，并被数十处跨层 importer 依赖。同时存在若干错位类型（如 `ActressDetail` 落在 library、`TagListItem` 挂在 app IPC）与平行状态词表（列表筛选 vs 批量刮削状态）。
+`packages/contracts/src/scrapeTypes.ts` 曾聚合影片刮削、演员刮削、插件包描述符与头像 auto-crop IPC 形状，并被数十处跨层 importer 依赖。同时存在若干错位类型（如 `ActressDetail` 落在 library、`TagListItem` 挂在 app IPC）与平行状态词表（列表筛选 vs 批量刮削状态）。
 
 ## Decision
 

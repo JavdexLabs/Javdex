@@ -1,0 +1,1452 @@
+import { applyDesktopManagedDraft, findReadyDesktopManagedDraft, discardDesktopManagedDraft } from '../../services/agentMetadata/desktopDraftStore'
+import {
+  agentMetadataPreviewVersions,
+  buildAgentMetadataReview
+} from '@library/catalog/catalogAgentMetadataReview'
+import { editCatalogActress } from '@library/catalog/catalogActressEdit'
+import {
+  applyVideoScrapeCommand,
+  applyActressScrapeCommand,
+  replacePendingVideoScrapeCommand,
+  submitActressScrapeConflictCommand,
+  confirmPendingVideoScrapeCommand
+} from '@library/catalog/catalogScrapeCommands'
+import { resolveCatalogScrapeFields } from '@library/catalog/catalogScrapeFields'
+import { createCatalogVideoCommands } from '@library/catalog/catalogVideoCommands'
+import { getDb } from '@library/db/database'
+import { recordActressScrapeFailure } from '@library/db/actressRepo'
+import {
+  PendingScanRepoError,
+  getPendingScanGroup,
+  listPendingScanGroups,
+  resolvePendingScanGroup
+} from '@library/db/pendingScanRepo'
+import { pagePendingScanQueue, countPendingScanQueue } from '@library/db/pendingScanQueueRepo'
+import {
+  getPendingResourceIdentity,
+  listPendingResourceIdentities
+} from '@library/db/pendingResourceIdentityRepo'
+import { getPendingAuditPresence } from '@library/db/pendingAuditRepo'
+import { selectAccessibleFallbackPrimaryResourceId } from '@library/scan/accessiblePrimaryResource'
+import {
+  applyPreparedPendingResourceIdentityResolution,
+  finishPreparedPendingResourceIdentityResolution,
+  preparePendingResourceIdentityResolution
+} from '@library/scan/pendingResourceIdentityService'
+import type {
+  PendingResourceIdentityChoice,
+  PendingResourceIdentityResolutionResult,
+  PendingScanGroupResolution
+} from '@shared/libraryTypes'
+import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
+import { structuredError } from '@shared/protocol/errors'
+import { ensureCatalogIdentity } from '@library/catalog/catalogIdentity'
+import {
+  acceptCatalogTask,
+  commitCatalogMutation,
+  readCatalogMutation,
+  readOperationReceipt
+} from '@library/catalog/catalogOperations'
+import {
+  applyActressCropRef,
+  commitManageImageMutation
+} from '@library/catalog/catalogImageApply'
+import { applyPlaylistImport } from '@library/catalog/catalogPlaylistImport'
+import { countCatalogTargets, createCatalogTargetList, pageCatalogTargetList } from '@library/catalog/catalogTargetLists'
+import {
+  discardPendingVideoScrapeRecord
+} from '@library/catalog/catalogPendingVideoScrapes'
+import {
+  countPendingVideoScrapes,
+  existingPendingVideoScrapeIds,
+  getPendingVideoScrapeById,
+  listPendingVideoScrapes,
+  pagePendingVideoScrapes
+} from '@library/db/pendingVideoScrapeRepo'
+import { mediaAssetStore } from '@library/mediaAssetStore'
+import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
+import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
+import {
+  abandonCatalogMigration,
+  enableCatalogMigration,
+  writeMigrationPackageBytes,
+  previewCatalogMigration,
+  startCatalogMigration,
+  statusCatalogMigration
+} from '@library/catalog/catalogMigration'
+import {
+  enqueueLibraryScan,
+  requestLibraryScanCancel,
+  startLibraryScan
+} from '@library/catalog/catalogScanRuntime'
+import {
+  catalogScanAuditGet,
+  catalogScanAuditHeader,
+  catalogScanAuditPage,
+  catalogScanAuditViewPage,
+  catalogScanLatest
+} from '@library/catalog/catalogAuditRead'
+import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
+import {
+  executeCatalogFileMaintenance,
+  previewRenameCatalogFile
+} from '@library/catalog/catalogFileMaintenance'
+import {
+  discardCatalogNfoPlan,
+  enqueueCatalogNfoExport,
+  getCatalogNfoOptions,
+  peekCatalogNfoPlanDigest,
+  planCatalogNfoExport,
+  catalogNfoState,
+  startCatalogNfoExportTask,
+  terminateCatalogNfoExport,
+  updateCatalogNfoPreferences
+} from '@library/catalog/catalogNfoExport'
+import { listCatalogTasks, readCatalogTask } from '@library/catalog/catalogTasks'
+import type { DesktopSession } from '@shared/desktop/session'
+import type { CatalogIdentity } from '@shared/protocol/identity'
+import type {
+  ActressGalleryImportInput,
+  ActressMergeInput
+} from '@shared/actressTypes'
+import type { ActressDeleteRequest } from '@shared/actressIpcContract'
+import type {
+  ClassificationEntityRef,
+  ClassificationImageInput,
+  DirectorProfileInput,
+  OrganizationCreateInput,
+  OrganizationRole,
+  OrganizationUpdateInput,
+  SeriesProfileInput
+} from '@shared/classificationTypes'
+import type {
+  AddMediaLibraryRootInput,
+  UpdateMediaLibraryConfigInput,
+  UpdateMediaLibraryRootInput
+} from '@shared/mediaLibraryIpcContract'
+import type { CreateMediaLibraryInput } from '@shared/mediaLibraryTypes'
+import type {
+  PlaylistCreateInput,
+  PlaylistListQuery,
+  PlaylistPageQuery,
+  PlaylistUpdateInput,
+  PlaylistVideoSortBy
+} from '@shared/playlistTypes'
+import type { SortDir } from '@shared/commonTypes'
+import type {
+  LastVideoResourceRemovalMode,
+  VideoLinkResourceImportInput,
+  VideoLinkResourceUpdateInput,
+  VideoMergeInput,
+  VideoSampleImportInput
+} from '@shared/videoTypes'
+import type {
+  DeleteVideoGloballyInput,
+  MoveVideoResourceInput,
+  RemoveVideoFromLibraryInput
+} from '@shared/videoLifecycleTypes'
+import type {
+  CatalogActressCommands,
+  CatalogBackend,
+  CatalogClassificationCommands,
+  CatalogLibraryCommands,
+  CatalogPlaylistCommands,
+  CatalogQueries,
+  CatalogQueryContext,
+  CatalogVideoCommands,
+  MutationContext
+} from '../../application/catalogBackend'
+import { createLocalDesktopCapabilities } from '../../application/desktopCapabilities'
+import { createUnconfiguredRemoteBackend } from '../remote/unconfiguredRemoteBackend'
+import {
+  createRemoteCatalogBackend,
+  type RemoteCatalogBackendOptions
+} from '../remote/remoteCatalogBackend'
+import type { VideoMaintenanceService } from '../../services/videoMaintenanceService'
+import {
+  createVideoQueryService,
+  type AsyncVideoQueryService,
+  type VideoQueryService
+} from '../../services/videoQueryService'
+import { videoMaintenanceService } from '../../services/videoMaintenanceService'
+import { videoLifecycleService } from '../../services/videoLifecycleService'
+import type { VideoLifecycleService } from '../../services/videoLifecycleService'
+import { actressQueryService, type ActressQueryService } from '../../services/actressQueryService'
+import { actressMaintenanceService } from '../../services/actressMaintenanceService'
+import { actressIdentityConflictWorkflow } from '../../services/actressIdentityConflictWorkflow'
+import { classificationQueryService } from '../../services/classificationQueryService'
+import { classificationMaintenanceService } from '../../services/classificationMaintenanceService'
+import { classificationImageService } from '../../services/classificationImageService'
+import { organizationMergeService } from '../../services/organizationMergeService'
+import { directorMergeService } from '../../services/directorMergeService'
+import { seriesMergeService } from '../../services/seriesMergeService'
+import { organizationDeletionService } from '../../services/organizationDeletionService'
+import { classificationDeletionService } from '../../services/classificationDeletionService'
+import { tagQueryService } from '../../services/tagQueryService'
+import { createPlaylist, deletePlaylist, updatePlaylist } from '../../services/playlistService'
+import {
+  createMediaLibraryService,
+  createMediaLibraryServiceDependencies
+} from '@library/catalog/mediaLibraryService'
+import { homeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
+import { getLibraryOverviewStats } from '@library/db/overviewRepo'
+import { getMediaLibraryDetail, listMediaLibraries } from '@library/db/mediaLibraryRepo'
+import { listPlaylistBrowsePage } from '@library/db/playlistListPageRepo'
+import {
+  addVideoToPlaylist,
+  getPlaylistDetail,
+  getPlaylistMetadata,
+  getPlaylistPage,
+  listPlaylistVideoPage,
+  listPlaylists,
+  listPlaylistsForVideo,
+  removeVideoFromPlaylist
+} from '@library/db/playlistRepo'
+import type { HomeDiscoveryInput, GlobalSearchInput } from '@shared/catalogTypes'
+import type { TagOptionsQuery } from '@shared/commonTypes'
+import type { ClassificationPageQuery } from '@shared/classificationTypes'
+import type { DiscardPendingActressScrapeInput, InspectActressConflictNameInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '@shared/actressConflictTypes'
+
+export async function unsupportedCatalogUseCase(name: string): Promise<never> {
+  throw structuredError('UNSUPPORTED_CAPABILITY', `本地后端尚未接入该用例：${name}`)
+}
+
+export function unsupportedSlice<T extends object>(keys: readonly (keyof T)[]): T {
+  return Object.fromEntries(keys.map((key) => [key, () => unsupportedCatalogUseCase(String(key))])) as T
+}
+export interface LocalCatalogReadPort {
+  homeLoad(input: HomeDiscoveryInput): import('@shared/catalogTypes').HomeSnapshot | Promise<import('@shared/catalogTypes').HomeSnapshot>
+  homeSearch(input: GlobalSearchInput): import('@shared/catalogTypes').GlobalSearchResult | Promise<import('@shared/catalogTypes').GlobalSearchResult>
+  tagFilterOptions(query: TagOptionsQuery): ReturnType<typeof tagQueryService.filterOptions> | Promise<ReturnType<typeof tagQueryService.filterOptions>>
+  imagePage(entity: ClassificationEntityRef, query?: ClassificationPageQuery): ReturnType<typeof classificationQueryService.listImageCandidatesPage> | Promise<ReturnType<typeof classificationQueryService.listImageCandidatesPage>>
+}
+
+export interface LocalCatalogBackendDependencies {
+  identity: CatalogIdentity
+  generation?: number
+  appVersion?: string
+  queries?: VideoQueryService | AsyncVideoQueryService
+  videos?: VideoMaintenanceService
+  lifecycle?: VideoLifecycleService
+  actresses?: ActressQueryService
+  reads?: LocalCatalogReadPort
+  libraries?: ReturnType<typeof createMediaLibraryService>
+}
+
+const defaultLibraries = (): ReturnType<typeof createMediaLibraryService> =>
+  createMediaLibraryService(
+    createMediaLibraryServiceDependencies({
+      isVideoScraperRunnable: () => true
+    })
+  )
+
+const defaultReads: LocalCatalogReadPort = {
+  homeLoad: (input) => homeDiscoveryRepo.load(input),
+  homeSearch: (input) => homeDiscoveryRepo.search(input),
+  tagFilterOptions: (query) => tagQueryService.filterOptions(query),
+  imagePage: (entity, query) => classificationQueryService.listImageCandidatesPage(entity, query)
+}
+
+export function createLocalCatalogBackend(
+  dependencies: LocalCatalogBackendDependencies
+): CatalogBackend {
+  if (dependencies.identity.mode !== 'local') {
+    throw new Error('LocalCatalogBackend requires a local catalog identity')
+  }
+  ensureCatalogIdentity({ catalogId: dependencies.identity.catalogId })
+  const queries = dependencies.queries ?? createVideoQueryService()
+  const videos = dependencies.videos ?? videoMaintenanceService
+  const writes = createCatalogVideoCommands(videos)
+  const lifecycle = dependencies.lifecycle ?? videoLifecycleService
+  const actresses = dependencies.actresses ?? actressQueryService
+  const reads = dependencies.reads ?? defaultReads
+  const libraries = dependencies.libraries ?? defaultLibraries()
+  const generation = dependencies.generation ?? 1
+  const identity = dependencies.identity
+  const session = (): DesktopSession => ({
+    state: 'available',
+    mode: 'local',
+    catalogId: identity.catalogId,
+    serverId: null,
+    generation,
+    writerEpoch: null,
+    frozen: false,
+    appVersion: dependencies.appVersion ?? null,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    message: null
+  })
+
+  const catalogQueries: CatalogQueries = {
+    async homeLoad(input) {
+      return reads.homeLoad(input)
+    },
+    async homeSearch(input) {
+      return reads.homeSearch(input)
+    },
+    async listVideos(input, _ctx?: CatalogQueryContext) {
+      return queries.list(input.scope, input.query)
+    },
+    async getVideo(input) {
+      return queries.get(input.scope, input.videoId)
+    },
+    async listVideoYears(input) {
+      return queries.listYears(input.scope)
+    },
+    async resolveScrapeFields(input) {
+      return resolveCatalogScrapeFields(input)
+    },
+    async listVideoSources(input) {
+      return listCatalogVideoSources(input)
+    },
+    async getResource(input) {
+      const resource = queries.getResource(input.libraryId, input.videoId, input.resourceId)
+      if (!resource) return null
+      return { ...resource, locatorRevision: resourceLocatorRevision(resource) }
+    },
+    async listTags() {
+      return tagQueryService.list()
+    },
+    async listManualTags() {
+      return tagQueryService.listManual()
+    },
+    async tagLabels(input) {
+      return tagQueryService.labels(input.ids)
+    },
+    async tagFilterOptions(input) {
+      return reads.tagFilterOptions(input)
+    },
+    async tagManualOptions(input) {
+      return tagQueryService.manualOptions(input)
+    },
+    async overviewStats() {
+      return getLibraryOverviewStats()
+    }
+  }
+
+  const videoCommands: CatalogVideoCommands = {
+    async edit(input, ctx) {
+      return writes.edit(input, { ...ctx, writerEpoch: 0 }).data.ok
+    },
+    async clearMeta(input, ctx) {
+      return writes.clearMeta(input, { ...ctx, writerEpoch: 0 }, true).data.ok
+    },
+    async markScrapeSuccess(input, ctx) {
+      return writes.markScrapeSuccess(input, { ...ctx, writerEpoch: 0 }, true).data.ok
+    },
+    async markScrapeFailed(input, ctx) {
+      return writes.markScrapeFailed(input, { ...ctx, writerEpoch: 0 }, true).data.ok
+    },
+    async setRating(input, ctx) {
+      return writes.setRating(input, { ...ctx, writerEpoch: 0 }).data.ok
+    },
+    async setPoster(input, _ctx: MutationContext) {
+      if (input.image.kind === 'clear') return videos.setPoster(input.videoId, null)
+      const localPath = (input as { posterPath?: string | null }).posterPath
+      if (typeof localPath === 'string' || localPath === null) {
+        return videos.setPoster(input.videoId, localPath)
+      }
+      throw structuredError(
+        'UNSUPPORTED_CAPABILITY',
+        '本地影片封面仍使用本机文件入口；上传引用等 S06。'
+      )
+    },
+    async importSamples(input, _ctx: MutationContext) {
+      const sample = input as { videoId: number } & VideoSampleImportInput
+      if (sample.source === 'file' || sample.source === 'url') {
+        return videos.importSample(sample.videoId, sample)
+      }
+      throw structuredError(
+        'UNSUPPORTED_CAPABILITY',
+        '本地样张导入仍使用本机文件入口；上传引用等 S06。'
+      )
+    },
+    async deleteSample(input, ctx) {
+      return writes.deleteSample(input, { ...ctx, writerEpoch: 0 }, true).data.ok
+    },
+    async addManualTag(input, ctx) {
+      return writes.addManualTag(input, { ...ctx, writerEpoch: 0 }, true).data.ok
+    },
+    async addExistingManualTag(input, ctx) {
+      return writes.addExistingManualTag(input, { ...ctx, writerEpoch: 0 }, true).data.ok
+    },
+    async removeManualTag(input, ctx) {
+      return writes.removeManualTag(input, { ...ctx, writerEpoch: 0 }, true).data.ok
+    },
+    async correctImport(input) {
+      return videos.correctImport(input.videoId, input.code, input.discardPendingScrape)
+    },
+    async importResource(input) {
+      return videos.importLinkResource(input as VideoLinkResourceImportInput)
+    },
+    async updateResource(input) {
+      return videos.updateLinkResource(
+        input.libraryId,
+        input.videoId,
+        input.resourceId,
+        {
+          url: input.url,
+          kind: input.kind,
+          displayName: input.displayName,
+          sizeBytes: input.sizeBytes
+        } satisfies VideoLinkResourceUpdateInput
+      )
+    },
+    async updateLocalResourceLabel(input) {
+      return videos.updateLocalResourceLabel(
+        input.libraryId,
+        input.videoId,
+        input.resourceId,
+        input.label
+      )
+    },
+    async setPrimaryResource(input) {
+      return videos.setPrimaryResource(input.libraryId, input.videoId, input.resourceId)
+    },
+    async removeResource(input) {
+      return videos.removeResource(
+        input.libraryId,
+        input.videoId,
+        input.resourceId,
+        input.lastResourceMode as LastVideoResourceRemovalMode | undefined
+      )
+    },
+    async previewRemoveFromLibrary(input) {
+      return lifecycle.previewRemoveFromLibrary(input.libraryId, input.videoId)
+    },
+    async removeFromLibrary(input, ctx) {
+      const local = input as RemoveVideoFromLibraryInput & { planDigest?: string }
+      return lifecycle.removeFromLibrary({
+        libraryId: local.libraryId,
+        videoId: local.videoId,
+        operationId: local.operationId ?? ctx.operationId,
+        expectedRevision: local.expectedRevision ?? local.planDigest ?? ''
+      })
+    },
+    async previewMoveResource(input) {
+      return lifecycle.previewMoveResource(
+        input.sourceLibraryId,
+        input.targetLibraryId,
+        input.resourceId
+      )
+    },
+    async moveResource(input, ctx) {
+      const local = input as MoveVideoResourceInput & { planDigest?: string }
+      return lifecycle.moveResource({
+        sourceLibraryId: local.sourceLibraryId,
+        targetLibraryId: local.targetLibraryId,
+        resourceId: local.resourceId,
+        operationId: local.operationId ?? ctx.operationId,
+        expectedRevision: local.expectedRevision ?? local.planDigest ?? ''
+      })
+    },
+    async previewDeleteGlobal(input) {
+      return lifecycle.previewDeleteGlobally(input.videoId)
+    },
+    async deleteGlobal(input, ctx) {
+      const local = input as DeleteVideoGloballyInput & { planDigest?: string }
+      return lifecycle.deleteGlobally({
+        videoId: local.videoId,
+        operationId: local.operationId ?? ctx.operationId,
+        expectedRevision: local.expectedRevision ?? local.planDigest ?? ''
+      })
+    },
+    async merge(input) {
+      return videos.mergeVideos(input as VideoMergeInput)
+    },
+    async splitResource(input) {
+      return videos.splitResource(input.libraryId, input.videoId, input.resourceId)
+    },
+    applyScrapeCandidate: async (input, ctx) => applyVideoScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data
+  }
+
+  const actressCommands: CatalogActressCommands = {
+    async list(input) {
+      return actresses.listLegacy(
+        input.search,
+        input.gender,
+        input.sortBy as never,
+        input.sortDir
+      )
+    },
+    async listPage(input) {
+      return actresses.listActresses(input)
+    },
+    async pickerPage(input) {
+      return actresses.listPicker(input)
+    },
+    async pickerGet(input) {
+      return actresses.getPicker(input.actressId)
+    },
+    async testTargetPage(input) {
+      return actresses.listTestTargets(input)
+    },
+    async get(input) {
+      return actresses.getActress(input.actressId)
+    },
+    async profile(input) {
+      return actresses.getProfile(input.actressId)
+    },
+    async metadata(input) {
+      return actresses.getMetadata(input.actressId)
+    },
+    async videoPage(input) {
+      return actresses.listVideos(input.actressId, input)
+    },
+    async galleryPage(input) {
+      return actresses.listGallery(input.actressId, input)
+    },
+    async avatarSourceInfo(input) {
+      return actresses.getAvatarSourceInfo(input.actressId)
+    },
+    async mergeCandidates(input) {
+      return actresses.listMergeCandidates(input)
+    },
+    async edit(input, ctx) {
+      const { avatar, ...fields } = input.fields
+      const imageInput = avatar && 'kind' in avatar
+        ? { fields, avatarRef: avatar }
+        : { fields: { ...fields, ...(avatar ? { avatar } : {}) } }
+      return editCatalogActress({ actressId: input.actressId, ...imageInput }, {
+        ...ctx, writerEpoch: 0
+      }, true).data.ok
+    },
+    async delete(input, ctx) {
+      return actressCommands.deleteBatch(
+        { ids: [input.actressId], mode: input.mode },
+        ctx
+      )
+    },
+    async deleteBatch(input) {
+      return actressMaintenanceService.deleteActresses(input as ActressDeleteRequest)
+    },
+    async deletePreview(input) {
+      return actressMaintenanceService.previewDelete({ ids: input.ids })
+    },
+    async clearMeta(input) {
+      return actressMaintenanceService.clearMetadata(input.actressId)
+    },
+    async importGallery(input) {
+      const local = input as { actressId: number } & ActressGalleryImportInput
+      if (local.source === 'file' || local.source === 'url') {
+        return actressMaintenanceService.importGalleryImage(local.actressId, local)
+      }
+      throw structuredError(
+        'UNSUPPORTED_CAPABILITY',
+        '本地演员图库仍使用本机文件入口；上传引用等 S06。'
+      )
+    },
+    async deleteGallery(input) {
+      return actressMaintenanceService.deleteGalleryImage(input.actressId, input.assetId)
+    },
+    async setPoster(input) {
+      if (input.image.kind === 'clear') {
+        return actressMaintenanceService.setPoster(input.actressId, null)
+      }
+      const localPath = (input as { posterPath?: string | null }).posterPath
+      if (typeof localPath === 'string' || localPath === null) {
+        return actressMaintenanceService.setPoster(input.actressId, localPath)
+      }
+      throw structuredError(
+        'UNSUPPORTED_CAPABILITY',
+        '本地演员头像仍使用本机文件入口；上传引用等 S06。'
+      )
+    },
+    async merge(input) {
+      const local = input as ActressMergeInput & {
+        retainedActressId?: number
+        sourceActressId?: number
+        mainNameActressId?: number
+      }
+      if (local.keepId && local.mergeId) {
+        return actressMaintenanceService.mergeActresses(local)
+      }
+      return actressMaintenanceService.mergeActresses({
+        keepId: local.retainedActressId!,
+        mergeId: local.sourceActressId!,
+        mainNameFrom: local.mainNameActressId === local.sourceActressId ? 'merge' : 'keep'
+      })
+    },
+    async markScrapeSuccess(input) {
+      return actressMaintenanceService.markScrapeSucceeded(input.actressId)
+    },
+    async markScrapeFailed(input) {
+      recordActressScrapeFailure(input.actressId)
+      return true
+    },
+    applyCrop: async (input, ctx) => {
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'actresses.applyCrop',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => applyActressCropRef(input, ctx.expectedVersions, ctx.operationId)
+      )
+      return result.data
+    },
+    applyScrapeCandidate: async (input, ctx) => applyActressScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data,
+    submitConflict: async (input, ctx) => submitActressScrapeConflictCommand(input, { ...ctx, writerEpoch: 0 }).data,
+    async conflictList() {
+      return actressIdentityConflictWorkflow.listConflictGroups()
+    },
+    async conflictQueuePage(input) {
+      return actressIdentityConflictWorkflow.pageConflictQueue(input)
+    },
+    async conflictGet(input) {
+      const local = input as { pendingId: number; normalizedName?: string }
+      if (local.normalizedName) {
+        return actressIdentityConflictWorkflow.getConflictGroup(local.normalizedName)
+      }
+      const row = getDb()
+        .prepare(
+          'SELECT normalized_name FROM pending_actress_scrape_conflicts WHERE pending_scrape_id = ? ORDER BY id LIMIT 1'
+        )
+        .get(local.pendingId) as { normalized_name: string } | undefined
+      if (!row) return null
+      return actressIdentityConflictWorkflow.getConflictGroup(row.normalized_name)
+    },
+    async conflictCount() {
+      return actressIdentityConflictWorkflow.countPendingReviewItems()
+    },
+    async conflictSummary() {
+      return actressIdentityConflictWorkflow.getConflictReviewSummary()
+    },
+    async inspectName(input) {
+      return actressIdentityConflictWorkflow.inspectConflictName(
+        input as InspectActressConflictNameInput
+      )
+    },
+    async discardConflict(input) {
+      return actressIdentityConflictWorkflow.discardPendingScrape(
+        input as DiscardPendingActressScrapeInput
+      )
+    },
+    async validateIllegal(input) {
+      return actressIdentityConflictWorkflow.validateIllegalNameReplacements(
+        input as ValidateIllegalNameReplacementsInput
+      )
+    },
+    async resolveConflict(input) {
+      return actressIdentityConflictWorkflow.resolveConflict(input as ResolveActressConflictInput)
+    }
+  }
+
+  const classificationCommands: CatalogClassificationCommands = {
+    async listOrganizations(input) {
+      return classificationQueryService.listOrganizations(input)
+    },
+    async pageOrganizations(input) {
+      return classificationQueryService.listOrganizationsPage(input)
+    },
+    async getOrganization(input) {
+      const role = (input as { role?: OrganizationRole }).role
+      if (role) return classificationQueryService.getOrganization(input.organizationId, role)
+      return (
+        classificationQueryService.getOrganization(input.organizationId, 'maker') ??
+        classificationQueryService.getOrganization(input.organizationId, 'publisher')
+      )
+    },
+    async createOrganization(input) {
+      return classificationMaintenanceService.createOrganization(input as OrganizationCreateInput)
+    },
+    async updateOrganization(input) {
+      const { organizationId, ...fields } = input
+      return classificationMaintenanceService.updateOrganization(
+        organizationId,
+        fields as OrganizationUpdateInput
+      )
+    },
+    async mergeOrganizations(input) {
+      return organizationMergeService.merge(input)
+    },
+    async deleteOrganization(input) {
+      return organizationDeletionService.deleteOrganization(input.organizationId)
+    },
+    async organizationOptions(input) {
+      return classificationQueryService.listOrganizationOptions(input.search)
+    },
+    async organizationMergeOptions(input) {
+      return classificationQueryService.listOrganizationMergeOptions(input.search)
+    },
+    async organizationRoleRemovePreview(input) {
+      return organizationDeletionService.previewRoleRemoval(input.organizationId, input.role)
+    },
+    async organizationRoleRemove(input) {
+      return organizationDeletionService.removeRole(input.organizationId, input.role)
+    },
+    async organizationDeletePreview(input) {
+      return organizationDeletionService.previewOrganization(input.organizationId)
+    },
+    async listDirectors(input) {
+      return classificationQueryService.listDirectors(input)
+    },
+    async pageDirectors(input) {
+      return classificationQueryService.listDirectorsPage(input)
+    },
+    async getDirector(input) {
+      return classificationQueryService.getDirector(input.directorId)
+    },
+    async createDirector(input) {
+      return classificationMaintenanceService.createDirector(input as DirectorProfileInput)
+    },
+    async updateDirector(input) {
+      const { directorId, ...fields } = input
+      return classificationMaintenanceService.updateDirector(directorId, fields)
+    },
+    async mergeDirectors(input) {
+      return directorMergeService.merge(input)
+    },
+    async deleteDirector(input) {
+      return classificationDeletionService.deleteDirector(input.directorId)
+    },
+    async directorOptions(input) {
+      return classificationQueryService.listDirectorOptions(input.search)
+    },
+    async directorDeletePreview(input) {
+      return classificationDeletionService.previewDirector(input.directorId)
+    },
+    async listSeries(input) {
+      return classificationQueryService.listSeries(input)
+    },
+    async pageSeries(input) {
+      return classificationQueryService.listSeriesPage(input)
+    },
+    async getSeries(input) {
+      return classificationQueryService.getSeries(input.seriesId)
+    },
+    async createSeries(input) {
+      return classificationMaintenanceService.createSeries(input as SeriesProfileInput)
+    },
+    async updateSeries(input) {
+      const { seriesId, ...fields } = input
+      return classificationMaintenanceService.updateSeries(seriesId, fields)
+    },
+    async mergeSeries(input) {
+      return seriesMergeService.merge(input)
+    },
+    async deleteSeries(input) {
+      return classificationDeletionService.deleteSeries(input.seriesId)
+    },
+    async seriesOptions(input) {
+      return classificationQueryService.listSeriesOptions(input.search)
+    },
+    async seriesDeletePreview(input) {
+      return classificationDeletionService.previewSeries(input.seriesId)
+    },
+    async imagePage(input) {
+      const { entity, ...query } = input as {
+        entity: ClassificationEntityRef
+      } & ClassificationPageQuery
+      return reads.imagePage(entity, query)
+    },
+    async imageCandidates(input) {
+      return classificationQueryService.listImageCandidates(input.entity)
+    },
+    async setImage(input) {
+      const image = input.image as ClassificationImageInput | { kind?: string; videoId?: number }
+      if (image && 'source' in image) {
+        return classificationImageService.setImage(input.entity, image)
+      }
+      if (image && 'kind' in image && image.kind === 'videoCover' && image.videoId) {
+        return classificationImageService.setImage(input.entity, {
+          source: 'video-cover',
+          videoId: image.videoId
+        })
+      }
+      if (image && 'kind' in image && image.kind === 'clear') {
+        return classificationImageService.setImage(input.entity, null)
+      }
+      throw structuredError(
+        'UNSUPPORTED_CAPABILITY',
+        '本地分类图片仍使用本机文件入口；上传引用等 S06。'
+      )
+    }
+  }
+
+  const playlistCommands: CatalogPlaylistCommands = {
+    async list() {
+      return listPlaylists()
+    },
+    async listPage(input) {
+      return listPlaylistBrowsePage(input as PlaylistListQuery)
+    },
+    async get(input) {
+      const local = input as {
+        playlistId: number
+        sortBy?: PlaylistVideoSortBy
+        sortDir?: SortDir
+      }
+      return getPlaylistDetail(local.playlistId, {
+        sortBy: local.sortBy,
+        sortDir: local.sortDir
+      })
+    },
+    async getPage(input) {
+      return getPlaylistPage(input.playlistId, input as PlaylistPageQuery)
+    },
+    async metadata(input) {
+      const local = input as {
+        playlistId: number
+        sortBy?: PlaylistVideoSortBy
+        sortDir?: SortDir
+      }
+      return getPlaylistMetadata(local.playlistId, {
+        sortBy: local.sortBy,
+        sortDir: local.sortDir
+      })
+    },
+    async videoPage(input) {
+      return listPlaylistVideoPage(input.playlistId, input as PlaylistPageQuery)
+    },
+    async listForVideo(input) {
+      return listPlaylistsForVideo(input.videoId)
+    },
+    async create(input) {
+      return createPlaylist(input as PlaylistCreateInput)
+    },
+    async update(input) {
+      const { playlistId, ...fields } = input
+      updatePlaylist(playlistId, fields as PlaylistUpdateInput)
+      return true
+    },
+    async delete(input) {
+      deletePlaylist(input.playlistId)
+      return true
+    },
+    async addVideo(input) {
+      return addVideoToPlaylist(input)
+    },
+    async removeVideo(input) {
+      return removeVideoFromPlaylist(input)
+    },
+    async applyImport(input, ctx) {
+      const expectedL = ctx.expectedVersions.L
+      if (!expectedL) {
+        throw structuredError('INVALID_INPUT', '媒体库更新需要 L 版本', { field: 'expectedVersions.L' })
+      }
+      const result = commitManageImageMutation(
+        {
+          operationId: ctx.operationId,
+          operation: 'playlists.applyImport',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () =>
+          applyPlaylistImport({
+            name: input.name,
+            videoIds: input.videoIds,
+            libraryId: input.libraryId,
+            cover: input.cover,
+            sourceUrl: input.sourceUrl,
+            expected: ctx.expectedVersions,
+            operationId: ctx.operationId,
+            expectedLibraryRevision: expectedL.revision,
+            videoLinks: input.videoLinks
+          })
+      )
+      return result.data
+    }
+  }
+
+  const libraryCommands: CatalogLibraryCommands = {
+    async list(input) {
+      return listMediaLibraries({ includeArchived: input.includeArchived })
+    },
+    async get(input) {
+      return getMediaLibraryDetail(input.libraryId)
+    },
+    async create(input) {
+      return libraries.create(input as CreateMediaLibraryInput)
+    },
+    async update(input) {
+      if ('patch' in input) {
+        return libraries.update({
+          libraryId: input.libraryId,
+          expectedRevision: input.expectedRevision,
+          patch: input.patch
+        })
+      }
+      return libraries.update({
+        libraryId: input.libraryId,
+        expectedRevision: (input as { expectedRevision?: number }).expectedRevision ?? 0,
+        patch: {
+          name: input.name,
+          icon: input.icon as CreateMediaLibraryInput['icon'],
+          color: input.color as CreateMediaLibraryInput['color'],
+          position: input.position
+        }
+      })
+    },
+    async updateConfig(input) {
+      const local = input as UpdateMediaLibraryConfigInput
+      return libraries.updateConfig({
+        libraryId: local.libraryId,
+        expectedRevision: local.expectedRevision,
+        patch: local.patch
+      })
+    },
+    async addRoot(input) {
+      const local = input as AddMediaLibraryRootInput & { root: { path?: string } }
+      if (!local.root.path) {
+        throw structuredError(
+          'UNSUPPORTED_CAPABILITY',
+          '本地添加根目录仍使用本机路径，不使用 mountSelectionId。'
+        )
+      }
+      return libraries.addRoot({
+        libraryId: local.libraryId,
+        expectedRevision: local.expectedRevision,
+        root: { ...local.root, path: local.root.path }
+      })
+    },
+    async updateRoot(input) {
+      const local = input as UpdateMediaLibraryRootInput
+      return libraries.updateRoot({
+        libraryId: local.libraryId,
+        rootId: local.rootId,
+        expectedRevision: local.expectedRevision,
+        patch: local.patch
+      })
+    },
+    async removeRoot(input) {
+      return libraries.removeRoot(input as never)
+    },
+    async cancelRootRemoval(input) {
+      return libraries.cancelRootRemoval(input as never)
+    },
+    async archive(input) {
+      return libraries.archive(input as never)
+    },
+    async restore(input) {
+      return libraries.restore(input as never)
+    },
+    async deletePreview(input) {
+      return libraries.previewRemoval(input.libraryId)
+    },
+    async delete(input) {
+      return libraries.remove(input as never)
+    },
+    async runScan(input, ctx) {
+      const accepted = acceptCatalogTask(
+        {
+          operationId: ctx.operationId,
+          operation: 'scans.run',
+          expectedVersions: ctx.expectedVersions,
+          input,
+          writerEpoch: 0
+        },
+        () => enqueueLibraryScan({ libraryId: input.libraryId, operationId: ctx.operationId })
+      )
+      if (accepted.outcome === 'applied') {
+        queueMicrotask(() => startLibraryScan(accepted.data.taskId))
+      }
+      return { receipt: accepted.receipt, taskId: accepted.data.taskId }
+    },
+    async cancelScan(input) {
+      return requestLibraryScanCancel(input)
+    },
+    async latestScan(input) {
+      return catalogScanLatest(input.libraryId)
+    },
+    async auditGet(input) {
+      return catalogScanAuditGet(input.libraryId)
+    },
+    async auditHeader(input) {
+      return catalogScanAuditHeader(input.libraryId)
+    },
+    async auditPage(input) {
+      const local = input as {
+        libraryId: number
+        section?: 'files' | 'removedResources' | 'promotedResources' | 'deletedVideos' | 'pendingGroups'
+        outcome?: 'added' | 'updated' | 'pending' | 'skipped' | 'unrecognized' | 'strm_failure' | 'processing_failure'
+        attention?: boolean
+        limit?: number
+        offset?: number
+      }
+      return catalogScanAuditPage(local.libraryId, {
+        section: local.section,
+        outcome: local.outcome,
+        attention: local.attention,
+        limit: local.limit,
+        offset: local.offset
+      })
+    },
+    async auditViewPage(input) {
+      const local = input as {
+        libraryId: number
+        tab: 'failed' | 'all' | 'added_updated' | 'skipped' | 'changes'
+        outcome?: 'all' | 'added' | 'updated' | 'pending' | 'skipped' | 'unrecognized' | 'strm_failure' | 'processing_failure'
+        changesFilter?: 'all' | 'removed' | 'promoted' | 'deleted'
+        search?: string
+        locale?: string
+        limit?: number
+        offset?: number
+        anchor?: { kind: 'path'; value: string; rootId?: number } | { kind: 'group'; id: number }
+      }
+      const { libraryId, ...query } = local
+      return catalogScanAuditViewPage(libraryId, query)
+    },
+    async getPendingScan(input) {
+      const local = input as { libraryId?: number; groupId: number }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_scan_groups WHERE id = ?')
+            .get(local.groupId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) return null
+      return getPendingScanGroup(libraryId, local.groupId)
+    },
+    async listPendingScans(input) {
+      if (input.libraryId) return listPendingScanGroups(input.libraryId)
+      return listMediaLibraries({ includeArchived: true }).flatMap((library) =>
+        listPendingScanGroups(library.id)
+      )
+    },
+    async pagePendingScanQueue(input) {
+      return pagePendingScanQueue(input)
+    },
+    async countPendingScanQueue(input) {
+      return countPendingScanQueue(input.libraryId)
+    },
+    async getPendingResourceIdentity(input) {
+      const local = input as { libraryId?: number; identityId: number }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_resource_identities WHERE id = ?')
+            .get(local.identityId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) return null
+      return getPendingResourceIdentity(libraryId, local.identityId)
+    },
+    async listPendingResourceIdentities(input) {
+      if (input.libraryId) return listPendingResourceIdentities(input.libraryId)
+      return listMediaLibraries({ includeArchived: true }).flatMap((library) =>
+        listPendingResourceIdentities(library.id)
+      )
+    },
+    async pendingAuditPresence(input) {
+      const local = input as {
+        libraryId: number
+        groupIds: number[]
+        identityIds: number[]
+        scrapeIds: number[]
+      }
+      return getPendingAuditPresence(local.libraryId, {
+        groupIds: local.groupIds,
+        identityIds: local.identityIds,
+        scrapeIds: local.scrapeIds
+      })
+    },
+    async previewRenameFile(input) {
+      return previewRenameCatalogFile(input)
+    },
+    async renameFile(input, ctx) {
+      return (await executeCatalogFileMaintenance({
+        operationId: ctx.operationId,
+        operation: 'files.rename',
+        expectedVersions: ctx.expectedVersions,
+        input,
+        writerEpoch: 0
+      })).data
+    },
+    async importManual(input, ctx) {
+      return (await executeCatalogFileMaintenance({
+        operationId: ctx.operationId,
+        operation: 'files.importManual',
+        expectedVersions: ctx.expectedVersions,
+        input,
+        writerEpoch: 0
+      })).data
+    },
+    resolvePendingScan: async (input, ctx) => {
+      const local = input as {
+        libraryId?: number
+        groupId: number
+        expectedRevision?: number
+        assignments: PendingScanGroupResolution['assignments']
+        primaryResourceIds?: PendingScanGroupResolution['primaryResourceIds']
+      }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_scan_groups WHERE id = ?')
+            .get(local.groupId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) throw structuredError('INVALID_INPUT', '待确认扫描组不存在')
+      const expectedRevision = local.expectedRevision ?? ctx.expectedVersions.Q?.revision
+      if (expectedRevision == null) {
+        throw structuredError('INVALID_INPUT', '待确认扫描需要 Q 版本')
+      }
+      try {
+        const result = maintenanceTaskGate.runSync('resource-maintenance', () =>
+          resolvePendingScanGroup(
+            libraryId,
+            local.groupId,
+            {
+              expectedRevision,
+              assignments: local.assignments,
+              primaryResourceIds: local.primaryResourceIds
+            },
+            { selectFallbackPrimaryResourceId: selectAccessibleFallbackPrimaryResourceId }
+          )
+        )
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'pendingScan.resolve',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => result
+        ).data
+      } catch (error) {
+        if (error instanceof PendingScanRepoError) {
+          if (error.code === 'REVISION_CONFLICT') {
+            throw structuredError('VERSION_CONFLICT', error.message)
+          }
+          throw structuredError('INVALID_INPUT', error.message)
+        }
+        throw error
+      }
+    },
+    resolveResourceIdentity: async (input, ctx) => {
+      const local = input as {
+        libraryId?: number
+        identityId: number
+        choice: PendingResourceIdentityChoice
+        expectedRevision?: number
+      }
+      const libraryId =
+        local.libraryId ??
+        (
+          getDb()
+            .prepare('SELECT library_id FROM pending_resource_identities WHERE id = ?')
+            .get(local.identityId) as { library_id: number } | undefined
+        )?.library_id
+      if (libraryId == null) throw structuredError('INVALID_INPUT', '资源身份待办不存在')
+      const expectedRevision = local.expectedRevision ?? ctx.expectedVersions.Q?.revision
+      if (expectedRevision == null) {
+        throw structuredError('INVALID_INPUT', '资源身份待办需要 Q 版本')
+      }
+      const request = {
+        operationId: ctx.operationId,
+        operation: 'pendingResourceIdentity.resolve',
+        expectedVersions: ctx.expectedVersions,
+        input,
+        writerEpoch: 0
+      } as const
+      const duplicate = readCatalogMutation<PendingResourceIdentityResolutionResult>(request)
+      if (duplicate) return duplicate.data
+
+      return maintenanceTaskGate.run('resource-maintenance', async () => {
+        const prepared = await preparePendingResourceIdentityResolution(libraryId, local.identityId, {
+          expectedRevision,
+          choice: local.choice
+        })
+        const committed = commitCatalogMutation(request, () => {
+          const assignment = applyPreparedPendingResourceIdentityResolution(prepared)
+          return {
+            ...assignment,
+            warnings: prepared.choice === 'discard' ? [] : prepared.inspection.warnings
+          }
+        })
+        if (committed.outcome === 'duplicate') return committed.data
+
+        const committedData = committed.data
+        const assignment = committedData.status === 'assigned'
+          ? committedData.videoId == null
+            ? (() => { throw new Error('资源归属提交结果缺少影片编号。') })()
+            : { status: 'assigned' as const, videoId: committedData.videoId }
+          : committedData.status === 'pending'
+            ? committedData.pendingGroupId == null
+              ? (() => { throw new Error('资源归属提交结果缺少待确认组编号。') })()
+              : { status: 'pending' as const, pendingGroupId: committedData.pendingGroupId }
+            : { status: 'discarded' as const }
+        return finishPreparedPendingResourceIdentityResolution(prepared, assignment)
+      })
+    }
+  }
+
+  return {
+    mode: 'local',
+    identity,
+    generation,
+    capabilities: createLocalDesktopCapabilities,
+    session,
+    queries: catalogQueries,
+    videos: videoCommands,
+    actresses: actressCommands,
+    classifications: classificationCommands,
+    playlists: playlistCommands,
+    libraries: libraryCommands,
+    reconnect: async () => session(),
+    claimWriter: async () => {
+      throw structuredError('UNSUPPORTED_CAPABILITY', '本地模式不使用 writer 领取')
+    },
+    nfo: {
+      async getOptions() {
+        return getCatalogNfoOptions()
+      },
+      async updatePreferences(input, ctx) {
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.updatePreferences',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => updateCatalogNfoPreferences(input)
+        ).data
+      },
+      async plan(input, ctx) {
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.plan',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => {
+            const preview = planCatalogNfoExport(input)
+            return { ...preview, planDigest: peekCatalogNfoPlanDigest(preview.planId) }
+          }
+        ).data
+      },
+      async discardPlan(input, ctx) {
+        return commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.discardPlan',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => {
+            discardCatalogNfoPlan(input.planId)
+            return { ok: true }
+          }
+        ).data
+      },
+      async start(input, ctx) {
+        const accepted = acceptCatalogTask(
+          {
+            operationId: ctx.operationId,
+            operation: 'nfo.start',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => enqueueCatalogNfoExport(input.planId, input.planDigest, ctx.operationId)
+        )
+        if (accepted.outcome === 'applied') {
+          queueMicrotask(() => startCatalogNfoExportTask(accepted.data.taskId))
+        }
+        return { receipt: accepted.receipt, taskId: accepted.data.taskId }
+      },
+      async terminate(input) {
+        return terminateCatalogNfoExport(input.taskId)
+      },
+      async state() {
+        return catalogNfoState()
+      }
+    },
+    browser: unsupportedSlice([
+      'status',
+      'setEnabled',
+      'pairOpen',
+      'pairInspect',
+      'pairDecide',
+      'deviceRemove',
+      'deviceRename',
+      'deviceReset',
+      'revokeSessions'
+    ]),
+    tasks: {
+      async get(input) {
+        const task = readCatalogTask(input.taskId)
+        if (!task) throw structuredError('INVALID_INPUT', '任务不存在')
+        return task
+      },
+      async list(input) {
+        return listCatalogTasks(input ?? {})
+      },
+      async cancel(input) {
+        const task = readCatalogTask(input.taskId)
+        if (!task) throw structuredError('INVALID_INPUT', '任务不存在')
+        if (task.kind === 'scan') {
+          if (task.libraryId == null) throw structuredError('INVALID_INPUT', '扫描任务缺少媒体库')
+          return requestLibraryScanCancel({ libraryId: task.libraryId, taskId: task.taskId })
+        }
+        if (task.kind === 'nfo-export') return terminateCatalogNfoExport(task.taskId)
+        throw structuredError('UNSUPPORTED_CAPABILITY', '该任务类型的取消仍待后续阶段接入')
+      },
+      async getOperation(input) {
+        return readOperationReceipt(input.operationId)
+      },
+      async createTargetList(input, ctx) {
+        const result = commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'targetLists.create',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => createCatalogTargetList(input)
+        )
+        return result.data
+      },
+      async countTargets(input) {
+        return countCatalogTargets(input)
+      },
+      async pageTargetList(input) {
+        return pageCatalogTargetList(input)
+      }
+    },
+    pendingVideoScrapes: {
+      async count() {
+        return countPendingVideoScrapes()
+      },
+      async existingIds(input) {
+        if (input.scrapeIds) return existingPendingVideoScrapeIds(input.scrapeIds)
+        if (input.videoIds?.length) {
+          const unique = [...new Set(input.videoIds)]
+          return (
+            getDb()
+              .prepare(
+                `SELECT video_id FROM pending_video_scrapes
+                 WHERE video_id IN (${unique.map(() => '?').join(',')})
+                 ORDER BY video_id`
+              )
+              .all(...unique) as Array<{ video_id: number }>
+          ).map((row) => row.video_id)
+        }
+        return (
+          getDb()
+            .prepare('SELECT video_id FROM pending_video_scrapes ORDER BY video_id')
+            .all() as Array<{ video_id: number }>
+        ).map((row) => row.video_id)
+      },
+      async page(input) {
+        return pagePendingVideoScrapes({
+          offset: input.offset,
+          limit: Math.min(input.limit ?? 50, 100),
+          ...(input.anchorId != null ? { anchorId: input.anchorId } : {}),
+          ...(input.videoId != null ? { videoId: input.videoId } : {})
+        })
+      },
+      async get(input) {
+        return getPendingVideoScrapeById(input.pendingScrapeId)
+      },
+      async list() {
+        return listPendingVideoScrapes()
+      },
+      async replace(input, ctx) {
+        return replacePendingVideoScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data
+      },
+      async confirm(input, ctx) {
+        return confirmPendingVideoScrapeCommand(input, { ...ctx, writerEpoch: 0 }).data
+      },
+      async discard(input, ctx) {
+        const expectedRevision =
+          ctx.expectedVersions.Q?.revision ??
+          getPendingVideoScrapeById(input.pendingScrapeId)?.revision
+        let stagedPaths: string[] = []
+        const result = commitCatalogMutation(
+          {
+            operationId: ctx.operationId,
+            operation: 'pendingVideoScrapes.discard',
+            expectedVersions: ctx.expectedVersions,
+            input,
+            writerEpoch: 0
+          },
+          () => {
+            const pending = getPendingVideoScrapeById(input.pendingScrapeId)
+            if (!pending || (expectedRevision != null && pending.revision !== expectedRevision)) {
+              throw structuredError('VERSION_CONFLICT', '待确认刮削结果已变化，请刷新后重新确认')
+            }
+            const discarded = discardPendingVideoScrapeRecord(input.pendingScrapeId)
+            stagedPaths = discarded.stagedPaths
+            return { ok: discarded.ok }
+          }
+        )
+        if (stagedPaths.length > 0) mediaAssetStore.cleanupVideoScrapeStagingPaths(stagedPaths)
+        return result.data
+      }
+    },
+    agentMetadata: {
+      async preview(input) {
+        const review = buildAgentMetadataReview(
+          input.candidate,
+          input.selection,
+          input.reviewRevision ?? input.candidate.revision + 1,
+          { includeVersions: true }
+        )
+        return { review, versions: agentMetadataPreviewVersions(input.candidate, getDb()) }
+      },
+      async findReady(input) {
+        return findReadyDesktopManagedDraft(input)
+      },
+      async apply(input, ctx) {
+        return applyDesktopManagedDraft(input, ctx)
+      },
+      async discard(input, ctx) {
+        return discardDesktopManagedDraft(input, ctx)
+      }
+    },
+    assets: {
+      ...unsupportedSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
+      async readImage(input, ctx) {
+        return mediaAssetStore.readForServeAsync(input.relPath, ctx?.signal, input.size)
+      }
+    },
+    migration: {
+      async preview(input) {
+        return previewCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async start(input) {
+        return startCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async status(input) {
+        return statusCatalogMigration(input)
+      },
+      async enable(input) {
+        return enableCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async abandon(input) {
+        return abandonCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
+      },
+      async putPackage(input) {
+        return writeMigrationPackageBytes(input.migrationId, input.body, {
+          appVersion: dependencies.appVersion ?? '0.7.0'
+        })
+      }
+    },
+    async dispose(): Promise<void> {
+      return
+    }
+  }
+}
+
+export function createCatalogBackendForMode(
+  mode: 'local' | 'remote',
+  local: LocalCatalogBackendDependencies,
+  remote?: RemoteCatalogBackendOptions
+): CatalogBackend {
+  if (mode === 'remote') {
+    if (remote?.baseUrl) return createRemoteCatalogBackend(remote)
+    return createUnconfiguredRemoteBackend()
+  }
+  return createLocalCatalogBackend(local)
+}

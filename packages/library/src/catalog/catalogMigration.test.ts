@@ -26,6 +26,9 @@ import {
 import { catalogLooksEmpty } from './catalogMigrationState'
 import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 
+const supportsPrivateMount = process.platform === 'linux' &&
+  spawnSync('unshare', ['--user', '--map-root-user', '--mount', 'true'], { stdio: 'ignore' }).status === 0
+
 function insertRoot(
   db: ReturnType<typeof openIsolatedCatalog>,
   libraryId: number,
@@ -714,7 +717,7 @@ describe('catalogMigration protocol', () => {
   })
 
   it('rolls back enable if image copy hits ENOSPC after the transaction commits', {
-    skip: process.platform !== 'linux' ? 'Requires Linux unshare and a bounded tmpfs; covered by Linux migration acceptance' : false
+    skip: supportsPrivateMount ? false : 'Requires user and mount namespaces; covered by Linux Docker migration smoke'
   }, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-enospc-'))
     roots.push(root)

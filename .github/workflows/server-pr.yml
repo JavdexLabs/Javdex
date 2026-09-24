@@ -1,4 +1,4 @@
-name: Server PR
+name: Server Mode PR
 
 on:
   pull_request:
@@ -8,9 +8,35 @@ permissions:
   contents: read
 
 jobs:
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install system test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 mpv
+      - run: npm ci
+      - run: git diff --check "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+      - run: npm run setup:desktop
+      - run: npm test
+        env:
+          JAVDEX_TEST_TIMEOUT_MS: "900000"
+      - run: npm run desktop:build
+      - run: npm run server:build
+      - run: docker build -t javdex-server:smoke .
+      - run: npm run server:smoke:agent
+
   server:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,3 +50,5 @@ jobs:
       - run: npm ci
       - run: npm run server:build
       - run: npm run server:test
+      - run: npm run server:smoke
+      - run: npm run server:smoke:migration

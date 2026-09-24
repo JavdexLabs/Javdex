@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import sharp from 'sharp'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { mediaAssetStore } from '@library/mediaAssetStore'
@@ -49,7 +50,7 @@ function spawnCrash(env: Record<string, string>): { status: number | null; stder
       '--import',
       'tsx',
       '--import',
-      path.resolve('scripts/register-library-test-host.ts'),
+      pathToFileURL(path.resolve('scripts/register-library-test-host.ts')).href,
       path.resolve('packages/library/src/catalog/catalogImageCrashChild.ts')
     ],
     {

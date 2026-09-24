@@ -28,6 +28,7 @@ interface RootRow {
 export interface MigrationPreviewOptions {
   appVersion: string
   encryptedAssetCount?: number
+  migrationId?: string
 }
 
 export function validateMappings(
@@ -177,7 +178,7 @@ export function computeMigrationPreview(
   }
   const digest = digestRequest(previewBase)
   return {
-    migrationId: randomUUID(),
+    migrationId: options.migrationId ?? randomUUID(),
     sourceServerId: identity.serverId,
     sourceCatalogId: identity.catalogId,
     schemaVersion: CURRENT_SCHEMA_VERSION,

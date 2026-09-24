@@ -12,6 +12,7 @@ import type {
 import type { Video, VideoResource } from '@shared/videoTypes'
 import { DEFAULT_MEDIA_LIBRARY_CONFIG, type MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import { MaintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
+import { isStructuredError } from '@shared/protocol/errors'
 import { createScanCoordinator, type ScanCoordinatorDependencies } from './scanCoordinator'
 import type { ScanOptions, ScanProgressFn } from './scanner'
 
@@ -1224,7 +1225,7 @@ describe('ScanCoordinator', () => {
     await assert.rejects(() => coordinatorWithPendingScan.run(), /正在运行/)
     assert.throws(
       () => gate.runSync('resource-maintenance', () => true),
-      /正在运行/
+      (error: unknown) => isStructuredError(error) && error.code === 'MAINTENANCE_BUSY'
     )
     releaseScan()
     await first

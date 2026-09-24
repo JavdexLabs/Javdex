@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { ensureCatalogIdentity } from './catalogIdentity'
 import { commitCatalogMutation, readOperationReceipt } from './catalogOperations'
@@ -58,7 +59,7 @@ it('rolls back a short videos.edit when SIGKILL lands before the SQLite commit',
       '--import',
       'tsx',
       '--import',
-      path.resolve('scripts/register-library-test-host.ts'),
+      pathToFileURL(path.resolve('scripts/register-library-test-host.ts')).href,
       path.resolve('packages/library/src/catalog/catalogMutationCrashChild.ts')
     ],
     {

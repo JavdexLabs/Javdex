@@ -333,7 +333,10 @@ export function previewCatalogMigration(
     input.mappings,
     {
       appVersion: host.appVersion,
-      encryptedAssetCount: countEncryptedAssets(imagesDir)
+      encryptedAssetCount: countEncryptedAssets(imagesDir),
+      migrationId: existing?.role === 'source' && existing.phase === 'prepare'
+        ? existing.migrationId
+        : undefined
     },
     database
   )

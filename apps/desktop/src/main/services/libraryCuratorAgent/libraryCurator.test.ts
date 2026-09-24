@@ -86,4 +86,3 @@ it('reads curator overview through a bound catalog without getDb', async () => {
     /概览响应无效/
   )
 })
-

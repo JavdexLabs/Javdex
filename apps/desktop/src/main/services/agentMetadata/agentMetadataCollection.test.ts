@@ -79,4 +79,3 @@ it('rejects a missing bound actress before opening Playwright', async () => {
   )
   assert.equal(actressCalls, 1)
 })
-

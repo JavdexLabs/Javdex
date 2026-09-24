@@ -297,6 +297,10 @@ async function assertTargetReady(base, migrationId, token, label) {
 }
 
 requireDocker()
+if (process.platform !== 'linux') {
+  process.stderr.write('server:smoke:migration requires a Linux host filesystem for SQLite and fault injection; run it in PR CI or on Linux.\n')
+  process.exit(1)
+}
 
 if (!fs.existsSync(path.join(root, 'out', 'server', 'index.js'))) {
   process.stderr.write('server:smoke:migration requires npm run server:build\n')
@@ -304,7 +308,11 @@ if (!fs.existsSync(path.join(root, 'out', 'server', 'index.js'))) {
 }
 
 const image = 'javdex-server:smoke'
-const build = spawnSync('docker', ['build', '-t', image, '.'], { cwd: root, stdio: 'inherit' })
+const registry = process.env.JAVDEX_SMOKE_NPM_REGISTRY
+const buildArgs = ['build', '-t', image]
+if (registry) buildArgs.push('--build-arg', `NPM_CONFIG_REGISTRY=${registry}`)
+buildArgs.push('.')
+const build = spawnSync('docker', buildArgs, { cwd: root, stdio: 'inherit' })
 if (build.status !== 0) process.exit(build.status ?? 1)
 
 const sourceData = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-mig-source-data-'))

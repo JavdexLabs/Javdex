@@ -11,6 +11,16 @@ function digestToken(token) {
   return createHash('sha256').update(token, 'utf8').digest('hex')
 }
 
+async function fetchLive(url) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 1_000)
+  try {
+    return await fetch(url, { signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const requiredBuildFiles = [
   path.join(root, 'out', 'server', 'index.js'),
@@ -35,10 +45,16 @@ if (docker.status !== 0) {
 const port = Number(process.env.JAVDEX_SMOKE_PORT ?? 8096)
 assert.ok(Number.isInteger(port) && port > 0 && port <= 65535, 'invalid JAVDEX_SMOKE_PORT')
 const image = 'javdex-server:smoke'
-const build = spawnSync('docker', ['build', '-t', image, '.'], { cwd: root, stdio: 'inherit' })
+const registry = process.env.JAVDEX_SMOKE_NPM_REGISTRY
+const buildArgs = ['build', '-t', image]
+if (registry) buildArgs.push('--build-arg', `NPM_CONFIG_REGISTRY=${registry}`)
+buildArgs.push('.')
+const build = spawnSync('docker', buildArgs, { cwd: root, stdio: 'inherit' })
 if (build.status !== 0) process.exit(build.status ?? 1)
 
 const volume = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-volume-'))
+// Docker Desktop bind mounts from Windows are FUSE; SQLite intentionally rejects them.
+const dataMount = process.platform === 'win32' ? `javdex-server-smoke-${randomUUID()}` : volume
 const media = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-media-'))
 const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-config-'))
 fs.writeFileSync(path.join(media, 'clip.mp4'), Buffer.from('0123456789abcdef'))
@@ -71,7 +87,7 @@ const run = spawnSync(
     '-p',
     `${port}:${port}`,
     '-v',
-    `${volume}:/data`,
+    `${dataMount}:/data`,
     '-v',
     `${media}:/media`,
     '-v',
@@ -87,6 +103,8 @@ const run = spawnSync(
 )
 if (run.status !== 0) {
   process.stderr.write(run.stderr)
+  if (dataMount !== volume) spawnSync('docker', ['volume', 'rm', dataMount], { stdio: 'ignore' })
+  for (const directory of [volume, media, configDir]) fs.rmSync(directory, { recursive: true, force: true })
   process.exit(run.status ?? 1)
 }
 
@@ -95,7 +113,7 @@ try {
   let live = null
   for (let i = 0; i < 40; i += 1) {
     try {
-      live = await fetch(`${base}/live`)
+      live = await fetchLive(`${base}/live`)
       if (live.ok) break
     } catch {
       live = null
@@ -174,7 +192,7 @@ try {
   live = null
   for (let i = 0; i < 40; i += 1) {
     try {
-      live = await fetch(`${base}/live`)
+      live = await fetchLive(`${base}/live`)
       if (live.ok) break
     } catch {
       live = null
@@ -183,10 +201,15 @@ try {
   }
   assert.ok(live?.ok, 'container did not come back after restart')
   assert.equal((await fetch(`${base}/api/session`, { headers: { Cookie: cookie } })).status, 200)
-  assert.ok(fs.existsSync(path.join(volume, 'library.db')))
+  const dataCheck = spawnSync('docker', [
+    'exec', 'javdex-server-smoke', 'node', '-e',
+    "process.exit(require('node:fs').existsSync('/data/library.db') ? 0 : 1)"
+  ], { encoding: 'utf8' })
+  assert.equal(dataCheck.status, 0, dataCheck.stderr)
   console.log('PASS: Docker image, volume SQLite, bind gate, session restart')
 } finally {
   spawnSync('docker', ['rm', '-f', 'javdex-server-smoke'], { stdio: 'ignore' })
+  if (dataMount !== volume) spawnSync('docker', ['volume', 'rm', dataMount], { stdio: 'ignore' })
   fs.rmSync(volume, { recursive: true, force: true })
   fs.rmSync(media, { recursive: true, force: true })
   fs.rmSync(configDir, { recursive: true, force: true })

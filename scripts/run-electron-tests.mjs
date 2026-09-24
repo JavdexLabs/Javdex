@@ -33,6 +33,7 @@ if (testFiles.length === 0) {
     '--import',
     './scripts/register-library-test-host.ts',
     '--test',
+    '--test-concurrency=4',
     ...testFiles
   ]
   const timeoutMs = Number(process.env.JAVDEX_TEST_TIMEOUT_MS ?? 180_000)

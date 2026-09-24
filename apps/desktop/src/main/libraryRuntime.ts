@@ -40,4 +40,3 @@ export function configureDesktopLibraryTestRuntime(): void {
     http: desktopHttpSettings()
   })
 }
-

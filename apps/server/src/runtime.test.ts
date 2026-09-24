@@ -4398,7 +4398,7 @@ describe('server runtime lifecycle', () => {
       getDb().prepare('SELECT id FROM media_library_roots LIMIT 1').get() as { id: number }
     ).id
     const cookie = (await login(base, password)).cookie
-    const issued = issueMigrationToken(config)
+    let issued = issueMigrationToken(config)
     const dummyId = randomUUID()
     const putHeaders = (extra: Record<string, string>): Record<string, string> => ({
       Origin: base,
@@ -4424,6 +4424,14 @@ describe('server runtime lifecycle', () => {
       body: Buffer.from('pkg')
     })
     assert.equal(tokenPut.status, 200, await tokenPut.text())
+    const wrongMigrationPreview = await postManage(
+      base,
+      'migration.preview',
+      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
+      { bearer: issued.oneTimeToken }
+    )
+    assert.equal(wrongMigrationPreview.status, 401)
+    issued = issueMigrationToken(config)
     const cookiePreview = await postManage(
       base,
       'migration.preview',

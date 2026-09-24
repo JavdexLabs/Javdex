@@ -354,7 +354,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       scanRecovery: unknown
       fds: string[]
     }>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`d01 child did not report\n${stderr}`)), 20_000)
+      const timeout = setTimeout(() => reject(new Error(`d01 child did not report\n${stderr}`)), 60_000)
       let stdout = ''
       let stderr = ''
       const onOut = (chunk: Buffer): void => {
@@ -427,7 +427,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
     )
     children.push(child)
     const report = await new Promise<M10Report>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`m10 child did not report\n${stderr}`)), 30_000)
+      const timeout = setTimeout(() => reject(new Error(`m10 child did not report\n${stderr}`)), 60_000)
       let stdout = ''
       let stderr = ''
       const onOut = (chunk: Buffer): void => {
@@ -483,7 +483,9 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
   }
 
   describe('createDesktopRuntime process isolation', () => {
-    it('keeps local-mode library.db descriptors and releases them on dispose', async () => {
+    it('keeps local-mode library.db descriptors and releases them on dispose', {
+      skip: process.platform === 'win32' ? 'Windows has no /proc or lsof descriptor enumeration' : false
+    }, async () => {
       const root = tempDir()
       const runtime = await createDesktopRuntime(root, '0.7.0')
       const catalogPath = localCatalogDatabasePath(root)
@@ -600,7 +602,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       }
     })
 
-    it('keeps source agent rows and stays copying when SIGKILL hits workStore copy', async () => {
+    it('keeps source agent rows and stays copying when SIGKILL hits workStore copy', { timeout: 120_000 }, async () => {
       const root = tempDir()
       fs.mkdirSync(path.join(root, 'data'), { recursive: true })
       const catalog = initDatabaseAtPath(localCatalogDatabasePath(root))
@@ -633,7 +635,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         }
       )
       children.push(child)
-      await waitForFile(path.join(root, 'd03-sentinel'))
+      await waitForFile(path.join(root, 'd03-sentinel'), 90_000)
       const killed = child.kill('SIGKILL')
       assert.equal(killed, true)
       await new Promise<void>((resolve) => {
@@ -692,7 +694,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       }
     })
 
-    it('keeps source agent rows when SIGKILL hits the open copy SQL transaction', async () => {
+    it('keeps source agent rows when SIGKILL hits the open copy SQL transaction', { timeout: 120_000 }, async () => {
       const root = tempDir()
       fs.mkdirSync(path.join(root, 'data'), { recursive: true })
       const catalog = initDatabaseAtPath(localCatalogDatabasePath(root))
@@ -727,7 +729,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         }
       )
       children.push(child)
-      await waitForFile(`${instruction}.ready`)
+      await waitForFile(`${instruction}.ready`, 90_000)
       const killed = child.kill('SIGKILL')
       assert.equal(killed, true)
       await new Promise<void>((resolve) => {

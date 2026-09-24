@@ -35,6 +35,8 @@ import { maybeCrashImageFlow } from '@library/catalog/catalogImageCrash'
 import { grantCatalogPlayback } from '@library/catalog/catalogPlay'
 import { readManageCatalogImage } from '@library/catalog/catalogManageImages'
 import { authenticateMigration } from '@library/catalog/catalogMigrationAuth'
+import { MIGRATION_STATE_KEY } from '@library/catalog/catalogMigrationState'
+import { readCatalogSetting } from '@library/catalog/catalogSettings'
 import {
   abandonCatalogMigration,
   enableCatalogMigration,
@@ -149,7 +151,7 @@ export async function putManageMigrationPackage(
   database?: Database.Database
 ): Promise<{ ok: true; bytes: number }> {
   const db = catalogDb(database)
-  authenticateMigration(context.bearerSecret, db)
+  authenticateMigration(context.bearerSecret, db, { migrationId: context.migrationId })
   const dest = migrationPackagePath(context.migrationId, { appVersion: SERVER_APP_VERSION })
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   let written = 0
@@ -274,13 +276,13 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
   if (meta.auth === 'migration') {
     const parsed = parseManageRequest(operation, context.body)
     if (!parsed.success) throw structuredError('INVALID_INPUT', '请求格式无效')
-    authenticateMigration(context.bearerSecret, catalogDb(database))
     const envelope = parsed.data as {
       migrationId?: string
       digest?: string
       input: Record<string, unknown>
     }
     const input = envelope.input
+    const migrationId = typeof input.migrationId === 'string' ? input.migrationId : envelope.migrationId
     if (
       typeof input.migrationId === 'string' &&
       envelope.migrationId &&
@@ -288,9 +290,18 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     ) {
       throw structuredError('INVALID_INPUT', '迁移编号不一致')
     }
+    authenticateMigration(context.bearerSecret, catalogDb(database), { migrationId })
     const host = { appVersion: SERVER_APP_VERSION }
     if (operation === 'migration.preview') {
-      return previewCatalogMigration(input as unknown as MigrationPreviewInput, host, catalogDb(database))
+      const db = catalogDb(database)
+      return db.transaction(() => {
+        const preview = previewCatalogMigration(input as unknown as MigrationPreviewInput, host, db)
+        const state = readCatalogSetting<{ migrationId: string } | null>(MIGRATION_STATE_KEY, null, db)
+        if (state?.migrationId === preview.migrationId) {
+          authenticateMigration(context.bearerSecret, db, { migrationId: preview.migrationId })
+        }
+        return preview
+      })()
     }
     if (operation === 'migration.start') {
       return startCatalogMigration(input as unknown as MigrationControlInput, host, catalogDb(database))

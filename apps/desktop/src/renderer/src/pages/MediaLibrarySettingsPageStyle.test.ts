@@ -105,7 +105,7 @@ describe('MediaLibrarySettingsPage layout', () => {
         tabs.indexOf('aria-label="扫描导入"') <
           tabs.indexOf('aria-label="扫描设置"')
     )
-    assert.match(tabs, /scan\.running \? scan\.cancel\(\) : scan\.start\(\)/)
+    assert.match(tabs, /<MediaLibraryScanRunButton scan=\{scan\}/)
     assert.match(tabs, /<SettingsNumberStepper/)
     assert.match(tabs, /aria-label="最短导入时长（分钟）"/)
     assert.match(tabs, /function ScanHistorySummary/)

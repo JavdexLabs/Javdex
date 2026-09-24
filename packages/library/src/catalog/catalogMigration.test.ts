@@ -172,6 +172,13 @@ describe('catalogMigration protocol', () => {
       assert.equal(preview.omittedRoots[0]?.rootId, unmappedRootId)
       assert.deepEqual(preview.autoCleanupDisabledLibraryIds, [1])
       assert.deepEqual(preview.pendingBlockers, [])
+      const retriedPreview = previewCatalogMigration(
+        { mappings: [{ sourceRootId: mappedRootId, targetMountSelectionId: 'mapped' }] },
+        sourceHost,
+        sourceDb
+      )
+      assert.equal(retriedPreview.migrationId, preview.migrationId)
+      assert.equal(retriedPreview.digest, preview.digest)
 
       const exporting = startCatalogMigration(
         { migrationId: preview.migrationId, digest: preview.digest },
@@ -604,7 +611,9 @@ describe('catalogMigration protocol', () => {
     }
   })
 
-  it('rolls back enable if image copy hits EACCES after the transaction commits', async () => {
+  it('rolls back enable if image copy hits EACCES after the transaction commits', {
+    skip: process.platform === 'win32' ? 'chmod(0) does not deny writes on Windows; covered by Docker migration smoke' : false
+  }, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s13-img-eacces-'))
     roots.push(root)
     const sourceDir = path.join(root, 'source')

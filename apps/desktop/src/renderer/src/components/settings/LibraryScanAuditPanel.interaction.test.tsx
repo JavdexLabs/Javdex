@@ -340,7 +340,7 @@ it('keeps the actual anchored page when resolving its target, clears anchor and 
     request.query.anchor ? { offset: 200, anchorOffset: 200, total: 201 } : {}))
   await tab('全部文件')
   await click('处理')
-  assert.deepEqual(requests.at(-1)?.query.anchor, { kind: 'path', value: '/file-201' })
+  assert.deepEqual(requests.at(-1)?.query.anchor, { kind: 'path', value: '/file-201', rootId: 7 })
   assert.match(text(renderer!.root), /3 \/ 3/)
   const header = deferred<void>()
   refresh = () => { refreshCount++; return header.promise }

@@ -121,6 +121,9 @@ function runContainer({ name, port, dataDir, imagesDir, mediaDir, configDir, ima
       '-d',
       '--name',
       name,
+      // Bind-mounted fault-injection directories belong to this Linux test user.
+      '--user',
+      `${process.getuid()}:${process.getgid()}`,
       '-p',
       `${port}:${port}`,
       '-v',

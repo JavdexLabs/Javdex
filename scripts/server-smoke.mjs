@@ -52,11 +52,12 @@ buildArgs.push('.')
 const build = spawnSync('docker', buildArgs, { cwd: root, stdio: 'inherit' })
 if (build.status !== 0) process.exit(build.status ?? 1)
 
-const volume = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-volume-'))
-// Docker Desktop bind mounts from Windows are FUSE; SQLite intentionally rejects them.
-const dataMount = process.platform === 'win32' ? `javdex-server-smoke-${randomUUID()}` : volume
+// A Docker volume keeps SQLite on the container filesystem on every host.
+const dataMount = `javdex-server-smoke-${randomUUID()}`
 const media = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-media-'))
 const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-config-'))
+fs.chmodSync(media, 0o755)
+fs.chmodSync(configDir, 0o755)
 fs.writeFileSync(path.join(media, 'clip.mp4'), Buffer.from('0123456789abcdef'))
 fs.writeFileSync(
   path.join(configDir, 'server.json'),
@@ -103,8 +104,8 @@ const run = spawnSync(
 )
 if (run.status !== 0) {
   process.stderr.write(run.stderr)
-  if (dataMount !== volume) spawnSync('docker', ['volume', 'rm', dataMount], { stdio: 'ignore' })
-  for (const directory of [volume, media, configDir]) fs.rmSync(directory, { recursive: true, force: true })
+  spawnSync('docker', ['volume', 'rm', dataMount], { stdio: 'ignore' })
+  for (const directory of [media, configDir]) fs.rmSync(directory, { recursive: true, force: true })
   process.exit(run.status ?? 1)
 }
 
@@ -209,8 +210,7 @@ try {
   console.log('PASS: Docker image, volume SQLite, bind gate, session restart')
 } finally {
   spawnSync('docker', ['rm', '-f', 'javdex-server-smoke'], { stdio: 'ignore' })
-  if (dataMount !== volume) spawnSync('docker', ['volume', 'rm', dataMount], { stdio: 'ignore' })
-  fs.rmSync(volume, { recursive: true, force: true })
+  spawnSync('docker', ['volume', 'rm', dataMount], { stdio: 'ignore' })
   fs.rmSync(media, { recursive: true, force: true })
   fs.rmSync(configDir, { recursive: true, force: true })
 }

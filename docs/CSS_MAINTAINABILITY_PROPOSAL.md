@@ -107,7 +107,7 @@ Global CSS              只负责真正全局的基础层
 ### 文件所有权
 
 ```text
-src/renderer/src/
+apps/desktop/src/renderer/src/
 ├── styles.css                       # token、reset、document/root 基础样式
 ├── styles/
 │   ├── global.css                   # 唯一全局 side-effect import 清单
@@ -167,7 +167,7 @@ src/renderer/src/
 ### 阶段 0：建立安全网
 
 1. 先独立提交并稳定当前 CSS 纯拆分，保留可回退基线。
-2. 新增 `src/renderer/src/vite-env.d.ts`，引用 `vite/client`。Vite 5 的 client types 声明了 `.module.css`、`.module.scss` 和 `.module.less` 默认导出。[Vite 5 client types](https://github.com/vitejs/vite/blob/v5.4.21/packages/vite/client.d.ts#L3-L40)
+2. 新增 `apps/desktop/src/renderer/src/vite-env.d.ts`，引用 `vite/client`。Vite 5 的 client types 声明了 `.module.css`、`.module.scss` 和 `.module.less` 默认导出。[Vite 5 client types](https://github.com/vitejs/vite/blob/v5.4.21/packages/vite/client.d.ts#L3-L40)
 3. 为 Electron-as-Node 测试注册 style module loader/stub：普通 CSS 返回空副作用模块，CSS Modules 默认导出一个可按 key 返回稳定字符串的 class map。先用一个 fixture 验证直接导入含 `.module.css` 的 TSX 测试能运行。
 4. 用 `styles/global.css` 固化全局导入顺序，`main.tsx` 只保留一个全局样式入口。
 5. 加入 CSS 指标脚本与 Stylelint，但 legacy 先采用 baseline/non-regression，不一次性豁免数百条规则。

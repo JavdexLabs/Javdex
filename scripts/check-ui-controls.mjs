@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import ts from 'typescript'
 
-const root = path.resolve('src/renderer/src')
+const root = path.resolve('apps/desktop/src/renderer/src')
 const primitiveFiles = new Set(['components/Switch.tsx', 'components/Checkbox.tsx'])
 const violations = []
 
@@ -12,7 +12,7 @@ function inspect(directory) {
     if (entry.isDirectory()) { inspect(file); continue }
     if (!file.endsWith('.tsx') || file.endsWith('.test.tsx')) continue
     const relative = path.relative(root, file).replaceAll(path.sep, '/')
-    if (primitiveFiles.has(relative)) continue
+    if (primitiveFiles.has(relative) || file === path.resolve('packages/ui/src/Checkbox.tsx')) continue
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     function visit(node) {
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
@@ -38,6 +38,7 @@ function inspect(directory) {
 }
 
 inspect(root)
+inspect(path.resolve('packages/ui/src'))
 if (violations.length) {
   console.error(violations.join('\n'))
   process.exitCode = 1

@@ -7,10 +7,13 @@ const path = require('node:path')
 const { app, nativeImage } = require('electron')
 app.setPath('userData', process.env.JAVDEX_TEST_USER_DATA)
 app.disableHardwareAcceleration()
-const { prepareCoverArtwork, renderCoverArtwork } = require('../src/main/nfo/export/nfoCoverArtwork.ts')
-const { NfoExportModule } = require('../src/main/nfo/export/nfoExportModule.ts')
-const { mediaAssetStore, readImageOrientationFromBuffer } = require('../src/main/services/mediaAssetStore.ts')
-const { encryptPlain } = require('../src/main/services/assetCrypto.ts')
+const { prepareCoverArtwork, renderCoverArtwork } = require('../apps/desktop/src/main/nfo/export/nfoCoverArtwork.ts')
+const { NfoExportModule } = require('../apps/desktop/src/main/nfo/export/nfoExportModule.ts')
+const { configureDesktopLibraryTestRuntime } = require('../apps/desktop/src/main/libraryRuntime.ts')
+const { mediaAssetStore, readImageOrientationFromBuffer } = require('../packages/library/src/mediaAssetStore.ts')
+const { encryptPlain } = require('../packages/library/src/assetCrypto.ts')
+
+configureDesktopLibraryTestRuntime()
 
 function bitmap(width, height) {
   const bytes = Buffer.alloc(width * height * 4)

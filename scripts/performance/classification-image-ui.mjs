@@ -11,18 +11,18 @@ const local=p=>JSON.stringify('/@fs/'+path.join(repo,p).replaceAll('\\','/'))
 fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
 fs.writeFileSync(path.join(root,'image.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="640" height="400" fill="#334455"/><circle cx="320" cy="200" r="100" fill="#889aab"/></svg>')
 fs.writeFileSync(path.join(root,'fixture.jsx'),`
-import React,{useState}from'react';import{createRoot}from'react-dom/client';import ${local('src/renderer/src/styles/global.css')};
+import React,{useState}from'react';import{createRoot}from'react-dom/client';import ${local('apps/desktop/src/renderer/src/styles/global.css')};
 window.React=React;window.__calls=[];window.__saves=[];window.__cancelled=0;
 window.api={settings:{get:async()=>({theme:'graphite',privacyModeEnabled:false,privacyModeScopes:['mediaEditors']})},classificationImages:{candidates:()=>{throw Error('Full candidates forbidden')},page:async(entity,q)=>{window.__calls.push({entity,q});if(window.__fail){window.__fail=false;throw Error('Page failed')}if(window.__hold){window.__hold=false;await new Promise(resolve=>window.__release=resolve)}return {items:Array.from({length:Math.min(60,Math.max(0,125-q.offset))},(_,n)=>({videoId:q.offset+n+1,code:'CODE-'+(q.offset+n+1),title:null,coverPath:'covers/'+(q.offset+n+1)+'.jpg'})),offset:q.offset,total:125,limit:60}},set:async(entity,input)=>{window.__saves.push({entity,input});return{imagePath:'saved.jpg',cleanupFailures:[]}}}};
-const Component=(await import(${local('src/renderer/src/components/ClassificationImageModal.tsx')})).default;
-const {ThemeProvider,useTheme}=await import(${local('src/renderer/src/components/ThemeProvider.tsx')});
+const Component=(await import(${local('apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx')})).default;
+const {ThemeProvider,useTheme}=await import(${local('apps/desktop/src/renderer/src/components/ThemeProvider.tsx')});
 function Editor(){const theme=useTheme();window.__privacy=enabled=>theme.syncPrivacyMode({privacyModeEnabled:enabled,privacyModeScopes:['mediaEditors']});const [entity,setEntity]=useState({kind:'director',id:1});window.__entity=setEntity;return <Component entity={entity} entityLabel="导演" imagePath="current.jpg" fallbackCoverPath={null} onCancel={()=>window.__cancelled++} onChanged={()=>{}}/>}
 createRoot(document.getElementById('root')).render(<ThemeProvider><Editor/></ThemeProvider>);
 `)
 let server,browser;const results=[]
 try{
- const apiFile=path.join(repo,'src/renderer/src/api.ts').replaceAll('\\','/')
- server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media',transform(code,id){if(id.replaceAll('\\','/')===apiFile)return code.replace('const url = `media://${normalized}`',"const url = '/image.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[repo,root]}}})
+ const apiFile=path.join(repo,'apps/desktop/src/renderer/src/api.ts').replaceAll('\\','/')
+ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media',transform(code,id){if(id.replaceAll('\\','/')===apiFile)return code.replace('const url = `media://${normalized}`',"const url = '/image.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{'@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[repo,root]}}})
  await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
  for(const viewport of [{width:1000,height:640},{width:1440,height:900}]){
   const page=await browser.newPage({viewport}),errors=[],requests=[];page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>{if(request.url().includes('/image.svg?'))requests.push(request.url())})

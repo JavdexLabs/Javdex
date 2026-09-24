@@ -3,6 +3,7 @@ import path from 'node:path'
 
 export function sourceFiles(root) {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    if (['node_modules', 'out', 'dist', 'coverage', '.git'].includes(entry.name)) return []
     const fullPath = path.join(root, entry.name)
     if (entry.isDirectory()) return sourceFiles(fullPath)
     return /\.[cm]?[jt]sx?$/.test(entry.name) ? [fullPath] : []

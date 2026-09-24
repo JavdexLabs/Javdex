@@ -13,20 +13,20 @@ fs.writeFileSync(path.join(root,'cover.svg'),'<svg xmlns="http://www.w3.org/2000
 const local=p=>JSON.stringify('/@fs'+path.join(repo,p))
 fs.writeFileSync(path.join(root,'fixture.jsx'),`
 import React from 'react';import {createRoot} from 'react-dom/client';import {MemoryRouter,Route,Routes,useNavigate} from 'react-router-dom';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-import ${local('src/renderer/src/styles/global.css')};
+import ${local('apps/desktop/src/renderer/src/styles/global.css')};
 window.React=React;window.__calls=[];window.__metadata=[];
 window.api={actresses:{galleryPage:async(id,query)=>{window.__calls.push({id,kind:'gallery',query});if(window.__galleryFail){window.__galleryFail=false;throw Error('Synthetic gallery failure')}if(window.__galleryHold){window.__galleryHold=false;await new Promise(resolve=>window.__releaseGallery=resolve)}const offset=query.anchorId?Math.floor((query.anchorId-1)/60)*60:(query.offset??0);return {anchorIndex:query.anchorId?(query.anchorId-1)%60:undefined,items:Array.from({length:Math.min(60,Math.max(0,125-offset))},(_,n)=>({id:offset+n+1,local_path:'photos/'+(offset+n+1)+'.jpg',remote_url:null,width:640,height:480,position:offset+n})),total:125,limit:60,offset}},get:()=>{throw Error('Full detail forbidden')},metadata:()=>{throw Error('Full gallery metadata forbidden')},profile:async id=>{window.__metadata.push(id);return {id,main_name:'Actor-'+id,gender:'female',names:[],aliases:[],links:[],gallery_count:125,display_gallery_count:125,first_gallery:null,avatar_path:null,avatar_source_path:null,scraped_status:0}},videoPage:async(id,query)=>{window.__calls.push({id,query});if(window.__fail){window.__fail=false;throw Error('Page failed')}const total=125,offset=query.offset??0;return {videos:Array.from({length:Math.min(60,Math.max(0,total-offset))},(_,n)=>({id:id*1000+offset+n,code:'WORK-'+(offset+n),title:'Synthetic work '+(offset+n),cover_path:'covers/'+(offset+n)+'.jpg',scraped_status:0,resource_kinds:[]})),total,limit:60,offset}}} ,settings:{get:async()=>({})},actressScrape:{listPlugins:async()=>[],listPluginDetails:async()=>[]},agentMetadata:{onSnapshotChanged:()=>()=>{}},assets:{getPathForFile:()=>null}};
-const Component=(await import(${local('src/renderer/src/pages/ActressDetailPage.tsx')})).default;
-const {AppBackgroundProvider}=await import(${local('src/renderer/src/components/AppBackgroundContext.tsx')});
-const {ImagePreviewOverlayProvider}=await import(${local('src/renderer/src/components/ImagePreviewOverlayContext.tsx')});
-const {AgentMetadataCollectorProvider}=await import(${local('src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx')});
+const Component=(await import(${local('apps/desktop/src/renderer/src/pages/ActressDetailPage.tsx')})).default;
+const {AppBackgroundProvider}=await import(${local('apps/desktop/src/renderer/src/components/AppBackgroundContext.tsx')});
+const {ImagePreviewOverlayProvider}=await import(${local('apps/desktop/src/renderer/src/components/ImagePreviewOverlayContext.tsx')});
+const {AgentMetadataCollectorProvider}=await import(${local('apps/desktop/src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx')});
 function Nav(){window.__navigate=useNavigate();return null}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav/><Routes><Route path="/actresses/:id" element={<Component/>}><Route path=":videoId" element={<div>Nested video</div>}/></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>);
 `)
 let server,browser;const results=[]
 try {
- server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/cover.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{
-  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
+ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'apps/desktop/src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/cover.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{
+  '@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
   'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
  }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
  await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})

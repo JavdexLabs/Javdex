@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { PluginWorkspaceModule } from '../../src/main/services/pluginDevAgent/pluginWorkspace'
+import { PluginWorkspaceModule } from '../../apps/desktop/src/main/services/pluginDevAgent/pluginWorkspace'
 
 it('measures event-loop responsiveness during real synthetic workspace deletion', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-cleanup-benchmark-'))

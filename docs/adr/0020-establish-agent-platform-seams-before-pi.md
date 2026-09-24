@@ -3,6 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-20
 - 实施：2026-08-20（Pi 成为唯一 Agent runtime，legacy runtime 已删除）
+- 部分替代：2026-09-20 [ADR-0030](0030-simplify-agent-recovery-and-model-configuration.md) 取消历史冷 rebuild、Profile/虚拟 Route 和新任务的用户缓存/压缩调参；下文保留原始决策背景。
 
 ## 背景
 

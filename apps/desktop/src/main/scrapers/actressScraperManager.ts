@@ -1,0 +1,413 @@
+import type { BaseActressScraper } from './BaseActressScraper'
+import type {
+  ActressScrapeDisposition,
+  ActressScrapeResult,
+  ActressScrapeField,
+  ActressScrapeUpdateMode
+} from '@shared/actressScrapeTypes'
+import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
+import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
+import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
+import {
+  getActressDetail,
+  recordActressScrapeFailure,
+} from '@library/db/actressRepo'
+import { resolveEffectiveActressScrapeFields } from '../services/actressAssetService'
+import { mediaAssetStore } from '@library/mediaAssetStore'
+import {
+  actressIdentityConflictWorkflow,
+  type PreparedActressScrapeResource
+} from '../services/actressIdentityConflictWorkflow'
+import { getSettings } from '../settings/settingsStore'
+import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
+import { createScraperPreLoginSession, type ScraperPreLoginSession } from './scraperPreLogin'
+import { buildPluginRegistry, runCompositeFieldGroups } from './compositeScrapeRun'
+import {
+  findCompositeScraper,
+  listMergedPluginDescriptors,
+  listCompositePluginDescriptors,
+  loadBundledActressScrapers,
+  loadUserActressScrapers
+} from './scraperPluginService'
+import { normalizeActressScrapeResult } from './scraperResultValidation'
+import { projectActressScrapeResult } from './actressScrapeFieldProjection'
+import { runActressCandidateWorkflow } from '../services/scrapeCandidateWorkflow'
+
+function buildRegistry(): Map<string, BaseActressScraper> {
+  return buildPluginRegistry(loadUserActressScrapers, loadBundledActressScrapers)
+}
+
+export function listActressScraperNames(): string[] {
+  const runnable = new Set(
+    listMergedPluginDescriptors('actress')
+      .filter((plugin) => plugin.configured !== false)
+      .map((plugin) => plugin.name)
+  )
+  return [
+    ...[...buildRegistry().keys()].filter((name) => runnable.has(name)),
+    ...listCompositePluginDescriptors('actress')
+      .filter((plugin) => plugin.configured !== false)
+      .map((plugin) => plugin.name)
+  ]
+}
+
+export function listActressScraperPlugins(): ScraperPluginDescriptor[] {
+  return listMergedPluginDescriptors('actress')
+}
+
+function assertActressScraperRunnable(name: string): ScraperPluginDescriptor {
+  const descriptor = listMergedPluginDescriptors('actress').find((plugin) => plugin.name === name)
+  if (!descriptor) throw new Error(`演员刮削插件「${name}」不存在`)
+  if (descriptor.configured === false) {
+    throw new Error(descriptor.disabledReason ?? `刮削插件「${name}」尚未配置`)
+  }
+  return descriptor
+}
+
+export function getActressScraper(name?: string): BaseActressScraper {
+  const settings = getSettings()
+  const key = name || settings.defaultActressScraper
+  assertActressScraperRunnable(key)
+  const registry = buildRegistry()
+  const scraper = registry.get(key)
+  if (!scraper) throw new Error(`演员刮削插件「${key}」不存在`)
+  return scraper
+}
+
+export type ActressScrapeOutcome = ActressScrapeDisposition
+
+export { actressIdentityConflictWorkflow }
+
+export interface ScrapeActressOptions {
+  closeBrowser?: boolean
+  fields?: ActressScrapeField[]
+  mode?: ActressScrapeUpdateMode
+  /** Name used to query scraper sites; defaults to the actress main name. */
+  queryName?: string
+  /** When true, scrapers also try stored aliases / zh / en names. Default false. */
+  useAliases?: boolean
+  /** Optional row revision captured before a batch began. */
+  expectedVersion?: { generation?: number; revision: number }
+  /** Stable persisted batch identifier, retained on pending snapshots. */
+  batchJobId?: string
+  delayController?: {
+    run<T>(kind: 'actress', pluginName: string, task: () => Promise<T>): Promise<T>
+  }
+  preLogin?: ScraperPreLoginSession
+}
+
+async function runActressPluginTask<T>(
+  pluginName: string,
+  proxyUrl: string,
+  delayController: ScrapeActressOptions['delayController'] | undefined,
+  preLogin: ScraperPreLoginSession | undefined,
+  task: () => Promise<T>
+): Promise<T> {
+  if (preLogin) await preLogin.ensure('actress', pluginName, proxyUrl)
+  return delayController ? delayController.run('actress', pluginName, task) : task()
+}
+
+function mergeActressResults(
+  base: ActressScrapeResult | null,
+  next: ActressScrapeResult
+): ActressScrapeResult {
+  return {
+    ...(base ?? {}),
+    ...next,
+    aliases: next.aliases ?? base?.aliases,
+    galleryImageUrls: next.galleryImageUrls ?? base?.galleryImageUrls
+  }
+}
+
+interface CompositeActressScrapeOutcome {
+  result: ActressScrapeResult | null
+  warnings: string[]
+  matchedFields: ActressScrapeField[]
+}
+
+async function scrapeCompositeActress(
+  compositeName: string,
+  fields: ActressScrapeField[],
+  queryName: string,
+  aliases: string[],
+  proxyUrl: string,
+  delayController?: ScrapeActressOptions['delayController'],
+  preLogin?: ScraperPreLoginSession
+): Promise<CompositeActressScrapeOutcome> {
+  const composite = findCompositeScraper('actress', compositeName)
+  if (!composite) return { result: null, warnings: [], matchedFields: [] }
+  return runCompositeFieldGroups<ActressScrapeField, ActressScrapeResult>({
+    fieldPluginMap: composite.fieldPluginMap,
+    fields,
+    onPluginError: 'collect',
+    runPlugin: async (pluginName) => {
+      const scraper = getActressScraper(pluginName)
+      const rawResult = await runActressPluginTask(
+        pluginName,
+        proxyUrl,
+        delayController,
+        preLogin,
+        () => scraper.parseTask(queryName, aliases, proxyUrl)
+      )
+      return normalizeActressScrapeResult(rawResult)
+    },
+    pick: (result, pluginFields) => projectActressScrapeResult(result, new Set(pluginFields)),
+    merge: mergeActressResults
+  })
+}
+
+function dedupeActressNameList(names: string[]): string[] {
+  const seen = new Set<string>()
+  const deduped: string[] = []
+  for (const name of names) {
+    const trimmed = name.trim()
+    if (!trimmed) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(trimmed)
+  }
+  return deduped
+}
+
+function resolveActressScrapeQuery(
+  mainName: string,
+  aliases: string[],
+  queryName?: string,
+  supplementalNames: string[] = [],
+  useAliases = false
+): { queryName: string; aliases: string[] } {
+  const trimmed = queryName?.trim() || mainName
+  if (!useAliases) {
+    return { queryName: trimmed, aliases: [] }
+  }
+  const knownNames = dedupeActressNameList([...aliases, ...supplementalNames])
+  if (trimmed === mainName) {
+    return { queryName: mainName, aliases: knownNames }
+  }
+  const fallback = dedupeActressNameList(
+    [mainName, ...knownNames].filter((name) => name !== trimmed)
+  )
+  return { queryName: trimmed, aliases: fallback }
+}
+
+export interface CollectedActressScrape {
+  selectedScraperName: string
+  descriptor: ScraperPluginDescriptor | undefined
+  queryName: string
+  result: ActressScrapeResult | null
+  sourceWarnings: string[]
+  fieldsToApply: ActressScrapeField[]
+  resources: PreparedActressScrapeResource[]
+}
+
+/** Collect plugin/Playwright actress profile data without writing the official catalog. */
+export async function collectActressScrape(input: {
+  mainName: string
+  aliases: string[]
+  nameZh?: string | null
+  nameEn?: string | null
+  scraperName?: string
+  fields: ActressScrapeField[]
+  requested: ActressScrapeField[]
+  queryName?: string
+  useAliases?: boolean
+  delayController?: ScrapeActressOptions['delayController']
+  preLogin?: ScraperPreLoginSession
+}): Promise<CollectedActressScrape> {
+  const settings = getSettings()
+  const proxyUrl = resolveScrapeProxyUrl(settings)
+  const preLogin = input.preLogin ?? createScraperPreLoginSession()
+  const selectedScraperName = input.scraperName || settings.defaultActressScraper
+  const descriptor = assertActressScraperRunnable(selectedScraperName)
+  const composite = findCompositeScraper('actress', selectedScraperName)
+  const scraper = composite ? null : getActressScraper(input.scraperName)
+  const selected = new Set(input.fields)
+  const gfriendsSelected =
+    scraper?.scraperName === 'Gfriends' ||
+    input.fields.some((field) => composite?.fieldPluginMap[field] === 'Gfriends')
+  const { queryName, aliases } = resolveActressScrapeQuery(
+    input.mainName,
+    input.aliases,
+    input.queryName,
+    [input.nameZh, input.nameEn].filter((name): name is string => Boolean(name?.trim())),
+    (input.useAliases ?? false) || gfriendsSelected
+  )
+  let rawResult: ActressScrapeResult | null
+  let sourceWarnings: string[] = []
+  let fieldsToApply = input.requested
+  if (scraper) {
+    rawResult = await runActressPluginTask(
+      scraper.scraperName,
+      proxyUrl,
+      input.delayController,
+      preLogin,
+      () => scraper.parseTask(queryName, aliases, proxyUrl)
+    )
+  } else {
+    const compositeOutcome = await scrapeCompositeActress(
+      selectedScraperName,
+      input.fields,
+      queryName,
+      aliases,
+      proxyUrl,
+      input.delayController,
+      preLogin
+    )
+    rawResult = compositeOutcome.result
+    sourceWarnings = compositeOutcome.warnings
+    fieldsToApply = compositeOutcome.matchedFields
+  }
+  const result = normalizeActressScrapeResult(rawResult)
+  const resources: PreparedActressScrapeResource[] = []
+  if (!result) {
+    return {
+      selectedScraperName,
+      descriptor,
+      queryName,
+      result: null,
+      sourceWarnings,
+      fieldsToApply,
+      resources
+    }
+  }
+  if (selected.has('avatar') && result.avatarUrl) {
+    try {
+      const data = await scrapeBrowser.fetchBuffer(result.avatarUrl)
+      if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+      const dimensions = mediaAssetStore.readImageDimensions(data)
+      resources.push({
+        field: 'avatar',
+        position: 0,
+        remoteUrl: result.avatarUrl,
+        data,
+        width: dimensions?.width ?? null,
+        height: dimensions?.height ?? null
+      })
+    } catch {
+      const sourceName = composite?.fieldPluginMap.avatar
+      sourceWarnings.push(
+        sourceName ? `字段源「${sourceName}」失败：头像下载失败` : '头像下载失败'
+      )
+    }
+  }
+
+  const galleryUrls = dedupeUrls(result.galleryImageUrls ?? [])
+  if (selected.has('gallery') && galleryUrls.length) {
+    let failedDownloads = 0
+    for (let index = 0; index < galleryUrls.length; index++) {
+      try {
+        const data = await scrapeBrowser.fetchBuffer(galleryUrls[index])
+        if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+        const dimensions = mediaAssetStore.readImageDimensions(data)
+        resources.push({
+          field: 'gallery',
+          position: index,
+          remoteUrl: galleryUrls[index],
+          data,
+          width: dimensions?.width ?? null,
+          height: dimensions?.height ?? null
+        })
+      } catch {
+        failedDownloads += 1
+      }
+    }
+    const sourceName = composite?.fieldPluginMap.gallery
+    if (failedDownloads > 0) {
+      sourceWarnings.push(
+        sourceName
+          ? `字段源「${sourceName}」失败：${failedDownloads} 张写真下载失败`
+          : `${failedDownloads} 张写真下载失败`
+      )
+    }
+    if (failedDownloads === galleryUrls.length) {
+      fieldsToApply = fieldsToApply.filter((field) => field !== 'gallery')
+    }
+  }
+
+  return {
+    selectedScraperName,
+    descriptor,
+    queryName,
+    result: { ...result, galleryImageUrls: galleryUrls },
+    sourceWarnings,
+    fieldsToApply,
+    resources
+  }
+}
+
+/** Scrape a single actress profile and persist avatar / fields / aliases. */
+export async function scrapeActress(
+  actressId: number,
+  scraperName?: string,
+  options?: ScrapeActressOptions
+): Promise<ActressScrapeOutcome> {
+  const detail = getActressDetail(actressId)
+  if (!detail) return { status: 'failure', ok: false, error: '演员不存在' }
+
+  const fields = options?.fields
+  const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
+  const mode = options?.mode ?? 'replace'
+  const effective = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  if (effective.length === 0) {
+    return { status: 'success', ok: true, result: {}, skipped: true }
+  }
+
+  return runActressCandidateWorkflow({
+    mainName: detail.main_name,
+    aliases: detail.aliases,
+    nameZh: detail.name_zh,
+    nameEn: detail.name_en,
+    scraperName,
+    fields: effective,
+    requested,
+    queryName: options?.queryName,
+    useAliases: options?.useAliases,
+    delayController: options?.delayController,
+    preLogin: options?.preLogin
+  }, {
+    collect: collectActressScrape,
+    markFailed: () => { recordActressScrapeFailure(actressId) },
+    persist: (collected) => {
+      return actressIdentityConflictWorkflow.processPreparedScrape({
+        actressId,
+        plugin: {
+          name: collected.selectedScraperName,
+          source: collected.descriptor?.source ?? (
+            findCompositeScraper('actress', collected.selectedScraperName) ? 'composite' : 'builtin'
+          ),
+          ...(collected.descriptor?.version ? { version: collected.descriptor.version } : {})
+        },
+        queryName: collected.queryName,
+        selectedFields: requested,
+        applicableFields: collected.applicableFields,
+        mode,
+        result: collected.result,
+        warnings: collected.sourceWarnings,
+        resources: collected.resources,
+        ...(options?.batchJobId ? { batchJobId: options.batchJobId } : {})
+      })
+    },
+    onError: (err) => {
+      if (!isScrapeBrowserBusyError(err)) recordActressScrapeFailure(actressId)
+      return { status: 'failure', ok: false, error: (err as Error).message }
+    },
+    close: () => {
+      if (options?.closeBrowser !== false) {
+        scrapeBrowser.close()
+      }
+    }
+  })
+}
+
+function dedupeUrls(urls: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const url of urls) {
+    const trimmed = url.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    out.push(trimmed)
+  }
+  return out
+}

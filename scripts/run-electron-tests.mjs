@@ -6,17 +6,21 @@ import electronPath from 'electron'
 function discoverTests(root) {
   return readdirSync(root, { withFileTypes: true })
     .flatMap((entry) => {
+      if (['node_modules', 'out', 'dist', 'coverage', '.git'].includes(entry.name)) return []
       const fullPath = path.join(root, entry.name)
-      if (entry.isDirectory()) return discoverTests(fullPath)
+      if (entry.isDirectory()) {
+        if (entry.name === 'server' && path.basename(root) === 'apps') return []
+        return discoverTests(fullPath)
+      }
       return /\.test\.tsx?$/.test(entry.name) ? [fullPath.replaceAll('\\', '/')] : []
     })
     .sort()
 }
 
 const requestedFiles = process.argv.slice(2)
-const testFiles = requestedFiles.length > 0 ? requestedFiles : discoverTests('src')
+const testFiles = requestedFiles.length > 0 ? requestedFiles : ['apps', 'packages'].flatMap(discoverTests).sort()
 if (testFiles.length === 0) {
-  console.error('No test files found under src/**/*.test.ts(x)')
+  console.error('No test files found under apps/ or packages/')
   process.exitCode = 1
 } else {
   const args = [
@@ -26,7 +30,10 @@ if (testFiles.length === 0) {
     './scripts/register-test-styles.mjs',
     '--import',
     'tsx',
+    '--import',
+    './scripts/register-library-test-host.ts',
     '--test',
+    '--test-concurrency=4',
     ...testFiles
   ]
   const timeoutMs = Number(process.env.JAVDEX_TEST_TIMEOUT_MS ?? 180_000)

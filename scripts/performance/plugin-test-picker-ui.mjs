@@ -11,18 +11,18 @@ const output=path.resolve(process.env.JAVDEX_PLUGIN_TARGET_UI_OUTPUT??path.join(
 fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
 fs.writeFileSync(path.join(root,'fixture.jsx'),`
 import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
-import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
+import ${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/styles/global.css'))};
 window.React=React;window.__calls=[];window.__added=[];window.__closed=0;
 const all=Array.from({length:101},(_,i)=>({id:i+1,main_name:i===0?'A'.repeat(128)+'…':'Candidate-'+String(i+1).padStart(3,'0'),avatar_path:null}));
 window.api={actresses:{list:()=>{throw new Error('Full actors forbidden')},testTargetPage:async query=>{window.__calls.push(query);if(window.__failPage){window.__failPage=false;throw new Error('Page failed')}const rows=all.filter(item=>!query.search||item.main_name.includes(query.search));return {items:rows.slice(query.offset,query.offset+40),offset:query.offset,hasMore:rows.length>query.offset+40}},testTargetGet:async id=>{if(window.__hold)await new Promise(resolve=>window.__release=resolve);if(window.__missing)return null;return id===1?'A'.repeat(150):all[id-1].main_name}}};
-const Component=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx'))})).default;
+const Component=(await import(${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/components/pluginDev/PluginDevMediaTargetPicker.tsx'))})).default;
 function App(){const[values,setValues]=useState([]),[open,setOpen]=useState(true);return open?<Component kind="actress" selectedValues={values} onAdd={value=>{window.__added.push(value);setValues(old=>[...old,value])}} onClose={()=>{window.__closed++;setOpen(false)}}/>:<button onClick={()=>setOpen(true)}>重新打开</button>}
 createRoot(document.getElementById('root')).render(<App/>);
 `)
 let server,browser;const results=[]
 try {
  server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
-  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
+  '@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
   'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
  }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
  await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})

@@ -9,13 +9,13 @@ function importsMetadataSourcePrivateFile(specifier) {
   return /metadata-sources\//.test(specifier)
 }
 
-const metadataRoot = path.resolve('src/main/metadata-sources')
+const metadataRoot = path.resolve('apps/desktop/src/main/metadata-sources')
 const privateImplementationCallers = new Set([
-  path.resolve('src/main/scrapers/scraperManager.ts')
+  path.resolve('apps/desktop/src/main/scrapers/scraperManager.ts')
 ])
 const violations = []
 
-for (const file of sourceFiles('src')) {
+for (const file of ['apps', 'packages'].flatMap(sourceFiles)) {
   const resolved = path.resolve(file)
   const insideMetadataSources =
     resolved === metadataRoot || resolved.startsWith(`${metadataRoot}${path.sep}`)

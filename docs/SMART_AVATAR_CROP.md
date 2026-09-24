@@ -105,7 +105,7 @@ Face Landmarker 不提供真实发顶关键点，因此头部居中额外使用�
 - `face_landmarker.task`: SHA-256 `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff`
 - `hair_segmenter.tflite`: SHA-256 `2628cf3ce5f695f604cbea2841e00befcaa3624bf80caf3664bef2656d59bf84`
 
-模型来自 Google MediaPipe 官方发布地址，许可与来源记录在 `src/renderer/public/models/NOTICE.txt`。升级 MediaPipe 或模型时，必须同步更新模型哈希、体积守卫、本文版本信息，并重新运行类型检查、单元测试和生产构建。
+模型来自 Google MediaPipe 官方发布地址，许可与来源记录在 `apps/desktop/src/renderer/public/models/NOTICE.txt`。升级 MediaPipe 或模型时，必须同步更新模型哈希、体积守卫、本文版本信息，并重新运行类型检查、单元测试和生产构建。
 
 ## 验证清单
 

@@ -1,6 +1,6 @@
 import { app, WebContentsView } from 'electron'
 import assert from 'node:assert/strict'
-import { ScrapeBrowserHelperRuntime } from '../src/main/scrapers/scrapeBrowserHelperRuntime'
+import { ScrapeBrowserHelperRuntime } from '../apps/desktop/src/main/scrapers/scrapeBrowserHelperRuntime'
 
 app.whenReady().then(async () => {
   const runtime = new ScrapeBrowserHelperRuntime()

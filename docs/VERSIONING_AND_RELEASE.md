@@ -58,6 +58,7 @@ GET https://api.github.com/repos/JavdexLabs/Javdex/releases/latest
 
 ```powershell
 npm ci
+npm run setup:desktop
 npm test
 npm run build
 npm run packaging:list
@@ -142,3 +143,13 @@ v0.5.0-beta.1
 ```
 
 GitHub Release 必须标记为 Prerelease。当前稳定客户端不会检测或提示预发布版本；如未来新增更新通道，需要另行定义通道选择、版本比较和降级规则。
+
+## 10. 桌面、服务与网页同版本
+
+同一 Git 提交的根与 workspace `package.json` version 同时约束：
+
+- 桌面安装包
+- `npm run server:build` 写入的 `out/server` 生产闭包
+- 网页包（桌面附带与服务闭包内的 `web/`）
+
+发布时三者必须来自同一源码版本。握手发现应用版本不一致时，桌面进入版本不符状态，不得写入远程资料库，也不得自动改连其他地址。Linux 服务镜像由同一提交的根目录 `Dockerfile` 构建，且只复制 `out/server`。禁止把不同提交的桌面包与服务闭包搭配使用。

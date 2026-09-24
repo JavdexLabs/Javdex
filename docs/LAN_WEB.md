@@ -51,14 +51,14 @@
 
 ## 开发与验证
 
-独立 React/Vite 浏览器入口在 `src/web`，构建至 `out/web`，随 Electron 包一起发布；不加载桌面 renderer 或 preload。开发桌面应用前会自动构建 Web 页面。需要持续修改 Web 时，另开终端运行 `npm run web:dev`（监听并重建），刷新浏览器即可。
+独立 React/Vite 浏览器入口在 `apps/web/src`，构建至 `out/web`，随 Electron 包一起发布；不加载桌面 renderer 或 preload。开发桌面应用前会自动构建 Web 页面。需要持续修改 Web 时，另开终端运行 `npm run web:dev`（监听并重建），刷新浏览器即可。
 
-HTTP 模块在 `src/main/web`。`WebCatalog` 是只读目录适配层，输出显式 DTO；文件传输先按资源 ID 验证归属及真实根目录，再对打开的文件描述符复核身份，通过流式 HTTP Range 响应发送。它不接受任意文件路径或代理 URL。
+HTTP 模块在 `apps/desktop/src/main/web`。`WebCatalog` 是只读目录适配层，输出显式 DTO；文件传输先按资源 ID 验证归属及真实根目录，再对打开的文件描述符复核身份，通过流式 HTTP Range 响应发送。它不接受任意文件路径或代理 URL。
 
 ```sh
 npm run web:build
 npm run typecheck
-node scripts/run-electron-tests.mjs src/main/web/webServer.test.ts src/main/web/pairing.test.ts src/main/web/catalog.test.ts
+node scripts/run-electron-tests.mjs apps/desktop/src/main/web/webServer.test.ts apps/desktop/src/main/web/pairing.test.ts apps/desktop/src/main/web/catalog.test.ts
 npm test
 npm run build
 ```

@@ -15,12 +15,12 @@
 
 冻结的领域 invariant：初始 debug dry-run、dry-run 后自动 verify、已有代码最小修改、finish 必须通过当前代码的 dry-run/verify、install gate、challenge wait/resume、cancel、完整工作日志，以及 18 个工具的 schema/结果规则。
 
-## 新平台自动门禁
+## 新平台自动门禁（当前）
 
-- `AgentExecution`：同一 run 十次 operation 只 open 一次 RuntimeSession；正常恢复不读 ExecutionHistory；typed checkpoint corruption 每 generation 只重建一次。
+- `AgentExecution`：同一 run 十次 operation 只 open 一次 RuntimeSession；只使用有效检查点恢复；损坏时拒绝续跑并保留业务成果，不再冷重建。
 - `PiRuntimeAdapter`：真实 Pi `0.84.2` + faux HTTP stream；十次 warm turn、custom allowlist、durable tool-result barrier、稳定 affinity、零 builtin/discovery。
 - `ToolHost`：permission、approval permit、resource lock、AbortSignal、redaction、ledger、terminal fail-closed 与 uncertain write。
-- `AgentRunStore`：schema 14、加密 recovery frame、hash integrity、幂等 operation、rebuild generation。
+- `AgentRunStore`：保留旧历史表，新增运行只写审计、业务状态及操作记录，不写完整冷恢复载荷；幂等 operation、审批和副作用 ledger 保留。
 - 架构静态检查：Pi import locality、禁止 legacy loop/compression/provider tool-chat、禁止 `PI_CACHE_RETENTION`。
 
 ## 真实 canary 与发布 guardrail

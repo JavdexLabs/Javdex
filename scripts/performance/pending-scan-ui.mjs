@@ -15,7 +15,7 @@ import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {MemoryRouter} from 'react-router-dom';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-import ${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/styles/global.css'))};
+import ${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/styles/global.css'))};
 window.React=React;window.__pages=[];window.__details=[];window.__fail=false;
 window.api={mediaLibraries:{list:async()=>[{id:1,name:'Synthetic'}]},actressScrape:{listConflicts:()=>{throw new Error('Full actress queue is forbidden')},pageConflicts:async()=>({items:[],total:0,offset:0}),conflictSummary:async()=>({groupCount:0})},scrape:{countPending:async()=>0,pagePending:async()=>({items:[],total:0,offset:0})},scan:{
  listPending:()=>{throw new Error('Unbounded inbox');},listPendingResourceIdentities:()=>{throw new Error('Unbounded identities')},countPendingQueue:async()=>120,
@@ -25,14 +25,14 @@ window.api={mediaLibraries:{list:async()=>[{id:1,name:'Synthetic'}]},actressScra
  getPendingGroup:async (libraryId,id)=>{window.__details.push(id);return null;}
 
 }};
-const Page=(await import(${JSON.stringify('/@fs'+path.join(repo,'src/renderer/src/pages/PendingCenterPage.tsx'))})).default;
+const Page=(await import(${JSON.stringify('/@fs'+path.join(repo,'apps/desktop/src/renderer/src/pages/PendingCenterPage.tsx'))})).default;
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter initialEntries={['/pending?type=scan']}><Page/></MemoryRouter></QueryClientProvider>);
 `)
 let server,browser
 const results=[]
 try {
  server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react()],resolve:{alias:{
-  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
+  '@shared':path.join(repo,'packages/contracts/src'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
   'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
  }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
  await server.listen();const port=server.httpServer.address().port

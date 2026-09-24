@@ -90,7 +90,7 @@ def main() -> None:
     write_pngs(image)
     write_public_favicons(image)
     write_icns()
-    print("Generated app icons in build/ and src/renderer/public/")
+    print("Generated app icons in build/ and apps/desktop/src/renderer/public/")
 
 
 if __name__ == "__main__":

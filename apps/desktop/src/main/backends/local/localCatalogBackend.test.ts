@@ -1,0 +1,254 @@
+import { randomUUID } from 'node:crypto'
+import { upsertActressFromScrape } from '@library/db/actressRepo'
+import { afterEach, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { CURRENT_SCHEMA_VERSION } from '@library/db/migrations'
+import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
+import { addMediaLibraryRoot } from '@library/db/mediaLibraryRepo'
+import type { ScopedVideoDetail, ScopedVideoListResult } from '@shared/catalogTypes'
+import { isStructuredError } from '@shared/protocol/errors'
+import { createLocalCatalogBackend, createCatalogBackendForMode } from './localCatalogBackend'
+import { createUnconfiguredRemoteBackend } from '../remote/unconfiguredRemoteBackend'
+import { loadOrCreateLocalCatalogIdentity, localCatalogIdentityPath } from '../../desktop/localCatalogIdentity'
+
+let tempRoot: string | null = null
+
+function setupLibrary(): { root: string; libraryId: number; videoId: number } {
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-s02d-local-backend-'))
+  process.env.JAVDEX_TEST_USER_DATA = tempRoot
+  const mediaRoot = path.join(tempRoot, 'media-root')
+  fs.mkdirSync(mediaRoot)
+  const videoPath = path.join(mediaRoot, 'S02D-001.mp4')
+  fs.writeFileSync(videoPath, 'video')
+  const db = initDatabaseAtPath(path.join(tempRoot, 'library.db'))
+  const root = addMediaLibraryRoot({
+    libraryId: 1,
+    expectedRevision: 1,
+    root: { path: mediaRoot }
+  })
+  const inserted = insertTestVideoWithFile(db, {
+    code: 'S02D-001',
+    filePath: videoPath,
+    title: 'Before',
+    rootId: root.id
+  })
+  return { root: tempRoot, libraryId: 1, videoId: inserted.videoId }
+}
+
+afterEach(() => {
+  closeDatabase()
+  delete process.env.JAVDEX_TEST_USER_DATA
+  if (tempRoot) fs.rmSync(tempRoot, { recursive: true, force: true })
+  tempRoot = null
+})
+
+describe('unconfigured remote backend', () => {
+  it('does not open the local catalog database', async () => {
+    const backend = createUnconfiguredRemoteBackend()
+    assert.equal(backend.mode, 'remote')
+    assert.equal(backend.session().state, 'disconnected')
+    await assert.rejects(
+      () => backend.queries.listVideos({ scope: { kind: 'all' } }),
+      (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
+    )
+    assert.throws(() => getDb(), /Database not initialised/)
+  })
+})
+
+describe('LocalCatalogBackend', () => {
+  it('routes legacy actress edits through the shared receipt without requiring an IPC version', async () => {
+    const { root } = setupLibrary()
+    const identity = loadOrCreateLocalCatalogIdentity(localCatalogIdentityPath(root))
+    const backend = createLocalCatalogBackend({ identity })
+    const actressId = upsertActressFromScrape('Before actress', null)
+    const original = await backend.actresses.get({ actressId })
+    assert.ok(original)
+    const input = { actressId, fields: { main_name: 'After actress' } }
+    const context = { operationId: randomUUID(), expectedVersions: {} }
+    try {
+      assert.equal(await backend.actresses.edit(input, context), true)
+      assert.equal(await backend.actresses.edit(input, context), true)
+      const updated = await backend.actresses.get({ actressId })
+      assert.equal(updated?.main_name, 'After actress')
+      assert.equal(updated?.revision, original.revision! + 1)
+      await assert.rejects(backend.actresses.edit(input, {
+        operationId: randomUUID(), expectedVersions: { A: { generation: original.generation!, revision: original.revision! } }
+      }), (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT')
+    } finally {
+      await backend.dispose()
+    }
+  })
+
+  it('lists and edits videos through the catalog port without a fake serverId', async () => {
+    const { root, libraryId, videoId } = setupLibrary()
+    const identity = loadOrCreateLocalCatalogIdentity(localCatalogIdentityPath(root))
+    const backend = createLocalCatalogBackend({ identity, appVersion: '0.7.0' })
+    assert.equal(backend.mode, 'local')
+    assert.equal(backend.session().serverId, null)
+    assert.equal(backend.session().schemaVersion, CURRENT_SCHEMA_VERSION)
+    assert.equal(backend.capabilities().editCatalog.allowed, true)
+    assert.equal(backend.capabilities().playRemoteFile.allowed, false)
+
+    const listed = (await backend.queries.listVideos({
+      scope: { kind: 'library', libraryId }
+    })) as ScopedVideoListResult
+    assert.equal(listed.total >= 1, true)
+    const detail = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail | null
+    assert.equal(detail?.title, 'Before')
+    assert.equal(detail?.generation, 1)
+    assert.equal(detail?.revision, 1)
+
+    await backend.videos.edit(
+      { videoId, fields: { title: 'After' } },
+      {
+        operationId: '00000000-0000-4000-8000-000000000001',
+        expectedVersions: { V: { generation: 1, revision: 1 } }
+      }
+    )
+    const updated = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail | null
+    assert.equal(updated?.title, 'After')
+    assert.equal(updated?.revision, 2)
+
+    await assert.rejects(
+      () =>
+        backend.videos.edit(
+          { videoId, fields: { title: 'Stale' } },
+          {
+            operationId: '00000000-0000-4000-8000-000000000010',
+            expectedVersions: { V: { generation: 1, revision: 1 } }
+          }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+    )
+    const retry = await backend.videos.edit(
+      { videoId, fields: { title: 'After' } },
+      {
+        operationId: '00000000-0000-4000-8000-000000000001',
+        expectedVersions: { V: { generation: 1, revision: 1 } }
+      }
+    )
+    assert.equal(retry, true)
+    assert.equal(
+      (
+        (await backend.queries.getVideo({
+          scope: { kind: 'library', libraryId },
+          videoId
+        })) as ScopedVideoDetail
+      ).revision,
+      2
+    )
+
+    await assert.rejects(
+      () =>
+        backend.videos.edit(
+          { videoId, fields: { title: 'No version' } },
+          { operationId: '00000000-0000-4000-8000-000000000011', expectedVersions: {} }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+    )
+
+    await assert.rejects(
+      () =>
+        backend.nfo.plan({} as never, {
+          operationId: '00000000-0000-4000-8000-000000000002',
+          expectedVersions: {}
+        }),
+      (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+    )
+  })
+
+  it('bumps V on setRating and rejects a stale rating write', async () => {
+    const { libraryId, videoId } = setupLibrary()
+    const identity = loadOrCreateLocalCatalogIdentity(localCatalogIdentityPath(tempRoot!))
+    const backend = createLocalCatalogBackend({ identity, appVersion: '0.7.0' })
+    const before = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail
+    const beforeVersion = { generation: before.generation ?? 1, revision: before.revision ?? 1 }
+    assert.equal(beforeVersion.revision, 1)
+
+    const rated = await backend.videos.setRating(
+      { videoId, rating: 4 },
+      {
+        operationId: '00000000-0000-4000-8000-000000000021',
+        expectedVersions: { V: beforeVersion }
+      }
+    )
+    assert.equal(rated, true)
+    const afterRating = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail
+    const afterRatingVersion = {
+      generation: afterRating.generation ?? beforeVersion.generation,
+      revision: afterRating.revision ?? beforeVersion.revision + 1
+    }
+    assert.equal(afterRating.rating, 4)
+    assert.equal(afterRatingVersion.revision, beforeVersion.revision + 1)
+
+    await assert.rejects(
+      () =>
+        backend.videos.setRating(
+          { videoId, rating: 1 },
+          {
+            operationId: '00000000-0000-4000-8000-000000000022',
+            expectedVersions: { V: beforeVersion }
+          }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+    )
+    await assert.rejects(
+      () =>
+        backend.videos.edit(
+          { videoId, fields: { title: 'Stale after rating' } },
+          {
+            operationId: '00000000-0000-4000-8000-000000000023',
+            expectedVersions: { V: beforeVersion }
+          }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+    )
+
+    const titled = await backend.videos.edit(
+      { videoId, fields: { title: 'Rated then titled' } },
+      {
+        operationId: '00000000-0000-4000-8000-000000000024',
+        expectedVersions: { V: afterRatingVersion }
+      }
+    )
+    assert.equal(titled, true)
+    const afterTitle = (await backend.queries.getVideo({
+      scope: { kind: 'library', libraryId },
+      videoId
+    })) as ScopedVideoDetail
+    assert.equal(afterTitle.title, 'Rated then titled')
+    assert.equal(afterTitle.revision, afterRatingVersion.revision + 1)
+  })
+
+  it('selects the unconfigured remote factory without opening library.db', async () => {
+    const backend = createCatalogBackendForMode('remote', {
+      identity: { mode: 'local', catalogId: 'should-not-open' }
+    })
+    assert.equal(backend.mode, 'remote')
+    await assert.rejects(
+      () =>
+        backend.videos.edit(
+          { videoId: 1, fields: { title: 'nope' } },
+          { operationId: '00000000-0000-4000-8000-000000000003', expectedVersions: {} }
+        ),
+      (error: unknown) => isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE'
+    )
+    assert.throws(() => getDb(), /Database not initialised/)
+  })
+})

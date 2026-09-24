@@ -4,11 +4,11 @@
 
 ## 三条 seam
 
-1. **`actressQueryService`**（[`actressQueryService.ts`](../../src/main/services/actressQueryService.ts)）
+1. **`actressQueryService`**（[`actressQueryService.ts`](../../apps/desktop/src/main/services/actressQueryService.ts)）
    - 拥有：列表分页、头像可用性筛选与跨页 snapshot、face-scan manifest、详情与头像源信息读取。
    - 不拥有：写库、冲突决策、刮削 apply。
 
-2. **`actressMaintenanceService`**（[`actressMaintenanceService.ts`](../../src/main/services/actressMaintenanceService.ts)）
+2. **`actressMaintenanceService`**（[`actressMaintenanceService.ts`](../../apps/desktop/src/main/services/actressMaintenanceService.ts)）
    - 拥有：编辑 / 删除 / 清元数据 / 合并、写真与海报、累计刮削成功标记。
    - Policy 示例：删除后资产清理失败收集；`clearMetadata` 经 `MediaAssetStore` coordinator。
 
@@ -16,7 +16,7 @@
    - 冲突列表、inspect、validate、discard、resolve。
    - IPC 直连本模块，不再经 application 透传层。
 
-[`actressHandlers.ts`](../../src/main/ipc/actressHandlers.ts) 只做 typed adapter，分别委托上述三条 seam。`check-actress-boundaries` 白名单锁定该接线。
+[`actressHandlers.ts`](../../apps/desktop/src/main/ipc/actressHandlers.ts) 只做 typed adapter，分别委托上述三条 seam。`check-actress-boundaries` 白名单锁定该接线。
 
 ## 必须保持的 invariants
 

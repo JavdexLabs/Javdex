@@ -5,9 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
-import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
-import { ActressIdentityConflictWorkflow } from '../../src/main/services/actressIdentityConflictWorkflow'
+import { initDatabaseAtPath, closeDatabase } from '../../apps/desktop/src/main/db/database'
+import { resetSettingsCacheForTests } from '../../apps/desktop/src/main/settings/settingsStore'
+import { ActressIdentityConflictWorkflow } from '../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 it('measures actor queue metadata and selected details',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-actor-queue-'))
  const previousUserData=process.env.JAVDEX_TEST_USER_DATA

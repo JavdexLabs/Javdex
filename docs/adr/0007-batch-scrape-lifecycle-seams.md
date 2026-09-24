@@ -4,12 +4,12 @@
 
 ## 两条 seam
 
-1. **`CheckpointedSequentialBatchQueue`**（[`checkpointedSequentialBatchQueue.ts`](../../src/main/services/checkpointedSequentialBatchQueue.ts)）
+1. **`CheckpointedSequentialBatchQueue`**（[`checkpointedSequentialBatchQueue.ts`](../../apps/desktop/src/main/services/checkpointedSequentialBatchQueue.ts)）
    - 拥有：start / resume / pause / discard、`activeJob`、checkpoint persist cadence、outcome 分支（paused → markPaused，done → finish，cancelled → discard + resetToIdle）、`scrapeBrowser.close()`。
    - 依赖已有内核：`SequentialBatchQueue`、`BatchScrapeCheckpointPort`。
    - 影片/演员队列只提供 `CheckpointedBatchPolicy`（target 解析、文案、`runTarget`、actress `beforeResume` / crop hook），不再各自复制 lifecycle。
 
-2. **`AvatarAutoCropMediator`**（[`avatarAutoCropMediator.ts`](../../src/main/services/avatarAutoCropMediator.ts)）
+2. **`AvatarAutoCropMediator`**（[`avatarAutoCropMediator.ts`](../../apps/desktop/src/main/services/avatarAutoCropMediator.ts)）
    - 拥有：pending map、requestId、timeout、renderer disconnect、crop batch token（begin/end/hasActiveBatch）。
    - 依赖：`emit`、`rendererAvailable`、`randomId`、`autoCropTimeoutMs`，以及由 controller 注入的 `assertCanBeginBatch`（队列空闲 / 无暂停任务），避免 mediator 反向依赖队列。
 

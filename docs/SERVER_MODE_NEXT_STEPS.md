@@ -1,6 +1,6 @@
 # 服务端模式：当前状态与后续范围
 
-核对日期：2026-09-23。当前基线为 PR #115 的 `codex/server-mode-feasibility` 工作分支，已合入当时最新 `dev`；workspace 版本为 `0.7.1`。下方按提交号记录的验证属于对应历史快照，不能代替当前分支复验。这是源码实现状态，不是服务端已发布声明。
+核对日期：2026-09-24。当前代码基线为 PR #115 分支 `codex/server-mode-feasibility` 的 `f8c7c01`；workspace 版本为 `0.7.1`。下方按提交号记录的验证属于对应历史快照，不能代替该基线复验。这是源码实现状态，不是服务端已发布声明。
 
 **独立 Node 宿主、桌面远程模式及 C1–C7 功能已实现；S13 全面验收与 S14 发布准备仍未完成。** 继续工作从本页开始，无需重新执行历史 S00–S12 或已经完成的 T0–T7。
 
@@ -37,7 +37,7 @@ Windows 宿主定向回归 69 项、类型检查、全仓库静态检查和编�
 
 ## 当前执行范围（2026-09-19 用户更新）
 
-**本次原 1–5 已完成。** 用户最终确认第 5 项以 **macOS arm64 + Linux arm64** 收尾；Windows、macOS x64 及其他平台列为后续事项，不阻塞本次验收。第 6 项仍不执行，历史 S13/S14 全矩阵不因此宣告完成。最终产物与证据见本文末尾。
+**该轮原 1–5 的记录见文末 `40860d0`（2026-09-19）历史快照，不是代码基线 `f8c7c01` 的验收结论。** 用户当时确认第 5 项以 **macOS arm64 + Linux arm64** 收尾；Windows、macOS x64 及其他平台列为后续事项，不把缺席平台当成该快照的阻塞项。第 6 项仍不执行。该快照不关闭 S13 全面验收或 S14 发布准备；未在当前基线复现的 GUI 证据仍不完整。
 
 用户已明确启动原建议的 1–5：提交既有成果；补齐服务端 NFO 元数据导入并开放远程网页配对；完整远程 GUI 验收；现行协议的故障恢复验收；同提交安装部署验收。该决定覆盖本文原先的暂缓范围。第 6 项（版本发布、合并与发布操作）仍不执行。完成后按实际提交、平台和命令更新结果；无法执行的验收保留未完成状态。
 
@@ -45,7 +45,7 @@ Windows 宿主定向回归 69 项、类型检查、全仓库静态检查和编�
 - 已提交：服务端 NFO 完整导入与远程配对 `dd72ab3`。
 - 按用户后续要求，容器验收使用本机 Colima / Docker（Linux arm64），不再限定 Cloud 会话。
 - 已提交：远程媒体库版本映射和按挂载名称添加目录 `ebbae81`。
-- 已验证原第 3 项的主要 GUI 流程与第 4 项定向恢复条件；macOS/Linux arm64 安装及保留数据替换已通过。最终 arm64 产物核对通过；用户已确认以这两个目标平台收尾，其他平台列为后续事项。历史结果不代替本轮。
+- 已记录原第 3 项的主要 GUI 流程与第 4 项定向恢复条件，以及当时的 macOS/Linux arm64 安装和保留数据替换。这些结果属于对应提交的历史快照，不能代替 `f8c7c01` 复验；哈希见文末。用户当时确认以这两个目标平台收尾，其他平台列为后续事项。
 
 ## 文档入口与维护职责
 
@@ -84,7 +84,7 @@ Windows 宿主定向回归 69 项、类型检查、全仓库静态检查和编�
 | 服务端 NFO 导入与远程配对 | 功能及真实 Node、GUI 验收通过，详见下方证据 |
 | 原建议中的远程 GUI 主流程 | 编辑冲突、扫描/改名、单条/批量刮削、候选与图片交付、清单导入、播放、取消/重连均有实际证据；模型传输使用夹具，不评估外部模型质量 |
 | 现行协议定向故障恢复 | 55 项 Linux 回归与 Docker 双宿主迁库故障验收通过；不声明历史 M/D 全矩阵关闭 |
-| 安装及保留数据更新 | macOS/Linux arm64 安装与同版本候选替换已通过；最终 arm64 产物核对通过；Windows/macOS x64 按用户确认列为后续事项 |
+| 安装及保留数据更新 | `40860d0`（2026-09-19）历史快照记录了 macOS/Linux arm64 安装与同版本候选替换，不是 `f8c7c01` 复验。S13/S14 仍未完成。Windows/macOS x64 仍无运行验收证据 |
 | 发布、推送、合并 main、升级版本号 | 原第 6 项明确不执行 |
 
 原 1–5 的实际范围以本页“范围复核”及用户原指令为准，不把历史全矩阵自动扩展为本次额外门槛。下方保留各轮证据及明确的未覆盖边界。
@@ -225,23 +225,25 @@ Linux 最终已安装桌面 `/opt/Javdex/javdex` 配合更新后的生产 Docker
 
 两平台均在旧应用中创建远程连接、NFO 影片、刮削封面/样图和浏览配对，退出应用后替换程序，保持同一隔离 userData 与钥匙串，再重新启动。检查 `this-computer.json` 原样保留、影片列表内容及 ID 不变、写入凭据无需重新认主、图片仍可读取、原浏览会话有效并可在 GUI 撤销。列表 `readRevision` 含进程身份，重启会变化，故比较持久内容而非该临时标记。
 
-- Linux arm64：用此前保存的已解包安装副本重新封装旧 deb（应用内容不改），先 `dpkg -i` 安装，再在测试中用当前最终 deb 替换。旧 ASAR SHA-256 `2af1252b70f7c7749a5a9787a2de6c524275aabd4b3a611f12541142c6ac2e39`，新 ASAR `c41716752d501c54bef70817c2ed3a30d688d504e221d3037ab1cd05499fb704`；新 deb 仍为 `0d3cd7b9997517e8e3e15b30580da4d9d187e4bae1fba849b88843ab0a7ac87e`。日志 `/tmp/javdex-desktop-upgrade-gui.log`，证据 `/var/tmp/javdex-acceptance/javdex-remote-desktop-SOTw98/evidence`，含 dpkg 安装日志。
-- macOS arm64：将先前 DMG 安装副本复制到隔离程序目录，测试中替换为最终 DMG 的应用副本（两者均已完成安装验证）。旧 ASAR SHA-256 `b84405ba89ee60e31f3e4358bc2afebf6508b5372ced9ab381e28caf6decf298`，新 ASAR `8800387a48a2d9090f169c95eece6a2ab744abd1336bbe74a53cc0af8faaacfa`。日志 `/tmp/javdex-mac-upgrade-gui.log`，证据 `/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-NMrwJm/evidence`。
+- Linux arm64：用此前保存的已解包安装副本重新封装旧 deb（应用内容不改），先 `dpkg -i` 安装，再在测试中用当时记录的 deb 替换。旧 ASAR SHA-256 `2af1252b70f7c7749a5a9787a2de6c524275aabd4b3a611f12541142c6ac2e39`，新 ASAR `c41716752d501c54bef70817c2ed3a30d688d504e221d3037ab1cd05499fb704`；新 deb 仍为 `0d3cd7b9997517e8e3e15b30580da4d9d187e4bae1fba849b88843ab0a7ac87e`。日志 `/tmp/javdex-desktop-upgrade-gui.log`，证据 `/var/tmp/javdex-acceptance/javdex-remote-desktop-SOTw98/evidence`，含 dpkg 安装日志。
+- macOS arm64：将先前 DMG 安装副本复制到隔离程序目录，测试中替换为当时记录的 DMG 应用副本（两者均已完成安装验证）。旧 ASAR SHA-256 `b84405ba89ee60e31f3e4358bc2afebf6508b5372ced9ab381e28caf6decf298`，新 ASAR `8800387a48a2d9090f169c95eece6a2ab744abd1336bbe74a53cc0af8faaacfa`。日志 `/tmp/javdex-mac-upgrade-gui.log`，证据 `/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-NMrwJm/evidence`。
 
 两条脚本均退出 0。可通过 `JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_DEB`（仅隔离 Linux 容器）或 `JAVDEX_REMOTE_SMOKE_DESKTOP_UPGRADE_APP`（macOS 隔离副本）复跑。两端版本号仍为 0.7.1；这证明本次候选间替换保留数据，不代表跨发布版本迁移或自动更新器验收。
 
-### 当前最终产物（覆盖前文候选哈希）
+### 历史快照：`40860d0` 的 arm64 产物（2026-09-19）
 
-功能代码包含 `40860d0`，桌面/Web 与 Node 宿主重新构建，版本仍为 `0.7.1`。前文旧哈希保留为历史验收证据，交付应使用此处最终文件：
+下表只记录提交 `40860d0`（2026-09-19）当时的桌面安装包与服务端镜像。它不是代码基线 `f8c7c01` 的验收结论，也不能代替当前分支复验。文首已说明：按提交号记下的验证属于对应历史快照。S13 全面验收与 S14 发布准备仍未完成；这些 GUI 与安装记录没有在 `f8c7c01` 上重跑。
 
-| 产物 | SHA-256 / 镜像 ID | 当前证据 |
+当时的桌面/Web 与 Node 宿主已重新构建，版本仍为 `0.7.1`。前文更早的候选哈希仍是更早一轮的历史证据。下表不作为当前交付物：
+
+| 产物 | SHA-256 / 镜像 ID | 当时证据（`40860d0`，2026-09-19） |
 |---|---|---|
 | `dist/Javdex-0.7.1-arm64.dmg` | `1d97b3ee3f67373ad90f51d2568c857ae5bd78bfb197119b934e44c8d2bfef56` | DMG 挂载后复制安装；从上一候选替换升级，设置/凭据/资料/图片保留，配对撤销成功 |
-| `dist/Javdex-0.7.1-arm64.deb` | `859dd8528db83ad6dff329f6701c1af19fac0c2554efc3c10c249ef436baec2a` | dpkg 替换安装成功，保留同一 userData；完整远程 GUI 流程及图片重启验证通过 |
-| `javdex-server:smoke` | `3f5e95646f23` | 生产 Docker 构建；保留数据镜像替换及最新同版本安装烟测通过 |
+| `dist/Javdex-0.7.1-arm64.deb` | `859dd8528db83ad6dff329f6701c1af19fac0c2554efc3c10c249ef436baec2a` | dpkg 替换安装成功，保留同一 userData；当时的远程 GUI 流程及图片重启验证通过 |
+| `javdex-server:smoke` | `3f5e95646f23` | 当时的生产 Docker 构建；保留数据镜像替换及同版本安装烟测通过 |
 
-Linux 完整脚本包括 NFO、播放/真实 mpv 解码、编辑冲突、单条图片采集、候选确认、批量部分提交后取消、实际改名、清单匹配/结果页、桌面替换升级、配对/重启/撤销。macOS 本次脚本包括 NFO、编辑冲突、单条图片采集、桌面替换升级、配对/重启/撤销。原 macOS 30 秒首次窗口等待曾超时；延长测试等待到 180 秒后同一产物通过，不将前次超时记为通过或据此声称产品修复。
+Linux 当时的完整脚本包括 NFO、播放/真实 mpv 解码、编辑冲突、单条图片采集、候选确认、批量部分提交后取消、实际改名、清单匹配/结果页、桌面替换升级、配对/重启/撤销。macOS 当时的脚本包括 NFO、编辑冲突、单条图片采集、桌面替换升级、配对/重启/撤销。原 macOS 30 秒首次窗口等待曾超时；延长测试等待到 180 秒后同一产物通过，不将前次超时记为通过或据此声称产品修复。这些日志没有在 `f8c7c01` 上复现。
 
-最终日志：`/tmp/javdex-final-candidate-linux-upgrade.log`、`/tmp/javdex-final-candidate-mac-upgrade.log`、`/tmp/javdex-final-candidate-install-smoke.log`；三项均退出 0。Linux 截图/播放器日志：`/var/tmp/javdex-acceptance/javdex-remote-desktop-yNJqwk/evidence`；macOS：`/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-RMXIkU/evidence`。Linux 测试地址已移除。
+当时日志：`/tmp/javdex-final-candidate-linux-upgrade.log`、`/tmp/javdex-final-candidate-mac-upgrade.log`、`/tmp/javdex-final-candidate-install-smoke.log`；三项均退出 0。Linux 截图/播放器日志：`/var/tmp/javdex-acceptance/javdex-remote-desktop-yNJqwk/evidence`；macOS：`/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-RMXIkU/evidence`。Linux 测试地址已移除。
 
-当前完成边界：原 1–5 在用户确认的范围内全部完成。第 5 项目标平台为 macOS arm64 与 Linux arm64，已完成构建、安装及同版本候选替换保留数据检查。Windows/macOS x64 尚无运行验收证据，按用户决定列为后续事项。没有修改版本号、发布、推送或合并 main。
+当时边界（仅该快照）：在用户当时确认的范围内，原 1–5 有定向记录。第 5 项目标平台为 macOS arm64 与 Linux arm64，当时完成了构建、安装及同版本候选替换保留数据检查。该记录不关闭 S13 全面验收或 S14 发布准备，也不补上未复现的 GUI 证据。Windows/macOS x64 当时尚无运行验收证据，列为后续事项。该快照没有修改版本号、发布或合并 main。当前分支可重复的服务端检查是 PR 工作流中的 `server:build` 与 `server:test`（`.github/workflows/server-pr.yml`）。

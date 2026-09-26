@@ -12,6 +12,9 @@ import { setTimeout as delay } from 'node:timers/promises'
 const name = `javdex-backup-smoke-${randomUUID()}`
 const volume = `${name}-data`
 const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-backup-smoke-'))
+// The production image runs as node (uid 1000), unlike the Linux CI host user.
+// This directory contains test-only configuration and must be traversable across the bind mount.
+fs.chmodSync(configDir, 0o755)
 const image = process.env.JAVDEX_BACKUP_SMOKE_IMAGE ?? 'javdex-server:backup-verification'
 const version = JSON.parse(fs.readFileSync('out/server/package.json', 'utf8')).version
 // A stalled local transport must fail the smoke instead of waiting indefinitely.
@@ -30,7 +33,7 @@ const port = probe.address().port; await new Promise(resolve => probe.close(reso
 fs.writeFileSync(path.join(configDir, 'server.json'), JSON.stringify({
   port, accessHosts: ['127.0.0.1'], dataDir: '/data', imagesDir: '/data/media_assets',
   mediaMounts: { library: '/media' }, web: { username: 'viewer' }
-}))
+}), { mode: 0o644 })
 let base
 let identity
 const secret = randomBytes(32).toString('base64url')
@@ -49,7 +52,8 @@ async function healthy() {
     try { if ((await fetch(`${base}/ready`)).ok) return } catch { /* starting */ }
     await delay(250)
   }
-  console.error(docker('logs', name).replace(/(token|secret)[^\n]*/gi, '$1 [redacted]'))
+  const logs = spawnSync('docker', ['logs', name], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+  console.error(`${logs.stdout ?? ''}${logs.stderr ?? ''}`.replace(/(token|secret)[^\n]*/gi, '$1 [redacted]'))
   assert.fail('isolated server did not become ready')
 }
 async function wait(id, phase) {

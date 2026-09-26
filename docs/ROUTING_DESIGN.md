@@ -134,7 +134,7 @@
 
 设置工作区使用 Data Router 的 hash history，使 `SettingsLeaveGuard` 能统一阻止未保存表单的路由跳转。应用根由 `createHashRouter` / `RouterProvider` 提供，原有 `App` 内嵌路由树继续负责页面布局。
 
-设置子页统一写入路径：`models/usage`、`models/providers`、`models/advanced`；`plugins/video`、`plugins/actress`；`storage/assets`、`storage/export`。媒体库作用域继续使用现有 query，构建目标路径时保留该作用域，不在子面板维护第二套页签状态。
+设置子页统一写入路径：`models/usage`、`models/providers`、`models/advanced`；`plugins/video`、`plugins/actress`；`storage/mode`、`storage/assets`、`storage/export`。旧 `network/mode` 入口用 replace 跳转至 `storage/mode`。媒体库作用域继续使用现有 query，构建目标路径时保留该作用域，不在子面板维护第二套页签状态。
 
 ## Overlay History
 

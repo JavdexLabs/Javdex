@@ -71,16 +71,23 @@ it('shows a version mismatch page without exposing a writer token', () => {
   assert.equal(text.includes('secret'), false)
 })
 
-it('asks for a one-time recovery token without showing a stored secret', () => {
+it('routes recovery to connection settings without asking for a token in two places', () => {
   const text = collectText(renderOverlay(session('recoveryRequired')).root)
-  assert.match(text, /领取写入凭据/)
-  assert.match(text, /一次性领取令牌/)
+  assert.match(text, /打开连接设置/)
+  assert.doesNotMatch(text, /一次性领取令牌/)
   assert.equal(text.includes('secret'), false)
   assert.equal(text.includes('Bearer'), false)
 })
 
+it('distinguishes a reachable unclaimed server from a broken connection', () => {
+  const text = collectText(renderOverlay(session('claimRequired', { writerEpoch: 0 })).root)
+  assert.match(text, /服务已连接，等待首次授权/)
+  assert.match(text, /打开连接设置/)
+  assert.doesNotMatch(text, /重新连接/)
+})
+
 it('keeps settings reachable while the catalog is disconnected', () => {
-  const tree = renderOverlay(session('disconnected'), '/settings/network/mode')
+  const tree = renderOverlay(session('disconnected'), '/settings/storage/mode')
   assert.equal(collectText(tree.root), '')
 })
 
@@ -88,4 +95,16 @@ it('shows a frozen read-only banner', () => {
   const text = collectText(renderOverlay(session('frozen')).root)
   assert.match(text, /资料库已冻结/)
   assert.equal(text.includes('领取写入凭据'), false)
+})
+
+it('routes invalid authorization to settings with no inline token form', () => {
+  const tree = renderOverlay(session('authInvalid'))
+  const text = collectText(tree.root)
+  assert.match(text, /写入授权已失效/)
+  assert.match(text, /远程请求已暂停/)
+  assert.match(text, /打开连接设置/)
+  assert.equal(tree.root.findAllByType('input').length, 0)
+  assert.equal(tree.root.findAllByType('form').length, 0)
+  act(() => { tree.root.findByType('button').props.onClick() })
+  assert.equal(collectText(tree.root), '', 'settings must remain accessible for authorization')
 })

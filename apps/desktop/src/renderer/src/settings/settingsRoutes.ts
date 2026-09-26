@@ -26,6 +26,7 @@ export type SettingsTab =
   | 'usage'
   | 'advanced'
   | 'actress'
+  | 'backup'
   | 'export'
 
 export interface SettingsTabItem {
@@ -90,10 +91,12 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
   {
     id: 'storage',
     label: '存储与导出',
-    hint: '资源路径',
-    defaultTab: 'assets',
+    hint: '资料库与资源路径',
+    defaultTab: 'mode',
     tabs: [
+      { id: 'mode', label: '资料库连接' },
       { id: 'assets', label: '图片资源' },
+      { id: 'backup', label: '备份与恢复' },
       { id: 'export', label: '导出影片资料' }
     ]
   },
@@ -103,7 +106,6 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     hint: `${WEB_ACCESS_LABEL}与代理`,
     defaultTab: 'web',
     tabs: [
-      { id: 'mode', label: '资料库连接' },
       { id: 'web', label: WEB_ACCESS_LABEL },
       { id: 'proxy', label: '代理' }
     ]
@@ -123,6 +125,9 @@ export function resolveSettingsRoute(pathname: string): {
   group: SettingsGroupItem
   tab: SettingsTab
 } {
+  if (pathname === '/settings/network/mode') {
+    return { group: SETTINGS_GROUP_BY_ID.get('storage')!, tab: 'mode' }
+  }
   const match = matchPath({ path: ROUTE_PATH.settingsGroup, end: true }, pathname)
   const groupId = match?.params.group as SettingsGroup | undefined
   const group = (groupId && SETTINGS_GROUP_BY_ID.get(groupId)) || SETTINGS_GROUPS[0]
@@ -132,6 +137,7 @@ export function resolveSettingsRoute(pathname: string): {
 }
 
 export function settingsPath(group: SettingsGroup, tab?: SettingsTab): string {
+  if (group === 'network' && tab === 'mode') return settingsPath('storage', 'mode')
   const config = SETTINGS_GROUP_BY_ID.get(group) ?? SETTINGS_GROUPS[0]
   return generatePath(ROUTE_PATH.settingsGroup, {
     group: config.id,

@@ -20,6 +20,7 @@ import type {
 } from './videoTypes'
 import type { CatalogScope } from './mediaLibraryTypes'
 import type { ScopedVideoDetail, ScopedVideoListResult } from './catalogTypes'
+import type { AggregateVersion } from './protocol/versions'
 import type {
   DeleteVideoGloballyInput,
   MoveVideoResourceInput,
@@ -63,11 +64,14 @@ export interface VideoIpcContract {
   [IPC.VIDEO_YEARS]: { args: [scope: CatalogScope]; result: number[] }
   [IPC.VIDEO_SAMPLE_IMPORT]: {
     args: [id: number, input: VideoSampleImportInput]
-    result: VideoAsset
+    result: VideoAsset | {
+      assetIds: number[]
+      versions: { V: AggregateVersion }
+    }
   }
-  [IPC.VIDEO_SAMPLE_DELETE]: { args: [id: number, assetId: number]; result: boolean }
+  [IPC.VIDEO_SAMPLE_DELETE]: { args: [id: number, assetId: number, expectedVersions?: ExpectedVersions]; result: boolean }
   [IPC.VIDEO_POSTER_SET]: {
-    args: [id: number, posterPath: string | null]
+    args: [id: number, posterPath: string | null, assetId?: number, expectedVersions?: ExpectedVersions]
     result: boolean
   }
   [IPC.VIDEO_MANUAL_TAG_ADD]: {

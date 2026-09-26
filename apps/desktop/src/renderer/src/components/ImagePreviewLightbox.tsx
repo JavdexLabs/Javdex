@@ -50,7 +50,7 @@ export interface ImagePreviewLightboxProps {
   onIndexChange: (index: number) => void
   labels: ImagePreviewLabels
   posterPath?: string | null
-  onPosterChange?: (posterPath: string | null) => Promise<void>
+  onPosterChange?: (posterPath: string | null, assetId?: number) => Promise<void>
   navigationStatus?: ReactNode
   toolbarActions?: ReactNode
 }
@@ -554,7 +554,7 @@ export default function ImagePreviewLightbox({
     setSavingPoster(true)
     bumpChrome()
     try {
-      await onPosterChange(isPoster ? null : posterCandidate)
+      await onPosterChange(isPoster ? null : posterCandidate, isPoster ? undefined : items[index]?.id)
       onClose()
     } finally {
       setSavingPoster(false)

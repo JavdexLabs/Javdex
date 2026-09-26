@@ -7,8 +7,22 @@
   animation: rotate 0.8s linear infinite;
 }
 
+.compact {
+  width: 1em;
+  height: 1em;
+  border-width: 2px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
 @keyframes rotate {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    animation: none;
   }
 }

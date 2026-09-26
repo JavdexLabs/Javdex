@@ -42,6 +42,7 @@ import type {
   PendingScanQueuePage,
   RenameImportResult
 } from '@shared/libraryTypes'
+import type { LibraryPathRemovalPreview } from '@shared/libraryTypes'
 import type { AggregateVersion, ExpectedVersions } from '@shared/protocol/versions'
 import type { VideoLifecycleImpact, VideoLifecycleResult } from '@shared/videoLifecycleTypes'
 import type {
@@ -110,6 +111,7 @@ import type {
   MediaLibraryRoot,
   MediaLibrarySummary
 } from '@shared/mediaLibraryTypes'
+import type { BrowseMediaMountResult } from '@shared/mediaLibraryIpcContract'
 import type { OperationReceipt } from '@shared/protocol/operationReceipt'
 import type { CatalogTaskSnapshot, TargetListPage } from '@shared/protocol/tasks'
 import type {
@@ -325,12 +327,14 @@ export interface CatalogOperationResults {
   'playlists.applyImport': PlaylistApplyImportResult
   'libraries.list': MediaLibrarySummary[]
   'libraries.get': MediaLibraryDetail | null
+  'libraries.browseMount': BrowseMediaMountResult
   'libraries.create': MediaLibraryDetail
   'libraries.update': MediaLibraryDetail
   'libraries.updateConfig': MediaLibraryConfig
   'libraries.addRoot': MediaLibraryRoot
   'libraries.updateRoot': MediaLibraryRoot
   'libraries.removeRoot': MediaLibraryRoot
+  'libraries.removeRootPreview': LibraryPathRemovalPreview
   'libraries.cancelRootRemoval': MediaLibraryRoot
   'libraries.archive': MediaLibraryDetail
   'libraries.restore': MediaLibraryDetail
@@ -461,6 +465,7 @@ export interface CatalogOperationResults {
   'play.grant': PlayGrant
   'migration.preview': MigrationPreview
   'migration.start': CatalogTaskSnapshot | MigrationPreview
+  'backup.control': import('@shared/protocol/backup').BackupResponse
   'migration.status': MigrationStatus
   'migration.enable': MigrationStatus
   'migration.abandon': MigrationStatus

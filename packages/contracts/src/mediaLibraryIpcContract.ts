@@ -1,4 +1,5 @@
 import { IPC } from './ipc-channels'
+import { z } from 'zod'
 import type {
   GlobalSearchInput,
   GlobalSearchResult,
@@ -20,6 +21,7 @@ import type {
   MediaLibrarySummary,
   MigrateMediaLibraryRootInput
 } from './mediaLibraryTypes'
+import type { LibraryPathRemovalPreview } from './libraryTypes'
 import type {
   IpcContractArgs,
   IpcContractChannel,
@@ -29,6 +31,26 @@ import type {
 export interface MediaLibraryListInput {
   includeArchived?: boolean
 }
+
+export interface BrowseMediaMountInput {
+  mountSelectionId?: string
+  relativePath?: string
+  search?: string
+}
+
+export interface BrowseMediaMountResult {
+  mounts: { id: string; path: string }[]
+  current: { mountSelectionId: string; relativePath: string; path: string } | null
+  directories: { name: string; relativePath: string }[]
+  truncated: boolean
+}
+
+export const browseMediaMountResultSchema = z.object({
+  mounts: z.array(z.object({ id: z.string(), path: z.string() }).strict()),
+  current: z.object({ mountSelectionId: z.string(), relativePath: z.string(), path: z.string() }).strict().nullable(),
+  directories: z.array(z.object({ name: z.string(), relativePath: z.string() }).strict()).max(500),
+  truncated: z.boolean()
+}).strict()
 
 export interface UpdateMediaLibraryInput {
   libraryId: number
@@ -45,7 +67,7 @@ export interface UpdateMediaLibraryConfigInput {
 export interface AddMediaLibraryRootInput {
   libraryId: number
   expectedRevision: number
-  root: CreateMediaLibraryRootInput | { mountSelectionId: string; position?: number; state?: 'active' | 'disabled' }
+  root: CreateMediaLibraryRootInput | { mountSelectionId: string; relativePath?: string; position?: number; state?: 'active' | 'disabled' }
 }
 
 export interface UpdateMediaLibraryRootInput {
@@ -98,6 +120,10 @@ export interface MediaLibraryIpcContract {
     args: [libraryId: number]
     result: MediaLibraryDetail | null
   }
+  [IPC.MEDIA_LIBRARY_MOUNT_BROWSE]: {
+    args: [input: BrowseMediaMountInput]
+    result: BrowseMediaMountResult
+  }
   [IPC.MEDIA_LIBRARY_CREATE]: {
     args: [input: CreateMediaLibraryInput]
     result: MediaLibraryDetail
@@ -121,6 +147,10 @@ export interface MediaLibraryIpcContract {
   [IPC.MEDIA_LIBRARY_ROOT_REMOVE]: {
     args: [input: RemoveMediaLibraryRootInput]
     result: MediaLibraryRoot
+  }
+  [IPC.MEDIA_LIBRARY_ROOT_REMOVE_PREVIEW]: {
+    args: [input: { libraryId: number; rootId: number }]
+    result: LibraryPathRemovalPreview
   }
   [IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL]: {
     args: [input: CancelMediaLibraryRootRemovalInput]

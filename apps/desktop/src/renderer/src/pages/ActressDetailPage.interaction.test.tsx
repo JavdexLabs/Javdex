@@ -6,6 +6,7 @@ import TestRenderer, { act } from 'react-test-renderer'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ActressProfile, ActressVideoPageQuery } from '@shared/actressTypes'
+import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { ElectronApi } from '../../../preload/index'
 
 let metadataResponse: ((id: number) => Promise<ActressProfile>) | null = null
@@ -15,8 +16,9 @@ let hold: (() => Promise<unknown>) | null = null
 let total = 125
 const calls: Array<{ id: number; query: ActressVideoPageQuery }> = []
 const metadataCalls: number[] = []
+const editCalls: Array<{ id: number; expectedVersions: ExpectedVersions }> = []
 function metadata(id: number): ActressProfile {
-  return { id, main_name: `Actor-${id}`, gender: 'female', names: [], aliases: [], gallery_count: 0, display_gallery_count: 0, first_gallery: null, links: [], avatar_path: null, avatar_source_path: null, scraped_status: 0 } as unknown as ActressProfile
+  return { id, main_name: `Actor-${id}`, gender: 'female', names: [], aliases: [], gallery_count: 0, display_gallery_count: 0, first_gallery: null, links: [], avatar_path: null, avatar_source_path: null, scraped_status: 0, generation: 1, revision: 1 } as unknown as ActressProfile
 }
 function page(id: number, offset: number) {
   return { videos: Array.from({ length: Math.min(60, Math.max(0, total - offset)) }, (_, n) => ({ id: id * 1000 + offset + n, code: `WORK-${id}-${offset+n}`, title: null, cover_path: null, scraped_status: 0, resource_kinds: [] })), total, limit: 60, offset }
@@ -27,7 +29,10 @@ const fake = {
     get: () => { throw new Error('Full actress detail forbidden') },
     metadata: () => { throw new Error('Full gallery metadata forbidden') },
     profile: async (id: number) => { metadataCalls.push(id); return metadataResponse ? metadataResponse(id) : metadata(id) },
-    edit: async () => editResponse ? editResponse() : true,
+    edit: async (id: number, _input: unknown, expectedVersions: ExpectedVersions) => {
+      editCalls.push({ id, expectedVersions })
+      return editResponse ? editResponse() : true
+    },
     mergeCandidates: async () => ({ items: [], hasMore: false, offset: 0 }),
     videoPage: async (id: number, query: ActressVideoPageQuery) => {
       if (query.withCover) return { videos: [], total: 0, limit: 60, offset: 0 }
@@ -70,7 +75,7 @@ async function mount() {
     renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video</div>} /></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>, {createNodeMock:viewport.createNodeMock})
   })
 }
-afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined;viewport=continuousViewport();position=0; url=''; calls.length = 0; metadataCalls.length = 0; total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
+afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined;viewport=continuousViewport();position=0; url=''; calls.length = 0; metadataCalls.length = 0; editCalls.length = 0; total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
 
 it('loads metadata once while paging 60/60/5 works and preserving the full count', async () => {
   await mount()
@@ -122,6 +127,7 @@ it('does not invalidate the new actor metadata when the old editor save settles 
   editResponse = () => new Promise(done => { finishEdit = done })
   let operation!: Promise<void>
   await act(async () => { operation = save({ main_name: 'Updated A' }); await Promise.resolve() })
+  assert.deepEqual(editCalls, [{ id: 1, expectedVersions: { A: { generation: 1, revision: 1 } } }])
   let finishMetadata!: (value: ActressProfile) => void
   metadataResponse = id => id === 2 ? new Promise(done => { finishMetadata = done }) : Promise.resolve(metadata(id))
   await act(async () => navigate('/actresses/2'))
@@ -129,6 +135,17 @@ it('does not invalidate the new actor metadata when the old editor save settles 
   await act(async () => finishMetadata(metadata(2)))
   assert.ok(text(renderer!.root).includes('Actor-2'))
   assert.deepEqual(metadataCalls, [1,2])
+})
+
+it('keeps the version captured when the actress editor opened', async () => {
+  await mount()
+  await click('编辑')
+  metadataResponse = async id => ({ ...metadata(id), revision: 2 })
+  const { notifyAvatarAutoCropSaved } = await import('../avatarAutoCrop/events')
+  await act(async () => notifyAvatarAutoCropSaved(1))
+  const EditModal = (await import('../components/EditActressModal')).default
+  await act(async () => renderer!.root.findByType(EditModal).props.onSave({ main_name: 'Updated A' }))
+  assert.deepEqual(editCalls, [{ id: 1, expectedVersions: { A: { generation: 1, revision: 1 } } }])
 })
 
 it('retains an open merge plan and its full count while the visible works refresh', async () => {

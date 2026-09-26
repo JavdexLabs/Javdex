@@ -26,7 +26,7 @@ let position = 0
 let viewport = continuousViewport()
 let renderer:TestRenderer.ReactTestRenderer|undefined
 let Component:typeof import('./MergeActressModal')['default']
-const keep=(id:number):ActressDetail=>({id,main_name:`Keep-${id}`,gender:'female',avatar_path:null,videos:[],gallery:[]} as unknown as ActressDetail)
+const keep=(id:number):ActressDetail=>({id,generation:1,revision:1,main_name:`Keep-${id}`,gender:'female',avatar_path:null,videos:[],gallery:[]} as unknown as ActressDetail)
 const element=(id:number)=><Component keepActress={keep(id)} keepVideoCount={keep(id).videos.length} onCancel={()=>cancelled++} onMerged={()=>merged++}/>
 const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20))})}
 async function mount(){Component=(await import('./MergeActressModal')).default;await act(async()=>{renderer=TestRenderer.create(element(1), { createNodeMock: viewport.createNodeMock })});await settle()}

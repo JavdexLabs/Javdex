@@ -59,6 +59,59 @@ test('every manage operation has matching metadata and a strict input schema', (
   }
 })
 
+test('organization reads accept the desktop picker and detail inputs', () => {
+  assert.equal(parseManageInput('organizations.options', {}).success, true)
+  assert.equal(parseManageInput('organizations.options', { search: 'Studio' }).success, true)
+  assert.equal(parseManageInput('organizations.get', { organizationId: 1, role: 'maker' }).success, true)
+  assert.equal(parseManageInput('organizations.mergeOptions', { search: 'Studio' }).success, true)
+  assert.equal(parseManageInput('organizations.options', { role: 'maker' }).success, false)
+})
+
+test('actress conflict reads accept desktop queue anchors and group names', () => {
+  assert.equal(parseManageInput('actressConflicts.queuePage', {
+    limit: 50, offset: 0, anchorName: undefined
+  }).success, true)
+  assert.equal(parseManageInput('actressConflicts.queuePage', {
+    limit: 50, offset: 0, anchorName: 'actor-name'
+  }).success, true)
+  assert.equal(parseManageInput('actressConflicts.get', { normalizedName: 'actor-name' }).success, true)
+  assert.equal(parseManageInput('actressConflicts.get', { pendingId: 1 }).success, true)
+  assert.equal(parseManageInput('actressConflicts.queuePage', { anchorName: '' }).success, false)
+  assert.equal(parseManageInput('actressConflicts.get', { normalizedName: '', pendingId: 1 }).success, false)
+})
+
+test('actress detail pages accept the desktop filters and preserve page limits', () => {
+  const video = parseManageInput('actresses.videoPage', {
+    actressId: 1, limit: 60, offset: 0, withCover: false
+  })
+  assert.equal(video.success, true)
+  const gallery = parseManageInput('actresses.galleryPage', {
+    actressId: 1, limit: 60, offset: 0, localOnly: false, anchorId: 2
+  })
+  assert.equal(gallery.success, true)
+  const defaultVideo = MANAGE_OPERATION_INPUTS['actresses.videoPage'].safeParse({ actressId: 1 })
+  const defaultGallery = MANAGE_OPERATION_INPUTS['actresses.galleryPage'].safeParse({ actressId: 1 })
+  assert.equal(defaultVideo.success, true)
+  assert.equal(defaultGallery.success, true)
+  if (defaultVideo.success) assert.equal(defaultVideo.data.limit, 60)
+  if (defaultGallery.success) assert.equal(defaultGallery.data.limit, 60)
+  assert.equal(parseManageInput('actresses.videoPage', {
+    actressId: 1, limit: 240, withCover: true
+  }).success, true)
+  assert.equal(parseManageInput('actresses.galleryPage', {
+    actressId: 1, limit: 100, localOnly: true
+  }).success, true)
+  assert.equal(parseManageInput('actresses.videoPage', {
+    actressId: 1, limit: 241
+  }).success, false)
+  assert.equal(parseManageInput('actresses.galleryPage', {
+    actressId: 1, limit: 101
+  }).success, false)
+  assert.equal(parseManageInput('actresses.galleryPage', {
+    actressId: 1, localOnly: 'true'
+  }).success, false)
+})
+
 test('video poster rejects desktop paths and unknown fields', () => {
   assert.equal(
     parseManageInput('videos.setPoster', {

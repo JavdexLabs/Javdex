@@ -23,7 +23,7 @@ function normalized(value: Partial<ThisComputerSettings>): ThisComputerSettings 
       : null
   return {
     mode,
-    remoteBaseUrl: mode === 'remote' ? remoteBaseUrl : null,
+    remoteBaseUrl,
     closeToTray: value.closeToTray === true,
     theme: typeof value.theme === 'string' && value.theme.trim() ? value.theme.trim() : 'graphite',
     playerPath:

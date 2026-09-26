@@ -7,6 +7,7 @@ import type {
 } from '@shared/classificationTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { ipcMutation } from '../application/mutationContext'
+import { remoteClassificationImage } from '../application/remoteClassificationImage'
 import { appCommandAdapter } from './appContractAdapter'
 import type { ClassificationQueryService } from '../services/classificationQueryService'
 import type { ClassificationMaintenanceService } from '../services/classificationMaintenanceService'
@@ -139,26 +140,26 @@ export function registerFacetHandlers(
   adapter.register(IPC.ORGANIZATION_CREATE, (input) =>
     backend.classifications.createOrganization(input, ipcMutation())
   )
-  adapter.register(IPC.ORGANIZATION_UPDATE, (id, input) =>
+  adapter.register(IPC.ORGANIZATION_UPDATE, (id, input, expectedVersions) =>
     backend.classifications.updateOrganization(
       { organizationId: id, ...input },
-      ipcMutation()
+      ipcMutation(undefined, expectedVersions)
     )
   )
-  adapter.register(IPC.ORGANIZATION_MERGE, (input) =>
-    backend.classifications.mergeOrganizations(input, ipcMutation())
+  adapter.register(IPC.ORGANIZATION_MERGE, (input, expectedVersions) =>
+    backend.classifications.mergeOrganizations(input, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW, (id, role) =>
     backend.classifications.organizationRoleRemovePreview({ organizationId: id, role })
   )
-  adapter.register(IPC.ORGANIZATION_ROLE_REMOVE, (id, role) =>
-    backend.classifications.organizationRoleRemove({ organizationId: id, role }, ipcMutation())
+  adapter.register(IPC.ORGANIZATION_ROLE_REMOVE, (id, role, planDigest, expectedVersions) =>
+    backend.classifications.organizationRoleRemove({ organizationId: id, role, planDigest }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.ORGANIZATION_DELETE_PREVIEW, (id) =>
     backend.classifications.organizationDeletePreview({ organizationId: id })
   )
-  adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
-    backend.classifications.deleteOrganization({ organizationId: id }, ipcMutation())
+  adapter.register(IPC.ORGANIZATION_DELETE, (id, planDigest, expectedVersions) =>
+    backend.classifications.deleteOrganization({ organizationId: id, planDigest }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.DIRECTOR_PAGE, (query) => backend.classifications.pageDirectors(query))
   adapter.register(IPC.DIRECTOR_LIST, (query) => backend.classifications.listDirectors(query ?? {}))
@@ -169,17 +170,17 @@ export function registerFacetHandlers(
   adapter.register(IPC.DIRECTOR_CREATE, (input) =>
     backend.classifications.createDirector(input, ipcMutation())
   )
-  adapter.register(IPC.DIRECTOR_UPDATE, (id, input) =>
-    backend.classifications.updateDirector({ directorId: id, ...input }, ipcMutation())
+  adapter.register(IPC.DIRECTOR_UPDATE, (id, input, expectedVersions) =>
+    backend.classifications.updateDirector({ directorId: id, ...input }, ipcMutation(undefined, expectedVersions))
   )
-  adapter.register(IPC.DIRECTOR_MERGE, (input) =>
-    backend.classifications.mergeDirectors(input, ipcMutation())
+  adapter.register(IPC.DIRECTOR_MERGE, (input, expectedVersions) =>
+    backend.classifications.mergeDirectors(input, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.DIRECTOR_DELETE_PREVIEW, (id) =>
     backend.classifications.directorDeletePreview({ directorId: id })
   )
-  adapter.register(IPC.DIRECTOR_DELETE, (id) =>
-    backend.classifications.deleteDirector({ directorId: id }, ipcMutation())
+  adapter.register(IPC.DIRECTOR_DELETE, (id, planDigest, expectedVersions) =>
+    backend.classifications.deleteDirector({ directorId: id, planDigest }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.SERIES_LIST, (query) => backend.classifications.listSeries(query ?? {}))
   adapter.register(IPC.SERIES_GET, (id) => backend.classifications.getSeries({ seriesId: id }))
@@ -189,17 +190,17 @@ export function registerFacetHandlers(
   adapter.register(IPC.SERIES_CREATE, (input) =>
     backend.classifications.createSeries(input, ipcMutation())
   )
-  adapter.register(IPC.SERIES_UPDATE, (id, input) =>
-    backend.classifications.updateSeries({ seriesId: id, ...input }, ipcMutation())
+  adapter.register(IPC.SERIES_UPDATE, (id, input, expectedVersions) =>
+    backend.classifications.updateSeries({ seriesId: id, ...input }, ipcMutation(undefined, expectedVersions))
   )
-  adapter.register(IPC.SERIES_MERGE, (input) =>
-    backend.classifications.mergeSeries(input, ipcMutation())
+  adapter.register(IPC.SERIES_MERGE, (input, expectedVersions) =>
+    backend.classifications.mergeSeries(input, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.SERIES_DELETE_PREVIEW, (id) =>
     backend.classifications.seriesDeletePreview({ seriesId: id })
   )
-  adapter.register(IPC.SERIES_DELETE, (id) =>
-    backend.classifications.deleteSeries({ seriesId: id }, ipcMutation())
+  adapter.register(IPC.SERIES_DELETE, (id, planDigest, expectedVersions) =>
+    backend.classifications.deleteSeries({ seriesId: id, planDigest }, ipcMutation(undefined, expectedVersions))
   )
   adapter.register(IPC.CLASSIFICATION_IMAGE_PAGE, (entity, query) =>
     backend.classifications.imagePage({ entity, ...query })
@@ -207,7 +208,10 @@ export function registerFacetHandlers(
   adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
     backend.classifications.imageCandidates({ entity })
   )
-  adapter.register(IPC.CLASSIFICATION_IMAGE_SET, (entity, input) =>
-    backend.classifications.setImage({ entity, image: input }, ipcMutation())
+  adapter.register(IPC.CLASSIFICATION_IMAGE_SET, async (entity, input, expectedVersions) =>
+    backend.classifications.setImage(
+      { entity, image: backend.mode === 'remote' ? await remoteClassificationImage(backend, input) : input },
+      ipcMutation(undefined, expectedVersions)
+    )
   )
 }

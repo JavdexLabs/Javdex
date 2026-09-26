@@ -1,4 +1,5 @@
 import type { ActressProfile } from './actressTypes'
+import type { ExpectedVersions } from './protocol/versions'
 import type { ActressGalleryPage, ActressGalleryPageQuery } from './actressTypes'
 import type { ActressMetadata } from './actressTypes'
 import type { ActressVideoPage, ActressVideoPageQuery } from './actressTypes'
@@ -12,6 +13,7 @@ import type {
   IpcContractResult
 } from './typedIpcContract'
 import type { SortDir } from './commonTypes'
+import type { AggregateVersion } from './protocol/versions'
 import type { ActressAvatarSourceInfo, ActressDetail, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from './actressTypes'
 import type { ActressConflictQueuePage, ActressConflictQueueQuery, ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from './actressConflictTypes'
 
@@ -101,7 +103,7 @@ export interface ActressIpcContract {
     result: ActressAvatarSourceInfo | null
   }
   [IPC.ACTRESS_EDIT]: {
-    args: [id: number, input: ActressEditInput]
+    args: [id: number, input: ActressEditInput, expectedVersions: ExpectedVersions]
     result: boolean
   }
   [IPC.ACTRESS_DELETE]: {
@@ -117,27 +119,30 @@ export interface ActressIpcContract {
     result: ActressDeleteImpact
   }
   [IPC.ACTRESS_CLEAR_META]: {
-    args: [id: number]
+    args: [id: number, expectedVersions?: ExpectedVersions]
     result: boolean
   }
   [IPC.ACTRESS_GALLERY_IMPORT]: {
     args: [id: number, input: ActressGalleryImportInput]
-    result: ActressGalleryAsset
+    result: ActressGalleryAsset | {
+      assetIds: number[]
+      versions: { A: AggregateVersion }
+    }
   }
   [IPC.ACTRESS_GALLERY_DELETE]: {
-    args: [id: number, assetId: number]
+    args: [id: number, assetId: number, expectedVersions?: ExpectedVersions]
     result: boolean
   }
   [IPC.ACTRESS_POSTER_SET]: {
-    args: [id: number, posterPath: string | null]
+    args: [id: number, posterPath: string | null, assetId?: number, expectedVersions?: ExpectedVersions]
     result: boolean
   }
   [IPC.ACTRESS_MERGE]: {
-    args: [input: ActressMergeInput]
+    args: [input: ActressMergeInput, expectedVersions?: ExpectedVersions]
     result: boolean
   }
   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: {
-    args: [id: number]
+    args: [id: number, expectedVersions?: ExpectedVersions]
     result: boolean
   }
   [IPC.ACTRESS_CONFLICT_LIST]: {

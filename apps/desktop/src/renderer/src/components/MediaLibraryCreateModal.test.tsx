@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import TestRenderer, { act, type ReactTestRendererJSON } from 'react-test-renderer'
-import type {
-  CreateMediaLibraryInput,
-  MediaLibraryDetail
-} from '@shared/mediaLibraryTypes'
+import type { CreateMediaLibraryInput, MediaLibraryDetail } from '@shared/mediaLibraryTypes'
 
-Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+Object.defineProperty(globalThis, 'React', {
+  configurable: true,
+  value: React
+})
 
 let createInput: CreateMediaLibraryInput | null = null
 let createFailure: Error | null = null
@@ -24,6 +25,11 @@ Object.defineProperty(globalThis, 'window', {
   value: {
     api: {
       mediaLibraries: {
+        browseMount: async () => ({
+          mounts: [],
+          current: null,
+          directories: []
+        }),
         create: async (input: CreateMediaLibraryInput) => {
           createInput = input
           if (createFailure) throw createFailure
@@ -69,7 +75,10 @@ function renderedText(): string {
 function button(label: string): TestRenderer.ReactTestInstance {
   assert.ok(renderer)
   const match = renderer.root.findAllByType('button').find((candidate) => {
-    const text = candidate.findAll(() => true).flatMap((node) => node.children).join('')
+    const text = candidate
+      .findAll(() => true)
+      .flatMap((node) => node.children)
+      .join('')
     return text.includes(label)
   })
   assert.ok(match, `missing button ${label}`)
@@ -136,9 +145,7 @@ describe('MediaLibraryCreateModal', () => {
     act(() => submitStep())
     assert.match(renderedText(), /请输入媒体库名称后再继续/)
     assert.equal(
-      renderer.root.findByProps({ placeholder: '例如：本地影片、NAS 收藏' }).props[
-        'aria-invalid'
-      ],
+      renderer.root.findByProps({ placeholder: '例如：本地影片、NAS 收藏' }).props['aria-invalid'],
       true
     )
 
@@ -167,19 +174,80 @@ describe('MediaLibraryCreateModal', () => {
     act(() => submitStep())
     assert.match(renderedText(), /创建后立即扫描/)
     assert.match(renderedText(), /暂不添加/)
-    assert.equal(
-      renderer.root.findByProps({ 'aria-label': '创建后立即扫描' }).props.disabled,
-      true
-    )
+    assert.equal(renderer.root.findByProps({ 'aria-label': '创建后立即扫描' }).props.disabled, true)
 
     act(() => button('上一步').props.onClick())
     assert.match(renderedText(), /扫描行为/)
-    const visitedFinalStep = renderer.root.findByProps({ 'aria-label': '第 4 步：首次扫描' })
+    const visitedFinalStep = renderer.root.findByProps({
+      'aria-label': '第 4 步：首次扫描'
+    })
     assert.equal(visitedFinalStep.props.disabled, false)
     act(() => visitedFinalStep.props.onClick())
     assert.match(renderedText(), /创建后立即扫描/)
 
     await settle()
+  })
+
+  it('uses the same four steps remotely and submits mount selections with config and first scan', async () => {
+    const { default: MediaLibraryCreateModal } = await import('./MediaLibraryCreateModal')
+    const { default: RemoteRootPicker } = await import('../pages/RemoteRootPicker')
+    let scan = false
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    act(() => {
+      renderer = TestRenderer.create(
+        <QueryClientProvider client={client}>
+          <MediaLibraryCreateModal
+            remoteMode
+            onCancel={() => {}}
+            onCreated={(_, firstScan) => {
+              scan = firstScan
+            }}
+          />
+        </QueryClientProvider>
+      )
+    })
+    await settle()
+    act(() =>
+      renderer!.root
+        .findByProps({ placeholder: '例如：本地影片、NAS 收藏' })
+        .props.onChange({ target: { value: '远程收藏' } })
+    )
+    act(() => submitStep())
+    act(() => button('选择目录').props.onClick())
+    act(() =>
+      renderer!.root
+        .findByType(RemoteRootPicker)
+        .props.onAdd(
+          { mountSelectionId: 'media', relativePath: '中文 子目录' },
+          '/media/中文 子目录'
+        )
+    )
+    act(() => submitStep())
+    act(() =>
+      renderer!.root
+        .findByProps({ 'aria-label': '自动导入本地 NFO' })
+        .props.onChange({ target: { checked: false } })
+    )
+    act(() => submitStep())
+    act(() =>
+      renderer!.root
+        .findByProps({ 'aria-label': '创建后立即扫描' })
+        .props.onChange({ target: { checked: true } })
+    )
+    await act(async () => {
+      submitStep()
+      await Promise.resolve()
+    })
+    assert.equal(createInput?.name, '远程收藏')
+    assert.equal(createInput?.roots, undefined)
+    assert.deepEqual(createInput?.remoteRoots, [
+      { mountSelectionId: 'media', relativePath: '中文 子目录' }
+    ])
+    assert.equal(createInput?.config?.autoImportLocalNfo, false)
+    assert.equal(scan, true)
+    client.clear()
   })
 
   it('deduplicates selected roots, submits independent config, and returns root errors to their step', async () => {
@@ -212,11 +280,14 @@ describe('MediaLibraryCreateModal', () => {
 
     act(() => submitStep())
     act(() => {
-      renderer?.root.findByProps({ 'aria-label': '自动导入本地 NFO' })
+      renderer?.root
+        .findByProps({ 'aria-label': '自动导入本地 NFO' })
         .props.onChange({ target: { checked: false } })
     })
     act(() => submitStep())
-    const firstScan = renderer.root.findByProps({ 'aria-label': '创建后立即扫描' })
+    const firstScan = renderer.root.findByProps({
+      'aria-label': '创建后立即扫描'
+    })
     assert.equal(firstScan.props.disabled, false)
     act(() => firstScan.props.onChange({ target: { checked: true } }))
 

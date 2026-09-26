@@ -1,3 +1,5 @@
+import { transferBackup, setBackupRestoredHandler } from './manageBackup'
+import { recoverBackupOperations } from '@library/catalog/catalogBackup'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +10,7 @@ import { recoverCatalogMaintenance } from '@library/catalog/catalogMaintenanceRe
 import { inspectPlayStream, setPlayGrantListener } from '@library/catalog/catalogPlay'
 import { closePlayStreams } from '@http/play'
 import { scanCoordinator } from '@library/scan/scanCoordinator'
+import { automaticScanScheduler } from '@library/scan/automaticScanScheduler'
 import { isWriterBound } from '@library/catalog/catalogIdentity'
 import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
 import { createWorkerWebCatalog } from '@http/catalogWorkerAdapter'
@@ -131,6 +134,7 @@ export async function startJavdexServer(
   const fail = async (error: unknown): Promise<never> => {
     setPlayGrantListener(null)
     setManageBrowserSurface(null)
+    setBackupRestoredHandler(undefined)
     try {
       await http?.stop()
     } catch {
@@ -149,6 +153,7 @@ export async function startJavdexServer(
     configureServerLibraryHost(config)
     ensureMediaAssetDirsAt(config.imagesDir)
     const database = initDatabaseAtPath(path.join(config.dataDir, 'library.db'))
+    recoverBackupOperations({ mode: 'remote', appVersion: SERVER_APP_VERSION, onRestored: () => { new WebSessions(Date.now, path.join(config.dataDir, 'web-devices.json')).clear() } }, database)
     recoverInterruptedLibraryScanRuns(database)
     recoverCatalogImages(database)
     recoverCatalogMaintenance(database)
@@ -181,6 +186,7 @@ export async function startJavdexServer(
         appVersion: SERVER_APP_VERSION,
         dispatch: (context) => dispatchManageOperation(context, database),
         putUpload: (context) => putManageUpload(context, database),
+        transferBackup: (context) => transferBackup(context, database),
         putMigrationPackage: (context) => putManageMigrationPackage(context, database),
         getAsset: (context) => getManageAsset(context, database)
       },
@@ -188,6 +194,7 @@ export async function startJavdexServer(
         inspect: (input) => inspectPlayStream(input, database)
       }
     })
+    setBackupRestoredHandler(() => { http!.revokeSessions() })
     http.setBrowserEnabled(loadBrowserEnabled(config.dataDir))
     setPlayGrantListener({
       onRevoke(grantIds) {
@@ -196,6 +203,7 @@ export async function startJavdexServer(
     })
     const port = await http.start(config.port, config.listenHost)
     setManageBrowserSurface(createBrowserSurface(http, config, port))
+    automaticScanScheduler.start()
     ready = true
     return {
       port,
@@ -203,6 +211,7 @@ export async function startJavdexServer(
       async stop(_signal?: NodeJS.Signals): Promise<void> {
         stopping = true
         ready = false
+        automaticScanScheduler.stop()
         try {
           await scanCoordinator.stopAndDrain()
         } catch {
@@ -213,6 +222,7 @@ export async function startJavdexServer(
         } finally {
           setPlayGrantListener(null)
           setManageBrowserSurface(null)
+          setBackupRestoredHandler(undefined)
           await worker?.dispose()
           closeDatabase()
           lock.release()

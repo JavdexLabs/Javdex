@@ -38,6 +38,7 @@ export function createUnconfiguredRemoteBackend(
     message
   })
   return {
+    backup: rejectingCatalogSlice('backup', rejectUnconfigured),
     mode: 'remote',
     identity: { mode: 'remote', catalogId: '' },
     generation: 0,

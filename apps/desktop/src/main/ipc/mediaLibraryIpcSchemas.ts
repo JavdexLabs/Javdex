@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { mountSelectionSchema } from '@shared/manage/primitives'
 import { IPC } from '@shared/ipc-channels'
 import type { MediaLibraryIpcContract } from '@shared/mediaLibraryIpcContract'
 import {
@@ -90,6 +91,11 @@ export const mediaLibraryIpcSchemas = {
     z.object({ includeArchived: z.boolean().optional() }).strict().optional()
   ]),
   [IPC.MEDIA_LIBRARY_GET]: z.tuple([positiveSafeInteger]),
+  [IPC.MEDIA_LIBRARY_MOUNT_BROWSE]: z.tuple([z.object({
+    mountSelectionId: nonEmptyText.max(200).optional(),
+    relativePath: z.string().max(1024).optional(),
+    search: z.string().max(100).optional()
+  }).strict()]),
   [IPC.MEDIA_LIBRARY_CREATE]: z.tuple([
     z
       .object({
@@ -98,7 +104,8 @@ export const mediaLibraryIpcSchemas = {
         color: z.enum(MEDIA_LIBRARY_COLORS).optional(),
         position: nonNegativeSafeInteger.optional(),
         config: mediaLibraryConfigSchema.optional(),
-        roots: z.array(createRoot).max(64).optional()
+        roots: z.array(createRoot).max(64).optional(),
+        remoteRoots: z.array(mountSelectionSchema).max(100).optional()
       })
       .strict()
   ]),
@@ -111,6 +118,7 @@ export const mediaLibraryIpcSchemas = {
   [IPC.MEDIA_LIBRARY_ROOT_ADD]: z.tuple([
     revisionInput.extend({ root: z.union([createRoot, z.object({
       mountSelectionId: nonEmptyText.max(200),
+      relativePath: z.string().max(1024).optional(),
       position: nonNegativeSafeInteger.optional(),
       state: ordinaryRootState.optional()
     }).strict()]) }).strict()
@@ -125,6 +133,12 @@ export const mediaLibraryIpcSchemas = {
         expectedImpactRevision: z.string().regex(/^[a-f0-9]{64}$/)
       })
       .strict()
+  ]),
+  [IPC.MEDIA_LIBRARY_ROOT_REMOVE_PREVIEW]: z.tuple([
+    z.object({
+      libraryId: positiveSafeInteger,
+      rootId: positiveSafeInteger
+    }).strict()
   ]),
   [IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL]: z.tuple([
     revisionInput.extend({ rootId: positiveSafeInteger }).strict()

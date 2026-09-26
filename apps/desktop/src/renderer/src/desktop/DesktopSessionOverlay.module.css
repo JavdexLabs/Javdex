@@ -24,19 +24,6 @@
   justify-content: center;
 }
 
-.claim {
-  display: grid;
-  gap: 8px;
-  width: min(420px, 100%);
-}
-
-.claimField {
-  display: grid;
-  gap: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
 .error {
   margin: 0;
   color: var(--danger);

@@ -23,6 +23,7 @@ import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import { SettingsNumberStepper } from './SettingsPrimitives'
 import { defaultPluginDelay, pluginSourceLabel } from '../../settings/settingsDisplay'
 import Button from '../Button'
+import SettingsFeedback from './SettingsFeedback'
 import styles from './PluginConfigModals.module.css'
 
 export type PluginKind = 'video' | 'actress'
@@ -193,7 +194,7 @@ export function PluginConfigModal({
     <>
       <Modal
         title={`编辑插件：${plugin.name}`}
-        confirmText={saving ? '保存中…' : '保存'}
+        confirmText="保存"
         confirmDisabled={saving}
         size="lg"
         className="modal-plugin-editor"
@@ -405,17 +406,10 @@ export function PluginConfigModal({
                   HTTP 可能暴露查询番号{willHaveToken ? '和访问令牌' : ''}；远程服务建议使用 HTTPS。
                 </p>
               )}
-              {testError && (
-                <p className={styles.error} role="alert">
-                  {testError}
-                </p>
-              )}
-              {testResult && (
-                <p className={styles.success} role="status">
-                  连接成功 · {testResult.version} · DB {testResult.dbVersion} ·{' '}
-                  {testResult.movieProviderCount} 个影片源
-                </p>
-              )}
+              <SettingsFeedback error={Boolean(testError)} detail={testError}
+                message={testingService ? '正在测试服务连接…' : testError || (testResult
+                  ? `连接成功 · ${testResult.version} · DB ${testResult.dbVersion} · ${testResult.movieProviderCount} 个影片源`
+                  : '测试当前填写的服务地址与凭据。')} />
               <div className={styles.serviceActions}>
                 {serviceConfig.serverUrl && onClearService && (
                   <Button
@@ -436,7 +430,7 @@ export function PluginConfigModal({
                   disabled={saving || testingService || !serverUrl.trim()}
                   onClick={() => void testService()}
                 >
-                  {testingService ? '测试中…' : '测试连接'}
+                  测试连接
                 </Button>
               </div>
             </section>

@@ -12,6 +12,7 @@ import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { buildActressScrapeMatchNameOptions } from '@shared/actressProfileOptions'
 import type { ActressProfile } from '@shared/actressTypes'
+import { expectedActressVersion } from '@shared/protocol/versions'
 import type { ActressDeleteResult } from '@shared/actressIpcContract'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -88,6 +89,7 @@ export default function ActressDetailPage(): JSX.Element {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
+  const [editVersion, setEditVersion] = useState<{ generation?: number; revision?: number } | null>(null)
   const [showMerge, setShowMerge] = useState(false)
   const [scraping, setScraping] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('actress')
@@ -242,7 +244,7 @@ export default function ActressDetailPage(): JSX.Element {
 
   const handleEditSave = async (input: ActressEditInput): Promise<void> => {
     try {
-      await api.actresses.edit(actressId, input)
+      await api.actresses.edit(actressId, input, expectedActressVersion(editVersion ?? {}))
       toast.show('演员资料已保存', 'success')
       setShowEdit(false)
       void load({ silent: true })
@@ -253,7 +255,7 @@ export default function ActressDetailPage(): JSX.Element {
 
   const handleMarkScrapeSuccess = async (): Promise<void> => {
     try {
-      await api.actresses.markScrapeSuccess(actressId)
+      await api.actresses.markScrapeSuccess(actressId, expectedActressVersion(actress ?? {}))
       toast.show('已标记为刮削成功', 'success')
       void invalidateActressLibraryQueries(queryClient)
       await load({ silent: true })
@@ -264,7 +266,7 @@ export default function ActressDetailPage(): JSX.Element {
 
   const doClearMeta = async (): Promise<void> => {
     try {
-      await api.actresses.clearMeta(actressId)
+      await api.actresses.clearMeta(actressId, expectedActressVersion(actress ?? {}))
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
       void invalidateActressLibraryQueries(queryClient)
@@ -336,7 +338,10 @@ export default function ActressDetailPage(): JSX.Element {
           key: 'edit',
           icon: <Pencil {...UI_ICON} />,
           label: '编辑',
-          onClick: () => setShowEdit(true)
+          onClick: () => {
+            setEditVersion({ generation: actress.generation, revision: actress.revision })
+            setShowEdit(true)
+          }
         },
         {
           key: 'agent-scrape',

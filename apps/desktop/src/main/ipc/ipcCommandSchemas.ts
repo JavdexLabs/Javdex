@@ -1,3 +1,4 @@
+import { backupRequestSchema, desktopBackupFileSchema } from '@shared/protocol/backup'
 import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import { z } from 'zod'
 import { IPC } from '@shared/ipc-channels'
@@ -9,7 +10,7 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
-import { expectedVersionsSchema } from '@shared/manage/primitives'
+import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
 const scanAuditViewQuery = z.object({
@@ -429,8 +430,8 @@ export const videoIpcSchemas = {
   [IPC.VIDEO_CORRECT_IMPORT]: z.tuple([id, nonEmptyText, z.boolean().optional()]),
   [IPC.VIDEO_YEARS]: z.tuple([catalogScope]),
   [IPC.VIDEO_SAMPLE_IMPORT]: z.tuple([id, mediaImageImport]),
-  [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
-  [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+  [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id, expectedVersionsSchema.optional()]),
+  [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText, id.optional(), expectedVersionsSchema.optional()]),
   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText, expectedVersionsSchema]),
   [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([
     positiveSafeInteger,
@@ -524,22 +525,23 @@ export const actressIpcSchemas = {
   }).strict().optional()]),
   [IPC.ACTRESS_GET]: z.tuple([id]),
   [IPC.ACTRESS_AVATAR_SOURCE_INFO]: z.tuple([id]),
-  [IPC.ACTRESS_EDIT]: z.tuple([id, object]),
+  [IPC.ACTRESS_EDIT]: z.tuple([id, object, expectedVersionsSchema]),
   [IPC.ACTRESS_DELETE]: z.tuple([actressDeleteRequest]),
   [IPC.ACTRESS_DELETE_BATCH]: z.tuple([actressDeleteRequest]),
   [IPC.ACTRESS_DELETE_PREVIEW]: z.tuple([idArray]),
-  [IPC.ACTRESS_CLEAR_META]: z.tuple([id]),
+  [IPC.ACTRESS_CLEAR_META]: z.tuple([id, expectedVersionsSchema.optional()]),
   [IPC.ACTRESS_GALLERY_IMPORT]: z.tuple([id, mediaImageImport]),
-  [IPC.ACTRESS_GALLERY_DELETE]: z.tuple([id, id]),
-  [IPC.ACTRESS_POSTER_SET]: z.tuple([id, nullableText]),
+  [IPC.ACTRESS_GALLERY_DELETE]: z.tuple([id, id, expectedVersionsSchema.optional()]),
+  [IPC.ACTRESS_POSTER_SET]: z.tuple([id, nullableText, id.optional(), expectedVersionsSchema.optional()]),
   [IPC.ACTRESS_MERGE]: z.tuple([
     z.object({
       keepId: id,
       mergeId: id,
       mainNameFrom: z.enum(['keep', 'merge'])
-    }).strict()
+    }).strict(),
+    expectedVersionsSchema.optional()
   ]),
-  [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
+  [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id, expectedVersionsSchema.optional()]),
   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
   [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
   [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
@@ -696,6 +698,8 @@ export const appIpcSchemas = {
   }).strict()]),
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
+  [IPC.BACKUP_CONTROL]: z.tuple([backupRequestSchema]),
+  [IPC.BACKUP_FILE]: z.tuple([desktopBackupFileSchema]),
   [IPC.DESKTOP_SESSION_GET]: noArgs,
   [IPC.DESKTOP_RECONNECT]: noArgs,
   [IPC.THIS_COMPUTER_GET]: noArgs,
@@ -708,6 +712,10 @@ export const appIpcSchemas = {
       })
       .strict()
   ]),
+  [IPC.THIS_COMPUTER_PROBE]: z.tuple([z.string().min(1).max(2048)]),
+  [IPC.THIS_COMPUTER_RESTART]: noArgs,
+  [IPC.THIS_COMPUTER_PICK_PLAYER]: z.tuple([z.string().max(4096).nullable()]),
+  [IPC.THIS_COMPUTER_DETECT_PLAYER]: z.tuple([]),
   [IPC.WRITER_CLAIM]: z.tuple([
     z
       .object({
@@ -806,11 +814,11 @@ export const appIpcSchemas = {
   [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
   [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
-  [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
-  [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+  [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput, expectedVersionsSchema.optional()]),
+  [IPC.PLAYLIST_DELETE]: z.tuple([id, expectedVersionsSchema.optional()]),
   [IPC.PLAYLIST_LIST_FOR_VIDEO]: z.tuple([id]),
-  [IPC.PLAYLIST_ADD_VIDEO]: z.tuple([id, id]),
-  [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+  [IPC.PLAYLIST_ADD_VIDEO]: z.tuple([id, id, expectedVersionsSchema.optional()]),
+  [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id, expectedVersionsSchema.optional()]),
   [IPC.TAG_LIST]: noArgs,
   [IPC.TAG_LIST_MANUAL]: noArgs,
   [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
@@ -831,29 +839,29 @@ export const appIpcSchemas = {
   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
   [IPC.ORGANIZATION_MERGE_OPTIONS]: z.tuple([optionalText]),
   [IPC.ORGANIZATION_CREATE]: z.tuple([profileInput]),
-  [IPC.ORGANIZATION_UPDATE]: z.tuple([id, profileInput]),
-  [IPC.ORGANIZATION_MERGE]: z.tuple([mergeInput]),
+  [IPC.ORGANIZATION_UPDATE]: z.tuple([id, profileInput, expectedVersionsSchema.optional()]),
+  [IPC.ORGANIZATION_MERGE]: z.tuple([mergeInput, expectedVersionsSchema.optional()]),
   [IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW]: z.tuple([id, organizationRole]),
-  [IPC.ORGANIZATION_ROLE_REMOVE]: z.tuple([id, organizationRole]),
+  [IPC.ORGANIZATION_ROLE_REMOVE]: z.tuple([id, organizationRole, digestSchema.optional(), expectedVersionsSchema.optional()]),
   [IPC.ORGANIZATION_DELETE_PREVIEW]: z.tuple([id]),
-  [IPC.ORGANIZATION_DELETE]: z.tuple([id]),
+  [IPC.ORGANIZATION_DELETE]: z.tuple([id, digestSchema.optional(), expectedVersionsSchema.optional()]),
   [IPC.DIRECTOR_PAGE]: z.tuple([classificationPageQuery]),
   [IPC.DIRECTOR_LIST]: z.tuple([listQuery]),
   [IPC.DIRECTOR_GET]: z.tuple([id]),
   [IPC.DIRECTOR_OPTIONS]: z.tuple([optionalText]),
   [IPC.DIRECTOR_CREATE]: z.tuple([profileInput]),
-  [IPC.DIRECTOR_UPDATE]: z.tuple([id, profileInput]),
-  [IPC.DIRECTOR_MERGE]: z.tuple([mergeInput]),
+  [IPC.DIRECTOR_UPDATE]: z.tuple([id, profileInput, expectedVersionsSchema.optional()]),
+  [IPC.DIRECTOR_MERGE]: z.tuple([mergeInput, expectedVersionsSchema.optional()]),
   [IPC.DIRECTOR_DELETE_PREVIEW]: z.tuple([id]),
-  [IPC.DIRECTOR_DELETE]: z.tuple([id]),
+  [IPC.DIRECTOR_DELETE]: z.tuple([id, digestSchema.optional(), expectedVersionsSchema.optional()]),
   [IPC.SERIES_LIST]: z.tuple([listQuery]),
   [IPC.SERIES_GET]: z.tuple([id]),
   [IPC.SERIES_OPTIONS]: z.tuple([optionalText]),
   [IPC.SERIES_CREATE]: z.tuple([profileInput]),
-  [IPC.SERIES_UPDATE]: z.tuple([id, profileInput]),
-  [IPC.SERIES_MERGE]: z.tuple([mergeInput]),
+  [IPC.SERIES_UPDATE]: z.tuple([id, profileInput, expectedVersionsSchema.optional()]),
+  [IPC.SERIES_MERGE]: z.tuple([mergeInput, expectedVersionsSchema.optional()]),
   [IPC.SERIES_DELETE_PREVIEW]: z.tuple([id]),
-  [IPC.SERIES_DELETE]: z.tuple([id]),
+  [IPC.SERIES_DELETE]: z.tuple([id, digestSchema.optional(), expectedVersionsSchema.optional()]),
   [IPC.CLASSIFICATION_IMAGE_PAGE]: z.tuple([classificationEntity.extend({id: positiveSafeInteger}), z.object({
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
@@ -861,7 +869,8 @@ export const appIpcSchemas = {
   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: z.tuple([classificationEntity]),
   [IPC.CLASSIFICATION_IMAGE_SET]: z.tuple([
     classificationEntity,
-    classificationImage.nullable()
+    classificationImage.nullable(),
+    expectedVersionsSchema.optional()
   ]),
   [IPC.PLUGIN_DEV_AGENT_START]: z.tuple([object]),
   [IPC.PLUGIN_DEV_AGENT_MESSAGE]: z.tuple([

@@ -43,8 +43,16 @@ function spawnPlayerProgram(program: string, args: string[]): Promise<PlayResult
   if (!fs.existsSync(program)) {
     return Promise.resolve({ ok: false, error: '找不到播放器程序' })
   }
+  const isMacApp = process.platform === 'darwin' && program.toLowerCase().endsWith('.app')
+  if (isMacApp && !fs.statSync(program).isDirectory()) {
+    return Promise.resolve({ ok: false, error: '所选路径不是应用程序' })
+  }
   return new Promise((resolve) => {
-    const child = spawn(program, args, { shell: false, stdio: 'ignore', detached: true })
+    const child = spawn(isMacApp ? '/usr/bin/open' : program, isMacApp ? ['-a', program, ...args] : args, {
+      shell: false,
+      stdio: 'ignore',
+      detached: true
+    })
     child.once('error', (error) => resolve({ ok: false, error: error.message }))
     child.once('spawn', () => {
       child.unref()

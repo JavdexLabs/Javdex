@@ -14,6 +14,7 @@ import { createAvatarCropV1, type ActressAvatarCommit } from '@shared/avatarCrop
 import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget, ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
 import type { BatchLogEntry } from '@shared/batchScrapeTypes'
 import { api, assetUrl } from '../api'
+import { expectedActressVersion } from '@shared/protocol/versions'
 import { createAvatarAnalysisBitmap, loadAvatarAnalysisImage } from '../avatarAutoCrop/image'
 import { notifyAvatarAutoCropSaved } from '../avatarAutoCrop/events'
 import { analyzeAvatarBitmap } from '../avatarAutoCrop/service'
@@ -125,7 +126,9 @@ async function smartCropAvatar(
   }
   if (sourceInfo.requiresSourceAdoption) commit.sourceAssetPath = sourceInfo.assetPath
 
-  await api.actresses.edit(target.actressId, { avatar: commit })
+  const profile = await api.actresses.profile(target.actressId)
+  if (!profile) throw new Error('演员不存在')
+  await api.actresses.edit(target.actressId, { avatar: commit }, expectedActressVersion(profile))
   return 'success'
 }
 

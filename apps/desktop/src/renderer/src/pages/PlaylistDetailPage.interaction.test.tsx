@@ -54,7 +54,7 @@ function NavigationProbe(): null { navigate = useNavigate(); url = useLocation()
 
 function page(id: number, offset = 0, total = 120): PlaylistPage {
   return {
-    id, name: `Playlist ${id}`, description: null, cover_path: null, preview_cover_path: null,
+    id, generation:1,revision:1,name: `Playlist ${id}`, description: null, cover_path: null, preview_cover_path: null,
     created_at: '2026', updated_at: null, links: [], total, filteredTotal: total, offset, limit: 60,
     videos: offset < total ? [{
       id: id * 1000 + offset, code: `VIDEO-${id}-${offset}`, title: null, cover_path: null,

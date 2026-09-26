@@ -301,14 +301,13 @@ describe('playlistImport catalog apply', () => {
       playlists: {
         applyImport: async (
           input: {
-            videoIds: number[]
-            videoLinks?: Array<{ videoId: number; label: string; url: string }>
+            entries: Array<{ kind: 'existing' | 'create'; videoId?: number; links?: Array<{ label: string; url: string }> }>
           },
           ctx: { operationId: string }
         ) => {
-          calls.push(`apply:${input.videoIds.join(',')}:${ctx.operationId}`)
-          assert.equal(input.videoLinks?.[0]?.videoId, 20)
-          assert.equal(input.videoLinks?.[0]?.url, 'https://example.test/video/aaa-1')
+          calls.push(`apply:${input.entries.map((entry) => entry.videoId ?? entry.kind).join(',')}:${ctx.operationId}`)
+          assert.equal(input.entries[0]?.kind, 'existing')
+          assert.equal(input.entries[0]?.links?.[0]?.url, 'https://example.test/video/aaa-1')
           return { playlistId: 99, added: 1, relatedLinksAdded: 1 }
         },
         get: async () => ({ id: 99, name: '导入清单' })

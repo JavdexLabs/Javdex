@@ -25,6 +25,7 @@ import { SERVER_APP_VERSION } from './appVersion'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRemoteCatalogBackend } from '../../desktop/src/main/backends/remote/remoteCatalogBackend'
 import { createLocalCatalogBackend } from '../../desktop/src/main/backends/local/localCatalogBackend'
+import { ipcPlaylistMutation } from '../../desktop/src/main/application/mutationContext'
 import { upsertActressFromScrape } from '@library/db/actressRepo'
 import { filesRenameDigest } from '@library/catalog/catalogFileMaintenance'
 import { previewLibraryPathRemoval } from '@library/scan/libraryPathCleanupService'
@@ -561,6 +562,17 @@ describe('server runtime lifecycle', () => {
     assert.doesNotMatch(refused, /默认媒体库/)
 
     const writer = await claimInitialWriter(base, config)
+    const storageEnvelope = {
+      serverId: writer.serverId,
+      catalogId: writer.catalogId,
+      writerEpoch: writer.writerEpoch,
+      input: {}
+    }
+    const unauthenticatedStorage = await postManage(base, 'catalog.storageInfo', storageEnvelope)
+    assert.equal(unauthenticatedStorage.status, 401)
+    const storage = await postManage(base, 'catalog.storageInfo', storageEnvelope, { bearer: writer.secret })
+    assert.equal(storage.status, 200)
+    assert.deepEqual(storage.json, { imagesDir: config.imagesDir })
     const cookieManage = await postManage(
       base,
       'writer.status',
@@ -1765,6 +1777,11 @@ describe('server runtime lifecycle', () => {
     const { videoId, fileId } = await insertBoundVideo('S08-LOOP')
     getDb().prepare('UPDATE videos SET release_date = ? WHERE id = ?').run('2024-03-01', videoId)
     const independentId = upsertActressFromScrape('Independent Star', null, 'female')
+    getDb().prepare('INSERT INTO video_actress(video_id, actress_id) VALUES(?, ?)')
+      .run(videoId, independentId)
+    const galleryId = Number(getDb().prepare(
+      'INSERT INTO actress_gallery_assets(actress_id, remote_url) VALUES(?, ?)'
+    ).run(independentId, 'https://example.test/gallery.jpg').lastInsertRowid)
     const version = getDb()
       .prepare('SELECT generation, revision FROM videos WHERE id = ?')
       .get(videoId) as { generation: number; revision: number }
@@ -1779,6 +1796,16 @@ describe('server runtime lifecycle', () => {
     })
     const ctx = { operationId: randomUUID(), expectedVersions: { V: version } }
     try {
+      assert.deepEqual(
+        await remote.actresses.conflictQueuePage({ limit: 50, offset: 0, anchorName: undefined }),
+        await local.actresses.conflictQueuePage({ limit: 50, offset: 0, anchorName: undefined })
+      )
+      assert.deepEqual(
+        await remote.actresses.conflictQueuePage({ limit: 50, offset: 0, anchorName: 'missing' }),
+        await local.actresses.conflictQueuePage({ limit: 50, offset: 0, anchorName: 'missing' })
+      )
+      assert.equal(await remote.actresses.conflictGet({ normalizedName: 'missing' }), null)
+
       const remoteSearch = (await remote.queries.homeSearch({ search: 'S08-LOOP' })) as {
         items: Array<{ id: number; title: string | null }>
       }
@@ -1871,6 +1898,24 @@ describe('server runtime lifecycle', () => {
         true
       )
 
+      const videoQuery = { actressId: independentId, limit: 60, offset: 0, withCover: false }
+      const remoteVideos = await remote.actresses.videoPage(videoQuery)
+      const localVideos = await local.actresses.videoPage(videoQuery)
+      assert.deepEqual(remoteVideos, localVideos)
+      assert.equal(remoteVideos?.total, 1)
+      const galleryQuery = { actressId: independentId, limit: 60, offset: 0, localOnly: false }
+      const remoteGallery = await remote.actresses.galleryPage(galleryQuery)
+      const localGallery = await local.actresses.galleryPage(galleryQuery)
+      assert.deepEqual(remoteGallery, localGallery)
+      assert.equal(remoteGallery?.total, 1)
+      const anchoredGallery = await remote.actresses.galleryPage({
+        ...galleryQuery, anchorId: galleryId
+      })
+      assert.equal(anchoredGallery?.anchorIndex, 0)
+      assert.equal((await remote.actresses.galleryPage({
+        ...galleryQuery, localOnly: true
+      }))?.total, 0)
+
       const orgId = (await remote.classifications.createOrganization(
         { role: 'maker', mainName: 'S08 Studio' },
         { operationId: randomUUID(), expectedVersions: {} }
@@ -1886,6 +1931,12 @@ describe('server runtime lifecycle', () => {
       }>
       assert.equal(orgs.some((row) => row.id === orgId && row.mainName === 'S08 Studio'), true)
       assert.equal(localOrgs.some((row) => row.id === orgId && row.mainName === 'S08 Studio'), true)
+      const options = await remote.classifications.organizationOptions({ search: 'S08 Studio' })
+      assert.equal(options.some((row) => row.id === orgId), true)
+      const organization = await remote.classifications.getOrganization({ organizationId: orgId, role: 'maker' })
+      assert.equal(organization?.id, orgId)
+      const mergeOptions = await remote.classifications.organizationMergeOptions({ search: 'S08 Studio' })
+      assert.equal(mergeOptions.some((row) => row.id === orgId), true)
 
       const playlist = { playlistId: await remote.playlists.create(
         { name: 'S08 List' },
@@ -1893,16 +1944,17 @@ describe('server runtime lifecycle', () => {
       ) }
       const added = await remote.playlists.addVideo(
         { playlistId: playlist.playlistId, videoId },
-        {
-          operationId: randomUUID(),
-          expectedVersions: {
-            P: getDb()
-              .prepare('SELECT generation, revision FROM playlists WHERE id = ?')
-              .get(playlist.playlistId) as { generation: number; revision: number }
-          }
-        }
+        await ipcPlaylistMutation(remote, playlist.playlistId)
       )
       assert.equal(added, true)
+      assert.equal(await remote.playlists.removeVideo(
+        { playlistId: playlist.playlistId, videoId },
+        await ipcPlaylistMutation(remote, playlist.playlistId)
+      ), true)
+      assert.equal(await remote.playlists.addVideo(
+        { playlistId: playlist.playlistId, videoId },
+        await ipcPlaylistMutation(remote, playlist.playlistId)
+      ), true)
       const memberships = (await remote.playlists.listForVideo({ videoId })) as Array<{
         id: number
         contains_video: boolean
@@ -2165,6 +2217,41 @@ describe('server runtime lifecycle', () => {
     } finally { remote.dispose() }
   })
 
+  it('creates remote libraries atomically with mount subdirectories and scan config', async () => {
+    const mount = path.join(root, 'create-wizard-mount')
+    const selected = path.join(mount, '中文 子目录')
+    fs.mkdirSync(selected, { recursive: true })
+    const { base, config } = await boot(path.join(root, 'create-wizard-data'), { media: mount })
+    const writer = await claimInitialWriter(base, config)
+    const identity = { serverId: writer.serverId, catalogId: writer.catalogId, writerEpoch: writer.writerEpoch }
+    const create = (input: unknown, operationId = randomUUID()) => postManage(base, 'libraries.create', {
+      ...identity, operationId, expectedVersions: {}, input
+    }, { bearer: writer.secret })
+    const list = async () => (await postManage(base, 'libraries.list', { ...identity, input: {} }, { bearer: writer.secret })).json
+    const before = await list()
+    const invalid = await create({ name: 'Invalid', remoteRoots: [{ mountSelectionId: 'media', relativePath: '../escape' }] })
+    assert.notEqual(invalid.status, 200)
+    assert.deepEqual(await list(), before)
+    const rawPath = await create({ name: 'Invalid', roots: [{ path: selected }] })
+    assert.equal(rawPath.status, 400)
+    const input = { name: 'Remote wizard', remoteRoots: [{ mountSelectionId: 'media', relativePath: '中文 子目录' }], config: { minImportDurationMinutes: 0, autoImportLocalNfo: false } }
+    const operationId = randomUUID()
+    const result = await create(input, operationId)
+    assert.equal(result.status, 200, JSON.stringify(result.json))
+    const library = result.json as { id: number; activeRootCount: number; roots: Array<{ path: string }>; config: { minImportDurationMinutes: number; autoImportLocalNfo: boolean } }
+    assert.equal(library.activeRootCount, 1)
+    assert.equal(library.roots[0].path, fs.realpathSync.native(selected))
+    assert.equal(library.config.minImportDurationMinutes, 0)
+    assert.equal(library.config.autoImportLocalNfo, false)
+    const replay = await create(input, operationId)
+    assert.equal(replay.status, 200)
+    assert.equal((replay.json as { id: number }).id, library.id)
+    const after = await list()
+    const overlap = await create({ ...input, name: 'Overlap' })
+    assert.notEqual(overlap.status, 200)
+    assert.deepEqual(await list(), after)
+  })
+
   it('scans a real mount, writes XML-only NFO, and keeps marker vs unmount distinct', async () => {
     const s09Mount = path.join(root, 's09-media')
     const extraMount = path.join(root, 's09-unmount')
@@ -2226,6 +2313,22 @@ describe('server runtime lifecycle', () => {
     })
     assert.equal(configUpdated.status, 200)
     library = (await read('libraries.get', { libraryId: 1 })).json as typeof library
+
+    const browsed = await read('libraries.browseMount', { mountSelectionId: 's09' })
+    assert.equal(browsed.status, 200, JSON.stringify(browsed.json))
+    assert.equal((browsed.json as { current: { path: string } }).current.path, fs.realpathSync.native(s09Mount))
+    const escaped = await read('libraries.browseMount', { mountSelectionId: 's09', relativePath: '../outside' })
+    assert.equal(escaped.status, 400)
+
+    const stale = await write('libraries.addRoot', {
+      ...versions(library),
+      L: { generation: 1, revision: library.revision + 1 }
+    }, {
+      libraryId: 1,
+      root: { mountSelectionId: 's09' }
+    })
+    assert.equal(stale.status, 409, JSON.stringify(stale.json))
+    assert.equal(fs.existsSync(path.join(s09Mount, JAVDEX_ROOT_MARKER)), false)
 
     const added = await write('libraries.addRoot', versions(library), {
       libraryId: 1,
@@ -2309,7 +2412,7 @@ describe('server runtime lifecycle', () => {
       const beforeNfo = getDb()
         .prepare("SELECT id, generation, revision FROM videos WHERE code = 'ABC-001'")
         .get() as { id: number; generation: number; revision: number }
-      const nfoPlan = await write('nfo.plan', versions(library), {
+      const nfoPlan = await write('nfo.plan', {}, {
         libraryIds: [1],
         profileId: 'portable-v1',
         includeCover: true,
@@ -2327,7 +2430,7 @@ describe('server runtime lifecycle', () => {
       }
       assert.equal(plan.warnings.some((warning) => warning.includes('只写 XML')), true)
       assert.equal(plan.summary.fileCount >= 1, true)
-      const nfoStart = await write('nfo.start', versions(library), {
+      const nfoStart = await write('nfo.start', {}, {
         planId: plan.planId,
         planDigest: plan.planDigest
       })
@@ -2929,19 +3032,19 @@ describe('server runtime lifecycle', () => {
     const importedTask = await helpers.pollTask((imported.json as { taskId: string }).taskId)
     assert.equal(importedTask.state, 'succeeded', JSON.stringify(importedTask))
     library = (await helpers.read('libraries.get', { libraryId: 1 })).json as typeof library
-    const expiredPlan = await helpers.write('nfo.plan', versions(library), nfoInput)
+    const expiredPlan = await helpers.write('nfo.plan', {}, nfoInput)
     assert.equal(expiredPlan.status, 200, JSON.stringify(expiredPlan.json))
     const expired = expiredPlan.json as { planId: string; planDigest: string }
     getDb()
       .prepare("UPDATE catalog_maintenance_plans SET expires_at = '2000-01-01T00:00:00.000Z' WHERE plan_id = ?")
       .run(expired.planId)
-    const expiredStart = await helpers.write('nfo.start', versions(library), {
+    const expiredStart = await helpers.write('nfo.start', {}, {
       planId: expired.planId,
       planDigest: expired.planDigest
     })
     assert.equal(expiredStart.status, 409, JSON.stringify(expiredStart.json))
     assert.equal((expiredStart.json as { code?: string }).code, 'VERSION_CONFLICT')
-    const restartPlan = await helpers.write('nfo.plan', versions(library), nfoInput)
+    const restartPlan = await helpers.write('nfo.plan', {}, nfoInput)
     assert.equal(restartPlan.status, 200, JSON.stringify(restartPlan.json))
     const beforeRestart = restartPlan.json as { planId: string; planDigest: string }
     assert.equal(fs.existsSync(path.join(mount, 'M09-001.nfo')), false)
@@ -2951,16 +3054,16 @@ describe('server runtime lifecycle', () => {
     const second = await boot(dataDir, extraMounts)
     helpers = await session(second.base, writer)
     library = (await helpers.read('libraries.get', { libraryId: 1 })).json as typeof library
-    const restartedStart = await helpers.write('nfo.start', versions(library), {
+    const restartedStart = await helpers.write('nfo.start', {}, {
       planId: beforeRestart.planId,
       planDigest: beforeRestart.planDigest
     })
     assert.equal(restartedStart.status, 409, JSON.stringify(restartedStart.json))
     assert.equal((restartedStart.json as { code?: string }).code, 'VERSION_CONFLICT')
-    const livePlan = await helpers.write('nfo.plan', versions(library), nfoInput)
+    const livePlan = await helpers.write('nfo.plan', {}, nfoInput)
     assert.equal(livePlan.status, 200, JSON.stringify(livePlan.json))
     const live = livePlan.json as { planId: string; planDigest: string }
-    const started = await helpers.write('nfo.start', versions(library), {
+    const started = await helpers.write('nfo.start', {}, {
       planId: live.planId,
       planDigest: live.planDigest
     })
@@ -3237,6 +3340,32 @@ describe('server runtime lifecycle', () => {
       { bearer: writer.secret }
     )
     assert.equal(cropped.status, 200, JSON.stringify(cropped.json))
+
+    const galleryAssetId = Number(getDb()
+      .prepare("INSERT INTO actress_gallery_assets (actress_id, local_path) VALUES (?, ?)")
+      .run(actressId, avatarRow.avatar_source_path).lastInsertRowid)
+    const galleryVersion = getDb()
+      .prepare('SELECT generation, revision FROM actresses WHERE id = ?')
+      .get(actressId) as { generation: number; revision: number }
+    const galleryPoster = await postManage(
+      base,
+      'actresses.setPoster',
+      {
+        operationId: randomUUID(),
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        expectedVersions: { A: galleryVersion },
+        input: { actressId, slot: 'galleryPoster', image: { kind: 'asset', assetId: galleryAssetId } }
+      },
+      { bearer: writer.secret }
+    )
+    assert.equal(galleryPoster.status, 200, JSON.stringify(galleryPoster.json))
+    const galleryPosterRow = getDb()
+      .prepare('SELECT poster_path, avatar_source_path FROM actresses WHERE id = ?')
+      .get(actressId) as { poster_path: string; avatar_source_path: string }
+    assert.equal(galleryPosterRow.poster_path, avatarRow.avatar_source_path)
+    assert.equal(galleryPosterRow.avatar_source_path, avatarRow.avatar_source_path)
 
     const agentVideo = await insertBoundVideo('S10-003', uniqueClip('S10-003'))
     const now = new Date().toISOString()
@@ -3794,6 +3923,21 @@ describe('server runtime lifecycle', () => {
       assert.equal(applied.relatedLinksAdded, 1)
       assert.deepEqual(await remote.playlists.applyImport(input, context), applied)
       assert.equal((await remote.playlists.get({ playlistId: applied.playlistId }))?.videos.length, 2)
+      const refreshedLibrary = await remote.libraries.get({ libraryId: 1 })
+      assert.ok(refreshedLibrary)
+      const placeholder = await remote.playlists.applyImport({
+        name: 'Remote no-resource playlist',
+        libraryId: 1,
+        entries: [{ kind: 'create', code: 'PL-REMOTE-CREATE', title: 'Remote placeholder', links: [] }]
+      }, {
+        operationId: randomUUID(),
+        expectedVersions: { L: { generation: 1, revision: refreshedLibrary.revision } }
+      })
+      assert.equal(placeholder.entries?.[0]?.created, true)
+      const placeholderVideo = await remote.queries.getVideo({ scope: { kind: 'all' }, videoId: placeholder.entries?.[0]?.videoId ?? 0 })
+      assert.ok(placeholderVideo)
+      assert.equal(placeholderVideo.code, 'PL-REMOTE-CREATE')
+      assert.equal(placeholderVideo.resources.length, 0)
       await assert.rejects(remote.playlists.applyImport(input, {
         operationId: randomUUID(), expectedVersions: { ...context.expectedVersions,
           L: { generation: 1, revision: library.revision - 1 } }
@@ -3995,9 +4139,11 @@ describe('server runtime lifecycle', () => {
     assert.ok(ttlMs > PLAY_GRANT_TTL_MS - 60_000)
     assert.ok(ttlMs <= PLAY_GRANT_TTL_MS + 5_000)
     const handle = new URL(play.playbackHandle)
+    assert.equal(decodeURIComponent(handle.pathname.split('/').at(-1) ?? ''), 'S11-001.mp4')
     const head = await fetch(play.playbackHandle, { method: 'HEAD' })
     assert.equal(head.status, 200)
     assert.equal(head.headers.get('accept-ranges'), 'bytes')
+    assert.equal(head.headers.get('content-disposition'), "inline; filename*=UTF-8''S11-001.mp4")
     const ranged = await fetch(play.playbackHandle, { headers: { Range: 'bytes=0-3' } })
     assert.equal(ranged.status, 206)
     assert.equal(Buffer.from(await ranged.arrayBuffer()).toString(), '0123')
@@ -4007,6 +4153,8 @@ describe('server runtime lifecycle', () => {
     assert.equal(cookiePlay.status, 404)
     const badToken = await fetch(`${handle.origin}${handle.pathname}?t=not-the-grant`)
     assert.equal(badToken.status, 404)
+    const wrongName = await fetch(`${handle.origin}${handle.pathname.replace(/[^/]+$/, 'other.mp4')}${handle.search}`)
+    assert.equal(wrongName.status, 404)
     const staleGrant = await postManage(
       base,
       'play.grant',
@@ -4030,6 +4178,42 @@ describe('server runtime lifecycle', () => {
     const stillPlaying = await fetch(play.playbackHandle, { headers: { Range: 'bytes=4-7' } })
     assert.equal(stillPlaying.status, 206)
     assert.equal(Buffer.from(await stillPlaying.arrayBuffer()).toString(), '4567')
+
+    for (const [code, extension] of [['S11-AVI', '.avi'], ['S11-UNKNOWN', '.unlisted']] as const) {
+      const file = path.join(mediaRoot, `${code} 原片${extension}`)
+      fs.writeFileSync(file, Buffer.from('original bytes'))
+      const bound = await insertBoundVideo(code, file)
+      const boundResource = getDb().prepare('SELECT * FROM video_resources WHERE id = ?').get(bound.fileId) as typeof resource
+      const originalGrant = await postManage(base, 'play.grant', {
+        serverId: writer.serverId,
+        catalogId: writer.catalogId,
+        writerEpoch: writer.writerEpoch,
+        input: {
+          libraryId: 1,
+          videoId: bound.videoId,
+          resourceId: bound.fileId,
+          locatorRevision: resourceLocatorRevision(boundResource)
+        }
+      }, { bearer: writer.secret })
+      assert.equal(originalGrant.status, 200, JSON.stringify(originalGrant.json))
+      const originalHandle = (originalGrant.json as { playbackHandle: string }).playbackHandle
+      assert.equal(decodeURIComponent(new URL(originalHandle).pathname.split('/').at(-1) ?? ''), path.basename(file))
+      const originalHead = await fetch(originalHandle, { method: 'HEAD' })
+      assert.equal(originalHead.status, 200)
+      const equivalentUrl = new URL(originalHandle)
+      equivalentUrl.pathname = equivalentUrl.pathname.replace(/%[0-9A-F]{2}/g, (escape) => escape.toLowerCase())
+      assert.equal((await fetch(equivalentUrl, { method: 'HEAD' })).status, 200)
+      const invalidNameUrl = new URL(originalHandle)
+      invalidNameUrl.pathname = invalidNameUrl.pathname.replace(/[^/]+$/, 'wrong-name.avi')
+      assert.equal((await fetch(invalidNameUrl, { method: 'HEAD' })).status, 404)
+      invalidNameUrl.pathname = invalidNameUrl.pathname.replace(/[^/]+$/, '%FF.avi')
+      assert.equal((await fetch(invalidNameUrl, { method: 'HEAD' })).status, 404)
+      assert.equal(originalHead.headers.get('content-type'), 'application/octet-stream')
+      assert.equal(originalHead.headers.get('content-disposition'), `inline; filename*=UTF-8''${encodeURIComponent(path.basename(file))}`)
+      const originalRange = await fetch(originalHandle, { headers: { Range: 'bytes=0-7' } })
+      assert.equal(originalRange.status, 206)
+      assert.equal(Buffer.from(await originalRange.arrayBuffer()).toString(), 'original')
+    }
 
     const png = await sharp({
       create: { width: 10, height: 8, channels: 3, background: { r: 9, g: 18, b: 27 } }
@@ -4576,6 +4760,10 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
         })
         return
       }
+      if (url.endsWith('/writer.status')) {
+        send({ bound: true, writerEpoch: 1 })
+        return
+      }
       if (url.endsWith('/videos.get')) {
         videosGetCount += 1
         void hold.then(() => {
@@ -4677,6 +4865,10 @@ describe('RemoteCatalogBackend reconnect isolation', () => {
             managementEnabled: true
           }
         })
+        return
+      }
+      if (url.endsWith('/writer.status')) {
+        send({ bound: true, writerEpoch: 1 })
         return
       }
       if (url.endsWith('/videos.get')) {

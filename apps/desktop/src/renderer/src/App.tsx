@@ -1,3 +1,4 @@
+import { useDesktopSession } from './desktop/DesktopSessionContext'
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import ResetListStateOnReload from './listView/ResetListStateOnReload'
@@ -218,11 +219,12 @@ function AppContent(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
+  const { session } = useDesktopSession()
   useEffect(() => installDisableInputSpellcheck(), [])
 
   return (
     <ThemeProvider>
-      <AppContent />
+      <AppContent key={session.catalogId} />
     </ThemeProvider>
   )
 }

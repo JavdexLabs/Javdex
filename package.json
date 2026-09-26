@@ -1,6 +1,6 @@
 {
   "name": "Javdex",
-  "version": "0.8.0-beta.1",
+  "version": "0.8.0-beta.3",
   "description": "Javdex — local JAV library manager",
   "main": "./out/main/index.js",
   "author": "Javdex",
@@ -51,7 +51,7 @@
     "web:dev": "vite build --config vite.web.config.ts --watch",
     "desktop:build": "electron-vite build && node scripts/check-mediapipe-assets.mjs && node scripts/check-built-pi-runtime.mjs",
     "setup:desktop": "electron-rebuild -f -w better-sqlite3",
-    "check:workspaces": "node scripts/check-workspaces.mjs",
+    "check:workspaces": "node scripts/check-workspaces.mjs && node --test scripts/check-workspaces.test.mjs",
     "check:server-boundaries": "node scripts/check-server-boundaries.mjs",
     "check:server-production-closure": "node scripts/check-server-production-closure.mjs",
     "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",

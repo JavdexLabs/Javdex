@@ -322,6 +322,31 @@ export function applyActressAvatarRef(
   return { versions: { A: readActressAggregateVersion(actressId, database)! } }
 }
 
+export function applyActressGalleryPosterRef(
+  actressId: number,
+  image: CatalogImageRef,
+  expected: ExpectedVersions,
+  operationId: string,
+  database: Database.Database = getDb()
+): { versions: { A: NonNullable<ReturnType<typeof readActressAggregateVersion>> } } {
+  assertExpectedActressVersion(actressId, expected, operationId, database)
+  let posterPath: string | null = null
+  if (image.kind === 'asset') {
+    const asset = database.prepare(
+      "SELECT local_path FROM actress_gallery_assets WHERE id = ? AND actress_id = ? AND type = 'gallery'"
+    ).get(image.assetId, actressId) as { local_path: string | null } | undefined
+    if (!asset?.local_path) {
+      throw structuredError('INVALID_INPUT', '背景必须来自当前演员的本地写真', { field: 'image' }, operationId)
+    }
+    posterPath = asset.local_path
+  } else if (image.kind !== 'clear') {
+    throw structuredError('INVALID_INPUT', '写真背景只能选择已有写真', { field: 'image' }, operationId)
+  }
+  database.prepare('UPDATE actresses SET poster_path = ?, updated_at = ?, revision = revision + 1 WHERE id = ?')
+    .run(posterPath, nowIso(), actressId)
+  return { versions: { A: readActressAggregateVersion(actressId, database)! } }
+}
+
 export function applyActressGalleryRefs(
   actressId: number,
   images: CatalogImageRef[],

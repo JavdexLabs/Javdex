@@ -59,6 +59,7 @@ describe('createRemoteSessionCapabilities', () => {
 
     const expectedFailure: Record<string, string> = {
       disconnected: 'disconnected',
+      claimRequired: 'recoveryRequired',
       versionMismatch: 'versionMismatch',
       recoveryRequired: 'recoveryRequired',
       authInvalid: 'writerRevoked',

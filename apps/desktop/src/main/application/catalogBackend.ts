@@ -170,12 +170,14 @@ export interface CatalogPlaylistCommands {
 export interface CatalogLibraryCommands {
   list: Query<'libraries.list'>
   get: Query<'libraries.get'>
+  browseMount: Query<'libraries.browseMount'>
   create: Command<'libraries.create'>
   update: Command<'libraries.update'>
   updateConfig: Command<'libraries.updateConfig'>
   addRoot: Command<'libraries.addRoot'>
   updateRoot: Command<'libraries.updateRoot'>
   removeRoot: Command<'libraries.removeRoot'>
+  previewRootRemoval: Query<'libraries.removeRootPreview'>
   cancelRootRemoval: Command<'libraries.cancelRootRemoval'>
   archive: Command<'libraries.archive'>
   restore: Command<'libraries.restore'>
@@ -286,12 +288,20 @@ export interface CatalogMigrationCommands {
   ) => Promise<{ ok: true; bytes: number }>
 }
 
+export interface CatalogBackupCommands {
+  request(input: import('@shared/protocol/backup').BackupRequest): Promise<import('@shared/protocol/backup').BackupResponse>
+  upload(id: string, offset: number, data: Buffer): Promise<number>
+  download(id: string, offset: number): Promise<Buffer>
+}
+
 export interface CatalogBackend {
+  backup: CatalogBackupCommands
   readonly mode: 'local' | 'remote'
   readonly identity: CatalogIdentity
   readonly generation: number
   capabilities(): DesktopCapabilityMap
   session(): DesktopSession
+  onSessionChanged?(listener: () => void): () => void
   reconnect(): Promise<DesktopSession>
   claimWriter(input: DesktopWriterClaimRequest): Promise<DesktopWriterClaimResult>
   queries: CatalogQueries

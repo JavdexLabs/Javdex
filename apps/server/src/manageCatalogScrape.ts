@@ -88,14 +88,7 @@ export const scrapeHandlers: Partial<Record<ManageOperationId, CatalogHandler>> 
     return { receipt: result.receipt, ...result.data }
   },
   'playlists.applyImport'(args) {
-    const input = args.envelope.input as {
-      name: string
-      videoIds: number[]
-      libraryId: number
-      cover?: CatalogImageRef
-      sourceUrl?: string
-      videoLinks?: Array<{ videoId: number; label: string; url: string }>
-    }
+    const input = args.envelope.input as ManageOperationInput<'playlists.applyImport'>
     const mutation = requireMutation(args.envelope)
     return commitImage(args, () =>
       applyPlaylistImport({

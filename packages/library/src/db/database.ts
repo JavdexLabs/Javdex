@@ -22,7 +22,7 @@ export function initDatabaseAtPath(dbPath: string): Database.Database {
   return openDatabase(dbPath)
 }
 
-function registerReadFunctions(connection: Database.Database): void {
+export function registerReadFunctions(connection: Database.Database): void {
   // Match renderer Unicode search semantics on both writer and reader connections.
   connection.function('tag_name_contains_folded', { deterministic: true }, (name: unknown, folded: unknown) =>
     typeof name === 'string' && typeof folded === 'string' && name.toLowerCase().includes(folded) ? 1 : 0)

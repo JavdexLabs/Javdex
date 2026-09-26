@@ -5,6 +5,7 @@ import { SettingsCard, SettingsStatusPill } from './SettingsPrimitives'
 import Button from '../Button'
 import styles from './StorageSettingsPanel.module.css'
 import NfoExportPanel from './NfoExportPanel'
+import { useDesktopSession } from '../../desktop/DesktopSessionContext'
 
 export default function StorageSettingsPanel({
   settings,
@@ -23,10 +24,45 @@ export default function StorageSettingsPanel({
   onToggleAssetEncryption: (checked: boolean) => void
   onExportBlockingChange: (blocking: boolean) => void
 }): JSX.Element {
+  const { session } = useDesktopSession()
   const resolvedPath = settings.mediaAssetsResolvedPath ?? settings.mediaAssetsPath
   const usingDefault = !settings.mediaAssetsPath.trim()
   const encryptionEnabled = settings.assetEncryption
   const assetKinds = ['封面', '头像', '样张', '演员写真', '清单封面']
+
+  if (tab === 'assets' && session.mode === 'remote') {
+    const serverPath = session.remoteImagesDir ?? '暂无法读取服务端目录'
+    return (
+      <SettingsCard
+        className={styles.root}
+        title="服务端图片资源"
+        hint="封面、头像、样张、演员写真与清单封面保存在当前连接的服务端。"
+        actions={<SettingsStatusPill status="info">服务端管理</SettingsStatusPill>}
+      >
+        <section className={styles.panel} aria-label="服务端图片资源目录">
+          <div className={styles.panelHead}>
+            <span className={styles.panelIcon} aria-hidden="true">
+              <HardDrive {...UI_ICON_SM} />
+            </span>
+            <div className={styles.panelCopy}>
+              <h4>媒体资源目录</h4>
+              <p>目录由服务端部署配置管理；这里显示的是服务端路径。</p>
+            </div>
+          </div>
+          <div className={styles.pathBox}>
+            <span className={styles.pathLabel}>服务端当前路径</span>
+            <div className={styles.pathRow}>
+              <FolderOpen {...UI_ICON_SM} aria-hidden />
+              <span className={styles.pathText} title={serverPath}>{serverPath}</span>
+            </div>
+          </div>
+          <p className={styles.remoteHint}>
+            如需更改目录，请先迁移现有图片，再修改服务端 imagesDir 或 JAVDEX_IMAGES_DIR 并重启服务。
+          </p>
+        </section>
+      </SettingsCard>
+    )
+  }
 
   return (
     <>

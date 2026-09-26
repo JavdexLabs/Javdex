@@ -14,6 +14,7 @@ import ActressAvatar from '../ActressAvatar'
 import EmptyState from '../EmptyState'
 import { UI_ICON_SM } from '../iconDefaults'
 import type { PluginKind } from './types'
+import { useDesktopSession } from '../../desktop/DesktopSessionContext'
 
 interface Props {
   kind: PluginKind
@@ -67,6 +68,7 @@ function TargetPickerSession({
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [error, setError] = useState<string | null>(null)
+  const { session } = useDesktopSession()
   const selectedSet = useMemo(
     () => new Set(selectedValues.map((value) => normalizeTarget(value))),
     [selectedValues]
@@ -85,13 +87,15 @@ function TargetPickerSession({
     setChoiceError(null)
   }
   const close = (): void => { choiceEpoch.current++; onClose() }
-  const chooseActress = async (id: number): Promise<void> => {
+  const chooseActress = async (id: number, listedName: string): Promise<void> => {
     if (choiceBusy.current) return
     choiceBusy.current = true
     const epoch = ++choiceEpoch.current
     setAddingId(id); setChoiceError(null)
     try {
-      const name = await api.actresses.testTargetGet(id)
+      // The server already returns the canonical display name in the page row,
+      // while the desktop-only identity endpoint is intentionally unavailable remotely.
+      const name = session.mode === 'remote' ? listedName : await api.actresses.testTargetGet(id)
       if (!mounted.current || epoch !== choiceEpoch.current) return
       if (name === null) throw new Error('该演员已不存在或不再符合候选条件，请刷新列表')
       const parsed = parseTestTargetList(name)
@@ -147,6 +151,14 @@ function TargetPickerSession({
     setSelectionError(null)
     setResolvingSelection(uncertain.length > 0)
     if (uncertain.length === 0) return
+    if (session.mode === 'remote') {
+      setResolvedNames(current => ({
+        ...Object.fromEntries(Object.entries(current).filter(([key]) => !uncertain.some(item => item.id === Number(key))).slice(-99)),
+        ...Object.fromEntries(uncertain.map(item => [item.id, item.main_name]))
+      }))
+      setResolvingSelection(false)
+      return
+    }
     let next = 0
     const resolved: Record<number, string> = {}
     let failed = false
@@ -164,7 +176,7 @@ function TargetPickerSession({
       if (failed) setSelectionError('部分长名称的已选状态无法确认，请重试')
     })
     return () => { cancelled = true }
-  }, [actresses, selectedSet, retry])
+  }, [actresses, retry, selectedSet, session.mode])
 
   const resultCount = kind === 'actress' ? actresses.length : videos.length
 
@@ -212,7 +224,7 @@ function TargetPickerSession({
                     className={`plugin-dev-target-picker-row${selected ? ' is-selected' : ''}`}
                     disabled={selected || addingId !== null || resolvingSelection}
                     aria-label={`添加测试演员 ${actress.main_name}`}
-                    onClick={() => void chooseActress(actress.id)}
+                    onClick={() => void chooseActress(actress.id, actress.main_name)}
                   >
                     <ActressAvatar
                       src={resolveMediaSrc(actress.avatar_path)}

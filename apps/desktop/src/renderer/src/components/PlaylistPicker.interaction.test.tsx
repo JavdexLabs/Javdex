@@ -7,12 +7,14 @@ import TestRenderer, { act } from 'react-test-renderer'
 const requests: Array<{ query: Record<string, unknown>; resolve: (page: unknown) => void; reject: (error: Error) => void }> = []
 let fullCalls = 0
 const added: Array<[number, number]> = []
+const addVersions: unknown[] = []
 const created: string[] = []
 const fakeApi = { playlists: {
   list: async () => { fullCalls++; return [] },
   listForVideo: async () => { fullCalls++; return [] },
+  metadata: async (id: number) => ({id,generation:1,revision:2}),
   listPage: (query: Record<string, unknown>) => new Promise((resolve, reject) => requests.push({ query, resolve, reject })),
-  addVideo: async (id: number, video: number) => { added.push([id, video]); return true },
+  addVideo: async (id: number, video: number, expectedVersions: unknown) => { added.push([id, video]); addVersions.push(expectedVersions); return true },
   removeVideo: async () => true,
   create: async (input: {name: string}) => { created.push(input.name); return 999 }
 } }
@@ -23,7 +25,7 @@ let Picker: typeof import('./AddVideosToPlaylistModal')['default']
 let viewport=continuousViewport()
 let renderer: TestRenderer.ReactTestRenderer | undefined
 before(async () => { Picker = (await import('./AddVideosToPlaylistModal')).default })
-afterEach(async () => { await act(async () => renderer?.unmount()); renderer = undefined;viewport=continuousViewport(); requests.length = 0; fullCalls = 0; added.length = 0; created.length = 0 })
+afterEach(async () => { await act(async () => renderer?.unmount()); renderer = undefined;viewport=continuousViewport(); requests.length = 0; fullCalls = 0; added.length = 0; addVersions.length = 0; created.length = 0 })
 function text(node: TestRenderer.ReactTestInstance): string { return node.children.map(child => typeof child === 'string' ? child : text(child)).join('') }
 async function click(label: string) {
   if(label==='下一页'){await viewport.scroll(renderer!,60);return}
@@ -33,7 +35,7 @@ async function click(label: string) {
 }
 async function resolve(index: number, offset = 0, total = 125, exact = false) {
   await act(async () => requests[index].resolve({ offset, limit: 60, total, hasExactName: exact,
-    items: Array.from({ length: Math.min(60, total - offset) }, (_, i) => ({ id: offset + i + 1, name: `List ${offset+i+1}`, description: null, preview_cover_path: null, video_count: 0, contains_video: false })) }))
+    items: Array.from({ length: Math.min(60, total - offset) }, (_, i) => ({ id: offset + i + 1, generation:1,revision:1,name: `List ${offset+i+1}`, description: null, preview_cover_path: null, video_count: 0, contains_video: false })) }))
 }
 it('loads only a server page and replaces sixty rows when advancing', async () => {
   await act(async () => { renderer = TestRenderer.create(<Picker videoIds={[7, 2]} onCancel={() => {}} />, {createNodeMock:viewport.createNodeMock}) })
@@ -48,6 +50,7 @@ it('loads only a server page and replaces sixty rows when advancing', async () =
     .find(node=>text(node).includes('List 61'))!
   await act(async()=>row.findAllByType('button').find(node=>text(node)==='加入')!.props.onClick())
   assert.deepEqual(added, [[61, 7], [61, 2]])
+  assert.deepEqual(addVersions, [{P:{generation:1,revision:1}},{P:{generation:1,revision:2}}])
 })
 
 it('does not create from a stale page or an off-page exact match, and retains full create input', async () => {

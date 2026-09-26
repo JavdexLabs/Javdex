@@ -720,11 +720,11 @@ if (hostConfigRaw) {
         }
         const localPlan = (await local.nfo.plan(
           planInput,
-          ipcMutation(undefined, versionsFrom(localLibrary))
+          ipcMutation()
         )) as NfoExportPlanPreview & { planDigest?: string }
         const remotePlan = (await remote.nfo.plan(
           planInput,
-          ipcMutation(undefined, versionsFrom(remoteLibrary))
+          ipcMutation()
         )) as NfoExportPlanPreview & { planDigest?: string }
         assert.equal(localPlan.summary.fileCount >= 1, true, JSON.stringify(localPlan))
         assert.equal(remotePlan.summary.fileCount >= 1, true, JSON.stringify(remotePlan))

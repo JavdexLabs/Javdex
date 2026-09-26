@@ -39,7 +39,7 @@ export function listPlaylistBrowsePage(query: PlaylistListQuery = {}, database: 
     const rows = database.prepare(`WITH page AS MATERIALIZED (
       SELECT p.id, p.created_at FROM playlists p ${filter} ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?
     ), projected AS MATERIALIZED (
-      SELECT p.id, page.created_at,
+      SELECT p.id, p.generation, p.revision, page.created_at,
         substr(CAST(p.name AS BLOB),1,516) AS name_prefix,
         substr(CAST(p.description AS BLOB),1,1028) AS description_prefix,
         (SELECT COUNT(*) FROM playlist_video pv WHERE pv.playlist_id=p.id) AS video_count,
@@ -48,13 +48,14 @@ export function listPlaylistBrowsePage(query: PlaylistListQuery = {}, database: 
           WHERE pv2.playlist_id=p.id AND v.cover_path IS NOT NULL AND trim(v.cover_path)!=''
           ORDER BY pv2.position,pv2.added_at,pv2.video_id LIMIT 1)) AS cover
       FROM page JOIN playlists p ON p.id=page.id
-    ) SELECT id,name_prefix,description_prefix,video_count,contains_video,
+    ) SELECT id,generation,revision,name_prefix,description_prefix,video_count,contains_video,
       CASE WHEN length(CAST(cover AS BLOB))<=4096 THEN cover ELSE NULL END AS preview_cover_path
       FROM projected ORDER BY created_at DESC,id DESC`).all(...params, input.limit, offset, input.videoId ?? null) as Array<{
-        id: number; name_prefix: Buffer; description_prefix: Buffer | null; video_count: number; contains_video: number; preview_cover_path: string | null
+        id: number; generation: number; revision: number; name_prefix: Buffer; description_prefix: Buffer | null; video_count: number; contains_video: number; preview_cover_path: string | null
       }>
     return { total, offset, limit: input.limit, hasExactName, items: rows.map(row => ({
-      id: row.id, name: display(row.name_prefix,128)!, description: display(row.description_prefix,256),
+      id: row.id, generation: row.generation, revision: row.revision,
+      name: display(row.name_prefix,128)!, description: display(row.description_prefix,256),
       video_count: row.video_count, contains_video: Boolean(row.contains_video), preview_cover_path: row.preview_cover_path
     })) }
   })()

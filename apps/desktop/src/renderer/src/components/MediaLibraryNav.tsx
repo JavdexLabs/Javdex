@@ -7,6 +7,7 @@ import { api } from '../api'
 import { clearListScrollForPrimaryNav } from '../listView/listViewMemory'
 import {
   mediaLibraryPath,
+  mediaLibrarySettingsPath,
   parseActiveMediaLibraryId,
   rememberMediaLibrarySettingsLibraryId
 } from '../listView/mediaLibraryRoutes'
@@ -40,7 +41,7 @@ export default function MediaLibraryNav(): JSX.Element {
   useEffect(() => {
     if (activeLibraryId) rememberMediaLibrarySettingsLibraryId(activeLibraryId)
   }, [activeLibraryId])
-  const { catalogReadsEnabled } = useDesktopSession()
+  const { catalogReadsEnabled, session } = useDesktopSession()
   const librariesQuery = useQuery({
     queryKey: mediaLibraryKeys.fullList(),
     queryFn: () => api.mediaLibraries.list({ includeArchived: true }),
@@ -58,7 +59,11 @@ export default function MediaLibraryNav(): JSX.Element {
       queryClient.invalidateQueries({ queryKey: ['home'] })
     ])
     toast.show(`媒体库“${library.name}”已创建`, 'success')
-    const go = (): void => navigate(mediaLibraryPath(library.id))
+    const go = (): void => navigate(
+      session.mode === 'remote'
+        ? mediaLibrarySettingsPath(library.id, 'sources')
+        : mediaLibraryPath(library.id)
+    )
     if (location.pathname === ROUTE_PATH.settingsPluginDev) requestLeave(go)
     else go()
     if (scanAfterCreate) {
@@ -171,6 +176,7 @@ export default function MediaLibraryNav(): JSX.Element {
           <MediaLibraryCreateModal
             onCancel={() => setCreateOpen(false)}
             onCreated={handleCreated}
+            remoteMode={session.mode === 'remote'}
           />,
           document.body
         )

@@ -27,6 +27,9 @@ export function registerMediaLibraryHandlers(
   adapter.register(IPC.MEDIA_LIBRARY_GET, (libraryId) =>
     backend.libraries.get({ libraryId })
   )
+  adapter.register(IPC.MEDIA_LIBRARY_MOUNT_BROWSE, (input) =>
+    backend.libraries.browseMount(input)
+  )
   adapter.register(IPC.MEDIA_LIBRARY_CREATE, (input) =>
     backend.libraries.create(input, ipcMutation())
   )
@@ -44,6 +47,9 @@ export function registerMediaLibraryHandlers(
   )
   adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE, (input) =>
     backend.libraries.removeRoot(input, ipcMutation())
+  )
+  adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE_PREVIEW, (input) =>
+    backend.libraries.previewRootRemoval(input)
   )
   adapter.register(IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL, (input) =>
     backend.libraries.cancelRootRemoval(input, ipcMutation())

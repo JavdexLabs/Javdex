@@ -46,7 +46,7 @@ it('saves proxy address and mode only on explicit commit; testing stays independ
     assert.deepEqual(updates, [])
     const test = renderer.root
       .findAllByType('button')
-      .find((button) => button.children.includes('测试连接'))!
+      .find((button) => visibleText(button) === '测试连接')!
     await act(async () => {
       test.props.onClick()
     })
@@ -64,3 +64,7 @@ it('saves proxy address and mode only on explicit commit; testing stays independ
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
+function visibleText(node: TestRenderer.ReactTestInstance | string): string {
+  return typeof node === 'string' ? node : node.children.map(child => visibleText(child as TestRenderer.ReactTestInstance)).join('')
+}

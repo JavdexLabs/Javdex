@@ -1,3 +1,4 @@
+import { createLocalBackup } from './localBackup'
 import { applyDesktopManagedDraft, findReadyDesktopManagedDraft, discardDesktopManagedDraft } from '../../services/agentMetadata/desktopDraftStore'
 import {
   agentMetadataPreviewVersions,
@@ -225,6 +226,7 @@ export interface LocalCatalogBackendDependencies {
   identity: CatalogIdentity
   generation?: number
   appVersion?: string
+  onRestored?: (catalogId: string) => void
   queries?: VideoQueryService | AsyncVideoQueryService
   videos?: VideoMaintenanceService
   lifecycle?: VideoLifecycleService
@@ -261,7 +263,7 @@ export function createLocalCatalogBackend(
   const actresses = dependencies.actresses ?? actressQueryService
   const reads = dependencies.reads ?? defaultReads
   const libraries = dependencies.libraries ?? defaultLibraries()
-  const generation = dependencies.generation ?? 1
+  let generation = dependencies.generation ?? 1
   const identity = dependencies.identity
   const session = (): DesktopSession => ({
     state: 'available',
@@ -837,7 +839,8 @@ export function createLocalCatalogBackend(
         () =>
           applyPlaylistImport({
             name: input.name,
-            videoIds: input.videoIds,
+            ...(input.videoIds ? { videoIds: input.videoIds } : {}),
+            ...(input.entries ? { entries: input.entries } : {}),
             libraryId: input.libraryId,
             cover: input.cover,
             sourceUrl: input.sourceUrl,
@@ -857,6 +860,9 @@ export function createLocalCatalogBackend(
     },
     async get(input) {
       return getMediaLibraryDetail(input.libraryId)
+    },
+    async browseMount() {
+      throw structuredError('UNSUPPORTED_CAPABILITY', '本地目录使用本机文件选择器')
     },
     async create(input) {
       return libraries.create(input as CreateMediaLibraryInput)
@@ -913,6 +919,9 @@ export function createLocalCatalogBackend(
     },
     async removeRoot(input) {
       return libraries.removeRoot(input as never)
+    },
+    async previewRootRemoval(input) {
+      return libraries.previewRootRemoval(input as never)
     },
     async cancelRootRemoval(input) {
       return libraries.cancelRootRemoval(input as never)
@@ -1177,9 +1186,10 @@ export function createLocalCatalogBackend(
   }
 
   return {
+    backup: createLocalBackup(dependencies.appVersion ?? '0.0.0', (id) => { identity.catalogId = id; generation++; dependencies.onRestored?.(id) }),
     mode: 'local',
     identity,
-    generation,
+    get generation() { return generation },
     capabilities: createLocalDesktopCapabilities,
     session,
     queries: catalogQueries,

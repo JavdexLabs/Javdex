@@ -21,6 +21,14 @@ export function applyPlaylistImport(input: ManageOperationInput<'playlists.apply
   database?: Database.Database
 }): PlaylistApplyImportResult {
   const database = input.database ?? getDb()
+  const entries = input.entries ?? (input.videoIds ?? []).map((videoId) => ({
+    kind: 'existing' as const,
+    videoId,
+    links: input.videoLinks?.filter((link) => link.videoId === videoId).map(({ label, url }) => ({ label, url }))
+  }))
+  if (entries.length === 0) {
+    throw structuredError('INVALID_INPUT', '清单导入至少需要一个影片或导入条目', { field: 'entries' }, input.operationId)
+  }
   const library = getMediaLibraryDetail(input.libraryId)
   if (!library) {
     throw structuredError('INVALID_INPUT', '媒体库不存在', { entityKind: 'library', entityId: input.libraryId }, input.operationId)
@@ -36,20 +44,21 @@ export function applyPlaylistImport(input: ManageOperationInput<'playlists.apply
       input.operationId
     )
   }
-  if (input.videoIds.length > 200) {
+  if (entries.length > 200) {
     throw structuredError(
       'LIMIT_EXCEEDED',
       '清单导入一次最多 200 个影片 ID；更长有序列表需合同增加 targetListId',
-      { field: 'videoIds', limit: 200, actual: input.videoIds.length },
+      { field: 'entries', limit: 200, actual: entries.length },
       input.operationId
     )
   }
-  const firstVideo = getVideoById(input.videoIds[0], database)
-  if (!firstVideo) {
-    throw structuredError('INVALID_INPUT', '清单影片不存在', { field: 'videoIds' }, input.operationId)
+  const existingEntries = entries.filter((entry): entry is Extract<typeof entry, { kind: 'existing' }> => entry.kind === 'existing')
+  const firstExistingId = existingEntries[0]?.videoId
+  if (firstExistingId == null && input.expected.V) {
+    throw structuredError('VERSION_CONFLICT', '清单导入缺少可校验的影片版本', { field: 'expected.V' }, input.operationId)
   }
-  if (input.expected.V) {
-    const current = readVideoAggregateVersion(input.videoIds[0], database)
+  if (firstExistingId != null && input.expected.V) {
+    const current = readVideoAggregateVersion(firstExistingId, database)
     if (
       !current ||
       current.generation !== input.expected.V.generation ||
@@ -58,14 +67,14 @@ export function applyPlaylistImport(input: ManageOperationInput<'playlists.apply
       throw structuredError(
         'VERSION_CONFLICT',
         '影片资料已更新，请刷新后重新导入',
-        { entityKind: 'video', entityId: input.videoIds[0] },
+        { entityKind: 'video', entityId: firstExistingId },
         input.operationId
       )
     }
   }
-  for (const videoId of input.videoIds) {
-    if (!getVideoById(videoId, database)) {
-      throw structuredError('INVALID_INPUT', '清单影片不存在', { field: 'videoIds', entityId: videoId }, input.operationId)
+  for (const entry of existingEntries) {
+    if (!getVideoById(entry.videoId, database)) {
+      throw structuredError('INVALID_INPUT', '清单影片不存在', { field: 'entries', entityId: entry.videoId }, input.operationId)
     }
   }
 
@@ -90,7 +99,7 @@ export function applyPlaylistImport(input: ManageOperationInput<'playlists.apply
   const links = input.sourceUrl
     ? [{ label: new URL(input.sourceUrl).host || '来源', url: input.sourceUrl }]
     : undefined
-  const allowedVideoIds = new Set(input.videoIds)
+  const allowedVideoIds = new Set(existingEntries.map((entry) => entry.videoId))
   if (input.videoLinks) {
     for (const link of input.videoLinks) {
       if (!allowedVideoIds.has(link.videoId)) {
@@ -103,28 +112,48 @@ export function applyPlaylistImport(input: ManageOperationInput<'playlists.apply
       }
     }
   }
+  const normalizedEntries = entries.map((entry) => ({
+    ...(entry.kind === 'create'
+      ? { kind: 'create' as const, code: entry.code, title: entry.title ?? null, links: entry.links }
+      : { kind: 'existing' as const, videoId: entry.videoId, links: entry.links }),
+    ...(entry.kind === 'existing' && input.entries && input.videoLinks
+      ? {
+          links: [
+            ...(entry.links ?? []),
+            ...input.videoLinks
+              .filter((link) => link.videoId === entry.videoId)
+              .map(({ label, url }) => ({ label, url }))
+          ]
+        }
+      : {})
+  }))
   const written = writePlaylistImport({
     destination: { kind: 'create', name: input.name, coverPath: coverRel },
     libraryId: input.libraryId,
     reusedMembership: 'ensure-target',
     sourceLinks: links,
-    entries: input.videoIds.map(videoId => ({
-      kind: 'existing', videoId,
-      links: input.videoLinks?.filter(link => link.videoId === videoId)
-    }))
+    entries: normalizedEntries
   }, database)
   const playlistId = written.playlistId
   const added = written.entries.filter(entry => entry.addedToPlaylist).length
   const relatedLinksAdded = written.entries.reduce((sum, entry) => sum + entry.relatedLinksAdded, 0)
-  const lastVideoId = input.videoIds[input.videoIds.length - 1]
+  const lastVideoId = written.entries.at(-1)?.videoId
   return {
     playlistId,
     added,
     relatedLinksAdded,
+    entries: written.entries.map((entry) => ({
+      videoId: entry.videoId,
+      created: entry.created,
+      membershipAdded: entry.membershipAdded,
+      addedToPlaylist: entry.addedToPlaylist,
+      alreadyInPlaylist: entry.alreadyInPlaylist,
+      relatedLinksAdded: entry.relatedLinksAdded
+    })),
     versions: {
       P: readPlaylistAggregateVersion(playlistId, database)!,
       L: { generation: 1, revision: library.revision },
-      V: readVideoAggregateVersion(lastVideoId, database) ?? undefined
+      V: lastVideoId == null ? undefined : readVideoAggregateVersion(lastVideoId, database) ?? undefined
     }
   }
 }

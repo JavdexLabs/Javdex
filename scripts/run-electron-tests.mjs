@@ -36,7 +36,9 @@ if (testFiles.length === 0) {
     '--test-concurrency=4',
     ...testFiles
   ]
-  const timeoutMs = Number(process.env.JAVDEX_TEST_TIMEOUT_MS ?? 180_000)
+  // Match release CI for the complete suite; keep focused runs bounded.
+  const defaultTimeoutMs = requestedFiles.length > 0 ? 180_000 : 900_000
+  const timeoutMs = Number(process.env.JAVDEX_TEST_TIMEOUT_MS ?? defaultTimeoutMs)
 
   const result = spawnSync(electronPath, args, {
     stdio: 'inherit',
@@ -45,7 +47,7 @@ if (testFiles.length === 0) {
       ELECTRON_RUN_AS_NODE: '1'
     },
     shell: false,
-    timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 180_000,
+    timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : defaultTimeoutMs,
     killSignal: 'SIGTERM'
   })
 

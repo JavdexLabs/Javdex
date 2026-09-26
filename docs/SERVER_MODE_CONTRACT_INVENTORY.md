@@ -42,6 +42,8 @@
 
 页面只提供业务目标、原版本和用户选择。writer token、HTTP 头、任意服务地址不进入 renderer。本地适配器直接调 library，不创建 localhost HTTP，也不模拟 writer token。
 
+服务端来源目录选择使用 `libraries.browseMount` 只读操作，仅列出部署配置 `mediaMounts` 的挂载及其中的普通子目录。`libraries.addRoot` 接收挂载名与相对路径，服务端再次解析、拒绝越界和符号链接目录后写入根标记；客户端路径不作为服务端主机路径使用。
+
 ## 共享用例与结果校验
 
 2026-09-20 架构优化已接入三组用例，其余阶段见 [实施方案与证据](ARCHITECTURE_SIMPLIFICATION_PLAN.md)：
@@ -86,6 +88,7 @@
 | `writer.handoffBegin` / `recoverIssue` | 当前 writer / 部署侧恢复（环回限制） | 签发一次性令牌；不是立即撤销旧 writer |
 | `uploads.create` / `inspect` | 管理写/读 | 上传完成 ≠ 业务受理 |
 | `play.grant` | 管理读 | 12 小时资源凭据 |
+| `catalog.storageInfo` | 管理读 | 返回当前服务端图片目录，供桌面存储页只读显示 |
 | `agentMetadata.preview` | 管理读 | 对桌面候选生成权威影响、令牌与当前版本；不持久化草稿 |
 | `agentMetadata.apply` | 管理写 | 再校验候选/预览并应用，或转入待确认；Agent runtime 留在桌面 |
 | `tasks.*` / `operations.get` / `targetLists.*` | 读或写 | 取消只到安全边界 |
@@ -168,10 +171,41 @@ C6 的最终语义集中如下，不再采用旧实施记录中的中间状态�
 - 首版为局域网、单 writer、无资料库同步。网页只读账号/Cookie 不授予管理、管理图片或授权播放权限；桌面主进程保存秘密。
 - 服务端使用固定挂载标记保护离线/卸载，不识别换卷，不提供已绑定挂载目录重绑；本机物理目录身份仍遵循 ADR-0024。
 - 远程不能打开服务端本机文件夹、选择桌面目录当服务端根、重绑本地根、加密图片或搬迁图片目录。正式图片为明文；无转码、无任意 URL 代理。
-- 能力按会话状态控制，见 [desktopCapabilities.ts](../apps/desktop/src/main/application/desktopCapabilities.ts)。当前远程 `manageBrowserPairing` 能力为不可用；有服务端接口不等于所有桌面 UI 动作均开放。冻结时不可编辑，但保留迁库能力，仍需 migration Bearer。
+- 能力按会话状态控制，见 [desktopCapabilities.ts](../apps/desktop/src/main/application/desktopCapabilities.ts)。远程可用会话开放 `manageBrowserPairing`，而本机目录、迁库等能力仍按原因禁用；有服务端接口不等于所有桌面 UI 动作均开放。冻结时不可编辑，但保留迁库能力，仍需 migration Bearer。
 - 工作存储准备未完成、凭据失效、版本不符或断线，不自动回退本地权威库。桌面工具可保留可用状态，正式查询/提交仍受远程会话约束。
+- 远程正式查询、写入、图片上传/读取和备份控制/传输统一处理 `AUTH_REQUIRED` / `WRITER_REVOKED`：锁定 `authInvalid`、中止在途客户端请求并通过会话事件更新界面，后续请求不再发送旧凭据。服务端已经提交的操作不会因客户端中止而回滚；恢复授权后由用户核对结果，失败写入不自动重放。旧连接迟到的响应不能覆盖恢复后的状态。
+- 重连不能只凭公开握手报告成功；存储信息接口的认证错误必须保留，旧服务端缺少该可选接口时用 `writer.status` 校验。认证失效时提示并提供连接设置入口，首次授权与恢复授权统一在设置页处理，不在业务页面展示令牌表单。成功领取后安全保存新凭据、更新会话代次并刷新查询。一次性令牌错误只显示在授权表单，不把它误认为当前 writer 被撤销。
 - 完整验收缺口和暂缓范围只维护在 [当前状态](SERVER_MODE_NEXT_STEPS.md)，不以“接口存在”替代验收。
 
-清单分页的管理输入保留桌面使用的 `search`、`videoId`、`locale`，并沿用有界分页；清单详情、元数据和影片分页接受 `sortBy` / `sortDir`，影片分页同时接受 `resourceKinds`，服务端将排序传给共享查询；远程导入界面关闭且禁用“自动创建无资源影片”，未匹配条目跳过，避免默认提交宿主不支持的选项。
+清单分页的管理输入保留桌面使用的 `search`、`videoId`、`locale`，并沿用有界分页；清单详情、元数据和影片分页接受 `sortBy` / `sortDir`，影片分页同时接受 `resourceKinds`，服务端将排序传给共享查询。远程清单导入使用逐条 `entries` 契约，既可复用已有影片，也可在目标媒体库中自动创建无资源影片；追加到已有清单仍保持禁用。
 
 `videos.get` 返回与桌面详情一致的资源展示字段 `display_locator` 和解析时长；本地文件显示挂载内相对路径（无可用媒体库根时只显示文件名），外部链接按既有规则遮蔽。详情资源不携带原始 `locator`、`resource_key`、`source_identity`。实际播放仍通过资源 ID 读取定位摘要并签发播放凭据，不能将展示路径作为文件权限。
+
+
+## 桌面发起的备份与恢复
+
+`backup.control.previewRemoval/removeRecord` 仅允许当前任务所有者及写入授权操作终态（completed/failed/cancelled）的记录，运行中与 recoveryRequired 禁止删除；桌面阻止整个传输期间的删除，服务端下载租约覆盖响应流及分块间的短暂间隔。预览返回范围摘要、文件数、字节数、目录、所在设备及保护备份依赖。默认只删除记录；`deleteFiles: true` 必须携带预览 `digest`，仅清理 `backups/:id.javdex-backup` 及该任务操作目录中的托管产物，拒绝符号链接和越界路径。来源包、手动另存副本不作为删除目标。恢复记录不连带清理其自动保护备份；仍被未结束恢复任务使用的保护备份不能清理。
+
+文件清理前持久化意图，清理成功后才隐藏记录；部分失败保留记录，同一请求可在重启后重试。始终保留最小操作日志用于恢复和幂等，删除后重试同一已完成恢复仍返回原结果，不重复覆盖。桌面同步清理对应传输索引；隔离本机导出失败/取消且未上传的临时记录仅支持删除记录，明确说明本机导出副本保留。
+
+备份来源图片不完整时进入 `awaitingImages`，释放维护锁；`missingImages` 提供去重路径和摘要。`confirmMissingImages` 必须带匹配摘要，重查后清单变化则再次等待确认。确认只影响备份副本，包摘要 `missingImages` 保留缺失清单；目标保护备份不继承确认。桌面隔离导出转发同一确认命令，失败历史不阻止新任务，启动中的并发导出仍被拒绝。
+
+导出进度报告数据库快照、图片复制与解密、路径整理、校验和打包阶段及实际完成量；桌面显示耗时和状态读取错误。数据库结构校验忽略 SQL 排版及历史迁移造成的列顺序差异，仍比较字段约束、默认值、索引和触发器；恢复按列名复制数据。
+
+格式 1 接受同版或更旧应用生成、数据库版本 17 至 `CURRENT_SCHEMA_VERSION` 的备份。应用版本按 SemVer（含预发布顺序）比较；更高版本拒绝，无法比较的不同开发版本不猜测兼容性。先验证归档/成员校验值、实际 `user_version`、原摘要及图片引用，再在隔离解包副本上调用共享 `migrateDatabase`，包含其开发快照拦截和事务回滚。升级后校验结构、外键及图片引用，重新读取目录、数量和无来源资源数；摘要保留来源版本，任务 `upgrade` 记录升级前后数据库版本。检查阶段不替换当前库、不改原包；重试重新解包，未知包格式及旧离线迁库包不自动转换。格式 1 的未知可选顶层清单字段忽略，必需字段仍严格校验。
+
+- `backup.control` 是独立于 `migration.*` 的任务协议（`packages/contracts/src/protocol/backup.ts`）。`create/receive/inspect/preview/restore/status/cancel/list` 使用当前有效 writer，不使用 `migrate-auth`。即使当前资料库处于本任务维护状态，也可查询任务；来源 serverId、catalogId、writer epoch 和 secret digest 共同约束操作。完成后的同任务、同确认摘要返回原结果，不重复执行。
+- `GET/PUT /manage/v1/backups/:id?offset=` 使用鉴权流式传输；每块最多 8 MiB，上传偏移落盘，重复块须逐字节相同。总包和展开内容分别限 64 GiB，与旧迁库 512 MiB 上限无关。压缩包、展开文件均校验 SHA-256；检查可用磁盘空间及备份版本兼容性。备份摘要对照数据库目录/数量和正式图片引用验证。
+- 数据库使用 SQLite backup 一致性快照；正式图片和分类封面按引用导出，排除临时候选和孤立文件。加密图片仅在副本解密。归档无登录凭据、catalog 任务/回执、桌面工作记录；源资料库最终解除维护状态。桌面从本机直接导入使用隔离 worker 和 SQLite 写锁，不把本机数据库绑定到远程会话。
+- 覆盖前阻止未完成任务及待确认事项，暂停自动扫描/图片维护，生成并验证目标自动备份。每个任务在 `backups/operations/:id/job.json` 保存数据库之外的日志。新图片写入独立路径并同步后，单次数据库事务发布资料与图片引用；旧图片不覆盖。事务保留目标 serverId/writer credential，生成新 catalogId 和新的实体代次，撤销播放与浏览器会话。
+- 启动先恢复日志，再恢复扫描/图片维护并开放服务。通过数据库中的新 catalogId 判断事务是否已提交：已提交则完成会话衔接，未提交则保持旧库并记录中断。任务记录不随数据库覆盖丢失。桌面以原凭据索引恢复查询，在验证任务完成后将当前凭据衔接至新 catalogId。
+- `backups/` 中的自动备份不自动清理，桌面允许下载。配置、挂载和认主关系属于目标宿主，不从来源包导入；自动扫描按恢复后配置及有效路径运行。原始视频始终不包含在备份，也不由恢复复制或删除。
+- 验证入口：`catalogBackup.test.ts`、原离线迁库回归、`node scripts/backup-docker-smoke.mjs`。Docker 检查要求先构建 `out/server` 及 `javdex-server:backup-verification` 镜像，使用唯一测试容器/卷，不复用本地自测资料卷。另需先构建桌面导出 worker；该检查覆盖本机加密图片导出、Windows/Linux 来源路径至 Docker 子目录映射。进程退出回归覆盖自动备份、图片暂存、数据库提交前和提交后四个阶段。合成验证不等于实际用户库的容量和耗时测量。
+
+### NFO 导出预览的版本约定
+
+NFO 预览跨多部影片、资源和目录，不要求单条聚合的 C/V/R/G 版本占位。桌面与服务端使用空 expectedVersions；预览由服务端读取当前资料生成，执行必须携带匹配的 planId 与 planDigest。保持 writer 授权、计划有效期、重启失效、单次消费及执行时资源目录授权检查。旧客户端携带版本字段仍兼容；不能以虚构版本值绕过请求检查。
+
+### 新建媒体库向导
+
+`libraries.create` 支持基本信息、`config` 和 `remoteRoots` 一次提交；远程来源只接受 `mountSelectionId` 与 `relativePath`，拒绝本机绝对路径输入。服务端校验挂载授权、子目录边界与媒体库目录重叠后事务创建；失败清理本次新增的目录标记，重复 operationId 返回原结果。桌面端统一为基本信息、根目录、扫描配置、首次扫描四步，目录与首次扫描可跳过。

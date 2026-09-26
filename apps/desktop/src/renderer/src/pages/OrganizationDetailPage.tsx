@@ -18,6 +18,7 @@ import type {
 } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
+import { expectedClassificationVersion } from '@shared/protocol/versions'
 import { FACET_LABEL } from '../facet'
 import BackButton from '../components/BackButton'
 import ClassificationImageModal from '../components/ClassificationImageModal'
@@ -120,7 +121,7 @@ export default function OrganizationDetailPage(): JSX.Element {
 
   const save = async (input: OrganizationUpdateInput): Promise<void> => {
     try {
-      await api.organizations.update(organizationId, input)
+      await api.organizations.update(organizationId, input, expectedClassificationVersion(detailQuery.data ?? {}))
       setEditing(false)
       toast.show('机构资料已更新', 'success')
       await queryClient.invalidateQueries({ queryKey: organizationKeys.all })
@@ -368,6 +369,7 @@ export default function OrganizationDetailPage(): JSX.Element {
         {editingImage ? (
           <ClassificationImageModal
             entity={{ kind: 'organization', id: organizationId }}
+            expectedVersions={expectedClassificationVersion(organization)}
             entityLabel="机构"
             imagePath={organization.imagePath}
             fallbackCoverPath={organization.fallbackCoverPath}
@@ -388,7 +390,7 @@ export default function OrganizationDetailPage(): JSX.Element {
             role={role}
             organizationName={organization.mainName}
             loadImpact={() => api.organizations.roleRemovalPreview(organizationId, role)}
-            remove={() => api.organizations.removeRole(organizationId, role)}
+            remove={(impact) => api.organizations.removeRole(organizationId, role, impact.planDigest, expectedClassificationVersion(organization))}
             onCancel={() => setDeleteAction(null)}
             onCompleted={roleRemoved}
           />
@@ -398,7 +400,7 @@ export default function OrganizationDetailPage(): JSX.Element {
             mode="organization"
             organizationName={organization.mainName}
             loadImpact={() => api.organizations.deletePreview(organizationId)}
-            remove={() => api.organizations.remove(organizationId)}
+            remove={(impact) => api.organizations.remove(organizationId, impact.planDigest, expectedClassificationVersion(organization))}
             onCancel={() => setDeleteAction(null)}
             onCompleted={organizationDeleted}
           />

@@ -702,7 +702,7 @@ describe('PlaylistImportModule interface', () => {
     assert.equal(dbCalls, 0)
   })
 
-  it('rejects remote append and auto-create before opening workStore', async () => {
+  it('rejects remote append before opening workStore', async () => {
     let dbCalls = 0
     const driver: PlaylistImportRunDriver = {
       create: async () => {
@@ -745,16 +745,44 @@ describe('PlaylistImportModule interface', () => {
       }),
       /不能追加到已有清单/
     )
-    await assert.rejects(
-      module.start({
+    assert.equal(dbCalls, 0)
+  })
+
+  it('allows remote new-list imports to auto-create unmatched videos', async () => {
+    const database = new Database(':memory:')
+    database.pragma('foreign_keys = ON')
+    migrateDatabase(database)
+    const driver: PlaylistImportRunDriver = {
+      create: async (_runId, _state, onRunPersisted) => { onRunPersisted() },
+      start: async () => undefined,
+      resume: async () => { throw new Error('resume') },
+      retry: async () => undefined,
+      finish: async () => undefined,
+      cancel: async () => undefined,
+      discard: async () => undefined
+    }
+    const module = new PlaylistImportModuleImpl(
+      () => database,
+      driver,
+      {
+        mode: 'remote',
+        libraries: {
+          get: async () => ({ id: 1, name: '主库', status: 'active' })
+        }
+      } as unknown as CatalogBackend
+    )
+    try {
+      const snapshot = await module.start({
         idempotencyKey: 'm10-remote-autocreate',
         sourceUrl: 'https://example.test/list',
         targetLibraryId: 1,
         destination: { kind: 'create' },
         autoCreateUnmatchedVideos: true
-      }),
-      /不能自动建片/
-    )
-    assert.equal(dbCalls, 0)
+      })
+      assert.equal(snapshot.frozenInput.autoCreateUnmatchedVideos, true)
+      assert.equal(snapshot.frozenInput.destination.kind, 'create')
+    } finally {
+      database.close()
+    }
   })
 })

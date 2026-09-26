@@ -1,4 +1,5 @@
 import type { ImageThumbnailSize } from '@shared/imageVariants'
+import { expectedActressVersion } from '@shared/protocol/versions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useActressGalleryPage } from '../hooks/useActressGalleryPage'
 import { useActressGalleryPreview } from '../hooks/useActressGalleryPreview'
@@ -117,7 +118,7 @@ export default function ActressGalleryPanel({
   onChanged
 }: {
   actressId: number
-  revision: object
+  revision: { generation?: number; revision?: number }
   posterPath: string | null
   onChanged: () => void
 }): JSX.Element {
@@ -128,16 +129,16 @@ export default function ActressGalleryPanel({
   const [deleting, setDeleting] = useState(false)
 
   const changePoster = useCallback(
-    async (nextPosterPath: string | null) => {
+    async (nextPosterPath: string | null, assetId?: number) => {
       try {
-        await api.actresses.setPoster(actressId, nextPosterPath)
+        await api.actresses.setPoster(actressId, nextPosterPath, assetId, expectedActressVersion(revision))
         toast.show(nextPosterPath ? '已设为背景' : '已清除背景', 'success')
         onChanged()
       } catch (e) {
         toast.show(String((e as Error).message), 'error')
       }
     },
-    [actressId, onChanged, toast]
+    [actressId, onChanged, revision, toast]
   )
 
   const photos = useActressGalleryPage(actressId)
@@ -186,7 +187,7 @@ export default function ActressGalleryPanel({
     if (!deleteTarget || deleting) return
     setDeleting(true)
     try {
-      await api.actresses.deleteGalleryImage(actressId, deleteTarget.id)
+      await api.actresses.deleteGalleryImage(actressId, deleteTarget.id, expectedActressVersion(revision))
       setDeleteTarget(null)
       preview.closeIf(deleteTarget.id)
       toast.show('写真已删除', 'success')

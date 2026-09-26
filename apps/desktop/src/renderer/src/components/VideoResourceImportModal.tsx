@@ -36,6 +36,7 @@ import { UI_ICON_SM } from './iconDefaults'
 import { mediaLibraryCatalogScope } from '../query/catalogScopes'
 import { useClassificationLinkKeys } from './classificationLinkForm'
 import styles from './VideoResourceImportModal.module.css'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
 type PlaybackDraft = VideoResourceDraft & {
   sizeSource: 'initial' | 'manual' | 'detected'
@@ -71,6 +72,8 @@ export default function VideoResourceImportModal({
   onImported?: (result: VideoResourceImportResult) => void
   onUpdated?: (resource: VideoResource) => void
 }): JSX.Element {
+  const { session } = useDesktopSession()
+  const remoteMode = session.mode === 'remote'
   const isLibraryImport = !resource && !fixedVideoId
   const [code, setCode] = useState(fixedCode ?? '')
   const [url, setUrl] = useState(resource?.locator ?? '')
@@ -100,7 +103,7 @@ export default function VideoResourceImportModal({
 
   const inferredKind = inferVideoResourceKind(url)
   const inferredKindLabel = VIDEO_RESOURCE_KIND_LABELS[inferredKind]
-  const canCheckLink = canProbeDirectResourceSize(kind, url)
+  const canCheckLink = !remoteMode && canProbeDirectResourceSize(kind, url)
   const hasRelatedLinks = relatedLinksFromDraft(links).length > 0
   const hasResourceUrl = isLibraryImport
     ? playbackDrafts.some((draft) => draft.url.trim())
@@ -293,7 +296,9 @@ export default function VideoResourceImportModal({
 
   const resourceUrlHint = isStrmManaged
     ? '链接由 STRM 源文件管理；请修改源文件内容并重新扫描。视频直链可尝试读取文件大小，不代表可以播放。'
-    : '支持 HTTP/HTTPS、Magnet 与 ED2K。仅视频直链可尝试读取大小；网页链接无法探测，也不代表可以播放。'
+    : remoteMode
+      ? '支持 HTTP/HTTPS、Magnet 与 ED2K。远程资料库不会读取本机或服务端文件大小，请手动填写；网页链接请直接保存。'
+      : '支持 HTTP/HTTPS、Magnet 与 ED2K。仅视频直链可尝试读取大小；网页链接无法探测，也不代表可以播放。'
 
   const resourceFields = (
     <>
@@ -360,7 +365,12 @@ export default function VideoResourceImportModal({
           placeholder="可选"
         />
       </EditFormField>
-      <EditFormField label="文件大小" htmlFor="resource-size" span={2} hint="可选；视频直链读取到大小后会自动填入。">
+      <EditFormField
+        label="文件大小"
+        htmlFor="resource-size"
+        span={2}
+        hint={remoteMode ? '可选；远程模式请手动填写。' : '可选；视频直链读取到大小后会自动填入。'}
+      >
         <div className="video-resource-size-control">
           <input
             id="resource-size"
@@ -540,13 +550,17 @@ export default function VideoResourceImportModal({
           <div className={styles.linksPane}>
             <EditFormSection
               title="资源链接"
-              hint="可选。支持直链、网页、Magnet 或 ED2K。仅视频直链可读取大小，网页链接请直接保存。"
+              hint={
+                remoteMode
+                  ? '可选。支持直链、网页、Magnet 或 ED2K。远程模式请手动填写大小，网页链接请直接保存。'
+                  : '可选。支持直链、网页、Magnet 或 ED2K。仅视频直链可读取大小，网页链接请直接保存。'
+              }
             >
               <div className={styles.resourceList}>
                 {playbackDrafts.map((draft, index) => {
                   const key = playbackKeys.linkKeys[index] ?? `resource-${index}`
                   const draftKind = inferVideoResourceKind(draft.url)
-                  const draftCanCheck = canProbeDirectResourceSize(draft.kind, draft.url)
+                  const draftCanCheck = !remoteMode && canProbeDirectResourceSize(draft.kind, draft.url)
                   return (
                     <div className={styles.resourceCard} key={key}>
                       <div className={styles.resourceUrlRow}>

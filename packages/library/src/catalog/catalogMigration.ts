@@ -1,3 +1,4 @@
+import { walkOfficialImages, availableBytes, digestImages, copyOfficialImages, snapshotLiveCatalog, restoreCatalogFromSnapshot, decryptStagedOfficialImages, copyAttachedCatalog } from './catalogSnapshot'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -15,14 +16,12 @@ import type {
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from '@library/db/migrations'
 import { MANAGE_PROTOCOL_VERSION } from '@shared/protocol/identity'
 import { MIGRATION_PACKAGE_MAX_BYTES } from '@shared/protocol/limits'
-import { ASSET_MEDIA_SUBDIRS, resolveMediaAssetsRoot } from '@library/assetStoragePaths'
+import { resolveMediaAssetsRoot } from '@library/assetStoragePaths'
 import {
   resolveLibraryMediaMounts,
   resolveLibraryUserDataPath
 } from '@library/runtime/host'
 import { structuredError } from '@shared/protocol/errors'
-import { decryptBlob, isEncryptedBlob } from '@library/assetCrypto'
-import { getPathAlias } from '@library/assetPathAliases'
 import { getDb } from '@library/db/database'
 import { digestEquals, digestRequest } from './catalogSecrets'
 import { readCatalogIdentity, setCatalogFrozen } from './catalogIdentity'
@@ -46,10 +45,8 @@ import { applyMigrationTransforms, stripExportSecrets } from './catalogMigration
 import {
   MIGRATION_FORMAT_VERSION,
   packMigrationArchive,
-  posixRel,
   sha256File,
   unpackMigrationArchive,
-  walkFiles,
   type MigrationManifest
 } from './catalogMigrationArchive'
 
@@ -139,32 +136,11 @@ function countEncryptedAssets(imagesDir: string): number {
   return count
 }
 
-function walkOfficialImages(imagesDir: string): string[] {
-  const files: string[] = []
-  for (const subdir of ASSET_MEDIA_SUBDIRS) {
-    const root = path.join(imagesDir, subdir)
-    if (!fs.existsSync(root)) continue
-    for (const abs of walkFiles(root)) {
-      files.push(posixRel(imagesDir, abs))
-    }
-  }
-  return files.sort()
-}
 
-function availableBytes(dir: string): number {
-  fs.mkdirSync(dir, { recursive: true })
-  const stat = fs.statfsSync(dir)
-  return Number(stat.bavail) * Number(stat.bsize)
-}
 
-function digestImages(imagesDir: string, rels: string[]): { count: number; digest: string } {
-  const payload = rels.map((rel) => {
-    const abs = path.join(imagesDir, rel)
-    const stat = fs.statSync(abs)
-    return { rel, size: stat.size, sha256: sha256File(abs) }
-  })
-  return { count: rels.length, digest: digestRequest(payload) }
-}
+
+
+
 
 function packagePath(userDataPath: string, migrationId: string): string {
   return path.join(userDataPath, 'migration-packages', `${migrationId}.tar.gz`)
@@ -174,16 +150,7 @@ function stagingDir(userDataPath: string, migrationId: string): string {
   return path.join(userDataPath, 'migration-staging', migrationId)
 }
 
-function copyOfficialImages(fromDir: string, toDir: string): string[] {
-  const copied: string[] = []
-  for (const rel of walkOfficialImages(fromDir)) {
-    const dest = path.join(toDir, rel)
-    fs.mkdirSync(path.dirname(dest), { recursive: true })
-    fs.copyFileSync(path.join(fromDir, rel), dest)
-    copied.push(rel)
-  }
-  return copied
-}
+
 
 function removeCopiedOfficialImages(imagesDir: string, rels: readonly string[]): void {
   for (const rel of rels) {
@@ -195,103 +162,22 @@ function removeCopiedOfficialImages(imagesDir: string, rels: readonly string[]):
   }
 }
 
-function snapshotLiveCatalog(database: Database.Database, destPath: string): void {
-  if (!database.name || database.name === ':memory:') {
-    throw structuredError('UNSUPPORTED_CAPABILITY', '内存资料库不能启用迁入')
-  }
-  database.pragma('wal_checkpoint(TRUNCATE)')
-  fs.mkdirSync(path.dirname(destPath), { recursive: true })
-  fs.copyFileSync(database.name, destPath)
-}
 
-function restoreCatalogFromSnapshot(database: Database.Database, snapshotPath: string): void {
-  database.exec(`ATTACH DATABASE ${sqlLiteral(snapshotPath)} AS preroll`)
-  try {
-    database.transaction(() => {
-      copyAttachedCatalog(database, 'preroll')
-    })()
-  } finally {
-    try {
-      database.exec('DETACH DATABASE preroll')
-    } catch {
-      // Detach after a rolled-back attach is optional.
-    }
-  }
-}
 
-function remapAssetPathOn(
-  database: Database.Database,
-  fromRel: string,
-  toRel: string
-): void {
-  database.prepare('UPDATE videos SET cover_path = ? WHERE cover_path = ?').run(toRel, fromRel)
-  database.prepare('UPDATE videos SET poster_path = ? WHERE poster_path = ?').run(toRel, fromRel)
-  database.prepare('UPDATE actresses SET avatar_path = ? WHERE avatar_path = ?').run(toRel, fromRel)
-  database
-    .prepare('UPDATE actresses SET avatar_source_path = ? WHERE avatar_source_path = ?')
-    .run(toRel, fromRel)
-  database.prepare('UPDATE actresses SET poster_path = ? WHERE poster_path = ?').run(toRel, fromRel)
-  database.prepare('UPDATE playlists SET cover_path = ? WHERE cover_path = ?').run(toRel, fromRel)
-  database.prepare('UPDATE video_assets SET local_path = ? WHERE local_path = ?').run(toRel, fromRel)
-  database
-    .prepare('UPDATE actress_gallery_assets SET local_path = ? WHERE local_path = ?')
-    .run(toRel, fromRel)
-}
+
+
+
 
 /**
  * Decrypt official images in a staging/export tree using the source LibraryHost
  * key (hostname + username + userDataPath) and source path aliases. Does not
  * mutate the live source imagesDir or alias journal.
  */
-function decryptStagedOfficialImages(
-  stagedImages: string,
-  database: Database.Database
-): void {
-  for (const rel of walkOfficialImages(stagedImages)) {
-    const abs = path.join(stagedImages, rel)
-    const blob = fs.readFileSync(abs)
-    if (!isEncryptedBlob(blob)) continue
-    const plainRel = getPathAlias(rel)
-    if (!plainRel) {
-      throw structuredError('RECOVERY_REQUIRED', `缺少加密路径别名，无法在迁库中解密：${rel}`)
-    }
-    const { data } = decryptBlob(blob)
-    const plainAbs = path.join(stagedImages, plainRel)
-    fs.mkdirSync(path.dirname(plainAbs), { recursive: true })
-    fs.writeFileSync(plainAbs, data)
-    if (plainAbs !== abs) fs.unlinkSync(abs)
-    if (plainRel !== rel) remapAssetPathOn(database, rel, plainRel)
-  }
-}
 
-function listUserTables(database: Database.Database): string[] {
-  return (
-    database
-      .prepare(
-        `SELECT name FROM sqlite_master
-          WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-          ORDER BY name`
-      )
-      .all() as Array<{ name: string }>
-  ).map((row) => row.name)
-}
 
-function copyAttachedCatalog(dest: Database.Database, alias: string): void {
-  dest.pragma('defer_foreign_keys = ON')
-  for (const name of listUserTables(dest)) {
-    dest.exec(`DELETE FROM "${name}"`)
-  }
-  const names = dest
-    .prepare(
-      `SELECT name FROM ${alias}.sqlite_master
-        WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`
-    )
-    .all() as Array<{ name: string }>
-  for (const { name } of names) {
-    dest.exec(`INSERT INTO "${name}" SELECT * FROM ${alias}."${name}"`)
-  }
-  dest.pragma('defer_foreign_keys = OFF')
-}
+
+
+
 
 export function previewCatalogMigration(
   input: MigrationPreviewInput,

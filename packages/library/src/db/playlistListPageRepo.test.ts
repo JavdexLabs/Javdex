@@ -31,7 +31,8 @@ it('matches full global list order, counts, cover fallback and per-video members
     const page=listPlaylistBrowsePage({videoId:1,offset})
     assert.equal(page.total,125);assert.ok(page.items.length<=60);actual.push(...page.items)
   }
-  assert.deepEqual(actual,full.map(item=>({id:item.id,name:item.name,description:item.description,preview_cover_path:item.preview_cover_path,video_count:item.video_count,contains_video:item.contains_video})))
+  assert.deepEqual(actual.map(({generation:_generation,revision:_revision,...item})=>item),full.map(item=>({id:item.id,name:item.name,description:item.description,preview_cover_path:item.preview_cover_path,video_count:item.video_count,contains_video:item.contains_video})))
+  assert.ok(actual.every(item=>Number.isSafeInteger(item.generation)&&Number.isSafeInteger(item.revision)))
   assert.equal(actual.find(item=>item.id===4)!.preview_cover_path,'')
   assert.equal(listPlaylistBrowsePage({offset:9999}).offset,120)
 })

@@ -1,4 +1,5 @@
 import { playlistApplyImportResultSchema } from '@shared/playlistImportCommit'
+import { browseMediaMountResultSchema } from '@shared/mediaLibraryIpcContract'
 import { playlistDetailSchema, playlistMetadataSchema, playlistPageSchema, playlistVideosPageSchema, playlistListPageSchema } from '@shared/playlistSchemas'
 import { actressEditResultSchema } from '@shared/actressEditContract'
 import { structuredError } from '@shared/protocol/errors'
@@ -48,7 +49,8 @@ const complexResultSchemas = {
   'playlists.getPage': playlistPageSchema.nullable(),
   'playlists.videoPage': playlistVideosPageSchema.nullable(),
   'playlists.listPage': playlistListPageSchema,
-  'playlists.applyImport': playlistApplyImportResultSchema
+  'playlists.applyImport': playlistApplyImportResultSchema,
+  'libraries.browseMount': browseMediaMountResultSchema
 } satisfies Partial<Record<keyof CatalogOperationResults, import('zod').ZodType>>
 
 /** HTTP envelopes and local primitive results meet at this one adapter boundary. */

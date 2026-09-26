@@ -1,0 +1,317 @@
+.card {
+  container-type: inline-size;
+}
+
+.restartNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--settings-gap, 12px);
+  margin: var(--settings-gap, 12px) 0 0;
+  padding: var(--settings-gap, 12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.restartCopy {
+  display: grid;
+  gap: var(--settings-gap-sm, 8px);
+  min-width: 0;
+}
+
+.restartTitle {
+  color: var(--text-primary);
+}
+
+.restartTarget {
+  overflow-wrap: anywhere;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--settings-gap, 12px);
+}
+
+.urlInputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--settings-gap-sm, 8px);
+}
+
+.urlInput {
+  min-width: 0;
+}
+
+.probeResult {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--form-label-gap);
+  height: calc(var(--settings-fs-caption) * var(--settings-lh, 1.45));
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption);
+}
+
+.probeSummary {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+  line-height: var(--settings-lh, 1.45);
+  user-select: text;
+}
+
+.probeSummary[data-tone='success'] {
+  color: var(--text-accent);
+}
+
+.playerButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--settings-gap-sm, 8px);
+}
+
+.playerInputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--settings-gap-sm, 8px);
+}
+
+.playerPathField {
+  min-width: 0;
+}
+
+.playerPickButton {
+  gap: var(--settings-gap-sm, 8px);
+  white-space: nowrap;
+}
+
+.playerHint,
+.pickerError {
+  margin: var(--form-label-gap, 8px) 0 0;
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.playerHint {
+  color: var(--text-muted);
+}
+
+.pickerError {
+  color: var(--text-danger);
+}
+
+.factLabel,
+.factValue {
+  margin: 0;
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.factLabel {
+  color: var(--text-muted);
+}
+
+.factValue {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.sessionMessage,
+.sessionError {
+  margin: var(--settings-gap, 12px) 0 0;
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+  overflow-wrap: anywhere;
+}
+
+.sessionMessage {
+  color: var(--text-secondary);
+}
+
+.sessionError {
+  color: var(--text-danger);
+}
+
+.sessionActions {
+  margin-top: var(--settings-gap, 12px);
+}
+
+.claimForm {
+  display: grid;
+  gap: var(--form-label-gap, 8px);
+  max-width: 700px;
+  margin-top: var(--settings-gap, 12px);
+}
+
+.claimLabel {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.claimInputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--settings-gap-sm, 8px);
+}
+
+.claimInput {
+  min-width: 0;
+}
+
+.claimHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.details {
+  margin-top: var(--settings-gap, 12px);
+  padding-top: var(--settings-gap-sm, 8px);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+}
+
+.detailsSummary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.detailsList {
+  display: grid;
+  gap: var(--settings-gap-sm, 8px);
+  margin: var(--settings-gap-sm, 8px) 0 0;
+}
+
+.detailsRow {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: var(--settings-gap-sm, 8px);
+}
+
+.detailsLabel,
+.detailsValue {
+  margin: 0;
+}
+
+.detailsValue {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.importGuide {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--settings-gap, 12px);
+  margin-top: var(--form-section-gap, 16px);
+  padding: var(--form-section-gap, 16px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+}
+
+.importGuideCopy {
+  flex: 1 1 360px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.importGuideTitle {
+  color: var(--text-primary);
+}
+
+.importGuideText,
+.importGuideNote {
+  margin: var(--form-label-gap) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.importGuideNote {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption);
+}
+
+.importGuideButton {
+  flex-shrink: 0;
+}
+
+@container (width < 620px) {
+  .fields,
+  .playerInputRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (width < 390px) {
+  .urlInputRow,
+  .playerInputRow,
+  .claimInputRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .playerPickButton,
+  .claimButton {
+    justify-self: start;
+  }
+}
+
+.sessionHeader {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--form-field-gap);
+  font-size: var(--settings-fs-secondary);
+}
+
+.sessionAddress {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+  color: var(--text-secondary);
+}
+
+.sessionStatus {
+  margin-left: auto;
+}
+
+.defaultPlayerButton {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.playerBusyIcon {
+  animation: player-busy-rotation 1s linear infinite;
+}
+
+@keyframes player-busy-rotation {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playerBusyIcon { animation: none; }
+}
+
+.connectionCard {
+  --form-actions-gap: var(--settings-gap-sm, 8px);
+}
+
+.connectionField {
+  row-gap: calc(var(--form-label-gap) / 2);
+}

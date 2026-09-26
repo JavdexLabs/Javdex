@@ -8,7 +8,7 @@ import { IPC_DISPOSITION } from './ipcDisposition'
 test('every IPC declaration has exactly one frozen disposition', () => {
   const ipcKeys = Object.keys(IPC)
   const dispositionKeys = Object.keys(IPC_DISPOSITION)
-  assert.equal(ipcKeys.length, 288)
+  assert.equal(ipcKeys.length, 296)
   assert.deepEqual(dispositionKeys.sort(), ipcKeys.sort())
 })
 

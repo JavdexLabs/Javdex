@@ -1,3 +1,5 @@
+import SettingsFeedback from './SettingsFeedback'
+import SettingsActionLabel from './SettingsActionLabel'
 import Checkbox from '../../../../../../../packages/ui/src/Checkbox'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -371,18 +373,15 @@ export default function NfoExportPanel({
                 <p>文件保存在本地视频或 STRM 文件旁；没有这些本地文件的资源会跳过。源视频不会被移动或修改。</p>
               </div>
             </details>
-            {error ? <p className={styles.error} role="alert">{error}</p> : null}
 
             {preview ? <PlanPreview key={preview.planId} preview={preview} /> : null}
 
             <footer className={styles.footer}>
-              <p className={styles.muted} role="status">
-                {previewChanged ? '设置已更改，请重新预览。' : preview ? runnableCount > 0 ? '核对预览后开始导出。' : '调整选项后可重新预览。' : '先预览文件和数量，再开始导出。'}
-              </p>
+              <SettingsFeedback error={Boolean(error)} detail={error} message={error || (previewChanged ? '设置已更改，请重新预览。' : preview ? runnableCount > 0 ? '核对预览后开始导出。' : '调整选项后可重新预览。' : '先预览文件和数量，再开始导出。')} />
               <div className={styles.actions}>
                 <Button ref={previewButtonRef} className={styles.actionButton} variant={preview ? 'default' : 'primary'} size="sm" disabled={disabled || busy || draft.libraryIds.length === 0} onClick={() => void generatePlan()}>
                   <FileOutput {...UI_ICON_SM} aria-hidden />
-                  {busy && !modal ? '正在预览…' : preview ? '重新预览' : '预览导出'}
+                  <SettingsActionLabel reserve="正在预览…">{busy && !modal ? '正在预览…' : preview ? '重新预览' : '预览导出'}</SettingsActionLabel>
                 </Button>
                 {preview ? (
                   <Button className={styles.actionButton} variant="primary" size="sm" disabled={disabled || busy || runnableCount === 0} onClick={() => void start()}>
@@ -564,10 +563,10 @@ export function ExportProgressModal({
               <span className={styles.progressName}>{progress?.current?.displayName || '准备写入…'}</span>
               <strong>{progress?.completed || 0} / {progress?.total || 0} · {percent}%</strong>
             </div>
-            {modal.error ? <p className={styles.error} role="alert">{modal.error}</p> : null}
+            <SettingsFeedback message={modal.error || (modal.terminating ? '正在停止导出…' : '可停止导出，已写入的文件会保留。')} error={Boolean(modal.error)} detail={modal.error} />
             <Button className={styles.modalAction} variant="danger" disabled={modal.terminating || modal.taskId === 'pending'} onClick={() => void onTerminate()}>
               <OctagonX {...UI_ICON_SM} aria-hidden />
-              {modal.terminating ? '正在停止…' : modal.error ? '重试停止' : '停止导出'}
+              <SettingsActionLabel reserve="正在停止…">{modal.terminating ? '正在停止…' : modal.error ? '重试停止' : '停止导出'}</SettingsActionLabel>
             </Button>
           </>
         ) : (

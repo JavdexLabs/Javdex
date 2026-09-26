@@ -45,13 +45,13 @@ function octal(value: number, width: number): string {
 }
 
 function splitUstarName(name: string): { prefix: string; name: string } {
-  if (name.length <= 100) return { prefix: '', name }
-  let index = name.length - 100
-  while (index < name.length && name[index] !== '/') index += 1
-  if (index >= name.length || index > 155) {
-    throw structuredError('LIMIT_EXCEEDED', '迁移归档条目路径过长')
+  if (Buffer.byteLength(name) <= 100) return { prefix: '', name }
+  for (let index = name.lastIndexOf('/'); index > 0; index = name.lastIndexOf('/', index - 1)) {
+    if (Buffer.byteLength(name.slice(0, index)) <= 155 && Buffer.byteLength(name.slice(index + 1)) <= 100) {
+      return { prefix: name.slice(0, index), name: name.slice(index + 1) }
+    }
   }
-  return { prefix: name.slice(0, index), name: name.slice(index + 1) }
+  throw structuredError('LIMIT_EXCEEDED', '归档条目路径过长')
 }
 
 function checksumHeader(header: Buffer): number {
@@ -67,7 +67,8 @@ function writeHeader(name: string, size: number, typeflag: string, mtime: number
   header.write(octal(typeflag === TYPE_DIR ? 0o755 : 0o644, 8), 100, 8, 'latin1')
   header.write(octal(0, 8), 108, 8, 'latin1')
   header.write(octal(0, 8), 116, 8, 'latin1')
-  header.write(octal(size, 12), 124, 12, 'latin1')
+  if (size < 8 * 1024 ** 3) header.write(octal(size, 12), 124, 12, 'latin1')
+  else { header[124] = 0x80; header.writeBigUInt64BE(BigInt(size), 128) }
   header.write(octal(Math.floor(mtime), 12), 136, 12, 'latin1')
   header.write('        ', 148, 8, 'latin1')
   header.write(typeflag, 156, 1, 'latin1')
@@ -86,7 +87,7 @@ function padToBlock(size: number): number {
 
 function assertSafeArchiveName(name: string, seen: Set<string>): void {
   const normalized = name.replace(/\\/g, '/')
-  if (!normalized || normalized.startsWith('/') || normalized.includes('\0')) {
+  if (!normalized || normalized.startsWith('/') || normalized.includes('\0') || normalized.includes(':')) {
     throw structuredError('INVALID_INPUT', '迁移归档包含非法路径')
   }
   const parts = normalized.split('/')
@@ -119,11 +120,12 @@ function pipeWithoutEnd(sourcePath: string, dest: NodeJS.WritableStream): Promis
     const source = fs.createReadStream(sourcePath)
     const onError = (error: Error): void => {
       source.destroy()
+      dest.removeListener('error', onError)
       reject(error)
     }
     source.on('error', onError)
     dest.on('error', onError)
-    source.on('end', () => resolve())
+    source.on('end', () => { dest.removeListener('error', onError); resolve() })
     source.pipe(dest, { end: false })
   })
 }
@@ -131,7 +133,7 @@ function pipeWithoutEnd(sourcePath: string, dest: NodeJS.WritableStream): Promis
 export async function packMigrationArchive(
   members: PackedArchiveMember[],
   destFile: string,
-  options: { maxBytes?: number } = {}
+  options: { maxBytes?: number; onProgress?: (completed: number, total: number) => void } = {}
 ): Promise<{ bytes: number }> {
   const maxBytes = options.maxBytes ?? MIGRATION_PACKAGE_MAX_BYTES
   fs.mkdirSync(path.dirname(destFile), { recursive: true })
@@ -155,7 +157,9 @@ export async function packMigrationArchive(
   })
   counting.on('error', () => undefined)
   const piping = pipeline(gzip, counting, output)
+  void piping.catch(() => undefined)
   try {
+    let completed = 0
     for (const member of members) {
       if (limitHit) break
       const name = member.name.replace(/\\/g, '/')
@@ -172,6 +176,7 @@ export async function packMigrationArchive(
       await pipeWithoutEnd(member.absPath, gzip)
       const pad = padToBlock(stat.size)
       if (pad) gzip.write(Buffer.alloc(pad, 0))
+      options.onProgress?.(++completed, members.length)
     }
     if (!limitHit) {
       gzip.write(Buffer.alloc(BLOCK * 2, 0))
@@ -204,6 +209,11 @@ interface TarHeader {
 }
 
 function parseOctal(buf: Buffer): number {
+  if (buf[0] & 0x80) {
+    let value = BigInt(buf[0] & 0x7f)
+    for (const byte of buf.subarray(1)) value = value * 256n + BigInt(byte)
+    return Number(value)
+  }
   const text = buf.toString('latin1').replace(/\0/g, '').trim()
   if (!text) return 0
   return Number.parseInt(text, 8)
@@ -247,7 +257,7 @@ export async function unpackMigrationArchive(
   const seen = new Set<string>()
   const files: string[] = []
   let pending = Buffer.alloc(0)
-  const openFile: { current: { abs: string; left: number; chunks: Buffer[] } | null } = { current: null }
+  const openFile: { current: { abs: string; left: number; fd: number } | null } = { current: null }
   let unpacked = 0
   let inflated = 0
   const archiveOverhead = Math.min(16 * 1024 * 1024, Math.max(1024, Math.ceil(maxBytes / 16)))
@@ -269,6 +279,7 @@ export async function unpackMigrationArchive(
       fs.mkdirSync(abs, { recursive: true })
       return
     }
+    if (options.availableBytes != null && unpacked + parsed.size > options.availableBytes) throw structuredError('LIMIT_EXCEEDED', '磁盘空间不足解包数据')
     files.push(parsed.name)
     if (parsed.size === 0) {
       fs.mkdirSync(path.dirname(abs), { recursive: true })
@@ -276,11 +287,14 @@ export async function unpackMigrationArchive(
       openFile.current = null
       return
     }
-    openFile.current = { abs, left: parsed.size, chunks: [] }
+    if (!Number.isSafeInteger(parsed.size) || parsed.size < 0 || parsed.size > maxBytes) throw structuredError('INVALID_INPUT', '归档文件大小无效')
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    openFile.current = { abs, left: parsed.size, fd: fs.openSync(abs, 'wx') }
   }
 
   const gunzip = createGunzip()
   const input = fs.createReadStream(archiveFile)
+  input.on('error', error => gunzip.destroy(error))
   const unzipped = input.pipe(gunzip)
   try {
     for await (const chunk of unzipped) {
@@ -298,7 +312,7 @@ export async function unpackMigrationArchive(
         const current = openFile.current
         if (current && current.left > 0) {
           const take = Math.min(current.left, BLOCK)
-          current.chunks.push(block.subarray(0, take))
+          fs.writeSync(current.fd, block.subarray(0, take))
           unpacked += take
           current.left -= take
           if (unpacked > maxBytes) {
@@ -308,8 +322,7 @@ export async function unpackMigrationArchive(
             })
           }
           if (current.left === 0) {
-            fs.mkdirSync(path.dirname(current.abs), { recursive: true })
-            fs.writeFileSync(current.abs, Buffer.concat(current.chunks))
+            fs.closeSync(current.fd)
             openFile.current = null
           }
         } else {
@@ -320,9 +333,14 @@ export async function unpackMigrationArchive(
   } catch (error) {
     gunzip.destroy()
     input.destroy()
+    if (openFile.current) fs.closeSync(openFile.current.fd)
     throw error
   }
-  if (openFile.current) throw structuredError('INVALID_INPUT', '迁移归档不完整')
+  if (openFile.current) {
+    fs.closeSync(openFile.current.fd)
+    throw structuredError('INVALID_INPUT', '迁移归档不完整')
+  }
+  if (pending.length) throw structuredError('INVALID_INPUT', '归档尾部不完整')
   return { files, bytes: unpacked }
 }
 

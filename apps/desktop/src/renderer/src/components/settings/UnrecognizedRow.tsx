@@ -1,3 +1,4 @@
+import SettingsActionLabel from './SettingsActionLabel'
 import { useEffect, useState } from 'react'
 import { Copy, FolderOpen, AlertCircle } from 'lucide-react'
 import type { ManualImportResult } from '@shared/libraryTypes'
@@ -227,7 +228,7 @@ export default function UnrecognizedRow({
             disabled={busy !== null || !canImport}
             onClick={() => void doManualImport()}
           >
-            {busy === 'import' ? '处理中…' : '导入'}
+            <SettingsActionLabel reserve="处理中…">{busy === 'import' ? '处理中…' : '导入'}</SettingsActionLabel>
           </Button>
         </div>
 
@@ -251,7 +252,7 @@ export default function UnrecognizedRow({
               disabled={busy !== null || !canRename}
               onClick={() => void doRename()}
             >
-              {busy === 'rename' ? '处理中…' : '重命名并导入'}
+              <SettingsActionLabel reserve="重命名并导入">{busy === 'rename' ? '处理中…' : '重命名并导入'}</SettingsActionLabel>
             </Button>
           </div>
         </details>

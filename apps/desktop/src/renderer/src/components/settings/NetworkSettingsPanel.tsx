@@ -1,3 +1,4 @@
+import SettingsActionLabel from './SettingsActionLabel'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import type { SettingsSnapshot } from '@shared/settingsTypes'
@@ -197,7 +198,7 @@ export function ProxyConfigRow({
                 disabled={testing || saving || !draft.url.trim()}
                 onClick={() => void test()}
               >
-                {testing ? '测试中…' : '测试连接'}
+                <SettingsActionLabel reserve="测试连接">{testing ? '测试中…' : '测试连接'}</SettingsActionLabel>
               </Button>
             </div>
             <small id={`${id}-test-hint`} className={styles.testHint}>

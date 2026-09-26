@@ -5,6 +5,7 @@ import type {
   DirectorOption
 } from '@shared/classificationTypes'
 import { api } from '../api'
+import { expectedClassificationVersion } from '@shared/protocol/versions'
 import { directorKeys } from '../query/queryKeys'
 import ClassificationMergeModal from './ClassificationMergeModal'
 import { UI_ICON_SM } from './iconDefaults'
@@ -30,7 +31,7 @@ export default function DirectorMergeModal({ target, onCancel, onMerged }: Props
       target={target}
       queryKey={directorKeys.options}
       listCandidates={(search) => api.directors.options(search)}
-      merge={(input) => api.directors.merge(input)}
+      merge={(input) => api.directors.merge(input, expectedClassificationVersion(target))}
       renderIcon={() => <Clapperboard {...UI_ICON_SM} aria-hidden />}
       targetMeta={(director) =>
         `档案 #${director.id} · ${director.videoCount} 部影片 · 主名保持不变`

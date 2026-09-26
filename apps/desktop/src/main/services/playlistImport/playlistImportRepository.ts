@@ -2920,10 +2920,10 @@ export class PlaylistImportRepository {
 
   prepareRemoteApply(runId: string, applyIdempotencyKey: string): {
     name: string
+    entries: PlaylistImportEntry[]
     videoIds: number[]
     libraryId: number
     sourceUrl?: string
-    videoLinks?: Array<{ videoId: number; label: string; url: string }>
     job: JobRow
     items: ApplyItemRow[]
   } {
@@ -2958,45 +2958,41 @@ export class PlaylistImportRepository {
       this.reopenStalePreview(runId)
       throw new Error('IMPORT_PREVIEW_STALE')
     }
-    const creates = items.filter((item) => item.state === 'planned-create')
-    if (creates.length > 0) {
-      throw new Error(
-        '远程清单导入不能自动建片。请先在资料库中创建对应影片，或关闭自动创建未匹配项。'
-      )
-    }
+    const appliedItems = items.filter((item) => !(item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'))
+    const entries: PlaylistImportEntry[] = []
     const videoIds: number[] = []
-    for (const item of items) {
-      if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') continue
+    for (const item of appliedItems) {
+      const links = job.save_detail_links === 1 && item.detail_url
+        ? [{ label: job.source_host || '来源', url: item.detail_url }]
+        : []
+      if (item.state === 'planned-create') {
+        entries.push({
+          kind: 'create',
+          code: item.normalized_code ?? '',
+          title: item.title,
+          links
+        })
+        continue
+      }
       if (item.resolved_video_id == null || !this.catalogVideoById(item.resolved_video_id)) {
         throw new Error('MATCH_SNAPSHOT_STALE')
       }
       videoIds.push(item.resolved_video_id)
+      entries.push({ kind: 'existing', videoId: item.resolved_video_id, links })
     }
-    if (videoIds.length === 0) {
+    if (entries.length === 0) {
       throw new Error('PLAYLIST_IMPORT_ITEMS_NOT_READY')
     }
-    if (videoIds.length > 200) {
-      throw new Error('清单导入一次最多 200 个影片 ID；远程冻结 applyImport 不接受更长列表。')
+    if (entries.length > 200) {
+      throw new Error('清单导入一次最多 200 个影片；远程冻结 applyImport 不接受更长列表。')
     }
     const fallbackName = `${job.source_host} · ${new Date().toISOString().slice(0, 10)}`
-    const videoLinks =
-      job.save_detail_links === 1
-        ? items.flatMap((item) => {
-            if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') return []
-            if (item.resolved_video_id == null || !item.detail_url) return []
-            return [{
-              videoId: item.resolved_video_id,
-              label: job.source_host || '来源',
-              url: item.detail_url
-            }]
-          })
-        : undefined
     return {
       name: job.requested_playlist_name || job.agent_suggested_playlist_name || fallbackName,
+      entries,
       videoIds,
       libraryId: job.target_library_id,
       ...(job.save_source_playlist_link === 1 ? { sourceUrl: job.normalized_source_url } : {}),
-      ...(videoLinks?.length ? { videoLinks } : {}),
       job,
       items
     }
@@ -3005,11 +3001,36 @@ export class PlaylistImportRepository {
   commitRemoteApply(
     runId: string,
     applyIdempotencyKey: string,
-    result: { playlistId: number; added: number; playlistName?: string; relatedLinksAdded?: number }
+    result: {
+      playlistId: number
+      added: number
+      playlistName?: string
+      relatedLinksAdded?: number
+      entries?: Array<{
+        videoId: number
+        created: boolean
+        membershipAdded: boolean
+        addedToPlaylist: boolean
+        alreadyInPlaylist: boolean
+        relatedLinksAdded: number
+      }>
+    }
   ): PlaylistImportOutcome {
     const plan = this.prepareRemoteApply(runId, applyIdempotencyKey)
     const at = now()
-    const reusedVideos = plan.items.filter((item) => item.state === 'planned-reuse').length
+    const appliedItems = plan.items.filter((item) => !(item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'))
+    const appliedEntries = result.entries ?? appliedItems.map((item) => ({
+      videoId: item.resolved_video_id!,
+      created: false,
+      membershipAdded: false,
+      addedToPlaylist: true,
+      alreadyInPlaylist: false,
+      relatedLinksAdded: 0
+    }))
+    if (appliedEntries.length !== appliedItems.length) throw new Error('PLAYLIST_IMPORT_APPLY_RESULT_MISMATCH')
+    const reusedVideos = appliedEntries.filter((entry) => !entry.created).length
+    const createdVideos = appliedEntries.filter((entry) => entry.created).length
+    const targetLibraryMembersCreated = appliedEntries.filter((entry) => entry.membershipAdded).length
     const skippedVideos = plan.items.filter(
       (item) => item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'
     ).length
@@ -3023,10 +3044,13 @@ export class PlaylistImportRepository {
     ).get(runId) as { value: number }).value
     for (const item of plan.items) {
       if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') continue
+      const appliedIndex = appliedItems.indexOf(item)
+      const applied = appliedEntries[appliedIndex]
+      if (!applied) throw new Error('PLAYLIST_IMPORT_APPLY_RESULT_MISMATCH')
       this.database.prepare(
         `UPDATE playlist_import_items SET state = 'applied', resolved_video_id = ?,
          revision = revision + 1, updated_at = ? WHERE id = ?`
-      ).run(item.resolved_video_id, at, item.id)
+      ).run(applied.videoId, at, item.id)
     }
     const outcome: PlaylistImportOutcome = {
       playlistId: result.playlistId,
@@ -3042,15 +3066,17 @@ export class PlaylistImportRepository {
       detailReuses: 0,
       userSelectedReuses: 0,
       crossLibraryReuses: 0,
-      createdVideos: 0,
-      targetLibraryMembersCreated: 0,
+      createdVideos,
+      targetLibraryMembersCreated,
       skippedVideos,
       addedToPlaylist: result.added,
-      alreadyInPlaylist: Math.max(0, plan.videoIds.length - result.added),
+      alreadyInPlaylist: result.entries
+        ? result.entries.filter((entry) => entry.alreadyInPlaylist).length
+        : Math.max(0, appliedEntries.length - result.added),
       relatedLinksAdded: result.relatedLinksAdded ?? 0,
       playlistRelatedLinksAdded: plan.sourceUrl ? 1 : 0,
       externalDuplicateItems: Math.max(0, sourceItems - plan.items.length),
-      convergedExternalItems: plan.videoIds.length - new Set(plan.videoIds).size,
+      convergedExternalItems: appliedEntries.length - new Set(appliedEntries.map((entry) => entry.videoId)).size,
       reuseLibraryDistribution: []
     }
     this.database.prepare(

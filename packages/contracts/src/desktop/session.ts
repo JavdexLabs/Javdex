@@ -5,6 +5,7 @@ export type DesktopSessionState =
   | 'starting'
   | 'available'
   | 'disconnected'
+  | 'claimRequired'
   | 'authInvalid'
   | 'versionMismatch'
   | 'recoveryRequired'
@@ -14,6 +15,8 @@ export type DesktopSessionState =
 export interface DesktopSession {
   state: DesktopSessionState
   mode: 'local' | 'remote'
+  /** Connection target chosen when the current desktop process started. */
+  remoteBaseUrl?: string | null
   catalogId: string | null
   serverId: string | null
   generation: number
@@ -21,6 +24,8 @@ export interface DesktopSession {
   frozen: boolean
   appVersion: string | null
   schemaVersion: number | null
+  /** Authenticated server image directory; absent in local mode or before remote metadata loads. */
+  remoteImagesDir?: string | null
   message: string | null
 }
 
@@ -39,6 +44,7 @@ export type DesktopWriterClaimResult = WriterClaimResult
 export const EMPTY_DESKTOP_SESSION: DesktopSession = {
   state: 'starting',
   mode: 'local',
+  remoteBaseUrl: null,
   catalogId: null,
   serverId: null,
   generation: 0,

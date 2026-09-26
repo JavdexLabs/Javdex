@@ -19,8 +19,7 @@ import { useSettingsDraft } from '../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../settings/SettingsLeaveGuard'
 import SettingsFormActions from '../components/settings/SettingsFormActions'
 import Button from '../components/Button'
-import ConfirmModal from '../components/ConfirmModal'
-import { AppFormField } from '../components/FormPrimitives'
+import RemoteRootPicker from './RemoteRootPicker'
 import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import EmptyState from '../components/EmptyState'
 import { NavIcon } from '../components/NavIcons'
@@ -98,7 +97,6 @@ export function MediaLibrarySettingsContent({
   const navigate = useNavigate()
   const { session } = useDesktopSession()
   const [remoteRootOpen, setRemoteRootOpen] = useState(false)
-  const [remoteMountName, setRemoteMountName] = useState('')
   const toast = useToast()
   const queryClient = useQueryClient()
   const { scrapers, defaultScraper } = useScraperPluginCatalog('video')
@@ -242,7 +240,6 @@ export function MediaLibrarySettingsContent({
   const addRoots = async (): Promise<void> => {
     if (!library || busy) return
     if (session.mode === 'remote') {
-      setRemoteMountName('')
       setRemoteRootOpen(true)
       return
     }
@@ -307,10 +304,9 @@ export function MediaLibrarySettingsContent({
     if (root.state === 'pending_removal' || root.state === 'archived') return
     setBusy('remove-root')
     try {
-      const preview = await api.settings.previewLibraryPathRemoval(
-        libraryId,
-        root.id
-      )
+      const preview = session.mode === 'remote'
+        ? await api.mediaLibraries.previewRootRemoval({ libraryId, rootId: root.id })
+        : await api.settings.previewLibraryPathRemoval(libraryId, root.id)
       setRootRemoval({
         kind: rootRemovalRequiresCleanup(preview) ? 'cleanup' : 'direct',
         root,
@@ -330,7 +326,14 @@ export function MediaLibrarySettingsContent({
       'remove-root',
       '来源目录移除任务已更新',
       () =>
-        target.kind === 'cleanup'
+        session.mode === 'remote'
+          ? api.mediaLibraries.removeRoot({
+              libraryId,
+              rootId: target.root.id,
+              expectedRevision: target.preview.libraryRevision,
+              expectedImpactRevision: target.preview.impactRevision
+            })
+          : target.kind === 'cleanup'
           ? api.settings.confirmLibraryPathRemoval(
               libraryId,
               target.root.id,
@@ -689,6 +692,7 @@ export function MediaLibrarySettingsContent({
               toggleRoot={toggleRoot}
               requestRootRemoval={requestRootRemoval}
               cancelRootRemoval={cancelRootRemoval}
+              remoteMode={session.mode === 'remote'}
             />
           ) : null}
           {tab === 'scraping' ? (
@@ -728,21 +732,15 @@ export function MediaLibrarySettingsContent({
       </div>
 
       {remoteRootOpen ? (
-        <ConfirmModal title="添加服务端来源目录" confirmText="添加" busy={busy === 'add-root'}
-          confirmDisabled={!remoteMountName.trim() || session.state !== 'available'}
+        <RemoteRootPicker busy={busy === 'add-root'} available={session.state === 'available'}
           onCancel={() => setRemoteRootOpen(false)}
-          onConfirm={() => void (async () => {
+          onAdd={(selection) => void (async () => {
             const added = await runMutation('add-root', '来源目录已添加', () => api.mediaLibraries.addRoot({
               libraryId, expectedRevision: library.revision,
-              root: { mountSelectionId: remoteMountName.trim(), state: 'active' }
+              root: { ...selection, state: 'active' }
             }))
             if (added) setRemoteRootOpen(false)
-          })()}>
-          <AppFormField label="挂载名称" hint="输入服务端部署配置中的挂载名称，例如 library。">
-            <input className="text-input" aria-label="挂载名称" autoFocus value={remoteMountName}
-              disabled={busy !== null} onChange={event => setRemoteMountName(event.target.value)} />
-          </AppFormField>
-        </ConfirmModal>
+          })()} />
       ) : null}
 
       <MediaLibrarySettingsDialogs

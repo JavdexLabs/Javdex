@@ -1,10 +1,5 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type FormEvent
-} from 'react'
+import RemoteRootPicker from '../pages/RemoteRootPicker'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { FolderPlus, X } from 'lucide-react'
 import {
   MEDIA_LIBRARY_COLORS,
@@ -62,10 +57,12 @@ function stepForCreateError(message: string): CreateStep {
 
 export default function MediaLibraryCreateModal({
   onCancel,
-  onCreated
+  onCreated,
+  remoteMode = false
 }: {
   onCancel: () => void
   onCreated: (library: MediaLibraryDetail, scanAfterCreate: boolean) => void
+  remoteMode?: boolean
 }): JSX.Element {
   const toast = useToast()
   const { scrapers, defaultScraper } = useScraperPluginCatalog('video')
@@ -83,6 +80,11 @@ export default function MediaLibraryCreateModal({
   const errorRef = useRef<HTMLDivElement>(null)
   const scanIntervalRef = useRef<HTMLInputElement>(null)
   const minDurationRef = useRef<HTMLInputElement>(null)
+  const steps = CREATE_STEPS
+  const [remotePickerOpen, setRemotePickerOpen] = useState(false)
+  const [remoteRoots, setRemoteRoots] = useState<
+    Record<string, { mountSelectionId: string; relativePath: string }>
+  >({})
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -117,6 +119,10 @@ export default function MediaLibraryCreateModal({
   }
 
   const pickRoots = async (): Promise<void> => {
+    if (remoteMode) {
+      setRemotePickerOpen(true)
+      return
+    }
     try {
       const paths = await api.settings.pickFolder()
       if (paths.length === 0) return
@@ -168,7 +174,7 @@ export default function MediaLibraryCreateModal({
 
   const advance = (): void => {
     if (busy || !validateCurrentStep()) return
-    if (step < CREATE_STEPS.length - 1) {
+    if (step < steps.length - 1) {
       const nextStep = (step + 1) as CreateStep
       setError(null)
       setFurthestStep((current) => Math.max(current, nextStep) as CreateStep)
@@ -182,7 +188,15 @@ export default function MediaLibraryCreateModal({
     if (busy) return
     setBusy(true)
     try {
-      const input = buildCreateMediaLibraryInput(draft)
+      const input = remoteMode
+        ? {
+            name: draft.name.trim(),
+            icon: draft.icon,
+            color: draft.color,
+            config: buildCreateMediaLibraryInput(draft).config,
+            remoteRoots: draft.roots.map((path) => remoteRoots[path])
+          }
+        : buildCreateMediaLibraryInput(draft)
       const library = await api.mediaLibraries.create(input)
       onCreated(library, draft.scanAfterCreate && library.activeRootCount > 0)
     } catch (error) {
@@ -209,392 +223,420 @@ export default function MediaLibraryCreateModal({
   }
 
   return (
-    <Modal
-      title="新建媒体库"
-      subtitle={`第 ${step + 1} 步，共 ${CREATE_STEPS.length} 步`}
-      hint="依次设置识别信息、来源与独立配置；根目录和首次扫描均可跳过。"
-      size="lg"
-      className={styles.modal}
-      bodyClassName={styles.modalBody}
-      busy={busy}
-      onCancel={onCancel}
-      actions={
-        <>
-          <Button
-            className={styles.cancelButton}
-            disabled={busy}
-            onClick={onCancel}
-          >
-            取消
-          </Button>
-          {step > 0 ? (
-            <Button
-              disabled={busy}
-              onClick={() => goToStep((step - 1) as CreateStep)}
-            >
-              上一步
+    <>
+      <Modal
+        title="新建媒体库"
+        subtitle={`第 ${step + 1} 步，共 ${steps.length} 步`}
+        hint={
+          remoteMode
+            ? '依次设置识别信息、服务端目录与扫描配置；目录和首次扫描均可跳过。'
+            : '依次设置识别信息、来源与独立配置；根目录和首次扫描均可跳过。'
+        }
+        size="lg"
+        className={styles.modal}
+        bodyClassName={styles.modalBody}
+        busy={busy}
+        onCancel={onCancel}
+        actions={
+          <>
+            <Button className={styles.cancelButton} disabled={busy} onClick={onCancel}>
+              取消
             </Button>
-          ) : null}
-          <Button
-            type="submit"
-            form={CREATE_FORM_ID}
-            variant="primary"
-            disabled={busy}
-          >
-            {step === CREATE_STEPS.length - 1 ? '创建媒体库' : '下一步'}
-          </Button>
-        </>
-      }
-    >
-      <div className={styles.body}>
-        <nav aria-label="创建媒体库步骤">
-          <ol className={styles.stepper}>
-            {CREATE_STEPS.map((label, index) => {
-              const stepIndex = index as CreateStep
-              const state =
-                stepIndex === step ? 'current' : stepIndex <= furthestStep ? 'complete' : 'upcoming'
-              return (
-                <li className={styles.stepItem} key={label}>
-                  <button
-                    className={styles.stepButton}
-                    type="button"
-                    data-state={state}
-                    aria-current={state === 'current' ? 'step' : undefined}
-                    aria-label={`第 ${index + 1} 步：${label}`}
-                    disabled={busy || stepIndex > furthestStep}
-                    onClick={() => goToStep(stepIndex)}
-                  >
-                    <span className={styles.stepNumber} aria-hidden>{index + 1}</span>
-                    <span className={styles.stepLabel}>{label}</span>
-                  </button>
-                </li>
-              )
-            })}
-          </ol>
-        </nav>
-
-        <form
-          className={styles.stepPanel}
-          id={CREATE_FORM_ID}
-          onSubmit={(event: FormEvent<HTMLFormElement>) => {
-            event.preventDefault()
-            advance()
-          }}
-        >
-          <header className={styles.stepHeader}>
-            <h4 className={styles.stepTitle} ref={stepHeadingRef} tabIndex={-1}>
-              {CREATE_STEPS[step]}
-            </h4>
-            <p className={styles.stepHint}>
-              {step === 0
-                ? '设置侧栏中可辨识的名称、图标和颜色。'
-                : step === 1
-                  ? '选择此库独占管理的目录；也可以先创建空库。'
-                  : step === 2
-                    ? '这些扫描、刮削、列表与首页选项只作用于当前媒体库。'
-                    : '确认摘要，并决定创建完成后是否立即扫描。'}
-            </p>
-          </header>
-
-          {error?.step === step ? (
-            <div
-              className={styles.error}
-              ref={errorRef}
-              role="alert"
-              tabIndex={-1}
-              id="media-library-create-error"
-            >
-              {error.message}
-            </div>
-          ) : null}
-
-          {step === 0 ? (
-            <AppFormSection title="名称与识别">
-              <AppFormField label="媒体库名称">
-                <input
-                  ref={nameRef}
-                  className={`text-input ${styles.control}`}
-                  value={draft.name}
-                  maxLength={200}
-                  disabled={busy}
-                  placeholder="例如：本地影片、NAS 收藏"
-                  aria-invalid={Boolean(error?.step === 0) || undefined}
-                  aria-describedby={error?.step === 0 ? 'media-library-create-error' : undefined}
-                  onChange={(event) => patchDraft({ name: event.target.value })}
-                />
-              </AppFormField>
-              <AppFormChoiceGroup label="媒体库图标" disabled={busy}>
-                <div className={styles.choiceGrid}>
-                  {MEDIA_LIBRARY_ICONS.map((icon) => (
+            {step > 0 ? (
+              <Button disabled={busy} onClick={() => goToStep((step - 1) as CreateStep)}>
+                上一步
+              </Button>
+            ) : null}
+            <Button type="submit" form={CREATE_FORM_ID} variant="primary" disabled={busy}>
+              {step === steps.length - 1 ? '创建媒体库' : '下一步'}
+            </Button>
+          </>
+        }
+      >
+        <div className={styles.body}>
+          <nav aria-label="创建媒体库步骤">
+            <ol className={styles.stepper}>
+              {steps.map((label, index) => {
+                const stepIndex = index as CreateStep
+                const state =
+                  stepIndex === step
+                    ? 'current'
+                    : stepIndex <= furthestStep
+                      ? 'complete'
+                      : 'upcoming'
+                return (
+                  <li className={styles.stepItem} key={label}>
                     <button
-                      key={icon}
+                      className={styles.stepButton}
                       type="button"
-                      className={styles.iconChoice}
-                      aria-label={ICON_LABELS[icon]}
-                      aria-pressed={draft.icon === icon}
-                      disabled={busy}
-                      onClick={() => patchDraft({ icon })}
+                      data-state={state}
+                      aria-current={state === 'current' ? 'step' : undefined}
+                      aria-label={`第 ${index + 1} 步：${label}`}
+                      disabled={busy || stepIndex > furthestStep}
+                      onClick={() => goToStep(stepIndex)}
                     >
-                      <NavIcon name={icon} />
-                      <span>{ICON_LABELS[icon]}</span>
-                    </button>
-                  ))}
-                </div>
-              </AppFormChoiceGroup>
-              <AppFormChoiceGroup label="标识颜色" disabled={busy}>
-                <div className={styles.choiceGrid}>
-                  {MEDIA_LIBRARY_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      className={styles.colorChoice}
-                      data-color={color}
-                      aria-label={`强调色：${COLOR_LABELS[color]}`}
-                      aria-pressed={draft.color === color}
-                      disabled={busy}
-                      onClick={() => patchDraft({ color })}
-                    >
-                      <span className={styles.colorDot} aria-hidden />
-                      {COLOR_LABELS[color]}
-                    </button>
-                  ))}
-                </div>
-              </AppFormChoiceGroup>
-            </AppFormSection>
-          ) : null}
-
-          {step === 1 ? (
-            <AppFormSection
-              title="来源目录（可选）"
-              hint="所选目录会以启用状态加入；同一路径不能属于多个启用媒体库。"
-              actions={
-                <Button size="sm" disabled={busy} onClick={() => void pickRoots()}>
-                  <FolderPlus {...UI_ICON_SM} aria-hidden />
-                  选择目录
-                </Button>
-              }
-            >
-              {draft.roots.length === 0 ? (
-                <div className={styles.emptyRoots}>暂不添加，创建后可在媒体库设置中补充。</div>
-              ) : (
-                <div className={styles.rootList} aria-label="已选择的来源目录">
-                  {draft.roots.map((path) => (
-                    <div className={styles.rootRow} key={path}>
-                      <span className={`${styles.rootPath} copyable-text`} title={path}>
-                        {path}
+                      <span className={styles.stepNumber} aria-hidden>
+                        {index + 1}
                       </span>
-                      <IconButton
-                        size="sm"
-                        label={`移除来源目录 ${path}`}
-                        icon={<X {...UI_ICON_SM} />}
+                      <span className={styles.stepLabel}>{label}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ol>
+          </nav>
+
+          <form
+            className={styles.stepPanel}
+            id={CREATE_FORM_ID}
+            onSubmit={(event: FormEvent<HTMLFormElement>) => {
+              event.preventDefault()
+              advance()
+            }}
+          >
+            <header className={styles.stepHeader}>
+              <h4 className={styles.stepTitle} ref={stepHeadingRef} tabIndex={-1}>
+                {steps[step]}
+              </h4>
+              <p className={styles.stepHint}>
+                {step === 0
+                  ? '设置侧栏中可辨识的名称、图标和颜色。'
+                  : step === 1
+                    ? '选择此库独占管理的目录；也可以先创建空库。'
+                    : step === 2
+                      ? '这些扫描、刮削、列表与首页选项只作用于当前媒体库。'
+                      : '确认摘要，并决定创建完成后是否立即扫描。'}
+              </p>
+            </header>
+
+            {error?.step === step ? (
+              <div
+                className={styles.error}
+                ref={errorRef}
+                role="alert"
+                tabIndex={-1}
+                id="media-library-create-error"
+              >
+                {error.message}
+              </div>
+            ) : null}
+
+            {step === 0 ? (
+              <AppFormSection title="名称与识别">
+                <AppFormField label="媒体库名称">
+                  <input
+                    ref={nameRef}
+                    className={`text-input ${styles.control}`}
+                    value={draft.name}
+                    maxLength={200}
+                    disabled={busy}
+                    placeholder="例如：本地影片、NAS 收藏"
+                    aria-invalid={Boolean(error?.step === 0) || undefined}
+                    aria-describedby={error?.step === 0 ? 'media-library-create-error' : undefined}
+                    onChange={(event) => patchDraft({ name: event.target.value })}
+                  />
+                </AppFormField>
+                <AppFormChoiceGroup label="媒体库图标" disabled={busy}>
+                  <div className={styles.choiceGrid}>
+                    {MEDIA_LIBRARY_ICONS.map((icon) => (
+                      <button
+                        key={icon}
+                        type="button"
+                        className={styles.iconChoice}
+                        aria-label={ICON_LABELS[icon]}
+                        aria-pressed={draft.icon === icon}
                         disabled={busy}
-                        onClick={() =>
-                          patchDraft({
-                            roots: draft.roots.filter((item) => item !== path),
-                            scanAfterCreate:
-                              draft.roots.length > 1 ? draft.scanAfterCreate : false
-                          })
+                        onClick={() => patchDraft({ icon })}
+                      >
+                        <NavIcon name={icon} />
+                        <span>{ICON_LABELS[icon]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </AppFormChoiceGroup>
+                <AppFormChoiceGroup label="标识颜色" disabled={busy}>
+                  <div className={styles.choiceGrid}>
+                    {MEDIA_LIBRARY_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        className={styles.colorChoice}
+                        data-color={color}
+                        aria-label={`强调色：${COLOR_LABELS[color]}`}
+                        aria-pressed={draft.color === color}
+                        disabled={busy}
+                        onClick={() => patchDraft({ color })}
+                      >
+                        <span className={styles.colorDot} aria-hidden />
+                        {COLOR_LABELS[color]}
+                      </button>
+                    ))}
+                  </div>
+                </AppFormChoiceGroup>
+              </AppFormSection>
+            ) : null}
+
+            {step === 1 ? (
+              <AppFormSection
+                title="来源目录（可选）"
+                hint="所选目录会以启用状态加入；同一路径不能属于多个启用媒体库。"
+                actions={
+                  <Button size="sm" disabled={busy} onClick={() => void pickRoots()}>
+                    <FolderPlus {...UI_ICON_SM} aria-hidden />
+                    选择目录
+                  </Button>
+                }
+              >
+                {draft.roots.length === 0 ? (
+                  <div className={styles.emptyRoots}>暂不添加，创建后可在媒体库设置中补充。</div>
+                ) : (
+                  <div className={styles.rootList} aria-label="已选择的来源目录">
+                    {draft.roots.map((path) => (
+                      <div className={styles.rootRow} key={path}>
+                        <span className={`${styles.rootPath} copyable-text`} title={path}>
+                          {path}
+                        </span>
+                        <IconButton
+                          size="sm"
+                          label={`移除来源目录 ${path}`}
+                          icon={<X {...UI_ICON_SM} />}
+                          disabled={busy}
+                          onClick={() =>
+                            patchDraft({
+                              roots: draft.roots.filter((item) => item !== path),
+                              scanAfterCreate:
+                                draft.roots.length > 1 ? draft.scanAfterCreate : false
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </AppFormSection>
+            ) : null}
+
+            {step === 2 ? (
+              <div className={styles.configSections}>
+                <AppFormSection title="扫描行为">
+                  <div className={styles.fieldGrid}>
+                    <AppFormField label="自动扫描周期" hint="5–10080 分钟">
+                      <input
+                        ref={scanIntervalRef}
+                        className={`text-input ${styles.control}`}
+                        type="number"
+                        min={5}
+                        max={10_080}
+                        step={1}
+                        value={draft.config.autoScanIntervalMinutes}
+                        disabled={busy || !draft.config.autoScanEnabled}
+                        aria-invalid={
+                          error?.step === 2 && /周期/.test(error.message) ? true : undefined
+                        }
+                        aria-describedby={
+                          error?.step === 2 ? 'media-library-create-error' : undefined
+                        }
+                        onChange={(event) =>
+                          patchConfig('autoScanIntervalMinutes', Number(event.target.value))
                         }
                       />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </AppFormSection>
-          ) : null}
+                    </AppFormField>
+                    <AppFormField label="导入最小时长" hint="0–1440 分钟">
+                      <input
+                        ref={minDurationRef}
+                        className={`text-input ${styles.control}`}
+                        type="number"
+                        min={0}
+                        max={1_440}
+                        step={1}
+                        value={draft.config.minImportDurationMinutes}
+                        disabled={busy}
+                        aria-invalid={
+                          error?.step === 2 && /最小时长/.test(error.message) ? true : undefined
+                        }
+                        aria-describedby={
+                          error?.step === 2 ? 'media-library-create-error' : undefined
+                        }
+                        onChange={(event) =>
+                          patchConfig('minImportDurationMinutes', Number(event.target.value))
+                        }
+                      />
+                    </AppFormField>
+                  </div>
+                  <SettingsSwitchRow
+                    title="自动扫描"
+                    description="按周期扫描当前库的启用目录。"
+                    checked={draft.config.autoScanEnabled}
+                    disabled={busy}
+                    onChange={(value) => patchConfig('autoScanEnabled', value)}
+                  />
+                  <SettingsSwitchRow
+                    title="同番号自动合并资源"
+                    description="扫描到同番号文件时直接加入现有影片成员。"
+                    checked={draft.config.autoMergeSameCodeResources}
+                    disabled={busy}
+                    onChange={(value) => patchConfig('autoMergeSameCodeResources', value)}
+                  />
+                  <SettingsSwitchRow
+                    title="清理无资源成员"
+                    description="安全清理后移除当前库内不再拥有资源的影片成员。"
+                    checked={draft.config.removeResourceLessMemberships}
+                    disabled={busy}
+                    onChange={(value) => patchConfig('removeResourceLessMemberships', value)}
+                  />
+                </AppFormSection>
 
-          {step === 2 ? (
-            <div className={styles.configSections}>
-              <AppFormSection title="扫描行为">
-                <div className={styles.fieldGrid}>
-                  <AppFormField label="自动扫描周期" hint="5–10080 分钟">
-                    <input
-                      ref={scanIntervalRef}
-                      className={`text-input ${styles.control}`}
-                      type="number"
-                      min={5}
-                      max={10_080}
-                      step={1}
-                      value={draft.config.autoScanIntervalMinutes}
-                      disabled={busy || !draft.config.autoScanEnabled}
-                      aria-invalid={
-                        error?.step === 2 && /周期/.test(error.message) ? true : undefined
-                      }
-                      aria-describedby={error?.step === 2 ? 'media-library-create-error' : undefined}
-                      onChange={(event) =>
-                        patchConfig('autoScanIntervalMinutes', Number(event.target.value))
-                      }
-                    />
-                  </AppFormField>
-                  <AppFormField label="导入最小时长" hint="0–1440 分钟">
-                    <input
-                      ref={minDurationRef}
-                      className={`text-input ${styles.control}`}
-                      type="number"
-                      min={0}
-                      max={1_440}
-                      step={1}
-                      value={draft.config.minImportDurationMinutes}
-                      disabled={busy}
-                      aria-invalid={
-                        error?.step === 2 && /最小时长/.test(error.message) ? true : undefined
-                      }
-                      aria-describedby={error?.step === 2 ? 'media-library-create-error' : undefined}
-                      onChange={(event) =>
-                        patchConfig('minImportDurationMinutes', Number(event.target.value))
-                      }
-                    />
-                  </AppFormField>
-                </div>
-                <SettingsSwitchRow
-                  title="自动扫描"
-                  description="按周期扫描当前库的启用目录。"
-                  checked={draft.config.autoScanEnabled}
-                  disabled={busy}
-                  onChange={(value) => patchConfig('autoScanEnabled', value)}
-                />
-                <SettingsSwitchRow
-                  title="同番号自动合并资源"
-                  description="扫描到同番号文件时直接加入现有影片成员。"
-                  checked={draft.config.autoMergeSameCodeResources}
-                  disabled={busy}
-                  onChange={(value) => patchConfig('autoMergeSameCodeResources', value)}
-                />
-                <SettingsSwitchRow
-                  title="清理无资源成员"
-                  description="安全清理后移除当前库内不再拥有资源的影片成员。"
-                  checked={draft.config.removeResourceLessMemberships}
-                  disabled={busy}
-                  onChange={(value) => patchConfig('removeResourceLessMemberships', value)}
-                />
-              </AppFormSection>
+                <AppFormSection
+                  title="本地元数据"
+                  hint="只在资源首次发现时读取；不会持续同步相邻文件。"
+                >
+                  <SettingsSwitchRow
+                    title="自动导入本地 NFO"
+                    description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
+                    checked={draft.config.autoImportLocalNfo}
+                    disabled={busy}
+                    onChange={(value) => patchConfig('autoImportLocalNfo', value)}
+                  />
+                </AppFormSection>
 
-              <AppFormSection title="本地元数据" hint="只在资源首次发现时读取；不会持续同步相邻文件。">
-                <SettingsSwitchRow
-                  title="自动导入本地 NFO"
-                  description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
-                  checked={draft.config.autoImportLocalNfo}
-                  disabled={busy}
-                  onChange={(value) => patchConfig('autoImportLocalNfo', value)}
-                />
-              </AppFormSection>
-
-              <AppFormSection title="刮削与列表默认值" hint="创建后仍可在媒体库设置中调整。">
-                <div className={styles.fieldGrid}>
-                  <AppFormField label="默认影片刮削器">
-                    <SelectControl
-                      value={draft.config.defaultVideoScraper ?? ''}
-                      disabled={busy}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                        patchConfig('defaultVideoScraper', event.target.value || null)
-                      }
-                    >
-                      <option value="">
-                        跟随全局默认{defaultScraper ? `（${defaultScraper}）` : ''}
-                      </option>
-                      {scrapers.map((scraper) => (
-                        <option key={scraper} value={scraper}>
-                          {scraper}
+                <AppFormSection title="刮削与列表默认值" hint="创建后仍可在媒体库设置中调整。">
+                  <div className={styles.fieldGrid}>
+                    <AppFormField label="默认影片刮削器">
+                      <SelectControl
+                        value={draft.config.defaultVideoScraper ?? ''}
+                        disabled={busy}
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                          patchConfig('defaultVideoScraper', event.target.value || null)
+                        }
+                      >
+                        <option value="">
+                          跟随全局默认
+                          {defaultScraper ? `（${defaultScraper}）` : ''}
                         </option>
-                      ))}
-                    </SelectControl>
-                  </AppFormField>
-                  <AppFormField label="默认排序">
-                    <SelectControl
-                      value={draft.config.defaultSortBy}
-                      disabled={busy}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                        patchConfig(
-                          'defaultSortBy',
-                          event.target.value as CreateMediaLibraryDraft['config']['defaultSortBy']
-                        )
-                      }
-                    >
-                      {MEDIA_LIBRARY_DEFAULT_SORTS.map((sort) => (
-                        <option key={sort} value={sort}>
-                          {{
-                            add_time: '添加时间',
-                            release_date: '发行日期',
-                            rating: '评分',
-                            code: '番号'
-                          }[sort]}
-                        </option>
-                      ))}
-                    </SelectControl>
-                  </AppFormField>
-                  <AppFormField label="默认方向">
-                    <SelectControl
-                      value={draft.config.defaultSortDir}
-                      disabled={busy}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                        patchConfig(
-                          'defaultSortDir',
-                          event.target.value as CreateMediaLibraryDraft['config']['defaultSortDir']
-                        )
-                      }
-                    >
-                      <option value="desc">降序</option>
-                      <option value="asc">升序</option>
-                    </SelectControl>
-                  </AppFormField>
-                </div>
-                <SettingsSwitchRow
-                  title="参与首页发现"
-                  description="加入随机推荐与近期添加。"
-                  checked={draft.config.includeInHomeDiscovery}
-                  disabled={busy}
-                  onChange={(value) => patchConfig('includeInHomeDiscovery', value)}
-                />
-              </AppFormSection>
-            </div>
-          ) : null}
+                        {scrapers.map((scraper) => (
+                          <option key={scraper} value={scraper}>
+                            {scraper}
+                          </option>
+                        ))}
+                      </SelectControl>
+                    </AppFormField>
+                    <AppFormField label="默认排序">
+                      <SelectControl
+                        value={draft.config.defaultSortBy}
+                        disabled={busy}
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                          patchConfig(
+                            'defaultSortBy',
+                            event.target.value as CreateMediaLibraryDraft['config']['defaultSortBy']
+                          )
+                        }
+                      >
+                        {MEDIA_LIBRARY_DEFAULT_SORTS.map((sort) => (
+                          <option key={sort} value={sort}>
+                            {
+                              {
+                                add_time: '添加时间',
+                                release_date: '发行日期',
+                                rating: '评分',
+                                code: '番号'
+                              }[sort]
+                            }
+                          </option>
+                        ))}
+                      </SelectControl>
+                    </AppFormField>
+                    <AppFormField label="默认方向">
+                      <SelectControl
+                        value={draft.config.defaultSortDir}
+                        disabled={busy}
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                          patchConfig(
+                            'defaultSortDir',
+                            event.target
+                              .value as CreateMediaLibraryDraft['config']['defaultSortDir']
+                          )
+                        }
+                      >
+                        <option value="desc">降序</option>
+                        <option value="asc">升序</option>
+                      </SelectControl>
+                    </AppFormField>
+                  </div>
+                  <SettingsSwitchRow
+                    title="参与首页发现"
+                    description="加入随机推荐与近期添加。"
+                    checked={draft.config.includeInHomeDiscovery}
+                    disabled={busy}
+                    onChange={(value) => patchConfig('includeInHomeDiscovery', value)}
+                  />
+                </AppFormSection>
+              </div>
+            ) : null}
 
-          {step === 3 ? (
-            <div className={styles.review}>
-              <dl className={styles.summaryGrid}>
-                <div className={styles.summaryItem}>
-                  <dt className={styles.summaryLabel}>媒体库</dt>
-                  <dd className={styles.summaryValue}>{draft.name.trim()}</dd>
-                </div>
-                <div className={styles.summaryItem}>
-                  <dt className={styles.summaryLabel}>来源目录</dt>
-                  <dd className={styles.summaryValue}>
-                    {draft.roots.length > 0 ? `${draft.roots.length} 个` : '暂不添加'}
-                  </dd>
-                </div>
-                <div className={styles.summaryItem}>
-                  <dt className={styles.summaryLabel}>自动扫描</dt>
-                  <dd className={styles.summaryValue}>
-                    {draft.config.autoScanEnabled
-                      ? `每 ${draft.config.autoScanIntervalMinutes} 分钟`
-                      : '关闭'}
-                  </dd>
-                </div>
-                <div className={styles.summaryItem}>
-                  <dt className={styles.summaryLabel}>首页发现</dt>
-                  <dd className={styles.summaryValue}>
-                    {draft.config.includeInHomeDiscovery ? '参与' : '不参与'}
-                  </dd>
-                </div>
-              </dl>
-              <SettingsSwitchRow
-                title="创建后立即扫描"
-                description={
-                  draft.roots.length > 0
-                    ? '创建完成后扫描本次选择的所有目录。'
-                    : '当前将创建空媒体库；添加来源目录后再开始扫描。'
-                }
-                checked={draft.scanAfterCreate && draft.roots.length > 0}
-                disabled={busy || draft.roots.length === 0}
-                onChange={(value) => patchDraft({ scanAfterCreate: value })}
-              />
-              <p className={styles.reviewNote}>
-                创建只会写入媒体库配置；源文件不会被移动或删除。
-              </p>
-            </div>
-          ) : null}
-        </form>
-      </div>
-    </Modal>
+            {step === 3 ? (
+              <div className={styles.review}>
+                <dl className={styles.summaryGrid}>
+                  <div className={styles.summaryItem}>
+                    <dt className={styles.summaryLabel}>媒体库</dt>
+                    <dd className={styles.summaryValue}>{draft.name.trim()}</dd>
+                  </div>
+                  <div className={styles.summaryItem}>
+                    <dt className={styles.summaryLabel}>来源目录</dt>
+                    <dd className={styles.summaryValue}>
+                      {draft.roots.length > 0 ? `${draft.roots.length} 个` : '暂不添加'}
+                    </dd>
+                  </div>
+                  <div className={styles.summaryItem}>
+                    <dt className={styles.summaryLabel}>自动扫描</dt>
+                    <dd className={styles.summaryValue}>
+                      {draft.config.autoScanEnabled
+                        ? `每 ${draft.config.autoScanIntervalMinutes} 分钟`
+                        : '关闭'}
+                    </dd>
+                  </div>
+                  <div className={styles.summaryItem}>
+                    <dt className={styles.summaryLabel}>首页发现</dt>
+                    <dd className={styles.summaryValue}>
+                      {draft.config.includeInHomeDiscovery ? '参与' : '不参与'}
+                    </dd>
+                  </div>
+                </dl>
+                <SettingsSwitchRow
+                  title="创建后立即扫描"
+                  description={
+                    draft.roots.length > 0
+                      ? '创建完成后扫描本次选择的所有目录。'
+                      : '当前将创建空媒体库；添加来源目录后再开始扫描。'
+                  }
+                  checked={draft.scanAfterCreate && draft.roots.length > 0}
+                  disabled={busy || draft.roots.length === 0}
+                  onChange={(value) => patchDraft({ scanAfterCreate: value })}
+                />
+                <p className={styles.reviewNote}>
+                  创建只会写入媒体库配置；源文件不会被移动或删除。
+                </p>
+              </div>
+            ) : null}
+          </form>
+        </div>
+      </Modal>
+      {remotePickerOpen && (
+        <RemoteRootPicker
+          busy={busy}
+          available
+          title="选择服务端来源目录"
+          confirmText="选择此目录"
+          onCancel={() => setRemotePickerOpen(false)}
+          onAdd={(selection, displayPath) => {
+            setRemoteRoots((current) => ({
+              ...current,
+              [displayPath]: selection
+            }))
+            patchDraft({ roots: [...new Set([...draft.roots, displayPath])] })
+            setRemotePickerOpen(false)
+          }}
+        />
+      )}
+    </>
   )
 }

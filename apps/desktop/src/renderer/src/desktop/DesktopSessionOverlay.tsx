@@ -13,6 +13,8 @@ function titleFor(session: DesktopSession): string {
       return '桌面与服务器版本不一致'
     case 'recoveryRequired':
       return '需要重新领取写入凭据'
+    case 'claimRequired':
+      return '服务已连接，等待首次授权'
     case 'authInvalid':
       return '写入授权已失效'
     case 'modePrepRequired':
@@ -27,19 +29,20 @@ function titleFor(session: DesktopSession): string {
 }
 
 function descriptionFor(session: DesktopSession): string {
+  if (session.state === 'authInvalid') return '远程请求已暂停。请前往连接设置恢复授权，完成后核对资料并手动重新提交未完成的操作。'
   if (session.message) return session.message
   if (session.state === 'starting') return '正在读取此电脑的连接状态。'
   if (session.state === 'modePrepRequired') {
     return '请先回到本地模式完成工作记录复制，不要在远程模式打开原资料库。'
   }
+  if (session.state === 'claimRequired') return '在服务端生成一次性令牌，然后在连接设置中领取写入凭据。'
   return '可以打开设置修改连接方式，或切回本地模式后重启。'
 }
 
 export default function DesktopSessionOverlay(): JSX.Element | null {
-  const { session, reconnect, claimWriter } = useDesktopSession()
+  const { session, reconnect } = useDesktopSession()
   const location = useLocation()
   const navigate = useNavigate()
-  const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const onSettings = location.pathname.startsWith('/settings')
@@ -59,8 +62,8 @@ export default function DesktopSessionOverlay(): JSX.Element | null {
     <div className={styles.overlay} role="alert">
       <EmptyState variant="fill" title={titleFor(session)} description={descriptionFor(session)}>
         <div className={styles.actions}>
-          <Button onClick={() => navigate(settingsPath('network', 'mode'))}>打开连接设置</Button>
-          {session.state === 'disconnected' || session.state === 'authInvalid' ? (
+          <Button onClick={() => navigate(settingsPath('storage', 'mode'))}>打开连接设置</Button>
+          {session.state === 'disconnected' ? (
             <Button
               variant="ghost"
               disabled={busy}
@@ -76,36 +79,6 @@ export default function DesktopSessionOverlay(): JSX.Element | null {
             </Button>
           ) : null}
         </div>
-        {session.state === 'recoveryRequired' ? (
-          <form
-            className={styles.claim}
-            onSubmit={(event) => {
-              event.preventDefault()
-              setBusy(true)
-              setError(null)
-              void claimWriter({
-                kind: session.writerEpoch && session.writerEpoch > 0 ? 'deployRecover' : 'initialBind',
-                oneTimeToken: token.trim()
-              })
-                .catch((reason) => setError((reason as Error).message))
-                .finally(() => setBusy(false))
-            }}
-          >
-            <label className={styles.claimField}>
-              一次性领取令牌
-              <input
-                className="text-input"
-                value={token}
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(event) => setToken(event.target.value)}
-              />
-            </label>
-            <Button type="submit" disabled={busy || token.trim().length < 32}>
-              领取写入凭据
-            </Button>
-          </form>
-        ) : null}
         {error ? <p className={styles.error}>{error}</p> : null}
       </EmptyState>
     </div>

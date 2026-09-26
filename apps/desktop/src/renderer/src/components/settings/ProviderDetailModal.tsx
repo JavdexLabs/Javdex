@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { LlmApiKeyAction, LlmProviderProtocol } from '@shared/llmProviders'
 import type { ModelCandidate, ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import Button from '../Button'
+import SettingsFeedback from './SettingsFeedback'
 import SettingsFormActions from './SettingsFormActions'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import ConfirmModal from '../ConfirmModal'
@@ -139,6 +140,7 @@ export default function ProviderDetailModal({
     try {
       setDiscovered(await window.api.settings.discoverManagedModels(connection.id))
     } catch (error) {
+      setTestResult((error as Error).message)
       toast.show((error as Error).message, 'error')
     } finally {
       setRemoteBusy(null)
@@ -147,11 +149,11 @@ export default function ProviderDetailModal({
 
   const test = async (modelRef: string): Promise<void> => {
     setRemoteBusy(modelRef)
-    setTestResult(null)
     try {
       const result = await window.api.settings.testManagedModel(modelRef)
       setTestResult(`模型测试通过：${result.sample}`)
     } catch (error) {
+      setTestResult((error as Error).message)
       toast.show((error as Error).message, 'error')
     } finally {
       setRemoteBusy(null)
@@ -281,19 +283,13 @@ export default function ProviderDetailModal({
                   disabled={remoteBusy !== null || dirty || busy}
                   onClick={() => void discover()}
                 >
-                  {remoteBusy === 'discover' ? '查询中…' : '查询远程模型'}
+                  查询远程模型
                 </Button>
               </header>
-              <p className={styles.metaText} role="status">
-                {dirty
-                  ? '连接有未保存的更改，请保存后再查询或测试模型。'
-                  : '查询和测试使用已保存的连接；测试不会改变默认模型。'}
-              </p>
-              {testResult ? (
-                <p className={styles.metaText} role="status">
-                  {dirty ? '配置已更改，请保存后重新测试。' : testResult}
-                </p>
-              ) : null}
+              <SettingsFeedback message={dirty ? '连接有未保存的更改，请保存后再查询或测试模型。'
+                : remoteBusy ? '正在查询或测试模型，请稍候…'
+                  : testResult || '查询和测试使用已保存的连接；测试不会改变默认模型。'}
+                detail={!dirty && !remoteBusy ? testResult : null} />
               <div className={styles.modelRows}>
                 {models.map((model) => (
                   <div key={model.id} className={styles.modelRow}>
@@ -312,7 +308,7 @@ export default function ProviderDetailModal({
                       disabled={remoteBusy !== null || dirty || busy}
                       onClick={() => void test(model.id)}
                     >
-                      {remoteBusy === model.id ? '测试中…' : '测试'}
+                      测试
                     </Button>
                     {!model.builtin ? (
                       <Button

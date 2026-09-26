@@ -1,3 +1,4 @@
+import SettingsActionLabel from './SettingsActionLabel'
 import { Play, Square } from 'lucide-react'
 import type { MediaLibrarySummary } from '@shared/mediaLibraryTypes'
 import Button from '../Button'
@@ -35,13 +36,13 @@ export default function MediaLibraryScanRunButton({
       ) : (
         <Play {...UI_ICON_SM} aria-hidden />
       )}
-      {scan.running
+      <SettingsActionLabel reserve="扫描并导入">{scan.running
         ? scan.cancelling
           ? '正在取消…'
           : '取消扫描'
         : library.activeRootCount > 0
           ? '扫描并导入'
-          : '执行待清理'}
+          : '执行待清理'}</SettingsActionLabel>
     </Button>
   )
 }

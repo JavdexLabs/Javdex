@@ -63,6 +63,7 @@ import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 import { useInfiniteActressList } from '../query/useInfiniteActressList'
 import VirtualActressGrid from '../components/VirtualActressGrid'
 import Button from '../components/Button'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -89,6 +90,7 @@ export default function ActressesPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
+  const { session: desktopSession } = useDesktopSession()
   const [searchParams, setSearchParams] = useSearchParams()
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.actressDetailOpen, end: false }))
 
@@ -111,6 +113,7 @@ export default function ActressesPage(): JSX.Element {
   const genderFilter = parseGender(searchParams.get(LIST_PARAM.gender))
   const statusFilter = parseActressStatus(searchParams.get(LIST_PARAM.status))
   const avatarFilter = parseActressAvatar(searchParams.get(LIST_PARAM.avatar))
+  const faceFilterAvailable = desktopSession.mode !== 'remote'
   const { sortBy, sortDir } = parseActressSort(
     searchParams.get(LIST_PARAM.sort),
     searchParams.get(LIST_PARAM.dir)
@@ -144,14 +147,14 @@ export default function ActressesPage(): JSX.Element {
 
   const actressListQuery = useMemo(
     () => {
-      const faceResultIds = avatarFilter === 'without-face'
+      const faceResultIds = faceFilterAvailable && avatarFilter === 'without-face'
         ? actressIdsWithoutFace(faceScan.manifest, faceScan.cache)
         : undefined
       return {
         search: debouncedQ.trim(),
         gender: genderFilter,
         status: statusFilter,
-        avatar: avatarFilter === 'without-face' ? 'all' as const : avatarFilter,
+        avatar: faceFilterAvailable && avatarFilter === 'without-face' ? 'all' as const : avatarFilter,
         sortBy,
         sortDir,
         actressIds: faceResultIds
@@ -160,6 +163,7 @@ export default function ActressesPage(): JSX.Element {
     [
       avatarFilter,
       debouncedQ,
+      faceFilterAvailable,
       faceScan.cache,
       faceScan.manifest,
       genderFilter,
@@ -235,6 +239,10 @@ export default function ActressesPage(): JSX.Element {
         }
         return
       }
+      if (!faceFilterAvailable) {
+        toast.show('远程资料库不支持本机人脸筛选', 'info')
+        return
+      }
 
       faceScanAutoStartedKeyRef.current = faceScanAutoStartKey
       const summary = await faceScan.start()
@@ -272,12 +280,20 @@ export default function ActressesPage(): JSX.Element {
       avatarBatchActive,
       faceScan,
       faceScanAutoStartKey,
+      faceFilterAvailable,
       patchParams,
       toast
     ]
   )
 
   useEffect(() => {
+    if (!faceFilterAvailable) {
+      faceScanAutoStartedKeyRef.current = null
+      if (avatarFilter === 'without-face') {
+        patchParams({ [LIST_PARAM.avatar]: actressAvatarParam('all') })
+      }
+      return
+    }
     if (avatarFilter !== 'without-face') {
       faceScanAutoStartedKeyRef.current = null
       return
@@ -292,11 +308,13 @@ export default function ActressesPage(): JSX.Element {
     actressBatchActive,
     avatarBatchActive,
     avatarFilter,
+    faceFilterAvailable,
     faceScanAutoStartKey,
     faceScanMissingIdentity,
     faceScan.needsScan,
     faceScan.manifestReady,
     faceScan.running,
+    patchParams,
     startFaceScan
   ])
 
@@ -486,6 +504,7 @@ export default function ActressesPage(): JSX.Element {
                   <ActressFilterPopover
                     open={filterOpen}
                     anchorRef={filterBtnRef}
+                    showFaceFilter={faceFilterAvailable}
                     state={{ status: statusFilter, avatar: avatarFilter }}
                     onChange={(patch: Partial<ActressFilterState>) => {
                       const updates: Record<string, string | null | undefined> = {}
@@ -495,7 +514,11 @@ export default function ActressesPage(): JSX.Element {
                       if (patch.avatar !== undefined) {
                         if (patch.avatar === 'without-face') {
                           setFilterOpen(false)
-                          void startFaceScan(avatarFilter)
+                          if (!faceFilterAvailable) {
+                            toast.show('远程资料库不支持本机人脸筛选', 'info')
+                          } else {
+                            void startFaceScan(avatarFilter)
+                          }
                         } else {
                           updates[LIST_PARAM.avatar] = actressAvatarParam(patch.avatar)
                         }

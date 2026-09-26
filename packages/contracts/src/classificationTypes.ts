@@ -83,6 +83,8 @@ export interface OrganizationSummary {
 }
 
 export interface OrganizationDetail extends OrganizationListItem {
+  generation?: number
+  revision?: number
   summary: string | null
   countryRegion: string | null
   foundedYear: number | null
@@ -134,6 +136,7 @@ export interface OrganizationMergeResult {
 export interface DirectorDeleteImpact {
   id: number
   videoCount: number
+  planDigest?: string
 }
 
 export interface DirectorDeleteResult {
@@ -146,6 +149,7 @@ export interface SeriesDeleteImpact {
   id: number
   videoCount: number
   directChildCount: number
+  planDigest?: string
 }
 
 export interface SeriesDeleteResult {
@@ -161,6 +165,7 @@ export interface OrganizationRoleRemovalImpact {
   roleVideoCount: number
   remainingRoles: OrganizationRole[]
   canRemove: boolean
+  planDigest?: string
 }
 
 export interface OrganizationRoleRemovalResult {
@@ -176,6 +181,7 @@ export interface OrganizationDeleteImpact {
   publisherVideoCount: number
   directChildCount: number
   ownedSeriesCount: number
+  planDigest?: string
 }
 
 export interface OrganizationDeleteResult {
@@ -221,6 +227,8 @@ export interface DirectorListItem {
 }
 
 export interface DirectorDetail extends DirectorListItem {
+  generation?: number
+  revision?: number
   aliases: string[]
   summary: string | null
   countryRegion: string | null
@@ -307,6 +315,8 @@ export interface SeriesSummary {
 }
 
 export interface SeriesDetail extends SeriesListItem {
+  generation?: number
+  revision?: number
   aliases: string[]
   summary: string | null
   parentSeries: SeriesSummary | null

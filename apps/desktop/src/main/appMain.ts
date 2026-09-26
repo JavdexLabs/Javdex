@@ -158,6 +158,7 @@ if (gotSingleInstanceLock) {
     configureDesktopLibraryRuntime()
     const runtime = await createDesktopRuntime(app.getPath('userData'), app.getVersion(), {
       local: {
+        onRestored: () => { webAccess.revoke() },
         queries: videoQueryService,
         videos: videoMaintenanceService,
         lifecycle: videoLifecycleService,

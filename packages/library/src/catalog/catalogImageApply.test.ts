@@ -13,6 +13,7 @@ import { ensureCatalogIdentity } from './catalogIdentity'
 import { completeCatalogUploadFromBuffer, createCatalogUpload, readCatalogUpload } from './catalogUploads'
 import {
   applyActressAvatarRef,
+  applyActressGalleryPosterRef,
   applyActressCropRef,
   applyActressGalleryRefs,
   applyClassificationImageRef,
@@ -69,6 +70,31 @@ afterEach(() => {
 })
 
 describe('catalog image apply', () => {
+  it('sets a gallery background without replacing the actress avatar and rejects foreign or stale assets', () => {
+    setup()
+    const database = getDb()
+    const actressId = Number(database.prepare("INSERT INTO actresses (main_name, avatar_path) VALUES ('One', 'avatars/one.png')").run().lastInsertRowid)
+    const otherId = Number(database.prepare("INSERT INTO actresses (main_name) VALUES ('Other')").run().lastInsertRowid)
+    const insert = database.prepare("INSERT INTO actress_gallery_assets (actress_id, local_path) VALUES (?, ?)")
+    const galleryId = Number(insert.run(actressId, 'actress_gallery/one.png').lastInsertRowid)
+    const foreignId = Number(insert.run(otherId, 'actress_gallery/other.png').lastInsertRowid)
+    const version = readActressAggregateVersion(actressId)!
+    assert.throws(
+      () => applyActressGalleryPosterRef(actressId, { kind: 'asset', assetId: foreignId }, { A: version }, randomUUID()),
+      (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT'
+    )
+    applyActressGalleryPosterRef(actressId, { kind: 'asset', assetId: galleryId }, { A: version }, randomUUID())
+    const paths = database.prepare('SELECT avatar_path, poster_path FROM actresses WHERE id = ?').get(actressId) as {
+      avatar_path: string; poster_path: string
+    }
+    assert.equal(paths.avatar_path, 'avatars/one.png')
+    assert.equal(paths.poster_path, 'actress_gallery/one.png')
+    assert.throws(
+      () => applyActressGalleryPosterRef(actressId, { kind: 'clear' }, { A: version }, randomUUID()),
+      (error: unknown) => isStructuredError(error) && error.code === 'VERSION_CONFLICT'
+    )
+  })
+
   it('applies cover, samples, poster-from-sample, actress, classification, playlist, and pending scrape images', async () => {
     setup()
     const videoId = Number(getDb().prepare("INSERT INTO videos (code, title) VALUES ('S06-001', 'One')").run().lastInsertRowid)

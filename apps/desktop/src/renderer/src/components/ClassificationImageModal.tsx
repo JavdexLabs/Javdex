@@ -16,6 +16,7 @@ import type {
   ClassificationImageInput,
   ClassificationImageUpdateResult,
 } from "@shared/classificationTypes";
+import type { ExpectedVersions } from '@shared/protocol/versions'
 import { api, assetUrl } from "../api";
 import EmptyState from "./EmptyState";
 import Modal from "./Modal";
@@ -35,6 +36,7 @@ type SourceMode = "file" | "url" | "video";
 
 interface Props {
   entity: ClassificationEntityRef;
+  expectedVersions?: ExpectedVersions;
   entityLabel: string;
   imagePath: string | null;
   fallbackCoverPath: string | null;
@@ -52,6 +54,7 @@ export default function ClassificationImageModal(props: Props): JSX.Element {
 
 function ClassificationImageEditor({
   entity,
+  expectedVersions,
   entityLabel,
   imagePath,
   fallbackCoverPath,
@@ -210,7 +213,7 @@ function ClassificationImageEditor({
     if (pending === undefined || saving || mediaEditorsHidden) return;
     setSaving(true);
     try {
-      const result = await api.classificationImages.set(entity, pending);
+      const result = await api.classificationImages.set(entity, pending, expectedVersions);
       if (!activeRef.current) return;
       await onChanged(result);
       if (!activeRef.current) return;

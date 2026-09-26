@@ -10,6 +10,7 @@ import type {
 } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
+import { expectedClassificationVersion } from '@shared/protocol/versions'
 import BackButton from '../components/BackButton'
 import ClassificationImageModal from '../components/ClassificationImageModal'
 import ClassificationDeleteModal from '../components/ClassificationDeleteModal'
@@ -63,7 +64,7 @@ export default function DirectorDetailPage(): JSX.Element {
   const scroll = useScrollContainerMemory(`director-detail:${hash}`)
   const save = async (input: DirectorUpdateInput): Promise<void> => {
     try {
-      await api.directors.update(id, input)
+      await api.directors.update(id, input, expectedClassificationVersion(detailQuery.data ?? {}))
       setEditing(false)
       await client.invalidateQueries({ queryKey: directorKeys.all })
       void refetchSilent()
@@ -269,6 +270,7 @@ export default function DirectorDetailPage(): JSX.Element {
         {editingImage && (
           <ClassificationImageModal
             entity={{ kind: 'director', id }}
+            expectedVersions={expectedClassificationVersion(director)}
             entityLabel="导演"
             imagePath={director.imagePath}
             fallbackCoverPath={director.fallbackCoverPath}
@@ -288,7 +290,7 @@ export default function DirectorDetailPage(): JSX.Element {
             entityLabel="导演"
             entityName={director.mainName}
             loadImpact={() => api.directors.deletePreview(id)}
-            remove={() => api.directors.remove(id)}
+            remove={(impact) => api.directors.remove(id, impact.planDigest, expectedClassificationVersion(director))}
             onCancel={() => setDeletingDirector(false)}
             onDeleted={deleted}
           />

@@ -18,6 +18,8 @@ Object.defineProperty(globalThis, 'React', {
 
 const target: OrganizationDetail = {
   id: 10,
+  generation: 1,
+  revision: 1,
   mainName: '保留机构',
   imagePath: null,
   fallbackCoverPath: null,

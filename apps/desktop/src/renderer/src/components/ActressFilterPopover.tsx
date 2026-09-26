@@ -16,6 +16,7 @@ interface Props {
   onChange: (patch: Partial<ActressFilterState>) => void
   onReset: () => void
   anchorRef: RefObject<HTMLElement | null>
+  showFaceFilter?: boolean
 }
 
 function isActressStatus(value: string): value is ActressListStatusFilter {
@@ -33,7 +34,8 @@ export default function ActressFilterPopover({
   state,
   onChange,
   onReset,
-  anchorRef
+  anchorRef,
+  showFaceFilter = true
 }: Props): JSX.Element | null {
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -105,7 +107,7 @@ export default function ActressFilterPopover({
               <option value="all">全部</option>
               <option value="with">有头像</option>
               <option value="without">无头像</option>
-              <option value="without-face">无人脸</option>
+              {showFaceFilter ? <option value="without-face">无人脸</option> : null}
             </SelectControl>
           </label>
         </div>

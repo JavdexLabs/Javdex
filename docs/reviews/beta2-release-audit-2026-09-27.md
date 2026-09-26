@@ -39,12 +39,19 @@ Linux 第三轮完整桌面测试 3333 通过、4 跳过、0 失败，桌面/服
 
 Linux PR CI 最终轮 [36257531589](https://github.com/JavdexLabs/Javdex/actions/runs/36257531589) 全部通过，桌面测试 3333 通过、4 跳过、0 失败，并完成 Agent 及双向备份容器验收。该证据属于 beta.2 候选；beta.3 仍需通过自身 CI。
 
-## 发布门禁
+## Beta 3 最终验证与发布
 
-- [x] 最终完整 `npm test` 成功退出：3,329 通过、8 跳过、0 失败，3337 项；包括类型、lint、CSS、控件和打包资源测试。
-- [x] 最终构建的隔离 Docker 备份验收成功退出。
-- [ ] 发布提交与标签；Release 工作流完成，各平台安装包与双架构镜像可用。
-- [ ] Release 为 Prerelease，稳定更新接口及 latest 镜像未被 Beta 替换，GHCR 可公开拉取。
-- [ ] 发布后合入远程 main，核验源码与发布标签一致。
+- 发布源码：`9ffd976f0468d91ff7836330f11ddfa0ec57fea4`，标签 `v0.8.0-beta.3`。beta.2 标签保留且没有 Release 产物。
+- [本次 PR CI](https://github.com/JavdexLabs/Javdex/actions/runs/36259599567) 全部通过：Linux 桌面 3333 通过、4 跳过、0 失败；服务端测试、双宿主迁库故障回滚、Agent 及双向备份 Docker 验收通过。
+- [本次发布工作流](https://github.com/JavdexLabs/Javdex/actions/runs/36259622646) 全部通过：Windows 完整测试 3329 通过、8 跳过、0 失败；Windows NSIS/ZIP、macOS x64/arm64 DMG（含签名校验）、Linux AppImage/deb 构建及 Agent 运行资源检查通过；服务端 amd64/arm64 原生构建和容器烟测通过。
+- beta.3 本机重新执行 npm ci、setup:desktop、完整 npm test、桌面/Web/服务端构建成功，完整测试同为 3329 通过、8 跳过、0 失败。
+- [GitHub Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.8.0-beta.3) 已公开，Prerelease=true、Draft=false。六个桌面安装包、两个部署文件和 SHA256SUMS 共九个下载地址均在未登录 HTTP 检查返回 200；清单的八项 SHA-256 与 GitHub 资产摘要逐项一致。
+- 使用空 Docker 客户端配置匿名拉取 `ghcr.io/javdexlabs/javdex-server:0.8.0-beta.3` 成功。多架构摘要：`sha256:ded1680c8ef20e3bbaefc9b3d08eedfd31ce1e6708884c84cebef1fce15856cc`；清单包含 Linux amd64 和 arm64。
+- 刚发布镜像在 Windows Docker Desktop 中再次通过隔离备份恢复烟测：桌面编译产物导出、加密图片、源库保留、Docker 子目录映射、上传续传、恢复后的 writer、旧会话拒绝、重复确认、重启、双向恢复和记录/托管文件清理。未使用现有自测数据卷。
+- 发布后稳定更新接口仍为 v0.7.1，`latest` 镜像标签仍不存在，与发布前一致。
 
-当前尚未发布，以上未勾选项不能视为通过。跨平台安装及 Linux 专属验收以本次发布 CI 为准，历史 Beta 1 证据不代替本轮检查。
+## 合并与验证边界
+
+由 [PR #116](https://github.com/JavdexLabs/Javdex/pull/116) 在发布验证完成后合入 main；最终合并状态与提交以该 PR 为准。发布后的补充仅更新验证记录和状态文档，不改变标签中的产品代码、依赖或产物。
+
+平台跳过项不计作通过。跨平台构建、资源及 macOS 签名检查不等于所有平台人工 GUI 安装验收；既有设置界面视觉验证范围见上方链接。S13 全矩阵和未覆盖的真实部署环境仍保留其各自验收边界。

@@ -2,7 +2,7 @@
 
 本页维护当前部署与操作方式。实现、合同和功能边界见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，进度与验证结果见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。桌面日常操作见 [使用指南](USER_GUIDE.md)，只读网页见 [LAN Web](LAN_WEB.md)。
 
-本页按 **0.8.0-beta.2** 说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0-beta.2` 必须成对使用，不要把 0.7.1 安装包接到本版服务端。Beta 不代表全部部署环境已完成验收，首次试用建议使用独立测试资料库。
+本页按 **0.8.0-beta.3** 说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0-beta.3` 必须成对使用，不要把 0.7.1 安装包接到本版服务端。Beta 不代表全部部署环境已完成验收，首次试用建议使用独立测试资料库。
 
 ## 服务端能做什么
 
@@ -13,12 +13,12 @@
 
 ## Docker Compose 快速开始
 
-正式发布流程提供 `ghcr.io/javdexlabs/javdex-server` 镜像，支持 Linux amd64 和 arm64，Docker 会自动选择对应架构。用户只需要 Docker 与 Compose 插件，无需 Node.js、npm 或编译源码。`0.8.0-beta.2` 镜像随该预发布条目一起提供，不会更新 `latest`。首次试用建议新建独立资料库。
+正式发布流程提供 `ghcr.io/javdexlabs/javdex-server` 镜像，支持 Linux amd64 和 arm64，Docker 会自动选择对应架构。用户只需要 Docker 与 Compose 插件，无需 Node.js、npm 或编译源码。`0.8.0-beta.3` 镜像随该预发布条目一起提供，不会更新 `latest`。首次试用建议新建独立资料库。
 
 1. 从所选 Release 下载 `docker-compose.example.yml` 和 `javdex-server.example.json`，放在同一个目录。在该目录创建 `.env`，填写与桌面安装包一致的版本号（不含 `v`）：
 
    ```dotenv
-   JAVDEX_VERSION=0.8.0-beta.2
+   JAVDEX_VERSION=0.8.0-beta.3
    ```
 
 2. 编辑 [Compose 示例](../deploy/docker-compose.example.yml) 和 [服务配置](../deploy/javdex-server.example.json)：

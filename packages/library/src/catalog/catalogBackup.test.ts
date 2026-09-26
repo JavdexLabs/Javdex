@@ -259,7 +259,9 @@ test('mapping handles Chinese/space paths, missing resources, and duplicate targ
   assert.equal(preview.missingResources, 1)
   assert.equal(preview.removedResources, 0)
   target.request({ action: 'restore', id, digest: preview.digest }); await wait(target, id, 'completed')
-  assert.equal((target.db.prepare('SELECT locator FROM video_resources').get() as { locator: string }).locator, path.join(dir, '电影.avi'))
+  // Mapping canonicalizes the existing directory, including Windows 8.3 aliases.
+  // The missing resource itself cannot be passed to realpath.
+  assert.equal((target.db.prepare('SELECT locator FROM video_resources').get() as { locator: string }).locator, path.join(fs.realpathSync.native(dir), '电影.avi'))
 })
 
 test('encrypted official images and classification covers export in plaintext without changing source files', async () => {

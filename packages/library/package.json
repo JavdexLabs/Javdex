@@ -1,6 +1,6 @@
 {
   "name": "@javdex/library",
-  "version": "0.8.0-beta.2",
+  "version": "0.8.0-beta.3",
   "private": true,
   "license": "MIT",
   "description": "Node-only catalog database, image store, public-image HTTP, scan helpers/orchestration/audit-read/scheduler, classification query/maintenance/images, actress query/conflict/gallery/maintenance, tag queries, playlist and media-library maintenance, video maintenance/lifecycle, asset migration, NFO codec/tickets/workset/export projection, scrape confirm/candidate apply, playlist applyImport, named target lists, agent metadata apply, play grants, manage-image reads, whole-catalog migration, and local path/resource identity; Electron NFO cover export and desktop collection/deliver remain in desktop",

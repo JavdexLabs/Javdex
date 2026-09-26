@@ -1,6 +1,6 @@
 {
   "name": "@javdex/web",
-  "version": "0.8.0-beta.2",
+  "version": "0.8.0-beta.3",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -9,8 +9,8 @@
     "typecheck": "node ../../scripts/run-root-script.mjs typecheck:browser"
   },
   "dependencies": {
-    "@javdex/contracts": "0.8.0-beta.2",
-    "@javdex/ui": "0.8.0-beta.2",
+    "@javdex/contracts": "0.8.0-beta.3",
+    "@javdex/ui": "0.8.0-beta.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "lucide-react": "^1.21.0"

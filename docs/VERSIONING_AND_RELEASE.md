@@ -57,7 +57,7 @@ GET https://api.github.com/repos/JavdexLabs/Javdex/releases/latest
 ## 4. 发布前准备
 
 1. 确认工作区没有意外改动。
-2. 将 `package.json` 更新为目标版本，并同步 `package-lock.json` 中的根包版本。
+2. 将根与全部 workspace 的 `package.json` 更新为目标版本，同时更新内部 `@javdex/*` 依赖的精确版本以及 `package-lock.json` 中的对应条目。运行 `npm run check:workspaces` 检查版本和内部依赖锁定，随后以 `npm ci` 验证干净安装；不能只修改各包自身的 `version`。
 3. 将用户可见变化写入 `CHANGELOG.md`，使用目标版本和发布日期作为标题。
 4. 新建 `.github/release-notes/vX.Y.Z.md`，供 Release workflow 读取。沿用上一版本的正文风格，以用户可见功能、体验改进和升级影响为主；同步受影响的使用指南，新增产品能力可补充到 README。
 5. 执行：

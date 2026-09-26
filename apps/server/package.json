@@ -8,9 +8,9 @@
     "javdex-server": "./src/index.ts"
   },
   "dependencies": {
-    "@javdex/contracts": "0.8.0-beta.1",
-    "@javdex/http": "0.8.0-beta.1",
-    "@javdex/library": "0.8.0-beta.1",
+    "@javdex/contracts": "0.8.0-beta.2",
+    "@javdex/http": "0.8.0-beta.2",
+    "@javdex/library": "0.8.0-beta.2",
     "better-sqlite3": "13.0.3",
     "sharp": "0.35.4",
     "zod": "^4.4.3"

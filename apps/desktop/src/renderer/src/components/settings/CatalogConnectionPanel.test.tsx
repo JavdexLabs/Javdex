@@ -4,6 +4,7 @@ import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { createMemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom'
 import type { DesktopSession } from '@shared/desktop/session'
+import { EMPTY_DESKTOP_SESSION } from '@shared/desktop/session'
 import type { DefaultPlayerDetectionResult, ThisComputerSettings, ThisComputerSettingsPatch } from '@shared/desktop/settings'
 import { DesktopSessionContext } from '../../desktop/DesktopSessionContext'
 import SettingsLeaveGuard from '../../settings/SettingsLeaveGuard'
@@ -64,6 +65,48 @@ function textOf(node: TestRenderer.ReactTestInstance | string): string {
     ? node
     : node.children.map((child) => textOf(child as TestRenderer.ReactTestInstance)).join('')
 }
+
+it('shows both actual versions inside connection details, including mismatched and unknown servers', async () => {
+  const previousWindow = globalThis.window
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    addEventListener() {}, removeEventListener() {}, api: { thisComputer: {
+      get: async () => ({ mode: 'remote', remoteBaseUrl: 'http://localhost:8096', playerPath: null })
+    } }
+  } })
+  try {
+    const { default: Panel } = await import('./CatalogConnectionPanel')
+    const { api } = await import('../../api')
+    api.thisComputer = window.api.thisComputer
+    for (const mode of ['mismatch', 'unknown', 'local'] as const) {
+      const session: DesktopSession = {
+        ...EMPTY_DESKTOP_SESSION, mode: mode === 'local' ? 'local' : 'remote',
+        state: mode === 'mismatch' ? 'versionMismatch' : mode === 'unknown' ? 'disconnected' : 'available',
+        desktopAppVersion: '0.8.0-beta.1',
+        appVersion: mode === 'unknown' ? null : mode === 'local' ? '0.8.0-beta.1' : '0.8.0-beta.3'
+      }
+      const router = createMemoryRouter([{ path: '*', element: <DesktopSessionContext.Provider value={{
+        session, capabilities: {} as never, catalogReadsEnabled: false,
+        reconnect: async () => {}, claimWriter: async () => { throw new Error('unused') }
+      }}><SettingsLeaveGuard><Panel /></SettingsLeaveGuard></DesktopSessionContext.Provider> }])
+      let tree: TestRenderer.ReactTestRenderer | undefined
+      try {
+        await act(async () => { tree = TestRenderer.create(<RouterProvider router={router} />) })
+        const details = tree!.root.findAllByType('details').find(node =>
+          node.findAllByType('summary').some(summary => textOf(summary) === '连接详情'))!
+        assert.ok(!details.props.open, 'version details stay collapsed by default')
+        const values = Object.fromEntries(details.findAllByType('dt').map(label =>
+          [textOf(label), textOf(label.parent!.findByType('dd'))]))
+        assert.equal(values['本地版本'], '0.8.0-beta.1')
+        assert.equal(values['服务端版本'], mode === 'local' ? undefined : mode === 'unknown' ? '未获取' : '0.8.0-beta.3')
+      } finally {
+        act(() => tree?.unmount())
+        router.dispose()
+      }
+    }
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
 
 it('saves remote-to-local mode without leaving a dirty draft or losing the server address', async () => {
   const previousWindow = globalThis.window

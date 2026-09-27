@@ -80,7 +80,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     generation,
     writerEpoch: handshake?.writerEpoch ?? null,
     frozen: handshake?.ready === 'frozen' || sessionState === 'frozen',
-    appVersion: handshake?.appVersion ?? options.appVersion,
+    appVersion: handshake?.appVersion ?? null,
+    desktopAppVersion: options.appVersion,
     schemaVersion: handshake?.schemaVersion ?? null,
     remoteImagesDir,
     message: sessionMessage

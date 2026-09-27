@@ -5,11 +5,12 @@ import { createRemoteCatalogBackend } from './remoteCatalogBackend'
 import { structuredError } from '@shared/protocol/errors'
 
 it('requires first authorization on an unbound server even with a stale cached writer secret', async () => {
+  let serverVersion = '0.8.0-beta.1'
   const server = createServer((request, response) => {
     assert.equal(request.url, '/manage/v1/handshake.get')
     response.setHeader('Content-Type', 'application/json')
     response.end(JSON.stringify({
-      appVersion: '0.8.0-beta.1', schemaVersion: 1,
+      appVersion: serverVersion, schemaVersion: 1,
       identity: { serverId: 'server-1', catalogId: 'catalog-1' },
       writerEpoch: 0, ready: 'notBound'
     }))
@@ -28,10 +29,18 @@ it('requires first authorization on an unbound server even with a stale cached w
         deleteWriterSecret: async () => undefined
       }
     })
+    assert.equal(backend.session().desktopAppVersion, '0.8.0-beta.1')
+    assert.equal(backend.session().appVersion, null, 'an unknown server version must not fall back to the desktop version')
     const session = await backend.reconnect()
     assert.equal(session.state, 'claimRequired')
     assert.equal(session.writerEpoch, 0)
     assert.equal(session.remoteBaseUrl, `http://127.0.0.1:${address.port}`)
+    assert.equal(session.appVersion, serverVersion)
+    serverVersion = '0.8.0-beta.3'
+    const mismatch = await backend.reconnect()
+    assert.equal(mismatch.state, 'versionMismatch')
+    assert.equal(mismatch.desktopAppVersion, '0.8.0-beta.1')
+    assert.equal(mismatch.appVersion, '0.8.0-beta.3')
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }

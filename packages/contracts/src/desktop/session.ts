@@ -22,7 +22,10 @@ export interface DesktopSession {
   generation: number
   writerEpoch: number | null
   frozen: boolean
+  /** Version of the catalog host; null until the remote handshake is received. */
   appVersion: string | null
+  /** Version of the running desktop process, independent of the catalog host. */
+  desktopAppVersion?: string | null
   schemaVersion: number | null
   /** Authenticated server image directory; absent in local mode or before remote metadata loads. */
   remoteImagesDir?: string | null

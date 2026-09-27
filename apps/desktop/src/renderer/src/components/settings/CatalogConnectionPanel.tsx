@@ -227,6 +227,14 @@ export default function CatalogConnectionPanel(): JSX.Element {
           <summary className={styles.detailsSummary}>连接详情</summary>
           <dl className={styles.detailsList}>
             <div className={styles.detailsRow}>
+              <dt className={styles.detailsLabel}>本地版本</dt><dd className={styles.detailsValue}>{session.desktopAppVersion ?? (session.mode === 'local' ? session.appVersion : null) ?? '未获取'}</dd>
+            </div>
+            {session.mode === 'remote' ? (
+              <div className={styles.detailsRow}>
+                <dt className={styles.detailsLabel}>服务端版本</dt><dd className={styles.detailsValue}>{session.appVersion ?? '未获取'}</dd>
+              </div>
+            ) : null}
+            <div className={styles.detailsRow}>
               <dt className={styles.detailsLabel}>会话代次</dt><dd className={styles.detailsValue}>{session.generation}</dd>
             </div>
             {session.catalogId ? (

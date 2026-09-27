@@ -245,16 +245,15 @@ export default function BackupSettingsPanel(): JSX.Element {
         const readOnly = Boolean(error && /\bEROFS\b/.test(error))
         return <div className={styles.record} key={item.id}>
         <div className={styles.recordCopy}><strong>{item.kind === 'backup' ? '资料库备份' : '恢复资料'}</strong><span className={styles.status} data-failed={item.phase === 'failed' || item.phase === 'recoveryRequired'}>{item.downloading ? '正在保存到本机' : phaseLabels[item.phase]}</span>
-          <p className={styles.recordMeta}>{new Date(item.createdAt).toLocaleString()}{item.bytes > 0 ? ` · ${size(item.bytes)}` : ''}{item.savedPath ? ' · 已保存到本机' : ''}{busyScope === item.id ? ' · 正在处理…' : ''}</p>
+          <p className={styles.recordMeta}>{new Date(item.createdAt).toLocaleString()}{item.bytes > 0 ? ` · ${size(item.bytes)}` : ''}{item.downloading ? ` · ${transfer(item)}` : item.savedPath ? ' · 已保存到本机' : ''}{busyScope === item.id ? ' · 正在处理…' : ''}</p>
         </div>
         <div className={styles.actions}>
           <Button size="sm" aria-expanded={expandedId === item.id} aria-controls={`${detailsPrefix}-${item.id}`} onClick={() => setExpandedId(current => current === item.id ? null : item.id)}>{expandedId === item.id ? <ChevronDown {...UI_ICON_SM} /> : <ChevronRight {...UI_ICON_SM} />}{expandedId === item.id ? '收起详情' : '展开详情'}</Button>
           {!finishedPhases.has(item.phase) && <Button size="sm" disabled={busy} onClick={() => continueTask(item)}>继续处理</Button>}
           {item.kind === 'backup' && item.phase === 'completed' && <Button size="sm" disabled={busy || item.downloading} onClick={() => file({ action: 'save', id: item.id }, item.id)}><Download {...UI_ICON_SM} />另存为</Button>}
+          {canRetryTransfer(item) && <Button size="sm" disabled={busy || item.downloading} onClick={() => file({ action: 'resume', id: item.id }, item.id)}>重试传输</Button>}
           {['completed', 'failed', 'cancelled'].includes(item.phase) && <Button size="sm" variant="danger" disabled={busy || item.downloading} title="确认删除记录，可选择清理托管备份" onClick={() => previewRemoval(item)}><Trash2 {...UI_ICON_SM} />删除记录</Button>}
         </div>
-        {error ? <p className={styles.recordMessage} data-error="true" role="alert">{readOnly ? '操作失败：目标目录为只读，请配置读写权限后重试。' : error}</p> : item.downloading && <p className={styles.recordMessage} role="status">{transfer(item)}</p>}
-        {canRetryTransfer(item) && <div className={styles.recordFeedback}><Button size="sm" disabled={busy || item.downloading} onClick={() => file({ action: 'resume', id: item.id }, item.id)}>重试传输</Button></div>}
         <div id={`${detailsPrefix}-${item.id}`} className={styles.recordDetails} hidden={expandedId !== item.id}>
           {expandedId === item.id && <>
             {error && <div><strong>错误详情</strong><p className={styles.recordError}>{error}</p>{readOnly && <p className={styles.recordResult}>请在资料库所在设备上检查错误路径的挂载是否为读写模式，并确认运行 Javdex 的用户拥有该目录的读写权限。</p>}</div>}

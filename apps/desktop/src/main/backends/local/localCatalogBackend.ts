@@ -266,6 +266,7 @@ export function createLocalCatalogBackend(
     writerEpoch: null,
     frozen: false,
     appVersion: dependencies.appVersion ?? null,
+    desktopAppVersion: dependencies.appVersion ?? null,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     message: null
   })

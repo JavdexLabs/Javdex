@@ -164,11 +164,14 @@ describe('assetLocationMigration', () => {
     }
   })
 
-  it('rejects a differently-cased path that resolves to the same directory', async () => {
+  it('rejects a differently-cased path that resolves to the same directory', async (t) => {
     const caseAlias = path.join(path.dirname(oldRoot!), path.basename(oldRoot!).toUpperCase())
     const aliasStat = statIfAvailable(caseAlias)
     const sourceStat = fs.statSync(oldRoot!)
-    if (!aliasStat || aliasStat.dev !== sourceStat.dev || aliasStat.ino !== sourceStat.ino) return
+    if (!aliasStat || aliasStat.dev !== sourceStat.dev || aliasStat.ino !== sourceStat.ino) {
+      t.skip('requires a case-insensitive filesystem')
+      return
+    }
 
     const source = path.join(mediaAssetStore.subdirPath('covers'), 'case-alias.jpg')
     fs.writeFileSync(source, 'source')

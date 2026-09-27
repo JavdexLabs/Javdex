@@ -244,7 +244,7 @@ export default function BackupSettingsPanel(): JSX.Element {
         const error = (removing?.id !== item.id && feedback?.scope === item.id ? feedback.message : '') || taskError(item)
         const readOnly = Boolean(error && /\bEROFS\b/.test(error))
         return <div className={styles.record} key={item.id}>
-        <div className={styles.recordCopy}><strong>{item.kind === 'backup' ? '资料库备份' : '恢复资料'}</strong><span className={styles.status} data-failed={item.phase === 'failed' || item.phase === 'recoveryRequired'}>{item.downloading ? '正在保存到本机' : phaseLabels[item.phase]}</span>
+        <div className={styles.recordCopy}><strong>{item.kind === 'backup' ? '资料库备份' : '恢复资料'}</strong><span className={styles.status} role={error ? 'alert' : undefined} data-failed={Boolean(error) || item.phase === 'failed' || item.phase === 'recoveryRequired'}>{error ? '操作未完成 · 展开详情查看原因' : item.downloading ? '正在保存到本机' : phaseLabels[item.phase]}</span>
           <p className={styles.recordMeta}>{new Date(item.createdAt).toLocaleString()}{item.bytes > 0 ? ` · ${size(item.bytes)}` : ''}{item.downloading ? ` · ${transfer(item)}` : item.savedPath ? ' · 已保存到本机' : ''}{busyScope === item.id ? ' · 正在处理…' : ''}</p>
         </div>
         <div className={styles.actions}>
@@ -256,7 +256,7 @@ export default function BackupSettingsPanel(): JSX.Element {
         </div>
         <div id={`${detailsPrefix}-${item.id}`} className={styles.recordDetails} hidden={expandedId !== item.id}>
           {expandedId === item.id && <>
-            {error && <div><strong>错误详情</strong><p className={styles.recordError}>{error}</p>{readOnly && <p className={styles.recordResult}>请在资料库所在设备上检查错误路径的挂载是否为读写模式，并确认运行 Javdex 的用户拥有该目录的读写权限。</p>}</div>}
+            {error && <div><strong>错误详情</strong><p className={styles.recordError}>{error}</p>{readOnly && <p className={styles.recordResult}>请检查错误路径所在设备的挂载是否为读写模式，并确认运行 Javdex 的用户拥有该目录的读写权限；另存到本机失败时，请检查这台电脑选择的保存目录。</p>}</div>}
             <p className={styles.recordResult}>{item.phase === 'completed' ? item.kind === 'backup' ? item.savedPath ? '备份已保存到这台电脑。' : '备份已生成，可另存到这台电脑。' : '恢复完成。当前资料库已更新，原目标的自动备份已保留。' : item.phase === 'cancelled' ? '操作已取消，原资料库保持可用。' : item.phase === 'failed' ? '操作未完成，请处理失败原因后重新发起。' : '任务尚未结束，可继续处理。'}</p>
             {(item.savedPath || item.fileName) && <div className={styles.recordLocation}><span className={styles.locationLabel}>{item.savedPath ? '本机副本' : '来源文件'}</span><span className={styles.path}>{item.savedPath || item.fileName}</span>{item.savedPath && <Button size="sm" disabled={busy} onClick={() => file({ action: 'reveal', id: item.id }, item.id)}><FolderOpen {...UI_ICON_SM} />所在文件夹</Button>}</div>}
             <JobSummary job={item} />

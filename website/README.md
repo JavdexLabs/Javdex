@@ -37,4 +37,4 @@ node website/scripts/build.mjs
 
 `optimize-assets.py` 需要 Pillow（`python -m pip install Pillow`）。封面和背景使用质量 88 的 WebP，保留原尺寸、横向构图；界面截图使用无损 WebP，并逐像素验证转换结果，避免损伤文字。转换成功后删除对应 PNG，避免重复保留。重新截图后运行压缩脚本，再构建网站。
 
-网站只有本地预览，构建或截图不会触发线上发布。
+本地构建或截图不会触发线上发布。GitHub Pages 由 `.github/workflows/pages.yml` 部署：默认分支的官网相关改动、正式 Release 发布或成功的 Release 工作流会触发更新。发布 0.8.0 后需检查线上下载清单来自该正式 Release，不能把本地离线构建视为已更新下载地址。

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { BROWSER_FORBIDDEN_FIELDS } from '@shared/browser/dto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -129,6 +130,9 @@ describe('Web read-only catalog scope', () => {
     assert.equal(catalog.collections().libraries[0].count, 1)
     const detail = catalog.detail(visible.videoId)
     assert.equal(detail.resources[0].libraryId, 1)
+    for (const field of BROWSER_FORBIDDEN_FIELDS) {
+      assert.equal(JSON.stringify({ result, detail }).includes(`"${field}":`), false, field)
+    }
     assert.doesNotMatch(
       JSON.stringify(detail),
       /private|locator|root_id|source_identity|cover_path/

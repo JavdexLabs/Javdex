@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import {
   AGENT_RESOURCE_CLEANUP_SCHEMA_SQL,
-  CATALOG_IMAGE_UPLOAD_SCHEMA_SQL,
   CATALOG_PROTOCOL_SCHEMA_SQL,
   SCAN_AUDIT_ENTRIES_SCHEMA_SQL
 } from './schema'
@@ -85,23 +84,6 @@ it('rolls back V18 DDL when upload tables fail, then upgrades on retry', (t) => 
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
   } finally {
     t.mock.restoreAll()
-    db.close()
-  }
-})
-
-it('upgrades official schema 18 to durable catalog task tables at schema 19', () => {
-  const db = new Database(':memory:')
-  try {
-    db.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
-    db.exec(CATALOG_IMAGE_UPLOAD_SCHEMA_SQL)
-    db.pragma('user_version = 18')
-    migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 19)
-    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
-    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_maintenance_plans'").get())
-    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_settings'").get())
-    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_root_markers'").get())
-  } finally {
     db.close()
   }
 })

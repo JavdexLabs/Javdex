@@ -18,7 +18,7 @@
 - portable、Jellyfin、Emby 将样张加入 `<fanart><thumb>…</thumb></fanart>`，与详情背景合并。
 - Plex、Infuse 复制图片但不添加样张 NFO 引用，并产生提示。
 
-代码依据：[nfoExportModule.ts](../apps/desktop/src/main/nfo/export/nfoExportModule.ts) 的 `includeSamples` 分支及 [nfoExportProfiles.ts](../apps/desktop/src/main/nfo/export/nfoExportProfiles.ts) 的 `supportsSampleReferences`、fanart 渲染逻辑。当前标志最多表示“导出器写入引用”，不能视作消费端完整支持证据。
+代码依据：[nfoExportModule.ts](../apps/desktop/src/main/nfo/export/nfoExportModule.ts) 的 `includeSamples` 分支及 [nfoExportProfiles.ts](../packages/library/src/nfo/export/nfoExportProfiles.ts) 的 `supportsSampleReferences`、fanart 渲染逻辑。当前标志最多表示“导出器写入引用”，不能视作消费端完整支持证据。
 
 ## 消费端对照
 

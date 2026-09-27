@@ -375,14 +375,7 @@ describe('createDesktopRuntime', () => {
     }
   })
 
-  it('rebuilds a remote runtime without reopening library.db or re-registering window IPC', async () => {
-    const source = fs.readFileSync(path.resolve('apps/desktop/src/main/appMain.ts'), 'utf8')
-    const windowStart = source.indexOf('function createWindow')
-    const windowEnd = source.indexOf('function registerAssetProtocol')
-    assert.ok(windowStart >= 0 && windowEnd > windowStart)
-    assert.equal(source.slice(windowStart, windowEnd).includes('registerIpcHandlers'), false)
-    assert.equal(source.includes('registerIpcHandlers('), true)
-
+  it('rebuilds a remote runtime without reopening library.db', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
     await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })

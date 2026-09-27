@@ -242,7 +242,9 @@ test('unrooted resources require explicit omission and disable automatic cleanup
   assert.equal((target.db.prepare('SELECT remove_resource_less_memberships AS n FROM media_library_configs').get() as { n: number }).n, 0)
 })
 
-test('mapping handles Chinese/space paths, missing resources, and duplicate target directories', async () => {
+test('mapping handles Chinese/space Windows paths, missing resources, and duplicate target directories', {
+  skip: process.platform !== 'win32' ? 'requires Windows source path semantics' : false
+}, async () => {
   const source = fixture(); const target = fixture()
   const first = insertTestVideoWithFile(source.db, { code: 'MAP-1', filePath: 'C:\\来源 目录\\电影.avi', libraryId: 1 })
   source.db.prepare("INSERT INTO media_library_roots (id, library_id, path, normalized_path) VALUES (1,1,?,?)").run('C:\\来源 目录', 'source-one')
@@ -254,7 +256,6 @@ test('mapping handles Chinese/space paths, missing resources, and duplicate targ
   const mapping = { sourceRootId: 1, target: { kind: 'local' as const, path: dir } }
   assert.throws(() => target.request({ action: 'preview', id, mappings: [mapping] }))
   assert.throws(() => target.request({ action: 'preview', id, mappings: [mapping, { ...mapping, sourceRootId: 2 }] }))
-  if (process.platform !== 'win32') return
   const preview = target.request({ action: 'preview', id, mappings: [mapping, { sourceRootId: 2, target: { kind: 'omit' } }] }).preview!
   assert.equal(preview.missingResources, 1)
   assert.equal(preview.removedResources, 0)

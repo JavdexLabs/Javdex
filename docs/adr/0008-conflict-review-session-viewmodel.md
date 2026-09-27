@@ -18,7 +18,7 @@
 
 ## 页面 ViewModel 四块
 
-[`ActressConflictReviewPage.tsx`](../../apps/desktop/src/renderer/src/pages/ActressConflictReviewPage.tsx) 只解构：
+演员冲突页面（现为 [`PendingActressConflictPane.tsx`](../../apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx)）只解构：
 
 - `queue` — 列表、选中组、stale/focus、`chooseGroup`
 - `detail` — selection、来源/归属、打开次级动作、confirm/apply/discard 请求

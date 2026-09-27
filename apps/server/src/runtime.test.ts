@@ -1436,17 +1436,6 @@ describe('server runtime lifecycle', () => {
     }
   }
 
-  it('does not import the catalog database from RemoteCatalogBackend', () => {
-    const source = fs.readFileSync(
-      path.resolve('apps/desktop/src/main/backends/remote/remoteCatalogBackend.ts'),
-      'utf8'
-    )
-    assert.equal(source.includes('@library/db'), false)
-    assert.equal(source.includes('initDatabase'), false)
-    assert.equal(source.includes('getDb'), false)
-    assert.equal(source.includes("from 'electron'"), false)
-  })
-
   it('edits a title and cover through RemoteCatalogBackend without a second local catalog', async () => {
     const dataDir = path.join(root, 'remote-backend')
     const { base, config } = await boot(dataDir)

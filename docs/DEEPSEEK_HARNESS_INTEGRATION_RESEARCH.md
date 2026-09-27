@@ -1,5 +1,7 @@
 # DeepSeek Harness 集成调研
 
+> 0.8.0 文档核对（2026-09-27）：本文保留 2026-08-15 的调研结论与当时代码描述；旧自研 `runner.ts` 已被 Pi 运行时替换，不再作为当前实施指令。现行架构见 [插件开发 Agent](PLUGIN_DEV_AGENT.md)，恢复与模型配置见 [ADR-0030](adr/0030-simplify-agent-recovery-and-model-configuration.md)。
+
 > 调研日期：2026-08-15
 > 上游快照：[`deepseek-ai/deepseek-harness@47f9438`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a)（2026-08-13）
 > 范围：是否用 DeepSeek Harness 提升 Javdex 内置刮削插件开发 Agent，而不再自行维护通用 Agent loop。本文只引用 DeepSeek Harness 官方仓库、官方发布页和 Electron 官方版本页；Javdex 现状引用本仓库文件。
@@ -76,7 +78,7 @@ Javdex 的 `PLUGIN_DEV_TOOL_SCHEMAS` 可以机械转换成 Harness tool 或 MCP 
 - 重复 dry-run、代码未改变和验证失败的提醒；
 - max steps、上下文压缩、进度事件和等待用户状态。
 
-其中通用的上下文压缩、事件和生命周期可交给 Harness；其余规则应移入 Javdex 工具本体或 Harness hooks，而不能随旧 runner 一起删除。现有职责见 [`PLUGIN_DEV_AGENT.md`](./PLUGIN_DEV_AGENT.md)、[`runner.ts`](../apps/desktop/src/main/services/pluginDevAgent/runner.ts) 和 [`toolSchemas.ts`](../apps/desktop/src/main/services/pluginDevAgent/toolSchemas.ts)。
+其中通用的上下文压缩、事件和生命周期可交给 Harness；其余规则应移入 Javdex 工具本体或 Harness hooks，而不能随旧 runner 一起删除。此处描述当时 `runner.ts` 的职责；当前实现见 [`PLUGIN_DEV_AGENT.md`](./PLUGIN_DEV_AGENT.md) 和 [`toolSchemas.ts`](../apps/desktop/src/main/services/pluginDevAgent/toolSchemas.ts)。
 
 ## 状态、会话、中断和事件流
 

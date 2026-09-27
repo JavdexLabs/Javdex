@@ -169,7 +169,7 @@ extrafanart/              # 可选；仅输出剧照，不把它们声明成主�
 - 普通插件运行在沙箱中，没有 Node `fs`、`require` 或任意本地文件访问能力。内置 `serviceBinding` 目前也是受信任绑定而非用户插件 API。
 - [`apps/desktop/src/main/scrapers/BaseScraper.ts`](../apps/desktop/src/main/scrapers/BaseScraper.ts) 的 Interface 只有 `parseTask(code, proxyUrl?)`，没有 `videoId`、资源 ID 或资源路径。
 - [`packages/contracts/src/videoScrapeTypes.ts`](../packages/contracts/src/videoScrapeTypes.ts) 的 `ScrapeResult` 以 `coverUrl`、`sampleImageUrls` 和演员 `avatarUrl` 表达图片，没有本地资产引用。
-- [`apps/desktop/src/main/services/videoScrapeApplyService.ts`](../apps/desktop/src/main/services/videoScrapeApplyService.ts) 的 delivery 通过 `fetcher(url)` 下载这些图片；[`apps/desktop/src/main/services/mediaAssetStore.ts`](../apps/desktop/src/main/services/mediaAssetStore.ts) 负责暂存、落盘和数据库变更协调。
+- [`apps/desktop/src/main/services/videoScrapeApplyService.ts`](../apps/desktop/src/main/services/videoScrapeApplyService.ts) 的 delivery 通过 `fetcher(url)` 下载这些图片；[`packages/library/src/mediaAssetStore.ts`](../packages/library/src/mediaAssetStore.ts) 负责暂存、落盘和数据库变更协调。
 
 所以，直接新增一个读取 NFO 的 `.avscraper` 会被迫做出至少一种错误选择：
 

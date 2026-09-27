@@ -112,6 +112,9 @@ it('validates authentication separately when an older server lacks optional meta
     f.reject('')
     assert.equal((await f.backend.reconnect()).state, 'available')
     assert.equal(f.backend.session().remoteImagesDir, null)
+    const publicSession = JSON.stringify(f.backend.session())
+    assert.ok(!publicSession.includes(f.secret()))
+    assert.doesNotMatch(publicSession, /"(?:writerToken|oneTimeToken|writerSecret)":/)
   } finally { await f.close() }
 })
 

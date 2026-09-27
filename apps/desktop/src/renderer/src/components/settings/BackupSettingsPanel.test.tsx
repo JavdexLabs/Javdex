@@ -106,7 +106,7 @@ test('failed history preserves metadata and exposes the full error through its s
     const metadata = text(row.findByProps({ className: styles.recordMeta }))
     assert.ok(metadata.includes(new Date(job.createdAt).toLocaleString()))
     assert.match(metadata, /1.0 MiB/)
-    assert.equal(row.findAllByProps({ role: 'alert' }).length, 0)
+    assert.match(text(row.findByProps({ role: 'alert' })), /操作未完成.*展开详情/)
     assert.doesNotMatch(text(row), /EROFS|目标目录为只读/)
     assert.equal(row.findAllByType('button').some(node => text(node) === '查看详情'), false)
     const toggle = row.findAllByType('button').find(node => text(node) === '展开详情')!
@@ -118,6 +118,38 @@ test('failed history preserves metadata and exposes the full error through its s
     assert.equal(toggle.props['aria-expanded'], false)
     assert.doesNotMatch(text(row), /EROFS|错误详情/)
     assert.equal(text(row.findByProps({ className: styles.recordMeta })), metadata)
+  } finally {
+    if (renderer) act(() => renderer!.unmount())
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous })
+  }
+})
+
+for (const source of ['rejection', 'transferError'] as const) test(`collapsed backup history exposes a save failure from ${source}`, async () => {
+  const previous = globalThis.window
+  const message = "EROFS: read-only file system, open '/Volumes/Readonly/backup.javdex-backup'"
+  const job: BackupJob = { id: 'save-failure', kind: 'backup', phase: 'completed', createdAt: new Date().toISOString(), bytes: 200, transferred: 200 }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, api: { backup: {
+    async control() { return { jobs: [{ ...job }] } },
+    async file() {
+      if (source === 'rejection') throw new Error(message)
+      job.transferError = message
+      return { job: { ...job } }
+    }
+  } } } })
+  const { api } = await import('../../api'); Object.assign(api.backup, window.api.backup)
+  let renderer: TestRenderer.ReactTestRenderer | undefined
+  try {
+    const { default: Panel } = await import('./BackupSettingsPanel')
+    await act(async () => { renderer = TestRenderer.create(<Panel />) })
+    const button = (label: string) => renderer!.root.findAllByType('button').find(node => text(node) === label)!
+    await act(async () => { button('另存为').props.onClick() })
+    assert.equal(button('展开详情').props['aria-expanded'], false)
+    assert.match(text(renderer!.root.findByProps({ role: 'alert' })), /操作未完成/)
+    assert.doesNotMatch(text(renderer!.root), /EROFS/)
+    await act(async () => { button('展开详情').props.onClick() })
+    assert.ok(text(renderer!.root).includes(message))
+    assert.match(text(renderer!.root), /另存到本机失败时，请检查这台电脑选择的保存目录/)
+    assert.doesNotMatch(text(renderer!.root), /请在资料库所在设备上检查/)
   } finally {
     if (renderer) act(() => renderer!.unmount())
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previous })

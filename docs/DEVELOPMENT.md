@@ -20,9 +20,9 @@ npm run dev
 
 开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../packages/contracts/src/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 
-## 0.8.0 Beta 数据库迁移
+## 0.8.0 数据库迁移
 
-v0.6.2 使用 schema 15，v0.7.x 使用 schema 16。当前 Beta 源码的目标为 **schema 19**：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。具体迁移以 `packages/library/src/db/migrations.ts` 为准。Beta 尚未发布，不能把 16 → 19 称为已发布升级路径。
+v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 **schema 19**：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级时执行 16 → 19；0.8.0 Beta 已使用 schema 19，不因正式版版本号变化重复升级。具体迁移以 `packages/library/src/db/migrations.ts` 为准。
 
 已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。正式 17 仍靠协议表结构识别，不能仅靠 `user_version = 17` 接受历史实验快照。
 
@@ -39,13 +39,15 @@ npm run build           # 生产构建与运行时资源校验
 npm start               # 预览生产构建
 ```
 
-`npm test` 会先运行架构边界、lint、CSS 架构和 UI 控件检查，再执行类型检查、打包运行时测试及 Electron 测试。测试具体入口见 [package.json](../package.json)。
+`npm test` 会先运行架构边界、lint、CSS 架构和 UI 控件检查，再执行类型检查、打包运行时测试及 Electron 测试。Electron 测试自动发现 `apps/` 与 `packages/` 下的 `*.test.ts` / `*.test.tsx`，排除 `apps/server`。服务端测试单独运行 `npm run server:test`，发布元数据测试运行 `node --test scripts/release-metadata.test.mjs`；两者各有 CI 入口。测试具体入口见 [package.json](../package.json)。
 
 需要运行特定 Electron 测试文件时：
 
 ```bash
-node scripts/run-electron-tests.mjs apps/desktop/src/main/nfo/nfoArtifactCodec.test.ts
+node scripts/run-electron-tests.mjs packages/library/src/nfo/nfoArtifactCodec.test.ts
 ```
+
+测试应验证真实模块的输出、交互或外部副作用。不要用 JSX 源码字符串、固定控件总数或逐项复制 CSS 声明代替行为验证；虚拟列表行高等跨模块数值约束可以保留。类型契约使用 `*.typecheck.ts`，由 TypeScript 检查，不交给运行时测试器计数。平台或系统能力不满足时应明确 `skip` 并注明原因，不能直接返回并计为通过。清理记录与保留依据见 [测试检视记录](TEST_AUDIT_2026-09-27.md)。
 
 `npm run build` 生成 `out/`，并校验人脸检测资源与 Pi 运行时。生产构建通过不等于各平台安装包已完成验证。
 
@@ -120,7 +122,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 局域网 Web 移动端 | [移动端 Web 规范](MOBILE_WEB_GUIDELINES.md) |
 | 服务端模式部署与双模式 | [服务端模式](SERVER_MODE.md)、[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) |
 | 服务端模式现状与实现 | [当前状态与后续范围](SERVER_MODE_NEXT_STEPS.md)、[实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md) |
-| 共享用例、合同与工作存储优化（实施中，含阶段状态与待定范围） | [架构优化方案](ARCHITECTURE_SIMPLIFICATION_PLAN.md) |
+| 共享用例、合同与工作存储优化（已完成，保留历史范围与验收） | [架构优化方案](ARCHITECTURE_SIMPLIFICATION_PLAN.md) |
 | 服务端历史研究与验收证据 | [归档索引](archive/server-mode/README.md) |
 | 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |
 | 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |

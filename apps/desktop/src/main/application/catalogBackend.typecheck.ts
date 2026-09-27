@@ -31,7 +31,8 @@ export type ContractChecks = [
   Assert<Equal<Parameters<CatalogBackend['queries']['getVideo']>[0], CatalogOperationInput<'videos.get'>>>
 ]
 
-// Compile-only negative tests: no backend is created and no mutation is executed.
+// Checked by typecheck:node, not the runtime test runner.
+// No backend is created and no mutation is executed.
 export function checkCatalogCalls(backend: CatalogBackend): void {
   const context = { operationId: 'operation', expectedVersions: {} }
   void backend.videos.setRating({ videoId: 1, rating: 4 }, context)

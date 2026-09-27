@@ -2,6 +2,8 @@
 
 Independent Node host for the catalog database, plaintext image store, query worker, and LAN browse HTTP.
 
+The 0.8.0 release image is `ghcr.io/javdexlabs/javdex-server:0.8.0` for Linux amd64 and arm64. Use the matching 0.8.0 desktop release; see the [deployment guide](../../docs/SERVER_MODE.md) for Compose setup and upgrades.
+
 This process does **not** run Electron, Playwright, scrapers, or the plugin agent. Desktop keeps local mode. Management HTTP is registered by this host only (`/manage/v1`); the desktop LAN browse server must omit it.
 
 ## Run locally after build

@@ -93,7 +93,10 @@ git push origin v0.4.0
 1. Windows 环境运行类型检查和完整测试。
 2. Windows、macOS、Linux 分别构建已启用目标。
 3. 汇总各平台构建产物。
-4. 创建对应标签的 GitHub Release 并上传产物。
+4. Linux amd64 / arm64 原生 runner 分别构建服务端、运行容器烟测并上传 GHCR，合成固定版本的多架构镜像。
+5. 在桌面产物与两种服务端架构均成功后，创建 GitHub Release，上传六个桌面安装包、Compose/JSON 部署示例与 SHA-256 校验和。
+
+正式版进入 GitHub 最新正式 Release，供应用更新提醒与官网读取；服务镜像仍使用固定版本标签，当前工作流不创建 `latest` 滚动镜像标签。发布后核验默认分支包含发布代码，并检查 Pages 工作流生成的下载信息。
 
 也可以手动运行 Release workflow，但输入的 `release_tag` 必须与 `package.json` 一致。
 

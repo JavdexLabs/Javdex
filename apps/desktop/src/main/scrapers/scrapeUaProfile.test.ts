@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildScrapeUserAgent,
-  derivePlatformFromOsToken,
-  resetScrapeUaProfileCache
+  derivePlatformFromOsToken
 } from './scrapeUaProfile'
 
 test('buildScrapeUserAgent drops Electron and app product tokens', () => {
@@ -22,9 +21,4 @@ test('derivePlatformFromOsToken maps Windows, macOS and Linux', () => {
     '"macOS"'
   )
   assert.equal(derivePlatformFromOsToken('X11; Linux x86_64').secChUaPlatform, '"Linux"')
-})
-
-test('resetScrapeUaProfileCache clears memoized profile', () => {
-  resetScrapeUaProfileCache()
-  assert.doesNotThrow(() => resetScrapeUaProfileCache())
 })

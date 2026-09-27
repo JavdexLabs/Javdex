@@ -541,37 +541,7 @@ export const MANAGE_OPERATION_INPUTS = {
       ...pageQuerySchema.shape
     })
     .strict(),
-  'migration.preview': z
-    .object({
-      mappings: z
-        .array(
-          z
-            .object({
-              sourceRootId: idSchema,
-              targetMountSelectionId: z.string().min(1).max(200)
-            })
-            .strict()
-        )
-        .max(200)
-    })
-    .strict(),
-  'migration.start': z.object({ migrationId: uuidSchema, digest: digestSchema }).strict(),
   'backup.control': backupRequestSchema,
-  'migration.status': z.object({ migrationId: uuidSchema }).strict(),
-  'migration.enable': z
-    .object({
-      migrationId: uuidSchema,
-      digest: digestSchema,
-      confirmSourceStopped: z.literal(true)
-    })
-    .strict(),
-  'migration.abandon': z
-    .object({
-      migrationId: uuidSchema,
-      digest: digestSchema,
-      confirmTargetStopped: z.boolean().optional()
-    })
-    .strict(),
   'home.load': z
     .object({
       seed: z.string().min(1).max(200),

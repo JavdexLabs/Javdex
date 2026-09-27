@@ -4,13 +4,9 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const target = process.argv[2]
-const script = target === 'node'
-  ? 'server-smoke-node.mjs'
-  : target === 'migration'
-    ? 'server-migration-smoke.mjs'
-    : null
+const script = target === 'node' ? 'server-smoke-node.mjs' : null
 if (!script) {
-  console.error('Expected node or migration smoke target')
+  console.error('Expected node smoke target')
   process.exit(1)
 }
 

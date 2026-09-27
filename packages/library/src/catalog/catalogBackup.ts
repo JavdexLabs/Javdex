@@ -19,10 +19,10 @@ import { readCatalogIdentity, setCatalogFrozen } from './catalogIdentity'
 import { digestRequest } from './catalogSecrets'
 import { schemaDeclaration } from './catalogSchema'
 import { compareBackupVersions, MIN_BACKUP_SCHEMA_VERSION } from './catalogBackupCompatibility'
-import { countPendingBlockers } from './catalogMigrationState'
-import { stripExportSecrets, applyMigrationTransforms } from './catalogMigrationApply'
+import { countPendingBlockers } from './catalogBackupPreflight'
+import { stripExportSecrets, applyBackupTransforms } from './catalogBackupTransforms'
 import { availableBytes, referencedOfficialImages, copyAttachedCatalog, decryptStagedOfficialImages, remapAssetPathOn, walkOfficialImages } from './catalogSnapshot'
-import { packMigrationArchive, unpackMigrationArchive, sha256File, posixRel } from './catalogMigrationArchive'
+import { packBackupArchive, unpackBackupArchive, sha256File, posixRel } from './catalogBackupArchive'
 
 export interface BackupHost {
   appVersion: string
@@ -240,7 +240,7 @@ async function makeArchiveContents(host: BackupHost, job: StoredJob, db: Databas
   await progress('packing', 0, 0)
   checkCancelled(job.id)
   const partial = `${archive(host, job.id)}.partial`
-  await packMigrationArchive([{ name: 'manifest.json', absPath: manifestPath }, ...members.map(absPath => ({ name: posixRel(work, absPath), absPath }))], partial, { maxBytes: BACKUP_MAX_BYTES, onProgress: (completed, total) => { report('packing', completed, total) } })
+  await packBackupArchive([{ name: 'manifest.json', absPath: manifestPath }, ...members.map(absPath => ({ name: posixRel(work, absPath), absPath }))], partial, { maxBytes: BACKUP_MAX_BYTES, onProgress: (completed, total) => { report('packing', completed, total) } })
   checkCancelled(job.id)
   job.bytes = fs.statSync(partial).size
   job.sha256 = sha256File(partial)
@@ -252,7 +252,7 @@ async function makeArchiveContents(host: BackupHost, job: StoredJob, db: Databas
 async function inspect(host: BackupHost, job: StoredJob, target: Database.Database): Promise<void> {
   if (job.transferred !== job.bytes || sha256File(archive(host, job.id)) !== job.sha256) invalid('备份传输不完整或校验失败')
   const dir = path.join(jobDir(host, job.id), `inspect-${randomUUID()}`)
-  const extracted = await unpackMigrationArchive(archive(host, job.id), dir, { maxBytes: BACKUP_MAX_BYTES, availableBytes: availableBytes(jobDir(host, job.id)) - 64 * 1024 * 1024 })
+  const extracted = await unpackBackupArchive(archive(host, job.id), dir, { maxBytes: BACKUP_MAX_BYTES, availableBytes: availableBytes(jobDir(host, job.id)) - 64 * 1024 * 1024 })
   const manifestFile = path.join(dir, 'manifest.json')
   if (!fs.existsSync(manifestFile) || fs.statSync(manifestFile).size > 16 * 1024 * 1024) invalid('备份清单无效')
   const rawManifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'))
@@ -324,7 +324,7 @@ function prepareRestore(host: BackupHost, job: StoredJob, db: Database.Database,
     const disabled = new Set(roots.filter(r => mappings.some(m => m.sourceRootId === r.id && m.target.kind === 'omit')).map(r => r.libraryId))
     const unrooted = copy.prepare("SELECT DISTINCT library_id AS id FROM video_resources WHERE kind = 'local' AND root_id IS NULL").all() as Array<{ id: number }>
     for (const row of unrooted) disabled.add(row.id)
-    applyMigrationTransforms(copy, mapped, mounts, job.summary.sourcePlatform, [...disabled])
+    applyBackupTransforms(copy, mapped, mounts, job.summary.sourcePlatform, [...disabled])
     const resources = copy.prepare("SELECT v.library_id AS libraryId, v.locator, r.path AS rootPath FROM video_resources v JOIN media_library_roots r ON r.id = v.root_id WHERE v.kind = 'local'").all() as Array<{ libraryId: number; locator: string; rootPath: string }>
     removed = before - resources.length
     for (const resource of resources) {

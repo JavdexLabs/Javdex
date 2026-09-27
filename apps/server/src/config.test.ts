@@ -17,6 +17,13 @@ function writeJson(file: string, value: unknown): void {
 }
 
 describe('server config', () => {
+  it('rejects the removed offline migration command before opening a catalog', async () => {
+    await assert.rejects(
+      loadServerConfig({}, ['node', 'index', 'migrate-auth']),
+      /未知参数: migrate-auth/
+    )
+  })
+
   const roots: string[] = []
   afterEach(() => {
     for (const key of Object.keys(process.env)) {

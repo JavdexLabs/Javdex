@@ -31,7 +31,6 @@ export interface RemoteCatalogBackendOptions {
   generation?: number
   timeoutMs?: number
   workStore?: { putVerification(operationId: string, catalogId: string): void }
-  migrationSecret?: string | null
   userDataPath?: string
 }
 
@@ -291,19 +290,6 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       tracked.done()
     }
   })
-
-  const migrate = async <K extends keyof CatalogOperationResults>(operation: K, input: CatalogWireInput<K>, signal?: AbortSignal): Promise<CatalogOperationResults[K]> => {
-    const tracked = trackSignal(signal)
-    try {
-      if (!options.migrationSecret) {
-        throw structuredError('AUTH_REQUIRED', '缺少迁移凭据')
-      }
-      return catalogRemoteResult(operation, await client.post(operation, { input }, { bearer: options.migrationSecret, signal: tracked.signal }))
-    } finally {
-      tracked.done()
-    }
-  }
-
 
   const q = <K extends keyof CatalogOperationResults>(operation: K) =>
     (input: CatalogOperationInput<K>, ctx?: CatalogQueryContext) =>
@@ -920,27 +906,6 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           tracked.done()
         }
         })
-      }
-    },
-    migration: {
-      preview: (input, ctx) => migrate('migration.preview', input, ctx?.signal),
-      start: (input, ctx) => migrate('migration.start', input, ctx?.signal),
-      status: (input, ctx) => migrate('migration.status', input, ctx?.signal),
-      enable: (input, ctx) => migrate('migration.enable', input, ctx?.signal),
-      abandon: (input, ctx) => migrate('migration.abandon', input, ctx?.signal),
-      async putPackage(input, ctx) {
-        const tracked = trackSignal(ctx?.signal)
-        try {
-          if (!options.migrationSecret) {
-            throw structuredError('AUTH_REQUIRED', '缺少迁移凭据')
-          }
-          return (await client.putMigrationPackage(input.migrationId, input.body, {
-            bearer: options.migrationSecret,
-            signal: tracked.signal
-          })) as { ok: true; bytes: number }
-        } finally {
-          tracked.done()
-        }
       }
     },
     async dispose(): Promise<void> {

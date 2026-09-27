@@ -34,7 +34,7 @@ jobs:
       - run: docker build -t javdex-server:smoke .
       - run: npm run server:smoke:agent
       - name: Verify backup and restore with isolated Docker data
-        run: node scripts/backup-docker-smoke.mjs
+        run: npm run server:smoke:backup
         env:
           JAVDEX_BACKUP_SMOKE_IMAGE: javdex-server:smoke
 
@@ -55,4 +55,3 @@ jobs:
       - run: npm run server:build
       - run: npm run server:test
       - run: npm run server:smoke
-      - run: npm run server:smoke:migration

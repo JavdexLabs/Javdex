@@ -22,11 +22,6 @@ export const CLAIM_CREDENTIAL_TTL_MS = 10 * 60 * 1000
 export const PLAN_TTL_MS = 10 * 60 * 1000
 export const PLAY_GRANT_TTL_MS = 12 * 60 * 60 * 1000
 export const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
-export const MIGRATION_AUTH_TTL_MS = CLAIM_CREDENTIAL_TTL_MS
-/** A claimed migration credential remains usable for offline transfer and recovery. */
-export const MIGRATION_RECOVERY_TTL_MS = 7 * 24 * 60 * 60 * 1000
-/** First-release archive cap; callers must reject rather than silently truncate. */
-export const MIGRATION_PACKAGE_MAX_BYTES = 512 * 1024 * 1024
 export const TASK_POLL_INTERVAL_MS = 2_000
 export const TASK_POLL_MAX_BACKOFF_MS = 30_000
 export const SECRET_RANDOM_BYTES = 32

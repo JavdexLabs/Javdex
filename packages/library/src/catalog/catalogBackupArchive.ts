@@ -4,35 +4,12 @@ import path from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline, finished } from 'node:stream/promises'
 import { createGunzip, createGzip } from 'node:zlib'
-import type { RootMapping } from '@shared/protocol/migration'
-import { MIGRATION_PACKAGE_MAX_BYTES } from '@shared/protocol/limits'
+import { BACKUP_MAX_BYTES } from '@shared/protocol/backup'
 import { structuredError } from '@shared/protocol/errors'
-
-export const MIGRATION_FORMAT_VERSION = 1
 
 const BLOCK = 512
 const TYPE_FILE = '0'
 const TYPE_DIR = '5'
-
-export interface MigrationManifest {
-  formatVersion: number
-  protocolVersion: number
-  appVersion: string
-  schemaVersion: number
-  sourcePlatform: string
-  sourceServerId: string | null
-  sourceCatalogId: string
-  migrationId: string
-  previewDigest: string
-  mappings: RootMapping[]
-  autoCleanupDisabledLibraryIds: number[]
-  dataCount: number
-  dataDigest: string
-  imageCount: number
-  imageDigest: string
-  mappingDigest: string
-  createdAt: string
-}
 
 export interface PackedArchiveMember {
   name: string
@@ -88,14 +65,14 @@ function padToBlock(size: number): number {
 function assertSafeArchiveName(name: string, seen: Set<string>): void {
   const normalized = name.replace(/\\/g, '/')
   if (!normalized || normalized.startsWith('/') || normalized.includes('\0') || normalized.includes(':')) {
-    throw structuredError('INVALID_INPUT', '迁移归档包含非法路径')
+    throw structuredError('INVALID_INPUT', '备份归档包含非法路径')
   }
   const parts = normalized.split('/')
   if (parts.some((part) => part === '' || part === '.' || part === '..')) {
-    throw structuredError('INVALID_INPUT', '迁移归档包含非法路径')
+    throw structuredError('INVALID_INPUT', '备份归档包含非法路径')
   }
   if (seen.has(normalized)) {
-    throw structuredError('INVALID_INPUT', '迁移归档包含重复条目')
+    throw structuredError('INVALID_INPUT', '备份归档包含重复条目')
   }
   seen.add(normalized)
 }
@@ -130,12 +107,12 @@ function pipeWithoutEnd(sourcePath: string, dest: NodeJS.WritableStream): Promis
   })
 }
 
-export async function packMigrationArchive(
+export async function packBackupArchive(
   members: PackedArchiveMember[],
   destFile: string,
   options: { maxBytes?: number; onProgress?: (completed: number, total: number) => void } = {}
 ): Promise<{ bytes: number }> {
-  const maxBytes = options.maxBytes ?? MIGRATION_PACKAGE_MAX_BYTES
+  const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES
   fs.mkdirSync(path.dirname(destFile), { recursive: true })
   const seen = new Set<string>()
   let written = 0
@@ -149,7 +126,7 @@ export async function packMigrationArchive(
       written += chunk.length
       if (written > maxBytes) {
         limitHit = true
-        callback(new Error('LIMIT_EXCEEDED:migration-package'))
+        callback(new Error('LIMIT_EXCEEDED:backup-package'))
         return
       }
       callback(null, chunk)
@@ -166,7 +143,7 @@ export async function packMigrationArchive(
       assertSafeArchiveName(name, seen)
       const stat = fs.lstatSync(member.absPath)
       if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
-        throw structuredError('INVALID_INPUT', '迁移归档不能包含符号链接或特殊文件')
+        throw structuredError('INVALID_INPUT', '备份归档不能包含符号链接或特殊文件')
       }
       if (stat.isDirectory()) {
         gzip.write(writeHeader(`${name.replace(/\/+$/, '')}/`, 0, TYPE_DIR, stat.mtimeMs / 1000))
@@ -194,8 +171,8 @@ export async function packMigrationArchive(
       finished(output)
     ])
     fs.rmSync(destFile, { force: true })
-    if (limitHit || (error instanceof Error && error.message === 'LIMIT_EXCEEDED:migration-package')) {
-      throw structuredError('LIMIT_EXCEEDED', '迁移包超过大小上限', { limit: maxBytes, actual: written })
+    if (limitHit || (error instanceof Error && error.message === 'LIMIT_EXCEEDED:backup-package')) {
+      throw structuredError('LIMIT_EXCEEDED', '备份包超过大小上限', { limit: maxBytes, actual: written })
     }
     throw error
   }
@@ -225,7 +202,7 @@ function readHeader(block: Buffer): TarHeader | null {
   const clone = Buffer.from(block)
   clone.write('        ', 148, 8, 'latin1')
   if (checksumHeader(clone) !== checksumStored) {
-    throw structuredError('INVALID_INPUT', '迁移归档头校验失败')
+    throw structuredError('INVALID_INPUT', '备份归档头校验失败')
   }
   const name = block.subarray(0, 100).toString('utf8').replace(/\0/g, '')
   const prefix = block.subarray(345, 500).toString('utf8').replace(/\0/g, '')
@@ -237,21 +214,21 @@ function readHeader(block: Buffer): TarHeader | null {
   }
 }
 
-export async function unpackMigrationArchive(
+export async function unpackBackupArchive(
   archiveFile: string,
   destDir: string,
   options: { maxBytes?: number; availableBytes?: number } = {}
 ): Promise<{ files: string[]; bytes: number }> {
-  const maxBytes = options.maxBytes ?? MIGRATION_PACKAGE_MAX_BYTES
+  const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES
   const archiveStat = fs.statSync(archiveFile)
   if (archiveStat.size > maxBytes) {
-    throw structuredError('LIMIT_EXCEEDED', '迁移包超过大小上限', {
+    throw structuredError('LIMIT_EXCEEDED', '备份包超过大小上限', {
       limit: maxBytes,
       actual: archiveStat.size
     })
   }
   if (options.availableBytes != null && options.availableBytes < archiveStat.size * 2) {
-    throw structuredError('LIMIT_EXCEEDED', '磁盘空间不足解包迁移数据')
+    throw structuredError('LIMIT_EXCEEDED', '磁盘空间不足解包备份数据')
   }
   fs.mkdirSync(destDir, { recursive: true })
   const seen = new Set<string>()
@@ -268,12 +245,12 @@ export async function unpackMigrationArchive(
     if (!parsed) return
     assertSafeArchiveName(parsed.name, seen)
     if (parsed.typeflag !== TYPE_FILE && parsed.typeflag !== TYPE_DIR && parsed.typeflag !== '\0') {
-      throw structuredError('INVALID_INPUT', '迁移归档包含不支持的条目类型')
+      throw structuredError('INVALID_INPUT', '备份归档包含不支持的条目类型')
     }
     const abs = path.resolve(destDir, parsed.name)
     const rel = path.relative(destDir, abs)
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-      throw structuredError('INVALID_INPUT', '迁移归档包含非法路径')
+      throw structuredError('INVALID_INPUT', '备份归档包含非法路径')
     }
     if (parsed.typeflag === TYPE_DIR) {
       fs.mkdirSync(abs, { recursive: true })
@@ -300,7 +277,7 @@ export async function unpackMigrationArchive(
     for await (const chunk of unzipped) {
       inflated += (chunk as Buffer).byteLength
       if (inflated > inflatedLimit) {
-        throw structuredError('LIMIT_EXCEEDED', '迁移包解压流超过大小上限', {
+        throw structuredError('LIMIT_EXCEEDED', '备份包解压流超过大小上限', {
           limit: inflatedLimit,
           actual: inflated
         })
@@ -316,7 +293,7 @@ export async function unpackMigrationArchive(
           unpacked += take
           current.left -= take
           if (unpacked > maxBytes) {
-            throw structuredError('LIMIT_EXCEEDED', '迁移包解压后超过大小上限', {
+            throw structuredError('LIMIT_EXCEEDED', '备份包解压后超过大小上限', {
               limit: maxBytes,
               actual: unpacked
             })
@@ -338,7 +315,7 @@ export async function unpackMigrationArchive(
   }
   if (openFile.current) {
     fs.closeSync(openFile.current.fd)
-    throw structuredError('INVALID_INPUT', '迁移归档不完整')
+    throw structuredError('INVALID_INPUT', '备份归档不完整')
   }
   if (pending.length) throw structuredError('INVALID_INPUT', '归档尾部不完整')
   return { files, bytes: unpacked }
@@ -349,13 +326,13 @@ export function walkFiles(root: string): string[] {
   const visit = (current: string): void => {
     const stat = fs.lstatSync(current)
     if (stat.isSymbolicLink()) {
-      throw structuredError('INVALID_INPUT', '迁移目录不能包含符号链接')
+      throw structuredError('INVALID_INPUT', '备份目录不能包含符号链接')
     }
     if (stat.isDirectory()) {
       for (const entry of fs.readdirSync(current).sort()) visit(path.join(current, entry))
       return
     }
-    if (!stat.isFile()) throw structuredError('INVALID_INPUT', '迁移目录包含不支持的文件类型')
+    if (!stat.isFile()) throw structuredError('INVALID_INPUT', '备份目录包含不支持的文件类型')
     files.push(current)
   }
   if (fs.existsSync(root)) visit(root)

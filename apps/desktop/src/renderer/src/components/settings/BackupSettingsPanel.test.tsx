@@ -72,7 +72,9 @@ test('history expands in place without changing its count; polling preserves col
     const row = renderer!.root.findByProps({ className: styles.record })
     assert.match(text(row.findByProps({ role: 'alert' })), /备份请求格式无效/)
     assert.equal(slots, 0, 'idle feedback must not reserve empty space')
-    assert.equal(renderer!.root.findAllByProps({ className: styles.feedback }).length, 0, 'row errors replace the metadata line instead of adding a feedback block')
+    assert.equal(renderer!.root.findAllByProps({ className: styles.feedback }).length, 0, 'row errors do not create a second detail entry')
+    assert.ok(text(row.findByProps({ className: styles.recordMeta })).includes(new Date(job.createdAt).toLocaleString()))
+    assert.equal(row.findAllByType('button').some(node => text(node) === '查看详情'), false)
     assert.equal(Boolean(button('删除记录').props.disabled), false)
     await act(async () => { refresh!() })
     assert.match(text(row), /备份请求格式无效/)
@@ -80,6 +82,39 @@ test('history expands in place without changing its count; polling preserves col
   } finally {
     if (renderer) act(() => renderer!.unmount())
     globalThis.setInterval = originalInterval
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous })
+  }
+})
+
+test('failed history preserves metadata and exposes the full error through its single disclosure', async () => {
+  const previous = globalThis.window
+  const job: BackupJob = { id: 'readonly-restore', kind: 'restore', phase: 'failed', createdAt: '2026-09-27T08:00:00Z', bytes: 1024 * 1024, transferred: 1024 * 1024,
+    error: "EROFS: read-only file system, open '/media/归档/很长的目录名称/.javdex-root'" }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, api: { backup: {
+    async control() { return { jobs: [job] } }, async file() { return { cancelled: true } }
+  } } } })
+  const { api } = await import('../../api'); Object.assign(api.backup, window.api.backup)
+  let renderer: TestRenderer.ReactTestRenderer | undefined
+  try {
+    const { default: Panel } = await import('./BackupSettingsPanel')
+    const { default: styles } = await import('./BackupSettingsPanel.module.css')
+    await act(async () => { renderer = TestRenderer.create(<Panel />) })
+    const row = renderer!.root.findByProps({ className: styles.record })
+    const metadata = text(row.findByProps({ className: styles.recordMeta }))
+    assert.ok(metadata.includes(new Date(job.createdAt).toLocaleString()))
+    assert.match(metadata, /1.0 MiB/)
+    assert.match(text(row.findByProps({ role: 'alert' })), /目标目录为只读/)
+    assert.equal(row.findAllByType('button').some(node => text(node) === '查看详情'), false)
+    const toggle = row.findAllByType('button').find(node => text(node) === '展开详情')!
+    await act(async () => { toggle.props.onClick() })
+    assert.equal(text(row.findByProps({ className: styles.recordError })), job.error)
+    assert.equal(text(row.findByProps({ className: styles.recordMeta })), metadata)
+    assert.equal(toggle.props['aria-expanded'], true)
+    await act(async () => { toggle.props.onClick() })
+    assert.equal(toggle.props['aria-expanded'], false)
+    assert.equal(text(row.findByProps({ className: styles.recordMeta })), metadata)
+  } finally {
+    if (renderer) act(() => renderer!.unmount())
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previous })
   }
 })

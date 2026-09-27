@@ -276,18 +276,6 @@ export interface CatalogAssetCommands {
   ) => Promise<{ body: Buffer; mime: string }>
 }
 
-export interface CatalogMigrationCommands {
-  preview: Query<'migration.preview'>
-  start: Command<'migration.start'>
-  status: Query<'migration.status'>
-  enable: Command<'migration.enable'>
-  abandon: Command<'migration.abandon'>
-  putPackage: (
-    input: { migrationId: string; body: Buffer },
-    ctx?: CatalogQueryContext
-  ) => Promise<{ ok: true; bytes: number }>
-}
-
 export interface CatalogBackupCommands {
   request(input: import('@shared/protocol/backup').BackupRequest): Promise<import('@shared/protocol/backup').BackupResponse>
   upload(id: string, offset: number, data: Buffer): Promise<number>
@@ -316,7 +304,6 @@ export interface CatalogBackend {
   pendingVideoScrapes: CatalogPendingVideoScrapeCommands
   agentMetadata: CatalogAgentMetadataCommands
   assets: CatalogAssetCommands
-  migration: CatalogMigrationCommands
   dispose(): Promise<void>
 }
 

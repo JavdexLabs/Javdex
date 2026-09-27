@@ -59,7 +59,7 @@
     "server:smoke": "node --import tsx scripts/server-smoke.mjs",
     "server:smoke:agent": "node scripts/run-electron-tests.mjs apps/desktop/src/main/services/agentMetadata/agentMetadataDocker.smoke.ts",
     "server:smoke:node": "node scripts/run-server-smoke.mjs node",
-    "server:smoke:migration": "node scripts/run-server-smoke.mjs migration",
+    "server:smoke:backup": "node scripts/backup-docker-smoke.mjs",
     "smoke:same-version-install": "node scripts/same-version-install-smoke.mjs",
     "typecheck:browser": "tsc --noEmit -p tsconfig.browser.json"
   },

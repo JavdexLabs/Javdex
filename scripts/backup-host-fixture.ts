@@ -3,14 +3,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
-import { openIsolatedCatalog } from '../packages/library/src/catalog/catalogMigration'
+import { openIsolatedCatalog } from '../packages/library/src/catalog/catalogSnapshot'
 import { ensureCatalogIdentity } from '../packages/library/src/catalog/catalogIdentity'
 import { configureLibraryHost } from '../packages/library/src/runtime/host'
 import { encryptPlain, isEncryptedBlob } from '../packages/library/src/assetCrypto'
 import { setPathAlias } from '../packages/library/src/assetPathAliases'
 import { insertTestVideoWithFile } from '../packages/library/src/db/testVideoFixtures'
 import { backupControl, writeBackupChunk } from '../packages/library/src/catalog/catalogBackup'
-import { sha256File } from '../packages/library/src/catalog/catalogMigrationArchive'
+import { sha256File } from '../packages/library/src/catalog/catalogBackupArchive'
 
 // Invoked by backup-docker-smoke with a freshly generated fixture directory.
 async function main(): Promise<void> {

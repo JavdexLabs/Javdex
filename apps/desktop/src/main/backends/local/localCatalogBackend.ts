@@ -68,14 +68,6 @@ import { mediaAssetStore } from '@library/mediaAssetStore'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import {
-  abandonCatalogMigration,
-  enableCatalogMigration,
-  writeMigrationPackageBytes,
-  previewCatalogMigration,
-  startCatalogMigration,
-  statusCatalogMigration
-} from '@library/catalog/catalogMigration'
-import {
   enqueueLibraryScan,
   requestLibraryScanCancel,
   startLibraryScan
@@ -1419,28 +1411,6 @@ export function createLocalCatalogBackend(
       ...unsupportedSlice(['createUpload', 'inspectUpload', 'putUpload', 'grantPlayback']),
       async readImage(input, ctx) {
         return mediaAssetStore.readForServeAsync(input.relPath, ctx?.signal, input.size)
-      }
-    },
-    migration: {
-      async preview(input) {
-        return previewCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
-      },
-      async start(input) {
-        return startCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
-      },
-      async status(input) {
-        return statusCatalogMigration(input)
-      },
-      async enable(input) {
-        return enableCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
-      },
-      async abandon(input) {
-        return abandonCatalogMigration(input, { appVersion: dependencies.appVersion ?? '0.7.0' })
-      },
-      async putPackage(input) {
-        return writeMigrationPackageBytes(input.migrationId, input.body, {
-          appVersion: dependencies.appVersion ?? '0.7.0'
-        })
       }
     },
     async dispose(): Promise<void> {

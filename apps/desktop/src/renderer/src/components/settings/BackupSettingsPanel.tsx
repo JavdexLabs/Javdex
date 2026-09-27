@@ -240,28 +240,31 @@ export default function BackupSettingsPanel(): JSX.Element {
     </SettingsCard>}
     <SettingsCard title={`操作记录 · ${history.length}`} hint="删除时可选择清理 Javdex 托管的备份；手动另存文件保留。">
       <Feedback message={statusError ? `无法更新任务状态：${statusError}。保留上次结果，尚未确认任务停止，请勿重复发起。` : ''} />
-      <div className={styles.history}>{history.slice(currentPage * 5, currentPage * 5 + 5).map(item => <div className={styles.record} key={item.id}>
-        <div className={styles.recordCopy}><strong>{item.kind === 'backup' ? '资料库备份' : '恢复资料'}</strong><span className={styles.status} data-failed={item.phase === 'failed' || item.phase === 'recoveryRequired'}>{item.downloading ? '正在保存到本机' : phaseLabels[item.phase]}</span><SettingsFeedback
-          message={(removing?.id !== item.id && feedback?.scope === item.id ? feedback.message : '') || taskError(item) || (item.downloading ? transfer(item) : busyScope === item.id ? '正在处理，请稍候…' : `${new Date(item.createdAt).toLocaleString()}${item.bytes > 0 ? ` · ${size(item.bytes)}` : ''}${item.savedPath ? ' · 已保存到本机' : ''}`)}
-          error={Boolean((removing?.id !== item.id && feedback?.scope === item.id && feedback.message) || taskError(item))}
-          detail={(removing?.id !== item.id && feedback?.scope === item.id ? feedback.message : '') || taskError(item) || null}
-        /></div>
+      <div className={styles.history}>{history.slice(currentPage * 5, currentPage * 5 + 5).map(item => {
+        const error = (removing?.id !== item.id && feedback?.scope === item.id ? feedback.message : '') || taskError(item)
+        const readOnly = Boolean(error && /\bEROFS\b/.test(error))
+        return <div className={styles.record} key={item.id}>
+        <div className={styles.recordCopy}><strong>{item.kind === 'backup' ? '资料库备份' : '恢复资料'}</strong><span className={styles.status} data-failed={item.phase === 'failed' || item.phase === 'recoveryRequired'}>{item.downloading ? '正在保存到本机' : phaseLabels[item.phase]}</span>
+          <p className={styles.recordMeta}>{new Date(item.createdAt).toLocaleString()}{item.bytes > 0 ? ` · ${size(item.bytes)}` : ''}{item.savedPath ? ' · 已保存到本机' : ''}{busyScope === item.id ? ' · 正在处理…' : ''}</p>
+        </div>
         <div className={styles.actions}>
-          <Button size="sm" variant="ghost" aria-expanded={expandedId === item.id} aria-controls={`${detailsPrefix}-${item.id}`} onClick={() => setExpandedId(current => current === item.id ? null : item.id)}>{expandedId === item.id ? <ChevronDown {...UI_ICON_SM} /> : <ChevronRight {...UI_ICON_SM} />}{expandedId === item.id ? '收起详情' : '展开详情'}</Button>
+          <Button size="sm" aria-expanded={expandedId === item.id} aria-controls={`${detailsPrefix}-${item.id}`} onClick={() => setExpandedId(current => current === item.id ? null : item.id)}>{expandedId === item.id ? <ChevronDown {...UI_ICON_SM} /> : <ChevronRight {...UI_ICON_SM} />}{expandedId === item.id ? '收起详情' : '展开详情'}</Button>
           {!finishedPhases.has(item.phase) && <Button size="sm" disabled={busy} onClick={() => continueTask(item)}>继续处理</Button>}
           {item.kind === 'backup' && item.phase === 'completed' && <Button size="sm" disabled={busy || item.downloading} onClick={() => file({ action: 'save', id: item.id }, item.id)}><Download {...UI_ICON_SM} />另存为</Button>}
           {['completed', 'failed', 'cancelled'].includes(item.phase) && <Button size="sm" variant="danger" disabled={busy || item.downloading} title="确认删除记录，可选择清理托管备份" onClick={() => previewRemoval(item)}><Trash2 {...UI_ICON_SM} />删除记录</Button>}
         </div>
+        {error ? <p className={styles.recordMessage} data-error="true" role="alert">{readOnly ? '操作失败：目标目录为只读，请配置读写权限后重试。' : error}</p> : item.downloading && <p className={styles.recordMessage} role="status">{transfer(item)}</p>}
         {canRetryTransfer(item) && <div className={styles.recordFeedback}><Button size="sm" disabled={busy || item.downloading} onClick={() => file({ action: 'resume', id: item.id }, item.id)}>重试传输</Button></div>}
         <div id={`${detailsPrefix}-${item.id}`} className={styles.recordDetails} hidden={expandedId !== item.id}>
           {expandedId === item.id && <>
+            {error && <div><strong>错误详情</strong><p className={styles.recordError}>{error}</p>{readOnly && <p className={styles.recordResult}>请在资料库所在设备上检查错误路径的挂载是否为读写模式，并确认运行 Javdex 的用户拥有该目录的读写权限。</p>}</div>}
             <p className={styles.recordResult}>{item.phase === 'completed' ? item.kind === 'backup' ? item.savedPath ? '备份已保存到这台电脑。' : '备份已生成，可另存到这台电脑。' : '恢复完成。当前资料库已更新，原目标的自动备份已保留。' : item.phase === 'cancelled' ? '操作已取消，原资料库保持可用。' : item.phase === 'failed' ? '操作未完成，请处理失败原因后重新发起。' : '任务尚未结束，可继续处理。'}</p>
             {(item.savedPath || item.fileName) && <div className={styles.recordLocation}><span className={styles.locationLabel}>{item.savedPath ? '本机副本' : '来源文件'}</span><span className={styles.path}>{item.savedPath || item.fileName}</span>{item.savedPath && <Button size="sm" disabled={busy} onClick={() => file({ action: 'reveal', id: item.id }, item.id)}><FolderOpen {...UI_ICON_SM} />所在文件夹</Button>}</div>}
             <JobSummary job={item} />
             {item.phase === 'completed' && item.kind === 'restore' && <div className={styles.actions}><Button size="sm" disabled={busy} onClick={() => void perform(reconnect, item.id)}>刷新资料库连接</Button></div>}
           </>}
         </div>
-      </div>)}{history.length === 0 && <p className={styles.empty}>{initialized.current ? job ? '当前任务显示在上方，暂无其他记录。' : '暂无操作记录' : '正在读取操作记录…'}</p>}</div>
+      </div>})}{history.length === 0 && <p className={styles.empty}>{initialized.current ? job ? '当前任务显示在上方，暂无其他记录。' : '暂无操作记录' : '正在读取操作记录…'}</p>}</div>
       {pages > 1 && <div className={styles.pagination}><span>第 {currentPage + 1} / {pages} 页</span><Button size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</Button><Button size="sm" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>下一页</Button></div>}
     </SettingsCard>
     {wizardOpen && job?.phase === 'ready' && <Modal title="恢复资料" hint={`目标：${target}`} size="xl" className={styles.wizard} bodyClassName={styles.wizardBody} bodyOverflow="hidden" busy={busy} onCancel={() => setWizardOpen(false)} actions={<div className={styles.wizardFooter}>

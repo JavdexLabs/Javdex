@@ -42,15 +42,6 @@ const serverId = '22222222-2222-4222-8222-222222222222'
 const catalogId = '33333333-3333-4333-8333-333333333333'
 const version = { generation: 1, revision: 4 }
 
-test('offline import needs operator confirmation and has no source permission operation', () => {
-  const input = { migrationId: operationId, digest: 'a'.repeat(64) }
-  assert.equal(parseManageInput('migration.enable', input).success, false)
-  assert.equal(parseManageInput('migration.enable', { ...input, confirmSourceStopped: false }).success, false)
-  assert.equal(parseManageInput('migration.enable', { ...input, confirmSourceStopped: true }).success, true)
-  assert.equal(parseManageInput('migration.abandon', { ...input, confirmTargetStopped: true }).success, true)
-  assert.equal('migration.allowEnable' in MANAGE_OPERATIONS, false)
-})
-
 test('every manage operation has matching metadata and a strict input schema', () => {
   const operations = Object.keys(MANAGE_OPERATIONS) as ManageOperationId[]
   assert.equal(operations.length, Object.keys(MANAGE_OPERATION_INPUTS).length)

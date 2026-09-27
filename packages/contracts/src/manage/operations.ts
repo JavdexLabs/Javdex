@@ -5,7 +5,6 @@ export type ManageAuthClass =
   | 'manageRead'
   | 'manageWrite'
   | 'claim'
-  | 'migration'
 
 export type ManageCompletion = 'sync' | 'preview' | 'task'
 
@@ -35,11 +34,6 @@ export const MANAGE_OPERATIONS = {
   'scrape.fields': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Resolve empty scrape fields from authoritative catalog data and images' },
   'targetLists.page': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Page a frozen target list' },
   'backup.control': { auth: 'manageRead', versions: [], completion: 'task', summary: 'Writer-authorized backup/restore task control; maintenance-safe status' },
-  'migration.preview': { auth: 'migration', versions: [], completion: 'preview', summary: 'Compute freeze-ready migration impact' },
-  'migration.start': { auth: 'migration', versions: [], completion: 'task', summary: 'Export a frozen source or validate a manually staged package on an empty target' },
-  'migration.status': { auth: 'migration', versions: [], completion: 'sync', summary: 'This host role and local migration phase; no peer coordination' },
-  'migration.enable': { auth: 'migration', versions: [], completion: 'sync', summary: 'Enable staged import after operator confirmation that the source is stopped' },
-  'migration.abandon': { auth: 'migration', versions: [], completion: 'sync', summary: 'Discard local import, or resume source after operator confirmation that the target is stopped' },
   'home.load': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Home discovery snapshot' },
   'home.search': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Global catalog search' },
   'videos.list': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Scoped video list' },

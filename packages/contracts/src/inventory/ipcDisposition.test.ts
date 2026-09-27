@@ -31,9 +31,7 @@ test('new protocol operations are frozen even when they have no IPC ancestor', (
     'play.grant',
     'tasks.get',
     'operations.get',
-    'migration.preview',
-    'migration.enable',
-    'migration.abandon'
+    'backup.control'
   ] as const) {
     assert.ok(operation in MANAGE_OPERATIONS, operation)
     assert.ok(operation in MANAGE_OPERATION_INPUTS, operation)

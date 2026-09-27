@@ -185,6 +185,37 @@
   font-variant-numeric: tabular-nums;
 }
 
+.recordMeta,
+.recordMessage {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.recordMeta {
+  margin-top: var(--form-label-gap);
+}
+
+.recordMessage {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.recordMessage[data-error='true'],
+.recordError {
+  color: var(--text-danger);
+}
+
+.recordError {
+  margin-block: var(--form-label-gap);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .status {
   margin-left: var(--form-field-gap);
   color: var(--text-muted);

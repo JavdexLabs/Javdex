@@ -31,8 +31,7 @@ export function createLocalDesktopCapabilities(): DesktopCapabilityMap {
     ...LOCAL_FILE_ACTIONS,
     ...DESKTOP_TOOLS,
     'manageBrowserPairing',
-    'editCatalog',
-    'migrateCatalog'
+    'editCatalog'
   ])
   return Object.fromEntries(
     DESKTOP_CAPABILITY_ACTIONS.map((action) => [
@@ -52,9 +51,6 @@ export function createRemoteDesktopCapabilities(options: { frozen?: boolean } = 
     DESKTOP_CAPABILITY_ACTIONS.map((action) => {
       if (action === 'editCatalog' || action === 'manageBrowserPairing') {
         return [action, capability(action, !frozen, frozen ? 'catalogFrozen' : 'available')]
-      }
-      if (action === 'migrateCatalog') {
-        return [action, capability(action, false, 'unsupportedOnServer')]
       }
       if (action === 'playRemoteFile' || DESKTOP_TOOLS.has(action)) {
         return [action, capability(action, true, 'available')]

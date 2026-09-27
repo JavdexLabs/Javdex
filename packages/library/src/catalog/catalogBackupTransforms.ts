@@ -1,10 +1,40 @@
 import path from 'node:path'
 import type Database from 'better-sqlite3'
-import type { RootMapping } from '@shared/protocol/migration'
 import { structuredError } from '@shared/protocol/errors'
 import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
 import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
-import { validateMappings } from './catalogMigrationPreview'
+
+interface RootMapping {
+  sourceRootId: number
+  targetMountSelectionId: string
+}
+
+function validateMappings(
+  mappings: RootMapping[],
+  roots: { id: number }[]
+): { mapped: Map<number, string>; errors: string[] } {
+  const mapped = new Map<number, string>()
+  const errors: string[] = []
+  const rootIds = new Set(roots.map((root) => root.id))
+  const usedTargets = new Set<string>()
+  for (const mapping of mappings) {
+    if (!rootIds.has(mapping.sourceRootId)) {
+      errors.push(`unknown-root:${mapping.sourceRootId}`)
+      continue
+    }
+    if (mapped.has(mapping.sourceRootId)) {
+      errors.push(`duplicate-source-root:${mapping.sourceRootId}`)
+      continue
+    }
+    if (usedTargets.has(mapping.targetMountSelectionId)) {
+      errors.push(`duplicate-target-mount:${mapping.targetMountSelectionId}`)
+      continue
+    }
+    mapped.set(mapping.sourceRootId, mapping.targetMountSelectionId)
+    usedTargets.add(mapping.targetMountSelectionId)
+  }
+  return { mapped, errors }
+}
 
 const PRIMARY_KIND_ORDER: Record<string, number> = {
   local: 0,
@@ -112,7 +142,7 @@ function promotePrimary(database: Database.Database, libraryId: number, videoId:
   }
 }
 
-export function applyMigrationTransforms(
+export function applyBackupTransforms(
   database: Database.Database,
   mappings: RootMapping[],
   mounts: Readonly<Record<string, string>>,

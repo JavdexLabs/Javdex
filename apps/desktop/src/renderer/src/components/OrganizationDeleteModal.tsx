@@ -19,14 +19,14 @@ interface RoleRemovalProps extends CommonProps {
   mode: 'role'
   role: OrganizationRole
   loadImpact: () => Promise<OrganizationRoleRemovalImpact>
-  remove: () => Promise<OrganizationRoleRemovalResult>
+  remove: (impact: OrganizationRoleRemovalImpact) => Promise<OrganizationRoleRemovalResult>
   onCompleted: (result: OrganizationRoleRemovalResult) => void | Promise<void>
 }
 
 interface OrganizationDeletionProps extends CommonProps {
   mode: 'organization'
   loadImpact: () => Promise<OrganizationDeleteImpact>
-  remove: () => Promise<OrganizationDeleteResult>
+  remove: (impact: OrganizationDeleteImpact) => Promise<OrganizationDeleteResult>
   onCompleted: (result: OrganizationDeleteResult) => void | Promise<void>
 }
 
@@ -35,7 +35,7 @@ type Props = RoleRemovalProps | OrganizationDeletionProps
 interface CommandModalProps<TImpact, TResult> {
   title: string
   loadImpact: () => Promise<TImpact>
-  command: () => Promise<TResult>
+  command: (impact: TImpact) => Promise<TResult>
   canExecute?: (impact: TImpact) => boolean
   onCancel: () => void
   onCompleted: (result: TResult) => void | Promise<void>

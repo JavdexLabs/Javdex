@@ -1,9 +1,10 @@
 import { IPC } from '@shared/ipc-channels'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
 import type { CatalogBackend } from '../application/catalogBackend'
-import { ipcMutation } from '../application/mutationContext'
+import { ipcMutation, ipcVideoMutation } from '../application/mutationContext'
 import { structuredError } from '@shared/protocol/errors'
 import type { VideoResourceLinkCheckResult } from '@shared/videoTypes'
+import { uploadCatalogImageSource } from '../application/remoteCatalogImage'
 import { createTypedIpcAdapter } from './typedIpcAdapter'
 import { videoIpcSchemas } from './ipcCommandSchemas'
 
@@ -24,59 +25,86 @@ export function registerVideoHandlers(
   adapter.register(IPC.VIDEO_GET, (scope, id) =>
     backend.queries.getVideo({ scope, videoId: id })
   )
-  adapter.register(IPC.VIDEO_UPDATE, (id, fields) =>
-    backend.videos.edit({ videoId: id, fields }, ipcMutation())
+  adapter.register(IPC.VIDEO_UPDATE, async (id, fields) =>
+    backend.videos.edit({ videoId: id, fields }, await ipcVideoMutation(backend, id))
   )
-  adapter.register(IPC.VIDEO_EDIT, (id, input, expectedVersions) =>
-    backend.videos.edit({ videoId: id, fields: input }, ipcMutation(undefined, expectedVersions))
+  adapter.register(IPC.VIDEO_EDIT, async (id, input, expectedVersions) => {
+    if (backend.mode !== 'remote' || !input.coverSourcePath) {
+      return backend.videos.edit({ videoId: id, fields: input }, await ipcVideoMutation(backend, id, expectedVersions))
+    }
+    const { coverSourcePath: _coverSourcePath, ...fields } = input
+    const cover = await uploadCatalogImageSource(backend, 'videoCover', {
+      source: 'file',
+      sourcePath: input.coverSourcePath
+    })
+    return backend.videos.edit({ videoId: id, fields: { ...fields, cover } }, await ipcVideoMutation(backend, id, expectedVersions))
+  })
+  adapter.register(IPC.VIDEO_CLEAR_META, async (id, expectedVersions) =>
+    backend.videos.clearMeta({ videoId: id }, await ipcVideoMutation(backend, id, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_CLEAR_META, (id, expectedVersions) =>
-    backend.videos.clearMeta({ videoId: id }, ipcMutation(undefined, expectedVersions))
+  adapter.register(IPC.VIDEO_MARK_SCRAPE_SUCCESS, async (id, expectedVersions) =>
+    backend.videos.markScrapeSuccess({ videoId: id }, await ipcVideoMutation(backend, id, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_MARK_SCRAPE_SUCCESS, (id, expectedVersions) =>
-    backend.videos.markScrapeSuccess({ videoId: id }, ipcMutation(undefined, expectedVersions))
-  )
-  adapter.register(IPC.VIDEO_CORRECT_IMPORT, (id, code, discardPendingScrape) =>
+  adapter.register(IPC.VIDEO_CORRECT_IMPORT, async (id, code, discardPendingScrape) =>
     backend.videos.correctImport(
       { videoId: id, code, discardPendingScrape: discardPendingScrape === true },
-      ipcMutation()
+      await ipcVideoMutation(backend, id)
     )
   )
-  adapter.register(IPC.VIDEO_SET_RATING, (id, rating, expectedVersions) =>
-    backend.videos.setRating({ videoId: id, rating }, ipcMutation(undefined, expectedVersions))
+  adapter.register(IPC.VIDEO_SET_RATING, async (id, rating, expectedVersions) =>
+    backend.videos.setRating({ videoId: id, rating }, await ipcVideoMutation(backend, id, expectedVersions))
   )
   adapter.register(IPC.VIDEO_YEARS, (scope) =>
     backend.queries.listVideoYears({ scope })
   )
   adapter.register(IPC.VIDEO_SAMPLE_IMPORT, async (id, input) => {
-    const result = await backend.videos.importSamples({ videoId: id, ...input }, ipcMutation())
-    if (!('id' in result)) throw structuredError('INVALID_INPUT', '本机样张导入未返回媒体资源')
+    const normalized = backend.mode === 'remote'
+      ? {
+          videoId: id,
+          images: [await uploadCatalogImageSource(backend, 'videoSample', input)]
+        }
+      : { videoId: id, ...input }
+    const result = await backend.videos.importSamples(
+      normalized as never,
+      await ipcVideoMutation(backend, id)
+    )
+    if (backend.mode === 'local' && !('id' in result)) {
+      throw structuredError('INVALID_INPUT', '本机样张导入未返回媒体资源')
+    }
     return result
   })
-  adapter.register(IPC.VIDEO_SAMPLE_DELETE, (id, assetId) =>
-    backend.videos.deleteSample({ videoId: id, assetId }, ipcMutation())
+  adapter.register(IPC.VIDEO_SAMPLE_DELETE, async (id, assetId, expectedVersions) =>
+    backend.videos.deleteSample({ videoId: id, assetId }, await ipcVideoMutation(backend, id, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_POSTER_SET, (id, posterPath) =>
-    backend.videos.setPoster(
+  adapter.register(IPC.VIDEO_POSTER_SET, async (id, posterPath, assetId, expectedVersions) => {
+    if (backend.mode === 'remote' && posterPath !== null && !assetId) {
+      throw structuredError('INVALID_INPUT', '样张缺少媒体资源 ID，请刷新后重试')
+    }
+    return backend.videos.setPoster(
       {
         videoId: id,
-        image: posterPath == null ? { kind: 'clear' } : { kind: 'asset', assetId: 1 },
-        posterPath
+        image: posterPath == null ? { kind: 'clear' } : { kind: 'asset', assetId: assetId! },
+        ...(backend.mode === 'local' ? { posterPath } : {})
       },
-      ipcMutation()
+      await ipcVideoMutation(backend, id, expectedVersions)
     )
+  })
+  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD, async (id, name, expectedVersions) =>
+    backend.videos.addManualTag({ videoId: id, name }, await ipcVideoMutation(backend, id, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD, (id, name, expectedVersions) =>
-    backend.videos.addManualTag({ videoId: id, name }, ipcMutation(undefined, expectedVersions))
+  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, async (id, tagId, expectedVersions) =>
+    backend.videos.addExistingManualTag({ videoId: id, tagId }, await ipcVideoMutation(backend, id, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, (id, tagId, expectedVersions) =>
-    backend.videos.addExistingManualTag({ videoId: id, tagId }, ipcMutation(undefined, expectedVersions))
+  adapter.register(IPC.VIDEO_MANUAL_TAG_REMOVE, async (id, tagId, expectedVersions) =>
+    backend.videos.removeManualTag({ videoId: id, tagId }, await ipcVideoMutation(backend, id, expectedVersions))
   )
-  adapter.register(IPC.VIDEO_MANUAL_TAG_REMOVE, (id, tagId, expectedVersions) =>
-    backend.videos.removeManualTag({ videoId: id, tagId }, ipcMutation(undefined, expectedVersions))
-  )
-  adapter.register(IPC.VIDEO_RESOURCE_IMPORT, (input) =>
-    backend.videos.importResource(input, ipcMutation())
+  adapter.register(IPC.VIDEO_RESOURCE_IMPORT, async (input) =>
+    backend.videos.importResource(
+      input,
+      input.target.kind === 'existing'
+        ? await ipcVideoMutation(backend, input.target.videoId)
+        : ipcMutation()
+    )
   )
   adapter.register(IPC.VIDEO_RESOURCE_GET, (libraryId, videoId, resourceId) =>
     backend.queries.getResource({ libraryId, videoId, resourceId })
@@ -92,34 +120,34 @@ export function registerVideoHandlers(
   })
   adapter.register(
     IPC.VIDEO_RESOURCE_UPDATE,
-    (libraryId, videoId, resourceId, input) =>
+    async (libraryId, videoId, resourceId, input) =>
       backend.videos.updateResource(
         { libraryId, videoId, resourceId, ...input },
-        ipcMutation()
+        await ipcVideoMutation(backend, videoId)
       )
   )
   adapter.register(
     IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL,
-    (libraryId, videoId, resourceId, label) =>
+    async (libraryId, videoId, resourceId, label) =>
       backend.videos.updateLocalResourceLabel(
         { libraryId, videoId, resourceId, label },
-        ipcMutation()
+        await ipcVideoMutation(backend, videoId)
       )
   )
   adapter.register(
     IPC.VIDEO_RESOURCE_SET_PRIMARY,
-    (libraryId, videoId, resourceId) =>
+    async (libraryId, videoId, resourceId) =>
       backend.videos.setPrimaryResource(
         { libraryId, videoId, resourceId },
-        ipcMutation()
+        await ipcVideoMutation(backend, videoId)
       )
   )
   adapter.register(
     IPC.VIDEO_RESOURCE_REMOVE,
-    (libraryId, videoId, resourceId, lastResourceMode) =>
+    async (libraryId, videoId, resourceId, lastResourceMode) =>
       backend.videos.removeResource(
         { libraryId, videoId, resourceId, lastResourceMode },
-        ipcMutation()
+        await ipcVideoMutation(backend, videoId)
       )
   )
   adapter.register(IPC.VIDEO_REMOVE_FROM_LIBRARY_PREVIEW, (libraryId, videoId) =>
@@ -146,10 +174,13 @@ export function registerVideoHandlers(
   adapter.register(IPC.VIDEO_DELETE_GLOBAL, (input) =>
     backend.videos.deleteGlobal(input, ipcMutation(input.operationId))
   )
-  adapter.register(IPC.VIDEO_MERGE, (input) =>
-    backend.videos.merge(input, ipcMutation())
+  adapter.register(IPC.VIDEO_MERGE, async (input) =>
+    backend.videos.merge(input, await ipcVideoMutation(backend, input.retainedVideoId))
   )
-  adapter.register(IPC.VIDEO_RESOURCE_SPLIT, (libraryId, videoId, resourceId) =>
-    backend.videos.splitResource({ libraryId, videoId, resourceId }, ipcMutation())
+  adapter.register(IPC.VIDEO_RESOURCE_SPLIT, async (libraryId, videoId, resourceId) =>
+    backend.videos.splitResource(
+      { libraryId, videoId, resourceId },
+      await ipcVideoMutation(backend, videoId)
+    )
   )
 }

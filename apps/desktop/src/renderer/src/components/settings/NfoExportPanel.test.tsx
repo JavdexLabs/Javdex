@@ -87,7 +87,7 @@ describe('NFO export foreground modal', () => {
     })
     const dialog = renderer!.root.findByProps({ role: 'dialog' })
     assert.equal(dialog.props['aria-modal'], 'true')
-    const buttons = renderer!.root.findAllByType('button')
+    const buttons = renderer!.root.findAllByType('button').filter(node => !node.props['aria-hidden'])
     assert.equal(buttons.length, 1)
     assert.match(instanceText(buttons[0]), /停止/u)
     await act(async () => { await buttons[0].props.onClick() })
@@ -109,7 +109,7 @@ describe('NFO export foreground modal', () => {
         <ExportProgressModal modal={modal} onTerminate={async () => undefined} onClose={() => { closes += 1 }} />
       )
     })
-    const buttons = renderer!.root.findAllByType('button')
+    const buttons = renderer!.root.findAllByType('button').filter(node => !node.props['aria-hidden'])
     assert.equal(buttons.length, 1)
     act(() => { buttons[0].props.onClick() })
     assert.equal(closes, 1)

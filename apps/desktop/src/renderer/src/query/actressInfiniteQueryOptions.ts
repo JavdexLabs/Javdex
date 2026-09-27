@@ -3,7 +3,7 @@ import type { ActressListItem, ActressListQuery, ActressListStatusCounts } from 
 import { nextActressPageOffset } from './actressListPages'
 import { actressKeys } from './queryKeys'
 
-const PAGE_SIZE = 240
+const PAGE_SIZE = 200
 
 export type FetchActressListPage = (query: ActressListQuery) => Promise<{
   items: ActressListItem[]

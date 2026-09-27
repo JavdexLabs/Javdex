@@ -77,6 +77,11 @@ describe('RemoteCatalogBackend image disk cache', () => {
         response.end(JSON.stringify(handshakeBody('catalog-cache')))
         return
       }
+      if (url.endsWith('/writer.status')) {
+        response.setHeader('Content-Type', 'application/json')
+        response.end(JSON.stringify({ bound: true, writerEpoch: 1 }))
+        return
+      }
       if (url.includes('/manage/v1/assets/')) {
         assetGets += 1
         const count = assetGets
@@ -143,6 +148,11 @@ describe('RemoteCatalogBackend image disk cache', () => {
       if (url.endsWith('/handshake.get')) {
         response.setHeader('Content-Type', 'application/json')
         response.end(JSON.stringify(handshakeBody('catalog-cache')))
+        return
+      }
+      if (url.endsWith('/writer.status')) {
+        response.setHeader('Content-Type', 'application/json')
+        response.end(JSON.stringify({ bound: true, writerEpoch: 1 }))
         return
       }
       if (url.includes('/manage/v1/assets/')) {

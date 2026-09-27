@@ -110,18 +110,11 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
   }
 
   async start(input: PlaylistImportStartInput): Promise<PlaylistImportSnapshot> {
-    const remote = this.catalog?.mode === 'remote'
     const normalizedInput: PlaylistImportStartInput = {
       ...input,
-      autoCreateUnmatchedVideos: input.autoCreateUnmatchedVideos ?? !remote,
+      autoCreateUnmatchedVideos: input.autoCreateUnmatchedVideos ?? true,
       saveDetailLinks: input.saveDetailLinks ?? true,
       saveSourcePlaylistLink: input.saveSourcePlaylistLink ?? false
-    }
-    if (remote && normalizedInput.autoCreateUnmatchedVideos) {
-      throw new PlaylistImportTargetError(
-        'UNSUPPORTED_CAPABILITY',
-        '远程清单导入不能自动建片。请先在资料库中创建对应影片，或关闭自动创建未匹配项。'
-      )
     }
     const key = normalizedInput.idempotencyKey.trim()
     if (!key) throw new Error('idempotencyKey 不能为空')

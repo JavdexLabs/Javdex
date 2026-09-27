@@ -53,6 +53,7 @@ function requireIdentity(database: Database.Database): CatalogIdentityState {
 }
 
 export function fileMaintenanceBlocksHandoff(database: Database.Database = getDb()): boolean {
+  if (readCatalogIdentity(database)?.frozen) return true
   const scan = database
     .prepare(
       `SELECT 1 AS busy FROM library_scan_runs WHERE status IN ('queued', 'running') LIMIT 1`

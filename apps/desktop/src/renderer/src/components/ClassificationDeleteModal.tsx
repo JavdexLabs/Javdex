@@ -14,7 +14,7 @@ interface Props<TImpact extends DeleteImpact, TResult extends DeleteResult> {
   entityLabel: '导演' | '系列'
   entityName: string
   loadImpact: () => Promise<TImpact>
-  remove: () => Promise<TResult>
+  remove: (impact: TImpact) => Promise<TResult>
   onCancel: () => void
   onDeleted: (result: TResult) => void | Promise<void>
 }

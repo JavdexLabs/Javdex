@@ -1,3 +1,5 @@
+import { recoverBackupOperations } from '@library/catalog/catalogBackup'
+import { persistRestoredLocalIdentity } from '../backends/local/localBackup'
 import fs from 'node:fs'
 import path from 'node:path'
 import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
@@ -129,6 +131,7 @@ export async function createDesktopRuntime(
 
   fs.mkdirSync(path.dirname(catalogPath), { recursive: true })
   const database = initDatabaseAtPath(catalogPath)
+  recoverBackupOperations({ mode: 'local', appVersion, userDataPath, onRestored: id => { persistRestoredLocalIdentity(id, userDataPath); options.local?.onRestored?.(id) } }, database)
   if (workStore.prepStatus() !== 'ready') {
     workStore.beginCopy()
     copyAgentWorkTables(database, workStore.database())

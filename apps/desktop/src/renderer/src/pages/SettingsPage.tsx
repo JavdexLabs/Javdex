@@ -1,3 +1,4 @@
+import SettingsActionLabel from '../components/settings/SettingsActionLabel'
 import { avatarLogNotice } from '../avatarAutoCrop/logs'
 import WebAccessPanel from '../components/settings/WebAccessPanel'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -21,6 +22,7 @@ import ModelSettingsPanel from '../components/settings/ModelSettingsPanel'
 import NetworkSettingsPanel from '../components/settings/NetworkSettingsPanel'
 import CatalogConnectionPanel from '../components/settings/CatalogConnectionPanel'
 import PluginsSettingsPanel from '../components/settings/PluginsSettingsPanel'
+import BackupSettingsPanel from '../components/settings/BackupSettingsPanel'
 import StorageSettingsPanel from '../components/settings/StorageSettingsPanel'
 import SettingsOverviewPanel from '../components/settings/SettingsOverviewPanel'
 import { MediaLibrarySettingsContent } from './MediaLibrarySettingsPage'
@@ -60,6 +62,7 @@ import type { ThemeId } from '@shared/settingsTypes'
 import type { UpdateCheckState } from '@shared/updateTypes'
 import Button from '../components/Button'
 import MediaLibraryCreateModal from '../components/MediaLibraryCreateModal'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import {
   withVideoBatchFilterScope,
   withVideoBatchRequestScope
@@ -90,12 +93,23 @@ function summarizeReleaseNotes(notes: string): string {
 }
 
 export default function SettingsPage(): JSX.Element {
+  const { session } = useDesktopSession()
   const queryClient = useQueryClient()
   const toast = useToast()
   const navigate = useNavigate()
   const location = useLocation()
   const { theme, setTheme, syncPrivacyMode } = useTheme()
   const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
+
+  useEffect(() => {
+    if (location.pathname === '/settings/network/mode') {
+      navigate({
+        pathname: settingsPath('storage', 'mode'),
+        search: location.search,
+        hash: location.hash
+      }, { replace: true })
+    }
+  }, [location.pathname, location.search, location.hash, navigate])
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null)
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null)
   const [settingsLoadAttempt, setSettingsLoadAttempt] = useState(0)
@@ -886,7 +900,10 @@ export default function SettingsPage(): JSX.Element {
                 />
               )}
 
-              {activeGroup.id === 'storage' && (
+              {activeGroup.id === 'storage' && activeTab === 'backup' && <BackupSettingsPanel />}
+              {activeGroup.id === 'storage' && activeTab === 'mode' && <CatalogConnectionPanel />}
+
+              {activeGroup.id === 'storage' && (activeTab === 'assets' || activeTab === 'export') && (
                 <StorageSettingsPanel
                   tab={activeTab === 'export' ? 'export' : 'assets'}
                   settings={settings}
@@ -902,8 +919,6 @@ export default function SettingsPage(): JSX.Element {
                 <ModelSettingsPanel settings={settings} activeTab={activeTab === 'advanced' ? 'advanced' : activeTab === 'providers' ? 'providers' : 'usage'} />
               )}
 
-              {activeGroup.id === 'network' && activeTab === 'mode' && <CatalogConnectionPanel />}
-
               {activeGroup.id === 'network' && activeTab === 'proxy' && settings && (
                 <NetworkSettingsPanel
                   settings={settings}
@@ -916,7 +931,7 @@ export default function SettingsPage(): JSX.Element {
               {activeGroup.id === 'about' && activeTab === 'info' && <AboutSettingsPanel />}
       </SettingsWorkspaceShell>
 
-      {createLibraryOpen ? <MediaLibraryCreateModal onCancel={() => setCreateLibraryOpen(false)} onCreated={(library, scanAfterCreate) => {
+      {createLibraryOpen ? <MediaLibraryCreateModal remoteMode={session.mode === 'remote'} onCancel={() => setCreateLibraryOpen(false)} onCreated={(library, scanAfterCreate) => {
         setCreateLibraryOpen(false)
         void queryClient.invalidateQueries({ queryKey: ['media-libraries'] })
         navigate(mediaLibrarySettingsPath(library.id, 'sources'))
@@ -1009,9 +1024,9 @@ export default function SettingsPage(): JSX.Element {
                     disabled={avatarAutoCropBatch.state.status === 'cancelling'}
                     onClick={avatarAutoCropBatch.cancel}
                   >
-                    {avatarAutoCropBatch.state.status === 'cancelling'
+                    <SettingsActionLabel reserve="正在停止…">{avatarAutoCropBatch.state.status === 'cancelling'
                       ? '正在停止…'
-                      : '停止任务'}
+                      : '停止任务'}</SettingsActionLabel>
                   </Button>
                 ) : null
               ) : undefined
@@ -1175,7 +1190,7 @@ export default function SettingsPage(): JSX.Element {
       {pluginDeleteTarget && (
         <ConfirmModal
           title={pluginDeleteTarget.composite ? '删除组合插件' : '删除插件'}
-          confirmText={pluginBusy ? '删除中…' : '删除'}
+          confirmText="删除"
           danger
           busy={Boolean(pluginBusy)}
           onCancel={() => setPluginDeleteTarget(null)}

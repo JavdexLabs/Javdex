@@ -160,6 +160,8 @@ export const classificationQueryService: ClassificationQueryService = {
     const row = getDb()
       .prepare(
         `SELECT o.id,
+                o.generation,
+                o.revision,
                 o.main_name,
                 o.image_path,
                 o.summary,
@@ -206,6 +208,8 @@ export const classificationQueryService: ClassificationQueryService = {
       .get(id, role) as
       | {
           id: number
+          generation: number
+          revision: number
           main_name: string
           image_path: string | null
           summary: string | null
@@ -248,6 +252,8 @@ export const classificationQueryService: ClassificationQueryService = {
 
     return {
       id: row.id,
+      generation: row.generation,
+      revision: row.revision,
       mainName: row.main_name,
       imagePath: row.image_path,
       fallbackCoverPath: row.fallback_cover_path,
@@ -417,6 +423,8 @@ export const classificationQueryService: ClassificationQueryService = {
       .get(id) as
       | {
           id: number
+          generation: number
+          revision: number
           main_name: string
           image_path: string | null
           summary: string | null
@@ -449,6 +457,8 @@ export const classificationQueryService: ClassificationQueryService = {
       .all(id) as OrganizationLink[]
     return {
       id: row.id,
+      generation: row.generation,
+      revision: row.revision,
       mainName: row.main_name,
       imagePath: row.image_path,
       fallbackCoverPath: row.fallback_cover_path,
@@ -584,6 +594,8 @@ export const classificationQueryService: ClassificationQueryService = {
       .get(id) as
       | {
           id: number
+          generation: number
+          revision: number
           main_name: string
           image_path: string | null
           summary: string | null
@@ -619,6 +631,8 @@ export const classificationQueryService: ClassificationQueryService = {
       .all(id) as OrganizationLink[]
     return {
       id: row.id,
+      generation: row.generation,
+      revision: row.revision,
       mainName: row.main_name,
       imagePath: row.image_path,
       fallbackCoverPath: row.fallback_cover_path,

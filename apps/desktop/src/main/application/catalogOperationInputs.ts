@@ -114,7 +114,6 @@ export interface CatalogDesktopInputs {
   }
   'organizations.options': {
     search?: string
-    role?: OrganizationRole
   }
   'organizations.mergeOptions': {
     search?: string

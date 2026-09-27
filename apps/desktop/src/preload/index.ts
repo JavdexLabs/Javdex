@@ -36,6 +36,7 @@ import type {
 } from '../../../../packages/contracts/src/videoIpcContract'
 import type {
   AddMediaLibraryRootInput,
+  BrowseMediaMountInput,
   CancelMediaLibraryRootRemovalInput,
   DeleteMediaLibraryInput,
   MediaLibraryIpcArgs,
@@ -238,6 +239,8 @@ const api = {
     list: (input?: MediaLibraryListInput) =>
       invokeMediaLibrary(IPC.MEDIA_LIBRARY_LIST, input),
     get: (libraryId: number) => invokeMediaLibrary(IPC.MEDIA_LIBRARY_GET, libraryId),
+    browseMount: (input: BrowseMediaMountInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_MOUNT_BROWSE, input),
     create: (input: CreateMediaLibraryInput) =>
       invokeMediaLibrary(IPC.MEDIA_LIBRARY_CREATE, input),
     update: (input: UpdateMediaLibraryInput) =>
@@ -250,6 +253,8 @@ const api = {
       invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_UPDATE, input),
     removeRoot: (input: RemoveMediaLibraryRootInput) =>
       invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_REMOVE, input),
+    previewRootRemoval: (input: { libraryId: number; rootId: number }) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_REMOVE_PREVIEW, input),
     cancelRootRemoval: (input: CancelMediaLibraryRootRemovalInput) =>
       invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL, input),
     previewRootMigration: (input: MediaLibraryRootMigrationPreviewInput) =>
@@ -296,6 +301,10 @@ const api = {
     apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
     revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)
   },
+  backup: {
+    control: (input: import('@shared/protocol/backup').BackupRequest) => invokeApp(IPC.BACKUP_CONTROL, input),
+    file: (input: import('@shared/protocol/backup').DesktopBackupFileRequest) => invokeApp(IPC.BACKUP_FILE, input)
+  },
   desktop: {
     getSession: () => invokeApp(IPC.DESKTOP_SESSION_GET),
     reconnect: () => invokeApp(IPC.DESKTOP_RECONNECT),
@@ -305,7 +314,11 @@ const api = {
   },
   thisComputer: {
     get: () => invokeApp(IPC.THIS_COMPUTER_GET),
-    update: (patch: ThisComputerSettingsPatch) => invokeApp(IPC.THIS_COMPUTER_UPDATE, patch)
+    update: (patch: ThisComputerSettingsPatch) => invokeApp(IPC.THIS_COMPUTER_UPDATE, patch),
+    probe: (baseUrl: string) => invokeApp(IPC.THIS_COMPUTER_PROBE, baseUrl),
+    restart: () => invokeApp(IPC.THIS_COMPUTER_RESTART),
+    pickPlayer: (currentPath: string | null) => invokeApp(IPC.THIS_COMPUTER_PICK_PLAYER, currentPath),
+    detectPlayer: () => invokeApp(IPC.THIS_COMPUTER_DETECT_PLAYER)
   },
   settings: {
     get: () => invokeApp(IPC.SETTINGS_GET),
@@ -416,10 +429,10 @@ const api = {
     years: (scope: CatalogScope) => invokeVideo(IPC.VIDEO_YEARS, scope),
     importSample: (id: number, input: VideoSampleImportInput) =>
       invokeVideo(IPC.VIDEO_SAMPLE_IMPORT, id, input),
-    deleteSample: (id: number, assetId: number) =>
-      invokeVideo(IPC.VIDEO_SAMPLE_DELETE, id, assetId),
-    setPoster: (id: number, posterPath: string | null) =>
-      invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+    deleteSample: (id: number, assetId: number, expectedVersions?: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_SAMPLE_DELETE, id, assetId, expectedVersions),
+    setPoster: (id: number, posterPath: string | null, assetId?: number, expectedVersions?: ExpectedVersions) =>
+      invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath, assetId, expectedVersions),
     addManualTag: (id: number, name: string, expectedVersions: ExpectedVersions) =>
       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name, expectedVersions),
     addExistingManualTag: (id: number, tagId: number, expectedVersions: ExpectedVersions) =>
@@ -502,15 +515,15 @@ const api = {
     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
     create: (input: PlaylistCreateInput) => invokeApp(IPC.PLAYLIST_CREATE, input),
-    update: (id: number, input: PlaylistUpdateInput) =>
-      invokeApp(IPC.PLAYLIST_UPDATE, id, input),
-    remove: (id: number) => invokeApp(IPC.PLAYLIST_DELETE, id),
+    update: (id: number, input: PlaylistUpdateInput, expectedVersions?: ExpectedVersions) =>
+      invokeApp(IPC.PLAYLIST_UPDATE, id, input, expectedVersions),
+    remove: (id: number, expectedVersions?: ExpectedVersions) => invokeApp(IPC.PLAYLIST_DELETE, id, expectedVersions),
     listForVideo: (videoId: number) =>
       invokeApp(IPC.PLAYLIST_LIST_FOR_VIDEO, videoId),
-    addVideo: (playlistId: number, videoId: number) =>
-      invokeApp(IPC.PLAYLIST_ADD_VIDEO, playlistId, videoId),
-    removeVideo: (playlistId: number, videoId: number) =>
-      invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
+    addVideo: (playlistId: number, videoId: number, expectedVersions?: ExpectedVersions) =>
+      invokeApp(IPC.PLAYLIST_ADD_VIDEO, playlistId, videoId, expectedVersions),
+    removeVideo: (playlistId: number, videoId: number, expectedVersions?: ExpectedVersions) =>
+      invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId, expectedVersions)
   },
   actresses: {
     mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
@@ -535,21 +548,22 @@ const api = {
     get: (id: number) => invokeActress(IPC.ACTRESS_GET, id),
     getAvatarSourceInfo: (id: number) =>
       invokeActress(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
-    edit: (id: number, input: ActressEditInput) => invokeActress(IPC.ACTRESS_EDIT, id, input),
+    edit: (id: number, input: ActressEditInput, expectedVersions: ExpectedVersions) =>
+      invokeActress(IPC.ACTRESS_EDIT, id, input, expectedVersions),
     deletePreview: (ids: number[]) => invokeActress(IPC.ACTRESS_DELETE_PREVIEW, ids),
     remove: (id: number, mode: ActressDeleteMode = 'only-unlinked') =>
       invokeActress(IPC.ACTRESS_DELETE, { ids: [id], mode }),
     removeBatch: (ids: number[], mode: ActressDeleteMode = 'only-unlinked') =>
       invokeActress(IPC.ACTRESS_DELETE_BATCH, { ids, mode }),
-    clearMeta: (id: number) => invokeActress(IPC.ACTRESS_CLEAR_META, id),
+    clearMeta: (id: number, expectedVersions?: ExpectedVersions) => invokeActress(IPC.ACTRESS_CLEAR_META, id, expectedVersions),
     importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
       invokeActress(IPC.ACTRESS_GALLERY_IMPORT, id, input),
-    deleteGalleryImage: (id: number, assetId: number) =>
-      invokeActress(IPC.ACTRESS_GALLERY_DELETE, id, assetId),
-    setPoster: (id: number, posterPath: string | null) =>
-      invokeActress(IPC.ACTRESS_POSTER_SET, id, posterPath),
-    merge: (input: ActressMergeInput) => invokeActress(IPC.ACTRESS_MERGE, input),
-    markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+    deleteGalleryImage: (id: number, assetId: number, expectedVersions?: ExpectedVersions) =>
+      invokeActress(IPC.ACTRESS_GALLERY_DELETE, id, assetId, expectedVersions),
+    setPoster: (id: number, posterPath: string | null, assetId?: number, expectedVersions?: ExpectedVersions) =>
+      invokeActress(IPC.ACTRESS_POSTER_SET, id, posterPath, assetId, expectedVersions),
+    merge: (input: ActressMergeInput, expectedVersions?: ExpectedVersions) => invokeActress(IPC.ACTRESS_MERGE, input, expectedVersions),
+    markScrapeSuccess: (id: number, expectedVersions?: ExpectedVersions) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id, expectedVersions)
   },
   tags: {
     filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
@@ -567,15 +581,15 @@ const api = {
     options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
     mergeOptions: (search?: string) => invokeApp(IPC.ORGANIZATION_MERGE_OPTIONS, search),
     create: (input: OrganizationCreateInput) => invokeApp(IPC.ORGANIZATION_CREATE, input),
-    update: (id: number, input: OrganizationUpdateInput) =>
-      invokeApp(IPC.ORGANIZATION_UPDATE, id, input),
-    merge: (input: OrganizationMergeInput) => invokeApp(IPC.ORGANIZATION_MERGE, input),
+    update: (id: number, input: OrganizationUpdateInput, expectedVersions?: ExpectedVersions) =>
+      invokeApp(IPC.ORGANIZATION_UPDATE, id, input, expectedVersions),
+    merge: (input: OrganizationMergeInput, expectedVersions?: ExpectedVersions) => invokeApp(IPC.ORGANIZATION_MERGE, input, expectedVersions),
     roleRemovalPreview: (id: number, role: OrganizationRole) =>
       invokeApp(IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW, id, role),
-    removeRole: (id: number, role: OrganizationRole) =>
-      invokeApp(IPC.ORGANIZATION_ROLE_REMOVE, id, role),
+    removeRole: (id: number, role: OrganizationRole, planDigest?: string, expectedVersions?: ExpectedVersions) =>
+      invokeApp(IPC.ORGANIZATION_ROLE_REMOVE, id, role, planDigest, expectedVersions),
     deletePreview: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE_PREVIEW, id),
-    remove: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE, id)
+    remove: (id: number, planDigest?: string, expectedVersions?: ExpectedVersions) => invokeApp(IPC.ORGANIZATION_DELETE, id, planDigest, expectedVersions)
   },
   directors: {
     page: (query: DirectorListQuery & ClassificationPageQuery) => invokeApp(IPC.DIRECTOR_PAGE, query),
@@ -583,11 +597,11 @@ const api = {
     get: (id: number) => invokeApp(IPC.DIRECTOR_GET, id),
     options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
     create: (input: DirectorProfileInput) => invokeApp(IPC.DIRECTOR_CREATE, input),
-    update: (id: number, input: DirectorUpdateInput) =>
-      invokeApp(IPC.DIRECTOR_UPDATE, id, input),
-    merge: (input: DirectorMergeInput) => invokeApp(IPC.DIRECTOR_MERGE, input),
+    update: (id: number, input: DirectorUpdateInput, expectedVersions?: ExpectedVersions) =>
+      invokeApp(IPC.DIRECTOR_UPDATE, id, input, expectedVersions),
+    merge: (input: DirectorMergeInput, expectedVersions?: ExpectedVersions) => invokeApp(IPC.DIRECTOR_MERGE, input, expectedVersions),
     deletePreview: (id: number) => invokeApp(IPC.DIRECTOR_DELETE_PREVIEW, id),
-    remove: (id: number) => invokeApp(IPC.DIRECTOR_DELETE, id)
+    remove: (id: number, planDigest?: string, expectedVersions?: ExpectedVersions) => invokeApp(IPC.DIRECTOR_DELETE, id, planDigest, expectedVersions)
   },
   series: {
     page: (query: SeriesListQuery & ClassificationPageQuery) => invokeApp(IPC.SERIES_PAGE, query),
@@ -595,17 +609,17 @@ const api = {
     get: (id: number) => invokeApp(IPC.SERIES_GET, id),
     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
     create: (input: SeriesProfileInput) => invokeApp(IPC.SERIES_CREATE, input),
-    update: (id: number, input: SeriesUpdateInput) => invokeApp(IPC.SERIES_UPDATE, id, input),
-    merge: (input: SeriesMergeInput) => invokeApp(IPC.SERIES_MERGE, input),
+    update: (id: number, input: SeriesUpdateInput, expectedVersions?: ExpectedVersions) => invokeApp(IPC.SERIES_UPDATE, id, input, expectedVersions),
+    merge: (input: SeriesMergeInput, expectedVersions?: ExpectedVersions) => invokeApp(IPC.SERIES_MERGE, input, expectedVersions),
     deletePreview: (id: number) => invokeApp(IPC.SERIES_DELETE_PREVIEW, id),
-    remove: (id: number) => invokeApp(IPC.SERIES_DELETE, id)
+    remove: (id: number, planDigest?: string, expectedVersions?: ExpectedVersions) => invokeApp(IPC.SERIES_DELETE, id, planDigest, expectedVersions)
   },
   classificationImages: {
     page: (entity: ClassificationEntityRef, query?: ClassificationPageQuery) => invokeApp(IPC.CLASSIFICATION_IMAGE_PAGE, entity, query),
     candidates: (entity: ClassificationEntityRef) =>
       invokeApp(IPC.CLASSIFICATION_IMAGE_CANDIDATES, entity),
-    set: (entity: ClassificationEntityRef, input: ClassificationImageInput | null) =>
-      invokeApp(IPC.CLASSIFICATION_IMAGE_SET, entity, input)
+    set: (entity: ClassificationEntityRef, input: ClassificationImageInput | null, expectedVersions?: ExpectedVersions) =>
+      invokeApp(IPC.CLASSIFICATION_IMAGE_SET, entity, input, expectedVersions)
   },
   scrape: {
     one: (

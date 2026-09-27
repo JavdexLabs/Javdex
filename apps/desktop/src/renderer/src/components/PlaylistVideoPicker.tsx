@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ListVideo } from 'lucide-react'
 import { api, assetUrl } from '../api'
+import { expectedPlaylistVersion } from '@shared/protocol/versions'
+import type { PlaylistBrowseItem } from '@shared/playlistTypes'
 import { useDebounce } from '../hooks/useDebounce'
 import { usePlaylistBrowsePage } from '../hooks/usePlaylistBrowsePage'
 import { useToast } from './Toast'
@@ -26,15 +28,22 @@ export default function PlaylistVideoPicker({ videoIds, single, subtitle, onCanc
   const ready = search === query.trim()
   const page = usePlaylistBrowsePage({search,offset,limit:60,videoId:single ? videoIds[0] : undefined,locale:Intl.DateTimeFormat().resolvedOptions().locale})
   const canCreate = ready && !page.loading && !page.error && Boolean(page.data) && Boolean(query.trim()) && !page.data?.hasExactName
-  async function change(id: number|'create', remove = false): Promise<void> {
+  async function change(id: number|'create', remove = false, observed?: PlaylistBrowseItem): Promise<void> {
     if (gate.current || !ready || page.loading || page.error || (id==='create' && !canCreate)) return
     gate.current=true;setBusyId(id)
     try {
       const target = id === 'create' ? await api.playlists.create({name:query.trim()}) : id
       let changed=0,failed=0
-      for(const video of videoIds) {
-        try { if(await (remove ? api.playlists.removeVideo(target,video) : api.playlists.addVideo(target,video))) changed++ }
-        catch { failed++ }
+      let expected = observed ? expectedPlaylistVersion(observed) : undefined
+      for(const [index, video] of videoIds.entries()) {
+        try {
+          if(await (remove ? api.playlists.removeVideo(target,video,expected) : api.playlists.addVideo(target,video,expected))) changed++
+          if (index < videoIds.length - 1) {
+            const latest = await api.playlists.metadata(target)
+            if (!latest) throw new Error('清单不存在')
+            expected = expectedPlaylistVersion(latest)
+          }
+        } catch { failed += videoIds.length - index; break }
       }
       if (!active.current || current.current!==session) return
       const message = failed ? `${id==='create' ? '清单已创建，' : ''}已加入 ${changed} 部，${failed} 部失败`
@@ -68,7 +77,7 @@ export default function PlaylistVideoPicker({ videoIds, single, subtitle, onCanc
             return <div key={item.id} className="playlist-pick-row">
               <div className="playlist-pick-cover">{cover ? <img src={cover} alt={item.name}/> : <span className="playlist-pick-cover-placeholder"><ListVideo {...UI_ICON_SM}/></span>}</div>
               <div className="playlist-pick-main"><div className="playlist-pick-name">{item.name}</div><div className="playlist-pick-meta">{item.video_count} 部影片</div></div>
-              <Button size="sm" disabled={disabled} className={single && item.contains_video ? 'playlist-pick-remove-btn' : ''} onClick={()=>void change(item.id,single && item.contains_video)}>
+              <Button size="sm" disabled={disabled} className={single && item.contains_video ? 'playlist-pick-remove-btn' : ''} onClick={()=>void change(item.id,single && item.contains_video,item)}>
                 {busyId===item.id ? '处理中…' : single && item.contains_video ? '移出' : '加入'}
               </Button>
             </div>

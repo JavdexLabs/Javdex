@@ -1,3 +1,4 @@
+import SettingsActionLabel from './SettingsActionLabel'
 import Switch from '../Switch'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, RectangleHorizontal, RectangleVertical } from 'lucide-react'
@@ -648,7 +649,7 @@ export default function AppearanceSettingsPanel({
                     disabled={avatarAutoCropBatch.state.status === 'cancelling'}
                     onClick={avatarAutoCropBatch.cancel}
                   >
-                    {avatarAutoCropBatch.state.status === 'cancelling' ? '正在停止…' : '停止'}
+                    <SettingsActionLabel reserve="正在停止…">{avatarAutoCropBatch.state.status === 'cancelling' ? '正在停止…' : '停止'}</SettingsActionLabel>
                   </Button>
                 ) : null}
               </div>
@@ -682,7 +683,7 @@ export default function AppearanceSettingsPanel({
                 }
                 onClick={() => void prepareBatchAvatarCrop()}
               >
-                {isCountingBatchAvatars ? '统计中…' : '构图全部头像'}
+                <SettingsActionLabel reserve="构图全部头像">{isCountingBatchAvatars ? '统计中…' : '构图全部头像'}</SettingsActionLabel>
               </Button>
             </div>
           )}

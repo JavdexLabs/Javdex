@@ -118,6 +118,13 @@
   user-select: text;
 }
 
+.remoteHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
 .actionRow {
   display: flex;
   align-items: center;

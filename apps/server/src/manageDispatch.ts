@@ -1,3 +1,4 @@
+import { dispatchBackup } from './manageBackup'
 import { catalogVideoCommands } from '@library/catalog/catalogVideoCommands'
 import type Database from 'better-sqlite3'
 import { pipeline } from 'node:stream/promises'
@@ -8,6 +9,7 @@ import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
 import { getVideoDetail } from '@library/db/videoRepo'
 import { listMediaLibraries } from '@library/db/mediaLibraryRepo'
 import { getLibraryOverviewStats } from '@library/db/overviewRepo'
+import { resolveMediaAssetsRoot } from '@library/assetStoragePaths'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { getDb } from '@library/db/database'
 import { readHandshake } from '@library/catalog/catalogHandshake'
@@ -23,6 +25,7 @@ import {
 import { commitCatalogMutation, readOperationReceipt } from '@library/catalog/catalogOperations'
 import {
   applyActressAvatarRef,
+  applyActressGalleryPosterRef,
   applyActressCropRef,
   applyActressGalleryRefs,
   applyClassificationImageRef,
@@ -233,6 +236,7 @@ function stallVideosEditBeforeMutationForTests(): Promise<void> | null {
 }
 
 export function dispatchManageOperation(context: ManageHttpContext, database?: Database.Database): unknown {
+  if (context.operation === 'backup.control') return dispatchBackup(context, database)
   const operation = context.operation
   const meta = MANAGE_OPERATIONS[operation]
   if (operation === 'handshake.get') {
@@ -369,6 +373,9 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     if (operation === 'catalog.overviewStats') {
       return getLibraryOverviewStats(catalogDb(database))
     }
+    if (operation === 'catalog.storageInfo') {
+      return { imagesDir: resolveMediaAssetsRoot() }
+    }
     if (operation === 'home.load') {
       const input = envelope.input as {
         seed: string
@@ -462,7 +469,7 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       return { receipt: result.receipt, ...result.data }
     }
     if (operation === 'actresses.setPoster') {
-      const input = envelope.input as { actressId: number; image: CatalogImageRef }
+      const input = envelope.input as { actressId: number; image: CatalogImageRef; slot?: 'galleryPoster' }
       const mutation = requireMutation(envelope)
       const result = commitManageImageMutation(
         {
@@ -472,7 +479,9 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
           input,
           writerEpoch: auth.epoch
         },
-        () => applyActressAvatarRef(input.actressId, input.image, mutation.expectedVersions, mutation.operationId, database),
+        () => input.slot === 'galleryPoster'
+          ? applyActressGalleryPosterRef(input.actressId, input.image, mutation.expectedVersions, mutation.operationId, database)
+          : applyActressAvatarRef(input.actressId, input.image, mutation.expectedVersions, mutation.operationId, database),
         database
       )
       return { receipt: result.receipt, ...result.data }
@@ -533,7 +542,7 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
           applyClassificationImageRef(input.entity, input.image, mutation.expectedVersions, mutation.operationId, database),
         database
       )
-      return { receipt: result.receipt, ...result.data }
+      return { receipt: result.receipt, ...result.data, cleanupFailures: [] }
     }
     if (operation === 'playlists.create') {
       const input = envelope.input as {

@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import { pipeline } from 'node:stream/promises'
+import { BACKUP_CHUNK_BYTES } from '@shared/protocol/backup'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '@library/mediaAssetStore'
 import { parseImageThumbnailSize, type ImageThumbnailSize } from '@shared/imageVariants'
@@ -49,7 +52,15 @@ export interface ManageMigrationPackagePutContext {
   isLoopback: boolean
 }
 
+export interface ManageBackupFileContext {
+  id: string
+  offset: number
+  request: IncomingMessage
+  bearerSecret: string | null
+}
+
 export interface ManageHttpSurface {
+  transferBackup?: (context: ManageBackupFileContext) => Promise<{ file?: string; offset?: number; release?: () => void }>
   appVersion: string
   dispatch: (context: ManageHttpContext) => unknown | Promise<unknown>
   putUpload?: (context: ManageUploadPutContext) => unknown | Promise<unknown>
@@ -148,6 +159,30 @@ export async function handleManageHttpRequest(
     bearerSecret: bearerSecret(request),
     remoteAddress,
     isLoopback: isLoopbackPeer(remoteAddress)
+  }
+  const backupMatch = /^\/manage\/v1\/backups\/([0-9a-f-]{36})$/.exec(url.pathname)
+  if (backupMatch) {
+    if (!manage.transferBackup) throw new WebError(404, '页面不存在')
+    if (!['GET', 'PUT'].includes(request.method ?? '')) throw new WebError(405, '备份文件请使用 GET 或 PUT')
+    if (!requireAppVersion(request, manage, response)) return true
+    try {
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      if (!Number.isSafeInteger(offset) || offset < 0) throw structuredError('INVALID_INPUT', '无效的备份偏移')
+      const result = await manage.transferBackup({ id: backupMatch[1], offset, request, bearerSecret: peer.bearerSecret })
+      try {
+        if (result.file) {
+          const total = fs.statSync(result.file).size
+          if (offset >= total) throw structuredError('INVALID_INPUT', '下载偏移超过文件大小')
+          const end = Math.min(total - 1, offset + BACKUP_CHUNK_BYTES - 1)
+          response.writeHead(206, { 'Content-Type': 'application/octet-stream', 'Content-Length': String(end - offset + 1), 'Content-Range': `bytes ${offset}-${end}/${total}`, 'Cache-Control': 'no-store' })
+          await pipeline(fs.createReadStream(result.file, { start: offset, end }), response)
+        } else json(response, 200, result)
+      } finally { result.release?.() }
+    } catch (error) {
+      if (response.headersSent) response.destroy()
+      else { const failure = toStructuredError(error); json(response, manageErrorStatus(failure.code), failure) }
+    }
+    return true
   }
   if (uploadMatch) {
     if ((request.method ?? '') !== 'PUT') throw new WebError(405, '上传内容请使用 PUT')

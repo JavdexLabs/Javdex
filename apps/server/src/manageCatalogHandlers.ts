@@ -1,3 +1,5 @@
+import { resolveMountSelectionPath } from '@library/scan/mountSelection'
+import { initializeJavdexRootMarker, removeNewJavdexRootMarker, markJavdexRootInitialized } from '@library/scan/javdexRootMarker'
 import { editCatalogActress } from '@library/catalog/catalogActressEdit'
 import type Database from 'better-sqlite3'
 import path from 'node:path'
@@ -342,11 +344,11 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
     return actressQueryService.getMetadata(input.actressId)
   },
   'actresses.videoPage'(args) {
-    const input = args.envelope.input as { actressId: number; limit?: number; offset?: number }
+    const input = args.envelope.input as { actressId: number; withCover?: boolean; limit?: number; offset?: number }
     return actressQueryService.listVideos(input.actressId, input)
   },
   'actresses.galleryPage'(args) {
-    const input = args.envelope.input as { actressId: number; limit?: number; offset?: number }
+    const input = args.envelope.input as { actressId: number; anchorId?: number; localOnly?: boolean; limit?: number; offset?: number }
     return actressQueryService.listGallery(input.actressId, input)
   },
   'actresses.avatarSourceInfo'(args) {
@@ -486,11 +488,14 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   },
   'actressConflicts.queuePage'(args) {
     return actressIdentityConflictWorkflow.pageConflictQueue(
-      args.envelope.input as { limit?: number; offset?: number }
+      args.envelope.input as { limit?: number; offset?: number; anchorName?: string }
     )
   },
   'actressConflicts.get'(args) {
-    const input = args.envelope.input as { pendingId: number }
+    const input = args.envelope.input as { pendingId: number } | { normalizedName: string }
+    if ('normalizedName' in input) {
+      return actressIdentityConflictWorkflow.getConflictGroup(input.normalizedName)
+    }
     const row = catalogDb(args.database)
       .prepare(
         'SELECT normalized_name FROM pending_actress_scrape_conflicts WHERE pending_scrape_id = ? ORDER BY id LIMIT 1'
@@ -528,7 +533,7 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
     return classificationQueryService.listOrganizationOptions(input.search)
   },
   'organizations.mergeOptions'(args) {
-    const input = args.envelope.input as { organizationId: number; search?: string }
+    const input = args.envelope.input as { organizationId?: number; search?: string }
     return classificationQueryService
       .listOrganizationMergeOptions(input.search)
       .filter((row) => row.id !== input.organizationId)
@@ -752,7 +757,27 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   },
   'libraries.create'(args) {
     const input = args.envelope.input as CreateMediaLibraryInput
-    return commit(args, () => runLibrary(() => mediaLibraries.create(input)))
+    return commit(args, () => runLibrary(() => {
+      const { remoteRoots, ...fields } = input
+      const roots = (remoteRoots ?? []).map(root => ({
+        path: resolveMountSelectionPath(root.mountSelectionId, root.relativePath),
+        state: 'active' as const
+      }))
+      const createdMarkers: string[] = []
+      try {
+        for (const root of roots) {
+          if (initializeJavdexRootMarker(root.path)) createdMarkers.push(root.path)
+        }
+        const library = mediaLibraries.create({ ...fields, roots })
+        for (const root of library.roots) markJavdexRootInitialized(library.id, root.id)
+        return getMediaLibraryDetail(library.id)!
+      } catch (error) {
+        for (const directory of createdMarkers) {
+          try { removeNewJavdexRootMarker(directory) } catch { /* Preserve the original error. */ }
+        }
+        throw error
+      }
+    }))
   },
   'libraries.update'(args) {
     const input = args.envelope.input as {

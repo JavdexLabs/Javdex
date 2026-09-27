@@ -348,7 +348,8 @@ export function SourcesSettingsTab({
   requestRootMigration,
   toggleRoot,
   requestRootRemoval,
-  cancelRootRemoval
+  cancelRootRemoval,
+  remoteMode = false
 }: {
   library: MediaLibraryDetail
   formDisabled: boolean
@@ -357,6 +358,7 @@ export function SourcesSettingsTab({
   toggleRoot: (root: MediaLibraryRoot) => Promise<void>
   requestRootRemoval: (root: MediaLibraryRoot) => Promise<void>
   cancelRootRemoval: (root: MediaLibraryRoot) => Promise<void>
+  remoteMode?: boolean
 }): JSX.Element {
   return (
     <section className={styles.sourcePanel} aria-label="来源目录">
@@ -411,13 +413,15 @@ export function SourcesSettingsTab({
               <span className={styles.rootActions}>
                 {root.state === 'active' || root.state === 'disabled' ? (
                   <>
-                    <Button
-                      size="sm"
-                      disabled={formDisabled}
-                      onClick={() => void requestRootMigration(root)}
-                    >
-                      迁移
-                    </Button>
+                    {!remoteMode ? (
+                      <Button
+                        size="sm"
+                        disabled={formDisabled}
+                        onClick={() => void requestRootMigration(root)}
+                      >
+                        迁移
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       disabled={formDisabled}

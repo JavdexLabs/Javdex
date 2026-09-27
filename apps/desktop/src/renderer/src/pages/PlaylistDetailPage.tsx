@@ -5,6 +5,7 @@ import type { SortDir } from '@shared/commonTypes'
 import type { PlaylistMetadata, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
 import type { VideoCard } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
+import { expectedPlaylistVersion } from '@shared/protocol/versions'
 import { navigateToPlaylistList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useToast } from '../components/Toast'
@@ -156,7 +157,7 @@ export default function PlaylistDetailPage(): JSX.Element {
   const updatePlaylist = async (input: PlaylistUpdateInput): Promise<void> => {
     if (!detail) return
     try {
-      await api.playlists.update(detail.id, input)
+      await api.playlists.update(detail.id, input, expectedPlaylistVersion(detail))
       setShowEdit(false)
       toast.show('播放清单已更新', 'success')
       await loadDetail()
@@ -168,7 +169,7 @@ export default function PlaylistDetailPage(): JSX.Element {
   const deletePlaylist = async (): Promise<void> => {
     if (!detail) return
     try {
-      await api.playlists.remove(detail.id)
+      await api.playlists.remove(detail.id, expectedPlaylistVersion(detail))
       setConfirmDelete(false)
       toast.show('播放清单已删除', 'success')
       navigateToPlaylistList(navigate, location)
@@ -181,7 +182,7 @@ export default function PlaylistDetailPage(): JSX.Element {
     if (!detail || removingVideoId !== null) return
     setRemovingVideoId(video.id)
     try {
-      await api.playlists.removeVideo(detail.id, video.id)
+      await api.playlists.removeVideo(detail.id, video.id, expectedPlaylistVersion(detail))
       await loadDetail()
       setVideoRemoveTarget(null)
       toast.show(`已从清单移出 ${video.code}`, 'success')

@@ -738,6 +738,135 @@
   line-height: 1.55;
 }
 
+.remoteRootPicker {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.remoteRootMountSelect {
+  width: 100%;
+}
+
+.remoteRootBrowser {
+  display: grid;
+  min-height: 220px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+}
+
+.remoteRootBreadcrumbs {
+  display: flex;
+  min-width: 0;
+  min-height: var(--control-h-sm);
+  align-items: center;
+  padding: 5px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.remoteRootBreadcrumbStep {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.remoteRootBreadcrumbButton {
+  padding: 3px 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.remoteRootBreadcrumbButton:hover {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.remoteRootDirectoryList {
+  height: 220px;
+  min-height: 0;
+  padding: 5px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.remoteRootSearch {
+  width: calc(100% - 12px);
+  margin: 6px;
+}
+
+.remoteRootDirectory {
+  display: flex;
+  width: 100%;
+  min-height: var(--control-h-sm);
+  align-items: center;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  gap: 9px;
+}
+
+.remoteRootBreadcrumbButton:focus-visible,
+.remoteRootDirectory:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.remoteRootDirectory:hover:not(:disabled) {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.remoteRootDirectoryName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remoteRootMessage {
+  display: flex;
+  min-height: var(--control-h-sm);
+  align-items: center;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  gap: 8px;
+}
+
+.remoteRootSelection {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.remoteRootSelection strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .migrationSelect {
   width: 100%;
 }

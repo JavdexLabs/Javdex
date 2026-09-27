@@ -19,7 +19,7 @@ function tableReady(database: Database.Database): boolean {
 }
 
 /** Write the marker once inside the actual mount. Never recreate a lost initialized marker. */
-export function initializeJavdexRootMarker(mountPath: string): void {
+export function initializeJavdexRootMarker(mountPath: string): boolean {
   const realMount = fs.realpathSync.native(mountPath)
   const file = markerPath(realMount)
   try {
@@ -31,11 +31,17 @@ export function initializeJavdexRootMarker(mountPath: string): void {
     if (fs.realpathSync.native(path.dirname(file)) !== realMount) {
       throw new Error('媒体挂载标记必须位于实际挂载内')
     }
-    return
+    return false
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
   fs.writeFileSync(file, '', { flag: 'wx', mode: 0o644 })
+  return true
+}
+
+/** Roll back only a marker created by the current add-root attempt. */
+export function removeNewJavdexRootMarker(mountPath: string): void {
+  fs.unlinkSync(markerPath(fs.realpathSync.native(mountPath)))
 }
 
 export function javdexRootMarkerReadable(mountPath: string): boolean {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface PreviewCommandOptions<TImpact, TResult> {
   loadImpact: () => Promise<TImpact>
-  command: () => Promise<TResult>
+  command: (impact: TImpact) => Promise<TResult>
   canExecute?: (impact: TImpact) => boolean
   onCompleted: (result: TResult) => void | Promise<void>
   completionErrorMessage: string
@@ -56,7 +56,7 @@ export function usePreviewCommand<TImpact, TResult>({
     setError(null)
     let result: TResult
     try {
-      result = await command()
+      result = await command(impact)
     } catch (commandError) {
       setError(String((commandError as Error).message ?? commandError))
       await refreshImpact(false)

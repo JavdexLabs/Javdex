@@ -181,12 +181,15 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
     setSourceUrl('')
     setRequestedName('')
     setTargetLibraryId('')
-    setAutoCreateUnmatchedVideos(session.mode !== 'remote')
+    setAutoCreateUnmatchedVideos(true)
     setSaveDetailLinks(true)
     setSaveSourcePlaylistLink(false)
-    setDestinationKind(input?.destination?.kind ?? 'create')
-    setPlaylistId(input?.destination?.kind === 'append' ? String(input.destination.playlistId) : '')
-    setPlaylistLabel(input?.destination?.kind === 'append' ? input.destination.playlistName : '')
+    const requestedDestination = input?.destination?.kind === 'append' && session.mode === 'remote'
+      ? { kind: 'create' as const }
+      : (input?.destination ?? { kind: 'create' as const })
+    setDestinationKind(requestedDestination.kind)
+    setPlaylistId(requestedDestination.kind === 'append' ? String(requestedDestination.playlistId) : '')
+    setPlaylistLabel(requestedDestination.kind === 'append' ? requestedDestination.playlistName : '')
     setSnapshot(null)
     setChoices({})
     setBusy(true)
@@ -210,6 +213,10 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
 
   const start = async (): Promise<void> => {
     if (!sourceUrl.trim() || !targetLibraryId || (destinationKind === 'append' && !playlistId)) return
+    if (session.mode === 'remote' && destinationKind === 'append') {
+      setError('远程模式暂不支持追加到已有清单，请新建清单。')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -217,7 +224,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
         idempotencyKey: `renderer-playlist-import:${crypto.randomUUID()}`,
         sourceUrl: sourceUrl.trim(),
         targetLibraryId: Number(targetLibraryId),
-        autoCreateUnmatchedVideos: session.mode !== 'remote' && autoCreateUnmatchedVideos,
+        autoCreateUnmatchedVideos,
         saveDetailLinks,
         saveSourcePlaylistLink,
         destination: destinationKind === 'append'
@@ -432,7 +439,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                           <EditFormField label="导入方式">
                             <SelectControl value={destinationKind} onChange={(event) => setDestinationKind(event.target.value as 'create' | 'append')}>
                               <option value="create">新建清单</option>
-                              <option value="append">追加到清单</option>
+                              {session.mode !== 'remote' ? <option value="append">追加到清单</option> : null}
                             </SelectControl>
                           </EditFormField>
                           {destinationKind === 'create' ? (
@@ -457,9 +464,8 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                         <div className={styles.setupOptions}>
                           <SettingsSwitchRow
                             title="自动创建无资源影片"
-                            description={session.mode === 'remote' ? '远程导入只匹配已有影片，未匹配条目会跳过。' : '未匹配到已有影片时，在目标媒体库创建无资源影片；关闭后跳过这些条目。'}
-                            checked={session.mode !== 'remote' && autoCreateUnmatchedVideos}
-                            disabled={session.mode === 'remote'}
+                            description="未匹配到已有影片时，在目标媒体库创建无资源影片；关闭后跳过这些条目。"
+                            checked={autoCreateUnmatchedVideos}
                             onChange={setAutoCreateUnmatchedVideos}
                           />
                           <SettingsSwitchRow

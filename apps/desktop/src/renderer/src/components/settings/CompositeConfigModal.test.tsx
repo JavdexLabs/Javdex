@@ -45,7 +45,7 @@ const sources = [
   source('图片源', ['avatar', 'gallery'])
 ]
 function button(label: string) {
-  return renderer.root.findAllByType('button').find((item) => item.children.includes(label))!
+  return renderer.root.findAllByType('button').find((item) => visibleText(item) === label)!
 }
 function select(label: string) {
   return renderer.root
@@ -153,3 +153,7 @@ it('uses video field capabilities for bulk assignment', () => {
   assert.equal(select('标题来源').props.value, '影片源')
   assert.equal(select('封面来源').props.value, '影片源')
 })
+
+function visibleText(node: TestRenderer.ReactTestInstance | string): string {
+  return typeof node === 'string' ? node : node.children.map(child => visibleText(child as TestRenderer.ReactTestInstance)).join('')
+}

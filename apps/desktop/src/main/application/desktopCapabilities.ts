@@ -77,7 +77,7 @@ export function createRemoteSessionCapabilities(
   const reason: DesktopCapabilityReason =
     state === 'versionMismatch'
       ? 'versionMismatch'
-      : state === 'recoveryRequired' || state === 'authInvalid'
+      : state === 'claimRequired' || state === 'recoveryRequired' || state === 'authInvalid'
         ? state === 'authInvalid'
           ? 'writerRevoked'
           : 'recoveryRequired'

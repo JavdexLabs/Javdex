@@ -1,4 +1,5 @@
 import type { ImageThumbnailSize } from '@shared/imageVariants'
+import { expectedVideoVersion } from '@shared/protocol/versions'
 import { useCallback, useMemo, useState } from 'react'
 import { useImagePreviewById } from '../hooks/useImagePreviewById'
 import type { VideoAsset } from '@shared/videoTypes'
@@ -85,11 +86,13 @@ function toPreviewItems(samples: VideoAsset[]): ImagePreviewItem[] {
 
 export default function VideoSampleGallery({
   videoId,
+  version,
   assets,
   posterPath,
   onChanged
 }: {
   videoId: number
+  version?: { generation?: number; revision?: number }
   assets: VideoAsset[]
   posterPath: string | null
   onChanged: () => void
@@ -122,16 +125,16 @@ export default function VideoSampleGallery({
   const [deleting, setDeleting] = useState(false)
 
   const changePoster = useCallback(
-    async (nextPosterPath: string | null) => {
+    async (nextPosterPath: string | null, assetId?: number) => {
       try {
-        await api.videos.setPoster(videoId, nextPosterPath)
+        await api.videos.setPoster(videoId, nextPosterPath, assetId, expectedVideoVersion(version ?? {}))
         toast.show(nextPosterPath ? '已设为背景' : '已清除背景', 'success')
         onChanged()
       } catch (e) {
         toast.show(String((e as Error).message), 'error')
       }
     },
-    [onChanged, toast, videoId]
+    [onChanged, toast, videoId, version]
   )
 
   const updateMeasuredRatio = useCallback((assetId: number, img: HTMLImageElement) => {
@@ -168,7 +171,7 @@ export default function VideoSampleGallery({
     if (!deleteTarget || deleting) return
     setDeleting(true)
     try {
-      await api.videos.deleteSample(videoId, deleteTarget.id)
+      await api.videos.deleteSample(videoId, deleteTarget.id, expectedVideoVersion(version ?? {}))
       setDeleteTarget(null)
       closePreviewIf(deleteTarget.id)
       toast.show('样张已删除', 'success')

@@ -40,6 +40,7 @@ export interface StoredPlayGrant {
 export interface InspectedPlayStream {
   grant: StoredPlayGrant
   file: string
+  fileName: string
   mime: string
   stat: { dev: number; ino: number; size: number; mtimeMs: number }
 }
@@ -165,7 +166,8 @@ export function grantCatalogPlayback(
   }
   writeCatalogSetting(grantKey(grantId), stored, database)
   writeCatalogSetting(tokenKey(stored.tokenDigest), grantId, database)
-  const pathAndQuery = `/play/v1/${grantId}?t=${encodeURIComponent(token)}`
+  const fileName = path.basename(resource.locator)
+  const pathAndQuery = `/play/v1/${grantId}/${encodeURIComponent(fileName)}?t=${encodeURIComponent(token)}`
   const origin = options.publicOrigin?.replace(/\/+$/, '') ?? ''
   return {
     grantId,
@@ -189,8 +191,9 @@ function inspectLocalResourceFile(resource: VideoResource): {
   if (resource.kind !== 'local' || resource.root_id == null) {
     throw structuredError('INVALID_INPUT', '此资源不支持原文件播放')
   }
-  const mime = VIDEO_MIMES[path.extname(resource.locator).toLowerCase()]
-  if (!mime) throw structuredError('INVALID_INPUT', '此文件格式不支持原文件播放')
+  // Playback grants serve the original file to a desktop player. Browser-native
+  // playback keeps its own format policy in WebCatalog.media.
+  const mime = VIDEO_MIMES[path.extname(resource.locator).toLowerCase()] ?? 'application/octet-stream'
   try {
     const checked = createAuthorizedMediaLibraryRootFileInspector()(
       resource.library_id,
@@ -240,6 +243,7 @@ export function inspectPlayStream(
   return {
     grant,
     file: opened.file,
+    fileName: path.basename(resource.locator),
     mime: opened.mime,
     stat: {
       dev: opened.stat.dev,

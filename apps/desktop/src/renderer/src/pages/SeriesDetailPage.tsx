@@ -17,6 +17,7 @@ import type {
 } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
+import { expectedClassificationVersion } from '@shared/protocol/versions'
 import BackButton from '../components/BackButton'
 import ClassificationImageModal from '../components/ClassificationImageModal'
 import ClassificationDeleteModal from '../components/ClassificationDeleteModal'
@@ -89,7 +90,7 @@ export default function SeriesDetailPage(): JSX.Element {
   const scroll = useScrollContainerMemory(`series-detail:${hash}`)
   const save = async (input: SeriesUpdateInput): Promise<void> => {
     try {
-      await api.series.update(id, input)
+      await api.series.update(id, input, expectedClassificationVersion(detailQuery.data ?? {}))
       setEditing(false)
       await client.invalidateQueries({ queryKey: seriesKeys.all })
       void refetchSilent()
@@ -332,6 +333,7 @@ export default function SeriesDetailPage(): JSX.Element {
         {editingImage && (
           <ClassificationImageModal
             entity={{ kind: 'series', id }}
+            expectedVersions={expectedClassificationVersion(series)}
             entityLabel="系列"
             imagePath={series.imagePath}
             fallbackCoverPath={series.fallbackCoverPath}
@@ -344,7 +346,7 @@ export default function SeriesDetailPage(): JSX.Element {
             entityLabel="系列"
             entityName={series.mainName}
             loadImpact={() => api.series.deletePreview(id)}
-            remove={() => api.series.remove(id)}
+            remove={(impact) => api.series.remove(id, impact.planDigest, expectedClassificationVersion(series))}
             onCancel={() => setDeletingSeries(false)}
             onDeleted={deleted}
           />

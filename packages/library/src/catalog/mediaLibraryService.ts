@@ -124,6 +124,7 @@ export function createMediaLibraryService(
     patch: MediaLibraryRootPatch
   }): MediaLibraryRoot
   removeRoot(input: RemoveMediaLibraryRootInput): MediaLibraryRoot
+  previewRootRemoval(input: { libraryId: number; rootId: number }): ReturnType<typeof previewLibraryPathRemoval>
   cancelRootRemoval(input: CancelMediaLibraryRootRemovalInput): MediaLibraryRoot
   previewRootMigration(input: {
     sourceLibraryId: number
@@ -181,6 +182,9 @@ export function createMediaLibraryService(
           expectedRevision: input.expectedRevision
         })
       })
+    },
+    previewRootRemoval(input) {
+      return dependencies.previewRootRemoval(input)
     },
     cancelRootRemoval(input) {
       return dependencies.runResourceMaintenance(() =>

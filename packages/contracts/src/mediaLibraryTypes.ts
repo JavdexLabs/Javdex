@@ -211,6 +211,8 @@ export interface MediaLibraryAutomaticScanState {
 }
 
 export interface CreateMediaLibraryInput {
+  /** Remote creation uses authorized mount selections, never desktop paths. */
+  remoteRoots?: { mountSelectionId: string; relativePath?: string }[]
   name: string
   icon?: MediaLibraryIcon
   color?: MediaLibraryColor

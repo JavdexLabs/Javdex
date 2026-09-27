@@ -232,10 +232,27 @@ function createDependencies(calls: string[]): MediaLibraryHandlerTestDependencie
 describe('media-library IPC schemas', () => {
   it('accepts a remote mount name and rejects mixed host-path authority', () => {
     const schema = mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_ROOT_ADD]
-    const input = { libraryId: 1, expectedRevision: 3, root: { mountSelectionId: 'library', state: 'active' } }
+    const input = { libraryId: 1, expectedRevision: 3, root: { mountSelectionId: 'library', relativePath: 'Films/Sub', state: 'active' } }
     assert.deepEqual(schema.parse([input]), [input])
     for (const root of [{ mountSelectionId: '' }, { mountSelectionId: 'library', path: '/private/media' }]) {
       assert.equal(schema.safeParse([{ ...input, root }]).success, false)
+    }
+    assert.equal(mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_MOUNT_BROWSE].safeParse([
+      { mountSelectionId: 'library', relativePath: 'Films/Sub' }
+    ]).success, true)
+    assert.equal(mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_MOUNT_BROWSE].safeParse([
+      { path: '/private/media' }
+    ]).success, false)
+  })
+
+  it('accepts remote wizard roots including an empty library and rejects unsafe selections', () => {
+    const schema = mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_CREATE]
+    for (const remoteRoots of [[], [{ mountSelectionId: 'media', relativePath: '中文 子目录' }]]) {
+      const input = { name: '远程媒体库', config: DEFAULT_MEDIA_LIBRARY_CONFIG, remoteRoots }
+      assert.deepEqual(schema.parse([input]), [input])
+    }
+    for (const root of [{ mountSelectionId: '' }, { mountSelectionId: 'media', path: '/private' }]) {
+      assert.equal(schema.safeParse([{ name: 'Invalid', remoteRoots: [root] }]).success, false)
     }
   })
 

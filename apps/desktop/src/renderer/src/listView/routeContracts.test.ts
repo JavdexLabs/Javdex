@@ -784,6 +784,12 @@ describe('settings route contract', () => {
     assert.equal(settingsPath('network'), '/settings/network/web')
     assert.equal(settingsPath('network', 'web'), '/settings/network/web')
     assert.equal(resolveSettingsRoute('/settings/network/web').tab, 'web')
+    assert.equal(settingsPath('storage'), '/settings/storage/mode')
+    assert.equal(settingsPath('network', 'mode'), '/settings/storage/mode')
+    assert.deepEqual(resolveSettingsRoute('/settings/network/mode'), {
+      group: SETTINGS_GROUPS.find((group) => group.id === 'storage'),
+      tab: 'mode'
+    })
     assert.deepEqual(SETTINGS_GROUPS.slice(0, 2).map((group) => group.id), [
       'overview',
       'library'
@@ -808,7 +814,6 @@ describe('settings route contract', () => {
         hint: `${WEB_ACCESS_LABEL}与代理`,
         defaultTab: 'web',
         tabs: [
-          { id: 'mode', label: '资料库连接' },
           { id: 'web', label: WEB_ACCESS_LABEL },
           { id: 'proxy', label: '代理' }
         ]

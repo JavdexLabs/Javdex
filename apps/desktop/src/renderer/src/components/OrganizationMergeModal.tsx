@@ -5,6 +5,7 @@ import type {
   OrganizationMergeResult,
 } from '@shared/classificationTypes'
 import { api } from '../api'
+import { expectedClassificationVersion } from '@shared/protocol/versions'
 import { organizationKeys } from '../query/queryKeys'
 import ClassificationMergeModal from './ClassificationMergeModal'
 import {
@@ -41,7 +42,7 @@ export default function OrganizationMergeModal({
       target={target}
       queryKey={organizationKeys.mergeOptions}
       listCandidates={(search) => api.organizations.mergeOptions(search)}
-      merge={(input) => api.organizations.merge(input)}
+      merge={(input) => api.organizations.merge(input, expectedClassificationVersion(target))}
       renderIcon={() => <Building2 {...UI_ICON_SM} aria-hidden />}
       targetMeta={organizationMeta}
       sourceMeta={organizationMeta}

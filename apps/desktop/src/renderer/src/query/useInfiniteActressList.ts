@@ -35,8 +35,8 @@ export function useInfiniteActressList(
   onError: (error: unknown) => void
 ): InfiniteActressListResult {
   const result = useWindowedCatalog<ActressCard, ActressCardPage>(
-    actressKeys.list(query, queryHash), 240,
-    async offset => toActressCardPage(await api.actresses.listPage({ ...query, limit: 240, offset }))
+    actressKeys.list(query, queryHash), 200,
+    async offset => toActressCardPage(await api.actresses.listPage({ ...query, limit: 200, offset }))
   )
   useEffect(() => { if (result.error) onError(result.error) }, [result.error, onError])
   return { ...result, statusCounts: result.page?.statusCounts ?? EMPTY_STATUS_COUNTS,

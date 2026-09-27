@@ -51,9 +51,10 @@ import {
 } from '@library/scan/libraryPathCleanupService'
 import {
   initializeJavdexRootMarker,
+  removeNewJavdexRootMarker,
   markJavdexRootInitialized
 } from '@library/scan/javdexRootMarker'
-import { resolveMountSelectionPath } from '@library/scan/mountSelection'
+import { browseMediaMount, resolveMountSelectionPath } from '@library/scan/mountSelection'
 import {
   commit,
   requireLibraryRevision,
@@ -290,28 +291,39 @@ function assertLibraryConfigVersions(
 }
 
 export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
+  'libraries.browseMount'(args) {
+    return browseMediaMount(args.envelope.input as { mountSelectionId?: string; relativePath?: string; search?: string })
+  },
   'libraries.addRoot'(args) {
     const input = args.envelope.input as {
       libraryId: number
-      root: { mountSelectionId: string; position?: number; state?: 'active' | 'pending_removal' | 'disabled' }
+      root: { mountSelectionId: string; relativePath?: string; position?: number; state?: 'active' | 'pending_removal' | 'disabled' }
     }
     const mutation = requireMutation(args.envelope)
     requireRootGeneration(mutation.expectedVersions, mutation.operationId)
     return commit(args, () =>
       runMaintenance(() => {
-        const mountPath = resolveMountSelectionPath(input.root.mountSelectionId)
-        initializeJavdexRootMarker(mountPath)
-        const root = mediaLibraries.addRoot({
-          libraryId: input.libraryId,
-          expectedRevision: requireLibraryRevision(mutation.expectedVersions, 'L', mutation.operationId),
-          root: {
-            path: mountPath,
-            position: input.root.position,
-            state: input.root.state
+        const mountPath = resolveMountSelectionPath(input.root.mountSelectionId, input.root.relativePath)
+        const expectedRevision = requireLibraryRevision(mutation.expectedVersions, 'L', mutation.operationId)
+        const markerCreated = initializeJavdexRootMarker(mountPath)
+        try {
+          const root = mediaLibraries.addRoot({
+            libraryId: input.libraryId,
+            expectedRevision,
+            root: {
+              path: mountPath,
+              position: input.root.position,
+              state: input.root.state
+            }
+          })
+          markJavdexRootInitialized(input.libraryId, root.id)
+          return root
+        } catch (error) {
+          if (markerCreated) {
+            try { removeNewJavdexRootMarker(mountPath) } catch { /* Keep the original failure. */ }
           }
-        })
-        markJavdexRootInitialized(input.libraryId, root.id)
-        return root
+          throw error
+        }
       })
     )
   },
@@ -378,6 +390,10 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
         })
       })
     )
+  },
+  'libraries.removeRootPreview'(args) {
+    const input = args.envelope.input as { libraryId: number; rootId: number }
+    return runMaintenance(() => previewLibraryPathRemoval(input))
   },
   'libraries.cancelRootRemoval'(args) {
     const input = args.envelope.input as { libraryId: number; rootId: number }
@@ -500,11 +516,6 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
   },
   'nfo.plan'(args) {
     const input = args.envelope.input as NfoExportPlanRequest
-    const mutation = requireMutation(args.envelope)
-    requireRootGeneration(mutation.expectedVersions, mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'C', mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'V', mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'R', mutation.operationId)
     return commit(args, () => {
       const preview = planCatalogNfoExport(input)
       return { ...preview, planDigest: peekCatalogNfoPlanDigest(preview.planId) }
@@ -520,10 +531,6 @@ export const maintenanceHandlers: Partial<Record<ManageOperationId, CatalogHandl
   'nfo.start'(args) {
     const input = args.envelope.input as { planId: string; planDigest: string }
     const mutation = requireMutation(args.envelope)
-    requireRootGeneration(mutation.expectedVersions, mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'C', mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'V', mutation.operationId)
-    requireVersionField(mutation.expectedVersions, 'R', mutation.operationId)
     const accepted = acceptTask(args, () =>
       enqueueCatalogNfoExport(input.planId, input.planDigest, mutation.operationId)
     ) as { receipt: unknown; taskId: string; outcome?: string }

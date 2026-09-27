@@ -1,11 +1,12 @@
 import { IPC } from '@shared/ipc-channels'
 import type { CatalogBackend } from '../application/catalogBackend'
-import { ipcMutation } from '../application/mutationContext'
+import { ipcActressMutation, ipcMutation } from '../application/mutationContext'
 import { structuredError } from '@shared/protocol/errors'
 import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
 import type { ActressFaceScanManifestItem } from '@shared/actressTypes'
 import { registerActressHandler } from './actressContractAdapter'
 import { collectCatalogActressAvatarCropTargets } from '../application/catalogActressAvatarCropSnapshot'
+import { uploadCatalogImageBase64, uploadCatalogImageSource } from '../application/remoteCatalogImage'
 
 export interface ActressHandlerDesktopQueries {
   listAvatarCropTargets(): ActressAvatarAutoCropTarget[]
@@ -79,26 +80,51 @@ export function registerActressHandlers(
   registerActressHandler(IPC.ACTRESS_AVATAR_SOURCE_INFO, (id) =>
     backend.actresses.avatarSourceInfo({ actressId: id })
   )
-  registerActressHandler(IPC.ACTRESS_EDIT, (id, input) =>
-    backend.actresses.edit({ actressId: id, fields: input }, ipcMutation())
-  )
+  registerActressHandler(IPC.ACTRESS_EDIT, async (id, input, expectedVersions) => {
+    if (backend.mode !== 'remote') {
+      return backend.actresses.edit({ actressId: id, fields: input }, await ipcActressMutation(backend, id, expectedVersions))
+    }
+    const {
+      avatar,
+      avatarSourcePath: _avatarSourcePath,
+      avatarImageBase64: _avatarImageBase64,
+      clearAvatar: _clearAvatar,
+      ...fields
+    } = input
+    const remoteAvatar = avatar
+      ? await uploadCatalogImageBase64(backend, 'actressAvatar', avatar.displayImageBase64)
+      : _clearAvatar
+        ? { kind: 'clear' as const }
+        : undefined
+    return backend.actresses.edit({
+      actressId: id,
+      fields: { ...fields, ...(remoteAvatar ? { avatar: remoteAvatar } : {}) }
+    }, await ipcActressMutation(backend, id, expectedVersions))
+  })
   registerActressHandler(IPC.ACTRESS_DELETE_PREVIEW, (ids) =>
     backend.actresses.deletePreview({ ids })
   )
-  registerActressHandler(IPC.ACTRESS_DELETE, (request) =>
-    backend.actresses.deleteBatch(request, ipcMutation())
-  )
+  registerActressHandler(IPC.ACTRESS_DELETE, async (request) => {
+    // The legacy IPC request is a one-or-many shape.  Keep the batch path for
+    // compatibility, but provide the aggregate version when the server can
+    // enforce it for the single-actress operation.
+    if (request.ids.length === 1) {
+      const mutation = await ipcActressMutation(backend, request.ids[0])
+      return backend.actresses.delete({ actressId: request.ids[0], mode: request.mode }, mutation)
+    }
+    return backend.actresses.deleteBatch(request, ipcMutation())
+  })
   registerActressHandler(IPC.ACTRESS_DELETE_BATCH, (request) =>
     backend.actresses.deleteBatch(request, ipcMutation())
   )
-  registerActressHandler(IPC.ACTRESS_CLEAR_META, (id) =>
-    backend.actresses.clearMeta({ actressId: id }, ipcMutation())
+  registerActressHandler(IPC.ACTRESS_CLEAR_META, async (id, expectedVersions) =>
+    backend.actresses.clearMeta({ actressId: id }, await ipcActressMutation(backend, id, expectedVersions))
   )
-  registerActressHandler(IPC.ACTRESS_MERGE, (input) =>
-    backend.actresses.merge(input, ipcMutation())
+  registerActressHandler(IPC.ACTRESS_MERGE, async (input, expectedVersions) =>
+    backend.actresses.merge(input, await ipcActressMutation(backend, input.keepId, expectedVersions))
   )
-  registerActressHandler(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, (id) =>
-    backend.actresses.markScrapeSuccess({ actressId: id }, ipcMutation())
+  registerActressHandler(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, async (id, expectedVersions) =>
+    backend.actresses.markScrapeSuccess({ actressId: id }, await ipcActressMutation(backend, id, expectedVersions))
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_LIST, () =>
     backend.actresses.conflictList({})
@@ -128,21 +154,39 @@ export function registerActressHandlers(
     backend.actresses.resolveConflict(input, ipcMutation())
   )
   registerActressHandler(IPC.ACTRESS_GALLERY_IMPORT, async (id, input) => {
-    const result = await backend.actresses.importGallery({ actressId: id, ...input }, ipcMutation())
-    if (!('id' in result)) throw structuredError('INVALID_INPUT', '本机图库导入未返回媒体资源')
+    const normalized = backend.mode === 'remote'
+      ? {
+          actressId: id,
+          images: [await uploadCatalogImageSource(backend, 'actressGallery', input)]
+        }
+      : { actressId: id, ...input }
+    const result = await backend.actresses.importGallery(
+      normalized as never,
+      await ipcActressMutation(backend, id)
+    )
+    if (backend.mode === 'local' && !('id' in result)) {
+      throw structuredError('INVALID_INPUT', '本机图库导入未返回媒体资源')
+    }
     return result
   })
-  registerActressHandler(IPC.ACTRESS_GALLERY_DELETE, (id, assetId) =>
-    backend.actresses.deleteGallery({ actressId: id, assetId }, ipcMutation())
-  )
-  registerActressHandler(IPC.ACTRESS_POSTER_SET, (id, posterPath) =>
-    backend.actresses.setPoster(
-      {
-        actressId: id,
-        image: posterPath == null ? { kind: 'clear' } : { kind: 'asset', assetId: 1 },
-        posterPath
-      },
-      ipcMutation()
+  registerActressHandler(IPC.ACTRESS_GALLERY_DELETE, async (id, assetId, expectedVersions) =>
+    backend.actresses.deleteGallery(
+      { actressId: id, assetId },
+      await ipcActressMutation(backend, id, expectedVersions)
     )
   )
+  registerActressHandler(IPC.ACTRESS_POSTER_SET, async (id, posterPath, assetId, expectedVersions) => {
+    if (backend.mode === 'remote' && posterPath !== null && !assetId) {
+      throw structuredError('INVALID_INPUT', '写真缺少媒体资源 ID，请刷新后重试')
+    }
+    return backend.actresses.setPoster(
+      {
+        actressId: id,
+        image: posterPath == null ? { kind: 'clear' } : { kind: 'asset', assetId: assetId! },
+        ...(backend.mode === 'remote' ? { slot: 'galleryPoster' as const } : {}),
+        ...(backend.mode === 'local' ? { posterPath } : {})
+      },
+      await ipcActressMutation(backend, id, expectedVersions)
+    )
+  })
 }

@@ -1,3 +1,4 @@
+import { registerBackupHandlers } from './backupHandlers'
 import { BrowserWindow } from 'electron'
 import { registerAssetHandlers } from './assetHandlers'
 import { registerActressHandlers, type ActressHandlerDesktopQueries } from './actressHandlers'
@@ -44,6 +45,7 @@ export function registerIpcHandlers(
   configureIpcSecurity({ getWindow, isTrustedUrl })
 
   registerDesktopSessionHandlers(ctx, { backend: options.backend, settings: options.settings })
+  registerBackupHandlers(ctx, options.backend)
   registerSettingsHandlers(ctx, options.backend)
   registerNfoExportHandlers(ctx, options.backend)
   registerMediaLibraryHandlers(options.backend, options.mediaLibraryDesktop)

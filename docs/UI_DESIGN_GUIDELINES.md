@@ -52,6 +52,16 @@
 - Empty/loading states: concise, centered, and task-oriented; no decorative hero treatment.
 - Empty height: `fill` inside fixed-height panes; `compact` (~140px via `--empty-inline-min-h`) inside scrolling detail sections such as samples/gallery.
 
+### Async feedback and layout stability
+
+- 设置页的测试、检测、保存、刷新和轮询必须保持布局稳定：在相同窗口与内容结构下，按钮宽度、输入框宽度、卡片高度及后续内容位置不能因空闲、忙碌、成功或失败反复变化。
+- 帮助、进度摘要和结果优先在同一个紧凑反馈行原位替换。不得先删除上次结果，再重新插入；刷新时保留已加载内容，直到新结果可用。保留旧结果时必须标明正在更新，不能将旧成功误报为本次成功。
+- 不为可能出现的错误预留大块空白。普通操作反馈最多预留一行控件高度；长错误、身份信息和技术细节放入可键盘访问的详情弹窗或用户主动展开的区域，不能仅依赖 hover/title，也不能只截断而不提供完整内容。
+- 按钮可保持文案不变并提供忙碌状态；必须切换文案时，使用 `SettingsActionLabel` 按最长状态文案占位，图标槽尺寸固定。隐藏占位内容不可产生重复可访问名称，不可进入 Tab 顺序。
+- 保存错误复用保存栏的状态位置；取消操作与详情入口在状态变化时保持控件布局。用禁用、aria-busy 和可见状态说明表达忙碌，禁止通过整个表单卸载/重建表达刷新。
+- 初次加载到真实内容、首次生成任务/预览、改变运行模式，以及用户主动展开详情属于有意义的结构变化，可以改变高度；不能为阻止这些变化而固定整个页面高度。任务阶段内的数值、计时和状态更新应稳定，必要时使用等宽数字与限高滚动。
+- 验收覆盖 1440×900 与 1000×640、长中文错误与路径、空闲→忙碌→成功/失败→再次执行，比较按钮与卡片边界、后续内容位置、滚动位置及键盘焦点；同时检查浅色/深色主题和减少动态效果偏好。
+
 ## Reference Basis
 
 - Fluent 2: semantic alias tokens and theme flexibility.

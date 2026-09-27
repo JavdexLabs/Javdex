@@ -14,6 +14,7 @@ test('HTTP wire envelopes normalize to catalog values and local paths never cros
       protocolVersion: 1, appVersion: '0.7.0', schemaVersion: 19,
       identity: { serverId: 'server', catalogId: 'catalog' }, writerEpoch: 1, ready: 'ready'
     },
+    'catalog.storageInfo': { imagesDir: '/srv/javdex/images' },
     'videos.edit': { receipt, ok: false, versions },
     'videos.setPoster': { receipt, posterPath: null, versions },
     'directors.create': { receipt, id: 7 },
@@ -46,6 +47,7 @@ test('HTTP wire envelopes normalize to catalog values and local paths never cros
     assert.deepEqual(await raw.post('videos.edit', {}), replies['videos.edit'])
     const context = { operationId: 'operation', expectedVersions: {} }
     assert.equal(await backend.videos.edit({ videoId: 1, fields: { title: 'title' } }, context), false)
+    assert.equal(backend.session().remoteImagesDir, '/srv/javdex/images')
     assert.equal(await backend.videos.setPoster({ videoId: 1, image: { kind: 'clear' } }, context), true)
     assert.equal(await backend.classifications.createDirector({ mainName: 'Director' }, context), 7)
     assert.equal(await backend.playlists.create({ name: 'List' }, context), 9)
@@ -74,6 +76,15 @@ test('preserves playlist query fields and maps library revisions without replaci
     res.end(JSON.stringify(operation === 'handshake.get' ? {
       protocolVersion: 1, appVersion: '0.7.1', schemaVersion: 19,
       identity: { serverId: 'server', catalogId: 'catalog' }, writerEpoch: 1, ready: 'ready'
+    } : operation === 'actresses.listPage' ? {
+      items: [], total: 0, limit: 200, offset: 0,
+      statusCounts: { all: 0, success: 0, unscraped: 0, failed: 0 }
+    } : operation === 'directors.page' || operation === 'series.page' ? {
+      items: [], total: 0, limit: 60, offset: 0
+    } : operation === 'libraries.browseMount' ? {
+      mounts: [{ id: 'media', path: '/media' }],
+      current: { mountSelectionId: 'media', relativePath: 'Films', path: '/media/Films' },
+      directories: [], truncated: false
     } : operation === 'playlists.listPage' ? {
       items: [], total: 0, offset: 0, limit: 60, hasExactName: false
     } : operation.startsWith('playlists.') ? null : {}))
@@ -85,7 +96,17 @@ test('preserves playlist query fields and maps library revisions without replaci
       writeWriterSecret: async () => {}, deleteWriterSecret: async () => {} }
   })
   try {
-    const context = { operationId: 'operation', expectedVersions: {} }
+    const context = { operationId: '00000000-0000-4000-8000-000000000001', expectedVersions: {} }
+    const actressQuery = { search: '', gender: 'female' as const, sortBy: 'video_count' as const,
+      sortDir: 'desc' as const, limit: 200, offset: 0 }
+    assert.equal((await backend.actresses.listPage(actressQuery)).total, 0)
+    assert.deepEqual(requests.at(-1)?.body.input, actressQuery)
+    const classificationQuery = { search: '', sortBy: 'video_count' as const,
+      sortDir: 'desc' as const, limit: 60, offset: 0 }
+    assert.equal((await backend.classifications.pageDirectors(classificationQuery)).total, 0)
+    assert.deepEqual(requests.at(-1)?.body.input, classificationQuery)
+    assert.equal((await backend.classifications.pageSeries(classificationQuery)).total, 0)
+    assert.deepEqual(requests.at(-1)?.body.input, classificationQuery)
     for (const operation of ['get', 'metadata', 'getPage', 'videoPage'] as const) {
       const query = { playlistId: 9, sortBy: 'release_date' as const, sortDir: 'asc' as const }
       await backend.playlists[operation](query)
@@ -102,9 +123,44 @@ test('preserves playlist query fields and maps library revisions without replaci
     await backend.libraries.update({ libraryId: 1, expectedRevision: 4, patch: { name: 'Renamed' } }, context)
     assert.deepEqual(requests.at(-1)?.body.input, { libraryId: 1, name: 'Renamed' })
     assert.deepEqual(requests.at(-1)?.body.expectedVersions, { L: { generation: 1, revision: 4 } })
-    await backend.libraries.addRoot({ libraryId: 1, expectedRevision: 4, root: { mountSelectionId: 'media' } } as Parameters<typeof backend.libraries.addRoot>[0], context)
-    assert.deepEqual(requests.at(-1)?.body.input, { libraryId: 1, root: { mountSelectionId: 'media' } })
+    const browsed = await backend.libraries.browseMount({ mountSelectionId: 'media', relativePath: 'Films' })
+    assert.equal(browsed.current?.path, '/media/Films')
+    assert.deepEqual(requests.at(-1)?.body.input, { mountSelectionId: 'media', relativePath: 'Films' })
+    await backend.libraries.addRoot({ libraryId: 1, expectedRevision: 4, root: { mountSelectionId: 'media', relativePath: 'Films' } } as Parameters<typeof backend.libraries.addRoot>[0], context)
+    assert.deepEqual(requests.at(-1)?.body.input, { libraryId: 1, root: { mountSelectionId: 'media', relativePath: 'Films' } })
     assert.deepEqual(requests.at(-1)?.body.expectedVersions, { L: { generation: 1, revision: 4 }, G: { generation: 1, revision: 1 } })
+    await backend.libraries.removeRoot({
+      libraryId: 1,
+      rootId: 2,
+      expectedRevision: 4,
+      expectedImpactRevision: 'a'.repeat(64)
+    }, context)
+    assert.deepEqual(requests.at(-1)?.body.input, {
+      libraryId: 1,
+      rootId: 2,
+      planId: context.operationId,
+      planDigest: 'a'.repeat(64)
+    })
+    assert.deepEqual(requests.at(-1)?.body.expectedVersions, {
+      L: { generation: 1, revision: 4 },
+      G: { generation: 1, revision: 1 },
+      R: { generation: 1, revision: 1 }
+    })
+    await backend.libraries.delete({
+      libraryId: 1,
+      expectedRevision: 4,
+      expectedImpactRevision: 'b'.repeat(64)
+    }, context)
+    assert.deepEqual(requests.at(-1)?.body.input, {
+      libraryId: 1,
+      planId: context.operationId,
+      planDigest: 'b'.repeat(64)
+    })
+    assert.deepEqual(requests.at(-1)?.body.expectedVersions, {
+      L: { generation: 1, revision: 4 },
+      G: { generation: 1, revision: 1 },
+      R: { generation: 1, revision: 1 }
+    })
   } finally {
     await backend.dispose()
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))

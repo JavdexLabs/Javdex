@@ -22,6 +22,7 @@ import {
   type ActressFaceScanTarget
 } from './scanQueue'
 import { actressFaceScanManifestQueryOptions } from './manifestQueryOptions'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
 export interface ActressFaceScanState {
   progress: ActressFaceScanProgress
@@ -56,6 +57,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
     getActressFaceScanSessionRevision,
     getActressFaceScanSessionRevision
   )
+  const { session: desktopSession } = useDesktopSession()
   const session = getActressFaceScanSession()
   const cache = session.cache
   const manifestQuery = useQuery(
@@ -85,6 +87,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
   }, [])
 
   const start = useCallback(async (): Promise<ActressFaceScanSummary | null> => {
+    if (desktopSession.mode === 'remote') return null
     const currentSession = getActressFaceScanSession()
     if (currentSession.running) return null
     const runId = currentSession.runSequence + 1
@@ -169,7 +172,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
         updateActressFaceScanSession({ running: false, cancelRequested: false })
       }
     }
-  }, [cache, refetchManifest, setNeedsScan])
+  }, [cache, desktopSession.mode, refetchManifest, setNeedsScan])
 
   const cancel = useCallback((): void => {
     if (!getActressFaceScanSession().running) return

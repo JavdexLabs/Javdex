@@ -36,8 +36,8 @@ Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{styl
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let Component: typeof import('./ActressGalleryPanel').default
 let Provider: typeof import('./ImagePreviewOverlayContext').ImagePreviewOverlayProvider
-let revision = {}
-function tree() { return <Provider><Component key={1} actressId={1} revision={revision} posterPath={null} onChanged={()=>{ revision={}; renderer?.update(tree()) }} /></Provider> }
+let revision = {generation:1,revision:1}
+function tree() { return <Provider><Component key={1} actressId={1} revision={revision} posterPath={null} onChanged={()=>{ revision={...revision,revision:revision.revision+1}; renderer?.update(tree()) }} /></Provider> }
 async function mount(t: TestContext) {
   Component=(await import('./ActressGalleryPanel')).default
   Provider=(await import('./ImagePreviewOverlayContext')).ImagePreviewOverlayProvider
@@ -49,7 +49,7 @@ async function mount(t: TestContext) {
 function preview() { return renderer!.root.findAllByType('div').find(n=>n.props['data-lightbox'])?.props['data-lightbox'] as ImagePreviewLightboxProps | undefined }
 const tiles=()=>renderer!.root.findAllByType('button').filter(n=>/^写真 \d+$/.test(n.props['aria-label']??''))
 async function click(label:string) { await act(async()=>{const n=renderer!.root.findAllByType('button').find(n=>n.props['aria-label']===label || n.children.join('')===label)!;assert.ok(n,label);assert.ok(!n.props.disabled);n.props.onClick({stopPropagation(){},preventDefault(){},currentTarget:{blur(){}}})}) }
-afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;calls.length=0;entries=Array.from({length:125},(_,n)=>n+1);hold=null;fail=false;historyCount=0;revision={}})
+afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;calls.length=0;entries=Array.from({length:125},(_,n)=>n+1);hold=null;fail=false;historyCount=0;revision={generation:1,revision:1}})
 
 it('bounds grid and preview windows, crosses both page edges and preserves one history entry', async t=>{
   await mount(t)
@@ -90,12 +90,12 @@ it('retains the current photo on page failure, retries, and discards a response 
 it('refreshes by stable ID after reorder and closes a removed preview without selecting its replacement',async t=>{
   await mount(t);await click('写真 60')
   entries=[60,...entries.filter(id=>id!==60)]
-  revision={};await act(async()=>renderer!.update(tree()))
+  revision={...revision,revision:revision.revision+1};await act(async()=>renderer!.update(tree()))
   assert.equal(preview()!.items[preview()!.index].id,60)
   assert.equal(preview()!.index,0)
   assert.ok(calls.some(q=>q.anchorId===60))
   entries=entries.filter(id=>id!==60)
-  revision={};await act(async()=>renderer!.update(tree()))
+  revision={...revision,revision:revision.revision+1};await act(async()=>renderer!.update(tree()))
   assert.equal(preview(),undefined)
 })
 

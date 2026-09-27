@@ -1,3 +1,5 @@
+import SettingsFeedback from './SettingsFeedback'
+import SettingsActionLabel from './SettingsActionLabel'
 import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, RefreshCw } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -48,7 +50,11 @@ export default function AppUpdatePanel(): JSX.Element {
     void api.appUpdate.getState().then((next) => {
       if (active) setState(next)
     }).catch((reason) => { if (active) setError((reason as Error).message) })
-    const unsubscribe = api.appUpdate.onStateChanged((next) => setState(next))
+    const unsubscribe = api.appUpdate.onStateChanged((next) => setState((current) =>
+      next.status === 'checking' && current?.latestRelease
+        ? { ...next, latestRelease: current.latestRelease }
+        : next
+    ))
     return () => {
       active = false
       unsubscribe()
@@ -56,7 +62,7 @@ export default function AppUpdatePanel(): JSX.Element {
   }, [])
 
   const checking = busy || state?.status === 'checking'
-  const available = state?.status === 'available'
+  const available = state?.status === 'available' || (state?.status === 'checking' && Boolean(state.latestRelease))
   const ignored = Boolean(
     available && state?.latestRelease?.version === state?.ignoredVersion
   )
@@ -86,11 +92,11 @@ export default function AppUpdatePanel(): JSX.Element {
       <div className="settings-overview-panel-head app-update-panel-head">
         <div>
           <h3 id="app-update-title">版本更新</h3>
-          <p role={error ? 'alert' : 'status'}>{error || statusText}</p>
+          <SettingsFeedback message={error || statusText} error={Boolean(error)} detail={error} />
         </div>
         <Button type="button" size="sm" disabled={checking} onClick={() => void runCheck()}>
           <RefreshCw {...UI_ICON_SM} className={checking ? 'is-spinning' : undefined} aria-hidden />
-          {checking ? '检查中' : '检查更新'}
+          <SettingsActionLabel reserve="检查更新">{checking ? '检查中' : '检查更新'}</SettingsActionLabel>
         </Button>
       </div>
 

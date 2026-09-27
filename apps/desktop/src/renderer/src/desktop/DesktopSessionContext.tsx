@@ -59,12 +59,16 @@ export function DesktopSessionProvider({ children }: { children: ReactNode }): J
   const identityRef = useRef({ catalogId: ASSUMED_LOCAL_SESSION.catalogId, generation: ASSUMED_LOCAL_SESSION.generation })
 
   const applySnapshot = useCallback((snapshot: DesktopSessionSnapshot) => {
+    if (!sessionAllowsCatalogReads(snapshot.session)) void queryClient.cancelQueries()
     const previous = identityRef.current
     if (
       previous.catalogId !== snapshot.session.catalogId ||
       previous.generation !== snapshot.session.generation
     ) {
-      queryClient.clear()
+      // Keep mounted observers attached while clearing data from the previous catalog.
+      // clear() removes their queries, leaving an in-flight startup page loading forever.
+      void queryClient.resetQueries()
+      queryClient.getMutationCache().clear()
     }
     identityRef.current = {
       catalogId: snapshot.session.catalogId,
@@ -78,10 +82,11 @@ export function DesktopSessionProvider({ children }: { children: ReactNode }): J
     const desktop = window.api?.desktop
     if (!desktop?.getSession) return
     let cancelled = false
+    let receivedEvent = false
     void desktop.getSession().then((snapshot) => {
-      if (!cancelled) applySnapshot(snapshot)
+      if (!cancelled && !receivedEvent) applySnapshot(snapshot)
     })
-    const unsubscribe = desktop.onSessionChanged?.(applySnapshot)
+    const unsubscribe = desktop.onSessionChanged?.(snapshot => { receivedEvent = true; applySnapshot(snapshot) })
     return () => {
       cancelled = true
       unsubscribe?.()

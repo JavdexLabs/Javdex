@@ -8,6 +8,7 @@ import {
 import type { ActressGender, ActressMergeCandidate, ActressMergeMainNameFrom } from '@shared/actressTypes'
 import type { ActressMetadata } from '@shared/actressTypes'
 import { api, assetUrl } from '../api'
+import { expectedActressVersion } from '@shared/protocol/versions'
 import { useDebounce } from '../hooks/useDebounce'
 import ActressName from './ActressName'
 import ActressAvatar from './ActressAvatar'
@@ -126,7 +127,7 @@ function MergeActressSession({
         keepId: keepActress.id,
         mergeId: selected.id,
         mainNameFrom
-      })
+      }, expectedActressVersion(keepActress))
       if (mounted.current) onMerged()
     } catch (e) {
       if (mounted.current) setError(String((e as Error).message ?? e))

@@ -1216,6 +1216,7 @@ export default function DetailPage(): JSX.Element {
 
       <VideoSampleGallery
         videoId={video.id}
+        version={video}
         assets={video.assets}
         posterPath={video.poster_path}
         onChanged={() => {

@@ -18,6 +18,14 @@ export interface PlaylistImportWriteInput {
 
 export const playlistApplyImportResultSchema = z.object({
   playlistId: z.number(), added: z.number(), relatedLinksAdded: z.number(),
+  entries: z.array(z.object({
+    videoId: z.number(),
+    created: z.boolean(),
+    membershipAdded: z.boolean(),
+    addedToPlaylist: z.boolean(),
+    alreadyInPlaylist: z.boolean(),
+    relatedLinksAdded: z.number()
+  }).strict()).optional(),
   versions: z.object({
     P: aggregateVersionSchema,
     L: aggregateVersionSchema.extend({ generation: z.literal(1) }),

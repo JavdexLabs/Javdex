@@ -1,6 +1,7 @@
 import { Layers3 } from 'lucide-react'
 import type { SeriesDetail, SeriesMergeResult, SeriesOption } from '@shared/classificationTypes'
 import { api } from '../api'
+import { expectedClassificationVersion } from '@shared/protocol/versions'
 import { seriesKeys } from '../query/queryKeys'
 import ClassificationMergeModal from './ClassificationMergeModal'
 import { UI_ICON_SM } from './iconDefaults'
@@ -26,7 +27,7 @@ export default function SeriesMergeModal({ target, onCancel, onMerged }: Props):
       target={target}
       queryKey={seriesKeys.options}
       listCandidates={(search) => api.series.options(search)}
-      merge={(input) => api.series.merge(input)}
+      merge={(input) => api.series.merge(input, expectedClassificationVersion(target))}
       renderIcon={() => <Layers3 {...UI_ICON_SM} aria-hidden />}
       targetMeta={(series) =>
         `档案 #${series.id} · ${series.videoCount} 部影片 · ${ownerName(series)}`

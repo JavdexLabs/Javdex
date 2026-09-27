@@ -1,3 +1,4 @@
+import SettingsActionLabel from './SettingsActionLabel'
 import { useMemo, useRef, useState } from 'react'
 import {
   ACTRESS_SCRAPE_FIELD_OPTIONS,
@@ -125,7 +126,7 @@ export default function CompositeConfigModal({
             取消
           </Button>
           <Button variant="primary" disabled={!canSave} onClick={save}>
-            {saving ? '保存中…' : plugin ? '保存更改' : '创建组合'}
+            <SettingsActionLabel reserve="保存更改">{saving ? '保存中…' : plugin ? '保存更改' : '创建组合'}</SettingsActionLabel>
           </Button>
         </>
       }

@@ -23,7 +23,7 @@ afterEach(() => {
 })
 
 describe('this-computer settings store', () => {
-  it('defaults to local mode and persists a remote URL only for remote mode', async () => {
+  it('defaults to local mode and remembers the remote URL when switching back to local', async () => {
     const store = createThisComputerSettingsStore(thisComputerSettingsPath(tempDir()))
     const defaults = await store.read()
     assert.equal(defaults.mode, 'local')
@@ -38,7 +38,8 @@ describe('this-computer settings store', () => {
     assert.equal(remote.remoteBaseUrl, 'https://library.example:8443')
     const local = await store.write({ mode: 'local' })
     assert.equal(local.mode, 'local')
-    assert.equal(local.remoteBaseUrl, null)
+    assert.equal(local.remoteBaseUrl, 'https://library.example:8443')
+    assert.equal((await store.write({ remoteBaseUrl: null })).remoteBaseUrl, null)
   })
 })
 

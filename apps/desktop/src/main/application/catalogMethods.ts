@@ -2,6 +2,7 @@ import type { CatalogBackend } from './catalogBackend'
 
 /** Exhaustive method inventory shared by unavailable backends. */
 export const CATALOG_METHODS = {
+  backup: { request: true, upload: true, download: true },
   queries: {
     homeLoad: true,
     homeSearch: true,
@@ -136,12 +137,14 @@ export const CATALOG_METHODS = {
   libraries: {
     list: true,
     get: true,
+    browseMount: true,
     create: true,
     update: true,
     updateConfig: true,
     addRoot: true,
     updateRoot: true,
     removeRoot: true,
+    previewRootRemoval: true,
     cancelRootRemoval: true,
     archive: true,
     restore: true,
@@ -234,7 +237,7 @@ export const CATALOG_METHODS = {
 }
 
 export type CatalogMethodSlice = Exclude<keyof CatalogBackend,
-  'mode' | 'identity' | 'generation' | 'capabilities' | 'session' | 'reconnect' | 'claimWriter' | 'dispose'>
+  'mode' | 'identity' | 'generation' | 'capabilities' | 'session' | 'onSessionChanged' | 'reconnect' | 'claimWriter' | 'dispose'>
 
 export function rejectingCatalogSlice<S extends CatalogMethodSlice>(
   slice: S,

@@ -1,0 +1,14 @@
+.root {
+  display: inline-grid;
+  white-space: nowrap;
+}
+
+.root::after {
+  content: attr(data-reserve);
+  visibility: hidden;
+  grid-area: 1 / 1;
+}
+
+.text {
+  grid-area: 1 / 1;
+}

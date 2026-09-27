@@ -1243,10 +1243,11 @@ export class ScrapeBrowserHelperRuntime {
     if (!win.isVisible()) win.show()
     win.setTitle(pluginName ? `刮削登入 · ${pluginName}` : '刮削登入')
     win.focus()
-    await win.loadURL(parsed.toString()).catch(() => {
+    // A site may keep navigating after login. Confirmation must not wait for
+    // loadURL or page inspection to settle before the scraper can continue.
+    void win.loadURL(parsed.toString()).catch(() => {
       /* navigation errors are tolerated; the user can refresh from the window menu */
     })
-    await this.syncHelperBanner(win)
     try {
       while (true) {
         signal?.throwIfAborted()
@@ -1256,13 +1257,13 @@ export class ScrapeBrowserHelperRuntime {
         if (this.preLoginDone) break
         await this.sleep(250, signal)
       }
-      return this.pageStatus(win)
+      return { url: win.webContents.getURL(), title: win.webContents.getTitle() }
     } finally {
       this.preLoginMode = false
       this.preLoginDone = false
       this.preLoginPluginName = ''
       if (!win.isDestroyed()) {
-        await this.syncHelperBanner(win)
+        this.removeHelperBanner(win)
         win.setTitle('元数据刮削 · 浏览器')
       }
     }

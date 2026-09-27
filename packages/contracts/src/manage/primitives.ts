@@ -134,7 +134,8 @@ export const seriesAssignmentSchema = z.union([
 
 export const mountSelectionSchema = z
   .object({
-    mountSelectionId: z.string().min(1).max(200)
+    mountSelectionId: z.string().min(1).max(200),
+    relativePath: z.string().max(1024).optional()
   })
   .strict()
 

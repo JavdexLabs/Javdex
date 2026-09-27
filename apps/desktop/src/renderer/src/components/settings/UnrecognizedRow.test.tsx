@@ -54,7 +54,7 @@ it('defaults the import target to a new video so typing a code is enough to impo
     )
   })
   const importButton = () =>
-    renderer!.root.findAllByType('button').find((button) => button.children.includes('导入'))!
+    renderer!.root.findAllByType('button').find((button) => visibleText(button) === '导入')!
   assert.equal(importButton().props.disabled, true)
   act(() => {
     renderer!.root
@@ -87,7 +87,7 @@ it('renames with no manual code or target and refreshes the pending row after fa
     )
   })
   const action = () =>
-    renderer!.root.findAllByType('button').find((button) => button.children.includes('重命名并导入'))!
+    renderer!.root.findAllByType('button').find((button) => visibleText(button) === '重命名并导入')!
   assert.equal(action().props.disabled, true)
   act(() => {
     renderer!.root
@@ -102,3 +102,7 @@ it('renames with no manual code or target and refreshes the pending row after fa
   assert.deepEqual(renameCalls, [[1, 2, 'D:/media/LOMD007.mp4', 'LOMD-007']])
   assert.deepEqual(refreshed, ['D:/media/LOMD007.mp4'])
 })
+
+function visibleText(node: TestRenderer.ReactTestInstance | string): string {
+  return typeof node === 'string' ? node : node.children.map(child => visibleText(child as TestRenderer.ReactTestInstance)).join('')
+}

@@ -1,0 +1,31 @@
+.root {
+  display: flex;
+  align-items: center;
+  gap: var(--form-label-gap);
+  height: var(--control-h-sm);
+  min-width: 0;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary);
+}
+
+.text[data-error='true'] {
+  color: var(--text-danger);
+}
+
+.hidden {
+  visibility: hidden;
+}
+
+.detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

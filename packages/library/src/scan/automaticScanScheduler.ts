@@ -1,3 +1,5 @@
+import { readCatalogIdentity } from '@library/catalog/catalogIdentity'
+import { isDatabaseOpen } from '@library/db/database'
 import type { LibraryScanTrigger, ScanCompletionResult } from '@shared/libraryTypes'
 import type { MediaLibraryAutomaticScanState } from '@shared/mediaLibraryTypes'
 import { listMediaLibraryAutomaticScanStates } from '@library/db/mediaLibraryRepo'
@@ -151,6 +153,6 @@ export const automaticScanScheduler = new AutomaticScanScheduler({
   now: Date.now,
   setTimer: (callback, delay) => setTimeout(() => void callback(), delay),
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
-  isMaintenanceBusy: () => maintenanceTaskGate.active !== null || scanCoordinator.running,
+  isMaintenanceBusy: () => maintenanceTaskGate.active !== null || scanCoordinator.running || (isDatabaseOpen() && Boolean(readCatalogIdentity()?.frozen)),
   runScan: (libraryId, trigger) => scanCoordinator.run({ libraryId, trigger })
 })

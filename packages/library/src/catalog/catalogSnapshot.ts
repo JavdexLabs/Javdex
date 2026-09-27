@@ -1,12 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type Database from 'better-sqlite3'
+import Database from 'better-sqlite3'
+import { migrateDatabase } from '@library/db/migrations'
 import { ASSET_MEDIA_SUBDIRS } from '@library/assetStoragePaths'
 import { decryptBlob, isEncryptedBlob } from '@library/assetCrypto'
 import { getPathAlias } from '@library/assetPathAliases'
 import { structuredError } from '@shared/protocol/errors'
 import { digestRequest } from './catalogSecrets'
-import { walkFiles, posixRel, sha256File } from './catalogMigrationArchive'
+import { walkFiles, posixRel, sha256File } from './catalogBackupArchive'
 function sqlLiteral(value: string): string { return "'" + value.replace(/'/g, "''") + "'" }
 
 export function walkOfficialImages(imagesDir: string): string[] {
@@ -106,7 +107,7 @@ export function decryptStagedOfficialImages(
     if (!isEncryptedBlob(blob)) continue
     const plainRel = getPathAlias(rel)
     if (!plainRel) {
-      throw structuredError('RECOVERY_REQUIRED', `缺少加密路径别名，无法在迁库中解密：${rel}`)
+      throw structuredError('RECOVERY_REQUIRED', `缺少加密路径别名，无法在备份中解密：${rel}`)
     }
     const { data } = decryptBlob(blob)
     const plainAbs = path.join(stagedImages, plainRel)
@@ -146,4 +147,13 @@ export function copyAttachedCatalog(dest: Database.Database, alias: string): voi
     dest.exec(`INSERT INTO ${quote(name)} (${columns}) SELECT ${columns} FROM ${alias}.${quote(name)}`)
   }
   dest.pragma('defer_foreign_keys = OFF')
+}
+
+export function openIsolatedCatalog(dbPath: string): Database.Database {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+  const connection = new Database(dbPath)
+  connection.pragma('journal_mode = WAL')
+  connection.pragma('foreign_keys = ON')
+  migrateDatabase(connection)
+  return connection
 }

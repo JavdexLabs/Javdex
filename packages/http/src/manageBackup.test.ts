@@ -7,7 +7,7 @@ import { once } from 'node:events'
 import { test } from 'node:test'
 import { handleManageHttpRequest, type ManageHttpSurface } from './manage'
 
-test('backup download releases its deletion guard after streaming and on invalid offsets', async () => {
+test('backup download releases its deletion guard after streaming and on invalid offsets', { timeout: 10_000 }, async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-backup-http-'))
   const file = path.join(directory, 'backup.bin')
   fs.writeFileSync(file, 'backup payload')
@@ -20,8 +20,9 @@ test('backup download releases its deletion guard after streaming and on invalid
       return { file, release: () => { active--; releases++ } }
     }
   }
+  const handled: Promise<boolean>[] = []
   const server = createServer((request, response) => {
-    void handleManageHttpRequest(request, response, new URL(request.url!, 'http://localhost'), manage, true)
+    handled.push(handleManageHttpRequest(request, response, new URL(request.url!, 'http://localhost'), manage, true))
   })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
@@ -32,12 +33,14 @@ test('backup download releases its deletion guard after streaming and on invalid
     const response = await fetch(url, { headers })
     assert.equal(response.status, 206)
     assert.equal(await response.text(), 'backup payload')
-    await new Promise(resolve => setImmediate(resolve))
+    // Receiving all bytes does not imply the server's pipeline/finally has settled.
+    await handled[0]
     assert.equal(active, 0)
     assert.equal(releases, 1)
     const invalid = await fetch(`${url}?offset=100`, { headers })
     assert.equal(invalid.status, 400)
     await invalid.text()
+    await handled[1]
     assert.equal(active, 0)
     assert.equal(releases, 2)
   } finally {

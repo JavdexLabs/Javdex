@@ -7,7 +7,7 @@
 数量为源码位置，不是运行时按钮数量；列表渲染可能产生多个按钮，页面样式覆盖也可能改变最终外观。
 
 ### ActressFaceScanModal · 44
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ActressFaceScanModal.tsx:44)
+[打开源码](../../apps/desktop/src/renderer/src/components/ActressFaceScanModal.tsx#L44)
 ```tsx
 <Button
             type="button"
@@ -20,7 +20,7 @@
 ```
 
 ### ActressFilterPopover · 117
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ActressFilterPopover.tsx:117)
+[打开源码](../../apps/desktop/src/renderer/src/components/ActressFilterPopover.tsx#L117)
 ```tsx
 <Button type="button" variant="ghost" size="sm" onClick={onReset}>
           重置
@@ -28,7 +28,7 @@
 ```
 
 ### ClassificationImageModal · 273
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx:273)
+[打开源码](../../apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx#L273)
 ```tsx
 <Button
                 type="button"
@@ -50,7 +50,7 @@
 ```
 
 ### ClassificationImageModal · 337
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx:337)
+[打开源码](../../apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx#L337)
 ```tsx
 <Button
                     type="button"
@@ -63,7 +63,7 @@
 ```
 
 ### ClassificationImageModal · 385
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx:385)
+[打开源码](../../apps/desktop/src/renderer/src/components/ClassificationImageModal.tsx#L385)
 ```tsx
 <Button
                     type="button"
@@ -76,7 +76,7 @@
 ```
 
 ### DirectorEditModal · 188
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/DirectorEditModal.tsx:188)
+[打开源码](../../apps/desktop/src/renderer/src/components/DirectorEditModal.tsx#L188)
 ```tsx
 <Button
               type="button"
@@ -98,7 +98,7 @@
 ```
 
 ### ImageImportField · 79
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ImageImportField.tsx:79)
+[打开源码](../../apps/desktop/src/renderer/src/components/ImageImportField.tsx#L79)
 ```tsx
 <Button type="button" variant="ghost" size="sm" onClick={clearPick}>
           取消选择
@@ -106,7 +106,7 @@
 ```
 
 ### LibraryFilterPopover · 165
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/LibraryFilterPopover.tsx:165)
+[打开源码](../../apps/desktop/src/renderer/src/components/LibraryFilterPopover.tsx#L165)
 ```tsx
 <Button type="button" variant="ghost" size="sm" onClick={onReset}>
           重置
@@ -114,7 +114,7 @@
 ```
 
 ### OrganizationEditModal · 251
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx:251)
+[打开源码](../../apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx#L251)
 ```tsx
 <Button
               type="button"
@@ -133,7 +133,7 @@
 ```
 
 ### PendingDecisionParts · 196
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/PendingDecisionParts.tsx:196)
+[打开源码](../../apps/desktop/src/renderer/src/components/PendingDecisionParts.tsx#L196)
 ```tsx
 <Button
         ref={anchorRef}
@@ -148,7 +148,7 @@
 ```
 
 ### PlaylistCreateModal · 94
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/PlaylistCreateModal.tsx:94)
+[打开源码](../../apps/desktop/src/renderer/src/components/PlaylistCreateModal.tsx#L94)
 ```tsx
 <Button
                     type="button"
@@ -161,7 +161,7 @@
 ```
 
 ### PlaylistResourceFilterPopover · 61
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/PlaylistResourceFilterPopover.tsx:61)
+[打开源码](../../apps/desktop/src/renderer/src/components/PlaylistResourceFilterPopover.tsx#L61)
 ```tsx
 <Button type="button" variant="ghost" size="sm" onClick={() => onChange([])}>
           重置
@@ -169,7 +169,7 @@
 ```
 
 ### RelatedLinksEditor · 90
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx:90)
+[打开源码](../../apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx#L90)
 ```tsx
 <Button
           type="button"
@@ -188,7 +188,7 @@
 ```
 
 ### SeriesEditModal · 292
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/SeriesEditModal.tsx:292)
+[打开源码](../../apps/desktop/src/renderer/src/components/SeriesEditModal.tsx#L292)
 ```tsx
 <Button
               type="button"
@@ -207,7 +207,7 @@
 ```
 
 ### VideoResourceImportModal · 686
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoResourceImportModal.tsx:686)
+[打开源码](../../apps/desktop/src/renderer/src/components/VideoResourceImportModal.tsx#L686)
 ```tsx
 <Button
                   type="button"
@@ -226,13 +226,13 @@
 ```
 
 ### AgentMetadataCollectorContext · 509
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx:509)
+[打开源码](../../apps/desktop/src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx#L509)
 ```tsx
 <Button variant="ghost" disabled={busy} onClick={() => setConfirmation('discard')}>丢弃草稿</Button>
 ```
 
 ### PluginDevConfigRail · 224
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevConfigRail.tsx:224)
+[打开源码](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevConfigRail.tsx#L224)
 ```tsx
 <Button
               type="button"
@@ -246,7 +246,7 @@
 ```
 
 ### PluginDevConversation · 286
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx:286)
+[打开源码](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx#L286)
 ```tsx
 <Button
         type="button"
@@ -261,7 +261,7 @@
 ```
 
 ### PluginDevConversation · 341
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx:341)
+[打开源码](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx#L341)
 ```tsx
 <Button
           key={option.id}
@@ -278,7 +278,7 @@
 ```
 
 ### PluginDevConversation · 584
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx:584)
+[打开源码](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx#L584)
 ```tsx
 <Button
                 type="button"
@@ -294,7 +294,7 @@
 ```
 
 ### PluginDevConversation · 595
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx:595)
+[打开源码](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevConversation.tsx#L595)
 ```tsx
 <Button
                 type="button"
@@ -311,7 +311,7 @@
 ```
 
 ### AppearanceSettingsPanel · 635
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPanel.tsx:635)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPanel.tsx#L635)
 ```tsx
 <Button
                   type="button"
@@ -325,7 +325,7 @@
 ```
 
 ### AppearanceSettingsPanel · 645
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPanel.tsx:645)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPanel.tsx#L645)
 ```tsx
 <Button
                     type="button"
@@ -340,7 +340,7 @@
 ```
 
 ### AppearanceSettingsPanel · 661
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPanel.tsx:661)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPanel.tsx#L661)
 ```tsx
 <Button
                   type="button"
@@ -354,13 +354,13 @@
 ```
 
 ### BackupSettingsPanel · 247
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/BackupSettingsPanel.tsx:247)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/BackupSettingsPanel.tsx#L247)
 ```tsx
 <Button size="sm" variant="ghost" aria-expanded={expandedId === item.id} aria-controls={`${detailsPrefix}-${item.id}`} onClick={() => setExpandedId(current => current === item.id ? null : item.id)}>{expandedId === item.id ? <ChevronDown {...UI_ICON_SM} /> : <ChevronRight {...UI_ICON_SM} />}{expandedId === item.id ? '收起详情' : '展开详情'}</Button>
 ```
 
 ### BatchSettingsPanel · 83
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/BatchSettingsPanel.tsx:83)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/BatchSettingsPanel.tsx#L83)
 ```tsx
 <Button type="button" variant="ghost" size="sm" onClick={onOpenPending}>
               查看待确认
@@ -368,7 +368,7 @@
 ```
 
 ### CompositeConfigModal · 195
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/CompositeConfigModal.tsx:195)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/CompositeConfigModal.tsx#L195)
 ```tsx
 <Button
               size="sm"
@@ -385,7 +385,7 @@
 ```
 
 ### NetworkSettingsPanel · 224
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/NetworkSettingsPanel.tsx:224)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/NetworkSettingsPanel.tsx#L224)
 ```tsx
 <Button
             size="sm"
@@ -402,19 +402,19 @@
 ```
 
 ### NfoExportPanel · 451
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/NfoExportPanel.tsx:451)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/NfoExportPanel.tsx#L451)
 ```tsx
 <Button size="sm" variant="ghost" disabled={page === 0} onClick={() => changePage(page - 1)}>上一页</Button>
 ```
 
 ### NfoExportPanel · 452
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/NfoExportPanel.tsx:452)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/NfoExportPanel.tsx#L452)
 ```tsx
 <Button size="sm" variant="ghost" disabled={end >= count} onClick={() => changePage(page + 1)}>下一页</Button>
 ```
 
 ### SettingsOverviewPanel · 343
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/SettingsOverviewPanel.tsx:343)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/SettingsOverviewPanel.tsx#L343)
 ```tsx
 <Button type="button" variant="ghost" size="sm" onClick={onOpenPending}>
                 查看待确认
@@ -422,7 +422,7 @@
 ```
 
 ### SettingsOverviewPanel · 506
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/SettingsOverviewPanel.tsx:506)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/SettingsOverviewPanel.tsx#L506)
 ```tsx
 <Button
                       type="button"
@@ -436,7 +436,7 @@
 ```
 
 ### StorageSettingsPanel · 122
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/StorageSettingsPanel.tsx:122)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/StorageSettingsPanel.tsx#L122)
 ```tsx
 <Button
                     type="button"
@@ -451,19 +451,19 @@
 ```
 
 ### WebAccessPanel · 312
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/WebAccessPanel.tsx:312)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/WebAccessPanel.tsx#L312)
 ```tsx
 <Button size="sm" variant="ghost" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}>{helpOpen ? '收起说明' : '无法连接？'}</Button>
 ```
 
 ### WebAccessPanel · 314
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/WebAccessPanel.tsx:314)
+[打开源码](../../apps/desktop/src/renderer/src/components/settings/WebAccessPanel.tsx#L314)
 ```tsx
 <Button size="sm" variant="ghost" onClick={() => setAddressFeedback("")}>关闭提示</Button>
 ```
 
 ### DesktopSessionOverlay · 68
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/desktop/DesktopSessionOverlay.tsx:68)
+[打开源码](../../apps/desktop/src/renderer/src/desktop/DesktopSessionOverlay.tsx#L68)
 ```tsx
 <Button
               variant="ghost"
@@ -481,7 +481,7 @@
 ```
 
 ### DirectorDetailPage · 145
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx:145)
+[打开源码](../../apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx#L145)
 ```tsx
 <Button
                   type="button"
@@ -496,7 +496,7 @@
 ```
 
 ### DirectorDetailPage · 155
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx:155)
+[打开源码](../../apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx#L155)
 ```tsx
 <Button
                   type="button"
@@ -511,7 +511,7 @@
 ```
 
 ### DirectorDetailPage · 165
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx:165)
+[打开源码](../../apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx#L165)
 ```tsx
 <Button
                   type="button"
@@ -526,7 +526,7 @@
 ```
 
 ### DirectorDetailPage · 175
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx:175)
+[打开源码](../../apps/desktop/src/renderer/src/pages/DirectorDetailPage.tsx#L175)
 ```tsx
 <Button
                   type="button"
@@ -541,7 +541,7 @@
 ```
 
 ### GlobalSearchPage · 113
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/GlobalSearchPage.tsx:113)
+[打开源码](../../apps/desktop/src/renderer/src/pages/GlobalSearchPage.tsx#L113)
 ```tsx
 <Button
             className={styles.libraryFilter}
@@ -561,7 +561,7 @@
 ```
 
 ### GlobalSearchPage · 133
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/GlobalSearchPage.tsx:133)
+[打开源码](../../apps/desktop/src/renderer/src/pages/GlobalSearchPage.tsx#L133)
 ```tsx
 <Button
                   key={library.id}
@@ -581,7 +581,7 @@
 ```
 
 ### OrganizationDetailPage · 229
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx:229)
+[打开源码](../../apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx#L229)
 ```tsx
 <Button
                   type="button"
@@ -596,7 +596,7 @@
 ```
 
 ### OrganizationDetailPage · 239
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx:239)
+[打开源码](../../apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx#L239)
 ```tsx
 <Button
                   type="button"
@@ -611,7 +611,7 @@
 ```
 
 ### OrganizationDetailPage · 247
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx:247)
+[打开源码](../../apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx#L247)
 ```tsx
 <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(true)}>
                   <Pencil {...UI_ICON_SM} aria-hidden />
@@ -620,7 +620,7 @@
 ```
 
 ### OrganizationDetailPage · 253
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx:253)
+[打开源码](../../apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx#L253)
 ```tsx
 <Button
                   type="button"
@@ -635,7 +635,7 @@
 ```
 
 ### OrganizationDetailPage · 263
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx:263)
+[打开源码](../../apps/desktop/src/renderer/src/pages/OrganizationDetailPage.tsx#L263)
 ```tsx
 <Button
                   type="button"
@@ -650,7 +650,7 @@
 ```
 
 ### PendingActressConflictPane · 597
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx:597)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx#L597)
 ```tsx
 <Button
                     variant="ghost"
@@ -663,7 +663,7 @@
 ```
 
 ### PendingActressConflictPane · 608
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx:608)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx#L608)
 ```tsx
 <Button
                       variant="ghost"
@@ -675,7 +675,7 @@
 ```
 
 ### PendingActressConflictPane · 615
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx:615)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx#L615)
 ```tsx
 <Button
                       variant="ghost"
@@ -687,7 +687,7 @@
 ```
 
 ### PendingActressConflictPane · 621
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx:621)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx#L621)
 ```tsx
 <Button variant="ghost" disabled={resolving} onClick={detail.openIllegalName}>
                       <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称
@@ -695,7 +695,7 @@
 ```
 
 ### PendingResourceIdentityPane · 79
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingResourceIdentityPane.tsx:79)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingResourceIdentityPane.tsx#L79)
 ```tsx
 <Button variant="ghost" disabled={busy != null} onClick={() => setDiscardOpen(true)}>
                 丢弃待办
@@ -703,7 +703,7 @@
 ```
 
 ### PendingScrapePane · 346
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx:346)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx#L346)
 ```tsx
 <Button
                 variant="ghost"
@@ -715,7 +715,7 @@
 ```
 
 ### PendingScrapePane · 352
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx:352)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx#L352)
 ```tsx
 <Button variant="ghost" disabled={busy} onClick={() => setDiscardOpen(true)}>
                 <Trash2 {...UI_ICON_SM} aria-hidden />丢弃全部候选
@@ -723,7 +723,7 @@
 ```
 
 ### PendingScrapePane · 407
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx:407)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx#L407)
 ```tsx
 <Button
               variant="ghost"
@@ -737,7 +737,7 @@
 ```
 
 ### PendingScrapePane · 416
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx:416)
+[打开源码](../../apps/desktop/src/renderer/src/pages/PendingScrapePane.tsx#L416)
 ```tsx
 <Button variant="ghost" size="sm" onClick={() => void openPrimaryResource('reveal')}>
                 <FolderOpen {...UI_ICON_SM} aria-hidden />
@@ -746,7 +746,7 @@
 ```
 
 ### SeriesDetailPage · 198
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx:198)
+[打开源码](../../apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx#L198)
 ```tsx
 <Button
                   type="button"
@@ -761,7 +761,7 @@
 ```
 
 ### SeriesDetailPage · 208
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx:208)
+[打开源码](../../apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx#L208)
 ```tsx
 <Button
                   type="button"
@@ -776,7 +776,7 @@
 ```
 
 ### SeriesDetailPage · 218
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx:218)
+[打开源码](../../apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx#L218)
 ```tsx
 <Button
                   type="button"
@@ -791,7 +791,7 @@
 ```
 
 ### SeriesDetailPage · 228
-[打开源码](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx:228)
+[打开源码](../../apps/desktop/src/renderer/src/pages/SeriesDetailPage.tsx#L228)
 ```tsx
 <Button
                   type="button"
@@ -810,63 +810,63 @@
 这类控件默认透明边框；hover 由全局及页面样式决定，部分始终无边框，需与文字操作按钮分开决定。
 | 组件 | 行号 | 标签 |
 |---|---|---|
-| ActressGalleryPanel | [206](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ActressGalleryPanel.tsx:206) | "导入写真" |
-| DetailActionBar | [105](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/DetailActionBar.tsx:105) | {action.label} |
-| DetailActionBar | [121](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/DetailActionBar.tsx:121) | {'\u66f4\u591a'} |
-| DirectorEditModal | [144](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/DirectorEditModal.tsx:144) | {`上移链接 ${index + 1}`} |
-| DirectorEditModal | [157](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/DirectorEditModal.tsx:157) | {`下移链接 ${index + 1}`} |
-| DirectorEditModal | [170](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/DirectorEditModal.tsx:170) | {`删除链接 ${index + 1}`} |
-| ImagePreviewLightbox | [607](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx:607) | "缩小" |
-| ImagePreviewLightbox | [614](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx:614) | "放大" |
-| ImagePreviewLightbox | [620](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx:620) | "还原视图" |
-| ImagePreviewLightbox | [628](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx:628) | "关闭预览" |
-| ListMaintenanceBanner | [58](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ListMaintenanceBanner.tsx:58) | "关闭提示" |
-| MediaLibraryCreateModal | [397](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/MediaLibraryCreateModal.tsx:397) | {`移除来源目录 ${path}`} |
-| MediaLibraryNav | [112](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/MediaLibraryNav.tsx:112) | "新建媒体库" |
-| MediaTileActionButton | [35](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/MediaTileActionButton.tsx:35) | {label} |
-| Modal | [209](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/Modal.tsx:209) | "关闭" |
-| OrganizationEditModal | [207](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx:207) | {`上移链接 ${index + 1}`} |
-| OrganizationEditModal | [220](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx:220) | {`下移链接 ${index + 1}`} |
-| OrganizationEditModal | [233](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx:233) | {`移除链接 ${index + 1}`} |
-| PluginCard | [162](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/PluginCard.tsx:162) | "更多操作" |
-| PosterCard | [201](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/PosterCard.tsx:201) | {`编辑 ${video.code} 元数据`} |
-| PosterCard | [215](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/PosterCard.tsx:215) | {`${video.code} 功能菜单`} |
-| RelatedLinksEditor | [54](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx:54) | {`上移链接 ${index + 1}`} |
-| RelatedLinksEditor | [64](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx:64) | {`下移链接 ${index + 1}`} |
-| RelatedLinksEditor | [74](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx:74) | {`删除链接 ${index + 1}`} |
-| ScrollToTopButton | [19](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/ScrollToTopButton.tsx:19) | "回到顶部" |
-| SelectionToolbar | [52](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/SelectionToolbar.tsx:52) | {clearLabel} |
-| SeriesEditModal | [248](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/SeriesEditModal.tsx:248) | {`上移链接 ${index + 1}`} |
-| SeriesEditModal | [261](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/SeriesEditModal.tsx:261) | {`下移链接 ${index + 1}`} |
-| SeriesEditModal | [274](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/SeriesEditModal.tsx:274) | {`移除链接 ${index + 1}`} |
-| SortSwitch | [47](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/SortSwitch.tsx:47) | {`${active?.title ?? active?.label ?? label}${dir === 'asc' ? '升序' : '降序'}`} |
-| VideoDetailMeta | [291](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx:291) | "播放此文件" |
-| VideoDetailMeta | [298](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx:298) | "更多" |
-| VideoDetailMeta | [460](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx:460) | {copied ? '已复制链接' : '复制链接'} |
-| VideoDetailMeta | [466](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx:466) | {`打开${kind}`} |
-| VideoDetailMeta | [473](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx:473) | "更多" |
-| VideoDetailMeta | [665](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx:665) | "添加资源" |
-| VideoResourceImportModal | [596](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoResourceImportModal.tsx:596) | {`删除资源链接 ${index + 1}`} |
-| VideoSampleGallery | [193](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoSampleGallery.tsx:193) | "导入样张" |
-| VideoTagPanel | [180](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/VideoTagPanel.tsx:180) | "添加自定义标签" |
-| PluginDevPanel | [1257](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevPanel.tsx:1257) | "查看代码" |
-| PluginDevPanel | [1268](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevPanel.tsx:1268) | "连接设置" |
-| BatchTaskControls | [99](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/BatchTaskControls.tsx:99) | {`${pauseText}${scopeLabel}${batchTaskText}`} |
-| BatchTaskControls | [108](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/BatchTaskControls.tsx:108) | {`${discardText}${scopeLabel}${batchTaskText}`} |
-| BatchTaskControls | [121](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/BatchTaskControls.tsx:121) | {`${discardText}${scopeLabel}${batchTaskText}`} |
-| LibraryScanAuditPanel | [168](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx:168) | "复制完整路径" |
-| LibraryScanAuditPanel | [176](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx:176) | "在文件夹中显示" |
-| SettingsOverviewPanel | [323](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/SettingsOverviewPanel.tsx:323) | {openLabel} |
-| UnrecognizedRow | [173](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/UnrecognizedRow.tsx:173) | "复制完整路径" |
-| UnrecognizedRow | [181](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/UnrecognizedRow.tsx:181) | "在文件夹中显示" |
-| PendingActressConflictPane | [174](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx:174) | {`查看「${name}」的详情`} |
-| PendingActressConflictPane | [691](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx:691) | "重新选择演员" |
+| ActressGalleryPanel | [206](../../apps/desktop/src/renderer/src/components/ActressGalleryPanel.tsx#L206) | "导入写真" |
+| DetailActionBar | [105](../../apps/desktop/src/renderer/src/components/DetailActionBar.tsx#L105) | {action.label} |
+| DetailActionBar | [121](../../apps/desktop/src/renderer/src/components/DetailActionBar.tsx#L121) | {'\u66f4\u591a'} |
+| DirectorEditModal | [144](../../apps/desktop/src/renderer/src/components/DirectorEditModal.tsx#L144) | {`上移链接 ${index + 1}`} |
+| DirectorEditModal | [157](../../apps/desktop/src/renderer/src/components/DirectorEditModal.tsx#L157) | {`下移链接 ${index + 1}`} |
+| DirectorEditModal | [170](../../apps/desktop/src/renderer/src/components/DirectorEditModal.tsx#L170) | {`删除链接 ${index + 1}`} |
+| ImagePreviewLightbox | [607](../../apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx#L607) | "缩小" |
+| ImagePreviewLightbox | [614](../../apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx#L614) | "放大" |
+| ImagePreviewLightbox | [620](../../apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx#L620) | "还原视图" |
+| ImagePreviewLightbox | [628](../../apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx#L628) | "关闭预览" |
+| ListMaintenanceBanner | [58](../../apps/desktop/src/renderer/src/components/ListMaintenanceBanner.tsx#L58) | "关闭提示" |
+| MediaLibraryCreateModal | [397](../../apps/desktop/src/renderer/src/components/MediaLibraryCreateModal.tsx#L397) | {`移除来源目录 ${path}`} |
+| MediaLibraryNav | [112](../../apps/desktop/src/renderer/src/components/MediaLibraryNav.tsx#L112) | "新建媒体库" |
+| MediaTileActionButton | [35](../../apps/desktop/src/renderer/src/components/MediaTileActionButton.tsx#L35) | {label} |
+| Modal | [209](../../apps/desktop/src/renderer/src/components/Modal.tsx#L209) | "关闭" |
+| OrganizationEditModal | [207](../../apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx#L207) | {`上移链接 ${index + 1}`} |
+| OrganizationEditModal | [220](../../apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx#L220) | {`下移链接 ${index + 1}`} |
+| OrganizationEditModal | [233](../../apps/desktop/src/renderer/src/components/OrganizationEditModal.tsx#L233) | {`移除链接 ${index + 1}`} |
+| PluginCard | [162](../../apps/desktop/src/renderer/src/components/PluginCard.tsx#L162) | "更多操作" |
+| PosterCard | [201](../../apps/desktop/src/renderer/src/components/PosterCard.tsx#L201) | {`编辑 ${video.code} 元数据`} |
+| PosterCard | [215](../../apps/desktop/src/renderer/src/components/PosterCard.tsx#L215) | {`${video.code} 功能菜单`} |
+| RelatedLinksEditor | [54](../../apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx#L54) | {`上移链接 ${index + 1}`} |
+| RelatedLinksEditor | [64](../../apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx#L64) | {`下移链接 ${index + 1}`} |
+| RelatedLinksEditor | [74](../../apps/desktop/src/renderer/src/components/RelatedLinksEditor.tsx#L74) | {`删除链接 ${index + 1}`} |
+| ScrollToTopButton | [19](../../apps/desktop/src/renderer/src/components/ScrollToTopButton.tsx#L19) | "回到顶部" |
+| SelectionToolbar | [52](../../apps/desktop/src/renderer/src/components/SelectionToolbar.tsx#L52) | {clearLabel} |
+| SeriesEditModal | [248](../../apps/desktop/src/renderer/src/components/SeriesEditModal.tsx#L248) | {`上移链接 ${index + 1}`} |
+| SeriesEditModal | [261](../../apps/desktop/src/renderer/src/components/SeriesEditModal.tsx#L261) | {`下移链接 ${index + 1}`} |
+| SeriesEditModal | [274](../../apps/desktop/src/renderer/src/components/SeriesEditModal.tsx#L274) | {`移除链接 ${index + 1}`} |
+| SortSwitch | [47](../../apps/desktop/src/renderer/src/components/SortSwitch.tsx#L47) | {`${active?.title ?? active?.label ?? label}${dir === 'asc' ? '升序' : '降序'}`} |
+| VideoDetailMeta | [291](../../apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx#L291) | "播放此文件" |
+| VideoDetailMeta | [298](../../apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx#L298) | "更多" |
+| VideoDetailMeta | [460](../../apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx#L460) | {copied ? '已复制链接' : '复制链接'} |
+| VideoDetailMeta | [466](../../apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx#L466) | {`打开${kind}`} |
+| VideoDetailMeta | [473](../../apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx#L473) | "更多" |
+| VideoDetailMeta | [665](../../apps/desktop/src/renderer/src/components/VideoDetailMeta.tsx#L665) | "添加资源" |
+| VideoResourceImportModal | [596](../../apps/desktop/src/renderer/src/components/VideoResourceImportModal.tsx#L596) | {`删除资源链接 ${index + 1}`} |
+| VideoSampleGallery | [193](../../apps/desktop/src/renderer/src/components/VideoSampleGallery.tsx#L193) | "导入样张" |
+| VideoTagPanel | [180](../../apps/desktop/src/renderer/src/components/VideoTagPanel.tsx#L180) | "添加自定义标签" |
+| PluginDevPanel | [1257](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevPanel.tsx#L1257) | "查看代码" |
+| PluginDevPanel | [1268](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevPanel.tsx#L1268) | "连接设置" |
+| BatchTaskControls | [99](../../apps/desktop/src/renderer/src/components/settings/BatchTaskControls.tsx#L99) | {`${pauseText}${scopeLabel}${batchTaskText}`} |
+| BatchTaskControls | [108](../../apps/desktop/src/renderer/src/components/settings/BatchTaskControls.tsx#L108) | {`${discardText}${scopeLabel}${batchTaskText}`} |
+| BatchTaskControls | [121](../../apps/desktop/src/renderer/src/components/settings/BatchTaskControls.tsx#L121) | {`${discardText}${scopeLabel}${batchTaskText}`} |
+| LibraryScanAuditPanel | [168](../../apps/desktop/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx#L168) | "复制完整路径" |
+| LibraryScanAuditPanel | [176](../../apps/desktop/src/renderer/src/components/settings/LibraryScanAuditPanel.tsx#L176) | "在文件夹中显示" |
+| SettingsOverviewPanel | [323](../../apps/desktop/src/renderer/src/components/settings/SettingsOverviewPanel.tsx#L323) | {openLabel} |
+| UnrecognizedRow | [173](../../apps/desktop/src/renderer/src/components/settings/UnrecognizedRow.tsx#L173) | "复制完整路径" |
+| UnrecognizedRow | [181](../../apps/desktop/src/renderer/src/components/settings/UnrecognizedRow.tsx#L181) | "在文件夹中显示" |
+| PendingActressConflictPane | [174](../../apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx#L174) | {`查看「${name}」的详情`} |
+| PendingActressConflictPane | [691](../../apps/desktop/src/renderer/src/pages/PendingActressConflictPane.tsx#L691) | "重新选择演员" |
 
 ## 透明边框样式候选
 
 以下为样式审计候选，含页签、选项、资源行和装饰元素；不能全部当作普通按钮直接替换。
 
-[styles.css:279](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles.css:279)
+[styles.css:279](../../apps/desktop/src/renderer/src/styles.css#L279)
 ```css
 ::-webkit-scrollbar-thumb {
   background: var(--bg-3);
@@ -876,7 +876,7 @@
 }
 ```
 
-[Button.module.css:70](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/Button.module.css:70)
+[Button.module.css:70](../../apps/desktop/src/renderer/src/components/Button.module.css#L70)
 ```css
 .ghost {
   border-color: transparent;
@@ -885,7 +885,7 @@
 }
 ```
 
-[IconButton.module.css:1](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/IconButton.module.css:1)
+[IconButton.module.css:1](../../apps/desktop/src/renderer/src/components/IconButton.module.css#L1)
 ```css
 .root {
   --icon-glyph-size: 14px;
@@ -911,7 +911,7 @@
 }
 ```
 
-[PluginDevPanel.module.css:11](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/pluginDev/PluginDevPanel.module.css:11)
+[PluginDevPanel.module.css:11](../../apps/desktop/src/renderer/src/components/pluginDev/PluginDevPanel.module.css#L11)
 ```css
 .kindButton {
   flex: 0 0 auto;
@@ -933,7 +933,7 @@
 }
 ```
 
-[ModelProvidersPanel.module.css:68](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/ModelProvidersPanel.module.css:68)
+[ModelProvidersPanel.module.css:68](../../apps/desktop/src/renderer/src/components/settings/ModelProvidersPanel.module.css#L68)
 ```css
 .providerRow,
 .disclosure,
@@ -946,7 +946,7 @@
 }
 ```
 
-[ModelSettingsPanel.module.css:16](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/components/settings/ModelSettingsPanel.module.css:16)
+[ModelSettingsPanel.module.css:16](../../apps/desktop/src/renderer/src/components/settings/ModelSettingsPanel.module.css#L16)
 ```css
 .tab {
   min-height: var(--control-h-sm);
@@ -957,7 +957,7 @@
 }
 ```
 
-[PendingCenterPage.module.css:153](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/pages/PendingCenterPage.module.css:153)
+[PendingCenterPage.module.css:153](../../apps/desktop/src/renderer/src/pages/PendingCenterPage.module.css#L153)
 ```css
 .railItem {
   width: 100%;
@@ -978,7 +978,7 @@
 }
 ```
 
-[media-details.css:169](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/media-details.css:169)
+[media-details.css:169](../../apps/desktop/src/renderer/src/styles/media-details.css#L169)
 ```css
 .app-shell--with-background .detail-meta-section {
   background: transparent;
@@ -987,7 +987,7 @@
 }
 ```
 
-[media-details.css:750](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/media-details.css:750)
+[media-details.css:750](../../apps/desktop/src/renderer/src/styles/media-details.css#L750)
 ```css
 .app-shell--with-background .detail-section {
   background: transparent;
@@ -995,7 +995,7 @@
 }
 ```
 
-[media-details.css:1638](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/media-details.css:1638)
+[media-details.css:1638](../../apps/desktop/src/renderer/src/styles/media-details.css#L1638)
 ```css
 .image-preview-thumb {
   position: relative;
@@ -1016,7 +1016,7 @@
 }
 ```
 
-[settings-overview.css:57](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/settings-overview.css:57)
+[settings-overview.css:57](../../apps/desktop/src/renderer/src/styles/settings-overview.css#L57)
 ```css
 .settings-group-tab {
   flex: 0 0 auto;
@@ -1043,7 +1043,7 @@
 }
 ```
 
-[settings-overview.css:955](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/settings-overview.css:955)
+[settings-overview.css:955](../../apps/desktop/src/renderer/src/styles/settings-overview.css#L955)
 ```css
 .settings-overview-batch-icon-btn.icon-btn {
   min-width: var(--control-h-sm);
@@ -1057,7 +1057,7 @@
 }
 ```
 
-[settings-overview.css:966](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/settings-overview.css:966)
+[settings-overview.css:966](../../apps/desktop/src/renderer/src/styles/settings-overview.css#L966)
 ```css
 .settings-overview-batch-icon-btn.icon-btn:hover:not(:disabled),
 .settings-overview-batch-icon-btn.icon-btn:focus-visible:not(:disabled) {
@@ -1067,7 +1067,7 @@
 }
 ```
 
-[settings-overview.css:1001](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/settings-overview.css:1001)
+[settings-overview.css:1001](../../apps/desktop/src/renderer/src/styles/settings-overview.css#L1001)
 ```css
 .settings-overview-batch-icon-btn--danger.icon-btn:hover:not(:disabled),
 .settings-overview-batch-icon-btn--danger.icon-btn:focus-visible:not(:disabled) {
@@ -1077,7 +1077,7 @@
 }
 ```
 
-[workbench.css:88](D:/Project/JavdexLabs/Javdex/apps/desktop/src/renderer/src/styles/workbench.css:88)
+[workbench.css:88](../../apps/desktop/src/renderer/src/styles/workbench.css#L88)
 ```css
 .workbench-tab {
   flex: 0 0 auto;
@@ -1098,7 +1098,7 @@
 }
 ```
 
-[image-preview.css:15](D:/Project/JavdexLabs/Javdex/apps/web/src/image-preview.css:15)
+[image-preview.css:15](../../apps/web/src/image-preview.css#L15)
 ```css
 .image-preview .yarl__button {
   min-width: 48px;
@@ -1108,7 +1108,7 @@
 }
 ```
 
-[styles.css:91](D:/Project/JavdexLabs/Javdex/apps/web/src/styles.css:91)
+[styles.css:91](../../apps/web/src/styles.css#L91)
 ```css
 button.primary {
   background: var(--text-accent);
@@ -1118,7 +1118,7 @@ button.primary {
 }
 ```
 
-[styles.css:243](D:/Project/JavdexLabs/Javdex/apps/web/src/styles.css:243)
+[styles.css:243](../../apps/web/src/styles.css#L243)
 ```css
 .logout {
   border: 1px solid transparent;
@@ -1127,7 +1127,7 @@ button.primary {
 }
 ```
 
-[styles.css:358](D:/Project/JavdexLabs/Javdex/apps/web/src/styles.css:358)
+[styles.css:358](../../apps/web/src/styles.css#L358)
 ```css
 .sort-tabs button {
   border-color: transparent;
@@ -1138,12 +1138,12 @@ button.primary {
 }
 ```
 
-[styles.css:711](D:/Project/JavdexLabs/Javdex/apps/web/src/styles.css:711)
+[styles.css:711](../../apps/web/src/styles.css#L711)
 ```css
 .resources .resource-heading { display: flex; flex: 1; min-width: 0; height: 64px; padding: 6px; gap: 8px; align-items: center; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: inherit; }
 ```
 
-[styles.css:716](D:/Project/JavdexLabs/Javdex/apps/web/src/styles.css:716)
+[styles.css:716](../../apps/web/src/styles.css#L716)
 ```css
 .resource-actions button, .resource-actions a {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;

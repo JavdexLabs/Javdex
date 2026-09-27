@@ -134,7 +134,6 @@ import type {
 } from '@shared/agentMetadataTypes'
 import type { UploadCreateResult, UploadInspectResult } from '@shared/protocol/uploads'
 import type { PlayGrant } from '@shared/protocol/play'
-import type { MigrationPreview, MigrationStatus } from '@shared/protocol/migration'
 import type { WebDevice } from '@shared/webTypes'
 
 /** Desktop application results, keyed by manage operation. Wire adapters normalize envelopes here. */
@@ -463,12 +462,7 @@ export interface CatalogOperationResults {
   'uploads.create': UploadCreateResult
   'uploads.inspect': UploadInspectResult
   'play.grant': PlayGrant
-  'migration.preview': MigrationPreview
-  'migration.start': CatalogTaskSnapshot | MigrationPreview
   'backup.control': import('@shared/protocol/backup').BackupResponse
-  'migration.status': MigrationStatus
-  'migration.enable': MigrationStatus
-  'migration.abandon': MigrationStatus
 }
 export interface CatalogBrowserStatus {
   enabled: boolean

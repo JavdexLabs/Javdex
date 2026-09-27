@@ -203,7 +203,7 @@ renderer → IPC 宿主适配 → CatalogBackend
 - 缩减清单导入能力（匹配已有影片、取消自动建片/动态滚动等）。
 - 缩减演员名称冲突处理选项。
 - 取消 Agent 历史冷恢复或精简模型配置概念。
-- 将应用内迁库改成单向运维工具。
+- 资料转移统一使用桌面备份恢复和本机导入；旧离线迁库已于 2026-09-27 移除。
 - 将插件开发移到外部编辑器或 Agent。
 - 改变全局影片身份、多媒体库共享资料及资源归属模型。
 - 全面拆分大型页面/Repository，或清理与本次三点无关的所有转发文件。
@@ -238,8 +238,8 @@ renderer → IPC 宿主适配 → CatalogBackend
 
 - `videoLifecycleRepo` 的删除预览包含 Agent 草稿/资源，硬删除还删除关联草稿；预览过期检查和草稿清理不能失效。
 - `videoPendingScrapeService`、`actressIdentityConflictWorkflow` 的图片清理同时查询待确认资源与就绪草稿资源，防止误删仍被草稿使用的图片。
-- `catalogImageRefs` 扫描草稿资源引用，迁库正式图片清单与垃圾回收需明确区分当前 catalog 草稿和桌面工作资源。
-- `catalogMigrationApply` 清理目的 catalog 的旧 Agent 表；它不能通过隐式 SQL 路由误删正在使用的桌面 workStore。
+- `catalogImageRefs` 扫描草稿资源引用，备份正式图片清单与垃圾回收需明确区分当前 catalog 草稿和桌面工作资源。
+- `catalogBackupTransforms` 清理目的 catalog 的旧 Agent 表；它不能通过隐式 SQL 路由误删正在使用的桌面 workStore。
 
 迁移状态仍采用 copying/ready；P4 已将复制校验增强为提交前逐表内容比较和外键检查，覆盖密文可读及 ready 后不覆盖。此表记录已查到的调用关系，不宣称跨库原子性或全部连接改造已完成。
 
@@ -320,7 +320,7 @@ P4 分步实施记录（按实施顺序，后续记录更新前面的阶段状�
 - `AgentMetadataDraftRepo` 已移除默认 `getDb()` 连接和无调用者的共享单例；Node 管理入口仍显式传 catalog，桌面默认实例显式传 workStore，测试同步指定连接。仓储与草稿服务 10 项定向测试及 Node 类型检查通过。
 - 草稿显式绑定、持久提交及启动恢复已保存为本地提交 `bac8043`；该批全仓 `pretest` 通过，未推送。
 - 影片/演员孤立暂存清理已移除将 pending 表和 Agent 草稿表混在 catalog 连接上的 UNION。正式待确认资源仍读 catalog，草稿路径通过显式 `AgentMetadataDraftRepo.listReadyStagedPaths` 读取；桌面启动传入 workStore 仓储。隔离仓储测试验证指定连接、目标类型与 ready 状态，避免拆连接后遗漏活动草稿图片。
-- 迁库核对确认 `stripExportSecrets` 的生产调用使用新打开的隔离导出副本。新增备份/清理隔离测试验证副本中的 Agent 记录被清除、正式影片保留，源 catalog 旧记录与活动 workStore 记录均保持不变。
+- 备份核对确认 `stripExportSecrets` 的生产调用使用新打开的隔离导出副本。新增备份/清理隔离测试验证副本中的 Agent 记录被清除、正式影片保留，源 catalog 旧记录与活动 workStore 记录均保持不变。
 - `catalogImageRefs` 的草稿引用查询显式限定 `main`，防止残留 SQL 路由将 catalog 图片引用读到工作库；桌面工作暂存引用由独立清理入口保护。隔离测试同时覆盖两库存在不同草稿图片时只返回 catalog 引用。
 - 删除预览的草稿 SQL 已收拢到 `AgentMetadataDraftRepo.lifecycleSnapshot`，在仓储连接的同一读事务内返回草稿状态/版本及资源身份。`videoLifecycleRepo` 使用该快照，保留原摘要字段和排序；终态草稿仍参与全局删除影响，不能误复用只查 ready 的清理方法。正式删除连接尚未切换，仍需设计并验证 catalog 删除后工作记录清理的恢复步骤。
 - 草稿删除已改用 `deleteLifecycleSnapshot`：完整核对草稿及资源快照后删除，已完成清理可重放，变化后的资源或新草稿拒绝按旧快照清理。生命周期删除回执新增内部 `agentDraftCleanup` 快照，旧回执允许缺省；公共结果显式去掉该字段。当前仍在原事务内删除，跨库清理及启动恢复接线尚未完成。

@@ -6,10 +6,22 @@ import { importsOf, sourceFiles } from './lib/import-boundary-check.mjs'
 
 const root = JSON.parse(fs.readFileSync('package.json', 'utf8'))
 const workspaces = ['apps/desktop', 'apps/web', 'apps/server', 'packages/contracts', 'packages/ui', 'packages/library', 'packages/http']
+const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'))
+assert.equal(lock.version, root.version, 'Lockfile version must match the product version')
+assert.equal(lock.packages[''].version, root.version, 'Lockfile root version must match the product version')
+const internalNames = new Set(workspaces.map(directory => JSON.parse(fs.readFileSync(`${directory}/package.json`, 'utf8')).name))
 for (const directory of workspaces) {
   const manifest = JSON.parse(fs.readFileSync(`${directory}/package.json`, 'utf8'))
   assert.equal(manifest.version, root.version, `${directory}: version must match the product version`)
   assert.equal(manifest.private, true, `${directory}: internal workspace must be private`)
+  assert.equal(lock.packages[directory]?.version, root.version, `${directory}: lockfile version must match`)
+  for (const section of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+    for (const [name, version] of Object.entries(manifest[section] ?? {})) {
+      if (!internalNames.has(name)) continue
+      assert.equal(version, root.version, `${directory}: ${name} must use the current product version`)
+      assert.equal(lock.packages[directory]?.[section]?.[name], version, `${directory}: locked ${name} must match its manifest`)
+    }
+  }
 }
 assert.equal(root.scripts.postinstall, undefined, 'Root install must not rebuild Electron native modules')
 const violations = []
@@ -29,4 +41,4 @@ for (const directory of ['apps/web/src', 'packages/contracts/src', 'packages/ui/
 }
 assert.equal(violations.length, 0, violations.join('\n'))
 console.log('Workspace versions and browser/shared dependency boundaries passed.')
-console.log('library currently owns catalog db, image store, public-image HTTP, scan helpers/orchestration/scheduler, scan-audit read, classification query/maintenance/images, actress query/conflict/gallery/maintenance, tag queries, playlist and media-library maintenance, video maintenance/lifecycle, asset migration, NFO, maintenance gate, path cleanup, scrape confirm/candidate apply, playlist applyImport, named target lists, agent metadata findReady/apply/discard, play grants, manage-image reads, and whole-catalog migration preview/start/enable/abandon; Electron NFO cover export and desktop collection/deliver remain in desktop. packages/http owns LAN browser HTTP, play Range streams, and manage upload/asset/migration-package PUT; apps/server hosts the independent Node process. This check does not claim a finished management API or remote desktop backend.')
+console.log('library currently owns catalog db, image store, public-image HTTP, scan helpers/orchestration/scheduler, scan-audit read, classification query/maintenance/images, actress query/conflict/gallery/maintenance, tag queries, playlist and media-library maintenance, video maintenance/lifecycle, asset migration, NFO, maintenance gate, path cleanup, scrape confirm/candidate apply, playlist applyImport, named target lists, agent metadata findReady/apply/discard, play grants, manage-image reads, and catalog backup/restore; Electron NFO cover export and desktop collection/deliver remain in desktop. packages/http owns LAN browser HTTP, play Range streams, and manage upload/asset and chunked backup transfer; apps/server hosts the independent Node process. This check does not claim a finished management API or remote desktop backend.')

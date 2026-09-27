@@ -1,10 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { openIsolatedCatalog } from '../catalogMigration'
+import { openIsolatedCatalog } from '@library/catalog/catalogSnapshot'
 import { backupControl, backupFile, writeBackupChunk, type BackupHost } from '../catalogBackup'
 import { ensureCatalogIdentity } from '../catalogIdentity'
-import { sha256File } from '../catalogMigrationArchive'
+import { sha256File } from '../catalogBackupArchive'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 
 // Child-process fixture: abrupt exit leaves no opportunity for JS cleanup/rollback.

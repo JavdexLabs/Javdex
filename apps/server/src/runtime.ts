@@ -21,7 +21,7 @@ import type { ServerConfig } from './config'
 import { acquireDataDirLock, ensureLocalDataDir, ensureMediaMounts } from './filesystem'
 import { configureServerLibraryHost, ensureServerCatalog } from './identity'
 import { assertSharpDecode } from './imageCodec'
-import { dispatchManageOperation, putManageUpload, getManageAsset, putManageMigrationPackage } from './manageDispatch'
+import { dispatchManageOperation, putManageUpload, getManageAsset } from './manageDispatch'
 import { SERVER_APP_VERSION } from './appVersion'
 import { WebCatalogWorkerClient } from './webCatalogWorkerClient'
 import {
@@ -82,8 +82,7 @@ function createBrowserSurface(
   return {
     status,
     setEnabled(enabled) {
-      setBackupRestoredHandler(() => { http!.revokeSessions() })
-    http.setBrowserEnabled(enabled)
+      http.setBrowserEnabled(enabled)
       persistBrowserEnabled(config.dataDir, enabled)
       return status()
     },
@@ -188,7 +187,6 @@ export async function startJavdexServer(
         dispatch: (context) => dispatchManageOperation(context, database),
         putUpload: (context) => putManageUpload(context, database),
         transferBackup: (context) => transferBackup(context, database),
-        putMigrationPackage: (context) => putManageMigrationPackage(context, database),
         getAsset: (context) => getManageAsset(context, database)
       },
       play: {
@@ -223,7 +221,7 @@ export async function startJavdexServer(
         } finally {
           setPlayGrantListener(null)
           setManageBrowserSurface(null)
-    setBackupRestoredHandler(undefined)
+          setBackupRestoredHandler(undefined)
           await worker?.dispose()
           closeDatabase()
           lock.release()

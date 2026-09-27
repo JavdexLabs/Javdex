@@ -17,7 +17,7 @@ import { resolveMediaLibraryRootIdentity } from '@library/mediaLibraryRootPath'
 import { resetLibraryHostForTests } from '@library/runtime/host'
 import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
 import { isStructuredError } from '@shared/protocol/errors'
-import { issueDeployToken, issueMigrationToken } from './identity'
+import { issueDeployToken } from './identity'
 import { dispatchManageOperation } from './manageDispatch'
 import { startJavdexServer, type JavdexServerHandle } from './runtime'
 import type { ServerConfig } from './config'
@@ -1520,7 +1520,6 @@ describe('server runtime lifecycle', () => {
       assert.equal(fs.existsSync(path.join(dataDir, 'media_assets', covered.cover_path!)), true)
       assert.equal(backend.session().state, 'available')
       assert.equal(backend.capabilities().editCatalog.allowed, true)
-      assert.equal(backend.capabilities().migrateCatalog.allowed, false)
       assert.equal(backend.capabilities().playLocalFile.allowed, false)
     } finally {
       await backend.dispose()
@@ -4200,6 +4199,14 @@ describe('server runtime lifecycle', () => {
       assert.equal(decodeURIComponent(new URL(originalHandle).pathname.split('/').at(-1) ?? ''), path.basename(file))
       const originalHead = await fetch(originalHandle, { method: 'HEAD' })
       assert.equal(originalHead.status, 200)
+      const equivalentUrl = new URL(originalHandle)
+      equivalentUrl.pathname = equivalentUrl.pathname.replace(/%[0-9A-F]{2}/g, (escape) => escape.toLowerCase())
+      assert.equal((await fetch(equivalentUrl, { method: 'HEAD' })).status, 200)
+      const invalidNameUrl = new URL(originalHandle)
+      invalidNameUrl.pathname = invalidNameUrl.pathname.replace(/[^/]+$/, 'wrong-name.avi')
+      assert.equal((await fetch(invalidNameUrl, { method: 'HEAD' })).status, 404)
+      invalidNameUrl.pathname = invalidNameUrl.pathname.replace(/[^/]+$/, '%FF.avi')
+      assert.equal((await fetch(invalidNameUrl, { method: 'HEAD' })).status, 404)
       assert.equal(originalHead.headers.get('content-type'), 'application/octet-stream')
       assert.equal(originalHead.headers.get('content-disposition'), `inline; filename*=UTF-8''${encodeURIComponent(path.basename(file))}`)
       const originalRange = await fetch(originalHandle, { headers: { Range: 'bytes=0-7' } })
@@ -4563,103 +4570,21 @@ describe('server runtime lifecycle', () => {
     }
   })
 
-  it('authorizes migration ops with a CLI token, freezes source writes, and ignores cookies', async () => {
-    const dataDir = path.join(root, 's12-migration')
-    const { base, config } = await boot(dataDir)
+  it('does not expose offline migration operations or package upload', async () => {
+    const { base, config } = await boot(path.join(root, 'removed-offline-migration'))
     const writer = await claimInitialWriter(base, config)
-    const clip = path.join(mediaRoot, 'S12-HTTP.mp4')
-    fs.writeFileSync(clip, Buffer.from('0123456789abcdef'))
-    await insertBoundVideo('S12-HTTP', clip)
-    const rootId = (
-      getDb().prepare('SELECT id FROM media_library_roots LIMIT 1').get() as { id: number }
-    ).id
-    const cookie = (await login(base, password)).cookie
-    let issued = issueMigrationToken(config)
-    const dummyId = randomUUID()
-    const putHeaders = (extra: Record<string, string>): Record<string, string> => ({
-      Origin: base,
-      'Content-Type': 'application/octet-stream',
-      'X-Javdex-App-Version': SERVER_APP_VERSION,
-      ...extra
-    })
-    const cookiePut = await fetch(`${base}/manage/v1/migration/packages/${dummyId}`, {
-      method: 'PUT',
-      headers: putHeaders({ Cookie: cookie }),
-      body: Buffer.from('pkg')
-    })
-    assert.equal(cookiePut.status, 401)
-    const writerPut = await fetch(`${base}/manage/v1/migration/packages/${dummyId}`, {
-      method: 'PUT',
-      headers: putHeaders({ Authorization: `Bearer ${writer.secret}` }),
-      body: Buffer.from('pkg')
-    })
-    assert.equal(writerPut.status, 401)
-    const tokenPut = await fetch(`${base}/manage/v1/migration/packages/${dummyId}`, {
-      method: 'PUT',
-      headers: putHeaders({ Authorization: `Bearer ${issued.oneTimeToken}` }),
-      body: Buffer.from('pkg')
-    })
-    assert.equal(tokenPut.status, 200, await tokenPut.text())
-    const wrongMigrationPreview = await postManage(
-      base,
-      'migration.preview',
-      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
-      { bearer: issued.oneTimeToken }
-    )
-    assert.equal(wrongMigrationPreview.status, 401)
-    issued = issueMigrationToken(config)
-    const cookiePreview = await postManage(
-      base,
-      'migration.preview',
-      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
-      { cookie }
-    )
-    assert.equal(cookiePreview.status, 401)
-    const writerPreview = await postManage(
-      base,
-      'migration.preview',
-      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
-      { bearer: writer.secret }
-    )
-    assert.equal(writerPreview.status, 401)
-    const preview = await postManage(
-      base,
-      'migration.preview',
-      { input: { mappings: [{ sourceRootId: rootId, targetMountSelectionId: 'library' }] } },
-      { bearer: issued.oneTimeToken }
-    )
-    assert.equal(preview.status, 200, JSON.stringify(preview.json))
-    const body = preview.json as { migrationId: string; digest: string }
-    const started = await postManage(
-      base,
-      'migration.start',
-      { input: { migrationId: body.migrationId, digest: body.digest } },
-      { bearer: issued.oneTimeToken }
-    )
-    assert.equal(started.status, 200, JSON.stringify(started.json))
-    assert.equal((started.json as { state?: string }).state, 'succeeded')
-    const frozenEdit = await postManage(
-      base,
-      'videos.list',
-      { serverId: writer.serverId, catalogId: writer.catalogId, input: { scope: { kind: 'all' } } },
-      { bearer: writer.secret }
-    )
-    assert.equal(frozenEdit.status, 403)
-    assert.equal((frozenEdit.json as { code?: string }).code, 'CATALOG_FROZEN')
-    const remote = createRemoteCatalogBackend({
-      baseUrl: base,
-      appVersion: SERVER_APP_VERSION,
-      credentials: memoryCredentials(new Map()),
-      migrationSecret: issued.oneTimeToken
-    })
-    try {
-      const status = (await remote.migration.status({ migrationId: body.migrationId })) as {
-        phase: string
-      }
-      assert.equal(status.phase, 'frozen')
-    } finally {
-      await remote.dispose()
+    for (const operation of ['preview', 'start', 'status', 'enable', 'abandon']) {
+      const result = await postManage(base, 'migration.' + operation, { input: {} }, { bearer: writer.secret })
+      assert.equal(result.status, 404)
     }
+    const upload = await fetch(base + '/manage/v1/migration/packages/' + randomUUID(), {
+      method: 'PUT', headers: { Origin: base, Authorization: 'Bearer ' + writer.secret }, body: 'removed'
+    })
+    assert.equal(upload.status, 404)
+    const result = await postManage(base, 'videos.list', {
+      serverId: writer.serverId, catalogId: writer.catalogId, input: { scope: { kind: 'all' } }
+    }, { bearer: writer.secret })
+    assert.equal(result.status, 200)
   })
 
   it('fails an in-flight remote query with a TCP RST and reconnects on a new generation', async () => {

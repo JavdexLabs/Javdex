@@ -1,6 +1,6 @@
 # 服务端实现与合同
 
-核对基线：2026-09-23，PR #115 工作分支 / workspace `0.7.1`。本页集中维护当前架构、功能接线及合同导航；部署步骤见 [操作说明](SERVER_MODE.md)，进度与验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。
+核对基线：2026-09-27，`0.8.0-beta.3` 后的旧离线迁库移除改动。本页集中维护当前架构、功能接线及合同导航；部署步骤见 [操作说明](SERVER_MODE.md)，进度与验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。
 
 权威实现是 TypeScript，而不是本文件：
 
@@ -13,7 +13,7 @@
 
 ## 工程默认（可实测后调整，不得静默截断）
 
-限额来源：[protocol/limits.ts](../packages/contracts/src/protocol/limits.ts)。
+限额来源：[protocol/limits.ts](../packages/contracts/src/protocol/limits.ts) 与 [protocol/backup.ts](../packages/contracts/src/protocol/backup.ts)。
 
 | 限额 | 值 |
 |---|---|
@@ -26,7 +26,7 @@
 | 领取凭据 / 计划 | 10 分钟 |
 | 播放凭据 | 12 小时固定 |
 | 未消费上传 | 24 小时 |
-| 迁库授权 / 包体积 | 10 分钟 / 最大 512 MiB |
+| 备份包 / 展开内容 / 传输块 | 分别最大 64 GiB / 64 GiB / 8 MiB |
 | 秘密 | ≥32 字节系统安全随机；只存摘要 |
 
 本地 `VIDEO_LIST` 已有每页 200 条上限，与管理分页上限对齐。现有刮削批次 IPC 可带最多 10000 个 ID；远程管理改为 target list，不把该 IPC 上限搬上 HTTP。
@@ -65,7 +65,7 @@
 - [draftApplyCommit.ts](../apps/desktop/src/main/services/agentMetadata/draftApplyCommit.ts) 先保存不可变提交意图和 catalog 身份，再提交正式资料及回执，最后更新工作草稿并清理暂存资源。重试优先读取原回执，不重复更新正式版本；清理失败保留待恢复状态。
 - [draftDiscardCommit.ts](../apps/desktop/src/main/services/agentMetadata/draftDiscardCommit.ts) 同样先取得 catalog 回执再丢弃工作草稿。启动时只在同 catalog、无回执且草稿仍为原状态/版本时释放未提交意图；未知读取错误或状态不一致不能当作未提交成功处理。
 - 远程 Agent 应用不使用本地 catalog 提交协调器：桌面保存服务端预览，提交成功后才终结本地草稿并清理暂存文件。连接结果不确定时依靠服务端 operation receipt 重试同一 operationId。
-- 影片删除在 catalog 回执中保留工作草稿快照，由桌面在正式删除后清理；草稿变化或 catalog 身份不符时拒绝清理，重复恢复不误删新草稿。暂存图片清理显式读取工作仓储，迁库导出脱敏使用独立导出连接。
+- 影片删除在 catalog 回执中保留工作草稿快照，由桌面在正式删除后清理；草稿变化或 catalog 身份不符时拒绝清理，重复恢复不误删新草稿。暂存图片清理显式读取工作仓储，备份导出脱敏使用独立导出连接。
 
 这些流程是有持久回执的分步提交，不是两个 SQLite 数据库之间的原子事务。调用者不得重新建立全局表名前缀或依靠 catalog 连接读取桌面工作表。
 
@@ -92,7 +92,7 @@
 | `agentMetadata.preview` | 管理读 | 对桌面候选生成权威影响、令牌与当前版本；不持久化草稿 |
 | `agentMetadata.apply` | 管理写 | 再校验候选/预览并应用，或转入待确认；Agent runtime 留在桌面 |
 | `tasks.*` / `operations.get` / `targetLists.*` | 读或写 | 取消只到安全边界 |
-| `migration.*` | 独立迁移授权 | 启用/放弃同一决策点 |
+| `backup.control` | 当前 writer | 备份、检查、目录映射、恢复与任务记录；提交阶段不可取消 |
 
 二进制 PUT `/manage/v1/uploads/:id` 不是 JSON 用例；JSON 只允许 purpose 与 contentType。
 
@@ -129,7 +129,7 @@ IPC 去向以 inventory 及其覆盖检查为准。兼容入口不要求一对�
 | 桌面采集 | 插件、Playwright、模型和交互留在桌面；[catalogRemoteScrape.ts](../apps/desktop/src/main/services/catalogRemoteScrape.ts) 上传候选图片并提交，[catalogRemoteBatch.ts](../apps/desktop/src/main/services/catalogRemoteBatch.ts) 冻结远程批量目标 |
 | writer / 回执 | [catalogWriter.ts](../packages/library/src/catalog/catalogWriter.ts) 管身份与交接，[catalogOperations.ts](../packages/library/src/catalog/catalogOperations.ts) 管幂等回执；忙时拒绝，不排队 |
 | 图片 / 播放 | [catalogUploads.ts](../packages/library/src/catalog/catalogUploads.ts)、[catalogImageApply.ts](../packages/library/src/catalog/catalogImageApply.ts)、[catalogPlay.ts](../packages/library/src/catalog/catalogPlay.ts)；上传成功不等于正式应用，播放有独立限时凭据 |
-| 迁库 | [catalogMigration.ts](../packages/library/src/catalog/catalogMigration.ts) / [catalogMigrationState.ts](../packages/library/src/catalog/catalogMigrationState.ts)；离线包、目标空库与人工切换，不做双端许可协调 |
+| 备份与恢复 | [catalogBackup.ts](../packages/library/src/catalog/catalogBackup.ts)、[catalogBackupArchive.ts](../packages/library/src/catalog/catalogBackupArchive.ts)、[catalogBackupTransforms.ts](../packages/library/src/catalog/catalogBackupTransforms.ts)；快照、校验、路径转换与恢复保护 |
 
 ## 已接线的功能补齐（C1–C7）
 
@@ -171,7 +171,7 @@ C6 的最终语义集中如下，不再采用旧实施记录中的中间状态�
 - 首版为局域网、单 writer、无资料库同步。网页只读账号/Cookie 不授予管理、管理图片或授权播放权限；桌面主进程保存秘密。
 - 服务端使用固定挂载标记保护离线/卸载，不识别换卷，不提供已绑定挂载目录重绑；本机物理目录身份仍遵循 ADR-0024。
 - 远程不能打开服务端本机文件夹、选择桌面目录当服务端根、重绑本地根、加密图片或搬迁图片目录。正式图片为明文；无转码、无任意 URL 代理。
-- 能力按会话状态控制，见 [desktopCapabilities.ts](../apps/desktop/src/main/application/desktopCapabilities.ts)。远程可用会话开放 `manageBrowserPairing`，而本机目录、迁库等能力仍按原因禁用；有服务端接口不等于所有桌面 UI 动作均开放。冻结时不可编辑，但保留迁库能力，仍需 migration Bearer。
+- 能力按会话状态控制，见 [desktopCapabilities.ts](../apps/desktop/src/main/application/desktopCapabilities.ts)。远程可用会话开放 `manageBrowserPairing`；本机目录能力按原因禁用。维护期间不能编辑，备份任务查询和取消由任务阶段及当前 writer 授权控制。
 - 工作存储准备未完成、凭据失效、版本不符或断线，不自动回退本地权威库。桌面工具可保留可用状态，正式查询/提交仍受远程会话约束。
 - 远程正式查询、写入、图片上传/读取和备份控制/传输统一处理 `AUTH_REQUIRED` / `WRITER_REVOKED`：锁定 `authInvalid`、中止在途客户端请求并通过会话事件更新界面，后续请求不再发送旧凭据。服务端已经提交的操作不会因客户端中止而回滚；恢复授权后由用户核对结果，失败写入不自动重放。旧连接迟到的响应不能覆盖恢复后的状态。
 - 重连不能只凭公开握手报告成功；存储信息接口的认证错误必须保留，旧服务端缺少该可选接口时用 `writer.status` 校验。认证失效时提示并提供连接设置入口，首次授权与恢复授权统一在设置页处理，不在业务页面展示令牌表单。成功领取后安全保存新凭据、更新会话代次并刷新查询。一次性令牌错误只显示在授权表单，不把它误认为当前 writer 被撤销。
@@ -192,15 +192,15 @@ C6 的最终语义集中如下，不再采用旧实施记录中的中间状态�
 
 导出进度报告数据库快照、图片复制与解密、路径整理、校验和打包阶段及实际完成量；桌面显示耗时和状态读取错误。数据库结构校验忽略 SQL 排版及历史迁移造成的列顺序差异，仍比较字段约束、默认值、索引和触发器；恢复按列名复制数据。
 
-格式 1 接受同版或更旧应用生成、数据库版本 17 至 `CURRENT_SCHEMA_VERSION` 的备份。应用版本按 SemVer（含预发布顺序）比较；更高版本拒绝，无法比较的不同开发版本不猜测兼容性。先验证归档/成员校验值、实际 `user_version`、原摘要及图片引用，再在隔离解包副本上调用共享 `migrateDatabase`，包含其开发快照拦截和事务回滚。升级后校验结构、外键及图片引用，重新读取目录、数量和无来源资源数；摘要保留来源版本，任务 `upgrade` 记录升级前后数据库版本。检查阶段不替换当前库、不改原包；重试重新解包，未知包格式及旧离线迁库包不自动转换。格式 1 的未知可选顶层清单字段忽略，必需字段仍严格校验。
+格式 1 接受同版或更旧应用生成、数据库版本 17 至 `CURRENT_SCHEMA_VERSION` 的备份。应用版本按 SemVer（含预发布顺序）比较；更高版本拒绝，无法比较的不同开发版本不猜测兼容性。先验证归档/成员校验值、实际 `user_version`、原摘要及图片引用，再在隔离解包副本上调用共享 `migrateDatabase`，包含其开发快照拦截和事务回滚。升级后校验结构、外键及图片引用，重新读取目录、数量和无来源资源数；摘要保留来源版本，任务 `upgrade` 记录升级前后数据库版本。检查阶段不替换当前库、不改原包；重试重新解包，未知包格式不自动转换。格式 1 的未知可选顶层清单字段忽略，必需字段仍严格校验。
 
-- `backup.control` 是独立于 `migration.*` 的任务协议（`packages/contracts/src/protocol/backup.ts`）。`create/receive/inspect/preview/restore/status/cancel/list` 使用当前有效 writer，不使用 `migrate-auth`。即使当前资料库处于本任务维护状态，也可查询任务；来源 serverId、catalogId、writer epoch 和 secret digest 共同约束操作。完成后的同任务、同确认摘要返回原结果，不重复执行。
-- `GET/PUT /manage/v1/backups/:id?offset=` 使用鉴权流式传输；每块最多 8 MiB，上传偏移落盘，重复块须逐字节相同。总包和展开内容分别限 64 GiB，与旧迁库 512 MiB 上限无关。压缩包、展开文件均校验 SHA-256；检查可用磁盘空间及备份版本兼容性。备份摘要对照数据库目录/数量和正式图片引用验证。
+- `backup.control` 是备份恢复任务协议（`packages/contracts/src/protocol/backup.ts`）。`create/receive/inspect/preview/restore/status/cancel/list` 使用当前有效 writer，无额外迁库授权。即使当前资料库处于本任务维护状态，也可查询任务；来源 serverId、catalogId、writer epoch 和 secret digest 共同约束操作。完成后的同任务、同确认摘要返回原结果，不重复执行。
+- `GET/PUT /manage/v1/backups/:id?offset=` 使用鉴权流式传输；每块最多 8 MiB，上传偏移落盘，重复块须逐字节相同。总包和展开内容分别限 64 GiB。压缩包、展开文件均校验 SHA-256；检查可用磁盘空间及备份版本兼容性。备份摘要对照数据库目录/数量和正式图片引用验证。
 - 数据库使用 SQLite backup 一致性快照；正式图片和分类封面按引用导出，排除临时候选和孤立文件。加密图片仅在副本解密。归档无登录凭据、catalog 任务/回执、桌面工作记录；源资料库最终解除维护状态。桌面从本机直接导入使用隔离 worker 和 SQLite 写锁，不把本机数据库绑定到远程会话。
 - 覆盖前阻止未完成任务及待确认事项，暂停自动扫描/图片维护，生成并验证目标自动备份。每个任务在 `backups/operations/:id/job.json` 保存数据库之外的日志。新图片写入独立路径并同步后，单次数据库事务发布资料与图片引用；旧图片不覆盖。事务保留目标 serverId/writer credential，生成新 catalogId 和新的实体代次，撤销播放与浏览器会话。
 - 启动先恢复日志，再恢复扫描/图片维护并开放服务。通过数据库中的新 catalogId 判断事务是否已提交：已提交则完成会话衔接，未提交则保持旧库并记录中断。任务记录不随数据库覆盖丢失。桌面以原凭据索引恢复查询，在验证任务完成后将当前凭据衔接至新 catalogId。
 - `backups/` 中的自动备份不自动清理，桌面允许下载。配置、挂载和认主关系属于目标宿主，不从来源包导入；自动扫描按恢复后配置及有效路径运行。原始视频始终不包含在备份，也不由恢复复制或删除。
-- 验证入口：`catalogBackup.test.ts`、原离线迁库回归、`node scripts/backup-docker-smoke.mjs`。Docker 检查要求先构建 `out/server` 及 `javdex-server:backup-verification` 镜像，使用唯一测试容器/卷，不复用本地自测资料卷。另需先构建桌面导出 worker；该检查覆盖本机加密图片导出、Windows/Linux 来源路径至 Docker 子目录映射。进程退出回归覆盖自动备份、图片暂存、数据库提交前和提交后四个阶段。合成验证不等于实际用户库的容量和耗时测量。
+- 验证入口：`catalogBackup.test.ts`、`catalogBackupArchive.test.ts`、`npm run server:smoke:backup`。Docker 检查要求先构建 `out/server` 及 `javdex-server:backup-verification` 镜像，使用唯一测试容器/卷，不复用本地自测资料卷。另需先构建桌面导出 worker；该检查覆盖本机加密图片导出、Windows/Linux 来源路径至 Docker 子目录映射。进程退出回归覆盖自动备份、图片暂存、数据库提交前和提交后四个阶段。合成验证不等于实际用户库的容量和耗时测量。
 
 ### NFO 导出预览的版本约定
 

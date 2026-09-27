@@ -1,6 +1,6 @@
 services:
   javdex:
-    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the desktop version, for example 0.8.0-beta.1}
+    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the desktop version, for example 0.8.0-beta.3}
     restart: unless-stopped
     ports:
       - "8096:8096"
@@ -8,7 +8,9 @@ services:
       JAVDEX_WEB_PASSWORD: "replace-with-a-long-password"
     volumes:
       - javdex-data:/data
-      - /absolute/path/to/media:/media
+      # 媒体库目录必须可读写；宿主机/NAS 权限也需允许容器内 node 用户读写。
+      # 添加来源需写入 .javdex-root 标记，不要将媒体卷改为 :ro。
+      - /absolute/path/to/media:/media:rw
       - ./javdex-server.example.json:/config/server.json:ro
     command: ["start", "--config", "/config/server.json"]
 

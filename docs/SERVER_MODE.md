@@ -1,8 +1,8 @@
-# 服务端模式：部署、认主与迁库
+# 服务端模式：部署、认主与备份恢复
 
 本页维护当前部署与操作方式。实现、合同和功能边界见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，进度与验证结果见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。桌面日常操作见 [使用指南](USER_GUIDE.md)，只读网页见 [LAN Web](LAN_WEB.md)。
 
-本页按 **0.8.0-beta.1** 说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0-beta.1` 必须成对使用，不要把 0.7.1 安装包接到本版服务端。Beta 不代表全部部署环境已完成验收，首次试用建议使用独立测试资料库。
+本页按 **0.8.0-beta.3** 说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0-beta.3` 必须成对使用，不要把 0.7.1 安装包接到本版服务端。Beta 不代表全部部署环境已完成验收，首次试用建议使用独立测试资料库。
 
 ## 服务端能做什么
 
@@ -13,19 +13,19 @@
 
 ## Docker Compose 快速开始
 
-正式发布流程提供 `ghcr.io/javdexlabs/javdex-server` 镜像，支持 Linux amd64 和 arm64，Docker 会自动选择对应架构。用户只需要 Docker 与 Compose 插件，无需 Node.js、npm 或编译源码。`0.8.0-beta.1` 镜像随该预发布条目一起提供，不会更新 `latest`。首次试用建议新建独立资料库。
+正式发布流程提供 `ghcr.io/javdexlabs/javdex-server` 镜像，支持 Linux amd64 和 arm64，Docker 会自动选择对应架构。用户只需要 Docker 与 Compose 插件，无需 Node.js、npm 或编译源码。`0.8.0-beta.3` 镜像随该预发布条目一起提供，不会更新 `latest`。首次试用建议新建独立资料库。
 
 1. 从所选 Release 下载 `docker-compose.example.yml` 和 `javdex-server.example.json`，放在同一个目录。在该目录创建 `.env`，填写与桌面安装包一致的版本号（不含 `v`）：
 
    ```dotenv
-   JAVDEX_VERSION=0.8.0-beta.1
+   JAVDEX_VERSION=0.8.0-beta.3
    ```
 
 2. 编辑 [Compose 示例](../deploy/docker-compose.example.yml) 和 [服务配置](../deploy/javdex-server.example.json)：
    - 将 `JAVDEX_WEB_PASSWORD` 替换为独立的 12–128 字符密码。
    - 将 `/absolute/path/to/media` 替换为 NAS 上真实媒体目录；这是宿主机路径，容器内统一使用 `/media`。
    - 将 `accessHosts` 中的 `192.168.1.10` 替换为其他设备实际访问的 NAS IP 或主机名，不填写 `http://` 或端口。
-   - 示例媒体挂载为可写。添加来源目录时服务会写入 `.javdex-root` 标记；重命名媒体文件与写出 NFO 也需要写权限。容器内 `node` 用户必须拥有对应目录的读写权限。
+   - **服务端媒体库目录必须具备读写权限**。媒体卷使用 `:rw` 挂载，并确保宿主机/NAS 的文件权限允许容器内 `node` 用户读写所选目录及其内容；具体要求见下文[媒体目录权限](#媒体目录权限)。
    - `/data` 使用持久数据卷，数据库与图片都保存在其中；不要将 SQLite 数据卷放在 SMB/NFS 共享上。
 
 3. 在配置文件所在目录拉取并启动，再查看启动日志：
@@ -57,12 +57,13 @@
 | 连接超时 | 容器是否运行、端口是否映射、防火墙是否允许同网设备访问 |
 | 提示尚未认主 | 是否已在桌面领取写入凭据；网页登录不能代替认主 |
 | 桌面提示版本不符 | 桌面安装包与服务端是否来自同一源码版本 |
-| 扫描找不到文件或权限不足 | 宿主机挂载路径、挂载名称及容器用户对所选目录的读写权限 |
+| 添加目录、扫描或导出提示权限不足 | 媒体卷是否为 `:rw`，宿主机/NAS 权限是否允许服务进程读写所选目录及其子目录；详见[媒体目录权限](#媒体目录权限) |
+| 扫描找不到文件 | 宿主机挂载路径、挂载名称及服务进程是否能访问实际文件 |
 | 能浏览但不能播放 | 浏览器是否支持视频编码；当前不转码，可下载后用本地播放器打开 |
 
 ## 网络与凭据边界
 
-首版管理接口和网页面向可信局域网。应用本身不终止 TLS；跨不可信网络访问时，应由部署者在受控反向代理或私有网络入口终止 HTTPS，并限制来源。writer、migration Bearer、网页登录 Cookie 和播放 grant 都应按凭据处理，不写入日志或分享链接。
+首版管理接口和网页面向可信局域网。应用本身不终止 TLS；跨不可信网络访问时，应由部署者在受控反向代理或私有网络入口终止 HTTPS，并限制来源。writer、网页登录 Cookie 和播放 grant 都应按凭据处理，不写入日志或分享链接。
 
 `play.grant` 生成的资源地址固定有效 12 小时，持有者在期限内可读取对应资源。它是能力链接，不是永久媒体地址；不要转发到群聊、公开播放器列表或外部索引。需要立即收回时应撤销相关访问条件或停止服务，不能只等待网页退出。
 
@@ -72,12 +73,20 @@
 
 ## 存储与进程
 
-- `dataDir`：绝对路径，存放 `library.db`、任务与迁库暂存。不要与 `imagesDir` 设成同一目录。
+- `dataDir`：绝对路径，存放 `library.db`、任务、备份与恢复暂存。不要与 `imagesDir` 设成同一目录。
 - `imagesDir`：正式图片目录（默认 `{dataDir}/media_assets`）。
 - 桌面远程模式下，“存储与导出 → 图片资源”只读显示服务端当前目录。更改 `imagesDir` 前先迁移现有图片并备份，随后重启服务；切换桌面模式不会移动或覆盖本机图片。
-- `mediaMounts`：配置文件中的挂载名 → 绝对目录。扫描与 NFO 只使用这些目录。添加来源时需写入 `.javdex-root` 标记，示例媒体卷因此使用读写挂载。
+- `mediaMounts`：配置文件中的挂载名 → 绝对目录。扫描与 NFO 只使用这些目录。媒体库来源目录必须满足下述读写权限要求。
 - 以专用 UID/GID 运行进程；数据目录与挂载应对该用户可读写。不要用桌面用户数据目录充当服务 `dataDir`。
 - 同一 `dataDir` 同时只允许一个宿主进程。
+
+### 媒体目录权限
+
+**服务端媒体库的来源目录必须允许服务进程读写，包括实际使用的子目录及文件。** 即使只计划扫描和播放，首次添加来源目录也需要创建 `.javdex-root` 标记；重命名媒体文件、导出 NFO 和配套图片还会写入媒体目录。部署时不要将媒体库来源配置为只读目录。
+
+- **Docker 挂载权限**：媒体卷使用读写挂载（示例为 `/absolute/path/to/media:/media:rw`），不能设为 `:ro` 或 `read_only: true`。配置文件 `/config/server.json` 的只读挂载可以保留。
+- **宿主机文件权限**：读写挂载不会自动授予文件系统权限。还需在宿主机或 NAS 上，让服务进程的 UID/GID 拥有所选目录及其内容的读写权限；官方镜像默认以 `node` 用户运行。Linux 目录还需要进入/遍历权限（`x`），上级目录也必须可遍历；网络共享需同时检查共享权限和 ACL。
+- **分别检查数据与媒体目录**：`/data` 可写并不代表 `/media` 可写。使用挂载下的子目录创建媒体库或恢复目录映射时，也需检查该子目录的权限。
 
 ## 开发者源码构建与配置
 
@@ -90,7 +99,7 @@ npm run server:build
 
 产物为 `out/server`，包含网页和服务端入口。独立部署时在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动；不需要 Electron rebuild。仓库的 Dockerfile 只打包已经生成的 `out/server`，因此 源码方式的 `docker build` 和 `npm run server:smoke` 前必须先运行 `npm run server:build`；烟测会在产物不完整时直接报错。镜像内以 `node` 用户运行，不会替你生成配置或挂载媒体目录。若 Docker 构建环境无法访问默认 npm 源，可在运行容器烟测前设置 `JAVDEX_SMOKE_NPM_REGISTRY`，脚本会将其传给 Dockerfile 的 `NPM_CONFIG_REGISTRY` 构建参数。
 
-`server:smoke` 在 Windows Docker Desktop 上使用 Docker 数据卷保存 SQLite；`server:smoke:migration` 的双宿主故障注入需要 Linux 宿主文件系统，在 PR 的 Linux CI 或 Linux 开发环境运行。
+`server:smoke` 在 Windows Docker Desktop 上使用 Docker 数据卷保存 SQLite；`server:smoke:backup` 使用独立测试容器和卷验证双向备份恢复及桌面本机导入，不覆盖已有资料。后者还需桌面导出 worker 和测试镜像，构建步骤见 [开发说明](DEVELOPMENT.md)。
 
 配置示例（目录及地址替换为服务机器实际值）：
 
@@ -118,36 +127,33 @@ npm run server:build
 javdex-server start --config /etc/javdex/server.json
 javdex-server bind --config /etc/javdex/server.json
 javdex-server recover --config /etc/javdex/server.json
-javdex-server migrate-auth --config /etc/javdex/server.json
 ```
 
 `bind` 在尚未认主时签发一次性令牌；桌面用该令牌领取 writer，秘密只存在本机安全存储。`recover` 在丢失 writer 秘密后签发恢复令牌。`JAVDEX_BOOTSTRAP_TOKEN` 仅用于首次启动写入引导令牌，不是 occupancy 文件。网页账号使用 `web.passwordHash` 或环境变量 `JAVDEX_WEB_PASSWORD`；Cookie 不能调用管理接口。
 
 交接/恢复领取遇到扫描、维护任务或未完成的文件操作时返回 `MAINTENANCE_BUSY`。请求不排队、不占用交接资格，也不消耗一次性令牌；操作者应完成或取消任务后重试（令牌过期需重新签发）。原 writer 在交接成功前保持有效，新维护任务不会因一次失败的交接而被禁止。成功领取仍是原子操作，同一成功 claim 的重试不增加写入代次。`writer.status.maintenanceBusy` 表示当前有维护任务，不表示有人排队。
 
-桌面在“此电脑”中选择远程地址后重启生效。远程模式只使用桌面设置、凭据与 `desktop-work.db`，不打开原 `library.db`。工作记录未复制完成时拒绝远程启动。
+桌面在“设置 → 存储与导出 → 资料库连接”选择远程地址后重启生效。远程模式只使用桌面设置、凭据与 `desktop-work.db`，不打开原 `library.db`。工作记录未复制完成时拒绝远程启动。
 
-## 迁库
+## 备份、恢复与本机导入
 
-迁库采用离线包和人工切换，不做双端协调；本地→服务端及服务端→本地均保留。目标必须是未认主的空资料库；仅有清单、标签或分类资料也不算空库。视频文件不复制，只按挂载映射改写定位。CLI `migrate-auth` 签发独立 migration Bearer（不是 writer）。新令牌须在 10 分钟内确定迁移编号；绑定后可继续用于该迁移的操作和丢响应恢复，最多有效 7 天，不能用于下一笔迁移。需要继续操作、开始新迁移、令牌丢失或怀疑泄露时，在对应服务机器上再次运行 `migrate-auth`；旧令牌随即不能发起新请求。升级前已领取的无期限恢复凭据按原签发时间计算 7 天，过期需重新签发。源端和目标端分别签发，不共用令牌。
+统一在桌面“设置 → 存储与导出 → 备份与恢复”操作。远程资料库须先连接并领取有效写入授权；支持已认主的空库或非空库，不需要额外迁库令牌。
 
-1. 在源端 `migration.preview` 确认映射和预检，调用 `migration.start` 冻结写入并导出包。完成后停止使用源库，保留其数据库与正式图片作为冻结备份。
-2. 人工复制 `{dataDir}/migration-packages/{migrationId}.tar.gz` 到目标，或使用迁移凭据上传到 `PUT /manage/v1/migration/packages/:migrationId`；随后在目标调用 `migration.start` 校验并暂存。源端此时可以完全离线，无需网络可达或签发启用许可。
-3. 确认源库已停用，在目标调用 `migration.enable`，输入除 `migrationId` / `digest` 外必须包含 `confirmSourceStopped: true`。启用生成新的 catalogId；操作者重新认主并人工切换桌面连接，不自动切换或回退。
+- **创建备份**：备份当前本地或服务端资料库，保存到这台电脑。也可把文件带到另一台电脑后恢复。
+- **从备份恢复**：选择备份，按向导对应目标资源目录并核对覆盖影响；执行前自动备份目标，再替换正式资料与图片。目标服务配置、挂载配置和认主关系保留。
+- **从本机资料库导入**：在远程模式中由桌面隔离导出本机资料，再上传并恢复到服务端。来源资料库保留且可独立使用，两份资料不自动同步。
 
-`migration.status` 只返回本端的 `role`（source/target）、`phase` 和摘要，不再返回推测的 `sourcePhase` / `targetPhase`；`migration.allowEnable` 已移除。目标 `enable` 与 `abandon` 仍是互斥本端终态，重复启用只回放结果。导出期间或目标暂存未处理时不能开始另一迁移。
+原始视频不会打包或上传；服务端资源需位于配置的挂载目录内。备份包含正式资料、图片、清单和评分，不包含登录凭据、插件/模型配置及桌面工作记录。加密图片只在备份副本中解密，备份文件不加密。压缩包和展开内容分别上限 64 GiB，传输分块为 8 MiB，支持断点续传。
 
-放弃目标暂存可在目标调用 `migration.abandon`。恢复已冻结的源库则必须先停用目标，并在源端调用 `migration.abandon` 时传 `confirmTargetStopped: true`。这些确认是操作者声明，不是跨端验证。目标已产生的新数据不会自动回流旧库；不能把恢复旧库当作无损回退，也不能同时写入两个副本。
+恢复前会处理目录映射、缺失资源与自动保护备份；提交阶段不可取消。操作失败或连接中断时，在操作记录中检查原任务并按提示继续，避免重复发起恢复。详细范围与流程见 [使用指南](USER_GUIDE.md#备份与恢复)。
 
-源端加密图片在导出时自动解密到迁移包（明文进目标）；解密使用当前 LibraryHost 机器密钥及源图片路径别名，不改源正式图。图片校验、路径映射和导入失败保护保留；孤立 `uploads/` 不会成为目标封面。丢响应后查询本端 `migration.status`，不要猜测启用结果。旧版双端状态会按本端角色读取，旧源启用许可只解释为源仍冻结，不自动解冻。
-
-当前桌面远程会话不开放 `migrateCatalog` 按钮，因为桌面尚未提供 migration Bearer 的安全输入和保存流程。服务端 HTTP migration 与 CLI `migrate-auth` 仍可由部署操作者使用；该流程不打开桌面本机 `library.db`。
+旧离线迁库尚未正式发布，现已移除其 CLI、管理接口及专用包格式；不提供旧包或旧任务兼容入口。
 
 ## 更新与恢复限制
 
 更新前正常停止服务，完整备份 `dataDir`、`imagesDir` 及部署配置，桌面数据目录也需单独备份。将 `.env` 中的 `JAVDEX_VERSION` 改为新版本，执行上面的 `pull` 和 `up -d`；桌面安装包同时升级到相同版本。保留原数据卷，不要执行 `docker compose down -v`。
 
-Beta 首次启动可能升级数据库。当前 schema 为 19，不应将升级后的库交给旧版应用；回退需恢复升级前完整备份及匹配版本，不可手工降低数据库版本。服务端备份不包含桌面采集草稿和运行记录，后者在桌面 `desktop-work.db` 中。冻结中的源库不能领取写入凭据。
+Beta 首次启动可能升级数据库。当前 schema 为 19，不应将升级后的库交给旧版应用；回退需恢复升级前完整备份及匹配版本，不可手工降低数据库版本。服务端备份不包含桌面采集草稿和运行记录，后者在桌面 `desktop-work.db` 中。资料库维护期间不能领取写入凭据。
 
 ## 功能与使用边界
 

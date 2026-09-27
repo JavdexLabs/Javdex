@@ -54,8 +54,14 @@ export async function handlePlayHttpRequest(
     if (isStructuredError(error)) throw new WebError(404, '播放凭据无效或已过期')
     throw error
   }
-  if (match[2] && match[2] !== encodeURIComponent(inspected.fileName)) {
-    throw new WebError(404, '播放凭据无效或已过期')
+  if (match[2]) {
+    let fileName: string
+    try {
+      fileName = decodeURIComponent(match[2])
+    } catch {
+      throw new WebError(404, '播放凭据无效或已过期')
+    }
+    if (fileName !== inspected.fileName) throw new WebError(404, '播放凭据无效或已过期')
   }
   response.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(inspected.fileName).replace(/'/g, '%27')}`)
   trackStream(inspected.grant.grantId, response)

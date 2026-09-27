@@ -118,7 +118,7 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     }
     const activeRouter = createMemoryRouter([{ path: '*', element: (
       <DesktopSessionContext.Provider value={{
-        session, capabilities: { migrateCatalog: { allowed: false } } as never,
+        session, capabilities: {} as never,
         catalogReadsEnabled: true, reconnect: async () => undefined,
         claimWriter: async () => { throw new Error('not used') }
       }}>

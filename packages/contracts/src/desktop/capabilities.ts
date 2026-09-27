@@ -33,7 +33,6 @@ export const DESKTOP_CAPABILITY_ACTIONS = [
   'openExternalLink',
   'manageBrowserPairing',
   'editCatalog',
-  'migrateCatalog'
 ] as const
 
 export type DesktopCapabilityAction = (typeof DESKTOP_CAPABILITY_ACTIONS)[number]

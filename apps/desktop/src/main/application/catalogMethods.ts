@@ -222,14 +222,6 @@ export const CATALOG_METHODS = {
     grantPlayback: true,
     readImage: true,
   },
-  migration: {
-    preview: true,
-    start: true,
-    status: true,
-    enable: true,
-    abandon: true,
-    putPackage: true,
-  },
 } as const satisfies {
   [S in CatalogMethodSlice]: {
     [M in keyof CatalogBackend[S]]: true

@@ -12,7 +12,7 @@ status: accepted
 
 ## 与 [ADR-0027](0027-isolate-read-only-lan-web-access.md)
 
-浏览器只读合同保持：网页仍不能调用桌面 IPC，Cookie 不能授权管理 HTTP、播放授权 GET 或管理图片 GET。服务端新增独立凭据的管理 HTTP 与播放授权，由桌面主进程持有 writer / migration secret，renderer 不得持有。局域网浏览仍走既有只读账号与配对；管理面与浏览面分离。服务端第一版明文图片、无转码、无任意 URL 代理。
+浏览器只读合同保持：网页仍不能调用桌面 IPC，Cookie 不能授权管理 HTTP、播放授权 GET 或管理图片 GET。服务端新增独立凭据的管理 HTTP 与播放授权，由桌面主进程持有 writer secret，renderer 不得持有。局域网浏览仍走既有只读账号与配对；管理面与浏览面分离。服务端第一版明文图片、无转码、无任意 URL 代理。
 
 ## 桌面双模式
 

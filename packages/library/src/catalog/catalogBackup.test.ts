@@ -5,10 +5,10 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, test } from 'node:test'
 import { backupControl, backupFile, beginBackupDownload, writeBackupChunk, recoverBackupOperations, type BackupHost } from './catalogBackup'
-import { openIsolatedCatalog } from './catalogMigration'
+import { openIsolatedCatalog } from '@library/catalog/catalogSnapshot'
 import { ensureCatalogIdentity, readCatalogIdentity } from './catalogIdentity'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
-import { sha256File, unpackMigrationArchive, packMigrationArchive } from './catalogMigrationArchive'
+import { sha256File, unpackBackupArchive, packBackupArchive } from './catalogBackupArchive'
 import { BACKUP_CHUNK_BYTES, type BackupJob } from '@shared/protocol/backup'
 import { authenticateWriter, issueOneTimeToken, claimWriter } from './catalogWriter'
 import { configureLibraryHost } from '@library/runtime/host'
@@ -88,7 +88,7 @@ async function received(target: ReturnType<typeof fixture>, file: string) {
 // Synthetic format-1 historical fixtures: remove the exact structures added by V18/V19.
 async function historicalBackup(source: ReturnType<typeof fixture>, version: number, edit?: (db: Database.Database, manifest: Record<string, unknown>) => void) {
   const { file } = await exported(source)
-  const dir = path.join(source.dir, randomUUID()); const members = await unpackMigrationArchive(file, dir)
+  const dir = path.join(source.dir, randomUUID()); const members = await unpackBackupArchive(file, dir)
   const manifestFile = path.join(dir, 'manifest.json')
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'))
   const databaseFile = path.join(dir, 'catalog/library.db'); const db = new Database(databaseFile)
@@ -116,7 +116,7 @@ async function historicalBackup(source: ReturnType<typeof fixture>, version: num
   databaseEntry.bytes = fs.statSync(databaseFile).size; databaseEntry.sha256 = sha256File(databaseFile)
   fs.writeFileSync(manifestFile, JSON.stringify(manifest))
   const output = path.join(source.dir, `${randomUUID()}.backup`)
-  await packMigrationArchive(members.files.map(name => ({ name, absPath: path.join(dir, name) })), output)
+  await packBackupArchive(members.files.map(name => ({ name, absPath: path.join(dir, name) })), output)
   return output
 }
 
@@ -259,7 +259,9 @@ test('mapping handles Chinese/space paths, missing resources, and duplicate targ
   assert.equal(preview.missingResources, 1)
   assert.equal(preview.removedResources, 0)
   target.request({ action: 'restore', id, digest: preview.digest }); await wait(target, id, 'completed')
-  assert.equal((target.db.prepare('SELECT locator FROM video_resources').get() as { locator: string }).locator, path.join(dir, '电影.avi'))
+  // Mapping canonicalizes the existing directory, including Windows 8.3 aliases.
+  // The missing resource itself cannot be passed to realpath.
+  assert.equal((target.db.prepare('SELECT locator FROM video_resources').get() as { locator: string }).locator, path.join(fs.realpathSync.native(dir), '电影.avi'))
 })
 
 test('encrypted official images and classification covers export in plaintext without changing source files', async () => {
@@ -284,12 +286,12 @@ test('encrypted official images and classification covers export in plaintext wi
 test('tampered manifest is rejected and target remains writable', async () => {
   const source = fixture(); const target = fixture()
   const { file } = await exported(source)
-  const unpack = path.join(source.dir, 'tamper'); const members = await unpackMigrationArchive(file, unpack)
+  const unpack = path.join(source.dir, 'tamper'); const members = await unpackBackupArchive(file, unpack)
   const manifestPath = path.join(unpack, 'manifest.json')
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); manifest.counts.videos = 999
   fs.writeFileSync(manifestPath, JSON.stringify(manifest))
   const tampered = path.join(source.dir, 'tampered.backup')
-  await packMigrationArchive(members.files.map(name => ({ name, absPath: path.join(unpack, name) })), tampered)
+  await packBackupArchive(members.files.map(name => ({ name, absPath: path.join(unpack, name) })), tampered)
   await assert.rejects(() => received(target, tampered), /摘要/)
   assert.equal(readCatalogIdentity(target.db)?.frozen, false)
 })

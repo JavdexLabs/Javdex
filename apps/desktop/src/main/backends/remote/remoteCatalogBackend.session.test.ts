@@ -186,3 +186,16 @@ it('one rejected credential aborts another active request without repeating stat
     assert.deepEqual(states, ['authInvalid'])
   } finally { await f.close() }
 })
+
+it('does not send a query when its caller already cancelled it', async () => {
+  const f = await authFixture()
+  try {
+    await f.backend.reconnect()
+    const before = [...f.calls]
+    const controller = new AbortController()
+    controller.abort()
+    await assert.rejects(f.backend.queries.overviewStats({}, { signal: controller.signal }))
+    assert.deepEqual(f.calls, before)
+    assert.equal(f.backend.session().state, 'available')
+  } finally { await f.close() }
+})

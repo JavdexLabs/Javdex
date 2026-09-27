@@ -62,7 +62,6 @@ export function createUnconfiguredRemoteBackend(
     pendingVideoScrapes: rejectingCatalogSlice('pendingVideoScrapes', rejectUnconfigured),
     agentMetadata: rejectingCatalogSlice('agentMetadata', rejectUnconfigured),
     assets: rejectingCatalogSlice('assets', rejectUnconfigured),
-    migration: rejectingCatalogSlice('migration', rejectUnconfigured),
     async dispose(): Promise<void> {
       return
     }

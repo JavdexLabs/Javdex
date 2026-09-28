@@ -1,4 +1,6 @@
 import { getDb } from './database'
+import { DEFAULT_EXTERNAL_RATING_SQL } from './externalRatingSql'
+import { ensureDefaultExternalRating } from './externalRatings'
 import type Database from 'better-sqlite3'
 import {
   VIDEO_FIELD_UPDATE_KEYS,
@@ -36,7 +38,7 @@ import {
 import { normalizeVideoCode } from '@shared/videoCode'
 import { buildStrmResourceKey } from '@library/strmResource'
 import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
-import { ensureVideoMembership, removeVideoMembership } from './libraryMembershipRepo'
+import { ensureVideoMembership, removeVideoMembership, pruneEmptyVideoMembership } from './libraryMembershipRepo'
 import { MediaLibraryRepoError } from './mediaLibraryRepo'
 import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
@@ -1222,7 +1224,7 @@ export function getVideoDetail(
     .prepare(
       `SELECT * FROM video_external_stats
        WHERE video_id = ?
-       ORDER BY fetched_at DESC, source ASC`
+       ORDER BY is_default DESC, fetched_at DESC, source ASC`
     )
     .all(id) as StoredVideoDetail['external_stats']
 
@@ -1411,6 +1413,10 @@ const SORT_COLUMNS: Record<string, string> = {
 
 function buildVideoListOrderBy(sortBy: string | undefined, sortDir: 'ASC' | 'DESC'): string {
   const key = sortBy ?? 'add_time'
+  if (key === 'external_rating') {
+    const score = DEFAULT_EXTERNAL_RATING_SQL
+    return `${score} IS NULL ASC, ${score} ${sortDir}, v.add_time DESC, v.id ASC`
+  }
   if (key === 'release_date') {
     return `(v.release_date IS NULL OR trim(v.release_date) = '') ASC, v.release_date ${sortDir}, v.add_time DESC`
   }
@@ -1673,6 +1679,20 @@ export function editVideoRecord(
   const txn = db.transaction(() => {
     const assignments: string[] = []
     const bind: Record<string, unknown> = { id }
+    if (input.externalRatings) {
+      const { deletedSources, defaultSource } = input.externalRatings
+      for (const source of deletedSources) {
+        db.prepare('DELETE FROM video_external_stats WHERE video_id = ? AND source = ?').run(id, source)
+      }
+      if (defaultSource !== null && !db.prepare(
+        'SELECT id FROM video_external_stats WHERE video_id = ? AND source = ? AND rating_average IS NOT NULL'
+      ).get(id, defaultSource)) {
+        throw new Error('默认外部评分不存在，请重新选择')
+      }
+      db.prepare('UPDATE video_external_stats SET is_default = CASE WHEN source = ? THEN 1 ELSE 0 END WHERE video_id = ?')
+        .run(defaultSource, id)
+      ensureDefaultExternalRating(db, id)
+    }
     for (const key of scalarKeys) {
       if (key in input && input[key] !== undefined) {
         assignments.push(`${key} = @${key}`)
@@ -1925,6 +1945,7 @@ export function mergeVideoRecords(
        FROM video_external_stats WHERE video_id = ? AND 1
        ON CONFLICT(video_id, source) DO NOTHING`
     ).run(retained.id, source.id)
+    ensureDefaultExternalRating(db, retained.id)
 
     writeRelatedLinks(
       db,
@@ -2087,6 +2108,7 @@ export function splitVideoResourceRecord(
       `UPDATE video_resources SET video_id = ?, is_primary = 1
        WHERE id = ? AND library_id = ?`
     ).run(createdVideoId, resourceId, libraryId)
+    pruneEmptyVideoMembership(libraryId, videoId, db)
     return { videoId: createdVideoId, resourceId }
   })()
 }

@@ -80,7 +80,7 @@ function bulk(key: string): void {
 }
 afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); failList = false })
 
-test('actual Library selection survives window eviction and both bulk commands use original revisions', async () => {
+test('actual Library selection survives window eviction and bulk deletion uses original revisions and manual removal is absent', async () => {
   await mount()
   await wait(() => renderer!.root.findAllByType(Grid).length === 1)
   act(() => grid().props.onToggleSelect(rows[0], 0))
@@ -91,7 +91,9 @@ test('actual Library selection survives window eviction and both bulk commands u
   assert.ok(!grid().props.videos.some((video: { id: number }) => video.id === 1))
   assert.deepEqual([...grid().props.selectedIds], [1])
   act(() => grid().props.onToggleSelect(rows[600], 600))
-  act(() => bulk('remove'))
+  assert.equal(grid().props.onRemoveFromLibrary, undefined)
+  assert.ok(!renderer!.root.findByType(SelectionToolbar).props.actions.some((action: { key: string }) => action.key === 'remove'))
+  act(() => bulk('delete'))
   await wait(() => !modal().props.confirmDisabled)
   assert.deepEqual(previews.sort((a, b) => a - b), [1, 601])
   await act(async () => modal().props.onConfirm())

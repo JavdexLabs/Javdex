@@ -1,3 +1,4 @@
+import { pruneEmptyVideoMembership } from './libraryMembershipRepo'
 import { AgentMetadataDraftRepo, type AgentDraftLifecycleSnapshot } from './agentMetadataDraftRepo'
 import { readCatalogIdentity } from '../catalog/catalogIdentity'
 import { createHash } from 'node:crypto'
@@ -236,12 +237,6 @@ function baseImpactDetails(input: {
     pendingAgentDraftCount: 0,
     pendingStagingAssetCount: 0,
     sourceFilesPreserved: true
-  }
-}
-
-function assertVideo(database: Database.Database, videoId: number): void {
-  if (!database.prepare('SELECT 1 FROM videos WHERE id = ?').get(videoId)) {
-    throw new Error('影片不存在')
   }
 }
 
@@ -487,46 +482,9 @@ export function createVideoLifecycleRepo(
 ): VideoLifecycleRepo {
   const { isLocalAccessible } = dependencies
   const drafts = dependencies.workDrafts ?? new AgentMetadataDraftRepo(() => database)
-  const previewRemoveFromLibrary = (
-    libraryIdRaw: number,
-    videoIdRaw: number
-  ): VideoLifecycleImpact => {
-    const libraryId = requireId(libraryIdRaw, '媒体库 ID')
-    const videoId = requireId(videoIdRaw, '影片 ID')
-    assertVideo(database, videoId)
-    const memberships = listMemberships(database, videoId)
-    const sourceMembership = memberships.find((row) => row.library_id === libraryId)
-    if (!sourceMembership) {
-      throw new Error('影片不属于当前媒体库')
-    }
-    assertWritableMembership(sourceMembership)
-    const resources = listResources(database, videoId)
-    const affected = resources.filter((resource) => resource.library_id === libraryId)
-    const affectedMemberships = memberships.filter((row) => row.library_id === libraryId)
-    const remainingLibraryIds = memberships
-      .map((row) => row.library_id)
-      .filter((id) => id !== libraryId)
-    const counts = relationCounts(database, videoId)
-    return {
-      kind: 'remove-from-library',
-      revision: buildRevision({
-        kind: 'remove-from-library',
-        videoId,
-        sourceLibraryId: libraryId,
-        targetLibraryId: null,
-        memberships,
-        resources
-      }),
-      videoId,
-      sourceLibraryId: libraryId,
-      targetLibraryId: null,
-      resourceIds: affected.map((resource) => resource.id),
-      sourcePaths: sourcePaths(affected),
-      remainingLibraryIds,
-      removesCanonicalVideo: false,
-      ...counts,
-      ...baseImpactDetails({ memberships: affectedMemberships, resources: affected })
-    }
+  // Retired command: reject older clients rather than silently removing an affiliation.
+  const previewRemoveFromLibrary = (): VideoLifecycleImpact => {
+    throw new Error('手动移出媒体库已停用；无资源的多库归属会自动清理')
   }
 
   const previewMoveResource = (
@@ -598,38 +556,8 @@ export function createVideoLifecycleRepo(
 
   return {
     previewRemoveFromLibrary,
-    removeFromLibrary(input): VideoLifecycleResult {
-      const operationId = requireOperationId(input.operationId)
-      const inputHash = operationInputHash('remove-from-library', {
-        libraryId: input.libraryId,
-        videoId: input.videoId,
-        expectedRevision: input.expectedRevision
-      })
-      return database.transaction(() => {
-        const replay = replayOrThrow(database, operationId, inputHash)
-        if (replay) return replay
-        const preview = previewRemoveFromLibrary(input.libraryId, input.videoId)
-        if (preview.revision !== input.expectedRevision) {
-          throw new VideoLifecycleRepoError('REVISION_CONFLICT', '生命周期预览已过期')
-        }
-        database
-          .prepare(
-            'DELETE FROM library_video_memberships WHERE library_id = ? AND video_id = ?'
-          )
-          .run(input.libraryId, input.videoId)
-        const result: VideoLifecycleResult = {
-          operationId,
-          kind: 'remove-from-library',
-          videoId: input.videoId,
-          sourceLibraryId: input.libraryId,
-          targetLibraryId: null,
-          resourceIds: preview.resourceIds,
-          promotedResourceId: null,
-          canonicalVideoDeleted: false
-        }
-        recordResult(database, operationId, result.kind, inputHash, result)
-        return result
-      }).immediate()
+    removeFromLibrary(): VideoLifecycleResult {
+      throw new Error('手动移出媒体库已停用；无资源的多库归属会自动清理')
     },
     previewMoveResource,
     moveResource(input): VideoLifecycleResult {
@@ -699,9 +627,11 @@ export function createVideoLifecycleRepo(
             promotedResourceId = candidate.id
           }
         }
+        const sourceMembershipRemoved = pruneEmptyVideoMembership(input.sourceLibraryId, resource.video_id, database)
         const result: VideoLifecycleResult = {
           operationId,
           kind: 'move-resource',
+          sourceMembershipRemoved,
           videoId: resource.video_id,
           sourceLibraryId: input.sourceLibraryId,
           targetLibraryId: input.targetLibraryId,

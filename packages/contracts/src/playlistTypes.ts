@@ -35,6 +35,7 @@ export interface PlaylistCreateInput {
 }
 
 export interface PlaylistUpdateInput extends PlaylistCreateInput {
+  removeAfterPlay?: boolean
   /** Remove the custom playlist cover and fall back to the first video cover. */
   removeCover?: boolean
 }

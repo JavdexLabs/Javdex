@@ -1,0 +1,76 @@
+.list {
+  display: grid;
+  gap: var(--form-label-gap);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--form-field-gap);
+  padding: var(--form-label-gap) var(--form-field-gap);
+  border: 1px solid var(--border-subtle);
+  border-inline-start: 3px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+}
+
+.activeRow {
+  border-inline-start-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.score {
+  flex: 0 0 2.5ch;
+  color: var(--text-primary);
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.info {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.source {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.removedRow {
+  background: var(--surface-control);
+}
+
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--form-label-gap);
+}
+
+.selected {
+  border-color: var(--border-accent);
+  color: var(--text-accent);
+  background: var(--surface-selected);
+}
+
+.choice {
+  gap: var(--form-label-gap);
+  white-space: nowrap;
+}
+
+.remove {
+  width: var(--control-h-sm);
+  padding: 0;
+}

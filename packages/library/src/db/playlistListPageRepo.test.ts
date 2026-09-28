@@ -18,6 +18,8 @@ function setup() {
   const db=initDatabaseAtPath(path.join(root,'catalog.db'))
   insertTestVideoWithFile(db,{code:'PL-1',filePath:'/synthetic/1.mp4'})
   db.exec("UPDATE videos SET cover_path='covers/1.png'; UPDATE library_video_memberships SET is_hidden=1")
+  // Use a fixed custom-list fixture for pagination boundaries.
+  db.exec('DELETE FROM playlists WHERE system_kind IS NOT NULL')
   const insert=db.prepare('INSERT INTO playlists(id,name,description,cover_path,created_at) VALUES(?,?,?,?,?)')
   for(let id=1;id<=125;id++)insert.run(id,id===1?' Target ':id===2?'İSTANBUL':`List ${id}`,id===3?'Literal %_\\ needle':null,id===4?'':null,id%2?'2026-01':'2026-02')
   db.exec('INSERT INTO playlist_video(playlist_id,video_id,position) SELECT id,1,0 FROM playlists')

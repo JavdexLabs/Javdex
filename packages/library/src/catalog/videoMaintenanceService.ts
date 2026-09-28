@@ -54,6 +54,7 @@ import { maintenanceTaskGate } from '@library/scan/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '@shared/videoResourcePromotion'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { getDb } from '@library/db/database'
+import { pruneEmptyVideoMembership } from '@library/db/libraryMembershipRepo'
 import {
   getPendingLocalFileDeletionByOriginalPath,
   markLocalFileDeletionsCommitted,
@@ -105,6 +106,7 @@ export interface VideoMaintenanceService {
 }
 
 interface VideoMaintenanceServiceDependencies {
+  pruneEmptyVideoMembership: typeof pruneEmptyVideoMembership
   getVideoById: typeof getVideoById
   updateVideoFields: typeof updateVideoFields
   editVideoRecord: typeof editVideoRecord
@@ -465,6 +467,7 @@ export function createVideoMaintenanceService(
     }
 
     let promotedResourceId: number | null = null
+    let membershipRemoved = false
     runInCoordinatedChange(() => {
       const sourcePaths =
         resource.kind === 'local'
@@ -495,9 +498,10 @@ export function createVideoMaintenanceService(
             promotedResourceId = candidate.id
           }
         }
+        membershipRemoved = (dependencies.pruneEmptyVideoMembership ?? pruneEmptyVideoMembership)(libraryId, videoId)
       })
     })
-    return { videoDeleted: false, promotedResourceId }
+    return { videoDeleted: false, promotedResourceId, ...(membershipRemoved ? { membershipRemoved: true } : {}) }
   }
 
   return {

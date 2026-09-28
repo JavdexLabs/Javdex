@@ -83,6 +83,33 @@ function explainPlan(database: Database.Database, statement: string): string {
 }
 
 describe('scoped video catalog repo', () => {
+  it('sorts library and global pages by default external score rather than membership time', () => {
+    const database = createFixture()
+    try {
+      database.exec(`
+        INSERT INTO videos (id, code, title) VALUES (103, 'ABC-103', 'Unrated');
+        INSERT INTO library_video_memberships
+          (library_id, video_id, added_at, updated_at, added_via, discovery_key)
+          VALUES (2, 103, '2025-01-01', '2025-01-01', 'scan', 203);
+        INSERT INTO video_external_stats (video_id, source, rating_average, is_default, fetched_at)
+          VALUES (101, 'chosen', 8, 1, '2024-01-01'),
+                 (101, 'newer', 1, 0, '2025-01-01'),
+                 (102, 'older', 10, 0, '2024-01-01'),
+                 (102, 'latest', 3, 0, '2025-01-01');
+      `)
+      const repo = createScopedVideoCatalogRepo(database)
+      for (const scope of [{ kind: 'library', libraryId: 2 }, { kind: 'all' }] as const) {
+        for (const sortDir of ['asc', 'desc'] as const) {
+          const query = { sortBy: 'external_rating' as const, sortDir }
+          const expected = sortDir === 'asc' ? [102, 101, 103] : [101, 102, 103]
+          assert.deepEqual(repo.list(scope, query).items.map(v => v.id), expected)
+          assert.deepEqual(repo.listPage(scope, { ...query, limit: 1, offset: 1 }).map(v => v.id), [expected[1]])
+        }
+      }
+    } finally {
+      database.close()
+    }
+  })
   it('keeps list resources and membership time inside one library', () => {
     const database = createFixture()
     try {

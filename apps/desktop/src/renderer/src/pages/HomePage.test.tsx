@@ -71,10 +71,13 @@ const fakeApi = {
   }
 } as unknown as ElectronApi
 
+const windowEvents = new EventTarget()
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
   value: {
     api: fakeApi,
+    addEventListener: windowEvents.addEventListener.bind(windowEvents),
+    removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
   }
 })
 

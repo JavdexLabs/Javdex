@@ -45,6 +45,7 @@ export default function SettingsWorkspaceShell({
         <nav className="settings-group-tabs" aria-label="设置分类">
           {SETTINGS_GROUPS.map((group) => (
             <NavLink
+              draggable={false}
               key={group.id}
               to={hrefForGroup?.(group) ?? settingsPath(group.id)}
               className={`settings-group-tab${activeGroup.id === group.id ? ' is-active' : ''}`}

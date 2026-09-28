@@ -78,6 +78,7 @@ export interface DeleteVideoGloballyInput extends VideoLifecycleCommitInput {
 }
 
 export interface VideoLifecycleResult {
+  sourceMembershipRemoved?: boolean
   operationId: string
   kind: VideoLifecycleKind
   videoId: number

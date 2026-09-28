@@ -156,12 +156,6 @@ export default function DetailPage(): JSX.Element {
   const [deletePreviewLoading, setDeletePreviewLoading] = useState(false)
   const [deletingVideo, setDeletingVideo] = useState(false)
   const [deleteOperationId, setDeleteOperationId] = useState<string | null>(null)
-  const removePreviewRequestRef = useRef(0)
-  const [confirmRemoveFromLibrary, setConfirmRemoveFromLibrary] = useState(false)
-  const [removePreview, setRemovePreview] = useState<VideoLifecycleImpact | null>(null)
-  const [removePreviewLoading, setRemovePreviewLoading] = useState(false)
-  const [removingFromLibrary, setRemovingFromLibrary] = useState(false)
-  const [removeOperationId, setRemoveOperationId] = useState<string | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [editIdentityConflict, setEditIdentityConflict] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -451,6 +445,9 @@ export default function DetailPage(): JSX.Element {
       invalidateVideos()
       if (result.videoDeleted) {
         toast.show('影片及全部数据已删除', 'success')
+        navigateBackFromVideoDetail(navigate, location)
+      } else if (result.membershipRemoved) {
+        toast.show('资源已移除，影片已自动移出当前媒体库', 'success')
         navigateBackFromVideoDetail(navigate, location)
       } else {
         toast.show(
@@ -772,75 +769,6 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const createRemoveOperationId = (): string =>
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `remove-video-${videoId}-${Date.now()}`
-
-  const closeRemovePreview = (): void => {
-    removePreviewRequestRef.current += 1
-    setConfirmRemoveFromLibrary(false)
-    setRemovePreview(null)
-    setRemovePreviewLoading(false)
-    setRemoveOperationId(null)
-  }
-
-  const openRemovePreview = async (): Promise<void> => {
-    const libraryId = video?.activeLibraryId
-    if (libraryId == null) return
-    const requestId = ++removePreviewRequestRef.current
-    setConfirmRemoveFromLibrary(true)
-    setRemovePreview(null)
-    setRemovePreviewLoading(true)
-    setRemoveOperationId(createRemoveOperationId())
-    try {
-      const impact = await api.videos.previewRemoveFromLibrary(libraryId, videoId)
-      if (requestId !== removePreviewRequestRef.current) return
-      setRemovePreview(impact)
-    } catch (error) {
-      if (requestId !== removePreviewRequestRef.current) return
-      closeRemovePreview()
-      toast.show(String((error as Error).message ?? error), 'error')
-    } finally {
-      if (requestId === removePreviewRequestRef.current) setRemovePreviewLoading(false)
-    }
-  }
-
-  const doRemoveFromLibrary = async (): Promise<void> => {
-    const libraryId = video?.activeLibraryId
-    if (!removePreview || !removeOperationId || removingFromLibrary || libraryId == null) return
-    setRemovingFromLibrary(true)
-    try {
-      await api.videos.removeFromLibrary({
-        libraryId,
-        videoId,
-        operationId: removeOperationId,
-        expectedRevision: removePreview.revision
-      })
-      toast.show('已移出媒体库', 'success')
-      invalidateVideos()
-      navigateBackFromVideoDetail(navigate, location)
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-      const requestId = ++removePreviewRequestRef.current
-      setRemovePreview(null)
-      setRemovePreviewLoading(true)
-      try {
-        const refreshed = await api.videos.previewRemoveFromLibrary(libraryId, videoId)
-        if (requestId === removePreviewRequestRef.current) {
-          setRemovePreview(refreshed)
-          setRemoveOperationId(createRemoveOperationId())
-        }
-      } catch {
-        if (requestId === removePreviewRequestRef.current) closeRemovePreview()
-      } finally {
-        if (requestId === removePreviewRequestRef.current) setRemovePreviewLoading(false)
-      }
-    } finally {
-      setRemovingFromLibrary(false)
-    }
-  }
-
   const openCorrectImport = (): void => {
     setCorrectCode(video?.code ?? '')
     setShowCorrectImport(true)
@@ -1106,14 +1034,6 @@ export default function DetailPage(): JSX.Element {
                     onClick: () => setConfirmClear(true)
                   },
                   {
-                    key: 'remove-from-library',
-                    label: '移出媒体库',
-                    hidden: video.activeLibraryId == null,
-                    onClick: () => {
-                      void openRemovePreview()
-                    }
-                  },
-                  {
                     key: 'delete-video',
                     label: '删除影片',
                     danger: true,
@@ -1368,11 +1288,12 @@ export default function DetailPage(): JSX.Element {
           sourceLibraryId={moveResourceTarget.library_id}
           resource={moveResourceTarget}
           onCancel={() => setMoveResourceTarget(null)}
-          onMoved={() => {
+          onMoved={(result) => {
             setMoveResourceTarget(null)
             toast.show('资源已移动到目标媒体库', 'success')
             invalidateVideos()
-            void load({ silent: true })
+            if (result.sourceMembershipRemoved) navigateBackFromVideoDetail(navigate, location)
+            else void load({ silent: true })
           }}
         />
       ) : null}
@@ -1525,26 +1446,7 @@ export default function DetailPage(): JSX.Element {
         </Modal>
       )}
 
-      {confirmRemoveFromLibrary && (
-        <Modal
-          title="移出媒体库"
-          size="lg"
-          busy={removingFromLibrary}
-          confirmText={
-            removingFromLibrary ? '移出中…' : removePreviewLoading ? '读取影响…' : '移出媒体库'
-          }
-          confirmDisabled={removePreviewLoading || !removePreview}
-          onConfirm={() => {
-            void doRemoveFromLibrary()
-          }}
-          onCancel={() => {
-            if (!removingFromLibrary) closeRemovePreview()
-          }}
-        >
-          {removePreviewLoading && !removePreview ? <p>正在读取完整影响范围…</p> : null}
-          {removePreview ? <VideoDeleteImpact impact={removePreview} /> : null}
-        </Modal>
-      )}
+
 
       {confirmDelete && (
         <Modal

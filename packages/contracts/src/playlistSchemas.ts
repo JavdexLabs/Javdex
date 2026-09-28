@@ -4,7 +4,9 @@ import { relatedLinkSchema, videoSchema, videoCardSchema } from './catalogDetail
 export const playlistSchema = z.object({
   id: z.number(), name: z.string(), description: z.string().nullable(),
   cover_path: z.string().nullable(), created_at: z.string(), updated_at: z.string().nullable(),
-  generation: z.number().optional(), revision: z.number().optional()
+  generation: z.number().optional(), revision: z.number().optional(),
+  system_kind: z.enum(['favorites', 'watch_later']).nullable().optional(),
+  remove_after_play: z.number().optional()
 })
 export const playlistDetailSchema = playlistSchema.extend({
   videos: z.array(videoSchema), links: z.array(relatedLinkSchema)

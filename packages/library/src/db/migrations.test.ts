@@ -7,9 +7,26 @@ import Database from 'better-sqlite3'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
-import { CATALOG_PROTOCOL_SCHEMA_SQL, CATALOG_IMAGE_UPLOAD_SCHEMA_SQL, CATALOG_TASK_SCHEMA_SQL } from './schema'
+import { CATALOG_PROTOCOL_SCHEMA_SQL, CATALOG_IMAGE_UPLOAD_SCHEMA_SQL, CATALOG_TASK_SCHEMA_SQL, SCHEMA_SQL, BUILTIN_PLAYLISTS_SQL } from './schema'
 import { ActressIdentityConflictWorkflow } from '../../../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
+
+it('adds built-in playlists on upgrade without claiming existing same-name lists', () => {
+  const db = new Database(':memory:')
+  try {
+    db.exec(SCHEMA_SQL.replace(BUILTIN_PLAYLISTS_SQL, ''))
+    db.exec("INSERT INTO playlists (name, created_at) VALUES ('我喜欢', '2026-01-01')")
+    db.pragma('user_version = 21')
+    migrateDatabase(db)
+    migrateDatabase(db)
+    const rows = db.prepare('SELECT name, system_kind, remove_after_play FROM playlists ORDER BY id').all()
+    assert.deepEqual(rows, [
+      { name: '我喜欢', system_kind: null, remove_after_play: 0 },
+      { name: '我喜欢', system_kind: 'favorites', remove_after_play: 0 },
+      { name: '稍后观看', system_kind: 'watch_later', remove_after_play: 0 }
+    ])
+  } finally { db.close() }
+})
 
 /** Older fixtures intentionally model only the tables relevant to their test.
  * Supply the unaffected tag index needed by the combined V16 migration. */
@@ -22,6 +39,16 @@ function ensureTagFixture(db: Database.Database): void {
 }
 
 function migrateFixture(db: Database.Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+    description TEXT, cover_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT)`)
+  if (Number(db.pragma('user_version', { simple: true })) > 0) {
+    db.exec(`CREATE TABLE IF NOT EXISTS video_external_stats (
+      id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL, source TEXT NOT NULL,
+      rating_average REAL, rating_count INTEGER, fetched_at TEXT,
+      FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+      UNIQUE(video_id, source)
+    )`)
+  }
   if (Number(db.pragma('user_version', { simple: true })) > 0) ensureTagFixture(db)
   migrateDatabase(db)
 }
@@ -259,6 +286,43 @@ function createV11StrmMigrationSchema(db: Database.Database): void {
 }
 
 describe('database schema', () => {
+  it('backfills schema 20 defaults deterministically while preserving manual selections', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(SCHEMA_SQL.replace(BUILTIN_PLAYLISTS_SQL, ''))
+      for (const code of ['A', 'B', 'C']) db.prepare('INSERT INTO videos (code) VALUES (?)').run(code)
+      const insert = db.prepare('INSERT INTO video_external_stats (video_id, source, rating_average, fetched_at, is_default) VALUES (?, ?, ?, ?, ?)')
+      insert.run(1, 'Older', 4, '2024-01-01', 0)
+      insert.run(1, 'B', 4, '2025-01-01', 0)
+      insert.run(1, 'A', 3, '2025-01-01', 0)
+      insert.run(1, 'Empty', null, '2026-01-01', 0)
+      insert.run(2, 'Manual', 3, '2024-01-01', 1)
+      insert.run(2, 'Newer', 4, '2025-01-01', 0)
+      insert.run(3, 'Empty', null, null, 0)
+      db.pragma('user_version = 20')
+      migrateDatabase(db)
+      migrateDatabase(db)
+      assert.deepEqual(db.prepare('SELECT video_id, source FROM video_external_stats WHERE is_default = 1 ORDER BY video_id').all(), [
+        { video_id: 1, source: 'A' }, { video_id: 2, source: 'Manual' }
+      ])
+    } finally { db.close() }
+  })
+  it('upgrades schema 19 ratings without losing scores and remains idempotent', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(SCHEMA_SQL.replace(BUILTIN_PLAYLISTS_SQL, ''))
+      db.exec('ALTER TABLE video_external_stats DROP COLUMN is_default')
+      db.prepare("INSERT INTO videos (code) VALUES ('TEST-20')").run()
+      db.prepare("INSERT INTO video_external_stats (video_id, source, rating_average) VALUES (1, 'JavDB', 4.5)").run()
+      db.pragma('user_version = 19')
+      migrateDatabase(db)
+      migrateDatabase(db)
+      assert.deepEqual(db.prepare('SELECT source, rating_average, is_default FROM video_external_stats').get(), {
+        source: 'JavDB', rating_average: 4.5, is_default: 1
+      })
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+    } finally { db.close() }
+  })
   it('adds STRM source identity without changing existing resource identity or link deduplication', () => {
     const db = new Database(':memory:')
     try {
@@ -712,7 +776,12 @@ describe('database schema', () => {
          VALUES (?, 'sample', 0, 'https://example.test/sample.jpg')`
       ).run(videoId)
       db.prepare("INSERT INTO facet_entries (type, value) VALUES ('maker', 'Unused')").run()
+      db.exec(`DELETE FROM playlists WHERE system_kind IS NOT NULL;
+        DROP INDEX idx_playlists_system_kind;
+        ALTER TABLE playlists DROP COLUMN system_kind;
+        ALTER TABLE playlists DROP COLUMN remove_after_play;`)
       db.pragma('user_version = 8')
+      db.exec('ALTER TABLE video_external_stats DROP COLUMN is_default')
 
       migrateFixture(db)
 
@@ -954,6 +1023,13 @@ describe('database schema', () => {
           (2, '　', 'alias', 0);
       `)
     } finally {
+      fixture.exec(`CREATE TABLE IF NOT EXISTS video_external_stats (
+        id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL, source TEXT NOT NULL,
+        rating_average REAL, rating_count INTEGER, fetched_at TEXT,
+        UNIQUE(video_id, source)
+      )`)
+      fixture.exec(`CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+        description TEXT, cover_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT)`)
       fixture.close()
     }
 

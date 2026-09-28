@@ -57,7 +57,7 @@ it('rolls back playlist, new videos, memberships and links when a later item fai
     entries: [{ kind: 'create', code: 'NEW-001', title: null }, { kind: 'existing', videoId: 9999 }]
   }, db), /MATCH_SNAPSHOT_STALE/)
   for (const table of ['playlists', 'playlist_video', 'playlist_links', 'library_video_memberships']) {
-    assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n, 0)
+    assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table}${table === 'playlists' ? ' WHERE system_kind IS NULL' : ''}`).get() as { n: number }).n, 0)
   }
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n, 2)
 })

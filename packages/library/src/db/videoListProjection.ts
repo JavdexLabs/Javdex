@@ -8,11 +8,18 @@ const VIDEO_RESOURCE_KINDS = new Set<VideoResourceKind>([
   'ed2k'
 ])
 
+function builtinMembershipSelect(alias: string): string {
+  return `EXISTS (SELECT 1 FROM playlist_video pv JOIN playlists p ON p.id = pv.playlist_id
+    WHERE pv.video_id = ${alias}.id AND p.system_kind = 'favorites') AS is_favorite,
+    EXISTS (SELECT 1 FROM playlist_video pv JOIN playlists p ON p.id = pv.playlist_id
+    WHERE pv.video_id = ${alias}.id AND p.system_kind = 'watch_later') AS is_watch_later`
+}
+
 export type VideoListProjectionRow = Video & { resource_kinds_csv?: string | null }
 
 /** Classification names are read-model projections; videos persist only stable entity ids. */
 export function videoClassificationSelectExtras(videoAlias = 'v'): string {
-  return `,
+  return `, ${builtinMembershipSelect(videoAlias)},
     (SELECT o.main_name FROM organizations o WHERE o.id = ${videoAlias}.maker_organization_id) AS maker,
     (SELECT o.main_name FROM organizations o WHERE o.id = ${videoAlias}.publisher_organization_id) AS publisher,
     (SELECT s.main_name FROM series s WHERE s.id = ${videoAlias}.series_id) AS series,
@@ -57,7 +64,7 @@ export type VideoCardProjectionRow = Omit<VideoCard, 'resource_kinds' | 'has_pen
 
 export function videoCardSelect(videoAlias = 'v'): string {
   return `${videoAlias}.id, ${videoAlias}.code, ${videoAlias}.title, ${videoAlias}.cover_path,
-    ${videoAlias}.scraped_status,
+    ${videoAlias}.scraped_status, ${builtinMembershipSelect(videoAlias)},
     EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = ${videoAlias}.id) AS has_pending_scrape,
     ${resourceKindsSelect(videoAlias)}`
 }

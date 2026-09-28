@@ -70,7 +70,7 @@ function legacyRows(after: ReturnType<typeof snapshot>, before: ReturnType<typeo
     const next = after[index]
     return {
       name: prev.name,
-      rows: next.rows.map((row, rowIndex) => {
+      rows: next.rows.slice(0, prev.rows.length).map((row, rowIndex) => {
         const original = prev.rows[rowIndex] as Record<string, unknown>
         const current = row as Record<string, unknown>
         return Object.fromEntries(Object.keys(original).map((key) => [key, current[key]]))
@@ -81,6 +81,11 @@ function legacyRows(after: ReturnType<typeof snapshot>, before: ReturnType<typeo
 
 function comparableSchema(db: Database.Database): SchemaRow[] {
   return schema(db).map((row) => {
+    if (row.name === 'video_external_stats' && row.type === 'table') {
+      const columns = (db.pragma('table_info(video_external_stats)') as Array<{ cid: number; name: string }>)
+        .map(({ cid: _cid, ...column }) => column).sort((a, b) => a.name.localeCompare(b.name))
+      return { ...row, sql: JSON.stringify({ columns, foreignKeys: db.pragma('foreign_key_list(video_external_stats)') }) }
+    }
     if (row.name !== 'videos' || row.type !== 'table') return row
     const columns = (db.pragma('table_info(videos)') as Array<{ cid: number; name: string; type: string }>)
       .map((column) => `${column.cid}:${column.name}:${column.type}`)
@@ -91,7 +96,6 @@ function comparableSchema(db: Database.Database): SchemaRow[] {
 
 function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot>) {
   migrateDatabase(db)
-      assert.equal(CURRENT_SCHEMA_VERSION, 19)
   assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
   assert.deepEqual(legacyRows(snapshot(db, before.map(table => table.name)), before), before)
   checkIntegrity(db)
@@ -134,8 +138,8 @@ it('adds combined V16 to the released V15 schema without rewriting any legacy da
       assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${quote(table.name)}`).get() as { n: number }).n, 0)
     }
     assert.deepEqual(
-      schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists'].includes(row.name) && oldSchema.some(old => old.name === row.name)),
-      oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists'].includes(row.name))
+      schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists','video_external_stats'].includes(row.name) && oldSchema.some(old => old.name === row.name)),
+      oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists','video_external_stats'].includes(row.name))
     )
     assert.deepEqual(auditBytes(), originalBytes)
     // A second startup must remain data- and schema-idempotent.

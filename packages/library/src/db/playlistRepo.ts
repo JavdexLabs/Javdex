@@ -92,9 +92,13 @@ export function updatePlaylistRecord(
 
   const normalized = normalizePlaylistInput(input)
   const shouldUpdateCover = input.removeCover === true || coverRelPath !== undefined
+  if (current.system_kind) normalized.name = current.name
   const nextCoverPath = input.removeCover ? null : coverRelPath
 
   db.transaction(() => {
+    if (current.system_kind === 'watch_later' && input.removeAfterPlay !== undefined) {
+      db.prepare('UPDATE playlists SET remove_after_play = ? WHERE id = ?').run(Number(input.removeAfterPlay), id)
+    }
     db.prepare(
       `UPDATE playlists
        SET name = @name,
@@ -157,8 +161,8 @@ export function getPlaylistDetail(id: number, sort: PlaylistVideoSort = {}): Pla
   const playlist = getPlaylistById(id)
   if (!playlist) return null
   const db = getDb()
-  const sortBy = sort.sortBy ?? 'added_at'
-  const sortDir = sort.sortDir === 'asc' ? 'ASC' : 'DESC'
+  const sortBy = playlist.system_kind === 'watch_later' ? 'added_at' : sort.sortBy ?? 'added_at'
+  const sortDir = playlist.system_kind === 'watch_later' || sort.sortDir === 'asc' ? 'ASC' : 'DESC'
   const orderBy = playlistVideoOrderBy(sortBy, sortDir)
   const videos = db
     .prepare(
@@ -183,7 +187,8 @@ export function listPlaylistVideoPage(id: number, query: PlaylistPageQuery = {})
     if (!db.prepare('SELECT id FROM playlists WHERE id = ?').get(id)) return null
     const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 60)))
     const offset = Math.max(0, Math.trunc(query.offset ?? 0))
-    const orderBy = playlistVideoOrderBy(query.sortBy ?? 'added_at', query.sortDir === 'asc' ? 'ASC' : 'DESC')
+    const watchLater = (db.prepare('SELECT system_kind FROM playlists WHERE id = ?').get(id) as { system_kind: string | null }).system_kind === 'watch_later'
+    const orderBy = playlistVideoOrderBy(watchLater ? 'added_at' : query.sortBy ?? 'added_at', watchLater || query.sortDir === 'asc' ? 'ASC' : 'DESC')
     const kinds = [...new Set(query.resourceKinds ?? [])]
     const concrete = kinds.filter(kind => kind !== 'none')
     const alternatives: string[] = []
@@ -210,7 +215,8 @@ export function getPlaylistMetadata(id: number, sort: PlaylistVideoSort = {}): P
   return db.transaction(() => {
     const playlist = getPlaylistById(id)
     if (!playlist) return null
-    const orderBy = playlistVideoOrderBy(sort.sortBy ?? 'added_at', sort.sortDir === 'asc' ? 'ASC' : 'DESC')
+    const watchLater = playlist.system_kind === 'watch_later'
+    const orderBy = playlistVideoOrderBy(watchLater ? 'added_at' : sort.sortBy ?? 'added_at', watchLater || sort.sortDir === 'asc' ? 'ASC' : 'DESC')
     const preview = db.prepare(`SELECT v.cover_path FROM playlist_video pv JOIN videos v ON v.id = pv.video_id
       WHERE pv.playlist_id = ? AND v.cover_path IS NOT NULL AND v.cover_path != ''
       ORDER BY ${orderBy} LIMIT 1`).get(id) as { cover_path: string } | undefined
@@ -275,6 +281,7 @@ export function deletePlaylistRecord(id: number): string | null {
   const db = getDb()
   const playlist = getPlaylistById(id)
   if (!playlist) return null
+  if (playlist.system_kind) throw new Error('默认清单不能删除，可以移出其中的影片')
   db.prepare('DELETE FROM playlists WHERE id = ?').run(id)
   return playlist.cover_path
 }

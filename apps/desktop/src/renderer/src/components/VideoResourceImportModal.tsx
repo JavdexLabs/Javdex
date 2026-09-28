@@ -424,6 +424,7 @@ export default function VideoResourceImportModal({
           <>
             登记番号，可选添加链接，不会扫描本地文件。扫描请到{' '}
             <Link
+              draggable={false}
               className={styles.hintLink}
               to={mediaLibrarySettingsPath(libraryId, 'sources')}
               onClick={onCancel}

@@ -59,6 +59,8 @@ describe('SqliteNfoExportRepository', () => {
       name: 'Alice', gender: 'female', avatarPath: 'avatars/a.jpg', actressRevision: 3
     }])
     assert.deepEqual(snapshot.ratings, [{ source: 'javdb', average: 4.2, count: 12 }])
+    db.prepare('UPDATE video_external_stats SET is_default = 1 WHERE video_id = 1').run()
+    assert.equal(repository.listResourceSnapshots([1])[0].ratings[0].isDefault, true)
     assert.deepEqual(snapshot.identities, [{ source: 'javdb', code: 'site-1' }])
     assert.deepEqual(snapshot.samples, ['samples/one.jpg'])
     assert.equal('rating' in snapshot, false)

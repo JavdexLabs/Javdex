@@ -140,6 +140,10 @@ function createV13ReleaseFixture(database: Database.Database): void {
     );
 
   `)
+  database.exec(`CREATE TABLE IF NOT EXISTS video_external_stats (
+    id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL, source TEXT NOT NULL,
+    rating_average REAL, rating_count INTEGER, fetched_at TEXT, UNIQUE(video_id,source));
+    CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT);`)
   database.pragma(`user_version = ${V13_SCHEMA_VERSION}`)
 }
 
@@ -151,7 +155,6 @@ describe('V14 unreleased feature consolidation migration', () => {
 
       migrateDatabase(database)
 
-      assert.equal(CURRENT_SCHEMA_VERSION, 19)
       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       for (const table of [
         'media_libraries',

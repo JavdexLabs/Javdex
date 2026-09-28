@@ -83,12 +83,14 @@ export const videoSchema = z.object({
   /** Primary kind first, followed by each remaining kind at most once. */
   resource_kinds: z.array(videoResourceKindSchema).optional(),
   /** Independent pending-decision dimension; not part of scraped_status. */
-  has_pending_scrape: z.boolean().optional()
+  has_pending_scrape: z.boolean().optional(),
+  is_favorite: z.number().optional(),
+  is_watch_later: z.number().optional()
 })
 
 export const videoCardSchema = videoSchema.pick({
   id: true, code: true, title: true, cover_path: true, scraped_status: true,
-  has_pending_scrape: true, resource_kinds: true
+  has_pending_scrape: true, resource_kinds: true, is_favorite: true, is_watch_later: true
 })
 
 export const videoResourceSchema = z.object({
@@ -123,6 +125,7 @@ export const videoAssetSchema = z.object({
 })
 
 export const videoExternalStatsSchema = z.object({
+  is_default: z.number().optional(),
   id: z.number(),
   video_id: z.number(),
   source: z.string(),

@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 import { isIsoDate, toDateInputValue, actressMergeGenderGroup } from '@shared/actressProfileOptions'
 import type { Actress } from '@shared/actressTypes'
 import type { VideoDetail, VideoEditInput } from '@shared/videoTypes'
+import { selectDefaultExternalRating } from '@shared/externalRatings'
 import { assetUrl } from '../api'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
+import ExternalRatingsEditor from './ExternalRatingsEditor'
 import { EditFormField, EditFormHint, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
@@ -78,6 +80,11 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
     (video.links ?? []).map(({ label, url }) => ({ label, url }))
   )
   const [saving, setSaving] = useState(false)
+  const [externalRatings, setExternalRatings] = useState<NonNullable<VideoEditInput['externalRatings']>>({
+    deletedSources: [],
+    defaultSource: selectDefaultExternalRating(video.external_stats)?.source ?? null
+  })
+  const [ratingsChanged, setRatingsChanged] = useState(false)
   const metadataLocked = Boolean(video.has_pending_scrape)
   const mediaEditorsHidden =
     privacyMode.privacyModeEnabled &&
@@ -109,6 +116,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         actressesFemale: splitList(actressesFemale),
         actressesMale: splitList(actressesMale),
         links: nextLinks,
+        ...(ratingsChanged ? { externalRatings } : {}),
         ...(coverSourcePath && !mediaEditorsHidden ? { coverSourcePath } : {})
       })
     } finally {
@@ -310,6 +318,12 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         </EditFormSection>
           </>
         )}
+        {!metadataLocked && <ExternalRatingsEditor
+          ratings={video.external_stats}
+          value={externalRatings}
+          disabled={saving}
+          onChange={(value) => { setExternalRatings(value); setRatingsChanged(true) }}
+        />}
         <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
       </div>
     </Modal>

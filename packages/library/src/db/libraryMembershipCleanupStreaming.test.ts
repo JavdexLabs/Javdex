@@ -25,7 +25,7 @@ it('preserves scope, pinned, playlist and resource exclusions and leaves catalog
   for (let id = 1; id <= 5; id++) member(id)
   member(1, 2); member(5, 2)
   db.exec(`UPDATE library_video_memberships SET is_pinned=1 WHERE library_id=1 AND video_id=2;
-    INSERT INTO playlists(id,name) VALUES(1,'Keep');
+    UPDATE playlists SET name='Keep' WHERE id=1;
     INSERT INTO playlist_video(playlist_id,video_id,position) VALUES(1,3,0);
     INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,source_identity) VALUES(1,4,'local','/local','local-four','local-four');
     INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,source_identity) VALUES(2,5,'local','/other','other-five','other-five');`)

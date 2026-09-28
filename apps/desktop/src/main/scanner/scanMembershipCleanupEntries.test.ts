@@ -103,3 +103,19 @@ it('retains the explicit JSON cleanup API and legacy audit array contract',async
   assert.equal(legacyCalls,1);assert.deepEqual(audit('legacy').deletedVideos,expected())
   assert.equal(readScanAuditSource(db,{libraryId,runId:'legacy'},'identity')?.format,'json')
 })
+
+
+for (const cleanupMode of ['atomic', 'cooperative'] as const) {
+  it(`${cleanupMode}: scan switch controls last affiliation while playlist protection remains`, async () => {
+    db.prepare('UPDATE media_library_configs SET remove_resource_less_memberships=0 WHERE library_id=?').run(libraryId)
+    db.prepare('DELETE FROM library_video_memberships WHERE library_id=1 AND video_id=1').run()
+    db.exec('INSERT INTO playlist_video(playlist_id,video_id,position) VALUES(1,2,0)')
+    let sequence=0
+    const coordinator=createScanCoordinator({cleanupMode,createRunId:()=>`policy-${++sequence}`,scanFolders:async scope=>empty(scope)})
+    assert.equal((await coordinator.run({libraryId})).deletedVideos,count-2)
+    assert.deepEqual(db.prepare('SELECT video_id FROM library_video_memberships WHERE library_id=? ORDER BY video_id').all(libraryId),[{video_id:1},{video_id:2},{video_id:count+1}])
+    db.prepare('UPDATE media_library_configs SET remove_resource_less_memberships=1 WHERE library_id=?').run(libraryId)
+    assert.equal((await coordinator.run({libraryId})).deletedVideos,1)
+    assert.deepEqual(db.prepare('SELECT video_id FROM library_video_memberships WHERE library_id=? ORDER BY video_id').all(libraryId),[{video_id:2},{video_id:count+1}])
+  })
+}

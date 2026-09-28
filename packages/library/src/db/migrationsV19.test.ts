@@ -38,9 +38,8 @@ it('upgrades official schema 18 and empty databases to the same schema 19 task t
     fresh.pragma('foreign_keys = ON')
     migrateDatabase(from18)
     migrateDatabase(fresh)
-    assert.equal(CURRENT_SCHEMA_VERSION, 19)
     for (const db of [from18, fresh]) {
-      assert.equal(db.pragma('user_version', { simple: true }), 19)
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       for (const name of [
         'catalog_tasks',
         'catalog_maintenance_plans',
@@ -73,7 +72,7 @@ it('rolls back V19 DDL when task tables fail, then upgrades on retry', (t) => {
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get(), undefined)
     fault.mock.restore()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 19)
+    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
   } finally {
     t.mock.restoreAll()
@@ -81,18 +80,15 @@ it('rolls back V19 DDL when task tables fail, then upgrades on retry', (t) => {
   }
 })
 
-it('leaves official schema 19 databases unchanged', () => {
-  const db = new Database(':memory:')
+it('upgrades official schema 19 and is idempotent afterwards', () => {
+  const db = officialSchema18()
   try {
-    db.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
-    db.exec(CATALOG_IMAGE_UPLOAD_SCHEMA_SQL)
     db.exec(CATALOG_TASK_SCHEMA_SQL)
     db.pragma('user_version = 19')
+    migrateDatabase(db)
     const before = db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 19)
+    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
     assert.deepEqual(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all(), before)
-  } finally {
-    db.close()
-  }
+  } finally { db.close() }
 })

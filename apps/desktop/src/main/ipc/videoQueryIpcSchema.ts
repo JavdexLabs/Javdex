@@ -38,7 +38,7 @@ const videoQueryShape = {
   codePrefix: z.string().trim().max(100).optional(),
   resourceKinds: uniqueResourceKinds.optional(),
   pendingScrape: z.enum(['all', 'pending', 'none']).optional(),
-  sortBy: z.enum(MEDIA_LIBRARY_DEFAULT_SORTS).optional(),
+  sortBy: z.enum([...MEDIA_LIBRARY_DEFAULT_SORTS, 'external_rating']).optional(),
   sortDir: z.enum(MEDIA_LIBRARY_SORT_DIRECTIONS).optional(),
   limit: z.number().int().min(1).max(VIDEO_LIST_PAGE_LIMIT_MAX).optional(),
   offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()

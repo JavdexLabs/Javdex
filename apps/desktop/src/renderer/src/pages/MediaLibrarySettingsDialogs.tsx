@@ -233,7 +233,7 @@ export function MediaLibrarySettingsDialogs({
                     </dd>
                   </div>
                   <div className={styles.impactItem}>
-                    <dt className={styles.impactTerm}>源库暂时无资源成员</dt>
+                    <dt className={styles.impactTerm}>源库将自动移出的影片</dt>
                     <dd className={styles.impactValue}>
                       {
                         rootMigration.preview
@@ -275,7 +275,7 @@ export function MediaLibrarySettingsDialogs({
                 <div className={styles.migrationNotice} role="note">
                   {rootMigration.preview.sourceMembershipsBecomingResourceLess >
                   0
-                    ? `迁移后源库有 ${rootMigration.preview.sourceMembershipsBecomingResourceLess} 个影片成员暂时没有资源；本次会保留这些成员关系，后续仅由源库的安全扫描清理策略决定是否移除。`
+                    ? `迁移后源库有 ${rootMigration.preview.sourceMembershipsBecomingResourceLess} 部影片不再有资源，将自动移出源库，目标库归属、影片资料和清单引用保留。`
                     : '源库现有影片成员关系会保留；目标库已有主资源时，迁入资源会作为备用资源。'}
                 </div>
               </>

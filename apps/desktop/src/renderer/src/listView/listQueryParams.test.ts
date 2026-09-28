@@ -11,6 +11,12 @@ import {
 } from './listQueryParams'
 
 describe('library resource filter URL contract', () => {
+  it('preserves external rating sorting in shared URLs', () => {
+    const params = canonicalizeLibrarySearchParams(new URLSearchParams('sort=external_rating&dir=asc'))
+    const query = libraryVideoQueryFromSearchParams(params)
+    assert.equal(query.sortBy, 'external_rating')
+    assert.equal(query.sortDir, 'asc')
+  })
   it('parses valid unique values in canonical order and ignores invalid values', () => {
     assert.deepEqual(parseVideoResourceFilters('none,direct,bad,direct,local'), [
       'local',

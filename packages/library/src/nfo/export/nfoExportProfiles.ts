@@ -15,6 +15,7 @@ export interface NfoExportActor {
 }
 
 export interface NfoExportRating {
+  isDefault?: boolean
   source: string
   average: number
   count?: number
@@ -185,13 +186,14 @@ function representedRatings(
   ratings: readonly NfoExportRating[]
 ): NfoExportRating[] {
   const bySource = new Map<string, NfoExportRating>()
-  for (const rating of ratings) {
+  for (const rating of [...ratings].sort((a, b) => Number(Boolean(b.isDefault)) - Number(Boolean(a.isDefault)))) {
     if (!Number.isFinite(rating.average)) continue
     const source = canonicalRatingSource(profile, rating)
     if (!source || bySource.has(source)) continue
     bySource.set(source, { ...rating, source })
   }
-  return Array.from(bySource.values()).sort((a, b) => a.source.localeCompare(b.source, 'en'))
+  return Array.from(bySource.values()).sort((a, b) =>
+    Number(Boolean(b.isDefault)) - Number(Boolean(a.isDefault)) || a.source.localeCompare(b.source, 'en'))
 }
 
 function uniqueSorted(values: readonly string[]): string[] {

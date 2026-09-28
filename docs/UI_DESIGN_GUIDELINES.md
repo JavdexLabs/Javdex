@@ -41,6 +41,7 @@
 ### Other components
 
 - Settings navigation: 分类标签负责定位，内容标题负责分组；内容区不再重复分类名称与概括性简介。有子页签时紧接导航，无子页签时直接展示内容。作用范围和生效提示放在对应操作旁，保留具体对象名称及无障碍关联。
+- 内部导航链接（包括侧栏、设置分类、首页入口和操作提示中的跳转）必须显式设置 `draggable={false}`，禁止浏览器原生链接拖拽；保持点击和键盘导航行为。需要拖拽排序的控件单独实现，不依赖链接原生拖拽。
 - Toolbar: normal browsing mode keeps search on the left, global actions on the right, and the result count stable and right aligned. Contextual card-selection mode may temporarily replace this row with `SelectionToolbar`.
 - Filter popover: grouped fields, short labels, reset/apply actions at the bottom, selected filters mirrored as removable chips.
 - Cards: 8px radius maximum for repeated media/facet cards, hover may change border/elevation but must not resize layout.

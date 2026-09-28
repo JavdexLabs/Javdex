@@ -1,6 +1,7 @@
 import type { VideoEditInput } from '@shared/videoTypes'
 
 export function videoEditInputFromManageFields(fields: {
+  externalRatings?: VideoEditInput['externalRatings']
   title?: string | null
   summary?: string | null
   release_date?: string | null
@@ -17,6 +18,7 @@ export function videoEditInputFromManageFields(fields: {
   links?: VideoEditInput['links']
 }): VideoEditInput {
   const input: VideoEditInput = {}
+  if ('externalRatings' in fields) input.externalRatings = fields.externalRatings
   if ('title' in fields) input.title = fields.title
   if ('summary' in fields) input.summary = fields.summary
   if ('release_date' in fields) input.release_date = fields.release_date

@@ -1,4 +1,5 @@
 import type { VideoDetail, VideoExternalStats } from '@shared/videoTypes'
+import { selectDefaultExternalRating } from '@shared/externalRatings'
 import StarRating from './StarRating'
 
 function formatExternalScore(value: number): string {
@@ -8,10 +9,6 @@ function formatExternalScore(value: number): string {
 
 function formatRatingCount(value: number): string {
   return value.toLocaleString('zh-CN')
-}
-
-function hasExternalRating(stat: VideoExternalStats): boolean {
-  return stat.rating_average != null && Number.isFinite(stat.rating_average)
 }
 
 function buildExternalRatingMeta(stat: VideoExternalStats): string {
@@ -28,7 +25,8 @@ interface Props {
 }
 
 export default function VideoDetailRatings({ video, onRatingChange }: Props): JSX.Element {
-  const externalRatings = video.external_stats.filter(hasExternalRating)
+  const selectedRating = selectDefaultExternalRating(video.external_stats)
+  const externalRatings = selectedRating ? [selectedRating] : []
 
   return (
     <div className="detail-ratings" aria-label="评分">

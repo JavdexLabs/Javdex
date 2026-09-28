@@ -8,7 +8,8 @@ import {
   hasActiveVisibleVideoMembership,
   hasVideoMembership,
   removeResourceLessMemberships,
-  removeVideoMembership
+  removeVideoMembership,
+  pruneEmptyVideoMembership
 } from './libraryMembershipRepo'
 
 describe('library membership repo', () => {
@@ -140,5 +141,40 @@ describe('library membership repo', () => {
     } finally {
       database.close()
     }
+  })
+})
+
+
+describe('automatic empty affiliation policy', () => {
+  it('prunes extra affiliations but leaves last-member cleanup to the scan switch', () => {
+    const db = new Database(':memory:')
+    try {
+      migrateDatabase(db)
+      db.exec("INSERT INTO media_libraries(id,name) VALUES(2,'B'); INSERT INTO videos(id,code) VALUES(901,'POLICY-901');")
+      ensureVideoMembership({libraryId:1,videoId:901,addedVia:'manual'},db)
+      ensureVideoMembership({libraryId:2,videoId:901,addedVia:'shared'},db)
+      assert.equal(pruneEmptyVideoMembership(1,901,db),true)
+      assert.equal(pruneEmptyVideoMembership(2,901,db),false)
+      assert.deepEqual(removeResourceLessMemberships(2,db,false),[])
+      assert.equal(removeResourceLessMemberships(2,db,true).length,1)
+      assert.ok(db.prepare('SELECT id FROM videos WHERE id=901').get())
+    } finally { db.close() }
+  })
+  it('protects playlist references and pinned affiliations under both rules', () => {
+    const db = new Database(':memory:')
+    try {
+      migrateDatabase(db)
+      db.exec("INSERT INTO media_libraries(id,name) VALUES(2,'B'); INSERT INTO videos(id,code) VALUES(902,'POLICY-902');")
+      ensureVideoMembership({libraryId:1,videoId:902,addedVia:'manual'},db)
+      ensureVideoMembership({libraryId:2,videoId:902,addedVia:'shared'},db)
+      db.exec('INSERT INTO playlist_video(playlist_id,video_id,position) VALUES(1,902,0)')
+      assert.equal(pruneEmptyVideoMembership(1,902,db),false)
+      assert.deepEqual(removeResourceLessMemberships(1,db,true),[])
+      db.exec('DELETE FROM playlist_video WHERE video_id=902; UPDATE library_video_memberships SET is_pinned=1 WHERE video_id=902')
+      assert.equal(pruneEmptyVideoMembership(1,902,db),false)
+      assert.deepEqual(removeResourceLessMemberships(1,db,true),[])
+      db.exec('UPDATE library_video_memberships SET is_pinned=0 WHERE video_id=902')
+      assert.equal(pruneEmptyVideoMembership(1,902,db),true)
+    } finally { db.close() }
   })
 })

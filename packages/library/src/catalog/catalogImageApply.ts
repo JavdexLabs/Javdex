@@ -522,7 +522,7 @@ export function applyClassificationImageRef(
 export function applyPlaylistCoverRef(
   playlistId: number | null,
   image: CatalogImageRef | undefined,
-  fields: { name: string; description?: string | null },
+  fields: { name: string; description?: string | null; removeAfterPlay?: boolean },
   expected: ExpectedVersions,
   operationId: string,
   database: Database.Database = getDb()
@@ -559,7 +559,8 @@ export function applyPlaylistCoverRef(
     {
       name: fields.name,
       description: fields.description ?? null,
-      removeCover: image?.kind === 'clear'
+      removeCover: image?.kind === 'clear',
+      removeAfterPlay: fields.removeAfterPlay
     },
     coverRel
   )

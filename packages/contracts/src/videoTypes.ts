@@ -97,6 +97,7 @@ export interface VideoResourceLinkCheckResult {
 export type LastVideoResourceRemovalMode = 'retain-video'
 
 export interface VideoResourceRemovalResult {
+  membershipRemoved?: boolean
   videoDeleted: boolean
   promotedResourceId: number | null
 }
@@ -145,7 +146,7 @@ export interface VideoQuery {
   /** OR filter; `none` matches videos with zero resource rows. */
   resourceKinds?: VideoResourceFilter[]
   pendingScrape?: VideoPendingScrapeFilter
-  sortBy?: 'add_time' | 'release_date' | 'rating' | 'code'
+  sortBy?: 'add_time' | 'release_date' | 'rating' | 'external_rating' | 'code'
   sortDir?: 'asc' | 'desc'
   limit?: number
   offset?: number
@@ -163,6 +164,7 @@ export type VideoFieldUpdateInput = Partial<
 >
 
 export interface VideoEditInput {
+  externalRatings?: { deletedSources: string[]; defaultSource: string | null }
   title?: string | null
   summary?: string | null
   release_date?: string | null

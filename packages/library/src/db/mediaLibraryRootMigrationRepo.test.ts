@@ -222,8 +222,8 @@ describe('media-library root migration repo', () => {
           `SELECT COUNT(*) AS value FROM library_video_memberships
             WHERE library_id = 2 AND video_id = 102`
         ),
-        1,
-        'root migration preserves explicit source membership even when it becomes resource-less'
+        0,
+        'root migration removes empty source affiliation after creating the target membership'
       )
 
       assert.equal(

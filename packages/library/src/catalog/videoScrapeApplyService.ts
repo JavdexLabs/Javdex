@@ -13,6 +13,7 @@ import type {
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { upsertActressFromScrape } from '@library/db/actressRepo'
 import { getDb } from '@library/db/database'
+import { ensureDefaultExternalRating } from '@library/db/externalRatings'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from '@library/db/libraryCleanup'
 import { getVideoById, listVideosForBatchScrape, replaceVideoTagsByOrigin } from '@library/db/videoRepo'
 import {
@@ -352,6 +353,7 @@ function upsertVideoExternalStats(
     ratingCount: result.ratingCount ?? null,
     fetchedAt
   })
+  ensureDefaultExternalRating(db, videoId)
 }
 
 function deleteVideoExternalStats(videoId: number, source: string): void {
@@ -360,6 +362,7 @@ function deleteVideoExternalStats(videoId: number, source: string): void {
     videoId,
     source
   )
+  ensureDefaultExternalRating(db, videoId)
 }
 
 export type VideoScrapeImpactAction = 'preserve' | 'set' | 'replace' | 'clear'

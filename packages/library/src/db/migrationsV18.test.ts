@@ -41,9 +41,8 @@ it('upgrades official 16/17 and empty databases to the same schema 18 upload tab
     migrateDatabase(from16)
     migrateDatabase(from17)
     migrateDatabase(fresh)
-    assert.equal(CURRENT_SCHEMA_VERSION, 19)
     for (const db of [from16, from17, fresh]) {
-      assert.equal(db.pragma('user_version', { simple: true }), 19)
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get())
       assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_file_jobs'").get())
       assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
@@ -79,7 +78,7 @@ it('rolls back V18 DDL when upload tables fail, then upgrades on retry', (t) => 
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get(), undefined)
     fault.mock.restore()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 19)
+    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_image_uploads'").get())
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'catalog_tasks'").get())
   } finally {

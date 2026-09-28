@@ -11,7 +11,7 @@ import {
   mediaLibraryRootIdentitiesOverlap,
   type ResolvedMediaLibraryRootPath
 } from '@library/mediaLibraryRootPath'
-import { discoveryKeyForMembership } from './libraryMembershipRepo'
+import { discoveryKeyForMembership, pruneEmptyVideoMembership } from './libraryMembershipRepo'
 import { MediaLibraryRepoError } from './mediaLibraryRepo'
 import { selectLibraryVideoResourcePromotionCandidate } from './videoResourcePromotionRepo'
 
@@ -315,6 +315,12 @@ function readCounts(
                WHERE remaining.library_id = @sourceLibraryId
                  AND remaining.video_id = moving.video_id
                  AND (remaining.root_id IS NULL OR remaining.root_id != @rootId)
+            )
+            AND NOT EXISTS (SELECT 1 FROM playlist_video pv WHERE pv.video_id = moving.video_id)
+            AND EXISTS (
+              SELECT 1 FROM library_video_memberships source_membership
+              WHERE source_membership.library_id = @sourceLibraryId
+                AND source_membership.video_id = moving.video_id AND source_membership.is_pinned = 0
             )) AS source_memberships_becoming_resource_less,
         (SELECT COUNT(DISTINCT group_id) FROM pending_scan_resources
           WHERE library_id = @sourceLibraryId AND root_id = @rootId) +
@@ -766,6 +772,8 @@ export function createMediaLibraryRootMigrationRepo(
             .run(candidate.id)
           promotedSourceResourceIds.push(candidate.id)
         }
+
+        for (const videoId of movedVideoIds) pruneEmptyVideoMembership(input.sourceLibraryId, videoId, database)
 
         const movedPendingScanResourceCount = movePendingScanResources(
           database,

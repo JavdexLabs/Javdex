@@ -165,12 +165,13 @@ export class SqliteNfoExportRepository implements NfoExportRepository {
         revision: number
       }>
     const ratings = database
-      .prepare(`SELECT source, rating_average, rating_count FROM video_external_stats
+      .prepare(`SELECT source, rating_average, rating_count, is_default FROM video_external_stats
         WHERE video_id = ? AND rating_average IS NOT NULL ORDER BY source`)
       .all(row.video_id) as Array<{
         source: string
         rating_average: number
         rating_count: number | null
+        is_default: number
       }>
     const identities = database
       .prepare(`SELECT source, external_code FROM video_sources
@@ -216,6 +217,7 @@ export class SqliteNfoExportRepository implements NfoExportRepository {
       ratings: ratings.map((rating) => ({
         source: rating.source,
         average: rating.rating_average,
+        ...(rating.is_default ? { isDefault: true } : {}),
         ...(rating.rating_count == null ? {} : { count: rating.rating_count })
       })),
       identities: identities.map((identity) => ({

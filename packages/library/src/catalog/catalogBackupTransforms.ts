@@ -1,3 +1,4 @@
+import { pruneEmptyVideoMembership } from '@library/db/libraryMembershipRepo'
 import path from 'node:path'
 import type Database from 'better-sqlite3'
 import { structuredError } from '@shared/protocol/errors'
@@ -302,4 +303,9 @@ export function applyBackupTransforms(
       WHERE library_id = ? AND remove_resource_less_memberships = 1`
   )
   for (const libraryId of autoCleanupDisabledLibraryIds) disable.run(libraryId)
+  // Root mapping is complete: preserve one affiliation even if all local files were omitted.
+  for (const member of touched) {
+    const [libraryId, videoId] = member.split(':').map(Number)
+    pruneEmptyVideoMembership(libraryId, videoId, database)
+  }
 }

@@ -214,7 +214,7 @@ describe('PlaylistImportRepository', () => {
 
       assert.equal(failed.phase, 'failed')
       assert.equal(failed.error?.code, 'NO_ITEMS_FOUND')
-      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n, 0)
       assert.equal((database.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n, 0)
     } finally {
       database.close()
@@ -281,7 +281,7 @@ describe('PlaylistImportRepository', () => {
       assert.equal(started.frozenInput.autoCreateUnmatchedVideos, true)
       assert.equal(started.frozenInput.saveDetailLinks, true)
       assert.equal(started.frozenInput.saveSourcePlaylistLink, true)
-      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n, 0)
       assert.equal((database.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n, 1)
 
       const first = repository.checkpointStaticPage({
@@ -336,7 +336,7 @@ describe('PlaylistImportRepository', () => {
         ]
       )
       assert.equal(ready.preview?.items[0]?.resolvedVideo?.code, 'AAA-1')
-      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n, 0)
 
       const outcome = repository.apply('run-create', 'apply-create')
       const replay = repository.apply('run-create', 'apply-create')
@@ -346,7 +346,7 @@ describe('PlaylistImportRepository', () => {
         /APPLY_IDEMPOTENCY_KEY_REUSED/
       )
       assert.deepEqual(outcome, {
-        playlistId: 1,
+        playlistId: 3,
         playlistName: 'Imported',
         targetLibraryId: 1,
         targetLibraryName: '默认媒体库',
@@ -1076,7 +1076,7 @@ describe('PlaylistImportRepository', () => {
 
       const outcome = repository.apply('run-options-disabled', 'apply-options-disabled')
       assert.deepEqual(outcome, {
-        playlistId: 1,
+        playlistId: 3,
         playlistName: 'Configured import',
         targetLibraryId: 1,
         targetLibraryName: '默认媒体库',
@@ -1518,7 +1518,7 @@ describe('PlaylistImportRepository', () => {
       )
       assert.equal(repository.snapshot('run-stale-direct')?.phase, 'resolving-identities')
       assert.equal(
-        (database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n,
+        (database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n,
         0
       )
     } finally {
@@ -1660,7 +1660,7 @@ describe('PlaylistImportRepository', () => {
       const stale = repository.snapshot('run-stale-tiebreak')!
       assert.equal(stale.phase, 'waiting_user')
       assert.equal(stale.attention?.kind, 'identity-review')
-      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n, 0)
     } finally {
       database.close()
     }
@@ -1702,7 +1702,7 @@ describe('PlaylistImportRepository', () => {
       assert.equal(failed.phase, 'ready-to-apply')
       assert.equal(failed.error?.code, 'APPLY_FAILED')
       assert.equal(failed.error?.retryable, true)
-      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n, 0)
       assert.equal((database.prepare("SELECT COUNT(*) AS n FROM videos WHERE code = 'RETRY-1'").get() as { n: number }).n, 0)
 
       database.exec('DROP TRIGGER fail_playlist_import_once')

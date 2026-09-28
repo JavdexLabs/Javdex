@@ -85,7 +85,7 @@ async function received(target: ReturnType<typeof fixture>, file: string) {
   return id
 }
 
-// Synthetic format-1 historical fixtures: remove the exact structures added by V18/V19.
+// Synthetic historical fixtures: remove structures introduced after the requested version.
 async function historicalBackup(source: ReturnType<typeof fixture>, version: number, edit?: (db: Database.Database, manifest: Record<string, unknown>) => void) {
   const { file } = await exported(source)
   const dir = path.join(source.dir, randomUUID()); const members = await unpackBackupArchive(file, dir)
@@ -100,6 +100,10 @@ async function historicalBackup(source: ReturnType<typeof fixture>, version: num
         for (const row of added.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>) db.exec(`DROP TABLE ${row.name}`)
       } finally { added.close() }
     }
+    if (version < 22) {
+      db.exec("DELETE FROM playlists WHERE system_kind IS NOT NULL; DROP INDEX idx_playlists_system_kind; ALTER TABLE playlists DROP COLUMN system_kind; ALTER TABLE playlists DROP COLUMN remove_after_play;")
+    }
+    if (version < 20) db.exec('ALTER TABLE video_external_stats DROP COLUMN is_default')
     if (version < 19) removeTables(CATALOG_TASK_SCHEMA_SQL)
     if (version < 18) {
       removeTables(CATALOG_IMAGE_UPLOAD_SCHEMA_SQL)
@@ -108,6 +112,7 @@ async function historicalBackup(source: ReturnType<typeof fixture>, version: num
         if (table !== 'actresses') db.exec(`ALTER TABLE ${table} DROP COLUMN revision`)
       }
     }
+    manifest.counts.playlists = (db.prepare("SELECT COUNT(*) AS n FROM playlists").get() as { n: number }).n
     db.pragma(`user_version = ${version}`)
     manifest.schemaVersion = version; manifest.appVersion = '0.7.1'
     edit?.(db, manifest)
@@ -138,7 +143,7 @@ test('older format-1 backups upgrade isolated copies through existing migrations
     const preview = target.request({ action: 'preview', id, mappings: [], omitUnrooted: true }).preview!
     target.request({ action: 'restore', id, digest: preview.digest }); await wait(target, id, 'completed')
     assert.equal((target.db.prepare('SELECT code FROM videos').get() as { code: string }).code, 'OLD-BACKUP')
-    assert.equal((target.db.prepare('SELECT name FROM playlists').get() as { name: string }).name, '保留清单')
+    assert.equal((target.db.prepare('SELECT name FROM playlists WHERE system_kind IS NULL').get() as { name: string }).name, '保留清单')
     const cover = (target.db.prepare('SELECT cover_path FROM videos').get() as { cover_path: string }).cover_path
     assert.equal(fs.readFileSync(path.join(target.host.imagesDir!, cover), 'utf8'), 'image')
     assert.equal(readCatalogIdentity(target.db)!.serverId, oldIdentity.serverId)

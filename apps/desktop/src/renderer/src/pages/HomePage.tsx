@@ -205,6 +205,7 @@ export default function HomePage(): JSX.Element {
             </div>
           ) : (
             <VirtualPosterGrid
+              builtinActions="watch"
               videos={searchVideos}
               detailLibraryIds={detailLibraryIds}
               catalogWindow={searchQuery.window}
@@ -251,6 +252,7 @@ export default function HomePage(): JSX.Element {
                 <div className={styles.posterGrid}>
                   {snapshot.discovery.map((video) => (
                     <PosterCard
+                      builtinActions="watch"
                       key={video.id}
                       video={video}
                       detailLibraryId={video.preferredLibraryId}
@@ -277,6 +279,7 @@ export default function HomePage(): JSX.Element {
                 <div className={styles.posterGrid}>
                   {snapshot.recent.map((video) => (
                     <PosterCard
+                      builtinActions="watch"
                       key={video.id}
                       video={video}
                       detailLibraryId={video.preferredLibraryId}
@@ -303,6 +306,7 @@ export default function HomePage(): JSX.Element {
                     )
                     return (
                       <Link
+                        draggable={false}
                         key={library.id}
                         className={styles.libraryCard}
                         to={mediaLibraryPath(library.id)}

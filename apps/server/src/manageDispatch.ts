@@ -479,6 +479,7 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     }
     if (operation === 'playlists.update') {
       const input = envelope.input as {
+        removeAfterPlay?: boolean
         playlistId: number
         name: string
         description?: string | null
@@ -497,7 +498,7 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
           applyPlaylistCoverRef(
             input.playlistId,
             input.cover,
-            { name: input.name, description: input.description },
+            { name: input.name, description: input.description, removeAfterPlay: input.removeAfterPlay },
             mutation.expectedVersions,
             mutation.operationId,
             database

@@ -1,0 +1,14 @@
+.watch {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  z-index: 5;
+}
+
+.favorite.favorite {
+  color: var(--danger);
+}
+
+.selected.selected {
+  color: var(--text-accent);
+}

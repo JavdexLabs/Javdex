@@ -351,7 +351,7 @@ const videoQuerySchema = z
     codePrefix: z.string().max(32).optional(),
     resourceKinds: z.array(resourceFilterSchema).max(6).optional(),
     pendingScrape: z.enum(['all', 'pending', 'none']).optional(),
-    sortBy: z.enum(['add_time', 'release_date', 'rating', 'code']).optional(),
+    sortBy: z.enum(['add_time', 'release_date', 'rating', 'external_rating', 'code']).optional(),
     sortDir: sortDirSchema.optional(),
     limit: z.number().int().min(1).max(PAGE_SIZE_MAX).optional(),
     offset: z.number().int().min(0).optional()
@@ -360,6 +360,10 @@ const videoQuerySchema = z
 
 const videoEditFields = z
   .object({
+    externalRatings: z.object({
+      deletedSources: z.array(z.string().min(1).max(256)).max(200),
+      defaultSource: z.string().min(1).max(256).nullable()
+    }).strict().optional(),
     title: limitedTextSchema.nullable().optional(),
     summary: limitedTextSchema.nullable().optional(),
     release_date: z.string().max(32).nullable().optional(),
@@ -1064,6 +1068,7 @@ export const MANAGE_OPERATION_INPUTS = {
     .strict(),
   'playlists.update': z
     .object({
+      removeAfterPlay: z.boolean().optional(),
       playlistId: idSchema,
       name: limitedTextSchema.min(1),
       description: limitedTextSchema.nullable().optional(),

@@ -1,0 +1,20 @@
+.more {
+  width: 64px;
+  flex: 0 0 64px;
+  height: 100%;
+}
+
+.more > button {
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background-color: var(--surface-control);
+  font-size: 12px;
+}
+
+.selected > button {
+  color: var(--text-accent);
+  background-color: var(--surface-selected);
+}

@@ -124,7 +124,7 @@ it('routes actual desktop IPC registration and Web catalog queries through the n
 
 it('preserves Web search/sort/filter/page semantics and observes committed membership changes', async () => {
   const db = setup(), legacy = new WebCatalog(db)
-  db.exec("INSERT INTO playlists(id,name) VALUES(1,'List'); INSERT INTO playlist_video(playlist_id,video_id) VALUES(1,1); UPDATE library_video_memberships SET is_hidden=1 WHERE video_id=2")
+  db.exec("UPDATE playlists SET name='List' WHERE id=1; INSERT INTO playlist_video(playlist_id,video_id) VALUES(1,1); UPDATE library_video_memberships SET is_hidden=1 WHERE video_id=2")
   const web = createWorkerWebCatalog(db, client!)
   for (const query of ['', 'page=2', 'page=99', 'q=%25_', 'q=READ&year=2025', 'library=1&tag=1', 'playlist=1', 'sort=code', 'sort=rating', 'sort=released']) {
     assert.deepEqual(await web.browse(new URLSearchParams(query)), legacy.browse(new URLSearchParams(query)))

@@ -75,7 +75,7 @@ describe('getLibraryOverviewStats', () => {
       stats.actresses.scraped + stats.actresses.failed + stats.actresses.unscraped,
       stats.actresses.female
     )
-    assert.equal(stats.playlists, 1)
+    assert.equal(stats.playlists, 3)
     assert.equal(stats.tags, 1)
     assert.equal(stats.galleryAssets, 0)
     assert.deepEqual(stats.facets, { directors: 1, makers: 0, publishers: 0, series: 0 })

@@ -821,6 +821,7 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
     assert.equal(row.source, 'JavDB')
     assert.equal(row.rating_average, 4.5)
     assert.equal(row.rating_count, 100)
+    assert.deepEqual(db.prepare('SELECT source FROM video_external_stats WHERE video_id = 1 AND is_default = 1').all(), [{ source: 'JavDB' }])
     assert.equal(
       (
         db
@@ -829,6 +830,8 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
       ).n,
       1
     )
+    applyScrapeResult(1, { code: 'IPX-535', ratingAverage: 4 }, null, new Map(), [], ['rating'], 'Other', 'replace', 'Other')
+    assert.deepEqual(db.prepare('SELECT source FROM video_external_stats WHERE video_id = 1 AND is_default = 1').all(), [{ source: 'JavDB' }])
   })
 
   it('leaves downloaded cast avatars untouched for application-layer adoption', () => {

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { ensureDefaultExternalRating } from './externalRatings'
 import { normalizeActressName } from './actressNameNormalization'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
@@ -27,7 +28,9 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 19
+import { BUILTIN_PLAYLISTS_SQL } from './schema'
+
+export const CURRENT_SCHEMA_VERSION = 22
 
 type Migration = {
   version: number
@@ -1541,6 +1544,23 @@ const MIGRATIONS: Migration[] = [
   {
     version: 19,
     migrate: migrateToV19
+  },
+  {
+    version: 20,
+    migrate(database) {
+      database.exec('ALTER TABLE video_external_stats ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1))')
+    }
+  },
+  {
+    version: 21,
+    migrate(database) {
+      const videos = database.prepare('SELECT DISTINCT video_id FROM video_external_stats').all() as { video_id: number }[]
+      for (const video of videos) ensureDefaultExternalRating(database, video.video_id)
+    }
+  },
+  {
+    version: 22,
+    migrate(database) { database.exec(BUILTIN_PLAYLISTS_SQL) }
   }
 ]
 

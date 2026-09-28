@@ -4,6 +4,7 @@ import { createPlayerService } from '../services/playerService'
 import { appCommandAdapter } from './appContractAdapter'
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
+import { removePlayedWatchLater } from '../application/watchLaterPlayback'
 
 export function registerPlayerHandlers(
   backend: CatalogBackend,
@@ -14,9 +15,15 @@ export function registerPlayerHandlers(
     readPlayerPath: async () => (await settings.read()).playerPath
   })
 
-  appCommandAdapter.register(IPC.PLAYER_PLAY, (libraryId, videoId): Promise<PlayResult> =>
-    service.playVideo(libraryId, videoId)
-  )
+  const afterPlayback = async (result: PlayResult, videoId?: number): Promise<PlayResult> => {
+    if (result.ok && videoId != null) {
+      try { await removePlayedWatchLater(backend, videoId) }
+      catch (error) { console.warn('播放已开始，但未能从稍后观看移出影片', error) }
+    }
+    return result
+  }
+  appCommandAdapter.register(IPC.PLAYER_PLAY, async (libraryId, videoId): Promise<PlayResult> =>
+    afterPlayback(await service.playVideo(libraryId, videoId), videoId))
 
   appCommandAdapter.register(IPC.PLAYER_REVEAL, (libraryId, videoId): PlayResult =>
     service.revealVideo(libraryId, videoId) as PlayResult
@@ -24,8 +31,8 @@ export function registerPlayerHandlers(
 
   appCommandAdapter.register(
     IPC.PLAYER_OPEN_RESOURCE,
-    (libraryId, resourceId, videoId): Promise<PlayResult> =>
-      service.openResource(libraryId, resourceId, videoId)
+    async (libraryId, resourceId, videoId): Promise<PlayResult> =>
+      afterPlayback(await service.openResource(libraryId, resourceId, videoId), videoId)
   )
 
   appCommandAdapter.register(

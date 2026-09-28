@@ -51,7 +51,7 @@ it('pages the same visible works once across libraries with stable date ties and
   assert.equal(old.length, 262)
   const descendingText = (a: string | null, b: string | null): number => a === b ? 0 : a === null ? 1 : b === null ? -1 : Buffer.compare(Buffer.from(b), Buffer.from(a))
   const expected = old.sort((a, b) => descendingText(a.release_date, b.release_date) || descendingText(a.add_time, b.add_time) || a.id - b.id)
-    .map(({ id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds }) => ({ id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds }))
+    .map(({ id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds, is_favorite, is_watch_later }) => ({ id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds, is_favorite, is_watch_later }))
   const service = createActressQueryService({ getActress: () => { throw new Error('Full actress detail forbidden') } })
   const pages = [0, 60, 120, 180, 240].map(offset => service.listVideos(1, { offset })!)
   assert.deepEqual(pages.flatMap(page => page.videos), expected)

@@ -39,7 +39,7 @@ export type MediaLibraryColor = (typeof MEDIA_LIBRARY_COLORS)[number]
 export type MediaLibraryStatus = (typeof MEDIA_LIBRARY_STATUSES)[number]
 export type MediaLibraryRootState = (typeof MEDIA_LIBRARY_ROOT_STATES)[number]
 export type MediaLibraryRootEditableState = (typeof MEDIA_LIBRARY_ROOT_EDITABLE_STATES)[number]
-export type MediaLibraryDefaultSortBy = NonNullable<VideoQuery['sortBy']>
+export type MediaLibraryDefaultSortBy = Exclude<NonNullable<VideoQuery['sortBy']>, 'external_rating'>
 export type MediaLibrarySortDirection = (typeof MEDIA_LIBRARY_SORT_DIRECTIONS)[number]
 
 export const MEDIA_LIBRARY_DEFAULT_SORTS = [

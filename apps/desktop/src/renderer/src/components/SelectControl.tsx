@@ -46,6 +46,7 @@ type SelectControlProps = Omit<
 > & {
   children: ReactNode
   value: string | number
+  displayLabel?: string
   onChange?: (event: ChangeEvent<HTMLSelectElement>) => void
 }
 
@@ -85,6 +86,7 @@ export default function SelectControl({
   onChange,
   title,
   value,
+  displayLabel,
   'aria-label': ariaLabel
 }: SelectControlProps): JSX.Element {
   const buttonRef = useRef<HTMLButtonElement | null>(null)
@@ -237,7 +239,7 @@ export default function SelectControl({
         onClick={() => setOpen((next) => !next)}
         onKeyDown={onKeyDown}
       >
-        <span className="app-select-value">{selectedOption?.label ?? visibleOptions[0]?.label ?? ''}</span>
+        <span className="app-select-value">{displayLabel ?? selectedOption?.label ?? visibleOptions[0]?.label ?? ''}</span>
       </button>
       {open && typeof document !== 'undefined'
         ? createPortal(

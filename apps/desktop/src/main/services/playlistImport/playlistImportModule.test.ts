@@ -144,7 +144,7 @@ describe('PlaylistImportModule interface', () => {
       assert.equal(replay.runId, first.runId)
       assert.equal(calls.filter((call) => call.startsWith('create:')).length, 1)
       assert.equal(calls.filter((call) => call.startsWith('start:')).length, 1)
-      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n, 0)
       assert.equal(module.snapshot()?.runId, first.runId)
       assert.equal(first.activities?.[0]?.kind, 'action')
       assert.equal(module.snapshot()?.activities?.[0]?.id, 'action:test')
@@ -288,7 +288,7 @@ describe('PlaylistImportModule interface', () => {
       assert.equal(cancelled.phase, 'cancelled')
       assert.equal(calls.some((call) => call === `cancel:${started.runId}`), true)
       assert.deepEqual(events, [`${started.runId}:${cancelled.revision}`])
-      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playlists WHERE system_kind IS NULL').get() as { n: number }).n, 0)
     } finally {
       database.close()
     }
@@ -369,7 +369,7 @@ describe('PlaylistImportModule interface', () => {
       assert.equal(refreshed.error?.retryable, true)
       assert.equal(calls.includes(`retry:${started.runId}`), true)
       assert.equal(repository.nextBrowserWork(started.runId)?.kind, 'detail')
-      assert.equal((database.prepare('SELECT COUNT(*) AS value FROM playlists').get() as { value: number }).value, 0)
+      assert.equal((database.prepare('SELECT COUNT(*) AS value FROM playlists WHERE system_kind IS NULL').get() as { value: number }).value, 0)
     } finally {
       database.close()
     }

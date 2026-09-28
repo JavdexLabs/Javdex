@@ -198,6 +198,7 @@ export function parseSort(
     rawSort === 'add_time' ||
     rawSort === 'release_date' ||
     rawSort === 'rating' ||
+    rawSort === 'external_rating' ||
     rawSort === 'code'
       ? rawSort
       : defaults.sortBy

@@ -10,6 +10,7 @@ import { actressOwnedNameVideoIdsSql } from './actressSearchSql'
 import { getDb } from './database'
 import { createRevisionReadCache, type ReadCacheMemo } from './revisionReadCache'
 import { getVideoDetail } from './videoRepo'
+import { DEFAULT_EXTERNAL_RATING_SQL } from './externalRatingSql'
 import { videoClassificationSelectExtras } from './videoListProjection'
 
 type ScopedVideoListRow = ScopedVideo & {
@@ -268,6 +269,9 @@ function buildWhere(
 function orderBy(query: VideoQuery): string {
   const direction = query.sortDir === 'asc' ? 'ASC' : 'DESC'
   switch (query.sortBy ?? 'add_time') {
+    case 'external_rating':
+      return `${DEFAULT_EXTERNAL_RATING_SQL} IS NULL ASC,
+              ${DEFAULT_EXTERNAL_RATING_SQL} ${direction}, scope_m.membership_added_at DESC, v.id ASC`
     case 'release_date':
       return `(v.release_date IS NULL OR trim(v.release_date) = '') ASC,
               v.release_date ${direction}, scope_m.membership_added_at DESC, v.id ASC`

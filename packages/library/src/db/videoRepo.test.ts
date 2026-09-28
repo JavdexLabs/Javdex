@@ -114,6 +114,21 @@ describe('videoRepo.scrapeStatus', () => {
 })
 
 describe('videoRepo.listVideos', () => {
+  it('sorts by the default external rating, keeps unrated videos last and paginates consistently', () => {
+    setupDb()
+    const db = getDb()
+    insertTestVideoWithFile(db, { code: 'TEST-003', filePath: 'c.mp4' })
+    db.prepare(`INSERT INTO video_external_stats
+      (video_id, source, rating_average, is_default, fetched_at) VALUES
+      (1, 'chosen', 3, 1, '2024-01-01'),
+      (1, 'newer', 10, 0, '2025-01-01'),
+      (2, 'older', 1, 0, '2024-01-01'),
+      (2, 'newest', 8, 0, '2025-01-01')`).run()
+    const ids = (dir: 'asc' | 'desc'): number[] => listVideos({ sortBy: 'external_rating', sortDir: dir }).items.map((v) => v.id)
+    assert.deepEqual(ids('desc'), [2, 1, 3])
+    assert.deepEqual(ids('asc'), [1, 2, 3])
+    assert.deepEqual(listVideos({ sortBy: 'external_rating', sortDir: 'desc', limit: 1, offset: 1 }).items.map((v) => v.id), [1])
+  })
   it('rejects attempts to restore classification text storage through generic updates', () => {
     setupDb()
     assert.throws(
@@ -325,6 +340,30 @@ describe('videoRepo.getVideoDetail', () => {
     assert.equal(detail.external_stats[0]?.source, 'JavDB')
     assert.equal(detail.external_stats[0]?.rating_average, 8.5)
     assert.equal(detail.external_stats[0]?.rating_count, 1234)
+  })
+
+  it('saves rating deletion and default selection atomically and rejects a deleted default', () => {
+    setupDb()
+    const db = getDb()
+    const insert = db.prepare('INSERT INTO video_external_stats (video_id, source, rating_average) VALUES (?, ?, ?)')
+    insert.run(1, 'A', 4)
+    insert.run(1, 'B', 3)
+    insert.run(2, 'Other', 2)
+    assert.throws(() => editVideoRecord(1, {
+      externalRatings: { deletedSources: ['A'], defaultSource: 'A' }
+    }), /默认外部评分不存在/)
+    assert.equal(getVideoDetail(1)!.external_stats.length, 2)
+    assert.throws(() => editVideoRecord(1, {
+      externalRatings: { deletedSources: [], defaultSource: 'Other' }
+    }), /默认外部评分不存在/)
+    editVideoRecord(1, { externalRatings: { deletedSources: [], defaultSource: 'A' } })
+    editVideoRecord(1, { externalRatings: { deletedSources: ['A'], defaultSource: null } })
+    assert.deepEqual(getVideoDetail(1)!.external_stats.map((s) => [s.source, s.is_default]), [['B', 1]])
+    editVideoRecord(1, { externalRatings: { deletedSources: ['A'], defaultSource: 'B' } })
+    assert.deepEqual(getVideoDetail(1)!.external_stats.map((s) => [s.source, s.is_default]), [['B', 1]])
+    editVideoRecord(1, { externalRatings: { deletedSources: ['B'], defaultSource: null } })
+    assert.equal(getVideoDetail(1)!.external_stats.length, 0)
+    assert.equal(getVideoDetail(2)!.external_stats.length, 1)
   })
 })
 

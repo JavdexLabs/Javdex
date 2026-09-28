@@ -10,7 +10,7 @@ import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
 import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 
 interface Props {
-  playlist?: Pick<PlaylistDetail, 'name' | 'description' | 'links' | 'cover_path'>
+  playlist?: Pick<PlaylistDetail, 'name' | 'description' | 'links' | 'cover_path' | 'system_kind'>
   currentCoverUrl?: string | null
   onCancel: () => void
   onCreate?: (input: PlaylistCreateInput) => Promise<void>
@@ -110,6 +110,7 @@ export default function PlaylistCreateModal({
                 id="playlist-name"
                 className="text-input"
                 value={name}
+                disabled={Boolean(playlist?.system_kind)}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="播放清单名称"
                 autoFocus

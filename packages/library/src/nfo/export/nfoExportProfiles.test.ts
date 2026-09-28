@@ -37,6 +37,14 @@ const document: NfoExportVideoDocument = {
 }
 
 describe('NFO export profiles', () => {
+  it('uses the selected external rating as the exported default', () => {
+    const xml = renderNfoExportDocument('portable-v1', {
+      ...document,
+      ratings: document.ratings.map((rating) => ({ ...rating, isDefault: rating.source === 'javdb' }))
+    }).toString('utf8')
+    assert.match(xml, /name="javdb" max="5" default="true"/)
+    assert.doesNotMatch(xml, /name="imdb" max="5" default="true"/)
+  })
   it('renders all public profiles as valid movie XML without database identities', () => {
     const parser = new XMLParser({ ignoreAttributes: false })
     for (const profileId of NFO_EXPORT_PROFILE_IDS) {

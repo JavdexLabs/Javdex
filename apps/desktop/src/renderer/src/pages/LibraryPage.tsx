@@ -6,7 +6,6 @@ import {
   Archive,
   Plus,
   Film,
-  FolderMinus,
   ListPlus,
   SearchCheck,
   SearchX,
@@ -104,14 +103,16 @@ const STATUS_LABELS: Record<string, string> = {
 const SORT_LABELS: Record<NonNullable<VideoQuery['sortBy']>, string> = {
   add_time: '添加时间',
   release_date: '发行日期',
-  rating: '评分',
+  rating: '自定义评分',
+  external_rating: '外部评分',
   code: '番号'
 }
 
 const SORT_SWITCH_OPTIONS: SortSwitchOption<NonNullable<VideoQuery['sortBy']>>[] = [
   { value: 'release_date', label: '发行', title: '发行日期' },
   { value: 'add_time', label: '添加', title: '添加时间' },
-  { value: 'rating', label: '评分' },
+  { value: 'rating', label: '自定义评分' },
+  { value: 'external_rating', label: '外部评分' },
   { value: 'code', label: '番号' }
 ]
 
@@ -154,21 +155,10 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   )
   const previewQueue = useMemo(() => createBulkPreviewQueue(), [])
   const removalPreviewAbort = useRef<AbortController | null>(null)
-  const membershipPreviewAbort = useRef<AbortController | null>(null)
   useEffect(() => () => {
     removalPreviewRequestRef.current += 1
     removalPreviewAbort.current?.abort()
-    membershipPreviewRequestRef.current += 1
-    membershipPreviewAbort.current?.abort()
   }, [])
-  const membershipPreviewRequestRef = useRef(0)
-  const [membershipTarget, setMembershipTarget] = useState<VideoCard | null>(null)
-  const [confirmBulkRemove, setConfirmBulkRemove] = useState(false)
-  const [removingMembership, setRemovingMembership] = useState(false)
-  const [membershipPreviewLoading, setMembershipPreviewLoading] = useState(false)
-  const [membershipImpacts, setMembershipImpacts] = useState<Map<number, BulkPreviewImpact>>(
-    new Map()
-  )
   const [showResourceImport, setShowResourceImport] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
   const [scraperName, setScraperName] = useState('')
@@ -209,12 +199,6 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     removalPreviewAbort.current?.abort()
     setRemovalPreviewLoading(false)
     setRemovalImpacts(new Map())
-    setMembershipTarget(null)
-    setConfirmBulkRemove(false)
-    membershipPreviewRequestRef.current += 1
-    membershipPreviewAbort.current?.abort()
-    setMembershipPreviewLoading(false)
-    setMembershipImpacts(new Map())
     setShowResourceImport(false)
   }, [])
 
@@ -399,15 +383,10 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   })
   useEffect(() => {
     removalPreviewRequestRef.current += 1
-    membershipPreviewRequestRef.current += 1
     removalPreviewAbort.current?.abort()
-    membershipPreviewAbort.current?.abort()
     setRemovalImpacts(new Map())
-    setMembershipImpacts(new Map())
     setConfirmBulkDelete(false)
-    setConfirmBulkRemove(false)
     setDeleteTarget(null)
-    setMembershipTarget(null)
   }, [scopedQueryHash, selectedIds])
 
 
@@ -652,83 +631,6 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     }
   }
 
-  const loadMembershipPreviews = async (targets: readonly Pick<Video, 'id'>[], detail = false): Promise<void> => {
-    membershipPreviewAbort.current?.abort()
-    const controller = new AbortController()
-    membershipPreviewAbort.current = controller
-    const requestId = ++membershipPreviewRequestRef.current
-    setMembershipPreviewLoading(true)
-    setMembershipImpacts(new Map())
-    try {
-      const impacts = await previewQueue.run(targets, async (video) =>
-        compactPreview(await api.videos.previewRemoveFromLibrary(libraryId, video.id), detail), controller.signal)
-      if (requestId !== membershipPreviewRequestRef.current) return
-      if (impacts) setMembershipImpacts(impacts)
-    } catch (error) {
-      if (requestId !== membershipPreviewRequestRef.current) return
-      setMembershipTarget(null)
-      setConfirmBulkRemove(false)
-      toast.show(String((error as Error).message ?? error), 'error')
-    } finally {
-      if (requestId === membershipPreviewRequestRef.current) setMembershipPreviewLoading(false)
-    }
-  }
-
-  const openSingleMembershipRemoval = (video: VideoCard): void => {
-    setMembershipTarget(video)
-    void loadMembershipPreviews([video], true)
-  }
-
-  const openBulkMembershipRemoval = (): void => {
-    setConfirmBulkRemove(true)
-    void loadMembershipPreviews(selectedVideos)
-  }
-
-  const removeVideosFromLibrary = async (targets: readonly Pick<Video, 'id'>[]): Promise<void> => {
-    if (removingMembership || targets.length === 0) return
-    if (targets.some((video) => !membershipImpacts.has(video.id))) {
-      toast.show('移出影响预览尚未就绪，请稍后重试', 'error')
-      return
-    }
-    setRemovingMembership(true)
-    let removed = 0
-    let failed = 0
-    for (const video of targets) {
-      try {
-        const impact = membershipImpacts.get(video.id)
-        if (!impact) throw new Error('缺少移出影响预览')
-        await api.videos.removeFromLibrary({
-          libraryId,
-          videoId: video.id,
-          operationId:
-            typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-              ? crypto.randomUUID()
-              : `remove-${libraryId}-${video.id}-${Date.now()}`,
-          expectedRevision: impact.revision
-        })
-        removed += 1
-      } catch {
-        failed += 1
-      }
-    }
-    setRemovingMembership(false)
-    setMembershipTarget(null)
-    setConfirmBulkRemove(false)
-    setMembershipImpacts(new Map())
-    if (targets.length > 1) clearSelection()
-    if (removed > 0) {
-      invalidateVideoLibraryQueries(queryClient)
-      refetchLibrarySurface()
-    } else {
-      refetchSilent()
-    }
-    if (failed > 0) {
-      toast.show(`已移出 ${removed} 部，${failed} 部失败`, 'error')
-    } else {
-      toast.show(targets.length > 1 ? `已移出 ${removed} 部影片` : '已移出媒体库', 'success')
-    }
-  }
-
   const appliedFilters: AppliedFilterItem[] = []
   if (status !== 'all') {
     appliedFilters.push({
@@ -857,12 +759,6 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                 onClick: () => setShowBulkScrape(true)
               },
               {
-                key: 'remove',
-                label: '移出媒体库',
-                icon: <FolderMinus {...UI_ICON_SM} aria-hidden />,
-                onClick: openBulkMembershipRemoval
-              },
-              {
                 key: 'delete',
                 label: '删除影片',
                 icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
@@ -928,6 +824,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                 <SortSwitch
                   label="排序"
                   options={SORT_SWITCH_OPTIONS}
+                  quickValues={['release_date', 'add_time']}
                   value={sortBy}
                   dir={sortDir}
                   onChange={(nextSortBy, nextSortDir) =>
@@ -1052,6 +949,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           </div>
         ) : (
           <VirtualPosterGrid
+            builtinActions="all"
             scrollMemoryKey={scrollMemoryKey}
             videos={videos}
             catalogWindow={catalogWindow}
@@ -1072,7 +970,6 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             }}
             onDelete={openSingleRemoval}
             deleteLabel="删除影片"
-            onRemoveFromLibrary={openSingleMembershipRemoval}
           />
         )}
       </ListSurface>
@@ -1202,64 +1099,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
         </Modal>
       )}
 
-      {membershipTarget && (
-        <Modal
-          title="移出媒体库"
-          size="lg"
-          confirmText={
-            removingMembership ? '移出中…' : membershipPreviewLoading ? '读取影响…' : '移出媒体库'
-          }
-          confirmDisabled={
-            membershipPreviewLoading || !membershipImpacts.has(membershipTarget.id)
-          }
-          busy={removingMembership}
-          onConfirm={() => {
-            if (!removingMembership) void removeVideosFromLibrary([membershipTarget])
-          }}
-          onCancel={() => {
-            if (!removingMembership) {
-              membershipPreviewRequestRef.current += 1
-              membershipPreviewAbort.current?.abort()
-              setMembershipTarget(null)
-              setMembershipImpacts(new Map())
-            }
-          }}
-        >
-          {membershipPreviewLoading && !membershipImpacts.get(membershipTarget.id) ? (
-            <p>正在读取完整影响范围…</p>
-          ) : null}
-          {membershipImpacts.get(membershipTarget.id) ? (
-            <VideoDeleteImpact impact={membershipImpacts.get(membershipTarget.id)!.detail!} />
-          ) : null}
-        </Modal>
-      )}
 
-      {confirmBulkRemove && (
-        <Modal
-          title="批量移出媒体库"
-          confirmText={
-            removingMembership ? '移出中…' : membershipPreviewLoading ? '读取影响…' : '移出媒体库'
-          }
-          confirmDisabled={
-            membershipPreviewLoading ||
-            selectedVideos.some((video) => !membershipImpacts.has(video.id))
-          }
-          busy={removingMembership}
-          onConfirm={() => {
-            if (!removingMembership) void removeVideosFromLibrary(selectedVideos)
-          }}
-          onCancel={() => {
-            if (!removingMembership) {
-              membershipPreviewRequestRef.current += 1
-              membershipPreviewAbort.current?.abort()
-              setConfirmBulkRemove(false)
-              setMembershipImpacts(new Map())
-            }
-          }}
-        >
-          确定要从当前媒体库移出已选择的 {selectedCount} 部影片吗？只会移除本库成员和本库资源，不会删除全局影片或磁盘文件。
-        </Modal>
-      )}
+
+
 
       {confirmBulkDelete && (
         <Modal

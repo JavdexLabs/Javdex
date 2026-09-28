@@ -24,7 +24,7 @@ afterEach(() => {
 function setup(count = 75) {
   const db = initDatabaseAtPath(path.join(root, 'catalog.db'))
   for (let i = 0; i < count; i++) insertTestVideoWithFile(db, { code: `WEB-${i}`, filePath: `/synthetic/${i}.mp4` })
-  db.exec("INSERT INTO playlists(id,name) VALUES(1,'List'); INSERT INTO playlist_video(playlist_id,video_id) VALUES(1,1)")
+  db.exec("UPDATE playlists SET name='List' WHERE id=1; INSERT INTO playlist_video(playlist_id,video_id) VALUES(1,1)")
   return { db, reader: new WebCatalogQueryReader(db) }
 }
 it('reuses count across pages, caches bounded pages/collections and isolates returned objects', t => {

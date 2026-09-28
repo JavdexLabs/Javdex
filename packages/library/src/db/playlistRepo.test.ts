@@ -21,6 +21,24 @@ import {
 
 let tempRoot: string | null = null
 
+it('creates stable default lists, defaults auto-removal off and orders watch later FIFO', () => {
+  setupDb()
+  const lists = listPlaylists()
+  assert.deepEqual(lists.map(p => p.system_kind).sort(), ['favorites', 'watch_later'])
+  const queue = lists.find(p => p.system_kind === 'watch_later')!
+  assert.equal(queue.remove_after_play, 0)
+  addVideoToPlaylist({ playlistId: queue.id, videoId: 2 })
+  addVideoToPlaylist({ playlistId: queue.id, videoId: 1 })
+  assert.deepEqual(listPlaylistVideoPage(queue.id, { sortBy: 'release_date', sortDir: 'desc' })!.videos.map(v => v.id), [2, 1])
+  updatePlaylistRecord(queue.id, { name: 'rename', removeAfterPlay: true })
+  assert.equal(getPlaylistMetadata(queue.id)!.remove_after_play, 1)
+  assert.equal(getPlaylistMetadata(queue.id)!.name, '稍后观看')
+  const favorite = lists.find(p => p.system_kind === 'favorites')!
+  addVideoToPlaylist({ playlistId: favorite.id, videoId: 1 })
+  assert.equal(listPlaylistVideoPage(queue.id)!.videos.find(v => v.id === 1)!.is_favorite, 1)
+  assert.equal(listPlaylistVideoPage(queue.id)!.videos[0].is_watch_later, 1)
+})
+
 function setupDb(): void {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-playlist-repo-'))
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
@@ -79,8 +97,8 @@ describe('playlistRepo', () => {
             actual.push(...page.videos)
           }
           assert.deepEqual(actual, filtered.map(({ id, code, title, cover_path, scraped_status,
-            has_pending_scrape, resource_kinds }) => ({
-            id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds
+            has_pending_scrape, resource_kinds, is_favorite, is_watch_later }) => ({
+            id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds, is_favorite, is_watch_later
           })))
         }
       }
@@ -138,7 +156,7 @@ describe('playlistRepo', () => {
     )
 
     const items = listPlaylists()
-    assert.equal(items.length, 1)
+    assert.equal(items.length, 3)
     assert.equal(items[0].id, id)
     assert.equal(items[0].name, 'Favorites')
     assert.equal(items[0].description, 'Keepers')
@@ -230,7 +248,7 @@ describe('playlistRepo', () => {
 
     const memberships = listPlaylistsForVideo(1)
     assert.deepEqual(
-      memberships.map((item) => [item.name, item.contains_video]),
+      memberships.filter(item => !item.system_kind).map((item) => [item.name, item.contains_video]),
       [
         ['Second', false],
         ['First', true]
@@ -253,7 +271,7 @@ describe('playlistRepo', () => {
 
     const memberships = listPlaylistsForVideo(1)
     assert.deepEqual(
-      memberships.map((item) => [item.name, item.contains_video, item.video_count]),
+      memberships.filter(item => !item.system_kind).map((item) => [item.name, item.contains_video, item.video_count]),
       [
         ['Second', true, 1],
         ['First', true, 1]

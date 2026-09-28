@@ -137,7 +137,8 @@ export interface RemovedResourceLessMembership {
  */
 export function removeResourceLessMembershipPage(
   libraryId: number, ids: readonly number[], onRemoved: (entry: RemovedResourceLessMembership) => void,
-  database: Database.Database = getDb()
+  database: Database.Database = getDb(),
+  allowLastMembership = true
 ): number {
   positiveId(libraryId, '媒体库 ID')
   if (!database.inTransaction || ids.length > 128 || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) {
@@ -145,6 +146,8 @@ export function removeResourceLessMembershipPage(
   }
   const read = database.prepare(`SELECT v.code,v.title FROM library_video_memberships m JOIN videos v ON v.id=m.video_id
     WHERE m.library_id=? AND m.video_id=? AND m.is_pinned=0
+      AND (${allowLastMembership ? '1' : '0'} OR EXISTS (SELECT 1 FROM library_video_memberships other
+        WHERE other.video_id=m.video_id AND other.library_id<>m.library_id))
       AND NOT EXISTS (SELECT 1 FROM playlist_video p WHERE p.video_id=m.video_id)
       AND NOT EXISTS (SELECT 1 FROM video_resources r WHERE r.library_id=m.library_id AND r.video_id=m.video_id)`)
   const remove = database.prepare('DELETE FROM library_video_memberships WHERE library_id=? AND video_id=?')
@@ -168,10 +171,11 @@ export function removeResourceLessMembershipPage(
  */
 export function removeResourceLessMemberships(
   libraryId: number,
-  database: Database.Database = getDb()
+  database: Database.Database = getDb(),
+  allowLastMembership = true
 ): RemovedResourceLessMembership[] {
   const removed: RemovedResourceLessMembership[] = []
-  removeResourceLessMembershipsWithAudit(libraryId, (entry) => { removed.push(entry) }, database)
+  removeResourceLessMembershipsWithAudit(libraryId, (entry) => { removed.push(entry) }, database, allowLastMembership)
   return removed
 }
 
@@ -185,7 +189,8 @@ export function removeResourceLessMemberships(
 export function removeResourceLessMembershipsWithAudit(
   libraryId: number,
   onRemoved: (entry: RemovedResourceLessMembership) => void,
-  database: Database.Database = getDb()
+  database: Database.Database = getDb(),
+  allowLastMembership = true
 ): number {
   const scopedLibraryId = positiveId(libraryId, '媒体库 ID')
   return database.transaction(() => {
@@ -197,6 +202,8 @@ export function removeResourceLessMembershipsWithAudit(
       SELECT video.id, video.code, video.title
       FROM library_video_memberships membership JOIN videos video ON video.id=membership.video_id
       WHERE membership.library_id=? AND membership.is_pinned=0
+        AND (${allowLastMembership ? '1' : '0'} OR EXISTS (SELECT 1 FROM library_video_memberships other
+          WHERE other.video_id=membership.video_id AND other.library_id<>membership.library_id))
         AND NOT EXISTS (SELECT 1 FROM playlist_video playlist_item WHERE playlist_item.video_id=membership.video_id)
         AND NOT EXISTS (SELECT 1 FROM video_resources resource
           WHERE resource.library_id=membership.library_id AND resource.video_id=membership.video_id)`)
@@ -206,6 +213,9 @@ export function removeResourceLessMembershipsWithAudit(
     const remove = database.prepare(
       `DELETE FROM library_video_memberships
         WHERE library_id = ? AND video_id = ? AND is_pinned = 0
+          AND (${allowLastMembership ? '1' : '0'} OR EXISTS (SELECT 1 FROM library_video_memberships other
+            WHERE other.video_id=library_video_memberships.video_id
+              AND other.library_id<>library_video_memberships.library_id))
           AND NOT EXISTS (
             SELECT 1 FROM playlist_video playlist_item
              WHERE playlist_item.video_id = library_video_memberships.video_id
@@ -239,4 +249,15 @@ export function removeResourceLessMembershipsWithAudit(
     database.exec(`DROP TABLE temp.${table}`)
     return count
   })()
+}
+
+/** Finish a resource operation by pruning an empty multi-library affiliation.
+ * Preserve the last affiliation, pinned members and all playlist references.
+ * Call after the complete operation, never from a per-resource DELETE trigger. */
+export function pruneEmptyVideoMembership(
+  libraryId: number, videoId: number, database: Database.Database = getDb()
+): boolean {
+  return database.transaction(() => removeResourceLessMembershipPage(
+    libraryId, [videoId], () => {}, database, false
+  ) > 0)()
 }

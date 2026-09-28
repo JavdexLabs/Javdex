@@ -31,37 +31,17 @@ function fixture(): Database.Database {
 }
 
 describe('video lifecycle repo', () => {
-  it('removes only one library membership and replays the same operation idempotently', () => {
+  it('rejects retired manual removal without touching resources or memberships', () => {
     const database = fixture()
     try {
       const lifecycle = createVideoLifecycleRepo(database, accessibleLocalFiles)
-      const preview = lifecycle.previewRemoveFromLibrary(1, 91)
-      assert.deepEqual(preview.resourceIds, [911, 912])
-      assert.deepEqual(preview.remainingLibraryIds, [2])
-      assert.equal(preview.removesCanonicalVideo, false)
-      const input = {
-        libraryId: 1,
-        videoId: 91,
-        operationId: 'remove-a-91',
-        expectedRevision: preview.revision
-      }
-      const first = lifecycle.removeFromLibrary(input)
-      assert.deepEqual(lifecycle.removeFromLibrary(input), first)
-      assert.equal(
-        (database.prepare('SELECT COUNT(*) AS count FROM videos WHERE id = 91').get() as {
-          count: number
-        }).count,
-        1
-      )
-      assert.deepEqual(
-        database
-          .prepare('SELECT library_id, id FROM video_resources WHERE video_id = 91')
-          .all(),
-        [{ library_id: 2, id: 921 }]
-      )
-    } finally {
-      database.close()
-    }
+      const before = database.prepare('SELECT * FROM library_video_memberships').all()
+      assert.throws(() => lifecycle.previewRemoveFromLibrary(1, 91), /已停用/)
+      assert.throws(() => lifecycle.removeFromLibrary({ libraryId: 1, videoId: 91,
+        operationId: 'old-client', expectedRevision: 'old-preview' }), /已停用/)
+      assert.deepEqual(database.prepare('SELECT * FROM library_video_memberships').all(), before)
+      assert.equal((database.prepare('SELECT COUNT(*) AS n FROM video_resources').get() as { n: number }).n, 3)
+    } finally { database.close() }
   })
 
   it('moves one external resource and keeps each library primary isolated', () => {
@@ -184,7 +164,7 @@ describe('video lifecycle repo', () => {
       const lifecycle = createVideoLifecycleRepo(database, accessibleLocalFiles)
       database.prepare("UPDATE media_libraries SET status = 'archived' WHERE id = 1").run()
 
-      assert.throws(() => lifecycle.previewRemoveFromLibrary(1, 91), /已归档媒体库/)
+      assert.throws(() => lifecycle.previewRemoveFromLibrary(1, 91), /已停用/)
       assert.throws(() => lifecycle.previewMoveResource(1, 2, 912), /已归档媒体库/)
     } finally {
       database.close()

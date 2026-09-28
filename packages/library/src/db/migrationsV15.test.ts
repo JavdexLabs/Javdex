@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS library_scan_runs (
       id, library_id, path, normalized_path, real_path, normalized_real_path, device_id, inode
     ) VALUES (2, 1, '/library', '/library', '/library', '/library', '1', '2');
   `)
+  database.exec(`CREATE TABLE IF NOT EXISTS video_external_stats (
+    id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL, source TEXT NOT NULL,
+    rating_average REAL, rating_count INTEGER, fetched_at TEXT, UNIQUE(video_id,source));
+    CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT);`)
   database.pragma(`user_version = ${V14_SCHEMA_VERSION}`)
 }
 
@@ -95,7 +99,6 @@ describe('V15 local NFO import migration', () => {
     try {
       database.pragma('foreign_keys = ON')
       migrateDatabase(database)
-      assert.equal(CURRENT_SCHEMA_VERSION, 19)
       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.equal(columnNames(database, 'media_library_configs').has('auto_import_local_nfo'), true)
       assert.equal(tableExists(database, 'pending_resource_identities'), true)

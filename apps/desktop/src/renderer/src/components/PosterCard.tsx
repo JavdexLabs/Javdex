@@ -11,6 +11,7 @@ import IconButton from './IconButton'
 import MediaTileActionButton from './MediaTileActionButton'
 import { UI_ICON, UI_ICON_SM } from './iconDefaults'
 import { getVideoResourceBadgeSummary } from './videoResourceBadges'
+import BuiltinPlaylistButton from './BuiltinPlaylistButton'
 
 const STATUS_BADGE: Record<number, { text: string; cls: string } | null> = {
   0: { text: '未刮削', cls: 'unscraped' },
@@ -34,9 +35,9 @@ export interface PosterCardProps<TVideo extends VideoCard = Video> {
   onMarkScrapeSuccess?: (video: TVideo) => void
   onDelete?: (video: TVideo) => void
   deleteLabel?: string
-  onRemoveFromLibrary?: (video: TVideo) => void
   onRemove?: (video: TVideo) => void
   removeDisabled?: boolean
+  builtinActions?: 'all' | 'watch'
 }
 
 export default function PosterCard<TVideo extends VideoCard = Video>({
@@ -53,9 +54,9 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
   onMarkScrapeSuccess,
   onDelete,
   deleteLabel = '删除影片',
-  onRemoveFromLibrary,
   onRemove,
-  removeDisabled = false
+  removeDisabled = false,
+  builtinActions
 }: PosterCardProps<TVideo>): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
@@ -66,7 +67,7 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const hasQuickActions = Boolean(
-    onAddToPlaylist || onScrape || onMarkScrapeSuccess || onRemoveFromLibrary || onDelete
+    onAddToPlaylist || onScrape || onMarkScrapeSuccess || onDelete || (onEdit && builtinActions === 'all')
   )
   const resourceBadges = getVideoResourceBadgeSummary(video.resource_kinds ?? [])
 
@@ -197,7 +198,9 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
             }}
           />
         )}
-        {!selectionMode && onEdit && (
+        {!selectionMode && builtinActions && <BuiltinPlaylistButton video={video} kind="watch_later" />}
+        {!selectionMode && builtinActions === 'all' && <BuiltinPlaylistButton video={video} kind="favorites" />}
+        {!selectionMode && onEdit && builtinActions !== 'all' && (
           <IconButton
             className="poster-icon-action poster-edit-action poster-hover-control"
             icon={<Pencil {...UI_ICON} />}
@@ -226,6 +229,7 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
             />
             {menuOpen && (
               <div className="poster-action-menu" role="menu">
+                {onEdit && builtinActions === 'all' && <button type="button" role="menuitem" onClick={e => stopAndRun(e, onEdit)}>编辑元数据</button>}
                 {onAddToPlaylist && (
                   <button
                     type="button"
@@ -249,15 +253,7 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
                     标记为刮削成功
                   </button>
                 )}
-                {onRemoveFromLibrary && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => stopAndRun(e, onRemoveFromLibrary)}
-                  >
-                    移出媒体库
-                  </button>
-                )}
+
                 {onDelete && (
                   <button
                     type="button"

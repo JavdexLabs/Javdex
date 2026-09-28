@@ -139,11 +139,12 @@ export interface ScanCoordinatorDependencies {
   ) => void
   runCleanupTransaction: <T>(operation: () => T) => T
   /** Atomic compatibility path only; cooperative cleanup uses the page dependency below. */
-  removeResourceLessMemberships: (libraryId: number) => RemovedResourceLessMembership[]
+  removeResourceLessMemberships: (libraryId: number, allowLastMembership?: boolean) => RemovedResourceLessMembership[]
   /** Atomic compatibility path with a synchronous audit sink. */
   removeResourceLessMembershipsWithAudit: (
     libraryId: number,
-    onRemoved: Parameters<typeof removeResourceLessMembershipsWithAudit>[1]
+    onRemoved: Parameters<typeof removeResourceLessMembershipsWithAudit>[1],
+    allowLastMembership?: boolean
   ) => number
   /** Cooperative path; called synchronously inside the business/audit page transaction. */
   removeResourceLessMembershipPage: typeof removeResourceLessMembershipPage
@@ -542,13 +543,13 @@ export class ScanCoordinator {
               () => beforeCleanupPage('pendingGroups'))
             if (!controller.signal.aborted) transaction(() => deferred.finish())
           }
-          if (isFullScan && snapshot.config.removeResourceLessMemberships) {
+          if (isFullScan) {
             await pages.each('memberships', controller.signal, transaction, ids => {
               if (offlineRoots.length > 0) return 0
               authorize()
               return this.dependencies.removeResourceLessMembershipPage(request.libraryId, ids, video => recordCleanupAudit({
                 section: 'deletedVideos', entry: { ...video, reason: 'resource_less' }
-              }))
+              }), undefined, Boolean(snapshot?.config.removeResourceLessMemberships))
             }, count => { result.deletedVideos += count }, () => beforeCleanupPage('memberships'))
           }
         } catch (error) { cleanupFailure = true; cleanupError = error }
@@ -623,13 +624,13 @@ export class ScanCoordinator {
         }
         let removedMemberships: RemovedResourceLessMembership[] = []
         let removedMembershipCount = 0
-        if (isFullScan && offlineRoots.length === 0 && snapshot?.config.removeResourceLessMemberships) {
+        if (isFullScan && offlineRoots.length === 0) {
           if (writer) {
             removedMembershipCount = this.dependencies.removeResourceLessMembershipsWithAudit(
-              request.libraryId, recordRemovedMembership
+              request.libraryId, recordRemovedMembership, Boolean(snapshot?.config.removeResourceLessMemberships)
             )
           } else {
-            removedMemberships = this.dependencies.removeResourceLessMemberships(request.libraryId)
+            removedMemberships = this.dependencies.removeResourceLessMemberships(request.libraryId, Boolean(snapshot?.config.removeResourceLessMemberships))
             for (const video of removedMemberships) recordRemovedMembership(video)
             removedMembershipCount = removedMemberships.length
           }
@@ -1077,9 +1078,9 @@ export function createScanCoordinator(
     recordCleanupAudit: dependencies.recordCleanupAudit,
     runCleanupTransaction: dependencies.runCleanupTransaction ?? runCleanupTransaction,
     removeResourceLessMemberships:
-      dependencies.removeResourceLessMemberships ?? removeResourceLessMemberships,
+      dependencies.removeResourceLessMemberships ?? ((id, allowLast) => removeResourceLessMemberships(id, undefined, allowLast)),
     removeResourceLessMembershipsWithAudit:
-      dependencies.removeResourceLessMembershipsWithAudit ?? removeResourceLessMembershipsWithAudit,
+      dependencies.removeResourceLessMembershipsWithAudit ?? ((id, sink, allowLast) => removeResourceLessMembershipsWithAudit(id, sink, undefined, allowLast)),
     removeResourceLessMembershipPage:
       dependencies.removeResourceLessMembershipPage ?? removeResourceLessMembershipPage,
     readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? readPendingScanAuditEntries,

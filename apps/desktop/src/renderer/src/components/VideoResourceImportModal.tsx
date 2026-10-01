@@ -16,7 +16,7 @@ import { api, assetUrl } from '../api'
 import { mediaLibrarySettingsPath } from '../listView/mediaLibraryRoutes'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
-import { EditFormField, EditFormSection } from './FormPrimitives'
+import { EditForm, EditFormField, EditFormFields, EditFormSection } from './FormPrimitives'
 import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
 import {
   buildVideoManualImportInput,
@@ -35,6 +35,7 @@ import IconButton from './IconButton'
 import { UI_ICON_SM } from './iconDefaults'
 import { mediaLibraryCatalogScope } from '../query/catalogScopes'
 import { useClassificationLinkKeys } from './classificationLinkForm'
+import TextInput from './TextInput'
 import styles from './VideoResourceImportModal.module.css'
 import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
@@ -303,10 +304,10 @@ export default function VideoResourceImportModal({
   const resourceFields = (
     <>
       <EditFormField label="资源链接" htmlFor="resource-url" span={2} hint={resourceUrlHint}>
-        <div className="video-resource-url-control">
-          <input
+        <div className={styles.urlControl}>
+          <TextInput
             id="resource-url"
-            className="text-input form-control-full"
+            className={`${styles.fullControl} ${styles.urlInput}`}
             value={url}
             onChange={(event) => {
               setUrl(event.target.value)
@@ -325,6 +326,7 @@ export default function VideoResourceImportModal({
               type="button"
               size="sm"
               disabled={checking || saving || !url.trim()}
+              className={styles.readAction}
               aria-label="尝试读取直链文件大小，不验证能否播放"
               onClick={() => void checkLink()}
             >
@@ -333,7 +335,7 @@ export default function VideoResourceImportModal({
           ) : null}
         </div>
         {checkResult ? (
-          <span className={`video-resource-check ${checkResult.ok ? 'is-success' : 'is-error'}`}>
+          <span className={styles.checkResult} data-status={checkResult.ok ? 'success' : 'error'}>
             {formatVideoResourceLinkCheck(checkResult)}
           </span>
         ) : null}
@@ -345,7 +347,7 @@ export default function VideoResourceImportModal({
       >
         <SelectControl
           id="resource-kind"
-          className="form-control-full"
+          className={styles.fullControl}
           value={kind}
           onChange={(event) => setKind(event.target.value as VideoResourceKindSelection)}
           disabled={saving || isStrmManaged}
@@ -356,9 +358,9 @@ export default function VideoResourceImportModal({
         </SelectControl>
       </EditFormField>
       <EditFormField label="展示名称" htmlFor="resource-name" hint="可选，不填写时显示脱敏域名或路径。">
-        <input
+        <TextInput
           id="resource-name"
-          className="text-input form-control-full"
+          className={styles.fullControl}
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
           disabled={saving}
@@ -371,10 +373,10 @@ export default function VideoResourceImportModal({
         span={2}
         hint={remoteMode ? '可选；远程模式请手动填写。' : '可选；视频直链读取到大小后会自动填入。'}
       >
-        <div className="video-resource-size-control">
-          <input
+        <div className={styles.sizeControl}>
+          <TextInput
             id="resource-size"
-            className="text-input"
+            className={styles.sizeInput}
             type="number"
             min="0"
             step="any"
@@ -440,7 +442,7 @@ export default function VideoResourceImportModal({
       bodyClassName={isLibraryImport ? styles.libraryBody : ''}
       bodyOverflow={isLibraryImport ? 'hidden' : 'auto'}
       confirmText={
-        saving ? '保存中…' : resource ? '保存' : isLibraryImport
+        resource ? '保存' : isLibraryImport
           ? targetValue === 'new' ? '添加影片' : '添加到所选影片'
           : '导入'
       }
@@ -455,20 +457,20 @@ export default function VideoResourceImportModal({
         (Boolean(resource) && !hasResourceUrl && !isStrmManaged)
       }
       busy={saving}
-      onConfirm={() => void save()}
+      onConfirm={save}
       onCancel={onCancel}
     >
-      <div className={isLibraryImport ? styles.form : 'entity-edit-form'}>
-        <div className={isLibraryImport ? styles.identityPane : 'entity-edit-fields video-resource-import-grid'}>
+      <EditForm variant={isLibraryImport ? 'custom' : 'default'} className={isLibraryImport ? styles.form : undefined}>
+        <EditFormFields variant={isLibraryImport ? 'custom' : 'relaxed'} className={isLibraryImport ? styles.identityPane : undefined}>
           <EditFormField
             label="影片番号"
             htmlFor="resource-code"
             span={2}
             hint={isLibraryImport ? '必填。可先建无资源影片。' : undefined}
           >
-            <input
+            <TextInput
               id="resource-code"
-              className="text-input form-control-full"
+              className={styles.fullControl}
               value={code}
               onChange={(event) => setCode(event.target.value)}
               disabled={Boolean(fixedCode) || saving}
@@ -546,7 +548,7 @@ export default function VideoResourceImportModal({
             </EditFormField>
           ) : null}
           {!isLibraryImport ? resourceFields : null}
-        </div>
+        </EditFormFields>
         {isLibraryImport ? (
           <div className={styles.linksPane}>
             <EditFormSection
@@ -565,9 +567,8 @@ export default function VideoResourceImportModal({
                   return (
                     <div className={styles.resourceCard} key={key}>
                       <div className={styles.resourceUrlRow}>
-                        <input
+                        <TextInput
                           id={`import-resource-${key}-url`}
-                          className="text-input"
                           value={draft.url}
                           placeholder="https://…"
                           disabled={saving}
@@ -610,7 +611,7 @@ export default function VideoResourceImportModal({
                       </div>
                       <div className={styles.resourceMetaRow}>
                         <SelectControl
-                          className="form-control-full"
+                          className={styles.fullControl}
                           value={draft.kind}
                           aria-label={`资源 ${index + 1} 类型`}
                           disabled={saving}
@@ -626,8 +627,7 @@ export default function VideoResourceImportModal({
                           <option value="direct">{VIDEO_RESOURCE_KIND_LABELS.direct}</option>
                           <option value="web">{VIDEO_RESOURCE_KIND_LABELS.web}</option>
                         </SelectControl>
-                        <input
-                          className="text-input"
+                        <TextInput
                           value={draft.displayName}
                           placeholder="展示名称"
                           aria-label={`资源 ${index + 1} 展示名称`}
@@ -636,9 +636,9 @@ export default function VideoResourceImportModal({
                             patchPlaybackDraft(index, { displayName: event.target.value })
                           }
                         />
-                        <div className="video-resource-size-control">
-                          <input
-                            className="text-input"
+                        <div className={styles.sizeControl}>
+                          <TextInput
+                            className={styles.sizeInput}
                             type="number"
                             min="0"
                             step="any"
@@ -674,7 +674,7 @@ export default function VideoResourceImportModal({
                       </div>
                       {draft.checkResult ? (
                         <span
-                          className={`video-resource-check ${draft.checkResult.ok ? 'is-success' : 'is-error'}`}
+                          className={styles.checkResult} data-status={draft.checkResult.ok ? 'success' : 'error'}
                         >
                           {formatVideoResourceLinkCheck(draft.checkResult)}
                         </span>
@@ -706,8 +706,8 @@ export default function VideoResourceImportModal({
             />
           </div>
         ) : null}
-      </div>
-      {error ? <div className="form-error-banner">{error}</div> : null}
+      </EditForm>
+      {error ? <div className={styles.errorBanner}>{error}</div> : null}
     </Modal>
   )
 }

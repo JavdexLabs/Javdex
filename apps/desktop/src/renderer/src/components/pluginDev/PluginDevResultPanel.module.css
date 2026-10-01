@@ -153,6 +153,16 @@
 
 .resultCase {
   flex-shrink: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.resultCase summary {
+  min-height: 28px;
+  padding: 6px 9px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .resultCase > summary {

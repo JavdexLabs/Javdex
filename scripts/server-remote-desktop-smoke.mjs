@@ -249,7 +249,7 @@ try {
       const beforeBatch = await page.evaluate(() => window.api.videos.list({ kind: 'library', libraryId: 1 }))
       await page.evaluate(() => { window.location.hash = '/libraries/1' })
       for (const code of ['GUI-901', 'GUI-903']) {
-        await page.locator('.poster-card').filter({ hasText: code }).hover()
+        await page.locator('[data-video-card]').filter({ hasText: code }).hover()
         await page.getByRole('button', { name: `选择 ${code}`, exact: true }).click()
       }
       await page.getByRole('button', { name: '刮削元数据', exact: true }).click()
@@ -303,7 +303,7 @@ try {
     }, playlistFixture.url)
     await page.getByRole('button', { name: '导入外部清单', exact: true }).click()
     await page.getByPlaceholder('https://example.com/list/...').fill(`${playlistFixture.url}/list`)
-    await page.locator('.entity-edit-field').filter({ has: page.getByText('目标媒体库', { exact: true }) }).getByRole('button').click()
+    await page.locator('[data-edit-form-field]').filter({ has: page.getByText('目标媒体库', { exact: true }) }).getByRole('button').click()
     await page.getByRole('option', { name: '默认媒体库', exact: true }).click()
     await page.getByRole('button', { name: '开始导入', exact: true }).click()
     await page.getByText('导入完成', { exact: true }).waitFor({ timeout: 45000 })
@@ -317,7 +317,7 @@ try {
     assert.equal(imported.detail.videos[0].id, imported.videos.items.find(item => item.code === 'GUI-901').id)
     assert.equal(imported.videos.items.filter(item => item.code === 'GUI-901').length, 1)
     await page.getByRole('button', { name: '查看清单', exact: true }).click()
-    await page.locator('.poster-card').filter({ hasText: 'GUI-901' }).waitFor()
+    await page.locator('[data-video-card]').filter({ hasText: 'GUI-901' }).waitFor()
     await page.screenshot({ path: path.join(output, 'remote-playlist-match.png'), fullPage: true })
     console.log('PASS: remote playlist import GUI reuses the existing server video and opens its playlist')
   }

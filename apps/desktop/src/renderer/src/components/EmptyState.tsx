@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import Spinner from './Spinner'
 import styles from './EmptyState.module.css'
 
-export type EmptyStateVariant = 'page' | 'compact' | 'panel' | 'modal' | 'log' | 'fill'
+export type EmptyStateVariant = 'page' | 'compact' | 'gallery' | 'panel' | 'modal' | 'log' | 'fill'
 
 interface EmptyStateProps {
   variant?: EmptyStateVariant
@@ -12,6 +12,7 @@ interface EmptyStateProps {
   children?: ReactNode
   loading?: boolean
   className?: string
+  descriptionClassName?: string
 }
 
 export default function EmptyState({
@@ -21,22 +22,29 @@ export default function EmptyState({
   description,
   children,
   loading = false,
-  className = ''
+  className = '',
+  descriptionClassName = ''
 }: EmptyStateProps): JSX.Element {
   return (
     <div
-      className={`${styles.root} ${styles[variant]} empty-state empty-state--${variant}${className ? ` ${className}` : ''}`}
+      className={`${styles.root} ${styles[variant]}${className ? ` ${className}` : ''}`}
+      data-empty-variant={variant}
       role={loading ? 'status' : undefined}
       aria-live={loading ? 'polite' : undefined}
     >
       {loading ? (
         <Spinner />
       ) : icon ? (
-        <div className={`${styles.icon} empty-state-icon`}>{icon}</div>
+        <div className={styles.icon}>{icon}</div>
       ) : null}
-      {title ? <strong className={`${styles.title} empty-state-title`}>{title}</strong> : null}
+      {title ? <strong className={styles.title}>{title}</strong> : null}
       {description ? (
-        <div className={`${styles.description} empty-state-description`}>{description}</div>
+        <div
+          data-empty-part="description"
+          className={`${styles.description}${descriptionClassName ? ` ${descriptionClassName}` : ''}`}
+        >
+          {description}
+        </div>
       ) : null}
       {children}
     </div>

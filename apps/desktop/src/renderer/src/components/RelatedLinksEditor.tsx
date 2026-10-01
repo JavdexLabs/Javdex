@@ -5,17 +5,21 @@ import { EditFormSection } from './FormPrimitives'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
 import Button from './Button'
+import TextInput from './TextInput'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
+import styles from './RelatedLinksEditor.module.css'
 
 export default function RelatedLinksEditor({
   links,
   disabled = false,
   hint,
+  removeVerb = '删除',
   onChange
 }: {
   links: RelatedLinkInput[]
   disabled?: boolean
   hint?: ReactNode
+  removeVerb?: '删除' | '移除'
   onChange: (links: RelatedLinkInput[]) => void
 }): JSX.Element {
   const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } = useClassificationLinkKeys(
@@ -23,11 +27,10 @@ export default function RelatedLinksEditor({
   )
   return (
     <EditFormSection title="相关链接" hint={hint}>
-      <div className="organization-link-editor">
+      <div className={styles.root}>
         {links.map((link, index) => (
-          <div className="organization-link-editor-row" key={linkKeys[index]}>
-            <input
-              className="text-input"
+          <div className={styles.row} key={linkKeys[index]}>
+            <TextInput
               aria-label={`链接 ${index + 1} 名称`}
               placeholder="名称"
               value={link.label}
@@ -38,8 +41,7 @@ export default function RelatedLinksEditor({
                 onChange(next)
               }}
             />
-            <input
-              className="text-input"
+            <TextInput
               aria-label={`链接 ${index + 1} 地址`}
               placeholder="https://"
               value={link.url}
@@ -50,9 +52,9 @@ export default function RelatedLinksEditor({
                 onChange(next)
               }}
             />
-            <div className="organization-link-actions">
+            <div className={styles.actions}>
               <IconButton
-                className="organization-link-action"
+                className={styles.action}
                 icon={<ChevronUp {...UI_ICON_SM} aria-hidden />}
                 label={`上移链接 ${index + 1}`}
                 disabled={disabled || index === 0}
@@ -62,7 +64,7 @@ export default function RelatedLinksEditor({
                 }}
               />
               <IconButton
-                className="organization-link-action"
+                className={styles.action}
                 icon={<ChevronDown {...UI_ICON_SM} aria-hidden />}
                 label={`下移链接 ${index + 1}`}
                 disabled={disabled || index === links.length - 1}
@@ -72,10 +74,10 @@ export default function RelatedLinksEditor({
                 }}
               />
               <IconButton
-                className="organization-link-action"
+                className={styles.action}
                 tone="danger"
                 icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
-                label={`删除链接 ${index + 1}`}
+                label={`${removeVerb}链接 ${index + 1}`}
                 disabled={disabled}
                 onClick={() => {
                   onChange(links.filter((_, itemIndex) => itemIndex !== index))
@@ -89,7 +91,7 @@ export default function RelatedLinksEditor({
           type="button"
           variant="ghost"
           size="sm"
-          className="organization-link-add"
+          className={styles.add}
           disabled={disabled}
           onClick={() => {
             onChange([...links, { label: '', url: '' }])

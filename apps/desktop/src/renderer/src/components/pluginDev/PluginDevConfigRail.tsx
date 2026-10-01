@@ -1,3 +1,5 @@
+import TextInput from '../TextInput'
+import TextArea from '../TextArea'
 import { useState } from 'react'
 import { getPluginDevKindProfile, parseTestTargetList } from '@shared/pluginDevKindProfile'
 import type { PluginKind } from './types'
@@ -6,6 +8,7 @@ import PluginDevFieldTags from './PluginDevFieldTags'
 import PluginDevMediaTargetPicker from './PluginDevMediaTargetPicker'
 import { WorkbenchRail, WorkbenchRailHeader } from '../workbench'
 import Button from '../Button'
+import styles from './PluginDevConfigRail.module.css'
 
 function PluginDevFieldLabel({
   children,
@@ -18,7 +21,7 @@ function PluginDevFieldLabel({
     <span>
       {children}
       {required ? (
-        <abbr className="plugin-edit-control-mark" title="必填">
+        <abbr className={styles.controlMark} title="必填">
           *
         </abbr>
       ) : null}
@@ -27,9 +30,9 @@ function PluginDevFieldLabel({
 }
 
 function pluginDevControlClass(required: boolean, attention: boolean): string {
-  const classes = ['plugin-edit-control', 'plugin-dev-control--primary']
-  if (required) classes.push('plugin-edit-control--required')
-  if (attention) classes.push('plugin-edit-control--attention')
+  const classes = [styles.control, styles.primary]
+  if (required) classes.push(styles.controlRequired)
+  if (attention) classes.push(styles.controlAttention)
   return classes.join(' ')
 }
 
@@ -143,20 +146,20 @@ export default function PluginDevConfigRail({
   }
 
   return (
-    <WorkbenchRail className="plugin-dev-rail plugin-dev-rail--config">
-      <WorkbenchRailHeader className="plugin-dev-rail-head">
+    <WorkbenchRail className={styles.rail}>
+      <WorkbenchRailHeader>
         <span>任务配置</span>
-        {isDebugMode ? <span className="plugin-dev-mode-badge">调试模式</span> : null}
+        {isDebugMode ? <span className={styles.modeBadge}>调试模式</span> : null}
       </WorkbenchRailHeader>
 
-      <div className="plugin-dev-config-scroll">
+      <div className={styles.scroll} data-plugin-dev-config-scroll>
         {agentDisabledReason ? (
-          <div className="plugin-dev-config-attention">
+          <div className={styles.attention} data-plugin-dev-attention>
             <strong>{activeLlmReady ? '下一步' : '模型未就绪'}</strong>
             <span>{agentDisabledReason}</span>
           </div>
         ) : null}
-        <label className="plugin-edit-control plugin-dev-control--primary plugin-dev-plugin-select">
+        <label className={`${styles.control} ${styles.primary}`}>
           <span>{isDebugMode ? '调试插件' : '插件来源'}</span>
           <SelectControl
             value={selectedPluginName}
@@ -170,21 +173,21 @@ export default function PluginDevConfigRail({
               </option>
             ))}
           </SelectControl>
-          {pluginsLoading && <span className="plugin-dev-plugin-select-hint">加载中…</span>}
+          {pluginsLoading && <span className={styles.selectHint}>加载中…</span>}
           {!pluginsLoading && selectablePlugins.length === 0 && (
-            <span className="plugin-dev-plugin-select-hint">暂无已安装的插件</span>
+            <span className={styles.selectHint}>暂无已安装的插件</span>
           )}
           {forkedFromBuiltIn ? (
-            <span className="plugin-dev-plugin-select-hint">
+            <span className={styles.selectHint}>
               来自内置「{forkedFromBuiltIn}」的草稿，须使用新名称安装，不会覆盖原插件
             </span>
           ) : null}
         </label>
 
-        <label className="plugin-edit-control plugin-dev-control--primary">
+        <label className={`${styles.control} ${styles.primary}`}>
           <span>插件名</span>
-          <input
-            className="text-input"
+          <TextInput
+            density="workspace" className={styles.textInput}
             value={siteName}
             placeholder="可选，未填由 Agent 自动生成"
             disabled={busy}
@@ -196,8 +199,8 @@ export default function PluginDevConfigRail({
           className={pluginDevControlClass(siteUrlRequired, siteUrlRequired && !siteUrl.trim())}
         >
           <PluginDevFieldLabel required={siteUrlRequired}>{profile.siteUrlLabel}</PluginDevFieldLabel>
-          <input
-            className="text-input"
+          <TextInput
+            density="workspace" className={styles.textInput}
             value={siteUrl}
             placeholder="https://example.com"
             disabled={busy}
@@ -205,7 +208,7 @@ export default function PluginDevConfigRail({
             onChange={(e) => onSiteUrlChange(e.target.value)}
           />
           {siteUrlRequired ? (
-            <small className="plugin-edit-control-hint">新建插件时必填，填写目标站点首页地址</small>
+            <small className={styles.controlHint}>新建插件时必填，填写目标站点首页地址</small>
           ) : null}
         </label>
 
@@ -215,22 +218,21 @@ export default function PluginDevConfigRail({
             testTargetRequired && !hasTestTarget
           )}
         >
-          <div className="plugin-dev-control-heading">
+          <div className={styles.controlHeading}>
             <PluginDevFieldLabel required={testTargetRequired}>
               {profile.testTargetLabel}
             </PluginDevFieldLabel>
             <Button
               type="button"
               variant="ghost"
-              className="plugin-dev-target-picker-button"
               disabled={busy}
               onClick={() => setShowTargetPicker(true)}
             >
               从媒体库选择
             </Button>
           </div>
-          <textarea
-            className="text-input plugin-dev-textarea plugin-dev-textarea--mini"
+          <TextArea
+            density="workspace" className={`${styles.textInput} ${styles.textarea} ${styles.textareaMini}`}
             value={testTarget}
             placeholder={
               isDebugMode
@@ -241,7 +243,7 @@ export default function PluginDevConfigRail({
             aria-required={testTargetRequired}
             onChange={(e) => onTestTargetChange(e.target.value)}
           />
-          <small className="plugin-edit-control-hint">
+          <small className={styles.controlHint}>
             {isDebugMode
               ? `调试时必填，用于 Agent 验证插件解析是否正确`
               : `AI 开发可不填；填写后 Agent 会优先使用这些${profile.testTargetShortLabel}验证`}
@@ -249,10 +251,10 @@ export default function PluginDevConfigRail({
           </small>
         </div>
 
-        <label className="plugin-edit-control">
+        <label className={styles.control}>
           <span>需求说明</span>
-          <textarea
-            className="text-input plugin-dev-textarea plugin-dev-textarea--short"
+          <TextArea
+            density="workspace" className={`${styles.textInput} ${styles.textarea} ${styles.textareaShort}`}
             value={description}
             placeholder="可选：描述站点特点或解析难点"
             disabled={busy}
@@ -260,20 +262,20 @@ export default function PluginDevConfigRail({
           />
         </label>
 
-        <div className="plugin-dev-meta-row">
-          <label className="plugin-edit-control">
+        <div className={styles.metaRow}>
+          <label className={styles.control}>
             <span>版本</span>
-            <input
-              className="text-input"
+            <TextInput
+              density="workspace" className={styles.textInput}
               value={version}
               disabled={busy}
               onChange={(e) => onVersionChange(e.target.value)}
             />
           </label>
-          <label className="plugin-edit-control">
+          <label className={styles.control}>
             <span>作者</span>
-            <input
-              className="text-input"
+            <TextInput
+              density="workspace" className={styles.textInput}
               value={author}
               disabled={busy}
               onChange={(e) => onAuthorChange(e.target.value)}
@@ -282,14 +284,15 @@ export default function PluginDevConfigRail({
         </div>
 
         {!hasPackage && !isDebugMode ? (
-          <div className="plugin-edit-control plugin-dev-field-discovery">
+          <div className={styles.control}>
             <span>支持字段</span>
-            <small className="plugin-edit-control-hint">
+            <small className={styles.controlHint}>
               Create 模式不预设字段；Agent 将根据详情页自行探索并填写最终支持字段。
             </small>
           </div>
         ) : (
           <PluginDevFieldTags
+            className={styles.fieldTags}
             kind={kind}
             supportedFieldIds={supportedFields}
             fieldLabel={fieldLabel}
@@ -299,11 +302,12 @@ export default function PluginDevConfigRail({
         )}
       </div>
 
-      <div className="plugin-dev-config-actions">
+      <div className={styles.actions}>
         <Button
           type="button"
           variant={canInstall ? 'default' : 'primary'}
           size="sm"
+          className={styles.actionButton}
           disabled={busy || !canUseAgent || agentBusy || Boolean(agentPrimaryDisabledReason)}
           title={agentPrimaryDisabledReason ?? undefined}
           onClick={onStartAgent}
@@ -314,7 +318,7 @@ export default function PluginDevConfigRail({
           type="button"
           variant={canInstall ? 'primary' : 'default'}
           size="sm"
-          className="plugin-dev-config-actions-install"
+          className={styles.actionButton}
           disabled={busy || !hasPackage || !canInstall}
           onClick={onInstall}
         >

@@ -1,0 +1,15 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.scroll {
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
+}
+
+.fill {
+  overflow: hidden;
+}

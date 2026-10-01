@@ -160,3 +160,298 @@
     max-width: 160px;
   }
 }
+
+.themeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.preview {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.previewFrame {
+  position: relative;
+  display: block;
+  width: var(--avatar-composition-preview-size, 172px);
+  height: var(--avatar-composition-preview-size, 172px);
+  overflow: hidden;
+  border: 1px solid var(--border-accent);
+  border-radius: 50%;
+  background: var(--surface-avatar-composition-preview);
+}
+
+.previewFrame::before,
+.previewFrame::after {
+  position: absolute;
+  z-index: 2;
+  content: '';
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.previewFrame::before {
+  top: 50%;
+  left: 0;
+  width: 100%;
+  border-top: 1px dashed var(--border-accent);
+}
+
+.previewFrame::after {
+  top: 0;
+  left: 50%;
+  height: 100%;
+  border-left: 1px dashed var(--border-accent);
+}
+
+.previewImage {
+  position: absolute;
+  display: block;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+  image-rendering: auto;
+  transition:
+    left var(--motion-med),
+    top var(--motion-med),
+    width var(--motion-med),
+    height var(--motion-med);
+}
+
+.previewImage[data-pending] {
+  opacity: 0;
+}
+
+.previewImage[data-fallback] {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.previewCaption {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  font-variant-numeric: tabular-nums;
+}
+
+.previewStatus {
+  margin-left: 8px;
+  color: var(--text-accent);
+}
+
+.previewStatus[data-error] {
+  color: var(--status-danger, var(--text-muted));
+}
+
+.batchRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.batchCopy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.batchCopy strong {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.batchCopy span {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.batchProgress {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) max-content max-content;
+  align-items: center;
+  gap: 9px;
+  flex: 0 1 520px;
+  min-width: 0;
+}
+
+.batchProgress progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-control);
+  accent-color: var(--accent);
+}
+
+.batchProgress progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--surface-control);
+}
+
+.batchProgress progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.batchProgress > span {
+  min-width: 44px;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.batchActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.batchAction {
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+
+@media (width <= 680px) {
+  .batchRow {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .batchActions {
+    align-self: flex-start;
+  }
+
+  .batchProgress {
+    width: 100%;
+    flex-basis: auto;
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .batchProgress .batchActions {
+    grid-column: 1 / -1;
+    place-self: auto end;
+  }
+}
+
+.coverRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--target-min);
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+
+.coverCopy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.coverTitle {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.coverDescription {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.privacyCard {
+  overflow: hidden;
+}
+
+.privacyCardHeader {
+  margin-bottom: 0;
+}
+
+.privacyDisclosure {
+  margin:
+    12px calc(var(--settings-card-pad-x, 18px) * -1)
+    calc(var(--settings-card-pad-y, 16px) * -1);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.privacyTrigger {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content 16px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--target-min);
+  padding: 9px var(--settings-card-pad-x, 18px);
+  border: 0;
+  background: color-mix(in srgb, var(--surface-control) 26%, transparent);
+  color: var(--text-primary);
+  text-align: left;
+  transition: background var(--motion-fast);
+}
+
+.privacyTrigger:hover {
+  background: color-mix(in srgb, var(--surface-control-hover) 55%, transparent);
+}
+
+.privacyTrigger:focus-visible {
+  position: relative;
+  z-index: 1;
+  box-shadow: inset var(--focus-ring);
+}
+
+.privacyTitle {
+  min-width: 0;
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.privacyMeta {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-variant-numeric: tabular-nums;
+}
+
+.privacyChevron {
+  justify-self: end;
+  color: var(--text-muted);
+  transition: transform var(--motion-fast);
+}
+
+.privacyDisclosure[data-expanded] .privacyChevron {
+  transform: rotate(180deg);
+}
+
+.privacyScopeList.privacyScopeList {
+  --settings-switch-row-pad-x: var(--settings-card-pad-x, 18px);
+
+  margin-top: 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--surface-control) 18%, transparent);
+}

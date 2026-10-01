@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes } from 'react'
+import styles from './MetaLink.module.css'
 
 /** Inline metadata value that navigates on click (facet, prefix filter, etc.). */
 export default function MetaLink({
@@ -9,7 +10,7 @@ export default function MetaLink({
   return (
     <button
       type={type}
-      className={`meta-val meta-link${className ? ` ${className}` : ''}`}
+      className={`${styles.root}${className ? ` ${className}` : ''}`}
       {...rest}
     />
   )

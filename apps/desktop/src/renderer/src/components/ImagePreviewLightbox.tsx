@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { Minus, Plus, RotateCcw, X } from 'lucide-react'
 import IconButton from './IconButton'
+import styles from './ImagePreviewLightbox.module.css'
 import { useImagePreviewOverlay } from './ImagePreviewOverlayContext'
 import { UI_ICON } from './iconDefaults'
 import {
@@ -98,6 +99,7 @@ export default function ImagePreviewLightbox({
   const swipeClickReleaseTimerRef = useRef<number | null>(null)
   const activeThumbRef = useRef<HTMLButtonElement>(null)
   const filmstripRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const thumbSelectRef = useRef(false)
   const filmstripDraggedRef = useRef(false)
   const filmstripDragRef = useRef<{
@@ -336,7 +338,7 @@ export default function ImagePreviewLightbox({
   }
 
   const swipeAreaWidth = (target: HTMLElement): number =>
-    target.closest<HTMLElement>('.image-preview-stage')?.clientWidth ?? target.clientWidth
+    stageRef.current?.clientWidth ?? target.clientWidth
 
   const onPointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     bumpChrome()
@@ -540,13 +542,10 @@ export default function ImagePreviewLightbox({
       : swipeDirection === 'next'
         ? swipeOffsetX + swipeViewportWidth
         : 0
-  const swipeSlideClass = `${swipeDragging ? ' is-dragging' : ''}${
-    swipeSettling ? ' is-settling' : ''
-  }`
   const posterCandidate = items[index]?.localPath ?? null
   const isPoster = Boolean(posterCandidate && posterPath === posterCandidate)
   const showPosterAction = Boolean(onPosterChange)
-  const chromeClass = chromeVisible || savingPoster || chromeHover || loading || navigationStatus ? ' is-visible' : ''
+  const showChrome = Boolean(chromeVisible || savingPoster || chromeHover || loading || navigationStatus)
   const canResetView = Math.round(scale * 100) !== 100
 
   const togglePoster = async (): Promise<void> => {
@@ -564,7 +563,7 @@ export default function ImagePreviewLightbox({
   return createPortal(
     (
     <div
-      className="image-preview"
+      className={styles.root}
       role="dialog"
       aria-modal
       aria-busy={loading}
@@ -572,13 +571,14 @@ export default function ImagePreviewLightbox({
       aria-describedby="image-preview-hint"
       onFocusCapture={() => noteChromeActivity(true)}
     >
-      <div className="image-preview-backdrop" aria-hidden />
-      <p id="image-preview-hint" className="sr-only">
+      <div className={styles.backdrop} aria-hidden />
+      <p id="image-preview-hint" className={styles.hint}>
         未缩放时可用鼠标左右拖动切换图片；也可使用左右方向键切换图片，加号与减号缩放，0 还原视图，Esc 关闭。
       </p>
 
       <header
-        className={`image-preview-chrome image-preview-chrome--top${chromeClass}`}
+        className={`${styles.chrome} ${styles.top}`}
+        data-visible={showChrome}
         onMouseEnter={holdChrome}
         onMouseLeave={releaseChrome}
         onFocusCapture={holdChrome}
@@ -586,14 +586,15 @@ export default function ImagePreviewLightbox({
           if (!e.currentTarget.contains(e.relatedTarget as Node)) releaseChrome()
         }}
       >
-        <span className="image-preview-counter image-preview-toolbar-pill">
+        <span data-image-preview-part="counter" className={`${styles.counter} ${styles.toolbarPill}`}>
           {windowOffset + index + 1} / {total}
         </span>
-        <div className="image-preview-actions">
+        <div className={styles.actions}>
           {showPosterAction && (
             <button
               type="button"
-              className={`image-preview-poster-chip${isPoster ? ' is-active' : ''}`}
+              className={styles.posterChip}
+              data-poster={isPoster}
               onClick={() => void togglePoster()}
               disabled={!posterCandidate || savingPoster}
               title={posterCandidate ? undefined : labels.posterMissing}
@@ -603,22 +604,22 @@ export default function ImagePreviewLightbox({
           )}
           {navigationStatus}
           {toolbarActions}
-          <div className="image-preview-zoom" aria-label="缩放">
+          <div className={styles.zoom} aria-label="缩放">
             <IconButton
-              className="image-preview-icon-btn image-preview-zoom-btn"
+              className={`${styles.icon} ${styles.zoomButton}`}
               icon={<Minus {...UI_ICON} />}
               label="缩小"
               onClick={() => zoomBy(-ZOOM_STEP)}
             />
-            <span className="image-preview-zoom-label">{Math.round(scale * 100)}%</span>
+            <span className={styles.zoomLabel}>{Math.round(scale * 100)}%</span>
             <IconButton
-              className="image-preview-icon-btn image-preview-zoom-btn"
+              className={`${styles.icon} ${styles.zoomButton}`}
               icon={<Plus {...UI_ICON} />}
               label="放大"
               onClick={() => zoomBy(ZOOM_STEP)}
             />
             <IconButton
-              className="image-preview-icon-btn image-preview-reset-btn"
+              className={`${styles.icon} ${styles.resetButton}`}
               icon={<RotateCcw {...UI_ICON} />}
               label="还原视图"
               onClick={resetView}
@@ -626,7 +627,7 @@ export default function ImagePreviewLightbox({
             />
           </div>
           <IconButton
-            className="image-preview-close image-preview-icon-btn"
+            className={`${styles.close} ${styles.icon}`}
             icon={<X {...UI_ICON} />}
             label="关闭预览"
             onClick={onClose}
@@ -634,10 +635,10 @@ export default function ImagePreviewLightbox({
         </div>
       </header>
 
-      <div className="image-preview-stage" onPointerMove={() => noteChromeActivity(true)}>
+      <div ref={stageRef} data-image-preview-part="stage" className={styles.stage} onPointerMove={() => noteChromeActivity(true)}>
         <button
           type="button"
-          className="image-preview-hit image-preview-hit--prev"
+          className={`${styles.hit} ${styles.previous}`}
           onClick={goPrev}
           onMouseEnter={() => noteChromeActivity(true)}
           onPointerDown={canSwipe ? onPointerDown : undefined}
@@ -648,9 +649,10 @@ export default function ImagePreviewLightbox({
           aria-label="上一张"
         />
         <div
-          className={`image-preview-viewport${canPan ? ' image-preview-viewport--pan' : ''}${
-            canSwipe ? ' image-preview-viewport--swipe' : ''
-          }`}
+          data-image-preview-part="viewport"
+          className={styles.viewport}
+          data-pan={canPan}
+          data-swipe={canSwipe}
           onPointerEnter={() => noteChromeActivity(true)}
           onWheel={onWheel}
           onPointerDown={onPointerDown}
@@ -660,21 +662,30 @@ export default function ImagePreviewLightbox({
           onDoubleClick={onDoubleClick}
         >
           <div
-            className={`image-preview-slide${swipeSlideClass}`}
+            data-image-preview-part="slide"
+            className={styles.slide}
+            data-dragging={swipeDragging}
+            data-settling={swipeSettling}
             style={{ transform: `translate3d(${swipeOffsetX}px, 0, 0)` }}
           >
             <img
               key={items[index]?.id ?? index}
               src={src}
               alt=""
-              className={`image-preview-img${imageReady ? ' is-visible' : ''}`}
+              data-image-preview-part="image"
+              className={styles.image}
+              data-visible={imageReady}
               style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${scale})` }}
               draggable={false}
             />
           </div>
           {adjacentItem && (
             <div
-              className={`image-preview-slide image-preview-slide--adjacent${swipeSlideClass}`}
+              data-image-preview-part="adjacent"
+              className={styles.slide}
+              data-adjacent
+              data-dragging={swipeDragging}
+              data-settling={swipeSettling}
               style={{ transform: `translate3d(${adjacentOffsetX}px, 0, 0)` }}
               aria-hidden
             >
@@ -682,7 +693,8 @@ export default function ImagePreviewLightbox({
                 key={adjacentItem.id}
                 src={adjacentItem.src}
                 alt=""
-                className="image-preview-img is-visible"
+                className={styles.image}
+                data-visible
                 draggable={false}
               />
             </div>
@@ -690,7 +702,7 @@ export default function ImagePreviewLightbox({
         </div>
         <button
           type="button"
-          className="image-preview-hit image-preview-hit--next"
+          className={`${styles.hit} ${styles.next}`}
           onClick={goNext}
           onMouseEnter={() => noteChromeActivity(true)}
           onPointerDown={canSwipe ? onPointerDown : undefined}
@@ -703,7 +715,8 @@ export default function ImagePreviewLightbox({
       </div>
 
       <footer
-        className={`image-preview-chrome image-preview-chrome--bottom${chromeClass}`}
+        className={`${styles.chrome} ${styles.bottom}`}
+        data-visible={showChrome}
         onMouseEnter={holdChrome}
         onMouseLeave={releaseChrome}
         onFocusCapture={holdChrome}
@@ -713,9 +726,8 @@ export default function ImagePreviewLightbox({
       >
         <div
           ref={filmstripRef}
-          className={`image-preview-filmstrip${
-            filmstripDragging ? ' image-preview-filmstrip--dragging' : ''
-          }`}
+          className={styles.filmstrip}
+          data-dragging={filmstripDragging}
           role="tablist"
           aria-label={labels.filmstrip}
           onWheel={onFilmstripWheel}
@@ -734,9 +746,8 @@ export default function ImagePreviewLightbox({
                 type="button"
                 role="tab"
                 aria-selected={active}
-                className={`image-preview-thumb${active ? ' image-preview-thumb--active' : ''}${
-                  thumbIsPoster ? ' image-preview-thumb--poster' : ''
-                }`}
+                className={styles.thumb}
+                data-poster={thumbIsPoster}
                 onClick={() => handleThumbClick(thumbIndex)}
                 disabled={loading}
                 aria-label={labels.thumb(windowOffset + thumbIndex)}

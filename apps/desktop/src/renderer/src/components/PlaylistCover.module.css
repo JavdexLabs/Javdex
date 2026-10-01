@@ -1,0 +1,67 @@
+.root {
+  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  contain: paint;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-muted);
+}
+
+.root[data-variant='card'] {
+  width: 82px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.root[data-variant='detail'] {
+  width: 164px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.root[data-variant='pick'] {
+  width: 68px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.root[data-variant='pick'] > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface-control-hover) 34%, transparent);
+}
+
+.root img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root > img {
+  filter: var(--privacy-image-filter);
+  scale: var(--privacy-image-scale);
+}
+
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root:where([data-variant='card'], [data-variant='pick']) > img {
+  scale: var(--privacy-image-scale-compact);
+}
+
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root:has(> img)::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--privacy-glass-background);
+  content: '';
+  pointer-events: none;
+}

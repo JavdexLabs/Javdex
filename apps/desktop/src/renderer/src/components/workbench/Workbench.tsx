@@ -1,4 +1,5 @@
 import { type HTMLAttributes, type ReactNode } from 'react'
+import styles from './Workbench.module.css'
 
 function classNames(base: string, className?: string): string {
   return className ? `${base} ${className}` : base
@@ -8,35 +9,35 @@ export function WorkbenchShell({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={classNames('workbench-shell', className)} {...props} />
+  return <div data-workbench-part="shell" className={classNames(styles.shell, className)} {...props} />
 }
 
 export function WorkbenchToolbar({
   className,
   ...props
 }: HTMLAttributes<HTMLElement>): JSX.Element {
-  return <header className={classNames('workbench-toolbar', className)} {...props} />
+  return <header data-workbench-part="toolbar" className={classNames(styles.toolbar, className)} {...props} />
 }
 
 export function WorkbenchMain({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={classNames('workbench-main', className)} {...props} />
+  return <div data-workbench-part="main" className={classNames(styles.main, className)} {...props} />
 }
 
 export function WorkbenchRail({
   className,
   ...props
 }: HTMLAttributes<HTMLElement>): JSX.Element {
-  return <aside className={classNames('workbench-rail', className)} {...props} />
+  return <aside data-workbench-part="rail" className={classNames(styles.rail, className)} {...props} />
 }
 
 export function WorkbenchRailHeader({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>): JSX.Element {
-  return <div className={classNames('workbench-rail-header', className)} {...props} />
+  return <div data-workbench-part="rail-header" className={classNames(styles.railHeader, className)} {...props} />
 }
 
 export function WorkbenchStatusPill({
@@ -48,7 +49,7 @@ export function WorkbenchStatusPill({
 }): JSX.Element {
   return (
     <span
-      className={classNames('workbench-status-pill', className)}
+      data-workbench-part="status-pill" className={classNames(styles.statusPill, className)}
       data-tone={tone}
       {...props}
     />
@@ -68,6 +69,7 @@ export function WorkbenchTabs<T extends string>({
   value,
   items,
   className,
+  tabClassName,
   onChange
 }: {
   id: string
@@ -75,6 +77,7 @@ export function WorkbenchTabs<T extends string>({
   value: T
   items: WorkbenchTabItem<T>[]
   className?: string
+  tabClassName?: string
   onChange: (value: T) => void
 }): JSX.Element {
   const enabledItems = items.filter((item) => !item.disabled)
@@ -86,7 +89,7 @@ export function WorkbenchTabs<T extends string>({
   return (
     <div
       id={id}
-      className={classNames('workbench-tabs', className)}
+      data-workbench-part="tabs" className={classNames(styles.tabs, className)}
       role="tablist"
       aria-label={label}
     >
@@ -102,7 +105,7 @@ export function WorkbenchTabs<T extends string>({
             aria-controls={item.panelId}
             tabIndex={value === item.id ? 0 : -1}
             disabled={item.disabled}
-            className={`workbench-tab${value === item.id ? ' is-active' : ''}`}
+            className={classNames(styles.tab, tabClassName)}
             onClick={() => onChange(item.id)}
             onKeyDown={(event) => {
               const currentIndex = enabledItems.findIndex((candidate) => candidate.id === item.id)

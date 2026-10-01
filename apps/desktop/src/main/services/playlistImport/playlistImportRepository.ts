@@ -1,3 +1,6 @@
+import { PlaylistImportIdentity, type CanonicalDetailIdentity } from './playlistImportIdentity'
+import { normalizePlaylistImportUrl } from './playlistImportUrl'
+export { normalizePlaylistImportUrl } from './playlistImportUrl'
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { PLAYLIST_IMPORT_SESSION_SCHEMA_SQL } from '@library/db/schema'
@@ -9,14 +12,11 @@ import type {
   PlaylistImportProgress,
   PlaylistImportSnapshot
 } from '@shared/playlistImportTypes'
-import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { hasSensitiveUrlQuery, isSensitiveUrlQueryKey } from '@shared/urlCredentialPolicy'
 import { writePlaylistImport } from '@library/catalog/playlistImportWrite'
 import type { PlaylistImportEntry } from '@shared/playlistImportCommit'
 import {
-  catalogIdentityRevision,
   type PlaylistImportCatalogLookup,
   type PlaylistImportCatalogVideoRecord
 } from './playlistImportCatalogLookup'
@@ -53,36 +53,6 @@ export interface PlaylistImportDetailCheckpointInput {
   evidenceRef: string
 }
 
-interface CanonicalDetailIdentity {
-  detailUrl: string
-  listCode?: string
-  detailCode?: string
-  codeConflict?: boolean
-  publisher?: string
-  releaseDate?: string
-  source?: string
-  externalCode?: string
-  sourceUrl?: string
-  strongMatchVideoId?: number
-  strongSignalConflict: boolean
-  strongSignalMismatch: boolean
-}
-
-interface GlobalIdentityCandidate {
-  videoId: number
-  code: string
-  libraryIds: number[]
-  publisherOrganizationId: number | null
-  releaseDate: string | null
-  identityRevision: string
-}
-
-interface GlobalIdentityVideoRow {
-  id: number
-  code: string
-  publisher_organization_id: number | null
-  release_date: string | null
-}
 
 export interface PlaylistImportVirtualBatchCheckpointInput {
   runId: string
@@ -293,16 +263,6 @@ function assertSuggestedPlaylistNamePosition(
   }
 }
 
-export function normalizePlaylistImportUrl(raw: string): string {
-  let url: URL
-  try {
-    url = new URL(normalizeRelatedLinkUrl(raw))
-  } catch {
-    throw new Error('外部清单链接必须是有效的 HTTP/HTTPS 地址')
-  }
-  if (hasSensitiveUrlQuery(url)) throw new Error('PLAYLIST_IMPORT_URL_CREDENTIALS')
-  return url.toString()
-}
 
 function normalizePlaylistImportDetailUrl(raw: string): {
   detailUrl: string
@@ -464,10 +424,13 @@ class PlaylistImportTotalMismatchError extends Error {
 }
 
 export class PlaylistImportRepository {
+  private readonly identity: PlaylistImportIdentity
+
   constructor(
     private readonly database: Database.Database,
     private readonly catalogLookup?: PlaylistImportCatalogLookup
   ) {
+    this.identity = new PlaylistImportIdentity(database, catalogLookup)
     this.database.exec(PLAYLIST_IMPORT_SESSION_SCHEMA_SQL)
   }
 
@@ -538,75 +501,6 @@ export class PlaylistImportRepository {
     }
   }
 
-  private sqlVideoIdsByDetailUrl(normalizedDetailUrl: string): number[] {
-    try {
-      return (this.database.prepare(
-        'SELECT video_id FROM video_links WHERE normalized_url = ? ORDER BY video_id'
-      ).all(normalizedDetailUrl) as Array<{ video_id: number }>).map((row) => row.video_id)
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
-
-  private sqlVideoIdsBySourceCode(source: string, externalCode: string): number[] {
-    try {
-      return (this.database.prepare(
-        `SELECT video_id FROM video_sources
-         WHERE lower(trim(source)) = lower(trim(?))
-           AND upper(trim(external_code)) = upper(trim(?))
-         ORDER BY video_id`
-      ).all(source, externalCode) as Array<{ video_id: number }>).map((row) => row.video_id)
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
-
-  private sqlVideoIdsBySourceUrl(source: string, sourceUrl: string): number[] {
-    try {
-      return (this.database.prepare(
-        `SELECT video_id, url FROM video_sources
-         WHERE lower(trim(source)) = lower(trim(?)) AND url IS NOT NULL
-         ORDER BY video_id`
-      ).all(source) as Array<{ video_id: number; url: string }>)
-        .filter((row) => {
-          try {
-            return normalizePlaylistImportUrl(row.url) === sourceUrl
-          } catch {
-            return false
-          }
-        })
-        .map((row) => row.video_id)
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
-
-  private sqlVideoIdsByPublisherCodeRelease(
-    normalizedPublisher: string,
-    code: string,
-    releaseDate: string
-  ): number[] {
-    try {
-      return (this.database.prepare(
-        `SELECT video.id AS video_id
-         FROM videos video
-         JOIN organization_name_ownership owner
-           ON owner.organization_id = video.publisher_organization_id
-         WHERE owner.normalized_name = ?
-           AND upper(trim(video.code)) = ?
-           AND video.release_date = ?
-         ORDER BY video.id`
-      ).all(normalizedPublisher, code, releaseDate) as Array<{ video_id: number }>).map(
-        (row) => row.video_id
-      )
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
 
   assertRunWithinBudget(runId: string, observedAt = Date.now()): void {
     const row = this.database.prepare(
@@ -1218,97 +1112,17 @@ export class PlaylistImportRepository {
       if (!item || item.state !== 'needs-detail') throw new Error('DETAIL_WORK_ITEM_INVALID')
       if (item.revision !== input.expectedItemRevision) throw new Error('ITEM_REVISION_STALE')
       const detailCode = input.detailCode?.trim() ? normalizeVideoCode(input.detailCode) : null
-      const codeConflict = Boolean(
-        item.normalized_code && detailCode && item.normalized_code !== detailCode
-      )
-      const code = item.normalized_code ?? detailCode
       const detailUrl = (this.database.prepare(
         'SELECT normalized_detail_url FROM playlist_import_items WHERE id = ?'
       ).get(item.id) as { normalized_detail_url: string }).normalized_detail_url
-      const candidates = this.mergeGlobalIdentityCandidates(
-        this.globalCodeCandidatesForCodes(
-          codeConflict ? [item.normalized_code, detailCode] : [code]
-        ),
-        this.globalDetailUrlCandidates(detailUrl),
-        this.globalSourceIdentityCandidates({
-          ...(typeof input.identity.source === 'string'
-            ? { source: input.identity.source }
-            : {}),
-          ...(typeof input.identity.externalCode === 'string'
-            ? { externalCode: input.identity.externalCode }
-            : {}),
-          ...(typeof input.identity.sourceUrl === 'string'
-            ? { sourceUrl: input.identity.sourceUrl }
-            : {})
-        })
-      )
-      const identity = this.canonicalDetailIdentity({
-        code,
+      const { code, candidates, identity, state, resolutionKind, errorCode, videoId } = this.identity.planDetail({
+        listCode: item.normalized_code,
+        detailCode,
         detailUrl,
         identity: input.identity,
-        candidates
+        targetLibraryId: job.target_library_id,
+        autoCreate: job.auto_create_unmatched_videos === 1
       })
-      if (codeConflict) {
-        identity.listCode = item.normalized_code!
-        identity.detailCode = detailCode!
-        identity.codeConflict = true
-        identity.strongSignalConflict = true
-      }
-      const strongMatches = identity.strongMatchVideoId == null
-        ? []
-        : [identity.strongMatchVideoId]
-      let state: 'planned-reuse' | 'planned-create' | 'needs-user' | 'failed'
-      let resolutionKind: string | null
-      let errorCode: string | null = null
-      let videoId: number | null = null
-      if (codeConflict) {
-        state = 'needs-user'
-        resolutionKind = 'user-existing'
-      } else if (candidates.length === 0 && code) {
-        if (job.auto_create_unmatched_videos === 1) {
-          state = 'planned-create'
-          resolutionKind = 'create-no-match'
-        } else {
-          state = 'failed'
-          resolutionKind = null
-          errorCode = 'AUTO_CREATE_DISABLED'
-        }
-      } else if (
-        !identity.strongSignalConflict &&
-        !identity.strongSignalMismatch &&
-        strongMatches.length === 1
-      ) {
-        state = 'planned-reuse'
-        resolutionKind = 'business-identity'
-        videoId = strongMatches[0]
-      } else if (
-        !identity.strongSignalConflict &&
-        !identity.strongSignalMismatch &&
-        candidates.length === 1
-      ) {
-        state = 'planned-reuse'
-        resolutionKind = 'direct-code'
-        videoId = candidates[0].videoId
-      } else {
-        const reasonableIds = candidates.map((candidate) => candidate.videoId)
-        const targetMatches = reasonableIds.filter((candidateId) => (
-          candidates.find((candidate) => candidate.videoId === candidateId)
-            ?.libraryIds.includes(job.target_library_id)
-        ))
-        if (
-          !identity.strongSignalConflict &&
-          !identity.strongSignalMismatch &&
-          reasonableIds.length > 1 &&
-          targetMatches.length === 1
-        ) {
-          state = 'planned-reuse'
-          resolutionKind = 'target-library-tiebreak'
-          videoId = targetMatches[0]
-        } else {
-          state = 'needs-user'
-          resolutionKind = 'user-existing'
-        }
-      }
       const at = now()
       this.database.prepare(
         `UPDATE playlist_import_items SET normalized_code = COALESCE(normalized_code, ?),
@@ -2205,10 +2019,9 @@ export class PlaylistImportRepository {
     for (const item of items) {
       if (item.error_code === 'SENSITIVE_DETAIL_URL') {
         needsUser += 1
-        const candidates = this.mergeGlobalIdentityCandidates(
-          item.normalized_code ? this.globalCodeCandidates(item.normalized_code) : [],
-          this.globalDetailUrlCandidates(item.normalized_detail_url)
-        )
+        const candidates = this.identity.findCandidates({
+          codes: [item.normalized_code], detailUrl: item.normalized_detail_url
+        })
         update.run({
           id: item.id,
           state: 'needs-user',
@@ -2233,7 +2046,7 @@ export class PlaylistImportRepository {
         })
         continue
       }
-      const candidates = this.globalCodeCandidates(item.normalized_code)
+      const candidates = this.identity.findCandidates({ codes: [item.normalized_code] })
       if (candidates.length === 0) {
         update.run({
           id: item.id,
@@ -2277,379 +2090,6 @@ export class PlaylistImportRepository {
     )
   }
 
-  private candidatesFromCatalogRecords(
-    records: PlaylistImportCatalogVideoRecord[]
-  ): GlobalIdentityCandidate[] {
-    return records
-      .map((record) => ({
-        videoId: record.videoId,
-        code: record.code,
-        libraryIds: record.libraryIds,
-        publisherOrganizationId: record.publisherOrganizationId,
-        releaseDate: record.releaseDate,
-        identityRevision: catalogIdentityRevision(record)
-      }))
-      .sort((left, right) => left.videoId - right.videoId)
-  }
-
-  private globalCodeCandidates(code: string): GlobalIdentityCandidate[] {
-    if (this.catalogLookup) {
-      return this.candidatesFromCatalogRecords(this.catalogLookup.videosByCode(code))
-    }
-    try {
-      const videos = this.database.prepare(
-        `SELECT id, code, publisher_organization_id, release_date
-         FROM videos WHERE upper(trim(code)) = ? ORDER BY id`
-      ).all(code) as GlobalIdentityVideoRow[]
-      return this.hydrateGlobalIdentityCandidates(videos)
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
-
-  private globalDetailUrlCandidates(normalizedDetailUrl: string): GlobalIdentityCandidate[] {
-    if (this.catalogLookup) {
-      return this.candidatesFromCatalogRecords(
-        this.catalogLookup.videosByDetailUrl(normalizedDetailUrl)
-      )
-    }
-    try {
-      const videos = this.database.prepare(
-        `SELECT video.id, video.code, video.publisher_organization_id, video.release_date
-         FROM video_links link
-         JOIN videos video ON video.id = link.video_id
-         WHERE link.normalized_url = ?
-         ORDER BY video.id`
-      ).all(normalizedDetailUrl) as GlobalIdentityVideoRow[]
-      return this.hydrateGlobalIdentityCandidates(videos)
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
-
-  private globalVideoCandidatesByIds(videoIds: number[]): GlobalIdentityCandidate[] {
-    const ids = [...new Set(videoIds)].sort((left, right) => left - right)
-    if (ids.length === 0) return []
-    if (this.catalogLookup) {
-      return this.candidatesFromCatalogRecords(this.catalogLookup.videosByIds(ids))
-    }
-    try {
-      const placeholders = ids.map(() => '?').join(', ')
-      const videos = this.database.prepare(
-        `SELECT id, code, publisher_organization_id, release_date
-         FROM videos WHERE id IN (${placeholders}) ORDER BY id`
-      ).all(...ids) as GlobalIdentityVideoRow[]
-      return this.hydrateGlobalIdentityCandidates(videos)
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
-
-  private globalSourceIdentityCandidates(identity: {
-    source?: string
-    externalCode?: string
-    sourceUrl?: string
-  }): GlobalIdentityCandidate[] {
-    if (this.catalogLookup) {
-      return this.candidatesFromCatalogRecords(this.catalogLookup.videosBySourceIdentity(identity))
-    }
-    const source = identity.source?.trim()
-    if (!source) return []
-    try {
-      const videoIds: number[] = []
-      if (identity.externalCode?.trim()) {
-        const rows = this.database.prepare(
-          `SELECT video_id FROM video_sources
-           WHERE lower(trim(source)) = lower(trim(?))
-             AND upper(trim(external_code)) = upper(trim(?))
-           ORDER BY video_id`
-        ).all(source, identity.externalCode.trim()) as Array<{ video_id: number }>
-        videoIds.push(...rows.map((row) => row.video_id))
-      }
-      if (identity.sourceUrl?.trim()) {
-        let normalizedSourceUrl: string | null = null
-        try {
-          normalizedSourceUrl = normalizePlaylistImportUrl(identity.sourceUrl)
-        } catch {
-          normalizedSourceUrl = null
-        }
-        if (normalizedSourceUrl) {
-          const rows = this.database.prepare(
-            `SELECT video_id, url FROM video_sources
-             WHERE lower(trim(source)) = lower(trim(?)) AND url IS NOT NULL
-             ORDER BY video_id`
-          ).all(source) as Array<{ video_id: number; url: string }>
-          for (const row of rows) {
-            try {
-              if (normalizePlaylistImportUrl(row.url) === normalizedSourceUrl) {
-                videoIds.push(row.video_id)
-              }
-            } catch {
-              // Ignore malformed legacy source URLs; they cannot establish identity.
-            }
-          }
-        }
-      }
-      return this.globalVideoCandidatesByIds(videoIds)
-    } catch (error) {
-      if (isMissingCatalogTable(error)) return []
-      throw error
-    }
-  }
-
-  private hydrateGlobalIdentityCandidates(
-    videos: GlobalIdentityVideoRow[]
-  ): GlobalIdentityCandidate[] {
-    const memberships = this.database.prepare(
-      `SELECT library_id FROM library_video_memberships WHERE video_id = ? ORDER BY library_id`
-    )
-    const links = this.database.prepare(
-      'SELECT normalized_url FROM video_links WHERE video_id = ? ORDER BY normalized_url'
-    )
-    const sources = this.database.prepare(
-      `SELECT source, external_code, url FROM video_sources
-       WHERE video_id = ? ORDER BY source, external_code, url`
-    )
-    return videos.map((video) => {
-      const libraryIds = (memberships.all(video.id) as Array<{ library_id: number }>)
-        .map((row) => row.library_id)
-      const relatedUrls = (links.all(video.id) as Array<{ normalized_url: string }>)
-        .map((row) => row.normalized_url)
-      const sourceRows = sources.all(video.id) as Array<{
-        source: string
-        external_code: string | null
-        url: string | null
-      }>
-      return {
-        videoId: video.id,
-        code: video.code,
-        libraryIds,
-        publisherOrganizationId: video.publisher_organization_id,
-        releaseDate: video.release_date,
-        identityRevision: hash({
-          code: normalizeVideoCode(video.code),
-          publisherOrganizationId: video.publisher_organization_id,
-          releaseDate: video.release_date,
-          libraryIds,
-          relatedUrls,
-          sources: sourceRows
-        })
-      }
-    })
-  }
-
-  private globalCodeCandidatesForCodes(
-    codes: Array<string | null>
-  ): GlobalIdentityCandidate[] {
-    const candidates: GlobalIdentityCandidate[] = []
-    for (const code of new Set(codes.filter((value): value is string => Boolean(value)))) {
-      candidates.push(...this.globalCodeCandidates(code))
-    }
-    return this.mergeGlobalIdentityCandidates(candidates)
-  }
-
-  private mergeGlobalIdentityCandidates(
-    ...groups: GlobalIdentityCandidate[][]
-  ): GlobalIdentityCandidate[] {
-    const byVideoId = new Map<number, GlobalIdentityCandidate>()
-    for (const candidate of groups.flat()) byVideoId.set(candidate.videoId, candidate)
-    return [...byVideoId.values()].sort((left, right) => left.videoId - right.videoId)
-  }
-
-  private canonicalDetailIdentity(input: {
-    code: string | null
-    detailUrl: string
-    identity: Record<string, unknown>
-    candidates: ReturnType<PlaylistImportRepository['globalCodeCandidates']>
-  }): CanonicalDetailIdentity {
-    const text = (key: string): string | undefined => {
-      const value = input.identity[key]
-      return typeof value === 'string' && value.trim() ? value.trim() : undefined
-    }
-    const canonical: CanonicalDetailIdentity = {
-      detailUrl: normalizePlaylistImportUrl(input.detailUrl),
-      ...(text('publisher') ? { publisher: text('publisher') } : {}),
-      ...(text('releaseDate') ? { releaseDate: text('releaseDate') } : {}),
-      ...(text('source') ? { source: text('source') } : {}),
-      ...(text('externalCode') ? { externalCode: text('externalCode') } : {}),
-      ...(text('sourceUrl') ? { sourceUrl: normalizePlaylistImportUrl(text('sourceUrl')!) } : {}),
-      strongSignalConflict: false,
-      strongSignalMismatch: false
-    }
-    const candidateIds = new Set(input.candidates.map((candidate) => candidate.videoId))
-    const signals: number[][] = []
-    const detailMatches = (
-      this.catalogLookup
-        ? this.catalogLookup.videosByDetailUrl(canonical.detailUrl).map((video) => video.videoId)
-        : this.sqlVideoIdsByDetailUrl(canonical.detailUrl)
-    ).filter((videoId) => candidateIds.has(videoId))
-    if (detailMatches.length > 0) {
-      signals.push(detailMatches)
-      if (input.code && detailMatches.some((videoId) => {
-        const candidate = input.candidates.find((entry) => entry.videoId === videoId)
-        return candidate != null && normalizeVideoCode(candidate.code) !== input.code
-      })) {
-        canonical.strongSignalConflict = true
-      }
-    }
-
-    if (canonical.source && canonical.externalCode) {
-      const externalCodeMatches = (
-        this.catalogLookup
-          ? this.catalogLookup.videosBySourceIdentity({
-              source: canonical.source,
-              externalCode: canonical.externalCode
-            }).map((video) => video.videoId)
-          : this.sqlVideoIdsBySourceCode(canonical.source, canonical.externalCode)
-      ).filter((videoId) => candidateIds.has(videoId))
-      if (externalCodeMatches.length > 0) {
-        signals.push(externalCodeMatches)
-        if (input.code && externalCodeMatches.some((videoId) => {
-          const candidate = input.candidates.find((entry) => entry.videoId === videoId)
-          return candidate != null && normalizeVideoCode(candidate.code) !== input.code
-        })) {
-          canonical.strongSignalConflict = true
-        }
-      }
-    }
-
-    if (canonical.source && canonical.sourceUrl) {
-      const sourceUrlMatches = (
-        this.catalogLookup
-          ? this.catalogLookup.videosBySourceIdentity({
-              source: canonical.source,
-              sourceUrl: canonical.sourceUrl
-            }).map((video) => video.videoId)
-          : this.sqlVideoIdsBySourceUrl(canonical.source, canonical.sourceUrl)
-      ).filter((videoId) => candidateIds.has(videoId))
-      if (sourceUrlMatches.length > 0) {
-        signals.push(sourceUrlMatches)
-        if (input.code && sourceUrlMatches.some((videoId) => {
-          const candidate = input.candidates.find((entry) => entry.videoId === videoId)
-          return candidate != null && normalizeVideoCode(candidate.code) !== input.code
-        })) {
-          canonical.strongSignalConflict = true
-        }
-      }
-    }
-
-    if (input.code && canonical.publisher && canonical.releaseDate) {
-      let normalizedPublisher: string | null = null
-      try {
-        normalizedPublisher = normalizeClassificationName(canonical.publisher)
-      } catch {
-        normalizedPublisher = null
-      }
-      if (normalizedPublisher) {
-        const businessMatches = (
-          this.catalogLookup
-            ? this.catalogLookup.videosByPublisherCodeRelease(
-                normalizedPublisher,
-                input.code,
-                canonical.releaseDate
-              ).map((video) => video.videoId)
-            : this.sqlVideoIdsByPublisherCodeRelease(
-                normalizedPublisher,
-                input.code,
-                canonical.releaseDate
-              )
-        ).filter((videoId) => candidateIds.has(videoId))
-        if (businessMatches.length > 0) {
-          signals.push(businessMatches)
-        } else if (input.candidates.some((candidate) => (
-          candidate.publisherOrganizationId != null && candidate.releaseDate != null
-        ))) {
-          canonical.strongSignalMismatch = true
-        }
-      }
-    }
-
-    if (signals.length === 0) return canonical
-    const intersection = signals.slice(1).reduce(
-      (current, signal) => current.filter((videoId) => signal.includes(videoId)),
-      [...new Set(signals[0])]
-    )
-    const distinctSignalIds = new Set(signals.flat())
-    if (intersection.length === 1) canonical.strongMatchVideoId = intersection[0]
-    canonical.strongSignalConflict ||= intersection.length === 0 && distinctSignalIds.size > 1
-    return canonical
-  }
-
-  private currentCandidatesForItem(item: ApplyItemRow): GlobalIdentityCandidate[] {
-    const identity = item.detail_identity_json
-      ? JSON.parse(item.detail_identity_json) as CanonicalDetailIdentity
-      : null
-    return this.mergeGlobalIdentityCandidates(
-      this.globalCodeCandidatesForCodes([
-        item.normalized_code,
-        identity?.codeConflict ? identity.detailCode ?? null : null
-      ]),
-      this.globalDetailUrlCandidates(item.normalized_detail_url),
-      identity ? this.globalSourceIdentityCandidates(identity) : []
-    )
-  }
-
-  private isResolutionCurrent(job: JobRow, item: ApplyItemRow): boolean {
-    const candidates = this.currentCandidatesForItem(item)
-    const frozenCandidates = item.candidate_snapshot_json ?? '[]'
-    if (JSON.stringify(candidates) !== frozenCandidates) return false
-    if (item.state === 'planned-create') {
-      if (item.resolution_kind === 'create-no-match') return candidates.length === 0
-      if (item.resolution_kind === 'user-create') {
-        const decision = this.database.prepare(
-          `SELECT expected_item_revision, choice_kind FROM playlist_import_decisions
-           WHERE item_id = ?`
-        ).get(item.id) as {
-          expected_item_revision: number
-          choice_kind: string
-        } | undefined
-        return decision?.choice_kind === 'create' && item.revision === decision.expected_item_revision + 1
-      }
-      return false
-    }
-    if (item.state !== 'planned-reuse' || item.resolved_video_id == null) return false
-    if (!candidates.some((candidate) => candidate.videoId === item.resolved_video_id)) return false
-    if (item.resolution_kind === 'direct-code') {
-      return candidates.length === 1 && candidates[0].videoId === item.resolved_video_id
-    }
-    if (item.resolution_kind === 'target-library-tiebreak') {
-      const targetMatches = candidates.filter((candidate) => (
-        candidate.libraryIds.includes(job.target_library_id)
-      ))
-      return candidates.length > 1 && targetMatches.length === 1 &&
-        targetMatches[0].videoId === item.resolved_video_id
-    }
-    if (item.resolution_kind === 'user-existing') {
-      const decision = this.database.prepare(
-        `SELECT expected_item_revision, choice_kind, chosen_video_id
-         FROM playlist_import_decisions WHERE item_id = ?`
-      ).get(item.id) as {
-        expected_item_revision: number
-        choice_kind: string
-        chosen_video_id: number | null
-      } | undefined
-      return decision?.choice_kind === 'existing' &&
-        decision.chosen_video_id === item.resolved_video_id &&
-        item.revision === decision.expected_item_revision + 1
-    }
-    if (item.resolution_kind === 'business-identity') {
-      if (!item.detail_identity_json) return false
-      const frozenIdentity = JSON.parse(item.detail_identity_json) as CanonicalDetailIdentity
-      const currentIdentity = this.canonicalDetailIdentity({
-        code: item.normalized_code,
-        detailUrl: item.normalized_detail_url,
-        identity: frozenIdentity as unknown as Record<string, unknown>,
-        candidates
-      })
-      return !currentIdentity.strongSignalConflict &&
-        !currentIdentity.strongSignalMismatch &&
-        currentIdentity.strongMatchVideoId === item.resolved_video_id
-    }
-    return false
-  }
 
   private reopenStalePreview(runId: string): void {
     this.database.transaction(() => {
@@ -2661,7 +2101,7 @@ export class PlaylistImportRepository {
       let hasUser = false
       const at = now()
       for (const item of items) {
-        const candidates = this.currentCandidatesForItem(item)
+        const candidates = this.identity.currentCandidatesForItem(item)
         if (item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED') {
           if (candidates.length === 0) continue
           if (candidates.length === 1) {
@@ -2673,7 +2113,7 @@ export class PlaylistImportRepository {
             ).run(candidates[0].videoId, JSON.stringify(candidates), at, item.id)
             continue
           }
-        } else if (this.isResolutionCurrent(job, item)) {
+        } else if (this.identity.isResolutionCurrent(job, item)) {
           continue
         }
         const needsUser = item.resolution_kind === 'target-library-tiebreak' ||
@@ -2952,8 +2392,8 @@ export class PlaylistImportRepository {
     }
     if (items.some((item) => (
       item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'
-        ? this.currentCandidatesForItem(item).length > 0
-        : !this.isResolutionCurrent(job, item)
+        ? this.identity.currentCandidatesForItem(item).length > 0
+        : !this.identity.isResolutionCurrent(job, item)
     ))) {
       this.reopenStalePreview(runId)
       throw new Error('IMPORT_PREVIEW_STALE')
@@ -3135,8 +2575,8 @@ export class PlaylistImportRepository {
       }
       if (items.some((item) => (
         item.state === 'failed' && item.error_code === 'AUTO_CREATE_DISABLED'
-          ? this.currentCandidatesForItem(item).length > 0
-          : !this.isResolutionCurrent(job, item)
+          ? this.identity.currentCandidatesForItem(item).length > 0
+          : !this.identity.isResolutionCurrent(job, item)
       ))) throw new ImportPreviewStaleError()
 
       if (job.destination_kind === 'append' && !this.database.prepare('SELECT 1 FROM playlists WHERE id = ?').get(job.requested_playlist_id)) {

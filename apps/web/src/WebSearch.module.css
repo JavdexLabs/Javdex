@@ -1,0 +1,73 @@
+
+.root {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 580px;
+  margin: 0 auto;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding-left: 14px;
+  gap: 8px;
+}
+
+.root > svg {
+  color: var(--text-muted);
+}
+
+.root:focus-within {
+  border-color: var(--text-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.root input {
+  border: 0;
+  background: transparent;
+  flex: 1;
+  width: 100%;
+  padding-left: 0;
+}
+
+.root button {
+  border: 0;
+  background: transparent;
+  padding: 8px;
+}
+
+.root button:last-child {
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding-inline: 14px;
+}
+
+@media (width <= 760px) {
+  .root {
+    order: 3;
+    flex-basis: 100%;
+    max-width: none;
+  }
+}
+
+@media (width >= 1920px) {
+  .root {
+    max-width: 740px;
+  }
+}
+
+@media (pointer: coarse) {
+  .root button {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}
+
+.root input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.root button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--text-accent);
+}

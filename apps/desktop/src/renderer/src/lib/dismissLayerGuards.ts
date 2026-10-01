@@ -1,5 +1,5 @@
 /** Portaled layers that must not count as an "outside" click for parent popovers. */
-const DISMISS_EXEMPT_SELECTORS = ['.app-select-menu'] as const
+const DISMISS_EXEMPT_SELECTORS = ['[data-select-control-menu]'] as const
 
 export function isDismissExemptPortaledTarget(target: Node | null): boolean {
   if (!(target instanceof Element)) return false

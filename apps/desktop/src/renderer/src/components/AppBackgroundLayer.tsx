@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties
 } from 'react'
+import styles from './AppBackgroundLayer.module.css'
 
 type BackgroundFit = 'cover' | 'contain'
 
@@ -29,13 +30,7 @@ function computePortraitFrame(
   return { leftPct, widthPct, fadePx }
 }
 
-export default function AppBackgroundLayer({
-  src,
-  animationClass
-}: {
-  src: string
-  animationClass: string
-}): JSX.Element {
+export default function AppBackgroundLayer({ src }: { src: string }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null)
   const [fit, setFit] = useState<BackgroundFit>('cover')
@@ -138,23 +133,22 @@ export default function AppBackgroundLayer({
   return (
     <div
       ref={rootRef}
-      className={`app-background ${animationClass}${
-        fit === 'contain' ? ' app-background--portrait' : ''
-      }`}
+      className={`${styles.root} ${styles.active}`}
+      data-fit={fit}
       aria-hidden
     >
       {fit === 'contain' ? (
         frame ? (
           <>
-            <div className="app-background-frame" style={frameStyle}>
-              <img src={src} alt="" draggable={false} className="app-background-frame-img" />
+            <div className={styles.frame} style={frameStyle}>
+              <img src={src} alt="" draggable={false} className={styles.frameImage} />
             </div>
             <div
-              className="app-background-edge-fade app-background-edge-fade--left"
+              className={`${styles.edgeFade} ${styles.left}`}
               style={leftFadeStyle}
             />
             <div
-              className="app-background-edge-fade app-background-edge-fade--right"
+              className={`${styles.edgeFade} ${styles.right}`}
               style={rightFadeStyle}
             />
           </>
@@ -164,10 +158,10 @@ export default function AppBackgroundLayer({
           src={src}
           alt=""
           draggable={false}
-          className="app-background-img app-background-img--cover"
+          className={`${styles.image} ${styles.cover}`}
         />
       )}
-      <div className="app-background-shade" />
+      <div className={styles.shade} />
     </div>
   )
 }

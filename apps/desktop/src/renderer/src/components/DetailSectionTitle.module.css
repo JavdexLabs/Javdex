@@ -1,0 +1,14 @@
+.root {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.root[data-grow='true'] {
+  flex: 1;
+}

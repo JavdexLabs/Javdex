@@ -30,16 +30,16 @@ try {
       await route.abort('failed')
     }, { times: 1 })
     await page.getByRole('button', { name: '获取配对码', exact: true }).click()
-    await page.locator('.pair-code').waitFor()
-    const code = (await page.locator('.pair-code').innerText()).replace(/\s/g, '')
+    await page.locator('[data-pair-code]').waitFor()
+    const code = (await page.locator('[data-pair-code]').innerText()).replace(/\s/g, '')
     if (scenario === 'refresh') {
       await page.reload()
-      await page.locator('.pair-code').waitFor()
-      assert.equal((await page.locator('.pair-code').innerText()).replace(/\s/g, ''), code)
+      await page.locator('[data-pair-code]').waitFor()
+      assert.equal((await page.locator('[data-pair-code]').innerText()).replace(/\s/g, ''), code)
     }
     if (scenario === 'network') {
       await page.getByText('连接暂时中断，正在自动重试…', { exact: true }).waitFor({ timeout: 12000 })
-      assert.equal(await page.locator('.pair-code').count(), 1)
+      assert.equal(await page.locator('[data-pair-code]').count(), 1)
     }
     const before = sessions.count()
     server.pairing.decide(code, true)

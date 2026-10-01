@@ -63,10 +63,11 @@ describe('VideoResourceImportModal', () => {
     })
     const mounted = renderer!
 
-    assert.equal(mounted.root.findByProps({ id: 'resource-url' }).props.disabled, true)
+    assert.doesNotMatch(JSON.stringify(mounted.toJSON()), /video-resource-(url-control|size-control|check)|form-error-banner|form-control-full|text-input/)
+    assert.equal(mounted.root.find((node) => node.type === 'input' && node.props.id === 'resource-url').props.disabled, true)
     assert.equal(mounted.root.findByProps({ id: 'resource-kind' }).props.disabled, true)
-    assert.equal(mounted.root.findByProps({ id: 'resource-name' }).props.disabled, false)
-    assert.equal(mounted.root.findByProps({ id: 'resource-size' }).props.disabled, false)
+    assert.equal(mounted.root.find((node) => node.type === 'input' && node.props.id === 'resource-name').props.disabled, false)
+    assert.equal(mounted.root.find((node) => node.type === 'input' && node.props.id === 'resource-size').props.disabled, false)
     assert.ok(
       mounted.root
         .findAllByType('button')
@@ -113,7 +114,7 @@ describe('VideoResourceImportModal', () => {
     })
     const mounted = renderer!
     assert.equal(
-      mounted.root.findAll((node) => node.props.placeholder === 'https://…').length,
+      mounted.root.findAllByType('input').filter((node) => node.props.placeholder === 'https://…').length,
       0
     )
     const addResource = mounted.root
@@ -124,10 +125,10 @@ describe('VideoResourceImportModal', () => {
       addResource.props.onClick()
     })
     assert.equal(
-      mounted.root.findAll((node) => node.props.placeholder === 'https://…').length,
+      mounted.root.findAllByType('input').filter((node) => node.props.placeholder === 'https://…').length,
       1
     )
-    const urlInput = mounted.root.find((node) => node.props.placeholder === 'https://…')
+    const urlInput = mounted.root.find((node) => node.type === 'input' && node.props.placeholder === 'https://…')
     act(() => {
       urlInput.props.onChange({ target: { value: 'https://github.com/JavdexLabs/Javdex' } })
     })

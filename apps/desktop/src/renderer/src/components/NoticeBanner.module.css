@@ -1,0 +1,53 @@
+.banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+}
+
+.warning {
+  border-color: var(--border-warning);
+  border-left: 3px solid var(--warning);
+  background: var(--surface-warning);
+}
+
+.info {
+  border-color: var(--border-info);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-info);
+}
+
+.copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.copy strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.copy span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.copySettings strong,
+.copySettings span {
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}

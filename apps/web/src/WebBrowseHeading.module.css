@@ -1,0 +1,51 @@
+
+.root {
+  display: flex;
+  align-items: end;
+  gap: 20px;
+  justify-content: space-between;
+  padding: 0 0 24px;
+}
+
+.root .description {
+  margin: 0;
+  font-size: 13px;
+}
+
+.count {
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding-bottom: 4px;
+}
+
+@media (width <= 760px) {
+  .root {
+    align-items: start;
+    gap: 12px;
+  }
+
+  .count {
+    padding-top: 30px;
+    font-size: 11px;
+  }
+
+  .root .label {
+    font-size: 10px;
+  }
+
+  .root .description {
+    font-size: 12px;
+  }
+}
+
+@media (width <= 380px) {
+  .root {
+    flex-direction: column;
+  }
+
+  .count {
+    padding: 0;
+  }
+}

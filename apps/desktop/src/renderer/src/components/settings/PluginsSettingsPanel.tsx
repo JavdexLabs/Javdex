@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import { useMemo, useState } from 'react'
 import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
@@ -88,10 +89,14 @@ function PluginEmptyState({
   onDev?: () => void
 }): JSX.Element {
   return (
-    <SettingsEmptyPanel variant="dashed" className="plugin-empty-state">
+    <SettingsEmptyPanel
+      variant="dashed"
+      className={styles.emptyState}
+      descriptionClassName={styles.emptyStateDescription}
+    >
       <span>{message}</span>
       {(onImport || onDev) && (
-        <div className="plugin-empty-state-actions">
+        <div className={styles.emptyStateActions}>
           {onImport && (
             <Button type="button" size="sm" onClick={onImport}>
               导入插件
@@ -184,7 +189,6 @@ export default function PluginsSettingsPanel({
     plugins: ScraperPluginDescriptor[],
     allFieldCount: number,
     options: {
-      scroll?: boolean
       showEmptyActions?: boolean
       emptyHint: string
       filteredEmptyHint?: string
@@ -202,8 +206,8 @@ export default function PluginsSettingsPanel({
     }
 
     return (
-      <div className={options.scroll ? 'plugin-card-scroll' : undefined}>
-        <div className="plugin-card-grid" role="list">
+      <div>
+        <div className={styles.cardGrid} role="list">
           {plugins.map((plugin) => {
             const isDefault = plugin.name === options.defaultPluginName
             return (
@@ -234,7 +238,7 @@ export default function PluginsSettingsPanel({
 
   return (
     <SettingsCard
-      className="plugins-page"
+      className={styles.root}
       title="全局刮削来源"
       hint="当前库可单独指定影片来源；未指定时跟随这里的全局默认。"
       actions={
@@ -255,17 +259,17 @@ export default function PluginsSettingsPanel({
         </>
       }
     >
-      <div className="plugins-toolbar" role="search">
-        <label className="plugins-toolbar-search">
+      <div className={styles.toolbar} role="search">
+        <label className={styles.toolbarSearch}>
           <span>搜索</span>
-          <input
-            className="text-input"
+          <TextInput
+            density="workspace" className={styles.searchInput}
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="插件名、站点、字段"
           />
         </label>
-        <label className="plugins-toolbar-sort">
+        <label className={styles.toolbarSort}>
           <span>排序</span>
           <SelectControl
             value={sortMode}
@@ -302,7 +306,6 @@ export default function PluginsSettingsPanel({
 
       >
         {renderPluginGrid('video', filteredVideoPlugins, ALL_VIDEO_SCRAPE_FIELDS.length, {
-          scroll: false,
           showEmptyActions: true,
           emptyHint: '暂无影片插件，可导入或使用开发助手创建',
           filteredEmptyHint: '没有符合筛选的影片插件',
@@ -322,7 +325,6 @@ export default function PluginsSettingsPanel({
 
       >
         {renderPluginGrid('actress', filteredActressPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length, {
-          scroll: false,
           showEmptyActions: true,
           emptyHint: '暂无演员插件，可导入或使用开发助手创建',
           filteredEmptyHint: '没有符合筛选的演员插件',

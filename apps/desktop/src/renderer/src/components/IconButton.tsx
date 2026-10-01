@@ -31,8 +31,6 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
     styles.root,
     tone === 'danger' ? styles.danger : '',
     size === 'sm' ? styles.sm : '',
-    'icon-btn',
-    tone === 'danger' ? 'icon-btn--danger' : '',
     className
   ]
     .filter(Boolean)
@@ -48,7 +46,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
       title={title ?? label}
       {...rest}
     >
-      <span className={`${styles.glyph} icon-btn__glyph`}>{icon}</span>
+      <span className={styles.glyph}>{icon}</span>
     </button>
   )
 })

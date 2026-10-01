@@ -1,0 +1,80 @@
+.root {
+  display: grid;
+  gap: 12px;
+}
+
+.sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.card {
+  padding: 12px 14px;
+  border: 1px solid var(--actress-meta-card-border, color-mix(in srgb, var(--text-primary) 11%, var(--border-subtle)));
+  border-radius: var(--radius-md);
+  background: var(--actress-meta-card-background, linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--text-primary) 8%, transparent) 0%,
+    color-mix(in srgb, var(--surface-panel) 15%, transparent) 46%,
+    color-mix(in srgb, var(--surface-base) 9%, transparent) 100%
+  ));
+  box-shadow: var(--actress-meta-card-shadow,
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 10%, transparent),
+    0 10px 28px color-mix(in srgb, var(--surface-base) 24%, transparent));
+}
+
+.sectionTitle {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  margin: 0;
+  gap: 8px 12px;
+}
+
+.item {
+  display: contents;
+}
+
+.term {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.value {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.statusValue {
+  user-select: none;
+}
+
+.aliasList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.summaryText {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  user-select: text;
+}

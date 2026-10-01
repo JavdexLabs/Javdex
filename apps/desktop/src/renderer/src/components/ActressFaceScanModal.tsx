@@ -2,6 +2,7 @@ import Modal from './Modal'
 import type { ActressFaceScanProgress, ActressFaceScanSummary } from '../actressFaceFilter/scanQueue'
 import { isActressFaceScanFailed } from '../actressFaceFilter/scanQueue'
 import Button from './Button'
+import styles from './ActressFaceScanModal.module.css'
 
 interface Props {
   progress: ActressFaceScanProgress
@@ -54,30 +55,30 @@ export default function ActressFaceScanModal({
         )
       }
     >
-      <div className="actress-face-scan-progress" aria-live="polite">
+      <div className={styles.root} aria-live="polite">
         <progress
           max={Math.max(1, progress.total)}
           value={Math.min(progress.current, progress.total)}
           aria-label="人脸识别进度"
         />
-        <div className="actress-face-scan-progress-meta">
+        <div className={styles.meta}>
           <span>
             已处理 {progress.current}/{progress.total}
           </span>
           <span>复用 {progress.reused}</span>
         </div>
-        <div className="actress-face-scan-stats">
+        <div className={styles.stats}>
           <span>有脸 {progress.hasFace}</span>
           <span>无人脸 {progress.withoutFace}</span>
           <span>识别失败 {progress.failed}</span>
         </div>
         {progress.currentName && !completed ? (
-          <p className="hint">当前：{progress.currentName}</p>
+          <p className={styles.hint}>当前：{progress.currentName}</p>
         ) : null}
         {summary && summary.failed > 0 ? (
           <>
-            <p className="hint">有 {summary.failed} 张头像识别失败，将在下次筛选时重试。</p>
-            <p className="hint selectable-text">失败原因：{summary.failures[0]?.message ?? '无法读取头像'}</p>
+            <p className={styles.hint}>有 {summary.failed} 张头像识别失败，将在下次筛选时重试。</p>
+            <p className={`${styles.hint} ${styles.error}`}>失败原因：{summary.failures[0]?.message ?? '无法读取头像'}</p>
           </>
         ) : null}
       </div>

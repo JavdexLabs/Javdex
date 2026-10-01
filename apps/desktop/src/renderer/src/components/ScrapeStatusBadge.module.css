@@ -1,0 +1,50 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+.root:where([data-status='0']) {
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-control) 72%, transparent);
+  color: var(--text-secondary);
+}
+
+.root:where([data-status='1']) {
+  border: 1px solid var(--border-success);
+  background: var(--surface-success);
+  color: var(--text-success);
+}
+
+.root:where([data-status='2']) {
+  border: 1px solid var(--border-danger);
+  background: var(--surface-danger);
+  color: var(--text-danger);
+}
+
+.root[data-pending='true'] {
+  border: 1px solid var(--border-warning);
+  background: var(--surface-warning);
+  color: var(--text-warning);
+  cursor: pointer;
+}
+
+.root[data-pending='true']:is(:hover, :focus-visible) {
+  border-color: var(--border-accent);
+  color: var(--text-accent);
+}
+
+.root[data-pending='true']:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}

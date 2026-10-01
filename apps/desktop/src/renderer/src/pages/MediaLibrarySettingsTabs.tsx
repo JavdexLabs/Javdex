@@ -1,3 +1,4 @@
+import TextInput from '../components/TextInput'
 import type { Dispatch, SetStateAction, ChangeEvent } from 'react'
 import type { NavigateFunction } from 'react-router-dom'
 import {
@@ -31,6 +32,7 @@ import { UI_ICON_SM } from '../components/iconDefaults'
 import { NavIcon } from '../components/NavIcons'
 import SelectControl from '../components/SelectControl'
 import SettingsSwitchRow from '../components/SettingsSwitchRow'
+import SettingsToggleList from '../components/SettingsToggleList'
 import LibraryScanAuditPanel from '../components/settings/LibraryScanAuditPanel'
 import MediaLibraryScanRunButton from '../components/settings/MediaLibraryScanRunButton'
 import {
@@ -256,8 +258,8 @@ export function OverviewSettingsTab({
         hint="名称、图标、颜色和排序用于识别当前媒体库，不会改变库内影片数据。"
       >
         <AppFormField label="媒体库名称">
-          <input
-            className={`text-input ${styles.textControl}`}
+          <TextInput
+            density="workspace" className={styles.textControl}
             value={identityDraft.name}
             maxLength={200}
             disabled={formDisabled}
@@ -273,8 +275,8 @@ export function OverviewSettingsTab({
           label="导航排序"
           hint="数字越小越靠前；相同时按创建顺序排列。"
         >
-          <input
-            className={`text-input ${styles.textControl}`}
+          <TextInput
+            density="workspace" className={styles.textControl}
             type="number"
             min={0}
             step={1}
@@ -373,6 +375,7 @@ export function SourcesSettingsTab({
           </div>
         </div>
         <Button
+          className={styles.sourceAction}
           size="sm"
           disabled={formDisabled}
           onClick={() => void addRoots()}
@@ -514,7 +517,7 @@ export function ScanSettingsTab({
         </div>
 
         <div className={styles.scanCommandRow}>
-          <MediaLibraryScanRunButton scan={scan} library={library} formDisabled={formDisabled} />
+          <MediaLibraryScanRunButton className={styles.scanAction} scan={scan} library={library} formDisabled={formDisabled} />
           <div className={styles.scanDuration}>
             <span className={styles.scanDurationLabel}>
               <Clock {...UI_ICON_SM} aria-hidden />
@@ -598,7 +601,7 @@ export function ScanSettingsTab({
           title="资源归属"
           hint="只影响之后扫描发现的新资源；不会自动处理已有待确认组。"
         >
-          <div className="settings-toggle-list settings-toggle-list--compact">
+          <SettingsToggleList compact>
             <SettingsSwitchRow
               title="同番号自动合并资源"
               description="同一媒体库扫描到同番号文件时，直接加入现有影片成员。"
@@ -608,14 +611,14 @@ export function ScanSettingsTab({
                 void updateConfigImmediately('autoMergeSameCodeResources', value)
               }
             />
-          </div>
+          </SettingsToggleList>
         </SettingsSectionBlock>
         <SettingsSectionBlock
           className={styles.scanSettingsBlock}
           title="本地元数据"
           hint="只在资源首次发现时读取；不会持续同步相邻文件。"
         >
-          <div className="settings-toggle-list settings-toggle-list--compact">
+          <SettingsToggleList compact>
             <SettingsSwitchRow
               title="自动导入本地 NFO"
               description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
@@ -625,14 +628,14 @@ export function ScanSettingsTab({
                 void updateConfigImmediately('autoImportLocalNfo', value)
               }
             />
-          </div>
+          </SettingsToggleList>
         </SettingsSectionBlock>
         <SettingsSectionBlock
           className={styles.scanSettingsBlock}
           title="自动扫描"
           hint="应用启动、系统唤醒及运行期间会检查是否已达到扫描间隔。"
         >
-          <div className="settings-toggle-list settings-toggle-list--compact">
+          <SettingsToggleList compact>
             <SettingsSwitchRow
               title="按固定间隔自动扫描媒体库"
               description="默认关闭；开启后不会立即扫描"
@@ -642,7 +645,7 @@ export function ScanSettingsTab({
                 void updateConfigImmediately('autoScanEnabled', value)
               }
             />
-          </div>
+          </SettingsToggleList>
           <label
             className={`${styles.scanAutoInterval}${configDraft.autoScanEnabled ? '' : ` ${styles.scanAutoIntervalDisabled}`}`}
           >
@@ -675,7 +678,7 @@ export function ScanSettingsTab({
           title="扫描后清理"
           hint="只在完整扫描成功且所有目录在线时执行。"
         >
-          <div className="settings-toggle-list settings-toggle-list--compact">
+          <SettingsToggleList compact>
             <SettingsSwitchRow
               title="扫描后自动清理无资源成员"
               description="仅移除当前媒体库中的成员关系，不会删除媒体目录中的源文件；仍被任一清单引用的影片会保留，不会被自动清理"
@@ -685,7 +688,7 @@ export function ScanSettingsTab({
                 void updateConfigImmediately('removeResourceLessMemberships', value)
               }
             />
-          </div>
+          </SettingsToggleList>
           <div className={styles.scanCleanupNotice}>
             <AlertTriangle {...UI_ICON_SM} aria-hidden />
             <span className={styles.scanCleanupCopy}>

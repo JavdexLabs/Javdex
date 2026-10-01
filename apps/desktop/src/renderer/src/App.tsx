@@ -74,19 +74,19 @@ function AppContent(): JSX.Element {
                     <Route path={ROUTE_PATH.home} element={<HomeShell />}>
                       <Route index element={null} />
                       <Route path={ROUTE_SEGMENT.homeVideo} element={<DetailPage />}>
-                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
+                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage fromVideo />} />
                       </Route>
                     </Route>
                     <Route path={ROUTE_PATH.search} element={<GlobalSearchShell />}>
                       <Route index element={null} />
                       <Route path={ROUTE_SEGMENT.searchVideo} element={<DetailPage />}>
-                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
+                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage fromVideo />} />
                       </Route>
                     </Route>
                     <Route path={ROUTE_PATH.mediaLibrary} element={<LibraryShell />}>
                       <Route index element={null} />
                       <Route path={ROUTE_SEGMENT.mediaLibraryVideo} element={<DetailPage />}>
-                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
+                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage fromVideo />} />
                       </Route>
                       <Route
                         path={ROUTE_SEGMENT.mediaLibrarySettings}
@@ -115,7 +115,7 @@ function AppContent(): JSX.Element {
                         <Route path={ROUTE_SEGMENT.actressVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
+                            element={<ActressDetailPage fromVideo />}
                           />
                         </Route>
                       </Route>
@@ -126,7 +126,7 @@ function AppContent(): JSX.Element {
                         <Route path={ROUTE_SEGMENT.playlistVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
+                            element={<ActressDetailPage fromVideo />}
                           />
                         </Route>
                       </Route>
@@ -144,7 +144,7 @@ function AppContent(): JSX.Element {
                         <Route path={ROUTE_SEGMENT.organizationVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
+                            element={<ActressDetailPage fromVideo />}
                           />
                         </Route>
                       </Route>
@@ -159,7 +159,7 @@ function AppContent(): JSX.Element {
                         <Route path={ROUTE_SEGMENT.directorVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
+                            element={<ActressDetailPage fromVideo />}
                           />
                         </Route>
                       </Route>
@@ -174,7 +174,7 @@ function AppContent(): JSX.Element {
                         <Route path={ROUTE_SEGMENT.seriesVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
+                            element={<ActressDetailPage fromVideo />}
                           />
                         </Route>
                       </Route>
@@ -200,7 +200,7 @@ function AppContent(): JSX.Element {
                       <Route index element={null} />
                       <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                       <Route path={ROUTE_SEGMENT.pendingVideo} element={<DetailPage />}>
-                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
+                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage fromVideo />} />
                       </Route>
                     </Route>
                     <Route path="*" element={<Navigate to={ROUTE_PATH.home} replace />} />

@@ -34,10 +34,11 @@ it('starts a scan from the settings command and switches the label while running
     }
   }
   renderer = TestRenderer.create(
-    <MediaLibraryScanRunButton scan={scan} library={library} formDisabled={false} />
+    <MediaLibraryScanRunButton className="scan-layout" scan={scan} library={library} formDisabled={false} />
   )
   const button = renderer.root.findByType('button')
   assert.equal(button.props['data-ui'], 'button')
+  assert.match(button.props.className, /(?:^| )scan-layout(?: |$)/)
   assert.equal(nodeText(button).includes('扫描并导入'), true)
   assert.equal(button.props.disabled, false)
   void act(() => {

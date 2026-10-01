@@ -60,6 +60,7 @@ export default function OrganizationPickerField({
         selectedId={selectedId}
         listLabel={`${FACET_LABEL[role]}候选`}
         createHint={`输入新名称会在保存时创建${FACET_LABEL[role]}`}
+        error={optionsQuery.isError ? `${FACET_LABEL[role]}候选加载失败，请稍后重试。` : undefined}
         onValueChange={(next) => {
           onChange(next)
           onAssignmentChange(resolveOrganizationAssignment(next, options))
@@ -69,11 +70,6 @@ export default function OrganizationPickerField({
           onAssignmentChange({ organizationId: option.id })
         }}
       />
-      {optionsQuery.isError ? (
-        <span className="classification-picker-error" role="alert">
-          {FACET_LABEL[role]}候选加载失败，请稍后重试。
-        </span>
-      ) : null}
     </>
   )
 }

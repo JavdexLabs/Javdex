@@ -1,0 +1,33 @@
+.loadingLabel {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.batchDetailModal[role='dialog'] {
+  display: flex;
+  flex-direction: column;
+  width: min(840px, calc(100vw - 48px));
+  height: min(640px, calc(100vh - 64px));
+  max-height: min(640px, calc(100vh - 64px));
+  padding: 16px;
+  overflow: hidden;
+}
+
+.batchDetailModal [data-modal-part='head'] {
+  align-items: center;
+  margin-bottom: 12px;
+  padding-inline: 2px;
+}
+
+.batchDetailModal[role='dialog'] [data-modal-part='body'] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin: calc(-1 * var(--focus-ring-space));
+  padding: var(--focus-ring-space);
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}

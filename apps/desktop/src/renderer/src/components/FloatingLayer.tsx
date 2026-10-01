@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useFloatingLayer } from '../hooks/useFloatingLayer'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import type { FloatingAlign, FloatingSide } from '../lib/floatingPosition'
+import styles from './FloatingLayer.module.css'
 
 interface FloatingLayerProps {
   open: boolean
@@ -68,16 +69,17 @@ export default function FloatingLayer({
     <div
       ref={floatingRef}
       id={id}
-      className={className}
+      className={[styles.root, className].filter(Boolean).join(' ')}
       role={role}
       aria-label={ariaLabel}
       style={{
         ...style,
-        position: 'fixed',
+        // These properties belong to the layer, not the caller's inline style.
+        position: undefined,
+        zIndex: undefined,
         top: coords?.top ?? -10000,
         left: coords?.left ?? -10000,
-        visibility: coords ? 'visible' : 'hidden',
-        zIndex: 1200
+        visibility: coords ? 'visible' : 'hidden'
       }}
     >
       {children}

@@ -1,8 +1,8 @@
 import { allFieldIdsForKind, fieldLabelForKind } from '@shared/pluginDevKindProfile'
 import type { PluginKind } from './types'
-import { X } from 'lucide-react'
-import { UI_ICON_SM } from '../iconDefaults'
+import ChipRemoveButton from '../ChipRemoveButton'
 import SelectControl from '../SelectControl'
+import styles from './PluginDevFieldTags.module.css'
 
 export { allFieldIdsForKind } from '@shared/pluginDevKindProfile'
 
@@ -44,12 +44,14 @@ export default function PluginDevFieldTags({
   supportedFieldIds,
   fieldLabel,
   busy,
+  className = '',
   onChange
 }: {
   kind: PluginKind
   supportedFieldIds: string[]
   fieldLabel?: (kind: PluginKind, field: string) => string
   busy: boolean
+  className?: string
   onChange: (fieldIds: string[]) => void
 }): JSX.Element {
   const labelForField = fieldLabel ?? fieldLabelForKind
@@ -76,43 +78,37 @@ export default function PluginDevFieldTags({
   }
 
   return (
-    <div className="plugin-edit-control plugin-dev-field-tags plugin-dev-field-tags--inline">
-      <span>支持字段</span>
-      <div className="plugin-dev-field-tags-list">
+    <div className={`${styles.root}${className ? ` ${className}` : ''}`}>
+      <span className={styles.label}>支持字段</span>
+      <div className={styles.list}>
         {showAllChip ? (
-          <span className="plugin-dev-field-tag plugin-dev-field-tag--editable">
-            <span className="plugin-dev-field-tag-label">全部字段</span>
-            <button
-              type="button"
-              className="plugin-dev-field-tag-remove"
+          <span className={styles.chip} data-chip-remove-host>
+            <span className={styles.chipLabel}>全部字段</span>
+            <ChipRemoveButton
               disabled={busy}
-              aria-label="自定义支持字段"
+              label="自定义支持字段"
+              reveal="always"
               title="展开后可逐个删除字段"
               onClick={removeAllChip}
-            >
-              <X {...UI_ICON_SM} />
-            </button>
+            />
           </span>
         ) : (
           selectedIds.map((field) => (
-            <span key={field} className="plugin-dev-field-tag plugin-dev-field-tag--editable">
-              <span className="plugin-dev-field-tag-label">{labelForField(kind, field)}</span>
-              <button
-                type="button"
-                className="plugin-dev-field-tag-remove"
+            <span key={field} className={styles.chip} data-chip-remove-host>
+              <span className={styles.chipLabel}>{labelForField(kind, field)}</span>
+              <ChipRemoveButton
                 disabled={busy}
-                aria-label={`移除字段 ${labelForField(kind, field)}`}
+                label={`移除字段 ${labelForField(kind, field)}`}
+                reveal="always"
                 onClick={() => removeField(field)}
-              >
-                <X {...UI_ICON_SM} />
-              </button>
+              />
             </span>
           ))
         )}
       </div>
       {availableToAdd.length > 0 && (
         <SelectControl
-          className="plugin-dev-field-add"
+          className={styles.add}
           value=""
           disabled={busy}
           onChange={(e) => {

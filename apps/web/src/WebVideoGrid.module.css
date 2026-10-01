@@ -1,0 +1,15 @@
+
+.root {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(100%, var(--card-width)), 1fr)
+  );
+  gap: 28px 18px;
+}
+
+@media (width <= 760px) {
+  .root {
+    gap: 24px 12px;
+  }
+}

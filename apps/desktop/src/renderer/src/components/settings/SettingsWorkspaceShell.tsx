@@ -1,3 +1,4 @@
+import ScrollViewport from '../ScrollViewport'
 import type { KeyboardEventHandler, ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
@@ -10,14 +11,15 @@ import {
   type SettingsTab
 } from '../../settings/settingsRoutes'
 import { SettingsTabBar } from './SettingsPrimitives'
+import styles from './SettingsWorkspaceShell.module.css'
 
 export function SettingsPluginDevShell({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <div className="scroll-body scroll-body--fill">
-      <div className="scroll-body-inner scroll-body-inner--settings settings-dev-page">
+    <ScrollViewport variant="fill">
+      <div data-page-content className={`${styles.root} ${styles.pluginDevPage}`}>
         {children}
       </div>
-    </div>
+    </ScrollViewport>
   )
 }
 
@@ -40,15 +42,16 @@ export default function SettingsWorkspaceShell({
 }): JSX.Element {
   const shellOwnsTabs = tabsPlacement === 'shell'
   return (
-    <div className="scroll-body scroll-body--fill">
-      <div className="scroll-body-inner scroll-body-inner--settings settings-overview-page">
-        <nav className="settings-group-tabs" aria-label="设置分类">
+    <ScrollViewport variant="fill">
+      <div data-page-content className={`${styles.root} ${styles.overviewPage}`}>
+        <nav className={styles.groupTabs} aria-label="设置分类">
           {SETTINGS_GROUPS.map((group) => (
             <NavLink
               draggable={false}
               key={group.id}
               to={hrefForGroup?.(group) ?? settingsPath(group.id)}
-              className={`settings-group-tab${activeGroup.id === group.id ? ' is-active' : ''}`}
+              className={styles.groupTab}
+              data-active={activeGroup.id === group.id}
               aria-current={activeGroup.id === group.id ? 'page' : undefined}
               onClick={(event) => {
                 if (
@@ -69,10 +72,10 @@ export default function SettingsWorkspaceShell({
           ))}
         </nav>
 
-        <div className="settings-scroll-region">
+        <div className={styles.scrollRegion}>
           <main
             id="settings-main-panel"
-            className="settings-content"
+            className={styles.content}
             role="region"
             aria-label={`${activeGroup.label}设置`}
           >
@@ -88,7 +91,7 @@ export default function SettingsWorkspaceShell({
             ) : null}
 
             <section
-              className="settings-section"
+              className={styles.section}
               role={shellOwnsTabs ? 'tabpanel' : undefined}
               id={
                 shellOwnsTabs
@@ -111,6 +114,6 @@ export default function SettingsWorkspaceShell({
           </main>
         </div>
       </div>
-    </div>
+    </ScrollViewport>
   )
 }

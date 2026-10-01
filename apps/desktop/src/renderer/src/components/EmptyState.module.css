@@ -18,6 +18,11 @@
   min-height: 280px;
 }
 
+/* These layout primitives expose their direct-content contract, not private classes. */
+.page:where([data-scroll-viewport] > *, [data-page-content] > *) {
+  min-height: 100%;
+}
+
 .fill {
   width: 100%;
   min-height: 0;
@@ -41,9 +46,23 @@
   height: auto;
   max-height: none;
   padding: 22px;
-  border: 1px dashed color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border: 1px dashed var(--empty-compact-border-color, color-mix(in srgb, var(--border-subtle) 72%, transparent));
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+  background: var(--empty-compact-background, color-mix(in srgb, var(--surface-panel) 74%, transparent));
+}
+
+.gallery {
+  width: 100%;
+  min-height: var(--empty-inline-min-h);
+  height: auto;
+  max-height: none;
+  margin: 0;
+  padding: 22px;
+  border: 1px dashed var(--empty-compact-border-color, color-mix(in srgb, var(--border-subtle) 72%, transparent));
+  border-radius: var(--radius-md);
+  background: var(--empty-compact-background, color-mix(in srgb, var(--surface-panel) 74%, transparent));
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .modal {

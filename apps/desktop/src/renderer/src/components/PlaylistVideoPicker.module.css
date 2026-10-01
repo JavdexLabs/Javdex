@@ -1,0 +1,50 @@
+[role='dialog'] > .body {
+  box-sizing: border-box;
+  height: min(480px, calc(100vh - 220px));
+  min-height: 320px;
+  overflow: hidden;
+  padding: var(--focus-ring-space);
+  padding-inline-end: calc(var(--scrollbar-safe-pad) + var(--focus-ring-space));
+  scrollbar-gutter: auto;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.search {
+  width: 100%;
+}
+
+.createButton {
+  white-space: nowrap;
+}
+
+.removeButton:hover:not(:disabled),
+.removeButton:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 72%, var(--border-subtle));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-control));
+  color: var(--danger);
+}
+
+@media (width <= 760px) {
+  .toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .createButton {
+    justify-self: stretch;
+  }
+}

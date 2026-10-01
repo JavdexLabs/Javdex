@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import Button from './Button'
+import styles from './ImageImportField.module.css'
 
 interface Props {
   label: string
@@ -61,17 +62,17 @@ export default function ImageImportField({
   const displayUrl = previewUrl || currentUrl
 
   const preview = (
-    <div className={`image-import-preview-box image-import-preview-box--${previewShape}`}>
+    <div className={styles.previewBox} data-shape={previewShape}>
       {displayUrl ? (
-        <img src={displayUrl} alt="" className="image-import-preview" />
+        <img src={displayUrl} alt="" className={styles.preview} />
       ) : (
-        <div className="image-import-placeholder">无封面</div>
+        <div className={styles.placeholder}>无封面</div>
       )}
     </div>
   )
 
   const actions = (
-    <div className="image-import-actions">
+    <div className={styles.actions}>
       <Button type="button" size="sm" onClick={() => inputRef.current?.click()}>
         选择图片
       </Button>
@@ -85,20 +86,12 @@ export default function ImageImportField({
   )
 
   const field = (
-    <div
-      className={[
-        'image-import-field',
-        hideLabel ? 'image-import-field--embedded' : '',
-        layout === 'inline' ? 'image-import-field--inline' : ''
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
+    <div className={styles.field} data-image-import-field data-layout={layout}>
       {layout === 'inline' ? (
         <>
           {preview}
-          <div className="image-import-side">
-            {hint ? <p className="image-import-hint">{hint}</p> : null}
+          <div className={styles.side}>
+            {hint ? <p className={styles.hint}>{hint}</p> : null}
             {actions}
           </div>
         </>
@@ -122,7 +115,7 @@ export default function ImageImportField({
 
   return (
     <>
-      <label style={{ alignSelf: 'start', paddingTop: 8 }}>{label}</label>
+      <label className={styles.label}>{label}</label>
       {field}
     </>
   )

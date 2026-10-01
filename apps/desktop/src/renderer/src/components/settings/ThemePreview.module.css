@@ -1,0 +1,55 @@
+/* Bind local preview roles to the existing theme palette, not inherited app roles. */
+.palette {
+  --theme-preview-background: var(--bg-2);
+  --theme-preview-border: var(--border);
+  --theme-preview-muted: var(--text-2);
+  --theme-preview-accent: var(--accent);
+  --theme-preview-label: var(--accent-hover);
+  --theme-preview-swatch-base: var(--bg-1);
+}
+
+.palette[data-theme='light'] {
+  --theme-preview-label: var(--accent);
+  --theme-preview-swatch-base: var(--bg-2);
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--theme-preview-border);
+  border-radius: 8px;
+  background: var(--theme-preview-background);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.choice:hover {
+  border-color: var(--theme-preview-muted);
+}
+
+.choice[aria-checked='true'] {
+  border-color: var(--theme-preview-accent);
+}
+
+.swatch {
+  height: 32px;
+  border-radius: 5px;
+  border: 1px solid var(--theme-preview-border);
+  background: linear-gradient(90deg, var(--theme-preview-swatch-base) 70%, var(--theme-preview-accent) 70%);
+}
+
+.label {
+  color: var(--theme-preview-label);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.hint {
+  color: var(--theme-preview-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}

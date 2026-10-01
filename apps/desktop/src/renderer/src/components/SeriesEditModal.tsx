@@ -1,7 +1,8 @@
+import TextInput from './TextInput'
+import TextArea from './TextArea'
 import Checkbox from '../../../../../../packages/ui/src/Checkbox'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type {
   OrganizationSummary,
   SeriesDetail,
@@ -13,15 +14,12 @@ import Modal from './Modal'
 import SelectControl from './SelectControl'
 import AliasTagEditor from './AliasTagEditor'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
-import { EditFormField, EditFormSection } from './FormPrimitives'
+import { EditForm, EditFormCheckRow, EditFormField, EditFormFields, EditFormLabelNote, EditFormSection } from './FormPrimitives'
 import { createSeriesFormDraft, seriesInputFromDraft } from './seriesFormState'
 import ClassificationPicker from './ClassificationPicker'
 import { organizationOptionDescription } from './organizationPickerState'
 import { promoteAliasToMain } from './aliasEditorState'
-import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
-import { UI_ICON_SM } from './iconDefaults'
-import IconButton from './IconButton'
-import Button from './Button'
+import RelatedLinksEditor from './RelatedLinksEditor'
 
 interface Props {
   series?: SeriesDetail | null
@@ -31,8 +29,6 @@ interface Props {
 
 export default function SeriesEditModal({ series, onCancel, onSave }: Props): JSX.Element {
   const [draft, setDraft] = useState(() => createSeriesFormDraft(series))
-  const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } =
-    useClassificationLinkKeys(draft.links.length)
   const [ownerSearch, setOwnerSearch] = useState(series?.ownerOrganization?.mainName ?? '')
   const [selectedOwner, setSelectedOwner] = useState<OrganizationSummary | null>(
     series?.ownerOrganization ?? null
@@ -64,19 +60,19 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
       title={series ? '编辑系列资料' : '新增系列'}
 
       size="lg"
-      className="modal-entity-edit"
-      confirmText={saving ? '保存中…' : '保存'}
+      busy={saving}
+      confirmText="保存"
       confirmDisabled={saving || !draft.mainName.trim()}
       onCancel={onCancel}
-      onConfirm={() => void save()}
+      onConfirm={save}
     >
-      <div className="entity-edit-form">
+      <EditForm>
         <EditFormSection title="名称与简介">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField label="主名" htmlFor="series-main-name" span={2}>
-              <input
+              <TextInput
                 id="series-main-name"
-                className="text-input"
+                density="workspace"
                 autoFocus
                 value={draft.mainName}
                 onChange={(event) => setDraft({ ...draft, mainName: event.target.value })}
@@ -88,9 +84,9 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
               span={2}
               labelExtra={
                 draft.aliases.length > 0 ? (
-                  <span id="series-aliases-hint" className="entity-edit-label-note">
+                  <EditFormLabelNote id="series-aliases-hint">
                     点击设为主名
-                  </span>
+                  </EditFormLabelNote>
                 ) : undefined
               }
             >
@@ -106,7 +102,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
               />
             </EditFormField>
             {series && draft.mainName.trim() !== series.mainName ? (
-              <label className="check-row entity-edit-field--full">
+              <EditFormCheckRow>
                 <Checkbox
                   checked={draft.keepPreviousMainName}
                   onChange={(event) =>
@@ -114,7 +110,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                   }
                 />
                 <span>将旧主名保留为别名</span>
-              </label>
+              </EditFormCheckRow>
             ) : null}
             <EditFormField
               label="简介"
@@ -128,19 +124,19 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 />
               }
             >
-              <textarea
+              <TextArea
                 id="series-summary"
-                className="text-input"
+                density="workspace"
                 rows={5}
                 value={draft.summary}
                 onChange={(event) => setDraft({ ...draft, summary: event.target.value })}
               />
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
 
         <EditFormSection title="系列信息">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField label="状态" htmlFor="series-status" span={2}>
               <SelectControl
                 id="series-status"
@@ -156,9 +152,9 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
               </SelectControl>
             </EditFormField>
             <EditFormField label="开始年份" htmlFor="series-start-year">
-              <input
+              <TextInput
                 id="series-start-year"
-                className="text-input"
+                density="workspace"
                 type="number"
                 min="1"
                 max="9999"
@@ -167,9 +163,9 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
               />
             </EditFormField>
             <EditFormField label="结束年份" htmlFor="series-end-year">
-              <input
+              <TextInput
                 id="series-end-year"
-                className="text-input"
+                density="workspace"
                 type="number"
                 min="1"
                 max="9999"
@@ -193,6 +189,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 }))}
                 selectedId={selectedOwner?.id ?? null}
                 listLabel="所属机构候选"
+                error={ownerQuery.isError ? '所属机构候选加载失败，请稍后重试。' : undefined}
                 placeholder="搜索机构主名或别名…"
                 onValueChange={(next) => {
                   setOwnerSearch(next)
@@ -209,101 +206,12 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                   setOwnerSearch(selectedOwner?.mainName ?? '')
                 }}
               />
-              {ownerQuery.isError ? (
-                <span className="classification-picker-error" role="alert">
-                  所属机构候选加载失败，请稍后重试。
-                </span>
-              ) : null}
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
 
-        <EditFormSection title="相关链接">
-          <div className="organization-link-editor">
-            {draft.links.map((link, index) => (
-              <div className="organization-link-editor-row" key={linkKeys[index]}>
-                <input
-                  className="text-input"
-                  aria-label={`链接 ${index + 1} 名称`}
-                  placeholder="名称"
-                  value={link.label}
-                  onChange={(event) => {
-                    const links = [...draft.links]
-                    links[index] = { ...link, label: event.target.value }
-                    setDraft({ ...draft, links })
-                  }}
-                />
-                <input
-                  className="text-input"
-                  aria-label={`链接 ${index + 1} 地址`}
-                  placeholder="https://"
-                  value={link.url}
-                  onChange={(event) => {
-                    const links = [...draft.links]
-                    links[index] = { ...link, url: event.target.value }
-                    setDraft({ ...draft, links })
-                  }}
-                />
-                <div className="organization-link-actions">
-                  <IconButton
-                    className="organization-link-action"
-                    label={`上移链接 ${index + 1}`}
-                    icon={<ChevronUp {...UI_ICON_SM} aria-hidden />}
-                    disabled={index === 0}
-                    onClick={() => {
-                      setDraft({
-                        ...draft,
-                        links: moveClassificationLink(draft.links, index, index - 1)
-                      })
-                      moveLinkKey(index, index - 1)
-                    }}
-                  />
-                  <IconButton
-                    className="organization-link-action"
-                    label={`下移链接 ${index + 1}`}
-                    icon={<ChevronDown {...UI_ICON_SM} aria-hidden />}
-                    disabled={index === draft.links.length - 1}
-                    onClick={() => {
-                      setDraft({
-                        ...draft,
-                        links: moveClassificationLink(draft.links, index, index + 1)
-                      })
-                      moveLinkKey(index, index + 1)
-                    }}
-                  />
-                  <IconButton
-                    className="organization-link-action"
-                    tone="danger"
-                    label={`移除链接 ${index + 1}`}
-                    icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
-                    onClick={() => {
-                      setDraft({
-                        ...draft,
-                        links: draft.links.filter((_, itemIndex) => itemIndex !== index)
-                      })
-                      removeLinkKey(index)
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="ghost"
-
-              size="sm"
-              className="organization-link-add"
-              onClick={() => {
-                setDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })
-                appendLinkKey()
-              }}
-            >
-              <Plus {...UI_ICON_SM} aria-hidden />
-              添加链接
-            </Button>
-          </div>
-        </EditFormSection>
-      </div>
+        <RelatedLinksEditor links={draft.links} removeVerb="移除" onChange={(links) => setDraft({ ...draft, links })} />
+      </EditForm>
     </Modal>
   )
 }

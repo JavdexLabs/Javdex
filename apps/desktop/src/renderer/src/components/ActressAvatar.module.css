@@ -14,6 +14,12 @@
   transition: border-color 0.15s;
 }
 
+.root[data-size='detail'] {
+  width: 160px;
+  height: 160px;
+  font-size: 48px;
+}
+
 .defaultAvatar {
   position: relative;
   display: block;

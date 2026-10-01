@@ -1,0 +1,125 @@
+.root {
+  position: relative;
+  height: 100%;
+}
+
+.root .action {
+  top: 6px;
+  right: 6px;
+}
+
+.root:hover .action,
+.root:focus-within .action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.root:hover,
+.root:focus-within {
+  --card-action-opacity: 1;
+  --card-action-events: auto;
+}
+
+.card {
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+  aspect-ratio: 1;
+  box-sizing: border-box;
+  padding: 14px 10px 12px;
+  gap: 0;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition:
+    border-color var(--motion-fast),
+    box-shadow var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 5%, transparent) 0%,
+    transparent 42%
+  );
+}
+
+.card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-elevated);
+  background: var(--surface-elevated);
+}
+
+.card:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.root[data-selected='true'] .card {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.avatarWrap {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+}
+
+.card:hover .status {
+  border-color: var(--surface-elevated);
+}
+
+.card .avatar {
+  position: relative;
+  z-index: 1;
+  width: 72px;
+  height: 72px;
+  font-size: 22px;
+  border-width: 2px;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--surface-base) 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.card .name {
+  position: relative;
+  z-index: 1;
+  margin-top: 10px;
+  width: 100%;
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.card:hover .avatar {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+}
+
+.card .count {
+  position: relative;
+  z-index: 1;
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}

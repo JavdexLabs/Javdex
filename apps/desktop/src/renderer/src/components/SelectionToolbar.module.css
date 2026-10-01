@@ -1,8 +1,66 @@
+.root {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 3px 8px 3px 14px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--surface-selected) 78%, var(--surface-base));
+  box-shadow: var(--focus-ring);
+  overflow: hidden;
+}
+
+.count {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-accent);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .actions > [data-ui='button'] {
   box-sizing: border-box;
   height: calc(var(--toolbar-control-h, var(--control-h-md)) - 8px);
-  min-height: calc(var(--toolbar-control-h, var(--control-h-md)) - 8px);
+  min-height: var(--workspace-button-min-height, calc(var(--toolbar-control-h, var(--control-h-md)) - 8px));
   padding-block: 0;
   gap: 6px;
   white-space: nowrap;
+}
+
+.clear[data-ui='icon-button'] {
+  --icon-glyph-size: 15px;
+
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.clear:hover:where(:not(:disabled)),
+.clear:focus-visible:where(:not(:disabled)) {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+@media (width <= 1120px) {
+  .actions {
+    overflow: hidden;
+  }
 }

@@ -4,6 +4,7 @@ import { highlightJavaScript } from '../../utils/highlightJavaScript'
 import { getPluginDevKindProfile } from '@shared/pluginDevKindProfile'
 import type { PluginKind } from './types'
 import styles from './PluginDevCodeModal.module.css'
+import { codeHighlightClasses } from '../CodeHighlight'
 
 export default function PluginDevCodeModal({
   kind,
@@ -16,21 +17,22 @@ export default function PluginDevCodeModal({
   pluginName: string
   onClose: () => void
 }): JSX.Element {
-  const highlighted = useMemo(() => highlightJavaScript(code), [code])
+  const highlighted = useMemo(() => highlightJavaScript(code, codeHighlightClasses), [code])
   const placeholder = useMemo(() => getPluginDevKindProfile(kind).buildCodeModalPlaceholder(), [kind])
 
   return (
     <Modal
       title={`插件代码 · ${pluginName || '未命名'}`}
-      className="modal--plugin-dev-code"
+      className={styles.modal}
+      bodyClassName={styles.body}
       chrome="shellless"
       hideCancel
       confirmText="关闭"
       onConfirm={onClose}
       onCancel={onClose}
     >
-      <div className="plugin-dev-code-modal-shell">
-        <pre className="plugin-dev-code-viewer" aria-label="插件代码">
+      <div className={styles.shell}>
+        <pre className={styles.viewer} aria-label="插件代码">
           <code>
             {code ? (
               <span dangerouslySetInnerHTML={{ __html: highlighted }} />

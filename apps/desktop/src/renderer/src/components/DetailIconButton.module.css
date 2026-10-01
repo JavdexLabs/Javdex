@@ -1,0 +1,59 @@
+.root[data-ui='icon-button'] {
+  --icon-glyph-size: 18px;
+
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast),
+    box-shadow var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+.root:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-control-hover) 72%, transparent);
+  color: var(--text-primary);
+}
+
+.root:focus-visible:not(:disabled) {
+  outline: none;
+  background: color-mix(in srgb, var(--surface-control-hover) 78%, transparent);
+  color: var(--text-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.root:active:not(:disabled) {
+  transform: scale(0.96);
+  background: color-mix(in srgb, var(--surface-control-hover) 88%, var(--surface-selected));
+}
+
+.root[aria-busy='true'] {
+  opacity: 0.65;
+  pointer-events: none;
+  color: var(--text-secondary);
+}
+
+.root[aria-busy='true'] > span {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.root.compact {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  flex-shrink: 0;
+  margin-bottom: 0;
+}

@@ -1,0 +1,75 @@
+.root {
+  position: relative;
+  min-width: 0;
+}
+
+.root:where([data-gallery-variant='actress']) {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.button {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast),
+    box-shadow var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+.button:disabled {
+  cursor: default;
+}
+
+.button img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: var(--gallery-image-filter, none);
+  scale: var(--gallery-image-scale, none);
+}
+
+.root:where([data-gallery-variant='actress']) .button {
+  height: 100%;
+  overflow: hidden;
+}
+
+.root:where([data-gallery-variant='actress']) .button img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+:where(:root[data-privacy-mode='true'][data-privacy-video-samples='true']) .root:where([data-gallery-variant='sample']),
+:where(:root[data-privacy-mode='true'][data-privacy-actress-gallery='true']) .root:where([data-gallery-variant='actress']) {
+  --gallery-image-filter: var(--privacy-image-filter);
+  --gallery-image-scale: var(--privacy-image-scale);
+  --gallery-privacy-overlay-content: '';
+  --gallery-privacy-overlay-background: var(--privacy-glass-background);
+}
+
+.button:has(> img)::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: var(--gallery-privacy-overlay-background, transparent);
+  content: var(--gallery-privacy-overlay-content, none);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.root:where(:hover, :focus-within) .button:where(:not(:disabled)),
+.button:focus-visible:where(:not(:disabled)) {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+  outline: none;
+}

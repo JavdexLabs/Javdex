@@ -1,0 +1,96 @@
+.root {
+  --chip-remove-size: 18px;
+  --icon-glyph-size: 10px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 0;
+  opacity: 0;
+  transform: scale(0.86);
+  transition:
+    max-width var(--motion-med),
+    width var(--motion-med),
+    min-width var(--motion-med),
+    margin var(--motion-med),
+    opacity var(--motion-med),
+    transform var(--motion-med),
+    color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.root svg {
+  display: block;
+  width: var(--icon-glyph-size);
+  height: var(--icon-glyph-size);
+  flex-shrink: 0;
+}
+
+.root:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.root[data-reveal='always'] {
+  width: var(--chip-remove-size);
+  min-width: var(--chip-remove-size);
+  max-width: var(--chip-remove-size);
+  margin-left: 0;
+  opacity: 0.72;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+@media (hover: hover) {
+  .root[data-reveal='hover'] {
+    pointer-events: none;
+  }
+
+  :where([data-chip-remove-host]):hover .root[data-reveal='hover'],
+  :where([data-chip-remove-host]):focus-within .root[data-reveal='hover'] {
+    width: var(--chip-remove-size);
+    min-width: var(--chip-remove-size);
+    max-width: var(--chip-remove-size);
+    margin-left: 3px;
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+  }
+
+  :where([data-chip-remove-host]):hover .root[data-reveal='always'],
+  :where([data-chip-remove-host]):focus-within .root[data-reveal='always'] {
+    margin-left: 3px;
+    opacity: 1;
+  }
+}
+
+@media (hover: none) {
+  .root[data-reveal='hover'] {
+    width: var(--chip-remove-size);
+    min-width: var(--chip-remove-size);
+    max-width: var(--chip-remove-size);
+    margin-left: 3px;
+    opacity: 0.55;
+    transform: scale(1);
+    pointer-events: auto;
+  }
+}
+
+.root:focus-visible,
+.root:hover:not(:disabled) {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}

@@ -1,3 +1,6 @@
+import ScrollRegion from './ScrollRegion'
+import VirtualGridViewport from './VirtualGridViewport'
+import styles from './VirtualActressGrid.module.css'
 import type { CatalogWindow } from '../query/useWindowedCatalog'
 import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FixedSizeGrid, type GridChildComponentProps } from 'react-window'
@@ -83,11 +86,13 @@ export default function VirtualActressGrid({
         { style, ...props },
         innerRef
       ) {
+        // react-window's calculated width must not override the viewport width.
         return (
           <div
             ref={innerRef}
-            style={{ ...style, height: innerHeight, position: 'relative', width: '100%' }}
             {...props}
+            className={[styles.inner, props.className].filter(Boolean).join(' ')}
+            style={{ ...style, height: innerHeight, width: undefined }}
           />
         )
       }),
@@ -111,20 +116,19 @@ export default function VirtualActressGrid({
       left: pagePadX + columnIndex * columnStride,
       width: cardWidth,
       height: rowHeight,
-      paddingBottom: ACTRESS_GRID_GAP,
-      boxSizing: 'border-box' as const
+      paddingBottom: ACTRESS_GRID_GAP
     }
     const windowActress = catalogWindow?.getItem(index)
     if (catalogWindow && !windowActress) {
       if (index >= catalogWindow.total) return null
-      return <div style={cellStyle}>{catalogWindow.error
+      return <div className={styles.cell} style={cellStyle}>{catalogWindow.error
         ? <Button size="sm" onClick={catalogWindow.retry}>加载失败，重试</Button>
         : <Spinner aria-label="正在加载演员" />}</div>
     }
     if (!catalogWindow && index >= actresses.length) {
       if (columnIndex !== 0 || index !== statusRowStart) return null
       return (
-        <div className="virtual-actress-grid-status" style={cellStyle}>
+        <div className={`${styles.cell} ${styles.status}`} style={cellStyle}>
           {loadMoreFailed ? (
             <Button type="button" size="sm" onClick={onRetryLoadMore}>
               加载失败，重试
@@ -137,7 +141,7 @@ export default function VirtualActressGrid({
     }
     const actress = windowActress ?? actresses[index]
     return (
-      <div className="virtual-actress-grid-cell" style={cellStyle}>
+      <div className={styles.cell} style={cellStyle}>
         <ActressCardTile
           actress={actress}
           selected={selectedIds.has(actress.id)}
@@ -151,11 +155,12 @@ export default function VirtualActressGrid({
   }
 
   return (
-    <div ref={ref} className="list-scroll-region virtual-actress-grid">
+    <ScrollRegion ref={ref} className={styles.root}>
       {renderWidth > 0 && renderHeight > 0 ? (
         <FixedSizeGrid
           ref={gridRef}
           outerRef={outerRef}
+          outerElementType={VirtualGridViewport}
           columnCount={columnCount}
           columnWidth={columnStride}
           rowCount={rowCount}
@@ -163,7 +168,6 @@ export default function VirtualActressGrid({
           width={renderWidth}
           height={renderHeight}
           innerElementType={innerElementType}
-          className="virtual-actress-grid-scroller"
           initialScrollTop={scrollTopRef.current}
           onScroll={({ scrollTop }) => persistScroll(scrollTop)}
           onItemsRendered={({ overscanRowStartIndex, overscanRowStopIndex }) => {
@@ -182,6 +186,6 @@ export default function VirtualActressGrid({
           persistScroll(0, 0)
         }}
       />
-    </div>
+    </ScrollRegion>
   )
 }

@@ -1,0 +1,142 @@
+.fieldset {
+  margin-top: 14px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fieldset > legend {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.options {
+  max-height: 210px;
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.twoOptions {
+  max-height: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: visible;
+}
+
+.option {
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+
+.option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+}
+
+.option[data-selected='true'] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.option:has(> input:focus-visible) {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.option > input {
+  flex: 0 0 auto;
+}
+
+.option > input:focus-visible {
+  outline: none;
+}
+
+.actorCopy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.actorCopy .avatar {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+}
+
+.actorCopy > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.actorCopy strong,
+.actorCopy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actorCopy small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.nameOptions {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.nameOptions > label {
+  min-width: 0;
+  min-height: var(--control-h-md);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.nameOptions > label[data-selected='true'] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.nameOptions > label:has(> input:focus-visible) {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.nameOptions > label > input:focus-visible {
+  outline: none;
+}
+
+.nameOptions span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

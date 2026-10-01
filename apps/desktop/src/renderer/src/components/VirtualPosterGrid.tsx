@@ -1,3 +1,6 @@
+import ScrollRegion from './ScrollRegion'
+import VirtualGridViewport from './VirtualGridViewport'
+import styles from './VirtualPosterGrid.module.css'
 import type { CatalogWindow } from '../query/useWindowedCatalog'
 import Button from './Button'
 import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -127,11 +130,13 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
         { style, ...rest },
         innerRef
       ) {
+        // react-window's calculated width must not override the viewport width.
         return (
           <div
             ref={innerRef}
-            style={{ ...style, height: innerHeight, position: 'relative', width: '100%' }}
             {...rest}
+            className={[styles.inner, rest.className].filter(Boolean).join(' ')}
+            style={{ ...style, height: innerHeight, width: undefined }}
           />
         )
       }),
@@ -181,18 +186,17 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
       if (loadingMore && columnIndex === 0 && index === videos.length) {
         return (
           <div
-            className="grid-poster-cell grid-poster-cell--loading"
+            className={styles.cell}
             style={{
               ...style,
               top: (style.top as number) + cardAreaPadTop,
               left: pagePadX + columnIndex * stride,
               width: columnWidth,
               height: rowHeight,
-              paddingBottom: GAP,
-              boxSizing: 'border-box'
+              paddingBottom: GAP
             }}
           >
-            <div className="poster-grid-loading">
+            <div className={styles.loading}>
               <Spinner />
             </div>
           </div>
@@ -205,15 +209,14 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
       columnIndex === columnCount - 1 ? columnWidth + widthRemainder : columnWidth
     return (
       <div
-        className="grid-poster-cell"
+        className={styles.cell}
         style={{
           ...style,
           top: (style.top as number) + cardAreaPadTop,
           left: pagePadX + columnIndex * stride,
           width: cellWidth,
           height: rowHeight,
-          paddingBottom: GAP,
-          boxSizing: 'border-box'
+          paddingBottom: GAP
         }}
       >
         {showLibraryBadges && isScopedVideo(video) ? (
@@ -239,6 +242,7 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
           />
         ) : (
           <PosterCard
+            className={styles.card}
             video={video}
             detailLibraryId={detailLibraryIds?.get(video.id) ?? detailLibraryId}
             thumbHeight={posterHeight}
@@ -268,15 +272,15 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
   const renderHeight = gridHeight > 0 ? gridHeight : lastSize.current.height
 
   return (
-    <div
+    <ScrollRegion
       ref={ref}
-      className="list-scroll-region"
-      style={{ flex: 1, minHeight: 0, height: '100%', overflow: 'hidden' }}
+      className={styles.root}
     >
       {renderWidth > 0 && renderHeight > 0 && (
         <FixedSizeGrid
           ref={gridRef}
           outerRef={outerRef}
+          outerElementType={VirtualGridViewport}
           columnCount={columnCount}
           columnWidth={stride}
           rowCount={rowCount}
@@ -295,12 +299,11 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
               onLoadMore?.()
             }
           }}
-          style={{ overflowX: 'hidden', scrollbarGutter: 'stable' }}
         >
           {Cell}
         </FixedSizeGrid>
       )}
       <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
-    </div>
+    </ScrollRegion>
   )
 }

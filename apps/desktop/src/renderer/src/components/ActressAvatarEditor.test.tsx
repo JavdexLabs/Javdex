@@ -139,8 +139,8 @@ describe('ActressAvatarEditor', () => {
     const cropImage = renderer!.root.find(
       (node) =>
         node.type === 'img' &&
-        (node.props.className === 'avatar-crop-image' ||
-          node.props.className === 'avatar-crop-preview')
+        (node.props['data-avatar-crop'] === 'image' ||
+          node.props['data-avatar-crop'] === 'preview')
     )
     assert.equal(cropImage.props.crossOrigin, 'anonymous')
   })

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
+import { closeDatabase, getDb, initDatabaseAtPath, openReadOnlyDatabaseAtPath } from '@library/db/database'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createVideoQueryService, createAsyncVideoQueryService } from './videoQueryService'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
@@ -46,6 +46,27 @@ afterEach(() => {
 })
 
 describe('VideoQueryService', () => {
+  it('keeps management fallback explicit and uses the supplied connection for every query', () => {
+    setupDb()
+    const reader = openReadOnlyDatabaseAtPath(path.join(tempRoot!, 'library.db'))
+    closeDatabase()
+    try {
+      const scoped = createVideoQueryService({ database: reader })
+      const otherScope = { kind: 'library', libraryId: 2 } as const
+      assert.equal(scoped.get(otherScope, 1), null)
+      assert.equal(scoped.list(DEFAULT_SCOPE).items.length, 1)
+      assert.ok(Array.isArray(scoped.listYears(DEFAULT_SCOPE)))
+      const resource = scoped.get(DEFAULT_SCOPE, 1)!.resources[0]
+      assert.equal(scoped.getResource(1, 1, resource.id)?.video_id, 1)
+      assert.equal(scoped.getResource(1, 999, resource.id), null)
+      const manage = createVideoQueryService({ database: reader, includeUnscoped: true })
+      assert.equal(manage.get(otherScope, 1)?.activeLibraryId, 0)
+      assert.equal(manage.get(otherScope, 999), null)
+    } finally {
+      reader.close()
+    }
+  })
+
   it('lists videos and reads their detail without mutating library state', () => {
     const { videoPath, imagePath } = setupDb()
     const videos = createVideoQueryService()

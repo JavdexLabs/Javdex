@@ -1,0 +1,10 @@
+.root {
+  position: relative;
+
+  --toolbar-control-h: var(--control-h-md);
+
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--page-header-border, var(--border-subtle));
+  background: var(--page-header-background, color-mix(in srgb, var(--surface-base) 92%, var(--surface-panel)));
+  transition: background var(--motion-med), border-color var(--motion-med);
+}

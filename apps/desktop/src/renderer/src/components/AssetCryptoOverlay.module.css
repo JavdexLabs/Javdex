@@ -1,0 +1,51 @@
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: var(--surface-blocking-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: all;
+}
+
+.panel {
+  width: min(480px, calc(100vw - 48px));
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-overlay);
+  padding: 28px;
+  box-shadow: var(--shadow);
+}
+
+.panel h3 {
+  margin: 0 0 8px;
+}
+
+.hint {
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.track {
+  height: 10px;
+  background: var(--surface-progress-track);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 8px 0 12px;
+}
+
+.fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width 0.25s;
+}
+
+.stats {
+  display: flex;
+  gap: 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

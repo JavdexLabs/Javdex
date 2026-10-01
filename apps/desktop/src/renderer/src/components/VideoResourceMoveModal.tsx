@@ -126,19 +126,11 @@ export default function VideoResourceMoveModal({
     <Modal
       title="移动资源到其它媒体库"
       size="md"
-      confirmText={
-        moving
-          ? '移动中…'
-          : previewing
-            ? '读取影响…'
-            : impact
-              ? '确认移动'
-              : '读取影响'
-      }
+      confirmText={impact ? '确认移动' : '读取影响'}
       confirmDisabled={loadingLibraries || targetLibraryId == null}
       busy={busy}
       onCancel={onCancel}
-      onConfirm={() => void (impact ? moveResource() : readPreview())}
+      onConfirm={() => impact ? moveResource() : readPreview()}
     >
       <div className={styles.body}>
         <div className={styles.resourceCard}>

@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import SettingsActionLabel from './SettingsActionLabel'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
@@ -178,9 +179,9 @@ export function ProxyConfigRow({
           <div className={styles.field}>
             <label htmlFor={id}>代理地址</label>
             <div className={styles.addressRow}>
-              <input
+              <TextInput
                 id={id}
-                className="text-input"
+                density="workspace"
                 value={draft.url}
                 disabled={saving}
                 placeholder="http://127.0.0.1:7890"

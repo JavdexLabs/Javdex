@@ -1,0 +1,121 @@
+.root {
+  min-width: 0;
+}
+
+.head {
+  display: grid;
+  grid-template-columns: 164px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 10px;
+  padding: 14px 0 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.main {
+  min-width: 0;
+}
+
+.kicker {
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0 0 8px;
+  color: var(--text-primary);
+  font-size: 22px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.metaRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.metaBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.description {
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 18px 0 12px;
+}
+
+.sectionTitle {
+  flex: 1;
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.sectionControls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (width <= 760px) {
+  .sectionHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sectionControls {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .head {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    justify-self: start;
+  }
+}

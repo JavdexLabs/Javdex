@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { useToast } from './Toast'
+import styles from './EditFieldAiTranslate.module.css'
 
 export default function EditFieldAiTranslate({
   text,
@@ -35,11 +36,13 @@ export default function EditFieldAiTranslate({
   return (
     <button
       type="button"
-      className="entity-edit-label-note entity-edit-ai-translate"
+      className={styles.root}
       disabled={disabled || busy}
+      aria-busy={busy || undefined}
       onClick={() => void handleClick()}
     >
-      {busy ? '翻译中…' : 'AI 译中'}
+      <span className={styles.reserve} aria-hidden="true">翻译中…</span>
+      <span className={styles.label}>{busy ? '翻译中…' : 'AI 译中'}</span>
     </button>
   )
 }

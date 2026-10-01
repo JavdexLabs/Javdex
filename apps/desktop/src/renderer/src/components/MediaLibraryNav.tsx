@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useLocation, useNavigate, NavLink } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
@@ -28,6 +28,7 @@ import { mediaLibraryKeys } from '../query/queryKeys'
 import { invalidateAllLibraryQueries } from '../query/invalidateLibraryQueries'
 import { mediaLibraryIdentityStyle } from './mediaLibraryIdentity'
 import { useDesktopSession } from '../desktop/DesktopSessionContext'
+import { SidebarNavIcon, SidebarNavLabel, SidebarNavLink, SidebarNavRow } from './SidebarNav'
 
 export default function MediaLibraryNav(): JSX.Element {
   const location = useLocation()
@@ -137,23 +138,22 @@ export default function MediaLibraryNav(): JSX.Element {
               {activeLibraries.map((library) => {
                 const to = mediaLibraryPath(library.id)
                 return (
-                  <div className="nav-item-row" key={library.id}>
-                    <NavLink
+                  <SidebarNavRow key={library.id}>
+                    <SidebarNavLink
                       to={primaryNavLinkTo(to, location.pathname, location.search)}
                       draggable={false}
                       onClick={(event) => handleClick(event, to)}
-                      className={({ isActive }) =>
-                        `nav-item ${styles.item}${isActive || activeLibraryId === library.id ? ' active' : ''}`
-                      }
+                      className={styles.item}
+                      active={activeLibraryId === library.id}
                       title={library.name}
                     >
-                      <span
-                        className={`nav-icon ${styles.icon}`}
+                      <SidebarNavIcon
+                        className={styles.icon}
                         style={mediaLibraryIdentityStyle(library.color)}
                       >
                         <NavIcon name={library.icon} />
-                      </span>
-                      <span className={`nav-label ${styles.name}`}>{library.name}</span>
+                      </SidebarNavIcon>
+                      <SidebarNavLabel className={styles.name}>{library.name}</SidebarNavLabel>
                       {library.pendingRemovalRootCount > 0 ? (
                         <span
                           className={styles.warning}
@@ -161,8 +161,8 @@ export default function MediaLibraryNav(): JSX.Element {
                           aria-label={`${library.pendingRemovalRootCount} 个来源待移除`}
                         />
                       ) : null}
-                    </NavLink>
-                  </div>
+                    </SidebarNavLink>
+                  </SidebarNavRow>
                 )
               })}
             </>

@@ -1,0 +1,179 @@
+.root {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.button {
+  --select-arrow-color: var(--text-muted);
+
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  min-height: var(--control-h-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 8px 34px 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  appearance: none;
+  background-color: var(--surface-control);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--select-arrow-color) 50%),
+    linear-gradient(135deg, var(--select-arrow-color) 50%, transparent 50%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-primary) 4%, transparent),
+      transparent 68%
+    );
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 13px) calc(50% - 2px),
+    0 0;
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px, 100% 100%;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent);
+  color: var(--text-primary);
+  font-size: var(--select-control-font-size, 13px);
+  line-height: 1.2;
+  outline: none;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast);
+}
+
+.button:hover {
+  --select-arrow-color: var(--text-secondary);
+
+  border-color: var(--border-strong);
+  background-color: var(--surface-control-hover);
+}
+
+.button:focus {
+  --select-arrow-color: var(--text-accent);
+
+  border-color: var(--border-accent);
+  background-color: color-mix(in srgb, var(--surface-control-hover) 82%, var(--surface-control));
+  box-shadow: var(--focus-ring);
+}
+
+.button:disabled {
+  --select-arrow-color: var(--text-muted);
+
+  opacity: 0.55;
+  background-color: color-mix(in srgb, var(--surface-control) 72%, var(--surface-base));
+}
+
+.root .button:disabled {
+  padding-right: 12px;
+  background-image: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.root[data-open='true'] .button {
+  --select-arrow-color: var(--text-accent);
+
+  border-color: var(--border-accent);
+  background-color: color-mix(in srgb, var(--surface-control-hover) 82%, var(--surface-control));
+  box-shadow: var(--focus-ring);
+}
+
+.value {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.root[data-variant='filter'] .button {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 30px 0 11px;
+  font-size: 13px;
+  border-radius: 8px;
+  background-color: var(--surface-base);
+  background-image: none;
+  border-color: var(--border-subtle);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.root[data-variant='filter'] .button:where(:hover) {
+  border-color: var(--border-strong);
+  background-color: var(--surface-control-hover);
+}
+
+.root[data-variant='filter'] .button:where(:focus, :focus-visible),
+.root[data-variant='filter']:where([data-open='true']) .button {
+  border-color: var(--border-accent);
+  background-color: color-mix(in srgb, var(--surface-control-hover) 82%, var(--surface-control));
+  box-shadow: var(--focus-ring);
+}
+
+.menu {
+  position: fixed;
+  z-index: 1400;
+  min-width: 132px;
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-elevated);
+  scrollbar-gutter: stable;
+}
+
+.menu[data-placement='bottom'] {
+  transform-origin: top;
+}
+
+.menu[data-placement='top'] {
+  transform-origin: bottom;
+}
+
+.option {
+  min-width: 0;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+
+.option:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.option:hover:not(:disabled),
+.option[data-active='true']:not(:disabled) {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.option[aria-selected='true'] {
+  background: var(--surface-selected);
+  color: var(--text-accent);
+  font-weight: 700;
+}
+
+.option:where([aria-selected='true'])[data-active='true']:not(:disabled),
+.option:where([aria-selected='true']):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-selected));
+  color: var(--text-accent);
+}

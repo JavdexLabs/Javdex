@@ -1,3 +1,4 @@
+import ScrollViewport from './ScrollViewport'
 import type { ReactNode, RefObject } from 'react'
 import BackButton from './BackButton'
 import styles from './DetailScrollBody.module.css'
@@ -17,8 +18,8 @@ export default function DetailScrollBody({
   children
 }: DetailScrollBodyProps): JSX.Element {
   return (
-    <div className="scroll-body scroll-body--scroll" ref={scrollRef}>
-      <div className="scroll-body-inner scroll-body-inner--detail">
+    <ScrollViewport variant="scroll" ref={scrollRef}>
+      <div data-page-content className={styles.content}>
         {onBack || headerContext ? (
           <div className={styles.header}>
             {onBack ? <BackButton variant="inline" onClick={onBack} /> : null}
@@ -27,6 +28,6 @@ export default function DetailScrollBody({
         ) : null}
         {children}
       </div>
-    </div>
+    </ScrollViewport>
   )
 }

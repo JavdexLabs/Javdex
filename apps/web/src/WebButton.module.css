@@ -1,0 +1,81 @@
+
+.control {
+  -webkit-tap-highlight-color: transparent;
+  min-height: var(--control-h-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+  padding: 8px 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .control:hover {
+    background: var(--surface-control-hover);
+  }
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button[data-variant='primary'] {
+  background: var(--text-accent);
+  color: var(--surface-base);
+  border-color: transparent;
+  font-weight: 650;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .button[data-variant='primary']:hover {
+    filter: brightness(1.08);
+  }
+}
+
+.chip {
+  font-size: 12px;
+  min-height: 36px;
+  padding: 6px 12px;
+  color: var(--text-secondary);
+}
+
+.chip svg {
+  width: 14px;
+  height: 14px;
+}
+
+.control.button:where(:not(:disabled, [data-variant='primary'])):active {
+  background: var(--surface-selected);
+}
+
+.chip:active {
+  background: var(--surface-selected);
+}
+
+.button[data-variant='primary']:where(:not(:disabled)):active {
+  filter: brightness(0.92);
+}
+
+@media (pointer: coarse) {
+  .control {
+    min-height: 48px;
+  }
+}
+
+@media (pointer: coarse) {
+  .button:not([hidden]) {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}
+
+.button:focus-visible {
+  outline: none;
+  border-color: var(--text-accent);
+  box-shadow: var(--focus-ring);
+}

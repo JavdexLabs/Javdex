@@ -114,7 +114,7 @@ async function mount(onMerged: (value: OrganizationMergeResult) => void): Promis
 }
 
 function candidateButtons(): TestRenderer.ReactTestInstance[] {
-  return renderer?.root.findAllByProps({ role: 'option' }) ?? []
+  return renderer?.root.findAll((node) => node.type === 'button' && node.props.role === 'option') ?? []
 }
 
 function confirmButton(): TestRenderer.ReactTestInstance {

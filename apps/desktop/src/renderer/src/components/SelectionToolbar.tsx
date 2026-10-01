@@ -30,9 +30,9 @@ export default function SelectionToolbar({
   onClear
 }: SelectionToolbarProps): JSX.Element {
   return (
-    <div className="selection-toolbar" role="toolbar" aria-label={'\u591a\u9009\u64cd\u4f5c'}>
-      <div className="selection-toolbar-count">{countLabel}</div>
-      <div className={`${styles.actions} selection-toolbar-actions`}>
+    <div className={styles.root} role="toolbar" aria-label={'\u591a\u9009\u64cd\u4f5c'}>
+      <div className={styles.count}>{countLabel}</div>
+      <div className={styles.actions}>
         {actions.map((action) => (
           <Button
             key={action.key}
@@ -50,7 +50,7 @@ export default function SelectionToolbar({
         ))}
       </div>
       <IconButton
-        className="selection-toolbar-clear"
+        className={styles.clear}
         icon={<X {...UI_ICON_SM} />}
         label={clearLabel}
         onClick={onClear}

@@ -67,6 +67,7 @@ import {
   withVideoBatchFilterScope,
   withVideoBatchRequestScope
 } from '../utils/videoBatchScope'
+import styles from './SettingsPage.module.css'
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
   const selection = window.getSelection()
@@ -397,7 +398,7 @@ export default function SettingsPage(): JSX.Element {
       )
     }
     return (
-      <EmptyState loading title={<span className="settings-loading-label">加载设置…</span>} />
+      <EmptyState loading title={<span className={styles.loadingLabel}>加载设置…</span>} />
     )
   }
 
@@ -762,6 +763,7 @@ export default function SettingsPage(): JSX.Element {
   const pluginDevPage = (
     <SettingsPluginDevShell>
       <PluginDevPanel
+        presentation="settings"
         loadPackage={devLoadPackage}
         onLoadConsumed={clearDevLoadPackage}
         onInstalled={handleInstalled}
@@ -963,8 +965,8 @@ export default function SettingsPage(): JSX.Element {
           }
 
           size="xl"
-          className="modal--batch-detail"
-          bodyClassName="modal-body--batch-detail"
+          className={styles.batchDetailModal}
+          bodyOverflow="hidden"
           hideActions
           onCancel={() => setBatchDetailScope(null)}
         >

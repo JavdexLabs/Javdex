@@ -29,6 +29,7 @@
 - `/actresses`: 演员列表。
 - `/actresses/:id`: 从演员列表打开演员详情。
 - `/actresses/:id/:videoId`: 从演员详情打开影片详情。
+- `/actresses/:id/:videoId/actress/:actressId`: 从该影片继续打开另一位演员；父演员、影片和末层演员保持三个独立实例。
 - `/playlists`: 清单列表。
 - `/playlists/:playlistId`: 清单详情。
 - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
@@ -119,7 +120,9 @@
 4. 列表筛选进入 URL query。
 5. 列表滚动使用作用域化 memory key。
 6. 返回按钮调用对应 navigation helper。
-7. 详情嵌套时使用 `detail-pane--stacked` 和 `detail-pane-overlay`。
+7. 详情嵌套时使用 `DetailPane stacked` 和 `DetailPaneOverlay`，不恢复旧全局样式类。
+
+同一个页面组件可同时出现在父层和末层时，其角色由路由声明确定，不能只按整条 location 推断。`ActressDetailPage` 的影片子路由显式传 `fromVideo`，读取 `actressId`；演员列表父路由不传此值，读取自身 `id` 并继续渲染影片 Outlet。待确认直接演员入口没有 `id`，使用该入口的 `actressId`。嵌套 `useParams` 会包含后代参数，不能让末层演员 ID 覆盖父演员身份。
 
 ## Route Change Checklist
 
@@ -146,6 +149,8 @@
 
 `playlistOffset`、`facetOffset`、`relatedVideoOffset` 兼容已有链接，作为初始条目位置。滚动同步使用 replace；偏移不参与列表数据会话标识，不能因为位置更新重建窗口。搜索与排序改变时回到列表起点；分类 role 切换同时清空旧搜索。搜索草稿绑定 navigation key、pathname 和 query，导航后旧 debounce 不得改写新 URL。
 
+滚动同步的规范化偏移与 URL 相同时不发起 replace，避免无效导航改变 location key。清单与分类列表存在待提交搜索草稿时暂缓锚点写回，由搜索提交归零；实际排序、作用域切换和前进／后退仍丢弃旧草稿。关联影片的 move／align 回调只能使用当前路由的 writer，卸载后或 writer 更新后的旧回调必须失效，不能让迟到滚动覆盖新 query 或重新打开已离开的详情。
+
 列表在详情返回时按条目位置与行内偏移恢复；窗口列数变化时重新计算位置。读取错误保留列表高度和已加载页，由列表区域提供重试。删除、合并导致总量下降时校正到有效范围并刷新保留页。旧会话请求即使不能取消，也不能写入新列表。
 
 待确认中心的 `scanOffset`、`scrapeOffset`、`actressOffset`、扫描历史、审计明细及演员写真仍使用显式分页。本次不改变 Web 路由或写真跨页预览。验证方法与范围见[连续浏览验证记录](performance/desktop-continuous-browsing.md)。
@@ -157,5 +162,7 @@
 卡片数据在进入查询缓存前投影并检查单页1 MiB JSON编码预算；宽详情仍由GET读取。仅选中ID独立于卡片缓存。Shift采用半开绝对范围，逐页获取ID并比较读取修订、总数和端点；取消或结果变化不提交部分范围。只读返回仅刷新活动且过期的查询，不遍历已淘汰历史页。
 
 导演、系列、机构、演员作品和清单详情的关联影片使用独立 `relatedVideoOffset`（每页60），滚动 replace URL，筛选或排序变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset` 或清单主列表的 `playlistOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。
+
+影片内打开的末层演员使用 `actressVideoOffset`，不读取或校正父层的 `relatedVideoOffset`。两人的作品总数不同时，末层归零不能重置父层位置，父层也不能裁切末层偏移。打开另一位末层演员或关闭末层时只清除 `actressVideoOffset`，保留父层关联影片位置与其余筛选。
 
 影片详情顶部的媒体库标签可点击：打开同一影片在目标媒体库中的详情，侧栏与资源作用域同步切换。该操作进入目标库路径并清空原列表 query；详情返回按钮返回目标库列表，系统后退可回到切换前的详情。全部成员库标签换行展示，不截掉可切换入口。

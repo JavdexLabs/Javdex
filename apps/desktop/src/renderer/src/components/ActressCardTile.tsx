@@ -4,6 +4,8 @@ import ActressAvatar from './ActressAvatar'
 import ActressName from './ActressName'
 import ActressStatusBadge from './ActressStatusBadge'
 import MediaTileActionButton from './MediaTileActionButton'
+import CardSelectionButton from './CardSelectionButton'
+import styles from './ActressCardTile.module.css'
 
 interface ActressCardTileProps {
   actress: ActressCard
@@ -24,13 +26,14 @@ export default function ActressCardTile({
 }: ActressCardTileProps): JSX.Element {
   return (
     <div
-      className={`actress-card-wrap${selected ? ' is-selected' : ''}${selectionMode ? ' is-selection-mode' : ''}`}
+      className={styles.root}
+      data-actress-card
+      data-selected={selected || undefined}
     >
-      <button
-        type="button"
-        className={`poster-select-toggle poster-hover-control${selected || selectionMode ? ' is-visible' : ''}${selected ? ' is-checked' : ''}`}
-        aria-label={selected ? `取消选择 ${actress.main_name}` : `选择 ${actress.main_name}`}
-        aria-pressed={selected}
+      <CardSelectionButton
+        visible={selected || selectionMode}
+        selected={selected}
+        label={selected ? `取消选择 ${actress.main_name}` : `选择 ${actress.main_name}`}
         onClick={(event) => {
           event.stopPropagation()
           onToggleSelect(event)
@@ -38,7 +41,7 @@ export default function ActressCardTile({
       />
       <button
         type="button"
-        className="actress-card card-interactive"
+        className={styles.card}
         aria-pressed={selectionMode ? selected : undefined}
         onClick={(event) => {
           if (selectionMode) {
@@ -48,23 +51,25 @@ export default function ActressCardTile({
           onOpen()
         }}
       >
-        <span className="actress-card-avatar">
+        <span className={styles.avatarWrap}>
           <ActressAvatar
+            className={styles.avatar}
             src={assetUrl(actress.avatar_path, 320)}
             name={actress.main_name}
             gender={actress.gender}
           />
-          <ActressStatusBadge status={actress.scraped_status} />
+          <ActressStatusBadge status={actress.scraped_status} className={styles.status} />
         </span>
         <ActressName
           name={actress.main_name}
           gender={actress.gender}
-          className="actress-name"
+          className={styles.name}
         />
-        <div className="actress-count">{actress.video_count} 部</div>
+        <div className={styles.count}>{actress.video_count} 部</div>
       </button>
       {!selectionMode && actress.video_count === 0 ? (
         <MediaTileActionButton
+          className={styles.action}
           label={`删除演员 ${actress.main_name}`}
           title="删除"
           onClick={onDelete}

@@ -17,6 +17,7 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import { NAV_ICON } from './iconDefaults'
+import styles from './NavIcons.module.css'
 
 const ICONS = {
   home: House,
@@ -40,5 +41,5 @@ export type NavIconName = keyof typeof ICONS
 
 export function NavIcon({ name }: { name: NavIconName }): JSX.Element {
   const Icon = ICONS[name]
-  return <Icon {...NAV_ICON} />
+  return <Icon {...NAV_ICON} className={styles.icon} />
 }

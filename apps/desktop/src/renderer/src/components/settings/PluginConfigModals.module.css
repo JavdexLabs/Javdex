@@ -94,3 +94,240 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.hero {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-elevated) 90%, transparent),
+    color-mix(in srgb, var(--surface-control) 70%, transparent)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.heroTop {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.note {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  min-width: 0;
+  overflow: visible;
+}
+
+.panel.servicePanel {
+  gap: 12px;
+}
+
+.panelAccent {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-soft) 42%, var(--surface-panel)),
+    color-mix(in srgb, var(--surface-panel) 92%, transparent)
+  );
+}
+
+.panelHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.panelTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.caption {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.toggleList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-control) 35%, transparent);
+}
+
+.captionBlock {
+  margin: -2px 0 0;
+}
+
+.captionBlock + .toggleList {
+  margin-top: 0;
+}
+
+.fieldCount {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.metaStack {
+  display: grid;
+  gap: 10px;
+}
+
+.descriptionField {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 0;
+}
+
+.metaRow {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metaRowWide {
+  grid-column: 1 / -1;
+}
+
+.metaRow dt {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.metaRow dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.metaValueTruncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delay {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.delayField {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.delaySep {
+  flex: 0 0 auto;
+  padding-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.fieldGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fieldChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  user-select: none;
+}
+
+.fieldChip[data-supported='true'] {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-soft) 72%, var(--surface-control)),
+    color-mix(in srgb, var(--surface-control) 88%, transparent)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.fieldChip[data-supported='false'] {
+  color: var(--text-muted);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-control) 55%, transparent);
+  opacity: 0.72;
+}
+
+.descriptionField > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.descriptionField:focus-within input {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}

@@ -1,4 +1,8 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import ResultCount from '../components/ResultCount'
 import ContinuousGrid from '../components/ContinuousGrid'
+import FacetCard from '../components/FacetCard'
 import { useCallback, useEffect, useState } from 'react'
 import { Clapperboard, Plus, SearchX } from 'lucide-react'
 import { useLocation, useMatch, useNavigate } from 'react-router-dom'
@@ -45,18 +49,14 @@ export default function DirectorListPage(): JSX.Element {
   }, [query.error, query.isError, toast])
 
   const create = async (input: DirectorUpdateInput): Promise<void> => {
-    try {
-      const id = await api.directors.create(input)
-      setCreating(false)
-      await query.refetch()
-      navigateToDirectorDetail(navigate, location, id)
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    }
+    const id = await api.directors.create(input)
+    setCreating(false)
+    await query.refetch()
+    navigateToDirectorDetail(navigate, location, id)
   }
   return (
-    <div className="list-page">
-      <div className="topbar">
+    <ListPage >
+      <PageHeader >
         <ListToolbar
           search={{
             value: searchInput,
@@ -81,9 +81,9 @@ export default function DirectorListPage(): JSX.Element {
             </>
           }
           resultCount={
-            <span className="count-badge count-badge--stable count-badge--facet">
+            <ResultCount width="facet">
               共 {total ?? '…'} 位导演
-            </span>
+            </ResultCount>
           }
         />
         <AppliedFilterBar
@@ -100,7 +100,7 @@ export default function DirectorListPage(): JSX.Element {
           }
           onClear={() => patchSort('video_count', 'desc')}
         />
-      </div>
+      </PageHeader>
       <ListSurface
         variant="scroll"
         scrollRef={ref}
@@ -120,35 +120,18 @@ export default function DirectorListPage(): JSX.Element {
             description="可手动新增，或在影片编辑时就地创建。"
           />
         ) : (
-          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
-              return (
-                <div className="facet-card-wrap" key={item.id}>
-                  <button
-                    type="button"
-                    className="facet-card card-interactive"
-                    onClick={() => navigateToDirectorDetail(navigate, location, item.id)}
-                  >
-                    <div className="facet-thumb">
-                      {cover ? (
-                        <img src={cover} alt="" loading="lazy" />
-                      ) : (
-                        <span className="facet-thumb-placeholder">
-                          <Clapperboard {...UI_ICON_SM} aria-hidden />
-                        </span>
-                      )}
-                    </div>
-                    <div className="facet-name">{item.mainName}</div>
-                    <div className="facet-count">{item.videoCount} 部</div>
-                  </button>
-                </div>
-              )
-            }} />
+          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => (
+            <FacetCard key={item.id} kind="director" name={item.mainName}
+              imageUrl={assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)}
+              placeholder={<Clapperboard {...UI_ICON_SM} aria-hidden />}
+              videoCount={item.videoCount}
+              onOpen={() => navigateToDirectorDetail(navigate, location, item.id)} />
+          )} />
         )}
       </ListSurface>
       {creating && !detailOpen ? (
         <DirectorEditModal onCancel={() => setCreating(false)} onSave={create} />
       ) : null}
-    </div>
+    </ListPage>
   )
 }

@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { isBuiltin } from 'node:module'
 import { importsOf, sourceFiles } from './lib/import-boundary-check.mjs'
+import { bypassesCatalogQuery } from './lib/catalog-query-boundary.mjs'
 
 function isForbiddenServerImport(specifier, fromFile) {
   const resolved = specifier.startsWith('.')
@@ -43,6 +44,9 @@ const violations = []
 for (const file of sourceFiles('apps/server/src')) {
   if (/\.test\.[cm]?[jt]sx?$/.test(file)) continue
   for (const specifier of importsOf(file)) {
+    if (bypassesCatalogQuery(specifier, file)) {
+      violations.push(`${file}: use the shared catalog video query interface (${specifier})`)
+    }
     if (isForbiddenServerImport(specifier, file)) {
       violations.push(
         `${file.replaceAll('\\', '/')}: production server code must not import desktop, Electron, Playwright, or the plugin agent (${specifier})`

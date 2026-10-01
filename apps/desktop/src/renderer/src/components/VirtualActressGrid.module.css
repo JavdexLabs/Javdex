@@ -1,0 +1,19 @@
+.root {
+  height: 100%;
+}
+
+.inner {
+  position: relative;
+  width: 100%;
+}
+
+.cell {
+  box-sizing: border-box;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}

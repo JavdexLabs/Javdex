@@ -9,14 +9,17 @@ import { canRunMediaLibraryScan } from '../../mediaLibrarySettingsState'
 export default function MediaLibraryScanRunButton({
   scan,
   library,
-  formDisabled
+  formDisabled,
+  className
 }: {
   scan: Pick<MediaLibraryScanController, 'running' | 'cancelling' | 'activeRunId' | 'start' | 'cancel'>
   library: Pick<MediaLibrarySummary, 'status' | 'activeRootCount' | 'pendingCleanupJobCount'>
   formDisabled: boolean
+  className?: string
 }): JSX.Element {
   return (
     <Button
+      className={className}
       type="button"
       variant={scan.running ? 'default' : 'primary'}
       disabled={

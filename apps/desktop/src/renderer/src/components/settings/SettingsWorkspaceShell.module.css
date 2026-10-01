@@ -1,0 +1,128 @@
+.root {
+  --workspace-input-font-size: var(--settings-fs-secondary, 12px);
+  --workspace-button-font-size: var(--settings-fs-secondary, 12px);
+  --workspace-button-min-height: var(--control-h-sm);
+  --workspace-caption-font-size: var(--settings-fs-caption, 11px);
+  --workspace-caption-line-height: var(--settings-lh, 1.45);
+  --select-control-font-size: var(--settings-fs-secondary, 12px);
+  --settings-fs-title: 14px;
+  --settings-fs-body: 13px;
+  --settings-fs-secondary: 12px;
+  --settings-fs-caption: 11px;
+  --settings-fs-metric: 18px;
+  --settings-fw-title: 700;
+  --settings-fw-label: 600;
+  --settings-fw-strong: 700;
+  --settings-lh: 1.45;
+  --settings-lh-tight: 1.35;
+  --settings-card-pad-y: 16px;
+  --settings-card-pad-x: 18px;
+  --settings-gap: 12px;
+  --settings-gap-sm: 8px;
+
+  width: 100%;
+  max-width: var(--settings-content-max);
+  padding: var(--card-area-pad-top) var(--detail-pad-x) var(--card-area-pad-bottom);
+  font-size: var(--settings-fs-secondary);
+  line-height: var(--settings-lh);
+  container-type: inline-size;
+  container-name: settings-workspace;
+}
+
+.root.pluginDevPage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  max-width: none;
+  overflow: hidden;
+  padding: 10px var(--detail-pad-x) 10px;
+}
+
+.overviewPage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.groupTabs {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: calc(var(--control-h-sm) + 12px);
+  padding: 6px;
+  overflow: auto hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.groupTab {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-title, 700);
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.groupTab:hover,
+.groupTab:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.groupTab[data-active='true'] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.scrollRegion {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  padding-bottom: var(--card-area-pad-bottom);
+  scrollbar-gutter: stable;
+}
+
+.content,
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-gap, 12px);
+  min-width: 0;
+}
+
+@container settings-workspace (width <= 500px) {
+  .groupTabs {
+    scrollbar-gutter: stable;
+  }
+}

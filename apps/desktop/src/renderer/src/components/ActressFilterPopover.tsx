@@ -2,7 +2,7 @@ import { useEffect, useRef, type RefObject } from 'react'
 import type { ActressAvatarFilter, ActressListStatusFilter } from '@shared/actressTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
-import Button from './Button'
+import FilterPanelContent, { FilterPanelShell, FilterFields, FilterField } from './FilterPanelContent'
 
 export interface ActressFilterState {
   status: ActressListStatusFilter
@@ -67,22 +67,16 @@ export default function ActressFilterPopover({
   if (!open) return null
 
   return (
-    <div
+    <FilterPanelShell
       ref={panelRef}
-      className="library-filter-popover library-filter-popover--actress"
       role="dialog"
       aria-label="筛选"
     >
-      <header className="library-filter-popover-head">
-        <h3 className="library-filter-popover-title">筛选</h3>
-      </header>
-
-      <div className="library-filter-popover-body">
-        <div className="library-filter-popover-grid">
-          <label className="library-filter-field">
-            <span className="library-filter-field-label">刮削状态</span>
+      <FilterPanelContent onReset={onReset} onClose={onClose} paddedEnd>
+        <FilterFields>
+          <FilterField label="刮削状态">
             <SelectControl
-              className="library-filter-input"
+              variant="filter"
               value={state.status}
               onChange={(event) => {
                 if (isActressStatus(event.target.value)) onChange({ status: event.target.value })
@@ -93,12 +87,11 @@ export default function ActressFilterPopover({
               <option value="unscraped">未刮削</option>
               <option value="failed">刮削失败</option>
             </SelectControl>
-          </label>
+          </FilterField>
 
-          <label className="library-filter-field">
-            <span className="library-filter-field-label">头像</span>
+          <FilterField label="头像">
             <SelectControl
-              className="library-filter-input"
+              variant="filter"
               value={state.avatar}
               onChange={(event) => {
                 if (isActressAvatarFilter(event.target.value)) onChange({ avatar: event.target.value })
@@ -109,18 +102,9 @@ export default function ActressFilterPopover({
               <option value="without">无头像</option>
               {showFaceFilter ? <option value="without-face">无人脸</option> : null}
             </SelectControl>
-          </label>
-        </div>
-      </div>
-
-      <footer className="library-filter-popover-footer">
-        <Button type="button" variant="ghost" size="sm" onClick={onReset}>
-          重置
-        </Button>
-        <Button type="button" variant="primary" size="sm" onClick={onClose}>
-          完成
-        </Button>
-      </footer>
-    </div>
+          </FilterField>
+        </FilterFields>
+      </FilterPanelContent>
+    </FilterPanelShell>
   )
 }

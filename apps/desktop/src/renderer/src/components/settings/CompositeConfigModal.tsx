@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import SettingsActionLabel from './SettingsActionLabel'
 import { useMemo, useRef, useState } from 'react'
 import {
@@ -134,8 +135,8 @@ export default function CompositeConfigModal({
       <div className={styles.identity}>
         <label className={styles.field}>
           <span>组合名称</span>
-          <input
-            className="text-input"
+          <TextInput
+            density="workspace"
             value={name}
             disabled={saving}
             placeholder={kind === 'video' ? '例如：影片信息与封面' : '例如：演员资料与头像'}
@@ -147,8 +148,8 @@ export default function CompositeConfigModal({
           <span>
             说明 <small>可选</small>
           </span>
-          <input
-            className="text-input"
+          <TextInput
+            density="workspace"
             value={description}
             disabled={saving}
             placeholder="记录这个组合的用途"

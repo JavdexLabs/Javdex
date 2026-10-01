@@ -3,9 +3,11 @@ import type { VideoPendingScrapeFilter, VideoQuery, VideoResourceFilter } from '
 import type { ScrapedStatus } from '@shared/commonTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
+import TextInput from './TextInput'
 import TagFilter from './TagFilter'
-import Button from './Button'
+import FilterPanelContent, { FilterPanelShell, FilterFields, FilterField, FilterFieldLabel } from './FilterPanelContent'
 import VideoResourceFilterFieldset from './VideoResourceFilterFieldset'
+import styles from './LibraryFilterPopover.module.css'
 
 export interface LibraryFilterState {
   status: ScrapedStatus | 'all'
@@ -68,17 +70,12 @@ export default function LibraryFilterPopover({
   if (!open) return null
 
   return (
-    <div ref={panelRef} className="library-filter-popover" role="dialog" aria-label="筛选">
-      <header className="library-filter-popover-head">
-        <h3 className="library-filter-popover-title">筛选</h3>
-      </header>
-
-      <div className="library-filter-popover-body">
-      <div className="library-filter-popover-grid">
-        <label className="library-filter-field">
-          <span className="library-filter-field-label">刮削状态</span>
+    <FilterPanelShell ref={panelRef} role="dialog" aria-label="筛选">
+      <FilterPanelContent onReset={onReset} onClose={onClose}>
+      <FilterFields>
+        <FilterField label="刮削状态">
           <SelectControl
-            className="library-filter-input"
+            variant="filter"
             value={String(state.status)}
             onChange={(e) =>
               onChange({
@@ -92,12 +89,11 @@ export default function LibraryFilterPopover({
             <option value="0">未刮削</option>
             <option value="2">刮削失败</option>
           </SelectControl>
-        </label>
+        </FilterField>
 
-        <label className="library-filter-field">
-          <span className="library-filter-field-label">待确认刮削</span>
+        <FilterField label="待确认刮削">
           <SelectControl
-            className="library-filter-input"
+            variant="filter"
             value={state.pendingScrape}
             onChange={(event) =>
               onChange({ pendingScrape: event.target.value as VideoPendingScrapeFilter })
@@ -107,12 +103,11 @@ export default function LibraryFilterPopover({
             <option value="pending">仅待确认</option>
             <option value="none">排除待确认</option>
           </SelectControl>
-        </label>
+        </FilterField>
 
-        <label className="library-filter-field">
-          <span className="library-filter-field-label">年份</span>
+        <FilterField label="年份">
           <SelectControl
-            className="library-filter-input"
+            variant="filter"
             value={String(state.year)}
             onChange={(e) =>
               onChange({
@@ -127,28 +122,27 @@ export default function LibraryFilterPopover({
               </option>
             ))}
           </SelectControl>
-        </label>
+        </FilterField>
 
-        <label className="library-filter-field library-filter-field--wide">
-          <span className="library-filter-field-label">番号系列</span>
-          <input
-            className="text-input library-filter-input"
+        <FilterField label="番号系列" wide>
+          <TextInput
+            variant="filter"
             placeholder="输入系列前缀"
             value={state.codePrefix}
             onChange={(e) => onChange({ codePrefix: e.target.value.toUpperCase() })}
           />
-        </label>
-      </div>
+        </FilterField>
+      </FilterFields>
 
       <VideoResourceFilterFieldset
         value={state.resourceKinds}
         onChange={(resourceKinds) => onChange({ resourceKinds })}
       />
 
-      <div className="library-filter-popover-tags">
-        <div className="library-filter-tags-head">
-          <span className="library-filter-field-label">标签</span>
-          <span className="library-filter-tags-hint" title="所选标签须同时包含">
+      <div className={styles.tags}>
+        <div className={styles.tagsHeader}>
+          <FilterFieldLabel>标签</FilterFieldLabel>
+          <span className={styles.tagsHint} title="所选标签须同时包含">
             须同时包含
           </span>
         </div>
@@ -159,16 +153,7 @@ export default function LibraryFilterPopover({
           variant="popover"
         />
       </div>
-      </div>
-
-      <footer className="library-filter-popover-footer">
-        <Button type="button" variant="ghost" size="sm" onClick={onReset}>
-          重置
-        </Button>
-        <Button type="button" variant="primary" size="sm" onClick={onClose}>
-          完成
-        </Button>
-      </footer>
-    </div>
+      </FilterPanelContent>
+    </FilterPanelShell>
   )
 }

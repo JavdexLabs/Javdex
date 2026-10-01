@@ -1,8 +1,12 @@
+import FilterTrigger from '../components/FilterTrigger'
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import PageContent from '../components/PageContent'
+import ResultCount from '../components/ResultCount'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  ChevronDown,
   Archive,
   Plus,
   Film,
@@ -37,6 +41,7 @@ import { useToast } from '../components/Toast'
 import VirtualPosterGrid from '../components/VirtualPosterGrid'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import LibraryFilterPopover, { type LibraryFilterState } from '../components/LibraryFilterPopover'
+import { FilterPanelAnchor } from '../components/FilterPanelContent'
 import ListToolbar from '../components/ListToolbar'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import AddVideosToPlaylistModal from '../components/AddVideosToPlaylistModal'
@@ -435,15 +440,11 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
 
   const saveEdit = async (input: VideoEditInput): Promise<void> => {
     if (!editingVideo) return
-    try {
-      await api.videos.edit(editingVideo.id, input, expectedVideoVersion(editingVideo))
-      setEditingVideo(null)
-      toast.show('元数据已保存', 'success')
-      invalidateVideoLibraryQueries(queryClient)
-      refetchLibrarySurface()
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
+    await api.videos.edit(editingVideo.id, input, expectedVideoVersion(editingVideo))
+    setEditingVideo(null)
+    toast.show('元数据已保存', 'success')
+    invalidateVideoLibraryQueries(queryClient)
+    refetchLibrarySurface()
   }
 
   const executeSingleScrape = async (
@@ -690,8 +691,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
 
   if (surfaceMode === 'archived' && library) {
     return (
-      <div className="list-page">
-        <div className="topbar library-header">
+      <ListPage >
+        <PageHeader>
           <ListToolbar
             leading={
               <div
@@ -717,9 +718,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
               </Button>
             }
           />
-        </div>
+        </PageHeader>
         <ListSurface variant="fill" withInner={false}>
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState
               icon={<Archive {...UI_ICON_SM} aria-hidden />}
               title="该媒体库已归档"
@@ -732,15 +733,15 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                 前往恢复媒体库
               </Button>
             </EmptyState>
-          </div>
+          </PageContent>
         </ListSurface>
-      </div>
+      </ListPage>
     )
   }
 
   return (
-    <div className="list-page">
-      <div className="topbar library-header">
+    <ListPage >
+      <PageHeader>
         {selectionMode ? (
           <SelectionToolbar
             countLabel={`已选择 ${selectedCount} 部影片 · Shift 连选`}
@@ -791,24 +792,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             }}
             controls={
               <>
-                <div className="library-filter-anchor">
-                  <Button
-                    ref={filterBtnRef}
-                    type="button"
-
-                    size="sm"
-                    className={`library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
-                    onClick={() => setFilterOpen((o) => !o)}
-                    aria-expanded={filterOpen}
-                    aria-haspopup="dialog"
-                  >
-                    <span className="library-filter-btn-label">筛选</span>
-                    <ChevronDown
-                      {...UI_ICON_SM}
-                      className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
-                      aria-hidden
-                    />
-                  </Button>
+                <FilterPanelAnchor>
+                  <FilterTrigger ref={filterBtnRef} open={filterOpen} active={hasAppliedFilters} onClick={() => setFilterOpen((o) => !o)} />
 
                   <LibraryFilterPopover
                     open={filterOpen && surfaceMode === 'active' && !detailOpen}
@@ -819,7 +804,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                     onReset={resetFilters}
                     anchorRef={filterBtnRef}
                   />
-                </div>
+                </FilterPanelAnchor>
 
                 <SortSwitch
                   label="排序"
@@ -856,15 +841,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
               </>
             }
             resultCount={
-              <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
+              <ResultCount width="media" aria-live="polite" fetching={isFetching && !loading && videos.length > 0}>
                 共 {total} 部
-                {isFetching && !loading && videos.length > 0 ? (
-                  <span className="library-fetch-hint" aria-hidden>
-                    {' '}
-                    ↻
-                  </span>
-                ) : null}
-              </span>
+              </ResultCount>
             }
           />
         )}
@@ -896,17 +875,17 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             }
           />
         ) : null}
-      </div>
+      </PageHeader>
 
       {selectingRange ? <p role="status">正在读取选择范围…</p> : null}
       {selectionError ? <p role="alert">{selectionError}</p> : null}
       <ListSurface variant="fill" withInner={false}>
         {libraryQuery.isLoading || loading ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState loading title="加载中…" />
-          </div>
+          </PageContent>
         ) : libraryQuery.isError || !library ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState
               icon={<Film {...UI_ICON_SM} aria-hidden />}
               title="无法打开媒体库"
@@ -920,15 +899,15 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                 </Button>
               ) : null}
             </EmptyState>
-          </div>
+          </PageContent>
         ) : catalogWindow.error && total === 0 ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState title="读取影片失败" description="请重试加载当前列表。">
               <Button size="sm" onClick={catalogWindow.retry}>重试</Button>
             </EmptyState>
-          </div>
+          </PageContent>
         ) : total === 0 ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState
               icon={
                 emptyDueToFilter ? (
@@ -946,7 +925,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                     : '请先在媒体库设置中添加来源目录。'
               }
             />
-          </div>
+          </PageContent>
         ) : (
           <VirtualPosterGrid
             builtinActions="all"
@@ -1126,7 +1105,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
         >
           确定要永久删除已选择的 {selectedCount} 部影片吗？会删除全局影片资料、各媒体库中的成员关系，以及本地视频 / STRM 源文件。
           {removalImpacts.size > 0 ? (
-            <div className="modal-path-hint">
+            <div>
               将删除{' '}
               {[...removalImpacts.values()].reduce(
                 (totalResources, impact) => totalResources + impact.sourcePathCount,
@@ -1142,6 +1121,6 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           ) : null}
         </Modal>
       )}
-    </div>
+    </ListPage>
   )
 }

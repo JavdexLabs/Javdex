@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import Checkbox from '../../../../../../../packages/ui/src/Checkbox'
 import {
   createContext,
@@ -551,9 +552,9 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                       <AgentMetadataSetupIntro kind={target?.kind} />
                       <div className={styles.sourceForm}>
                         <label htmlFor="agent-metadata-source-url">外部详情页 URL</label>
-                        <input
+                        <TextInput
                           id="agent-metadata-source-url"
-                          className="text-input"
+                          density="workspace"
                           type="url"
                           inputMode="url"
                           autoFocus

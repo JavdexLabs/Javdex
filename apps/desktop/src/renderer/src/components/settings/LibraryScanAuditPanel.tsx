@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FixedSizeList, type ListChildComponentProps } from 'react-window'
 import type {
@@ -493,8 +494,8 @@ export default function LibraryScanAuditPanel({
         <>
             {activeTab === 'all' ? (
               <div className={styles.toolbar}>
-                <input
-                  className="text-input"
+                <TextInput
+                  density="workspace"
                   value={search}
                   maxLength={500}
                   onChange={(event) => { resetPage(); setSearch(event.target.value) }}

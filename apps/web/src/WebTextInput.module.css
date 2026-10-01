@@ -1,0 +1,33 @@
+
+input.input {
+  min-width: 0;
+  min-height: var(--control-h-md);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  padding: 10px 12px;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.input[data-appearance='login'] {
+  width: 100%;
+  background: var(--surface-panel);
+  min-height: 48px;
+}
+
+.input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+@media (pointer: coarse) {
+  input.input { font-size: 16px; }
+}
+
+input.input:focus {
+  outline: none;
+  border-color: var(--text-accent);
+  box-shadow: var(--focus-ring);
+}

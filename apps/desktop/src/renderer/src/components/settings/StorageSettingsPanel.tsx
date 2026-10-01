@@ -35,6 +35,7 @@ export default function StorageSettingsPanel({
     return (
       <SettingsCard
         className={styles.root}
+        headerClassName={styles.cardHeader}
         title="服务端图片资源"
         hint="封面、头像、样张、演员写真与清单封面保存在当前连接的服务端。"
         actions={<SettingsStatusPill status="info">服务端管理</SettingsStatusPill>}
@@ -69,6 +70,7 @@ export default function StorageSettingsPanel({
       {tab === 'assets' ? (
         <SettingsCard
           className={styles.root}
+          headerClassName={styles.cardHeader}
           title="资源存储"
           hint="管理封面、头像、样张与清单封面的保存位置和磁盘加密方式。"
           actions={
@@ -108,6 +110,7 @@ export default function StorageSettingsPanel({
 
               <div className={styles.actionRow}>
                 <Button
+                  className={styles.actionButton}
                   type="button"
                   size="sm"
                   disabled={storageBusy}
@@ -118,6 +121,7 @@ export default function StorageSettingsPanel({
                 </Button>
                 {!usingDefault ? (
                   <Button
+                    className={styles.actionButton}
                     type="button"
                     variant="ghost"
                     size="sm"

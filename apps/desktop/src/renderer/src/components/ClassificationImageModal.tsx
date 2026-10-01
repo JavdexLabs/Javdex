@@ -1,3 +1,4 @@
+import TextInput from './TextInput'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useContinuousPage } from "../hooks/useContinuousPage";
 import { useHorizontalDragScroll } from "../hooks/useHorizontalDragScroll";
@@ -223,8 +224,6 @@ function ClassificationImageEditor({
         toast.show(pending ? "正式主图已更新" : "正式主图已移除", "success");
       }
       onCancel();
-    } catch (error) {
-      toast.show(String((error as Error).message), "error");
     } finally {
       if (activeRef.current) setSaving(false);
     }
@@ -236,13 +235,13 @@ function ClassificationImageEditor({
 
       size="lg"
       bodyOverflow="hidden"
-      confirmText={saving ? "保存中…" : "保存主图"}
+      confirmText="保存主图"
       confirmDisabled={
         pending === undefined || saving || loadingRemote || mediaEditorsHidden
       }
       busy={saving}
       onCancel={onCancel}
-      onConfirm={() => void save()}
+      onConfirm={save}
     >
       {mediaEditorsHidden ? (
         <EmptyState
@@ -255,7 +254,8 @@ function ClassificationImageEditor({
         <div className={styles.editor}>
           <div className={styles.current}>
             <div
-              className={`${styles.preview} classification-image-preview${
+              data-classification-image-preview
+              className={`${styles.preview}${
                 entity.kind === "organization"
                   ? ` ${styles.previewOrganization}`
                   : ""
@@ -370,8 +370,8 @@ function ClassificationImageEditor({
                 hidden={mode !== "url"}
               >
                 <div className={styles.urlSource}>
-                  <input
-                    className="text-input"
+                  <TextInput
+                    density="workspace"
                     type="url"
                     placeholder="https://example.com/image.jpg"
                     value={remoteUrl}
@@ -440,7 +440,8 @@ function ClassificationImageEditor({
                           }}
                         >
                           <span
-                            className={`${styles.candidateCover} classification-image-candidate-cover`}
+                            data-classification-image-candidate-cover
+                            className={styles.candidateCover}
                           >
                             <img
                               src={assetUrl(candidate.coverPath, 320) ?? ""}

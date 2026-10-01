@@ -6,8 +6,9 @@ import path from 'node:path'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { chromium } from 'playwright-core'
+import { installStableScreenshots } from '../lib/stable-screenshot.mjs'
 const repo=process.cwd(), root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-picker-ui-'))
-const output=path.resolve(process.env.JAVDEX_PICKER_UI_OUTPUT ?? path.join(root,'results'))
+const output=path.resolve(process.env.JAVDEX_PICKER_UI_OUTPUT ?? fs.mkdtempSync(path.join(os.tmpdir(),'javdex-picker-evidence-')))
 fs.mkdirSync(output,{recursive:true})
 fs.writeFileSync(path.join(root,'index.html'),'<html><head><style>html,body,#root{height:100%;margin:0}#root{display:flex;min-height:0;overflow:hidden}</style></head><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
 fs.writeFileSync(path.join(root,'fixture.jsx'),`
@@ -49,31 +50,53 @@ try {
  }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
  await server.listen();const port=server.httpServer.address().port
  browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
- for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
+ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) for (const theme of ['graphite', 'light']) {
   const page=await browser.newPage({viewport});const errors=[]
+  installStableScreenshots(page)
   page.on('pageerror',e=>errors.push(e.message))
   await page.goto(`http://127.0.0.1:${port}`)
+  await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
   await page.getByRole('button',{name:'Actor-1 刮削 1 · 历史 0',exact:true}).waitFor()
   await page.getByRole('button',{name:/选择其他演员…/}).click()
   const modal=page.getByRole('dialog',{name:'选择其他演员',exact:true})
-  const choices=modal.getByRole('group',{name:'其他演员',exact:true})
+  const choices=modal.locator('[role="group"][aria-label="其他演员"][aria-busy]')
+  const scrollTo = async index => {
+    await choices.evaluate((grid, index) => {
+      let scroller = grid.parentElement
+      while (scroller && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+      if (!scroller) throw new Error('Missing candidate scroll owner')
+      const localTop = scroller.scrollTop + grid.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      const cell = grid.querySelector('[data-index]')
+      if (!cell) throw new Error('Missing virtual candidate cell')
+      const step = cell.getBoundingClientRect().height + 4
+      scroller.scrollTop = localTop + index * step
+    }, index)
+  }
   await choices.getByRole('button',{name:'Choice-2001 选择为拟定归属',exact:true}).waitFor()
-  assert.equal(await choices.getByRole('button').count(),40)
-  await modal.getByRole('button',{name:'下一页',exact:true}).click()
+  assert.ok(await choices.getByRole('button').count() < 40, 'candidates are virtualized')
+  const first = choices.getByRole('button', {name:'Choice-2001 选择为拟定归属',exact:true})
+  await first.focus()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Shift+Tab')
+  assert.equal(await first.evaluate(el=>el.matches(':focus-visible')),true)
+  await first.press('ArrowDown')
+  await page.waitForFunction(()=>document.activeElement?.textContent.includes('Choice-2002'))
+  await scrollTo(40)
   await choices.getByRole('button',{name:'Choice-2041 选择为拟定归属',exact:true}).click()
   await modal.waitFor({state:'hidden'})
-  assert.ok((await page.locator('.conflict-workbench-owner--other').textContent()).includes('Current-2041'))
+  assert.ok((await page.locator('[data-conflict-other-owner]').textContent()).includes('Current-2041'))
   await page.getByRole('button',{name:'重新选择演员',exact:true}).click()
   await choices.getByRole('button',{name:'Choice-2001 选择为拟定归属',exact:true}).waitFor()
-  await modal.getByRole('button',{name:'下一页',exact:true}).click()
+  await scrollTo(40)
   const selected=choices.getByRole('button',{name:'Choice-2041 选择为拟定归属',exact:true})
   await selected.waitFor();assert.equal(await selected.getAttribute('aria-pressed'),'true')
   await page.evaluate(()=>{window.__failPicker=true})
-  await modal.getByRole('button',{name:'下一页',exact:true}).click()
-  await modal.getByText('演员候选读取失败',{exact:true}).waitFor()
+  await scrollTo(80)
+  await modal.getByRole('alert').filter({hasText:'picker error'}).waitFor()
+  assert.ok(await choices.getByRole('button').count() > 0, 'later-page errors retain loaded candidates')
   await modal.getByRole('button',{name:'重试',exact:true}).click()
   await choices.getByRole('button',{name:'Choice-2081 选择为拟定归属',exact:true}).waitFor()
-  assert.equal(await choices.getByRole('button').count(),21)
+  assert.ok(await choices.getByRole('button').count() <= 12)
   await modal.getByRole('searchbox',{name:'搜索其他演员'}).fill('2099')
   await choices.getByRole('button',{name:'Choice-2099 选择为拟定归属',exact:true}).waitFor()
   assert.equal(await choices.getByRole('button').count(),1)
@@ -85,20 +108,28 @@ try {
   await choices.getByRole('button',{name:'Choice-2002 选择为拟定归属',exact:true}).click()
   await modal.waitFor({state:'hidden'})
   await page.evaluate(async()=>{window.__resolveChoice({main_name:'Old late choice',revision:9});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))})
-  assert.ok((await page.locator('.conflict-workbench-owner--other').textContent()).includes('Current-2002'))
+  assert.ok((await page.locator('[data-conflict-other-owner]').textContent()).includes('Current-2002'))
   await page.getByRole('button',{name:'重新选择演员',exact:true}).click()
   await choices.getByRole('button',{name:'Choice-2001 选择为拟定归属',exact:true}).waitFor()
   const geometry=await page.evaluate(()=>({width:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth,height:innerHeight}))
   assert.ok(geometry.scrollWidth<=geometry.width+1)
-  const pager=await modal.getByLabel('演员候选分页',{exact:true}).boundingBox()
-  assert.ok(pager && pager.y>=0 && pager.y+pager.height<=viewport.height+1)
+  const cancel=await modal.getByRole('button',{name:'取消',exact:true}).boundingBox()
+  assert.ok(cancel && cancel.y>=0 && cancel.y+cancel.height<=viewport.height+1)
+  const style=await choices.getByRole('button').first().evaluate(el=>({display:getComputedStyle(el).display,
+    height:el.getBoundingClientRect().height,width:el.getBoundingClientRect().width,cell:el.parentElement.getBoundingClientRect().width}))
+  assert.equal(style.display,'flex')
+  assert.equal(style.height,64)
+  assert.ok(Math.abs(style.width-style.cell)<1)
   const heading=await page.getByRole('heading',{name:'待确认',exact:true}).boundingBox()
   assert.ok(heading && heading.y>=0 && heading.y+heading.height<=viewport.height)
   assert.deepEqual(errors,[])
-  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}.png`)})
-  results.push({viewport,geometry,pager,queries:await page.evaluate(()=>window.__pickerQueries),choiceGets:await page.evaluate(()=>window.__choiceGets),errors})
+  const queries = await page.evaluate(()=>window.__pickerQueries)
+  assert.ok(queries.every(query=>query.limit===40))
+  assert.ok([0,40,80].every(offset=>queries.some(query=>query.offset===offset)))
+  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-${theme}.png`)})
+  results.push({viewport,theme,geometry,cancel,style,queries:await page.evaluate(()=>window.__pickerQueries),choiceGets:await page.evaluate(()=>window.__choiceGets),errors})
   await page.close()
  }
  fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n')
- console.log(JSON.stringify(results))
+ console.log(JSON.stringify({output,passed:results.length}))
 } finally {await browser?.close();await server?.close();fs.rmSync(root,{recursive:true,force:true})}

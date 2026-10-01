@@ -20,7 +20,7 @@ afterEach(() => {
   selected = null
 })
 
-function renderPicker(value = 'Collection'): void {
+function renderPicker(value = 'Collection', error?: string): void {
   act(() => {
     const tree = (
       <ClassificationPicker
@@ -30,6 +30,7 @@ function renderPicker(value = 'Collection'): void {
         selectedId={null}
         listLabel="系列候选"
         createHint="保留当前输入可新建未归属系列"
+        error={error}
         onValueChange={() => undefined}
         onSelect={(option) => {
           selected = option
@@ -72,6 +73,15 @@ function keyDown(key: string): { defaultPrevented: boolean; nativePropagationSto
 }
 
 describe('classification picker', () => {
+  it('shows a load error as an alert only when provided', () => {
+    renderPicker()
+    assert.equal(renderer?.root.findAllByProps({ role: 'alert' }).length, 0)
+
+    renderPicker('Collection', '系列候选加载失败，请稍后重试。')
+    const alert = renderer?.root.findByProps({ role: 'alert' })
+    assert.equal(alert?.children.join(''), '系列候选加载失败，请稍后重试。')
+  })
+
   it('keeps candidates hidden until the field is used', () => {
     renderPicker()
 

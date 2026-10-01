@@ -4,7 +4,7 @@
   justify-content: space-between;
   gap: 16px;
   min-height: var(--target-min);
-  padding: 10px 12px;
+  padding: 10px var(--settings-switch-row-pad-x, 12px);
   cursor: pointer;
   user-select: none;
   transition: background var(--motion-fast);

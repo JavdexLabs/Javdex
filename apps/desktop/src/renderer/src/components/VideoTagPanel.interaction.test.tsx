@@ -55,7 +55,7 @@ function button(label: string) {
 }
 async function click(label: string) {
   if (label === '下一页' || label === '上一页') {
-    const scroll = renderer!.root.findAll(node => node.props.className === 'video-tag-add-modal-catalog-scroll')[0]
+    const scroll = renderer!.root.findAll(node => node.props['data-video-tag-catalog-scroll'] === true)[0]
     assert.ok(scroll?.props.onScroll, label)
     await act(async () => scroll.props.onScroll({
       currentTarget: { scrollTop: label === '下一页' ? 9840 : 0, clientHeight: 160, scrollHeight: 10000 }
@@ -149,12 +149,13 @@ it('keeps catalog rows and retry when a later page fails', async () => {
 it('creates from the full draft and prevents an old write completion from closing another video modal', async () => {
   await show(); await click('添加自定义标签')
   await type(' Fresh name ')
-  await act(async () => renderer!.root.findByType(Modal).props.onConfirm())
+  let submission!: Promise<boolean>
+  await act(async () => { submission = renderer!.root.findByType(Modal).props.onConfirm() })
   assert.equal(writes[0].name, 'Fresh name')
   await show(2)
   assert.equal(renderer!.root.findAllByType(Modal).length, 0)
   await click('添加自定义标签')
-  await act(async () => writes[0].resolve(true))
+  await act(async () => { writes[0].resolve(true); await submission })
   assert.equal(renderer!.root.findAllByType(Modal).length, 1)
   assert.deepEqual(changed, [])
 })

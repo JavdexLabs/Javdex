@@ -3,6 +3,7 @@ import { LoaderCircle, Pause, Play, Square } from 'lucide-react'
 import IconButton from '../IconButton'
 import { UI_ICON_SM } from '../iconDefaults'
 import Button from '../Button'
+import styles from './BatchTaskControls.module.css'
 
 export type BatchControlAction = 'pause' | 'resume' | 'discard'
 export type BatchControlHandler = () => boolean | void | Promise<boolean | void>
@@ -91,13 +92,13 @@ export default function BatchTaskControls({
   if (variant === 'icon') {
     return (
       <span
-        className="settings-overview-batch-actions batch-task-controls batch-task-controls--icon"
+        className={styles.iconGroup}
         role="group"
         aria-label={`${scopeLabel}${batchTaskText}${controlText}`}
       >
         {running ? (
           <IconButton
-            className="settings-overview-batch-icon-btn"
+            className={styles.iconButton}
             icon={pauseIcon}
             label={`${pauseText}${scopeLabel}${batchTaskText}`}
             aria-busy={pendingAction === 'pause' || undefined}
@@ -106,7 +107,7 @@ export default function BatchTaskControls({
           />
         ) : (
           <IconButton
-            className="settings-overview-batch-icon-btn"
+            className={styles.iconButton}
             icon={resumeIcon}
             label={
               resumeAllowed
@@ -119,7 +120,7 @@ export default function BatchTaskControls({
           />
         )}
         <IconButton
-          className="settings-overview-batch-icon-btn settings-overview-batch-icon-btn--danger"
+          className={`${styles.iconButton} ${styles.dangerIconButton}`}
           icon={discardIcon}
           label={`${discardText}${scopeLabel}${batchTaskText}`}
           aria-busy={pendingAction === 'discard' || undefined}
@@ -132,13 +133,13 @@ export default function BatchTaskControls({
 
   return (
     <div
-      className="batch-action-row batch-action-row--compact batch-task-controls batch-task-controls--button"
+      className={styles.buttonRow}
       role="group"
       aria-label={`${scopeLabel}${batchTaskText}${controlText}`}
     >
       <Button
         type="button"
-
+        className={styles.actionButton}
         size="sm"
         aria-busy={pendingAction === 'pause' || undefined}
         disabled={!running || controlsBusy}
@@ -149,7 +150,7 @@ export default function BatchTaskControls({
       </Button>
       <Button
         type="button"
-
+        className={styles.actionButton}
         size="sm"
         aria-busy={pendingAction === 'resume' || undefined}
         disabled={!resumeAllowed || controlsBusy}
@@ -162,7 +163,7 @@ export default function BatchTaskControls({
       <Button
         type="button"
         variant="danger"
-
+        className={styles.actionButton}
         size="sm"
         aria-busy={pendingAction === 'discard' || undefined}
         disabled={!controllable || controlsBusy}

@@ -1,0 +1,218 @@
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  align-items: start;
+  gap: 10px;
+}
+
+.list button {
+  text-align: left;
+  justify-content: flex-start;
+  max-width: 100%;
+}
+
+.list span {
+  overflow-wrap: anywhere;
+}
+
+.list small {
+  display: block;
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 3px;
+}
+
+.card {
+  min-width: 0;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+}
+
+.card[data-selected='true'] {
+  background: var(--surface-selected);
+  border-color: var(--text-accent);
+}
+
+.list .heading {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 64px;
+  padding: 6px;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+}
+
+.heading > svg {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.list .heading:focus-visible {
+  border-color: var(--text-accent);
+}
+
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0;
+}
+
+.actions:empty {
+  display: none;
+}
+
+.actions button, .actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px;
+  min-width: 48px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.actions svg {
+  width: 16px;
+  height: 16px;
+}
+
+.feedback {
+  position: fixed;
+  z-index: 100;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+  box-shadow: var(--shadow-feedback);
+}
+
+.copyFallback {
+  width: 240px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  user-select: text;
+}
+
+.feedback button {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.actions a:focus-visible,
+.actions button:focus-visible {
+  outline: none;
+  border-color: var(--text-accent);
+  box-shadow: var(--focus-ring);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .actions a:hover, .actions button:hover {
+    background: var(--surface-control-hover);
+    color: var(--text-primary);
+  }
+}
+
+.actions a:active, .actions button:active {
+  background: var(--surface-selected);
+}
+
+.info {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  display: block;
+  font-size: 14px;
+}
+
+.name, .info small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metadata {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.metadata small {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.primary, .availability {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.primary {
+  color: var(--text-accent);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+@media (width <= 760px) {
+  .list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (width <= 760px) {
+  .list small {
+    font-size: 12px;
+  }
+
+  .list button:disabled {
+    opacity: 1;
+    color: var(--text-muted);
+  }
+}
+
+.copyField {
+  position: fixed;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+}

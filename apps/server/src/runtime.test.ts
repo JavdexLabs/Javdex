@@ -1987,6 +1987,50 @@ describe('server runtime lifecycle', () => {
       }
       assert.equal(preview.videoId, imported.videoId)
       assert.match(preview.revision, /^[a-f0-9]{64}$/)
+      getDb().prepare('INSERT INTO video_sources(video_id,source,external_code,url) VALUES(?,?,?,?)')
+        .run(imported.videoId, 'contract-source', null, 'https://example.test/source')
+      assert.deepEqual(
+        await remote.queries.listVideoSources({ videoIds: [imported.videoId] }),
+        await local.queries.listVideoSources({ videoIds: [imported.videoId] })
+      )
+      const targetLibraryId = Number(getDb().prepare('INSERT INTO media_libraries(name,position) VALUES(?,?)')
+        .run('Contract target', 1).lastInsertRowid)
+      const resourceId = (await remote.queries.getVideo({ scope: { kind: 'library', libraryId: 1 }, videoId: imported.videoId }))!.resources[0].id
+      const movePreview = await remote.videos.previewMoveResource({ sourceLibraryId: 1, targetLibraryId, resourceId })
+      const moved = await remote.videos.moveResource(
+        { sourceLibraryId: 1, targetLibraryId, resourceId, planId: randomUUID(), planDigest: movePreview.revision },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )
+      assert.equal(moved.kind, 'move-resource')
+      assert.equal(moved.targetLibraryId, targetLibraryId)
+      assert.equal(moved.sourceMembershipRemoved, true)
+      assert.equal(getDb().prepare(
+        'SELECT 1 FROM library_video_memberships WHERE library_id = 1 AND video_id = ?'
+      ).get(imported.videoId), undefined)
+      assert.equal((await remote.queries.getVideo({
+        scope: { kind: 'library', libraryId: targetLibraryId }, videoId: imported.videoId
+      }))!.resources[0].id, resourceId)
+      for (const backend of [local, remote]) {
+        await assert.rejects(
+          backend.videos.previewRemoveFromLibrary({ libraryId: targetLibraryId, videoId: imported.videoId }),
+          { message: /手动移出媒体库已停用/ }
+        )
+        await assert.rejects(
+          backend.videos.removeFromLibrary(
+            { libraryId: targetLibraryId, videoId: imported.videoId, planId: randomUUID(), planDigest: movePreview.revision },
+            { operationId: randomUUID(), expectedVersions: {} }
+          ),
+          { message: /手动移出媒体库已停用/ }
+        )
+      }
+      const emptyVideoId = Number(getDb().prepare('INSERT INTO videos(code) VALUES(?)').run('CONTRACT-DELETE').lastInsertRowid)
+      const deletePreview = await remote.videos.previewDeleteGlobal({ videoId: emptyVideoId })
+      const deleted = await remote.videos.deleteGlobal(
+        { videoId: emptyVideoId, planId: randomUUID(), planDigest: deletePreview.revision },
+        { operationId: randomUUID(), expectedVersions: {} }
+      )
+      assert.equal(deleted.kind, 'delete-globally')
+      assert.equal(deleted.canonicalVideoDeleted, true)
 
       const directorId = (await remote.classifications.createDirector(
         { mainName: 'S08 Director' },

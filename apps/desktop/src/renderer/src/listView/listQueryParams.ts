@@ -20,6 +20,7 @@ export const LIST_PARAM = {
   releaseDir: 'releaseDir',
   facetOffset: 'facetOffset',
   relatedVideoOffset: 'relatedVideoOffset',
+  actressVideoOffset: 'actressVideoOffset',
   playlistOffset: 'playlistOffset',
   pendingType: 'type',
   pendingItem: 'item',

@@ -1,0 +1,8 @@
+.root {
+  user-select: text;
+}
+
+.error {
+  color: var(--text-danger);
+  font-size: var(--classification-merge-text-sm);
+}

@@ -1,5 +1,8 @@
 import type { ReactNode, Ref } from 'react'
 import ScrollToTopButton from './ScrollToTopButton'
+import ScrollViewport from './ScrollViewport'
+import ScrollRegion from './ScrollRegion'
+import PageContent from './PageContent'
 
 interface ListSurfaceProps {
   variant: 'fill' | 'scroll'
@@ -23,28 +26,29 @@ export default function ListSurface({
   onScrollToTop
 }: ListSurfaceProps): JSX.Element {
   const body = (
-    <div
+    <ScrollViewport
       ref={scrollRef}
-      className={`scroll-body scroll-body--${variant}${className ? ` ${className}` : ''}`}
+      variant={variant}
+      className={className}
     >
       {withInner ? (
-        <div className={`scroll-body-inner${innerClassName ? ` ${innerClassName}` : ''}`}>
+        <PageContent className={innerClassName}>
           {children}
-        </div>
+        </PageContent>
       ) : (
         children
       )}
-    </div>
+    </ScrollViewport>
   )
 
   if (variant === 'scroll' || onScrollToTop) {
     return (
-      <div className="list-scroll-region">
+      <ScrollRegion>
         {body}
         {onScrollToTop ? (
           <ScrollToTopButton visible={Boolean(showScrollToTop)} onClick={onScrollToTop} />
         ) : null}
-      </div>
+      </ScrollRegion>
     )
   }
 

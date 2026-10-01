@@ -87,6 +87,45 @@
   background: color-mix(in srgb, var(--surface-control) 22%, transparent);
 }
 
+.editSection[data-variant='media'] {
+  padding-block: 10px;
+}
+
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.editForm[data-variant='relaxed'] {
+  gap: 12px;
+}
+
+.editFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+.editFields[data-variant='relaxed'] {
+  gap: 12px 14px;
+}
+
+.editLabelNote {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+@media (width <= 560px) {
+  .editFields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .editSectionTitle {
   margin: 0;
   color: var(--text-muted);
@@ -101,8 +140,28 @@
   gap: 4px;
 }
 
+.editField > input,
+.editField > textarea {
+  width: 100%;
+}
+
+.editField > textarea {
+  min-height: 72px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.45;
+}
+
 .editFieldFull {
   grid-column: 1 / -1;
+}
+
+.editCheckRow {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--target-min);
 }
 
 .editLabel {

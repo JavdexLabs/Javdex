@@ -128,7 +128,6 @@ export function PluginDevLeaveGuardProvider({ children }: { children: ReactNode 
       {showModal && (
         <Modal
           title="未安装的插件更改"
-          className="modal--plugin-dev-leave"
           confirmText="仍要离开"
           cancelText="留在本页"
           danger

@@ -1,0 +1,156 @@
+.rail {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.modeBadge {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-panel));
+  color: var(--text-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 2px var(--scrollbar-safe-pad) 6px 0;
+  scrollbar-gutter: stable;
+}
+
+.attention {
+  margin: 10px 10px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface-control));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.attention strong {
+  display: block;
+  color: var(--text-primary);
+}
+
+.attention span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 10px 10px 0;
+}
+
+.control span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.controlRequired > span {
+  color: var(--text-primary);
+}
+
+.controlMark {
+  margin-left: 2px;
+  color: var(--danger);
+  font-weight: 800;
+  text-decoration: none;
+  cursor: help;
+}
+
+.controlHint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.control .textInput {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.textareaShort {
+  min-height: 62px;
+}
+
+.textareaMini {
+  min-height: 48px;
+}
+
+.controlAttention :is(input, textarea).textInput {
+  border-color: color-mix(in srgb, var(--warning) 52%, var(--border-subtle));
+  background: color-mix(in srgb, var(--warning) 6%, var(--surface-control));
+}
+
+.control:focus-within .textInput {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.primary input {
+  font-weight: 600;
+}
+
+.selectHint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.controlHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 10px;
+}
+
+.metaRow .control {
+  margin: 0;
+}
+
+.scroll > .fieldTags {
+  margin-top: 10px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  flex-shrink: 0;
+  margin: auto 10px 10px;
+}
+
+.actionButton {
+  width: 100%;
+  justify-content: center;
+}

@@ -1,0 +1,79 @@
+.root[data-ui='icon-button'] {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+
+  --icon-glyph-size: 12px;
+
+  border-radius: 6px;
+  backdrop-filter: blur(10px);
+  box-shadow:
+    0 1px 2px var(--shadow-media-base-color),
+    inset 0 1px 0 var(--shadow-media-inset-color);
+  opacity: var(--card-action-opacity, 0);
+  pointer-events: var(--card-action-events, none);
+  transition:
+    opacity var(--motion-fast),
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast),
+    box-shadow var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+.root[data-action='delete'] {
+  border-color: var(--border-danger);
+  background: color-mix(in srgb, var(--surface-danger) 76%, transparent);
+  color: var(--text-danger);
+}
+
+.root[data-action='remove'] {
+  border-color: color-mix(in srgb, var(--border-strong) 54%, transparent);
+  background: color-mix(in srgb, var(--surface-base) 72%, transparent);
+  color: var(--text-secondary);
+}
+
+:where([data-media-tile]:hover, [data-media-tile]:focus-within) .root[data-ui='icon-button'],
+.root[data-ui='icon-button']:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.root[data-action='delete']:hover:where(:not(:disabled)),
+.root[data-action='delete']:focus-visible:where(:not(:disabled)) {
+  background: color-mix(in srgb, var(--surface-danger) 88%, var(--surface-base));
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border-subtle));
+  color: var(--danger);
+  box-shadow:
+    0 2px 8px var(--shadow-media-hover-color),
+    inset 0 1px 0 var(--shadow-media-hover-inset-color);
+  outline: none;
+}
+
+.root[data-action='remove']:hover:where(:not(:disabled)),
+.root[data-action='remove']:focus-visible:where(:not(:disabled)) {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.root[data-ui='icon-button']:focus-visible:where(:not(:disabled)) {
+  box-shadow:
+    var(--focus-ring),
+    0 1px 2px var(--shadow-media-base-color);
+}
+
+.root[data-ui='icon-button']:active:where(:not(:disabled)) {
+  transform: scale(0.94);
+}
+
+.root[data-action='delete']:active:where(:not(:disabled)) {
+  background: color-mix(in srgb, var(--danger) 48%, var(--surface-base));
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}

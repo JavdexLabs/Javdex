@@ -1,0 +1,122 @@
+.layout {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 20px;
+  gap: 14px;
+}
+
+.avatarFrame {
+  flex-shrink: 0;
+}
+
+.avatarFrame[data-preview='true'] {
+  cursor: zoom-in;
+}
+
+.avatarFrame:where([data-preview='true']):focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 4px;
+  box-shadow: var(--focus-ring);
+}
+
+.avatarFrame:where([data-preview='true']) .avatar {
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.avatarFrame:where([data-preview='true']:hover) .avatar {
+  border-color: var(--border-accent);
+}
+
+.header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 28px;
+}
+
+.head {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.head .title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.22;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  min-width: max-content;
+}
+
+.actions .stickyActions {
+  position: sticky;
+  z-index: 30;
+  top: 8px;
+}
+
+.tabs {
+  display: inline-flex;
+  height: var(--control-h-sm);
+  margin: 8px 0 16px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 9%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.tab:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+}
+
+.tab[aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-accent);
+  font-weight: 700;
+}
+
+@container detail-page (width <= 720px) {
+  .header {
+    gap: 16px;
+  }
+}
+
+@container detail-page (width <= 480px) {
+  .header {
+    gap: 12px;
+  }
+}

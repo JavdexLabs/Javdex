@@ -1,0 +1,36 @@
+.root {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-height: 56px;
+  padding: 2px 0 18px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.first {
+  color: var(--text-primary);
+}
+
+.second {
+  color: var(--text-accent);
+}
+
+@media (width <= 1120px) {
+  .wordmark {
+    font-size: 22px;
+  }
+}

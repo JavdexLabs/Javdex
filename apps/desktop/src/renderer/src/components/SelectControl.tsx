@@ -16,6 +16,7 @@ import {
   type SelectHTMLAttributes
 } from 'react'
 import { createPortal } from 'react-dom'
+import styles from './SelectControl.module.css'
 
 interface SelectOption {
   value: string
@@ -47,6 +48,8 @@ type SelectControlProps = Omit<
   children: ReactNode
   value: string | number
   displayLabel?: string
+  variant?: 'default' | 'filter'
+  buttonClassName?: string
   onChange?: (event: ChangeEvent<HTMLSelectElement>) => void
 }
 
@@ -87,6 +90,8 @@ export default function SelectControl({
   title,
   value,
   displayLabel,
+  variant = 'default',
+  buttonClassName,
   'aria-label': ariaLabel
 }: SelectControlProps): JSX.Element {
   const buttonRef = useRef<HTMLButtonElement | null>(null)
@@ -219,14 +224,14 @@ export default function SelectControl({
   return (
     <div
       ref={rootRef}
-      className={`app-select${className ? ` ${className}` : ''}${open ? ' is-open' : ''}${
-        disabled ? ' is-disabled' : ''
-      }`}
+      className={`${styles.root}${className ? ` ${className}` : ''}`}
+      data-open={open || undefined}
+      data-variant={variant}
     >
       <button
         ref={buttonRef}
         type="button"
-        className="select app-select-button"
+        className={`${styles.button}${buttonClassName ? ` ${buttonClassName}` : ''}`}
         id={id}
         name={name}
         autoFocus={autoFocus}
@@ -239,14 +244,16 @@ export default function SelectControl({
         onClick={() => setOpen((next) => !next)}
         onKeyDown={onKeyDown}
       >
-        <span className="app-select-value">{displayLabel ?? selectedOption?.label ?? visibleOptions[0]?.label ?? ''}</span>
+        <span className={styles.value}>{displayLabel ?? selectedOption?.label ?? visibleOptions[0]?.label ?? ''}</span>
       </button>
       {open && typeof document !== 'undefined'
         ? createPortal(
             <div
               ref={menuRef}
               id={listboxId}
-              className={`app-select-menu app-select-menu--${menuPlacement}`}
+              className={styles.menu}
+              data-select-control-menu="true"
+              data-placement={menuPlacement}
               role="listbox"
               tabIndex={-1}
               style={menuStyle}
@@ -257,9 +264,8 @@ export default function SelectControl({
                   <button
                     key={`${option.value}:${index}`}
                     type="button"
-                    className={`app-select-option${selected ? ' is-selected' : ''}${
-                      index === activeIndex ? ' is-active' : ''
-                    }`}
+                    className={styles.option}
+                    data-active={index === activeIndex || undefined}
                     disabled={option.disabled}
                     role="option"
                     aria-selected={selected}

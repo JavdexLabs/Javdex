@@ -9,7 +9,7 @@ import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
 import styles from './BuiltinPlaylistButton.module.css'
 
-export default function BuiltinPlaylistButton({ video, kind }: { video: VideoCard; kind: 'favorites' | 'watch_later' }): JSX.Element {
+export default function BuiltinPlaylistButton({ video, kind, className = '' }: { video: VideoCard; kind: 'favorites' | 'watch_later'; className?: string }): JSX.Element {
   const initial = Boolean(kind === 'favorites' ? video.is_favorite : video.is_watch_later)
   const [selected, setSelected] = useState(initial)
   const [busy, setBusy] = useState(false)
@@ -25,7 +25,7 @@ export default function BuiltinPlaylistButton({ video, kind }: { video: VideoCar
     return () => window.removeEventListener('builtin-playlist-changed', listener)
   }, [kind, video.id])
   const name = kind === 'favorites' ? '我喜欢' : '稍后观看'
-  return <IconButton className={`poster-icon-action poster-hover-control ${kind === 'favorites' ? 'poster-edit-action' : styles.watch} ${selected ? (kind === 'favorites' ? styles.favorite : styles.selected) : ''}`}
+  return <IconButton className={`${className} ${kind === 'watch_later' ? styles.watch : ''} ${selected ? (kind === 'favorites' ? styles.favorite : styles.selected) : ''}`}
     icon={kind === 'favorites' ? <Heart {...UI_ICON} fill={selected ? 'currentColor' : 'none'} /> : <Clock {...UI_ICON} />}
     label={`${selected ? '移出' : '加入'}${name}`} title={`${selected ? '移出' : '加入'}${name}`}
     aria-pressed={selected} disabled={busy}

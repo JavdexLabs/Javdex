@@ -7,7 +7,9 @@ import {
   reconcileClassificationMergeSource
 } from './classificationMergeState'
 import { useDebounce } from '../hooks/useDebounce'
-import EmptyState from './EmptyState'
+import { ClassificationChoiceEmpty, ClassificationChoiceList, ClassificationChoiceRow } from './ClassificationChoices'
+import SearchInput from './SearchInput'
+import styles from './ClassificationMergeModal.module.css'
 import Modal from './Modal'
 import { UI_ICON_SM } from './iconDefaults'
 
@@ -99,7 +101,7 @@ export default function ClassificationMergeModal<
       title={title}
       hint={hint}
       size="md"
-      className="classification-merge-modal"
+      className={styles.modal}
       confirmText={merging ? '合并中…' : '确认合并'}
       confirmDisabled={!input}
       busy={merging}
@@ -107,29 +109,28 @@ export default function ClassificationMergeModal<
       onCancel={onCancel}
       onConfirm={() => void submit()}
     >
-      <div className="classification-merge-body">
-        <div className="classification-merge-flow" aria-label={`${entityLabel}合并方向`}>
+      <div className={styles.body}>
+        <div className={styles.flow} aria-label={`${entityLabel}合并方向`}>
           <article
-            className={`classification-merge-card${
-              selected ? ' classification-merge-card--source' : ''
-            }`}
+            className={styles.card}
+            data-highlighted={Boolean(selected)}
           >
-            <span className="classification-merge-badge">来源 · 并入后删除</span>
+            <span className={styles.badge}>来源 · 并入后删除</span>
             {renderIcon()}
             <strong>{selected?.mainName ?? '尚未选择来源'}</strong>
             <small>{selected ? sourceMeta(selected) : `从下方候选中选择${sourceNoun}`}</small>
           </article>
-          <ArrowRight className="classification-merge-arrow" {...UI_ICON_SM} aria-hidden />
-          <article className="classification-merge-card classification-merge-card--target">
-            <span className="classification-merge-badge">目标 · 保留</span>
+          <ArrowRight className={styles.arrow} {...UI_ICON_SM} aria-hidden />
+          <article className={styles.card} data-highlighted>
+            <span className={styles.badge}>目标 · 保留</span>
             {renderIcon()}
             <strong>{target.mainName}</strong>
             <small>{targetMeta(target)}</small>
           </article>
         </div>
 
-        <section className="classification-merge-picker" aria-label={`选择来源${entityLabel}`}>
-          <div className="classification-merge-section-head">
+        <section className={styles.picker} aria-label={`选择来源${entityLabel}`}>
+          <div className={styles.sectionHead}>
             <strong>选择来源{entityLabel}</strong>
             {!candidatesQuery.isLoading && candidates.length > 0 ? (
               <span>
@@ -137,27 +138,25 @@ export default function ClassificationMergeModal<
               </span>
             ) : null}
           </div>
-          <input
-            className="search-input"
+          <SearchInput
+            fullWidth
             type="search"
             placeholder="搜索主名或别名…"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             autoFocus
           />
-          <div className="classification-choice-list classification-merge-candidates">
+          <ClassificationChoiceList>
             {candidatesQuery.isLoading ? (
-              <EmptyState loading variant="modal" />
+              <ClassificationChoiceEmpty loading />
             ) : candidatesQuery.isError ? (
-              <EmptyState
-                variant="modal"
+              <ClassificationChoiceEmpty
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
                 title={`候选${entityLabel}加载失败`}
                 description={errorMessage(candidatesQuery.error)}
               />
             ) : candidates.length === 0 ? (
-              <EmptyState
-                variant="modal"
+              <ClassificationChoiceEmpty
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
                 title={search ? `没有匹配的${entityLabel}` : `没有可合并的${entityLabel}`}
                 description={
@@ -169,37 +168,29 @@ export default function ClassificationMergeModal<
                 {candidates.map((candidate) => {
                   const isSelected = candidate.id === selected?.id
                   return (
-                    <button
+                    <ClassificationChoiceRow
                       key={candidate.id}
-                      type="button"
-                      className={`classification-choice-item classification-merge-candidate${
-                        isSelected ? ' is-selected' : ''
-                      }`}
                       role="option"
-                      aria-selected={isSelected}
+                      selected={isSelected}
+                      name={candidate.mainName}
+                      description={candidateMeta(candidate)}
+                      trailing={`${candidate.videoCount} 部`}
                       onClick={() => setSelected(candidate)}
-                    >
-                      <span className="classification-choice-radio" aria-hidden />
-                      <span className="classification-choice-main">
-                        <strong>{candidate.mainName}</strong>
-                        <small>{candidateMeta(candidate)}</small>
-                      </span>
-                      <span>{candidate.videoCount} 部</span>
-                    </button>
+                    />
                   )
                 })}
               </div>
             )}
-          </div>
+          </ClassificationChoiceList>
         </section>
 
         {selected ? (
-          <section className="classification-merge-plan" aria-label="合并规则">
+          <section className={styles.plan} aria-label="合并规则">
             <strong>合并后</strong>
             <ul>{renderPlan(target, selected)}</ul>
           </section>
         ) : null}
-        {error ? <p className="classification-merge-error">{error}</p> : null}
+        {error ? <p className={styles.error}>{error}</p> : null}
       </div>
     </Modal>
   )

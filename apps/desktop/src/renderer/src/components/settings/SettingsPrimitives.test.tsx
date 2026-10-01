@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import { SettingsCard, SettingsStatusPill, SettingsNumberStepper } from './SettingsPrimitives'
+import EmptyState from '../EmptyState'
+import { SettingsCard, SettingsEmptyPanel, SettingsStatusPill, SettingsNumberStepper } from './SettingsPrimitives'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -85,7 +86,8 @@ describe('SettingsPrimitives', () => {
     const section = renderer?.root.findByType('section')
     assert.ok(section)
     assert.equal(section.props['aria-labelledby'], 'panel-title')
-    assert.match(section.props.className, /settings-card/)
+    assert.ok(section.props.className)
+    assert.doesNotMatch(section.props.className, /(?:^| )settings-card(?: |$)/)
   })
 
   it('exposes status as data rather than a behavior-bearing class name', () => {
@@ -99,5 +101,40 @@ describe('SettingsPrimitives', () => {
     assert.ok(pill)
     assert.equal(pill.props['data-status'], 'warning')
     assert.doesNotMatch(pill.props.className, /settings-status-pill--warning/)
+  })
+
+  it('provides a header layout seam without forwarding it to the card DOM', () => {
+    act(() => {
+      renderer = TestRenderer.create(
+        <SettingsCard as="section" title="防窥模式" headerClassName="privacy-header">
+          <p>保护范围</p>
+        </SettingsCard>
+      )
+    })
+    const card = renderer!.root.findByType('section')
+    assert.equal(card.props.headerClassName, undefined)
+    const header = card.findByType('h3').parent!.parent!
+    assert.match(header.props.className, /privacy-header/)
+    assert.equal(card.findByType('h3').children[0], '防窥模式')
+  })
+
+  it('keeps empty-panel root and description styles explicit without legacy classes', () => {
+    act(() => {
+      renderer = TestRenderer.create(
+        <SettingsEmptyPanel
+          variant="compact"
+          className="custom-empty"
+          descriptionClassName="custom-description"
+        >
+          尚无扫描记录
+        </SettingsEmptyPanel>
+      )
+    })
+
+    const emptyState = renderer!.root.findByType(EmptyState)
+    assert.match(emptyState.props.className, /custom-empty/)
+    assert.match(emptyState.props.descriptionClassName, /custom-description/)
+    assert.doesNotMatch(emptyState.props.className, /settings-empty-panel/)
+    assert.equal(emptyState.props.description, '尚无扫描记录')
   })
 })

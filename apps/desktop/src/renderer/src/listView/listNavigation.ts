@@ -333,6 +333,15 @@ export function navigateToVideoListSurface(
   )
 }
 
+/** Child actress pagination never owns the underlying list's works offset. */
+function stripActressVideoOffset(search: string): string {
+  const params = new URLSearchParams(search)
+  if (!params.has(LIST_PARAM.actressVideoOffset)) return search
+  params.delete(LIST_PARAM.actressVideoOffset)
+  const next = params.toString()
+  return next ? `?${next}` : ''
+}
+
 /** Actress detail nested under video detail (stays in current list route tree). */
 export function navigateToActressFromVideoDetail(
   navigate: NavigateFunction,
@@ -340,6 +349,7 @@ export function navigateToActressFromVideoDetail(
   videoId: number,
   actressId: number
 ): void {
+  location = { ...location, search: stripActressVideoOffset(location.search) }
   const mediaLibrary = parseMediaLibraryVideoPath(location.pathname)
   if (mediaLibrary) {
     navigate({
@@ -421,6 +431,7 @@ export function navigateBackFromActressDetail(
   navigate: NavigateFunction,
   location: Location
 ): void {
+  location = { ...location, search: stripActressVideoOffset(location.search) }
   const mediaLibrary = parseMediaLibraryVideoPath(location.pathname)
   if (mediaLibrary?.actressId != null) {
     navigate({

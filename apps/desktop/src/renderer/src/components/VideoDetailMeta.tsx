@@ -9,8 +9,11 @@ import type {
 } from '@shared/videoTypes'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/videoScrapeTypes'
 import MetaLink from './MetaLink'
-import IconButton from './IconButton'
+import DetailIconButton from './DetailIconButton'
+import { DetailMenuAnchor, DetailMenuItem, DetailMenuPanel, DetailMenuSeparator } from './DetailMenu'
 import EmptyState from './EmptyState'
+import DetailSectionTitle from './DetailSectionTitle'
+import { DetailSection, DetailSectionActions, DetailSectionCount, DetailSectionHead } from './DetailSection'
 import { UI_ICON } from './iconDefaults'
 import {
   navigateToDirectorDetail,
@@ -20,6 +23,8 @@ import {
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
+import ScrapeStatusBadge from './ScrapeStatusBadge'
+import styles from './VideoDetailMeta.module.css'
 
 export type VideoPrimaryMetaItem =
   | { key: string; label: string; type: 'text'; value: string }
@@ -36,7 +41,6 @@ export type VideoPrimaryMetaItem =
 
 type SecondaryItem =
   | { key: string; label: string; type: 'text'; value: string }
-  | { key: string; label: string; type: 'path'; value: string }
   | { key: string; label: string; type: 'status'; status: ScrapedStatus }
 
 function isBlank(value: string | null | undefined): boolean {
@@ -186,28 +190,22 @@ function ResourceReassignmentMenuItems({
 }): JSX.Element {
   return (
     <>
-      <button
-        type="button"
-        className="detail-menu-item"
-        role="menuitem"
+      <DetailMenuItem
         onClick={() => {
           onClose()
           onSetPrimaryResource?.(resource.id)
         }}
       >
         设为主资源
-      </button>
-      <button
-        type="button"
-        className="detail-menu-item"
-        role="menuitem"
+      </DetailMenuItem>
+      <DetailMenuItem
         onClick={() => {
           onClose()
           onSplitResource?.(resource)
         }}
       >
         拆分为独立影片
-      </button>
+      </DetailMenuItem>
     </>
   )
 }
@@ -262,41 +260,39 @@ function VideoLocalResourceRow({
   }, [menuOpen])
 
   return (
-    <div
-      className={`detail-meta-file${isPrimary && multiResources ? ' detail-meta-file--primary' : ''}`}
-    >
-      <div className="detail-meta-file-main">
-        <div className="detail-meta-file-label-row">
-          <span className="detail-meta-file-label">{title}</span>
-          <span className="detail-meta-file-badge">{VIDEO_RESOURCE_KIND_LABELS.local}</span>
+    <div data-resource-row className={styles.file}>
+      <div className={styles.fileMain}>
+        <div className={styles.labelRow}>
+          <span className={styles.fileLabel}>{title}</span>
+          <span className={styles.badge}>{VIDEO_RESOURCE_KIND_LABELS.local}</span>
           {isPrimary ? (
-            <span className="detail-meta-file-badge" title="顶部播放将使用此资源">
+            <span className={styles.badge} title="顶部播放将使用此资源">
               主资源
             </span>
           ) : null}
         </div>
         {facts.length > 0 ? (
-          <div className="detail-meta-file-facts">
+          <div className={styles.facts}>
             {facts.map((fact) => (
-              <span key={fact.key} className="detail-meta-file-fact">
+              <span key={fact.key} className={styles.fact}>
                 <span>{fact.label}</span>
                 <strong>{fact.value}</strong>
               </span>
             ))}
           </div>
         ) : null}
-        {!isBlank(path) ? <div className="detail-meta-path">{path}</div> : null}
+        {!isBlank(path) ? <div className={styles.path}>{path}</div> : null}
       </div>
-      <div className="detail-meta-file-actions">
-        <IconButton
-          className="detail-icon-action"
+      <div className={styles.actions}>
+        <DetailIconButton
+          className={styles.resourceAction}
           icon={<Play {...UI_ICON} />}
           label="播放此文件"
           onClick={() => onOpenResource?.(resource.id)}
         />
-        <div className="detail-more-actions" ref={menuRef}>
-          <IconButton
-            className="detail-icon-action"
+        <DetailMenuAnchor ref={menuRef}>
+          <DetailIconButton
+            className={styles.resourceAction}
             icon={<Ellipsis {...UI_ICON} />}
             label="更多"
             aria-haspopup="menu"
@@ -304,40 +300,31 @@ function VideoLocalResourceRow({
             onClick={() => setMenuOpen((open) => !open)}
           />
           {menuOpen ? (
-            <div className="detail-more-menu" role="menu">
-              <button
-                type="button"
-                className="detail-menu-item"
-                role="menuitem"
+            <DetailMenuPanel>
+              <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
                   onEditResource?.(resource)
                 }}
               >
                 编辑标签
-              </button>
-              <button
-                type="button"
-                className="detail-menu-item"
-                role="menuitem"
+              </DetailMenuItem>
+              <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
                   onRevealResource?.(resource.id)
                 }}
               >
                 在文件夹中显示
-              </button>
-              <button
-                type="button"
-                className="detail-menu-item"
-                role="menuitem"
+              </DetailMenuItem>
+              <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
                   onMoveResource?.(resource)
                 }}
               >
                 移动到其它媒体库
-              </button>
+              </DetailMenuItem>
               {!isPrimary ? (
                 <ResourceReassignmentMenuItems
                   resource={resource}
@@ -346,21 +333,19 @@ function VideoLocalResourceRow({
                   onSplitResource={onSplitResource}
                 />
               ) : null}
-              <div className="detail-menu-separator" />
-              <button
-                type="button"
-                className="detail-menu-item detail-menu-item--danger"
-                role="menuitem"
+              <DetailMenuSeparator />
+              <DetailMenuItem
+                danger
                 onClick={() => {
                   setMenuOpen(false)
                   onRemoveResource?.(resource)
                 }}
               >
                 删除本地文件
-              </button>
-            </div>
+              </DetailMenuItem>
+            </DetailMenuPanel>
           ) : null}
-        </div>
+        </DetailMenuAnchor>
       </div>
     </div>
   )
@@ -368,7 +353,6 @@ function VideoLocalResourceRow({
 
 function VideoLinkResourceRow({
   resource,
-  multiResources,
   onOpenResource,
   onRevealResource,
   onReadResourceLocator,
@@ -379,7 +363,6 @@ function VideoLinkResourceRow({
   onRemoveResource
 }: {
   resource: VideoResourceDetail
-  multiResources: boolean
   onOpenResource?: (resourceId: number) => void
   onRevealResource?: (resourceId: number) => void
   onReadResourceLocator?: (resourceId: number) => Promise<string | null>
@@ -428,50 +411,48 @@ function VideoLinkResourceRow({
   }, [menuOpen])
 
   return (
-    <div
-      className={`detail-meta-file${isPrimary && multiResources ? ' detail-meta-file--primary' : ''}`}
-    >
-      <div className="detail-meta-file-main">
-        <div className="detail-meta-file-label-row">
-          <span className="detail-meta-file-label">{title}</span>
-          <span className="detail-meta-file-badge">{kind}</span>
-          {isStrm ? <span className="detail-meta-file-badge">STRM 托管</span> : null}
+    <div data-resource-row className={styles.file}>
+      <div className={styles.fileMain}>
+        <div className={styles.labelRow}>
+          <span className={styles.fileLabel}>{title}</span>
+          <span className={styles.badge}>{kind}</span>
+          {isStrm ? <span className={styles.badge}>STRM 托管</span> : null}
           {isPrimary ? (
-            <span className="detail-meta-file-badge" title="顶部播放将打开此资源">
+            <span className={styles.badge} title="顶部播放将打开此资源">
               主资源
             </span>
           ) : null}
         </div>
-        {resource.display_name?.trim() ? <div className="detail-meta-path">{masked}</div> : null}
+        {resource.display_name?.trim() ? <div className={styles.path}>{masked}</div> : null}
         {resource.strm_source_path ? (
-          <div className="detail-meta-path copyable-text">源文件 · {resource.strm_source_path}</div>
+          <div className={`${styles.path} copyable-text`}>源文件 · {resource.strm_source_path}</div>
         ) : null}
         {resource.size_bytes != null && resource.size_bytes > 0 ? (
-          <div className="detail-meta-file-facts">
-            <span className="detail-meta-file-fact">
+          <div className={styles.facts}>
+            <span className={styles.fact}>
               <span>大小</span>
               <strong>{formatFileSize(resource.size_bytes)}</strong>
             </span>
           </div>
         ) : null}
-        {fullLink ? <div className="detail-meta-path detail-meta-path--full">{fullLink}</div> : null}
+        {fullLink ? <div className={`${styles.path} ${styles.pathFull}`}>{fullLink}</div> : null}
       </div>
-      <div className="detail-meta-file-actions">
-        <IconButton
-          className="detail-icon-action"
+      <div className={styles.actions}>
+        <DetailIconButton
+          className={styles.resourceAction}
           icon={copied ? <Check {...UI_ICON} /> : <Copy {...UI_ICON} />}
           label={copied ? '已复制链接' : '复制链接'}
           onClick={() => void copyFullLink()}
         />
-        <IconButton
-          className="detail-icon-action"
+        <DetailIconButton
+          className={styles.resourceAction}
           icon={<ExternalLink {...UI_ICON} />}
           label={`打开${kind}`}
           onClick={() => onOpenResource?.(resource.id)}
         />
-        <div className="detail-more-actions" ref={menuRef}>
-          <IconButton
-            className="detail-icon-action"
+        <DetailMenuAnchor ref={menuRef}>
+          <DetailIconButton
+            className={styles.resourceAction}
             icon={<Ellipsis {...UI_ICON} />}
             label="更多"
             aria-haspopup="menu"
@@ -479,11 +460,8 @@ function VideoLinkResourceRow({
             onClick={() => setMenuOpen((open) => !open)}
           />
           {menuOpen ? (
-            <div className="detail-more-menu" role="menu">
-              <button
-                type="button"
-                className="detail-menu-item"
-                role="menuitem"
+            <DetailMenuPanel>
+              <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
                   setFullLink(null)
@@ -491,31 +469,25 @@ function VideoLinkResourceRow({
                 }}
               >
                 编辑资源信息
-              </button>
+              </DetailMenuItem>
               {isStrm ? (
-                <button
-                  type="button"
-                  className="detail-menu-item"
-                  role="menuitem"
+                <DetailMenuItem
                   onClick={() => {
                     setMenuOpen(false)
                     onRevealResource?.(resource.id)
                   }}
                 >
                   在文件夹中显示
-                </button>
+                </DetailMenuItem>
               ) : null}
-              <button
-                type="button"
-                className="detail-menu-item"
-                role="menuitem"
+              <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
                   onMoveResource?.(resource)
                 }}
               >
                 移动到其它媒体库
-              </button>
+              </DetailMenuItem>
               {!isPrimary ? (
                 <ResourceReassignmentMenuItems
                   resource={resource}
@@ -524,32 +496,27 @@ function VideoLinkResourceRow({
                   onSplitResource={onSplitResource}
                 />
               ) : null}
-              <button
-                type="button"
-                className="detail-menu-item"
-                role="menuitem"
+              <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
                   void toggleFullLink()
                 }}
               >
                 {fullLink ? '隐藏完整链接' : '查看完整链接'}
-              </button>
-              <div className="detail-menu-separator" />
-              <button
-                type="button"
-                className="detail-menu-item detail-menu-item--danger"
-                role="menuitem"
+              </DetailMenuItem>
+              <DetailMenuSeparator />
+              <DetailMenuItem
+                danger
                 onClick={() => {
                   setMenuOpen(false)
                   onRemoveResource?.(resource)
                 }}
               >
                 {isStrm ? '删除 STRM 源文件' : '移除链接资源'}
-              </button>
-            </div>
+              </DetailMenuItem>
+            </DetailMenuPanel>
           ) : null}
-        </div>
+        </DetailMenuAnchor>
       </div>
     </div>
   )
@@ -562,11 +529,11 @@ export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.E
   if (items.length === 0) return null
 
   return (
-    <div className="meta-grid detail-meta-grid">
+    <div className={styles.primaryGrid} data-primary-meta>
       {items.map((item) => (
         <Fragment key={item.key}>
-          <span className="meta-key">{item.label}</span>
-          <span className="meta-val">
+          <span className={styles.primaryKey}>{item.label}</span>
+          <span className={styles.primaryValue}>
             {item.type === 'organization' ? (
               <MetaLink
                 onClick={() =>
@@ -600,30 +567,21 @@ export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.E
   )
 }
 
-function maintenanceStatusClass(status: ScrapedStatus): string {
-  if (status === 1) return 'detail-meta-status--success'
-  return status === 2 ? 'detail-meta-status--failed' : 'detail-meta-status--unscraped'
-}
-
 export function VideoMaintenanceInfo({ video }: { video: VideoDetail }): JSX.Element {
   const recordItems = buildRecordItems(video)
 
   return (
-    <dl className="detail-maintenance-grid">
+    <dl className={styles.maintenanceGrid} data-maintenance-meta>
       {recordItems.map((item) => (
-        <div key={item.key} className="detail-maintenance-item">
+        <div key={item.key} className={styles.maintenanceItem}>
           <dt>{item.label}</dt>
-          <dd
-            className={
-              item.type === 'status'
-                ? `detail-meta-status ${maintenanceStatusClass(item.status)}`
-                : item.type === 'path'
-                  ? 'detail-meta-path'
-                  : undefined
-            }
-          >
-            {item.type === 'status' ? getVideoScrapeStatusLabel(item.status) : item.value}
-          </dd>
+          {item.type === 'status' ? (
+            <ScrapeStatusBadge as="dd" status={item.status}>
+              {getVideoScrapeStatusLabel(item.status)}
+            </ScrapeStatusBadge>
+          ) : (
+            <dd>{item.value}</dd>
+          )}
         </div>
       ))}
     </dl>
@@ -656,22 +614,22 @@ export function VideoDetailSecondaryMeta({
   const multiResources = video.resources.length > 1
 
   return (
-    <div className="detail-meta-sections">
-      <section className="detail-section detail-meta-section">
-        <div className="detail-section-head detail-section-head--with-actions">
-          <h2 className="section-title">影片资源</h2>
-          <div className="detail-section-actions">
-            <span className="detail-section-count">{video.resources.length} 个</span>
-            <IconButton
-              className="detail-icon-action"
+    <div className={styles.sections}>
+      <DetailSection>
+        <DetailSectionHead>
+          <DetailSectionTitle grow>影片资源</DetailSectionTitle>
+          <DetailSectionActions>
+            <DetailSectionCount>{video.resources.length} 个</DetailSectionCount>
+            <DetailIconButton
+              compact
               icon={<Link2 {...UI_ICON} />}
               label="添加资源"
               onClick={onAddResource}
             />
-          </div>
-        </div>
+          </DetailSectionActions>
+        </DetailSectionHead>
         {video.resources.length > 0 ? (
-          <div className="detail-meta-files">
+          <div className={styles.files}>
             {video.resources.map((resource) =>
               resource.kind === 'local' ? (
                 <VideoLocalResourceRow
@@ -690,7 +648,6 @@ export function VideoDetailSecondaryMeta({
                 <VideoLinkResourceRow
                   key={resource.id}
                   resource={resource}
-                  multiResources={multiResources}
                   onOpenResource={onOpenResource}
                   onRevealResource={onRevealResource}
                   onReadResourceLocator={onReadResourceLocator}
@@ -711,7 +668,7 @@ export function VideoDetailSecondaryMeta({
             description="添加资源后会在这里展示。"
           />
         )}
-      </section>
+      </DetailSection>
     </div>
   )
 }

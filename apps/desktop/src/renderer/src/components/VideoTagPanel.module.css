@@ -1,0 +1,356 @@
+.root {
+  margin-bottom: 0;
+}
+
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 9%, var(--border-subtle));
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 7%, transparent) 0%,
+    color-mix(in srgb, var(--surface-control) 12%, transparent) 100%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  transition:
+    border-color var(--motion-fast),
+    background var(--motion-fast),
+    color var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+button.chip {
+  margin: 0;
+  appearance: none;
+  font-family: inherit;
+}
+
+.scraped {
+  cursor: pointer;
+}
+
+.scraped:hover,
+.scraped:focus-visible {
+  border-color: color-mix(in srgb, var(--text-primary) 14%, var(--border-subtle));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 10%, transparent) 0%,
+    color-mix(in srgb, var(--surface-control) 18%, transparent) 100%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 10%, transparent);
+  color: var(--text-primary);
+}
+
+button.scraped:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  max-width: 100%;
+  border-color: color-mix(in srgb, var(--accent) 28%, color-mix(in srgb, var(--text-primary) 9%, var(--border-subtle)));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 9%, transparent) 0%,
+    color-mix(in srgb, var(--surface-control) 12%, transparent) 100%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.custom:hover,
+.custom:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 38%, color-mix(in srgb, var(--text-primary) 9%, var(--border-subtle)));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 13%, transparent) 0%,
+    color-mix(in srgb, var(--surface-control) 16%, transparent) 100%
+  );
+}
+
+.chipLabel {
+  max-width: 220px;
+  margin: 0;
+  padding: 3px 0;
+  overflow: hidden;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--motion-fast);
+}
+
+.chipLabel:hover,
+.chipLabel:focus-visible {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.chipLabel:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.chipRemove {
+  --chip-remove-size: 18px;
+  --icon-glyph-size: 10px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  line-height: 0;
+  opacity: 0;
+  transform: scale(0.86);
+  cursor: pointer;
+  transition:
+    max-width var(--motion-med),
+    width var(--motion-med),
+    min-width var(--motion-med),
+    margin var(--motion-med),
+    opacity var(--motion-med),
+    transform var(--motion-med),
+    color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.chipRemove svg {
+  display: block;
+  width: var(--icon-glyph-size);
+  height: var(--icon-glyph-size);
+  flex-shrink: 0;
+}
+
+@media (hover: hover) {
+  .chipRemove {
+    pointer-events: none;
+  }
+
+  .custom:hover .chipRemove,
+  .custom:focus-within .chipRemove {
+    width: var(--chip-remove-size);
+    min-width: var(--chip-remove-size);
+    max-width: var(--chip-remove-size);
+    margin-left: 3px;
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+  }
+}
+
+@media (hover: none) {
+  .chipRemove {
+    width: var(--chip-remove-size);
+    min-width: var(--chip-remove-size);
+    max-width: var(--chip-remove-size);
+    margin-left: 3px;
+    opacity: 0.55;
+    transform: scale(1);
+    pointer-events: auto;
+  }
+}
+
+.chipRemove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chipRemove:focus-visible,
+.chipRemove:hover:not(:disabled) {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.addButton[data-ui='icon-button'] {
+  width: var(--target-min);
+  height: var(--target-min);
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  align-self: center;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 9%, var(--border-subtle));
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 7%, transparent) 0%,
+    color-mix(in srgb, var(--surface-control) 12%, transparent) 100%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-muted);
+  transition:
+    border-color var(--motion-fast),
+    color var(--motion-fast),
+    background var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.addButton:focus-visible:not(:disabled),
+.addButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 32%, color-mix(in srgb, var(--text-primary) 9%, var(--border-subtle)));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 10%, transparent) 0%,
+    color-mix(in srgb, var(--surface-control) 16%, transparent) 100%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-accent);
+}
+
+.modal.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(480px, calc(100vw - 40px));
+  max-height: min(560px, calc(100vh - 48px));
+  padding: 20px 22px;
+  overflow: hidden;
+}
+
+.modal .modalBody {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+  padding-inline-end: var(--focus-ring-space);
+  overflow: hidden;
+}
+
+.modalContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.modalField {
+  flex-shrink: 0;
+}
+
+.modalInput {
+  width: 100%;
+}
+
+.catalog {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-control) 72%, var(--surface-panel));
+}
+
+.catalogHead {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.catalogCount {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.catalogScroll {
+  flex: 1;
+  min-height: 88px;
+  margin: 0 -4px;
+  padding: 2px 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.catalogList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.catalogEmpty.catalogEmpty {
+  min-height: 128px;
+  margin: 0;
+  padding: 18px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.catalogPick {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  overflow: hidden;
+  appearance: none;
+  font-family: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.catalogPick:hover:not(:disabled),
+.catalogPick:focus-visible:not(:disabled) {
+  border-color: var(--border-accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-control));
+  color: var(--text-accent);
+}
+
+.catalogPick[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-control));
+  color: var(--text-accent);
+  opacity: 1;
+  cursor: default;
+}
+
+.catalogPick:disabled:not([aria-pressed='true']) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

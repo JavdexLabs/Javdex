@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import SettingsActionLabel from './SettingsActionLabel'
 import { useId, useState } from 'react'
 import { useDesktopSession } from '../../desktop/DesktopSessionContext'
@@ -29,7 +30,7 @@ export default function WriterAuthorizationForm(): JSX.Element {
     <label className={styles.claimLabel} htmlFor={inputId}>{initial ? '首次授权' : '恢复写入授权'}</label>
     <p id={hintId} className={styles.claimHint}>请部署者在服务端运行 {initial ? 'bind' : 'recover'} 命令，取得一次性令牌。网页账号密码不能代替此令牌。</p>
     <div className={styles.claimInputRow}>
-      <input id={inputId} className={`text-input ${styles.claimInput}`} value={token} disabled={busy}
+      <TextInput id={inputId} density="workspace" className={styles.claimInput} value={token} disabled={busy}
         autoComplete="off" spellCheck={false} placeholder="粘贴一次性令牌" aria-describedby={hintId}
         onChange={event => setToken(event.target.value)} />
       <Button className={styles.claimButton} type="submit" disabled={busy || token.trim().length < 32}><SettingsActionLabel reserve="领取写入凭据">{busy ? '正在授权…' : '领取写入凭据'}</SettingsActionLabel></Button>

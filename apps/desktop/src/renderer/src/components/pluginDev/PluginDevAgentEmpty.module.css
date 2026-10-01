@@ -1,0 +1,9 @@
+.root {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.root strong {
+  color: var(--text-secondary);
+  font-size: 13px;
+}

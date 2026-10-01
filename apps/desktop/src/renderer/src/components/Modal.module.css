@@ -172,3 +172,22 @@
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
+
+.error {
+  margin-top: var(--form-field-gap);
+  color: var(--text-danger);
+  overflow-wrap: anywhere;
+}
+
+.errorSummary {
+  min-height: var(--control-h-sm);
+  cursor: pointer;
+}
+
+.errorDetails {
+  max-height: 160px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  white-space: pre-wrap;
+  user-select: text;
+}

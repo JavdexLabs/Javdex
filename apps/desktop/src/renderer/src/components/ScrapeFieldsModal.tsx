@@ -8,8 +8,11 @@ import { useEffect, useMemo, useState } from 'react'
 import ScraperSiteSelect from './ScraperSiteSelect'
 import SelectControl from './SelectControl'
 import SettingsSwitchRow from './SettingsSwitchRow'
+import SettingsToggleList from './SettingsToggleList'
 import Modal from './Modal'
 import Button from './Button'
+import { SegmentedActions, SegmentedAction } from './SegmentedActions'
+import styles from './ScrapeFieldsModal.module.css'
 
 export interface ScrapeFieldOption<T extends string> {
   id: T
@@ -365,26 +368,26 @@ export default function ScrapeFieldsModal<
     onClearGroup: (groupOptions: ScrapeFieldOption<T>[]) => void,
     compact = false
   ): JSX.Element => (
-    <div className={`scrape-field-groups${compact ? ' scrape-field-groups--compact' : ''}`}>
+    <div className={`${styles.scrapeFieldGroups}${compact ? ` ${styles.scrapeFieldGroupsCompact}` : ''}`}>
       {groups.map((group) => (
-        <section className="scrape-field-group" key={group.id}>
-          <div className="scrape-field-group-head">
+        <section className={styles.scrapeFieldGroup} key={group.id}>
+          <div className={styles.scrapeFieldGroupHead}>
             <span>{group.label}</span>
-            <div className="scrape-field-group-actions btn-segment btn-segment--sm">
-              <button type="button" onClick={() => onSelectGroup(group.options)}>
+            <SegmentedActions size="sm" className={styles.scrapeFieldGroupActions}>
+              <SegmentedAction type="button" onClick={() => onSelectGroup(group.options)}>
                 全选
-              </button>
-              <button type="button" onClick={() => onClearGroup(group.options)}>
+              </SegmentedAction>
+              <SegmentedAction type="button" onClick={() => onClearGroup(group.options)}>
                 清空
-              </button>
-            </div>
+              </SegmentedAction>
+            </SegmentedActions>
           </div>
-          <div className={`scrape-fields-list${compact ? ' scrape-fields-list--compact' : ''}`}>
+          <div className={`${styles.scrapeFieldsList}${compact ? ` ${styles.scrapeFieldsListCompact}` : ''}`}>
             {group.options.map((opt) => (
               <label
                 key={opt.id}
-                className={`scrape-field-option${
-                  supported && !supported.has(opt.id) ? ' scrape-field-option--disabled' : ''
+                className={`${styles.scrapeFieldOption}${
+                  supported && !supported.has(opt.id) ? ` ${styles.scrapeFieldOptionDisabled}` : ''
                 }`}
               >
                 <Checkbox
@@ -402,17 +405,17 @@ export default function ScrapeFieldsModal<
   )
 
   const renderMissingFilterGroups = (): JSX.Element => (
-    <div className="scrape-missing-filter-groups">
+    <div className={styles.scrapeMissingFilterGroups}>
       {missingFieldGroups.map((group) => (
-        <div className="scrape-missing-filter-group" key={group.id}>
-          <span className="scrape-missing-filter-group-title">{group.label}</span>
-          <div className="scrape-missing-filter-chips">
+        <div className={styles.scrapeMissingFilterGroup} key={group.id}>
+          <span className={styles.scrapeMissingFilterGroupTitle}>{group.label}</span>
+          <div className={styles.scrapeMissingFilterChips}>
             {group.options.map((opt) => (
               <label
                 key={opt.id}
-                className={`scrape-missing-filter-chip${
-                  missingSelected.has(opt.id) ? ' is-selected' : ''
-                }${supported && !supported.has(opt.id) ? ' is-disabled' : ''}`}
+                className={`${styles.scrapeMissingFilterChip}${
+                  missingSelected.has(opt.id) ? ` ${styles.isSelected}` : ''
+                }${supported && !supported.has(opt.id) ? ` ${styles.isDisabled}` : ''}`}
               >
                 <Checkbox
                   disabled={Boolean(supported && !supported.has(opt.id))}
@@ -474,7 +477,7 @@ export default function ScrapeFieldsModal<
       hint={hint}
 
       size="xl"
-      className="modal--scrape"
+      className={styles.root}
       onCancel={onCancel}
       actions={
         <>
@@ -504,23 +507,23 @@ export default function ScrapeFieldsModal<
         </>
       }
     >
-      <div className="scrape-modal-body">
-        <div className="scrape-modal-summary" aria-label="本次任务摘要">
+      <div className={styles.scrapeModalBody}>
+        <div className={styles.scrapeModalSummary} aria-label="本次任务摘要">
           {summaryItems.map((item) => (
-            <span className="scrape-modal-summary-item" key={`${item.label}:${item.value}`}>
+            <span className={styles.scrapeModalSummaryItem} key={`${item.label}:${item.value}`}>
               <span>{item.label}</span>
               <strong>{item.value}</strong>
             </span>
           ))}
         </div>
 
-        <div className="scrape-modal-layout">
-          <aside className="scrape-modal-config-column" aria-label="任务配置">
-            <section className="scrape-config-section">
-              <div className="scrape-config-section-head">
-                <span className="scrape-modal-section-title">{scraperTitle}</span>
+        <div className={styles.scrapeModalLayout}>
+          <aside className={styles.scrapeModalConfigColumn} aria-label="任务配置">
+            <section className={styles.scrapeConfigSection}>
+              <div className={styles.scrapeConfigSectionHead}>
+                <span className={styles.scrapeModalSectionTitle}>{scraperTitle}</span>
                 {unsupportedCount > 0 && (
-                  <span className="scrape-config-badge">{unsupportedCount} 个字段不支持</span>
+                  <span className={styles.scrapeConfigBadge}>{unsupportedCount} 个字段不支持</span>
                 )}
               </div>
               <ScraperSiteSelect
@@ -530,15 +533,15 @@ export default function ScrapeFieldsModal<
                 title={scraperTitle}
               />
               {unsupportedCount > 0 && (
-                <p className="hint scrape-modal-inline-hint">
+                <p className={`${styles.hint} ${styles.scrapeModalInlineHint}`}>
                   当前插件不支持 {unsupportedCount} 个字段，相关选项已禁用。
                 </p>
               )}
             </section>
 
             {matchNameOptions && matchNameOptions.length > 0 && (
-              <section className="scrape-config-section">
-                <span className="scrape-modal-section-title">{matchNameTitle}</span>
+              <section className={styles.scrapeConfigSection}>
+                <span className={styles.scrapeModalSectionTitle}>{matchNameTitle}</span>
                 <SelectControl
                   value={matchName}
                   onChange={(e) => setMatchName(e.target.value)}
@@ -550,26 +553,26 @@ export default function ScrapeFieldsModal<
                     </option>
                   ))}
                 </SelectControl>
-                {matchNameHint ? <p className="hint scrape-modal-inline-hint">{matchNameHint}</p> : null}
+                {matchNameHint ? <p className={`${styles.hint} ${styles.scrapeModalInlineHint}`}>{matchNameHint}</p> : null}
               </section>
             )}
 
             {(scopeOptions?.length || auxScopeOptions?.length || hasMissingFilter) && (
-              <section className="scrape-config-section">
-                <div className="scrape-config-section-head">
-                  <span className="scrape-modal-section-title">目标范围</span>
+              <section className={styles.scrapeConfigSection}>
+                <div className={styles.scrapeConfigSectionHead}>
+                  <span className={styles.scrapeModalSectionTitle}>目标范围</span>
                   {scopeCountLabel ? (
-                    <span className="scrape-scope-count-badge">{scopeCountLabel}</span>
+                    <span className={styles.scrapeScopeCountBadge}>{scopeCountLabel}</span>
                   ) : null}
                 </div>
                 {scopeOptions && scopeOptions.length > 0 && (
-                  <div className="scrape-config-subsection">
-                    <span className="scrape-config-subtitle">{scopeTitle}</span>
-                    <div className="scrape-modal-pills" role="radiogroup" aria-label={scopeTitle}>
+                  <div className={styles.scrapeConfigSubsection}>
+                    <span className={styles.scrapeConfigSubtitle}>{scopeTitle}</span>
+                    <div className={styles.scrapeModalPills} role="radiogroup" aria-label={scopeTitle}>
                       {scopeOptions.map((opt) => (
                         <label
                           key={String(opt.id)}
-                          className={`scrape-modal-pill${scope === opt.id ? ' scrape-modal-pill--active' : ''}`}
+                          className={`${styles.scrapeModalPill}${scope === opt.id ? ` ${styles.scrapeModalPillActive}` : ''}`}
                         >
                           <input
                             type="radio"
@@ -588,13 +591,13 @@ export default function ScrapeFieldsModal<
                 )}
 
                 {auxScopeOptions && auxScopeOptions.length > 0 && (
-                  <div className="scrape-config-subsection">
-                    <span className="scrape-config-subtitle">{auxScopeTitle}</span>
-                    <div className="scrape-modal-pills" role="radiogroup" aria-label={auxScopeTitle}>
+                  <div className={styles.scrapeConfigSubsection}>
+                    <span className={styles.scrapeConfigSubtitle}>{auxScopeTitle}</span>
+                    <div className={styles.scrapeModalPills} role="radiogroup" aria-label={auxScopeTitle}>
                       {auxScopeOptions.map((opt) => (
                         <label
                           key={String(opt.id)}
-                          className={`scrape-modal-pill${auxScope === opt.id ? ' scrape-modal-pill--active' : ''}`}
+                          className={`${styles.scrapeModalPill}${auxScope === opt.id ? ` ${styles.scrapeModalPillActive}` : ''}`}
                         >
                           <input
                             type="radio"
@@ -612,51 +615,51 @@ export default function ScrapeFieldsModal<
                   </div>
                 )}
                 {hasMissingFilter && missingFieldOptions && (
-                  <div className={`scrape-missing-filter${missingFilterEnabled ? ' is-active' : ''}`}>
-                    <div className="scrape-missing-filter-head">
-                      <div className="scrape-missing-filter-copy">
-                        <span className="scrape-config-subtitle">缺失字段筛选</span>
+                  <div className={styles.scrapeMissingFilter} data-active={missingFilterEnabled}>
+                    <div className={styles.scrapeMissingFilterHead}>
+                      <div className={styles.scrapeMissingFilterCopy}>
+                        <span className={styles.scrapeConfigSubtitle}>缺失字段筛选</span>
                         <small>{missingFieldHint ?? '只处理缺少任一所选字段的条目'}</small>
                       </div>
-                      <div className="scrape-missing-filter-mode btn-segment btn-segment--sm">
-                        <button
+                      <SegmentedActions size="sm" className={styles.scrapeMissingFilterMode}>
+                        <SegmentedAction
                           type="button"
-                          className={!missingFilterEnabled ? 'is-active' : ''}
+                          aria-pressed={!missingFilterEnabled}
                           onClick={() => handleMissingFilterToggle(false)}
                         >
                           不限
-                        </button>
-                        <button
+                        </SegmentedAction>
+                        <SegmentedAction
                           type="button"
-                          className={missingFilterEnabled ? 'is-active' : ''}
+                          aria-pressed={missingFilterEnabled}
                           onClick={() => handleMissingFilterToggle(true)}
                         >
                           缺任一字段
-                        </button>
-                      </div>
+                        </SegmentedAction>
+                      </SegmentedActions>
                     </div>
 
                     {missingFilterEnabled && (
-                      <div className="scrape-missing-filter-body">
-                        <div className="scrape-missing-filter-toolbar">
-                          <span className="hint">
+                      <div className={styles.scrapeMissingFilterBody}>
+                        <div className={styles.scrapeMissingFilterToolbar}>
+                          <span className={styles.hint}>
                             已选 {missingSelected.size}/{missingFieldOptions.length}
                           </span>
-                          <div className="btn-segment btn-segment--sm">
-                            <button type="button" onClick={selectMissingFromWriteFields}>
+                          <SegmentedActions size="sm" className={styles.missingActions}>
+                            <SegmentedAction type="button" onClick={selectMissingFromWriteFields}>
                               按写入字段
-                            </button>
-                            <button type="button" onClick={selectAllMissing}>
+                            </SegmentedAction>
+                            <SegmentedAction type="button" onClick={selectAllMissing}>
                               全选
-                            </button>
-                            <button type="button" onClick={selectNoMissing}>
+                            </SegmentedAction>
+                            <SegmentedAction type="button" onClick={selectNoMissing}>
                               清空
-                            </button>
-                          </div>
+                            </SegmentedAction>
+                          </SegmentedActions>
                         </div>
                         {renderMissingFilterGroups()}
                         {missingSelected.size === 0 && (
-                          <p className="hint scrape-modal-inline-hint scrape-missing-filter-warning">
+                          <p className={`${styles.hint} ${styles.scrapeModalInlineHint} ${styles.scrapeMissingFilterWarning}`}>
                             请选择至少一个缺失字段，或切回“不限”。
                           </p>
                         )}
@@ -668,14 +671,14 @@ export default function ScrapeFieldsModal<
             )}
 
             {updateModeOptions && updateModeOptions.length > 0 && (
-              <section className="scrape-config-section">
-                <span className="scrape-modal-section-title">更新方式</span>
-                <div className="scrape-mode-options" role="radiogroup" aria-label="更新方式">
+              <section className={styles.scrapeConfigSection}>
+                <span className={styles.scrapeModalSectionTitle}>更新方式</span>
+                <div className={styles.scrapeModeOptions} role="radiogroup" aria-label="更新方式">
                   {updateModeOptions.map((opt) => (
                     <label
                       key={opt.id}
-                      className={`scrape-mode-option${
-                        updateMode === opt.id ? ' scrape-mode-option--active' : ''
+                      className={`${styles.scrapeModeOption}${
+                        updateMode === opt.id ? ` ${styles.scrapeModeOptionActive}` : ''
                       }`}
                     >
                       <input
@@ -687,26 +690,26 @@ export default function ScrapeFieldsModal<
                           applyUpdateModeSelection(opt.id)
                         }}
                       />
-                      <span className="scrape-mode-option-copy">
-                        <span className="scrape-mode-option-title">{opt.label}</span>
+                      <span className={styles.scrapeModeOptionCopy}>
+                        <span className={styles.scrapeModeOptionTitle}>{opt.label}</span>
                         {opt.description ? (
-                          <span className="scrape-mode-option-desc">{opt.description}</span>
+                          <span className={styles.scrapeModeOptionDesc}>{opt.description}</span>
                         ) : null}
                       </span>
-                      <span className="scrape-mode-option-check" aria-hidden="true" />
+                      <span className={styles.scrapeModeOptionCheck} aria-hidden="true" />
                     </label>
                   ))}
                 </div>
                 {updateModeHint && !updateModeOptions.some((opt) => opt.description) ? (
-                  <p className="hint scrape-modal-inline-hint">{updateModeHint}</p>
+                  <p className={`${styles.hint} ${styles.scrapeModalInlineHint}`}>{updateModeHint}</p>
                 ) : null}
               </section>
             )}
 
             {hasOptionalToggles && (
-              <section className="scrape-config-section">
-                <span className="scrape-modal-section-title">附加选项</span>
-                <div className="scrape-modal-toggles settings-toggle-list settings-toggle-list--compact">
+              <section className={styles.scrapeConfigSection}>
+                <span className={styles.scrapeModalSectionTitle}>附加选项</span>
+                <SettingsToggleList compact className={styles.scrapeModalToggles}>
                   {showUseAliasesToggle && (
                     <SettingsSwitchRow
                       title="使用别名刮削"
@@ -728,32 +731,32 @@ export default function ScrapeFieldsModal<
                       onChange={setAutoCropAvatar}
                     />
                   )}
-                </div>
+                </SettingsToggleList>
               </section>
             )}
           </aside>
 
-          <section className="scrape-fields-panel" aria-label="写入字段">
-            <div className="scrape-fields-panel-head">
+          <section className={styles.scrapeFieldsPanel} aria-label="写入字段">
+            <div className={styles.scrapeFieldsPanelHead}>
               <div>
-                <span className="scrape-modal-section-title">写入字段</span>
-                <p className="hint scrape-fields-panel-hint">选择本次允许写入的元数据字段。</p>
+                <span className={styles.scrapeModalSectionTitle}>写入字段</span>
+                <p className={`${styles.hint} ${styles.scrapeFieldsPanelHint}`}>选择本次允许写入的元数据字段。</p>
               </div>
-              <div className="scrape-fields-toolbar scrape-fields-toolbar--inline">
-                <span className="hint">
+              <div className={`${styles.scrapeFieldsToolbar} ${styles.scrapeFieldsToolbarInline}`}>
+                <span className={styles.hint}>
                   已选 {selected.size}/{selectableFieldCount}
                 </span>
-                <div className="btn-segment btn-segment--sm">
-                  <button type="button" onClick={selectAll}>
+                <SegmentedActions size="sm">
+                  <SegmentedAction type="button" onClick={selectAll}>
                     全选
-                  </button>
-                  <button type="button" onClick={selectNone}>
+                  </SegmentedAction>
+                  <SegmentedAction type="button" onClick={selectNone}>
                     全不选
-                  </button>
-                </div>
+                  </SegmentedAction>
+                </SegmentedActions>
               </div>
             </div>
-            <div className="scrape-fields-panel-body">
+            <div className={styles.scrapeFieldsPanelBody}>
               {renderFieldGroups(fieldGroups, selected, toggle, selectGroup, clearGroup, true)}
             </div>
           </section>

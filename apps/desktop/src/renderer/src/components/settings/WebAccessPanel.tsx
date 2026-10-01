@@ -1,9 +1,11 @@
+import TextInput from '../TextInput'
 import { useEffect, useRef, useState } from "react";
 import type { WebAccessStatus } from "@shared/webTypes";
 import { api } from "../../api";
 import { useSettingsDraft } from "../../settings/useSettingsDraft";
 import { useSettingsFormGuard } from "../../settings/SettingsLeaveGuard";
 import SettingsSwitchRow from "../SettingsSwitchRow";
+import SettingsToggleList from "../SettingsToggleList";
 import Button from "../Button";
 import { SettingsCard } from "./SettingsPrimitives";
 import SettingsFormActions from "./SettingsFormActions";
@@ -168,7 +170,7 @@ function WebAccessForm({
         }
       >
         <div className={styles.form}>
-          <div className="settings-toggle-list">
+          <SettingsToggleList>
             <SettingsSwitchRow
               title={`开启${WEB_ACCESS_LABEL}`}
               description={
@@ -180,13 +182,13 @@ function WebAccessForm({
               disabled={saving}
               onChange={(enabled) => form.setDraft((d) => ({ ...d, enabled }))}
             />
-          </div>
+          </SettingsToggleList>
           {remoteCatalog ? null : (
           <div className={styles.fields}>
             <label className={styles.field}>
               端口
-              <input
-                className={`text-input ${styles.input}`}
+              <TextInput
+                density="workspace" className={styles.input}
                 aria-label="端口"
                 inputMode="numeric"
                 aria-invalid={Boolean(error?.startsWith("端口"))}
@@ -202,8 +204,8 @@ function WebAccessForm({
             </label>
             <label className={styles.field}>
               访问账号
-              <input
-                className={`text-input ${styles.input}`}
+              <TextInput
+                density="workspace" className={styles.input}
                 autoComplete="off"
                 aria-invalid={Boolean(error?.startsWith("账号"))}
                 value={form.draft.username}
@@ -231,8 +233,8 @@ function WebAccessForm({
               ) : (
                 <label className={styles.field}>
                   {status.hasPassword ? "新密码（留空保留）" : "访问密码"}
-                  <input
-                    className={`text-input ${styles.input}`}
+                  <TextInput
+                    density="workspace" className={styles.input}
                     aria-label={status.hasPassword ? "新密码（留空保留）" : "访问密码"}
                   type="password"
                     autoComplete="new-password"

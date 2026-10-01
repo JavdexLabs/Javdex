@@ -1,0 +1,25 @@
+.root {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.root[data-stable] {
+  flex: 0 0 auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.root[data-width='media'] {
+  min-width: 6.75em;
+}
+
+.root[data-width='facet'] {
+  min-width: 10.5em;
+}
+
+.fetchHint {
+  opacity: 0.45;
+  font-size: 0.85em;
+}

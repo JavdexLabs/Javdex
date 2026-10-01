@@ -1,6 +1,33 @@
 import type { ReactNode } from 'react'
 import styles from './FormPrimitives.module.css'
 
+/** Shared stack and grid layout for entity edit forms. */
+export function EditForm({ children, variant = 'default', className = '' }: {
+  children: ReactNode
+  variant?: 'default' | 'relaxed' | 'custom'
+  className?: string
+}): JSX.Element {
+  return <div data-edit-form className={[variant === 'custom' ? '' : styles.editForm, className].filter(Boolean).join(' ')}
+    data-variant={variant}>{children}</div>
+}
+
+export function EditFormFields({ children, variant = 'default', className = '' }: {
+  children: ReactNode
+  variant?: 'default' | 'relaxed' | 'custom'
+  className?: string
+}): JSX.Element {
+  return <div data-edit-form-fields className={[variant === 'custom' ? '' : styles.editFields, className].filter(Boolean).join(' ')}
+    data-variant={variant}>{children}</div>
+}
+
+export function EditFormLabelNote({ children, id }: { children: ReactNode; id?: string }): JSX.Element {
+  return <span id={id} className={styles.editLabelNote}>{children}</span>
+}
+
+export function EditFormCheckRow({ children }: { children: ReactNode }): JSX.Element {
+  return <label data-edit-form-check-row className={styles.editCheckRow}>{children}</label>
+}
+
 /** Shared form field layout (same tokens as settings forms). */
 export function AppFormField({
   label,
@@ -14,10 +41,10 @@ export function AppFormField({
   className?: string
 }): JSX.Element {
   return (
-    <label className={`${styles.formField} settings-form-field${className ? ` ${className}` : ''}`}>
-      <span className={`${styles.formLabel} settings-form-label`}>{label}</span>
+    <label className={`${styles.formField}${className ? ` ${className}` : ''}`}>
+      <span className={styles.formLabel}>{label}</span>
       {children}
-      {hint ? <small className={`${styles.formHint} settings-form-hint`}>{hint}</small> : null}
+      {hint ? <small className={styles.formHint}>{hint}</small> : null}
     </label>
   )
 }
@@ -51,14 +78,14 @@ export function AppFormSection({
   children: ReactNode
 }): JSX.Element {
   return (
-    <section className={`${styles.formSection} app-form-section${className ? ` ${className}` : ''}`}>
-      <div className={`${styles.sectionHead} app-form-section-head`}>
-        <div className="app-form-section-copy">
-          <h4 className={`${styles.sectionTitle} app-form-section-title`}>{title}</h4>
-          {hint ? <p className={`${styles.sectionHint} app-form-section-hint`}>{hint}</p> : null}
+    <section className={`${styles.formSection}${className ? ` ${className}` : ''}`}>
+      <div className={styles.sectionHead}>
+        <div>
+          <h4 className={styles.sectionTitle}>{title}</h4>
+          {hint ? <p className={styles.sectionHint}>{hint}</p> : null}
         </div>
         {actions ? (
-          <div className={`${styles.sectionActions} app-form-section-actions`}>{actions}</div>
+          <div className={styles.sectionActions}>{actions}</div>
         ) : null}
       </div>
       {children}
@@ -70,19 +97,19 @@ export function AppFormSection({
 export function EditFormSection({
   title,
   hint,
-  className = '',
+  variant = 'default',
   children
 }: {
   title: string
   hint?: ReactNode
-  className?: string
+  variant?: 'default' | 'media'
   children: ReactNode
 }): JSX.Element {
   return (
-    <section className={`${styles.editSection} entity-edit-section${className ? ` ${className}` : ''}`}>
-      <h4 className={`${styles.editSectionTitle} entity-edit-section-title`}>{title}</h4>
+    <section className={styles.editSection} data-variant={variant}>
+      <h4 className={styles.editSectionTitle}>{title}</h4>
       {hint ? (
-        <p className={`${styles.editHint} entity-edit-section-hint`}>{hint}</p>
+        <p className={styles.editHint}>{hint}</p>
       ) : null}
       {children}
     </section>
@@ -100,7 +127,7 @@ export function EditFormHint({
   id?: string
 }): JSX.Element {
   return (
-    <Component id={id} className={`${styles.editHint} entity-edit-field-hint`}>
+    <Component id={id} className={styles.editHint}>
       {children}
     </Component>
   )
@@ -123,10 +150,8 @@ export function EditFormField({
   children: ReactNode
 }): JSX.Element {
   return (
-    <div
-      className={`${styles.editField}${span === 2 ? ` ${styles.editFieldFull}` : ''} entity-edit-field${span === 2 ? ' entity-edit-field--full' : ''}`}
-    >
-      <label htmlFor={htmlFor} className={`${styles.editLabel} entity-edit-label`}>
+    <div data-edit-form-field className={`${styles.editField}${span === 2 ? ` ${styles.editFieldFull}` : ''}`}>
+      <label htmlFor={htmlFor} className={styles.editLabel}>
         <span>{label}</span>
         {labelExtra}
       </label>

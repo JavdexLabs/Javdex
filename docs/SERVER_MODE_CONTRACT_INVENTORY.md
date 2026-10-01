@@ -2,6 +2,8 @@
 
 核对基线：2026-09-27，`0.8.0` 正式版，包含备份恢复与旧离线迁库移除改动。本页集中维护当前架构、功能接线及合同导航；部署步骤见 [操作说明](SERVER_MODE.md)，进度与验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。
 
+后续开发改动（未发布）：影片来源分页及生命周期预览／提交结果增加运行时 schema，桌面和服务端影片查询接入共享 `videoQueryService`；既有输入、授权、事务与本地／远程路径策略不变。具体模块及测试入口见 [维护性优化说明](DEVELOPMENT.md#080-后的四项维护性优化)。
+
 权威实现是 TypeScript，而不是本文件：
 
 - IPC 去向：[`packages/contracts/src/inventory/ipcDisposition.ts`](../packages/contracts/src/inventory/ipcDisposition.ts)

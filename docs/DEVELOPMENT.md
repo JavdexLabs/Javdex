@@ -111,6 +111,28 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 草稿应用、丢弃和影片删除后的工作清理依靠持久意图、catalog 回执及可重试清理恢复，不依赖跨库原子性。首次旧记录迁移保留源数据，ready 后不再复制。具体连接归属和提交顺序见 [服务端合同中的工作存储说明](SERVER_MODE_CONTRACT_INVENTORY.md#桌面工作存储与恢复)，实施与验收证据见 [架构优化方案](ARCHITECTURE_SIMPLIFICATION_PLAN.md)。涉及这些路径时，用独立 catalog/work 数据库及关闭重开测试验证恢复；同库测试不能代替跨存储验证。
 
+### 0.8.0 后的四项维护性优化
+
+本轮按以下顺序实施，不改变数据库 schema、业务取舍、HTTP 输入或界面布局：
+
+| 阶段 | 实现与职责 | 验收入口 |
+|---|---|---|
+| 1. 清单导入身份模块 | `playlistImportIdentity.ts` 统一候选查找、强信号交集和预览有效性判断；`playlistImportRepository.ts` 保留任务状态、检查点和事务。URL 规范化独立共享，避免反向依赖仓储。 | 原有 Repository、CatalogLookup、Module 行为测试，覆盖跨库候选、陈旧预览与提交重试 |
+| 2. 远程返回契约 | `catalogVideoSourceSchemas.ts` 与 `videoLifecycleSchemas.ts` 定义来源分页和影片生命周期预览／结果，类型由 schema 推导；远程适配器在接收 JSON 后校验。 | `catalogRemoteResults.test.ts` 与 Node `runtime.test.ts` 的真实 HTTP 往返 |
+| 3. 详情操作流程 | `useVideoLifecycleController` 拥有预览、提交、失败重读和操作 ID；`useVideoResourceController` 拥有资源读取、标签编辑和删除。页面只接线、展示与导航，旧请求不能修改新的影片操作状态。 | `videoDetailControllers.test.tsx` 的用户操作、重复提交、失败重试及换页测试 |
+| 4. 共享查询入口 | `packages/library/src/catalog/videoQueryService.ts` 拥有作用域详情、资源归属检查和投影；桌面保留查询 worker，服务端显式提供路径投影和无成员资料读取策略。 | `videoQueryService.test.ts`、Node HTTP 测试、desktop/server 边界检查及 `catalog-query-boundary.test.mjs` |
+
+本轮远程 schema 收敛范围为 `videos.sources` 和生命周期预览／提交结果，不是宣称全部管理响应已经迁移。六个旧操作名的 schema 仍保留，但手动移出已停用；移动后的无来源成员归属自动清理，兼容结果 schema 不代表重新开放旧操作。共享包也未一刀切取消通配导出：已迁移的两个宿主入口禁止重新直接引用影片仓储，其余旧入口按业务改动逐步迁移。保留本地直连、服务端 HTTP、宿主路径策略和独立 workStore，不引入通用 RPC 框架或全局依赖注入容器。
+
+回检约束：
+
+- 身份模块通过 `planDetail` 返回可持久化决策，仓储不再修改强信号证据；详情计划与提交前有效性检查共用自动复用规则。列表的单番号快速路径、显式用户选择和事务推进仍保持各自职责。
+- `CatalogResultSchemas` 逐操作约束 schema 输出类型；`actresses.edit` 的回执到布尔值转换也在校验器中完成。`catalogRemoteResults.typecheck.ts` 用预期编译错误防止预览、提交和布尔结果校验器互换。
+- 资源控制器提供打开／关闭／完成动作，不暴露目标状态 setter。影片作用域之外另有编辑和移动会话编号：同影片关闭后重开也隔离旧响应；同步提交锁防双击，失败可重试。成功的旧请求仍使列表缓存失效，但不关闭新会话、不提示或导航到新页面。
+- 回归入口为 `npm test` 与 `npm run server:test`；本机自动化通过不代表完整 GUI、跨平台安装或 Linux 故障注入验收。环境跳过项需单独报告。
+
+2026-09-28 本轮回检：`npm test` 退出码为 0（包含架构检查、lint、类型检查、打包脚本测试；Electron 3297 通过、2 项 Windows 路径语义测试跳过）；`npm run server:test` 退出码为 0（47 通过、6 项真实挂载／mpv／Linux 环境测试跳过）。详情控制器新增用例先复现重复保存与关闭后延迟重开，再验证修复；本轮未执行完整 GUI 或跨平台安装验收。
+
 ## 按任务查阅文档
 
 先阅读根目录 [AGENTS.md](../AGENTS.md) 的仓库约定，再按实际改动选择文档，无需通读全部设计与研究资料。

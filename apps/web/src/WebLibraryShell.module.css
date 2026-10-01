@@ -1,0 +1,114 @@
+
+.header {
+  height: var(--header-height);
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-base);
+}
+
+.logout {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.logout:focus-visible {
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.main {
+  margin-left: var(--sidebar-width);
+  padding: 36px var(--space-page) 0;
+  max-width: 2440px;
+  min-height: calc(100dvh - var(--header-height));
+}
+
+.footer {
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 22px 0;
+  margin-top: 40px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.skip {
+  position: fixed;
+  top: -100px;
+  left: 20px;
+  z-index: 20;
+  background: var(--text-accent);
+  color: var(--surface-base);
+  padding: 12px;
+}
+
+.skip:focus {
+  top: 12px;
+}
+
+@media (width <= 1100px) {
+  .header {
+    gap: 20px;
+    padding-inline: 20px;
+  }
+}
+
+@media (width <= 760px) {
+  .header {
+    height: auto;
+    min-height: var(--header-height);
+    padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+}
+
+@media (width <= 760px) {
+  .logout {
+    margin-left: auto;
+    min-height: 32px;
+  }
+}
+
+@media (width <= 760px) {
+  .main {
+    margin-left: 0;
+    padding-top: 24px;
+    padding-left: max(var(--space-page), env(safe-area-inset-left));
+    padding-right: max(var(--space-page), env(safe-area-inset-right));
+  }
+}
+
+@media (width <= 760px) {
+  .footer {
+    padding-bottom: max(22px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (width <= 380px) {
+  .footer span {
+    display: none;
+  }
+}
+
+@media (width >= 1920px) {
+  .header {
+    padding-inline: 36px;
+  }
+}
+
+@media (pointer: coarse) {
+  .logout {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}

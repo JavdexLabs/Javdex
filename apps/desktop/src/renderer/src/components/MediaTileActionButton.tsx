@@ -2,6 +2,7 @@ import type { MouseEvent, ReactNode } from 'react'
 import { Trash2, X } from 'lucide-react'
 import IconButton from './IconButton'
 import { UI_ICON_SM } from './iconDefaults'
+import styles from './MediaTileActionButton.module.css'
 
 type MediaTileAction = 'delete' | 'remove'
 
@@ -34,13 +35,13 @@ export default function MediaTileActionButton({
   return (
     <IconButton
       className={[
-        'media-tile-action',
-        `media-tile-action--${action}`,
+        styles.root,
         className
       ]
         .filter(Boolean)
         .join(' ')}
       tone={action === 'delete' ? 'danger' : 'default'}
+      data-action={action}
       icon={icon ?? (action === 'delete' ? <Trash2 {...UI_ICON_SM} /> : <X {...UI_ICON_SM} />)}
       label={label}
       title={title ?? label}

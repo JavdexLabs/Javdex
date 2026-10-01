@@ -1,3 +1,7 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import PageContent from '../components/PageContent'
+import ResultCount from '../components/ResultCount'
 import { useWindowedCatalog } from '../query/useWindowedCatalog'
 import { toScopedVideoCardPage, type ScopedVideoCard, type ScopedVideoCardPage } from '@shared/cardProjection'
 import { useEffect, useMemo, useState } from 'react'
@@ -88,8 +92,8 @@ export default function GlobalSearchPage(): JSX.Element {
   const hasQuery = Boolean(urlQ.trim())
 
   return (
-    <div className="list-page">
-      <div className={`${styles.header} topbar`}>
+    <ListPage >
+      <PageHeader className={styles.header}>
         <ListToolbar
           search={{
             value: searchInput,
@@ -99,9 +103,9 @@ export default function GlobalSearchPage(): JSX.Element {
           }}
           resultCount={
             hasQuery ? (
-              <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
+              <ResultCount width="media" aria-live="polite">
                 共 {total} 部
-              </span>
+              </ResultCount>
             ) : null
           }
         />
@@ -145,23 +149,23 @@ export default function GlobalSearchPage(): JSX.Element {
             })}
           </div>
         </div>
-      </div>
+      </PageHeader>
 
       <ListSurface variant="fill" withInner={false}>
         {!hasQuery ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState
               icon={<LibraryBig {...UI_ICON_SM} aria-hidden />}
               title="跨媒体库搜索"
               description="输入番号、标题或演员名称开始搜索。"
             />
-          </div>
+          </PageContent>
         ) : searching ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState loading title="搜索中…" />
-          </div>
+          </PageContent>
         ) : Boolean(resultsQuery.error) && total === 0 ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState
               icon={<SearchX {...UI_ICON_SM} aria-hidden />}
               title="搜索失败"
@@ -171,15 +175,15 @@ export default function GlobalSearchPage(): JSX.Element {
                 重新搜索
               </Button>
             </EmptyState>
-          </div>
+          </PageContent>
         ) : total === 0 ? (
-          <div className="scroll-body-inner">
+          <PageContent >
             <EmptyState
               icon={<SearchX {...UI_ICON_SM} aria-hidden />}
               title="没有匹配的影片"
               description="尝试其它关键词或放宽媒体库筛选。"
             />
-          </div>
+          </PageContent>
         ) : (
           <VirtualPosterGrid
             videos={videos}
@@ -190,6 +194,6 @@ export default function GlobalSearchPage(): JSX.Element {
           />
         )}
       </ListSurface>
-    </div>
+    </ListPage>
   )
 }

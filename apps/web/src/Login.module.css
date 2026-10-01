@@ -1,0 +1,61 @@
+
+.page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 30px 20px;
+}
+
+.card {
+  width: min(100%, 430px);
+}
+
+.brand {
+  margin-bottom: 56px;
+}
+
+.card h1 {
+  font-size: 40px;
+}
+
+.form {
+  display: grid;
+  gap: 20px;
+  margin-top: 34px;
+}
+
+.foot {
+  margin-top: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.foot svg {
+  width: 15px;
+  height: 15px;
+}
+
+@media (width <= 760px) {
+  .page {
+    padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  }
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-block: 16px;
+}
+.tabs button { flex: 1; }
+.tabs button[aria-pressed="true"] { border-color: var(--text-accent); }
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--text-accent);
+  font-weight: 600;
+  margin-bottom: 12px;
+}

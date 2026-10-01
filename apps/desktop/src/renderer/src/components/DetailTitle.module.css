@@ -1,0 +1,29 @@
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(19px, 2.2cqi, 24px);
+  font-weight: 700;
+  line-height: 1.32;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.video {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+@container detail-page (max-width: 900px) {
+  .title {
+    font-size: 20px;
+  }
+}
+
+@container detail-page (max-width: 720px) {
+  .title {
+    font-size: 18px;
+  }
+}

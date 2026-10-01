@@ -225,6 +225,23 @@
   white-space: nowrap;
 }
 
+/* Display-only cover protection belongs to the image editor, not global layout. */
+:where(:root[data-privacy-mode="true"][data-privacy-covers="true"])
+  :is(.preview, .candidateCover) > img {
+  filter: var(--privacy-image-filter);
+  scale: var(--privacy-image-scale);
+}
+
+:where(:root[data-privacy-mode="true"][data-privacy-covers="true"])
+  :is(.preview, .candidateCover):has(> img)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--privacy-glass-background);
+}
+
 @media (width <= 680px) {
   .current {
     grid-template-columns: var(--classification-image-preview-w-compact) minmax(

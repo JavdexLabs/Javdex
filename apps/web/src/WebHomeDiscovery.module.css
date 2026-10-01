@@ -1,0 +1,14 @@
+.root {
+  display: grid;
+  gap: 32px;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.heading h2 { margin: 0; }

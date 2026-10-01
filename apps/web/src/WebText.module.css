@@ -1,0 +1,16 @@
+
+.muted {
+  color: var(--text-muted);
+}
+
+.danger {
+  color: var(--text-danger);
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--text-accent);
+  font-weight: 600;
+  margin-bottom: 12px;
+}

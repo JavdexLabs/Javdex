@@ -1,4 +1,4 @@
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, type MouseEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, resolveMediaSrc } from '../api'
@@ -29,6 +29,8 @@ import {
 } from '../globalSearchShortcut'
 import DesktopSessionOverlay from '../desktop/DesktopSessionOverlay'
 import { useDesktopSession } from '../desktop/DesktopSessionContext'
+import { SidebarNavIcon, SidebarNavLabel, SidebarNavLink, SidebarNavRow } from './SidebarNav'
+import styles from './Layout.module.css'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
@@ -108,38 +110,34 @@ function NavItems({
           : badgeCount === 'error' ? '待确认数量加载失败，打开待确认项'
           : `打开 ${badgeCount} 项待确认`
         return (
-          <div
-            className={`nav-item-row${hasBadge && badgeTarget ? ' nav-item-row--with-badge' : ''}`}
-            key={n.to}
-          >
-            <NavLink
+          <SidebarNavRow key={n.to}>
+            <SidebarNavLink
               to={primaryNavLinkTo(n.to, location.pathname, location.search)}
               end={n.end}
               draggable={false}
               onClick={(event) => handleNavClick(event, n.to)}
-              className={({ isActive }) =>
-                `nav-item ${isActive || activeListRoot === n.to ? 'active' : ''}`
-              }
+              active={activeListRoot === n.to}
+              reserveBadgeSpace={Boolean(hasBadge && badgeTarget)}
             >
-              <span className="nav-icon">
+              <SidebarNavIcon>
                 <NavIcon name={n.icon} />
-              </span>
-              <span className="nav-label">{n.label}</span>
-            </NavLink>
+              </SidebarNavIcon>
+              <SidebarNavLabel>{n.label}</SidebarNavLabel>
+            </SidebarNavLink>
             {hasBadge && badgeTarget ? (
               <button
                 type="button"
-                className="nav-count-badge"
+                className={styles.countBadge}
                 aria-label={badgeLabel}
                 title={badgeLabel}
                 onClick={() => handleBadgeClick(n.to, badgeTarget)}
               >
-                <span className="nav-count-badge__value">
+                <span className={styles.countValue}>
                   {badgeCount === 'loading' ? '…' : badgeCount === 'error' ? '!' : badgeCount > 99 ? '99+' : badgeCount}
                 </span>
               </button>
             ) : null}
-          </div>
+          </SidebarNavRow>
         )
       })}
     </>
@@ -211,27 +209,28 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   }, [location.pathname, navigate, requestLeave])
 
   return (
-    <div className={`app-shell${hasBackgroundLayer ? ' app-shell--with-background' : ''}`}>
+    <div className={styles.root} data-background={hasBackgroundLayer || undefined}>
       {backgroundSrc && (
         <AppBackgroundLayer
           key={backgroundSrc}
           src={backgroundSrc}
-          animationClass="app-background--active"
         />
       )}
-      <aside className="sidebar">
+      <aside className={styles.sidebar}>
         <AppBrand />
-        <nav className="sidebar-nav">
-          <NavItems items={NAV_MAIN.slice(0, 1)} />
-          <MediaLibraryNav />
-          <div role="group" aria-label="全局浏览">
-            <NavItems items={NAV_MAIN.slice(1)} />
-            <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
-              <div className="nav-group-label">分类</div>
-              <NavItems items={NAV_FACETS} />
+        <nav className={styles.nav}>
+          <div className={styles.browseNav}>
+            <NavItems items={NAV_MAIN.slice(0, 1)} />
+            <MediaLibraryNav />
+            <div role="group" aria-label="全局浏览">
+              <NavItems items={NAV_MAIN.slice(1)} />
+              <div className={styles.group} data-active={facetActive || undefined}>
+                <div className={styles.groupLabel}>分类</div>
+                <NavItems items={NAV_FACETS} />
+              </div>
             </div>
           </div>
-          <div className="sidebar-nav-spacer" />
+          <div className={styles.spacer} />
           <NavItems
             items={NAV_BOTTOM}
             badges={pendingBadges}
@@ -239,9 +238,9 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
           />
         </nav>
       </aside>
-      <div className="main-area">
+      <div className={styles.main}>
         <DesktopSessionOverlay />
-        <div className="content">{children}</div>
+        <div className={styles.content}>{children}</div>
       </div>
       <AssetCryptoOverlay />
     </div>

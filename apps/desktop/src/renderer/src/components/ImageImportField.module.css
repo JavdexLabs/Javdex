@@ -1,0 +1,115 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  gap: 10px;
+}
+
+.field[data-layout='inline'] {
+  flex-direction: row;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 14px;
+}
+
+.side {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  padding-block: 4px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.previewBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  width: 220px;
+  height: 160px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.field[data-layout='inline'] .previewBox {
+  flex: 0 0 min(38%, 300px);
+  width: min(38%, 300px);
+  height: auto;
+  min-height: 132px;
+  max-height: 196px;
+  aspect-ratio: 3 / 2;
+}
+
+.previewBox[data-shape='square'] {
+  width: 180px;
+  height: 180px;
+}
+
+.field[data-layout='inline'] .previewBox:where([data-shape='square']) {
+  flex-basis: min(34%, 180px);
+  width: min(34%, 180px);
+  max-height: 180px;
+  aspect-ratio: 1;
+}
+
+.preview {
+  width: 100%;
+  height: 100%;
+  background: color-mix(in srgb, var(--surface-base) 55%, transparent);
+  object-fit: contain;
+}
+
+.previewBox[data-shape='square'] .preview {
+  object-fit: cover;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--surface-control) 88%, transparent),
+    color-mix(in srgb, var(--surface-control) 88%, transparent) 6px,
+    color-mix(in srgb, var(--surface-base) 40%, transparent) 6px,
+    color-mix(in srgb, var(--surface-base) 40%, transparent) 12px
+  );
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.label {
+  align-self: start;
+  padding-top: 8px;
+}
+
+@media (width <= 560px) {
+  .field[data-layout='inline'] {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .field[data-layout='inline'] .previewBox {
+    flex-basis: auto;
+    width: 100%;
+    max-height: none;
+  }
+}

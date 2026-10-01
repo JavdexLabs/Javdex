@@ -1,3 +1,21 @@
+.content {
+  --empty-compact-background: transparent;
+  --empty-compact-border-color: color-mix(in srgb, var(--border-subtle) 58%, transparent);
+
+  flex: 1;
+  padding: var(--card-area-pad-top) var(--detail-pad-x) var(--card-area-pad-bottom);
+  background: var(--detail-scroll-background, transparent);
+  container-type: inline-size;
+  container-name: detail-page;
+}
+
+@media (width <= 960px) {
+  .content {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
 .header {
   display: flex;
   min-width: 0;

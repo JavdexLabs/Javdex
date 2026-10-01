@@ -2,8 +2,7 @@ import { dispatchBackup } from './manageBackup'
 import { catalogVideoCommands } from '@library/catalog/catalogVideoCommands'
 import type Database from 'better-sqlite3'
 import fs from 'node:fs'
-import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
-import { getVideoDetail } from '@library/db/videoRepo'
+import { createVideoQueryService, type VideoQueryService } from '@library/catalog/videoQueryService'
 import { listMediaLibraries } from '@library/db/mediaLibraryRepo'
 import { getLibraryOverviewStats } from '@library/db/overviewRepo'
 import { resolveMediaAssetsRoot } from '@library/assetStoragePaths'
@@ -250,26 +249,20 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
     }
     if (operation === 'videos.list') {
       const input = envelope.input as {
-        scope: Parameters<typeof scopedVideoCatalogRepo.list>[0]
-        query?: Parameters<typeof scopedVideoCatalogRepo.list>[1]
+        scope: Parameters<VideoQueryService['list']>[0]
+        query?: Parameters<VideoQueryService['list']>[1]
       }
-      return scopedVideoCatalogRepo.list(input.scope, input.query)
+      return createVideoQueryService({ database: catalogDb(database) }).list(input.scope, input.query)
     }
     if (operation === 'videos.get') {
       const input = envelope.input as {
-        scope: Parameters<typeof scopedVideoCatalogRepo.get>[0]
+        scope: Parameters<VideoQueryService['get']>[0]
         videoId: number
       }
-      const scoped = scopedVideoCatalogRepo.get(input.scope, input.videoId)
-      if (scoped) return projectRemoteVideoDetail(scoped)
-      const detail = getVideoDetail(input.videoId, catalogDb(database))
-      if (!detail) return null
-      return projectRemoteVideoDetail({
-        ...detail,
-        activeLibraryId: 0,
-        membershipAddedAt: '',
-        libraries: []
-      })
+      return createVideoQueryService({
+        database: catalogDb(database), includeUnscoped: true,
+        projectDetail: projectRemoteVideoDetail
+      }).get(input.scope, input.videoId)
     }
     if (operation === 'libraries.list') {
       const input = envelope.input as { includeArchived?: boolean }

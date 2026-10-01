@@ -72,7 +72,7 @@ async function mount(kind: string, query = ''): Promise<void> {
         </Route>
       </Routes></MemoryRouter>
     </QueryClientProvider>, { createNodeMock: element =>
-      viewport.createNodeMock(element) ?? (element.props.className === 'scroll-body scroll-body--scroll' ? scroll : null) })
+      viewport.createNodeMock(element) ?? (element.props['data-scroll-viewport'] === 'scroll' ? scroll : null) })
   })
   await wait(() => cards().length > 0)
 }
@@ -87,7 +87,7 @@ function text(node: TestRenderer.ReactTestInstance | string): string {
   return typeof node === 'string' ? node : node.children.map(text).join('')
 }
 function cards(): TestRenderer.ReactTestInstance[] {
-  return renderer.root.findAllByProps({ className: 'facet-card card-interactive' })
+  return renderer.root.findAll(node => node.type === 'button' && Boolean(node.props['data-facet-card']))
 }
 function button(label: string): TestRenderer.ReactTestInstance {
   return renderer.root.findAllByType('button').find(node => text(node) === label)!
@@ -102,6 +102,15 @@ afterEach(async () => {
 })
 
 for (const kind of ['series', 'maker', 'director']) describe(`${kind} real list page`, () => {
+  it('keeps search drafts through unchanged and changed scroll anchors', async () => {
+    await mount(kind)
+    await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'draft' } }))
+    await viewport.scroll(renderer, 0)
+    assert.equal(renderer.root.findByType('input').props.value, 'draft')
+    await viewport.scroll(renderer, 60)
+    assert.equal(renderer.root.findByType('input').props.value, 'draft')
+    await wait(() => location.search === '?q=draft')
+  })
   it('renders 60/60/5 with server total and bounded page cache', async () => {
     await mount(kind)
     assert.ok(cards().length > 0 && cards().length <= 8)

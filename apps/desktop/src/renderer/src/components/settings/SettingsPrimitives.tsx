@@ -16,6 +16,7 @@ type CardProps = {
   hint?: ReactNode
   actions?: ReactNode
   className?: string
+  headerClassName?: string
   children: ReactNode
 } & Pick<AriaAttributes, 'aria-label' | 'aria-labelledby'>
 
@@ -37,17 +38,18 @@ export function SettingsCard({
   hint,
   actions,
   className = '',
+  headerClassName,
   children,
   ...ariaProps
 }: CardProps): JSX.Element {
   return (
     <Component
       id={id}
-      className={`${styles.card} settings-card${className ? ` ${className}` : ''}`}
+      className={`${styles.card}${className ? ` ${className}` : ''}`}
       {...ariaProps}
     >
       {(title || hint || actions) && (
-        <SettingsCardHeader title={title} hint={hint} actions={actions} />
+        <SettingsCardHeader title={title} hint={hint} actions={actions} className={headerClassName} />
       )}
       {children}
     </Component>
@@ -57,20 +59,22 @@ export function SettingsCard({
 export function SettingsCardHeader({
   title,
   hint,
-  actions
+  actions,
+  className = ''
 }: {
   title?: ReactNode
   hint?: ReactNode
   actions?: ReactNode
+  className?: string
 }): JSX.Element {
   return (
-    <div className={`${styles.cardHead} settings-card-head`}>
-      <div className={`${styles.cardHeadCopy} settings-card-head-copy`}>
+    <div className={`${styles.cardHead}${className ? ` ${className}` : ''}`}>
+      <div className={styles.cardHeadCopy}>
         {title ? <h3>{title}</h3> : null}
         {hint ? <p className={styles.cardHint}>{hint}</p> : null}
       </div>
       {actions ? (
-        <div className={`${styles.cardActions} settings-card-actions`}>{actions}</div>
+        <div className={styles.cardActions}>{actions}</div>
       ) : null}
     </div>
   )
@@ -90,7 +94,7 @@ export function SettingsHeaderSwitch({
 }): JSX.Element {
   return (
     <label
-      className={`${styles.headerSwitch}${disabled ? ` ${styles.headerSwitchDisabled}` : ''} settings-header-switch`}
+      className={`${styles.headerSwitch}${disabled ? ` ${styles.headerSwitchDisabled}` : ''}`}
       title={label}
     >
       <Switch
@@ -185,17 +189,26 @@ export function SettingsTabBar({
 export function SettingsEmptyPanel({
   children,
   variant = 'plain',
-  className = ''
+  className = '',
+  descriptionClassName = ''
 }: {
   children: ReactNode
   variant?: 'plain' | 'dashed' | 'compact'
   className?: string
+  descriptionClassName?: string
 }): JSX.Element {
   const emptyVariant = variant === 'compact' ? 'compact' : 'panel'
+  const variantClass =
+    variant === 'dashed'
+      ? styles.emptyPanelDashed
+      : variant === 'compact'
+        ? styles.emptyPanelCompact
+        : ''
   return (
     <EmptyState
       variant={emptyVariant}
-      className={`settings-empty-panel settings-empty-panel--${variant}${className ? ` ${className}` : ''}`}
+      className={`${styles.emptyPanel}${variantClass ? ` ${variantClass}` : ''}${className ? ` ${className}` : ''}`}
+      descriptionClassName={`${styles.emptyPanelDescription}${descriptionClassName ? ` ${descriptionClassName}` : ''}`}
       description={children}
     />
   )
@@ -216,7 +229,7 @@ export function SettingsStatusPill({
 
   return (
     <span
-      className={`${styles.statusPill}${statusClass ? ` ${statusClass}` : ''} settings-status-pill${className ? ` ${className}` : ''}`}
+      className={`${styles.statusPill}${statusClass ? ` ${statusClass}` : ''}${className ? ` ${className}` : ''}`}
       data-status={status}
     >
       {children}
@@ -235,6 +248,7 @@ export function SettingsNumberStepper({
   max = Number.MAX_SAFE_INTEGER,
   step = 1,
   unit,
+  fill = false,
   disabled = false,
   'aria-label': ariaLabel,
   onChange
@@ -244,6 +258,7 @@ export function SettingsNumberStepper({
   max?: number
   step?: number
   unit?: string
+  fill?: boolean
   disabled?: boolean
   'aria-label'?: string
   onChange: (value: number) => void
@@ -315,7 +330,7 @@ export function SettingsNumberStepper({
   return (
     <div className={styles.stepperField}>
       <div
-        className={`${styles.numberStepper}${disabled ? ` ${styles.numberStepperDisabled}` : ''} settings-number-stepper`}
+        className={`${styles.numberStepper}${fill ? ` ${styles.numberStepperFill}` : ''}${disabled ? ` ${styles.numberStepperDisabled}` : ''}`}
         role="group"
         aria-label={ariaLabel}
       >
@@ -339,7 +354,7 @@ export function SettingsNumberStepper({
           <Minus {...UI_ICON_SM} aria-hidden />
         </button>
         <input
-          className={`${styles.stepperValue} settings-number-stepper__value`}
+          className={`${styles.stepperValue}${fill ? ` ${styles.stepperValueFill}` : ''}`}
           type="text"
           inputMode="numeric"
           disabled={disabled}
@@ -404,7 +419,7 @@ export function SettingsNumberStepper({
           <Plus {...UI_ICON_SM} aria-hidden />
         </button>
         {unit ? (
-          <span className={`${styles.stepperUnit} settings-number-stepper__unit`}>{unit}</span>
+          <span className={styles.stepperUnit}>{unit}</span>
         ) : null}
       </div>
       {invalid ? (

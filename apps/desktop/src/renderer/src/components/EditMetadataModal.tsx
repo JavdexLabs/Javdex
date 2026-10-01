@@ -1,3 +1,5 @@
+import TextInput from './TextInput'
+import TextArea from './TextArea'
 import { useMemo, useState } from 'react'
 import { isIsoDate, toDateInputValue, actressMergeGenderGroup } from '@shared/actressProfileOptions'
 import type { Actress } from '@shared/actressTypes'
@@ -6,7 +8,7 @@ import { selectDefaultExternalRating } from '@shared/externalRatings'
 import { assetUrl } from '../api'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
 import ExternalRatingsEditor from './ExternalRatingsEditor'
-import { EditFormField, EditFormHint, EditFormSection } from './FormPrimitives'
+import { EditForm, EditFormField, EditFormFields, EditFormHint, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
@@ -132,19 +134,19 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
       title="编辑影片资料"
       subtitle={video.code}
       size="xl"
-      className="modal-entity-edit"
-      confirmText={saving ? '保存中…' : '保存'}
+      busy={saving}
+      confirmText="保存"
       confirmDisabled={saving || releaseDateInvalid}
       onCancel={onCancel}
-      onConfirm={() => void handleSave()}
+      onConfirm={handleSave}
     >
-      <div className="entity-edit-form">
+      <EditForm>
         {metadataLocked ? (
           <EditFormHint as="p">这部影片有待确认刮削结果，目前只能编辑相关链接。</EditFormHint>
         ) : (
           <>
         {!mediaEditorsHidden ? (
-          <EditFormSection title="封面" className="entity-edit-section--media">
+          <EditFormSection title="封面" variant="media">
             <ImageImportField
               label="封面"
               hideLabel
@@ -157,7 +159,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         ) : null}
 
         <EditFormSection title="基本信息">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField
               label="标题"
               htmlFor="video-edit-title"
@@ -166,9 +168,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
                 <EditFieldAiTranslate text={title} disabled={saving} onTranslated={setTitle} />
               }
             >
-              <input
+              <TextInput
                 id="video-edit-title"
-                className="text-input"
+                density="workspace"
                 value={title}
                 placeholder={displayTitle}
                 onChange={(e) => setTitle(e.target.value)}
@@ -176,9 +178,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
             </EditFormField>
 
             <EditFormField label="发行日期" htmlFor="video-edit-release-date">
-              <input
+              <TextInput
                 id="video-edit-release-date"
-                className="text-input"
+                density="workspace"
                 type="date"
                 value={releaseDate}
                 onChange={(e) => setReleaseDate(e.target.value)}
@@ -209,19 +211,19 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
                 <EditFieldAiTranslate text={summary} disabled={saving} onTranslated={setSummary} />
               }
             >
-              <textarea
+              <TextArea
                 id="video-edit-summary"
-                className="text-input"
+                density="workspace"
                 rows={4}
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
               />
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
 
         <EditFormSection title="出品信息">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField
               label="制作商"
               htmlFor="video-edit-maker"
@@ -270,19 +272,19 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
                 }}
               />
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
 
         <EditFormSection title="演职员与标签">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField
               label="女优"
               htmlFor="video-edit-actresses-female"
               hint="多个演员用逗号分隔"
             >
-              <input
+              <TextInput
                 id="video-edit-actresses-female"
-                className="text-input"
+                density="workspace"
                 value={actressesFemale}
                 onChange={(e) => setActressesFemale(e.target.value)}
               />
@@ -293,9 +295,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
               htmlFor="video-edit-actresses-male"
               hint="多个演员用逗号分隔"
             >
-              <input
+              <TextInput
                 id="video-edit-actresses-male"
-                className="text-input"
+                density="workspace"
                 value={actressesMale}
                 onChange={(e) => setActressesMale(e.target.value)}
               />
@@ -307,14 +309,14 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
               span={2}
               hint="多个标签用逗号分隔；不影响自定义标签"
             >
-              <input
+              <TextInput
                 id="video-edit-tags"
-                className="text-input"
+                density="workspace"
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
               />
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
           </>
         )}
@@ -325,7 +327,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
           onChange={(value) => { setExternalRatings(value); setRatingsChanged(true) }}
         />}
         <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
-      </div>
+      </EditForm>
     </Modal>
   )
 }

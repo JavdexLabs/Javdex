@@ -19,6 +19,9 @@ import Button from '../components/Button'
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
 import IconButton from '../components/IconButton'
+import StatusText from '../components/StatusText'
+import SearchInput from '../components/SearchInput'
+import TextInput from '../components/TextInput'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { WorkbenchTabs } from '../components/workbench'
 import { navigateToActressDetail } from '../listView/listNavigation'
@@ -130,7 +133,7 @@ function OwnerChoiceCard({
   avatarSrc,
   gender = null,
   actressId,
-  className,
+  other = false,
   extraAction,
   onSelect
 }: {
@@ -140,7 +143,7 @@ function OwnerChoiceCard({
   avatarSrc: string | null | undefined
   gender?: 'female' | 'male' | null
   actressId: number
-  className?: string
+  other?: boolean
   extraAction?: ReactNode
   onSelect: () => void
 }): JSX.Element {
@@ -148,7 +151,9 @@ function OwnerChoiceCard({
   const location = useLocation()
   return (
     <div
-      className={`conflict-workbench-owner${selected ? ' is-selected' : ''}${className ? ` ${className}` : ''}`}
+      className={`${styles.owner}${other ? ` ${styles.otherOwner}` : ''}`}
+      data-selected={selected}
+      data-conflict-other-owner={other || undefined}
     >
       <label className={styles.ownerSelect}>
         <input
@@ -159,6 +164,7 @@ function OwnerChoiceCard({
           onChange={onSelect}
         />
         <ActressAvatar
+          className={styles.avatar}
           src={resolveMediaSrc(avatarSrc)}
           name={name}
           gender={gender}
@@ -247,9 +253,10 @@ function SourceDetails({
       return value ? [{ key, label, value }] : []
     })
     return (
-      <div className="conflict-workbench-source-detail">
-        <div className="conflict-workbench-source-heading">
+      <div className={styles.sourceDetail}>
+        <div className={styles.sourceHeading}>
           <ActressAvatar
+            className={styles.avatar}
             src={resolveMediaSrc(candidate.actressAvatarPath)}
             name={candidate.actressMainName}
             gender={null}
@@ -260,14 +267,14 @@ function SourceDetails({
             <span>待确认刮削结果 · {candidate.plugin.name}</span>
           </div>
         </div>
-        <dl className="conflict-workbench-meta-grid">
+        <dl className={styles.metaGrid}>
           <div><dt>插件</dt><dd>{candidate.plugin.name} · {candidate.plugin.source}</dd></div>
           <div><dt>查询名称</dt><dd className="copyable-text">{candidate.queryName}</dd></div>
           <div><dt>更新方式</dt><dd>{MODE_LABEL[candidate.mode]}</dd></div>
           <div><dt>实际字段</dt><dd>{candidateFieldLabel(candidate.applicableFields)}</dd></div>
         </dl>
         {values.length > 0 ? (
-          <dl className="conflict-workbench-result-values">
+          <dl className={styles.resultValues}>
             {values.map((field) => (
               <div key={field.key}><dt>{field.label}</dt><dd className="copyable-text">{field.value}</dd></div>
             ))}
@@ -276,7 +283,7 @@ function SourceDetails({
           <PendingImpactNote>插件没有返回非空资料字段。</PendingImpactNote>
         )}
         {candidate.resources.length > 0 ? (
-          <div className="conflict-workbench-resource-grid">
+          <div className={styles.resourceGrid}>
             {candidate.resources.slice(0, 8).map((resource) => (
               <img
                 key={`${resource.field}-${resource.position}`}
@@ -288,7 +295,7 @@ function SourceDetails({
           </div>
         ) : null}
         {candidate.warnings.length > 0 ? (
-          <div className="conflict-workbench-warning" role="status">
+          <div className={styles.warning} role="status">
             {candidate.warnings.map((warning) => <p key={warning}>{warning}</p>)}
           </div>
         ) : null}
@@ -297,9 +304,9 @@ function SourceDetails({
   }
   if (claim) {
     return (
-      <div className="conflict-workbench-source-detail">
+      <div className={styles.sourceDetail}>
         <h3>历史名称声明</h3>
-        <dl className="conflict-workbench-meta-grid">
+        <dl className={styles.metaGrid}>
           <div><dt>原始名称</dt><dd className="copyable-text">{claim.name}</dd></div>
           <div><dt>名称类型</dt><dd>{NAME_TYPE_LABEL[claim.type]}</dd></div>
           <div><dt>演员 ID</dt><dd className="copyable-text">{claim.actressId}</dd></div>
@@ -350,25 +357,26 @@ export default function PendingActressConflictPane({
         <ConfirmModal
           title="选择其他演员"
           size="md"
-          className="modal--conflict-owner-picker"
-          bodyClassName="conflict-workbench-owner-modal-body"
+          className={styles.ownerPickerModal}
+          bodyClassName={styles.ownerModalBody}
           confirmText="选好后返回处理页确认"
           confirmDisabled
           onConfirm={() => undefined}
           onCancel={otherOwner.close}
         >
           <p>这里只选择拟定归属；不会在弹窗内提交名称变更。</p>
-          <div className="conflict-workbench-owner-picker">
-            <input
+          <div className={styles.ownerPicker}>
+            <SearchInput
               type="search"
-              className="search-input form-control-full"
+              fullWidth
+              variant="compact"
               placeholder="搜索演员主名或别名…"
               aria-label="搜索其他演员"
               maxLength={256}
               value={otherOwner.search}
               onChange={(event) => otherOwner.changeSearch(event.target.value)}
             />
-            <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
+            <div className={styles.ownerSearch} role="group" aria-label="其他演员">
               {otherOwner.loading ? (
                 <EmptyState loading variant="modal" />
               ) : otherOwner.error && otherOwner.window.total === 0 ? (
@@ -380,13 +388,14 @@ export default function PendingActressConflictPane({
                   <button
                     key={item.id}
                     type="button"
+                    className={styles.ownerCandidate}
                     disabled={otherOwner.excludedIds.includes(item.id)}
                     aria-pressed={otherOwner.selected?.id === item.id}
                     aria-busy={otherOwner.choosingId === item.id}
-                    className={otherOwner.selected?.id === item.id ? 'is-selected' : ''}
                     onClick={() => otherOwner.choose(item)}
                   >
                     <ActressAvatar
+                      className={styles.avatar}
                       src={resolveMediaSrc(item.avatar_path)}
                       name={item.main_name}
                       decorative
@@ -417,7 +426,7 @@ export default function PendingActressConflictPane({
           onConfirm={editName.submit}
           onCancel={editName.close}
         >
-          <dl className="conflict-workbench-edit-context">
+          <dl className={styles.editContext}>
             <div><dt>当前名称</dt><dd className="copyable-text">{editSourceName}</dd></div>
             <div><dt>名称类型</dt><dd>{NAME_TYPE_LABEL[editSourceType]}</dd></div>
             <div>
@@ -430,16 +439,16 @@ export default function PendingActressConflictPane({
             </div>
             <div><dt>作用范围</dt><dd>{CONFLICT_ACTION_SCOPE_LABEL.editName}</dd></div>
           </dl>
-          <label className="conflict-workbench-edit-field">
+          <label className={styles.editField}>
             <span>新名称</span>
-            <input
+            <TextInput
               autoFocus
-              className="text-input form-control-full"
+              className={styles.editInput}
               value={editName.value}
               onChange={(event) => editName.change(event.target.value)}
             />
           </label>
-          <div className="conflict-workbench-edit-inspection" role="status">
+          <div className={styles.editInspection} role="status">
             <span>标准化结果</span>
             <strong className="copyable-text">{editInspection.normalizedName || '空'}</strong>
             <em>
@@ -489,17 +498,17 @@ export default function PendingActressConflictPane({
             const error = replacement.errors[claimant.actressId]
             const errorId = `conflict-replacement-error-${claimant.actressId}`
             return (
-              <label className="conflict-workbench-edit-field" key={claimant.actressId}>
+              <label className={styles.editField} key={claimant.actressId}>
                 <span>为「{claimant.mainName}」填写替代主名</span>
-                <input
+                <TextInput
                   autoFocus={index === 0}
-                  className="text-input form-control-full"
+                  className={styles.editInput}
                   value={replacement.mainNames[claimant.actressId] ?? ''}
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? errorId : undefined}
                   onChange={(event) => replacement.change(claimant.actressId, event.target.value)}
                 />
-                {error ? <small id={errorId} className="text-danger">{error}</small> : null}
+                {error ? <StatusText as="small" tone="danger" id={errorId}>{error}</StatusText> : null}
               </label>
             )
           })}
@@ -661,7 +670,7 @@ export default function PendingActressConflictPane({
             title="选择名称归属"
             hint="点选拟定归属；详情可打开演员页核对"
           >
-            <div className="conflict-workbench-owner-grid" role="radiogroup" aria-label="名称归属">
+            <div className={styles.ownerGrid} role="radiogroup" aria-label="名称归属">
               {ownerOptions.map((owner) => (
                 <OwnerChoiceCard
                   key={owner.actressId}
@@ -682,7 +691,7 @@ export default function PendingActressConflictPane({
               {otherOwner.selected ? (
                 <OwnerChoiceCard
                   selected={proposedOwner?.actressId === otherOwner.selected.id}
-                  className="conflict-workbench-owner--other"
+                  other
                   name={otherOwner.selected.main_name}
                   hint="已从演员库选择"
                   avatarSrc={otherOwner.selected.avatar_path}
@@ -700,7 +709,8 @@ export default function PendingActressConflictPane({
               ) : (
                 <button
                   type="button"
-                  className="conflict-workbench-owner conflict-workbench-owner--other"
+                  className={`${styles.owner} ${styles.otherOwner}`}
+                  data-conflict-other-owner
                   onClick={detail.openOtherOwner}
                 >
                   <UserRoundSearch {...UI_ICON_SM} aria-hidden />
@@ -719,7 +729,7 @@ export default function PendingActressConflictPane({
           title="核对来源资料"
           hint="选择要查看或修正的来源资料"
         >
-          <div className="conflict-workbench-source-list" role="group" aria-label="冲突来源">
+          <div className={styles.sourceList} role="group" aria-label="冲突来源">
             {selectedGroup.candidates.map((candidate) => {
               const active =
                 selection.source?.kind === 'scrape' && selection.source.id === candidate.pendingId
@@ -728,10 +738,10 @@ export default function PendingActressConflictPane({
                   key={`scrape-${candidate.pendingId}`}
                   type="button"
                   aria-pressed={active}
-                  className={active ? 'is-selected' : ''}
                   onClick={() => detail.selectSource({ kind: 'scrape', id: candidate.pendingId })}
                 >
                   <ActressAvatar
+                    className={styles.avatar}
                     src={resolveMediaSrc(candidate.actressAvatarPath)}
                     name={candidate.actressMainName}
                     gender={null}
@@ -760,10 +770,10 @@ export default function PendingActressConflictPane({
                   key={`claim-${claim.claimId}`}
                   type="button"
                   aria-pressed={active}
-                  className={active ? 'is-selected' : ''}
                   onClick={() => detail.selectSource({ kind: 'claim', id: claim.claimId })}
                 >
                   <ActressAvatar
+                    className={styles.avatar}
                     src={resolveMediaSrc(claimant?.avatarPath)}
                     name={claimant?.mainName ?? claim.name}
                     gender={null}
@@ -786,7 +796,7 @@ export default function PendingActressConflictPane({
           hint={`${unlockableCount} 份资料可在本次处理后应用`}
         >
           {isConflict && proposedOwner ? (
-            <div className="conflict-workbench-name-impact">
+            <div className={styles.nameImpact}>
               <strong>名称归属</strong>
               <span>「{selectedGroup.displayName}」将唯一归属「{proposedOwner.mainName}」</span>
               <ul>
@@ -814,7 +824,7 @@ export default function PendingActressConflictPane({
               </ul>
             </div>
           ) : isConflict ? (
-            <div className="conflict-workbench-impact-placeholder">
+            <div className={styles.impactPlaceholder}>
               先选择一位演员，才能确认名称归属影响。
             </div>
           ) : null}

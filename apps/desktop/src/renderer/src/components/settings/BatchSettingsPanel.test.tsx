@@ -11,7 +11,7 @@ it('shows bounded log preview with explicit omission notice and full task counte
   let renderer!:TestRenderer.ReactTestRenderer
   try {
     await act(async()=>{renderer=TestRenderer.create(<BatchSettingsPanel scope="avatar" batch={{total:500,current:500,success:0,failed:0,pending:0,currentCode:null,status:'done',logs:state.logs}} running={false} paused={false} skipped={500} logRef={{current:null}} emptyLog="Empty" logNotice={avatarLogNotice(state)} onPause={()=>{}} onResume={()=>{}} onDiscard={()=>{}} />)})
-    const rows=renderer.root.findAll(node=>typeof node.props.className==='string'&&node.props.className.startsWith('log-line '))
+    const rows=renderer.root.findAll(node=>node.props['data-batch-log-line']===true)
     assert.equal(rows.length,200)
     const output=JSON.stringify(renderer.toJSON())
     assert.match(output,/已省略 300 条较早日志/)

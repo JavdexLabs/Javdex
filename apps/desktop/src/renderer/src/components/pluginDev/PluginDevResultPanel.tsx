@@ -8,7 +8,7 @@ import type {
 import { runTargetLabel } from '@shared/pluginDevKindProfile'
 import { SquareTerminal } from 'lucide-react'
 import { formatParseResultKeyLabel } from '@shared/scrapeFieldPromptDocs'
-import EmptyState from '../EmptyState'
+import PluginDevAgentEmpty from './PluginDevAgentEmpty'
 import { UI_ICON_SM } from '../iconDefaults'
 import type { PluginKind } from './types'
 import styles from './PluginDevResultPanel.module.css'
@@ -106,7 +106,7 @@ function ExecutionCaseView({ kind, item }: {
     resultHasMultipleRecords(item.pluginResult) ||
     resultHasMultipleRecords(item.effectiveResult)
   return (
-    <details className={`plugin-dev-details ${styles.resultCase}`} open={open}>
+    <details className={styles.resultCase} open={open}>
       <summary>
         <span>{label}</span>
         <span className={item.runtimeAccepted ? styles.statusOk : styles.statusFail}>
@@ -136,7 +136,7 @@ function ExecutionCaseView({ kind, item }: {
 
 function LegacyCaseView({ kind, item }: { kind: PluginKind; item: PluginDevDryRunCase }): JSX.Element {
   return (
-    <details className={`plugin-dev-details ${styles.resultCase}`} open={!item.ok}>
+    <details className={styles.resultCase} open={!item.ok}>
       <summary>
         <span>{item.target}</span>
         <span className={item.ok ? styles.statusOk : styles.statusFail}>{item.ok ? '通过' : '失败'}</span>
@@ -164,9 +164,7 @@ export default function PluginDevResultPanel({
 }): JSX.Element {
   if (!dryRun && !execution) {
     return (
-      <EmptyState
-        variant="fill"
-        className="plugin-dev-agent-empty"
+      <PluginDevAgentEmpty
         icon={<SquareTerminal {...UI_ICON_SM} aria-hidden />}
         title="暂无运行结果"
         description="Agent 运行 plugin_dry_run 后，插件原始返回和生产有效结果会显示在这里。"

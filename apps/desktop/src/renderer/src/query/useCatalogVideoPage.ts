@@ -8,7 +8,7 @@ import { toScopedVideoCardPage } from '@shared/cardProjection'
 import { videoKeys } from './queryKeys'
 
 /** A related-video grid retains at most three pages; its URL offset survives nested detail routes. */
-export function useCatalogVideoPage(scope: CatalogScope, query: VideoQuery, hash: string, onError: (error: unknown) => void, enabled = true) {
+export function useCatalogVideoPage(scope: CatalogScope, query: VideoQuery, hash: string, onError: (message: string) => void, enabled = true) {
   const { offset, move, align } = useRelatedVideoOffset(hash)
   const result = useContinuousPage(JSON.stringify(videoKeys.list(scope, query, hash)), 60,
     async offset => toScopedVideoCardPage(await api.videos.list(scope, { ...query, limit: 60, offset })), enabled, offset)

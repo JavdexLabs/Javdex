@@ -7,6 +7,7 @@ interface Props {
   src: string | null | undefined
   name: string
   gender?: ActressGender | null
+  size?: 'standard' | 'detail'
   className?: string
   decorative?: boolean
 }
@@ -21,6 +22,7 @@ export default function ActressAvatar({
   src,
   name,
   gender,
+  size = 'standard',
   className,
   decorative = false
 }: Props): JSX.Element {
@@ -41,6 +43,7 @@ export default function ActressAvatar({
   return (
     <span
       className={classes}
+      data-size={size === 'detail' ? 'detail' : undefined}
       aria-hidden={decorative ? true : undefined}
       role={!decorative && !showImage ? 'img' : undefined}
       aria-label={!decorative && !showImage ? name : undefined}

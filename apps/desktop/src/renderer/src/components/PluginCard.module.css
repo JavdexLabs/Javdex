@@ -1,27 +1,7 @@
-.card .body {
-  display: grid;
-  grid-template-rows: repeat(2, calc(var(--control-h-sm) - 8px)) 17px 17px 3px;
-  align-content: start;
-}
-
-.card .titleRow {
-  align-items: center;
-}
-
-.card .tags {
-  flex-wrap: nowrap;
-}
-
-.tags .version {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card .actions {
-  justify-content: flex-start;
+.version {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .availability {
@@ -39,4 +19,333 @@
 .availability[data-configured='true'] {
   border-color: var(--border-accent);
   color: var(--text-accent);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 138px;
+  min-width: 0;
+  padding: 10px 10px 8px;
+  background: var(--surface-control);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+.cardDefault {
+  background: color-mix(in srgb, var(--surface-selected) 62%, var(--surface-control));
+  border-color: color-mix(in srgb, var(--border-accent) 46%, var(--border-subtle));
+  box-shadow: inset 3px 0 0 var(--border-accent);
+}
+
+.card:hover,
+.card:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+  outline: none;
+}
+
+.card:focus-visible {
+  box-shadow:
+    inset 3px 0 0 transparent,
+    0 0 0 2px var(--focus-ring);
+}
+
+.cardDefault:focus-visible {
+  box-shadow:
+    inset 3px 0 0 var(--border-accent),
+    0 0 0 2px var(--focus-ring);
+}
+
+.floatingMenu {
+  width: 132px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-elevated);
+  animation: floating-in var(--motion-fast) ease;
+}
+
+@keyframes floating-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.floatingMenu :where(button) {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.floatingMenu :where(button):disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.floatingMenu :where(button):focus-visible,
+.floatingMenu :where(button):hover:where(:not(:disabled)) {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.dangerItem {
+  color: var(--danger);
+}
+
+.dangerItem:focus-visible,
+.dangerItem:hover:where(:not(:disabled)) {
+  background: var(--surface-danger);
+  color: var(--danger);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+
+.card .body {
+  display: grid;
+  grid-template-rows: repeat(2, calc(var(--control-h-sm) - 8px)) 17px 17px 3px;
+  align-content: start;
+}
+
+.titleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.card .titleRow {
+  align-items: center;
+}
+
+.name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.defaultTag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-accent) 14%, transparent);
+  color: var(--text-accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.setDefaultButton {
+  flex-shrink: 0;
+  min-height: 20px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-accent) 40%, var(--border-subtle));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  opacity: 0.72;
+  pointer-events: auto;
+  transition:
+    opacity var(--motion-fast),
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.setDefaultButton:focus-visible,
+.setDefaultButton:hover:where(:not(:disabled)) {
+  background: color-mix(in srgb, var(--text-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--border-accent) 55%, var(--border-subtle));
+  color: var(--text-accent);
+  outline: none;
+}
+
+.setDefaultButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.card:where(:hover, :focus-within, .cardMenuOpen) .setDefaultButton {
+  opacity: 1;
+}
+
+.tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.card .tags {
+  flex-wrap: nowrap;
+}
+
+.tags .version {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldCount {
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.description {
+  min-height: 17px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldBar {
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  overflow: hidden;
+}
+
+.fieldFill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-muted);
+  transition: width var(--motion-med);
+}
+
+.fieldFillFull {
+  background: var(--text-accent);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0;
+  min-height: 32px;
+  opacity: 0.7;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    opacity var(--motion-fast);
+}
+
+.card .actions {
+  justify-content: flex-start;
+}
+
+.card:where(:hover, :focus-within, .cardMenuOpen) .actions {
+  opacity: 1;
+}
+
+.menuAnchor {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.card .iconAction {
+  --icon-glyph-size: 16px;
+
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+.card .iconAction:where(:hover, :focus-visible):where(:not(:disabled)) {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.card .iconAction:focus-visible:where(:not(:disabled)) {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.card .iconAction:active:where(:not(:disabled)) {
+  background: color-mix(in srgb, var(--surface-control-hover) 88%, var(--surface-selected));
+}
+
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+
+  .setDefaultButton {
+    opacity: 1;
+  }
 }

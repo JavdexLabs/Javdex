@@ -1,3 +1,182 @@
+.shell {
+  flex: 1;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  padding: 10px;
+}
+
+.shell.shellSettings {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  gap: 10px;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.breadcrumb strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.backLink {
+  min-height: var(--control-h-sm);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-accent);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-title, 700);
+  cursor: pointer;
+}
+
+.shellSettings .backLink {
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.backLink:hover {
+  color: var(--text-primary);
+}
+
+.toolbar {
+  flex-wrap: wrap;
+  min-height: 48px;
+  padding: 8px 10px;
+}
+
+.toolbarStart,
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.toolbarStart {
+  min-width: 0;
+}
+
+.toolbarActions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.codeActionSlot {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--control-h-sm);
+}
+
+.toolbarIconButton[data-ui='icon-button'],
+.toolbarIconPlaceholder {
+  width: var(--control-h-sm);
+  min-width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+
+  --icon-glyph-size: 14px;
+}
+
+.toolbarIconPlaceholder {
+  display: inline-flex;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.toolbarIconButton:hover:not(:disabled),
+.toolbarIconButton:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.toolbarIconButton:focus-visible:not(:disabled) {
+  box-shadow: var(--focus-ring);
+}
+
+.toolbarIconButton:active:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.toolbarKindToggle {
+  flex-shrink: 0;
+}
+
+.statusPill[data-status='running'] {
+  border-color: var(--border-info);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.statusPill[data-status='waiting'] {
+  border-color: var(--border-warning);
+  color: var(--text-warning);
+}
+
+.statusPill[data-status='ok'] {
+  border-color: var(--border-success);
+  color: var(--text-success);
+}
+
+.statusPill[data-status='fail'] {
+  border-color: var(--border-danger);
+  color: var(--text-danger);
+}
+
+.statusPill[data-status='cancelled'] {
+  border-color: color-mix(in srgb, var(--text-muted) 44%, var(--border-subtle));
+  color: var(--text-muted);
+}
+
+.main {
+  grid-template-columns: 240px minmax(0, 1fr) minmax(420px, 0.95fr);
+  gap: 12px;
+}
+
+.mainAgentFocus {
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+}
+
+.main.mainSettings {
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  min-height: 0;
+}
+
+@container settings-workspace (max-width: 940px) {
+  .main,
+  .main.mainSettings {
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  }
+}
+
+@container settings-workspace (max-width: 740px) {
+  .main,
+  .main.mainSettings {
+    grid-template-columns: 1fr;
+  }
+}
+
 .kindToggle {
   display: flex;
   align-items: center;
@@ -27,6 +206,10 @@
     background var(--motion-fast),
     border-color var(--motion-fast),
     color var(--motion-fast);
+}
+
+.kindToggle .kindButton {
+  flex: 1;
 }
 
 .kindButton:focus-visible {

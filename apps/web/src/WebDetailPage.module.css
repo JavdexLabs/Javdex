@@ -1,0 +1,165 @@
+
+.back {
+  margin-bottom: 24px;
+  background: transparent;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(24px, 4vw, 64px);
+}
+
+.copy {
+  max-width: 920px;
+}
+
+.copy h1 {
+  font-size: clamp(24px, 2.4vw, 38px);
+}
+
+.copy section {
+  margin-top: 28px;
+}
+
+.copy .metadata {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.summary {
+  color: var(--text-secondary);
+  white-space: pre-line;
+  line-height: 1.9;
+  font-size: 14px;
+}
+
+.resourceSection > .resourceNote {
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+  font-size: 13px;
+}
+
+.facts dt {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.playerShell {
+  margin-bottom: 32px;
+}
+
+.playerShell video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 78dvh;
+  background: var(--surface-player);
+  border-radius: var(--radius);
+}
+
+.playerCaption {
+  font-size: 12px;
+  margin: 10px 0 0;
+}
+
+.playerError {
+  padding: 20px;
+  background: var(--surface-elevated);
+  color: var(--text-danger);
+}
+
+.gallerySection {
+  margin-top: 40px;
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 14px;
+}
+
+.gallery img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  display: block;
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+}
+.playerFallback { margin-bottom: 32px; }
+
+.playerFallbackCover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 78dvh;
+  object-fit: contain;
+  background: var(--surface-base);
+  border-radius: var(--radius);
+}
+
+.imageTrigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius);
+  cursor: zoom-in;
+}
+
+.castGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 12px;
+}
+
+@media (width <= 760px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .root h1 {
+    font-size: 26px;
+  }
+
+  .playerShell {
+    margin-inline: 0;
+  }
+
+  .playerShell video {
+    border-radius: 0;
+  }
+
+  .playerCaption {
+    padding-inline: 0;
+  }
+}
+
+@media (width >= 1920px) {
+  .summary {
+    font-size: 18px;
+  }
+}
+
+@media (width <= 760px) {
+  .summary { font-size: 15px; }
+}

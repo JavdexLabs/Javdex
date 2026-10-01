@@ -1,0 +1,23 @@
+.confirmation {
+  display: grid;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+
+.error {
+  color: var(--text-danger);
+}
+
+.notice {
+  justify-content: flex-start;
+}
+
+.noticeIcon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.noticeCopy {
+  flex: 1;
+}

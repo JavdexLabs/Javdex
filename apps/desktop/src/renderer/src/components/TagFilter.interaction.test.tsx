@@ -32,8 +32,7 @@ async function mount(initial: number[] = [], variant: 'default'|'popover' = 'pop
 function options() { return renderer!.root.findAllByType('button').filter(n => n.props.role==='option') }
 function optionFor(id: number) {
   return options().find(node => {
-    const name = node.findAll(child => child.props.className === 'tag-chip-cloud-name')[0]
-    return name && String(name.children[0]) === `Tag ${id}`
+    return node.props['data-tag-id'] === id
   })
 }
 async function click(label: string) {
@@ -42,7 +41,7 @@ async function click(label: string) {
     if (grids.length) {
       position=Math.max(0,position+(label==='下一页'?100:-100));await viewport.scroll(renderer!,position);return
     }
-    const cloud = renderer!.root.findAll(node => node.props.className === 'tag-chip-cloud')[0]
+    const cloud = renderer!.root.findAll(node => node.props.role === 'listbox')[0]
     await act(async () => cloud.props.onScroll({ currentTarget: { scrollTop: label==='下一页' ? 9840 : 0, clientHeight: 160, scrollHeight: 10000 } }))
     return
   }
@@ -66,7 +65,7 @@ it('loads on open only, pages without full catalog reads and preserves cross-pag
   await click('下一页');assert.equal(requests[1].query.offset,100)
   await act(async () => renderer!.unmount());renderer=undefined;viewport=continuousViewport();position=0;requests.length=0
   await mount();await resolve(0,[1],true)
-  assert.equal(optionFor(1)?.props.className, 'tag-chip-cloud-item')
+  assert.equal(optionFor(1)?.props['aria-selected'], false)
   await act(async () => optionFor(1)!.props.onClick())
   assert.equal(requests.length,1,'selection alone does not reload candidates')
   await click('下一页');await resolve(1,[101])

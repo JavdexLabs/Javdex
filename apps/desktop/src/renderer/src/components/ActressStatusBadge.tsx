@@ -7,9 +7,11 @@ import styles from './ActressStatusBadge.module.css'
  * A successful cumulative scrape is the quiet default and stays unbadged.
  */
 export default function ActressStatusBadge({
-  status
+  status,
+  className = ''
 }: {
   status: ScrapedStatus
+  className?: string
 }): JSX.Element | null {
   const filter = actressStatusFilterOf(status)
   if (filter === 'success') return null
@@ -17,7 +19,7 @@ export default function ActressStatusBadge({
   const label = ACTRESS_STATUS_FILTER_LABELS[filter]
   return (
     <span
-      className={`${styles.root} ${styles[filter]} actress-status-badge actress-status-badge--${filter}`}
+      className={`${styles.root} ${styles[filter]} ${className}`}
       role="img"
       aria-label={`刮削状态：${label}`}
     >

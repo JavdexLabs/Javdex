@@ -1,0 +1,121 @@
+.modal.modal {
+  width: min(var(--classification-merge-modal-w), calc(100vw - var(--modal-viewport-inset)));
+}
+
+.body {
+  display: grid;
+  gap: var(--classification-merge-gap);
+  min-height: 0;
+}
+
+.flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--classification-merge-control-gap);
+}
+
+.card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--classification-merge-control-gap);
+  min-width: 0;
+  min-height: var(--classification-merge-card-min-h);
+  padding: var(--classification-merge-pad);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.card[data-highlighted='true'] {
+  border-style: solid;
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.card strong,
+.card small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card strong {
+  color: var(--text-primary);
+}
+
+.card small {
+  color: var(--text-muted);
+}
+
+.badge {
+  position: absolute;
+  inset-block-start: var(--classification-merge-control-gap);
+  inset-inline-start: var(--classification-merge-control-gap);
+  padding: var(--classification-merge-badge-pad-y) var(--classification-merge-control-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: var(--classification-merge-text-xs);
+  line-height: 1.35;
+}
+
+.arrow {
+  color: var(--text-muted);
+}
+
+.picker {
+  display: grid;
+  gap: var(--classification-merge-control-gap);
+  min-height: 0;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--classification-merge-control-gap);
+}
+
+.sectionHead > strong {
+  font-size: var(--classification-merge-text-sm);
+}
+
+.sectionHead > span {
+  color: var(--text-muted);
+  font-size: var(--classification-merge-text-xs);
+}
+
+
+.plan {
+  padding: var(--classification-merge-pad);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+}
+
+.plan > strong {
+  font-size: var(--classification-merge-text-sm);
+}
+
+.plan > ul {
+  margin: var(--classification-merge-control-gap) 0 0;
+  padding-inline-start: var(--classification-merge-gap);
+  color: var(--text-secondary);
+  font-size: var(--classification-merge-text-sm);
+  line-height: 1.55;
+}
+
+.error {
+  margin: 0;
+  color: var(--text-danger);
+  font-size: var(--classification-merge-text-sm);
+}

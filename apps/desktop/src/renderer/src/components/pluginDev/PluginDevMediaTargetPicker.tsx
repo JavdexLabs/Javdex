@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import ContinuousGrid from '../ContinuousGrid'
 import { useContinuousPage } from '../../hooks/useContinuousPage'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -15,6 +16,7 @@ import EmptyState from '../EmptyState'
 import { UI_ICON_SM } from '../iconDefaults'
 import type { PluginKind } from './types'
 import { useDesktopSession } from '../../desktop/DesktopSessionContext'
+import styles from './PluginDevMediaTargetPicker.module.css'
 
 interface Props {
   kind: PluginKind
@@ -185,17 +187,18 @@ function TargetPickerSession({
       title={titleForKind(kind)}
 
       size="lg"
-      className="modal--plugin-dev-target-picker"
+      className={styles.modal}
+      bodyClassName={styles.modalBody}
       bodyOverflow="hidden"
       confirmText="完成"
       cancelText="关闭"
       onConfirm={close}
       onCancel={close}
     >
-      <div className="plugin-dev-target-picker">
-        <div className="plugin-dev-target-picker-head">
-          <input
-            className="text-input"
+      <div className={styles.picker}>
+        <div className={styles.head}>
+          <TextInput
+            density="workspace"
             value={search}
             aria-label="搜索测试目标"
             maxLength={kind === 'actress' ? 256 : undefined}
@@ -203,16 +206,16 @@ function TargetPickerSession({
             autoFocus
             onChange={(event) => { invalidateChoice(); setVideos([]); setLoading(true); setSearch(event.target.value) }}
           />
-          <span className="plugin-dev-target-picker-count">
+          <span className={styles.count}>
             {(kind === 'actress' ? candidates.loading || search !== debouncedSearch : loading) ? '加载中…' : kind === 'actress' ? '选择测试演员' : `${resultCount}/${videoTotal}`}
           </span>
         </div>
 
-        {error ? <div className="plugin-dev-target-picker-error" role="alert">{error} <Button size="sm" onClick={() => { invalidateChoice(); setLoading(true); setRetry(value => value + 1) }}>重试</Button></div> : null}
-        {selectionError ? <div className="plugin-dev-target-picker-error" role="alert">{selectionError} <Button size="sm" onClick={() => setRetry(value => value + 1)}>重试</Button></div> : null}
-        {choiceError ? <div className="plugin-dev-target-picker-error" role="alert">{choiceError}</div> : null}
+        {error ? <div className={styles.error} role="alert">{error} <Button size="sm" onClick={() => { invalidateChoice(); setLoading(true); setRetry(value => value + 1) }}>重试</Button></div> : null}
+        {selectionError ? <div className={styles.error} role="alert">{selectionError} <Button size="sm" onClick={() => setRetry(value => value + 1)}>重试</Button></div> : null}
+        {choiceError ? <div className={styles.error} role="alert">{choiceError}</div> : null}
 
-        <div className="plugin-dev-target-picker-list" role="list">
+        <div className={styles.list} role="list">
           {kind === 'actress'
             ? search === debouncedSearch && <ContinuousGrid remember={false} window={candidates.window} scope={`test-actresses:${debouncedSearch}`} label="测试演员" itemHeight={64} itemKey={actress => actress.id} renderItem={actress => {
                 const exactName = resolvedNames[actress.id] ?? (Array.from(actress.main_name).length <= 128 ? actress.main_name : '')
@@ -221,7 +224,8 @@ function TargetPickerSession({
                   <button
                     key={actress.id}
                     type="button"
-                    className={`plugin-dev-target-picker-row${selected ? ' is-selected' : ''}`}
+                    className={styles.row}
+                    data-selected={selected}
                     disabled={selected || addingId !== null || resolvingSelection}
                     aria-label={`添加测试演员 ${actress.main_name}`}
                     onClick={() => void chooseActress(actress.id, actress.main_name)}
@@ -230,16 +234,16 @@ function TargetPickerSession({
                       src={resolveMediaSrc(actress.avatar_path)}
                       name={actress.main_name}
                       gender="female"
-                      className="plugin-dev-target-picker-avatar"
+                      className={styles.avatar}
                       decorative
                     />
-                    <span className="plugin-dev-target-picker-main">
+                    <span className={styles.main}>
                       <strong>
                         <ActressName name={actress.main_name} gender="female" />
                       </strong>
 
                     </span>
-                    <span className="plugin-dev-target-picker-action">
+                    <span className={styles.action}>
                       {addingId === actress.id ? '读取中…' : resolvingSelection ? '核对中…' : selected ? '已添加' : '添加'}
                     </span>
                   </button>
@@ -252,19 +256,20 @@ function TargetPickerSession({
                   <button
                     key={video.id}
                     type="button"
-                    className={`plugin-dev-target-picker-row${selected ? ' is-selected' : ''}`}
+                    className={styles.row}
+                    data-selected={selected}
                     disabled={selected}
                     onClick={() => onAdd(video.code)}
                   >
-                    <span className="plugin-dev-target-picker-poster">
+                    <span className={styles.poster}>
                       {poster ? <img src={poster} alt="" loading="lazy" /> : <span>{video.code}</span>}
                     </span>
-                    <span className="plugin-dev-target-picker-main">
+                    <span className={styles.main}>
                       <strong>{video.code}</strong>
                       <small title={video.title ?? ''}>{video.title || '未命名影片'}</small>
                     </span>
-                    <span className="plugin-dev-target-picker-meta">{formatDate(video.release_date)}</span>
-                    <span className="plugin-dev-target-picker-action">
+                    <span className={styles.meta}>{formatDate(video.release_date)}</span>
+                    <span className={styles.action}>
                       {selected ? '已添加' : '添加'}
                     </span>
                   </button>
@@ -273,7 +278,7 @@ function TargetPickerSession({
           {!loading && !error && resultCount === 0 ? (
             <EmptyState
               variant="modal"
-              className="plugin-dev-target-picker-empty"
+              className={styles.empty}
               icon={<SearchX {...UI_ICON_SM} aria-hidden />}
               title={search.trim() ? '没有找到匹配条目' : '媒体库暂无可选条目'}
               description={search.trim() ? '调整搜索关键词后再试。' : '导入媒体后可在这里选择测试目标。'}

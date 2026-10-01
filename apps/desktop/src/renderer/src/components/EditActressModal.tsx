@@ -1,3 +1,6 @@
+import TextInput from './TextInput'
+import TextArea from './TextArea'
+import { SegmentedControl, SegmentedOption } from './SegmentedControl'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BLOOD_TYPE_OPTIONS,
@@ -21,12 +24,13 @@ import { assetUrl } from '../api'
 import ActressAvatarEditor from './ActressAvatarEditor'
 import AliasTagEditor from './AliasTagEditor'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
-import { EditFormField, EditFormSection } from './FormPrimitives'
+import { EditForm, EditFormField, EditFormFields, EditFormLabelNote, EditFormSection } from './FormPrimitives'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
 import { useTheme } from './ThemeProvider'
 import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
 import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
+import styles from './EditActressModal.module.css'
 
 interface Props {
   actress: Omit<ActressMetadata, 'gallery'>
@@ -165,15 +169,15 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
       title={`编辑${actressGenderMergeLabel(gender)}资料`}
       subtitle={displayName}
       size="xl"
-      className="modal-entity-edit"
-      confirmText={saving ? '保存中…' : '保存'}
+      busy={saving}
+      confirmText="保存"
       confirmDisabled={saving || !mainName.trim() || dateInvalid}
       onCancel={onCancel}
-      onConfirm={() => void handleSave()}
+      onConfirm={handleSave}
     >
-      <div className="entity-edit-form">
+      <EditForm>
             {!mediaEditorsHidden ? (
-              <EditFormSection title="头像" className="entity-edit-section--media">
+              <EditFormSection title="头像" variant="media">
                 <ActressAvatarEditor
                   key={`${actress.id}:${avatarRevisionKey}`}
                   displayUrl={assetUrl(actress.avatar_path)}
@@ -186,11 +190,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
             ) : null}
 
             <EditFormSection title="姓名">
-              <div className="entity-edit-fields">
+              <EditFormFields>
                 <EditFormField label="主名" htmlFor="actress-main-name" span={2}>
-                  <input
+                  <TextInput
                     id="actress-main-name"
-                    className="text-input"
+                    density="workspace"
                     value={mainName}
                     onChange={(e) => setMainName(e.target.value)}
                     required
@@ -198,9 +202,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 </EditFormField>
 
                 <EditFormField label="中文名" htmlFor="actress-name-zh">
-                  <input
+                  <TextInput
                     id="actress-name-zh"
-                    className="text-input"
+                    density="workspace"
                     value={nameZh}
                     onChange={(e) => setNameZh(filterCjkName(e.target.value))}
                     placeholder="汉字或假名"
@@ -208,9 +212,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 </EditFormField>
 
                 <EditFormField label="英文名" htmlFor="actress-name-en">
-                  <input
+                  <TextInput
                     id="actress-name-en"
-                    className="text-input"
+                    density="workspace"
                     value={nameEn}
                     onChange={(e) => setNameEn(filterLatinName(e.target.value))}
                     placeholder="Latin letters"
@@ -224,9 +228,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                   span={2}
                   labelExtra={
                     aliases.length > 0 ? (
-                      <span id="actress-aliases-hint" className="entity-edit-label-note">
+                      <EditFormLabelNote id="actress-aliases-hint">
                         点击设为主名
-                      </span>
+                      </EditFormLabelNote>
                     ) : undefined
                   }
                 >
@@ -239,37 +243,37 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                     aria-describedby={aliases.length > 0 ? 'actress-aliases-hint' : undefined}
                   />
                 </EditFormField>
-              </div>
+              </EditFormFields>
             </EditFormSection>
 
             <EditFormSection title="基本资料">
-              <div className="entity-edit-fields">
+              <EditFormFields>
                 <EditFormField label="性别" span={2}>
-                  <div className="mode-toggle mode-toggle--stretch">
-                    <button
+                  <SegmentedControl variant="stretch" aria-label="性别">
+                    <SegmentedOption
                       type="button"
-                      className={gender === 'female' ? 'active' : ''}
+                      selected={gender === 'female'}
                       onClick={() => handleGenderChange('female')}
                     >
                       女优
-                    </button>
-                    <button
+                    </SegmentedOption>
+                    <SegmentedOption
                       type="button"
-                      className={gender === 'male' ? 'active' : ''}
+                      selected={gender === 'male'}
                       onClick={() => handleGenderChange('male')}
                     >
                       男优
-                    </button>
+                    </SegmentedOption>
                     {allowUnknownGender ? (
-                      <button
+                      <SegmentedOption
                         type="button"
-                        className={gender === null ? 'active' : ''}
+                        selected={gender === null}
                         onClick={() => handleGenderChange(null)}
                       >
                         未知
-                      </button>
+                      </SegmentedOption>
                     ) : null}
-                  </div>
+                  </SegmentedControl>
                 </EditFormField>
 
                 <EditFormField label="国籍" htmlFor="actress-nationality">
@@ -287,9 +291,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 </EditFormField>
 
                 <EditFormField label="生日" htmlFor="actress-birth-date">
-                  <input
+                  <TextInput
                     id="actress-birth-date"
-                    className="text-input"
+                    density="workspace"
                     type="date"
                     value={birthDate}
                     onChange={(e) => setBirthDate(e.target.value)}
@@ -297,9 +301,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 </EditFormField>
 
                 <EditFormField label="出道" htmlFor="actress-debut-date">
-                  <input
+                  <TextInput
                     id="actress-debut-date"
-                    className="text-input"
+                    density="workspace"
                     type="date"
                     value={debutDate}
                     onChange={(e) => setDebutDate(e.target.value)}
@@ -346,31 +350,31 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                     />
                   }
                 >
-                  <textarea
+                  <TextArea
                     id="actress-summary"
-                    className="text-input"
+                    density="workspace"
                     rows={3}
                     value={profileSummary}
                     onChange={(e) => setProfileSummary(e.target.value)}
                   />
                 </EditFormField>
-              </div>
+              </EditFormFields>
             </EditFormSection>
 
             <EditFormSection title={isMaleProfile ? '体型' : '身体数据'}>
-              <div className="entity-edit-fields">
+              <EditFormFields>
                 <EditFormField label="身高" htmlFor="actress-height" span={isMaleProfile ? 2 : 1}>
-                  <div className="entity-edit-input-suffix">
-                    <input
+                  <div className={styles.inputSuffix}>
+                    <TextInput
                       id="actress-height"
-                      className="text-input"
+                      density="workspace"
                       inputMode="numeric"
                       pattern="[0-9]*"
                       value={heightCm}
                       onChange={(e) => setHeightCm(filterPositiveInt(e.target.value, 3))}
                       placeholder="整数"
                     />
-                    <span className="entity-edit-input-unit">cm</span>
+                    <span className={styles.inputUnit}>cm</span>
                   </div>
                 </EditFormField>
 
@@ -392,10 +396,10 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                     </EditFormField>
 
                     <EditFormField label="三围" span={2}>
-                      <div className="inline-field-row">
-                        <div className="entity-edit-input-suffix">
-                          <input
-                            className="text-input"
+                      <div className={styles.inlineFieldRow}>
+                        <div className={styles.inputSuffix}>
+                          <TextInput
+                            density="workspace"
                             inputMode="numeric"
                             pattern="[0-9]*"
                             placeholder="胸"
@@ -403,11 +407,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                             value={bustCm}
                             onChange={(e) => setBustCm(filterPositiveInt(e.target.value, 3))}
                           />
-                          <span className="entity-edit-input-unit">cm</span>
+                          <span className={styles.inputUnit}>cm</span>
                         </div>
-                        <div className="entity-edit-input-suffix">
-                          <input
-                            className="text-input"
+                        <div className={styles.inputSuffix}>
+                          <TextInput
+                            density="workspace"
                             inputMode="numeric"
                             pattern="[0-9]*"
                             placeholder="腰"
@@ -415,11 +419,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                             value={waistCm}
                             onChange={(e) => setWaistCm(filterPositiveInt(e.target.value, 3))}
                           />
-                          <span className="entity-edit-input-unit">cm</span>
+                          <span className={styles.inputUnit}>cm</span>
                         </div>
-                        <div className="entity-edit-input-suffix">
-                          <input
-                            className="text-input"
+                        <div className={styles.inputSuffix}>
+                          <TextInput
+                            density="workspace"
                             inputMode="numeric"
                             pattern="[0-9]*"
                             placeholder="臀"
@@ -427,16 +431,16 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                             value={hipCm}
                             onChange={(e) => setHipCm(filterPositiveInt(e.target.value, 3))}
                           />
-                          <span className="entity-edit-input-unit">cm</span>
+                          <span className={styles.inputUnit}>cm</span>
                         </div>
                       </div>
                     </EditFormField>
                   </>
                 ) : null}
-              </div>
+              </EditFormFields>
             </EditFormSection>
             <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
-          </div>
+          </EditForm>
     </Modal>
   )
 }

@@ -9,13 +9,16 @@ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavig
 import { useElementSize } from '../hooks/useElementSize'
 import ImagePreviewLightbox, { type ImagePreviewItem } from './ImagePreviewLightbox'
 import ImageImportModal from './ImageImportModal'
-import MediaTileActionButton from './MediaTileActionButton'
+import GalleryImageTile from './GalleryImageTile'
 import Modal from './Modal'
-import IconButton from './IconButton'
+import DetailIconButton from './DetailIconButton'
 import EmptyState from './EmptyState'
 import { useToast } from './Toast'
 import { ImagePlus } from 'lucide-react'
 import { UI_ICON } from './iconDefaults'
+import DetailSectionTitle from './DetailSectionTitle'
+import { DetailSection, DetailSectionActions, DetailSectionCount, DetailSectionHead } from './DetailSection'
+import styles from './VideoSampleGallery.module.css'
 
 const SAMPLE_MASONRY_GAP = 10
 const SAMPLE_MASONRY_MIN_COL_WIDTH = 260
@@ -185,64 +188,53 @@ export default function VideoSampleGallery({
 
   return (
     <>
-      <section className="detail-section detail-section--samples">
-        <div className="detail-section-head detail-section-head--with-actions">
-          <h2 className="section-title">样张</h2>
-          <div className="detail-section-actions">
-            <span className="detail-section-count">{samples.length} 张</span>
-            <IconButton
-              className="detail-icon-action"
+      <DetailSection>
+        <DetailSectionHead>
+          <DetailSectionTitle grow>样张</DetailSectionTitle>
+          <DetailSectionActions>
+            <DetailSectionCount>{samples.length} 张</DetailSectionCount>
+            <DetailIconButton
+              compact
               icon={<ImagePlus {...UI_ICON} />}
               label="导入样张"
               onClick={() => setShowImport(true)}
             />
-          </div>
-        </div>
+          </DetailSectionActions>
+        </DetailSectionHead>
         {samples.length === 0 ? (
           <EmptyState
-            variant="compact"
-            className="sample-empty"
+            variant="gallery"
             icon={<ImagePlus {...UI_ICON} aria-hidden />}
             title="暂无样张"
             description="导入图片后会在这里展示。"
           />
         ) : (
-          <div className="sample-masonry" ref={masonryRef}>
+          <div className={styles.masonry} ref={masonryRef}>
             {masonryColumns.map((column, columnIndex) => (
-              <div key={columnIndex} className="sample-masonry-column">
+              <div key={columnIndex} className={styles.column}>
                 {column.items.map(({ asset, index }) => {
                   const src = sampleSrc(asset, 640)
                   if (!src) return null
                   return (
-                    <div key={asset.id} className="sample-masonry-item">
-                      <button
-                        type="button"
-                        className="sample-masonry-btn"
-                        disabled={!previewEnabled}
-                        onClick={() => openPreview(asset.id)}
-                        aria-label={`样张 ${index + 1}`}
-                      >
-                        <img
-                          src={src}
-                          alt=""
-                          loading="lazy"
-                          draggable={false}
-                          onLoad={(e) => updateMeasuredRatio(asset.id, e.currentTarget)}
-                        />
-                      </button>
-                      <MediaTileActionButton
-                        label={`删除样张 ${index + 1}`}
-                        title="删除样张"
-                        onClick={() => setDeleteTarget(asset)}
-                      />
-                    </div>
+                    <GalleryImageTile
+                      key={asset.id}
+                      variant="sample"
+                      src={src}
+                      label={`样张 ${index + 1}`}
+                      disabled={!previewEnabled}
+                      onOpen={() => openPreview(asset.id)}
+                      onImageLoad={(image) => updateMeasuredRatio(asset.id, image)}
+                      deleteLabel={`删除样张 ${index + 1}`}
+                      deleteTitle="删除样张"
+                      onDelete={() => setDeleteTarget(asset)}
+                    />
                   )
                 })}
               </div>
             ))}
           </div>
         )}
-      </section>
+      </DetailSection>
       {isOpen && previewIndex != null && (
         <ImagePreviewLightbox
           items={previewItems}

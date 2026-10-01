@@ -7,6 +7,7 @@ import { UI_ICON_MD } from './iconDefaults'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { defaultPluginDelay, pluginSourceLabel } from '../settings/settingsDisplay'
 import Button from './Button'
+import PluginSourceBadge from './PluginSourceBadge'
 import styles from './PluginCard.module.css'
 
 function formatPluginVersion(plugin: ScraperPluginDescriptor): string | null {
@@ -70,23 +71,22 @@ export default function PluginCard({
   return (
     <>
       <article
-        className={`${styles.card} plugin-card plugin-card--${plugin.source}${isDefault ? ' plugin-card--default' : ''}${
-          menuOpen ? ' plugin-card--menu-open' : ''
-        }`}
+        className={`${styles.card}${isDefault ? ` ${styles.cardDefault}` : ''}${menuOpen ? ` ${styles.cardMenuOpen}` : ''}`}
+        data-source={plugin.source}
         role="listitem"
         aria-label={`${displayName}${isDefault ? '，默认插件' : ''}${plugin.configured === false ? '，待配置' : ''}`}
       >
-        <div className={`plugin-card-body ${styles.body}`}>
-          <div className={`plugin-card-title-row ${styles.titleRow}`}>
-            <h4 className="plugin-card-name" title={displayName}>
+        <div className={styles.body}>
+          <div className={styles.titleRow}>
+            <h4 className={styles.name} title={displayName}>
               {displayName}
             </h4>
             {isDefault ? (
-              <span className="plugin-card-default-tag">全局默认</span>
+              <span className={styles.defaultTag}>全局默认</span>
             ) : (
               <button
                 type="button"
-                className="plugin-card-set-default-btn"
+                className={styles.setDefaultButton}
                 disabled={actionsDisabled || plugin.configured === false}
                 title={plugin.configured === false ? plugin.disabledReason : undefined}
                 onClick={(e) => {
@@ -98,13 +98,13 @@ export default function PluginCard({
               </button>
             )}
           </div>
-          <div className={`plugin-card-tags ${styles.tags}`}>
+          <div className={styles.tags}>
             {sourceLabel && (
-              <span className={`plugin-source-badge plugin-source-badge--${plugin.source}`}>
+              <PluginSourceBadge source={plugin.source}>
                 {sourceLabel}
-              </span>
+              </PluginSourceBadge>
             )}
-            {versionLabel && <span className={`plugin-version ${styles.version}`}>{versionLabel}</span>}
+            {versionLabel && <span className={styles.version}>{versionLabel}</span>}
             {plugin.requiresConfiguration && (
               <span
                 className={styles.availability}
@@ -115,17 +115,17 @@ export default function PluginCard({
               </span>
             )}
           </div>
-          <div className="plugin-card-meta">
+          <div className={styles.meta}>
             <span>{delayLabel}</span>
-            <span className="plugin-card-field-count">
+            <span className={styles.fieldCount}>
               字段 {plugin.supportedFields.length}/{allFieldCount}
             </span>
           </div>
-          <p className="plugin-card-description" title={summaryLabel || undefined}>
+          <p className={styles.description} title={summaryLabel || undefined}>
             {summaryLabel || ' '}
           </p>
           <div
-            className="plugin-card-field-bar"
+            className={styles.fieldBar}
             role="progressbar"
             aria-valuenow={coveragePct}
             aria-valuemin={0}
@@ -133,12 +133,12 @@ export default function PluginCard({
             aria-label={`字段支持 ${plugin.supportedFields.length}/${allFieldCount}`}
           >
             <div
-              className={`plugin-card-field-fill${coverage >= 1 ? ' plugin-card-field-fill--full' : ''}`}
+              className={`${styles.fieldFill}${coverage >= 1 ? ` ${styles.fieldFillFull}` : ''}`}
               style={{ width: `${coveragePct}%` }}
             />
           </div>
         </div>
-        <div className={`plugin-card-actions ${styles.actions}`}>
+        <div className={styles.actions}>
           {plugin.requiresConfiguration && plugin.configured === false ? (
             <Button
               type="button"
@@ -158,9 +158,9 @@ export default function PluginCard({
             </Button>
           )}
           {showMoreMenu && (
-            <span ref={menuBtnRef} className="plugin-card-menu-anchor">
+            <span ref={menuBtnRef} className={styles.menuAnchor}>
               <IconButton
-                className="plugin-card-icon-action"
+                className={styles.iconAction}
                 icon={<Ellipsis {...UI_ICON_MD} />}
                 label="更多操作"
                 disabled={actionsDisabled}
@@ -183,7 +183,7 @@ export default function PluginCard({
           side="bottom"
           align="end"
           offset={6}
-          className="plugin-floating-menu"
+          className={styles.floatingMenu}
           role="menu"
           onClose={() => setMenuOpen(false)}
         >
@@ -212,7 +212,7 @@ export default function PluginCard({
           <button
             type="button"
             role="menuitem"
-            className="danger"
+            className={styles.dangerItem}
             disabled={!plugin.removable || actionsDisabled}
             onClick={() => {
               setMenuOpen(false)

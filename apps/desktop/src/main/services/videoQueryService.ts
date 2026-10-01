@@ -1,57 +1,9 @@
 import { catalogReadService } from './catalogReadService'
-import { getVideoResourceInLibrary } from '@library/db/videoRepo'
-import {
-  scopedVideoCatalogRepo,
-  type ScopedStoredVideoDetail,
-  type ScopedVideoCatalogRepo
-} from '@library/db/scopedVideoCatalogRepo'
-import { resolveVideoDisplayDurationSeconds } from '@library/scan/videoDuration'
+import { createVideoQueryService, type VideoQueryService } from '@library/catalog/videoQueryService'
+export { createVideoQueryService, type VideoQueryService } from '@library/catalog/videoQueryService'
 import type { CatalogScope } from '@shared/mediaLibraryTypes'
-import type { ScopedVideoDetail, ScopedVideoListResult } from '@shared/catalogTypes'
-import type {
-  VideoQuery,
-  VideoResource
-} from '@shared/videoTypes'
-import { projectVideoDetail } from '@library/catalog/videoDetailProjection'
-
-export interface VideoQueryService {
-  list(scope: CatalogScope, query?: VideoQuery): ScopedVideoListResult
-  get(scope: CatalogScope, id: number): ScopedVideoDetail | null
-  getResource(libraryId: number, videoId: number, resourceId: number): VideoResource | null
-  listYears(scope: CatalogScope): number[]
-}
-
-interface VideoQueryServiceDependencies {
-  catalog: ScopedVideoCatalogRepo
-  getVideoResourceInLibrary: typeof getVideoResourceInLibrary
-  resolveDuration: typeof resolveVideoDisplayDurationSeconds
-}
-
-export function createVideoQueryService(
-  dependencies: Partial<VideoQueryServiceDependencies> = {}
-): VideoQueryService {
-  const catalog = dependencies.catalog ?? scopedVideoCatalogRepo
-  const readResource = dependencies.getVideoResourceInLibrary ?? getVideoResourceInLibrary
-  const resolveDuration = dependencies.resolveDuration ?? resolveVideoDisplayDurationSeconds
-
-  return {
-    list(scope, query): ScopedVideoListResult {
-      return catalog.list(scope, query ?? {})
-    },
-    get(scope, id): ScopedVideoDetail | null {
-      const detail: ScopedStoredVideoDetail | null = catalog.get(scope, id)
-      if (!detail) return null
-      return projectVideoDetail(detail, { resolveDuration })
-    },
-    getResource(libraryId, videoId, resourceId): VideoResource | null {
-      const resource = readResource(libraryId, resourceId)
-      return resource?.video_id === videoId ? resource : null
-    },
-    listYears(scope): number[] {
-      return catalog.listYears(scope)
-    }
-  }
-}
+import type { ScopedVideoListResult } from '@shared/catalogTypes'
+import type { VideoQuery } from '@shared/videoTypes'
 
 export interface AsyncVideoQueryService extends Omit<VideoQueryService, 'list' | 'listYears'> {
   list(scope: CatalogScope, query?: VideoQuery): Promise<ScopedVideoListResult>

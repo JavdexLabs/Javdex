@@ -1,0 +1,228 @@
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 0;
+}
+
+.actressRowAvatars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.actressMini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 76px;
+  min-height: 96px;
+  margin: 0;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  appearance: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.actressMini:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.actressMini:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.actressMini .actressMiniAvatar {
+  width: 64px;
+  height: 64px;
+  font-size: 20px;
+}
+
+.actressMini:focus-visible .actressMiniAvatar {
+  border-color: var(--border-accent);
+}
+
+.actressMiniName {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.summaryText {
+  color: var(--text-1);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.heroBody {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  min-width: 0;
+}
+
+.titleBlock {
+  min-width: 0;
+  width: 100%;
+}
+
+.titleBadges {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.code {
+  color: var(--accent-hover);
+  font-weight: 700;
+}
+
+.scrapeHint {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.scrapeHintLink {
+  margin: 0 4px;
+  font-size: inherit;
+  vertical-align: baseline;
+}
+
+.cover {
+  position: relative;
+  flex-shrink: 0;
+  width: 420px;
+  aspect-ratio: 800 / 538;
+  align-self: start;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 10%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-elevated) 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.cover > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.cover > .coverTall {
+  display: block;
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.coverPreview {
+  cursor: zoom-in;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.coverPreview:hover {
+  border-color: var(--border-accent);
+}
+
+.coverPreview:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 4px;
+  box-shadow: var(--focus-ring);
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-self: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 2px;
+}
+
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .cover > img {
+  filter: var(--privacy-image-filter);
+  scale: var(--privacy-image-scale);
+}
+
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .cover:has(> img)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--privacy-glass-background);
+}
+
+@container detail-page (max-width: 900px) {
+  .heroBody {
+    gap: 18px;
+  }
+}
+
+@container detail-page (max-width: 720px) {
+  .hero {
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .heroBody {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .cover {
+    width: 100%;
+    max-width: 100%;
+    align-self: stretch;
+  }
+
+  .cover:has(> .coverTall) {
+    aspect-ratio: 7 / 10;
+  }
+
+  .info {
+    width: 100%;
+  }
+}
+
+.operationHint {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  user-select: text;
+}
+
+.operationPath {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  word-break: break-all;
+  user-select: text;
+}
+
+.fullControl {
+  width: 100%;
+}

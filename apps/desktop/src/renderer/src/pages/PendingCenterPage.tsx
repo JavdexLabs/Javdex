@@ -1,3 +1,5 @@
+import ListPage from '../components/ListPage'
+import ScrollViewport from '../components/ScrollViewport'
 import type { PendingScanQueueItem, PendingScanQueueQuery } from '@shared/libraryTypes'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -278,7 +280,7 @@ export default function PendingCenterPage(): JSX.Element {
       : null
 
   return (
-    <div className={`list-page ${styles.page}`}>
+    <ListPage className={styles.page}>
       <header className={styles.topbar}>
         <div className={styles.titleRow}>
           <h1 className={styles.title}>待确认</h1>
@@ -331,8 +333,8 @@ export default function PendingCenterPage(): JSX.Element {
           ) : null}
         </div>
       </header>
-      <div
-        className="scroll-body scroll-body--fill"
+      <ScrollViewport
+        variant="fill"
         id="pending-results"
         role="tabpanel"
         aria-labelledby={`pending-types-${type}`}
@@ -476,8 +478,8 @@ export default function PendingCenterPage(): JSX.Element {
             </WorkbenchMain>
           )}
         </WorkbenchShell>
-      </div>
-    </div>
+      </ScrollViewport>
+    </ListPage>
   )
 }
 

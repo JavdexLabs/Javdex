@@ -37,3 +37,29 @@ it('ignores session memory from a different URL page', async () => {
   await act(async () => { renderer = TestRenderer.create(grid(0), { createNodeMock: viewport.createNodeMock }) })
   assert.equal(viewport.owner.scrollTop, 0)
 })
+
+for (const minWidth of [120, 38]) it(`does not publish a restored row preceding the URL page boundary until user scrolls (minWidth=${minWidth})`, async () => {
+  const viewport = continuousViewport()
+  const data = windowFor(200)
+  const anchors: number[] = []
+  const listeners = new Set<() => void>()
+  let top = 0
+  Object.defineProperty(viewport.owner, 'scrollTop', {
+    get: () => top,
+    set: (value: number) => { top = Math.round(value) }
+  })
+  viewport.owner.addEventListener = (_: string, listener: () => void) => listeners.add(listener)
+  viewport.owner.removeEventListener = (_: string, listener: () => void) => listeners.delete(listener)
+  // Three columns exercise pixel rounding; eight columns straddle the 60-item page.
+  await act(async () => { renderer = TestRenderer.create(
+    <ContinuousGrid window={data} scope="fractional" pageSize={60} initialIndex={60} label="list"
+      minWidth={minWidth} itemKey={item => item.id} itemHeight={width => width * 1.7}
+      renderItem={() => <span />} onAnchor={index => anchors.push(index)} />,
+    { createNodeMock: viewport.createNodeMock }) })
+  await act(async () => { for (const listener of listeners) listener() })
+  assert.deepEqual(anchors, [], 'Restoration must not reset the URL page')
+  top += 500
+  await act(async () => { for (const listener of listeners) listener() })
+  assert.equal(anchors.length, 1, 'Real scrolling still publishes an anchor')
+  assert.ok(anchors[0] >= 60)
+})

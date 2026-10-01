@@ -1,0 +1,89 @@
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--control-h-sm);
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.root:focus-within {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.input {
+  flex: 1 1 120px;
+  min-width: 80px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  padding: 2px 4px;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.input:disabled {
+  cursor: not-allowed;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  max-width: 100%;
+  min-height: var(--target-min);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.3;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.chip[data-promotable='true']:hover,
+.chip[data-promotable='true']:focus-within {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.chipName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  padding: 0;
+  margin: 0;
+}
+
+:where(button).chipName {
+  cursor: pointer;
+  text-align: left;
+}
+
+:where(button).chipName:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+:where(button).chipName:focus-visible,
+:where(button).chipName:hover:not(:disabled) {
+  color: var(--text-accent);
+  outline: none;
+}

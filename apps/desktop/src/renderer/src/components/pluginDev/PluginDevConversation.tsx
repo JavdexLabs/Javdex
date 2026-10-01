@@ -1,3 +1,4 @@
+import TextArea from '../TextArea'
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
 import { Bot, BrainCircuit, Download, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -10,7 +11,7 @@ import type {
 } from '@shared/pluginDevTypes'
 import { AGENT_REASONING_TEXT_CHAR_LIMIT } from '@shared/agentReasoning'
 import { formatToolLabel, toolCategory } from './pluginDevFormat'
-import EmptyState from '../EmptyState'
+import PluginDevAgentEmpty from './PluginDevAgentEmpty'
 import { UI_ICON_SM } from '../iconDefaults'
 import { agentPhaseLabel, type PluginDevConversationItem } from './types'
 import Button from '../Button'
@@ -373,12 +374,11 @@ export default function PluginDevConversation({
   ) : null
 
   return (
-    <div className="plugin-dev-conversation">
-      <div ref={logRef} className="plugin-dev-conversation-log" onScroll={handleLogScroll}>
+    <div className={styles.conversation}>
+      <div ref={logRef} className={styles.log} data-conversation-log onScroll={handleLogScroll}>
         {items.length === 0 && !running && !currentInteraction ? (
-          <EmptyState
-            variant="fill"
-            className="plugin-dev-agent-empty"
+          <PluginDevAgentEmpty
+            className={styles.empty}
             icon={<Bot {...UI_ICON_SM} aria-hidden />}
             title="开始 Agent 运行"
             description="填写配置后点击「AI开发 / AI调试」，或在底部输入指示开始调试。"
@@ -387,7 +387,7 @@ export default function PluginDevConversation({
           items.map((item) => {
             if (item.type === 'user') {
               return (
-                <div key={item.id} className="plugin-dev-chat-message plugin-dev-chat-message--user">
+                <div key={item.id} className={styles.chatMessage} data-role="user">
                   <span>你</span>
                   <p>{item.text}</p>
                 </div>
@@ -397,7 +397,8 @@ export default function PluginDevConversation({
               return (
                 <div
                   key={item.id}
-                  className="plugin-dev-chat-message plugin-dev-chat-message--agent"
+                  className={styles.chatMessage}
+                  data-role="agent"
                   aria-busy={item.streaming || undefined}
                 >
                   <span>
@@ -415,18 +416,18 @@ export default function PluginDevConversation({
               return <ReasoningBlock key={item.id} item={item} />
             }
             const category = toolCategory(item.tool)
-            const state = item.ok === false ? 'is-fail' : item.ok === true ? 'is-ok' : ''
+            const state = item.ok === false ? 'fail' : item.ok === true ? 'ok' : undefined
             return (
-              <div key={item.id} className={`plugin-dev-conv-tool ${state}`}>
-                <div className="plugin-dev-conv-tool-head">
-                  <span className="plugin-dev-conv-tool-label">工具</span>
-                  <span className={`plugin-dev-timeline-tool plugin-dev-timeline-tool--${category}`}>
+              <div key={item.id} className={styles.tool} data-state={state}>
+                <div className={styles.toolHead}>
+                  <span className={styles.toolLabel}>工具</span>
+                  <span className={styles.toolCategory} data-category={category}>
                     {formatToolLabel(item.tool)}
                   </span>
-                  <span className="plugin-dev-conv-tool-step">#{item.step}</span>
+                  <span className={styles.toolStep}>#{item.step}</span>
                 </div>
                 {(item.detail || item.summary) && (
-                  <details className="plugin-dev-conv-tool-detail" open={item.ok === false}>
+                  <details className={styles.toolDetail} open={item.ok === false}>
                     <summary>查看输出</summary>
                     <pre>{item.detail || item.summary}</pre>
                   </details>
@@ -437,17 +438,18 @@ export default function PluginDevConversation({
         )}
 
         {running && activeTool && (
-          <div className="plugin-dev-conv-tool is-pending">
-            <div className="plugin-dev-conv-tool-head">
-              <span className="plugin-dev-conv-tool-label">工具</span>
+          <div className={styles.tool} data-state="pending">
+            <div className={styles.toolHead}>
+              <span className={styles.toolLabel}>工具</span>
               <span
-                className={`plugin-dev-timeline-tool plugin-dev-timeline-tool--${toolCategory(activeTool)}`}
+                className={styles.toolCategory}
+                data-category={toolCategory(activeTool)}
               >
                 {formatToolLabel(activeTool)}
               </span>
-              <span className="plugin-dev-conv-tool-step">{agentPhaseLabel(agentPhase)}</span>
-              {agentStep > 0 && <span className="plugin-dev-conv-tool-step">#{agentStep}</span>}
-              <span className="plugin-dev-timeline-muted">执行中…</span>
+              <span className={styles.toolStep}>{agentPhaseLabel(agentPhase)}</span>
+              {agentStep > 0 && <span className={styles.toolStep}>#{agentStep}</span>}
+              <span className={styles.toolPending}>执行中…</span>
             </div>
           </div>
         )}
@@ -455,10 +457,10 @@ export default function PluginDevConversation({
         {currentInteraction}
       </div>
 
-      <div className="plugin-dev-composer-stack">
-        <div className="plugin-dev-chat-composer">
-          <textarea
-            className="text-input plugin-dev-feedback-input"
+      <div className={styles.composerStack}>
+        <div className={styles.chatComposer}>
+          <TextArea
+            density="workspace" className={styles.feedbackInput}
             value={feedbackText}
             placeholder={placeholder}
             disabled={
@@ -482,9 +484,9 @@ export default function PluginDevConversation({
               }
             }}
           />
-          <div className="plugin-dev-chat-actions">
+          <div className={styles.chatActions}>
             <span>{agentRunning ? '任务运行中' : 'Enter 发送 · Ctrl+Enter 换行'}</span>
-            <div className="plugin-dev-chat-action-end">
+            <div className={styles.chatActionEnd}>
               <div
                 className={styles.contextPopover}
                 style={

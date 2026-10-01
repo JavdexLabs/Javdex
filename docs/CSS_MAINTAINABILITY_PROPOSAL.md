@@ -6,6 +6,8 @@
 >
 > 适用范围：Javdex Electron renderer（React + electron-vite/Vite）
 
+> 本文保留 2026-08-11 的调研基线和原迁移方案，不代表当前依赖版本或债务统计。2026-09-30 已完成桌面／Web 功能样式源码收口，应用壳也归自身 Module；当前全局契约、验证边界与尚待完成的视觉闭环以 [CSS_MODULE_MIGRATION.md](CSS_MODULE_MIGRATION.md) 为准，不重新引入本文迁移期的 legacy 表。
+
 ## 决策摘要
 
 **推荐采用“原生 CSS Modules + React 视觉原语 + 少量全局基础样式”的渐进架构。**

@@ -10,6 +10,8 @@ import {
 } from './actressDeleteConfirmation'
 import Button from './Button'
 import { UI_ICON_SM } from './iconDefaults'
+import NoticeBanner, { NoticeBannerCopy } from './NoticeBanner'
+import styles from './ActressDeleteModal.module.css'
 
 interface ActressDeleteModalProps {
   ids: number[]
@@ -99,19 +101,16 @@ export default function ActressDeleteModal({
         </>
       }
     >
-      <div className="actress-delete-confirmation selectable-text">
+      <div className={`${styles.confirmation} selectable-text`}>
         {!impact && !error ? <p>正在检查影片关联…</p> : null}
         {copy ? <p>{copy.description}</p> : null}
         {copy?.warningTitle && copy.warningBody ? (
-          <div className="settings-notice settings-notice--warning actress-delete-confirmation__notice" role="status">
-            <AlertTriangle {...UI_ICON_SM} aria-hidden />
-            <div className="settings-notice-copy">
-              <strong>{copy.warningTitle}</strong>
-              <span>{copy.warningBody}</span>
-            </div>
-          </div>
+          <NoticeBanner tone="warning" className={styles.notice} role="status">
+            <AlertTriangle {...UI_ICON_SM} className={styles.noticeIcon} aria-hidden />
+            <NoticeBannerCopy title={copy.warningTitle} body={copy.warningBody} className={styles.noticeCopy} />
+          </NoticeBanner>
         ) : null}
-        {error ? <p className="actress-delete-confirmation__error">{error}</p> : null}
+        {error ? <p className={styles.error}>{error}</p> : null}
       </div>
     </Modal>
   )

@@ -1,0 +1,21 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 300px;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.root > svg {
+  width: 36px;
+  height: 36px;
+}
+
+.root p {
+  max-width: 38em;
+  margin: 0;
+}

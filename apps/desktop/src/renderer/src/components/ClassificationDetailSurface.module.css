@@ -1,0 +1,12 @@
+.inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--organization-section-gap);
+}
+
+.videoHeading {
+  padding-block-start: var(--organization-section-gap);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}

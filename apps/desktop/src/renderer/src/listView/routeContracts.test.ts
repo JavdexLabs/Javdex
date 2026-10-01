@@ -564,7 +564,7 @@ describe('navigation helpers', () => {
     for (const [pathname] of paths) {
       navigateBackFromActressDetail(navigate, {
         pathname,
-        search: '?q=kept',
+        search: '?q=kept&relatedVideoOffset=60&actressVideoOffset=120',
         hash: '',
         state: null,
         key: pathname
@@ -573,8 +573,22 @@ describe('navigation helpers', () => {
 
     assert.deepEqual(
       destinations,
-      paths.map(([, pathname]) => ({ pathname, search: '?q=kept' }))
+      paths.map(([, pathname]) => ({ pathname, search: '?q=kept&relatedVideoOffset=60' }))
     )
+  })
+
+  it('starts another nested actress at its own first page without resetting the parent works', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => { destinations.push(to) }) as NavigateFunction
+    navigateToActressFromVideoDetail(navigate, {
+      pathname: '/actresses/3/8',
+      search: '?q=kept&relatedVideoOffset=60&actressVideoOffset=120',
+      hash: '', state: null, key: 'nested'
+    }, 8, 7)
+    assert.deepEqual(destinations, [{
+      pathname: '/actresses/3/8/actress/7',
+      search: '?q=kept&relatedVideoOffset=60'
+    }])
   })
 
   it('keeps stable series identity and release direction through its detail stack', () => {

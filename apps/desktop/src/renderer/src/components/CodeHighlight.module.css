@@ -1,0 +1,20 @@
+.keyword {
+  color: var(--code-keyword);
+}
+
+.string {
+  color: var(--code-string);
+}
+
+.comment {
+  color: var(--code-comment);
+  font-style: italic;
+}
+
+.number {
+  color: var(--code-number);
+}
+
+.function {
+  color: var(--code-function);
+}

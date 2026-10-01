@@ -1,9 +1,11 @@
+import styles from './TagFilter.module.css'
 import ContinuousGrid from './ContinuousGrid'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTagFilterOptions } from '../hooks/useTagFilterOptions'
 import { useTagLabels } from '../hooks/useTagLabels'
 import { useDebounce } from '../hooks/useDebounce'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+import TextInput from './TextInput'
 import Button from './Button'
 import Checkbox from '../../../../../../packages/ui/src/Checkbox'
 
@@ -63,9 +65,9 @@ function TagChipCloud({
 
   return (
     <>
-      <div ref={cloudRef} className="tag-chip-cloud" role="listbox" aria-label="标签" aria-multiselectable onScroll={onScroll}>
+      <div ref={cloudRef} className={styles.chipCloud} role="listbox" aria-label="标签" aria-multiselectable onScroll={onScroll}>
         {items.length === 0 && !loading && !error ? (
-          <div className="tag-chip-cloud-empty">无匹配标签</div>
+          <div className={styles.chipCloudEmpty}>无匹配标签</div>
         ) : (
           items.map((tag) => {
             const selectedTag = selected.includes(tag.id)
@@ -75,12 +77,13 @@ function TagChipCloud({
                 type="button"
                 role="option"
                 aria-selected={selectedTag}
-                className={selectedTag ? 'tag-chip-cloud-item tag-chip-cloud-item--selected' : 'tag-chip-cloud-item'}
+                data-tag-id={tag.id}
+                className={styles.chipCloudItem}
                 disabled={disabled(tag.id)}
                 onClick={() => onToggle(tag.id)}
               >
-                <span className="tag-chip-cloud-name">{tag.label}</span>
-                <span className="tag-chip-cloud-count">{tag.video_count}</span>
+                <span className={styles.chipCloudName}>{tag.label}</span>
+                <span className={styles.chipCloudCount}>{tag.video_count}</span>
               </button>
             )
           })
@@ -139,7 +142,7 @@ export default function TagFilter({
       <button
         key={id}
         type="button"
-        className="tag-chip selected"
+        className={styles.chip}
         onClick={() => toggle(id)}
       >
         {byId.get(id) ?? id} ×
@@ -149,8 +152,8 @@ export default function TagFilter({
   const atLimit = (id: number): boolean => !selected.includes(id) && selected.length >= 100
 
   const searchField = (
-    <input
-      className={isCompact ? 'text-input library-filter-input tag-chip-cloud-search' : 'text-input tag-popover-search'}
+    <TextInput
+      className={isCompact ? styles.chipCloudSearch : styles.popoverSearch}
       placeholder="搜索标签…"
       aria-label="搜索标签"
       maxLength={500}
@@ -159,11 +162,11 @@ export default function TagFilter({
       onChange={(e) => setSearch(e.target.value)}
     />
   )
-  const hint = <div className="library-filter-tags-hint" aria-live="polite">按名称{selected.length >= 100 ? ' · 最多选择100个标签' : ''}</div>
+  const hint = <div className={styles.hint} aria-live="polite">按名称{selected.length >= 100 ? ' · 最多选择100个标签' : ''}</div>
 
   if (isCompact) {
     return (
-      <div className="tag-filter tag-filter--compact">
+      <div className={`${styles.filter} ${styles.filterCompact}`}>
         {searchField}
         {hint}
         <TagChipCloud
@@ -182,26 +185,26 @@ export default function TagFilter({
   }
 
   return (
-    <div className="tag-filter">
-      <div className="tag-filter-row">
-        <div className="tag-filter-add" ref={addRef}>
-          <Button type="button" size="sm" className="tag-filter-add-btn" onClick={() => setOpen(value => !value)}>
+    <div className={styles.filter}>
+      <div className={styles.filterRow}>
+        <div className={styles.filterAdd} ref={addRef}>
+          <Button type="button" size="sm"  onClick={() => setOpen(value => !value)}>
             添加标签{selected.length ? ` (${selected.length})` : ''}
           </Button>
           {open ? (
-            <div className="tag-popover">
+            <div className={styles.popover}>
               {searchField}
               {hint}
-              <div className="tag-picker-list">
+              <div className={styles.pickerList}>
                 <ContinuousGrid contained fill window={page.window} scope={`tag-filter:${debouncedSearch}`}
                   label="标签候选" emptyLabel="无标签" itemHeight={36} itemKey={tag => tag.id}
                   renderItem={tag => {
                     const selectedTag = selected.includes(tag.id)
                     return (
-                      <label className="tag-option">
+                      <label className={styles.option}>
                         <Checkbox checked={selectedTag} disabled={atLimit(tag.id)} onChange={() => toggle(tag.id)} />
-                        <span className="tag-option-name">{tag.label}</span>
-                        <span className="tag-option-count">{tag.video_count}</span>
+                        <span className={styles.optionName}>{tag.label}</span>
+                        <span className={styles.optionCount}>{tag.video_count}</span>
                       </label>
                     )
                   }} />

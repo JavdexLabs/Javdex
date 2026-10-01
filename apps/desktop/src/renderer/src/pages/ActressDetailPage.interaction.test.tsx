@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { afterEach, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
+import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ActressProfile, ActressVideoPageQuery } from '@shared/actressTypes'
 import type { ExpectedVersions } from '@shared/protocol/versions'
@@ -14,6 +14,7 @@ let editResponse: (() => Promise<boolean>) | null = null
 let fail = false
 let hold: (() => Promise<unknown>) | null = null
 let total = 125
+const actorTotals = new Map<number, number>()
 const calls: Array<{ id: number; query: ActressVideoPageQuery }> = []
 const metadataCalls: number[] = []
 const editCalls: Array<{ id: number; expectedVersions: ExpectedVersions }> = []
@@ -21,7 +22,8 @@ function metadata(id: number): ActressProfile {
   return { id, main_name: `Actor-${id}`, gender: 'female', names: [], aliases: [], gallery_count: 0, display_gallery_count: 0, first_gallery: null, links: [], avatar_path: null, avatar_source_path: null, scraped_status: 0, generation: 1, revision: 1 } as unknown as ActressProfile
 }
 function page(id: number, offset: number) {
-  return { videos: Array.from({ length: Math.min(60, Math.max(0, total - offset)) }, (_, n) => ({ id: id * 1000 + offset + n, code: `WORK-${id}-${offset+n}`, title: null, cover_path: null, scraped_status: 0, resource_kinds: [] })), total, limit: 60, offset }
+  const actorTotal = actorTotals.get(id) ?? total
+  return { videos: Array.from({ length: Math.min(60, Math.max(0, actorTotal - offset)) }, (_, n) => ({ id: id * 1000 + offset + n, code: `WORK-${id}-${offset+n}`, title: null, cover_path: null, scraped_status: 0, resource_kinds: [] })), total: actorTotal, limit: 60, offset }
 }
 const fake = {
   actresses: {
@@ -65,17 +67,49 @@ async function click(label: string) {
     button.props.onClick()
   })
 }
-async function mount() {
+async function mount(entry = '/actresses/1') {
   const Component = (await import('./ActressDetailPage')).default
   const { ImagePreviewOverlayProvider } = await import('../components/ImagePreviewOverlayContext')
   const { AppBackgroundProvider } = await import('../components/AppBackgroundContext')
   const { AgentMetadataCollectorProvider } = await import('../components/agentMetadata/AgentMetadataCollectorContext')
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   await act(async () => {
-    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video</div>} /></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>, {createNodeMock:viewport.createNodeMock})
+    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={[entry]}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video<Outlet /></div>}><Route path="actress/:actressId" element={<Component fromVideo />} /></Route></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>, {createNodeMock:viewport.createNodeMock})
   })
 }
-afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined;viewport=continuousViewport();position=0; url=''; calls.length = 0; metadataCalls.length = 0; editCalls.length = 0; total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
+afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined;viewport=continuousViewport();position=0; url=''; calls.length = 0; metadataCalls.length = 0; editCalls.length = 0; actorTotals.clear(); total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
+
+it('keeps distinct parent and leaf actress identities in an actress-video-actress stack', async () => {
+  actorTotals.set(2, 10)
+  await mount('/actresses/1/1120/actress/2?relatedVideoOffset=60')
+  assert.deepEqual([...new Set(metadataCalls)].sort(), [1, 2])
+  const initialMetadataCalls = [...metadataCalls]
+  const panes = renderer!.root.findAllByType('div').filter(node => 'data-detail-pane' in node.props)
+  assert.equal(panes.length, 2)
+  assert.equal(panes[0].props['data-stacked'], true)
+  assert.equal(panes[1].props['data-stacked'], undefined)
+  const parent = panes[0]
+  assert.ok(text(parent).includes('Actor-1'))
+  assert.ok(text(panes[1]).includes('Actor-2'))
+  const leafBack = panes[1].findAllByType('button').find(node => text(node) === '返回')!
+  assert.ok(leafBack)
+  await act(async () => leafBack.props.onClick())
+  assert.equal(url, '/actresses/1/1120?relatedVideoOffset=60')
+  assert.equal(renderer!.root.findAllByType('div').filter(node => 'data-detail-pane' in node.props)[0], parent)
+  assert.ok(text(parent).includes('Actor-1'))
+  assert.deepEqual(metadataCalls, initialMetadataCalls)
+})
+
+it('keeps the leaf works offset when its parent has fewer works and drops only the leaf offset on return', async () => {
+  actorTotals.set(1, 10)
+  await mount('/actresses/1/1000/actress/2?actressVideoOffset=60')
+  assert.ok(calls.some(call => call.id === 2 && call.query.offset === 60))
+  assert.equal(url, '/actresses/1/1000/actress/2?actressVideoOffset=60')
+  const panes = renderer!.root.findAllByType('div').filter(node => 'data-detail-pane' in node.props)
+  const back = panes[1].findAllByType('button').find(node => text(node) === '返回')!
+  await act(async () => back.props.onClick())
+  assert.equal(url, '/actresses/1/1000')
+})
 
 it('loads metadata once while paging 60/60/5 works and preserving the full count', async () => {
   await mount()

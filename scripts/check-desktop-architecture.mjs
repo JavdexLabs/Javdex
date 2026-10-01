@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { importsOf, sourceFiles } from './lib/import-boundary-check.mjs'
+import { bypassesCatalogQuery } from './lib/catalog-query-boundary.mjs'
 import { readFileSync } from 'node:fs'
 
 function relative(file) {
@@ -43,6 +44,13 @@ if (
 }
 
 const violations = []
+for (const file of productionFiles('apps/desktop/src/main')) {
+  for (const specifier of importsOf(file)) {
+    if (bypassesCatalogQuery(specifier, file)) {
+      violations.push(`${file}: use the shared catalog video query interface (${specifier})`)
+    }
+  }
+}
 
 const catalogIpcFiles = [
   'apps/desktop/src/main/ipc/index.ts',

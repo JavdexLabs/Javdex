@@ -1,0 +1,143 @@
+
+.card {
+  user-select: none;
+  display: block;
+  min-width: 0;
+  border-radius: var(--radius);
+}
+
+.poster {
+  position: relative;
+  aspect-ratio: 7 / 10;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.poster img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+
+.placeholder {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.placeholder svg {
+  width: 34px;
+  height: 34px;
+  opacity: 0.4;
+}
+
+.code {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: var(--surface-base);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--surface-media-overlay);
+  opacity: 0;
+  transition: opacity 0.16s;
+}
+
+.play svg {
+  width: 48px;
+  height: 48px;
+  padding: 12px;
+  border-radius: 50%;
+  background: var(--text-accent);
+  color: var(--surface-base);
+}
+
+.card:focus-visible .play {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .card:hover .play {
+    opacity: 1;
+  }
+}
+
+.card h2 {
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 500;
+  margin: 10px 0 5px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.card > p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 0;
+}
+
+.rating {
+  color: var(--text-accent);
+  margin-left: auto;
+}
+
+.card:active .play {
+  opacity: 1;
+}
+
+@media (width >= 1920px) {
+  .card h2 {
+    font-size: 17px;
+  }
+}
+
+@media (width >= 1920px) {
+  .card > p {
+    font-size: 14px;
+  }
+}
+
+@media (width >= 1920px) {
+  .code {
+    font-size: 13px;
+  }
+}
+
+@media (width <= 760px) {
+  .card h2 { font-size: 14px; }
+}
+
+@media (width <= 760px) {
+  .card > p,
+.code { font-size: 12px; }
+}

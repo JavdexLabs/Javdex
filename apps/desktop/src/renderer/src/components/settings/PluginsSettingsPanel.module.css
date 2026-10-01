@@ -1,3 +1,46 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toolbar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(148px, auto) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.toolbarSearch,
+.toolbarSort {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.toolbarSearch span,
+.toolbarSort span {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.searchInput {
+  width: 100%;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+
 .compositeEntry {
   display: flex;
   align-items: center;
@@ -7,6 +50,27 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-elevated);
+}
+
+.emptyState {
+  align-items: flex-start;
+  min-height: 96px;
+  padding: 14px 12px;
+  line-height: var(--settings-lh, 1.45);
+  text-align: left;
+}
+
+.emptyStateDescription {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.emptyStateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .compositeEntry strong {
@@ -23,4 +87,10 @@
 
 .compositeEntry button {
   flex-shrink: 0;
+}
+
+@media (width <= 980px) {
+  .toolbar {
+    grid-template-columns: 1fr;
+  }
 }

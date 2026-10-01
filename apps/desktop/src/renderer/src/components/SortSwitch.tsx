@@ -34,13 +34,13 @@ export default function SortSwitch<T extends string>({
   const moreActive = quickValues && !quickValues.includes(value)
 
   return (
-    <div className={`sort-switch${compact ? ' sort-switch--compact' : ''}`} aria-label={label}>
-      <div className="sort-switch-fields" role="group" aria-label={`${label}字段`}>
+    <div className={styles.root} data-compact={compact || undefined} aria-label={label}>
+      <div className={styles.fields} role="group" aria-label={`${label}字段`}>
         {options.filter((option) => !quickValues || quickValues.includes(option.value)).map((option) => (
           <button
             key={option.value}
             type="button"
-            className={`sort-switch-field${option.value === value ? ' is-active' : ''}`}
+            className={styles.field}
             onClick={() => onChange(option.value, dir)}
             title={option.title ?? option.label}
             aria-pressed={option.value === value}
@@ -51,7 +51,8 @@ export default function SortSwitch<T extends string>({
       </div>
       {quickValues && (
         <SelectControl
-          className={`${styles.more}${moreActive ? ` ${styles.selected}` : ''}`}
+          className={styles.more}
+          buttonClassName={`${styles.moreButton}${moreActive ? ` ${styles.selected}` : ''}`}
           aria-label={`${label}全部选项`}
           value={value}
           displayLabel="更多"
@@ -63,7 +64,7 @@ export default function SortSwitch<T extends string>({
         </SelectControl>
       )}
       <IconButton
-        className="sort-switch-dir"
+        className={styles.direction}
         icon={dir === 'asc' ? <ArrowUp {...UI_ICON} /> : <ArrowDown {...UI_ICON} />}
         label={`${active?.title ?? active?.label ?? label}${dir === 'asc' ? '升序' : '降序'}`}
         title={dir === 'asc' ? '升序' : '降序'}

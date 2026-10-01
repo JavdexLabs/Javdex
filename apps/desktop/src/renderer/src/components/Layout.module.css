@@ -1,0 +1,184 @@
+.root {
+  position: relative;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+
+  /* Retain the existing macOS WebKit text-selection boundary. */
+  /* stylelint-disable-next-line property-no-vendor-prefix */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.sidebar {
+  position: relative;
+  z-index: 1;
+  width: 210px;
+  flex-shrink: 0;
+  background: var(--surface-panel);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px 18px;
+}
+
+.root[data-background='true'] .sidebar {
+  --surface-sidebar-group: transparent;
+
+  background: color-mix(in srgb, var(--surface-panel) 68%, transparent);
+  border-right-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.spacer {
+  flex: 0 0 auto;
+  min-height: 12px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.browseNav {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
+  padding: var(--focus-ring-space);
+  margin: calc(-1 * var(--focus-ring-space));
+}
+
+.group {
+  margin: 8px 0 4px;
+}
+
+.groupLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px 14px 6px;
+}
+
+.group[data-active='true'] .groupLabel {
+  color: var(--text-accent);
+}
+
+.countBadge {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+.countValue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--warning) 22%, var(--surface-elevated));
+  color: var(--text-warning);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.countBadge:hover .countValue {
+  background: color-mix(in srgb, var(--warning) 32%, var(--surface-elevated));
+}
+
+.countBadge:focus-visible {
+  outline: none;
+}
+
+.countBadge:focus-visible .countValue {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-base);
+}
+
+.root[data-background='true'] .main {
+  background: color-mix(in srgb, var(--surface-base) 42%, transparent);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.root[data-background='true'] .content {
+  background: transparent;
+}
+
+.root[data-background='true'] {
+  --list-page-background: color-mix(in srgb, var(--surface-base) 34%, transparent);
+  --detail-scroll-background: color-mix(in srgb, var(--surface-base) 34%, transparent);
+  --page-header-background: transparent;
+  --page-header-border: color-mix(in srgb, var(--border-subtle) 58%, transparent);
+  --detail-pane-overlay-background: transparent;
+  --detail-pane-overlay-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 58%, transparent);
+  --detail-actions-border-color: color-mix(in srgb, var(--text-primary) 13%, transparent);
+  --detail-actions-background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-primary) 10%, transparent) 0%,
+      color-mix(in srgb, var(--text-primary) 2%, transparent) 46%,
+      transparent 100%
+    ),
+    color-mix(in srgb, var(--surface-base) 12%, transparent);
+  --list-detail-shell-background: transparent;
+  --list-detail-shell-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 58%, transparent);
+  --actress-meta-card-background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--text-primary) 6%, transparent) 0%,
+    color-mix(in srgb, var(--surface-base) 12%, transparent) 50%,
+    color-mix(in srgb, var(--surface-base) 6%, transparent) 100%
+  );
+  --actress-meta-card-border: color-mix(in srgb, var(--text-primary) 9%, var(--border-subtle));
+  --actress-meta-card-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 8%, transparent),
+    0 12px 32px color-mix(in srgb, var(--surface-base) 30%, transparent);
+}
+
+@media (width <= 1120px) {
+  .sidebar {
+    width: 176px;
+    padding-inline: 10px;
+  }
+
+  .groupLabel {
+    padding-inline: 10px;
+  }
+}

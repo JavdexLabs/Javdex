@@ -1,0 +1,113 @@
+.root {
+  display: grid;
+  grid-template-columns: var(--organization-profile-media-w) minmax(0, 1fr);
+  gap: var(--organization-profile-gap);
+  padding: var(--organization-profile-pad);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--organization-profile-media-w);
+  aspect-ratio: 1.49 / 1;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--thumb-gradient-start), var(--thumb-gradient-end));
+  color: var(--text-muted);
+}
+
+.image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .image > img {
+  filter: var(--privacy-image-filter);
+  scale: var(--privacy-image-scale);
+}
+
+.image[data-kind='director'] {
+  aspect-ratio: 3 / 4;
+}
+
+.image[data-kind='director'] img,
+.image[data-kind='series'] img {
+  object-fit: cover;
+}
+
+.main {
+  min-width: 0;
+}
+
+.kicker {
+  margin-bottom: 3px;
+  color: var(--text-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 22px;
+  line-height: 1.25;
+  user-select: text;
+}
+
+.meta,
+.aliases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--organization-inline-gap) var(--organization-meta-gap);
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  user-select: text;
+}
+
+.meta > span:not(:last-child)::after {
+  content: '·';
+  margin-left: var(--organization-meta-gap);
+  color: var(--text-muted);
+}
+
+.aliases span {
+  padding: 2px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-control);
+}
+
+.summary {
+  max-width: 76ch;
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.summaryEmpty {
+  color: var(--text-muted);
+}
+
+@media (width <= 680px) {
+  .root {
+    grid-template-columns: var(--organization-profile-media-w-compact) minmax(0, 1fr);
+    gap: var(--organization-meta-gap);
+  }
+
+  .image {
+    width: var(--organization-profile-media-w-compact);
+  }
+}

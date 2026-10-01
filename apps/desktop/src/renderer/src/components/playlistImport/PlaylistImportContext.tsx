@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import {
   createContext,
   useCallback,
@@ -28,7 +29,7 @@ import {
 import Button from '../Button'
 import ConfirmModal from '../ConfirmModal'
 import EmptyState from '../EmptyState'
-import { EditFormField, EditFormSection } from '../FormPrimitives'
+import { EditForm, EditFormField, EditFormFields, EditFormSection } from '../FormPrimitives'
 import SelectControl from '../SelectControl'
 import SettingsSwitchRow from '../SettingsSwitchRow'
 import { useToast } from '../Toast'
@@ -419,12 +420,12 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                     <div className={styles.setupIntro}>
                       <p className={styles.setupIntroText}>Agent 会逐页固化清单候选，再核对跨媒体库身份；所有写入在结果确定后一次完成。</p>
                     </div>
-                    <div className={`entity-edit-form ${styles.setupForm}`}>
+                    <EditForm variant="relaxed">
                       <EditFormSection title="来源与目标">
-                        <div className="entity-edit-fields">
+                        <EditFormFields>
                           <EditFormField label="外部清单 URL" span={2} hint="必须是 HTTP/HTTPS 清单页；登录或验证码会暂停等待你处理。">
-                            <input
-                              className="text-input"
+                            <TextInput
+                              density="workspace"
                               type="url"
                               inputMode="url"
                               value={sourceUrl}
@@ -444,7 +445,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                           </EditFormField>
                           {destinationKind === 'create' ? (
                             <EditFormField label="新清单名称" hint="可选。留空时由 Agent 从页面名称生成；未识别到时使用站点域名和日期。">
-                              <input className="text-input" value={requestedName} onChange={(event) => setRequestedName(event.target.value)} />
+                              <TextInput density="workspace" value={requestedName} onChange={(event) => setRequestedName(event.target.value)} />
                             </EditFormField>
                           ) : (
                             <EditFormField label="目标清单">
@@ -458,7 +459,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                               {libraries.map((library) => <option key={library.id} value={library.id}>{library.name}</option>)}
                             </SelectControl>
                           </EditFormField>
-                        </div>
+                        </EditFormFields>
                       </EditFormSection>
                       <EditFormSection title="导入选项">
                         <div className={styles.setupOptions}>
@@ -485,7 +486,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                       <div className={styles.setupRule}>
                         不下载播放资源；被清单引用的无资源影片不会被自动清理。导入期间请保持软件和弹窗打开。
                       </div>
-                    </div>
+                    </EditForm>
                   </AgentWorkspacePaneBody>
                 </>
               )}

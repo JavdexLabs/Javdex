@@ -4,6 +4,8 @@ import { resolveMediaSrc } from '../api'
 import ActressAvatar from '../components/ActressAvatar'
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
+import StatusText from '../components/StatusText'
+import styles from './ConflictMergeActressesModal.module.css'
 import {
   canConfirmMergeActresses,
   type ActressConflictMergeActor
@@ -32,8 +34,9 @@ function ActorChoice({
   detail: string
 }): JSX.Element {
   return (
-    <span className="conflict-merge-actor-copy">
+    <span className={styles.actorCopy}>
       <ActressAvatar
+        className={styles.avatar}
         src={resolveMediaSrc(actor.avatarPath)}
         name={actor.mainName}
         gender={null}
@@ -118,15 +121,16 @@ export default function ConflictMergeActressesModal({
     >
       <p>合并会删除其中一条档案。请依次选择两位演员、保留档案和最终主名。</p>
 
-      <fieldset className="conflict-merge-fieldset">
+      <fieldset className={styles.fieldset}>
         <legend>1. 选择两位演员</legend>
-        <div className="conflict-merge-options">
+        <div className={styles.options}>
           {actors.map((actor) => {
             const selected = selectedIds.includes(actor.actressId)
             return (
               <label
                 key={actor.actressId}
-                className={`conflict-merge-option${selected ? ' is-selected' : ''}`}
+                className={styles.option}
+                data-selected={selected}
               >
                 <Checkbox
                   checked={selected}
@@ -145,28 +149,27 @@ export default function ConflictMergeActressesModal({
           ) : null}
         </div>
         {bothHavePending ? (
-          <p className="text-danger">两位演员都有待确认刮削结果，请先处理其中一份。</p>
+          <StatusText as="p" tone="danger">两位演员都有待确认刮削结果，请先处理其中一份。</StatusText>
         ) : null}
         {hasThirdPartyConflict ? (
-          <p className="text-danger">
+          <StatusText as="p" tone="danger">
             {actors.length > 2
               ? '本组还涉及第三位演员，请先确认名称归属后再合并。'
               : pairBlockedReason}
-          </p>
+          </StatusText>
         ) : null}
       </fieldset>
 
       {pair.length === 2 ? (
         <>
-          <fieldset className="conflict-merge-fieldset">
+          <fieldset className={styles.fieldset}>
             <legend>2. 选择保留档案</legend>
-            <div className="conflict-merge-options conflict-merge-options--two">
+            <div className={`${styles.options} ${styles.twoOptions}`}>
               {pair.map((actor) => (
                 <label
                   key={actor.actressId}
-                  className={`conflict-merge-option${
-                    keepActressId === actor.actressId ? ' is-selected' : ''
-                  }`}
+                  className={styles.option}
+                  data-selected={keepActressId === actor.actressId}
                 >
                   <input
                     type="radio"
@@ -181,13 +184,13 @@ export default function ConflictMergeActressesModal({
             </div>
           </fieldset>
 
-          <fieldset className="conflict-merge-fieldset">
+          <fieldset className={styles.fieldset}>
             <legend>3. 选择最终主名</legend>
-            <div className="conflict-merge-name-options">
+            <div className={styles.nameOptions}>
               {pair.map((actor) => (
                 <label
                   key={`${actor.actressId}-${actor.mainName}`}
-                  className={finalMainNameActressId === actor.actressId ? 'is-selected' : ''}
+                  data-selected={finalMainNameActressId === actor.actressId}
                 >
                   <input
                     type="radio"

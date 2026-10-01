@@ -1,0 +1,54 @@
+.root {
+  display: grid;
+  flex-shrink: 0;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+}
+
+.root span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.root > .label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-subtle));
+  border-radius: 999px;
+  background: var(--surface-selected);
+  color: var(--text-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chipLabel {
+  line-height: 1.2;
+}
+
+.add {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+}

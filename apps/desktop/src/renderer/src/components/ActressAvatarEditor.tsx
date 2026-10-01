@@ -35,6 +35,8 @@ import {
   isDefaultCropTransform
 } from '../utils/avatarCrop'
 import Button from './Button'
+import GalleryPagination from './GalleryPagination'
+import styles from './ActressAvatarEditor.module.css'
 
 type SourceTab = 'current' | 'local' | 'cover' | 'gallery'
 
@@ -774,13 +776,13 @@ export default function ActressAvatarEditor({
   const pickerError = activeTab !== 'current' && openError ? openError : null
 
   return (
-    <div className="actress-avatar-editor">
-      <div className="avatar-editor-layout">
-        <div className="avatar-editor-stage">
+    <div className={styles.actressAvatarEditor}>
+      <div className={styles.avatarEditorLayout}>
+        <div className={styles.avatarEditorStage}>
           <div
             ref={viewportRef}
-            className={`avatar-crop-viewport${editing ? ' avatar-crop-viewport--active' : ''}`}
-            style={{ width: AVATAR_VIEW_SIZE, height: AVATAR_VIEW_SIZE }}
+            className={`${styles.avatarCropViewport}${editing ? ` ${styles.avatarCropViewportActive}` : ''}`}
+            style={{ '--avatar-view-size': `${AVATAR_VIEW_SIZE}px` } as React.CSSProperties}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -794,7 +796,8 @@ export default function ActressAvatarEditor({
                   crossOrigin="anonymous"
                   src={editUrl ?? undefined}
                   alt=""
-                  className="avatar-crop-preview"
+                  className={styles.avatarCropPreview}
+                  data-avatar-crop="preview"
                   draggable={false}
                   onDragStart={(e) => e.preventDefault()}
                 />
@@ -804,7 +807,8 @@ export default function ActressAvatarEditor({
                   crossOrigin="anonymous"
                   src={editUrl ?? undefined}
                   alt=""
-                  className="avatar-crop-image"
+                  className={styles.avatarCropImage}
+                  data-avatar-crop="image"
                   draggable={false}
                   onDragStart={(e) => e.preventDefault()}
                   style={{
@@ -820,7 +824,8 @@ export default function ActressAvatarEditor({
                 <img
                   src={previewCrop.url}
                   alt=""
-                  className="avatar-crop-preview"
+                  className={styles.avatarCropPreview}
+                  data-avatar-crop="preview"
                   draggable={false}
                   onDragStart={(e) => e.preventDefault()}
                 />
@@ -828,7 +833,8 @@ export default function ActressAvatarEditor({
                 <img
                   src={previewCrop.url}
                   alt=""
-                  className="avatar-crop-image"
+                  className={styles.avatarCropImage}
+                  data-avatar-crop="image"
                   draggable={false}
                   onDragStart={(e) => e.preventDefault()}
                   style={{
@@ -840,23 +846,23 @@ export default function ActressAvatarEditor({
                 />
               )
             ) : displayUrl ? (
-              <img src={displayUrl} alt="" className="avatar-crop-preview" />
+              <img src={displayUrl} alt="" className={styles.avatarCropPreview} data-avatar-crop="preview" />
             ) : (
-              <div className="avatar-crop-empty">无头像</div>
+              <div className={styles.avatarCropEmpty}>无头像</div>
             )}
           </div>
         </div>
 
-        <div className="avatar-editor-workspace">
-          <div className="avatar-source-panel">
-            <div className="avatar-source-tabs" role="tablist" aria-label="头像来源">
+        <div className={styles.avatarEditorWorkspace}>
+          <div className={styles.avatarSourcePanel}>
+            <div className={styles.avatarSourceTabs} role="tablist" aria-label="头像来源">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   role="tab"
                   aria-selected={activeTab === tab.id}
-                  className={activeTab === tab.id ? 'active' : ''}
+                  className={activeTab === tab.id ? styles.active : ''}
                   disabled={tab.disabled}
                   onClick={() => {
                     setOpenError(null)
@@ -869,15 +875,15 @@ export default function ActressAvatarEditor({
               ))}
             </div>
 
-            <div className="avatar-source-panel-body">
+            <div className={styles.avatarSourcePanelBody}>
               <div
-                className={`avatar-source-page${activeTab === 'current' ? ' is-active' : ''}`}
+                className={`${styles.avatarSourcePage}${activeTab === 'current' ? ` ${styles.isActive}` : ''}`}
                 role="tabpanel"
                 hidden={activeTab !== 'current'}
               >
                 {editableSourceUrl ? (
-                  <div className="avatar-source-static">
-                    <p className="avatar-source-note">{currentSourceNote}</p>
+                  <div className={styles.avatarSourceStatic}>
+                    <p className={styles.avatarSourceNote}>{currentSourceNote}</p>
                     <Button
                       type="button"
 
@@ -890,16 +896,16 @@ export default function ActressAvatarEditor({
                     </Button>
                   </div>
                 ) : (
-                  <p className="avatar-source-empty">暂无头像，请从其他来源选择</p>
+                  <p className={styles.avatarSourceEmpty}>暂无头像，请从其他来源选择</p>
                 )}
               </div>
 
               <div
-                className={`avatar-source-page${activeTab === 'local' ? ' is-active' : ''}`}
+                className={`${styles.avatarSourcePage}${activeTab === 'local' ? ` ${styles.isActive}` : ''}`}
                 role="tabpanel"
                 hidden={activeTab !== 'local'}
               >
-                <div className="avatar-source-static">
+                <div className={styles.avatarSourceStatic}>
                   <Button
                     type="button"
 
@@ -909,15 +915,15 @@ export default function ActressAvatarEditor({
                   >
                     选择本地图片…
                   </Button>
-                  <p className="avatar-source-note">JPG · PNG · WebP</p>
+                  <p className={styles.avatarSourceNote}>JPG · PNG · WebP</p>
                 </div>
               </div>
 
               <div
                 ref={coverScroll.ref}
-                className={`avatar-source-page avatar-source-page--scroll${
-                  activeTab === 'cover' ? ' is-active' : ''
-                }${coverScroll.isDragging ? ' avatar-source-page--dragging' : ''}`}
+                className={`${styles.avatarSourcePage} ${styles.avatarSourcePageScroll}${
+                  activeTab === 'cover' ? ` ${styles.isActive}` : ''
+                }${coverScroll.isDragging ? ` ${styles.avatarSourcePageDragging}` : ''}`}
                 role="tabpanel"
                 hidden={activeTab !== 'cover'}
                 onScroll={onCoverScroll}
@@ -926,10 +932,10 @@ export default function ActressAvatarEditor({
                 onPointerUp={coverScroll.onPointerUp}
                 onPointerCancel={coverScroll.onPointerCancel}
               >
-                {covers.loading && coverVideos.length === 0 ? <p className="avatar-source-empty">加载中…</p> : covers.error && coverVideos.length === 0 ? (
+                {covers.loading && coverVideos.length === 0 ? <p className={styles.avatarSourceEmpty}>加载中…</p> : covers.error && coverVideos.length === 0 ? (
                   <div role="alert">{covers.error}<Button onClick={covers.reload}>重试</Button></div>
                 ) : coverVideos.length === 0 ? (
-                  <p className="avatar-source-empty">暂无关联封面</p>
+                  <p className={styles.avatarSourceEmpty}>暂无关联封面</p>
                 ) : (
                   <>
                     {coverVideos.map((video) => {
@@ -940,7 +946,7 @@ export default function ActressAvatarEditor({
                         <button
                           key={video.id}
                           type="button"
-                          className={`avatar-pick-tile${activeSourceKey === sourceKey ? ' active' : ''}`}
+                          className={`${styles.avatarPickTile}${activeSourceKey === sourceKey ? ` ${styles.active}` : ''}`}
                           title={video.code}
                           aria-label={video.code}
                           aria-busy={openingSourceKey === sourceKey}
@@ -970,9 +976,9 @@ export default function ActressAvatarEditor({
 
               <div
                 ref={galleryScroll.ref}
-                className={`avatar-source-page avatar-source-page--scroll${
-                  activeTab === 'gallery' ? ' is-active' : ''
-                }${galleryScroll.isDragging ? ' avatar-source-page--dragging' : ''}`}
+                className={`${styles.avatarSourcePage} ${styles.avatarSourcePageScroll}${
+                  activeTab === 'gallery' ? ` ${styles.isActive}` : ''
+                }${galleryScroll.isDragging ? ` ${styles.avatarSourcePageDragging}` : ''}`}
                 role="tabpanel"
                 hidden={activeTab !== 'gallery'}
                 onPointerDownCapture={galleryScroll.onPointerDownCapture}
@@ -980,10 +986,10 @@ export default function ActressAvatarEditor({
                 onPointerUp={galleryScroll.onPointerUp}
                 onPointerCancel={galleryScroll.onPointerCancel}
               >
-                {photos.loading ? <p className="avatar-source-empty">加载中…</p> : photos.error ? (
+                {photos.loading ? <p className={styles.avatarSourceEmpty}>加载中…</p> : photos.error ? (
                   <div role="alert">{photos.error}<Button onClick={photos.reload}>重试</Button></div>
                 ) : galleryItems.length === 0 ? (
-                  <p className="avatar-source-empty">暂无写真</p>
+                  <p className={styles.avatarSourceEmpty}>暂无写真</p>
                 ) : (
                   galleryItems.map((asset, index) => {
                     const url = gallerySrc(asset)
@@ -994,7 +1000,7 @@ export default function ActressAvatarEditor({
                       <button
                         key={asset.id}
                         type="button"
-                        className={`avatar-pick-tile${activeSourceKey === sourceKey ? ' active' : ''}`}
+                        className={`${styles.avatarPickTile}${activeSourceKey === sourceKey ? ` ${styles.active}` : ''}`}
                         title={label}
                         aria-label={label}
                         aria-busy={openingSourceKey === sourceKey}
@@ -1016,27 +1022,25 @@ export default function ActressAvatarEditor({
                 )}
               </div>
               {pickerError ? (
-                <div className="avatar-source-picker-toast avatar-source-picker-toast--error" role="alert">
+                <div className={`${styles.avatarSourcePickerToast} ${styles.avatarSourcePickerToastError}`} role="alert">
                   {pickerError}
                 </div>
               ) : null}
             </div>
 
-              {activeTab === 'gallery' && photos.data && photos.data.total > 60 ? (
-                <nav className="actress-works-pagination" aria-label="头像写真分页">
-                  <Button size="sm" disabled={photos.offset === 0} onClick={() => photos.move(photos.offset - 60)}>上一页</Button>
-                  <span>第 {Math.floor(photos.offset / 60) + 1} 页</span>
-                  <Button size="sm" disabled={photos.offset + galleryItems.length >= photos.data.total} onClick={() => photos.move(photos.offset + 60)}>下一页</Button>
-                </nav>
+              {activeTab === 'gallery' && photos.data ? (
+                <GalleryPagination label="头像写真分页" offset={photos.offset}
+                  total={photos.data.total} loadedCount={galleryItems.length}
+                  compact hideTotal onMove={photos.move} />
               ) : null}
           </div>
 
           <div
-            className={`avatar-editor-edit-bar${editing ? ' avatar-editor-edit-bar--visible' : ''}`}
+            className={`${styles.avatarEditorEditBar}${editing ? ` ${styles.avatarEditorEditBarVisible}` : ''}`}
             aria-hidden={!editing}
           >
-            <div className="avatar-editor-edit-row">
-              <label className="avatar-crop-zoom-label">
+            <div className={styles.avatarEditorEditRow}>
+              <label className={styles.avatarCropZoomLabel}>
                 缩放
                 <input
                   type="range"
@@ -1049,13 +1053,13 @@ export default function ActressAvatarEditor({
                 />
               </label>
               {autoCropCandidates.length > 1 ? (
-                <div className="avatar-face-candidates" role="group" aria-label="选择检测到的人脸">
-                  <span className="avatar-face-candidates-label">人脸</span>
+                <div className={styles.avatarFaceCandidates} role="group" aria-label="选择检测到的人脸">
+                  <span className={styles.avatarFaceCandidatesLabel}>人脸</span>
                   {autoCropCandidates.map((candidate, index) => (
                     <button
                       key={candidate.id}
                       type="button"
-                      className={`avatar-face-candidate${activeAutoCropCandidate === candidate.id ? ' active' : ''}`}
+                      className={`${styles.avatarFaceCandidate}${activeAutoCropCandidate === candidate.id ? ` ${styles.active}` : ''}`}
                       aria-pressed={activeAutoCropCandidate === candidate.id}
                       aria-label={`选择第 ${index + 1} 张人脸`}
                       title={`人脸 ${index + 1}`}
@@ -1066,19 +1070,19 @@ export default function ActressAvatarEditor({
                   ))}
                 </div>
               ) : null}
-              <div className="avatar-editor-actions">
+              <div className={styles.avatarEditorActions}>
                 <Button
                   type="button"
                   variant="primary"
 
                   size="sm"
-                  className="avatar-smart-crop-button"
+                  className={styles.avatarSmartCropButton}
                   tabIndex={editing ? 0 : -1}
                   disabled={!editing || smartCropping}
                   aria-busy={smartCropping || undefined}
                   onClick={() => void applySmartCrop()}
                 >
-                  {smartCropping ? <span className="avatar-smart-crop-spinner" aria-hidden /> : null}
+                  {smartCropping ? <span className={styles.avatarSmartCropSpinner} aria-hidden /> : null}
                   <span>{smartCropping ? '构图中' : '智能构图'}</span>
                 </Button>
                 <Button

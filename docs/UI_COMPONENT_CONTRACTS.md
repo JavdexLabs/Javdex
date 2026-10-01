@@ -4,13 +4,22 @@
 
 ## Layout Surfaces
 
-- `app-shell`: 全局桌面壳，包含侧边导航、主内容区和全局覆盖层。
-- `list-page`: 列表面的根容器，内部通常包含 `topbar` 和 `scroll-body`。
-- `detail-pane`: 详情面的根容器，可在嵌套详情打开时追加 `detail-pane--stacked`。
-- `detail-pane-overlay`: 详情内的下一层覆盖详情。
-- `scroll-body`: 页面滚动边界。自带滚动视口的虚拟列表或固定高度内容使用 `scroll-body--fill`，普通详情使用 `scroll-body--scroll`。
+- `Layout`：全局桌面壳，包含侧边导航、主内容区和全局覆盖层；样式归入 `Layout.module.css`，不输出旧 `app-shell` 类。背景状态通过自身 data 属性选择，背景表面仍以语义变量传递给页面。
+- `ListPage`：列表面的根容器，内部通常包含 `PageHeader` 和 `ListSurface`。
+- `DetailPane`：详情面的根容器；嵌套详情打开时传 `stacked`，由组件隐藏底层交互。
+- `DetailPaneOverlay`：详情内的下一层覆盖详情，与 `DetailPane` 配合使用。
+- `ScrollViewport`：页面滚动边界。自带滚动视口的虚拟列表或固定高度内容使用 `variant="fill"`，普通详情使用 `variant="scroll"`。`PageContent` 负责默认内容留白，`ScrollRegion` 承载滚动区和浮动回顶按钮。
+- `ClassificationDetailSurface`：导演、系列、机构详情共用的滚动内容间距与关联影片标题；外层仍使用 `ListPage`，不叠加旧的 `organization-detail-page` 类。
 
-页面组件应该组合这些既有 surface class，不要在页面根部临时创造新的滚动或定位模型。
+页面组件组合这些既有原语，不在页面根部临时创造滚动或定位模型。设置工作区的布局与排版由 `SettingsWorkspaceShell.module.css` 持有，不再使用旧 `scroll-body-inner--settings` 类。背景图通过应用壳提供的 `--list-page-background`、`--page-header-background` 和 `--page-header-border` 传递，不穿透组件内部 class。
+
+侧栏主导航与媒体库导航共用 `SidebarNavRow` / `SidebarNavLink` / `SidebarNavIcon` / `SidebarNavLabel`。原语只持有视觉和原生属性／ref；目标、query 记忆、点击拦截、离开保护和徽标回调由调用方保留。`active` 仅补充列表根的视觉选中，原生 `aria-current` 仍由 NavLink 的路由匹配决定；`reserveBadgeSpace` 明确预留徽标位置，不从 class 推断业务。媒体库的颜色、警告及截断由自身 Module 和布局入口持有。
+
+`AppBrand` 与 `NavIcon` 自己管理品牌／图标样式及响应式字号。`AppBackgroundLayer` 持有背景及淡入动画，调用方只传图片，不再传全局动画类；横竖图判断、contain 几何和 ResizeObserver 动态计算保持原实现。系统减少动画偏好仍属于 document reset，不拆进功能组件。全局 `selectable-text` / `copyable-text` 是文档文本选择契约，不作为功能布局桥接。
+
+`PluginDevPanel` 通过显式 `presentation="settings"` 使用嵌入设置页的无边框、紧凑字号及双栏布局，默认 `standalone` 保留独立面板布局。设置页调用方必须传入该语义；不通过祖先的 class／data 标记推断展示模式。工作区宽度仍由既有 `settings-workspace` 容器查询响应，两种模式的响应式优先级均由面板 Module 持有。
+
+`FloatingLayer` 自己持有固定定位与 1200 层级，忽略调用方 inline style 的 position／zIndex；测量得到的 top／left、可见状态及调用方动态宽度继续保留。虚拟网格的内层全宽归各自 Module，清除 react-window 提供的 inline width；视口清除 inline overflow 后使用自身滚动策略。计算高度、单元坐标和与行高／列步长共用的间距仍由几何计算持有，不在 CSS 复制常量。头像裁剪视口的宽高由 Module 使用 `--avatar-view-size`，绑定共享 `AVATAR_VIEW_SIZE`，避免视觉与导出算法尺寸分叉。
 
 ## Toolbar
 
@@ -46,28 +55,51 @@
 
 ## Buttons
 
-- `btn-primary`: 只用于提交、播放、开始主要任务。
-- `btn-ghost`: 用于详情页维护动作或低强调动作。
-- `btn-danger`: 用于破坏性动作；真正执行前必须有确认。
-- 小型按钮使用 `btn-sm`，目标尺寸仍需满足最小点击区域。
+- `Button variant="primary"`：只用于提交、播放、开始主要任务。
+- `Button variant="ghost"`：用于详情页维护动作或低强调动作。
+- `Button variant="danger"`：用于破坏性动作；真正执行前必须有确认。
+- 小型按钮使用 `Button size="sm"`，目标尺寸仍需满足最小点击区域；不要使用已移除的 `.btn-sm`。
 - 纯图标按钮优先使用 `IconButton`，并提供可访问名称。
+- Button 的视觉由自身 Module 持有，不输出旧 `btn` 类。设置壳传递 `--workspace-button-font-size`／`--workspace-button-min-height` 保留 12px／32px 的实际密度；独立按钮仍采用原有默认或小尺寸。工具栏显式控制高度，文字按钮的最小高度消费同一密度变量，图标按钮不受文字密度影响。不要用全局类或祖先选择器恢复这条桥接。
+- 相邻的执行动作使用 `SegmentedActions` / `SegmentedAction`，通过 `size="sm"` 保留原有 24px 紧凑动作尺寸，不拼接旧 `btn-segment`。普通命令不添加 pressed 状态；切换型命令由调用方明确传 `aria-pressed`。选项筛选仍使用 `SegmentedControl` / `SegmentedOption`，不把两类业务交互混成一个隐式选择模型。
+- IconButton 自己持有外框、尺寸、tone 和 glyph 样式，调用方提供可访问名称、原生属性和布局 class，不依赖旧 `icon-btn` 桥接。
 
 不要用临时符号代替可复用图标控件；确实需要文字命令时，按钮文案应短、明确。
 
 ## Popovers And Modals
 
+- 跨设置概览、插件连接及删除确认的警告/信息条使用 `NoticeBanner`；`tone` 决定语义配色，`NoticeBannerCopy` 和 `NoticeBannerActions` 承载文案与操作。调用方只保留自身的图标和特殊布局，不重新定义通知外框。
 - 筛选使用 popover，按字段分组，底部放重置/应用或关闭动作。
+- 列表筛选弹层使用 `FilterPanelAnchor` 定位、`FilterPanelShell` 承载外框、`FilterPanelContent` 管理标题/滚动内容/操作栏；两列字段用 `FilterFields` 与 `FilterField`。筛选选择框用 `SelectControl variant="filter"`，文本输入用 `TextInput variant="filter"`，避免页面选择器穿透控件内部样式。
 - 阻塞式确认、编辑表单、批量任务配置使用 modal。
+- 实体编辑弹窗使用 `EditForm` 和 `EditFormFields` 管理表单栈与双列字段网格；需要较大间距时选 `relaxed`，已有自定义布局用 `custom`。跨两列的保留旧名复选项使用 `EditFormCheckRow`，不要恢复旧全局布局类。
+- `EditFormField` 负责直接子级的输入宽度与 textarea 最小高度、行高；嵌套控件（如 `ClassificationPicker`、带单位输入）由其自身 Module 保证内部输入宽度，不通过父级全局 class 穿透。
+- 单行与多行编辑分别使用 `TextInput`／`TextArea`，保留原生属性、ref 和事件；视觉及焦点由共享输入 Module 持有，不再使用旧 `text-input` 类。字号默认 13px；迁自旧设置输入的调用方显式传 `density="workspace"`，由设置壳的 `--workspace-input-font-size` 保留原有 12px 密度，壳外回退 13px。已有默认／筛选输入不自动继承该变体，避免改变当前有效字号。`TextArea` 自己持有稳定滚动槽；宽度、最小高度和行高仍由表单布局负责。
+- 编辑表单中的封面/头像区使用 `EditFormSection variant="media"` 保留 10px 上下内边距；普通分区使用默认变体，不再给 Modal 添加 `modal-entity-edit` 功能类。
+- `ImageImportField` 自己管理横向/纵向布局、宽/方预览、占位与操作区；调用方只传 `layout`、`previewShape`、当前图片和动作，不再依赖全局 `image-import-*` class 或静态 inline 布局样式。
+- `VideoResourceImportModal` 使用共享 `TextInput`；链接／大小行、读取反馈及提交错误由自身 Module 管理，不依赖全局资源导入或整宽控件 class。保留单条、媒体库添加、编辑、STRM 和远程模式的既有资格与提交语义。
+- `DetailPage` 的修正番号、本地资源标签输入使用共享 `TextInput`；操作提示、可复制路径及整宽控件由页面 Module 持有。合并、拆分、移除及最后资源确认沿用原有领域行为，不恢复已经无效的旧表单 class。`DetailIconButton` 自己定义忙碌动画，不依赖全局 keyframe。
 - modal 最大高度受视口约束，内部内容允许滚动。
 - danger modal 只在确认动作上体现危险，不把整个弹窗做成高饱和警告样式。
+- 分类合并和导演选择的文本候选使用 `ClassificationChoiceList` / `ClassificationChoiceRow`；调用方提供 option/radio 语义、名称、说明及选中值，候选圆点与列表外框由原语持有。分类候选空态使用 `ClassificationChoiceEmpty`，不依赖全局候选 class 穿透 `EmptyState`；带头像的连续演员候选保持独立布局。
+- 分类删除与机构角色移除使用 `ClassificationDeleteNotice` 管理影响预览的加载提示、可复制正文及错误；领域风险和保留说明仍由调用方提供。不要恢复已无样式的旧确认内容／安全说明 class。
+- 编辑表单的 `Modal.onConfirm` 返回实际提交 Promise，不使用 `void save()` 截断；失败需抛出给 Modal，才能在原表单保留错误及草稿。业务冲突的专用处理流程可以先消费对应错误。
+- Modal 在提交期间锁定重复确认、取消、Esc 和遮罩关闭；自定义 actions 仍由调用方传入 `busy` 并禁用操作。切换编辑对象应通过 key 创建新会话，避免旧提交污染新草稿。
+- Modal 的 chrome、size、说明和各内容区由自身 Module 持有，不输出旧 `modal-*` 类；说明保留原有 `aria-describedby`，调用方布局使用 `className` / `bodyClassName` 或 `data-modal-part` 插槽，不用 CSS 类推断提交和关闭行为。`AppFormSection` 的标题、说明和操作布局也归自身 Module，不恢复旧 `app-form-section-*`。
+- 默认确认按钮保留固定文案；共享 `Button` 从空闲起传 `busy={false}` 可预留稳定指示槽，忙碌时禁用并设置 `aria-busy`，减少动态效果时不旋转。
 
 ## Cards And Media Items
 
 - 媒体卡片是重复信息单元，圆角最大 8px。
+- 导演、系列和机构详情的资料卡统一使用 `ClassificationProfile`；页面提供领域字段，组件负责标题、图片裁切、别名、简介、链接及隐私模式样式。
+- 导演、系列和机构列表卡片统一使用 `FacetCard`；页面提供封面、名称、数量和打开详情行为，卡片按分类决定封面裁切并自行处理隐私遮罩。
+- 别名与插件字段 chip 的移除操作统一使用 `ChipRemoveButton`；别名随父 chip 悬停/聚焦显示，插件字段保持常驻，勿在页面重复实现按钮样式。
 - hover 可以改变边框、阴影或轻微位移，但不能造成网格重新排布。
 - 封面、标题、番号、状态是主视觉，装饰性元素应保持克制。
 - 长标题、路径、标签必须有截断、换行或稳定宽度策略。
 - 卡片、封面、头像、画廊缩略图和预览图默认不可复制选中，避免拖拽/点击时误选图片或 UI 文案。
+- 桌面 `ImagePreviewLightbox` 自己管理预览壳、工具栏、缩放、滑动及缩略图样式；滑动宽度读取显式 stage ref，不依赖 CSS 类名。调用方通过既有 `navigationStatus` / `toolbarActions` 插槽提供状态与命令，保留有界图片窗口、全局计数及跨页回调；只读 data 标记用于测试定位，不作为业务状态来源。
+- 分类主图编辑器自己管理预览和候选封面的隐私遮罩；只读取根节点的隐私范围契约，不恢复全局图片 class。遮罩不得拦截来源按钮、状态或图片选择交互。
 
 ## Selection And Copy
 
@@ -83,6 +115,7 @@
 - 空状态保持简短、任务导向，不使用营销式 hero。
 - loading 状态使用现有 spinner 和短文本。
 - 错误通过 toast 或页面内短提示表达，避免在列表面插入大块解释文本。
+- 提交失败优先留在对应表单，详情折叠且正文可选择复制；全局错误 Toast 不自动消失，相同错误去重，提供完整详情、复制和手动关闭。成功及普通信息提示仍自动消失。
 
 ### Empty height model
 
@@ -97,14 +130,18 @@
 
 规则：
 
-1. **固定高度父容器 → 铺满。** Agent 对话日志、结果面板这类右侧工作区，空状态必须用 `empty-state--fill`，让首屏不出现「上面一小块空、下面大片死白」。
+1. **固定高度父容器 → 铺满。** Agent 对话日志、结果面板这类右侧工作区，空状态必须用 `EmptyState variant="fill"`，让首屏不出现「上面一小块空、下面大片死白」。
 2. **会滚动的详情区块 → 中等带高。** 样张/写真等 section 空状态用 `compact` +（可选）`sample-empty`，高度对齐样张空状态（`--empty-inline-min-h: 140px`）。禁止让这类空状态 `min-height: 100%` 撑满整个详情滚动区。
-3. **不要把「铺满」规则套到所有 `.empty-state`。** 仅 `page`（整页）或 `fill`（固定面板）可以占满父级；`compact` 永远是内容带，不是视口填充。
+3. **不要把「铺满」规则套到所有 EmptyState。** 仅 `page`（整页）或 `fill`（固定面板）可以占满父级；`compact` 永远是内容带，不是视口填充。
 4. **新增空状态先问父容器。** 若父级是固定高度工作区，选 `fill`；若父级在长页面里只是一块内容，选 `compact`。
+
+EmptyState 的图标、标题和说明由自身 Module 管理；特殊说明布局走已有 `descriptionClassName`，不恢复旧 `empty-state-*`。只读 `data-empty-variant` / `data-empty-part` 供检查定位，不作为业务状态来源。
 
 ## Workbench And Decision Panes
 
 需要“左侧队列 + 右侧工作区”的页面（插件管理、待确认收件箱）使用 `components/workbench` 的 `WorkbenchShell`、`WorkbenchMain`、`WorkbenchRail`、`WorkbenchRailHeader`、`WorkbenchTabs`、`WorkbenchStatusPill`，不要另建一套壳层。
+
+工作台原语的样式由 `Workbench.module.css` 持有；调用方通过已有 `className`／`tabClassName` 定制自身布局，不依赖旧全局 workbench 类。页签选中样式读取 `aria-selected`，保留 roving focus、方向键和 Home／End 跳过禁用项的行为。只读 `data-workbench-part` 供自动化定位，不作为业务状态来源。
 
 待确认收件箱在此之上再收敛决定流程。三类领域（扫描资源、影片刮削、演员名称冲突）共用 `PendingDecisionParts` 的原语：
 
@@ -125,8 +162,14 @@
 - 页面中避免 hardcoded 颜色、阴影、圆角和间距。
 - inline style 仅用于真实动态值，例如虚拟列表定位、进度条宽度、图片缩放变换。
 - 可复用视觉模式应沉淀为 class，而不是散落在 JSX 中。
-- 新增或重构的组件样式写在同名 `ComponentName.module.css`，由组件自己导入；全局 CSS 只保留 token、reset、应用壳层和迁移期 legacy 样式。`npm run check:css-architecture` 以基线方式拦截全局 class 增长，详见 `CSS_MAINTAINABILITY_PROPOSAL.md`。
+- 新增或重构的组件样式写在同名 `ComponentName.module.css`，由组件自己导入；全局 CSS 只保留 token、reset 和 document 基础契约，应用壳层也由自身 Module 持有，不恢复 legacy 功能表。`npm run check:css-architecture` 以基线方式拦截全局 class 增长及 className／classList 行为推断，详见 `CSS_MODULE_MIGRATION.md`；最初方案见 `CSS_MAINTAINABILITY_PROPOSAL.md`。
 - 跨组件共享的视觉规则提升为 React 原语（props seam），不要靠调用方拼接全局 class。
+- Web `ResourceList` 的卡片、选中态、动作及统一反馈由 `ResourceCard.module.css` 持有，复制兼容文本框使用同模块的静态 class。`ImagePreview.module.css` 仅在局部 root 下覆写 YARL 已知部件；第三方原表导入限定在预览适配器，不允许其他 Web Module 借 `:global` 穿透应用宿主。预览的键盘隔离使用独立 `web-image-preview` 标记，不读取样式类名。
+- Web `WebButton`／`WebChipLink`／`WebTextInput` 持有共用控件样式，保留原生属性与 ref，不强制把 button 默认类型改成非提交；`variant`／`appearance` 只表达实际视觉差异。`WebBrand` 自持品牌样式，登录与顶栏复用而不额外包裹。`Login`／`PairLogin` 自持页面样式；`LoginForm` 共享字段、记住设备行、说明和提交布局，不靠父页面穿透配对子组件。触屏尺寸与焦点须检查实际计算结果，不以 CSS 声明或截图初态代替按压／禁用状态验收。
+- Web 浏览壳、搜索、侧栏、范围弹层、影片卡片和网格分别由 `WebLibraryShell`、`WebSearch`、`WebSidebar`、`WebCollectionPicker`、`WebVideoCard`、`WebVideoGrid` 持有同名 Module。壳只组织原生区域与内容槽，不加载数据或管理路由；范围选择先关闭弹层，不变项不导航，URL 与切换焦点策略仍由调用方持有。卡片转发原生 anchor 属性和 ref，网格的单 Tab 入口与 onFocus 必须到达实际 anchor。焦点及测试定位用独立 `data-web-*` 标记或原生区域语义，不读取 CSS 类名；侧栏活动项显式使用 data-active，避免把无效范围参数误当成“全部”。
+- `WebHomeDiscovery` 持有首页布局及原有请求／重试／焦点逻辑；刷新保留已有网格，进入详情只隐藏、不重载首页。`WebStatus` 持有统一提示布局，没有 retry 时为 status，有 retry 时为 alert；样式迁移不改变状态播报、重试入口或加载资格。
+- `WebBrowseHeading`、`WebBrowseSort`、`WebChipRow`、`WebPagination` 持有结果标题布局、排序、chip 行与分页的同名 Module。加载中的总量用破折号，零结果仍显示 0；排序保留空值默认和未知参数不选中的语义。chip 行在结果筛选与详情标签间复用，applied 只增加非空行底部间距，并转发原生 div 属性／事件／ref。分页仅表达受控页号及边界禁用，URL、筛选清除与 page 重置仍由列表控制器处理；焦点和脚本定位用独立标记，不借助样式 class。
+- `WebDetailPage` 持有详情、原生播放器、封面回退、资料与剧照布局；`WebCastMember` 自持演员卡片，父页面只持有演员网格布局。主资源选择、明确切换资源、默认暂停、播放重试、预览历史与焦点恢复保持原有业务，不在样式迁移中另建控制层。`WebText tone="muted|danger|eyebrow"` 复用文本语义，仍输出唯一原生 p 并转发属性／事件／ref；调用方通过 className 表达自己的位置／尺寸，详情资源说明用局部 resourceNote，不穿透子组件的文本类。方向键排除跳到内容入口使用 data-web-skip，Tab 仍可到达它；行为代码不读取 Module 生成名或旧 skip 类。
 - 选中、就绪这类状态优先用 `aria-*` 或 `data-*` 属性选择器表达，不新增全局 `.is-*`。
 
 ## Migration Checklist
@@ -134,26 +177,30 @@
 ### Settings forms
 
 - 功能启用/关闭统一使用 `Switch` / `SettingsSwitchRow`，多项勾选使用 `Checkbox`。控件形态不决定保存时机；需一起提交的字段使用草稿和 `SettingsFormActions`，Switch 也在保存后生效。迁移、加解密等任务使用动作按钮和 `ConfirmModal`。
+- 多行开关外框使用 `SettingsToggleList`，紧凑间距传 `compact`；特殊外框通过显式 `className` 调整。防窥范围行的横向留白通过 `--settings-switch-row-pad-x` 传给行自身，不穿透旧全局 class。`SettingsCard.headerClassName` 只定制标题区布局，不传到卡片 DOM。
+- 外观设置的主题选项使用 `ThemeChoice`，概览色块复用 `ThemeSwatch`。局部 `data-theme` 仅选择预览 palette，预览角色在自身 Module 绑定；应用主题仍由 `applyTheme` 设置根节点。主题键盘选择和保存时机由调用方保留，不复制每个主题的硬编码颜色规则。
 - 图标、颜色等带标题的选项组使用 `AppFormChoiceGroup`；标签与内容间距由组件维护，禁止依赖 fieldset 外层 gap。
 - `SettingsFormActions` 默认用于内容底部并保留 16px 间距，标题旁的操作必须指定 `placement="header"`。页面不额外补偿操作栏的顶部间距。
 - `useSettingsDraft` 保留未提交输入，只同步未编辑的字段。服务器刷新与本地修改同一字段时展示冲突提示；规范化保存值使用 `accept(saved, submitted)`，保留保存期间继续输入的内容。
 - 草稿表单通过 `useSettingsFormGuard` 登记 dirty、busy、保存和放弃处理。分类、子页签、作用域切换及返回操作统一提供继续编辑、放弃、保存后离开；组件内关闭弹窗也使用此入口。
 - 保存状态属于实际提交组；串行保存的互斥与版本号由命令入口的 ref 管理，不用过时渲染闭包里的 busy 值阻止后续组。
 - 测试连接说明使用的是当前草稿还是已保存值。代理测试使用当前输入；模型测试使用已保存连接，连接有草稿时要求先保存。
-- `SettingsWorkspaceShell` 只负责分类导航、子页签和内容面板，不重复显示分类大标题、简介或笼统的“全局设置”。子页签数据统一来自 `settingsRoutes.ts`；保留面板的无障碍名称与页签关联。
+- `SettingsWorkspaceShell` 持有工作区布局、排版及密度变量，负责分类导航、子页签和内容面板，不重复显示分类大标题、简介或笼统的“全局设置”。子页签数据统一来自 `settingsRoutes.ts`；保留面板的无障碍名称与页签关联。状态文字与步进单位由自己的 Module 消费 caption 密度；卡片标题布局使用已有 `headerClassName`，不依赖属性选择器穿透旧 class。作用域仍按 DOM 继承，不新增 React 上下文改变 portal 的密度。
+- 设置页空态使用 `SettingsEmptyPanel` 的 `plain`、`dashed`、`compact` 变体；特殊容器用本组件的 `className`，说明内容排版用 `descriptionClassName` 传入调用方 Module 类，不依赖 `settings-empty-panel` 全局选择器。
 - 内容卡片标题负责分组；具体媒体库名称、切换器、状态与操作保留。作用范围、生效时机及操作提示紧邻对应设置或按钮，不再集中放在页面顶部。
 
 ### General
 
 新建或重构页面时，按下面清单检查：
 
-- 列表页根节点使用 `list-page`。
-- 详情页根节点使用 `detail-pane`。
+- 列表页根节点使用 `ListPage`。
+- 详情页根节点使用 `DetailPane`，嵌套详情使用 `DetailPaneOverlay`。
+- 列表与详情共用路由时，由 `ListDetailShell` 保留列表挂载和滚动状态，并承载详情叠层；背景图模式通过应用壳的语义变量调整叠层表面。
 - 列表页 toolbar 使用 `ListToolbar`。
 - 改变结果集的筛选状态写入 URL query。
 - 已应用筛选使用 `AppliedFilterBar`，但搜索词只保留在搜索框内。
-- 可滚动详情使用 `scroll-body--scroll`。
-- 自带滚动视口的虚拟列表或固定填充列表使用 `scroll-body--fill`；依附外部滚动容器的连续网格使用 `scroll-body--scroll`。
+- 可滚动详情使用 `ScrollViewport variant="scroll"`（通常由 `DetailScrollBody` 组合）。
+- 自带滚动视口的虚拟列表或固定填充列表使用 `ListSurface variant="fill"`；依附外部滚动容器的连续网格使用 `variant="scroll"`。
 - 破坏性操作进入确认 modal。
 - 静态视觉值进入 CSS class 和语义 token，并写在组件同名 `.module.css` 中。
 - 主从工作台复用 `components/workbench`；待确认类决定复用 `PendingDecisionParts`。
@@ -166,10 +213,18 @@
 
 - `useContinuousPage` 适配 `items / total / offset` 和仅提供 `hasMore` 的既有接口。最多保留三页；后者只预留下一页空间，读到末页后确定总量。禁止累计追加所有历史页。
 - `ContinuousGrid` 用于规则网格与固定高度候选行，`ContinuousPosterGrid` 复用海报卡片及封面比例。详情使用已有外层滚动容器（可通过 `scrollRef` 明确指定）；候选弹窗使用固定高度独立视口。焦点留白、滚动条占位和状态色沿用语义 token。
+- 虚拟候选卡片通过自身 CSS Module class 获得布局、选中、禁用和焦点样式，不能依赖网格的直接子 button 选择器；候选实际位于虚拟单元内。分页验收按可见单元和接口页大小检查，不要求一页所有条目同时存在于 DOM。
 - 搜索/对象会话隔离请求。页失败不移除其他页或占位高度；重试只读当前保留窗口。关闭候选弹窗后旧请求不更新新会话。
 - 选择状态存储稳定 ID；完整名称、修订及业务资格在确认时通过现有后端读取验证。已选项与确认区不属于虚拟候选 DOM；不能从当前候选页反推全部选择。
 - 方向键按行列移动，遇到未加载目标先读取再聚焦；Tab 只遍历已存在的交互控件。文本输入保留编辑按键。回收焦点所在页时保留焦点单元容器；数据重新进入窗口后再恢复交互目标。
 - 待确认处理、扫描历史和审计保持显式分页。演员写真主列表、候选与预览，本轮保持原实现。
+- 演员画廊和头像写真来源共用 `GalleryPagination`，沿用每页 60 项、上一页／下一页及全局页码；头像来源使用紧凑按钮并隐藏总量，画廊显示总量。查询、异步会话与图片预览仍由各自 hook 管理，分页原语不加载资料。
+
+### 侧栏与窄窗刮削字段
+
+`Layout` 的浏览导航中段独立滚动，品牌及底部待确认／设置入口不随中段被挤出视口；保留焦点留白和滚动槽。媒体库原有内部列表滚动契约保持不变。
+
+`ScrapeFieldsModal` 在 760px 以下改为纵向自然高度内容，任务配置区不参与压缩，由共享 Modal 正文承担滚动，操作栏保持可达。鼠标验收必须实际点击写入字段，不得以强制点击或键盘操作替代遮挡检查。
 
 
 ## 备份与恢复设置

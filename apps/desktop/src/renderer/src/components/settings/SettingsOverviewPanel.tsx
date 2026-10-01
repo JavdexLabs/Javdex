@@ -29,7 +29,12 @@ import {
 } from '../../settings/settingsDisplay'
 import IconButton from '../IconButton'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
+import batchControlStyles from './BatchTaskControls.module.css'
+import { ThemeSwatch } from './ThemePreview'
+import styles from './SettingsOverviewPanel.module.css'
 import Button from '../Button'
+import NoticeBanner, { NoticeBannerActions, NoticeBannerCopy } from '../NoticeBanner'
+import SettingsPanel, { SettingsPanelTitle } from './SettingsPanel'
 
 export type SettingsOverviewNotice = {
   tone: 'warning' | 'info'
@@ -136,7 +141,7 @@ function proxyStatus(enabled: boolean, url: string): { detail: string; value: st
   return { detail: '未配置地址', value: '直连' }
 }
 
-function SettingsStatusCard({
+export function SettingsStatusCard({
   icon: Icon,
   label,
   value,
@@ -144,6 +149,7 @@ function SettingsStatusCard({
   detailLines,
   attention = false,
   emphasizeValue = false,
+  valueVariant,
   hint,
   onClick
 }: {
@@ -154,43 +160,42 @@ function SettingsStatusCard({
   detailLines?: string[]
   attention?: boolean
   emphasizeValue?: boolean
+  valueVariant?: 'theme'
   hint?: string
   onClick: () => void
 }): JSX.Element {
   return (
     <button
       type="button"
-      className={`settings-overview-status-card${
-        attention ? ' settings-overview-status-card--attention' : ''
-      }${emphasizeValue ? ' settings-overview-status-card--emphasis' : ''}`}
+      className={`${styles.statusCard}${attention ? ` ${styles.statusCardAttention}` : ''}`}
       title={hint}
       onClick={onClick}
     >
-      <span className="settings-overview-status-card-icon" aria-hidden>
+      <span className={styles.statusCardIcon} aria-hidden>
         <Icon {...UI_ICON_SM} />
       </span>
-      <span className="settings-overview-status-card-label">{label}</span>
+      <span className={styles.statusCardLabel} data-settings-status-label>{label}</span>
       <strong
-        className={`settings-overview-status-card-value${
-          emphasizeValue ? ' settings-overview-status-card-value--plugin' : ''
-        }`}
+        className={`${styles.statusCardValue}${emphasizeValue ? ` ${styles.statusCardValuePlugin}` : ''}${
+          attention && emphasizeValue ? ` ${styles.statusCardValuePluginAttention}` : ''
+        }${valueVariant === 'theme' ? ` ${styles.statusCardValueTheme}` : ''}`}
       >
         {value}
       </strong>
       {detailLines && detailLines.length > 0 ? (
-        <span className="settings-overview-status-card-detail settings-overview-status-card-detail--stack">
+        <span className={`${styles.statusCardDetail} ${styles.statusCardDetailStack}`}>
           {detailLines.map((line) => (
             <span key={line}>{line}</span>
           ))}
         </span>
       ) : detail ? (
-        <span className="settings-overview-status-card-detail">{detail}</span>
+        <span className={styles.statusCardDetail}>{detail}</span>
       ) : null}
     </button>
   )
 }
 
-function ScrapeCoverageBlock({
+export function ScrapeCoverageBlock({
   scraped,
   unscraped,
   failed = 0,
@@ -213,31 +218,31 @@ function ScrapeCoverageBlock({
   }`
 
   return (
-    <div className="settings-overview-scrape">
-      <div className="settings-overview-scrape-head">
+    <div className={styles.scrapeCoverage}>
+      <div className={styles.scrapeHead}>
         <span>{title}</span>
-        <span className="settings-overview-scrape-summary">{summary}</span>
+        <span className={styles.scrapeSummary}>{summary}</span>
       </div>
       <div
-        className="settings-overview-scrape-bar"
+        className={styles.scrapeBar}
         role="img"
         aria-label={`已刮削 ${scrapedPct}%，未刮削 ${unscrapedPct}%${failed > 0 ? `，失败 ${failedPct}%` : ''}`}
       >
         {scrapedPct > 0 && (
           <span
-            className="settings-overview-scrape-segment settings-overview-scrape-segment--scraped"
+            className={`${styles.scrapeSegment} ${styles.scrapeSegmentScraped}`}
             style={{ flexGrow: scrapedPct }}
           />
         )}
         {unscrapedPct > 0 && (
           <span
-            className="settings-overview-scrape-segment settings-overview-scrape-segment--pending"
+            className={`${styles.scrapeSegment} ${styles.scrapeSegmentPending}`}
             style={{ flexGrow: unscrapedPct }}
           />
         )}
         {failedPct > 0 && (
           <span
-            className="settings-overview-scrape-segment settings-overview-scrape-segment--failed"
+            className={`${styles.scrapeSegment} ${styles.scrapeSegmentFailed}`}
             style={{ flexGrow: failedPct }}
           />
         )}
@@ -246,7 +251,7 @@ function ScrapeCoverageBlock({
   )
 }
 
-function BatchOverviewStatus({
+export function BatchOverviewStatus({
   batch,
   percent,
   scopeLabel,
@@ -296,13 +301,15 @@ function BatchOverviewStatus({
   const openLabel = `查看${scopeLabel}批量任务详情`
 
   return (
-    <div
-      className={`settings-overview-batch-inline${activeBatch ? ' is-active' : ' is-idle'}`}
-    >
-      <div className="settings-overview-batch-inline-head">
-        <span className="settings-overview-batch-inline-title">
-          <span>批量任务</span>
-          <strong>{status}</strong>
+    <div className={`${styles.batchInline}${activeBatch ? '' : ` ${styles.batchInlineIdle}`}`}>
+      <div className={`${styles.batchHead}${activeBatch ? '' : ` ${styles.batchHeadIdle}`}`}>
+        <span className={styles.batchTitle}>
+          <span className={styles.batchTitleLabel}>批量任务</span>
+          <strong
+            className={`${styles.batchTitleStatus}${activeBatch ? '' : ` ${styles.batchTitleStatusIdle}`}`}
+          >
+            {status}
+          </strong>
         </span>
         {batchControllable ? (
           <BatchTaskControls
@@ -321,7 +328,7 @@ function BatchOverviewStatus({
         ) : null}
         {activeBatch ? (
           <IconButton
-            className="settings-overview-batch-icon-btn settings-overview-batch-detail-btn"
+            className={`${batchControlStyles.iconButton} ${batchControlStyles.detailIconButton}`}
             icon={<SquareTerminal {...UI_ICON_SM} />}
             label={openLabel}
             onClick={onOpen}
@@ -329,23 +336,30 @@ function BatchOverviewStatus({
         ) : null}
       </div>
       <div
-        className="settings-overview-batch-progress"
+        className={`${styles.batchProgress} ${activeBatch ? styles.batchProgressActive : styles.batchProgressIdle}`}
         role="img"
         aria-label={activeBatch ? `批量任务${status}，进度 ${safePercent}%` : '批量任务空闲'}
       >
-        <span style={{ width: `${safePercent}%` }} />
+        <span
+          className={`${styles.batchProgressFill}${activeBatch ? '' : ` ${styles.batchProgressFillIdle}`}`}
+          style={{ width: `${safePercent}%` }}
+        />
       </div>
-      <div className="settings-overview-batch-meta">
-        <small>{batchDetail}</small>
+      <div className={styles.batchMeta}>
+        <small
+          className={`${styles.batchMetaDetail}${activeBatch ? '' : ` ${styles.batchMetaDetailIdle}`}`}
+        >
+          {batchDetail}
+        </small>
         {activeBatch || (showPending && pendingGroupCount > 0 && onOpenPending) ? (
-          <span className="settings-overview-batch-meta-actions">
+          <span className={styles.batchMetaActions}>
             {showPending && pendingGroupCount > 0 && onOpenPending ? (
               <Button type="button" variant="ghost" size="sm" onClick={onOpenPending}>
                 查看待确认
               </Button>
             ) : null}
             {activeBatch ? (
-              <span className="settings-overview-batch-inline-count">{batchCount}</span>
+              <span className={styles.batchCount}>{batchCount}</span>
             ) : null}
           </span>
         ) : null}
@@ -485,21 +499,15 @@ export default function SettingsOverviewPanel({
   }
 
   return (
-    <div className="settings-overview">
+    <div className={styles.root}>
       {notices.length > 0 && (
-        <div className="settings-notice-list" role="status">
+        <div className={styles.noticeList} role="status">
           {notices.map((notice) => (
-            <div
-              key={notice.title}
-              className={`settings-notice settings-notice--${notice.tone}`}
-            >
-              <div className="settings-notice-copy">
-                <strong>{notice.title}</strong>
-                <span>{notice.body}</span>
-              </div>
+            <NoticeBanner key={notice.title} tone={notice.tone}>
+              <NoticeBannerCopy title={notice.title} body={notice.body} settingsTypography />
               {(notice.secondaryAction && notice.secondaryActionLabel) ||
               (notice.action && notice.actionLabel) ? (
-                <div className="settings-notice-actions">
+                <NoticeBannerActions>
                   {notice.secondaryAction && notice.secondaryActionLabel ? (
                     <Button
                       type="button"
@@ -522,16 +530,16 @@ export default function SettingsOverviewPanel({
                       {notice.actionLabel}
                     </Button>
                   ) : null}
-                </div>
+                </NoticeBannerActions>
               ) : null}
-            </div>
+            </NoticeBanner>
           ))}
         </div>
       )}
 
-      <section className="settings-overview-panel settings-overview-panel--status" aria-label="状态">
-        <h3>状态</h3>
-        <div className="settings-overview-status-grid">
+      <SettingsPanel aria-label="状态">
+        <SettingsPanelTitle standalone>状态</SettingsPanelTitle>
+        <div className={styles.statusGrid} data-settings-status-grid>
           <SettingsStatusCard
             icon={FolderOpen}
             label="媒体库"
@@ -607,11 +615,9 @@ export default function SettingsOverviewPanel({
           <SettingsStatusCard
             icon={Palette}
             label="外观"
+            valueVariant="theme"
             value={
-              <span
-                className={`theme-swatch theme-swatch-${theme} settings-overview-status-card-theme-swatch`}
-                aria-hidden
-              />
+              <ThemeSwatch theme={theme} className={styles.statusCardThemeSwatch} />
             }
             detail={themeLabel}
             onClick={() => onNavigate('appearance', 'theme')}
@@ -625,12 +631,12 @@ export default function SettingsOverviewPanel({
             onClick={() => onNavigate('storage', 'assets')}
           />
         </div>
-      </section>
+      </SettingsPanel>
 
-      <div className="settings-overview-media-grid">
-        <section className="settings-overview-media-card" aria-label="影片刮削概览">
-          <div className="settings-overview-hero-head">
-            <h3>影片刮削概览</h3>
+      <div className={styles.mediaGrid} data-settings-media-grid>
+        <section className={styles.mediaCard} aria-label="影片刮削概览">
+          <div className={styles.mediaHead}>
+            <h3 className={styles.mediaTitle}>影片刮削概览</h3>
           </div>
 
           <ScrapeCoverageBlock
@@ -641,15 +647,15 @@ export default function SettingsOverviewPanel({
           />
 
           {videoTotal === 0 && !statsLoading ? (
-            <p className="settings-overview-media-empty">添加路径并扫描后开始积累影片</p>
+            <p className={styles.mediaEmpty}>添加路径并扫描后开始积累影片</p>
           ) : null}
 
-          <div className="settings-overview-media-action">
-            <div className="settings-overview-action-row">
+          <div className={styles.mediaAction}>
+            <div className={styles.actionRow}>
               <Button
                 type="button"
                 variant="primary"
-
+                className={styles.actionButton}
                 size="sm"
                 aria-disabled={videoDefaultBlockReason ? true : undefined}
                 title={videoDefaultBlockReason ?? undefined}
@@ -660,7 +666,7 @@ export default function SettingsOverviewPanel({
               </Button>
               <Button
                 type="button"
-
+                className={styles.actionButton}
                 size="sm"
                 aria-disabled={videoAdvancedBlockReason ? true : undefined}
                 title={videoAdvancedBlockReason ?? undefined}
@@ -670,7 +676,7 @@ export default function SettingsOverviewPanel({
                 高级刮削
               </Button>
             </div>
-            <small>
+            <small className={styles.mediaActionHint}>
               全局目录 · {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
             </small>
           </div>
@@ -686,9 +692,9 @@ export default function SettingsOverviewPanel({
           />
         </section>
 
-        <section className="settings-overview-media-card" aria-label="演员刮削概览">
-          <div className="settings-overview-hero-head">
-            <h3>演员刮削概览</h3>
+        <section className={styles.mediaCard} aria-label="演员刮削概览">
+          <div className={styles.mediaHead}>
+            <h3 className={styles.mediaTitle}>演员刮削概览</h3>
           </div>
 
           <ScrapeCoverageBlock
@@ -700,15 +706,15 @@ export default function SettingsOverviewPanel({
           />
 
           {actressFemaleTotal === 0 && !statsLoading ? (
-            <p className="settings-overview-media-empty">导入影片后会自动建立演员条目</p>
+            <p className={styles.mediaEmpty}>导入影片后会自动建立演员条目</p>
           ) : null}
 
-          <div className="settings-overview-media-action">
-            <div className="settings-overview-action-row">
+          <div className={styles.mediaAction}>
+            <div className={styles.actionRow}>
               <Button
                 type="button"
                 variant="primary"
-
+                className={styles.actionButton}
                 size="sm"
                 aria-disabled={actressDefaultBlockReason ? true : undefined}
                 title={actressDefaultBlockReason ?? undefined}
@@ -719,7 +725,7 @@ export default function SettingsOverviewPanel({
               </Button>
               <Button
                 type="button"
-
+                className={styles.actionButton}
                 size="sm"
                 aria-disabled={actressAdvancedBlockReason ? true : undefined}
                 title={actressAdvancedBlockReason ?? undefined}
@@ -729,7 +735,7 @@ export default function SettingsOverviewPanel({
                 高级刮削
               </Button>
             </div>
-            <small>
+            <small className={styles.mediaActionHint}>
               {settings.defaultActressScraper || '未设置插件'} · 女优未刮削项 · 空字段补齐 · 全字段
             </small>
           </div>
@@ -751,22 +757,22 @@ export default function SettingsOverviewPanel({
         </section>
       </div>
 
-      <section className="settings-overview-panel settings-overview-panel--agent-tools" aria-label="Agent 工具">
-        <h3>Agent 工具</h3>
-        <div className="settings-overview-agent-tools-grid">
+      <SettingsPanel aria-label="Agent 工具">
+        <SettingsPanelTitle standalone>Agent 工具</SettingsPanelTitle>
+        <div className={styles.agentToolsGrid}>
           {SETTINGS_OVERVIEW_AGENT_TOOLS.map((tool) => {
             const Icon = tool.icon
             return (
               <button
                 key={tool.id}
                 type="button"
-                className="settings-overview-agent-tool-card"
+                className={styles.agentToolCard}
                 onClick={() => onOpenAgentTool(tool.id)}
               >
-                <span className="settings-overview-agent-tool-icon" aria-hidden>
+                <span className={styles.agentToolIcon} aria-hidden>
                   <Icon {...UI_ICON_SM} />
                 </span>
-                <span className="settings-overview-agent-tool-copy">
+                <span className={styles.agentToolCopy}>
                   <strong>{tool.title}</strong>
                   <small>{tool.description}</small>
                 </span>
@@ -774,7 +780,7 @@ export default function SettingsOverviewPanel({
             )
           })}
         </div>
-      </section>
+      </SettingsPanel>
     </div>
   )
 }

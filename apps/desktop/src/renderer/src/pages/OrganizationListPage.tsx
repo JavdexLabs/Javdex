@@ -1,4 +1,8 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import ResultCount from '../components/ResultCount'
 import ContinuousGrid from '../components/ContinuousGrid'
+import FacetCard from '../components/FacetCard'
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { Building2, Plus, SearchX } from 'lucide-react'
@@ -77,20 +81,16 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
       ]
 
   const createOrganization = async (input: OrganizationUpdateInput): Promise<void> => {
-    try {
-      const id = await api.organizations.create({ ...input, role })
-      setCreateOpen(false)
-      toast.show(`已新增${label}`, 'success')
-      void listQuery.refetch()
-      navigateToOrganizationDetail(navigate, location, role, id)
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    }
+    const id = await api.organizations.create({ ...input, role })
+    setCreateOpen(false)
+    toast.show(`已新增${label}`, 'success')
+    void listQuery.refetch()
+    navigateToOrganizationDetail(navigate, location, role, id)
   }
 
   return (
-    <div className="list-page">
-      <div className="topbar">
+    <ListPage >
+      <PageHeader >
         <ListToolbar
           search={{
             value: searchInput,
@@ -115,16 +115,16 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
             </>
           }
           resultCount={
-            <span className="count-badge count-badge--stable count-badge--facet" aria-live="polite">
+            <ResultCount width="facet" aria-live="polite">
               共 {total ?? '…'} 个{label}
-            </span>
+            </ResultCount>
           }
         />
         <AppliedFilterBar
           items={appliedFilters}
           onClear={() => patchSort('video_count', 'desc')}
         />
-      </div>
+      </PageHeader>
 
       <ListSurface
         variant="scroll"
@@ -145,31 +145,12 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
             description={urlQ ? '调整搜索关键词后再试。' : '可手动新增，或在影片编辑时就地创建。'}
           />
         ) : (
-          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
-              return (
-                <div key={item.id} className="facet-card-wrap">
-                  <button
-                    type="button"
-                    className="facet-card card-interactive"
-                    title={item.mainName}
-                    onClick={() => navigateToOrganizationDetail(navigate, location, role, item.id)}
-                  >
-                    <div className="facet-thumb facet-thumb--contain">
-                      {cover ? (
-                        <img src={cover} alt="" loading="lazy" />
-                      ) : (
-                        <span className="facet-thumb-placeholder" aria-hidden>
-                          <Building2 {...UI_ICON_SM} />
-                        </span>
-                      )}
-                    </div>
-                    <div className="facet-name">{item.mainName}</div>
-                    <div className="facet-count">{item.videoCount} 部</div>
-                  </button>
-                </div>
-              )
-            }} />
+          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => (
+            <FacetCard key={item.id} kind="organization" name={item.mainName}
+              imageUrl={assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)}
+              placeholder={<Building2 {...UI_ICON_SM} />} videoCount={item.videoCount}
+              onOpen={() => navigateToOrganizationDetail(navigate, location, role, item.id)} />
+          )} />
         )}
       </ListSurface>
 
@@ -180,6 +161,6 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
           onSave={createOrganization}
         />
       ) : null}
-    </div>
+    </ListPage>
   )
 }

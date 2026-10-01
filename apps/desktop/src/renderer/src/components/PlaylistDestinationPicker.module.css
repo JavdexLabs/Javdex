@@ -5,6 +5,10 @@
   min-height: 0;
 }
 
+.search {
+  width: 100%;
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -20,23 +24,4 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.row {
-  width: 100%;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.row:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.row[aria-pressed='true'] {
-  background: var(--surface-selected);
-  border-color: var(--border-accent);
 }

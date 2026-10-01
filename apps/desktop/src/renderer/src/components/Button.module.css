@@ -2,13 +2,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--control-h-md);
+  min-height: var(--workspace-button-min-height, var(--control-h-md));
   padding: 9px 16px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-elevated);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--workspace-button-font-size, 13px);
   font-weight: 500;
   line-height: 1.15;
   transition:
@@ -82,7 +82,50 @@
 }
 
 .sm {
-  min-height: var(--control-h-sm);
+  min-height: var(--workspace-button-min-height, var(--control-h-sm));
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--workspace-button-font-size, 12px);
+}
+
+.root[data-busy-slot] {
+  position: relative;
+  padding-inline-start: calc(24px + 1em);
+}
+
+.root[data-busy-slot]::before {
+  position: absolute;
+  inset-inline-start: 12px;
+  width: 1em;
+  height: 1em;
+  box-sizing: border-box;
+  border: 2px solid currentcolor;
+  border-inline-end-color: transparent;
+  border-radius: var(--radius-pill);
+  content: '';
+  visibility: hidden;
+}
+
+.root[aria-busy='true']::before {
+  visibility: visible;
+  animation: busy-spin 0.8s linear infinite;
+}
+
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    transition: none;
+  }
+
+  .root:active {
+    transform: none;
+  }
+
+  .root[data-busy-slot]::before {
+    animation: none;
+  }
 }

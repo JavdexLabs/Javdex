@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Ellipsis } from 'lucide-react'
 import { useEscapeKey } from '../hooks/useEscapeKey'
-import IconButton from './IconButton'
+import DetailIconButton from './DetailIconButton'
+import { DetailMenuAnchor, DetailMenuItem, DetailMenuPanel, DetailMenuSeparator } from './DetailMenu'
 import { UI_ICON } from './iconDefaults'
 import Button from './Button'
 import styles from './DetailActionBar.module.css'
@@ -81,7 +82,8 @@ export default function DetailActionBar({
 
   return (
     <div
-      className={`${styles.root} detail-actions detail-actions--${variant}${className ? ` ${className}` : ''}`}
+      className={`${styles.root}${className ? ` ${className}` : ''}`}
+      data-variant={variant}
       role="toolbar"
       aria-label={ariaLabel}
     >
@@ -89,7 +91,7 @@ export default function DetailActionBar({
         <Button
           type="button"
           variant="primary"
-          className="detail-play-btn"
+          className={styles.primary}
           disabled={primary.disabled || primary.busy}
           aria-busy={primary.busy || undefined}
           onClick={primary.onClick}
@@ -100,11 +102,10 @@ export default function DetailActionBar({
       ) : null}
 
       {actions.length > 0 ? (
-        <div className="detail-action-group detail-action-group--icons" role="group" aria-label={ariaLabel}>
+        <div className={styles.actionGroup} role="group" aria-label={ariaLabel}>
           {actions.map((action) => (
-            <IconButton
+            <DetailIconButton
               key={action.key}
-              className="detail-icon-action"
               icon={action.icon}
               label={action.label}
               title={action.title ?? action.label}
@@ -117,9 +118,8 @@ export default function DetailActionBar({
       ) : null}
 
       {hasMenu ? (
-        <div className="detail-more-actions" ref={moreActionsRef}>
-          <IconButton
-            className="detail-icon-action"
+        <DetailMenuAnchor ref={moreActionsRef}>
+          <DetailIconButton
             icon={<Ellipsis {...UI_ICON} />}
             label={'\u66f4\u591a'}
             aria-haspopup="menu"
@@ -127,17 +127,15 @@ export default function DetailActionBar({
             onClick={() => setMoreOpen((open) => !open)}
           />
           {moreOpen && (
-            <div className="detail-more-menu" role="menu">
+            <DetailMenuPanel>
               {visibleMenuItems.map((item) => {
                 if (isMenuSeparator(item)) {
-                  return <div key={item.key} className="detail-menu-separator" />
+                  return <DetailMenuSeparator key={item.key} />
                 }
                 return (
-                  <button
+                  <DetailMenuItem
                     key={item.key}
-                    type="button"
-                    className={`detail-menu-item${item.danger ? ' detail-menu-item--danger' : ''}`}
-                    role="menuitem"
+                    danger={item.danger}
                     disabled={item.disabled}
                     onClick={() => {
                       setMoreOpen(false)
@@ -145,12 +143,12 @@ export default function DetailActionBar({
                     }}
                   >
                     {item.label}
-                  </button>
+                  </DetailMenuItem>
                 )
               })}
-            </div>
+            </DetailMenuPanel>
           )}
-        </div>
+        </DetailMenuAnchor>
       ) : null}
     </div>
   )

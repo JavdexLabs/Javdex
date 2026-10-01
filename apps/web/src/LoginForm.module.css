@@ -1,0 +1,27 @@
+.field {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.help { color: var(--text-muted); }
+.error { color: var(--text-danger); }
+
+@media (pointer: coarse) {
+  .remember { min-height: 48px; }
+}
+
+
+.submit {
+  min-height: 48px;
+  justify-content: space-between;
+}

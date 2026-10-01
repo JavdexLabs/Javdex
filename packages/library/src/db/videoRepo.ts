@@ -400,10 +400,11 @@ export function getLocalVideoResourceById(resourceId: number): LocalVideoResourc
 
 export function getVideoResourceInLibrary(
   libraryId: number,
-  resourceId: number
+  resourceId: number,
+  database: Database.Database = getDb()
 ): VideoResource | null {
   return (
-    (getDb()
+    (database
       .prepare('SELECT * FROM video_resources WHERE id = ? AND library_id = ?')
       .get(resourceId, libraryId) as VideoResource | undefined) ?? null
   )

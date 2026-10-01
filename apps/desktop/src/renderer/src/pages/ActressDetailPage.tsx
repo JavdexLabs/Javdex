@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Bot, Inbox, Pencil, SearchCheck, SearchX } from 'lucide-react'
 import { navigateBackFromActressDetail } from '../listView/listNavigation'
+import { LIST_PARAM } from '../listView/listQueryParams'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
@@ -31,6 +32,7 @@ import ActressProfileMeta, {
   canMarkActressScrapeSuccess
 } from '../components/ActressProfileMeta'
 import DetailScrollBody from '../components/DetailScrollBody'
+import DetailPane, { DetailPaneOverlay } from '../components/DetailPane'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
 import { useHistoryBackedImagePreviewState } from '../components/ImagePreviewOverlayContext'
 import DetailActionBar from '../components/DetailActionBar'
@@ -45,30 +47,23 @@ import type { ActressScrapeField, ActressScrapeUpdateMode } from '@shared/actres
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 import { useAgentMetadataCollector } from '../components/agentMetadata/AgentMetadataCollectorContext'
+import DetailInfoChip from '../components/DetailInfoChip'
+import titleStyles from '../components/DetailTitle.module.css'
+import styles from './ActressDetailPage.module.css'
 
-export default function ActressDetailPage(): JSX.Element {
+export default function ActressDetailPage({ fromVideo = false }: { fromVideo?: boolean }): JSX.Element {
   const { id, actressId: actressIdParam } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
-  const libraryActressStack = useMatch(ROUTE_MATCH.libraryActressStack)
-  const organizationActressStack = useMatch(ROUTE_MATCH.organizationActressStack)
-  const directorActressStack = useMatch(ROUTE_MATCH.directorActressStack)
-  const seriesActressStack = useMatch(ROUTE_MATCH.seriesActressStack)
-  const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
-  const actressActressStack = useMatch(ROUTE_MATCH.actressActressStack)
-  const pendingActressStack = useMatch(ROUTE_MATCH.pendingActressStack)
   const actressVideoStack = useMatch({ path: ROUTE_MATCH.actressVideoStack, end: false })
-  const fromVideo =
-    libraryActressStack ??
-    organizationActressStack ??
-    directorActressStack ??
-    seriesActressStack ??
-    playlistActressStack ??
-    actressActressStack ??
-    pendingActressStack
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
-  const actressId = Number(actressIdParam ?? id)
-  const { offset: relatedOffset, move: moveRelated, align: alignRelated } = useRelatedVideoOffset(String(actressId))
+  // Nested route params include descendant IDs; the route owns this instance's role.
+  const actressId = Number(fromVideo ? actressIdParam : id ?? actressIdParam)
+  const { offset: relatedOffset, move: moveRelated, align: alignRelated } = useRelatedVideoOffset(
+    String(actressId),
+    60,
+    fromVideo ? LIST_PARAM.actressVideoOffset : LIST_PARAM.relatedVideoOffset
+  )
   const works = useActressVideoPage(actressId, false, relatedOffset)
   const knownTotal = useRef<{ id: number; total: number } | null>(null)
   if (works.data) knownTotal.current = { id: actressId, total: works.data.total }
@@ -243,14 +238,10 @@ export default function ActressDetailPage(): JSX.Element {
   }
 
   const handleEditSave = async (input: ActressEditInput): Promise<void> => {
-    try {
-      await api.actresses.edit(actressId, input, expectedActressVersion(editVersion ?? {}))
-      toast.show('演员资料已保存', 'success')
-      setShowEdit(false)
-      void load({ silent: true })
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
+    await api.actresses.edit(actressId, input, expectedActressVersion(editVersion ?? {}))
+    toast.show('演员资料已保存', 'success')
+    setShowEdit(false)
+    void load({ silent: true })
   }
 
   const handleMarkScrapeSuccess = async (): Promise<void> => {
@@ -286,24 +277,24 @@ export default function ActressDetailPage(): JSX.Element {
   }, [location, navigate])
 
   const videoOverlay = videoStackOpen ? (
-    <div className="detail-pane-overlay">
+    <DetailPaneOverlay>
       <Outlet />
-    </div>
+    </DetailPaneOverlay>
   ) : null
 
   if (loading || (actress !== null && actress.id !== actressId)) {
     return (
-      <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+      <DetailPane stacked={videoStackOpen}>
         <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
           <EmptyState loading />
         </DetailScrollBody>
         {videoOverlay}
-      </div>
+      </DetailPane>
     )
   }
   if (!actress) {
     return (
-      <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+      <DetailPane stacked={videoStackOpen}>
         <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
           <EmptyState
             icon={<SearchX {...UI_ICON} aria-hidden />}
@@ -312,7 +303,7 @@ export default function ActressDetailPage(): JSX.Element {
           />
         </DetailScrollBody>
         {videoOverlay}
-      </div>
+      </DetailPane>
     )
   }
 
@@ -333,6 +324,7 @@ export default function ActressDetailPage(): JSX.Element {
     <DetailActionBar
       ariaLabel="演员操作"
       variant="inline"
+      className={styles.stickyActions}
       actions={[
         {
           key: 'edit',
@@ -395,14 +387,13 @@ export default function ActressDetailPage(): JSX.Element {
   )
 
   return (
-    <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+    <DetailPane stacked={videoStackOpen}>
       <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
-      <div className="actress-profile-layout">
-        <div className="actress-profile-header">
+      <div className={styles.layout}>
+        <div className={styles.header}>
           <div
-            className={`detail-avatar-frame${
-              avatarPreview && avatarPreviewEnabled ? ' detail-avatar-frame--preview' : ''
-            }`}
+            className={styles.avatarFrame}
+            data-preview={avatarPreview && avatarPreviewEnabled || undefined}
             role={avatarPreview && avatarPreviewEnabled ? 'button' : undefined}
             aria-label={
               avatarPreview && avatarPreviewEnabled
@@ -420,36 +411,37 @@ export default function ActressDetailPage(): JSX.Element {
               src={avatar}
               name={actress.main_name}
               gender={actress.gender}
-              className="detail-avatar-lg"
+              size="detail"
+              className={styles.avatar}
             />
           </div>
-          <div className="actress-profile-head">
-            <h1 className="detail-title actress-profile-title">
+          <div className={styles.head}>
+            <h1 className={`${titleStyles.title} ${styles.title}`}>
               <ActressName name={actress.main_name} gender={actress.gender} />
             </h1>
-            {profileSubtitle && <p className="actress-profile-subtitle">{profileSubtitle}</p>}
+            {profileSubtitle && <p className={styles.subtitle}>{profileSubtitle}</p>}
             {profileStats.length > 0 && (
-              <div className="actress-profile-stats" aria-label="概要">
+              <div className={styles.stats} aria-label="概要">
                 {profileStats.map((stat) => (
-                  <span key={stat} className="actress-profile-stat">
+                  <DetailInfoChip key={stat} variant="stat">
                     {stat}
-                  </span>
+                  </DetailInfoChip>
                 ))}
               </div>
             )}
           </div>
-          <div className="actress-profile-actions">{profileActions}</div>
+          <div className={styles.actions}>{profileActions}</div>
         </div>
 
         <ActressProfileMeta actress={actress} />
       </div>
 
-      <div className="actress-detail-tabs" role="tablist" aria-label="演员详情内容">
+      <div className={styles.tabs} role="tablist" aria-label="演员详情内容">
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === 'videos'}
-          className={activeTab === 'videos' ? 'active' : ''}
+          className={styles.tab}
           onClick={() => setActiveTab('videos')}
         >
           出演作品
@@ -458,7 +450,7 @@ export default function ActressDetailPage(): JSX.Element {
           type="button"
           role="tab"
           aria-selected={activeTab === 'gallery'}
-          className={activeTab === 'gallery' ? 'active' : ''}
+          className={styles.tab}
           onClick={() => setActiveTab('gallery')}
         >
           写真
@@ -602,6 +594,6 @@ export default function ActressDetailPage(): JSX.Element {
           }}
         />
       )}
-    </div>
+    </DetailPane>
   )
 }

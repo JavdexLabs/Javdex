@@ -1,0 +1,240 @@
+.root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.unrecoverable {
+  margin: 6px 0 0;
+  color: var(--text-warning);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.toolbar {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+}
+
+.toolbarActions {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.stats {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-control) 42%, var(--surface-panel));
+}
+
+.statsRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.statsRowWithPending {
+  grid-template-columns: repeat(5, max-content) minmax(0, 1fr);
+}
+
+.stat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.statLabel {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.stat strong {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.statPending strong {
+  color: var(--text-warning);
+}
+
+.statsCurrent {
+  min-width: 0;
+  justify-self: end;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.progress {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.progressTrack {
+  overflow: hidden;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-control);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+}
+
+.progressTrack > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--motion-med);
+}
+
+.progressPct {
+  color: var(--text-accent);
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.logPanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-base);
+}
+
+.logHead {
+  flex: 0 0 auto;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.logHead span {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logHead small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.logBox {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  padding: 10px calc(14px + var(--scrollbar-safe-pad)) 12px 14px;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  scrollbar-gutter: stable;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: text;
+  user-select: text;
+}
+
+.logLine {
+  padding: 1px 0;
+  user-select: text;
+}
+
+.logLineInfo {
+  color: var(--text-2);
+}
+
+.logLineSuccess {
+  color: var(--success);
+}
+
+.logLineError {
+  color: var(--danger);
+}
+
+.emptyPanel {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: center;
+}
+
+@container settings-workspace (width <= 500px) {
+  .toolbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .statsRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .statsCurrent {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}

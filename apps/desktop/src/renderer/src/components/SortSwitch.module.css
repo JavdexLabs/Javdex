@@ -4,7 +4,7 @@
   height: 100%;
 }
 
-.more > button {
+.moreButton {
   height: 100%;
   min-height: 0;
   border: 0;
@@ -14,7 +14,96 @@
   font-size: 12px;
 }
 
-.selected > button {
+.selected.selected {
   color: var(--text-accent);
   background-color: var(--surface-selected);
+}
+
+.root {
+  display: inline-flex;
+  align-items: center;
+  height: var(--toolbar-control-h, var(--control-h-md));
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  overflow: hidden;
+}
+
+.fields {
+  display: inline-flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.field,
+.direction {
+  min-width: var(--target-min);
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+.field {
+  padding: 0 10px;
+}
+
+.direction {
+  width: 34px;
+
+  --icon-glyph-size: 14px;
+
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.field:hover,
+.direction:hover {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.field[aria-pressed='true'] {
+  background: var(--surface-selected);
+  color: var(--text-accent);
+  font-weight: 700;
+}
+
+.field:focus-visible,
+.direction:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+  box-shadow: var(--focus-ring);
+}
+
+.root[data-compact='true'] {
+  height: var(--toolbar-control-h, var(--control-h-sm));
+}
+
+.root[data-compact='true'] .field {
+  padding: 0 9px;
+}
+
+.root[data-compact='true'] .direction {
+  width: 32px;
+}
+
+@media (width <= 760px) {
+  .root {
+    max-width: 100%;
+  }
+
+  .field {
+    padding: 0 8px;
+  }
 }

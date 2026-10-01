@@ -12,6 +12,7 @@ import PluginDevConversation from './PluginDevConversation'
 import PluginDevResultPanel from './PluginDevResultPanel'
 import { type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'
 import { WorkbenchRail, WorkbenchTabs } from '../workbench'
+import styles from './PluginDevAgentRail.module.css'
 
 export default function PluginDevAgentRail({
   kind,
@@ -91,12 +92,13 @@ export default function PluginDevAgentRail({
   const running = agentStatus === 'running' && busy
 
   return (
-    <WorkbenchRail className="plugin-dev-rail plugin-dev-rail--agent">
+    <WorkbenchRail className={styles.rail}>
       <WorkbenchTabs
         id="plugin-dev-tab"
         label="Agent 面板"
         value={tab}
-        className="plugin-dev-agent-tabs"
+        className={styles.tabs}
+        tabClassName={styles.tab}
         items={[
           {
             id: 'conversation',
@@ -112,10 +114,10 @@ export default function PluginDevAgentRail({
         onChange={onTabChange}
       />
 
-      <div className="plugin-dev-agent-body">
+      <div className={styles.body}>
         <div
           id="plugin-dev-panel-conversation"
-          className="plugin-dev-agent-pane"
+          className={styles.pane}
           role="tabpanel"
           aria-labelledby="plugin-dev-tab-conversation"
           hidden={tab !== 'conversation'}
@@ -153,7 +155,7 @@ export default function PluginDevAgentRail({
         </div>
         <div
           id="plugin-dev-panel-result"
-          className="plugin-dev-agent-pane"
+          className={styles.pane}
           role="tabpanel"
           aria-labelledby="plugin-dev-tab-result"
           hidden={tab !== 'result'}

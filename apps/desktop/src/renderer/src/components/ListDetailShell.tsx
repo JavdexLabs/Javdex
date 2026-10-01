@@ -1,5 +1,6 @@
 import { matchPath, Outlet, useLocation } from 'react-router-dom'
 import { type ReactNode } from 'react'
+import styles from './ListDetailShell.module.css'
 
 interface ListDetailShellProps {
   list: ReactNode
@@ -22,10 +23,10 @@ export default function ListDetailShell({
   )
 
   return (
-    <div className={`list-detail-shell${detailOpen ? ' list-detail-shell--detail' : ''}`}>
-      <div className="list-detail-shell-main">{list}</div>
+    <div className={styles.root} data-detail-open={detailOpen || undefined}>
+      <div className={styles.main}>{list}</div>
       {detailOpen && (
-        <div className="list-detail-shell-detail">
+        <div className={styles.detail} data-list-detail-overlay>
           <Outlet />
         </div>
       )}

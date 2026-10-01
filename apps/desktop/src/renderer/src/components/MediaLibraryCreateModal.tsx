@@ -1,3 +1,4 @@
+import TextInput from './TextInput'
 import RemoteRootPicker from '../pages/RemoteRootPicker'
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { FolderPlus, X } from 'lucide-react'
@@ -324,9 +325,9 @@ export default function MediaLibraryCreateModal({
             {step === 0 ? (
               <AppFormSection title="名称与识别">
                 <AppFormField label="媒体库名称">
-                  <input
+                  <TextInput
                     ref={nameRef}
-                    className={`text-input ${styles.control}`}
+                    density="workspace" className={styles.control}
                     value={draft.name}
                     maxLength={200}
                     disabled={busy}
@@ -421,9 +422,9 @@ export default function MediaLibraryCreateModal({
                 <AppFormSection title="扫描行为">
                   <div className={styles.fieldGrid}>
                     <AppFormField label="自动扫描周期" hint="5–10080 分钟">
-                      <input
+                      <TextInput
                         ref={scanIntervalRef}
-                        className={`text-input ${styles.control}`}
+                        density="workspace" className={styles.control}
                         type="number"
                         min={5}
                         max={10_080}
@@ -442,9 +443,9 @@ export default function MediaLibraryCreateModal({
                       />
                     </AppFormField>
                     <AppFormField label="导入最小时长" hint="0–1440 分钟">
-                      <input
+                      <TextInput
                         ref={minDurationRef}
-                        className={`text-input ${styles.control}`}
+                        density="workspace" className={styles.control}
                         type="number"
                         min={0}
                         max={1_440}

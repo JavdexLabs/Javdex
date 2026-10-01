@@ -9,6 +9,9 @@ import type { ActressMetadata } from '@shared/actressTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/actressTypes'
 import RelatedLinksList from './RelatedLinksList'
+import DetailInfoChip from './DetailInfoChip'
+import ScrapeStatusBadge from './ScrapeStatusBadge'
+import styles from './ActressProfileMeta.module.css'
 
 type MetaItem = { key: string; label: string; value: string; status?: ScrapedStatus }
 
@@ -57,12 +60,6 @@ function formatTimestamp(value: string | null | undefined): string | null {
   const date = new Date(trimmed)
   if (Number.isNaN(date.getTime())) return trimmed
   return date.toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
-}
-
-const ACTRESS_SCRAPE_STATUS_PRESENTATION: Record<ScrapedStatus, { className: string }> = {
-  0: { className: 'detail-meta-status--unscraped' },
-  1: { className: 'detail-meta-status--success' },
-  2: { className: 'detail-meta-status--failed' }
 }
 
 /** Cumulative success is sticky, so only unscraped and failed records can be marked manually. */
@@ -227,27 +224,27 @@ export default function ActressProfileMeta({
   if (!hasContent) return null
 
   return (
-    <div className="actress-profile-meta">
+    <div className={styles.root}>
       {sections.length > 0 && (
-        <div className="actress-profile-meta-sections">
+        <div className={styles.sections}>
           {sections.map((section) => (
-            <section key={section.id} className="actress-profile-meta-section">
-              <h2 className="actress-profile-meta-section-title">{section.title}</h2>
-              <dl className="actress-profile-meta-grid">
+            <section key={section.id} className={styles.card} data-actress-meta-card>
+              <h2 className={styles.sectionTitle}>{section.title}</h2>
+              <dl className={styles.grid}>
                 {section.items.map((item) => (
-                  <div key={item.key} className="actress-profile-meta-item">
-                    <dt>{item.label}</dt>
-                    <dd
-                      className={
-                        item.status == null
-                          ? undefined
-                          : `detail-meta-status ${
-                              ACTRESS_SCRAPE_STATUS_PRESENTATION[item.status].className
-                            }`
-                      }
-                    >
-                      {item.value}
-                    </dd>
+                  <div key={item.key} className={styles.item}>
+                    <dt className={styles.term}>{item.label}</dt>
+                    {item.status == null ? (
+                      <dd className={styles.value}>{item.value}</dd>
+                    ) : (
+                      <ScrapeStatusBadge
+                        as="dd"
+                        status={item.status}
+                        className={`${styles.value} ${styles.statusValue}`}
+                      >
+                        {item.value}
+                      </ScrapeStatusBadge>
+                    )}
                   </div>
                 ))}
               </dl>
@@ -257,27 +254,27 @@ export default function ActressProfileMeta({
       )}
 
       {aliases.length > 0 && (
-        <section className="actress-profile-aliases" aria-label="别名">
-          <h2 className="actress-profile-meta-section-title">别名</h2>
-          <div className="actress-profile-alias-list">
+        <section className={styles.card} aria-label="别名" data-actress-meta-card>
+          <h2 className={styles.sectionTitle}>别名</h2>
+          <div className={styles.aliasList}>
             {aliases.map((alias) => (
-              <span key={alias} className="actress-profile-alias-chip">
+              <DetailInfoChip key={alias} variant="alias">
                 {alias}
-              </span>
+              </DetailInfoChip>
             ))}
           </div>
         </section>
       )}
 
       {summary && (
-        <section className="actress-profile-summary" aria-label="简介">
-          <h2 className="actress-profile-meta-section-title">简介</h2>
-          <p>{summary}</p>
+        <section className={styles.card} aria-label="简介" data-actress-meta-card>
+          <h2 className={styles.sectionTitle}>简介</h2>
+          <p className={styles.summaryText}>{summary}</p>
         </section>
       )}
       {links.length > 0 ? (
-        <section className="actress-profile-summary" aria-label="相关链接">
-          <h2 className="actress-profile-meta-section-title">相关链接</h2>
+        <section className={styles.card} aria-label="相关链接" data-actress-meta-card>
+          <h2 className={styles.sectionTitle}>相关链接</h2>
           <RelatedLinksList links={links} />
         </section>
       ) : null}

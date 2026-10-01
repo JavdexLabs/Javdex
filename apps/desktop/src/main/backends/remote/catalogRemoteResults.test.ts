@@ -4,6 +4,41 @@ import { catalogRemoteResult } from './catalogRemoteResults'
 import { createUnconfiguredRemoteBackend } from './unconfiguredRemoteBackend'
 import { CATALOG_METHODS } from '../../application/catalogMethods'
 
+test('source lookup validates nested entries before matching and keeps nullable source fields', () => {
+  const page = { items: [{ videoId: 1, code: 'A-1', sources: [{ source: 'site', externalCode: null, url: null }] }], total: 1, limit: 50, offset: 0 }
+  assert.deepEqual(catalogRemoteResult('videos.sources', JSON.parse(JSON.stringify(page))), page)
+  for (const invalid of [{}, { ...page, total: '1' }, { ...page, items: [{ videoId: 1, code: 'A-1', sources: [{}] }] }]) {
+    assert.throws(() => catalogRemoteResult('videos.sources', invalid), { code: 'INVALID_INPUT' })
+  }
+})
+
+test('lifecycle previews require complete impact and commit envelopes validate domain results', () => {
+  const impact = {
+    kind: 'delete-globally', revision: 'revision', videoId: 1,
+    sourceLibraryId: null, targetLibraryId: null, resourceIds: [], sourcePaths: [],
+    remainingLibraryIds: [], removesCanonicalVideo: true, playlistCount: 0, assetCount: 0,
+    libraries: [], resources: [], playlists: [], mediaAssets: [], pendingScrapeCount: 0,
+    pendingAgentDraftCount: 0, pendingStagingAssetCount: 0, sourceFilesPreserved: false
+  }
+  for (const op of ['videos.previewDeleteGlobal', 'videos.previewMoveResource', 'videos.previewRemoveFromLibrary'] as const) {
+    assert.deepEqual(catalogRemoteResult(op, impact), impact)
+    assert.throws(() => catalogRemoteResult(op, { ...impact, sourceFilesPreserved: undefined }), { code: 'INVALID_INPUT' })
+    assert.throws(() => catalogRemoteResult(op, { ...impact, resources: [{ resourceId: 1 }] }), { code: 'INVALID_INPUT' })
+  }
+  const result = { operationId: 'op', kind: 'delete-globally', videoId: 1, sourceLibraryId: null,
+    targetLibraryId: null, resourceIds: [], promotedResourceId: null, canonicalVideoDeleted: true }
+  for (const op of ['videos.deleteGlobal', 'videos.moveResource', 'videos.removeFromLibrary'] as const) {
+    assert.deepEqual(catalogRemoteResult(op, { receipt: {}, data: result }), result)
+    assert.deepEqual(catalogRemoteResult(op, { receipt: {}, ...result }), result)
+    assert.throws(() => catalogRemoteResult(op, { ...result, canonicalVideoDeleted: 'true' }), { code: 'INVALID_INPUT' })
+  }
+  const moved = { ...result, kind: 'move-resource', sourceMembershipRemoved: true }
+  assert.deepEqual(catalogRemoteResult('videos.moveResource', { receipt: {}, data: moved }), moved)
+  assert.throws(() => catalogRemoteResult('videos.moveResource', {
+    receipt: {}, data: { ...moved, sourceMembershipRemoved: 'true' }
+  }), { code: 'INVALID_INPUT' })
+})
+
 test('remote adapters normalize primitive and enveloped boolean results, including false', () => {
   assert.equal(catalogRemoteResult('videos.edit', { ok: false }), false)
   assert.equal(catalogRemoteResult('videos.edit', false), false)

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useActressGalleryPage } from '../hooks/useActressGalleryPage'
 import { useActressGalleryPreview } from '../hooks/useActressGalleryPreview'
 import Button from './Button'
+import GalleryPagination from './GalleryPagination'
 import type { ActressGalleryAsset } from '@shared/actressTypes'
 import {
   actressGalleryRatio
@@ -13,13 +14,14 @@ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavig
 import { useElementSize } from '../hooks/useElementSize'
 import ImagePreviewLightbox, { type ImagePreviewItem } from './ImagePreviewLightbox'
 import ImageImportModal from './ImageImportModal'
-import MediaTileActionButton from './MediaTileActionButton'
+import GalleryImageTile from './GalleryImageTile'
 import Modal from './Modal'
 import IconButton from './IconButton'
 import EmptyState from './EmptyState'
 import { useToast } from './Toast'
 import { ImagePlus } from 'lucide-react'
 import { UI_ICON } from './iconDefaults'
+import styles from './ActressGalleryPanel.module.css'
 
 const GALLERY_MASONRY_GAP = 10
 const GALLERY_MASONRY_MIN_COL_WIDTH = 260
@@ -201,10 +203,10 @@ export default function ActressGalleryPanel({
 
   return (
     <>
-      <div className="actress-gallery-toolbar">
-        <div className="actress-gallery-count">{photos.data ? `${photos.data.total} 张写真` : '写真读取中…'}</div>
+      <div className={styles.toolbar}>
+        <div className={styles.count}>{photos.data ? `${photos.data.total} 张写真` : '写真读取中…'}</div>
         <IconButton
-          className="detail-icon-action"
+          className={styles.importAction}
           icon={<ImagePlus {...UI_ICON} />}
           label="导入写真"
           onClick={() => setShowImport(true)}
@@ -215,15 +217,14 @@ export default function ActressGalleryPanel({
         <div role="alert">{photos.error}<Button onClick={photos.reload}>重试</Button></div>
       ) : items.length === 0 ? (
         <EmptyState
-          variant="compact"
-          className="sample-empty"
+          variant="gallery"
           icon={<ImagePlus {...UI_ICON} aria-hidden />}
           title="暂无写真"
           description="导入图片后会在这里展示。"
         />
       ) : (
         <div
-          className="actress-gallery-masonry"
+          className={styles.masonry}
           ref={masonryRef}
           style={{ height: masonryLayout.height }}
         >
@@ -231,48 +232,31 @@ export default function ActressGalleryPanel({
             const src = gallerySrc(asset, 640)
             if (!src) return null
             return (
-              <div
+              <GalleryImageTile
                 key={asset.id}
-                className="sample-masonry-item actress-gallery-masonry-item"
+                variant="actress"
+                src={src}
+                label={`写真 ${photos.offset + index + 1}`}
+                disabled={!preview.enabled}
+                onOpen={() => { if (photos.data) preview.open(photos.data, asset.id) }}
+                deleteLabel={`删除写真 ${photos.offset + index + 1}`}
+                deleteTitle="删除写真"
+                onDelete={() => setDeleteTarget(asset)}
                 style={{
                   width,
                   height,
                   transform: `translate3d(${x}px, ${y}px, 0)`
                 }}
-              >
-                <button
-                  type="button"
-                  className="sample-masonry-btn actress-gallery-masonry-btn"
-                  disabled={!preview.enabled}
-                  onClick={() => { if (photos.data) preview.open(photos.data, asset.id) }}
-                  aria-label={`写真 ${photos.offset + index + 1}`}
-                >
-                  <img
-                    src={src}
-                    alt=""
-                    loading="lazy"
-                    draggable={false}
-                  />
-                </button>
-                <MediaTileActionButton
-                  label={`删除写真 ${photos.offset + index + 1}`}
-                  title="删除写真"
-                  onClick={() => setDeleteTarget(asset)}
-                />
-              </div>
+              />
             )
           })}
         </div>
       )}
 
-      {photos.data && photos.data.total > 60 && (
-        <nav className="actress-works-pagination" aria-label="演员写真分页">
-          <Button disabled={photos.offset === 0} onClick={() => photos.move(photos.offset - 60)}>上一页</Button>
-          <span>第 {Math.floor(photos.offset / 60) + 1} 页 · 共 {photos.data.total} 张</span>
-          <Button disabled={photos.offset + items.length >= photos.data.total} onClick={() => photos.move(photos.offset + 60)}>下一页</Button>
-        </nav>
+      {photos.data && (
+        <GalleryPagination label="演员写真分页" offset={photos.offset}
+          total={photos.data.total} loadedCount={items.length} onMove={photos.move} />
       )}
-
       {preview.view && (
         <ImagePreviewLightbox
           items={previewItems}

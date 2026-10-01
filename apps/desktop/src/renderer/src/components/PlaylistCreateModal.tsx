@@ -1,7 +1,9 @@
+import TextInput from './TextInput'
+import TextArea from './TextArea'
 import { useState } from 'react'
 import type { PlaylistCreateInput, PlaylistDetail, PlaylistUpdateInput } from '@shared/playlistTypes'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
-import { EditFormField, EditFormSection } from './FormPrimitives'
+import { EditForm, EditFormField, EditFormFields, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
@@ -70,15 +72,15 @@ export default function PlaylistCreateModal({
     <Modal
       title={editing ? '编辑播放清单' : '创建播放清单'}
       size="lg"
-      className="modal-entity-edit"
-      confirmText={saving ? '保存中…' : editing ? '保存' : '创建'}
+      busy={saving}
+      confirmText={editing ? '保存' : '创建'}
       confirmDisabled={!canSave || saving}
       onCancel={onCancel}
-      onConfirm={() => void handleSave()}
+      onConfirm={handleSave}
     >
-      <div className="entity-edit-form">
+      <EditForm>
         {!mediaEditorsHidden ? (
-          <EditFormSection title="封面" className="entity-edit-section--media">
+          <EditFormSection title="封面" variant="media">
             <ImageImportField
               key={removeCover ? 'cover-removed' : 'cover-active'}
               label="封面"
@@ -104,11 +106,11 @@ export default function PlaylistCreateModal({
         ) : null}
 
         <EditFormSection title="基本信息">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField label="名称" htmlFor="playlist-name" span={2}>
-              <input
+              <TextInput
                 id="playlist-name"
-                className="text-input"
+                density="workspace"
                 value={name}
                 disabled={Boolean(playlist?.system_kind)}
                 onChange={(event) => setName(event.target.value)}
@@ -128,19 +130,19 @@ export default function PlaylistCreateModal({
                 />
               }
             >
-              <textarea
+              <TextArea
                 id="playlist-description"
-                className="text-input"
+                density="workspace"
                 rows={4}
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
               />
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
 
         <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
-      </div>
+      </EditForm>
     </Modal>
   )
 }

@@ -1,0 +1,46 @@
+
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid var(--border-subtle);
+  padding: 18px 0;
+}
+
+.options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.options button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.options button[aria-pressed='true'] {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+@media (width <= 760px) {
+  .options {
+    gap: 0;
+  }
+
+  .options button {
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+}
+
+@media (pointer: coarse) {
+  .options button {
+    min-height: 48px;
+  }
+}

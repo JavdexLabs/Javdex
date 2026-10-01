@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AssetCryptoProgress } from '@shared/libraryTypes'
 import { api } from '../api'
+import styles from './AssetCryptoOverlay.module.css'
 
 /** Full-screen blocker while the main process migrates all cover/avatar files. */
 export default function AssetCryptoOverlay(): JSX.Element | null {
@@ -27,18 +28,18 @@ export default function AssetCryptoOverlay(): JSX.Element | null {
         : '正在迁移媒体资源'
 
   return (
-    <div className="asset-crypto-overlay" role="alertdialog" aria-modal="true">
-      <div className="asset-crypto-panel">
+    <div className={styles.root} role="alertdialog" aria-modal="true">
+      <div className={styles.panel}>
         <h3>{title}</h3>
-        <p className="hint">
+        <p className={styles.hint}>
           {progress.phase === 'relocate'
             ? '媒体资源文件迁移中，请勿关闭应用或进行其他操作。'
             : '全库封面与头像迁移中，请勿关闭应用或进行其他操作。'}
         </p>
-        <div className="progress-track">
-          <div className="progress-fill" style={{ width: `${pct}%` }} />
+        <div className={styles.track}>
+          <div className={styles.fill} style={{ width: `${pct}%` }} />
         </div>
-        <div className="progress-stats">
+        <div className={styles.stats}>
           <span>
             进度 {progress.current}/{progress.total}
           </span>

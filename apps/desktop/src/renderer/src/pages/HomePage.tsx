@@ -1,3 +1,7 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import PageContent from '../components/PageContent'
+import ResultCount from '../components/ResultCount'
 import { useWindowedCatalog } from '../query/useWindowedCatalog'
 import { toScopedVideoCardPage, type ScopedVideoCard, type ScopedVideoCardPage } from '@shared/cardProjection'
 import {
@@ -144,8 +148,8 @@ export default function HomePage(): JSX.Element {
   const snapshot = homeQuery.data
 
   return (
-    <div className="list-page">
-      <div className={`${styles.header} topbar`}>
+    <ListPage >
+      <PageHeader className={styles.header}>
         <ListToolbar
           leading={
             <div className={styles.heading}>
@@ -169,22 +173,22 @@ export default function HomePage(): JSX.Element {
           }}
           resultCount={
             hasSearch ? (
-              <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
+              <ResultCount width="media" aria-live="polite">
                 共 {searchSettled ? searchTotal : '…'} 部
-              </span>
+              </ResultCount>
             ) : undefined
           }
         />
-      </div>
+      </PageHeader>
 
       {hasSearch ? (
         <ListSurface variant="fill" withInner={false}>
           {searchLoading ? (
-            <div className="scroll-body-inner">
+            <PageContent >
               <EmptyState loading title="搜索中…" />
-            </div>
+            </PageContent>
           ) : Boolean(searchQuery.error) && searchTotal === 0 ? (
-            <div className="scroll-body-inner">
+            <PageContent >
               <EmptyState
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
                 title="搜索失败"
@@ -194,15 +198,15 @@ export default function HomePage(): JSX.Element {
                   重新搜索
                 </Button>
               </EmptyState>
-            </div>
+            </PageContent>
           ) : searchTotal === 0 ? (
-            <div className="scroll-body-inner">
+            <PageContent >
               <EmptyState
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
                 title="没有匹配的影片"
                 description="尝试其它番号、标题或演员名称。"
               />
-            </div>
+            </PageContent>
           ) : (
             <VirtualPosterGrid
               builtinActions="watch"
@@ -387,6 +391,6 @@ export default function HomePage(): JSX.Element {
           ) : null}
         </ListSurface>
       )}
-    </div>
+    </ListPage>
   )
 }

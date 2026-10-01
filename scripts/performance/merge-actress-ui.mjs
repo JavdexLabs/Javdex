@@ -34,7 +34,7 @@ try {
   await page.getByRole('option',{name:'选择合并演员 Candidate-2',exact:true}).click()
   await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-selected.png`)})
   const layout=await page.evaluate(()=>{
-    const flow=document.querySelector('.merge-actress-flow').getBoundingClientRect(),picker=document.querySelector('.merge-actress-picker').getBoundingClientRect(),plan=document.querySelector('.merge-actress-plan').getBoundingClientRect();
+    const flow=document.querySelector('[data-merge-actress-part="flow"]').getBoundingClientRect(),picker=document.querySelector('[data-merge-actress-part="picker"]').getBoundingClientRect(),plan=document.querySelector('[data-merge-actress-part="plan"]').getBoundingClientRect();
     return {flowBottom:flow.bottom,pickerTop:picker.top,pickerBottom:picker.bottom,planTop:plan.top}
   })
   assert.ok(layout.flowBottom<=layout.pickerTop && layout.pickerBottom<=layout.planTop,'Preview, picker and plan must not overlap')

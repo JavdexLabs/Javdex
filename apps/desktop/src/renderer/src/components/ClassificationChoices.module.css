@@ -1,0 +1,106 @@
+.list {
+  min-height: var(--empty-inline-min-h, 140px);
+  max-height: var(--classification-merge-picker-h);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-base);
+}
+
+.list > .empty {
+  min-height: var(--empty-inline-min-h, 140px);
+  border: 0;
+  background: transparent;
+}
+
+.row {
+  display: grid;
+  align-items: center;
+  gap: var(--classification-merge-control-gap);
+  width: 100%;
+  min-height: var(--classification-merge-candidate-min-h);
+  padding: var(--classification-merge-control-gap) var(--classification-merge-pad);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.row[role='option'] {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.row[role='radio'] {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row:hover,
+.row:focus-visible,
+.row:is([aria-selected='true'], [aria-checked='true']) {
+  background: var(--surface-selected);
+}
+
+.row:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--classification-merge-focus-offset);
+}
+
+.row:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.radio {
+  position: relative;
+  width: var(--classification-merge-choice-size);
+  height: var(--classification-merge-choice-size);
+  border: var(--classification-merge-choice-border-w) solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-panel);
+}
+
+.row:is([aria-selected='true'], [aria-checked='true']) .radio {
+  border-color: var(--border-accent);
+}
+
+.row:where([aria-selected='true'], [aria-checked='true']) .radio::after {
+  content: '';
+  position: absolute;
+  inset: var(--classification-merge-choice-inset);
+  border-radius: 50%;
+  background: var(--text-accent);
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+}
+
+.copy > strong,
+.copy > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy > strong {
+  color: var(--text-primary);
+  font-size: var(--classification-merge-text-md);
+}
+
+.copy > small {
+  color: var(--text-muted);
+  font-size: var(--classification-merge-text-xs);
+}
+
+.row[role='radio'] .copy {
+  gap: var(--classification-merge-badge-pad-y);
+}

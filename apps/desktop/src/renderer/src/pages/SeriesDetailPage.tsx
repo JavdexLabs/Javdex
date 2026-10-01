@@ -1,6 +1,10 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import DetailPane, { DetailPaneOverlay } from '../components/DetailPane'
+import ResultCount from '../components/ResultCount'
 import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
-import { ExternalLink, GitMerge, ImagePlus, Layers3, Pencil, SearchX, Trash2 } from 'lucide-react'
+import { GitMerge, ImagePlus, Layers3, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -44,6 +48,8 @@ import { ROUTE_MATCH } from '../listView/routePaths'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import Button from '../components/Button'
+import ClassificationProfile from '../components/ClassificationProfile'
+import ClassificationDetailSurface, { ClassificationVideoHeading } from '../components/ClassificationDetailSurface'
 
 const STATUS = {
   unknown: '状态未知',
@@ -80,7 +86,7 @@ export default function SeriesDetailPage(): JSX.Element {
     [id, releaseDir]
   )
   const onError = useCallback(
-    (error: unknown) => toast.show(String((error as Error).message), 'error'),
+    (message: string) => toast.show(message, 'error'),
     [toast]
   )
   const videoPage =
@@ -89,14 +95,10 @@ export default function SeriesDetailPage(): JSX.Element {
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`series-detail:${hash}`)
   const save = async (input: SeriesUpdateInput): Promise<void> => {
-    try {
-      await api.series.update(id, input, expectedClassificationVersion(detailQuery.data ?? {}))
-      setEditing(false)
-      await client.invalidateQueries({ queryKey: seriesKeys.all })
-      void refetchSilent()
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    }
+    await api.series.update(id, input, expectedClassificationVersion(detailQuery.data ?? {}))
+    setEditing(false)
+    await client.invalidateQueries({ queryKey: seriesKeys.all })
+    void refetchSilent()
   }
   const merged = async (result: SeriesMergeResult): Promise<void> => {
     setMergingSeries(false)
@@ -130,17 +132,17 @@ export default function SeriesDetailPage(): JSX.Element {
   }
   const series = detailQuery.data
   const overlay = stacked ? (
-    <div className="detail-pane-overlay">
+    <DetailPaneOverlay>
       <Outlet />
-    </div>
+    </DetailPaneOverlay>
   ) : null
   const state = (content: JSX.Element): JSX.Element => (
-    <div className={`detail-pane${stacked ? ' detail-pane--stacked' : ''}`}>
-      <div className="list-page">
+    <DetailPane stacked={stacked}>
+      <ListPage >
         <ListSurface variant="scroll">{content}</ListSurface>
-      </div>
+      </ListPage>
       {overlay}
-    </div>
+    </DetailPane>
   )
   if (!valid) return state(<EmptyState icon={<SearchX {...UI_ICON_SM} />} title="参数无效" />)
   if (detailQuery.isLoading) return state(<EmptyState loading />)
@@ -160,9 +162,9 @@ export default function SeriesDetailPage(): JSX.Element {
       ? `${series.startYear ?? '未知'} - ${series.endYear ?? '至今'}`
       : null
   return (
-    <div className={`detail-pane${stacked ? ' detail-pane--stacked' : ''}`}>
-      <div className="list-page organization-detail-page">
-        <div className="topbar">
+    <DetailPane stacked={stacked}>
+      <ListPage>
+        <PageHeader >
           <ListToolbar
             leading={
               <BackButton
@@ -236,27 +238,25 @@ export default function SeriesDetailPage(): JSX.Element {
               </>
             }
             resultCount={
-              <span className="count-badge count-badge--stable count-badge--media">
+              <ResultCount width="media">
                 共 {total} 部
-              </span>
+              </ResultCount>
             }
           />
-        </div>
-        <ListSurface
-          variant="scroll"
+        </PageHeader>
+        <ClassificationDetailSurface
           scrollRef={scroll.ref}
-          innerClassName="organization-detail-scroll-inner"
           showScrollToTop={scroll.showScrollToTop}
           onScrollToTop={scroll.scrollToTop}
         >
-          <section className="organization-profile series-profile" aria-label="系列资料">
-            <div className="organization-profile-image">
-              {image ? <img src={image} alt="" /> : <Layers3 {...UI_ICON_SM} aria-hidden />}
-            </div>
-            <div className="organization-profile-main">
-              <div className="organization-profile-kicker">系列</div>
-              <h1 className="selectable-text">{series.mainName}</h1>
-              <div className="organization-profile-meta selectable-text">
+          <ClassificationProfile
+            kind="series"
+            label="系列资料"
+            kicker="系列"
+            name={series.mainName}
+            imageUrl={image}
+            placeholder={<Layers3 {...UI_ICON_SM} aria-hidden />}
+            meta={<>
                 <span>{STATUS[series.status]}</span>
                 <span>所属：{series.ownerOrganization?.mainName ?? '未归属'}</span>
                 {lifetime && <span>生命周期：{lifetime}</span>}
@@ -268,39 +268,12 @@ export default function SeriesDetailPage(): JSX.Element {
                       : ''}
                   </span>
                 )}
-              </div>
-              {series.aliases.length > 0 && (
-                <div className="organization-aliases selectable-text">
-                  {series.aliases.map((alias) => (
-                    <span key={alias}>{alias}</span>
-                  ))}
-                </div>
-              )}
-              <p
-                className={`organization-summary selectable-text${series.summary ? '' : ' organization-summary--empty'}`}
-              >
-                {series.summary ?? '暂无简介'}
-              </p>
-              {series.links.length > 0 && (
-                <div className="organization-links">
-                  {series.links.map((link) => (
-                    <a
-                      key={`${link.position}:${link.url}`}
-                      href={link.url}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        void api.externalLinks.open(link.url)
-                      }}
-                    >
-                      {link.label}
-                      <ExternalLink {...UI_ICON_SM} aria-hidden />
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-          <div className="organization-video-heading">关联影片</div>
+              </>}
+            aliases={series.aliases}
+            summary={series.summary}
+            links={series.links}
+          />
+          <ClassificationVideoHeading />
           {loading ? (
             <EmptyState loading variant="compact" />
           ) : videoPage.error && total === 0 ? (
@@ -319,7 +292,7 @@ export default function SeriesDetailPage(): JSX.Element {
               <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={hash} />
             </>
           )}
-        </ListSurface>
+        </ClassificationDetailSurface>
         {editing && (
           <SeriesEditModal series={series} onCancel={() => setEditing(false)} onSave={save} />
         )}
@@ -351,8 +324,8 @@ export default function SeriesDetailPage(): JSX.Element {
             onDeleted={deleted}
           />
         )}
-      </div>
+      </ListPage>
       {overlay}
-    </div>
+    </DetailPane>
   )
 }

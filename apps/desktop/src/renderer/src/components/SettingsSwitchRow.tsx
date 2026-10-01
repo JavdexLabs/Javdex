@@ -19,7 +19,7 @@ export default function SettingsSwitchRow({
 }: Props): JSX.Element {
   return (
     <label
-      className={`${styles.root}${disabled ? ` ${styles.disabled}` : ''} settings-toggle-item`}
+      className={`${styles.root}${disabled ? ` ${styles.disabled}` : ''}`}
     >
       <span className={styles.copy}>
         <span className={styles.title}>{title}</span>

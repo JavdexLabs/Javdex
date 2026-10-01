@@ -1,6 +1,10 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import DetailPane, { DetailPaneOverlay } from '../components/DetailPane'
+import ResultCount from '../components/ResultCount'
 import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
-import { BadgeMinus, ExternalLink, GitMerge, ImagePlus, Inbox, Pencil, SearchX, Trash2 } from 'lucide-react'
+import { BadgeMinus, GitMerge, ImagePlus, Inbox, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -41,6 +45,8 @@ import { ROUTE_MATCH } from '../listView/routePaths'
 import { organizationKeys, seriesKeys, videoKeys } from '../query/queryKeys'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import Button from '../components/Button'
+import ClassificationProfile from '../components/ClassificationProfile'
+import ClassificationDetailSurface, { ClassificationVideoHeading } from '../components/ClassificationDetailSurface'
 
 const STATUS_LABEL = {
   unknown: '状态未知',
@@ -97,7 +103,7 @@ export default function OrganizationDetailPage(): JSX.Element {
     scrollToTop
   } = useScrollContainerMemory(`organization-detail:${videoQueryHash}`)
   const handlePageError = useCallback(
-    (error: unknown) => toast.show(String((error as Error).message ?? error), 'error'),
+    (message: string) => toast.show(message, 'error'),
     [toast]
   )
   const videoPage =
@@ -120,15 +126,11 @@ export default function OrganizationDetailPage(): JSX.Element {
   useDismissOverlaysOnNavigate(dismissEditing, location.pathname)
 
   const save = async (input: OrganizationUpdateInput): Promise<void> => {
-    try {
-      await api.organizations.update(organizationId, input, expectedClassificationVersion(detailQuery.data ?? {}))
-      setEditing(false)
-      toast.show('机构资料已更新', 'success')
-      await queryClient.invalidateQueries({ queryKey: organizationKeys.all })
-      void refetchSilent()
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    }
+    await api.organizations.update(organizationId, input, expectedClassificationVersion(detailQuery.data ?? {}))
+    setEditing(false)
+    toast.show('机构资料已更新', 'success')
+    await queryClient.invalidateQueries({ queryKey: organizationKeys.all })
+    void refetchSilent()
   }
 
   const merged = async (result: OrganizationMergeResult): Promise<void> => {
@@ -174,17 +176,17 @@ export default function OrganizationDetailPage(): JSX.Element {
   }
 
   const videoOverlay = videoStackOpen ? (
-    <div className="detail-pane-overlay">
+    <DetailPaneOverlay>
       <Outlet />
-    </div>
+    </DetailPaneOverlay>
   ) : null
   const renderState = (state: JSX.Element): JSX.Element => (
-    <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
-      <div className="list-page">
+    <DetailPane stacked={videoStackOpen}>
+      <ListPage >
         <ListSurface variant="scroll">{state}</ListSurface>
-      </div>
+      </ListPage>
       {videoOverlay}
-    </div>
+    </DetailPane>
   )
 
   if (!role || !validId) {
@@ -216,9 +218,9 @@ export default function OrganizationDetailPage(): JSX.Element {
       : null
 
   return (
-    <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
-      <div className="list-page organization-detail-page">
-        <div className="topbar">
+    <DetailPane stacked={videoStackOpen}>
+      <ListPage>
+        <PageHeader >
           <ListToolbar
             leading={<BackButton variant="inline" onClick={() => navigateToFacetList(navigate, location, role)} />}
             title={organization.mainName}
@@ -271,28 +273,26 @@ export default function OrganizationDetailPage(): JSX.Element {
               </>
             }
             resultCount={
-              <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
+              <ResultCount width="media" aria-live="polite">
                 共 {total} 部
-              </span>
+              </ResultCount>
             }
           />
-        </div>
+        </PageHeader>
 
-        <ListSurface
-          variant="scroll"
+        <ClassificationDetailSurface
           scrollRef={scrollRef}
-          innerClassName="organization-detail-scroll-inner"
           showScrollToTop={showScrollToTop}
           onScrollToTop={scrollToTop}
         >
-          <section className="organization-profile" aria-label="机构资料">
-            <div className="organization-profile-image">
-              {image ? <img src={image} alt="" /> : <Inbox {...UI_ICON_SM} aria-hidden />}
-            </div>
-            <div className="organization-profile-main">
-              <div className="organization-profile-kicker">{label}机构</div>
-              <h1 className="selectable-text">{organization.mainName}</h1>
-              <div className="organization-profile-meta selectable-text">
+          <ClassificationProfile
+            kind="organization"
+            label="机构资料"
+            kicker={`${label}机构`}
+            name={organization.mainName}
+            imageUrl={image}
+            placeholder={<Inbox {...UI_ICON_SM} aria-hidden />}
+            meta={<>
                 <span>{STATUS_LABEL[organization.status]}</span>
                 {organization.countryRegion ? <span>{organization.countryRegion}</span> : null}
                 {years ? <span>{years}</span> : null}
@@ -304,40 +304,13 @@ export default function OrganizationDetailPage(): JSX.Element {
                       : ''}
                   </span>
                 ) : null}
-              </div>
-              {organization.aliases.length > 0 ? (
-                <div className="organization-aliases selectable-text">
-                  {organization.aliases.map((alias) => (
-                    <span key={alias}>{alias}</span>
-                  ))}
-                </div>
-              ) : null}
-              {organization.summary ? (
-                <p className="organization-summary selectable-text">{organization.summary}</p>
-              ) : (
-                <p className="organization-summary organization-summary--empty">暂无简介</p>
-              )}
-              {organization.links.length > 0 ? (
-                <div className="organization-links">
-                  {organization.links.map((link) => (
-                    <a
-                      key={`${link.position}:${link.url}`}
-                      href={link.url}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        void api.externalLinks.open(link.url)
-                      }}
-                    >
-                      {link.label}
-                      <ExternalLink {...UI_ICON_SM} aria-hidden />
-                    </a>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </section>
+              </>}
+            aliases={organization.aliases}
+            summary={organization.summary || null}
+            links={organization.links}
+          />
 
-          <div className="organization-video-heading">关联影片</div>
+          <ClassificationVideoHeading />
           {loading ? (
             <EmptyState loading variant="compact" />
           ) : videoPage.error && total === 0 ? (
@@ -356,7 +329,7 @@ export default function OrganizationDetailPage(): JSX.Element {
               <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={videoQueryHash} />
             </>
           )}
-        </ListSurface>
+        </ClassificationDetailSurface>
 
         {editing ? (
           <OrganizationEditModal
@@ -405,8 +378,8 @@ export default function OrganizationDetailPage(): JSX.Element {
             onCompleted={organizationDeleted}
           />
         ) : null}
-      </div>
+      </ListPage>
       {videoOverlay}
-    </div>
+    </DetailPane>
   )
 }

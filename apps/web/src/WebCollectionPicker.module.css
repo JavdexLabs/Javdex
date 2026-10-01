@@ -1,0 +1,99 @@
+
+.help {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.bar {
+  display: none;
+}
+
+.dialog {
+  width: min(440px, calc(100% - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  overscroll-behavior: contain;
+}
+.dialog::backdrop { background: color-mix(in srgb, var(--surface-base) 75%, transparent); }
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.dialog h3 {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 16px 0 8px;
+}
+
+.options button {
+  width: 100%;
+  min-height: 48px;
+  justify-content: flex-start;
+  text-align: left;
+  margin-top: 4px;
+}
+
+.options button[aria-pressed='true'] {
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.heading button {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+@media (width <= 760px) {
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+}
+
+@media (width <= 760px) {
+  .bar > button {
+    flex: 1;
+    min-width: 0;
+    width: 0;
+    min-height: 48px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    background: var(--surface-elevated);
+    justify-content: space-between;
+    font-size: 16px;
+  }
+}
+
+@media (width <= 760px) {
+  .bar > button span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

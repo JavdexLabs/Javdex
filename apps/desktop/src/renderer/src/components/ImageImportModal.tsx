@@ -1,3 +1,5 @@
+import TextInput from './TextInput'
+import styles from './ImageImportModal.module.css'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { ImagePlus, Link, UploadCloud } from 'lucide-react'
 import { api } from '../api'
@@ -91,6 +93,7 @@ export default function ImageImportModal({
   const canSave = queued.length > 0
 
   const appendFiles = (fileList: FileList | File[]): void => {
+    if (saving) return
     const incoming = Array.from(fileList).filter(isImageFile)
     if (incoming.length === 0) {
       toast.show('没有可导入的图片文件', 'error')
@@ -120,6 +123,7 @@ export default function ImageImportModal({
   }
 
   const removeQueued = (key: string): void => {
+    if (saving) return
     setQueued((current) => {
       const target = current.find((item) => item.key === key)
       if (target?.previewObjectUrl) URL.revokeObjectURL(target.previewUrl)
@@ -129,7 +133,7 @@ export default function ImageImportModal({
 
   const addRemoteImage = async (): Promise<void> => {
     const rawUrl = urlInput.trim()
-    if (!rawUrl || loadingUrl) return
+    if (!rawUrl || loadingUrl || saving) return
 
     let remoteUrl: string
     try {
@@ -192,13 +196,16 @@ export default function ImageImportModal({
           continue
         }
         imported += 1
+        if (item.previewObjectUrl) URL.revokeObjectURL(item.previewUrl)
+        // A retry must only submit the remaining queue, not already committed images.
+        setQueued(current => current.filter(queuedItem => queuedItem.key !== item.key))
       }
       toast.show(`已导入 ${imported} 张${itemLabel}`, 'success')
       onChanged()
       onCancel()
     } catch (e) {
       if (imported > 0) onChanged()
-      toast.show(String((e as Error).message), 'error')
+      throw e
     } finally {
       setSaving(false)
     }
@@ -209,19 +216,21 @@ export default function ImageImportModal({
         title={title}
 
         size="lg"
-        className="image-import-modal"
-        confirmText={saving ? '导入中...' : `导入${itemLabel}`}
+        className={styles.modal}
+        bodyClassName={styles.body}
+        confirmText={`导入${itemLabel}`}
+        busy={saving}
         confirmDisabled={!canSave || saving || loadingUrl}
         onCancel={onCancel}
-        onConfirm={() => void handleImport()}
+        onConfirm={handleImport}
       >
-        <div className="image-import-shell">
-          <div className="image-import-tabs" role="tablist" aria-label="导入方式">
+        <div className={styles.shell}>
+          <div className={styles.tabs} role="tablist" aria-label="导入方式">
             <button
               type="button"
               role="tab"
+              disabled={saving}
               aria-selected={mode === 'file'}
-              className={mode === 'file' ? 'active' : ''}
               onClick={() => setMode('file')}
             >
               <UploadCloud {...UI_ICON} />
@@ -230,8 +239,8 @@ export default function ImageImportModal({
             <button
               type="button"
               role="tab"
+              disabled={saving}
               aria-selected={mode === 'url'}
-              className={mode === 'url' ? 'active' : ''}
               onClick={() => setMode('url')}
             >
               <Link {...UI_ICON} />
@@ -241,7 +250,8 @@ export default function ImageImportModal({
 
           {mode === 'file' ? (
             <div
-              className={`image-import-dropzone${dragging ? ' is-dragging' : ''}`}
+              className={styles.dropzone}
+              data-dragging={dragging || undefined}
               onDragEnter={(event) => {
                 event.preventDefault()
                 setDragging(true)
@@ -253,16 +263,16 @@ export default function ImageImportModal({
               }}
               onDrop={handleDrop}
             >
-              <div className="image-import-dropzone__icon">
+              <div className={styles.dropzoneIcon}>
                 <UploadCloud {...UI_ICON} />
               </div>
               <div>
-                <div className="image-import-dropzone__title">拖入图片，或选择本地文件</div>
-                <div className="image-import-dropzone__hint">
+                <div className={styles.dropzoneTitle}>拖入图片，或选择本地文件</div>
+                <div className={styles.dropzoneHint}>
                   支持单张或多张，重复选择会追加到当前列表。
                 </div>
               </div>
-              <Button type="button" onClick={() => fileInputRef.current?.click()}>
+              <Button type="button" disabled={saving} onClick={() => fileInputRef.current?.click()}>
                 <ImagePlus {...UI_ICON} />
                 选择图片
               </Button>
@@ -279,11 +289,12 @@ export default function ImageImportModal({
               />
             </div>
           ) : (
-            <div className="image-import-url-panel">
-              <div className="image-import-url-row">
-                <input
-                  className="text-input"
+            <div className={styles.urlPanel}>
+              <div className={styles.urlRow}>
+                <TextInput
+                  density="workspace" className={styles.urlInput}
                   type="url"
+                  disabled={saving || loadingUrl}
                   value={urlInput}
                   onChange={(event) => setUrlInput(event.target.value)}
                   onKeyDown={(event) => {
@@ -298,45 +309,47 @@ export default function ImageImportModal({
                   type="button"
 
                   onClick={() => void addRemoteImage()}
-                  disabled={!urlInput.trim() || loadingUrl}
+                  disabled={!urlInput.trim() || loadingUrl || saving}
+                  busy={loadingUrl}
                 >
                   <Link {...UI_ICON} />
-                  {loadingUrl ? '加载中...' : '加载图片'}
+                  加载图片
                 </Button>
               </div>
-              <div className="image-import-muted">{urlHint}</div>
+              <div className={styles.muted}>{urlHint}</div>
             </div>
           )}
 
-          <div className="image-import-gallery-head">
+          <div className={styles.galleryHead}>
             <div>
               <h4>待导入预览</h4>
               <p>{queued.length} 张待导入</p>
             </div>
           </div>
 
-          <div className="image-import-gallery" aria-label={`${itemLabel}图片预览`}>
+          <div className={styles.gallery} aria-label={`${itemLabel}图片预览`}>
             {queued.length === 0 ? (
               <EmptyState
                 variant="compact"
-                className="image-import-empty"
+                className={styles.empty}
                 icon={<ImagePlus {...UI_ICON} aria-hidden />}
                 title={'\u6682\u65e0\u5f85\u5bfc\u5165\u56fe\u7247'}
                 description={emptyText}
               />
             ) : (
               queued.map((item, index) => (
-                <div key={item.key} className="image-import-tile">
-                  <div className="image-import-thumb" aria-hidden="true">
+                <div key={item.key} className={styles.tile} data-media-tile>
+                  <div className={styles.thumb} aria-hidden="true">
                     <img src={item.previewUrl} alt="" loading="lazy" draggable={false} />
                   </div>
                   <MediaTileActionButton
                     action="remove"
                     label={`移除待导入图片 ${index + 1}`}
                     title="移除图片"
+                    disabled={saving}
                     onClick={() => removeQueued(item.key)}
                   />
-                  <div className="image-import-name" title={item.name}>{item.name}</div>
+                  <div className={styles.name} title={item.name}>{item.name}</div>
                 </div>
               ))
             )}

@@ -16,6 +16,7 @@
   --warn: #c7924e;
   --radius: 8px;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --background-shade-gradient: linear-gradient(90deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.08));
   --page-pad-x: 24px;
   --page-pad-y: 18px;
   --page-pad-bottom: 30px;
@@ -107,6 +108,8 @@
 :root {
   /* Semantic UI tokens. Theme blocks define raw palette values; components use these roles. */
   --surface-base: var(--bg-0);
+  --surface-progress-track: var(--bg-3);
+  --surface-blocking-overlay: rgb(0 0 0 / 75%);
   --surface-panel: var(--bg-1);
   --surface-elevated: var(--bg-2);
   --surface-control: var(--bg-2);
@@ -129,6 +132,23 @@
   --text-muted: var(--text-2);
   --text-accent: var(--accent-hover);
   --text-on-accent: #fff;
+  /* Image overlays keep their contrast independently of the surrounding theme. */
+  --text-on-media: #fff;
+  --surface-media-badge: rgb(0 0 0 / 70%);
+  --surface-image-preview-backdrop: color-mix(in srgb, var(--surface-base) 88%, #000 12%);
+  --surface-avatar-composition-preview: #f4f1ea;
+  --surface-media-warning: rgb(240 160 32 / 85%);
+  --surface-media-danger: rgb(231 76 94 / 85%);
+  --surface-media-action: rgb(0 0 0 / 56%);
+  --shadow-media-base-color: rgb(0 0 0 / 28%);
+  --shadow-media-inset-color: rgb(255 255 255 / 8%);
+  --shadow-media-hover-color: rgb(0 0 0 / 34%);
+  --shadow-media-hover-inset-color: rgb(255 255 255 / 12%);
+  --surface-media-selection: rgb(0 0 0 / 38%);
+  --surface-media-selection-hover: rgb(0 0 0 / 58%);
+  --surface-media-action-hover: rgb(0 0 0 / 74%);
+  --border-media-action: rgb(255 255 255 / 42%);
+  --border-media-action-hover: rgb(255 255 255 / 78%);
   --gender-female: #e91e8c;
   --gender-male: #42a5f5;
   --rating-empty: #44444f;
@@ -157,6 +177,7 @@
   --modal-viewport-inset: 48px;
   --modal-backdrop: rgba(0, 0, 0, 0.6);
   --shadow-floating-control: 0 2px 10px rgba(0, 0, 0, 0.18);
+  --shadow-status-card-hover-color: color-mix(in srgb, #000 22%, transparent);
   --target-min: 28px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -265,6 +286,15 @@ textarea,
   user-select: text;
 }
 
+input[type='search']::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+textarea {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 :focus {
   outline: none;
 }
@@ -287,451 +317,14 @@ textarea,
   background: var(--scrollbar-thumb-hover);
 }
 
-/* ---- Layout ---- */
-.app-shell {
-  position: relative;
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.app-background {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-  background: var(--surface-base);
-}
-.app-background--active {
-  animation: app-background-fade-in 220ms ease-out both;
-}
-.app-background-img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  transform: none;
-}
-.app-background-img--cover {
-  object-fit: cover;
-  object-position: center;
-  filter: saturate(1.03) brightness(0.88);
-}
-.app-background-frame {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  overflow: hidden;
-}
-.app-background-frame-img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center top;
-  filter: saturate(1.03) brightness(0.9);
-}
-.app-background-edge-fade {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  pointer-events: none;
-  z-index: 2;
-}
-.app-background-edge-fade--left {
-  background: linear-gradient(90deg, var(--surface-base) 0%, transparent 100%);
-}
-.app-background-edge-fade--right {
-  background: linear-gradient(270deg, var(--surface-base) 0%, transparent 100%);
-}
-.app-background-shade {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background:
-    linear-gradient(90deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.08)),
-    color-mix(in srgb, var(--surface-base) 18%, transparent);
-}
-.app-background--portrait .app-background-shade {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-base) 24%, transparent),
-      transparent 42%,
-      color-mix(in srgb, var(--surface-base) 10%, transparent)
-    );
-}
-@keyframes app-background-fade-in {
-  from {
-    opacity: 0;
+/* Document-wide reduced motion belongs to the reset layer, not a feature module. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
-  to {
-    opacity: 1;
-  }
-}
-
-.sidebar {
-  position: relative;
-  z-index: 1;
-  width: 210px;
-  flex-shrink: 0;
-  background: var(--surface-panel);
-  border-right: 1px solid var(--border-subtle);
-  display: flex;
-  flex-direction: column;
-  padding: 14px 12px 18px;
-}
-.app-shell--with-background .sidebar {
-  --surface-sidebar-group: transparent;
-
-  background: color-mix(in srgb, var(--surface-panel) 68%, transparent);
-  border-right-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
-}
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-/** Separates library browsing from the bottom maintenance zone. */
-.sidebar-nav-spacer {
-  flex: 1;
-  min-height: 12px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.nav-group {
-  margin: 8px 0 4px;
-}
-.nav-group-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 8px 14px 6px;
-}
-.nav-group--active .nav-group-label {
-  color: var(--text-accent);
-}
-.nav-svg {
-  display: block;
-  width: 18px;
-  height: 18px;
-}
-
-.brand {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  min-height: 56px;
-  padding: 2px 0 18px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  user-select: none;
-}
-
-.brand-wordmark {
-  display: inline-flex;
-  align-items: baseline;
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-align: center;
-}
-
-.brand-wordmark-jav {
-  color: var(--text-primary);
-}
-
-.brand-wordmark-dex {
-  color: var(--text-accent);
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: var(--control-h-lg);
-  padding: 0 14px;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1;
-  margin-bottom: 4px;
-  -webkit-user-drag: none;
-  transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
-}
-.nav-item-row {
-  position: relative;
-}
-.nav-item-row > .nav-item {
-  width: 100%;
-}
-.nav-item-row--with-badge > .nav-item {
-  padding-right: 44px;
-}
-.nav-item:hover {
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-}
-.nav-item.active {
-  background: var(--surface-selected);
-  color: var(--text-accent);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-.nav-icon {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  line-height: 0;
-}
-.nav-label {
-  display: block;
-  line-height: 18px;
-  flex: 1;
-  min-width: 0;
-}
-
-.nav-count-badge {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--target-min);
-  min-height: var(--target-min);
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  transform: translateY(-50%);
-}
-
-.nav-count-badge__value {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  min-width: 18px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--warning) 22%, var(--surface-elevated));
-  color: var(--text-warning);
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.nav-count-badge:hover .nav-count-badge__value {
-  background: color-mix(in srgb, var(--warning) 32%, var(--surface-elevated));
-}
-
-.nav-count-badge:focus-visible {
-  outline: none;
-}
-
-.nav-count-badge:focus-visible .nav-count-badge__value {
-  outline: var(--focus-outline);
-  outline-offset: 2px;
-}
-
-.main-area {
-  position: relative;
-  z-index: 1;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface-base);
-}
-.app-shell--with-background .main-area {
-  background: color-mix(in srgb, var(--surface-base) 42%, transparent);
-}
-
-.content {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.app-shell--with-background .content {
-  background: transparent;
-}
-
-.app-shell--with-background .list-page {
-  background: color-mix(in srgb, var(--surface-base) 34%, transparent);
-}
-.app-shell--with-background .list-detail-shell-detail,
-.app-shell--with-background .detail-pane-overlay {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-subtle) 58%, transparent);
-}
-.app-shell--with-background .topbar {
-  background: transparent;
-  border-bottom-color: color-mix(in srgb, var(--border-subtle) 58%, transparent);
-}
-.app-shell--with-background .scroll-body-inner--detail {
-  flex: 1;
-  background: color-mix(in srgb, var(--surface-base) 34%, transparent);
-}
-.list-detail-shell {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.list-detail-shell-main {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transition: none;
-}
-/* Opening detail: hide list immediately so it does not bleed through the overlay. */
-.list-detail-shell--detail .list-detail-shell-main {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-.list-detail-shell-detail {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--surface-base);
-}
-.app-shell--with-background .list-detail-shell-detail {
-  background: transparent;
-}
-
-.detail-pane {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.detail-pane--stacked > :not(.detail-pane-overlay) {
-  opacity: 0;
-  pointer-events: none;
-}
-.detail-pane-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--surface-base);
-  transition: background var(--motion-med), box-shadow var(--motion-med);
-}
-.list-page {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.list-scroll-region {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* Scroll region: scrollbar always at the right edge of the main area. */
-.scroll-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.scroll-body--scroll {
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-}
-.scroll-body--fill {
-  overflow: hidden;
-}
-.scroll-body-inner {
-  padding: var(--page-pad-y) var(--page-pad-x) var(--page-pad-bottom);
-}
-.scroll-body-inner--detail {
-  flex: 1;
-  padding: var(--card-area-pad-top) var(--detail-pad-x) var(--card-area-pad-bottom);
-  container-type: inline-size;
-  container-name: detail-page;
-}
-.scroll-body-inner--settings {
-  --settings-fs-title: 14px;
-  --settings-fs-body: 13px;
-  --settings-fs-secondary: 12px;
-  --settings-fs-caption: 11px;
-  --settings-fs-metric: 18px;
-  --settings-fw-title: 700;
-  --settings-fw-label: 600;
-  --settings-fw-strong: 700;
-  --settings-lh: 1.45;
-  --settings-lh-tight: 1.35;
-  --settings-card-pad-y: 16px;
-  --settings-card-pad-x: 18px;
-  --settings-gap: 12px;
-  --settings-gap-sm: 8px;
-  width: 100%;
-  max-width: var(--settings-content-max);
-  padding: var(--card-area-pad-top) var(--detail-pad-x) var(--card-area-pad-bottom);
-  font-size: var(--settings-fs-secondary);
-  line-height: var(--settings-lh);
-  container-type: inline-size;
-  container-name: settings-workspace;
-}
-
-.scroll-body-inner--settings.settings-overview-page {
-  flex: 1;
-  min-height: 0;
-  padding-bottom: 0;
-}
-
-.settings-scroll-region {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-  padding-bottom: var(--card-area-pad-bottom);
-}
-
-.scroll-body-inner--settings.settings-dev-page {
-  max-width: none;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 10px var(--detail-pad-x) 10px;
 }

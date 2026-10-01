@@ -1,7 +1,12 @@
+import FilterTrigger from '../components/FilterTrigger'
+import { SegmentedControl, SegmentedOption } from '../components/SegmentedControl'
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import ResultCount from '../components/ResultCount'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, CircleAlert, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
+import { CircleAlert, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
 import { ACTRESS_LIST_DEFAULTS, type ActressAvatarFilter, type ActressListSortBy } from '@shared/actressTypes'
 import type { ActressCard } from '@shared/cardProjection'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, type ActressScrapeField, type ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
@@ -17,6 +22,7 @@ import SelectionToolbar from '../components/SelectionToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressFilterPopover, { type ActressFilterState } from '../components/ActressFilterPopover'
+import { FilterPanelAnchor } from '../components/FilterPanelContent'
 import ActressFaceScanModal from '../components/ActressFaceScanModal'
 import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/actressTypes'
 import {
@@ -64,6 +70,7 @@ import { useInfiniteActressList } from '../query/useInfiniteActressList'
 import VirtualActressGrid from '../components/VirtualActressGrid'
 import Button from '../components/Button'
 import { useDesktopSession } from '../desktop/DesktopSessionContext'
+import styles from './ActressesPage.module.css'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -432,8 +439,8 @@ export default function ActressesPage(): JSX.Element {
   const emptyDueToFilter = Boolean(debouncedQ.trim()) || hasAppliedFilters
 
   return (
-    <div className="list-page">
-      <div className="topbar library-header">
+    <ListPage >
+      <PageHeader>
         {selectionMode ? (
           <SelectionToolbar
             countLabel={selectingRange ? `已选择 ${selectedCount} 位演员 · 正在读取范围…` : `已选择 ${selectedCount} 位演员 · Shift 连选`}
@@ -476,31 +483,15 @@ export default function ActressesPage(): JSX.Element {
                     type="button"
 
                     size="sm"
-                    className="actress-conflict-entry"
+                    className={styles.conflictEntry}
                     onClick={() => navigate(pendingCenterPath({ type: 'actress' }))}
                   >
                     <CircleAlert {...UI_ICON_SM} aria-hidden />
                     待确认 {pendingConflictCount}
                   </Button>
                 ) : null}
-                <div className="library-filter-anchor">
-                  <Button
-                    ref={filterBtnRef}
-                    type="button"
-
-                    size="sm"
-                    className={`library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
-                    onClick={() => setFilterOpen((open) => !open)}
-                    aria-expanded={filterOpen}
-                    aria-haspopup="dialog"
-                  >
-                    <span className="library-filter-btn-label">筛选</span>
-                    <ChevronDown
-                      {...UI_ICON_SM}
-                      className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
-                      aria-hidden
-                    />
-                  </Button>
+                <FilterPanelAnchor>
+                  <FilterTrigger ref={filterBtnRef} open={filterOpen} active={hasAppliedFilters} onClick={() => setFilterOpen((open) => !open)} />
                   <ActressFilterPopover
                     open={filterOpen}
                     anchorRef={filterBtnRef}
@@ -528,30 +519,30 @@ export default function ActressesPage(): JSX.Element {
                     onReset={resetFilters}
                     onClose={() => setFilterOpen(false)}
                   />
-                </div>
-                <div className="mode-toggle" role="group" aria-label="性别筛选">
-                  <button
+                </FilterPanelAnchor>
+                <SegmentedControl variant="toolbar" role="group" aria-label="性别筛选">
+                  <SegmentedOption
                     type="button"
-                    className={genderFilter === 'female' ? 'active' : ''}
+                    selected={genderFilter === 'female'}
                     onClick={() => patchParams({ [LIST_PARAM.gender]: null })}
                   >
                     女
-                  </button>
-                  <button
+                  </SegmentedOption>
+                  <SegmentedOption
                     type="button"
-                    className={genderFilter === 'male' ? 'active' : ''}
+                    selected={genderFilter === 'male'}
                     onClick={() => patchParams({ [LIST_PARAM.gender]: 'male' })}
                   >
                     男
-                  </button>
-                  <button
+                  </SegmentedOption>
+                  <SegmentedOption
                     type="button"
-                    className={genderFilter === 'all' ? 'active' : ''}
+                    selected={genderFilter === 'all'}
                     onClick={() => patchParams({ [LIST_PARAM.gender]: 'all' })}
                   >
                     全部
-                  </button>
-                </div>
+                  </SegmentedOption>
+                </SegmentedControl>
                 <SortSwitch
                   label="排序"
                   options={ACTRESS_SORT_OPTIONS}
@@ -567,18 +558,13 @@ export default function ActressesPage(): JSX.Element {
               </>
             }
             resultCount={
-              <span
-                className="count-badge count-badge--stable count-badge--people"
+              <ResultCount
+                width="media"
                 aria-live="polite"
+                fetching={isFetching && !loading && items.length > 0}
               >
                 共 {listQuery.total} 位
-                {isFetching && !loading && items.length > 0 ? (
-                  <span className="library-fetch-hint" aria-hidden>
-                    {' '}
-                    ↻
-                  </span>
-                ) : null}
-              </span>
+              </ResultCount>
             }
           />
         )}
@@ -610,7 +596,7 @@ export default function ActressesPage(): JSX.Element {
             }
           />
         ) : null}
-      </div>
+      </PageHeader>
 
       {selectionError && <div role="alert">{selectionError}</div>}
       <ListSurface variant="fill" withInner={false}>
@@ -753,6 +739,6 @@ export default function ActressesPage(): JSX.Element {
           onDone={faceScan.close}
         />
       )}
-    </div>
+    </ListPage>
   )
 }

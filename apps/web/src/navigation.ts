@@ -36,7 +36,7 @@ function available(element: HTMLElement): boolean {
 /** Region > group > adjacent row/column > distance. Native editing keeps its keys. */
 export function spatialNavigation(event: KeyboardEvent): void {
   // The image viewer owns arrows, zoom, Escape and its focus trap.
-  if (document.querySelector('.image-preview')) return
+  if (document.getElementById('web-image-preview')) return
   const active = document.activeElement as HTMLElement | null
   const editing = active?.matches('input, textarea, select') || active?.isContentEditable
   const modal = document.querySelector('dialog[open]')
@@ -107,7 +107,7 @@ export function spatialNavigation(event: KeyboardEvent): void {
   if (current === document.body || current === document.documentElement) {
     const first = Array.from(document.querySelectorAll<HTMLElement>(
       'a[href], button, input, select, video[controls]'
-    )).find(element => available(element) && !element.classList.contains('skip'))
+    )).find(element => available(element) && !element.hasAttribute('data-web-skip'))
     if (first) {
       event.preventDefault()
       first.focus()
@@ -128,7 +128,7 @@ export function spatialNavigation(event: KeyboardEvent): void {
     'a[href], button:not(:disabled), input, select, video[controls]'
   )) {
     if (
-      candidate === current || !available(candidate) || candidate.classList.contains('skip')
+      candidate === current || !available(candidate) || candidate.hasAttribute('data-web-skip')
     )
       continue
     const candidateRegion = candidate.closest('[data-navigation-region]')?.getAttribute('data-navigation-region')

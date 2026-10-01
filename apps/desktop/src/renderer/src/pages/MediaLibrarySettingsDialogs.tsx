@@ -1,3 +1,4 @@
+import TextInput from '../components/TextInput'
 import type { ChangeEvent, Dispatch, SetStateAction } from 'react'
 import type { LibraryPathRemovalPreview } from '@shared/libraryTypes'
 import type {
@@ -403,8 +404,8 @@ export function MediaLibrarySettingsDialogs({
                 个清理任务未结束，暂时不能删除。
               </div>
             ) : null}
-            <input
-              className={`text-input ${styles.textControl}`}
+            <TextInput
+              density="workspace" className={styles.textControl}
               autoFocus
               value={deleteConfirmation}
               aria-label="输入媒体库名称确认永久删除"

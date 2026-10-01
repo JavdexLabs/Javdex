@@ -15,24 +15,8 @@ export interface CatalogVideoSourceQuery {
   offset?: number
 }
 
-export interface CatalogVideoSourceEntry {
-  source: string
-  externalCode: string | null
-  url: string | null
-}
-
-export interface CatalogVideoSourceItem {
-  videoId: number
-  code: string
-  sources: CatalogVideoSourceEntry[]
-}
-
-export interface CatalogVideoSourcePage {
-  items: CatalogVideoSourceItem[]
-  total: number
-  limit: number
-  offset: number
-}
+import type { CatalogVideoSourceEntry, CatalogVideoSourcePage } from '@shared/catalogVideoSourceSchemas'
+export type { CatalogVideoSourceEntry, CatalogVideoSourceItem, CatalogVideoSourcePage } from '@shared/catalogVideoSourceSchemas'
 
 function uniqueIds(ids: number[]): number[] {
   return [...new Set(ids)].sort((left, right) => left - right)

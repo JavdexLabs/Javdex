@@ -1,0 +1,25 @@
+.badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.composite {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.builtin {
+  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-control) 72%, transparent);
+  color: var(--text-secondary);
+}
+
+.user {
+  border-color: var(--border-accent);
+  color: var(--text-accent);
+}

@@ -1,0 +1,429 @@
+@media (width <= 560px) {
+  .avatarEditorLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .avatarEditorStage {
+    width: 100%;
+    height: auto;
+    justify-content: flex-start;
+  }
+
+  .avatarEditorWorkspace {
+    width: 100%;
+  }
+}
+
+.actressAvatarEditor {
+  --avatar-tabs-h: 30px;
+  --avatar-edit-bar-h: 34px;
+  --avatar-workspace-gap: 8px;
+  --avatar-workspace-h: 180px;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.avatarEditorLayout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  min-width: 0;
+  height: var(--avatar-workspace-h);
+}
+
+.avatarEditorStage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  width: 180px;
+  height: var(--avatar-workspace-h);
+}
+
+.avatarEditorWorkspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--avatar-workspace-gap);
+  min-width: 0;
+  height: var(--avatar-workspace-h);
+  min-height: var(--avatar-workspace-h);
+}
+
+.avatarSourceTabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  flex-shrink: 0;
+  height: var(--avatar-tabs-h);
+  padding: 3px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--surface-control) 55%, transparent);
+}
+
+.avatarSourceTabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0 6px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.avatarSourceTabs button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.avatarSourceTabs button:hover:where(:not(:disabled, .active)) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--surface-control-hover) 60%, transparent);
+}
+
+.avatarSourceTabs button.active {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.avatarSourcePanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control) 35%, transparent);
+  overflow: hidden;
+}
+
+.avatarSourcePanelBody {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.avatarSourcePage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.avatarSourcePage[hidden] {
+  display: none;
+}
+
+.avatarSourcePage.isActive {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.avatarSourcePageScroll {
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 8px;
+  padding: 6px 8px;
+  overflow: auto hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  overscroll-behavior-x: contain;
+  cursor: grab;
+  touch-action: pan-x;
+}
+
+.avatarSourcePageScroll.avatarSourcePageDragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.avatarSourceStatic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  text-align: center;
+}
+
+.avatarSourceNote,
+.avatarSourceEmpty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.avatarSourcePickerToast {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 6px;
+  z-index: 2;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-elevated) 92%, transparent);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+
+.avatarSourcePickerToastError {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-subtle));
+  background: color-mix(in srgb, var(--surface-elevated) 88%, var(--danger) 12%);
+}
+
+.avatarPickTile {
+  flex: 0 0 auto;
+  height: 100%;
+  width: auto;
+  aspect-ratio: 1;
+  min-width: 72px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color var(--motion-fast),
+    box-shadow var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+.avatarPickTile:hover {
+  border-color: var(--border-strong);
+}
+
+.avatarSourcePageScroll.avatarSourcePageDragging .avatarPickTile {
+  pointer-events: none;
+}
+
+.avatarPickTile.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.avatarPickTile img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.avatarEditorEditBar {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 0 0 var(--avatar-edit-bar-h);
+  height: var(--avatar-edit-bar-h);
+  min-height: var(--avatar-edit-bar-h);
+  max-height: var(--avatar-edit-bar-h);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.avatarEditorEditBarVisible {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.avatarEditorEditRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.avatarCropZoomLabel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-1);
+}
+
+.avatarCropZoomLabel input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.avatarEditorActions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.avatarEditorEditBar .avatarCropZoomLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.avatarEditorEditBar :where(.avatarCropZoomLabel) input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.avatarEditorEditBar .avatarEditorActions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+
+.avatarSmartCropButton {
+  flex: 0 0 92px;
+  width: 92px;
+  min-width: 92px;
+  gap: 6px;
+}
+
+.avatarSmartCropSpinner {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, currentcolor 34%, transparent);
+  border-top-color: currentcolor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatarSmartCropSpinner {
+    animation-duration: 1.8s;
+  }
+}
+
+.avatarFaceCandidates {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.avatarFaceCandidatesLabel {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.avatarFaceCandidate {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.avatarFaceCandidate:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+}
+
+.avatarFaceCandidate.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.avatarFaceCandidate:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
+.avatarCropViewport {
+  position: relative;
+  width: var(--avatar-view-size);
+  height: var(--avatar-view-size);
+  border-radius: 50%;
+  overflow: hidden;
+  border: none;
+  box-shadow: inset 0 0 0 2px var(--border);
+  background: var(--bg-2);
+  cursor: default;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.avatarCropViewportActive {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.avatarCropViewportActive:active {
+  cursor: grabbing;
+}
+
+.avatarCropImage {
+  position: absolute;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+  max-width: none;
+}
+
+.avatarCropPreview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.avatarCropEmpty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

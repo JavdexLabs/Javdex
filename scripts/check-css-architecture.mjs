@@ -1,9 +1,12 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import postcss from 'postcss'
+import { allowedWebGlobalImport, allowedWebGlobalSelector } from './lib/web-css-policy.mjs'
 
 const rendererRoot = path.resolve('apps/desktop/src/renderer/src')
 const baselinePath = path.resolve('scripts/css-architecture-baseline.json')
+const webRoot = path.resolve('apps/web/src')
+const webBaselinePath = path.resolve('scripts/web-css-architecture-baseline.json')
 const writeBaseline = process.argv.includes('--write-baseline')
 const debtKeys = [
   'globalClassCount',
@@ -36,8 +39,7 @@ function isDescendantSelector(selector) {
   return /[^>+~\s]\s+[^>+~\s]/.test(selector)
 }
 
-function collectMetrics() {
-  const roots = [rendererRoot, path.resolve('packages/ui/src')]
+function collectMetrics(roots, web = false) {
   const cssFiles = roots.flatMap((root) => walk(root, (file) => file.endsWith('.css')))
   const sourceFiles = roots.flatMap((root) => walk(root, (file) => /\.tsx?$/.test(file)))
   const globalClasses = new Set()
@@ -53,6 +55,10 @@ function collectMetrics() {
     const isModule = file.endsWith('.module.css')
     const root = postcss.parse(source, { from: file })
     root.walkRules((rule) => {
+      if (web && isModule && rule.selector.includes(':global') &&
+          !allowedWebGlobalSelector(relative(file), rule.selector)) {
+        violations.push(`${relative(file)}:${rule.source?.start?.line ?? 1} has an unapproved global selector`)
+      }
       for (const selector of selectorParts(rule.selector)) {
         if (isDescendantSelector(selector)) descendantSelectorCount += 1
         for (const match of selector.matchAll(/\.([_a-zA-Z]+[\w-]*)/g)) {
@@ -84,19 +90,21 @@ function collectMetrics() {
     const source = readFileSync(file, 'utf8')
     rawButtonClassOccurrenceCount += source.match(/['"`]btn(?:-[\w-]+)?\b/g)?.length ?? 0
     classNameBehaviorInferenceCount +=
-      source.match(/className[^\n]{0,120}\.(?:includes|match|test)\s*\(/g)?.length ?? 0
+      (source.match(/className[^\n]{0,120}\.(?:includes|match|test)\s*\(/g)?.length ?? 0) +
+      (source.match(/classList\s*\.\s*(?:contains|item)\s*\(/g)?.length ?? 0)
 
     for (const match of source.matchAll(/import\s+['"]([^'"]+\.css)['"]/g)) {
       const importPath = match[1]
       const isMainGlobalEntry =
         relative(file) === 'apps/desktop/src/renderer/src/main.tsx' && importPath === './styles/global.css'
-      if (!importPath.endsWith('.module.css') && !isMainGlobalEntry) {
+      if (!importPath.endsWith('.module.css') && !(web
+        ? allowedWebGlobalImport(relative(file), importPath) : isMainGlobalEntry)) {
         violations.push(`${relative(file)} imports global CSS directly: ${importPath}`)
       }
     }
   }
 
-  const forbiddenStyles = walk(rendererRoot, (file) => /\.(?:scss|sass|less)$/.test(file))
+  const forbiddenStyles = roots.flatMap(root => walk(root, (file) => /\.(?:scss|sass|less)$/.test(file)))
   for (const file of forbiddenStyles) violations.push(`${relative(file)} uses a forbidden preprocessor`)
 
   return {
@@ -115,21 +123,30 @@ function collectMetrics() {
   }
 }
 
-const result = collectMetrics()
+const result = collectMetrics([rendererRoot, path.resolve('packages/ui/src')])
+const webResult = collectMetrics([webRoot], true)
 
 if (writeBaseline) {
   writeFileSync(baselinePath, `${JSON.stringify(result.metrics, null, 2)}\n`)
+  writeFileSync(webBaselinePath, `${JSON.stringify(webResult.metrics, null, 2)}\n`)
   console.log(`Wrote CSS architecture baseline to ${relative(baselinePath)}`)
   console.table(result.metrics)
+  console.table(webResult.metrics)
   process.exit(0)
 }
 
 const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'))
+const webBaseline = JSON.parse(readFileSync(webBaselinePath, 'utf8'))
 for (const key of debtKeys) {
   if (result.metrics[key] > baseline[key]) {
     result.violations.push(`${key} increased from ${baseline[key]} to ${result.metrics[key]}`)
   }
+  if (webResult.metrics[key] > webBaseline[key]) {
+    webResult.violations.push(`Web ${key} increased from ${webBaseline[key]} to ${webResult.metrics[key]}`)
+  }
 }
+
+result.violations.push(...webResult.violations)
 
 if (result.violations.length > 0) {
   console.error('CSS architecture checks failed:')
@@ -139,3 +156,5 @@ if (result.violations.length > 0) {
 
 console.log('CSS architecture checks passed.')
 console.table(result.metrics)
+console.log('Web CSS architecture (separate debt baseline):')
+console.table(webResult.metrics)

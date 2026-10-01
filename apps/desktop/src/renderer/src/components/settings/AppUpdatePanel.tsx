@@ -7,6 +7,8 @@ import type { UpdateCheckErrorCode, UpdateCheckState } from '@shared/updateTypes
 import { api } from '../../api'
 import { UI_ICON_SM } from '../iconDefaults'
 import Button from '../Button'
+import SettingsPanel, { SettingsPanelHead, SettingsPanelTitle } from './SettingsPanel'
+import styles from './AppUpdatePanel.module.css'
 
 const ERROR_LABELS: Record<UpdateCheckErrorCode, string> = {
   'network-unavailable': '无法连接更新服务器，请检查网络或代理设置',
@@ -88,30 +90,30 @@ export default function AppUpdatePanel(): JSX.Element {
   }
 
   return (
-    <section className="settings-overview-panel app-update-panel" aria-labelledby="app-update-title">
-      <div className="settings-overview-panel-head app-update-panel-head">
+    <SettingsPanel className={styles.panel} aria-labelledby="app-update-title">
+      <SettingsPanelHead className={styles.panelHead} topAligned>
         <div>
-          <h3 id="app-update-title">版本更新</h3>
+          <SettingsPanelTitle id="app-update-title">版本更新</SettingsPanelTitle>
           <SettingsFeedback message={error || statusText} error={Boolean(error)} detail={error} />
         </div>
         <Button type="button" size="sm" disabled={checking} onClick={() => void runCheck()}>
-          <RefreshCw {...UI_ICON_SM} className={checking ? 'is-spinning' : undefined} aria-hidden />
+          <RefreshCw {...UI_ICON_SM} aria-hidden />
           <SettingsActionLabel reserve="检查更新">{checking ? '检查中' : '检查更新'}</SettingsActionLabel>
         </Button>
-      </div>
+      </SettingsPanelHead>
 
-      <div className="app-update-meta">
+      <div className={styles.meta}>
         <span>当前版本 <strong>{state?.currentVersion ?? '—'}</strong></span>
         <span>上次检查 <strong>{formatCheckedAt(state?.checkedAt)}</strong></span>
       </div>
 
       {available && state?.latestRelease ? (
-        <div className={`app-update-release${ignored ? ' is-ignored' : ''}`}>
-          <div className="app-update-release-copy">
+        <div className={`${styles.release}${ignored ? ` ${styles.releaseIgnored}` : ''}`}>
+          <div className={styles.releaseCopy}>
             <strong>{state.latestRelease.releaseName}</strong>
             <span className="selectable-text">{releaseSummary(state.latestRelease.releaseNotes)}</span>
           </div>
-          <div className="app-update-actions">
+          <div className={styles.actions}>
             {!ignored ? (
               <Button
                 type="button"
@@ -135,9 +137,9 @@ export default function AppUpdatePanel(): JSX.Element {
             </Button>
           </div>
           {hasReleaseNotes(state.latestRelease.releaseNotes) ? (
-            <details className="app-update-release-notes">
+            <details className={styles.releaseNotes}>
               <summary>查看更新说明</summary>
-              <div className="app-update-markdown selectable-text">
+              <div className={`${styles.markdown} selectable-text`}>
                 <ReactMarkdown
                   components={{
                     a: ({ href, children }) => (
@@ -160,6 +162,6 @@ export default function AppUpdatePanel(): JSX.Element {
           ) : null}
         </div>
       ) : null}
-    </section>
+    </SettingsPanel>
   )
 }

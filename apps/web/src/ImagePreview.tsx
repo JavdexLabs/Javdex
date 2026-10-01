@@ -3,7 +3,7 @@ import Zoom from 'yet-another-react-lightbox/plugins/zoom'
 import Counter from 'yet-another-react-lightbox/plugins/counter'
 import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/counter.css'
-import './image-preview.css'
+import styles from './ImagePreview.module.css'
 
 export default function ImagePreview({ images, index, close, exited }: {
   images: { src: string; alt: string }[]
@@ -12,12 +12,12 @@ export default function ImagePreview({ images, index, close, exited }: {
   exited: () => void
 }): JSX.Element {
   return <Lightbox
-    className="image-preview"
+    className={styles.root}
     open={index >= 0}
     index={Math.max(0, index)}
     slides={images}
     close={close}
-    portal={{ container: { onKeyDownCapture: event => {
+    portal={{ container: { id: 'web-image-preview', onKeyDownCapture: event => {
       if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return
       const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
         .filter(button => button.getClientRects().length > 0)

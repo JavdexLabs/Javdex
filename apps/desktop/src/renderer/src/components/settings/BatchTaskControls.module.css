@@ -1,0 +1,107 @@
+.buttonRow {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.buttonRow .actionButton {
+  min-width: 72px;
+  min-height: var(--workspace-button-min-height, 32px);
+  gap: 6px;
+  justify-content: center;
+  padding-inline: 10px;
+}
+
+.buttonRow .actionButton[aria-busy='true'] {
+  pointer-events: none;
+}
+
+.actionButton[aria-busy='true'] svg {
+  animation: spin 0.8s linear infinite;
+}
+
+@container settings-workspace (max-width: 500px) {
+  .buttonRow {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .buttonRow .actionButton {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.iconGroup {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.iconButton {
+  --icon-glyph-size: 13px;
+
+  min-width: var(--control-h-sm);
+  width: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  height: var(--control-h-sm);
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton:focus-visible:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--surface-control-hover) 78%, transparent);
+  color: var(--text-primary);
+}
+
+.iconButton:focus-visible:not(:disabled) {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.iconButton:active:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-selected) 82%, transparent);
+}
+
+.iconButton[aria-busy='true'] {
+  color: var(--text-primary);
+  opacity: 0.75;
+}
+
+.iconButton[aria-busy='true'] > span {
+  animation: spin 0.8s linear infinite;
+}
+
+.dangerIconButton {
+  color: var(--text-secondary);
+}
+
+.dangerIconButton:hover:not(:disabled),
+.dangerIconButton:focus-visible:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-danger);
+  color: color-mix(in srgb, var(--danger) 82%, var(--text-primary));
+}
+
+.detailIconButton {
+  color: var(--text-primary);
+}

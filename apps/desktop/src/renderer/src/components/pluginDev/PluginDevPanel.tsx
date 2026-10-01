@@ -32,6 +32,7 @@ import {
   WorkbenchToolbar
 } from '../workbench'
 import PluginDevAgentRail from './PluginDevAgentRail'
+import PluginSourceBadge from '../PluginSourceBadge'
 import PluginDevCodeModal from './PluginDevCodeModal'
 import PluginDevConnectionModal from './PluginDevConnectionModal'
 import PluginDevConfigRail from './PluginDevConfigRail'
@@ -175,11 +176,13 @@ function conversationFromWorkLog(
 export default function PluginDevPanel({
   onInstalled,
   loadPackage,
-  onLoadConsumed
+  onLoadConsumed,
+  presentation = 'standalone'
 }: {
   onInstalled: (kind: PluginKind) => Promise<void>
   loadPackage: ScraperPluginPackage | null
   onLoadConsumed: () => void
+  presentation?: 'standalone' | 'settings'
 }): JSX.Element {
   const toast = useToast()
   const navigate = useNavigate()
@@ -1181,25 +1184,25 @@ export default function PluginDevPanel({
     }
   }
 
-  const statusClass =
+  const statusTone =
     agentStatus === 'running'
-      ? 'is-running'
+      ? 'running'
       : agentStatus === 'waiting_user'
-        ? currentArtifactReady ? 'is-ok' : 'is-waiting'
+        ? currentArtifactReady ? 'ok' : 'waiting'
         : agentStatus === 'completed'
-          ? 'is-ok'
+          ? 'ok'
         : agentStatus === 'failed'
-          ? 'is-fail'
+          ? 'fail'
           : agentStatus === 'cancelled'
-            ? 'is-cancelled'
-            : ''
+            ? 'cancelled'
+            : undefined
 
   return (
-    <WorkbenchShell className="plugin-dev-shell">
-      <nav className="plugin-dev-breadcrumb" aria-label="当前位置">
+    <WorkbenchShell className={`${styles.shell}${presentation === 'settings' ? ` ${styles.shellSettings}` : ''}`}>
+      <nav className={styles.breadcrumb} aria-label="当前位置">
         <button
           type="button"
-          className="settings-back-link"
+          className={styles.backLink}
           onClick={() => leaveGuard.requestLeave(() => navigate(settingsPath('overview')))}
         >
           设置
@@ -1207,7 +1210,7 @@ export default function PluginDevPanel({
         <span>/</span>
         <button
           type="button"
-          className="settings-back-link"
+          className={styles.backLink}
           onClick={() =>
             leaveGuard.requestLeave(() =>
               navigate(settingsPath('plugins', 'video'))
@@ -1220,10 +1223,10 @@ export default function PluginDevPanel({
         <strong>开发助手</strong>
       </nav>
 
-      <WorkbenchToolbar className="plugin-dev-toolbar">
-        <div className="plugin-dev-toolbar-start">
+      <WorkbenchToolbar className={styles.toolbar}>
+        <div className={styles.toolbarStart}>
           <div
-            className={`${styles.kindToggle} plugin-dev-kind-toggle plugin-dev-toolbar-kind-toggle`}
+            className={`${styles.kindToggle} ${styles.toolbarKindToggle}`}
             role="group"
             aria-label="插件类型"
           >
@@ -1244,29 +1247,29 @@ export default function PluginDevPanel({
               演员
             </button>
           </div>
-          <WorkbenchStatusPill className={`plugin-dev-status-pill ${statusClass}`}>
+          <WorkbenchStatusPill className={styles.statusPill} data-status={statusTone}>
             {agentStatusLabel(agentStatus, agentStep, currentArtifactReady)}
           </WorkbenchStatusPill>
         </div>
-        <div className="plugin-dev-toolbar-actions">
-          <span className="plugin-source-badge plugin-source-badge--user plugin-dev-source-badge">
+        <div className={styles.toolbarActions}>
+          <PluginSourceBadge source="user">
             {activeLlmModelLabel || '未配置模型'}
-          </span>
-          <span className="plugin-dev-code-action-slot">
+          </PluginSourceBadge>
+          <span className={styles.codeActionSlot}>
             {code.trim().length > 0 ? (
               <IconButton
-                className="plugin-dev-toolbar-icon-btn"
+                className={styles.toolbarIconButton}
                 icon={<Code2 {...UI_ICON_MD} />}
                 label="查看代码"
                 disabled={busy !== null}
                 onClick={() => setShowCodeModal(true)}
               />
             ) : (
-              <span className="plugin-dev-toolbar-icon-placeholder" aria-hidden="true" />
+              <span className={styles.toolbarIconPlaceholder} aria-hidden="true" />
             )}
           </span>
           <IconButton
-            className="plugin-dev-toolbar-icon-btn"
+            className={styles.toolbarIconButton}
             icon={<Settings {...UI_ICON_MD} />}
             label="连接设置"
             disabled={busy !== null}
@@ -1275,7 +1278,7 @@ export default function PluginDevPanel({
         </div>
       </WorkbenchToolbar>
 
-      <WorkbenchMain className="plugin-dev-main plugin-dev-main--agent-focus">
+      <WorkbenchMain className={`${styles.main} ${styles.mainAgentFocus}${presentation === 'settings' ? ` ${styles.mainSettings}` : ''}`}>
         <PluginDevConfigRail
           kind={kind}
           siteName={siteName}

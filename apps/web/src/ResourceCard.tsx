@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Download, ExternalLink, Play, FileVideo, Link, X } from 'lucide-react'
 import type { WebResource } from '../../../packages/contracts/src/webTypes'
+import { WebButton } from './WebButton'
+import WebTextInput from './WebTextInput'
+import styles from './ResourceCard.module.css'
 
 type Feedback = { message: string; link?: string; transient?: boolean; opener: HTMLElement }
 export default function ResourceList({ resources, selected, play }: {
@@ -23,7 +26,7 @@ export default function ResourceList({ resources, selected, play }: {
       else {
         const field = document.createElement('textarea')
         field.value = r.link
-        field.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none'
+        field.className = styles.copyField
         document.body.append(field)
         try { field.select(); if (!document.execCommand('copy')) throw new Error('copy failed') }
         finally { field.remove(); opener.focus({ preventScroll: true }) }
@@ -43,16 +46,16 @@ export default function ResourceList({ resources, selected, play }: {
     setFeedback(null)
   }
   return <>
-    <div className="resources" data-navigation-group>
+    <div className={styles.list} data-navigation-group>
       {resources.map(r => <ResourceCard key={r.id} resource={r} selected={r.id === selected}
         duplicate={resources.some(other => other.id !== r.id && other.name === r.name)} play={() => play(r.id)}
         copy={(resource, opener) => void copy(resource, opener)} explain={explain} />)}
     </div>
-    {feedback && <div className="resource-toast" role="status">
+    {feedback && <div className={styles.feedback} role="status">
       <span>{feedback.message}</span>
-      {feedback.link && <input className="resource-copy-fallback" readOnly value={feedback.link}
+      {feedback.link && <WebTextInput className={styles.copyFallback} readOnly value={feedback.link}
         aria-label="复制失败，请手动复制链接" onFocus={event => event.currentTarget.select()} />}
-      <button aria-label="关闭资源提示" onClick={close}><X aria-hidden="true" /></button>
+      <WebButton aria-label="关闭资源提示" onClick={close}><X aria-hidden="true" /></WebButton>
     </div>}
   </>
 }
@@ -68,24 +71,23 @@ function ResourceCard({ resource: r, selected, duplicate, play, copy, explain }:
     duplicate ? r.libraryName : null].filter(Boolean).join(' · ')
   const heading = <>
     {r.playable ? <Play aria-hidden="true" /> : r.kind === 'local' ? <FileVideo aria-hidden="true" /> : <Link aria-hidden="true" />}
-    <span className="resource-info">
-      <span className="resource-name" title={r.name}>{r.name}</span>
-      <span className="resource-meta"><small title={metadata}>{metadata}</small>
-        {r.isPrimary && <span className="resource-primary" aria-label="主资源" title="主资源">主</span>}
-        {!r.playable && r.kind === 'local' && <span className="resource-availability">
+    <span className={styles.info}>
+      <span className={styles.name} title={r.name}>{r.name}</span>
+      <span className={styles.metadata}><small title={metadata}>{metadata}</small>
+        {r.isPrimary && <span className={styles.primary} aria-label="主资源" title="主资源">主</span>}
+        {!r.playable && r.kind === 'local' && <span className={styles.availability}>
           {r.downloadUrl ? '仅下载' : '不可用'}
         </span>}
       </span>
     </span>
   </>
-  return <article className={`resource-card${selected ? ' resource-selected' : ''}`} aria-label={r.name}>
-    {r.playable ? <button className="resource-heading" onClick={play} aria-pressed={selected} aria-label={`播放 ${r.name}`}>{heading}</button>
-      : <button className="resource-heading" aria-label={`查看资源说明 ${r.name}`} onClick={event => explain(r, event.currentTarget)}>{heading}</button>}
-    <div className="resource-actions" data-navigation-group>
+  return <article className={styles.card} data-selected={selected} aria-label={r.name}>
+    {r.playable ? <WebButton className={styles.heading} onClick={play} aria-pressed={selected} aria-label={`播放 ${r.name}`}>{heading}</WebButton>
+      : <WebButton className={styles.heading} aria-label={`查看资源说明 ${r.name}`} onClick={event => explain(r, event.currentTarget)}>{heading}</WebButton>}
+    <div className={styles.actions} data-navigation-group>
       {r.downloadUrl && <a href={r.downloadUrl} download aria-label="下载" title="下载"><Download aria-hidden="true" /></a>}
-      {r.link && <><button onClick={event => copy(r, event.currentTarget)} aria-label="复制链接" title="复制链接"><Copy aria-hidden="true" /></button>
+      {r.link && <><WebButton onClick={event => copy(r, event.currentTarget)} aria-label="复制链接" title="复制链接"><Copy aria-hidden="true" /></WebButton>
         <a href={r.link} target="_blank" rel="noopener noreferrer" aria-label="打开链接" title="打开链接"><ExternalLink aria-hidden="true" /></a></>}
     </div>
   </article>
 }
-

@@ -1,0 +1,25 @@
+.root {
+  height: 100%;
+}
+
+.inner {
+  position: relative;
+  width: 100%;
+}
+
+.cell {
+  box-sizing: border-box;
+}
+
+.card {
+  height: 100%;
+}
+
+.loading {
+  height: 100%;
+  min-height: var(--control-h-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}

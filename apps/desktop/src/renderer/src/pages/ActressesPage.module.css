@@ -1,0 +1,8 @@
+.conflictEntry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-warning);
+  border-color: var(--border-warning);
+  background: var(--surface-warning);
+}

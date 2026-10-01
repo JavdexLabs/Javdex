@@ -1,3 +1,4 @@
+import TextInput from './TextInput'
 import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import {
   CLOSED_CLASSIFICATION_PICKER,
@@ -22,6 +23,7 @@ interface Props {
   selectedId: number | null
   listLabel: string
   createHint?: string
+  error?: string
   placeholder?: string
   onValueChange: (value: string) => void
   onSelect: (option: ClassificationPickerOption) => void
@@ -39,6 +41,7 @@ export default function ClassificationPicker({
   selectedId,
   listLabel,
   createHint,
+  error,
   placeholder,
   onValueChange,
   onSelect,
@@ -134,10 +137,10 @@ export default function ClassificationPicker({
 
   return (
     <div className={styles.picker}>
-      <input
+      <TextInput
         ref={inputRef}
         id={id}
-        className="text-input"
+        density="workspace"
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={view.open}
@@ -179,6 +182,7 @@ export default function ClassificationPicker({
       ) : (
         listbox
       )}
+      {error ? <span className={styles.error} role="alert">{error}</span> : null}
     </div>
   )
 }

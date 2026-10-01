@@ -14,10 +14,6 @@
   line-height: 1.5;
 }
 
-.setupForm {
-  gap: 12px;
-}
-
 .setupOptions {
   overflow: hidden;
   border: 1px solid var(--border-subtle);

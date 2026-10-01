@@ -299,7 +299,7 @@ export default function PendingScrapePane({
             setDirectorChoice(null)
             setDirectorId(null)
           }}
-          onConfirm={() => directorId != null && void confirm({ directorSelectionId: directorId })}
+          onConfirm={() => { if (directorId != null) return confirm({ directorSelectionId: directorId }) }}
         >
           <div className={styles.directorOptions}>
             {directorChoice.candidates.map((candidate) => (

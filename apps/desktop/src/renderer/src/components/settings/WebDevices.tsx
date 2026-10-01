@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Check, X, LoaderCircle } from "lucide-react";
@@ -146,7 +147,7 @@ export default function WebDevices({
               </div>
             </> : <>
               <label className={styles.field}>新设备显示的配对码
-                <input className={`text-input ${styles.codeInput}`} value={code} disabled={busy || !pairing || !status.running} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" maxLength={6}
+                <TextInput density="workspace" className={styles.codeInput} value={code} disabled={busy || !pairing || !status.running} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" maxLength={6}
                   onPaste={e => {
                     e.preventDefault();
                     const input = e.currentTarget;
@@ -297,8 +298,8 @@ export default function WebDevices({
           {confirm.kind === "rename" ? (
             <label className={styles.field}>
               设备名称
-              <input
-                className="text-input"
+              <TextInput
+                density="workspace"
                 value={newName}
                 maxLength={80}
                 disabled={busy}

@@ -1,3 +1,4 @@
+import TextInput from '../components/TextInput'
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, Folder } from 'lucide-react'
@@ -95,7 +96,7 @@ export default function RemoteRootPicker({
                       </span>
                     ))}
                   </nav>
-                  <input className={`text-input ${styles.remoteRootSearch}`} type="search" aria-label="筛选当前目录" placeholder="筛选当前目录的子文件夹"
+                  <TextInput density="workspace" className={styles.remoteRootSearch} type="search" aria-label="筛选当前目录" placeholder="筛选当前目录的子文件夹"
                     value={search} maxLength={100} disabled={busy} onChange={(event) => setSearch(event.target.value)} />
                   <div className={styles.remoteRootDirectoryList} aria-label="子目录">
                     {browseQuery.isLoading || browseQuery.isFetching ? <p className={styles.remoteRootMessage}>正在读取目录…</p> :

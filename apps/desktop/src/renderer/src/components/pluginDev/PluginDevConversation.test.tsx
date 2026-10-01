@@ -408,7 +408,7 @@ describe('PluginDevConversation history controls', () => {
         <PluginDevConversation {...base} pendingUserRequest={choice} />
       )
     })
-    const log = renderer?.root.findByProps({ className: 'plugin-dev-conversation-log' })
+    const log = renderer?.root.findByProps({ 'data-conversation-log': true })
     assert.equal(
       log?.findAllByProps({ role: 'status' }).length,
       1,

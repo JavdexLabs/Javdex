@@ -53,11 +53,13 @@ export default function ContinuousGrid<T>({ window: data, renderItem, itemKey, l
   const anchor = useRef({ index: initialIndex, delta: 0 })
   const appliedLayout = useRef({ columns, rowHeight })
   const measure = useRef<(() => void) | null>(null)
+  const restoredScrollTop = useRef<number | null>(null)
   const layout = useRef({ columns, rowHeight }); layout.current = { columns, rowHeight }
   useLayoutEffect(() => {
     const element = root.current
     if (!element) return
     const scroller = contained ? viewport.current! : scrollRef?.current ?? scrollingParent(element)
+    restoredScrollTop.current = null
     setFocus(null)
     let restored = false, frame = 0
     const update = () => {
@@ -68,7 +70,10 @@ export default function ContinuousGrid<T>({ window: data, renderItem, itemKey, l
         const saved = memory && samePage(memory.index, initial.current, pageSize) ? { ...memory } : { index: initial.current, delta: 0 }
         const resolved = saved.key === undefined ? -1 : latest.current.data.findIndex(item => latest.current.itemKey(item) === saved.key)
         if (resolved >= 0 && samePage(resolved, initial.current, pageSize)) saved.index = resolved
-        if (!remember || saved.index || saved.delta || scroller.scrollTop > localTop) scroller.scrollTop = localTop + Math.floor(saved.index / layout.current.columns) * layout.current.rowHeight + saved.delta
+        if (!remember || saved.index || saved.delta || scroller.scrollTop > localTop) {
+          scroller.scrollTop = localTop + Math.floor(saved.index / layout.current.columns) * layout.current.rowHeight + saved.delta
+          restoredScrollTop.current = scroller.scrollTop
+        }
         restored = true
       }
       const top = Math.max(0, scroller.scrollTop - localTop)
@@ -85,6 +90,11 @@ export default function ContinuousGrid<T>({ window: data, renderItem, itemKey, l
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         update()
+        // A restored row may straddle a URL page, and scrollTop is pixel-rounded.
+        // Measure programmatic restoration, but only user scrolling owns the URL anchor.
+        const restoring = restoredScrollTop.current === scroller.scrollTop
+        restoredScrollTop.current = null
+        if (restoring) return
         const top = Math.max(0, scroller.getBoundingClientRect().top - element.getBoundingClientRect().top)
         const index = Math.min(Math.max(0, latest.current.data.total - 1), Math.floor(top / layout.current.rowHeight) * layout.current.columns)
         if (remember) { memories.delete(scope); memories.set(scope, { index, delta: top % layout.current.rowHeight, key: latest.current.data.getItem(index) ? latest.current.itemKey(latest.current.data.getItem(index)!) : undefined }) }
@@ -108,7 +118,10 @@ export default function ContinuousGrid<T>({ window: data, renderItem, itemKey, l
       const localTop = scroller.scrollTop + element.getBoundingClientRect().top - scroller.getBoundingClientRect().top
       const next = Math.floor(Math.min(saved.index, data.total - 1) / columns) * rowHeight + Math.min(saved.delta, rowHeight - 1)
       // Above-list metadata remains visible if scrolling has not entered the grid.
-      if (saved.index || saved.delta) scroller.scrollTop = localTop + next
+      if (saved.index || saved.delta) {
+        scroller.scrollTop = localTop + next
+        restoredScrollTop.current = scroller.scrollTop
+      }
       setGeometry(old => ({ ...old, top: Math.max(0, scroller.scrollTop - localTop) }))
     }
     appliedLayout.current = { columns, rowHeight }

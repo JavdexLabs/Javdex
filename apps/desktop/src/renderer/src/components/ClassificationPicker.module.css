@@ -2,6 +2,17 @@
   min-width: 0;
 }
 
+.picker > input {
+  width: 100%;
+}
+
+.error {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-danger);
+  font-size: 12px;
+}
+
 .layer {
   min-width: 0;
 }

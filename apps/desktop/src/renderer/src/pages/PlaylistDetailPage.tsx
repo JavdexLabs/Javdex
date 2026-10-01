@@ -1,3 +1,4 @@
+import ResultCount from '../components/ResultCount'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Filter, Import, Inbox, Pencil, SearchX } from 'lucide-react'
@@ -23,6 +24,9 @@ import { UI_ICON } from '../components/iconDefaults'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import RelatedLinksList from '../components/RelatedLinksList'
 import Button from '../components/Button'
+import PlaylistCover from '../components/PlaylistCover'
+import DetailPane, { DetailPaneOverlay } from '../components/DetailPane'
+import styles from './PlaylistDetailPage.module.css'
 import PlaylistResourceFilterPopover from '../components/PlaylistResourceFilterPopover'
 import {
   LIST_PARAM,
@@ -158,14 +162,10 @@ export default function PlaylistDetailPage(): JSX.Element {
 
   const updatePlaylist = async (input: PlaylistUpdateInput): Promise<void> => {
     if (!detail) return
-    try {
-      await api.playlists.update(detail.id, input, expectedPlaylistVersion(detail))
-      setShowEdit(false)
-      toast.show('播放清单已更新', 'success')
-      await loadDetail()
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
+    await api.playlists.update(detail.id, input, expectedPlaylistVersion(detail))
+    setShowEdit(false)
+    toast.show('播放清单已更新', 'success')
+    await loadDetail()
   }
 
   const deletePlaylist = async (): Promise<void> => {
@@ -200,23 +200,23 @@ export default function PlaylistDetailPage(): JSX.Element {
 
   const videoOverlay =
     videoStackOpen ? (
-      <div className="detail-pane-overlay">
+      <DetailPaneOverlay>
         <Outlet />
-      </div>
+      </DetailPaneOverlay>
     ) : null
 
   if (loading && (!detail || detail.id !== playlistId)) {
     return (
-      <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+      <DetailPane stacked={videoStackOpen}>
         <EmptyState loading />
         {videoOverlay}
-      </div>
+      </DetailPane>
     )
   }
 
   if (!detail) {
     return (
-      <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+      <DetailPane stacked={videoStackOpen}>
         <DetailScrollBody onBack={() => navigateToPlaylistList(navigate, location)}>
           <EmptyState
             icon={<SearchX {...UI_ICON} aria-hidden />}
@@ -225,34 +225,34 @@ export default function PlaylistDetailPage(): JSX.Element {
           />
         </DetailScrollBody>
         {videoOverlay}
-      </div>
+      </DetailPane>
     )
   }
 
   const cover = playlistDetailCover(detail)
 
   return (
-    <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+    <DetailPane stacked={videoStackOpen}>
       <DetailScrollBody onBack={() => navigateToPlaylistList(navigate, location)}>
 
-          <div className="playlist-detail">
-            <div className="playlist-detail-head">
-              <div className="playlist-detail-cover">{renderCover(cover, detail.name)}</div>
-              <div className="playlist-detail-main">
-                <div className="playlist-detail-kicker">清单</div>
-                <h2>{detail.name}</h2>
-                <div className="playlist-detail-meta-row">
-                  <span>{(videos.page?.unfilteredTotal ?? 0)} 部影片</span>
-                  <span>{detail.cover_path ? '自定义封面' : '自动封面'}</span>
+          <div className={styles.root} data-playlist-detail>
+            <div className={styles.head}>
+              <PlaylistCover variant="detail">{renderCover(cover, detail.name)}</PlaylistCover>
+              <div className={styles.main}>
+                <div className={styles.kicker}>清单</div>
+                <h2 className={styles.title}>{detail.name}</h2>
+                <div className={styles.metaRow}>
+                  <span className={styles.metaBadge}>{(videos.page?.unfilteredTotal ?? 0)} 部影片</span>
+                  <span className={styles.metaBadge}>{detail.cover_path ? '自定义封面' : '自动封面'}</span>
                 </div>
                 {detail.description ? (
-                  <p>{detail.description}</p>
+                  <p className={styles.description}>{detail.description}</p>
                 ) : (
-                  <p className="playlist-detail-empty-desc">暂无简介</p>
+                  <p className={styles.description}>暂无简介</p>
                 )}
                 <RelatedLinksList links={detail.links ?? []} />
               </div>
-              <div className="playlist-detail-actions">
+              <div className={styles.actions}>
                 <DetailActionBar
                   ariaLabel="清单操作"
                   variant="inline"
@@ -288,17 +288,17 @@ export default function PlaylistDetailPage(): JSX.Element {
               </div>
             </div>
 
-            <div className="playlist-section-head">
-              <div className="section-title">
+            <div className={styles.sectionHead}>
+              <div className={styles.sectionTitle}>
                 影片
                 {resourceFilters.length > 0 && (videos.page?.unfilteredTotal ?? 0) > 0 ? (
-                  <span className="section-title-detail">
+                  <span>
                     匹配 {videos.total} / 共 {(videos.page?.unfilteredTotal ?? 0)} 部
                   </span>
                 ) : null}
               </div>
-              <div className="playlist-section-controls">
-                {detail.system_kind === 'watch_later' && <label className="playlist-section-controls">
+              <div className={styles.sectionControls}>
+                {detail.system_kind === 'watch_later' && <label className={styles.sectionControls}>
                   <Switch aria-label="播放后移除" checked={detail.remove_after_play === 1} disabled={savingPlayback}
                     onChange={async event => {
                       const removeAfterPlay = event.target.checked
@@ -335,7 +335,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                     setVideoSortDir(nextSortDir)
                   }}
                 />}
-                <span className="count-badge">{videos.total}</span>
+                <ResultCount stable={false}>{videos.total}</ResultCount>
 
               </div>
             </div>
@@ -406,6 +406,6 @@ export default function PlaylistDetailPage(): JSX.Element {
       )}
 
       {videoOverlay}
-    </div>
+    </DetailPane>
   )
 }

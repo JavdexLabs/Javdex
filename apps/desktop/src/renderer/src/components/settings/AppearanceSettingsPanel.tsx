@@ -1,3 +1,4 @@
+import { SegmentedControl, SegmentedOption } from '../SegmentedControl'
 import SettingsActionLabel from './SettingsActionLabel'
 import Switch from '../Switch'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -35,6 +36,8 @@ import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
 import { useDisplayMode } from '../DisplayModeContext'
 import Button from '../Button'
+import SettingsToggleList from '../SettingsToggleList'
+import { ThemeChoice } from './ThemePreview'
 import styles from './AppearanceSettingsPanel.module.css'
 import SettingsFormActions from './SettingsFormActions'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
@@ -235,15 +238,15 @@ function AvatarCompositionPreview({
   }, [analysis, centeringMode, faceRatio, preserveFullHead])
 
   return (
-    <div className="avatar-composition-preview" aria-busy={status === 'analyzing'}>
-      <span className="avatar-composition-preview-frame" aria-hidden="true">
+    <div data-avatar-composition-preview className={styles.preview} aria-busy={status === 'analyzing'}>
+      <span data-avatar-composition-frame className={styles.previewFrame} aria-hidden="true">
         <img
           src={avatarCompositionLonghairUrl}
           alt=""
           draggable={false}
-          className={`avatar-composition-preview-image${
-            cropLayout ? '' : status === 'error' ? ' is-fallback' : ' is-pending'
-          }`}
+          className={styles.previewImage}
+          data-fallback={!cropLayout && status === 'error' || undefined}
+          data-pending={!cropLayout && status !== 'error' || undefined}
           style={
             cropLayout
               ? {
@@ -256,10 +259,10 @@ function AvatarCompositionPreview({
           }
         />
       </span>
-      <span className="avatar-composition-preview-caption" aria-live="polite">
+      <span className={styles.previewCaption} aria-live="polite">
         {centeringMode === 'face' ? '脸部居中' : '头部居中'}
-        {status === 'analyzing' ? <span className="avatar-composition-preview-status">检测中…</span> : null}
-        {status === 'error' ? <span className="avatar-composition-preview-status is-error">预览不可用</span> : null}
+        {status === 'analyzing' ? <span className={styles.previewStatus}>检测中…</span> : null}
+        {status === 'error' ? <span className={styles.previewStatus} data-error>预览不可用</span> : null}
       </span>
     </div>
   )
@@ -441,15 +444,12 @@ export default function AppearanceSettingsPanel({
   return (
     <>
       <SettingsCard title="主题" hint="界面配色，立即生效。">
-        <div className="theme-grid" role="radiogroup" aria-label="界面主题">
+        <div className={styles.themeGrid} role="radiogroup" aria-label="界面主题">
           {THEME_OPTIONS.map((option) => (
-            <button
+            <ThemeChoice
               key={option.id}
-              type="button"
-              className={`theme-option theme-option--${option.id}${theme === option.id ? ' active' : ''}`}
-              role="radio"
-              aria-checked={theme === option.id}
-              tabIndex={theme === option.id ? 0 : -1}
+              option={option}
+              selected={theme === option.id}
               onKeyDown={(event) => {
                 const direction = ['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 0
                 if (!direction) return
@@ -461,52 +461,48 @@ export default function AppearanceSettingsPanel({
                 buttons?.[next]?.focus()
               }}
               onClick={() => onThemeChange(option.id)}
-            >
-              <span className={`theme-swatch theme-swatch-${option.id}`} />
-              <span className="theme-option-label">{option.label}</span>
-              <span className="theme-option-hint">{option.hint}</span>
-            </button>
+            />
           ))}
         </div>
       </SettingsCard>
 
       <SettingsCard title="影片卡片" hint="控制媒体库及其它影片列表中的辅助信息。">
-        <div className="settings-toggle-list">
+        <SettingsToggleList>
           <SettingsSwitchRow
             title="显示资源类型标签"
             description="最多显示两个类型，其余以 +N 收起"
             checked={settings.showVideoResourceTypeBadges}
             onChange={(checked) => void toggleResourceTypeBadges(checked)}
           />
-          <div className="settings-cover-mode-row">
-            <span className="settings-cover-mode-copy">
-              <span className="settings-cover-mode-title">封面比例</span>
-              <span className="settings-cover-mode-description">
+          <div className={styles.coverRow}>
+            <span className={styles.coverCopy}>
+              <span className={styles.coverTitle}>封面比例</span>
+              <span className={styles.coverDescription}>
                 所有媒体库的影片卡片统一使用竖版海报或横版封面
               </span>
             </span>
-            <div className="mode-toggle" title="封面显示方式" role="group" aria-label="封面显示方式">
-              <button
+            <SegmentedControl variant="default" title="封面显示方式" role="group" aria-label="封面显示方式">
+              <SegmentedOption
                 type="button"
-                className={mode === 'portrait' ? 'active' : undefined}
+                selected={mode === 'portrait'}
                 aria-pressed={mode === 'portrait'}
                 onClick={() => void changeCoverDisplayMode('portrait')}
               >
                 <RectangleVertical {...UI_ICON_SM} aria-hidden />
                 <span>竖版</span>
-              </button>
-              <button
+              </SegmentedOption>
+              <SegmentedOption
                 type="button"
-                className={mode === 'landscape' ? 'active' : undefined}
+                selected={mode === 'landscape'}
                 aria-pressed={mode === 'landscape'}
                 onClick={() => void changeCoverDisplayMode('landscape')}
               >
                 <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
                 <span>横版</span>
-              </button>
-            </div>
+              </SegmentedOption>
+            </SegmentedControl>
           </div>
-        </div>
+        </SettingsToggleList>
       </SettingsCard>
 
       <SettingsCard
@@ -605,8 +601,8 @@ export default function AppearanceSettingsPanel({
           </div>
         </div>
 
-        <div className="avatar-auto-crop-batch-row">
-          <div className="avatar-auto-crop-batch-copy">
+        <div data-avatar-batch-row className={styles.batchRow}>
+          <div className={styles.batchCopy}>
             <strong>批量智能构图</strong>
             <span>
               {batchRunning
@@ -621,7 +617,7 @@ export default function AppearanceSettingsPanel({
           </div>
 
           {batchRunning ? (
-            <div className="avatar-auto-crop-batch-progress" aria-live="polite">
+            <div className={styles.batchProgress} aria-live="polite">
               <progress
                 max={Math.max(1, avatarAutoCropBatch.state.total)}
                 value={avatarAutoCropBatch.state.current}
@@ -630,8 +626,9 @@ export default function AppearanceSettingsPanel({
               <span>
                 {avatarAutoCropBatch.state.current}/{avatarAutoCropBatch.state.total}
               </span>
-              <div className="avatar-auto-crop-batch-actions">
+              <div className={styles.batchActions}>
                 <Button
+                  className={styles.batchAction}
                   type="button"
                   variant="ghost"
 
@@ -642,6 +639,7 @@ export default function AppearanceSettingsPanel({
                 </Button>
                 {avatarAutoCropBatch.state.source === 'manual' ? (
                   <Button
+                  className={styles.batchAction}
                     type="button"
                     variant="ghost"
 
@@ -655,9 +653,10 @@ export default function AppearanceSettingsPanel({
               </div>
             </div>
           ) : (
-            <div className="avatar-auto-crop-batch-actions">
+            <div className={styles.batchActions}>
               {avatarAutoCropBatch.state.logs.length > 0 ? (
                 <Button
+                  className={styles.batchAction}
                   type="button"
                   variant="ghost"
 
@@ -668,6 +667,7 @@ export default function AppearanceSettingsPanel({
                 </Button>
               ) : null}
               <Button
+                  className={styles.batchAction}
                 type="button"
 
                 size="sm"
@@ -708,7 +708,7 @@ export default function AppearanceSettingsPanel({
         title="详情页背景"
         hint="打开详情页时，用库里已有的图片做柔和背景。若你已单独设过背景，会优先保留你的选择。"
       >
-        <div className="settings-toggle-list">
+        <SettingsToggleList>
           <SettingsSwitchRow
             title="影片详情"
             description="用第一张样张图做背景"
@@ -721,11 +721,12 @@ export default function AppearanceSettingsPanel({
             checked={settings.actressDetailUseFirstGalleryBackground}
             onChange={(checked) => onPatchSettings({ actressDetailUseFirstGalleryBackground: checked })}
           />
-        </div>
+        </SettingsToggleList>
       </SettingsCard>
 
       <SettingsCard
-        className="privacy-mode-card"
+        className={styles.privacyCard}
+        headerClassName={styles.privacyCardHeader}
         title="防窥模式"
         hint="遮盖或隐藏敏感图片；仅影响显示，不修改本地文件。"
         actions={
@@ -737,30 +738,29 @@ export default function AppearanceSettingsPanel({
         }
       >
           <div
-            className={`privacy-mode-disclosure${
-              privacyScopesExpanded ? ' is-expanded' : ''
-            }`}
+            className={styles.privacyDisclosure}
+            data-expanded={privacyScopesExpanded || undefined}
           >
             <button
               type="button"
-              className="privacy-mode-disclosure-trigger"
+              className={styles.privacyTrigger}
               aria-expanded={privacyScopesExpanded}
               aria-controls="privacy-mode-scope-list"
               onClick={() => setPrivacyScopesExpanded((expanded) => !expanded)}
             >
-              <span className="privacy-mode-disclosure-title">保护范围</span>
-              <span className="privacy-mode-disclosure-meta">
+              <span className={styles.privacyTitle}>保护范围</span>
+              <span className={styles.privacyMeta}>
                 已启用 {enabledPrivacyScopeCount} 项
               </span>
               <ChevronDown
                 {...UI_ICON_SM}
-                className="privacy-mode-disclosure-chevron"
+                className={styles.privacyChevron}
               />
             </button>
             {privacyScopesExpanded ? (
-              <div
+              <SettingsToggleList
                 id="privacy-mode-scope-list"
-                className="settings-toggle-list privacy-mode-scope-list"
+                className={styles.privacyScopeList}
               >
                 {PRIVACY_SCOPE_OPTIONS.map((option) => (
                   <SettingsSwitchRow
@@ -771,20 +771,20 @@ export default function AppearanceSettingsPanel({
                     onChange={(checked) => togglePrivacyScope(option.scope, checked)}
                   />
                 ))}
-              </div>
+              </SettingsToggleList>
             ) : null}
           </div>
       </SettingsCard>
 
       <SettingsCard title="窗口行为" hint="关闭窗口时的运行方式，立即生效。">
-        <div className="settings-toggle-list">
+        <SettingsToggleList>
           <SettingsSwitchRow
             title="关闭窗口后最小化到系统托盘"
             description={`关闭窗口时继续运行，${WEB_ACCESS_LABEL}和后台任务不受影响；从托盘菜单选择“退出 Javdex”可完全退出。`}
             checked={settings.closeToTray}
             onChange={(checked) => onPatchSettings({ closeToTray: checked })}
           />
-        </div>
+        </SettingsToggleList>
       </SettingsCard>
     </>
   )

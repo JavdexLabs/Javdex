@@ -1,5 +1,6 @@
 import type { ReactNode, Ref } from 'react'
 import styles from './ListToolbar.module.css'
+import SearchInput from './SearchInput'
 
 interface ListToolbarProps {
   leading?: ReactNode
@@ -27,11 +28,11 @@ export default function ListToolbar({
   resultCount
 }: ListToolbarProps): JSX.Element {
   const searchInput = search ? (
-    <input
+    <SearchInput
       id={search.id}
       ref={search.inputRef}
-      className={`${styles.search} search-input topbar-toolbar-search`}
-      type="search"
+      variant="toolbar"
+      withAdornment={Boolean(search.endAdornment)}
       placeholder={search.placeholder}
       value={search.value}
       onChange={(e) => search.onChange(e.target.value)}
@@ -41,7 +42,7 @@ export default function ListToolbar({
   ) : null
 
   return (
-    <div className={`${styles.root} topbar-toolbar`}>
+    <div className={styles.root}>
       {leading}
       {search ? (
         search.endAdornment ? (
@@ -53,12 +54,12 @@ export default function ListToolbar({
           searchInput
         )
       ) : (
-        <div className={`${styles.title} topbar-toolbar-title`}>{title}</div>
+        <div className={styles.title}>{title}</div>
       )}
 
       {controls || resultCount ? (
-        <div className={`${styles.end} topbar-toolbar-end`}>
-          {controls && <div className={`${styles.controls} topbar-toolbar-controls`}>{controls}</div>}
+        <div className={styles.end}>
+          {controls && <div className={styles.controls}>{controls}</div>}
           {resultCount}
         </div>
       ) : null}

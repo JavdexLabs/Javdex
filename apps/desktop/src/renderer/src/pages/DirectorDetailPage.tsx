@@ -1,6 +1,10 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import DetailPane, { DetailPaneOverlay } from '../components/DetailPane'
+import ResultCount from '../components/ResultCount'
 import ContinuousPosterGrid from '../components/ContinuousPosterGrid'
 import { useCallback, useMemo, useState } from 'react'
-import { Clapperboard, ExternalLink, GitMerge, ImagePlus, Pencil, SearchX, Trash2 } from 'lucide-react'
+import { Clapperboard, GitMerge, ImagePlus, Pencil, SearchX, Trash2 } from 'lucide-react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
@@ -30,6 +34,8 @@ import { ROUTE_MATCH } from '../listView/routePaths'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import Button from '../components/Button'
+import ClassificationProfile from '../components/ClassificationProfile'
+import ClassificationDetailSurface, { ClassificationVideoHeading } from '../components/ClassificationDetailSurface'
 
 export default function DirectorDetailPage(): JSX.Element {
   const id = Number(useParams().directorId)
@@ -54,7 +60,7 @@ export default function DirectorDetailPage(): JSX.Element {
   )
   const hash = useMemo(() => hashListQuery({ scope: 'director-detail', id }), [id])
   const onError = useCallback(
-    (error: unknown) => toast.show(String((error as Error).message), 'error'),
+    (message: string) => toast.show(message, 'error'),
     [toast],
   )
   const videoPage =
@@ -63,14 +69,10 @@ export default function DirectorDetailPage(): JSX.Element {
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`director-detail:${hash}`)
   const save = async (input: DirectorUpdateInput): Promise<void> => {
-    try {
-      await api.directors.update(id, input, expectedClassificationVersion(detailQuery.data ?? {}))
-      setEditing(false)
-      await client.invalidateQueries({ queryKey: directorKeys.all })
-      void refetchSilent()
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    }
+    await api.directors.update(id, input, expectedClassificationVersion(detailQuery.data ?? {}))
+    setEditing(false)
+    await client.invalidateQueries({ queryKey: directorKeys.all })
+    void refetchSilent()
   }
   const merged = async (result: DirectorMergeResult): Promise<void> => {
     setMergingDirector(false)
@@ -102,17 +104,17 @@ export default function DirectorDetailPage(): JSX.Element {
   }
   const director = detailQuery.data
   const overlay = stacked ? (
-    <div className="detail-pane-overlay">
+    <DetailPaneOverlay>
       <Outlet />
-    </div>
+    </DetailPaneOverlay>
   ) : null
   const state = (content: JSX.Element): JSX.Element => (
-    <div className={`detail-pane${stacked ? ' detail-pane--stacked' : ''}`}>
-      <div className="list-page">
+    <DetailPane stacked={stacked}>
+      <ListPage >
         <ListSurface variant="scroll">{content}</ListSurface>
-      </div>
+      </ListPage>
       {overlay}
-    </div>
+    </DetailPane>
   )
   if (!valid) return state(<EmptyState icon={<SearchX {...UI_ICON_SM} />} title="参数无效" />)
   if (detailQuery.isLoading) return state(<EmptyState loading />)
@@ -127,9 +129,9 @@ export default function DirectorDetailPage(): JSX.Element {
   if (!director) return state(<EmptyState icon={<SearchX {...UI_ICON_SM} />} title="导演不存在" />)
   const image = assetUrl(director.imagePath ?? director.fallbackCoverPath)
   return (
-    <div className={`detail-pane${stacked ? ' detail-pane--stacked' : ''}`}>
-      <div className="list-page organization-detail-page">
-        <div className="topbar">
+    <DetailPane stacked={stacked}>
+      <ListPage>
+        <PageHeader >
           <ListToolbar
             leading={
               <BackButton
@@ -183,68 +185,37 @@ export default function DirectorDetailPage(): JSX.Element {
               </>
             }
             resultCount={
-              <span className="count-badge count-badge--stable count-badge--media">
+              <ResultCount width="media">
                 共 {total} 部
-              </span>
+              </ResultCount>
             }
           />
-        </div>
-        <ListSurface
-          variant="scroll"
+        </PageHeader>
+        <ClassificationDetailSurface
           scrollRef={scroll.ref}
-          innerClassName="organization-detail-scroll-inner"
           showScrollToTop={scroll.showScrollToTop}
           onScrollToTop={scroll.scrollToTop}
         >
-          <section className="organization-profile director-profile" aria-label="导演资料">
-            <div className="organization-profile-image">
-              {image ? <img src={image} alt="" /> : <Clapperboard {...UI_ICON_SM} />}
-            </div>
-            <div className="organization-profile-main">
-              <div className="organization-profile-kicker">导演</div>
-              <h1 className="selectable-text">{director.mainName}</h1>
-              {director.releaseYearStart ? (
-                <div className="organization-profile-meta selectable-text">
-                  <span>
-                    本地作品：{director.releaseYearStart}
-                    {director.releaseYearEnd !== director.releaseYearStart
-                      ? ` - ${director.releaseYearEnd}`
-                      : ''}
-                  </span>
-                </div>
-              ) : null}
-              {director.aliases.length > 0 && (
-                <div className="organization-aliases selectable-text">
-                  {director.aliases.map((alias) => (
-                    <span key={alias}>{alias}</span>
-                  ))}
-                </div>
-              )}
-              <p
-                className={`organization-summary selectable-text${director.summary ? '' : ' organization-summary--empty'}`}
-              >
-                {director.summary ?? '暂无简介'}
-              </p>
-              {director.links.length > 0 && (
-                <div className="organization-links">
-                  {director.links.map((link) => (
-                    <a
-                      key={`${link.position}:${link.url}`}
-                      href={link.url}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        void api.externalLinks.open(link.url)
-                      }}
-                    >
-                      {link.label}
-                      <ExternalLink {...UI_ICON_SM} />
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-          <div className="organization-video-heading">关联影片</div>
+          <ClassificationProfile
+            kind="director"
+            label="导演资料"
+            kicker="导演"
+            name={director.mainName}
+            imageUrl={image}
+            placeholder={<Clapperboard {...UI_ICON_SM} />}
+            meta={director.releaseYearStart ? (
+              <span>
+                本地作品：{director.releaseYearStart}
+                {director.releaseYearEnd !== director.releaseYearStart
+                  ? ` - ${director.releaseYearEnd}`
+                  : ''}
+              </span>
+            ) : undefined}
+            aliases={director.aliases}
+            summary={director.summary}
+            links={director.links}
+          />
+          <ClassificationVideoHeading />
           {loading ? (
             <EmptyState loading variant="compact" />
           ) : videoPage.error && total === 0 ? (
@@ -263,7 +234,7 @@ export default function DirectorDetailPage(): JSX.Element {
               <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={hash} />
             </>
           )}
-        </ListSurface>
+        </ClassificationDetailSurface>
         {editing && (
           <DirectorEditModal director={director} onCancel={() => setEditing(false)} onSave={save} />
         )}
@@ -295,8 +266,8 @@ export default function DirectorDetailPage(): JSX.Element {
             onDeleted={deleted}
           />
         )}
-      </div>
+      </ListPage>
       {overlay}
-    </div>
+    </DetailPane>
   )
 }

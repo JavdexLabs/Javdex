@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { X } from 'lucide-react'
-import { UI_ICON_SM } from './iconDefaults'
+import ChipRemoveButton from './ChipRemoveButton'
+import styles from './AliasTagEditor.module.css'
 
 interface Props {
   id?: string
@@ -60,7 +60,7 @@ export default function AliasTagEditor({
 
   return (
     <div
-      className="alias-tag-editor"
+      className={styles.root}
       onClick={() => {
         if (!disabled) inputRef.current?.focus()
       }}
@@ -68,12 +68,14 @@ export default function AliasTagEditor({
       {aliases.map((alias, index) => (
         <span
           key={`${alias}-${index}`}
-          className={`alias-tag-chip${onPromoteToMain ? ' alias-tag-chip--promotable' : ''}`}
+          className={styles.chip}
+          data-promotable={onPromoteToMain ? 'true' : undefined}
+          data-chip-remove-host
         >
           {onPromoteToMain ? (
             <button
               type="button"
-              className="alias-tag-chip-name"
+              className={styles.chipName}
               onClick={(e) => {
                 e.stopPropagation()
                 onPromoteToMain(alias)
@@ -84,26 +86,22 @@ export default function AliasTagEditor({
               {alias}
             </button>
           ) : (
-            <span className="alias-tag-chip-name">{alias}</span>
+            <span className={styles.chipName}>{alias}</span>
           )}
-          <button
-            type="button"
-            className="alias-tag-chip-remove"
+          <ChipRemoveButton
             onClick={(e) => {
               e.stopPropagation()
               removeAt(index)
             }}
             disabled={disabled}
-            aria-label={`移除别名 ${alias}`}
-          >
-            <X {...UI_ICON_SM} />
-          </button>
+            label={`移除别名 ${alias}`}
+          />
         </span>
       ))}
       <input
         ref={inputRef}
         id={id}
-        className="alias-tag-editor-input"
+        className={styles.input}
         value={draft}
         disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}

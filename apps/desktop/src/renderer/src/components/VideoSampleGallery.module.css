@@ -1,0 +1,15 @@
+/* Equal-width columns; items are assigned to the shortest column by the owner. */
+.masonry {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  gap: 12px;
+}
+
+.column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  gap: 12px;
+}

@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import SettingsActionLabel from './SettingsActionLabel'
 import { useEffect, useState } from 'react'
 import { Copy, FolderOpen, AlertCircle } from 'lucide-react'
@@ -196,8 +197,8 @@ export default function UnrecognizedRow({
 
       <div className={styles.actions}>
         <div className={styles.edit}>
-          <input
-            className={`text-input ${styles.codeInput}`}
+          <TextInput
+            density="workspace" className={styles.codeInput}
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => {
@@ -235,8 +236,8 @@ export default function UnrecognizedRow({
         <details className={styles.rename}>
           <summary>重命名源文件并重新识别</summary>
           <div className={`${styles.edit} ${styles.renameEdit}`}>
-            <input
-              className={`text-input ${styles.renameInput}`}
+            <TextInput
+              density="workspace" className={styles.renameInput}
               value={renameBase}
               onChange={(e) => setRenameBase(e.target.value)}
               onKeyDown={(e) => {

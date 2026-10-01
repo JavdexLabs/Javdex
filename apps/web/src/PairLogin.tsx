@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
-import Checkbox from '../../../packages/ui/src/Checkbox'
 import type { WebPairState } from '../../../packages/contracts/src/webTypes'
 import { ApiError, post } from './client'
+import { WebButton } from './WebButton'
+import WebTextInput from './WebTextInput'
+import { LoginField, RememberDevice, LoginCopy, LoginSubmitButton } from './LoginForm'
+import styles from './PairLogin.module.css'
 
 type Session = { authenticated: boolean; username: string }
 export default function PairLogin({
@@ -98,52 +101,46 @@ export default function PairLogin({
     }
   }
   return (
-    <div className="pair-login">
-      <p className="muted">
+    <div className={styles.root}>
+      <LoginCopy>
         在桌面「设置 → 网络 → 网页服务」开启设备配对，再获取配对码。
-      </p>
+      </LoginCopy>
       {!pair ? (
         <>
-          <label>
+          <LoginField>
             设备名称
-            <input
+            <WebTextInput
+              appearance="login"
               value={name}
               maxLength={50}
               placeholder="例如：客厅电视"
               onChange={(e) => setName(e.target.value)}
             />
-          </label>
-          <label className="remember-device">
-            <Checkbox
-              checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
-            />
-            记住此设备
-          </label>
-          <p className="muted">
+          </LoginField>
+          <RememberDevice checked={remember} onChange={(e) => setRemember(e.target.checked)}>记住此设备</RememberDevice>
+          <LoginCopy>
             记住后长期有效，退出登录、撤销授权或修改密码后失效。仅在自己的设备上使用。
-          </p>
-          <button
-            className="primary"
+          </LoginCopy>
+          <LoginSubmitButton
             disabled={busy || restoring}
             onClick={() => void start()}
           >
             {restoring ? '正在恢复配对…' : busy ? '正在申请…' : '获取配对码'}
-          </button>
+          </LoginSubmitButton>
         </>
       ) : (
         <div>
           <p>在桌面输入此码，核对设备后批准</p>
-          <strong className="pair-code">
+          <strong className={styles.code} data-pair-code>
             {pair.code.slice(0, 3)} {pair.code.slice(3)}
           </strong>
-          <p className="muted" role="status">
+          <LoginCopy  role="status">
             {pair.state === 'approved' ? '已批准，正在连接' : remaining === 0 ? '配对码已过期' : '等待桌面批准'}
-          </p>
-          <p className="muted">
+          </LoginCopy>
+          <LoginCopy>
             剩余 {remaining} 秒
-          </p>
-          <button
+          </LoginCopy>
+          <WebButton
             disabled={busy || restoring}
             onClick={() => {
               setBusy(true)
@@ -161,13 +158,13 @@ export default function PairLogin({
             }}
           >
             取消配对
-          </button>
+          </WebButton>
         </div>
       )}
       {error && (
-        <p role="alert" className="error">
+        <LoginCopy role="alert" tone="danger">
           {error}
-        </p>
+        </LoginCopy>
       )}
     </div>
   )

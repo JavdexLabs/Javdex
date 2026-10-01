@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { RemoteConnectionProbeResult, ThisComputerSettings } from '@shared/desktop/settings'
@@ -275,8 +276,8 @@ export default function CatalogConnectionPanel(): JSX.Element {
           {draft.mode === 'remote' ? (
             <AppFormField className={styles.connectionField} label="服务器地址">
               <div className={styles.urlInputRow}>
-                <input
-                  className={`text-input ${styles.urlInput}`}
+                <TextInput
+                  density="workspace" className={styles.urlInput}
                   value={draft.remoteBaseUrl}
                   disabled={saving}
                   placeholder="http://192.168.1.10:8096"
@@ -360,8 +361,8 @@ export default function CatalogConnectionPanel(): JSX.Element {
               : '播放服务端视频需设置这台电脑上的播放器。'}>
             <div className={styles.playerInputRow}>
               <AppFormField label="播放器程序" className={styles.playerPathField}>
-                <input
-                  className="text-input"
+                <TextInput
+                  density="workspace"
                   value={playerForm.draft.playerPath}
                   disabled={savingPlayer || saving || pickingPlayer || detectingPlayer}
                   spellCheck={false}

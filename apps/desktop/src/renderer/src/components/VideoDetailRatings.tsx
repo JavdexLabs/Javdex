@@ -1,6 +1,7 @@
 import type { VideoDetail, VideoExternalStats } from '@shared/videoTypes'
 import { selectDefaultExternalRating } from '@shared/externalRatings'
 import StarRating from './StarRating'
+import styles from './VideoDetailRatings.module.css'
 
 function formatExternalScore(value: number): string {
   const rounded = Math.round(value * 10) / 10
@@ -29,23 +30,23 @@ export default function VideoDetailRatings({ video, onRatingChange }: Props): JS
   const externalRatings = selectedRating ? [selectedRating] : []
 
   return (
-    <div className="detail-ratings" aria-label="评分">
-      <div className="detail-rating-group">
-        <span className="detail-rating-label">自定义评分</span>
+    <div className={styles.root} aria-label="评分">
+      <div className={styles.group}>
+        <span className={styles.label}>自定义评分</span>
         <StarRating value={video.rating} onChange={onRatingChange} size={22} />
       </div>
       {externalRatings.length > 0 && (
         <>
-          <span className="detail-ratings-divider" aria-hidden />
-          <div className="detail-rating-group">
-            <span className="detail-rating-label">外部评分</span>
-            <div className="detail-external-ratings">
+          <span className={styles.divider} aria-hidden />
+          <div className={styles.group}>
+            <span className={styles.label}>外部评分</span>
+            <div className={styles.externalRatings}>
               {externalRatings.map((stat) => (
-                <div key={stat.id} className="detail-external-rating" title={buildExternalRatingMeta(stat)}>
-                  <span className="detail-external-rating-score">
+                <div key={stat.id} className={styles.externalRating} title={buildExternalRatingMeta(stat)}>
+                  <span className={styles.score}>
                     {formatExternalScore(stat.rating_average!)}
                   </span>
-                  <span className="detail-external-rating-meta">{buildExternalRatingMeta(stat)}</span>
+                  <span className={styles.meta}>{buildExternalRatingMeta(stat)}</span>
                 </div>
               ))}
             </div>

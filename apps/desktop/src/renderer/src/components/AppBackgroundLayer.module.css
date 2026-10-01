@@ -1,0 +1,87 @@
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: var(--surface-base);
+}
+
+.active {
+  animation: fade-in 220ms ease-out both;
+}
+
+.image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: none;
+}
+
+.cover {
+  object-fit: cover;
+  object-position: center;
+  filter: saturate(1.03) brightness(0.88);
+}
+
+.frame {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.frameImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  filter: saturate(1.03) brightness(0.9);
+}
+
+.edgeFade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.left {
+  background: linear-gradient(90deg, var(--surface-base) 0%, transparent 100%);
+}
+
+.right {
+  background: linear-gradient(270deg, var(--surface-base) 0%, transparent 100%);
+}
+
+.shade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    var(--background-shade-gradient),
+    color-mix(in srgb, var(--surface-base) 18%, transparent);
+}
+
+.root[data-fit='contain'] .shade {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-base) 24%, transparent),
+      transparent 42%,
+      color-mix(in srgb, var(--surface-base) 10%, transparent)
+    );
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}

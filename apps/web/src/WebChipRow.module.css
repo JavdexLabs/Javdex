@@ -1,0 +1,10 @@
+
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.applied:not(:empty) {
+  padding-bottom: 20px;
+}

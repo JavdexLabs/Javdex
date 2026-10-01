@@ -6,6 +6,7 @@ import type {
 } from '@shared/classificationTypes'
 import { usePreviewCommand } from '../hooks/usePreviewCommand'
 import Modal from './Modal'
+import ClassificationDeleteNotice from './ClassificationDeleteNotice'
 
 type DeleteImpact = DirectorDeleteImpact | SeriesDeleteImpact
 type DeleteResult = DirectorDeleteResult | SeriesDeleteResult
@@ -53,8 +54,7 @@ export default function ClassificationDeleteModal<
       onCancel={onCancel}
       onConfirm={() => void execute()}
     >
-      <div className="classification-delete-confirmation selectable-text">
-        {!impact && !error ? <p>正在检查影响范围…</p> : null}
+      <ClassificationDeleteNotice pending={!impact} error={error}>
         {impact ? (
           <>
             <p>
@@ -62,13 +62,12 @@ export default function ClassificationDeleteModal<
               {entityLabel}关联
               {entityLabel === '系列' ? `，并让 ${children} 个直接子系列变为无上级` : ''}。
             </p>
-            <p className="classification-delete-confirmation__safe">
+            <p>
               影片、影片资源及其他影片元数据不会被删除。{entityLabel}资料与正式主图将被永久移除。
             </p>
           </>
         ) : null}
-        {error ? <p className="classification-maintenance-error">{error}</p> : null}
-      </div>
+      </ClassificationDeleteNotice>
     </Modal>
   )
 }

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { highlightJavaScript } from '../utils/highlightJavaScript'
 import styles from './CodeEditor.module.css'
+import { codeHighlightClasses } from './CodeHighlight'
 
 interface CodeEditorProps {
   value: string
@@ -21,7 +22,7 @@ export default function CodeEditor({
 }: CodeEditorProps): JSX.Element {
   const preRef = useRef<HTMLPreElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const highlighted = useMemo(() => highlightJavaScript(value), [value])
+  const highlighted = useMemo(() => highlightJavaScript(value, codeHighlightClasses), [value])
 
   const syncScroll = useCallback((): void => {
     const pre = preRef.current
@@ -33,7 +34,7 @@ export default function CodeEditor({
 
   return (
     <div
-      className={`${styles.root}${disabled ? ` ${styles.disabled}` : ''} code-editor${className ? ` ${className}` : ''}`}
+      className={`${styles.root}${disabled ? ` ${styles.disabled}` : ''}${className ? ` ${className}` : ''}`}
       data-disabled={disabled || undefined}
     >
       <pre ref={preRef} className={styles.highlight} aria-hidden="true">

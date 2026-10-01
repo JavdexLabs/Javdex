@@ -12,6 +12,9 @@ import MediaTileActionButton from './MediaTileActionButton'
 import { UI_ICON, UI_ICON_SM } from './iconDefaults'
 import { getVideoResourceBadgeSummary } from './videoResourceBadges'
 import BuiltinPlaylistButton from './BuiltinPlaylistButton'
+import styles from './PosterCard.module.css'
+import CoverPlaceholder from './CoverPlaceholder'
+import CardSelectionButton from './CardSelectionButton'
 
 const STATUS_BADGE: Record<number, { text: string; cls: string } | null> = {
   0: { text: '未刮削', cls: 'unscraped' },
@@ -132,14 +135,18 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
 
   return (
     <div
-      className={`poster-card card-interactive${className ? ` ${className}` : ''}${selected ? ' is-selected' : ''}${selectionMode ? ' is-selection-mode' : ''}`}
+      className={`${styles.root}${className ? ` ${className}` : ''}`}
+      data-video-card
+      data-selected={selected || undefined}
       role="button"
       tabIndex={0}
       onClick={openVideo}
       onKeyDown={onKeyDown}
     >
       <div
-        className={`poster-thumb ${mode}${thumbHeight != null ? ' poster-thumb--fixed' : ''}`}
+        className={styles.thumb}
+        data-mode={mode}
+        data-fixed={thumbHeight != null || undefined}
         style={thumbHeight != null ? { height: thumbHeight } : undefined}
       >
         {cover ? (
@@ -147,47 +154,47 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
             src={cover}
             alt={video.code}
             loading="lazy"
-            className={`cover-${mode}${tallCover ? ' cover-tall' : ''}`}
+            className={styles.cover}
+            data-tall={tallCover || undefined}
             onLoad={onCoverLoad}
           />
         ) : (
-          <div className="poster-placeholder">{video.code}</div>
+          <CoverPlaceholder>{video.code}</CoverPlaceholder>
         )}
-        {badge && <span className={`poster-badge ${badge.cls}`}>{badge.text}</span>}
+        {badge && <span className={styles.badge} data-status={badge.cls}>{badge.text}</span>}
         {video.has_pending_scrape ? (
-          <span className="poster-badge" data-pending="true">
+          <span className={styles.badge} data-pending="true">
             待确认
           </span>
         ) : null}
         {showResourceTypeBadges && resourceBadges.visible.length > 0 ? (
           <span
-            className="poster-resource-badges"
+            className={styles.resourceBadges}
             title={resourceBadges.title}
             aria-label={`资源类型：${resourceBadges.title}`}
           >
             {resourceBadges.visible.map((item) => (
-              <span key={item.kind} className="poster-resource-badge">
+              <span key={item.kind} className={styles.resourceBadge}>
                 {item.label}
               </span>
             ))}
             {resourceBadges.overflow > 0 ? (
-              <span className="poster-resource-badge">+{resourceBadges.overflow}</span>
+              <span className={styles.resourceBadge}>+{resourceBadges.overflow}</span>
             ) : null}
           </span>
         ) : null}
         {onToggleSelect && (
-          <button
-            type="button"
-            className={`poster-select-toggle poster-hover-control${selected || selectionMode ? ' is-visible' : ''}${selected ? ' is-checked' : ''}`}
-            aria-label={selected ? `取消选择 ${video.code}` : `选择 ${video.code}`}
-            aria-pressed={selected}
+          <CardSelectionButton
+            visible={selected || selectionMode}
+            selected={selected}
+            label={selected ? `取消选择 ${video.code}` : `选择 ${video.code}`}
             onClick={stopAndToggleSelect}
           />
         )}
         {!selectionMode && onRemove && (
           <MediaTileActionButton
             action="delete"
-            className="poster-hover-control"
+            className={styles.hoverControl}
             icon={<ListMinus {...UI_ICON_SM} />}
             label={`从清单移出 ${video.code}`}
             title="移出清单"
@@ -198,11 +205,11 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
             }}
           />
         )}
-        {!selectionMode && builtinActions && <BuiltinPlaylistButton video={video} kind="watch_later" />}
-        {!selectionMode && builtinActions === 'all' && <BuiltinPlaylistButton video={video} kind="favorites" />}
+        {!selectionMode && builtinActions && <BuiltinPlaylistButton video={video} kind="watch_later" className={`${styles.iconAction} ${styles.hoverControl}`} />}
+        {!selectionMode && builtinActions === 'all' && <BuiltinPlaylistButton video={video} kind="favorites" className={`${styles.iconAction} ${styles.hoverControl} ${styles.editAction}`} />}
         {!selectionMode && onEdit && builtinActions !== 'all' && (
           <IconButton
-            className="poster-icon-action poster-edit-action poster-hover-control"
+            className={`${styles.iconAction} ${styles.editAction} ${styles.hoverControl}`}
             icon={<Pencil {...UI_ICON} />}
             label={`编辑 ${video.code} 元数据`}
             title="编辑元数据"
@@ -212,11 +219,11 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
         {!selectionMode && hasQuickActions && (
           <div
             ref={menuRef}
-            className="poster-menu-wrap poster-hover-control"
+            className={`${styles.menuWrap} ${styles.hoverControl}`}
             onClick={(e) => e.stopPropagation()}
           >
             <IconButton
-              className="poster-icon-action"
+              className={styles.iconAction}
               icon={<Ellipsis {...UI_ICON} />}
               label={`${video.code} 功能菜单`}
               aria-haspopup="menu"
@@ -228,7 +235,7 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
               }}
             />
             {menuOpen && (
-              <div className="poster-action-menu" role="menu">
+              <div className={styles.actionMenu} role="menu">
                 {onEdit && builtinActions === 'all' && <button type="button" role="menuitem" onClick={e => stopAndRun(e, onEdit)}>编辑元数据</button>}
                 {onAddToPlaylist && (
                   <button
@@ -258,7 +265,7 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
                   <button
                     type="button"
                     role="menuitem"
-                    className="danger"
+                    data-danger="true"
                     onClick={(e) => stopAndRun(e, onDelete)}
                   >
                     {deleteLabel}
@@ -269,9 +276,9 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
           </div>
         )}
       </div>
-      <div className="poster-meta">
-        <div className="poster-code">{video.code}</div>
-        <div className="poster-title">{video.title || '— 待刮削 —'}</div>
+      <div className={styles.meta}>
+        <div className={styles.code} data-video-code>{video.code}</div>
+        <div className={styles.title}>{video.title || '— 待刮削 —'}</div>
       </div>
     </div>
   )

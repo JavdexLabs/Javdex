@@ -95,11 +95,13 @@ export function useClassificationPage<T>(
     isFetching: continuous.loading, isPending: continuous.loading, refetch: continuous.reload }
   const move = useCallback((next: number): void => {
     if (blockAnchor.current) return
+    if (draft?.context === context && draft.value.trim() !== urlQ.trim()) return
     const normalized = parseFacetOffset(String(next))
+    if (params.get(LIST_PARAM.facetOffset) === (normalized ? String(normalized) : null)) return
     setParams(previous => patchSearchParams(previous, {
       [LIST_PARAM.facetOffset]: normalized === 0 ? null : String(normalized)
     }), { replace: true })
-  }, [setParams])
+  }, [context, draft, urlQ, params, setParams])
   const total = continuous.known ? continuous.total : undefined
   const lastOffset = total === undefined ? offset : Math.max(0, Math.ceil(total / CLASSIFICATION_PAGE_SIZE) - 1) * CLASSIFICATION_PAGE_SIZE
   const outOfBounds = !resetting && continuous.known && !query.isError && offset > lastOffset

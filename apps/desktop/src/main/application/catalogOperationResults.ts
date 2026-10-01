@@ -13,7 +13,7 @@ import type {
   VideoScrapeField
 } from '@shared/videoScrapeTypes'
 import type { ActressScrapeField } from '@shared/actressScrapeTypes'
-import type { CatalogVideoSourcePage } from '@library/catalog/catalogVideoSources'
+import type { CatalogVideoSourcePage } from '@shared/catalogVideoSourceSchemas'
 import type {
   CorrectImportResult,
   VideoAsset,

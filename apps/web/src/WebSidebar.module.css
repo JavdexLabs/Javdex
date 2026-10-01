@@ -1,0 +1,138 @@
+
+.root {
+  width: var(--sidebar-width);
+  position: fixed;
+  inset: var(--header-height) auto 0 0;
+  padding: 24px 14px;
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 5px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+  padding: 2px;
+}
+
+.root a {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+  min-height: 44px;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  color: var(--text-secondary);
+}
+
+.root a span {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.foot small {
+  font-size: 10px;
+}
+
+.root a small {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .root a:hover {
+    background: var(--surface-elevated);
+  }
+}
+
+.root a[data-active='true'] {
+  color: var(--text-accent);
+  background: var(--surface-selected);
+}
+
+.label {
+  margin: 24px 14px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.12em;
+}
+
+.foot {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  margin: auto 14px 0;
+  padding-top: 16px;
+  font-size: 12px;
+}
+
+.root a:active {
+  background: var(--surface-selected);
+}
+
+@media (width <= 1100px) {
+  .root {
+    padding-inline: 8px;
+  }
+}
+
+@media (width <= 760px) {
+  .root {
+    display: none;
+    position: static;
+    width: auto;
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-gutter: auto;
+    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    gap: 8px;
+  }
+}
+
+@media (width <= 760px) {
+  .root a {
+    font-size: 13px;
+    padding: 8px 12px;
+    min-height: 40px;
+  }
+}
+
+@media (width <= 760px) {
+  .root a span {
+    max-width: 140px;
+  }
+}
+
+@media (width <= 760px) {
+  .root a small,
+.label,
+.foot {
+    display: none;
+  }
+}
+
+@media (width >= 1920px) {
+  .root a {
+    min-height: 54px;
+  }
+}
+
+@media (pointer: coarse) {
+  .root a {
+    min-height: 48px;
+  }
+}

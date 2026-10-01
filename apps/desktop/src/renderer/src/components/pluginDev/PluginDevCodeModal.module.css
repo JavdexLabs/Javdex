@@ -1,3 +1,65 @@
+.modal {
+  width: min(1560px, calc(100vw - 48px));
+  height: min(92vh, calc(100vh - 48px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 20px 22px;
+}
+
+.modal [data-modal-part='head'] h3,
+.modal [data-modal-part='actions'] {
+  flex-shrink: 0;
+}
+
+.modal .body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  margin: 0 0 14px;
+  overflow: hidden;
+  padding-inline-end: 0;
+}
+
+.shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.viewer {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 14px calc(16px + var(--scrollbar-safe-pad)) 14px 16px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  line-height: 1.58;
+  tab-size: 2;
+  white-space: pre;
+  user-select: text;
+}
+
+.viewer code {
+  display: block;
+  min-width: max-content;
+}
+
+.viewer ::selection {
+  background: color-mix(in srgb, var(--accent) 64%, transparent);
+  color: var(--text-primary);
+}
+
 .placeholder {
   color: var(--text-muted);
 }

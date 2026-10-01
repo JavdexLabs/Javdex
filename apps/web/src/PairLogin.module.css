@@ -1,0 +1,13 @@
+
+.root {
+  display: grid;
+  gap: 12px;
+}
+
+.code {
+  display: block;
+  font-size: clamp(2rem, 8vw, 3.5rem);
+  letter-spacing: .12em;
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}

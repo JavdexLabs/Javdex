@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import IconButton from './IconButton'
@@ -29,13 +29,9 @@ interface Props {
   closeDisabled?: boolean
   hideCancel?: boolean
   hideActions?: boolean
-  onConfirm?: () => void
+  onConfirm?: () => void | Promise<unknown>
   onCancel: () => void
   actions?: ReactNode
-}
-
-function legacySizeClassName(size: ModalSize): string {
-  return size === 'compact' ? 'modal--form-compact' : `modal--form-${size}`
 }
 
 const modalStack: string[] = []
@@ -65,6 +61,7 @@ const FOCUSABLE_SELECTOR = [
   'input:not(:disabled)',
   'select:not(:disabled)',
   'textarea:not(:disabled)',
+  'summary',
   '[tabindex]:not([tabindex="-1"])'
 ].join(',')
 
@@ -92,15 +89,43 @@ export default function Modal({
   actions
 }: Props): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null)
+  // Capture before child autoFocus runs during commit, not after mounting.
+  const returnFocusRef = useRef(document.activeElement as HTMLElement | null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const submissionLock = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   const reactId = useId()
   const modalId = `modal-${reactId.replace(/:/g, '')}`
   const titleId = `${modalId}-title`
   const descriptionId = `${modalId}-description`
   const shellless = chrome === 'shellless'
-  const closeBlocked = busy || closeDisabled
+  const effectiveBusy = busy || submitting
+  const closeBlocked = effectiveBusy || closeDisabled
+  const submit = async (): Promise<void> => {
+    if (!onConfirm || confirmDisabled || effectiveBusy || submissionLock.current) return
+    submissionLock.current = true
+    try {
+      const result = onConfirm()
+      if (result && typeof result.then === 'function') {
+        setSubmitting(true)
+        await result
+      }
+      if (mounted.current) setSubmitError(null)
+    } catch (error) {
+      if (mounted.current) setSubmitError(error instanceof Error ? error.message : String(error))
+    } finally {
+      submissionLock.current = false
+      if (mounted.current) setSubmitting(false)
+    }
+  }
 
   const requestClose = useCallback(() => {
-    if (closeBlocked || !isTopModal(modalId)) return
+    if (closeBlocked || submissionLock.current || !isTopModal(modalId)) return
     onCancel()
   }, [closeBlocked, modalId, onCancel])
 
@@ -112,7 +137,7 @@ export default function Modal({
   useEscapeKey(requestDismiss, dismissible && !closeBlocked)
 
   useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null
+    const prev = returnFocusRef.current
     registerModal(modalId)
     dialogRef.current?.focus()
     return () => {
@@ -150,11 +175,8 @@ export default function Modal({
 
   const modalClass = [
     styles.root,
-    'modal',
     shellless ? '' : styles.form,
     shellless ? '' : styles[size],
-    shellless ? '' : 'modal--form',
-    shellless ? '' : legacySizeClassName(size),
     className
   ]
     .filter(Boolean)
@@ -165,7 +187,7 @@ export default function Modal({
 
   return (
     <div
-      className={`${styles.backdrop} modal-backdrop`}
+      className={styles.backdrop}
       data-modal-id={modalId}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) requestDismiss()
@@ -178,36 +200,35 @@ export default function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={hint ? descriptionId : undefined}
-        aria-busy={busy || undefined}
+        aria-busy={effectiveBusy || undefined}
         tabIndex={-1}
         onKeyDown={trapFocus}
         onClick={(e) => e.stopPropagation()}
       >
         <header
+          data-modal-part="head"
           className={[
             styles.head,
             shellless ? '' : styles.formHead,
-            showCloseButton ? styles.headWithClose : '',
-            'modal-head',
-            showCloseButton ? 'modal-head--with-close' : ''
+            showCloseButton ? styles.headWithClose : ''
           ]
             .filter(Boolean)
             .join(' ')}
         >
-          <div className={`${styles.headMain} modal-head-main`}>
+          <div className={styles.headMain}>
             <h3 id={titleId}>
               {title}
-              {subtitle ? <span className={`${styles.subtitle} modal-subtitle`}>{subtitle}</span> : null}
+              {subtitle ? <span className={styles.subtitle}>{subtitle}</span> : null}
             </h3>
             {hint ? (
-              <p id={descriptionId} className={`${styles.lead} modal-lead hint`}>
+              <p id={descriptionId} className={styles.lead}>
                 {hint}
               </p>
             ) : null}
           </div>
           {showCloseButton ? (
             <IconButton
-              className={`${styles.closeButton} modal-close-btn`}
+              className={styles.closeButton}
               label="关闭"
               icon={<X {...UI_ICON_MD} />}
               disabled={closeBlocked}
@@ -216,35 +237,44 @@ export default function Modal({
           ) : null}
         </header>
         <div
+          data-modal-part="body"
           className={[
             styles.body,
             shellless ? '' : styles.formBody,
-            bodyOverflow === 'hidden' ? styles.bodyHidden : '',
-            'modal-body',
+            // A retained error adds content beyond fixed-height editors; keep it scrollable.
+            bodyOverflow === 'hidden' && !submitError ? styles.bodyHidden : '',
             bodyClassName
           ]
             .filter(Boolean)
             .join(' ')}
         >
           {children}
+          {submitError && <div className={styles.error} role="alert">
+            <details>
+              <summary className={styles.errorSummary}>{effectiveBusy ? '正在重试，上次操作未完成' : '操作未完成，可重试或查看错误详情'}</summary>
+              <p className={styles.errorDetails}>{submitError}</p>
+            </details>
+          </div>}
         </div>
         {!hideActions && (
           <div
-            className={`${styles.actions}${shellless ? '' : ` ${styles.formActions}`} modal-actions`}
+            data-modal-part="actions"
+            className={`${styles.actions}${shellless ? '' : ` ${styles.formActions}`}`}
           >
             {actions ?? (
               showDefaultActions ? (
                 <>
                   {!hideCancel && (
-                    <Button type="button" disabled={closeBlocked} onClick={onCancel}>
+                    <Button type="button" disabled={closeBlocked} onClick={requestClose}>
                       {cancelText}
                     </Button>
                   )}
                   <Button
                     type="button"
                     variant={danger ? 'danger' : 'primary'}
-                    disabled={confirmDisabled || busy}
-                    onClick={onConfirm}
+                    disabled={confirmDisabled || effectiveBusy}
+                    busy={effectiveBusy}
+                    onClick={() => void submit()}
                   >
                     {confirmText}
                   </Button>

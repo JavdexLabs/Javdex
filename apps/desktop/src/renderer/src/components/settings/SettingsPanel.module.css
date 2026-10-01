@@ -1,0 +1,30 @@
+.panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  padding: var(--settings-card-pad-y, 16px) var(--settings-card-pad-x, 18px);
+}
+
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-title, 700);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.titleStandalone {
+  margin-bottom: 12px;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.headTopAligned {
+  align-items: flex-start;
+}

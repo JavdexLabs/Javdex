@@ -1,0 +1,59 @@
+.root {
+  flex: 1;
+  min-height: var(--control-h-md);
+  background: var(--surface-control);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 11px 14px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast);
+}
+
+.root:hover {
+  border-color: var(--border-strong);
+}
+
+.root:focus {
+  border-color: var(--border-accent);
+  box-shadow: var(--search-focus-shadow, var(--focus-ring));
+}
+
+.root[data-full-width] {
+  width: 100%;
+}
+
+.root[data-variant='compact'] {
+  flex: 0 0 var(--control-h-md);
+  height: var(--control-h-md);
+}
+
+.root[data-variant='toolbar'] {
+  --search-focus-shadow: 0 0 0 3px var(--accent-soft);
+
+  box-sizing: border-box;
+  min-width: 160px;
+  max-width: min(420px, 48vw);
+  height: var(--toolbar-control-h, var(--control-h-md));
+  min-height: var(--toolbar-control-h, var(--control-h-md));
+  padding: 0 14px 0 36px;
+  flex: 1 1 auto;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23888888' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242 1.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 12px center;
+  background-size: 16px;
+}
+
+.root[data-adornment] {
+  width: 100%;
+  max-width: none;
+  padding-inline-end: 66px;
+}
+
+@media (width <= 1120px) {
+  .root[data-variant='toolbar'] {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}

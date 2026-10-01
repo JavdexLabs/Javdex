@@ -26,7 +26,24 @@ afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;v
 function text(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:text(child)).join('')}
 async function resolve(index:number,offset=0,total=125){await act(async()=>requests[index].resolve({offset,total,limit:60,hasExactName:false,items:Array.from({length:Math.min(60,total-offset)},(_,i)=>({id:offset+i+1,name:`List ${offset+i+1}`,description:null,preview_cover_path:null,video_count:0,contains_video:false}))}))}
 async function click(label:string){if(label==='下一页'){position+=60;await viewport.scroll(renderer!,position);return}const button=renderer!.root.findAllByType('button').find(node=>text(node)===label)!;assert.ok(button,label);assert.ok(!button.props.disabled);await act(async()=>button.props.onClick())}
-function cards(){return renderer!.root.findAllByType('button').filter(node=>String(node.props.className).startsWith('playlist-card '))}
+function cards(){return renderer!.root.findAllByType('button').filter(node=>node.props['data-playlist-card'])}
+it('keeps a pending search draft when the grid reports the unchanged URL page', async () => {
+  await mount(); await resolve(0)
+  await act(async () => renderer!.root.findByType('input').props.onChange({ target: { value: 'draft' } }))
+  await viewport.scroll(renderer!, 0)
+  assert.equal(renderer!.root.findByType('input').props.value, 'draft')
+  await act(async () => { await new Promise(done => setTimeout(done, 330)) })
+  assert.match(url, /q=draft/)
+})
+it('keeps a pending search draft when scrolling reaches another page before debounce', async () => {
+  await mount(); await resolve(0)
+  await act(async () => renderer!.root.findByType('input').props.onChange({ target: { value: 'draft' } }))
+  await viewport.scroll(renderer!, 60)
+  assert.equal(renderer!.root.findByType('input').props.value, 'draft')
+  await act(async () => { await new Promise(done => setTimeout(done, 330)) })
+  assert.match(url, /q=draft/)
+  assert.doesNotMatch(url, /playlistOffset/)
+})
 it('pages 60/60/5 in URL and restores the same page after nested detail without full reads',async()=>{
   await mount();assert.equal(full,0);await resolve(0);assert.ok(cards().length > 0 && cards().length <= 8)
   await click('下一页');assert.match(url,/playlistOffset=60/);await resolve(1,60)

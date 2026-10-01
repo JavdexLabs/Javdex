@@ -9,6 +9,7 @@ import type {
 import { FACET_LABEL } from '../facet'
 import { usePreviewCommand } from '../hooks/usePreviewCommand'
 import Modal from './Modal'
+import ClassificationDeleteNotice, { ClassificationDeleteError } from './ClassificationDeleteNotice'
 
 interface CommonProps {
   organizationName: string
@@ -71,11 +72,9 @@ function OrganizationCommandModal<TImpact, TResult>({
       onCancel={onCancel}
       onConfirm={() => void execute()}
     >
-      <div className="classification-delete-confirmation selectable-text">
-        {!impact && !error ? <p>正在检查影响范围…</p> : null}
+      <ClassificationDeleteNotice pending={!impact} error={error}>
         {impact ? renderImpact(impact) : null}
-        {error ? <p className="classification-maintenance-error">{error}</p> : null}
-      </div>
+      </ClassificationDeleteNotice>
     </Modal>
   )
 }
@@ -106,13 +105,13 @@ function OrganizationRoleRemovalModal({
             部影片的{roleLabel}关联。
           </p>
           {impact.canRemove ? (
-            <p className="classification-delete-confirmation__safe">
+            <p>
               其他机构角色、共享机构资料、所属系列和品牌图均会保留。
             </p>
           ) : (
-            <p className="classification-maintenance-error">
+            <ClassificationDeleteError>
               这是该机构的最后一个角色，不能单独移除。请取消后使用“完整删除机构”。
-            </p>
+            </ClassificationDeleteError>
           )}
         </>
       )}
@@ -143,7 +142,7 @@ function FullOrganizationDeleteModal({
             {impact.directChildCount} 个直属子机构变为无上级、{impact.ownedSeriesCount}{' '}
             个所属系列变为未归属。
           </p>
-          <p className="classification-delete-confirmation__safe">
+          <p>
             影片、影片资源及其他影片元数据不会被删除。机构资料与品牌图将被永久移除。
           </p>
         </>

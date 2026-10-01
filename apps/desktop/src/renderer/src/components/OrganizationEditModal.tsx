@@ -1,6 +1,7 @@
+import TextInput from './TextInput'
+import TextArea from './TextArea'
 import Checkbox from '../../../../../../packages/ui/src/Checkbox'
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type {
   OrganizationDetail,
   OrganizationRole,
@@ -10,17 +11,14 @@ import Modal from './Modal'
 import SelectControl from './SelectControl'
 import AliasTagEditor from './AliasTagEditor'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
-import { EditFormField, EditFormSection } from './FormPrimitives'
+import { EditForm, EditFormCheckRow, EditFormField, EditFormFields, EditFormLabelNote, EditFormSection } from './FormPrimitives'
 import {
   createOrganizationFormDraft,
   organizationUpdateInputFromDraft
 } from './organizationFormState'
 import { promoteAliasToMain } from './aliasEditorState'
-import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
-import { UI_ICON_SM } from './iconDefaults'
-import IconButton from './IconButton'
+import RelatedLinksEditor from './RelatedLinksEditor'
 import { FACET_LABEL } from '../facet'
-import Button from './Button'
 
 interface Props {
   role: OrganizationRole
@@ -36,8 +34,6 @@ export default function OrganizationEditModal({
   onSave
 }: Props): JSX.Element {
   const [draft, setDraft] = useState(() => createOrganizationFormDraft(organization))
-  const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } =
-    useClassificationLinkKeys(draft.links.length)
   const [saving, setSaving] = useState(false)
   const isEditing = Boolean(organization)
 
@@ -55,19 +51,19 @@ export default function OrganizationEditModal({
       title={isEditing ? '编辑机构资料' : `新增${FACET_LABEL[role]}`}
 
       size="lg"
-      className="modal-entity-edit"
-      confirmText={saving ? '保存中…' : '保存'}
+      busy={saving}
+      confirmText="保存"
       confirmDisabled={saving || !draft.mainName.trim()}
       onCancel={onCancel}
-      onConfirm={() => void save()}
+      onConfirm={save}
     >
-      <div className="entity-edit-form">
+      <EditForm>
         <EditFormSection title="名称与简介">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField label="主名" htmlFor="organization-main-name" span={2}>
-              <input
+              <TextInput
                 id="organization-main-name"
-                className="text-input"
+                density="workspace"
                 value={draft.mainName}
                 autoFocus
                 onChange={(event) => setDraft({ ...draft, mainName: event.target.value })}
@@ -79,9 +75,9 @@ export default function OrganizationEditModal({
               span={2}
               labelExtra={
                 draft.aliases.length > 0 ? (
-                  <span id="organization-aliases-hint" className="entity-edit-label-note">
+                  <EditFormLabelNote id="organization-aliases-hint">
                     点击设为主名
-                  </span>
+                  </EditFormLabelNote>
                 ) : undefined
               }
             >
@@ -97,7 +93,7 @@ export default function OrganizationEditModal({
               />
             </EditFormField>
             {isEditing && draft.mainName.trim() !== organization?.mainName ? (
-              <label className="check-row entity-edit-field--full">
+              <EditFormCheckRow>
                 <Checkbox
                   checked={draft.keepPreviousMainName}
                   onChange={(event) =>
@@ -105,7 +101,7 @@ export default function OrganizationEditModal({
                   }
                 />
                 <span>将旧主名保留为别名</span>
-              </label>
+              </EditFormCheckRow>
             ) : null}
             <EditFormField
               label="简介"
@@ -119,23 +115,23 @@ export default function OrganizationEditModal({
                 />
               }
             >
-              <textarea
+              <TextArea
                 id="organization-summary"
-                className="text-input"
+                density="workspace"
                 rows={5}
                 value={draft.summary}
                 onChange={(event) => setDraft({ ...draft, summary: event.target.value })}
               />
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
 
         <EditFormSection title="机构信息">
-          <div className="entity-edit-fields">
+          <EditFormFields>
             <EditFormField label="国家或地区" htmlFor="organization-country">
-              <input
+              <TextInput
                 id="organization-country"
-                className="text-input"
+                density="workspace"
                 value={draft.countryRegion}
                 onChange={(event) => setDraft({ ...draft, countryRegion: event.target.value })}
               />
@@ -157,112 +153,28 @@ export default function OrganizationEditModal({
               </SelectControl>
             </EditFormField>
             <EditFormField label="成立年份" htmlFor="organization-founded-year">
-              <input
+              <TextInput
                 id="organization-founded-year"
-                className="text-input"
+                density="workspace"
                 inputMode="numeric"
                 value={draft.foundedYear}
                 onChange={(event) => setDraft({ ...draft, foundedYear: event.target.value })}
               />
             </EditFormField>
             <EditFormField label="停止年份" htmlFor="organization-ended-year">
-              <input
+              <TextInput
                 id="organization-ended-year"
-                className="text-input"
+                density="workspace"
                 inputMode="numeric"
                 value={draft.endedYear}
                 onChange={(event) => setDraft({ ...draft, endedYear: event.target.value })}
               />
             </EditFormField>
-          </div>
+          </EditFormFields>
         </EditFormSection>
 
-        <EditFormSection title="相关链接">
-          <div className="organization-link-editor">
-            {draft.links.map((link, index) => (
-              <div className="organization-link-editor-row" key={linkKeys[index]}>
-                <input
-                  className="text-input"
-                  value={link.label}
-                  aria-label={`链接 ${index + 1} 名称`}
-                  placeholder="名称"
-                  onChange={(event) => {
-                    const links = [...draft.links]
-                    links[index] = { ...link, label: event.target.value }
-                    setDraft({ ...draft, links })
-                  }}
-                />
-                <input
-                  className="text-input"
-                  value={link.url}
-                  aria-label={`链接 ${index + 1} 地址`}
-                  placeholder="https://"
-                  onChange={(event) => {
-                    const links = [...draft.links]
-                    links[index] = { ...link, url: event.target.value }
-                    setDraft({ ...draft, links })
-                  }}
-                />
-                <div className="organization-link-actions">
-                  <IconButton
-                    className="organization-link-action"
-                    label={`上移链接 ${index + 1}`}
-                    icon={<ChevronUp {...UI_ICON_SM} aria-hidden />}
-                    disabled={index === 0}
-                    onClick={() => {
-                      setDraft({
-                        ...draft,
-                        links: moveClassificationLink(draft.links, index, index - 1)
-                      })
-                      moveLinkKey(index, index - 1)
-                    }}
-                  />
-                  <IconButton
-                    className="organization-link-action"
-                    label={`下移链接 ${index + 1}`}
-                    icon={<ChevronDown {...UI_ICON_SM} aria-hidden />}
-                    disabled={index === draft.links.length - 1}
-                    onClick={() => {
-                      setDraft({
-                        ...draft,
-                        links: moveClassificationLink(draft.links, index, index + 1)
-                      })
-                      moveLinkKey(index, index + 1)
-                    }}
-                  />
-                  <IconButton
-                    className="organization-link-action"
-                    tone="danger"
-                    label={`移除链接 ${index + 1}`}
-                    icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
-                    onClick={() => {
-                      setDraft({
-                        ...draft,
-                        links: draft.links.filter((_, itemIndex) => itemIndex !== index)
-                      })
-                      removeLinkKey(index)
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="ghost"
-
-              size="sm"
-              className="organization-link-add"
-              onClick={() => {
-                setDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })
-                appendLinkKey()
-              }}
-            >
-              <Plus {...UI_ICON_SM} aria-hidden />
-              添加链接
-            </Button>
-          </div>
-        </EditFormSection>
-      </div>
+        <RelatedLinksEditor links={draft.links} removeVerb="移除" onChange={(links) => setDraft({ ...draft, links })} />
+      </EditForm>
     </Modal>
   )
 }

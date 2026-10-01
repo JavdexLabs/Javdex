@@ -16,6 +16,8 @@ import Modal from './Modal'
 import EmptyState from './EmptyState'
 import { UI_ICON_SM } from './iconDefaults'
 import Button from './Button'
+import SearchInput from './SearchInput'
+import styles from './MergeActressModal.module.css'
 
 interface Props {
   keepActress: Omit<ActressMetadata, 'gallery'> & ({ gallery: ActressMetadata['gallery'] } | { gallery_count: number })
@@ -47,14 +49,14 @@ function MergeActressCard({
 
   return (
     <div
-      className={`merge-actress-card${empty ? ' merge-actress-card--empty' : ''}${
-        highlighted ? ' merge-actress-card--highlight' : ''
-      }`}
+      className={styles.card}
+      data-empty={empty}
+      data-highlighted={highlighted}
     >
-      <span className="merge-actress-card-badge">{badge}</span>
+      <span className={styles.cardBadge}>{badge}</span>
       {empty ? (
-        <div className="merge-actress-card-avatar" aria-hidden="true">
-          <span className="merge-actress-card-placeholder">
+        <div className={styles.cardAvatar} aria-hidden="true">
+          <span className={styles.cardPlaceholder}>
             <UserRound {...UI_ICON_SM} />
           </span>
         </div>
@@ -63,23 +65,23 @@ function MergeActressCard({
           src={avatar}
           name={actress?.main_name ?? ''}
           gender={actress?.gender}
-          className="merge-actress-card-avatar"
+          className={styles.cardAvatar}
           decorative
         />
       )}
-      <div className="merge-actress-card-body">
+      <div className={styles.cardBody}>
         {empty ? (
           <>
-            <div className="merge-actress-card-name merge-actress-card-name--muted">选择演员</div>
-            <div className="merge-actress-card-meta">在下方列表中选择要并入的一名演员</div>
+            <div className={styles.cardName} data-muted>选择演员</div>
+            <div className={styles.cardMeta}>在下方列表中选择要并入的一名演员</div>
           </>
         ) : (
           actress && (
             <>
-              <div className="merge-actress-card-name">
+              <div className={styles.cardName}>
                 <ActressName name={actress.main_name} gender={actress.gender} />
               </div>
-              <div className="merge-actress-card-meta">
+              <div className={styles.cardMeta}>
                 {actress.video_count} 部影片
                 {actress.gallery_count != null ? ` · ${actress.gallery_count} 张写真` : ''}
               </div>
@@ -176,7 +178,7 @@ function MergeActressSession({
       hint={`将另一名${actressGenderMergeLabel(keepActress.gender)}资料并入当前条目。列表只显示可合并候选；影片与写真会保留，对方记录将被删除。`}
 
       size="md"
-      className="merge-actress-modal"
+      className={styles.modal}
       bodyOverflow="hidden"
       onCancel={onCancel}
       closeDisabled={merging}
@@ -196,10 +198,10 @@ function MergeActressSession({
         </>
       }
     >
-      <div className="merge-actress-body">
-        <div className="merge-actress-flow" aria-label="合并预览">
+      <div className={styles.body}>
+        <div className={styles.flow} data-merge-actress-part="flow" aria-label="合并预览">
           <MergeActressCard actress={keepCard} badge="保留当前" highlighted />
-          <div className="merge-actress-flow-arrow" aria-hidden="true">
+          <div className={styles.flowArrow} aria-hidden="true">
             <span>并入当前</span>
           </div>
           <MergeActressCard
@@ -210,15 +212,15 @@ function MergeActressSession({
           />
         </div>
 
-        <section className="merge-actress-section merge-actress-picker" aria-label="选择演员">
-          <div className="merge-actress-section-head">
-            <span className="merge-actress-section-title">选择要合并的演员</span>
+        <section className={`${styles.section} ${styles.picker}`} data-merge-actress-part="picker" aria-label="选择演员">
+          <div className={styles.sectionHead}>
+            <span className={styles.sectionTitle}>选择要合并的演员</span>
             {!loading && items.length > 0 && (
-              <span className="merge-actress-section-meta">可按名称搜索</span>
+              <span className={styles.sectionMeta}>可按名称搜索</span>
             )}
           </div>
-          <input
-            className="search-input merge-actress-search"
+          <SearchInput
+            fullWidth
             type="search"
             placeholder="搜索主名或别名…"
             aria-label="搜索合并候选"
@@ -229,16 +231,17 @@ function MergeActressSession({
             autoFocus
           />
 
-          <div className="merge-actress-pick-panel">
+          <div className={styles.pickPanel}>
             {loading ? (
-              <EmptyState variant="modal" loading />
+              <EmptyState className={styles.empty} variant="modal" loading />
             ) : pageError && !candidates.total ? (
-              <div role="alert" className="merge-actress-page-error">
+              <div role="alert" className={styles.pageError}>
                 <p>合并候选读取失败</p>
                 <Button size="sm" disabled={merging} onClick={candidates.reload}>重试</Button>
               </div>
             ) : items.length === 0 ? (
               <EmptyState
+                className={styles.empty}
                 variant="modal"
                 icon={<SearchX {...UI_ICON_SM} aria-hidden />}
                 title={debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
@@ -258,23 +261,23 @@ function MergeActressSession({
                       role="option"
                       aria-label={`选择合并演员 ${item.main_name}`}
                       aria-selected={isSelected}
-                      className={`merge-actress-pick-item${isSelected ? ' is-selected' : ''}`}
+                      className={styles.pickItem}
                       disabled={merging}
                       onClick={() => { setSelected(isSelected ? null : item); setMainNameFrom('keep') }}
                     >
-                      <span className="merge-actress-pick-radio" aria-hidden="true" />
+                      <span className={styles.pickRadio} aria-hidden="true" />
                       <ActressAvatar
                         src={assetUrl(item.avatar_path)}
                         name={item.main_name}
                         gender={item.gender}
-                        className="merge-actress-pick-avatar"
+                        className={styles.pickAvatar}
                         decorative
                       />
-                      <span className="merge-actress-pick-main">
-                        <span className="merge-actress-pick-name">
+                      <span className={styles.pickMain}>
+                        <span className={styles.pickName}>
                           <ActressName name={item.main_name} gender={item.gender} />
                         </span>
-                        <span className="merge-actress-pick-meta">{item.video_count} 部影片</span>
+                        <span className={styles.pickMeta}>{item.video_count} 部影片</span>
                       </span>
                     </button>
                   )
@@ -285,17 +288,18 @@ function MergeActressSession({
         </section>
 
         <section
-          className={`merge-actress-section merge-actress-plan${
-            selected ? '' : ' merge-actress-plan--empty'
-          }`}
+          className={`${styles.section} ${styles.plan}`}
+          data-empty={!selected}
+          data-merge-actress-part="plan"
           aria-label="合并方案"
         >
-          <div className="merge-actress-section-title">合并方案</div>
+          <div className={styles.sectionTitle}>合并方案</div>
           {selected ? (
             <>
-              <div className="merge-name-options">
+              <div className={styles.nameOptions}>
                 <label
-                  className={`merge-name-option${mainNameFrom === 'keep' ? ' is-active' : ''}`}
+                  className={styles.nameOption}
+                  data-active={mainNameFrom === 'keep'}
                 >
                   <input
                     type="radio"
@@ -304,13 +308,14 @@ function MergeActressSession({
                     checked={mainNameFrom === 'keep'}
                     onChange={() => setMainNameFrom('keep')}
                   />
-                  <span className="merge-name-option-copy">
-                    <span className="merge-name-option-label">保留当前主名</span>
-                    <span className="merge-name-option-value">{keepActress.main_name}</span>
+                  <span className={styles.nameCopy}>
+                    <span className={styles.nameLabel}>保留当前主名</span>
+                    <span className={styles.nameValue}>{keepActress.main_name}</span>
                   </span>
                 </label>
                 <label
-                  className={`merge-name-option${mainNameFrom === 'merge' ? ' is-active' : ''}`}
+                  className={styles.nameOption}
+                  data-active={mainNameFrom === 'merge'}
                 >
                   <input
                     type="radio"
@@ -319,14 +324,14 @@ function MergeActressSession({
                     checked={mainNameFrom === 'merge'}
                     onChange={() => setMainNameFrom('merge')}
                   />
-                  <span className="merge-name-option-copy">
-                    <span className="merge-name-option-label">使用对方主名</span>
-                    <span className="merge-name-option-value">{selected.main_name}</span>
+                  <span className={styles.nameCopy}>
+                    <span className={styles.nameLabel}>使用对方主名</span>
+                    <span className={styles.nameValue}>{selected.main_name}</span>
                   </span>
                 </label>
               </div>
 
-              <ul className="merge-actress-summary">
+              <ul className={styles.summary}>
                 <li>
                   当前条目保留为「{finalMainName}」，对方记录将删除
                 </li>
@@ -343,13 +348,13 @@ function MergeActressSession({
               </ul>
             </>
           ) : (
-            <div className="merge-actress-plan-empty">
+            <div className={styles.planEmpty}>
               先选择一名要并入的演员，再确认合并后的主名、影片数量和别名处理。
             </div>
           )}
         </section>
 
-        {error && <p ref={errorRef} role="alert" className="merge-actress-error">{error}</p>}
+        {error && <p ref={errorRef} role="alert" className={styles.error}>{error}</p>}
       </div>
     </Modal>
   )

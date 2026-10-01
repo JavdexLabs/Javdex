@@ -123,10 +123,10 @@ it('places LAN access after the library card and jumps each status card to its s
     await Promise.resolve()
   })
   const cards = renderer!.root
-    .findByProps({ className: 'settings-overview-status-grid' })
+    .findByProps({ 'data-settings-status-grid': true })
     .findAllByType('button')
   const labels = cards.map((card) =>
-    collectText(card.findByProps({ className: 'settings-overview-status-card-label' }))
+    collectText(card.findByProps({ 'data-settings-status-label': true }))
   )
   assert.deepEqual(labels, [
     '媒体库',

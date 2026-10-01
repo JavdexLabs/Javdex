@@ -1,3 +1,4 @@
+import TextInput from '../TextInput'
 import Switch from '../Switch'
 import SettingsSwitchRow from '../SettingsSwitchRow'
 import { useMemo, useRef, useState } from 'react'
@@ -24,6 +25,7 @@ import { SettingsNumberStepper } from './SettingsPrimitives'
 import { defaultPluginDelay, pluginSourceLabel } from '../../settings/settingsDisplay'
 import Button from '../Button'
 import SettingsFeedback from './SettingsFeedback'
+import PluginSourceBadge from '../PluginSourceBadge'
 import styles from './PluginConfigModals.module.css'
 
 export type PluginKind = 'video' | 'actress'
@@ -197,7 +199,6 @@ export function PluginConfigModal({
         confirmText="保存"
         confirmDisabled={saving}
         size="lg"
-        className="modal-plugin-editor"
         busy={saving}
         onCancel={handleCancel}
         onConfirm={() => {
@@ -205,27 +206,19 @@ export function PluginConfigModal({
           else commitSave()
         }}
       >
-        <div className="plugin-edit-form plugin-edit-form--config">
+        <div className={styles.form}>
           {(plugin.overridesBuiltIn || !editableMeta) && (
-            <header className="plugin-config-hero">
-              <div className="plugin-config-hero-top">
-                <span
-                  className={`plugin-source-badge plugin-source-badge--${
-                    plugin.source === 'user'
-                      ? 'user'
-                      : plugin.source === 'composite'
-                        ? 'composite'
-                        : 'builtin'
-                  }`}
-                >
+            <header className={styles.hero}>
+              <div className={styles.heroTop}>
+                <PluginSourceBadge source={plugin.source}>
                   {pluginSourceLabel(plugin)}
-                </span>
+                </PluginSourceBadge>
                 {plugin.overridesBuiltIn && (
-                  <span className="plugin-config-note">覆盖内置同名插件</span>
+                  <span className={styles.note}>覆盖内置同名插件</span>
                 )}
               </div>
               {!editableMeta && (
-                <p className="plugin-config-hint">
+                <p className={styles.hint}>
                   {plugin.requiresConfiguration
                     ? '此内置插件连接你指定的服务端；服务凭证仅由主进程安全保存。'
                     : '内置插件可调整访问间隔；需要登入的网站可开启刮削前预登入。查看或调试代码请使用卡片菜单「AI 调试」。'}
@@ -234,52 +227,52 @@ export function PluginConfigModal({
             </header>
           )}
 
-          <section className="plugin-config-panel">
-            <h4 className="plugin-config-panel-title">基本信息</h4>
+          <section className={styles.panel}>
+            <h4 className={styles.panelTitle}>基本信息</h4>
             {editableMeta ? (
-              <div className="plugin-config-meta-stack">
-                <dl className="plugin-config-meta">
-                  <div className="plugin-config-meta-row">
+              <div className={styles.metaStack}>
+                <dl className={styles.meta}>
+                  <div className={styles.metaRow}>
                     <dt>版本</dt>
                     <dd>{versionLabel}</dd>
                   </div>
-                  <div className="plugin-config-meta-row">
+                  <div className={styles.metaRow}>
                     <dt>主页</dt>
-                    <dd className="plugin-config-meta-value--truncate" title={homepageLabel}>
+                    <dd className={styles.metaValueTruncate} title={homepageLabel}>
                       {homepageLabel}
                     </dd>
                   </div>
-                  <div className="plugin-config-meta-row">
+                  <div className={styles.metaRow}>
                     <dt>作者</dt>
                     <dd>{authorLabel}</dd>
                   </div>
                 </dl>
-                <label className="plugin-edit-control plugin-config-description-field">
+                <label className={styles.descriptionField}>
                   <span>说明</span>
-                  <input
-                    className="text-input"
+                  <TextInput
+                    density="workspace"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                   />
                 </label>
               </div>
             ) : (
-              <dl className="plugin-config-meta">
-                <div className="plugin-config-meta-row">
+              <dl className={styles.meta}>
+                <div className={styles.metaRow}>
                   <dt>版本</dt>
                   <dd>{versionLabel}</dd>
                 </div>
-                <div className="plugin-config-meta-row">
+                <div className={styles.metaRow}>
                   <dt>主页</dt>
-                  <dd className="plugin-config-meta-value--truncate" title={homepageLabel}>
+                  <dd className={styles.metaValueTruncate} title={homepageLabel}>
                     {homepageLabel}
                   </dd>
                 </div>
-                <div className="plugin-config-meta-row">
+                <div className={styles.metaRow}>
                   <dt>作者</dt>
                   <dd>{authorLabel}</dd>
                 </div>
-                <div className="plugin-config-meta-row plugin-config-meta-row--wide">
+                <div className={`${styles.metaRow} ${styles.metaRowWide}`}>
                   <dt>说明</dt>
                   <dd>{description.trim() || '—'}</dd>
                 </div>
@@ -288,9 +281,9 @@ export function PluginConfigModal({
           </section>
 
           {serviceConfig && (
-            <section className={`plugin-config-panel ${styles.servicePanel}`}>
-              <div className="plugin-config-panel-head">
-                <h4 className="plugin-config-panel-title">MetaTube Server</h4>
+            <section className={`${styles.panel} ${styles.servicePanel}`}>
+              <div className={styles.panelHead}>
+                <h4 className={styles.panelTitle}>MetaTube Server</h4>
                 <span
                   className={styles.serviceStatus}
                   data-configured={Boolean(serviceConfig.serverUrl)}
@@ -301,8 +294,8 @@ export function PluginConfigModal({
               <div className={styles.serviceGrid}>
                 <label className={styles.fullField}>
                   <span>服务端地址</span>
-                  <input
-                    className="text-input"
+                  <TextInput
+                    density="workspace"
                     value={serverUrl}
                     placeholder="http://127.0.0.1:8080"
                     disabled={saving}
@@ -321,8 +314,8 @@ export function PluginConfigModal({
                 <label className={styles.fullField}>
                   <span>访问令牌（可选）</span>
                   <div className={styles.tokenRow}>
-                    <input
-                      className="text-input"
+                    <TextInput
+                      density="workspace"
                       type={showToken ? 'text' : 'password'}
                       value={token}
                       placeholder={
@@ -436,13 +429,13 @@ export function PluginConfigModal({
             </section>
           )}
 
-          <section className="plugin-config-panel plugin-config-panel--accent">
-            <div className="plugin-config-panel-head">
-              <h4 className="plugin-config-panel-title">访问间隔</h4>
-              <span className="plugin-config-panel-caption">批量刮削时按站点独立计算</span>
+          <section className={`${styles.panel} ${styles.panelAccent}`}>
+            <div className={styles.panelHead}>
+              <h4 className={styles.panelTitle}>访问间隔</h4>
+              <span className={styles.caption}>批量刮削时按站点独立计算</span>
             </div>
-            <div className="plugin-config-delay">
-              <label className="plugin-config-delay-field">
+            <div className={styles.delay}>
+              <label className={styles.delayField}>
                 <span>最小</span>
                 <SettingsNumberStepper
                   aria-label="最小访问间隔（秒）"
@@ -451,6 +444,7 @@ export function PluginConfigModal({
                   max={600}
                   step={1}
                   unit="秒"
+                  fill
                   disabled={saving}
                   onChange={(next) => {
                     setMinSeconds(next)
@@ -458,10 +452,10 @@ export function PluginConfigModal({
                   }}
                 />
               </label>
-              <span className="plugin-config-delay-sep" aria-hidden>
+              <span className={styles.delaySep} aria-hidden>
                 —
               </span>
-              <label className="plugin-config-delay-field">
+              <label className={styles.delayField}>
                 <span>最大</span>
                 <SettingsNumberStepper
                   aria-label="最大访问间隔（秒）"
@@ -470,6 +464,7 @@ export function PluginConfigModal({
                   max={600}
                   step={1}
                   unit="秒"
+                  fill
                   disabled={saving}
                   onChange={(next) => setMaxSeconds(Math.max(next, minSeconds))}
                 />
@@ -478,12 +473,12 @@ export function PluginConfigModal({
           </section>
 
           {plugin.preLoginAvailable ? (
-            <section className="plugin-config-panel">
-              <h4 className="plugin-config-panel-title">预登入</h4>
-              <p className="plugin-config-panel-caption plugin-config-panel-caption--block">
+            <section className={styles.panel}>
+              <h4 className={styles.panelTitle}>预登入</h4>
+              <p className={`${styles.caption} ${styles.captionBlock}`}>
                 刮削前打开网站主页，由你在当前页完成登入
               </p>
-              <div className="settings-toggle-list settings-toggle-list--compact">
+              <div className={styles.toggleList}>
                 <SettingsSwitchRow
                   title="刮削前预登入"
                   description="开启后，该插件每次刮削任务会先打开主页。请在当前页登入或通过验证，再点窗口顶部操作栏「登入完成」。不支持弹出新窗口的登入。批量刮削同一插件只询问一次。组合来源会按字段源依次打开需要登入的主页。"
@@ -495,24 +490,25 @@ export function PluginConfigModal({
             </section>
           ) : null}
 
-          <section className="plugin-config-panel">
-            <div className="plugin-config-panel-head">
-              <h4 className="plugin-config-panel-title">支持字段</h4>
-              <span className="plugin-config-field-count">
+          <section className={styles.panel}>
+            <div className={styles.panelHead}>
+              <h4 className={styles.panelTitle}>支持字段</h4>
+              <span className={styles.fieldCount}>
                 {supportedCount}/{allFields.length}
               </span>
             </div>
-            <p className="plugin-config-panel-caption plugin-config-panel-caption--block">
+            <p className={`${styles.caption} ${styles.captionBlock}`}>
               由插件实现决定，不可在此修改
             </p>
-            <div className="plugin-config-field-grid" role="list" aria-label="支持字段">
+            <div className={styles.fieldGrid} role="list" aria-label="支持字段">
               {allFields.map((field) => {
                 const supported = supportedFieldSet.has(field)
                 return (
                   <span
                     key={field}
                     role="listitem"
-                    className={`plugin-config-field-chip${supported ? ' is-on' : ' is-off'}`}
+                    className={styles.fieldChip}
+                    data-supported={supported}
                   >
                     {fieldLabel(kind, field)}
                   </span>

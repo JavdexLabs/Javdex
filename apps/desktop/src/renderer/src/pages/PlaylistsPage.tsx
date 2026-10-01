@@ -1,8 +1,11 @@
+import PageHeader from '../components/PageHeader'
+import ListPage from '../components/ListPage'
+import ResultCount from '../components/ResultCount'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { ListVideo, SearchX } from 'lucide-react'
-import type { PlaylistCreateInput, PlaylistBrowseItem } from '@shared/playlistTypes'
-import { api, assetUrl } from '../api'
+import type { PlaylistCreateInput } from '@shared/playlistTypes'
+import { api } from '../api'
 import { usePlaylistBrowsePage } from '../hooks/usePlaylistBrowsePage'
 import ContinuousGrid from '../components/ContinuousGrid'
 import { LIST_PARAM, PLAYLIST_PAGE_SIZE, parsePlaylistOffset, patchSearchParams } from '../listView/listQueryParams'
@@ -18,12 +21,9 @@ import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import Button from '../components/Button'
+import PlaylistCard from '../components/PlaylistCard'
 import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
 import { onPlaylistImportCompleted } from '../components/playlistImport/events'
-
-function playlistListCover(item: PlaylistBrowseItem): string | null {
-  return assetUrl(item.preview_cover_path, 640)
-}
 
 export default function PlaylistsPage(): JSX.Element {
   const navigate = useNavigate()
@@ -60,11 +60,14 @@ export default function PlaylistsPage(): JSX.Element {
   const loading=page.loading
   const loadList=page.reload
   const move=useCallback((next:number)=>{
+    // Search will reset the page on commit; an incidental anchor must not discard its draft.
+    if (draft?.context === context && draft.value.trim() !== urlQ.trim()) return
     const normalized=parsePlaylistOffset(String(next))
+    if (searchParams.get(LIST_PARAM.playlistOffset) === (normalized ? String(normalized) : null)) return
     setSearchParams(previous=>patchSearchParams(previous,{
       [LIST_PARAM.playlistOffset]:normalized ? String(normalized) : null
     }),{replace:true})
-  },[setSearchParams])
+  },[context,draft,urlQ,searchParams,setSearchParams])
 
   const generation=useRef(0)
   useEffect(()=>{
@@ -83,20 +86,13 @@ export default function PlaylistsPage(): JSX.Element {
 
   const createPlaylist = async (input: PlaylistCreateInput): Promise<void> => {
     const token=generation.current
-    try {
-      const newId = await api.playlists.create(input)
-      if(generation.current!==token)return
-      setShowCreate(false)
-      toast.show('播放清单已创建', 'success')
-      await loadList()
-      if(generation.current===token)navigateToPlaylistDetail(navigate, location, newId)
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
+    const newId = await api.playlists.create(input)
+    if(generation.current!==token)return
+    setShowCreate(false)
+    toast.show('播放清单已创建', 'success')
+    await loadList()
+    if(generation.current===token)navigateToPlaylistDetail(navigate, location, newId)
   }
-
-  const renderCover = (cover: string | null, label: string): JSX.Element =>
-    cover ? <img src={cover} alt={label} /> : <span>无封面</span>
 
   const renderList = (): JSX.Element => {
     if (loading) {
@@ -128,37 +124,15 @@ export default function PlaylistsPage(): JSX.Element {
       )
     }
     return (
-      <ContinuousGrid window={page.window} scope={scrollMemoryKey} label="播放清单" minWidth={260} itemHeight={112} pageSize={PLAYLIST_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / PLAYLIST_PAGE_SIZE) * PLAYLIST_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => {
-          const cover = playlistListCover(item)
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={`playlist-card card-interactive${activeId === item.id ? ' active' : ''}`}
-              onClick={() => navigateToPlaylistDetail(navigate, location, item.id)}
-            >
-              <div className="playlist-card-cover">
-                {renderCover(cover, item.name)}
-                <span className="playlist-card-count">{item.video_count}</span>
-              </div>
-              <div className="playlist-card-main">
-                <div className="playlist-card-name">{item.name}</div>
-                <div className="playlist-card-meta">{item.video_count} 部影片</div>
-                {item.description ? (
-                  <div className="playlist-card-desc">{item.description}</div>
-                ) : (
-                  <div className="playlist-card-desc playlist-card-desc--empty">暂无简介</div>
-                )}
-              </div>
-            </button>
-          )
-        }} />
+      <ContinuousGrid window={page.window} scope={scrollMemoryKey} label="播放清单" minWidth={260} itemHeight={112} pageSize={PLAYLIST_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / PLAYLIST_PAGE_SIZE) * PLAYLIST_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => (
+        <PlaylistCard key={item.id} item={item} active={activeId === item.id} onOpen={() => navigateToPlaylistDetail(navigate, location, item.id)} />
+      )} />
     )
   }
 
   return (
-    <div className="list-page">
-      <div className="topbar">
+    <ListPage >
+      <PageHeader >
         <ListToolbar
           search={{
             value: searchInput,
@@ -188,12 +162,12 @@ export default function PlaylistsPage(): JSX.Element {
             </>
           }
           resultCount={
-            <span className="count-badge count-badge--stable" aria-live="polite">
+            <ResultCount  aria-live="polite">
               共 {page.known ? page.total : '…'} 个
-            </span>
+            </ResultCount>
           }
         />
-      </div>
+      </PageHeader>
 
       <ListSurface
         variant="scroll"
@@ -209,6 +183,6 @@ export default function PlaylistsPage(): JSX.Element {
       {showCreate && (
         <PlaylistCreateModal onCancel={() => setShowCreate(false)} onCreate={createPlaylist} />
       )}
-    </div>
+    </ListPage>
   )
 }

@@ -1,3 +1,56 @@
+.root {
+  position: sticky;
+  z-index: 30;
+  top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 3px;
+  border: 1px solid var(--detail-actions-border-color, color-mix(in srgb, var(--text-primary) 10%, transparent));
+  border-radius: var(--radius-overlay);
+  background: var(--detail-actions-background,
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-primary) 9%, transparent) 0%,
+      color-mix(in srgb, var(--text-primary) 2%, transparent) 44%,
+      transparent 100%
+    ),
+    color-mix(in srgb, var(--surface-panel) 18%, transparent));
+  box-shadow:
+    0 2px 10px color-mix(in srgb, var(--surface-base) 8%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 13%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--surface-base) 18%, transparent);
+}
+
+.root[data-variant='inline'] {
+  position: static;
+  z-index: auto;
+  top: auto;
+  flex-wrap: nowrap;
+  margin-top: 0;
+}
+
+.primary {
+  flex-shrink: 0;
+  gap: 7px;
+  min-width: 0;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--surface-base) 9%, transparent);
+}
+
+.actionGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
 .root > [data-ui='button'],
 .root[role='toolbar'] [data-ui='icon-button'] {
   box-sizing: border-box;
@@ -9,4 +62,22 @@
 .root[role='toolbar'] [data-ui='icon-button'] {
   width: var(--control-h-md);
   min-width: var(--control-h-md);
+}
+
+.root > [data-ui='button'] {
+  min-height: var(--workspace-button-min-height, var(--control-h-md));
+}
+
+@container detail-page (max-width: 720px) {
+  .root:not([data-variant='inline']) {
+    position: static;
+    width: 100%;
+    margin-top: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
 }

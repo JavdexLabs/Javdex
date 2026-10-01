@@ -54,11 +54,6 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
 }
 
-function wrap(kind: HighlightKind, text: string): string {
-  if (kind === 'plain') return escapeHtml(text)
-  return `<span class="code-hl-${kind}">${escapeHtml(text)}</span>`
-}
-
 function isIdentifierStart(ch: string): boolean {
   return /[a-zA-Z_$]/.test(ch)
 }
@@ -67,7 +62,12 @@ function isIdentifierPart(ch: string): boolean {
   return /[a-zA-Z0-9_$]/.test(ch)
 }
 
-export function highlightJavaScript(code: string): string {
+export function highlightJavaScript(
+  code: string,
+  classes: Record<Exclude<HighlightKind, 'plain'>, string>
+): string {
+  const wrap = (kind: HighlightKind, text: string): string =>
+    kind === 'plain' ? escapeHtml(text) : `<span class="${classes[kind]}">${escapeHtml(text)}</span>`
   let html = ''
   let i = 0
 

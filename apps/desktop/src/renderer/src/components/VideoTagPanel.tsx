@@ -10,9 +10,13 @@ import { AppFormField } from './FormPrimitives'
 import { useToast } from './Toast'
 import { Plus, SearchX, Tags, X } from 'lucide-react'
 import IconButton from './IconButton'
+import TextInput from './TextInput'
 import { UI_ICON, UI_ICON_SM } from './iconDefaults'
 import EmptyState from './EmptyState'
 import Button from './Button'
+import DetailSectionTitle from './DetailSectionTitle'
+import { DetailSection, DetailSectionCount, DetailSectionHead } from './DetailSection'
+import styles from './VideoTagPanel.module.css'
 
 interface Props {
   videoId: number
@@ -139,17 +143,17 @@ export default function VideoTagPanel({
   }
 
   return (
-    <section className="detail-section video-tag-panel" aria-label="影片标签">
-      <div className="detail-section-head">
-        <h2 className="section-title">标签</h2>
-        <span className="detail-section-count">{tags.length} 个</span>
-      </div>
-      <div className="tag-list">
+    <DetailSection className={styles.root} aria-label="影片标签" data-video-tag-panel>
+      <DetailSectionHead>
+        <DetailSectionTitle>标签</DetailSectionTitle>
+        <DetailSectionCount>{tags.length} 个</DetailSectionCount>
+      </DetailSectionHead>
+      <div className={styles.list}>
         {scrapedTags.map((tag) => (
           <button
             key={tag.id}
             type="button"
-            className="tag-chip tag-chip--scraped clickable"
+            className={`${styles.chip} ${styles.scraped}`}
             onClick={() => onFilterTag(tag)}
             title={`筛选刮削标签：${tag.name}`}
           >
@@ -157,10 +161,10 @@ export default function VideoTagPanel({
           </button>
         ))}
         {manualTags.map((tag) => (
-          <span key={tag.id} className="tag-chip tag-chip--custom">
+          <span key={tag.id} className={`${styles.chip} ${styles.custom}`}>
             <button
               type="button"
-              className="tag-chip-label"
+              className={styles.chipLabel}
               onClick={() => onFilterTag(tag)}
               title={`筛选自定义标签：${tag.name}`}
             >
@@ -168,7 +172,7 @@ export default function VideoTagPanel({
             </button>
             <button
               type="button"
-              className="tag-chip-remove"
+              className={styles.chipRemove}
               aria-label={`移除自定义标签 ${tag.name}`}
               disabled={busy}
               onClick={() => setRemoveSelection({ videoId, tag })}
@@ -178,7 +182,7 @@ export default function VideoTagPanel({
           </span>
         ))}
         <IconButton
-          className="video-tag-add-btn"
+          className={styles.addButton}
           icon={<Plus {...UI_ICON} />}
           label="添加自定义标签"
           title="添加自定义标签"
@@ -192,19 +196,21 @@ export default function VideoTagPanel({
           title="添加自定义标签"
           hint="输入新名称创建，或从下方选择已有标签快速添加。"
           size="md"
-          className="modal--video-tag-add"
-          confirmText={busy ? '添加中…' : '添加'}
+          className={styles.modal}
+          bodyClassName={styles.modalBody}
+          confirmText="添加"
+          busy={busy}
           confirmDisabled={busy || !draft.trim()}
           onCancel={closeAddModal}
-          onConfirm={() => void addTag({ name: draft })}
+          onConfirm={() => addTag({ name: draft })}
         >
-          <div className="video-tag-add-modal-body">
-            <div className="video-tag-add-modal-field">
+          <div className={styles.modalContent}>
+            <div className={styles.modalField}>
               <AppFormField label="标签名称">
-                <input
+                <TextInput
                   ref={inputRef}
                   id={`video-tag-add-input-${videoId}`}
-                  className="text-input video-tag-add-modal-input"
+                  className={styles.modalInput}
                   value={draft}
                   onChange={(e) => { setDraft(e.target.value); setOffset(0) }}
                   maxLength={500}
@@ -220,14 +226,14 @@ export default function VideoTagPanel({
               </AppFormField>
             </div>
 
-            <section className="video-tag-add-modal-catalog" aria-label="已有自定义标签">
-              <div className="video-tag-add-modal-catalog-head">
-                <span className="app-form-section-title">已有自定义标签</span>
-                <span className="video-tag-add-modal-catalog-count" aria-live="polite">
+            <section className={styles.catalog} aria-label="已有自定义标签">
+              <div className={styles.catalogHead}>
+                <span>已有自定义标签</span>
+                <span className={styles.catalogCount} aria-live="polite">
                   {catalogLoading ? '加载中…' : '按名称'}
                 </span>
               </div>
-              <div ref={catalogScrollRef} className="video-tag-add-modal-catalog-scroll" onScroll={onCatalogScroll}>
+              <div ref={catalogScrollRef} className={styles.catalogScroll} data-video-tag-catalog-scroll onScroll={onCatalogScroll}>
                 {catalogLoading ? (
                   <EmptyState variant="modal" loading title="正在加载标签…" />
                 ) : options.error && options.window.total === 0 ? (
@@ -237,7 +243,7 @@ export default function VideoTagPanel({
                 ) : options.items.length === 0 && !draft.trim() ? (
                   <EmptyState
                     variant="modal"
-                    className="video-tag-add-modal-empty"
+                    className={styles.catalogEmpty}
                     icon={<Tags {...UI_ICON_SM} aria-hidden />}
                     title={'\u6682\u65e0\u5df2\u6709\u6807\u7b7e'}
                     description={'\u53ef\u5728\u4e0a\u65b9\u8f93\u5165\u65b0\u540d\u79f0\u521b\u5efa\u6807\u7b7e\u3002'}
@@ -245,21 +251,21 @@ export default function VideoTagPanel({
                 ) : options.items.length === 0 ? (
                   <EmptyState
                     variant="modal"
-                    className="video-tag-add-modal-empty"
+                    className={styles.catalogEmpty}
                     icon={<SearchX {...UI_ICON_SM} aria-hidden />}
                     title={'\u6ca1\u6709\u5339\u914d\u7684\u6807\u7b7e'}
                     description={'\u8c03\u6574\u5173\u952e\u8bcd\uff0c\u6216\u5728\u4e0a\u65b9\u76f4\u63a5\u521b\u5efa\u65b0\u6807\u7b7e\u3002'}
                   />
                 ) : (
                   <>
-                    <div className="video-tag-add-modal-catalog-list">
+                    <div className={styles.catalogList}>
                       {options.items.map((tag) => {
                         const onVideo = manualIdsOnVideo.has(tag.id)
                         return (
                           <button
                             key={tag.id}
                             type="button"
-                            className={`tag-chip tag-chip--custom-pick${onVideo ? ' is-on-video' : ''}`}
+                            className={`${styles.chip} ${styles.catalogPick}`}
                             disabled={busy || onVideo}
                             onClick={() => void addTag({ tagId: tag.id })}
                             title={
@@ -288,9 +294,10 @@ export default function VideoTagPanel({
         <Modal
           title="移除自定义标签"
           danger
-          confirmText={busy ? '移除中…' : '移除'}
+          confirmText="移除"
+          busy={busy}
           confirmDisabled={busy}
-          onConfirm={() => void removeTag(removeTarget)}
+          onConfirm={() => removeTag(removeTarget)}
           onCancel={() => {
             if (!busy) setRemoveSelection(null)
           }}
@@ -298,6 +305,6 @@ export default function VideoTagPanel({
           确定从本片移除自定义标签「{removeTarget.name}」？
         </Modal>
       )}
-    </section>
+    </DetailSection>
   )
 }

@@ -42,14 +42,10 @@ export default function SeriesPickerField({ id, value, selectedId, onChange }: P
         selectedId={selectedId}
         listLabel="系列候选"
         createHint="保留当前输入可新建未归属系列"
+        error={query.isError ? '系列候选加载失败，请稍后重试。' : undefined}
         onValueChange={(next) => onChange(next, typedSeriesAssignment(next))}
         onSelect={(option) => onChange(option.mainName, selectedSeriesAssignment(option))}
       />
-      {query.isError ? (
-        <span className="classification-picker-error" role="alert">
-          系列候选加载失败，请稍后重试。
-        </span>
-      ) : null}
     </>
   )
 }

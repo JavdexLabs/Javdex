@@ -1,0 +1,3 @@
+.root {
+  padding: var(--page-pad-y) var(--page-pad-x) var(--page-pad-bottom);
+}

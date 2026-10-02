@@ -27,6 +27,7 @@
     "dist:linux": "node scripts/dist.mjs --platform linux",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
+    "prototype:libmpv": "node scripts/libmpv-prototype.mjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.browser.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",

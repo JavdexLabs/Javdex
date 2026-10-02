@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Javdex · libmpv 原生渲染验证</title>
+  <link rel="stylesheet" href="../../../renderer/src/styles.css">
+  <link rel="stylesheet" href="./prototype.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div><strong>libmpv · 原生渲染验证</strong><span class="muted">独立原型 / 合成视频 / 不连接正式媒体库</span></div>
+      <label>播放来源 <select id="source">
+        <option value="local-h264">本地 · H.264 + AAC / MP4</option>
+        <option value="remote-h264">远程 · H.264 + AAC / MP4</option>
+        <option value="local-hevc">本地 · HEVC Main10 + AAC / MKV</option>
+        <option value="remote-hevc">远程 · HEVC Main10 + AAC / MKV</option>
+      </select></label>
+    </header>
+    <section id="viewport" aria-label="原生视频画面"><span>画面由原生 NSOpenGLView + libmpv 绘制，不是 HTML video</span></section>
+    <footer>
+      <div class="controls">
+        <button id="play">播放</button><button id="back">−5 秒</button><button id="forward">+5 秒</button>
+        <label class="timeline"><span id="time">0.0 / 0.0 秒</span><input id="seek" type="range" min="0" max="18" step="0.1" value="0" aria-label="播放位置"></label>
+        <label>音量 <input id="volume" type="range" min="0" max="100" value="15" aria-label="音量"></label>
+        <button id="fullscreen">全屏</button><button id="overlay">覆盖层验证</button><button id="reopen">重建播放会话</button>
+      </div>
+      <div id="status" role="status">初始化中…</div>
+      <div class="muted">这里只证明 macOS 可行性。Web 未改，服务端只交付原始字节。覆盖层采用隐藏原生画面，不代表 HTML 可与视频任意叠加。</div>
+    </footer>
+  </main>
+  <dialog id="dialog"><h2>HTML 覆盖层验证</h2><p>原生画面已暂时隐藏；关闭后恢复。生产播放器还需要专门设计字幕/弹层的合成方式。</p><button id="dismiss">关闭覆盖层</button></dialog>
+  <script src="./prototype.js"></script>
+</body>
+</html>

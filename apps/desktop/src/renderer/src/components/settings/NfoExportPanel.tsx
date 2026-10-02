@@ -1,7 +1,7 @@
 import SettingsFeedback from './SettingsFeedback'
 import SettingsActionLabel from './SettingsActionLabel'
 import Checkbox from '../../../../../../../packages/ui/src/Checkbox'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { FileOutput, LoaderCircle, OctagonX } from 'lucide-react'
 import type {
@@ -19,6 +19,7 @@ import SelectControl from '../SelectControl'
 import { AppFormField } from '../FormPrimitives'
 import { UI_ICON_SM } from '../iconDefaults'
 import { shouldBlockNfoExportShortcut } from '@shared/nfoExportForegroundGuard'
+import { InteractionLayerOwner, useInteractionLayer } from '../../interaction/useInteractionLayer'
 import { SettingsCard, SettingsStatusPill } from './SettingsPrimitives'
 import styles from './NfoExportPanel.module.css'
 
@@ -107,51 +108,10 @@ export default function NfoExportPanel({
   useEffect(() => {
     onBlockingChange(blocking)
     if (!blocking || typeof document === 'undefined') return
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const previewButton = previewButtonRef.current
-    const root = document.getElementById('root')
-    root?.setAttribute('inert', '')
-    const dialog = document.querySelector<HTMLElement>('[data-nfo-export-modal]')
-    dialog?.focus()
-    const keepInputInsideModal = (event: KeyboardEvent): void => {
-      if (event.key === 'Tab' && dialog) {
-        const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), summary, [tabindex="0"]'))
-          .filter((element) => element.getClientRects().length > 0)
-        const first = controls[0]
-        const last = controls.at(-1)
-        if (!first || !dialog.contains(document.activeElement) || document.activeElement === dialog
-          || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
-          event.preventDefault()
-          const target = event.shiftKey ? last : first
-          target?.focus()
-          if (!first) dialog.focus()
-        }
-        event.stopImmediatePropagation()
-        return
-      }
-      if (event.key === 'Escape' || shouldBlockNfoExportShortcut({
-        key: event.key,
-        altKey: event.altKey,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey
-      })) {
-        event.preventDefault()
-        event.stopImmediatePropagation()
-        return
-      }
-      if (dialog && event.target instanceof Node && dialog.contains(event.target)) return
-      event.preventDefault()
-      event.stopImmediatePropagation()
-    }
-    window.addEventListener('keydown', keepInputInsideModal, true)
     window.addEventListener('beforeunload', preventNfoExportUnload)
     return () => {
-      root?.removeAttribute('inert')
-      window.removeEventListener('keydown', keepInputInsideModal, true)
       window.removeEventListener('beforeunload', preventNfoExportUnload)
       onBlockingChange(false)
-      if (previousFocus?.isConnected && !previousFocus.matches(':disabled')) previousFocus.focus()
-      else previewButton?.focus()
     }
   }, [blocking, onBlockingChange])
 
@@ -395,7 +355,7 @@ export default function NfoExportPanel({
       </SettingsCard>
       {modal && typeof document !== 'undefined'
         ? createPortal(
-            <ExportProgressModal modal={modal} onTerminate={terminate} onClose={closeReport} />,
+            <ExportProgressModal modal={modal} onTerminate={terminate} onClose={closeReport} returnFocusRef={previewButtonRef} />,
             document.body
           )
         : null}
@@ -525,12 +485,16 @@ export function PlanPreview({ preview }: { preview: NfoExportPlanPreview }): JSX
 export function ExportProgressModal({
   modal,
   onTerminate,
-  onClose
+  onClose,
+  returnFocusRef
 }: {
   modal: ExportModalState
   onTerminate: () => Promise<void>
   onClose: () => void
+  returnFocusRef?: RefObject<HTMLElement | null>
 }): JSX.Element {
+  const dialogRef = useRef<HTMLElement>(null)
+  const layer = useInteractionLayer({ rootRef: dialogRef, anchorRef: returnFocusRef, modal: true, blockShortcut: shouldBlockNfoExportShortcut })
   const progress = modal.progress
   const report = modal.report
   const reportTitle = report
@@ -540,8 +504,10 @@ export function ExportProgressModal({
     : '正在导出影片资料'
   const percent = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
   return (
-    <div className={styles.backdrop}>
+    <InteractionLayerOwner.Provider value={layer.owner}>
+    <div className={styles.backdrop} style={layer.style}>
       <section
+        ref={dialogRef}
         className={styles.modal}
         role="dialog"
         aria-modal="true"
@@ -591,6 +557,7 @@ export function ExportProgressModal({
         )}
       </section>
     </div>
+    </InteractionLayerOwner.Provider>
   )
 }
 

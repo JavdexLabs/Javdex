@@ -1,4 +1,6 @@
 .inner {
+  --organization-section-gap: 14px;
+
   display: flex;
   flex-direction: column;
   gap: var(--organization-section-gap);

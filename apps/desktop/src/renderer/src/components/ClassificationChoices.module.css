@@ -1,4 +1,11 @@
 .list {
+  --classification-merge-picker-h: 220px;
+  --classification-merge-candidate-min-h: 48px;
+  --classification-merge-choice-size: 16px;
+  --classification-merge-choice-border-w: 2px;
+  --classification-merge-choice-inset: 3px;
+  --classification-merge-focus-offset: -2px;
+
   min-height: var(--empty-inline-min-h, 140px);
   max-height: var(--classification-merge-picker-h);
   overflow-y: auto;

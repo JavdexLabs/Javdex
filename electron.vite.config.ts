@@ -144,6 +144,7 @@ export default defineConfig({
     },
     plugins: [react(), mediaPipeRuntimePlugin()],
     build: {
+      manifest: true,
       rollupOptions: {
         input: {
           index: resolve('apps/desktop/src/renderer/index.html')

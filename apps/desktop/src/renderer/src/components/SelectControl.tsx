@@ -17,6 +17,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import styles from './SelectControl.module.css'
+import { useInteractionLayer } from '../interaction/useInteractionLayer'
 
 interface SelectOption {
   value: string
@@ -110,6 +111,7 @@ export default function SelectControl({
   const [activeIndex, setActiveIndex] = useState(selectedIndex)
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({})
   const [menuPlacement, setMenuPlacement] = useState<'bottom' | 'top'>('bottom')
+  const layer = useInteractionLayer({ enabled: open, rootRef: menuRef, anchorRef: buttonRef, onDismiss: () => setOpen(false) })
 
   useEffect(() => {
     setActiveIndex(selectedIndex)
@@ -119,12 +121,12 @@ export default function SelectControl({
     if (!open) return
     const onPointerDown = (event: MouseEvent): void => {
       const target = event.target as Node
-      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      if (!layer.isTop() || layer.contains(target)) return
       setOpen(false)
     }
     document.addEventListener('mousedown', onPointerDown)
     return () => document.removeEventListener('mousedown', onPointerDown)
-  }, [open])
+  }, [layer, open])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -216,8 +218,6 @@ export default function SelectControl({
         return
       }
       selectValue(visibleOptions[activeIndex]?.value ?? valueText)
-    } else if (event.key === 'Escape') {
-      setOpen(false)
     }
   }
 
@@ -256,7 +256,7 @@ export default function SelectControl({
               data-placement={menuPlacement}
               role="listbox"
               tabIndex={-1}
-              style={menuStyle}
+              style={{ ...menuStyle, ...layer.style }}
             >
               {visibleOptions.map((option, index) => {
                 const selected = option.value === valueText

@@ -2,7 +2,7 @@ import SettingsActionLabel from '../components/settings/SettingsActionLabel'
 import { avatarLogNotice } from '../avatarAutoCrop/logs'
 import WebAccessPanel from '../components/settings/WebAccessPanel'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { lazy, useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type { ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeField, ActressScrapeUpdateMode, VideoBatchScrapeStatus, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
 import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
@@ -14,15 +14,11 @@ import { actressKeys, mediaLibraryKeys, overviewStatsKeys } from '../query/query
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
-import PluginDevPanel from '../components/pluginDev/PluginDevPanel'
-import AppearanceSettingsPanel from '../components/settings/AppearanceSettingsPanel'
 import AboutSettingsPanel from '../components/settings/AboutSettingsPanel'
 import BatchSettingsPanel from '../components/settings/BatchSettingsPanel'
-import ModelSettingsPanel from '../components/settings/ModelSettingsPanel'
 import NetworkSettingsPanel from '../components/settings/NetworkSettingsPanel'
 import CatalogConnectionPanel from '../components/settings/CatalogConnectionPanel'
 import PluginsSettingsPanel from '../components/settings/PluginsSettingsPanel'
-import BackupSettingsPanel from '../components/settings/BackupSettingsPanel'
 import StorageSettingsPanel from '../components/settings/StorageSettingsPanel'
 import SettingsOverviewPanel from '../components/settings/SettingsOverviewPanel'
 import { MediaLibrarySettingsContent } from './MediaLibrarySettingsPage'
@@ -68,6 +64,12 @@ import {
   withVideoBatchRequestScope
 } from '../utils/videoBatchScope'
 import styles from './SettingsPage.module.css'
+import { useStorageSettingsController } from '../settings/useStorageSettingsController'
+
+const PluginDevPanel = lazy(() => import('../components/pluginDev/PluginDevPanel'))
+const AppearanceSettingsPanel = lazy(() => import('../components/settings/AppearanceSettingsPanel'))
+const ModelSettingsPanel = lazy(() => import('../components/settings/ModelSettingsPanel'))
+const BackupSettingsPanel = lazy(() => import('../components/settings/BackupSettingsPanel'))
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
   const selection = window.getSelection()
@@ -226,8 +228,6 @@ export default function SettingsPage(): JSX.Element {
     reset: resetActressBatchScopeCount
   } = useLatestAsyncLabel('- 位演员')
   const [createLibraryOpen, setCreateLibraryOpen] = useState(false)
-  const [storageBusy, setStorageBusy] = useState(false)
-  const [storageAction, setStorageAction] = useState<{ kind: 'crypto'; enabled: boolean } | { kind: 'relocate'; target: string | null } | null>(null)
   const [nfoExportBlocking, setNfoExportBlocking] = useState(false)
   const actressConflictSummaryQuery = useQuery({
     queryKey: actressKeys.conflictSummary(),
@@ -242,6 +242,14 @@ export default function SettingsPage(): JSX.Element {
     if (activeGroup.id !== 'overview') return
     void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
   }, [activeGroup.id, queryClient])
+
+  const { action: storageAction, busy: storageBusy, requestEncryption: toggleAssetEncryption,
+    requestRelocate: relocateMediaAssets, confirm: runStorageAction, cancel: cancelStorageAction } = useStorageSettingsController({
+    settings,
+    storage: { pickFolder: api.settings.pickFolder, setEnabled: api.assetCrypto.setEnabled, relocate: api.assetStorage.relocate },
+    onSaved: (patch) => setSettings((current) => current ? { ...current, ...patch } : current),
+    notify: (message, tone) => toast.show(message, tone)
+  })
 
   const dismissSettingsOverlays = useCallback(() => {
     setEditingPlugin(null)
@@ -442,41 +450,6 @@ export default function SettingsPage(): JSX.Element {
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
       return false
-    }
-  }
-
-  const toggleAssetEncryption = async (enabled: boolean): Promise<void> => {
-    if (!settings || storageBusy || settings.assetEncryption === enabled) return
-    setStorageAction({ kind: 'crypto', enabled })
-  }
-
-  const relocateMediaAssets = async (targetPath?: string | null): Promise<void> => {
-    if (!settings || storageBusy) return
-    try {
-      const target = targetPath === undefined ? (await api.settings.pickFolder())[0] : targetPath
-      if (target === undefined) return
-      if (target === settings.mediaAssetsResolvedPath || (target === null && !settings.mediaAssetsPath)) {
-        toast.show('已在使用该目录', 'info')
-        return
-      }
-      setStorageAction({ kind: 'relocate', target })
-    } catch (error) { toast.show((error as Error).message, 'error') }
-  }
-
-  const runStorageAction = async (): Promise<void> => {
-    if (!storageAction || storageBusy) return
-    setStorageBusy(true)
-    try {
-      const next = storageAction.kind === 'crypto'
-        ? await api.assetCrypto.setEnabled(storageAction.enabled)
-        : await api.assetStorage.relocate(storageAction.target)
-      setSettings((current) => current ? { ...current, assetEncryption: next.assetEncryption, mediaAssetsPath: next.mediaAssetsPath, mediaAssetsResolvedPath: next.mediaAssetsResolvedPath } : next)
-      toast.show(storageAction.kind === 'crypto' ? (storageAction.enabled ? '图片加密已开启' : '图片加密已关闭') : next.mediaAssetsResolvedPath === settings.mediaAssetsResolvedPath ? '目录未改变' : '图片资源目录已更新', 'success')
-      setStorageAction(null)
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setStorageBusy(false)
     }
   }
 
@@ -944,7 +917,7 @@ export default function SettingsPage(): JSX.Element {
         title={storageAction.kind === 'crypto' ? (storageAction.enabled ? '启用图片加密' : '关闭图片加密') : '迁移图片资源'}
         confirmText="开始处理"
         busy={storageBusy}
-        onCancel={() => setStorageAction(null)}
+        onCancel={cancelStorageAction}
         onConfirm={() => void runStorageAction()}
       >
         {storageAction.kind === 'relocate' ? <>

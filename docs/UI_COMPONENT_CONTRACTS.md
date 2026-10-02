@@ -19,7 +19,11 @@
 
 `PluginDevPanel` 通过显式 `presentation="settings"` 使用嵌入设置页的无边框、紧凑字号及双栏布局，默认 `standalone` 保留独立面板布局。设置页调用方必须传入该语义；不通过祖先的 class／data 标记推断展示模式。工作区宽度仍由既有 `settings-workspace` 容器查询响应，两种模式的响应式优先级均由面板 Module 持有。
 
-`FloatingLayer` 自己持有固定定位与 1200 层级，忽略调用方 inline style 的 position／zIndex；测量得到的 top／left、可见状态及调用方动态宽度继续保留。虚拟网格的内层全宽归各自 Module，清除 react-window 提供的 inline width；视口清除 inline overflow 后使用自身滚动策略。计算高度、单元坐标和与行高／列步长共用的间距仍由几何计算持有，不在 CSS 复制常量。头像裁剪视口的宽高由 Module 使用 `--avatar-view-size`，绑定共享 `AVATAR_VIEW_SIZE`，避免视觉与导出算法尺寸分叉。
+`FloatingLayer` 自己持有固定定位与交互层级，忽略调用方 inline style 的 position／zIndex；测量得到的 top／left、可见状态及调用方动态宽度继续保留。弹层基准使用 `--layer-overlay`，嵌套深度由交互 Module 配合 `--layer-step` 决定，Toast 使用 `--layer-toast`；不能靠追加更大的硬编码数字解决遮挡。虚拟网格的内层全宽归各自 Module，清除 react-window 提供的 inline width；视口清除 inline overflow 后使用自身滚动策略。计算高度、单元坐标和与行高／列步长共用的间距仍由几何计算持有，不在 CSS 复制常量。头像裁剪视口的宽高由 Module 使用 `--avatar-view-size`，绑定共享 `AVATAR_VIEW_SIZE`，避免视觉与导出算法尺寸分叉。
+
+交互层统一通过 `useInteractionLayer` 注册，由 `InteractionLayerOwner` 传递父子所有权（React portal 保留所有权，但不改变密度的 DOM 继承）。Escape 只交给最上层，已处理或输入法组合中的按键不再次关闭父层；忙碌/不可关闭弹窗仍消费 Escape。模态层拥有背景 inert、Tab 顺序、返回焦点和计数式滚动锁；portaled 子菜单插入其触发按钮之后，但尊重显式负 tabIndex。非模态浮层因 blur/Tab 关闭时，不抢回用户已经移动到其他控件的焦点。图片预览继续使用自己的 history token，普通弹窗不写返回栈。NFO 前台任务保留卸载保护、显式停止与全局快捷键禁用策略；其错误详情等子层继承父任务的快捷键拦截，Escape 仍只关闭最上层。
+
+`className` / `bodyClassName` 是布局插槽，不是视觉 variant 或业务状态输入；按钮/输入的外观由自身 Module 与显式 variant/density 决定。全局 token 只承载共享语义；只被一个 Module 消费的功能变量归该 Module 的实际作用域，portaled 区域必须在自身根上声明。CSS 架构检查阻止单所有者 classification/organization 变量重新进入全局。
 
 ## Toolbar
 

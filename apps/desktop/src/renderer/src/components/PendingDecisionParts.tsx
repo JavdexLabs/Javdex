@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, TriangleAlert } from 'lucide-react'
 import Button from './Button'
 import FloatingLayer from './FloatingLayer'
-import { useEscapeKey } from '../hooks/useEscapeKey'
 import { UI_ICON_SM } from './iconDefaults'
 import { WorkbenchStatusPill } from './workbench'
 import styles from './PendingDecisionParts.module.css'
@@ -181,7 +180,6 @@ export function PendingSecondaryActions({
     setOpen(false)
     anchorRef.current?.focus()
   }
-  useEscapeKey(close, open)
   useEffect(() => {
     if (!open) return
     const frame = window.requestAnimationFrame(() => {

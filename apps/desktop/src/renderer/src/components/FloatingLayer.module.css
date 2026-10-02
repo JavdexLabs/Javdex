@@ -1,4 +1,4 @@
 .root {
   position: fixed;
-  z-index: 1200;
+  z-index: var(--layer-overlay);
 }

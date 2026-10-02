@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
-import { useEscapeKey } from '../hooks/useEscapeKey'
+import { InteractionLayerOwner, useInteractionLayer } from '../interaction/useInteractionLayer'
 import IconButton from './IconButton'
 import { UI_ICON_MD } from './iconDefaults'
 import Button from './Button'
@@ -34,37 +34,6 @@ interface Props {
   actions?: ReactNode
 }
 
-const modalStack: string[] = []
-let previousBodyOverflow = ''
-
-function registerModal(id: string): void {
-  if (modalStack.length === 0) {
-    previousBodyOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-  }
-  modalStack.push(id)
-}
-
-function unregisterModal(id: string): void {
-  const index = modalStack.lastIndexOf(id)
-  if (index >= 0) modalStack.splice(index, 1)
-  if (modalStack.length === 0) document.body.style.overflow = previousBodyOverflow
-}
-
-function isTopModal(id: string): boolean {
-  return modalStack.at(-1) === id
-}
-
-const FOCUSABLE_SELECTOR = [
-  'button:not(:disabled)',
-  '[href]',
-  'input:not(:disabled)',
-  'select:not(:disabled)',
-  'textarea:not(:disabled)',
-  'summary',
-  '[tabindex]:not([tabindex="-1"])'
-].join(',')
-
 export default function Modal({
   title,
   subtitle,
@@ -89,8 +58,6 @@ export default function Modal({
   actions
 }: Props): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null)
-  // Capture before child autoFocus runs during commit, not after mounting.
-  const returnFocusRef = useRef(document.activeElement as HTMLElement | null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const submissionLock = useRef(false)
@@ -124,54 +91,17 @@ export default function Modal({
     }
   }
 
-  const requestClose = useCallback(() => {
-    if (closeBlocked || submissionLock.current || !isTopModal(modalId)) return
+  const requestClose = () => {
+    if (closeBlocked || submissionLock.current || !layer.isTop()) return
     onCancel()
-  }, [closeBlocked, modalId, onCancel])
+  }
 
-  const requestDismiss = useCallback(() => {
+  const requestDismiss = () => {
     if (!dismissible) return
     requestClose()
-  }, [dismissible, requestClose])
-
-  useEscapeKey(requestDismiss, dismissible && !closeBlocked)
-
-  useEffect(() => {
-    const prev = returnFocusRef.current
-    registerModal(modalId)
-    dialogRef.current?.focus()
-    return () => {
-      unregisterModal(modalId)
-      prev?.focus()
-    }
-  }, [modalId])
-
-  const trapFocus = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'Tab' || !isTopModal(modalId)) return
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-      (element) =>
-        !element.hidden &&
-        !element.closest('[hidden]') &&
-        element.getAttribute('aria-hidden') !== 'true'
-    )
-    if (focusable.length === 0) {
-      event.preventDefault()
-      dialog.focus()
-      return
-    }
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    const active = document.activeElement
-    if (event.shiftKey && (active === first || !dialog.contains(active))) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
-      event.preventDefault()
-      first.focus()
-    }
   }
+
+  const layer = useInteractionLayer({ rootRef: dialogRef, modal: true, onDismiss: requestDismiss })
 
   const modalClass = [
     styles.root,
@@ -185,9 +115,11 @@ export default function Modal({
   const showDefaultActions = !hideActions && !actions && onConfirm
   const showCloseButton = Boolean(hideActions)
 
-  return (
+  const content = (
+    <InteractionLayerOwner.Provider value={layer.owner}>
     <div
       className={styles.backdrop}
+      style={layer.style}
       data-modal-id={modalId}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) requestDismiss()
@@ -202,7 +134,6 @@ export default function Modal({
         aria-describedby={hint ? descriptionId : undefined}
         aria-busy={effectiveBusy || undefined}
         tabIndex={-1}
-        onKeyDown={trapFocus}
         onClick={(e) => e.stopPropagation()}
       >
         <header
@@ -285,5 +216,7 @@ export default function Modal({
         )}
       </div>
     </div>
+    </InteractionLayerOwner.Provider>
   )
+  return content
 }

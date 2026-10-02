@@ -1,4 +1,5 @@
 import TextInput from '../../apps/desktop/src/renderer/src/components/TextInput'
+import './avatar-worker-adapter'
 import TextArea from '../../apps/desktop/src/renderer/src/components/TextArea'
 import React, { useContext, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -88,6 +89,7 @@ window.api = {
   externalLinks: { open: async url => { window.lastOpenedLink = url } }
 }
 const { default: DetailOperationsFixture } = await import('./detail-operations-fixture')
+const { AvatarAutoCropBatchStateProvider } = await import('../../apps/desktop/src/renderer/src/contexts/AvatarAutoCropBatchContext')
 const { default: SettingsDensityFixture } = await import('./settings-density-fixture')
 const { default: NativeEditorsFixture } = await import('./native-editors-fixture')
 const { default: HomePage } = await import('../../apps/desktop/src/renderer/src/pages/HomePage')
@@ -733,18 +735,18 @@ function AppearanceFixture({ variant }) {
   }))
   window.rejectAppearanceSave = setRejectSave
   window.finishAppearanceBatch = () => setBatch(current => ({ ...current, status: 'done', current: 20, success: 18, failed: 2, cancelled: true }))
-  window.fixtureAvatarBatch = {
+  const avatarBatchAdapter = {
     state: batch, countAllAvatars: async () => 20,
     startAllAvatars: async () => { setBatch({ ...batch, status: 'running', source: 'manual', total: 20, current: 9, currentName: '测试演员长名称', logs: [{ time: '2026-09-30', level: 'info', code: 'fixture', message: '正在构图' }] }); return 20 },
     cancel: () => setBatch(current => ({ ...current, status: 'cancelling' }))
   }
-  return <main data-appearance-host style={{ padding: 24, display: 'grid', gridAutoRows: 'max-content', alignContent: 'start', gap: 16, overflow: 'auto', height: '100%' }}>
+  return <AvatarAutoCropBatchStateProvider value={avatarBatchAdapter}><main data-appearance-host style={{ padding: 24, display: 'grid', gridAutoRows: 'max-content', alignContent: 'start', gap: 16, overflow: 'auto', height: '100%' }}>
     <DisplayModeProvider><AppearanceSettingsPanel settings={settings} theme={theme} scrapeBatchActive={false}
       onThemeChange={next => { setTheme(next); window.lastAppearanceTheme = next }}
       onPatchSettings={async patch => { window.lastAppearancePatch = patch; if (rejectSave) return false; setSettings(current => ({ ...current, ...patch })); return true }}
       onOpenAvatarBatchDetails={() => { window.openedAppearanceLogs = true }}
     /></DisplayModeProvider>
-  </main>
+  </main></AvatarAutoCropBatchStateProvider>
 }
 
 function ImagePreviewFixture({ variant }) {

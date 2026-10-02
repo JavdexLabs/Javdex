@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloatingLayer } from '../hooks/useFloatingLayer'
-import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+import { InteractionLayerOwner, useInteractionLayer } from '../interaction/useInteractionLayer'
 import type { FloatingAlign, FloatingSide } from '../lib/floatingPosition'
 import styles from './FloatingLayer.module.css'
 
@@ -37,6 +37,7 @@ export default function FloatingLayer({
   children
 }: FloatingLayerProps): JSX.Element | null {
   const floatingRef = useRef<HTMLDivElement>(null)
+  const layer = useInteractionLayer({ enabled: open, rootRef: floatingRef, anchorRef, onDismiss: onClose })
   const coords = useFloatingLayer({
     open,
     anchorRef,
@@ -50,10 +51,8 @@ export default function FloatingLayer({
     if (!open || !onClose) return
     const onDoc = (event: MouseEvent): void => {
       const target = event.target as Node
-      if (floatingRef.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
+      if (!layer.isTop() || layer.contains(target)) return
       if (ignoreCloseRefs.some((ref) => ref.current?.contains(target))) return
-      if (isDismissExemptPortaledTarget(target)) return
       onClose()
     }
     const timer = window.setTimeout(() => document.addEventListener('mousedown', onDoc), 0)
@@ -61,11 +60,12 @@ export default function FloatingLayer({
       window.clearTimeout(timer)
       document.removeEventListener('mousedown', onDoc)
     }
-  }, [anchorRef, ignoreCloseRefs, onClose, open])
+  }, [ignoreCloseRefs, layer, onClose, open])
 
   if (!open) return null
 
   return createPortal(
+    <InteractionLayerOwner.Provider value={layer.owner}>
     <div
       ref={floatingRef}
       id={id}
@@ -76,14 +76,15 @@ export default function FloatingLayer({
         ...style,
         // These properties belong to the layer, not the caller's inline style.
         position: undefined,
-        zIndex: undefined,
+        zIndex: layer.style.zIndex,
         top: coords?.top ?? -10000,
         left: coords?.left ?? -10000,
         visibility: coords ? 'visible' : 'hidden'
       }}
     >
       {children}
-    </div>,
+    </div>
+    </InteractionLayerOwner.Provider>,
     document.body
   )
 }

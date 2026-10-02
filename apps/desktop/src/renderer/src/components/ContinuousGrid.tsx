@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } fro
 import type { ContinuousWindow } from '../hooks/useContinuousPage'
 import Button from './Button'
 import styles from './ContinuousGrid.module.css'
+import { createBrowseAnchorMemory } from '../listView/browseWindow'
 
 interface Props<T> {
   window: ContinuousWindow<T>
@@ -23,7 +24,7 @@ interface Props<T> {
   emptyLabel?: string
   onAnchor?: (index: number) => void
 }
-const memories = new Map<string, { index: number; delta: number; key?: string | number }>()
+const memories = createBrowseAnchorMemory<{ index: number; delta: number; key?: string | number }>()
 /** Clear restoration anchors when resetting a browsing session. */
 export function clearContinuousScrollMemory(): void { memories.clear() }
 function scrollingParent(element: HTMLElement): HTMLElement {
@@ -97,8 +98,7 @@ export default function ContinuousGrid<T>({ window: data, renderItem, itemKey, l
         if (restoring) return
         const top = Math.max(0, scroller.getBoundingClientRect().top - element.getBoundingClientRect().top)
         const index = Math.min(Math.max(0, latest.current.data.total - 1), Math.floor(top / layout.current.rowHeight) * layout.current.columns)
-        if (remember) { memories.delete(scope); memories.set(scope, { index, delta: top % layout.current.rowHeight, key: latest.current.data.getItem(index) ? latest.current.itemKey(latest.current.data.getItem(index)!) : undefined }) }
-        while (memories.size > 20) memories.delete(memories.keys().next().value!)
+        if (remember) { memories.remember(scope, { index, delta: top % layout.current.rowHeight, key: latest.current.data.getItem(index) ? latest.current.itemKey(latest.current.data.getItem(index)!) : undefined }) }
         latest.current.onAnchor?.(index)
       })
     }

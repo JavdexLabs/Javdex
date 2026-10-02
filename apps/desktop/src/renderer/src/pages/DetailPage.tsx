@@ -9,6 +9,7 @@ import type {
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import { useVideoLifecycleController } from './useVideoLifecycleController'
 import { useVideoResourceController } from './useVideoResourceController'
+import { useVideoScrapeController } from './useVideoScrapeController'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -46,7 +47,6 @@ import ActressAvatar from '../components/ActressAvatar'
 import type { VideoEditInput } from '@shared/videoTypes'
 import { expectedVideoVersion } from '@shared/protocol/versions'
 import type {
-  VideoDirectorChoiceRequired,
   VideoScrapeField,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
@@ -91,13 +91,6 @@ import {
   rememberRecentMediaLibraryId
 } from '../listView/recentMediaLibrary'
 import { resolveVideoDetailDefaultScraper } from './videoDetailScraperState'
-
-interface PendingDirectorChoice {
-  fields: VideoScrapeField[]
-  site: string
-  mode?: VideoScrapeUpdateMode
-  choice: VideoDirectorChoiceRequired
-}
 
 export default function DetailPage(): JSX.Element {
   const { id, videoId: videoIdParam } = useParams()
@@ -156,7 +149,6 @@ export default function DetailPage(): JSX.Element {
   const detailScopeKey = `${detailRouteSource}:${requestedLibraryId}:${videoId}`
   const currentDetailScopeRef = useRef(detailScopeKey)
   currentDetailScopeRef.current = detailScopeKey
-  const [scraping, setScraping] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [editIdentityConflict, setEditIdentityConflict] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -168,9 +160,6 @@ export default function DetailPage(): JSX.Element {
   const [videoDetailUseFirstSampleBackground, setVideoDetailUseFirstSampleBackground] =
     useState(false)
   const [showScrapeFields, setShowScrapeFields] = useState(false)
-  const [pendingDirectorChoice, setPendingDirectorChoice] =
-    useState<PendingDirectorChoice | null>(null)
-  const [directorChoiceBusy, setDirectorChoiceBusy] = useState(false)
   const [showCorrectImport, setShowCorrectImport] = useState(false)
   const [confirmDiscardForCorrect, setConfirmDiscardForCorrect] = useState(false)
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false)
@@ -218,14 +207,22 @@ export default function DetailPage(): JSX.Element {
     busy: deletingVideo, open: openDeletePreview, close: closeDeletePreview,
     commit: doDelete, reset: resetDeletion } = deletion
 
+  const { execute: executeRescrape, closeDirectorChoice, scraping, pendingDirectorChoice, directorChoiceBusy } = useVideoScrapeController({
+    video, scope: detailScopeKey,
+    scrape: api.scrape.one,
+    onSelected: (libraryId, name) => setScraperSelection({ libraryId, name }),
+    onPending: (id) => navigate(pendingCenterPath({ type: 'scrape', videoId: id })),
+    onApplied: () => { invalidateVideos(); void load({ silent: true }) },
+    notify: (message, tone) => toast.show(message, tone)
+  })
+
   const dismissOverlays = useCallback(() => {
     resetDeletion()
     setShowEdit(false)
     setEditIdentityConflict(null)
     setConfirmClear(false)
     setShowScrapeFields(false)
-    setPendingDirectorChoice(null)
-    setDirectorChoiceBusy(false)
+    closeDirectorChoice()
     setShowCorrectImport(false)
     setShowAddToPlaylist(false)
     setShowMaintenanceInfo(false)
@@ -234,7 +231,7 @@ export default function DetailPage(): JSX.Element {
     closeResourceMove()
     closeCoverPreview()
     closeResourceRemoval()
-  }, [closeCoverPreview, resetDeletion, closeResourceEditor, closeResourceMove, closeResourceRemoval])
+  }, [closeCoverPreview, closeDirectorChoice, resetDeletion, closeResourceEditor, closeResourceMove, closeResourceRemoval])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
@@ -501,58 +498,6 @@ export default function DetailPage(): JSX.Element {
       toast.show(String((error as Error).message), 'error')
     } finally {
       setSplitBusy(false)
-    }
-  }
-
-  const executeRescrape = async (
-    fields: VideoScrapeField[],
-    site: string,
-    mode?: VideoScrapeUpdateMode,
-    directorSelectionId?: number
-  ): Promise<void> => {
-    if (!video) return
-    setScraperSelection({ libraryId: video.activeLibraryId, name: site })
-    setScraping(true)
-    if (directorSelectionId != null) setDirectorChoiceBusy(true)
-    try {
-      const res = await api.scrape.one(
-        videoId,
-        site || undefined,
-        fields,
-        mode,
-        directorSelectionId,
-        video.activeLibraryId
-      )
-      if (res.directorChoice) {
-        setPendingDirectorChoice({ fields, site, mode, choice: res.directorChoice })
-        return
-      }
-      if (res.pending) {
-        toast.show('发现多个候选，已保存到待确认中心', 'info')
-        navigate(pendingCenterPath({ type: 'scrape', videoId }))
-        return
-      }
-      setPendingDirectorChoice(null)
-      const hasWarnings = res.warnings.length > 0
-      toast.show(
-        res.applied
-          ? hasWarnings
-            ? `已更新，部分字段未应用：${res.warnings.join('；')}`
-            : '匹配完成'
-          : hasWarnings
-            ? `所选字段未应用：${res.warnings.join('；')}`
-            : '所选字段无可写入内容',
-        res.applied && !hasWarnings ? 'success' : 'info'
-      )
-      if (res.applied) {
-        invalidateVideos()
-        void load({ silent: true })
-      }
-    } catch (e) {
-      toast.show(`匹配失败：${(e as Error).message}`, 'error')
-    } finally {
-      setScraping(false)
-      setDirectorChoiceBusy(false)
     }
   }
 
@@ -1070,7 +1015,7 @@ export default function DetailPage(): JSX.Element {
         <DirectorScrapeChoiceModal
           choice={pendingDirectorChoice.choice}
           busy={directorChoiceBusy}
-          onCancel={() => setPendingDirectorChoice(null)}
+          onCancel={closeDirectorChoice}
           onChoose={(directorId) => {
             void executeRescrape(
               pendingDirectorChoice.fields,

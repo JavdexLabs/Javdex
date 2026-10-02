@@ -1,4 +1,6 @@
 .root {
+  --organization-link-label-min: 110px;
+
   display: flex;
   flex-direction: column;
   gap: var(--organization-inline-gap);

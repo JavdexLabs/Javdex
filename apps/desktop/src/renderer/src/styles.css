@@ -106,6 +106,9 @@
 }
 
 :root {
+  --layer-overlay: 900;
+  --layer-step: 100;
+  --layer-toast: 2000;
   /* Semantic UI tokens. Theme blocks define raw palette values; components use these roles. */
   --surface-base: var(--bg-0);
   --surface-progress-track: var(--bg-3);
@@ -184,34 +187,13 @@
   --radius-lg: 10px;
   --radius-overlay: 12px;
   --radius-pill: 999px;
-  --organization-profile-media-w: 148px;
-  --organization-profile-media-w-compact: 96px;
-  --organization-profile-pad: 16px;
-  --organization-profile-gap: 18px;
-  --organization-section-gap: 14px;
   --organization-inline-gap: 6px;
   --organization-meta-gap: 12px;
-  --organization-link-label-min: 110px;
-  --classification-image-preview-w: 148px;
-  --classification-image-preview-w-compact: 96px;
-  --classification-image-source-h: 164px;
-  --classification-image-pad: 16px;
-  --classification-image-gap: 18px;
-  --classification-image-section-gap: 14px;
-  --classification-image-control-gap: 6px;
-  --classification-picker-max-h: 220px;
   --classification-merge-modal-w: 640px;
   --classification-merge-gap: 14px;
   --classification-merge-control-gap: 8px;
   --classification-merge-pad: 14px;
-  --classification-merge-card-min-h: 120px;
-  --classification-merge-picker-h: 220px;
   --classification-merge-badge-pad-y: 2px;
-  --classification-merge-candidate-min-h: 48px;
-  --classification-merge-choice-size: 16px;
-  --classification-merge-choice-border-w: 2px;
-  --classification-merge-choice-inset: 3px;
-  --classification-merge-focus-offset: -2px;
   --classification-merge-text-xs: 11px;
   --classification-merge-text-sm: 12px;
   --classification-merge-text-md: 13px;

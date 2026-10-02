@@ -4,7 +4,6 @@ import FloatingLayer from './FloatingLayer'
 import IconButton from './IconButton'
 import { Ellipsis } from 'lucide-react'
 import { UI_ICON_MD } from './iconDefaults'
-import { useEscapeKey } from '../hooks/useEscapeKey'
 import { defaultPluginDelay, pluginSourceLabel } from '../settings/settingsDisplay'
 import Button from './Button'
 import PluginSourceBadge from './PluginSourceBadge'
@@ -42,10 +41,6 @@ export default function PluginCard({
 }): JSX.Element {
   const menuBtnRef = useRef<HTMLSpanElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
-
-  useEscapeKey(() => {
-    setMenuOpen(false)
-  }, menuOpen)
 
   const canDebug =
     plugin.debuggable !== false && (plugin.source === 'builtin' || plugin.source === 'user')

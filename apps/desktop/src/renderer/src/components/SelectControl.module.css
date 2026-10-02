@@ -116,7 +116,7 @@
 
 .menu {
   position: fixed;
-  z-index: 1400;
+  z-index: var(--layer-overlay);
   min-width: 132px;
   display: grid;
   gap: 2px;

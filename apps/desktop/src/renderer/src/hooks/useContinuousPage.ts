@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { retainBrowsePages } from '../listView/browseWindow'
+import { useBrowseSession } from '../listView/useBrowseSession'
 
 export interface ContinuousPage<T> { items: T[]; total?: number; hasMore?: boolean; offset?: number; hasExactName?: boolean }
 export interface ContinuousWindow<T> {
@@ -26,11 +28,9 @@ export function useContinuousPage<P extends ContinuousPage<unknown>>(scope: stri
   const wanted = [...offsets].sort((a, b) => a - b).join(',')
   const loadedVersion = useRef(version)
   const invalidated = useRef(new Set<number>())
-  const live = useRef(true)
-  const run = useRef(0)
-  useEffect(() => { live.current = true; return () => { live.current = false } }, [])
+  const session = useBrowseSession(key, enabled)
   useEffect(() => {
-    const token = ++run.current
+    const token = session.begin(key)
     if (!enabled) return
     let cancelled = false
     const refresh = loadedVersion.current !== version
@@ -39,7 +39,7 @@ export function useContinuousPage<P extends ContinuousPage<unknown>>(scope: stri
     const retained = snapshotRef.current
     const desired = wanted.split(',').map(Number)
     setSnapshot(old => ({ ...(old.key === key ? old : { key, total: 0, known: false, exact: false, hasExactName: false }), errors: new Map([...(old.key === key ? old.errors : [])].filter(([offset]) => desired.includes(offset))), pages: new Map([...(old.key === key ? old.pages : [])].filter(([offset]) => desired.includes(offset))) }))
-    const stale = () => cancelled || run.current !== token || !live.current
+    const stale = () => cancelled || !session.isCurrent(token)
     const load = async () => {
       for (const offset of desired) {
         if (!invalidated.current.has(offset) && retained.pages.has(offset)) continue
@@ -49,7 +49,7 @@ export function useContinuousPage<P extends ContinuousPage<unknown>>(scope: stri
           if (stale()) return
           invalidated.current.delete(offset)
           setSnapshot(old => {
-            if (old.key !== key || run.current !== token) return old
+            if (old.key !== key || !session.isCurrent(token)) return old
             const pages = new Map(old.pages); pages.set(offset, page ?? { items: [], total: 0 } as unknown as P)
             const errors = new Map(old.errors); errors.delete(offset)
             const total = page?.total ?? (page ? offset + page.items.length + (page.hasMore ? size : 0) : 0)
@@ -62,15 +62,13 @@ export function useContinuousPage<P extends ContinuousPage<unknown>>(scope: stri
     }
     void load()
     return () => { cancelled = true }
-  }, [key, wanted, size, enabled, version])
+  }, [key, wanted, size, enabled, version, session])
   const onVisibleRange = useCallback((start: number, end: number) => {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return
-    const first = Math.floor(Math.max(0, start) / size) * size
-    const last = Math.floor(Math.max(start, end) / size) * size
     setRange(old => {
-      const next: number[] = []
-      for (let offset = first; offset <= last && next.length < 3; offset += size) next.push(offset)
-      const keep = [...next, ...(old.key === key ? old.offsets : []).filter(offset => !next.includes(offset) && (!snapshotRef.current.known || offset < snapshotRef.current.total))].slice(0, 3)
+      // An estimated total must not clamp the next hasMore request.
+      const total = snapshotRef.current.exact ? snapshotRef.current.total : undefined
+      const keep = retainBrowsePages(start, end, size, old.key === key ? old.offsets : [], total)
       return old.key === key && old.offsets.join(',') === keep.join(',') ? old : { key, offsets: keep }
     })
   }, [key, size])

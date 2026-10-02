@@ -1,4 +1,12 @@
 .editor {
+  --classification-image-preview-w: 148px;
+  --classification-image-preview-w-compact: 96px;
+  --classification-image-source-h: 164px;
+  --classification-image-pad: 16px;
+  --classification-image-gap: 18px;
+  --classification-image-section-gap: 14px;
+  --classification-image-control-gap: 6px;
+
   display: grid;
   gap: var(--classification-image-gap);
 }

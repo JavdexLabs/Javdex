@@ -1,5 +1,5 @@
 // X11/XWayland only: a child of the explicitly selected Electron X11 parent.
-// All calls on our Display/GL context are serialized on the N-API owner thread;
+// All calls on our Display/GL context are serialized on the helper owner thread;
 // no late XInitThreads, no shared Display handed to decoder threads, no Wayland
 // ID casting and no visible top-level playback window. AT-SPI remains unverified.
 #include <X11/Xlib.h>
@@ -9,6 +9,7 @@
 #include <X11/Xft/Xft.h>
 #include <GL/glx.h>
 #include <GL/glxext.h>
+#define JAVDEX_STANDALONE_PLAYBACK
 #include "mpvCore.h"
 #include "x11Controls.h"
 #include <chrono>
@@ -147,13 +148,17 @@ void layout() {
         if (presentation == "fullscreen" && controlsVisible) height = std::max(1, std::min(height, parentInfo.height - barHeight - margin - x11::pixel(8, scale) - y));
         if (!font || fontScale != scale) {
             if (font) XftFontClose(display, font);
-            font = XftFontOpen(display, XScreenNumberOfScreen(parentInfo.screen), FC_FAMILY, FcTypeString, "sans",
-                FC_PIXEL_SIZE, FcTypeDouble, 13 * scale, nullptr);
+            // Xft does not perform Chromium-style per-glyph fallback. Require
+            // the Chinese control glyphs when matching the native UI font.
+            const auto pattern = std::string("sans:charset=4ece 5934 91cd 64ad 653e 6682 505c 6536 8d77 9000 51fa 5168 5c4f 6b62:pixelsize=") + std::to_string(13 * scale);
+            font = XftFontOpenName(display, XScreenNumberOfScreen(parentInfo.screen), pattern.c_str());
             if (!font) throw std::runtime_error("Cannot create X11 playback control font");
             fontScale = scale;
         }
     }
     XMoveResizeWindow(display, video, x, y, x11::pixel(requested.width, scale, 1, 65535), height);
+    if (visible) XRaiseWindow(display, video);
+    if (controlsVisible) XRaiseWindow(display, toolbar);
     XWindowAttributes actual{};
     if (XGetWindowAttributes(display, video, &actual)) { pixelWidth = actual.width; pixelHeight = actual.height; }
 }
@@ -261,6 +266,9 @@ void destroyPlayer() {
     requireOwner(); closing = true;
     {
         XErrors errors(display); cancelInput();
+        if (video) XUnmapWindow(display, video);
+        if (toolbar) XUnmapWindow(display, toolbar);
+        XSync(display, False);
         if (context && !glXMakeContextCurrent(display, cleanupDrawable, cleanupDrawable, context)) throw std::runtime_error("Cannot make X11 cleanup context current");
         playback.shutdown();
         glXMakeContextCurrent(display, None, None, nullptr);
@@ -281,24 +289,14 @@ void destroyPlayer() {
     visible = controlsVisible = closing = focusFullscreen = false; controls.focus = Control::Video;
     singleClickAt = 0; lastPointerX = lastPointerY = -1;
 }
-void updateBounds(napi_env env, napi_value rect) {
-    requested = {namedNumber(env, rect, "x"), namedNumber(env, rect, "y"), namedNumber(env, rect, "width"), namedNumber(env, rect, "height"), namedNumber(env, rect, "scale")};
+void updateBounds(const Bounds &rect) {
+    requested = rect;
     if (requested.scale <= 0 || requested.scale > 8) throw std::runtime_error("Invalid X11 display scale");
     layout();
 }
-napi_value create(napi_env env, napi_callback_info info) {
-    size_t count = 3; napi_value args[3]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+void create(Window handle, const Bounds &rect) {
     try {
-        if (count != 3) throw std::runtime_error("Expected an explicitly selected X11 parent, bounds and backend");
-        napi_value backend; napi_get_named_property(env, args[2], "backend", &backend);
-        if (stringArg(env, backend) != "x11") throw std::runtime_error("Native Wayland parents cannot be attached to X11 playback");
         destroyPlayer();
-        void *data = nullptr; size_t length = 0;
-        if (napi_get_buffer_info(env, args[0], &data, &length) != napi_ok) throw std::runtime_error("Invalid X11 Window buffer");
-        // Electron 43's Ozone AcceleratedWidget is uint32_t, even though
-        // Xlib's Window is unsigned long on a 64-bit host. Backend is checked
-        // above: a Wayland widget has the same width but is not an XID.
-        const Window handle = x11::windowId(data, length);
         ownerThread = std::this_thread::get_id(); display = XOpenDisplay(nullptr);
         if (!display) throw std::runtime_error("Cannot connect to the selected X11 display");
         XErrors errors(display);
@@ -312,7 +310,16 @@ napi_value create(napi_env env, napi_callback_info info) {
             GLX_RENDER_TYPE, GLX_RGBA_BIT, GLX_DOUBLEBUFFER, True, GLX_RED_SIZE, 8, GLX_GREEN_SIZE, 8, GLX_BLUE_SIZE, 8, None};
         int configurations = 0; GLXFBConfig *available = glXChooseFBConfig(display, screen, attributes, &configurations);
         if (!available || !configurations) { if (available) XFree(available); throw std::runtime_error("No compatible X11 GLX framebuffer configuration"); }
-        const GLXFBConfig config = available[0]; visual = glXGetVisualFromFBConfig(display, config); XFree(available);
+        GLXFBConfig config = nullptr;
+        // A 32-bit ARGB child can be composited as fully transparent: libmpv's
+        // render target does not promise an opaque alpha channel. Choose a
+        // native opaque RGB visual instead of whichever FBConfig sorts first.
+        for (int i = 0; i < configurations; i++) {
+            auto *candidate = glXGetVisualFromFBConfig(display, available[i]);
+            if (candidate && candidate->depth == 24) { config = available[i]; visual = candidate; break; }
+            if (candidate) XFree(candidate);
+        }
+        XFree(available);
         if (!visual) throw std::runtime_error("No X11 GLX visual");
         colormap = XCreateColormap(display, parentInfo.root, visual->visual, AllocNone);
         XSetWindowAttributes windowAttributes{}; windowAttributes.colormap = colormap; windowAttributes.border_pixel = 0;
@@ -340,46 +347,38 @@ napi_value create(napi_env env, napi_callback_info info) {
         textDraw = XftDrawCreate(display, toolbar, visual->visual, colormap);
         if (!graphics || !textDraw) throw std::runtime_error("Cannot create X11 control drawing resources");
         textColor.pixel = foreground; textColor.color = {0, 0, 0, 65535};
-        updateBounds(env, args[1]); playback.initialize(getProcAddress); interact();
+        const auto *rendererName = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
+        const bool softwareRendering = x11::softwareRenderer(rendererName);
+        updateBounds(rect); playback.initialize(getProcAddress, nullptr, softwareRendering); interact();
         errors.check();
-        return undefined(env);
+        return;
     } catch (const std::exception &error) {
         const std::string reason = error.what();
-        try { destroyPlayer(); } catch (...) { return fail(env, reason + "; X11 cleanup failed"); }
-        return fail(env, reason);
+        try { destroyPlayer(); } catch (...) { throw std::runtime_error(reason + "; X11 cleanup failed"); }
+        throw std::runtime_error(reason);
     }
 }
-napi_value bounds(napi_env env, napi_callback_info info) {
-    size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-    try { if (display && !closing && count == 1) { requireOwner(); XErrors errors(display); events(); updateBounds(env, args[0]); errors.check(); } }
-    catch (const std::exception &error) { return fail(env, error.what()); }
-    return undefined(env);
+void bounds(const Bounds &rect) {
+    if (display && !closing) { requireOwner(); XErrors errors(display); events(); updateBounds(rect); errors.check(); }
 }
-napi_value setVisible(napi_env env, napi_callback_info info) {
-    size_t count = 1; napi_value args[1]; bool value = false; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-    try {
-        if (count != 1 || napi_get_value_bool(env, args[0], &value) != napi_ok) throw std::runtime_error("Expected visibility flag");
+void setVisible(bool value) {
         if (display && !closing) {
             requireOwner(); XErrors errors(display); events();
-            if (closing) return undefined(env);
+            if (closing) return;
             visible = value;
-            if (value) XMapWindow(display, video); else {
+            if (value) XMapRaised(display, video); else {
                 Window focused; int revert; XGetInputFocus(display, &focused, &revert);
                 cancelInput(); XUnmapWindow(display, video); showControls(false);
                 if (focused == video || focused == toolbar) XSetInputFocus(display, parent, RevertToParent, CurrentTime);
             }
             errors.check();
         }
-    } catch (const std::exception &error) { return fail(env, error.what()); }
-    return undefined(env);
 }
-napi_value setPresentation(napi_env env, napi_callback_info info) {
-    size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-    try {
-        if (display && !closing && count == 1) {
-            requireOwner(); const auto next = stringArg(env, args[0]);
+void setPresentation(const std::string &next) {
+        if (display && !closing) {
+            requireOwner();
             if (next != "expanded" && next != "docked" && next != "fullscreen") throw std::runtime_error("Invalid playback presentation");
-            if (next == presentation) return undefined(env);
+            if (next == presentation) return;
             XErrors errors(display); cancelInput(); presentation = next; focusFullscreen = next == "fullscreen"; interact();
             if (next != "fullscreen") {
                 Window focused; int revert; XGetInputFocus(display, &focused, &revert);
@@ -388,33 +387,20 @@ napi_value setPresentation(napi_env env, napi_callback_info info) {
             }
             showControls(next == "fullscreen" && visible); layout(); errors.check();
         }
-    } catch (const std::exception &error) { return fail(env, error.what()); }
-    return undefined(env);
 }
-napi_value command(napi_env env, napi_callback_info info) {
-    size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-    try { requireOwner(); if (count != 1 || closing) throw std::runtime_error("No X11 playback session"); playback.command(env, args[0]); }
-    catch (const std::exception &error) { return fail(env, error.what()); }
-    return undefined(env);
+std::string state() {
+    if (display) { requireOwner(); { XErrors errors(display); events(); } if (closing) destroyPlayer(); }
+    auto result = playback.stateJson();
+    if (playback.alive()) {
+        result.pop_back();
+        result += ",\"pixelWidth\":" + std::to_string(pixelWidth) + ",\"pixelHeight\":" + std::to_string(pixelHeight)
+            + ",\"backend\":\"x11-glx\",\"fullscreenControlsVisible\":" + (controlsVisible ? "true" : "false") + '}';
+    }
+    return result;
 }
-napi_value read(napi_env env, bool drain) {
-    try {
-        if (display && drain) { requireOwner(); { XErrors errors(display); events(); } if (closing) destroyPlayer(); }
-        napi_value result = playback.state(env, drain);
-        if (playback.alive()) {
-            setNumber(env, result, "pixelWidth", pixelWidth); setNumber(env, result, "pixelHeight", pixelHeight);
-            setFlag(env, result, "fullscreenControlsVisible", controlsVisible); setString(env, result, "backend", "x11-glx");
-            setNumber(env, result, "focusedControlIndex", static_cast<int>(controls.focus));
-        }
-        return result;
-    } catch (const std::exception &error) { return fail(env, error.what()); }
-}
-napi_value state(napi_env env, napi_callback_info) { return read(env, true); }
-napi_value inspect(napi_env env, napi_callback_info) { return read(env, false); }
-napi_value render(napi_env env, napi_callback_info) {
-    try {
-        if (!display || !drawable || closing) return undefined(env);
-        requireOwner(); XErrors errors(display); events(); if (closing) return undefined(env);
+void render() {
+        if (!display || !drawable || closing) return;
+        requireOwner(); XErrors errors(display); events(); if (closing) return;
         const auto timestamp = now();
         if (singleClickAt && timestamp - singleClickAt > 300) { singleClickAt = 0; queue("toggle-pause"); }
         if (visible && presentation == "fullscreen") {
@@ -429,29 +415,7 @@ napi_value render(napi_env env, napi_callback_info) {
         if (!glXMakeContextCurrent(display, drawable, drawable, context)) throw std::runtime_error("Cannot make X11 playback context current");
         if (playback.updateRequested() && !draw(true)) throw std::runtime_error("X11 frame rendering failed");
         errors.check();
-    } catch (const std::exception &error) { return fail(env, error.what()); }
-    return undefined(env);
 }
-napi_value destroy(napi_env env, napi_callback_info) {
-    try { destroyPlayer(); } catch (const std::exception &error) { return fail(env, error.what()); }
-    return undefined(env);
-}
-void cleanup(void *) { try { destroyPlayer(); } catch (...) { /* Normal shutdown must release before environment cleanup. */ } }
 } // namespace
 
-napi_value initialize(napi_env env, napi_value exports) {
-    napi_property_descriptor methods[] = {
-        {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"setBounds", nullptr, bounds, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"setVisible", nullptr, setVisible, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"setPresentation", nullptr, setPresentation, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"command", nullptr, command, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"state", nullptr, state, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"inspect", nullptr, inspect, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"render", nullptr, render, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"destroy", nullptr, destroy, nullptr, nullptr, nullptr, napi_default, nullptr}
-    };
-    napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
-    napi_add_env_cleanup_hook(env, cleanup, nullptr); return exports;
-}
-NAPI_MODULE(NODE_GYP_MODULE_NAME, initialize)
+#include "linuxPlaybackHelper.h"

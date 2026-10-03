@@ -160,3 +160,37 @@ type Viewport = { contentBoundsDip: Rect; visible: boolean; presentation: Presen
 本次增量 `npm test` 退出 0：Electron 3487 项中 3485 通过、2 个 Windows 路径语义用例跳过、0 失败；包含全量 lint/类型/架构与打包/fixture/4 项构建命令计划测试。本机打包脚本中 Linux 实际 ELF fixture 另按平台跳过，已由上面的两个 Linux 容器执行，不能将此跳过忽略。macOS 原生及桌面重新构建通过，正常关闭回归再次通过（`close-report.json`，forced=false、code=0）；此次未重跑长片/远程媒体完整矩阵，也未做声音听感、VoiceOver 或设备输入验收。
 
 下一步仍需 Windows 实际构建/PE 检查、平台显示与输入关口以及 GPL 运行库来源/许可审核；macOS 的人工与正式运行库验收继续列为未完成。上述增量记录当时未提交、推送或发布；用户随后授权提交前检视、提交并推送功能分支，本轮修复和独立验证结果见 [提交前审查](BUILTIN_PLAYBACK_REVIEW.md)，不是发布或跨平台验收记录。
+
+### Linux helper 进程隔离增量（2026-10-03，本机画面与控制已验证）
+
+后续真实 Electron 调试发现同进程 libmpv 会受到 Electron 全局 FFmpeg／分配器符号干扰；`RTLD_DEEPBIND` 曾出现 libnuma invalid free，`dlmopen` 独立 namespace 实验也未通过真实播放和跨 libc 线程清理。因此不保留这两种方式，不把合成 namespace 测试通过当作真实 libmpv 可用证明。
+
+Linux 入口改为直接链接 libmpv 的独立 `playback-helper`，由其拥有原有 X11/GLX child windows 与核心，仍嵌入同一 Electron parent；macOS/Windows addon 入口不变。Electron 使用私有继承管道和带长度的字段协议控制 helper，不启动 shell、不开放监听端口，返回状态在 JS bridge 缓存。进程地址空间隔离消除与 Electron 同进程的符号绑定；这不是解码器沙箱，也不自动证明退出、反复开启、音视频或 GPU 路径正确。
+
+软件 OpenGL 后续调试中，帧计数与时钟曾推进但 surface 仍黑屏，未将其记为首帧通过。源码现按 GL renderer 名称识别 `llvmpipe`／`softpipe`，仅此路径启用 bilinear 的 scale/cscale/dscale、关闭 correct-downscaling 及 `gpu-dumb-mode` 兼容策略；已在当前软件 OpenGL 环境看到正常明亮的真实视频画面。该选择用较简单缩放换取兼容性，不代表保留高级 shader 缩放画质，不证明真实 GPU、硬解或其它驱动通过。清理诊断代码后的本机交互复验见下文，音频与其它平台仍未完成。
+
+运行库清单的 Linux 入口必须是 `playback-helper`，不接受 `playback.node`。helper 参加现有 SHA-256、准确文件清单和唯一源码／许可所有者检查；复制后再次检查。ELF 检查允许 helper 为 `ET_EXEC` 或 PIE `ET_DYN`，要求执行权限、非零入口、完整 program headers 及架构对应的标准 glibc interpreter，库文件仍仅接受 `ET_DYN`。当前检查面向 glibc 和 GNU readelf，未支持 musl；未引入 `dlmopen` 运行前提。helper 正常 `DT_NEEDED` 中的 libmpv 与间接非系统依赖继续要求运行库内 `$ORIGIN` 闭包，不能因 helper 是单独进程而省略依赖或来源材料。
+
+本次定向验证在 Linux x64、glibc 2.41、GCC 14.2.0 执行：`node --test scripts/playback-runtime.test.mjs` 为 8 通过、1 macOS-only 跳过。合成 C fixture 分别编译非 PIE 和 PIE helper，完成输入／复制后校验、移除开发目录后运行、缺失依赖清单拒绝和丢失执行权限拒绝；它不是实际 libmpv、正式运行库或 GUI 播放验收。arm64 helper 搬移、XWayland、声音听感、硬解、输入／AT-SPI、跨屏／DPI、干净安装和完整第三方运行库审核仍需独立证据。
+
+JS bridge 通过 17 项定向回归：使用真实临时可执行 fixture 进程与生产 bridge，核对 UTF-8／特殊路径的字节长度协议、分块状态、动作仅消费一次、错误动作拒绝、管道断开、启动失败、旧进程迟到输出、关闭／重开及不响应 helper 的有界终止。该回归曾复现 `actions: [null]` 被放行，补充逐项动作验证后通过。播放器目录测试合计 69 通过；打包测试 20 通过／1 macOS-only 跳过，构建命令计划 5 通过。`playback-linux-helper-smoke.mjs` 使用本机开发库路径执行真实 helper 的无显示启动／协议／退出检查通过；未创建 GL 或播放媒体。Dockerfile 已迁移到相同 helper smoke，本次尚未重新构建 Docker 镜像，不沿用旧 addon 镜像作为新 helper 验证证据。
+
+本轮 `npm run build` 退出 0，包含桌面 bundle、运行时／资源检查与 Web 构建。完整 `npm test` 的前置边界／lint、类型、打包与构建计划检查通过，但 Electron 汇总为 3539 项中 3505 通过、12 失败、17 取消、5 跳过，命令退出 1，不能记为完整测试通过。失败涉及沙箱拒绝 Unix socket 的 `listen EPERM`，以及 `networkInterfaces()` 的 `uv_interface_addresses` error 1；静态代码支持以下推断：后者在 WebServer authority 校验发生后，通用错误处理返回 404，影响 HTTP／配对断言和登录 suite 前置；这不是所有失败的独立运行时因果证明。单独 loopback HTTP/fetch probe 正常；Unix socket 定向升级权限重试仍被拒绝，未跳过或改写这些测试。完整测试仍需在允许这些 OS 能力的验证环境重新执行。
+
+显示选择同时修正为仅依据原始启动参数：Electron ready 前默认 `getSwitchValue('ozone-platform') === 'x11'` 不再视为 opt-in。回归覆盖 `--javdex-x11`、显式 ozone 参数、最后一个重复参数优先、`--` 后位置参数、畸形／空值和冲突失败后状态不变。该参数回归不证明显示或播放验收通过。
+
+
+### Linux x64 最终真实桌面复验（2026-10-03）
+
+Debian 13.6、Xfce/X11、Electron 43.4.1、libmpv 0.40.0、Mesa 25.0.7 llvmpipe（LLVM 19.1.7）。使用独立测试资料库与自制 120 秒 960×540@24 H.264/AAC 素材，画面带时间／帧号，不触及正式资料库。最终 native ELF 不含临时 `glReadPixels`、清屏、`glFinish`、调试日志或 loader 绕过。开发依赖仍位于独立前缀，未作为可分发运行库。
+
+本机正常应用入口实测通过：详情和资源行播放、完整连续帧、暂停稳定、恢复、暂停中 ±5 秒、时间轴拖拽、音量／静音状态、全屏进出与原生控件、自动隐藏／唤回、收起／双击展开、SRT 中英文和 ASS 彩色样式、关闭／重开。暂停拖拽从烧录 `00:53.625` 到 `01:38.333`，与 UI 时间对应；不是只验证按钮或内部计数。修正 Xft 中文字符匹配后全屏控件可读。无启动 flag 时友好禁用，`--javdex-x11` 和 `--ozone-platform=x11` 两个正常启动路径均可播放。
+
+负向验证中外部 `.sup` 被现有 SRT/ASS 限制明确拒绝，本轮不把它当作内嵌 PGS 通过。由此实际发现 Toast 被原生 surface 遮挡，以及 modal 背景 inert 导致 Toast 关闭按钮点击穿透。现已按相交区域避让视频，并显式保留 Toast 交互子树；不注册新 modal、不在出现时抢焦点，Tab 可到 Toast 控件。17 个相关定向测试、类型／lint 和完整构建通过；真实应用再次触发错误，物理点击关闭后相同 `00:12.333` 暂停帧恢复，没有重开播放会话。新增真实浏览器回归已写入 UI 测试入口，但此执行器在 Chromium process-singleton Unix socket 阶段返回 EPERM，未记为通过。
+
+测试文件暂时不可用时，可取消既有清理确认而保留记录；恢复原文件后在同一应用重新播放成功。多轮正常退出码均为 0，真实桌面终端检查退出后无 `playback-helper` 残留。私有管道故障、异常退出／旧消息及有界停止另有进程回归；这不等于长期泄漏／所有解码器异常均已覆盖。
+
+**仍不能宣布整体验收通过**：本机无可用音频输出设备，应用诊断为“音频 无／无输出”，不声称音频解码输出、听感或音画同步通过；完整 `npm test` 的 OS 能力限制仍如上记录。真实 GPU、硬解、XWayland、跨屏／DPI、AT-SPI、长片／4K/HDR、远程真实部署、安装包与第三方源码／许可审核均未由本次扩展证明。上述 GUI 修复阶段只保留本地改动；其后用户授权独立检视并推送原功能分支，不包含合并、部署或发布。
+
+
+提交前独立复验：在相同执行环境、完全相同依赖、workspace 链接指向独立基线 checkout 的条件下，提交 `9d6a904cdf951d4b7163893152e5ddf094ddaec6` 与当前修复均对同一 41 项失败相关测试得到 12 通过、12 失败、17 取消；全部 29 个失败／取消名称、主错误签名以及 webServer before-hook 错误与此前全量一致。由此已验证这组失败先于本 patch 存在，而非仅按错误类型猜测；socket 和网卡接口权限有直接错误证据，HTTP 错误链的具体因果仍保留为上述静态支持的推断。独立只读代码检视未发现阻止功能分支推送的问题；不把此结论等同于完整测试全绿或发布验收通过。

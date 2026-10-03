@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import type { PlaybackAvailability, PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback'
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
 import { linuxPlaybackBackend } from './playbackDisplay'
+import { createLinuxPlaybackBridge } from './linuxPlaybackBridge'
 
 interface Bridge {
   create(handle: Buffer, bounds: { x: number; y: number; width: number; height: number; scale?: number }, host?: { backend: 'x11' }): void
@@ -17,8 +18,9 @@ interface Bridge {
   destroy(): void
 }
 function runtimePath(): string {
-  return app.isPackaged ? path.join(process.resourcesPath, 'native-playback', 'playback.node')
-    : path.join(app.getAppPath(), 'out', 'native-playback', 'playback.node')
+  const filename = process.platform === 'linux' ? 'playback-helper' : 'playback.node'
+  return app.isPackaged ? path.join(process.resourcesPath, 'native-playback', filename)
+    : path.join(app.getAppPath(), 'out', 'native-playback', filename)
 }
 export function builtinPlaybackAvailability(): PlaybackAvailability {
   if (!['darwin', 'win32', 'linux'].includes(process.platform)) return { available: false, reason: '此平台的原生播放适配尚未实现，请显式使用外部播放器' }
@@ -40,7 +42,8 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
       if (!availability.available) throw new Error(availability.reason ?? '内置播放不可用')
       const window = getWindow()
       if (!window || window.isDestroyed()) throw new Error('主窗口不可用')
-      if (!bridge) bridge = createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath()) as Bridge
+      if (!bridge) bridge = process.platform === 'linux' ? createLinuxPlaybackBridge(runtimePath())
+        : createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath()) as Bridge
       if (process.platform === 'linux') {
         bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1,
           scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend: 'x11' })

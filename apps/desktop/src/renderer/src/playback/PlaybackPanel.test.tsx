@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl } from '@shared/desktop/playback'
+import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewport } from '@shared/desktop/playback'
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import type { ElectronApi } from '../../../preload/index'
 import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
@@ -28,6 +28,7 @@ const opened: Array<{ target: PlaybackTarget; privateSession: boolean }> = []
 const external: unknown[][] = []
 const controls: Array<{ id: string; command: PlaybackControl }> = []
 const queried: unknown[][] = []
+const viewports: PlaybackViewport[] = []
 let getDetail = async (): Promise<ScopedVideoDetail | null> => detail()
 let open = async () => ({ ok: true })
 let openExternal = async () => ({ ok: true })
@@ -36,7 +37,8 @@ const fake = {
     snapshot: async () => snapshot(),
     onChanged: (listener: typeof changed) => { changed = listener; return () => { changed = () => {} } },
     open: async (value: PlaybackTarget, options: { privateSession: boolean }) => { opened.push({ target: value, privateSession: options.privateSession }); return open() },
-    control: async (id: string, command: PlaybackControl) => { controls.push({ id, command }) }
+    control: async (id: string, command: PlaybackControl) => { controls.push({ id, command }) },
+    viewport: async (value: PlaybackViewport) => { viewports.push(value) }
   },
   player: { openResource: async (...args: unknown[]) => { external.push(args); return openExternal() } },
   videos: { get: async (...args: unknown[]) => { queried.push(args); return getDetail() } }
@@ -50,14 +52,16 @@ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), {
   api: fake, location: { href: 'http://localhost/' }, history, setTimeout, clearTimeout, setInterval, clearInterval
 }) })
-Object.defineProperty(globalThis, 'document', { configurable: true, value: { body: { style: { overflow: '' } }, activeElement: null } })
+Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+  body: { style: { overflow: '' } }, activeElement: null, visibilityState: 'visible', querySelectorAll: () => []
+} })
 Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: class { observe() {} disconnect() {} } })
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let Select: typeof import('../components/SelectControl').default
-async function mount(): Promise<void> {
+async function mount(options?: TestRenderer.TestRendererOptions): Promise<void> {
   const Panel = (await import('./PlaybackPanel')).default
   Select = (await import('../components/SelectControl')).default
-  await act(async () => { renderer = TestRenderer.create(<OverlayHistoryProvider><Panel /></OverlayHistoryProvider>) })
+  await act(async () => { renderer = TestRenderer.create(<OverlayHistoryProvider><Panel /></OverlayHistoryProvider>, options) })
 }
 function button(label: string) {
   const result = renderer!.root.findAllByType('button').find(node => node.props['aria-label'] === label || node.children.includes(label))
@@ -69,7 +73,7 @@ function source() { return renderer!.root.findAllByType(Select).find(node => nod
 afterEach(async () => {
   await act(async () => renderer?.unmount())
   renderer = undefined
-  opened.length = external.length = controls.length = queried.length = 0
+  opened.length = external.length = controls.length = queried.length = viewports.length = 0
   getDetail = async () => detail(); open = openExternal = async () => ({ ok: true }); history.state = null
 })
 
@@ -157,4 +161,39 @@ test('source query failure keeps the current playback and can be retried by reop
   getDetail = async () => detail()
   await options()
   assert.equal(source().props.disabled, false)
+})
+
+test('viewport polling hides only intersecting visible toast surfaces and restores the same playback session', async context => {
+  let poll = (): void => {}
+  context.mock.method(window, 'setInterval', (callback: () => void) => { poll = callback; return 1 })
+  context.mock.method(window, 'clearInterval', () => {})
+  const video = { x: 10, y: 20, width: 100, height: 80, left: 10, top: 20, right: 110, bottom: 100 }
+  let surfaceBounds = { left: 200, top: 20, right: 300, bottom: 60 }
+  let surfaceVisible = true
+  const surface = { getBoundingClientRect: () => surfaceBounds, checkVisibility: () => surfaceVisible }
+  let surfaces: typeof surface[] = []
+  context.mock.method(document, 'querySelectorAll', (selector: string) => {
+    assert.equal(selector, '[data-native-playback-occluder]')
+    return surfaces
+  })
+  await mount({ createNodeMock: element => element.type === 'button' && String(element.props['aria-label']).startsWith('视频画面')
+    ? { getBoundingClientRect: () => video, closest: () => null } : null })
+  assert.deepEqual(viewports.map(value => value.visible), [true])
+  surfaces = [surface]
+  await act(async () => poll())
+  assert.equal(viewports.length, 1, 'a disjoint toast does not hide video or resend unchanged geometry')
+  surfaceBounds = { left: 109, top: 20, right: 200, bottom: 60 }
+  await act(async () => { poll(); poll() })
+  assert.deepEqual(viewports.map(value => value.visible), [true, false])
+  surfaceVisible = false
+  await act(async () => poll())
+  assert.deepEqual(viewports.map(value => value.visible), [true, false, true])
+  surfaceVisible = true
+  await act(async () => poll())
+  surfaces = []
+  await act(async () => poll())
+  assert.deepEqual(viewports.map(value => value.visible), [true, false, true, false, true])
+  assert.ok(viewports.every(value => value.sessionId === 'first' && value.presentation === 'expanded'))
+  assert.deepEqual(controls, [], 'visual occlusion neither pauses nor stops the decoder')
+  assert.deepEqual(opened, [], 'restoring video does not reopen the source')
 })

@@ -1,5 +1,5 @@
 import { createContext, useContext, useId, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
-import { interactionLayers, type InteractionLayer } from './interactionLayers'
+import { interactionLayers, preservedInteractionSurfaceSelector, type InteractionLayer } from './interactionLayers'
 
 export const InteractionLayerOwner = createContext<{ id: string; depth: number } | undefined>(undefined)
 
@@ -11,13 +11,18 @@ let backgroundObserver: MutationObserver | null = null
 function syncBackground(): void {
   for (const [element, previous] of inerted) element.inert = previous
   inerted.clear()
-  const roots = interactionLayers.modalRoots()
-  if (!roots.length) { backgroundObserver?.disconnect(); backgroundObserver = null; return }
+  const modalRoots = interactionLayers.modalRoots()
+  if (!modalRoots.length) { backgroundObserver?.disconnect(); backgroundObserver = null; return }
+  // Preserved feedback surfaces remain clickable above a modal, without owning
+  // dismissal, scroll locks, or focus. Include ancestors when walking the body.
+  const roots = [...modalRoots, ...document.querySelectorAll<HTMLElement>(preservedInteractionSurfaceSelector)]
   if (!backgroundObserver && typeof MutationObserver !== 'undefined') {
     backgroundObserver = new MutationObserver(records => {
-      if (records.some(record => [...record.addedNodes].some(node => node instanceof HTMLElement))) syncBackground()
+      if (records.some(record => record.type === 'attributes'
+        || [...record.addedNodes, ...record.removedNodes].some(node => node instanceof HTMLElement))) syncBackground()
     })
-    backgroundObserver.observe(document.body, { childList: true, subtree: true })
+    backgroundObserver.observe(document.body, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ['data-interaction-preserve-surface'] })
   }
   // Walk around the active modal and its portaled descendants, without hiding them.
   const visit = (parent: Element): void => {

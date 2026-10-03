@@ -3,6 +3,11 @@
 #include <limits>
 
 int main() {
+    assert(javdex::x11::softwareRenderer("llvmpipe (LLVM 19.1.7, 256 bits)"));
+    assert(javdex::x11::softwareRenderer("softpipe"));
+    assert(!javdex::x11::softwareRenderer("Mesa Intel UHD Graphics"));
+    assert(!javdex::x11::softwareRenderer("NVIDIA GeForce"));
+    assert(!javdex::x11::softwareRenderer(nullptr));
     using namespace javdex::x11;
     uint32_t xid = 0xf1234567;
     assert(windowId(&xid, sizeof(xid)) == xid);

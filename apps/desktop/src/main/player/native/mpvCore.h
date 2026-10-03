@@ -1,7 +1,9 @@
 #pragma once
-// Shared main-process libmpv owner. Platform adapters own their window/GL
+// Shared libmpv owner (platform addon or isolated Linux helper). Platform adapters own their window/GL
 // context and make that context current before initialize/render/shutdown.
+#ifndef JAVDEX_STANDALONE_PLAYBACK
 #include <node_api.h>
+#endif
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
 #include <atomic>
@@ -18,6 +20,7 @@
 #include <vector>
 
 namespace javdex {
+#ifndef JAVDEX_STANDALONE_PLAYBACK
 inline napi_value undefined(napi_env env) { napi_value value; napi_get_undefined(env, &value); return value; }
 inline napi_value fail(napi_env env, const std::string &message) { napi_throw_error(env, nullptr, message.c_str()); return nullptr; }
 inline std::string stringArg(napi_env env, napi_value value) {
@@ -44,6 +47,8 @@ inline double namedNumber(napi_env env, napi_value object, const char *key) {
         throw std::runtime_error("Expected finite native geometry");
     return number;
 }
+
+#endif
 
 // MPV_FORMAT_NODE data belongs to the event queue and expires on the next read.
 // Copy it while consuming; inspect() must never call mpv_wait_event itself.
@@ -100,7 +105,7 @@ public:
         const auto found = observed.find(name);
         return found == observed.end() || !std::isfinite(found->second.number) ? 0 : found->second.number;
     }
-    void initialize(void *(*getProc)(void *, const char *), void *context = nullptr) {
+    void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = 0; requested.store(false);
@@ -116,6 +121,17 @@ public:
         for (const auto &option : options) {
             int error = mpv_set_option_string(handle, option[0], option[1]);
             if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
+        }
+        if (softwareRendering) {
+            // Mesa llvmpipe/softpipe can misrender libmpv's convolution scaling
+            // path (black/striped/partial frames). A conservative supported GL
+            // path keeps playback usable on software contexts; real GPUs keep
+            // normal quality. See mpv-player/mpv#14577 for the upstream symptom.
+            const char *fallback[][2] = {{"scale", "bilinear"}, {"cscale", "bilinear"}, {"dscale", "bilinear"}, {"correct-downscaling", "no"}, {"gpu-dumb-mode", "yes"}};
+            for (const auto &option : fallback) {
+                int result = mpv_set_option_string(handle, option[0], option[1]);
+                if (result < 0) throw std::runtime_error(mpv_error_string(result));
+            }
         }
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
@@ -139,6 +155,7 @@ public:
         if (handle) { mpv_terminate_destroy(handle); handle = nullptr; }
         actions.clear(); requested.store(false);
     }
+#ifndef JAVDEX_STANDALONE_PLAYBACK
     void command(napi_env env, napi_value array) {
         if (!alive()) throw std::runtime_error("No native playback session");
         bool isArray = false; napi_is_array(env, array, &isArray);
@@ -147,6 +164,12 @@ public:
         if (!length || length > 8) throw std::runtime_error("Invalid command length");
         std::vector<std::string> values;
         for (uint32_t i = 0; i < length; i++) { napi_value value; napi_get_element(env, array, i, &value); values.push_back(stringArg(env, value)); }
+        command(values);
+    }
+#endif
+    void command(const std::vector<std::string> &values) {
+        if (!alive()) throw std::runtime_error("No native playback session");
+        if (values.empty() || values.size() > 8) throw std::runtime_error("Invalid command length");
         std::vector<const char *> args;
         for (const auto &value : values) args.push_back(value.c_str());
         args.push_back(nullptr);
@@ -189,6 +212,43 @@ public:
             lastErrorCode = error; lastError = mpv_error_string(error);
         }
     }
+    const char *errorKind() const {
+        switch (lastErrorCode) {
+            case MPV_ERROR_UNKNOWN_FORMAT: return "format";
+            case MPV_ERROR_NOTHING_TO_PLAY: return "streams";
+            case MPV_ERROR_AO_INIT_FAILED: return "audio";
+            case MPV_ERROR_VO_INIT_FAILED: return "video";
+            case MPV_ERROR_LOADING_FAILED: return "load";
+            default: return "native";
+        }
+    }
+    void drainEvents() {
+        if (!alive()) return;
+        while (true) { const auto *event = mpv_wait_event(handle, 0); if (event->event_id == MPV_EVENT_NONE) break; consume(*event); }
+    }
+    std::string stateJson() {
+        drainEvents();
+        std::string result = std::string("{\"alive\":") + (alive() ? "true" : "false");
+        auto number = [&](const char *key, double value) {
+            std::ostringstream text; text.imbue(std::locale::classic()); text << std::setprecision(17) << value;
+            result += ',' + jsonString(key) + ':' + (std::isfinite(value) ? text.str() : "null");
+        };
+        for (const auto &[key, value] : observed) {
+            if (value.format == MPV_FORMAT_DOUBLE) number(key.c_str(), value.number);
+            if (value.format == MPV_FORMAT_FLAG) result += ',' + jsonString(key.c_str()) + ':' + (value.number ? "true" : "false");
+            if (value.format == MPV_FORMAT_STRING || value.format == MPV_FORMAT_NODE) result += ',' + jsonString(key.c_str()) + ':' + jsonString(value.text.c_str());
+        }
+        number("nativeFrames", frames); number("presentedFrames", presentedFrames); number("loadedFiles", loadedFiles);
+        number("playbackRestarts", restarts); number("commandErrors", commandErrors);
+        result += ",\"errorKind\":" + jsonString(errorKind()) + ",\"error\":" + jsonString(lastError.c_str()) + ",\"actions\":[";
+        for (size_t i = 0; i < actions.size(); i++) {
+            if (i) result += ',';
+            result += "{\"kind\":" + jsonString(actions[i].kind.c_str()) + ",\"value\":" + std::to_string(actions[i].value) + '}';
+        }
+        actions.clear();
+        return result + "]}";
+    }
+#ifndef JAVDEX_STANDALONE_PLAYBACK
     napi_value state(napi_env env, bool drain) {
         napi_value result; napi_create_object(env, &result);
         setFlag(env, result, "alive", alive());
@@ -207,18 +267,9 @@ public:
         setNumber(env, result, "nativeFrames", frames); setNumber(env, result, "presentedFrames", presentedFrames);
         setNumber(env, result, "loadedFiles", loadedFiles); setNumber(env, result, "playbackRestarts", restarts); setNumber(env, result, "commandErrors", commandErrors);
         setString(env, result, "error", lastError);
-        if (lastErrorCode < 0) {
-            const char *kind = "native";
-            switch (lastErrorCode) {
-                case MPV_ERROR_UNKNOWN_FORMAT: kind = "format"; break;
-                case MPV_ERROR_NOTHING_TO_PLAY: kind = "streams"; break;
-                case MPV_ERROR_AO_INIT_FAILED: kind = "audio"; break;
-                case MPV_ERROR_VO_INIT_FAILED: kind = "video"; break;
-                case MPV_ERROR_LOADING_FAILED: kind = "load"; break;
-            }
-            setString(env, result, "errorKind", kind);
-        }
+        if (lastErrorCode < 0) setString(env, result, "errorKind", errorKind());
         return result;
     }
+#endif
 };
 }

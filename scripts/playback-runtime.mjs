@@ -8,7 +8,8 @@ import path from 'node:path'
 import { electronBuilderArchName } from './packaging-runtime.mjs'
 
 const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex')
-const binary = file => /\.(node|dylib|dll)$|\.so(?:\.\d+)*$/.test(file)
+const linuxPlaybackHelper = 'playback-helper'
+const binary = file => file === linuxPlaybackHelper || /\.(node|dylib|dll)$|\.so(?:\.\d+)*$/.test(file)
 const text = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 4096
 function relativeFile(value) {
   assert.ok(text(value) && !value.includes('\\') && !value.includes(':') && !value.includes('\0')
@@ -74,6 +75,29 @@ const linuxSystemLibraries = new Set([
   'libGL.so.1', 'libGLX.so.0', 'libOpenGL.so.0', 'libGLdispatch.so.0', 'libEGL.so.1'
 ])
 
+function inspectLinuxHelperHeader(file, data, archName) {
+  assert.ok(lstatSync(file).mode & 0o111, 'Linux playback helper must be executable')
+  assert.ok(data.readBigUInt64LE(24) !== 0n, 'Linux playback helper has no ELF entry point')
+  const offset = data.readBigUInt64LE(32), size = data.readUInt16LE(54), count = data.readUInt16LE(56)
+  assert.ok(offset >= 64n && size === 56 && count > 0 && offset + BigInt(size * count) <= BigInt(data.length),
+    'invalid Linux playback helper program headers')
+  const interpreters = []
+  for (let index = 0; index < count; index++) {
+    const header = Number(offset) + index * size
+    if (data.readUInt32LE(header) !== 3) continue // PT_INTERP
+    const start = data.readBigUInt64LE(header + 8), length = data.readBigUInt64LE(header + 32)
+    assert.ok(length > 1n && start + length <= BigInt(data.length), 'invalid Linux playback helper interpreter')
+    const value = data.subarray(Number(start), Number(start + length))
+    assert.ok(value.at(-1) === 0 && !value.subarray(0, -1).includes(0), 'invalid Linux playback helper interpreter')
+    interpreters.push(value.subarray(0, -1).toString('utf8'))
+  }
+  const allowed = archName === 'x64'
+    ? ['/lib64/ld-linux-x86-64.so.2', '/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2']
+    : ['/lib/ld-linux-aarch64.so.1', '/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1']
+  assert.ok(interpreters.length === 1 && allowed.includes(interpreters[0]),
+    'Linux playback helper must use the target system glibc interpreter')
+}
+
 /** readDynamic is a private inspection seam for parser tests. No ldd/dlopen is
  * used on runtime inputs; GNU readelf can inspect ELF without executing it. */
 export function inspectLinuxPlaybackBinary(file, { directory, archName, binaryFiles }, readDynamic = file => tool('readelf', ['-dW', file])) {
@@ -81,9 +105,13 @@ export function inspectLinuxPlaybackBinary(file, { directory, archName, binaryFi
   assert.ok(data.length >= 64 && data.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])), 'playback binary is not ELF')
   assert.ok(data[4] === 2 && data[5] === 1 && data[6] === 1 && data.readUInt32LE(20) === 1,
     'playback runtime requires 64-bit little-endian ELF')
-  assert.equal(data.readUInt16LE(16), 3, 'playback binary must be an ELF shared object')
+  const helper = file === path.join(directory, linuxPlaybackHelper)
+  const type = data.readUInt16LE(16)
+  assert.ok(helper ? type === 2 || type === 3 : type === 3,
+    helper ? 'Linux playback helper must be an ELF executable or PIE' : 'playback binary must be an ELF shared object')
   const machine = { x64: 62, arm64: 183 }[archName]
   assert.ok(machine && data.readUInt16LE(18) === machine, 'playback binary architecture does not match its package')
+  if (helper) inspectLinuxHelperHeader(file, data, archName)
   const dynamic = readDynamic(file)
   assert.match(dynamic, /\(NULL\)/, 'missing ELF dynamic section')
   assert.ok(!/\((AUDIT|DEPAUDIT|FILTER|AUXILIARY)\)/.test(dynamic), 'unsupported ELF dynamic dependency indirection')
@@ -151,7 +179,9 @@ export function validatePlaybackRuntime(directory, target, inspectBinary = inspe
   }
   assert.deepEqual(filesIn(directory), [...names, 'runtime.json'].sort(), 'playback files do not exactly match their inventory')
   for (const name of names) assert.equal(digest(path.join(directory, name)), manifest.files[name], 'playback file digest mismatch: ' + name)
-  assert.ok(names.includes('playback.node'), 'missing playback addon')
+  assert.ok(names.includes(target.platformName === 'linux' ? linuxPlaybackHelper : 'playback.node'),
+    target.platformName === 'linux' ? 'missing Linux playback helper' : 'missing playback addon')
+  if (target.platformName === 'linux') assert.ok(!names.includes('playback.node'), 'Linux playback uses an isolated helper, not an in-process addon')
   assert.ok(Array.isArray(manifest.components) && manifest.components.length > 0 && manifest.components.length <= 100,
     'missing playback dependency/source inventory')
   const owners = new Map()
@@ -173,7 +203,8 @@ export function validatePlaybackRuntime(directory, target, inspectBinary = inspe
     }
   }
   const mpv = manifest.components.find(component => component.name === 'mpv')
-  assert.ok(mpv && mpv.version === manifest.mpvVersion && mpv.binaries.some(name => name !== 'playback.node'), 'missing matching libmpv component')
+  assert.ok(mpv && mpv.version === manifest.mpvVersion
+    && mpv.binaries.some(name => name !== 'playback.node' && name !== linuxPlaybackHelper), 'missing matching libmpv component')
   const binaryFiles = new Set(names.filter(binary).map(name => path.join(directory, name)))
   for (const file of binaryFiles) {
     assert.ok(owners.has(path.relative(directory, file).split(path.sep).join('/')), 'binary has no source/license owner')

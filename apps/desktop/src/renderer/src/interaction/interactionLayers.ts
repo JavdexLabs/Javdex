@@ -10,6 +10,7 @@ export interface InteractionLayer {
 }
 
 const focusableSelector = 'button:not(:disabled),[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex]:not([tabindex="-1"])'
+export const preservedInteractionSurfaceSelector = '[data-interaction-preserve-surface]'
 
 export function createInteractionLayers() {
   const layers: InteractionLayer[] = []
@@ -68,6 +69,12 @@ export function createInteractionLayers() {
         const extra = Array.from(childRoot.querySelectorAll<HTMLElement>(focusableSelector)).filter(element => !controls.includes(element))
         const anchorIndex = controls.indexOf(child.anchor?.() as HTMLElement)
         controls.splice(anchorIndex >= 0 ? anchorIndex + 1 : controls.length, 0, ...extra)
+      }
+      // Global feedback stays reachable without becoming a modal or taking focus.
+      for (const surface of document.querySelectorAll<HTMLElement>(preservedInteractionSurfaceSelector)) {
+        for (const element of surface.querySelectorAll<HTMLElement>(focusableSelector)) {
+          if (!controls.includes(element)) controls.push(element)
+        }
       }
       return controls.filter(element => element.tabIndex >= 0 && !element.closest('[hidden],[inert],[aria-hidden="true"]')
         && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')

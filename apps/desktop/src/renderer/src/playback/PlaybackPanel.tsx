@@ -14,6 +14,7 @@ import { interactionLayers } from '../interaction/interactionLayers'
 import { useOverlayHistory } from '../interaction/OverlayHistoryContext'
 import { createPlaybackHistory } from './playbackHistory'
 import { playbackTrackLabel } from './playbackTrackLabel'
+import { hasPlaybackOcclusion } from './playbackOcclusion'
 import styles from './PlaybackPanel.module.css'
 
 let viewportSequence = 0
@@ -114,6 +115,7 @@ export default function PlaybackPanel(): JSX.Element | null {
       const visible = current.phase !== 'error' && bounds.width > 0 && bounds.height > 0
         && document.visibilityState !== 'hidden' && !element.closest('[inert]')
         && (presentation === 'docked' ? !interactionLayers.hasModal() : layer.isTop())
+        && !hasPlaybackOcclusion(bounds, document.querySelectorAll<HTMLElement>('[data-native-playback-occluder]'))
       const rect = { x: Math.max(0, bounds.x), y: Math.max(0, bounds.y), width: bounds.width, height: bounds.height }
       const key = JSON.stringify([rect, visible])
       if (key === last) return
@@ -123,7 +125,7 @@ export default function PlaybackPanel(): JSX.Element | null {
     report()
     const observer = new ResizeObserver(report)
     if (video.current) observer.observe(video.current)
-    // Also follows portal/modal ownership and native full-screen transitions.
+    // Also follows portal/modal ownership, visual occluders and full-screen transitions.
     const timer = window.setInterval(report, 100)
     window.addEventListener('resize', report)
     return () => { disposed = true; observer.disconnect(); window.clearInterval(timer); window.removeEventListener('resize', report) }

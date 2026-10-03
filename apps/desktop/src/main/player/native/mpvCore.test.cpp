@@ -56,5 +56,10 @@ int main() {
     event = {MPV_EVENT_FILE_LOADED, 0, 0, nullptr};
     core.consume(event); core.consume(event); assert(core.loads() == 2);
     assert(!core.updateRequested()); assert(!core.render(0, 0));
+    core.queue("seek-relative", -5);
+    const auto transport = core.stateJson();
+    assert(transport.find("\"actions\":[{\"kind\":\"seek-relative\",\"value\":-5.000000}]") != std::string::npos);
+    assert(core.stateJson().find("\"actions\":[]") != std::string::npos);
+    assert(transport.find("\"time-pos\":null") == std::string::npos); // invalidated value omitted
     core.shutdown(); core.shutdown(); assert(!core.alive());
 }

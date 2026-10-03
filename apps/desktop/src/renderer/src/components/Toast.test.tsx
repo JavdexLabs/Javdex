@@ -3,6 +3,7 @@ import { afterEach, test } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { ToastProvider, useToast } from './Toast'
+import { interactionLayers } from '../interaction/interactionLayers'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() })
@@ -51,4 +52,27 @@ test('a late clipboard completion cannot update a reopened error detail session'
   act(() => button('查看详情').props.onClick())
   await act(async () => { finish(); await Promise.resolve() })
   assert.ok(!JSON.stringify(renderer!.toJSON()).includes('已复制'))
+})
+
+test('only a visible nonempty toast stack marks visual occlusion without claiming modal ownership', () => {
+  act(() => { renderer = TestRenderer.create(<ToastProvider><Actions /></ToastProvider>) })
+  const stack = () => renderer!.root.findByProps({ 'aria-live': 'polite' })
+  assert.equal(stack().props['data-native-playback-occluder'], undefined)
+  assert.equal(stack().props['data-interaction-preserve-surface'], undefined)
+  assert.equal(interactionLayers.hasModal(), false)
+  act(() => button('失败').props.onClick())
+  assert.equal(stack().props['data-native-playback-occluder'], true)
+  assert.equal(stack().props['data-interaction-preserve-surface'], true)
+  assert.equal(interactionLayers.hasModal(), false)
+  act(() => button('查看详情').props.onClick())
+  assert.equal(stack().props.hidden, true)
+  assert.equal(stack().props['data-native-playback-occluder'], undefined)
+  assert.equal(stack().props['data-interaction-preserve-surface'], undefined)
+  act(() => renderer!.root.findByProps({ role: 'dialog' }).findAllByType('button')
+    .find(node => node.children.join('') === '关闭')!.props.onClick())
+  assert.equal(stack().props['data-native-playback-occluder'], true)
+  act(() => button('关闭').props.onClick())
+  assert.equal(stack().props['data-native-playback-occluder'], undefined)
+  assert.equal(stack().props['data-interaction-preserve-surface'], undefined)
+  assert.equal(interactionLayers.hasModal(), false)
 })

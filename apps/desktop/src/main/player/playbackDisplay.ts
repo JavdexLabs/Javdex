@@ -5,7 +5,6 @@ export const LINUX_X11_PLAYBACK_FLAG = '--javdex-x11'
 interface DisplayStartupHost {
   isReady(): boolean
   commandLine: {
-    getSwitchValue(name: string): string
     appendSwitch(name: string, value: string): void
   }
 }
@@ -18,9 +17,20 @@ export function configurePlaybackDisplay(
 ): void {
   if (platform !== 'linux') { linuxBackend = null; return }
   if (host.isReady()) throw new Error('播放显示后端必须在应用启动时选择；请退出应用后重新启动')
-  const selected = host.commandLine.getSwitchValue('ozone-platform')
-  if (argv.includes(LINUX_X11_PLAYBACK_FLAG)) {
-    if (selected && selected !== 'x11') throw new Error('--javdex-x11 与 --ozone-platform 的选择冲突，请只选择一种显示后端')
+  // Electron may already report an ozone default (including x11) before ready.
+  // Only startup arguments prove opt-in. Match Chromium's switch rules: skip the
+  // executable, trim ASCII whitespace, stop at --, and use the last = value.
+  let explicitX11 = false
+  let selected: string | undefined
+  for (const rawArg of argv.slice(1)) {
+    const arg = rawArg.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '')
+    if (arg === '--') break
+    if (arg === LINUX_X11_PLAYBACK_FLAG) explicitX11 = true
+    const ozone = /^--?ozone-platform(?:=([\s\S]*))?$/.exec(arg)
+    if (ozone) selected = ozone[1] ?? ''
+  }
+  if (explicitX11) {
+    if (selected !== undefined && selected !== 'x11') throw new Error('--javdex-x11 与 --ozone-platform 的选择冲突，请只选择一种显示后端')
     host.commandLine.appendSwitch('ozone-platform', 'x11')
     linuxBackend = 'x11'
   } else if (selected === 'x11') {

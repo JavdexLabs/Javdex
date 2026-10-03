@@ -10,6 +10,10 @@
 #include <string>
 
 namespace javdex::x11 {
+inline bool softwareRenderer(const char *name) {
+    const std::string renderer = name ? name : "";
+    return renderer.find("llvmpipe") != std::string::npos || renderer.find("softpipe") != std::string::npos;
+}
 inline uint32_t windowId(const void *data, size_t length) {
     if (!data || length != sizeof(uint32_t)) throw std::runtime_error("Invalid Electron X11 Window buffer (expected uint32_t)");
     uint32_t id; std::memcpy(&id, data, sizeof(id));

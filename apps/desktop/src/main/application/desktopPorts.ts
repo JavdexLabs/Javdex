@@ -18,6 +18,7 @@ export interface DesktopCredentialStore {
 export interface DesktopSettingsStore {
   read(): Promise<ThisComputerSettings>
   write(patch: Partial<ThisComputerSettings>): Promise<ThisComputerSettings>
+  onChanged?(listener: (settings: ThisComputerSettings) => void): () => void
 }
 
 export interface DesktopRuntimePorts {

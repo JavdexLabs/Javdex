@@ -5,25 +5,22 @@ import { appCommandAdapter } from './appContractAdapter'
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
 import { removePlayedWatchLater } from '../application/watchLaterPlayback'
+import type { PlaybackTarget } from '@shared/desktop/playback'
 
 export function registerPlayerHandlers(
   backend: CatalogBackend,
-  settings: DesktopSettingsStore
+  settings: DesktopSettingsStore,
+  openBuiltin: (target: PlaybackTarget) => Promise<PlayResult>
 ): void {
   const service = createPlayerService({
     catalog: backend,
-    readPlayerPath: async () => (await settings.read()).playerPath
+    readPlayerPath: async () => (await settings.read()).playerPath,
+    readPlayerPreference: async () => (await settings.read()).playerPreference,
+    openBuiltin,
+    externalStarted: async videoId => { await removePlayedWatchLater(backend, videoId) }
   })
-
-  const afterPlayback = async (result: PlayResult, videoId?: number): Promise<PlayResult> => {
-    if (result.ok && videoId != null) {
-      try { await removePlayedWatchLater(backend, videoId) }
-      catch (error) { console.warn('播放已开始，但未能从稍后观看移出影片', error) }
-    }
-    return result
-  }
   appCommandAdapter.register(IPC.PLAYER_PLAY, async (libraryId, videoId): Promise<PlayResult> =>
-    afterPlayback(await service.playVideo(libraryId, videoId), videoId))
+    service.playVideo(libraryId, videoId))
 
   appCommandAdapter.register(IPC.PLAYER_REVEAL, (libraryId, videoId): PlayResult =>
     service.revealVideo(libraryId, videoId) as PlayResult
@@ -31,8 +28,8 @@ export function registerPlayerHandlers(
 
   appCommandAdapter.register(
     IPC.PLAYER_OPEN_RESOURCE,
-    async (libraryId, resourceId, videoId): Promise<PlayResult> =>
-      afterPlayback(await service.openResource(libraryId, resourceId, videoId), videoId)
+    async (libraryId, resourceId, videoId, player): Promise<PlayResult> =>
+      service.openResource(libraryId, resourceId, videoId, player)
   )
 
   appCommandAdapter.register(

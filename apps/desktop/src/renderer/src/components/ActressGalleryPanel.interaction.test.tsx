@@ -5,6 +5,7 @@ import TestRenderer, { act } from 'react-test-renderer'
 import type { ActressGalleryPage, ActressGalleryPageQuery } from '@shared/actressTypes'
 import type { ElectronApi } from '../../../preload/index'
 import type { ImagePreviewLightboxProps } from './ImagePreviewLightbox'
+import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
 
 const calls: ActressGalleryPageQuery[] = []
 let entries = Array.from({length:125}, (_,n) => n+1)
@@ -30,14 +31,14 @@ const fake = { actresses: {
 Object.defineProperty(globalThis,'React',{configurable:true,value:React})
 Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{
   api:fake,location:{href:'http://localhost/'},setTimeout,clearTimeout,
-  history:{state:null,pushState(){historyCount++},back(){window.dispatchEvent(new Event('popstate'))}}
+  history:{state:null,pushState(){historyCount++},go(){window.dispatchEvent(new Event('popstate'))}}
 })})
 Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}},activeElement:null}})
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let Component: typeof import('./ActressGalleryPanel').default
 let Provider: typeof import('./ImagePreviewOverlayContext').ImagePreviewOverlayProvider
 let revision = {generation:1,revision:1}
-function tree() { return <Provider><Component key={1} actressId={1} revision={revision} posterPath={null} onChanged={()=>{ revision={...revision,revision:revision.revision+1}; renderer?.update(tree()) }} /></Provider> }
+function tree() { return <OverlayHistoryProvider><Provider><Component key={1} actressId={1} revision={revision} posterPath={null} onChanged={()=>{ revision={...revision,revision:revision.revision+1}; renderer?.update(tree()) }} /></Provider></OverlayHistoryProvider> }
 async function mount(t: TestContext) {
   Component=(await import('./ActressGalleryPanel')).default
   Provider=(await import('./ImagePreviewOverlayContext')).ImagePreviewOverlayProvider

@@ -9,6 +9,9 @@ export const DEFAULT_THIS_COMPUTER_SETTINGS: ThisComputerSettings = {
   closeToTray: false,
   theme: 'graphite',
   playerPath: null,
+  playerPreference: 'external',
+  playbackVolume: 50,
+  resumePlayback: false,
   proxyUrl: '',
   proxyUrlEnabled: false,
   llmProxyUrl: '',
@@ -28,6 +31,11 @@ function normalized(value: Partial<ThisComputerSettings>): ThisComputerSettings 
     theme: typeof value.theme === 'string' && value.theme.trim() ? value.theme.trim() : 'graphite',
     playerPath:
       typeof value.playerPath === 'string' && value.playerPath.trim() ? value.playerPath.trim() : null,
+    // Keep existing installations on their external player until they explicitly opt in.
+    playerPreference: value.playerPreference === 'builtin' ? 'builtin' : 'external',
+    playbackVolume: typeof value.playbackVolume === 'number' && Number.isFinite(value.playbackVolume)
+      ? Math.max(0, Math.min(100, value.playbackVolume)) : 50,
+    resumePlayback: value.resumePlayback === true,
     proxyUrl: typeof value.proxyUrl === 'string' ? value.proxyUrl : '',
     proxyUrlEnabled: value.proxyUrlEnabled === true,
     llmProxyUrl: typeof value.llmProxyUrl === 'string' ? value.llmProxyUrl : '',
@@ -40,6 +48,7 @@ export function thisComputerSettingsPath(userDataPath: string): string {
 }
 
 export function createThisComputerSettingsStore(filePath: string): DesktopSettingsStore {
+  const listeners = new Set<(settings: ThisComputerSettings) => void>()
   const readSync = (): ThisComputerSettings => {
     try {
       const raw = fs.readFileSync(filePath, 'utf8')
@@ -62,7 +71,11 @@ export function createThisComputerSettingsStore(filePath: string): DesktopSettin
       const temp = `${filePath}.tmp-${process.pid}`
       fs.writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
       fs.renameSync(temp, filePath)
+      for (const listener of listeners) {
+        try { listener({ ...next }) } catch { console.warn('[this-computer] settings listener failed') }
+      }
       return next
-    }
+    },
+    onChanged(listener) { listeners.add(listener); return () => listeners.delete(listener) }
   }
 }

@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/JavdexLabs/Javdex/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/JavdexLabs/Javdex?display_name=tag&sort=semver&label=release&color=367766"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-2f3432"></a>
+  <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-2f3432"></a>
   <a href="https://javdexlabs.github.io/Javdex/"><img alt="Website" src="https://img.shields.io/badge/website-javdexlabs.github.io-367766"></a>
 </p>
 
@@ -164,6 +164,8 @@ Javdex 管理你已有的影片文件、手动添加的资源链接和影片资�
 
 ## License
 
-Javdex 基于 [MIT License](LICENSE) 开源。
+当前 Javdex 源码整体按 [GNU GPL v3 或后续版本（GPL-3.0-or-later）](LICENSE) 发布，项目声明见 [NOTICE](NOTICE)。
+
+此前按 MIT 发布的版本保留原有授权，原版权及许可声明见 [历史 MIT 声明](LICENSES/Javdex-MIT.txt)。第三方代码、模型与图标仍遵循各自许可，见 [第三方说明](docs/THIRD_PARTY_NOTICES.md)。
 
 Copyright (c) 2026 Javdex

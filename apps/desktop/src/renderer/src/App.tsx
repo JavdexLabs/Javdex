@@ -25,6 +25,8 @@ import { DisplayModeProvider } from './components/DisplayModeContext'
 import { ThemeProvider, useTheme } from './components/ThemeProvider'
 import { AppBackgroundProvider } from './components/AppBackgroundContext'
 import { ImagePreviewOverlayProvider } from './components/ImagePreviewOverlayContext'
+import { OverlayHistoryProvider } from './interaction/OverlayHistoryContext'
+import { NavigationGuardProvider } from './interaction/NavigationGuard'
 import { AvatarAutoCropBatchProvider } from './contexts/AvatarAutoCropBatchContext'
 import { installDisableInputSpellcheck } from './installDisableInputSpellcheck'
 import { ROUTE_PATH, ROUTE_SEGMENT } from './listView/routePaths'
@@ -67,6 +69,8 @@ function AppContent(): JSX.Element {
           <AgentMetadataCollectorProvider>
           <DisplayModeProvider>
             <AppBackgroundProvider>
+              <OverlayHistoryProvider>
+              <NavigationGuardProvider>
               <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
                 <PluginDevLeaveGuardProvider>
                   <SettingsLeaveGuard>
@@ -211,6 +215,8 @@ function AppContent(): JSX.Element {
                   </SettingsLeaveGuard>
                 </PluginDevLeaveGuardProvider>
               </ImagePreviewOverlayProvider>
+              </NavigationGuardProvider>
+              </OverlayHistoryProvider>
             </AppBackgroundProvider>
           </DisplayModeProvider>
           </AgentMetadataCollectorProvider>

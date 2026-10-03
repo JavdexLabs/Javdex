@@ -2,7 +2,7 @@
   "name": "@javdex/desktop",
   "version": "0.8.0",
   "private": true,
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "node ../../scripts/run-root-script.mjs dev",
     "build": "node ../../scripts/run-root-script.mjs build",

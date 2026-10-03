@@ -5,6 +5,8 @@ import TestRenderer, { act } from 'react-test-renderer'
 import { createMemoryRouter, RouterProvider, Routes, Route } from 'react-router-dom'
 import SettingsLeaveGuard, { useSettingsFormGuard } from './SettingsLeaveGuard'
 import { useSettingsDraft } from './useSettingsDraft'
+import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
+import { NavigationGuardProvider } from '../interaction/NavigationGuard'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -38,12 +40,12 @@ it('blocks route changes with a draft and saves before continuing through the re
     {
       path: '*',
       element: (
-        <SettingsLeaveGuard>
+        <OverlayHistoryProvider><NavigationGuardProvider><SettingsLeaveGuard>
           <Routes>
             <Route path="/" element={<Form />} />
             <Route path="/next" element={<p>目标页面</p>} />
           </Routes>
-        </SettingsLeaveGuard>
+        </SettingsLeaveGuard></NavigationGuardProvider></OverlayHistoryProvider>
       )
     }
   ])

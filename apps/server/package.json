@@ -2,7 +2,7 @@
   "name": "@javdex/server",
   "version": "0.8.0",
   "private": true,
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "description": "Independent Node catalog host: SQLite, image storage, query worker, LAN browse HTTP, manage HTTP handshake/claim/edit/backup/restore, CLI bind/recover, and process lifecycle.",
   "bin": {
     "javdex-server": "./src/index.ts"

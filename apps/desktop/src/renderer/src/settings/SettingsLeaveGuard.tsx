@@ -10,9 +10,9 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import { useBlocker } from 'react-router-dom'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
+import { useNavigationGuard, type NavigationDecision } from '../interaction/NavigationGuard'
 
 type FormEntry = {
   label: string
@@ -65,6 +65,7 @@ export function useSettingsFormGuard(entry: FormEntry): (action: () => void) => 
 export default function SettingsLeaveGuard({ children }: { children: ReactNode }): JSX.Element {
   const entries = useRef(new Map<string, FormEntry>()).current
   const [pending, setPending] = useState<(() => void) | null>(null)
+  const [routePending, setRoutePending] = useState<NavigationDecision | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [, notify] = useReducer((value: number) => value + 1, 0)
@@ -78,15 +79,10 @@ export default function SettingsLeaveGuard({ children }: { children: ReactNode }
     [entries]
   )
   const context = useMemo(() => ({ entries, requestLeave, notify }), [entries, requestLeave])
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      (currentLocation.pathname !== nextLocation.pathname ||
-        currentLocation.search !== nextLocation.search) &&
-      Array.from(entries.values()).some((entry) => entry.dirty || entry.busy)
-  )
+  useNavigationGuard(() => Array.from(entries.values()).some(entry => entry.dirty || entry.busy),
+    decision => { setError(null); setRoutePending(decision) })
   const forms = Array.from(entries.values()).filter((entry) => entry.dirty || entry.busy)
-  const blocked = blocker.state === 'blocked'
-  const visible = blocked || pending !== null
+  const visible = routePending !== null || pending !== null
   const busy = saving || forms.some((entry) => entry.busy)
 
   useEffect(() => {
@@ -102,13 +98,16 @@ export default function SettingsLeaveGuard({ children }: { children: ReactNode }
   const cancel = (): void => {
     setPending(null)
     setError(null)
-    if (blocked) blocker.reset()
+    routePending?.reset()
+    setRoutePending(null)
   }
   const finish = (): void => {
     const action = pending
     setPending(null)
     setError(null)
-    if (blocked) blocker.proceed()
+    const decision = routePending
+    setRoutePending(null)
+    if (decision) decision.proceed()
     else action?.()
   }
   const discard = (): void => {

@@ -214,6 +214,7 @@ function VideoLocalResourceRow({
   resource,
   multiResources,
   onOpenResource,
+  onBuiltinResource,
   onRevealResource,
   onSetPrimaryResource,
   onSplitResource,
@@ -223,7 +224,8 @@ function VideoLocalResourceRow({
 }: {
   resource: VideoResourceDetail
   multiResources: boolean
-  onOpenResource?: (resourceId: number) => void
+  onOpenResource?: (resourceId: number, player?: 'external') => void
+  onBuiltinResource?: (resourceId: number, privateSession?: boolean) => void
   onRevealResource?: (resourceId: number) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onSplitResource?: (resource: VideoResourceDetail) => void
@@ -301,6 +303,15 @@ function VideoLocalResourceRow({
           />
           {menuOpen ? (
             <DetailMenuPanel>
+              {onBuiltinResource && <DetailMenuItem onClick={() => { setMenuOpen(false); onBuiltinResource(resource.id) }}>
+                内置播放
+              </DetailMenuItem>}
+              {onBuiltinResource && <DetailMenuItem onClick={() => { setMenuOpen(false); onBuiltinResource(resource.id, true) }}>
+                内置播放（本次不保存进度）
+              </DetailMenuItem>}
+              {onOpenResource && <DetailMenuItem onClick={() => { setMenuOpen(false); onOpenResource(resource.id, 'external') }}>
+                外部播放
+              </DetailMenuItem>}
               <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
@@ -591,6 +602,7 @@ export function VideoMaintenanceInfo({ video }: { video: VideoDetail }): JSX.Ele
 export function VideoDetailSecondaryMeta({
   video,
   onOpenResource,
+  onBuiltinResource,
   onRevealResource,
   onReadResourceLocator,
   onEditResource,
@@ -601,7 +613,8 @@ export function VideoDetailSecondaryMeta({
   onAddResource
 }: {
   video: VideoDetail
-  onOpenResource?: (resourceId: number) => void
+  onOpenResource?: (resourceId: number, player?: 'external') => void
+  onBuiltinResource?: (resourceId: number, privateSession?: boolean) => void
   onRevealResource?: (resourceId: number) => void
   onReadResourceLocator?: (resourceId: number) => Promise<string | null>
   onEditResource?: (resource: VideoResourceDetail) => void
@@ -637,6 +650,7 @@ export function VideoDetailSecondaryMeta({
                   resource={resource}
                   multiResources={multiResources}
                   onOpenResource={onOpenResource}
+                  onBuiltinResource={onBuiltinResource}
                   onRevealResource={onRevealResource}
                   onSetPrimaryResource={onSetPrimaryResource}
                   onSplitResource={onSplitResource}

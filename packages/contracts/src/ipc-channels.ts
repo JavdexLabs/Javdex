@@ -328,6 +328,14 @@ export const IPC = {
   PLAYER_REVEAL: 'player:reveal',
   PLAYER_OPEN_RESOURCE: 'player:openResource',
   PLAYER_REVEAL_RESOURCE: 'player:revealResource',
+  PLAYBACK_AVAILABILITY: 'playback:availability',
+  PLAYBACK_OPEN: 'playback:open',
+  PLAYBACK_SNAPSHOT: 'playback:snapshot',
+  PLAYBACK_CONTROL: 'playback:control',
+  PLAYBACK_VIEWPORT: 'playback:viewport',
+  PLAYBACK_SUBTITLE: 'playback:subtitle',
+  PLAYBACK_CLEAR_PROGRESS: 'playback:clear-progress',
+  PLAYBACK_CHANGED: 'playback:changed',
 
   // Asset encryption
   ASSET_CRYPTO_SET: 'assetCrypto:set',

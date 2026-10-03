@@ -10,6 +10,7 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
+import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackOpenOptionsSchema, playbackClearProgressSchema } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
@@ -708,7 +709,9 @@ export const appIpcSchemas = {
       .object({
         mode: z.enum(['local', 'remote']).optional(),
         remoteBaseUrl: z.string().max(2048).nullable().optional(),
-        playerPath: z.string().max(4096).nullable().optional()
+        playerPath: z.string().max(4096).nullable().optional(),
+        playerPreference: z.enum(['external', 'builtin']).optional(),
+        resumePlayback: z.boolean().optional()
       })
       .strict()
   ]),
@@ -962,8 +965,15 @@ export const appIpcSchemas = {
   [IPC.PLAYLIST_IMPORT_CONTROL]: z.tuple([nonEmptyText, playlistImportControl]),
   [IPC.PLAYER_PLAY]: z.tuple([id, id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id, id]),
-  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id, id.optional()]),
+  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id, id.optional(), z.literal('external').optional()]),
   [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id, id]),
+  [IPC.PLAYBACK_AVAILABILITY]: z.tuple([]),
+  [IPC.PLAYBACK_OPEN]: z.tuple([playbackTargetSchema, playbackOpenOptionsSchema.optional()]),
+  [IPC.PLAYBACK_SNAPSHOT]: z.tuple([]),
+  [IPC.PLAYBACK_CONTROL]: z.tuple([playbackSessionIdSchema, playbackControlSchema]),
+  [IPC.PLAYBACK_VIEWPORT]: z.tuple([playbackViewportSchema]),
+  [IPC.PLAYBACK_SUBTITLE]: z.tuple([playbackSessionIdSchema]),
+  [IPC.PLAYBACK_CLEAR_PROGRESS]: z.tuple([playbackClearProgressSchema]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),
   [IPC.ASSET_FETCH_REMOTE_IMAGE]: z.tuple([nonEmptyText]),

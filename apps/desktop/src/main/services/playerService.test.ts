@@ -26,6 +26,63 @@ function resource(overrides: Partial<VideoResource> = {}): VideoResource {
 }
 
 describe('PlayerService', () => {
+  for (const mode of ['local', 'remote'] as const) {
+    it(`routes ${mode} primary and explicit files to the native owner without launching external programs or marking started`, async () => {
+      const file = resource({ kind: 'local', locator: '/catalog/movie.mp4' })
+      const targets: unknown[] = []
+      let externalStarts = 0
+      const service = createPlayerService({
+        getMediaLibrary: () => ({ status: 'active' }) as never,
+        getVideoById: () => ({ id: 7 }) as never,
+        getPrimaryVideoResource: () => file, getVideoResourceInLibrary: () => file,
+        catalog: mode === 'remote' ? { mode, queries: {
+          getVideo: async () => ({ resources: [file] }), getResource: async () => file
+        }, assets: { grantPlayback: async () => { throw new Error('Only the native owner may grant here') } } } as never : undefined,
+        readPlayerPreference: async () => 'builtin',
+        openBuiltin: async target => { targets.push(target); return { ok: true } },
+        fileExists: () => { throw new Error('Do not probe a native/remote locator through the external path') },
+        openPath: async () => { throw new Error('Unexpected external player') },
+        externalStarted: async () => { externalStarts++ }
+      })
+      assert.deepEqual(await service.playVideo(1, 7), { ok: true })
+      assert.deepEqual(await service.openResource(1, 3, 7), { ok: true })
+      assert.deepEqual(targets, [{ libraryId: 1, videoId: 7, resourceId: 3 }, { libraryId: 1, videoId: 7, resourceId: 3 }])
+      assert.equal(externalStarts, 0)
+    })
+  }
+
+  it('never falls back on native failure, but honors an explicit external selection and configured local program', async () => {
+    const file = resource({ kind: 'local', locator: '/catalog/movie.mp4' })
+    const spawned: unknown[] = []
+    let started = 0
+    const service = createPlayerService({
+      getMediaLibrary: () => ({ status: 'active' }) as never, getVideoResourceInLibrary: () => file,
+      readPlayerPreference: async () => 'builtin', readPlayerPath: async () => '/Applications/Player.app',
+      openBuiltin: async () => ({ ok: false, error: 'Native unavailable' }), fileExists: () => true,
+      spawnPlayer: async (program, args) => { spawned.push({ program, args }); return { ok: true } },
+      externalStarted: async () => { started++ }
+    })
+    assert.deepEqual(await service.openResource(1, 3, 7), { ok: false, error: 'Native unavailable' })
+    assert.equal(spawned.length, 0)
+    assert.equal(started, 0)
+    assert.deepEqual(await service.openResource(1, 3, 7, 'external'), { ok: true })
+    assert.deepEqual(spawned, [{ program: '/Applications/Player.app', args: ['/catalog/movie.mp4'] }])
+    assert.equal(started, 1)
+    assert.equal((await service.openResource(1, 3, 99, 'external')).ok, false)
+    assert.equal(spawned.length, 1)
+  })
+
+  it('keeps non-file links external even when built-in playback is preferred', async () => {
+    const opened: string[] = []
+    const service = createPlayerService({
+      getMediaLibrary: () => ({ status: 'active' }) as never, getVideoResourceInLibrary: () => resource(),
+      readPlayerPreference: async () => 'builtin', openBuiltin: async () => { throw new Error('Unexpected native call') },
+      openExternal: async url => { opened.push(url) }
+    })
+    assert.deepEqual(await service.openResource(1, 3, 7), { ok: true })
+    assert.equal(opened.length, 1)
+  })
+
   it('opens and reveals a local resource through system file operations', async () => {
     const opened: string[] = []
     const revealed: string[] = []

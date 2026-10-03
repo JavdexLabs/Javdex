@@ -449,12 +449,19 @@ export interface AppIpcContract {
     args: [libraryId: number, videoId: number]
     result: PlayResult
   }
+  [IPC.PLAYBACK_AVAILABILITY]: { args: []; result: import('./desktop/playback').PlaybackAvailability }
+  [IPC.PLAYBACK_OPEN]: { args: [target: import('./desktop/playback').PlaybackTarget, options?: import('./desktop/playback').PlaybackOpenOptions]; result: PlayResult }
+  [IPC.PLAYBACK_SNAPSHOT]: { args: []; result: import('./desktop/playback').PlaybackSnapshot | null }
+  [IPC.PLAYBACK_CONTROL]: { args: [sessionId: string, command: import('./desktop/playback').PlaybackControl]; result: void }
+  [IPC.PLAYBACK_VIEWPORT]: { args: [viewport: import('./desktop/playback').PlaybackViewport]; result: void }
+  [IPC.PLAYBACK_SUBTITLE]: { args: [sessionId: string]; result: void }
+  [IPC.PLAYBACK_CLEAR_PROGRESS]: { args: [input: import('./desktop/playback').PlaybackClearProgress]; result: void }
   [IPC.PLAYER_REVEAL]: {
     args: [libraryId: number, videoId: number]
     result: PlayResult
   }
   [IPC.PLAYER_OPEN_RESOURCE]: {
-    args: [libraryId: number, resourceId: number, videoId?: number]
+    args: [libraryId: number, resourceId: number, videoId?: number, player?: 'external']
     result: PlayResult
   }
   [IPC.PLAYER_REVEAL_RESOURCE]: {
@@ -469,6 +476,7 @@ export interface AppIpcContract {
 }
 
 export interface AppIpcEventContract {
+  [IPC.PLAYBACK_CHANGED]: import('./desktop/playback').PlaybackSnapshot | null
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState
   [IPC.SCAN_PROGRESS]: LibraryScanProgressEvent
   [IPC.SCAN_STATE_CHANGED]: LibraryScanEvent

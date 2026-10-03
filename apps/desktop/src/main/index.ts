@@ -1,5 +1,8 @@
 import { app } from 'electron'
 import { SCRAPE_BROWSER_HELPER_FLAG } from './scrapers/scrapeBrowserProtocol'
+import { configurePlaybackDisplay } from './player/playbackDisplay'
+
+configurePlaybackDisplay(app)
 
 const SCRAPE_BROWSER_SMOKE_FLAG = '--javdex-scraper-helper-smoke'
 

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { FileMatcher } from 'app-builder-lib/out/fileMatcher.js'
 import buildConfig from '../electron-builder.config.mjs'
 import {
   MAC_ELECTRON_LANGUAGES,
@@ -159,4 +160,30 @@ test('mac packaging explicitly enables ad-hoc signing before invoking its custom
   const mac = buildConfig().mac
   assert.equal(mac.identity, '-')
   assert.equal(typeof mac.sign, 'function')
+})
+
+test('desktop packages retain the current license, historical MIT notice and third-party notices', () => {
+  const root = process.cwd()
+  const filter = new FileMatcher(root, '/unused-package-output', value => value, buildConfig().files).createFilter()
+  for (const file of ['LICENSE', 'NOTICE', 'LICENSES/Javdex-MIT.txt', 'LICENSES/node-gyp-MIT.txt', 'docs/THIRD_PARTY_NOTICES.md']) {
+    assert.equal(filter(path.join(root, file), { isDirectory: () => false }), true, `${file} must remain in the application archive`)
+  }
+})
+
+test('desktop packages exclude playback acceptance fixtures and development native binaries', () => {
+  const root = process.cwd()
+  const filter = new FileMatcher(root, '/unused-package-output', value => value, buildConfig().files).createFilter()
+  const selected = file => filter(path.join(root, file), { isDirectory: () => false })
+  for (const file of [
+    'out/playback-acceptance/media-matrix/hevc-main10.mkv',
+    'out/playback-acceptance/Javdex Playback Acceptance.app/Contents/MacOS/Electron',
+    'out/libmpv-prototype/playback.node',
+    'out/libmpv-prototype/smoke-report.json',
+    'out/native-playback/playback.node',
+    'out/native-playback/navigation-key-test',
+    'out/playback-runtime/darwin-arm64/playback.node'
+  ]) assert.equal(selected(file), false, `${file} is a development artifact, not an audited packaged runtime`)
+  for (const file of ['out/main/index.js', 'out/preload/index.js', 'out/renderer/index.html']) {
+    assert.equal(selected(file), true, `${file} remains in the application archive`)
+  }
 })

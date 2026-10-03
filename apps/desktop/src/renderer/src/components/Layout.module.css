@@ -1,7 +1,15 @@
+.shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .root {
   position: relative;
   display: flex;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 
   /* Retain the existing macOS WebKit text-selection boundary. */

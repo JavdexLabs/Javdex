@@ -368,7 +368,6 @@ export default function DetailPage(): JSX.Element {
     try {
       const res = await api.player.play(video.activeLibraryId, videoId)
       if (res.ok) {
-        toast.show('已交给系统打开', 'success')
         void load({ silent: true })
       } else if (res.fileMissing) {
         const primary = video?.resources.find((resource) => resource.is_primary === 1)
@@ -382,13 +381,12 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const handleOpenResource = async (resourceId: number): Promise<void> => {
+  const handleOpenResource = async (resourceId: number, player?: 'external'): Promise<void> => {
     if (!video) return
     try {
-      const result = await api.player.openResource(video.activeLibraryId, resourceId, videoId)
-      if (result.ok) {
-        toast.show('已交给系统打开', 'success')
-      } else if (result.fileMissing) {
+      const result = await api.player.openResource(video.activeLibraryId, resourceId, videoId, player)
+      if (result.ok) return
+      if (result.fileMissing) {
         const resource = video?.resources.find((item) => item.id === resourceId)
         if (resource?.kind === 'local') openResourceRemoval(resource)
         else toast.show(result.error ?? '本地资源不存在', 'error')
@@ -398,6 +396,14 @@ export default function DetailPage(): JSX.Element {
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     }
+  }
+
+  const handleBuiltinResource = async (resourceId: number, privateSession = false): Promise<void> => {
+    if (!video) return
+    try {
+      const result = await api.playback.open({ libraryId: video.activeLibraryId, videoId, resourceId }, { privateSession })
+      if (!result.ok) toast.show(result.error ?? '内置播放不可用', 'error')
+    } catch (error) { toast.show((error as Error).message, 'error') }
   }
 
   const handleReveal = async (): Promise<void> => {
@@ -891,8 +897,9 @@ export default function DetailPage(): JSX.Element {
 
       <VideoDetailSecondaryMeta
         video={video}
-        onOpenResource={(resourceId) => {
-          void handleOpenResource(resourceId)
+        onBuiltinResource={(resourceId, privateSession) => { void handleBuiltinResource(resourceId, privateSession) }}
+        onOpenResource={(resourceId, player) => {
+          void handleOpenResource(resourceId, player)
         }}
         onRevealResource={(resourceId) => {
           void handleRevealResource(resourceId)

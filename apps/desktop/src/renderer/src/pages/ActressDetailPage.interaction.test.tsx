@@ -70,11 +70,12 @@ async function click(label: string) {
 async function mount(entry = '/actresses/1') {
   const Component = (await import('./ActressDetailPage')).default
   const { ImagePreviewOverlayProvider } = await import('../components/ImagePreviewOverlayContext')
+  const { OverlayHistoryProvider } = await import('../interaction/OverlayHistoryContext')
   const { AppBackgroundProvider } = await import('../components/AppBackgroundContext')
   const { AgentMetadataCollectorProvider } = await import('../components/agentMetadata/AgentMetadataCollectorContext')
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   await act(async () => {
-    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={[entry]}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video<Outlet /></div>}><Route path="actress/:actressId" element={<Component fromVideo />} /></Route></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>, {createNodeMock:viewport.createNodeMock})
+    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={[entry]}><AppBackgroundProvider><OverlayHistoryProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video<Outlet /></div>}><Route path="actress/:actressId" element={<Component fromVideo />} /></Route></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></OverlayHistoryProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>, {createNodeMock:viewport.createNodeMock})
   })
 }
 afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined;viewport=continuousViewport();position=0; url=''; calls.length = 0; metadataCalls.length = 0; editCalls.length = 0; actorTotals.clear(); total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })

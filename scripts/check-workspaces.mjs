@@ -9,12 +9,16 @@ const workspaces = ['apps/desktop', 'apps/web', 'apps/server', 'packages/contrac
 const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'))
 assert.equal(lock.version, root.version, 'Lockfile version must match the product version')
 assert.equal(lock.packages[''].version, root.version, 'Lockfile root version must match the product version')
+assert.equal(root.license, 'GPL-3.0-or-later', 'Product license must be GPL-3.0-or-later')
+assert.equal(lock.packages[''].license, root.license, 'Lockfile root license must match the product license')
 const internalNames = new Set(workspaces.map(directory => JSON.parse(fs.readFileSync(`${directory}/package.json`, 'utf8')).name))
 for (const directory of workspaces) {
   const manifest = JSON.parse(fs.readFileSync(`${directory}/package.json`, 'utf8'))
   assert.equal(manifest.version, root.version, `${directory}: version must match the product version`)
   assert.equal(manifest.private, true, `${directory}: internal workspace must be private`)
+  assert.equal(manifest.license, root.license, `${directory}: license must match the product license`)
   assert.equal(lock.packages[directory]?.version, root.version, `${directory}: lockfile version must match`)
+  assert.equal(lock.packages[directory]?.license, manifest.license, `${directory}: lockfile license must match`)
   for (const section of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const [name, version] of Object.entries(manifest[section] ?? {})) {
       if (!internalNames.has(name)) continue
@@ -40,5 +44,5 @@ for (const directory of ['apps/web/src', 'packages/contracts/src', 'packages/ui/
   }
 }
 assert.equal(violations.length, 0, violations.join('\n'))
-console.log('Workspace versions and browser/shared dependency boundaries passed.')
+console.log('Workspace versions, licenses and browser/shared dependency boundaries passed.')
 console.log('library currently owns catalog db, image store, public-image HTTP, scan helpers/orchestration/scheduler, scan-audit read, classification query/maintenance/images, actress query/conflict/gallery/maintenance, tag queries, playlist and media-library maintenance, video maintenance/lifecycle, asset migration, NFO, maintenance gate, path cleanup, scrape confirm/candidate apply, playlist applyImport, named target lists, agent metadata findReady/apply/discard, play grants, manage-image reads, and catalog backup/restore; Electron NFO cover export and desktop collection/deliver remain in desktop. packages/http owns LAN browser HTTP, play Range streams, and manage upload/asset and chunked backup transfer; apps/server hosts the independent Node process. This check does not claim a finished management API or remote desktop backend.')

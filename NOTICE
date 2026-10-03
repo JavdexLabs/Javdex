@@ -1,0 +1,18 @@
+Javdex
+Copyright (c) 2026 Javdex
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This source tree is distributed as a whole under the GNU General Public
+License, version 3 or (at your option) any later version. Javdex is free
+software: you can redistribute it and/or modify it under those terms.
+
+Javdex is distributed without any warranty; without even the implied
+warranty of merchantability or fitness for a particular purpose.
+See LICENSE for the complete GNU General Public License version 3 text.
+
+Code previously distributed under the MIT License retains its existing
+copyright and permission notice, preserved in LICENSES/Javdex-MIT.txt.
+This change does not revoke permissions already granted for earlier releases.
+
+Third-party code, models and assets retain their own copyright and license
+notices. See their accompanying notices and docs/THIRD_PARTY_NOTICES.md.

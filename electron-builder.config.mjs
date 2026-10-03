@@ -5,6 +5,7 @@ import {
   PORTABLE_ELECTRON_LANGUAGES,
   prunePackagedRuntime
 } from './scripts/packaging-runtime.mjs'
+import { stagePackagedPlaybackRuntime, verifyPackagedPlaybackRuntime } from './scripts/playback-runtime.mjs'
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
 
@@ -40,7 +41,17 @@ const base = {
     output: 'dist'
   },
   files: [
+    'LICENSE',
+    'NOTICE',
+    'LICENSES/**/*',
+    'docs/THIRD_PARTY_NOTICES.md',
     'out/**/*',
+    // Development binaries, synthetic media and copied Electron probes are not
+    // release inputs. A reviewed playback runtime is staged outside app.asar.
+    '!out/native-playback/**/*',
+    '!out/playback-acceptance/**/*',
+    '!out/libmpv-prototype/**/*',
+    '!out/playback-runtime/**/*',
     '!out/resources/**/*',
     '!out/renderer/icon-{16,32,48,512}.png',
     '!node_modules/@mediapipe/tasks-vision/**/*',
@@ -119,7 +130,11 @@ export default function buildConfig() {
   const selected = readSelectedTargets()
   const config = structuredClone(base)
 
-  config.afterPack = prunePackagedRuntime
+  config.beforePack = context => { verifyPackagedPlaybackRuntime(context) }
+  config.afterPack = context => {
+    prunePackagedRuntime(context)
+    stagePackagedPlaybackRuntime(context)
+  }
   config.mac.sign = signMacApp
 
   if (selected?.win) config.win.target = selected.win

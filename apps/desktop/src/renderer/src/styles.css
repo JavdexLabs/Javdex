@@ -137,6 +137,7 @@
   --text-on-accent: #fff;
   /* Image overlays keep their contrast independently of the surrounding theme. */
   --text-on-media: #fff;
+  --surface-video: black;
   --surface-media-badge: rgb(0 0 0 / 70%);
   --surface-image-preview-backdrop: color-mix(in srgb, var(--surface-base) 88%, #000 12%);
   --surface-avatar-composition-preview: #f4f1ea;

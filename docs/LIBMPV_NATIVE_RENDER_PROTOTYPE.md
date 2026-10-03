@@ -83,7 +83,7 @@ libmpv 回调只置原子通知标记。Electron 主循环约每 16 ms 处理更
 - **Windows/Linux**：原生视图宿主、GPU 上下文和线程实现另做适配；不能从 macOS 外推已支持。
 - **macOS 渲染寿命**：当前 CGL/OpenGL 路线已运行，但 Apple 已弃用 OpenGL；这是长期维护风险。主线程定时绘制仅证明原型可用，长时间/高帧率/复杂页面负载下是否需要独立渲染线程尚未测量。
 - **UI 合成**：控件固定在视频区外；字幕可由 mpv 合成，任意 HTML 弹层不能直接盖住原生视图。生产版需要确定采用原生视频独立窗口还是固定区域，以及弹层避让策略。
-- **分发**：仍依赖开发机 Homebrew 动态库；没有选择可再分发的库构建、封装依赖、公证与更新机制。mpv 和依赖的许可证需按实际构建审核，当前仓库 MIT 不能自动覆盖它们，见官方 [Copyright / LGPL 构建说明](https://github.com/mpv-player/mpv/blob/master/Copyright)。
+- **分发**：原型仍依赖开发机 Homebrew 动态库；没有选择可再分发的库构建、封装依赖、公证与更新机制。2026-10-03 已确认 Javdex 采用 GPL-3.0-or-later，原 MIT 声明另行保留；这不代替 mpv 和依赖的实际构建、许可与对应源码审核，见官方 [Copyright / LGPL 构建说明](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与[当前方案](BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md#9-分阶段执行与验收)。
 - **产品链路**：未接正式媒体库的播放按钮，未改变“稍后观看”等写入时机，未增加进度持久化或跨端历史。
 - **媒体覆盖**：未验证真实长片、4K/HDR/杜比视界、DTS/TrueHD、多音轨、字幕选择、倍速、外接显示器、多窗口、内存泄漏长期趋势。
 - **网络与服务器部署**：远程端是同机真实服务夹具，不是独立 Node/Docker 部署验收；未覆盖真实 LAN/HTTPS、凭据过期续签、断网重试、限速或故障注入。

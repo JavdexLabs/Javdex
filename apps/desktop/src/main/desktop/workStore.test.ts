@@ -28,6 +28,7 @@ describe('this-computer settings store', () => {
     const defaults = await store.read()
     assert.equal(defaults.mode, 'local')
     assert.equal(defaults.playerPath, null)
+    assert.equal(defaults.playerPreference, 'external')
     const withPlayer = await store.write({ playerPath: ' /usr/bin/mpv ' })
     assert.equal(withPlayer.playerPath, '/usr/bin/mpv')
     const remote = await store.write({
@@ -40,6 +41,16 @@ describe('this-computer settings store', () => {
     assert.equal(local.mode, 'local')
     assert.equal(local.remoteBaseUrl, 'https://library.example:8443')
     assert.equal((await store.write({ remoteBaseUrl: null })).remoteBaseUrl, null)
+  })
+  it('preserves legacy external selection and persists an explicit built-in preference only on this computer', async () => {
+    const file = thisComputerSettingsPath(tempDir())
+    fs.writeFileSync(file, JSON.stringify({ mode: 'remote', playerPath: '/usr/bin/mpv' }))
+    const store = createThisComputerSettingsStore(file)
+    assert.equal((await store.read()).playerPreference, 'external')
+    await store.write({ playerPreference: 'builtin' })
+    const reloaded = await createThisComputerSettingsStore(file).read()
+    assert.equal(reloaded.playerPreference, 'builtin')
+    assert.equal(reloaded.playerPath, '/usr/bin/mpv')
   })
 })
 

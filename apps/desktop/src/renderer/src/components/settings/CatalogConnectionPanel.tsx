@@ -7,6 +7,8 @@ import { ArrowRight, FolderOpen, LoaderCircle, Monitor, RotateCw } from 'lucide-
 import { api } from '../../api'
 import { useDesktopSession } from '../../desktop/DesktopSessionContext'
 import Button from '../Button'
+import SettingsSwitchRow from '../SettingsSwitchRow'
+import Modal from '../Modal'
 import { AppFormField } from '../FormPrimitives'
 import { UI_ICON_SM } from '../iconDefaults'
 import SelectControl from '../SelectControl'
@@ -46,7 +48,8 @@ export default function CatalogConnectionPanel(): JSX.Element {
     remoteBaseUrl: savedSettings?.remoteBaseUrl ?? ''
   }
   const form = useSettingsDraft(saved)
-  const playerForm = useSettingsDraft({ playerPath: savedSettings?.playerPath ?? '' })
+  const playerForm = useSettingsDraft({ playerPath: savedSettings?.playerPath ?? '', playerPreference: savedSettings?.playerPreference ?? 'external', resumePlayback: savedSettings?.resumePlayback ?? false })
+  const [clearProgress, setClearProgress] = useState(false)
   const [savingPlayer, setSavingPlayer] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [restartError, setRestartError] = useState<string | null>(null)
@@ -105,7 +108,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
     setPlayerDetectionHint(null)
     try {
       const selected = await api.thisComputer.pickPlayer(playerForm.draft.playerPath.trim() || null)
-      if (selected) playerForm.setDraft({ playerPath: selected })
+      if (selected) playerForm.setDraft(current => ({ ...current, playerPath: selected }))
     } catch (reason) {
       setPickerError((reason as Error).message)
     } finally {
@@ -119,7 +122,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
     try {
       const result = await api.thisComputer.detectPlayer()
       if (result.status === 'found') {
-        playerForm.setDraft({ playerPath: result.path })
+        playerForm.setDraft(current => ({ ...current, playerPath: result.path }))
         setPlayerDetectionHint(`已选择系统的 ${result.extension} 默认播放器，保存后生效。`)
       } else {
         setPickerError(result.message)
@@ -157,9 +160,9 @@ export default function CatalogConnectionPanel(): JSX.Element {
     setSavingPlayer(true)
     setPickerError(null)
     try {
-      const result = await api.thisComputer.update({ playerPath: submitted.playerPath.trim() || null })
+      const result = await api.thisComputer.update({ playerPath: submitted.playerPath.trim() || null, playerPreference: submitted.playerPreference, resumePlayback: submitted.resumePlayback })
       setSavedSettings(result.settings)
-      playerForm.accept({ playerPath: result.settings.playerPath ?? '' }, submitted)
+      playerForm.accept({ playerPath: result.settings.playerPath ?? '', playerPreference: result.settings.playerPreference ?? 'external', resumePlayback: result.settings.resumePlayback ?? false }, submitted)
       setPlayerDetectionHint(null)
       return true
     } catch (reason) {
@@ -260,6 +263,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
         <div className={styles.fields}>
           <AppFormField className={styles.connectionField} label="资料库位置" hint={draft.mode === 'local' ? '资料保存在这台电脑。' : '资料保存在服务端。'}>
             <SelectControl
+              aria-label="资料库位置"
               value={draft.mode}
               disabled={saving}
               onChange={(event) => {
@@ -354,11 +358,19 @@ export default function CatalogConnectionPanel(): JSX.Element {
           </aside>
         ) : null}
       </SettingsCard>
-        {draft.mode === 'remote' || session.mode === 'remote' ? (
           <SettingsCard title="播放器" className={styles.card}
             hint={playerForm.draft.playerPath.trim()
               ? `${playerForm.dirty ? '待保存程序' : '当前程序'}：${playerForm.draft.playerPath.trim().split(/[\\/]/).pop()}`
-              : '播放服务端视频需设置这台电脑上的播放器。'}>
+              : '仅影响此电脑；播放方式保存后从下一次播放生效。'}>
+            <div className={styles.playerFields}>
+            <AppFormField label="默认播放方式">
+              <SelectControl aria-label="默认播放方式" value={playerForm.draft.playerPreference}
+                disabled={savingPlayer || saving || !savedSettings}
+                onChange={event => playerForm.setDraft(current => ({ ...current, playerPreference: event.target.value as 'builtin' | 'external' }))}>
+                <option value="external">外部播放器</option>
+                <option value="builtin">内置播放器（验证中）</option>
+              </SelectControl>
+            </AppFormField>
             <div className={styles.playerInputRow}>
               <AppFormField label="播放器程序" className={styles.playerPathField}>
                 <TextInput
@@ -371,7 +383,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
                   onChange={(event) => {
                     setPickerError(null)
                     setPlayerDetectionHint(null)
-                    playerForm.setDraft({ playerPath: event.target.value })
+                    playerForm.setDraft(current => ({ ...current, playerPath: event.target.value }))
                   }}
                 />
               </AppFormField>
@@ -395,15 +407,25 @@ export default function CatalogConnectionPanel(): JSX.Element {
                 </Button>
               </div>
             </div>
+            <SettingsSwitchRow title="保存续播进度" description="默认关闭。开启后仅在此电脑保存位置；保存关闭后立即停止记录，保存开启后从下次播放生效。"
+              checked={playerForm.draft.resumePlayback} disabled={savingPlayer || saving || !savedSettings}
+              onChange={resumePlayback => playerForm.setDraft(current => ({ ...current, resumePlayback }))} />
+            <Button size="sm" variant="ghost" className={styles.playerClearButton} onClick={() => setClearProgress(true)}>清除全部本机续播进度</Button>
+            </div>
             <div id={playerHintId}>
-              <SettingsFeedback message={detectingPlayer ? '正在读取系统默认播放器…' : playerDetectionHint && playerForm.dirty ? playerDetectionHint : '用于播放服务端视频及视频直链，播放器需支持网络播放。'} />
+              <SettingsFeedback message={detectingPlayer ? '正在读取系统默认播放器…' : playerDetectionHint && playerForm.dirty ? playerDetectionHint : playerForm.draft.playerPreference === 'builtin'
+                ? '内置播放支持本机/远程媒体库的影片文件；其它链接仍外部打开。运行库不可用时提示错误，不自动切换播放器。'
+                : '外部程序用于本机及服务端影片文件；留空时本机使用系统关联，服务端影片需指定支持网络播放的程序。'} />
             </div>
             <SettingsFormActions dirty={playerForm.dirty} saving={savingPlayer}
               disabled={saving || pickingPlayer || detectingPlayer || !savedSettings}
               error={pickerError} conflict={playerForm.conflict}
               onSave={() => void savePlayer()} onCancel={resetPlayer} />
           </SettingsCard>
-        ) : null}
+          {clearProgress && <Modal title="清除全部本机续播进度" confirmText="清除进度" danger onCancel={() => setClearProgress(false)}
+            onConfirm={async () => { await api.playback.clearProgress({ scope: 'all' }); setClearProgress(false) }}>
+            <p>清除此电脑所有资料库的续播位置，无法撤销。影片和资料保留。当前播放会话停止保存进度；之后的新播放仍按已保存的设置执行。</p>
+          </Modal>}
 
     </>
   )

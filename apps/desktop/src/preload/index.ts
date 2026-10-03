@@ -846,13 +846,23 @@ const api = {
     targets: (token: string, afterId: number) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, token, afterId),
     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
+  playback: {
+    availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
+    open: (target: import('@shared/desktop/playback').PlaybackTarget, options?: import('@shared/desktop/playback').PlaybackOpenOptions) => invokeApp(IPC.PLAYBACK_OPEN, target, options),
+    snapshot: () => invokeApp(IPC.PLAYBACK_SNAPSHOT),
+    control: (sessionId: string, command: import('@shared/desktop/playback').PlaybackControl) => invokeApp(IPC.PLAYBACK_CONTROL, sessionId, command),
+    viewport: (viewport: import('@shared/desktop/playback').PlaybackViewport) => invokeApp(IPC.PLAYBACK_VIEWPORT, viewport),
+    subtitle: (sessionId: string) => invokeApp(IPC.PLAYBACK_SUBTITLE, sessionId),
+    clearProgress: (input: import('@shared/desktop/playback').PlaybackClearProgress) => invokeApp(IPC.PLAYBACK_CLEAR_PROGRESS, input),
+    onChanged: (cb: (state: import('@shared/desktop/playback').PlaybackSnapshot | null) => void) => onAppEvent(IPC.PLAYBACK_CHANGED, cb)
+  },
   player: {
     play: (libraryId: number, videoId: number) =>
       invokeApp(IPC.PLAYER_PLAY, libraryId, videoId),
     reveal: (libraryId: number, videoId: number) =>
       invokeApp(IPC.PLAYER_REVEAL, libraryId, videoId),
-    openResource: (libraryId: number, resourceId: number, videoId?: number) =>
-      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId, videoId),
+    openResource: (libraryId: number, resourceId: number, videoId?: number, player?: 'external') =>
+      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId, videoId, player),
     revealResource: (libraryId: number, resourceId: number) =>
       invokeApp(IPC.PLAYER_REVEAL_RESOURCE, libraryId, resourceId)
   },

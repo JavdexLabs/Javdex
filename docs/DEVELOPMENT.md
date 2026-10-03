@@ -73,6 +73,45 @@ npm run dist:linux           # Linux 目标
 
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
 
+### 内置播放运行库（开发分支）
+
+内置播放的实现与尚未通过的关口见 [实施计划](BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md)。`npm run playback:native:build` 只生成链接本机开发库的 addon，不是可分发运行库。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，不把合成素材、截图、临时 Electron bundle 或 Homebrew addon 收入 `app.asar`。
+
+原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Cocoa/WGL/X11 仅拥有平台窗口、GL context 和原生输入。macOS 构建先编译运行 C++ 的键位与核心回归，再生成 Cocoa addon；Linux CMake 构建运行共用核心与私有 X11 几何／句柄／键盘回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
+
+Windows WGL 适配源码与 CMake 入口已加入，**尚未在 Windows 编译或验收**。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。运行时须让该开发库的 `bin` 进入启动应用的 PATH；构建器只为自己的测试子进程加入此目录，不复制 DLL、不下载依赖、不修改用户系统环境。WGL 不等于 ANGLE 直接硬解，硬解结果须从实际内核状态核对。
+
+Windows 构建还直接编入已安装 `@electron/rebuild` 所依赖的 node-gyp 延迟加载钩子，并链接 `delayimp`、`/DELAYLOAD:node.exe`；仅链接 `node.lib` 不足以在 Electron 或改名后的应用可执行文件中加载。构建器解析依赖自身的钩子路径，不下载或修改上游文件。缺少钩子时停止构建；对应许可见 [第三方说明](THIRD_PARTY_NOTICES.md#node-gyp-延迟加载钩子)。依据为 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules#a-note-about-win_delay_load_hook)，命令及配置回归不等于 Windows 实际编译/加载通过。
+
+Linux X11／XWayland adapter 与显式启动选项已加入，原生 Wayland 后续补齐。先退出应用，再以 `--javdex-x11`（或 Electron 的 `--ozone-platform=x11`）启动；未显式选择时内置播放不可用，不依据环境变量或 Buffer 宽度猜测 backend。冲突的 ozone 选项拒绝启动；缺少 `DISPLAY` / X server 时给出不可用原因，不自动回退外部播放器。当前提供命令行选择，尚未提供设置页启动开关；不切换系统桌面、不静默强制 X11。开发构建需要 CMake、C++17 编译器、make、pkg-config、X11/GLX/OpenGL/Xft 开发库及同架构 libmpv；设置 `JAVDEX_MPV_PREFIX`（系统前缀如 `/usr`），然后运行 `npm run playback:native:build`。库路径须由开发环境提供，构建器不复制 `.so` 或安装依赖。实际源码、隔离编译及未验收项见 [平台记录](BUILTIN_PLAYBACK_PLATFORM_ADAPTERS.md#10-本轮实施记录2026-10-03)。
+
+可选的 Linux 无 GUI 编译检查使用 `scripts/playback-linux-compile.Dockerfile`；需要本机已有可用 Docker，不能替代 GUI、GPU、音频或干净安装验收。用 `mktemp -d` 创建专用构建目录，只复制 `apps/desktop/src/main/player/native/` 为 `native/`、匹配 Electron 版本的 `include/node/` 为 `electron-headers/`，及 `scripts/playback-runtime.mjs`、`playback-runtime.test.mjs`、`packaging-runtime.mjs` 为 `scripts/`，再将该 Dockerfile 复制到专用目录。不要把整个仓库、用户资料或凭据作为 context。镜像内安装 Debian 开发依赖、运行 C++ 回归及真实 ELF 搬移测试；`docker run --rm <构建镜像>` 仅验证 Node 加载、显式 backend／句柄校验和空会话清理。镜像中的系统 libmpv 没有来源闭包清单，检查必须拒绝将该 addon 单独作为正式运行库。
+
+经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供 `playback.node`、依赖库及 `runtime.json`，例如 `darwin-arm64/` 和 `darwin-x64/`。未指定时不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。已有 macOS Mach-O 与 Linux ELF 技术检查，Windows PE 检查尚未实现、指定 Windows 运行库仍拒绝打包；各平台的正式运行库/安装验收均未完成，不能用清单或命令选择测试代替。
+
+`runtime.json` v1 的输入合同如下；清单由实际运行库构建生成，不手工填入虚假的摘要：
+
+| 字段 | 要求 |
+| --- | --- |
+| `schemaVersion` | `1` |
+| `hashStage` | `pre-sign`；这是签名前构建输入清单，不是签名后运行库的逐字节摘要 |
+| `platform` / `arch` / `electronVersion` | 匹配正在打包的 Electron 平台、架构及实际版本；当前架构为 `arm64` / `x64` |
+| `mpvVersion` | 与 `components` 中名为 `mpv` 的版本一致 |
+| `files` | 相对路径到 SHA-256 的对象；精确覆盖全部文件，唯独不包含清单自身。禁止越界路径、符号链接和额外文件 |
+| `components` | 每项包含 `name`、`version`、`license`、`binaries`，以及指向清单内非空文件的 `licenseFile`、`sourceArchive`、`buildRecipe`；所有二进制有且仅有一个来源所有者，包括 Javdex addon |
+
+`beforePack` 核查输入；`afterPack` 再核查并复制到应用 Resources 的 `native-playback/`，复核复制结果，随后才由现有流程签名。不会覆盖已存在的运行库目录。macOS 二进制必须包含目标架构；非系统动态依赖必须通过 `@loader_path` 指向该运行库清单内的二进制，禁止开发机绝对路径、依赖搜索型 `@rpath`、越界依赖和外部 rpath。动态库自身的 install name 可为规范的 `@rpath/<文件名>`，它不是一次依赖搜索。技术检查与搬移回归入口为 `npm run test:packaging`。
+
+Linux 使用 ELF header 和 GNU `readelf -dW` 核对 64 位小端、shared object、目标 x64/arm64、SONAME 与动态依赖，不执行输入库或用 `ldd`。RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH 存在时不误用被覆盖的 RPATH；非系统 NEEDED 必须在这些目录中精确命中清单。禁止绝对／逃逸／空搜索项及动态 audit/filter 间接加载。系统依赖仅放行代码中明确列出的 glibc/C++ ABI、X11、GLVND 和 Xft/fontconfig/freetype 名称（不同架构 loader 分开）；这些是宿主提供的显示/字体前提，不代表可省略 mpv、FFmpeg、其它解码依赖或许可记录。该静态检查不能发现运行时 `dlopen` 的全部插件，也不核对最低 GLIBC/C++ 符号版本；目标发行版、驱动及 ABI 基线仍须实际分发审核与干净安装。
+
+代码签名可能改变二进制字节，因此保留的 `pre-sign` 摘要只证明输入与搬移阶段一致，不能拿它比较签名后的文件。最终包须另做签名完整性和分发产物摘要检查；正式播放运行库的签名/安装验收仍未完成，不由此输入清单自动推断。
+
+**摘要不是签名，清单不是许可合规或播放验收证明。** Javdex 采用 GPL-3.0-or-later，应用 `LICENSE`、`NOTICE`、workspace 元数据、锁文件及当前公开许可说明已同步；此前 MIT 声明保留在 `LICENSES/Javdex-MIT.txt`，既有版本不追溯改写。构建来源、选项、源码与二进制对应关系、全部间接依赖及分发义务仍需复核，第三方代码保留各自版权和许可。mpv 默认构建与可选 LGPL 构建、FFmpeg 构建选项及依赖的许可边界分别见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 和 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)。当前 macOS 开发库仍依赖 Homebrew，Linux 隔离检查使用 Debian 开发库；尚未提供经过这些关口的正式运行库或干净安装包。
+
+部分 macOS 播放回归以隔离资料目录运行：先生成 `playback:native:build`、`desktop:build`（远程另需 `server:build`），再运行 `node scripts/playback-media-acceptance.mjs` 检查合成素材，或 `node scripts/playback-subtitle-acceptance.mjs` 定向检查复杂 ASS 与原创 PGS；可加 `--bitmap-only` 缩短图像字幕回归。`npm run test:playback:fixtures` 独立核对原创 PGS 字节/像素结构，不依赖 FFmpeg、GUI 或播放运行库，已纳入根 `npm test`。远程使用 `node scripts/playback-remote-acceptance.mjs --media-matrix`；追加 `--system-subtitle-picker` 时会等待真实系统选择器分别选择生成的 SRT/ASS，不适合无人值守 CI，也不 mock 文件选择器。具体文件、像素证据、失败诊断及未覆盖范围见 [字幕验收说明](BUILTIN_PLAYBACK_SUBTITLE_ACCEPTANCE.md) 与 [PGS 验收合同/结果](BUILTIN_PLAYBACK_BITMAP_ACCEPTANCE.md)。GUI 回归命令仅接受 macOS，依赖开发机运行库；不代表发布、其它平台或干净安装验收。
+
+`node scripts/playback-close-acceptance.mjs` 检查播放中正常关闭主窗口：窗口确实销毁，进程退出前内核已释放，随后应用正常退出。不要把清理移到可能被否决的 `close` 事件；本机实测还发现该事件中拆除活跃原生视图会让窗口留存。Windows 源码为 `closed` 清理保留私有隐藏 drawable/context，不用独立可见播放窗口代替主窗口嵌入；该 Windows 生命周期路径尚未实机验证。
+
 ## 官网开发
 
 服务端源码构建、Docker 部署及更新备份见 [服务端部署指南](SERVER_MODE.md)。当前能力与接口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，未完成验收和历史测试边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。服务端部署不需要 Electron，也不运行 `setup:desktop`。
@@ -161,7 +200,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 数据库结构与迁移 | [schema.ts](../packages/library/src/db/schema.ts)、[migrations.ts](../packages/library/src/db/migrations.ts) |
 | Issue、PRD 与分类标签 | [Issue 约定](agents/issue-tracker.md)、[标签约定](agents/triage-labels.md) |
 | 版本与发布 | [发布规范](VERSIONING_AND_RELEASE.md)、[更新日志](../CHANGELOG.md) |
-| 第三方集成与许可 | [第三方说明](THIRD_PARTY_NOTICES.md)、[MIT License](../LICENSE) |
+| 第三方集成与许可 | [第三方说明](THIRD_PARTY_NOTICES.md)、[GPL v3 或后续版本](../LICENSE)、[项目声明](../NOTICE) |
 
 提交改动时说明解决的问题、最终行为和验证结果。用户可见的功能与入口变化应同步更新使用指南；README 保持产品概览，版本细节记录在更新日志，实现约束留在对应设计文档。
 

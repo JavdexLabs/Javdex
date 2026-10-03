@@ -2,7 +2,7 @@
   "name": "@javdex/web",
   "version": "0.8.0",
   "private": true,
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "build": "node ../../scripts/run-root-script.mjs web:build",
     "dev": "node ../../scripts/run-root-script.mjs web:dev",

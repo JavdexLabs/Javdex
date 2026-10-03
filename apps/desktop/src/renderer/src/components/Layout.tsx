@@ -32,6 +32,7 @@ import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import { interactionLayers } from '../interaction/interactionLayers'
 import { SidebarNavIcon, SidebarNavLabel, SidebarNavLink, SidebarNavRow } from './SidebarNav'
 import styles from './Layout.module.css'
+import PlaybackPanel from '../playback/PlaybackPanel'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
@@ -210,6 +211,7 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   }, [location.pathname, navigate, requestLeave])
 
   return (
+    <div className={styles.shell}>
     <div className={styles.root} data-background={hasBackgroundLayer || undefined}>
       {backgroundSrc && (
         <AppBackgroundLayer
@@ -244,6 +246,8 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
         <div className={styles.content}>{children}</div>
       </div>
       <AssetCryptoOverlay />
+    </div>
+    <PlaybackPanel />
     </div>
   )
 }

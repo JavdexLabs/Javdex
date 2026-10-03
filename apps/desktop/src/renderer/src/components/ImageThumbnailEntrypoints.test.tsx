@@ -4,6 +4,7 @@ import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { ActressListItem } from '@shared/actressTypes'
 import type { VideoAsset } from '@shared/videoTypes'
+import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), {
@@ -38,10 +39,10 @@ for (const kind of ['video', 'actress'] as const) {
       return Reflect.apply(createElement, React, [type, props, ...children])
     })
     await act(async () => {
-      renderer = TestRenderer.create(<ImagePreviewOverlayProvider>
+      renderer = TestRenderer.create(<OverlayHistoryProvider><ImagePreviewOverlayProvider>
         {kind === 'video' ? <VideoGallery videoId={1} assets={[sample, remote] as VideoAsset[]} posterPath={null} onChanged={() => {}} />
           : <ActressGallery actressId={1} revision={{}} posterPath={null} onChanged={() => {}} />}
-      </ImagePreviewOverlayProvider>)
+      </ImagePreviewOverlayProvider></OverlayHistoryProvider>)
     })
     assert.deepEqual(renderer!.root.findAllByType('img').map(image => image.props.src), [
       'media://samples/local.jpg?size=640', 'https://example.test/remote.jpg'

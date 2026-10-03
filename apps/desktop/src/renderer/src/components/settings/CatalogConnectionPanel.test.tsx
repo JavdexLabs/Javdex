@@ -7,7 +7,13 @@ import type { DesktopSession } from '@shared/desktop/session'
 import { EMPTY_DESKTOP_SESSION } from '@shared/desktop/session'
 import type { DefaultPlayerDetectionResult, ThisComputerSettings, ThisComputerSettingsPatch } from '@shared/desktop/settings'
 import { DesktopSessionContext } from '../../desktop/DesktopSessionContext'
-import SettingsLeaveGuard from '../../settings/SettingsLeaveGuard'
+import LeaveGuard from '../../settings/SettingsLeaveGuard'
+import { OverlayHistoryProvider } from '../../interaction/OverlayHistoryContext'
+import { NavigationGuardProvider } from '../../interaction/NavigationGuard'
+
+function SettingsLeaveGuard({ children }: { children: React.ReactNode }): JSX.Element {
+  return <OverlayHistoryProvider><NavigationGuardProvider><LeaveGuard>{children}</LeaveGuard></NavigationGuardProvider></OverlayHistoryProvider>
+}
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -35,7 +41,7 @@ it('detects a player into the draft only and retains the chosen path on failed d
       capabilities: {} as never, catalogReadsEnabled: true, reconnect: async () => {}, claimWriter: async () => { throw new Error('unused') }
     }}><SettingsLeaveGuard><Panel /></SettingsLeaveGuard></DesktopSessionContext.Provider> }])
     await act(async () => { tree = TestRenderer.create(<RouterProvider router={router!} />) })
-    assert.match(textOf(tree!.root), /播放服务端视频需设置/)
+    assert.match(textOf(tree!.root), /服务端影片需指定支持网络播放的程序/)
     assert.doesNotMatch(textOf(tree!.root), /播放设置（可选）/)
     await act(async () => { tree!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.onChange({ target: { value: 'http://new-server:8096' } }) })
     const detect = () => tree!.root.findAllByType('button').find(node => textOf(node) === '使用系统默认播放器')!
@@ -47,9 +53,16 @@ it('detects a player into the draft only and retains the chosen path on failed d
     await act(async () => { detect().props.onClick() })
     assert.match(textOf(tree!.root), /未找到默认程序/)
     assert.equal(tree!.root.findByProps({ placeholder: '选择程序或输入绝对路径' }).props.value, 'D:\\播放器\\Player.exe')
+    const { default: SelectControl } = await import('../SelectControl')
+    act(() => tree!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '默认播放方式')!.props.onChange({ target: { value: 'builtin' } }))
+    const { default: SettingsSwitchRow } = await import('../SettingsSwitchRow')
+    const recordingSwitch = () => tree!.root.findAllByType(SettingsSwitchRow).find(node => node.props.title === '保存续播进度')!
+    assert.equal(recordingSwitch().props.checked, false, 'missing legacy preference defaults to off')
+    act(() => recordingSwitch().props.onChange(true))
+    assert.equal(writes, 0, 'player preference is a draft until saved')
     await act(async () => { tree!.root.findAllByType('button').find(node => textOf(node) === '保存')!.props.onClick() })
     assert.equal(writes, 1)
-    assert.deepEqual(patches, [{ playerPath: 'D:\\播放器\\Player.exe' }])
+    assert.deepEqual(patches, [{ playerPath: 'D:\\播放器\\Player.exe', playerPreference: 'builtin', resumePlayback: true }])
     assert.equal(tree!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.value, 'http://new-server:8096')
     assert.match(textOf(tree!.root), /有未保存的更改/)
     assert.doesNotMatch(textOf(tree!.root), /保存后生效/)
@@ -175,7 +188,7 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     ) }], { initialEntries: ['/settings'] })
     router = activeRouter
     await act(async () => { renderer = TestRenderer.create(<RouterProvider router={activeRouter} />) })
-    act(() => renderer!.root.findByType(SelectControl).props.onChange({ target: { value: 'local' } }))
+    act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'local' } }))
     assert.match(textOf(renderer!.root), /有未保存的更改/)
     const save = renderer!.root.findAllByType('button').find((button) => button.children.includes('应用连接'))!
     await act(async () => { save.props.onClick() })
@@ -187,9 +200,10 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     await act(async () => { await router!.navigate('/next') })
     assert.equal(router.state.location.pathname, '/next')
     await act(async () => { await router!.navigate('/settings') })
-    assert.equal(renderer!.root.findByType(SelectControl).props.value, 'local')
+    assert.equal(renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.value, 'local')
+    assert.ok(renderer!.root.findAllByType(SelectControl).some(node => node.props['aria-label'] === '默认播放方式'), 'local mode also exposes player preferences')
     assert.match(textOf(renderer!.root), /当前使用：远程资料库.*重启后使用：本地资料库/)
-    act(() => renderer!.root.findByType(SelectControl).props.onChange({ target: { value: 'remote' } }))
+    act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'remote' } }))
     assert.equal(renderer!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.value, serverUrl)
     const probe = renderer!.root.findAllByType('button').find((button) => button.children.includes('测试连接'))!
     await act(async () => { probe.props.onClick() })
@@ -205,7 +219,7 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
 
     assert.match(textOf(renderer!.root), /有未保存的更改/)
     assert.equal(renderer!.root.findAllByType('button').find((button) => textOf(button) === '立即重启')!.props.disabled, true)
-    act(() => renderer!.root.findByType(SelectControl).props.onChange({ target: { value: 'local' } }))
+    act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'local' } }))
     const restart = renderer!.root.findAllByType('button').find((button) => textOf(button) === '立即重启')!
     assert.equal(restart.props.disabled, false)
     await act(async () => { restart.props.onClick() })

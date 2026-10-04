@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { FileMatcher } from 'app-builder-lib/out/fileMatcher.js'
+import { FileMatcher, getMainFileMatchers } from 'app-builder-lib/out/fileMatcher.js'
+import { doMergeConfigs } from 'app-builder-lib/out/util/config/config.js'
 import buildConfig from '../electron-builder.config.mjs'
 import {
   MAC_ELECTRON_LANGUAGES,
@@ -160,6 +161,59 @@ test('mac packaging explicitly enables ad-hoc signing before invoking its custom
   const mac = buildConfig().mac
   assert.equal(mac.identity, '-')
   assert.equal(typeof mac.sign, 'function')
+})
+
+test('Windows packaging retains host native modules and removes foreign platforms and architectures', () => {
+  const root = process.cwd()
+  for (const arch of ['x64', 'arm64']) {
+    const config = buildConfig()
+    // Dependencies are included by electron-builder's separate node-module file
+    // set. Model that inclusion before applying the application's exclusions.
+    const patterns = ['node_modules/**/*', ...config.files, ...config.win.files]
+    const filter = new FileMatcher(root, '/unused-package-output', value => value.replaceAll('${arch}', arch), patterns).createFilter()
+    const selected = file => filter(path.join(root, file), { isDirectory: () => false })
+    const otherArch = arch === 'x64' ? 'arm64' : 'x64'
+    for (const file of [
+      `node_modules/@mariozechner/clipboard-win32-${arch}-msvc/clipboard.node`,
+      `node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-${arch}/console.node`,
+      'node_modules/@mariozechner/clipboard/index.js'
+    ]) assert.equal(selected(file), true, `${arch} requires ${file}`)
+    for (const file of [
+      `node_modules/@mariozechner/clipboard-win32-${otherArch}-msvc/clipboard.node`,
+      'node_modules/@mariozechner/clipboard-darwin-universal/clipboard.node',
+      'node_modules/@mariozechner/clipboard-linux-x64-gnu/clipboard.node',
+      'node_modules/@earendil-works/pi-tui/native/darwin/prebuilds/darwin-arm64/modifiers.node',
+      `node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-${otherArch}/console.node`
+    ]) assert.equal(selected(file), false, `${arch} must exclude ${file}`)
+  }
+})
+
+test('desktop packaging keeps bundled Photon WASM and LAN web while excluding their redundant copies', () => {
+  const root = process.cwd()
+  const filter = new FileMatcher(root, '/unused-package-output', value => value, ['node_modules/**/*', ...buildConfig().files]).createFilter()
+  const selected = file => filter(path.join(root, file), { isDirectory: () => false })
+  for (const file of ['out/main/chunks/photon_rs_bg.wasm', 'out/web/index.html', 'node_modules/@silvia-odwyer/photon-node/LICENSE.md']) {
+    assert.equal(selected(file), true, `${file} is required at runtime or for notices`)
+  }
+  for (const file of ['out/server/index.js', 'out/server/web/index.html', 'node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm']) {
+    assert.equal(selected(file), false, `${file} is a redundant desktop input`)
+  }
+})
+
+test('normalized Windows desktop matchers do not default to including the repository', () => {
+  const root = process.cwd()
+  const config = doMergeConfigs([buildConfig()])
+  const debugLogger = { isEnabled: false }
+  const packager = { config, projectDir: root, buildResourcesDir: 'build', debugLogger }
+  const matchers = getMainFileMatchers(root, '/unused-package-output', value => value.replaceAll('${arch}', 'x64'),
+    config.win, { info: packager, config, debugLogger }, path.join(root, 'dist'), false)
+  const selected = file => matchers.some(matcher => matcher.createFilter()(path.join(root, file), { isDirectory: () => false }))
+  for (const file of ['out/playback-acceptance/build/large.dll', 'out/server/index.js', 'scripts/dist.mjs', 'docs/DEVELOPMENT.md']) {
+    assert.equal(selected(file), false, `${file} must be excluded by every app file set`)
+  }
+  for (const file of ['out/main/index.js', 'out/web/index.html', 'out/main/chunks/photon_rs_bg.wasm']) {
+    assert.equal(selected(file), true, `${file} must remain in the application`)
+  }
 })
 
 test('desktop packages retain the current license, historical MIT notice and third-party notices', () => {

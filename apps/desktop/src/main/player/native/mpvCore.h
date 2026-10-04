@@ -92,12 +92,19 @@ class MpvCore {
     mpv_handle *handle = nullptr;
     mpv_render_context *renderer = nullptr;
     std::atomic<bool> requested{false};
+    std::atomic<void (*)(void *)> renderWakeup{nullptr};
+    std::atomic<void *> renderWakeupContext{nullptr};
     std::map<std::string, ObservedValue> observed;
     std::deque<NativeAction> actions;
     std::string lastError;
     int lastErrorCode = 0;
     uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0;
-    static void request(void *context) { static_cast<MpvCore *>(context)->requested.store(true); }
+    static void request(void *context) {
+        auto core = static_cast<MpvCore *>(context);
+        if (!core->requested.exchange(true)) {
+            if (auto wakeup = core->renderWakeup.load()) wakeup(core->renderWakeupContext.load());
+        }
+    }
 public:
     bool alive() const { return handle && renderer; }
     uint64_t loads() const { return loadedFiles; }
@@ -105,10 +112,12 @@ public:
         const auto found = observed.find(name);
         return found == observed.end() || !std::isfinite(found->second.number) ? 0 : found->second.number;
     }
-    void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false) {
+    void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false,
+        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = 0; requested.store(false);
+        renderWakeupContext.store(wakeupContext); renderWakeup.store(wakeup);
         handle = mpv_create();
         if (!handle) throw std::runtime_error("mpv_create failed");
         const char *options[][2] = {
@@ -151,6 +160,7 @@ public:
         mpv_render_context_set_update_callback(renderer, request, this);
     }
     void shutdown() {
+        renderWakeup.store(nullptr);
         if (renderer) { mpv_render_context_set_update_callback(renderer, nullptr, nullptr); mpv_render_context_free(renderer); renderer = nullptr; }
         if (handle) { mpv_terminate_destroy(handle); handle = nullptr; }
         actions.clear(); requested.store(false);

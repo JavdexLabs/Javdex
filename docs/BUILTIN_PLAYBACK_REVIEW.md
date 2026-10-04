@@ -2,6 +2,8 @@
 
 日期：2026-10-03。范围：`codex/libmpv-native-render-prototype` 上自 `93127dc` 起的全部未提交改动，包含原生 adapter、桌面会话与 UI、共享返回协调、GPL 声明及构建／验收脚本。基线之后没有既有提交，因此新文件与 tracked diff 一起审查，而非仅检查三点 diff。
 
+本文保留提交前审查时的验证范围。后续 Windows MSVC/PE/真实开发应用结果、屏幕黑屏/暂停全屏重绘及原生输入修复，三种展示、真实键盘鼠标的证据和剩余设备/发布关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，不追溯改写下文当时的“未执行”记录。
+
 按 `code-review` 技能并行检查仓库规范和实施方案；复核后修复本轮发现。历史协调采用 `codebase-design` 的集中所有权原则：复杂性留在共享协调器，不增加每个页面各自的返回栈。用户授权提交和推送此功能分支，不包含合并、发布或将整个实施计划标为完成。
 
 ## Standards

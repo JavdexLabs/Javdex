@@ -241,7 +241,7 @@ export async function checkComplexSubtitlePixels(application, page, directory, p
     expanded, later, docked, fullscreen }
 }
 
-// This mode intentionally needs a real macOS file-picker operation. It never
+// This mode intentionally needs a real system file-picker operation. It never
 // replaces showOpenDialog, supplies a path through renderer IPC, or uploads it.
 export async function checkLocalSubtitlePicker(application, page, directory, file, ready) {
   assert.ok(['external.srt', 'complex.ass'].includes(file))
@@ -264,7 +264,7 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   assert.equal(await page.getByRole('button', { name: '字幕字号', exact: true }).isDisabled(), codec === 'ass')
   if (codec === 'ass') {
     await page.getByRole('button', { name: '播放选项', exact: true }).click()
-    return { file, selection: 'real macOS system picker',
+    return { file, selection: `real ${process.platform} system picker`,
       ...await checkComplexSubtitlePixels(application, page, directory, 'remote-local-ass') }
   }
   await page.getByRole('button', { name: '字幕字号', exact: true }).click()
@@ -306,6 +306,6 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded', 'local SRT fullscreen exit')
   await page.waitForTimeout(1500)
-  return { name: 'local SRT over remote media in one paused session', file, selection: 'real macOS system picker',
+  return { name: 'local SRT over remote media in one paused session', file, selection: `real ${process.platform} system picker`,
     size: 40, expanded, docked, fullscreen }
 }

@@ -1,10 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 project(JavdexNativePlayback LANGUAGES CXX)
 
+# JS supplies native Windows paths; normalize before CMake interprets them as
+# target source paths (a backslash followed by P is otherwise an invalid escape).
+foreach(input ELECTRON_INCLUDE_DIR ELECTRON_NODE_LIBRARY ELECTRON_DELAY_LOAD_HOOK MPV_PREFIX PLAYBACK_OUTPUT_DIR)
+  if(DEFINED ${input})
+    file(TO_CMAKE_PATH "${${input}}" ${input})
+  endif()
+endforeach()
+
 # Development adapter build. No dependency download and no runtime packaging;
 # release inputs must still pass the separate reviewed runtime inventory gate.
-if(NOT (WIN32 AND MSVC) AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "This CMake entry builds the Windows MSVC or Linux X11 adapter only")
+if(NOT (WIN32 AND (MSVC OR MINGW)) AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "This CMake entry builds the Windows MSVC/MinGW or Linux X11 adapter only")
 endif()
 foreach(input ELECTRON_INCLUDE_DIR MPV_PREFIX PLAYBACK_OUTPUT_DIR)
   if(NOT DEFINED ${input} OR "${${input}}" STREQUAL "")
@@ -21,17 +29,25 @@ if(WIN32)
   if(NOT EXISTS "${ELECTRON_NODE_LIBRARY}")
     message(FATAL_ERROR "Missing matching Electron node.lib")
   endif()
-  if(NOT EXISTS "${ELECTRON_DELAY_LOAD_HOOK}")
+  if(MSVC AND NOT EXISTS "${ELECTRON_DELAY_LOAD_HOOK}")
     message(FATAL_ERROR "Missing node-gyp's Electron delay-load hook")
   endif()
   # node.lib imports node.exe, while Electron (including a renamed packaged
-  # executable) exports those symbols itself. Compile the installed node-gyp
-  # hook into this module; a hook in another DLL cannot redirect its imports.
-  add_library(playback MODULE windowsPlayback.cpp "${ELECTRON_DELAY_LOAD_HOOK}")
-  target_compile_options(playback PRIVATE /utf-8 /EHsc /W4)
+  # executable) exports those symbols itself. Compile the appropriate hook
+  # into this module; a hook in another DLL cannot redirect its imports.
+  if(MSVC)
+    add_library(playback MODULE windowsPlayback.cpp "${ELECTRON_DELAY_LOAD_HOOK}")
+    target_compile_options(playback PRIVATE /utf-8 /EHsc /W4)
+    target_link_options(playback PRIVATE /DELAYLOAD:node.exe)
+  else()
+    # node-gyp's hook is guarded by _MSC_VER. The MinGW build supplies the
+    # same host redirection through its own delayimp hook and LLVM's linker.
+    add_library(playback MODULE windowsPlayback.cpp windowsElectronDelayHook.cpp)
+    target_compile_options(playback PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(playback PRIVATE -Wl,--delayload=node.exe)
+  endif()
   target_compile_definitions(playback PRIVATE _WIN32_WINNT=0x0A00 UNICODE _UNICODE HOST_BINARY="node.exe")
-  target_link_options(playback PRIVATE /DELAYLOAD:node.exe)
-  target_link_libraries(playback PRIVATE "${ELECTRON_NODE_LIBRARY}" delayimp user32 gdi32 opengl32 comctl32)
+  target_link_libraries(playback PRIVATE "${ELECTRON_NODE_LIBRARY}" delayimp user32 gdi32 opengl32 comctl32 imm32 ole32 oleacc)
 else()
   find_package(X11 REQUIRED)
   find_package(OpenGL REQUIRED COMPONENTS OpenGL GLX)
@@ -57,7 +73,7 @@ endforeach()
 
 add_executable(mpv-core-test mpvCore.test.cpp)
 target_compile_features(mpv-core-test PRIVATE cxx_std_17)
-if(WIN32)
+if(MSVC)
   target_compile_options(mpv-core-test PRIVATE /utf-8 /EHsc /UNDEBUG)
 else()
   target_compile_options(mpv-core-test PRIVATE -UNDEBUG)

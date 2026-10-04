@@ -1,14 +1,57 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { inspectLinuxPlaybackBinary, inspectMacPlaybackBinary, stagePackagedPlaybackRuntime, validatePlaybackRuntime, verifyPackagedPlaybackRuntime } from './playback-runtime.mjs'
+import { inspectLinuxPlaybackBinary, inspectMacPlaybackBinary, inspectWindowsPlaybackBinary, stagePackagedPlaybackRuntime, validatePackagedPlaybackRuntime, validatePlaybackRuntime, verifyPackagedPlaybackRuntime } from './playback-runtime.mjs'
 
 const target = { platformName: 'darwin', archName: process.arch === 'x64' ? 'x64' : 'arm64', electronVersion: '43.4.1' }
 const hash = value => createHash('sha256').update(value).digest('hex')
+
+test('acceptance cleanup cannot report success after forced, failed or signalled exit', () => {
+  for (const cleanup of [
+    { forced: false, code: 0, signal: null },
+    { forced: true, code: 0, signal: null },
+    { forced: false, code: 5, signal: null },
+    { forced: false, code: null, signal: 'SIGTERM' }
+  ]) {
+    const helper = new URL('./playback-acceptance-support.mjs', import.meta.url).href
+    const script = `import { recordAcceptanceCleanup } from ${JSON.stringify(helper)};
+      const report = { status: 'partial-pass' };
+      recordAcceptanceCleanup(report, ${JSON.stringify(cleanup)});
+      console.log(JSON.stringify(report));`
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' })
+    const clean = !cleanup.forced && cleanup.code === 0 && cleanup.signal === null
+    assert.equal(result.status, clean ? 0 : 1, result.stderr)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.status, clean ? 'partial-pass' : 'failed')
+    assert.deepEqual(report.cleanup, cleanup)
+  }
+})
+
+test('Windows profile staging requires its supplied toolchain evidence before writing output', t => {
+  const root = mkdtempSync(path.join(tmpdir(), 'javdex-profile-evidence-test-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const directory = path.join(root, 'evidence'), destination = path.join(root, 'output')
+  mkdirSync(directory)
+  const script = fileURLToPath(new URL('./stage-windows-playback-profile.mjs', import.meta.url))
+  const command = ['--original', path.join(root, 'original'), '--prefix', path.join(root, 'prefix'),
+    '--destination', destination, '--build', path.join(root, 'build'), '--evidence', directory]
+  const missing = spawnSync(process.execPath, [script, ...command], { encoding: 'utf8' })
+  assert.equal(missing.status, 1)
+  assert.match(missing.stderr, /Missing reviewed toolchain lock/)
+  assert.equal(existsSync(destination), false)
+  writeFileSync(path.join(directory, 'toolchain-lock.json'), '{}')
+  const supplied = spawnSync(process.execPath, [script, ...command], { encoding: 'utf8' })
+  assert.equal(supplied.status, 1, 'the absent original input must still fail closed')
+  assert.doesNotMatch(supplied.stderr, /Missing reviewed toolchain lock/)
+  assert.equal(existsSync(destination), false)
+})
+
 function fixture(t, runtimeTarget = target) {
   const target = runtimeTarget
   const root = mkdtempSync(path.join(tmpdir(), 'javdex-playback-runtime-test-'))
@@ -46,10 +89,49 @@ test('runtime inventory checks hashes, exact payload and binary/source ownership
   const staged = stagePackagedPlaybackRuntime(f.context, options)
   assert.equal(staged.binaryCount, 2)
   assert.ok(existsSync(path.join(staged.directory, 'playback.node')))
-  assert.equal(readFileSync(path.join(staged.directory, 'runtime.json'), 'utf8'), readFileSync(path.join(f.directory, 'runtime.json'), 'utf8'))
+  assert.equal(staged.manifest.schemaVersion, 2)
+  assert.equal(staged.manifest.sourceBundle.inputInventorySha256, hash(readFileSync(path.join(f.directory, 'runtime.json'))))
+  assert.deepEqual(staged.manifest.components, f.manifest.components)
+  assert.equal(existsSync(path.join(staged.directory, 'sources')), false, 'source/build evidence is not installed')
+  const archive = path.join(f.root, staged.manifest.sourceBundle.fileName)
+  assert.equal(hash(readFileSync(archive)), staged.manifest.sourceBundle.sha256)
+  const extracted = path.join(f.root, 'extracted-sources')
+  mkdirSync(extracted)
+  const unpacked = spawnSync('tar', ['-xf', archive, '-C', extracted], { encoding: 'utf8' })
+  assert.equal(unpacked.status, 0, unpacked.stderr)
+  assert.equal(readFileSync(path.join(extracted, 'reviewed-runtime', 'sources', 'fixture.tar'), 'utf8'), 'unit-test source placeholder')
+  assert.equal(readFileSync(path.join(extracted, 'reviewed-runtime', 'runtime.json'), 'utf8'), readFileSync(path.join(f.directory, 'runtime.json'), 'utf8'))
+  assert.equal(existsSync(path.join(extracted, 'reviewed-runtime', 'playback.node')), false)
   assert.equal(inspected.length, 6, 'staging rechecks both input and copied binaries')
   assert.throws(() => stagePackagedPlaybackRuntime(f.context, options), /overwrite/)
   assert.equal(verifyPackagedPlaybackRuntime({}, { environment: {} }), null, 'ordinary development package has no implicit runtime')
+})
+
+test('distribution keeps dependency checks and rejects evidence leakage or reuse as reviewed input', t => {
+  const f = fixture(t)
+  const staged = stagePackagedPlaybackRuntime(f.context, { environment: f.environment, inspectBinary: () => {} })
+  assert.throws(() => validatePlaybackRuntime(staged.directory, target, () => {}), /schema/)
+  writeFileSync(path.join(staged.directory, 'playback.node'), 'tampered')
+  assert.throws(() => validatePackagedPlaybackRuntime(staged.directory, target, () => {}), /digest mismatch/)
+  writeFileSync(path.join(staged.directory, 'playback.node'), 'synthetic runtime')
+  mkdirSync(path.join(staged.directory, 'sources'))
+  writeFileSync(path.join(staged.directory, 'sources', 'extra.tar'), 'unexpected source')
+  assert.throws(() => validatePackagedPlaybackRuntime(staged.directory, target, () => {}), /exactly match/)
+  staged.manifest.files['sources/extra.tar'] = hash('unexpected source')
+  writeFileSync(path.join(staged.directory, 'runtime.json'), JSON.stringify(staged.manifest))
+  assert.throws(() => validatePackagedPlaybackRuntime(staged.directory, target, () => {}), /non-runtime evidence/)
+})
+
+test('reused companion source archive must still match its digest', t => {
+  const f = fixture(t)
+  const options = { environment: f.environment, inspectBinary: () => {} }
+  const first = stagePackagedPlaybackRuntime(f.context, options)
+  const context = name => ({ ...f.context, appOutDir: path.join(f.root, name),
+    packager: { ...f.context.packager, getResourcesDir: () => path.join(f.root, name, 'Resources') } })
+  const second = stagePackagedPlaybackRuntime(context('second-package'), options)
+  assert.deepEqual(second.manifest.sourceBundle, first.manifest.sourceBundle)
+  writeFileSync(path.join(f.root, first.manifest.sourceBundle.fileName), 'tampered source delivery')
+  assert.throws(() => stagePackagedPlaybackRuntime(context('third-package'), options), /source bundle digest mismatch/)
 })
 
 test('runtime inventory rejects wrong targets, modified/unlisted files and missing source evidence', t => {
@@ -85,12 +167,131 @@ test('runtime inventory rejects escaping paths, symlinks and binaries without ow
   assert.throws(check, /no source\/license owner/)
 })
 
-test('native verification is fail-closed for platforms without an implemented binary inspector', t => {
+test('Windows inventory cannot accept placeholder binaries through the real PE inspector', t => {
   const f = fixture(t)
   f.manifest.platform = 'win32'; f.save()
-  assert.throws(() => validatePlaybackRuntime(f.directory, { ...target, platformName: 'win32' }, () => {}), /not implemented for this platform/)
+  assert.throws(() => validatePlaybackRuntime(f.directory, { ...target, platformName: 'win32' }), /PE/)
   assert.throws(() => verifyPackagedPlaybackRuntime(f.context, { environment: { JAVDEX_PLAYBACK_RUNTIME_DIR: '' } }), /must name/)
 })
+
+function peFixture(t, { machine = 0x8664, imports = ['kernel32.dll', 'libmpv-2.dll'], delayed = ['node.exe'] } = {}) {
+  const directory = mkdtempSync(path.join(tmpdir(), 'javdex-playback-pe-test-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const file = path.join(directory, 'playback.node'), mpv = path.join(directory, 'libmpv-2.dll')
+  const data = Buffer.alloc(2048), pe = 64, optional = 88, section = 328
+  data.writeUInt16LE(0x5a4d, 0); data.writeUInt32LE(pe, 60); data.writeUInt32LE(0x4550, pe)
+  data.writeUInt16LE(machine, pe + 4); data.writeUInt16LE(1, pe + 6)
+  data.writeUInt16LE(240, pe + 20); data.writeUInt16LE(0x2000, pe + 22)
+  data.writeUInt16LE(0x20b, optional); data.writeUInt32LE(16, optional + 108)
+  data.writeUInt32LE(4096, section + 12); data.writeUInt32LE(1536, section + 16); data.writeUInt32LE(512, section + 20)
+  let string = 1024
+  const addName = name => { const address = 4096 + string - 512; data.write(name + '\0', string, 'ascii'); string += name.length + 1; return address }
+  const directoryEntry = (index, offset, stride, names, delayed) => {
+    data.writeUInt32LE(4096 + offset - 512, optional + 112 + index * 8)
+    data.writeUInt32LE(stride * (names.length + 1), optional + 116 + index * 8)
+    names.forEach((name, i) => {
+      if (delayed) data.writeUInt32LE(1, offset + i * stride)
+      data.writeUInt32LE(addName(name), offset + i * stride + (delayed ? 4 : 12))
+    })
+  }
+  directoryEntry(1, 512, 20, imports, false); directoryEntry(13, 768, 32, delayed, true)
+  writeFileSync(mpv, 'parser-only fixture')
+  const input = { directory, archName: machine === 0xaa64 ? 'arm64' : 'x64', binaryFiles: new Set([file, mpv]) }
+  const check = () => { writeFileSync(file, data); return inspectWindowsPlaybackBinary(file, input) }
+  return { directory, file, data, input, check }
+}
+
+test('PE checks x64/ARM64 imports and the Electron delayed host without executing DLLs', t => {
+  for (const machine of [0x8664, 0xaa64]) {
+    const f = peFixture(t, { machine })
+    assert.deepEqual(f.check(), { dependencies: ['kernel32.dll', 'libmpv-2.dll'], delayedDependencies: ['node.exe'] })
+    f.input.archName = machine === 0x8664 ? 'arm64' : 'x64'
+    assert.throws(f.check, /architecture/)
+  }
+})
+
+test('PE rejects missing codec/CRT closure, nested-only DLLs and ambiguous filename casing', t => {
+  // CfgMgr32 is the Windows device-configuration API used by the Vulkan
+  // loader. The loader itself still belongs in the adjacent runtime closure.
+  peFixture(t, { imports: ['libmpv-2.dll', 'cfgmgr32.dll', 'usp10.dll', 'rpcrt4.dll', 'msimg32.dll',
+    'ncrypt.dll', 'wsock32.dll', 'dnsapi.dll', 'gdiplus.dll'] }).check()
+  for (const missing of ['avcodec-62.dll', 'vcruntime140.dll', 'vulkan-1.dll', 'libc++.dll']) {
+    const f = peFixture(t, { imports: ['libmpv-2.dll', missing] })
+    assert.throws(f.check, /absent from the adjacent/)
+  }
+  const clang = peFixture(t, { imports: ['libmpv-2.dll', 'libc++.dll'] })
+  clang.input.binaryFiles.add(path.join(clang.directory, 'libc++.dll'))
+  clang.check()
+  const f = peFixture(t)
+  f.input.binaryFiles.delete(path.join(f.directory, 'libmpv-2.dll'))
+  f.input.binaryFiles.add(path.join(f.directory, 'lib', 'libmpv-2.dll'))
+  assert.throws(f.check, /absent from the adjacent/)
+  f.input.binaryFiles.add(path.join(f.directory, 'LIBMPV-2.DLL'))
+  assert.throws(f.check, /ambiguous case-insensitive/)
+})
+
+test('PE rejects immediate Electron imports, missing delay hook contract and nonlocal names', t => {
+  for (const options of [
+    { imports: ['libmpv-2.dll', 'node.exe'] },
+    { delayed: [] },
+    { imports: ['libmpv-2.dll', '../outside.dll'] }
+  ]) {
+    const f = peFixture(t, options)
+    assert.throws(f.check, /delay-load|non-canonical/)
+  }
+})
+
+test('PE parser fails closed on truncated headers, off-file RVAs and unterminated directories', t => {
+  const f = peFixture(t)
+  f.data.writeUInt32LE(0xfffffff0, 60)
+  assert.throws(f.check, /range/)
+  f.data.writeUInt32LE(64, 60)
+  f.data.writeUInt32LE(0xfffffff0, 208)
+  assert.throws(f.check, /RVA/)
+  f.data.writeUInt32LE(4096, 208)
+  f.data.writeUInt32LE(40, 212)
+  assert.throws(f.check, /unterminated/)
+})
+
+test('real Windows PE addon retains adjacent imports and Electron delay hook after relocation',
+  { skip: process.platform !== 'win32' ? 'real PE compilation/loading requires Windows' : false }, t => {
+    const require = createRequire(import.meta.url)
+    const version = require('electron/package.json').version
+    const headers = process.env.JAVDEX_ELECTRON_HEADERS ?? path.join(homedir(), '.electron-gyp', version, 'include/node')
+    const nodeLibrary = process.env.JAVDEX_ELECTRON_NODE_LIBRARY ?? path.join(homedir(), '.electron-gyp', version, process.arch, 'node.lib')
+    if (spawnSync('cl', [], { encoding: 'utf8' }).error || !existsSync(path.join(headers, 'node_api.h')) || !existsSync(nodeLibrary)) {
+      t.skip('requires installed MSVC and matching Electron headers/node.lib'); return
+    }
+    const root = mkdtempSync(path.join(tmpdir(), 'javdex-playback-pe-relocation-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const original = path.join(root, 'original'), moved = path.join(root, 'moved')
+    mkdirSync(original); mkdirSync(moved)
+    writeFileSync(path.join(original, 'mpv.cpp'), 'extern "C" __declspec(dllexport) int mpv_fixture() { return 42; }')
+    writeFileSync(path.join(original, 'addon.cpp'), '#include <node_api.h>\nextern "C" __declspec(dllimport) int mpv_fixture();\nnapi_value init(napi_env env, napi_value exports) { napi_value result; napi_create_int32(env, mpv_fixture(), &result); return result; }\nNAPI_MODULE(NODE_GYP_MODULE_NAME, init)\n')
+    const compile = args => {
+      const result = spawnSync('cl', ['/nologo', '/MT', '/EHsc', '/LD', ...args], { cwd: original, encoding: 'utf8' })
+      assert.equal(result.status, 0, result.stdout + result.stderr)
+    }
+    compile(['mpv.cpp', '/Fe:mpv.dll'])
+    const rebuildRequire = createRequire(require.resolve('@electron/rebuild'))
+    const hook = path.join(path.dirname(rebuildRequire.resolve('node-gyp/package.json')), 'src/win_delay_load_hook.cc')
+    compile(['addon.cpp', hook, `/I${headers}`, '/DHOST_BINARY="node.exe"', '/Fe:playback.node',
+      '/link', nodeLibrary, 'mpv.lib', 'delayimp.lib', '/DELAYLOAD:node.exe'])
+    for (const name of ['playback.node', 'mpv.dll']) cpSync(path.join(original, name), path.join(moved, name))
+    const input = { directory: moved, archName: process.arch, binaryFiles: new Set(['playback.node', 'mpv.dll'].map(name => path.join(moved, name))) }
+    const inspected = inspectWindowsPlaybackBinary(path.join(moved, 'playback.node'), input)
+    assert.ok(inspected.dependencies.includes('mpv.dll'))
+    assert.ok(inspected.delayedDependencies.includes('node.exe'))
+    inspectWindowsPlaybackBinary(path.join(moved, 'mpv.dll'), input)
+    rmSync(original, { recursive: true, force: true })
+    const loaded = spawnSync(require('electron'), ['-e', 'console.log(require(process.argv[1]))', path.join(moved, 'playback.node')],
+      { cwd: root, encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
+    assert.equal(loaded.status, 0, loaded.stderr)
+    assert.equal(loaded.stdout.trim(), '42')
+    rmSync(path.join(moved, 'mpv.dll'))
+    assert.throws(() => inspectWindowsPlaybackBinary(path.join(moved, 'playback.node'), { ...input,
+      binaryFiles: new Set([path.join(moved, 'playback.node')]) }), /absent from the adjacent/)
+  })
 
 test('Linux inventory requires an isolated helper with hashes and source ownership, not the legacy addon', t => {
   const linuxTarget = { ...target, platformName: 'linux' }, f = fixture(t, linuxTarget)
@@ -229,7 +430,7 @@ test('Linux executable and PIE helpers retain their runtime-local dependency aft
       assert.throws(() => inspectLinuxPlaybackBinary(stagedHelper,
         { directory: staged.directory, archName: linuxTarget.archName, binaryFiles: new Set([stagedHelper]) }), /absent/)
       chmodSync(stagedHelper, 0o644)
-      assert.throws(() => validatePlaybackRuntime(staged.directory, linuxTarget), /must be executable/,
+      assert.throws(() => validatePackagedPlaybackRuntime(staged.directory, linuxTarget), /must be executable/,
         'staging validation checks executable mode even though content hashes do not cover it')
     }
   })

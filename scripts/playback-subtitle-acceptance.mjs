@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { closeAcceptance, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState } from './playback-acceptance-support.mjs'
+import { closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels } from './playback-subtitle-checks.mjs'
 
-assert.equal(process.platform, 'darwin', 'this runner currently accepts macOS only')
+assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
 const fixtures = prepareMediaFixtures()
 const directory = createAcceptanceDirectory('subtitles-')
 const bitmapOnly = process.argv.includes('--bitmap-only')
@@ -41,6 +41,6 @@ try {
   report.status = 'failed'; report.failure = error.stack ?? String(error)
   throw error
 } finally {
-  if (application) report.cleanup = await closeAcceptance(application)
+  if (application) recordAcceptanceCleanup(report, await closeAcceptance(application))
   fs.writeFileSync(reportFile, JSON.stringify(report, null, 2))
 }

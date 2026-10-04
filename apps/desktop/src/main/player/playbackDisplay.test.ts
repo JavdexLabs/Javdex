@@ -10,6 +10,28 @@ function host(selected = '', ready = false) {
   } }
 }
 
+it('selects a Windows composition path that exposes installed WGL child surfaces before ready', () => {
+  const windows = host()
+  configurePlaybackDisplay(windows, { platform: 'win32', windowsNativePlayback: true })
+  assert.deepEqual(windows.switches, [['disable-direct-composition', '']])
+  assert.equal(linuxPlaybackBackend(), null)
+  assert.throws(() => configurePlaybackDisplay(host('', true), { platform: 'win32', windowsNativePlayback: true }), /重新启动/)
+})
+
+it('preserves normal composition without a Windows native runtime and on other platforms', () => {
+  for (const platform of ['win32', 'darwin'] as const) {
+    const withoutRuntime = host()
+    configurePlaybackDisplay(withoutRuntime, { platform })
+    assert.deepEqual(withoutRuntime.switches, [])
+  }
+  const mac = host()
+  configurePlaybackDisplay(mac, { platform: 'darwin', windowsNativePlayback: true })
+  assert.deepEqual(mac.switches, [])
+  const linux = host()
+  configurePlaybackDisplay(linux, { platform: 'linux', argv: ['electron', '--javdex-x11'], windowsNativePlayback: true })
+  assert.deepEqual(linux.switches, [['ozone-platform', 'x11']])
+})
+
 it('does not mistake Electron defaults for an explicit X11 startup choice', () => {
   for (const selected of ['', 'x11', 'wayland', 'auto', 'headless']) {
     configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', '--javdex-x11'] })

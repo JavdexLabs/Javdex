@@ -52,6 +52,7 @@ const base = {
     '!out/playback-acceptance/**/*',
     '!out/libmpv-prototype/**/*',
     '!out/playback-runtime/**/*',
+    '!out/server/**/*',
     '!out/resources/**/*',
     '!out/renderer/icon-{16,32,48,512}.png',
     '!node_modules/@mediapipe/tasks-vision/**/*',
@@ -61,6 +62,8 @@ const base = {
     '!node_modules/**/*.d.ts.map',
     '!node_modules/**/*.map',
     '!node_modules/playwright-core/lib/vite/**/*',
+    // Photon is bundled into out/main/chunks with its adjacent WASM asset.
+    '!node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm',
     '!node_modules/@earendil-works/pi-coding-agent/**/*'
   ],
   asar: true,
@@ -73,6 +76,12 @@ const base = {
   ],
   win: {
     icon: 'build/icon.ico',
+    files: [
+      '!node_modules/@mariozechner/clipboard-{android,darwin,freebsd,linux}-*/**/*',
+      '!node_modules/@mariozechner/clipboard-win32-!(${arch})-*/**/*',
+      '!node_modules/@earendil-works/pi-tui/native/!(win32)/**/*',
+      '!node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-!(${arch})/**/*'
+    ],
     electronLanguages: PORTABLE_ELECTRON_LANGUAGES,
     artifactName: '${productName}-Setup-${version}-${arch}.${ext}',
     legalTrademarks: 'Javdex',
@@ -129,6 +138,9 @@ function readSelectedTargets() {
 export default function buildConfig() {
   const selected = readSelectedTargets()
   const config = structuredClone(base)
+  // Platform files form a separate matcher in electron-builder. An exclusions-
+  // only matcher defaults to **/*, so retain the desktop allowlist here too.
+  config.win.files.unshift(...config.files)
 
   config.beforePack = context => { verifyPackagedPlaybackRuntime(context) }
   config.afterPack = context => {

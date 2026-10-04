@@ -3,15 +3,15 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { closeAcceptance, createAcceptanceDirectory, launchAcceptance, nativeEvidence, output, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
+import { acceptanceProcess, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, output, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 
-assert.equal(process.platform, 'darwin', 'this acceptance runner covers macOS only')
+assert.ok(['darwin', 'win32'].includes(process.platform), 'this acceptance runner covers macOS and Windows only')
 const fixture = prepareMediaFixtures()
 const directory = createAcceptanceDirectory('close-')
 const [target] = seedAcceptanceCatalog(directory, [fixture.media[0]])
 const report = { status: 'running', platform: `${process.platform}/${process.arch}`, checks: [],
-  pending: ['Windows parent/DC cleanup, native input and actual playback acceptance'] }
+  pending: ['abnormal process termination and clean installed runtime acceptance'] }
 const reportFile = path.join(output, 'close-report.json')
 let application
 try {
@@ -26,9 +26,37 @@ try {
   report.before = await nativeEvidence(application)
   assert.equal(report.before.alive, true)
   assert.ok(report.before.presentedFrames > 0)
+  if (process.platform === 'win32') {
+    // Windows quits on last-window close. Persist observations while the main
+    // inspector is still alive instead of keeping the process open artificially.
+    const traceFile = path.join(output, 'windows-close-trace.json')
+    await application.evaluate(({ app, BrowserWindow }, traceFile) => {
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+      const bridge = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
+      const window = BrowserWindow.getAllWindows()[0]
+      const trace = { events: [] }
+      const save = () => require('node:fs').writeFileSync(traceFile, JSON.stringify(trace, null, 2))
+      window.once('close', event => { trace.atClose = { prevented: event.defaultPrevented,
+        parentDestroyed: window.isDestroyed(), nativeAlive: bridge.inspect().alive }; save() })
+      window.once('closed', () => { trace.events.push({ kind: 'original-closed', nativeAlive: bridge.inspect().alive }); save() })
+      app.once('will-quit', () => { trace.atQuit = { remainingWindows: BrowserWindow.getAllWindows().length,
+        nativeAlive: bridge.inspect().alive }; save() })
+      window.close()
+    }, traceFile).catch(error => {
+      if (!fs.existsSync(traceFile)) throw error
+    })
+    await waitForValue(() => acceptanceProcess(application).exitCode, value => value !== null, 'normal last-window close exits Windows application')
+    report.closeTrace = JSON.parse(fs.readFileSync(traceFile, 'utf8'))
+    assert.equal(report.closeTrace.atClose.prevented, false)
+    assert.equal(report.closeTrace.atClose.parentDestroyed, false)
+    assert.equal(report.closeTrace.atClose.nativeAlive, true)
+    assert.ok(report.closeTrace.events.some(event => event.kind === 'original-closed'))
+    assert.deepEqual(report.closeTrace.atQuit, { remainingWindows: 0, nativeAlive: false })
+    report.checks.push('accepted close destroys Windows parent during active playback', 'native core released before normal process exit')
+  } else {
   report.atClose = await application.evaluate(({ app, BrowserWindow }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const bridge = require(app.getAppPath() + '/out/native-playback/playback.node')
+    const bridge = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
     const window = BrowserWindow.getAllWindows()[0]
     let observed
     globalThis.playbackCloseTrace = { originalId: window.id, events: [] }
@@ -49,6 +77,7 @@ try {
   assert.equal((await nativeEvidence(application)).alive, false)
   report.checks.push('accepted close actually destroys main window during active playback', 'last-window close releases native playback before process quit')
   report.closeTrace = await application.evaluate(() => globalThis.playbackCloseTrace)
+  }
   report.status = 'partial-pass'
 } catch (error) {
   report.status = 'failed'; report.error = error.message
@@ -56,7 +85,7 @@ try {
     remaining: BrowserWindow.getAllWindows().map(window => ({ id: window.id, title: window.getTitle(), visible: window.isVisible() })) })).catch(() => null)
   throw error
 } finally {
-  if (application) report.cleanup = await closeAcceptance(application)
+  if (application) recordAcceptanceCleanup(report, await closeAcceptance(application))
   fs.writeFileSync(reportFile, JSON.stringify(report, null, 2))
 }
 assert.equal(report.cleanup.forced, false, 'application must quit normally')

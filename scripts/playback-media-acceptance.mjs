@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { captureAcceptanceFrame, closeAcceptance, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
+import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels } from './playback-subtitle-checks.mjs'
 
-assert.equal(process.platform, 'darwin', 'this runner currently accepts macOS only')
+assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
 const fixtures = prepareMediaFixtures()
 const directory = createAcceptanceDirectory('media-')
 const targets = seedAcceptanceCatalog(directory, fixtures.media)
 const report = { status: 'running', platform: `${process.platform}/${process.arch}`, ffmpeg: fixtures.version, checks: [], evidence: {}, pending: [
   'human audio listening, channel mapping, pitch and lip-sync', 'real-film subtitles, further bitmap formats and real long movies',
-  'VoiceOver, physical navigation gestures and multi-display DPI', 'relocatable runtime, clean packages and non-macOS acceptance'
+  'screen-reader speech, physical navigation gestures and multi-display DPI', 'relocatable runtime, clean packages and other-platform acceptance'
 ] }
 const reportFile = path.join(fixtures.directory, 'report.json')
 const save = () => fs.writeFileSync(reportFile, JSON.stringify(report, null, 2))
@@ -68,7 +68,7 @@ try {
   for (const track of audio) {
     await select('音轨', new RegExp(`^${track.title}`))
     await waitForState(page, state => state?.tracks.some(item => item.type === 'audio' && item.id === track.id && item.selected)
-      && state.info.audioOutput === 'coreaudio' && decodedCodec[track.codec].test(state.info.audioCodec ?? ''), `switch ${track.codec}`)
+      && state.info.audioOutput === (process.platform === 'win32' ? 'wasapi' : 'coreaudio') && decodedCodec[track.codec].test(state.info.audioCodec ?? ''), `switch ${track.codec}`)
     const before = await waitForValue(() => nativeEvidence(application), value => Number.isFinite(value.audioPosition), `${track.codec} audio clock missing`)
     const after = await waitForValue(() => nativeEvidence(application), value => value.audioPosition > before.audioPosition + 0.4
       && value.presentedFrames > before.presentedFrames, `${track.codec} clock/frames did not advance`)
@@ -128,7 +128,7 @@ try {
   await stop()
 
   const hevc = await open(1, 'HEVC')
-  assert.equal(hevc.info.hardwareDecoder, 'videotoolbox', 'Main10 hardware decode must be observed, not inferred from hwdec=auto')
+  if (process.platform === 'darwin') assert.equal(hevc.info.hardwareDecoder, 'videotoolbox', 'Main10 hardware decode must be observed, not inferred from hwdec=auto')
   assert.deepEqual([hevc.info.width, hevc.info.height], [640, 360])
   const hevcFrame = await frame('hevc-main10')
   assert.ok(hevcFrame.visiblePixels > hevcFrame.width * hevcFrame.height * 0.2)
@@ -255,8 +255,7 @@ try {
   throw error
 } finally {
   if (application && !keepOpen) {
-    report.cleanup = await closeAcceptance(application)
-    if (report.cleanup.forced) report.pending.push('normal application shutdown; bounded harness cleanup is not clean-exit acceptance')
+    recordAcceptanceCleanup(report, await closeAcceptance(application))
     save()
   }
 }

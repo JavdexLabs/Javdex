@@ -4,12 +4,18 @@
 #define NOMINMAX
 #include <windows.h>
 #include <commctrl.h>
+#include <imm.h>
+#include <initguid.h>
+#include <oleacc.h>
+#include <UIAutomation.h>
 #include <GL/gl.h>
 #include "mpvCore.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <cwchar>
+#include <vector>
 
 namespace {
 using namespace javdex;
@@ -17,18 +23,30 @@ MpvCore playback;
 HWND parent = nullptr, video = nullptr, cleanupWindow = nullptr, controls = nullptr;
 HWND pauseButton = nullptr, dockButton = nullptr, fullscreenButton = nullptr, stopButton = nullptr;
 HWND seekSlider = nullptr, volumeSlider = nullptr, timeLabel = nullptr;
+HWND mouseSlider = nullptr;
 HFONT controlsFont = nullptr;
 UINT controlsDpi = 0;
 HDC videoDc = nullptr, cleanupDc = nullptr;
 HGLRC context = nullptr;
 DWORD ownerThread = 0;
 bool visible = false, controlsVisible = false, closing = false, focusFullscreen = false;
+bool drawableVisible = false;
+bool redrawRequested = false;
+bool renderFailed = false;
+IAccPropServices *accessibilityProperties = nullptr;
+bool parentClipChildrenAdded = false;
+std::vector<HWND> siblingClipAdded;
 std::string presentation = "expanded";
 struct Bounds { double x = 0, y = 0, width = 1, height = 1; } requested;
 ULONGLONG lastInteraction = 0, singleClickAt = 0;
 POINT lastMouse{};
 int pixelWidth = 0, pixelHeight = 0;
+uint64_t renderCalls = 0, measuredFrames = 0;
+uint64_t frameWakeups = 0;
+double renderMilliseconds = 0, swapMilliseconds = 0, maxRenderMilliseconds = 0, maxSwapMilliseconds = 0;
+std::chrono::steady_clock::time_point renderingStarted;
 constexpr wchar_t surfaceClass[] = L"JavdexLibmpvSurface";
+constexpr UINT renderMessage = WM_APP + 1;
 enum ControlId { Pause = 1, Dock, Fullscreen, Stop, Seek, Volume };
 
 void layout();
@@ -37,6 +55,24 @@ void interact() { lastInteraction = GetTickCount64(); }
 void queue(const char *kind, double value = 0) { playback.queue(kind, value); interact(); }
 bool owner() { return ownerThread == GetCurrentThreadId(); }
 void requireOwner() { if (!owner()) throw std::runtime_error("Native playback requires its window owner thread"); }
+void wakeupRender(void *window) {
+    // mpv calls from its own threads. Post, never Send or render here: WGL
+    // remains owned by the HWND thread and teardown can discard late messages.
+    PostMessageW(static_cast<HWND>(window), renderMessage, 0, 0);
+}
+void accessibleName(HWND window, const wchar_t *label) {
+    if (!accessibilityProperties && FAILED(CoCreateInstance(CLSID_AccPropServices, nullptr, CLSCTX_INPROC_SERVER,
+        IID_IAccPropServices, reinterpret_cast<void **>(&accessibilityProperties)))) throw std::runtime_error("Cannot initialize native control accessibility");
+    for (const GUID property : {PROPID_ACC_NAME, Name_Property_GUID}) {
+        if (FAILED(accessibilityProperties->SetHwndPropStr(window, static_cast<DWORD>(OBJID_CLIENT), CHILDID_SELF, property, label)))
+            throw std::runtime_error("Cannot name native playback control");
+    }
+}
+void clearAccessibleName(HWND window) {
+    if (!accessibilityProperties || !window || !IsWindow(window)) return;
+    const GUID properties[] = {PROPID_ACC_NAME, Name_Property_GUID};
+    accessibilityProperties->ClearHwndProps(window, static_cast<DWORD>(OBJID_CLIENT), CHILDID_SELF, properties, 2);
+}
 void *getProcAddress(void *, const char *name) {
     PROC address = wglGetProcAddress(name);
     const auto invalid = reinterpret_cast<intptr_t>(address);
@@ -49,7 +85,15 @@ bool draw(bool newFrame = false) {
     if (!wglMakeCurrent(videoDc, context)) return false;
     RECT client{}; if (!GetClientRect(video, &client)) return false;
     pixelWidth = client.right; pixelHeight = client.bottom;
-    if (!playback.render(pixelWidth, pixelHeight) || !SwapBuffers(videoDc)) return false;
+    const auto started = std::chrono::steady_clock::now();
+    if (!playback.render(pixelWidth, pixelHeight)) return false;
+    const auto rendered = std::chrono::steady_clock::now();
+    if (!SwapBuffers(videoDc)) return false;
+    const auto swapped = std::chrono::steady_clock::now();
+    const double renderTime = std::chrono::duration<double, std::milli>(rendered - started).count();
+    const double swapTime = std::chrono::duration<double, std::milli>(swapped - rendered).count();
+    measuredFrames++; renderMilliseconds += renderTime; swapMilliseconds += swapTime;
+    maxRenderMilliseconds = std::max(maxRenderMilliseconds, renderTime); maxSwapMilliseconds = std::max(maxSwapMilliseconds, swapTime);
     playback.swapped();
     if (newFrame) playback.presented(visible && IsWindowVisible(video) && !IsIconic(parent));
     return true;
@@ -108,8 +152,9 @@ bool key(HWND window, UINT message, WPARAM code, LPARAM flags) {
 }
 LRESULT CALLBACK controlInput(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
     if (key(window, message, wparam, lparam)) return 0;
+    if (message == WM_LBUTTONDOWN && (window == seekSlider || window == volumeSlider)) mouseSlider = window;
     if (message == WM_GETDLGCODE) return DefSubclassProc(window, message, wparam, lparam) | DLGC_WANTTAB | DLGC_WANTARROWS;
-    if (message == WM_SETFOCUS || message == WM_MOUSEMOVE || message == WM_LBUTTONDOWN) interact();
+    if (message == WM_SETFOCUS || message == WM_LBUTTONDOWN) interact();
     if (message == WM_XBUTTONDOWN) { queue(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? "history-back" : "history-forward"); return TRUE; }
     if (message == WM_NCDESTROY) RemoveWindowSubclass(window, controlInput, 1);
     return DefSubclassProc(window, message, wparam, lparam);
@@ -120,7 +165,10 @@ LRESULT CALLBACK surfaceInput(HWND window, UINT message, WPARAM wparam, LPARAM l
     if (window == video && key(window, message, wparam, lparam)) return 0;
     if (message == WM_GETDLGCODE && window == video) return DLGC_WANTTAB | DLGC_WANTARROWS;
     if (message == WM_XBUTTONDOWN) { queue(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? "history-back" : "history-forward"); return TRUE; }
-    if (message == WM_MOUSEMOVE || message == WM_SETFOCUS) interact();
+    // Geometry/show calls can synthesize WM_MOUSEMOVE without physical motion.
+    // The render loop samples the cursor, so these messages must not hold the
+    // controls open forever while the viewport is reported periodically.
+    if (message == WM_SETFOCUS) interact();
     if (window == video && (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)) {
         // Reveal before hit testing: a control click must not also pause video.
         if (presentation == "fullscreen" && controls && !controlsVisible) {
@@ -151,10 +199,30 @@ LRESULT CALLBACK surfaceInput(HWND window, UINT message, WPARAM wparam, LPARAM l
     }
     if (message == WM_HSCROLL && window == controls) {
         HWND slider = reinterpret_cast<HWND>(lparam);
-        if (LOWORD(wparam) == TB_ENDTRACK) {
+        // Trackbars also emit ENDTRACK on key-up even when our key handler
+        // consumed key-down. Only mouse tracking may commit the thumb value;
+        // otherwise the old value cancels the queued relative keyboard action.
+        if (LOWORD(wparam) == TB_ENDTRACK && mouseSlider == slider) {
+            mouseSlider = nullptr;
             const double value = static_cast<double>(SendMessageW(slider, TBM_GETPOS, 0, 0));
             if (slider == seekSlider) queue("seek", playback.number("duration") * value / 10000);
             if (slider == volumeSlider) queue("volume", value);
+        }
+        return 0;
+    }
+    if (message == WM_SIZE && window == video) {
+        // Paused playback has no new-frame notification. Resize must redraw
+        // after SetWindowPos commits the drawable, not inside its size callback.
+        redrawRequested = true; PostMessageW(window, renderMessage, 0, 0); return 0;
+    }
+    if (message == renderMessage && window == video) {
+        if (context && !closing && playback.alive()) {
+            frameWakeups++;
+            const bool newFrame = playback.updateRequested();
+            if (newFrame || redrawRequested) {
+                if (!draw(newFrame)) renderFailed = true;
+                redrawRequested = false;
+            }
         }
         return 0;
     }
@@ -233,11 +301,19 @@ void createControls() {
     seekSlider = widget(TRACKBAR_CLASSW, L"播放进度", WS_TABSTOP | TBS_NOTICKS, Seek);
     volumeSlider = widget(TRACKBAR_CLASSW, L"音量", WS_TABSTOP | TBS_NOTICKS, Volume);
     timeLabel = widget(L"STATIC", L"00:00:00", 0, 0);
+    // Trackbar proxies infer labels from nearby static text, ignoring captions.
+    // Annotate both MSAA and UIA names so time text cannot label either slider.
+    accessibleName(seekSlider, L"播放进度");
+    accessibleName(volumeSlider, L"音量");
+    // These windows accept shortcuts, not text. Keep the Electron parent's IME
+    // context intact so returning to HTML inputs still supports composition.
+    ImmAssociateContext(controls, nullptr);
+    ImmAssociateContextEx(controls, nullptr, IACE_CHILDREN);
     SendMessageW(seekSlider, TBM_SETRANGEMAX, FALSE, 10000);
     SendMessageW(volumeSlider, TBM_SETRANGEMAX, FALSE, 100);
 }
 void destroyPlayer() {
-    if (!context && !video && !cleanupWindow) return;
+    if (!context && !video && !cleanupWindow && !parentClipChildrenAdded && siblingClipAdded.empty()) return;
     requireOwner(); closing = true; singleClickAt = 0;
     // Stop/replacement releases while parent is alive; `closed` may run after
     // parent destruction. cleanupDc stays valid in either case. Do not destroy
@@ -250,14 +326,28 @@ void destroyPlayer() {
     if (video && videoDc) ReleaseDC(video, videoDc);
     if (cleanupWindow && cleanupDc) ReleaseDC(cleanupWindow, cleanupDc);
     videoDc = cleanupDc = nullptr;
+    clearAccessibleName(seekSlider); clearAccessibleName(volumeSlider);
+    if (accessibilityProperties) accessibilityProperties->Release();
+    accessibilityProperties = nullptr;
     if (controls && IsWindow(controls)) DestroyWindow(controls);
     if (controlsFont) DeleteObject(controlsFont);
     controlsFont = nullptr; controlsDpi = 0;
     if (video && IsWindow(video)) DestroyWindow(video);
     if (cleanupWindow) DestroyWindow(cleanupWindow);
+    for (HWND sibling : siblingClipAdded) {
+        if (IsWindow(sibling) && GetParent(sibling) == parent)
+            SetWindowLongPtrW(sibling, GWL_STYLE, GetWindowLongPtrW(sibling, GWL_STYLE) & ~static_cast<LONG_PTR>(WS_CLIPSIBLINGS));
+    }
+    siblingClipAdded.clear();
+    if (parentClipChildrenAdded && parent && IsWindow(parent)) {
+        SetWindowLongPtrW(parent, GWL_STYLE, GetWindowLongPtrW(parent, GWL_STYLE) & ~static_cast<LONG_PTR>(WS_CLIPCHILDREN));
+        RedrawWindow(parent, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+    }
+    parentClipChildrenAdded = false;
     parent = video = cleanupWindow = controls = nullptr;
     pauseButton = dockButton = fullscreenButton = stopButton = seekSlider = volumeSlider = timeLabel = nullptr;
-    controlsVisible = visible = focusFullscreen = false;
+    mouseSlider = nullptr;
+    controlsVisible = visible = focusFullscreen = drawableVisible = redrawRequested = renderFailed = false;
     pixelWidth = pixelHeight = 0; closing = false;
 }
 void updateBounds(napi_env env, napi_value rect) {
@@ -274,11 +364,34 @@ napi_value create(napi_env env, napi_callback_info info) {
         std::memcpy(&handle, data, sizeof(handle));
         if (!IsWindow(handle) || GetWindowThreadProcessId(handle, nullptr) != GetCurrentThreadId()) throw std::runtime_error("Expected main-thread Electron HWND");
         ownerThread = GetCurrentThreadId(); parent = handle; presentation = "expanded"; registerClass();
+        renderCalls = measuredFrames = frameWakeups = 0; renderMilliseconds = swapMilliseconds = maxRenderMilliseconds = maxSwapMilliseconds = 0;
+        renderingStarted = std::chrono::steady_clock::now();
+        // With normal swap-chain composition the Electron parent must exclude
+        // our child drawables, including during fullscreen resize/repaint.
+        const LONG_PTR parentStyle = GetWindowLongPtrW(parent, GWL_STYLE);
+        if (!(parentStyle & WS_CLIPCHILDREN)) {
+            SetLastError(0);
+            if (!SetWindowLongPtrW(parent, GWL_STYLE, parentStyle | WS_CLIPCHILDREN) && GetLastError())
+                throw std::runtime_error("Cannot clip playback child surfaces");
+            parentClipChildrenAdded = true;
+        }
+        // Existing Electron child surfaces must also exclude their siblings.
+        // Otherwise a later web repaint covers the GDI fullscreen controls.
+        // Use Win32 child relationships, not Chromium's private class names.
+        for (HWND sibling = GetWindow(parent, GW_CHILD); sibling; sibling = GetWindow(sibling, GW_HWNDNEXT)) {
+            const LONG_PTR style = GetWindowLongPtrW(sibling, GWL_STYLE);
+            if (style & WS_CLIPSIBLINGS) continue;
+            SetLastError(0);
+            if (!SetWindowLongPtrW(sibling, GWL_STYLE, style | WS_CLIPSIBLINGS) && GetLastError())
+                throw std::runtime_error("Cannot clip playback sibling surfaces");
+            siblingClipAdded.push_back(sibling);
+        }
         video = CreateWindowExW(0, surfaceClass, L"视频画面", WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_TABSTOP,
             0, 0, 1, 1, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
         RECT location{}; GetWindowRect(parent, &location);
         cleanupWindow = CreateWindowExW(0, surfaceClass, L"", WS_POPUP, location.left, location.top, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         if (!video || !cleanupWindow) throw std::runtime_error("Cannot create native playback drawable");
+        ImmAssociateContext(video, nullptr);
         videoDc = GetDC(video); cleanupDc = GetDC(cleanupWindow);
         PIXELFORMATDESCRIPTOR format{}; format.nSize = sizeof(format); format.nVersion = 1;
         format.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
@@ -296,7 +409,7 @@ napi_value create(napi_env env, napi_callback_info info) {
         if (!next) throw std::runtime_error("Cannot create OpenGL 3.2 core context");
         wglMakeCurrent(nullptr, nullptr); wglDeleteContext(context); context = next;
         if (!wglMakeCurrent(videoDc, context)) throw std::runtime_error("Cannot attach playback OpenGL context");
-        updateBounds(env, args[1]); playback.initialize(getProcAddress);
+        updateBounds(env, args[1]); playback.initialize(getProcAddress, nullptr, false, wakeupRender, video);
         lastInteraction = GetTickCount64(); GetCursorPos(&lastMouse);
         return undefined(env);
     } catch (const std::exception &error) {
@@ -344,18 +457,70 @@ napi_value read(napi_env env, bool drain) {
     napi_value result = playback.state(env, drain);
     if (!playback.alive()) return result;
     setNumber(env, result, "pixelWidth", pixelWidth); setNumber(env, result, "pixelHeight", pixelHeight);
+    setNumber(env, result, "dpi", GetDpiForWindow(parent));
+    setNumber(env, result, "renderCalls", static_cast<double>(renderCalls));
+    setNumber(env, result, "frameWakeups", static_cast<double>(frameWakeups));
+    setNumber(env, result, "measuredFrames", static_cast<double>(measuredFrames));
+    setNumber(env, result, "renderMilliseconds", renderMilliseconds); setNumber(env, result, "swapMilliseconds", swapMilliseconds);
+    setNumber(env, result, "maxRenderMilliseconds", maxRenderMilliseconds); setNumber(env, result, "maxSwapMilliseconds", maxSwapMilliseconds);
+    setNumber(env, result, "renderingElapsedMilliseconds", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderingStarted).count());
     const HWND focus = GetFocus();
     setString(env, result, "focusedControl", focus == video ? "video" : focus == seekSlider ? "seek" : focus == pauseButton ? "pause"
         : focus == volumeSlider ? "volume" : focus == dockButton ? "dock" : focus == fullscreenButton ? "fullscreen" : focus == stopButton ? "stop" : "web-content");
     setFlag(env, result, "fullscreenControlsVisible", controlsVisible);
+    if (controls && presentation == "fullscreen") {
+        POINT pointer{}; RECT area{}; GetCursorPos(&pointer); GetWindowRect(controls, &area);
+        setFlag(env, result, "controlsHovered", PtInRect(&area, pointer));
+        setFlag(env, result, "controlsFocused", IsChild(controls, focus));
+        setNumber(env, result, "idleMilliseconds", static_cast<double>(GetTickCount64() - lastInteraction));
+    }
     return result;
 }
 napi_value state(napi_env env, napi_callback_info) { return read(env, true); }
 napi_value inspect(napi_env env, napi_callback_info) { return read(env, false); }
+// One-shot acceptance readback. Ordinary playback never transports pixels to JS.
+napi_value capture(napi_env env, napi_callback_info) {
+    try {
+        requireOwner();
+        if (!video || !context || closing || !playback.alive()) throw std::runtime_error("No native playback session");
+        if (!wglMakeCurrent(videoDc, context)) throw std::runtime_error("Cannot capture native context");
+        RECT client{}; GetClientRect(video, &client);
+        const int width = client.right, height = client.bottom;
+        if (width <= 0 || height <= 0 || !playback.render(width, height)) throw std::runtime_error("Cannot capture native frame");
+        std::vector<unsigned char> rgba(static_cast<size_t>(width) * height * 4), bgra(rgba.size());
+        glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        if (glGetError() != GL_NO_ERROR) throw std::runtime_error("Native frame readback failed");
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            const size_t target = (static_cast<size_t>(y) * width + x) * 4;
+            const size_t source = (static_cast<size_t>(height - y - 1) * width + x) * 4;
+            bgra[target] = rgba[source + 2]; bgra[target + 1] = rgba[source + 1];
+            bgra[target + 2] = rgba[source]; bgra[target + 3] = 255;
+        }
+        if (!SwapBuffers(videoDc)) throw std::runtime_error("Native capture swap failed");
+        playback.swapped();
+        napi_value result, buffer; napi_create_object(env, &result);
+        napi_create_buffer_copy(env, bgra.size(), bgra.data(), nullptr, &buffer);
+        napi_set_named_property(env, result, "data", buffer);
+        setNumber(env, result, "width", width); setNumber(env, result, "height", height);
+        if (controls && controlsVisible) {
+            RECT area{}, origin{}; GetWindowRect(controls, &area); GetWindowRect(video, &origin);
+            setNumber(env, result, "controlsTop", area.top - origin.top);
+        }
+        return result;
+    } catch (const std::exception &error) { return fail(env, error.what()); }
+}
 napi_value render(napi_env env, napi_callback_info) {
     if (closing || !video || !context) return undefined(env);
     try {
         requireOwner(); const auto now = GetTickCount64();
+        if (renderFailed) throw std::runtime_error("Native frame rendering or swap failed");
+        renderCalls++;
+        // Minimizing can discard a paused WGL front buffer without a new mpv
+        // frame or child resize. Redraw once when the drawable becomes visible.
+        const bool drawableNow = visible && IsWindowVisible(video) && !IsIconic(parent);
+        const bool exposed = drawableNow && !drawableVisible;
+        drawableVisible = drawableNow;
         if (singleClickAt && now - singleClickAt > GetDoubleClickTime()) { singleClickAt = 0; queue("toggle-pause"); }
         if (focusFullscreen && visible && presentation == "fullscreen" && GetForegroundWindow() == parent) { SetFocus(video); focusFullscreen = false; }
         if (controls && visible && presentation == "fullscreen") {
@@ -372,7 +537,11 @@ napi_value render(napi_env env, napi_callback_info) {
             wchar_t time[32]; swprintf_s(time, L"%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60); SetWindowTextW(timeLabel, time);
         }
         if (!wglMakeCurrent(videoDc, context)) throw std::runtime_error("Cannot make playback OpenGL context current");
-        if (playback.updateRequested() && !draw(true)) throw std::runtime_error("Native frame rendering or swap failed");
+        const bool newFrame = playback.updateRequested();
+        if (newFrame || exposed || redrawRequested) {
+            if (!draw(newFrame)) throw std::runtime_error("Native frame rendering or swap failed");
+            redrawRequested = false;
+        }
     } catch (const std::exception &error) { return fail(env, error.what()); }
     return undefined(env);
 }
@@ -392,6 +561,7 @@ napi_value initialize(napi_env env, napi_value exports) {
         {"command", nullptr, command, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"state", nullptr, state, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"inspect", nullptr, inspect, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"capture", nullptr, capture, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"destroy", nullptr, destroy, nullptr, nullptr, nullptr, napi_default, nullptr}
     };

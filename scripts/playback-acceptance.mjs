@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { closeAcceptance, createAcceptanceDirectory, launchAcceptance, output, seedAcceptanceCatalog, waitForState } from './playback-acceptance-support.mjs'
+import { closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, output, seedAcceptanceCatalog, waitForState } from './playback-acceptance-support.mjs'
 
-if (process.platform !== 'darwin') throw new Error('This acceptance runner currently covers macOS only')
+if (!['darwin', 'win32'].includes(process.platform)) throw new Error('This acceptance runner covers macOS and Windows only')
 const directory = createAcceptanceDirectory()
 const media = [path.join(output, 'synthetic-h264.mp4')]
 if (!fs.existsSync(media[0])) {
@@ -25,7 +25,7 @@ if (!fs.existsSync(media[1])) {
 media.push(path.join(output, 'synthetic-unplayable.mp4'))
 fs.writeFileSync(media[2], 'Synthetic unsupported media, not a playable video.\n')
 seedAcceptanceCatalog(directory, media)
-let application
+let application, report
 let keepOpen = false
 const errors = []
 try {
@@ -45,10 +45,10 @@ try {
   assert.equal(await page.evaluate(async () => (await window.api.thisComputer.get()).playerPreference), 'builtin')
   const result = await page.evaluate(target => window.api.player.play(target.libraryId, target.videoId), target)
   assert.equal(result.ok, true, JSON.stringify(result))
-  const initial = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5 && state.info.hardwareDecoder != null, 'video did not start')
+  const initial = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5, 'video did not start')
   fs.writeFileSync(path.join(output, 'initial-state.json'), JSON.stringify(initial, null, 2))
-  assert.equal(initial.info.hardwareDecoder, 'videotoolbox')
-  assert.equal(initial.info.audioOutput, 'coreaudio')
+  if (process.platform === 'darwin') assert.equal(initial.info.hardwareDecoder, 'videotoolbox')
+  assert.equal(initial.info.audioOutput, process.platform === 'win32' ? 'wasapi' : 'coreaudio')
   const id = initial.sessionId
   await page.getByRole('button', { name: '播放选项', exact: true }).click()
   await page.waitForFunction(() => document.querySelector('button[aria-label="播放来源"]')?.textContent.includes('测试视频 1'))
@@ -120,19 +120,19 @@ try {
   await page.waitForTimeout(300)
   await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    globalThis.subtitleBaseline = require(app.getAppPath() + '/out/native-playback/playback.node').capture()
+    globalThis.subtitleBaseline = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
   })
   await page.evaluate(({ id, subtitleId }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: subtitleId }), { id: withSubtitles.sessionId, subtitleId })
   await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.selected), 'subtitle clearance')
   await page.evaluate(id => window.api.playback.control(id, { kind: 'seek', seconds: 65 }), withSubtitles.sessionId)
   await page.waitForTimeout(300)
-  const subtitleClearance = await application.evaluate(({ app, nativeImage }) => {
+  const subtitleClearance = await application.evaluate(({ app, nativeImage }, outputDirectory) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const frame = require(app.getAppPath() + '/out/native-playback/playback.node').capture()
+    const frame = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
     const baseline = globalThis.subtitleBaseline
     delete globalThis.subtitleBaseline
     for (const [name, image] of [['baseline', baseline], ['subtitles', frame]]) {
-      require('node:fs').writeFileSync(app.getAppPath() + '/out/playback-acceptance/' + name + '.png',
+      require('node:fs').writeFileSync(require('node:path').join(outputDirectory, name + '.png'),
         nativeImage.createFromBitmap(image.data, { width: image.width, height: image.height }).toPNG())
     }
     if (frame.width !== baseline.width || frame.height !== baseline.height) throw new Error('Subtitle capture geometry changed')
@@ -147,17 +147,20 @@ try {
       }
     }
     return { count, bottom, controlsTop: frame.controlsTop, width: frame.width, height: frame.height }
-  })
+  }, output)
   fs.writeFileSync(path.join(output, 'subtitle-clearance.json'), JSON.stringify(subtitleClearance, null, 2))
   assert.ok(subtitleClearance.count > 100, 'subtitle pixels must actually be rendered')
   assert.ok(Number.isFinite(subtitleClearance.controlsTop), 'paused fullscreen controls must be visible')
   assert.ok(subtitleClearance.bottom < subtitleClearance.controlsTop, `Subtitle overlaps fullscreen controls: ${JSON.stringify(subtitleClearance)}`)
   await page.evaluate(id => window.api.playback.control(id, { kind: 'pause', paused: false }), withSubtitles.sessionId)
+  // Win32 controls deliberately stay visible while a native control has focus.
+  // Claim the window before testing inactivity so its video receives focus.
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus())
   await waitForState(page, state => state.phase === 'playing', 'resume before auto-hide')
   await page.waitForTimeout(3500)
   const hiddenControls = await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const { width, height, controlsTop } = require(app.getAppPath() + '/out/native-playback/playback.node').capture()
+    const { width, height, controlsTop } = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
     return { width, height, controlsTop }
   })
   assert.equal(hiddenControls.controlsTop, undefined, 'fullscreen controls auto-hide while playing')
@@ -254,7 +257,7 @@ try {
   assert.equal(retried.recordingProgress, false, 'retry keeps the private session private')
   assert.equal(await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    return require(app.getAppPath() + '/out/native-playback/playback.node').inspect().alive
+    return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect().alive
   }), false, 'failure releases the native decoder')
   await page.getByRole('button', { name: '关闭播放器', exact: true }).click()
   await waitForState(page, state => state === null, 'close error surface')
@@ -270,14 +273,14 @@ try {
   const focusDeadline = Date.now() + 5000
   while (!await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    return require(app.getAppPath() + '/out/native-playback/playback.node').inspect().focusedControl === 'video'
+    return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect().focusedControl === 'video'
   })) {
     if (Date.now() > focusDeadline) throw new Error('Fullscreen did not acquire native video focus')
     await page.waitForTimeout(100)
   }
   assert.equal(await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    return Object.hasOwn(require(app.getAppPath() + '/out/native-playback/playback.node').inspect(), 'actions')
+    return Object.hasOwn(require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect(), 'actions')
   }), false, 'read-only diagnostics do not consume or expose the native action queue')
   await page.evaluate(id => window.api.playback.control(id, { kind: 'stop' }), focusSession.sessionId)
   await waitForState(page, state => state === null, 'detail fullscreen stop')
@@ -320,7 +323,7 @@ try {
   assert.ok(Math.abs(collapsed.position - historyPosition) < 0.1)
   assert.equal(await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    return require(app.getAppPath() + '/out/native-playback/playback.node').inspect().loadedFiles
+    return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect().loadedFiles
   }), 1)
   // Docked playback must not consume an ordinary page back.
   await page.evaluate(() => window.history.back())
@@ -340,8 +343,9 @@ try {
   await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5 && state.resumePosition === null, 'disabled resume starts from zero')
   const resumeChecks = { savedPosition: savedPoint.position, preparedPosition: waitingResume.resumePosition, narrowResume, privateEofPreserved: true, globalOffPreserved: true }
   const errorChecks = { controlledMessage: failed.error, retriedSameResource: true, nativeReleased: true }
-  const report = { status: 'partial acceptance passed', directory, initial, paused, adjustedSubtitles, subtitleClearance, hiddenControls, resumeChecks, errorChecks, focusChecks, historyChecks,
-    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264/VideoToolbox and CoreAudio', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', 'fullscreen subtitle/control separation', 'auto-hide restores native viewport', 'default-off progress file absent', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus and detail trigger restoration', 'real browser history closes options/fullscreen/expanded before page back', 'explicit stop consumes viewing marker'],
+  report = { status: 'partial acceptance passed', directory, initial, paused, adjustedSubtitles, subtitleClearance, hiddenControls, resumeChecks, errorChecks, focusChecks, historyChecks,
+    platform: `${process.platform}/${process.arch}`,
+    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', 'fullscreen subtitle/control separation', 'auto-hide restores native viewport', 'default-off progress file absent', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus and detail trigger restoration', 'real browser history closes options/fullscreen/expanded before page back', 'explicit stop consumes viewing marker'],
     pending: ['native screen/mini-video frame inspection', 'fullscreen native control interaction', 'remote source', 'full feature/packaging acceptance'], errors }
   assert.deepEqual(errors, [])
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))
@@ -357,7 +361,7 @@ try {
       try {
         const native = await application.evaluate(({ app, BrowserWindow }) => {
           const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-          const state = require(app.getAppPath() + '/out/native-playback/playback.node').inspect()
+          const state = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
           const window = BrowserWindow.getAllWindows()[0]
           return { alive: state.alive, focusedControl: state.focusedControl, fullscreenControlsVisible: state.fullscreenControlsVisible,
             webContentsFocused: window?.webContents.isFocused(),
@@ -387,9 +391,28 @@ try {
     await page.getByRole('button', { name: '停止播放', exact: true }).click()
     await waitForState(page, state => state === null, 'stop')
     assert.equal(await page.locator('[data-playback-session]').count(), 0)
-    console.log('macOS partial application playback acceptance passed')
+    console.log(`${process.platform} partial application playback acceptance passed`)
   }
 } catch (error) {
-  fs.writeFileSync(path.join(output, 'failure.json'), JSON.stringify({ message: error.message, directory, errors }, null, 2))
+  const failure = { status: 'failed', platform: `${process.platform}/${process.arch}`, message: error.message, directory, errors }
+  if (application) failure.observation = await application.evaluate(({ app, BrowserWindow }) => {
+    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+    const native = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
+    const window = BrowserWindow.getAllWindows()[0]
+    return { packaged: app.isPackaged, resourcesPath: process.resourcesPath, focused: window?.isFocused(),
+      fullscreen: window?.isFullScreen(), webContentsFocused: window?.webContents.isFocused(),
+      focusedControl: native.focusedControl, alive: native.alive, loadedFiles: native.loadedFiles }
+  }).catch(() => null)
+  report = failure
+  fs.writeFileSync(path.join(output, 'failure.json'), JSON.stringify(failure, null, 2))
+  fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(failure, null, 2))
   throw error
-} finally { if (application && !keepOpen) console.log(JSON.stringify({ cleanup: await closeAcceptance(application) })) }
+} finally {
+  if (application && !keepOpen) {
+    const cleanup = await closeAcceptance(application)
+    console.log(JSON.stringify({ cleanup }))
+    recordAcceptanceCleanup(report, cleanup)
+    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))
+    if (report.status === 'failed') fs.writeFileSync(path.join(output, 'failure.json'), JSON.stringify(report, null, 2))
+  }
+}

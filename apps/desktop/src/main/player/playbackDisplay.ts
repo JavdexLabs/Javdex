@@ -13,8 +13,15 @@ let linuxBackend: 'x11' | null = null
 
 export function configurePlaybackDisplay(
   host: DisplayStartupHost,
-  { platform = process.platform, argv = process.argv }: { platform?: NodeJS.Platform; argv?: string[] } = {}
+  { platform = process.platform, argv = process.argv, windowsNativePlayback = false }:
+    { platform?: NodeJS.Platform; argv?: string[]; windowsNativePlayback?: boolean } = {}
 ): void {
+  if (platform === 'win32' && windowsNativePlayback) {
+    if (host.isReady()) throw new Error('播放显示后端必须在应用启动时选择；请退出应用后重新启动')
+    // Chromium's DirectComposition tree obscures the sibling WGL/Win32 child
+    // surfaces. Use its normal GPU swap chain so video and controls compose.
+    host.commandLine.appendSwitch('disable-direct-composition', '')
+  }
   if (platform !== 'linux') { linuxBackend = null; return }
   if (host.isReady()) throw new Error('播放显示后端必须在应用启动时选择；请退出应用后重新启动')
   // Electron may already report an ozone default (including x11) before ready.

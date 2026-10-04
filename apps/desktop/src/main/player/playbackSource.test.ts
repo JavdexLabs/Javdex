@@ -120,7 +120,7 @@ test('manual files are rechecked; revision fallback is consistent and physical c
     const f = fixture(file)
     const source = await f.resolver.resolve(target)
     await f.resolver.validate(source)
-    assert.equal(source.fileIdentity?.includes(file), true)
+    assert.equal(JSON.parse(source.fileIdentity!)[0], fs.realpathSync(file))
     assert.match(source.resumeKey, /^[a-f\d]{64}$/)
     fs.writeFileSync(file, 'synthetic replacement with another size')
     await assert.rejects(f.resolver.validate(source), error => error instanceof PlaybackFailure && error.code === 'identity')

@@ -10,6 +10,7 @@
 #include <UIAutomation.h>
 #include <GL/gl.h>
 #include "mpvCore.h"
+#include "sliderFeedback.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -24,12 +25,15 @@ HWND parent = nullptr, video = nullptr, cleanupWindow = nullptr, controls = null
 HWND pauseButton = nullptr, dockButton = nullptr, fullscreenButton = nullptr, stopButton = nullptr;
 HWND seekSlider = nullptr, volumeSlider = nullptr, timeLabel = nullptr;
 HWND mouseSlider = nullptr;
+SliderFeedback seekFeedback(1.0, 20000), volumeFeedback(0.01, 5000);
 HFONT controlsFont = nullptr;
 UINT controlsDpi = 0;
 HDC videoDc = nullptr, cleanupDc = nullptr;
 HGLRC context = nullptr;
 DWORD ownerThread = 0;
 bool visible = false, controlsVisible = false, closing = false, focusFullscreen = false;
+bool rendererControls = false;
+uint64_t interactionSequence = 0;
 bool drawableVisible = false;
 bool redrawRequested = false;
 bool renderFailed = false;
@@ -38,6 +42,8 @@ bool parentClipChildrenAdded = false;
 std::vector<HWND> siblingClipAdded;
 std::string presentation = "expanded";
 struct Bounds { double x = 0, y = 0, width = 1, height = 1; } requested;
+std::vector<Bounds> occlusions;
+bool regionApplied = false;
 ULONGLONG lastInteraction = 0, singleClickAt = 0;
 POINT lastMouse{};
 int pixelWidth = 0, pixelHeight = 0;
@@ -50,8 +56,9 @@ constexpr UINT renderMessage = WM_APP + 1;
 enum ControlId { Pause = 1, Dock, Fullscreen, Stop, Seek, Volume };
 
 void layout();
+double scale();
 void destroyPlayer();
-void interact() { lastInteraction = GetTickCount64(); }
+void interact() { lastInteraction = GetTickCount64(); interactionSequence++; }
 void queue(const char *kind, double value = 0) { playback.queue(kind, value); interact(); }
 bool owner() { return ownerThread == GetCurrentThreadId(); }
 void requireOwner() { if (!owner()) throw std::runtime_error("Native playback requires its window owner thread"); }
@@ -99,7 +106,12 @@ bool draw(bool newFrame = false) {
     return true;
 }
 void focusNext(HWND current, bool backwards) {
-    if (presentation != "fullscreen" || !controls) { queue(backwards ? "focus-backward" : "focus-forward"); return; }
+    if (rendererControls || presentation != "fullscreen" || !controls) {
+        // Release our child before Electron restores web-view focus. Chromium
+        // may still consider its view focused after a direct SetFocus(video).
+        if (rendererControls && GetFocus() == video) SetFocus(parent);
+        queue(backwards ? "focus-backward" : "focus-forward"); return;
+    }
     interact(); controlsVisible = true; ShowWindow(controls, SW_SHOWNOACTIVATE); layout();
     const std::array<HWND, 7> order{video, seekSlider, pauseButton, volumeSlider, dockButton, fullscreenButton, stopButton};
     auto found = std::find(order.begin(), order.end(), current);
@@ -152,7 +164,24 @@ bool key(HWND window, UINT message, WPARAM code, LPARAM flags) {
 }
 LRESULT CALLBACK controlInput(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
     if (key(window, message, wparam, lparam)) return 0;
-    if (message == WM_LBUTTONDOWN && (window == seekSlider || window == volumeSlider)) mouseSlider = window;
+    if ((message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK) && (window == seekSlider || window == volumeSlider)) {
+        mouseSlider = window;
+        if (IsWindowEnabled(window)) {
+            RECT thumb{}, channel{};
+            SendMessageW(window, TBM_GETTHUMBRECT, 0, reinterpret_cast<LPARAM>(&thumb));
+            SendMessageW(window, TBM_GETCHANNELRECT, 0, reinterpret_cast<LPARAM>(&channel));
+            const POINT pointer{static_cast<short>(LOWORD(lparam)), static_cast<short>(HIWORD(lparam))};
+            if (!PtInRect(&thumb, pointer)) {
+                const double halfThumb = (thumb.right - thumb.left) / 2.0;
+                const int position = sliderPositionAt(pointer.x, channel.left + halfThumb, channel.right - halfThumb,
+                    static_cast<int>(SendMessageW(window, TBM_GETRANGEMIN, 0, 0)),
+                    static_cast<int>(SendMessageW(window, TBM_GETRANGEMAX, 0, 0)));
+                // Native channel clicks page by default. Move the thumb under
+                // the pointer first, then preserve native capture/drag/endtrack.
+                SendMessageW(window, TBM_SETPOS, TRUE, position);
+            }
+        }
+    }
     if (message == WM_GETDLGCODE) return DefSubclassProc(window, message, wparam, lparam) | DLGC_WANTTAB | DLGC_WANTARROWS;
     if (message == WM_SETFOCUS || message == WM_LBUTTONDOWN) interact();
     if (message == WM_XBUTTONDOWN) { queue(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? "history-back" : "history-forward"); return TRUE; }
@@ -170,6 +199,17 @@ LRESULT CALLBACK surfaceInput(HWND window, UINT message, WPARAM wparam, LPARAM l
     // controls open forever while the viewport is reported periodically.
     if (message == WM_SETFOCUS) interact();
     if (window == video && (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)) {
+        if (rendererControls && presentation == "fullscreen") {
+            RECT client{}; GetClientRect(parent, &client);
+            POINT pointer{}; GetCursorPos(&pointer); ScreenToClient(parent, &pointer);
+            // Hidden HTML chrome leaves both edges covered by the drawable.
+            // Suppress a first click there until the header or toolbar receives
+            // its viewport, so revealing a control cannot also pause video.
+            if (requested.y + requested.height >= client.bottom / scale() - 1
+                && (pointer.y < 64 * scale() || pointer.y >= client.bottom - 96 * scale())) {
+                singleClickAt = 0; interact(); return 0;
+            }
+        }
         // Reveal before hit testing: a control click must not also pause video.
         if (presentation == "fullscreen" && controls && !controlsVisible) {
             POINT pointer{}; RECT area{}; GetCursorPos(&pointer); GetWindowRect(controls, &area);
@@ -205,8 +245,13 @@ LRESULT CALLBACK surfaceInput(HWND window, UINT message, WPARAM wparam, LPARAM l
         if (LOWORD(wparam) == TB_ENDTRACK && mouseSlider == slider) {
             mouseSlider = nullptr;
             const double value = static_cast<double>(SendMessageW(slider, TBM_GETPOS, 0, 0));
-            if (slider == seekSlider) queue("seek", playback.number("duration") * value / 10000);
-            if (slider == volumeSlider) queue("volume", value);
+            if (slider == seekSlider) {
+                const double seconds = playback.number("duration") * value / 10000;
+                seekFeedback.request(seconds, GetTickCount64()); queue("seek", seconds);
+            }
+            if (slider == volumeSlider) {
+                volumeFeedback.request(value, GetTickCount64()); queue("volume", value);
+            }
         }
         return 0;
     }
@@ -270,6 +315,34 @@ void place(HWND window, double x, double y, double width, double height, double 
     SetWindowPos(window, HWND_TOP, static_cast<int>(std::lround(x * dpi)), static_cast<int>(std::lround(y * dpi)),
         std::max(1, static_cast<int>(std::lround(width * dpi))), std::max(1, static_cast<int>(std::lround(height * dpi))), SWP_NOACTIVATE);
 }
+void clipOcclusions() {
+    if (!video || !parent) return;
+    if (occlusions.empty()) {
+        if (regionApplied) {
+            if (!SetWindowRgn(video, nullptr, TRUE)) throw std::runtime_error("Cannot restore playback window region");
+            regionApplied = false;
+        }
+        return;
+    }
+    RECT client{}, window{}; GetClientRect(video, &client); GetWindowRect(video, &window);
+    POINT origin{window.left, window.top}; ScreenToClient(parent, &origin);
+    HRGN region = CreateRectRgn(0, 0, client.right, client.bottom);
+    if (!region) throw std::runtime_error("Cannot create playback window region");
+    const double dpi = scale();
+    for (const auto &area : occlusions) {
+        HRGN cutout = CreateRectRgn(static_cast<int>(std::floor(area.x * dpi)) - origin.x,
+            static_cast<int>(std::floor(area.y * dpi)) - origin.y,
+            static_cast<int>(std::ceil((area.x + area.width) * dpi)) - origin.x,
+            static_cast<int>(std::ceil((area.y + area.height) * dpi)) - origin.y);
+        if (!cutout) { DeleteObject(region); throw std::runtime_error("Cannot create playback popup region"); }
+        const int combined = CombineRgn(region, region, cutout, RGN_DIFF); DeleteObject(cutout);
+        if (combined == ERROR) { DeleteObject(region); throw std::runtime_error("Cannot clip playback popup region"); }
+    }
+    // SetWindowRgn transfers ownership on success. Chromium may paint through
+    // these holes; the remaining native frame keeps rendering without a hide.
+    if (!SetWindowRgn(video, region, TRUE)) { DeleteObject(region); throw std::runtime_error("Cannot apply playback popup region"); }
+    regionApplied = true;
+}
 void layout() {
     if (!video || !parent || closing) return;
     const double dpi = scale(); RECT client{}; GetClientRect(parent, &client);
@@ -285,6 +358,7 @@ void layout() {
     double videoHeight = requested.height;
     if (presentation == "fullscreen" && controlsVisible) videoHeight = std::min(videoHeight, height - 88 - requested.y);
     place(video, requested.x, requested.y, requested.width, std::max(1.0, videoHeight), dpi);
+    clipOcclusions();
     if (controls && controlsVisible) SetWindowPos(controls, HWND_TOP, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
 }
 void createControls() {
@@ -347,7 +421,10 @@ void destroyPlayer() {
     parent = video = cleanupWindow = controls = nullptr;
     pauseButton = dockButton = fullscreenButton = stopButton = seekSlider = volumeSlider = timeLabel = nullptr;
     mouseSlider = nullptr;
+    seekFeedback.reset(); volumeFeedback.reset();
     controlsVisible = visible = focusFullscreen = drawableVisible = redrawRequested = renderFailed = false;
+    rendererControls = false; interactionSequence = 0;
+    occlusions.clear(); regionApplied = false;
     pixelWidth = pixelHeight = 0; closing = false;
 }
 void updateBounds(napi_env env, napi_value rect) {
@@ -439,8 +516,8 @@ napi_value setPresentation(napi_env env, napi_callback_info info) {
         if (next != "expanded" && next != "docked" && next != "fullscreen") throw std::runtime_error("Invalid playback presentation");
         if (next == presentation) return undefined(env); // periodic viewport reports do not reset auto-hide
         focusFullscreen = next == "fullscreen"; presentation = next; singleClickAt = 0; interact();
-        if (presentation == "fullscreen") createControls();
-        controlsVisible = presentation == "fullscreen" && visible;
+        if (presentation == "fullscreen" && !rendererControls) createControls();
+        controlsVisible = presentation == "fullscreen" && visible && !rendererControls;
         if (controls) ShowWindow(controls, controlsVisible ? SW_SHOWNOACTIVATE : SW_HIDE);
         layout();
     } catch (const std::exception &error) { return fail(env, error.what()); }
@@ -450,6 +527,35 @@ napi_value command(napi_env env, napi_callback_info info) {
     size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
     if (count != 1 || closing || !video) return fail(env, "No native playback session");
     try { requireOwner(); playback.command(env, args[0]); } catch (const std::exception &error) { return fail(env, error.what()); }
+    return undefined(env);
+}
+napi_value setRendererControls(napi_env env, napi_callback_info info) {
+    size_t count = 1; napi_value args[1]; bool value = false;
+    napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+    if (count != 1 || napi_get_value_bool(env, args[0], &value) != napi_ok) return fail(env, "Invalid playback chrome mode");
+    try {
+        requireOwner(); rendererControls = value;
+        if (rendererControls && controls) { controlsVisible = false; ShowWindow(controls, SW_HIDE); }
+        layout();
+    } catch (const std::exception &error) { return fail(env, error.what()); }
+    return undefined(env);
+}
+napi_value setOcclusions(napi_env env, napi_callback_info info) {
+    size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+    try {
+        requireOwner(); uint32_t length = 0; bool array = false;
+        if (count != 1 || napi_is_array(env, args[0], &array) != napi_ok || !array
+            || napi_get_array_length(env, args[0], &length) != napi_ok || length > 32) throw std::runtime_error("Invalid playback popup regions");
+        std::vector<Bounds> next;
+        for (uint32_t index = 0; index < length; index++) {
+            napi_value value; napi_get_element(env, args[0], index, &value);
+            Bounds area{namedNumber(env, value, "x"), namedNumber(env, value, "y"), namedNumber(env, value, "width"), namedNumber(env, value, "height")};
+            for (const double number : {area.x, area.y, area.width, area.height})
+                if (!std::isfinite(number) || number < 0 || number > 65536) throw std::runtime_error("Invalid playback popup bounds");
+            if (area.width > 0 && area.height > 0) next.push_back(area);
+        }
+        occlusions = std::move(next); clipOcclusions();
+    } catch (const std::exception &error) { return fail(env, error.what()); }
     return undefined(env);
 }
 napi_value read(napi_env env, bool drain) {
@@ -464,10 +570,21 @@ napi_value read(napi_env env, bool drain) {
     setNumber(env, result, "renderMilliseconds", renderMilliseconds); setNumber(env, result, "swapMilliseconds", swapMilliseconds);
     setNumber(env, result, "maxRenderMilliseconds", maxRenderMilliseconds); setNumber(env, result, "maxSwapMilliseconds", maxSwapMilliseconds);
     setNumber(env, result, "renderingElapsedMilliseconds", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderingStarted).count());
-    const HWND focus = GetFocus();
+    // Chromium can own focus on another GUI thread. GetFocus only observes
+    // this thread's queue and can retain a stale native child handle.
+    GUITHREADINFO focusInfo{}; focusInfo.cbSize = sizeof(focusInfo);
+    const HWND focus = GetGUIThreadInfo(0, &focusInfo) ? focusInfo.hwndFocus : nullptr;
     setString(env, result, "focusedControl", focus == video ? "video" : focus == seekSlider ? "seek" : focus == pauseButton ? "pause"
         : focus == volumeSlider ? "volume" : focus == dockButton ? "dock" : focus == fullscreenButton ? "fullscreen" : focus == stopButton ? "stop" : "web-content");
     setFlag(env, result, "fullscreenControlsVisible", controlsVisible);
+    setFlag(env, result, "rendererFullscreenControls", rendererControls);
+    setFlag(env, result, "nativeVideoFocused", focus == video);
+    setNumber(env, result, "interactionSequence", static_cast<double>(interactionSequence));
+    if (rendererControls && presentation == "fullscreen") {
+        POINT pointer{}; RECT area{}; GetCursorPos(&pointer); GetClientRect(parent, &area); ScreenToClient(parent, &pointer);
+        setNumber(env, result, "fullscreenPointerY", GetForegroundWindow() == parent && PtInRect(&area, pointer) ? pointer.y / scale() : -1);
+    }
+    setNumber(env, result, "occlusionRegions", static_cast<double>(occlusions.size()));
     if (controls && presentation == "fullscreen") {
         POINT pointer{}; RECT area{}; GetCursorPos(&pointer); GetWindowRect(controls, &area);
         setFlag(env, result, "controlsHovered", PtInRect(&area, pointer));
@@ -523,6 +640,11 @@ napi_value render(napi_env env, napi_callback_info) {
         drawableVisible = drawableNow;
         if (singleClickAt && now - singleClickAt > GetDoubleClickTime()) { singleClickAt = 0; queue("toggle-pause"); }
         if (focusFullscreen && visible && presentation == "fullscreen" && GetForegroundWindow() == parent) { SetFocus(video); focusFullscreen = false; }
+        if (rendererControls && visible && presentation == "fullscreen" && GetForegroundWindow() == parent) {
+            POINT pointer{}; RECT area{}; GetCursorPos(&pointer); GetClientRect(parent, &area);
+            POINT local = pointer; ScreenToClient(parent, &local);
+            if (PtInRect(&area, local) && (pointer.x != lastMouse.x || pointer.y != lastMouse.y)) { lastMouse = pointer; interact(); }
+        }
         if (controls && visible && presentation == "fullscreen") {
             POINT pointer{}; RECT area{}; GetCursorPos(&pointer); GetWindowRect(controls, &area);
             if (pointer.x != lastMouse.x || pointer.y != lastMouse.y) { lastMouse = pointer; interact(); }
@@ -530,10 +652,12 @@ napi_value render(napi_env env, napi_callback_info) {
             if (show != controlsVisible) { controlsVisible = show; ShowWindow(controls, show ? SW_SHOWNOACTIVATE : SW_HIDE); layout(); }
             SetWindowTextW(pauseButton, playback.number("eof-reached") ? L"从头重播" : playback.number("pause") ? L"播放" : L"暂停");
             EnableWindow(seekSlider, playback.number("seekable") && playback.number("duration") > 0);
+            const double position = seekFeedback.value(playback.number("time-pos"), playback.number("seeking") != 0, now);
+            const double volume = volumeFeedback.value(playback.number("volume"), false, now);
             if (GetCapture() != seekSlider) SendMessageW(seekSlider, TBM_SETPOS, TRUE,
-                static_cast<LPARAM>(std::clamp(playback.number("time-pos") / std::max(1.0, playback.number("duration")), 0.0, 1.0) * 10000));
-            if (GetCapture() != volumeSlider) SendMessageW(volumeSlider, TBM_SETPOS, TRUE, static_cast<LPARAM>(std::clamp(playback.number("volume"), 0.0, 100.0)));
-            const int seconds = static_cast<int>(std::max(0.0, playback.number("time-pos")));
+                static_cast<LPARAM>(std::clamp(position / std::max(1.0, playback.number("duration")), 0.0, 1.0) * 10000));
+            if (GetCapture() != volumeSlider) SendMessageW(volumeSlider, TBM_SETPOS, TRUE, static_cast<LPARAM>(std::clamp(volume, 0.0, 100.0)));
+            const int seconds = static_cast<int>(std::max(0.0, position));
             wchar_t time[32]; swprintf_s(time, L"%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60); SetWindowTextW(timeLabel, time);
         }
         if (!wglMakeCurrent(videoDc, context)) throw std::runtime_error("Cannot make playback OpenGL context current");
@@ -558,6 +682,8 @@ napi_value initialize(napi_env env, napi_value exports) {
         {"setBounds", nullptr, bounds, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setVisible", nullptr, setVisible, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setPresentation", nullptr, setPresentation, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setRendererControls", nullptr, setRendererControls, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setOcclusions", nullptr, setOcclusions, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"command", nullptr, command, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"state", nullptr, state, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"inspect", nullptr, inspect, nullptr, nullptr, nullptr, napi_default, nullptr},

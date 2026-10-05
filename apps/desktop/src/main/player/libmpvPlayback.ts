@@ -12,6 +12,8 @@ interface Bridge {
   setBounds(bounds: { x: number; y: number; width: number; height: number; scale?: number }): void
   setVisible(visible: boolean): void
   setPresentation(presentation: string): void
+  setRendererControls?(enabled: boolean): void
+  setOcclusions?(rects: Array<{ x: number; y: number; width: number; height: number }>): void
   command(args: string[]): void
   render(): void
   state(): NativePlaybackState
@@ -48,6 +50,7 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
         bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1,
           scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend: 'x11' })
       } else bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1 })
+      if (process.platform === 'win32') bridge.setRendererControls?.(true)
       alive = true
     },
     load(locator, options): void {
@@ -67,8 +70,12 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
       else if (control.kind === 'subtitle-size') command(['set', 'sub-font-size', String(control.value)])
       else throw new Error('此控制应由播放会话处理')
     },
-    read: () => bridge && alive ? bridge.state() : { alive: false },
-    viewport(rect, visible, state: PlaybackSnapshot): void {
+    read: () => {
+      const value = bridge && alive ? bridge.state() : { alive: false }
+      const zoom = getWindow()?.webContents.getZoomFactor() ?? 1
+      return value.fullscreenPointerY == null ? value : { ...value, fullscreenPointerY: value.fullscreenPointerY / zoom }
+    },
+    viewport(rect, visible, state: PlaybackSnapshot, occlusions = []): void {
       if (!alive || !bridge) return
       const window = getWindow()
       if (!window || window.isDestroyed()) return
@@ -78,6 +85,7 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
       const zoom = window.webContents.getZoomFactor()
       bridge.setBounds({ x: rect.x * zoom, y: rect.y * zoom, width: rect.width * zoom, height: rect.height * zoom,
         ...(process.platform === 'linux' ? { scale: screen.getDisplayMatching(window.getBounds()).scaleFactor } : {}) })
+      bridge.setOcclusions?.(occlusions.map(area => ({ x: area.x * zoom, y: area.y * zoom, width: area.width * zoom, height: area.height * zoom })))
       bridge.setPresentation(state.presentation)
       if (visible) bridge.setVisible(true)
     },

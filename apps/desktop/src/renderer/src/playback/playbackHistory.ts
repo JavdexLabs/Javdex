@@ -33,7 +33,7 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
     },
     setOptions(value: boolean): void {
       if (!value) { closeOptions(); return }
-      if (options || !state || state.presentation !== 'expanded' || state.phase === 'error') return
+      if (options || !state || state.presentation === 'docked' || state.phase === 'error') return
       options = history.open('playback-options', () => { options = null; optionsChanged(false) })
       optionsChanged(true)
     },

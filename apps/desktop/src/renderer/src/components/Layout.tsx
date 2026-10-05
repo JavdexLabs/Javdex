@@ -244,10 +244,10 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
       <div className={styles.main}>
         <DesktopSessionOverlay />
         <div className={styles.content}>{children}</div>
+        <PlaybackPanel />
       </div>
       <AssetCryptoOverlay />
     </div>
-    <PlaybackPanel />
     </div>
   )
 }

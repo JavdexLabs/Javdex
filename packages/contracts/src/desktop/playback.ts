@@ -14,6 +14,8 @@ export interface PlaybackViewport {
   presentation: PlaybackPresentation
   rect: { x: number; y: number; width: number; height: number }
   visible: boolean
+  /** Visible HTML popup intersections, clipped to this viewport. */
+  occlusions?: Array<{ x: number; y: number; width: number; height: number }>
 }
 export type PlaybackControl =
   | { kind: 'pause'; paused: boolean }
@@ -49,6 +51,13 @@ export interface PlaybackSnapshot {
   phase: 'opening' | 'playing' | 'paused' | 'buffering' | 'ended' | 'error'
   /** Transient native-to-HTML keyboard handoff; never persisted. */
   focusRequest?: { sequence: number; backwards: boolean }
+  /** Windows native drawable hands chrome and keyboard traversal to the renderer. */
+  rendererFullscreenControls?: boolean
+  nativeVideoFocused?: boolean
+  /** Changes only on native pointer/keyboard activity, never on playback ticks. */
+  interactionSequence?: number
+  /** Fullscreen pointer in CSS pixels; -1 when outside the active player. */
+  fullscreenPointerY?: number
   paused: boolean
   seeking: boolean
   position: number | null

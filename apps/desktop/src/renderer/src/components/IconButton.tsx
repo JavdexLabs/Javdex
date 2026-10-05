@@ -1,8 +1,8 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import styles from './IconButton.module.css'
 
-export type IconButtonTone = 'default' | 'danger'
-export type IconButtonSize = 'md' | 'sm'
+export type IconButtonTone = 'default' | 'danger' | 'accent'
+export type IconButtonSize = 'md' | 'sm' | 'control'
 
 export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   icon: ReactNode
@@ -29,8 +29,8 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
 ): JSX.Element {
   const classes = [
     styles.root,
-    tone === 'danger' ? styles.danger : '',
-    size === 'sm' ? styles.sm : '',
+    tone === 'danger' ? styles.danger : tone === 'accent' ? styles.accent : '',
+    size === 'sm' ? styles.sm : size === 'control' ? styles.control : '',
     className
   ]
     .filter(Boolean)

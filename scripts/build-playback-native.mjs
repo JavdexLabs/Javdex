@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { playbackNativeBuild } from './playback-native-build.mjs'
+import { playbackNativeBuild, stageWindowsDevelopmentLibraries } from './playback-native-build.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
@@ -37,4 +37,8 @@ for (const step of playbackNativeBuild({ platform, arch, root, prefix, include, 
   const result = spawnSync(step.command, step.args, { cwd: root, env: environment, stdio: 'inherit' })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error('Native build or regression command failed: ' + step.command + ' (exit ' + result.status + ')')
+}
+if (platform === 'win32') {
+  const files = stageWindowsDevelopmentLibraries({ output, libraryDirectory: path.join(prefix, 'bin'), arch })
+  console.log(`Staged ${files.length} development playback DLLs beside playback.node`)
 }

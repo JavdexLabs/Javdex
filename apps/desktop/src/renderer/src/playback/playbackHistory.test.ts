@@ -31,6 +31,14 @@ test('back closes options, exits fullscreen, then docks; never stops or rebuilds
   f.playback.observe(f.state('docked'))
   assert.equal(f.marker(), null); assert.deepEqual(f.goes, [])
 })
+test('fullscreen settings consume their own back step before leaving fullscreen', () => {
+  const f = fixture()
+  f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen'))
+  f.playback.setOptions(true); f.pop()
+  assert.deepEqual(f.options, [true, false]); assert.deepEqual(f.commands, [])
+  f.pop()
+  assert.deepEqual(f.commands.at(-1), { id: 'one', value: { kind: 'presentation', value: 'expanded' } })
+})
 test('normal updates and mount snapshot never write history; a late old tick cannot reopen a consumed layer', () => {
   const f = fixture()
   f.playback.observe(f.state(), true)

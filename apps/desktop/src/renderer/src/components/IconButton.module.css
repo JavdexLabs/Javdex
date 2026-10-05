@@ -54,3 +54,15 @@
   min-width: 24px;
   min-height: 24px;
 }
+
+.control {
+  --icon-glyph-size: 16px;
+
+  min-width: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+}
+
+.accent {
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}

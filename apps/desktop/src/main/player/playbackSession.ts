@@ -245,7 +245,12 @@ export function createPlaybackSession(deps: Dependencies) {
       const { width, height } = deps.windowSize()
       const rect = viewport.rect
       const valid = rect.width >= 1 && rect.height >= 1 && rect.x + rect.width <= width + 1 && rect.y + rect.height <= height + 1
-      deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot)
+      const occlusions = valid ? (viewport.occlusions ?? []).flatMap(area => {
+        const x = Math.max(rect.x, area.x), y = Math.max(rect.y, area.y)
+        const right = Math.min(rect.x + rect.width, area.x + area.width), bottom = Math.min(rect.y + rect.height, area.y + area.height)
+        return right > x && bottom > y ? [{ x, y, width: right - x, height: bottom - y }] : []
+      }) : []
+      deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot, occlusions)
     },
     addSubtitle(id: string, file: string): void { current(id); deps.native.addSubtitle(file) },
     tick(): void {
@@ -282,6 +287,10 @@ export function createPlaybackSession(deps: Dependencies) {
       state.info = { videoCodec: raw['video-codec'] ?? null, audioCodec: raw['audio-codec'] ?? null,
         width: finite(raw.width), height: finite(raw.height), hardwareDecoder: raw['hwdec-current'] ?? null,
         audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']) }
+      state.rendererFullscreenControls = raw.rendererFullscreenControls === true
+      state.nativeVideoFocused = raw.nativeVideoFocused === true
+      state.interactionSequence = finite(raw.interactionSequence) ?? undefined
+      state.fullscreenPointerY = finite(raw.fullscreenPointerY) ?? undefined
       deps.awake(state.phase === 'playing')
       // Rendering a paused first frame and jumping the clock cannot prove actual playback.
       const frames = raw.presentedFrames ?? 0

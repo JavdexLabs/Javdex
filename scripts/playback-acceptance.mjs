@@ -31,6 +31,14 @@ const errors = []
 try {
   application = await launchAcceptance(directory)
   const page = await application.firstWindow()
+  const clickChrome = async (name, title = false) => {
+    const state = await page.evaluate(() => window.api?.playback?.snapshot())
+    if (state?.presentation === 'fullscreen' && state.rendererFullscreenControls) {
+      const size = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+      await page.mouse.move(size.width / 2, title ? 2 : size.height - 2)
+    }
+    await page.getByRole('button', { name, exact: true }).click()
+  }
   await application.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]
     globalThis.playbackWindowEvents = []
@@ -50,12 +58,45 @@ try {
   if (process.platform === 'darwin') assert.equal(initial.info.hardwareDecoder, 'videotoolbox')
   assert.equal(initial.info.audioOutput, process.platform === 'win32' ? 'wasapi' : 'coreaudio')
   const id = initial.sessionId
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  const seekDragChecks = []
+  const dragSeek = async fraction => {
+    const slider = page.getByRole('slider', { name: '播放进度', exact: true })
+    const box = await slider.boundingBox()
+    assert.ok(box, 'expanded playback seek slider is visible')
+    const before = await page.evaluate(() => window.api.playback.snapshot())
+    const value = Number(await slider.inputValue())
+    const x = box.x + 8 + (box.width - 16) * value / before.duration
+    await page.mouse.move(x, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 8 + (box.width - 16) * fraction, box.y + box.height / 2, { steps: 8 })
+    const requested = Number(await slider.inputValue())
+    assert.ok(Math.abs(requested - before.position) > 5, 'mouse drag changes the seek target')
+    await page.mouse.up()
+    const samples = []
+    for (let sample = 0; sample < 6; sample++) {
+      const displayed = Number(await slider.inputValue())
+      assert.ok(Math.abs(displayed - requested) < 2, `released seek thumb reverted: ${displayed} instead of ${requested}`)
+      samples.push(displayed)
+      await page.waitForTimeout(100)
+    }
+    const after = await waitForState(page, state => !state.seeking && Math.abs(state.position - requested) < 2, 'dragged seek completion')
+    assert.equal(after.paused, before.paused, 'dragging preserves playing/paused intent')
+    seekDragChecks.push({ paused: before.paused, requested, samples, actual: after.position })
+  }
+  await dragSeek(0.6)
+  await dragSeek(0.2)
+  await page.evaluate(id => window.api.playback.control(id, { kind: 'pause', paused: true }), id)
+  await waitForState(page, state => state.paused, 'pause before drag')
+  await dragSeek(0.5)
+  await page.evaluate(id => window.api.playback.control(id, { kind: 'pause', paused: false }), id)
+  await waitForState(page, state => !state.paused, 'resume after drag')
+  fs.writeFileSync(path.join(output, 'seek-drag-state.json'), JSON.stringify(seekDragChecks, null, 2))
+  await clickChrome('播放设置')
   await page.waitForFunction(() => document.querySelector('button[aria-label="播放来源"]')?.textContent.includes('测试视频 1'))
   assert.equal(await page.getByRole('button', { name: '播放来源', exact: true }).isDisabled(), true, 'one file must not offer a fictitious alternative')
   assert.equal(await page.getByRole('button', { name: '使用外部播放器打开', exact: true }).isEnabled(), true, 'external open is available before an error')
   assert.equal((await page.evaluate(() => window.api.playback.snapshot())).sessionId, id, 'reading options must preserve playback')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await clickChrome('播放设置')
   await page.getByRole('button', { name: '收起到底栏', exact: true }).click()
   await waitForState(page, state => state?.presentation === 'docked', 'dock')
   const docked = await page.evaluate(() => window.api.playback.snapshot())
@@ -71,6 +112,48 @@ try {
   fs.writeFileSync(path.join(output, 'fullscreen-state.json'), JSON.stringify({ state: fullscreenState,
     events: await application.evaluate(() => globalThis.playbackWindowEvents) }, null, 2))
   assert.equal(fullscreenState.paused, false, 'entering fullscreen must preserve playing intent')
+  if (fullscreenState.rendererFullscreenControls) {
+    const videoBounds = () => page.getByRole('button', { name: '视频画面，单击播放或暂停，双击全屏', exact: true }).boundingBox()
+    const fullscreenVideo = await videoBounds()
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+    assert.deepEqual(fullscreenVideo, { x: 0, y: 0, ...viewport }, 'fullscreen video spans the complete window behind chrome')
+    await clickChrome('播放设置')
+    await page.getByRole('complementary', { name: '播放设置', exact: true }).waitFor()
+    const settingsChrome = await page.evaluate(() => {
+      const root = document.querySelector('[data-playback-session]')
+      const header = root.querySelector('header').getBoundingClientRect()
+      const settings = root.querySelector('aside[aria-label="播放设置"]').getBoundingClientRect()
+      return { header: root.dataset.headerVisible, controls: root.dataset.controlsVisible, headerBottom: header.bottom, settingsTop: settings.top }
+    })
+    assert.equal(settingsChrome.header, 'true', 'fullscreen settings keep the title bar visible')
+    assert.equal(settingsChrome.controls, 'true', 'fullscreen settings keep the toolbar visible')
+    assert.equal(settingsChrome.settingsTop, settingsChrome.headerBottom, 'settings meet the title bar without a gap')
+    assert.equal((await page.evaluate(() => window.api.playback.snapshot())).sessionId, id)
+    assert.deepEqual(await videoBounds(), fullscreenVideo, 'opening settings overlays video without resizing it')
+    await page.getByRole('button', { name: '关闭播放设置', exact: true }).click()
+    await page.mouse.move(viewport.width / 2, viewport.height / 2)
+    await page.waitForFunction(() => document.querySelector('[data-playback-session]').dataset.headerVisible === 'false')
+    assert.deepEqual(await videoBounds(), fullscreenVideo, 'closing settings restores hover chrome without resizing video')
+    await clickChrome('快捷字幕')
+    await page.waitForFunction(() => document.querySelector('[role="listbox"]'))
+    await page.waitForTimeout(200)
+    const clipped = await application.evaluate(({ app }) => {
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+      return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
+    })
+    assert.ok(clipped.occlusionRegions > 0, 'HTML quick menu clips only its own native video intersection')
+    assert.ok(clipped.alive && clipped.presentedFrames > 0, 'native video keeps rendering with the quick menu open')
+    await page.getByRole('option', { name: '关闭字幕', exact: true }).click()
+    const fullSlider = page.getByRole('slider', { name: '播放进度', exact: true })
+    const fullBox = await fullSlider.boundingBox()
+    await page.mouse.click(fullBox.x + 6 + (fullBox.width - 12) * 0.7, fullBox.y + fullBox.height / 2)
+    const clickedSeek = await waitForState(page, state => !state.seeking && Math.abs(state.position - 84) < 2, 'fullscreen click seek')
+    assert.equal(clickedSeek.paused, false)
+    const fullVolume = page.getByRole('slider', { name: '音量', exact: true })
+    const volumeBox = await fullVolume.boundingBox()
+    await page.mouse.click(volumeBox.x + 6 + (volumeBox.width - 12) * 0.25, volumeBox.y + volumeBox.height / 2)
+    await waitForState(page, state => Math.abs(state.volume - 25) <= 1, 'fullscreen click volume')
+  }
   await page.evaluate(id => window.api.playback.control(id, { kind: 'presentation', value: 'docked' }), id)
   await page.waitForTimeout(1500)
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFullScreen()), false)
@@ -99,13 +182,14 @@ try {
     await window.api.playback.control(id, { kind: 'subtitle-size', value: 70 })
   }, withSubtitles.sessionId)
   await waitForState(page, state => state?.paused && state.subtitleDelay === 1.5 && state.subtitleSize === 70, 'subtitle property roundtrip')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await clickChrome('播放设置')
   await page.getByRole('textbox', { name: '指定时间', exact: true }).fill('00:99:00')
   await page.getByRole('button', { name: '跳转到指定时间', exact: true }).click()
   assert.match(await page.getByRole('alert').innerText(), /请输入/)
   await page.getByRole('textbox', { name: '指定时间', exact: true }).fill('00:01:00')
   await page.getByRole('button', { name: '跳转到指定时间', exact: true }).click()
   await waitForState(page, state => state?.paused && Math.abs(state.position - 60) < 0.2, 'exact time form preserves pause')
+  await page.getByRole('tab', { name: '字幕', exact: true }).click()
   await page.getByRole('button', { name: '字幕字号', exact: true }).click()
   await page.getByRole('option', { name: '40', exact: true }).click()
   await page.getByRole('button', { name: '提前 0.5 秒', exact: true }).click()
@@ -148,15 +232,28 @@ try {
     }
     return { count, bottom, controlsTop: frame.controlsTop, width: frame.width, height: frame.height }
   }, output)
+  if (fullscreenState.rendererFullscreenControls) {
+    const geometry = await page.evaluate(() => {
+      const root = document.querySelector('[data-playback-session]')
+      const slider = root.querySelector('input[aria-label="播放进度"]')
+      const video = root.querySelector('button[aria-label^="视频画面"]')
+      return { controlsTop: slider.parentElement.parentElement.getBoundingClientRect().top, video: video.getBoundingClientRect().toJSON() }
+    })
+    subtitleClearance.controlsTop = (geometry.controlsTop - geometry.video.top) * subtitleClearance.height / geometry.video.height
+  }
   fs.writeFileSync(path.join(output, 'subtitle-clearance.json'), JSON.stringify(subtitleClearance, null, 2))
   assert.ok(subtitleClearance.count > 100, 'subtitle pixels must actually be rendered')
-  assert.ok(Number.isFinite(subtitleClearance.controlsTop), 'paused fullscreen controls must be visible')
-  assert.ok(subtitleClearance.bottom < subtitleClearance.controlsTop, `Subtitle overlaps fullscreen controls: ${JSON.stringify(subtitleClearance)}`)
+  assert.ok(Number.isFinite(subtitleClearance.controlsTop), 'fullscreen toolbar geometry is available')
+  if (!fullscreenState.rendererFullscreenControls) assert.ok(subtitleClearance.bottom < subtitleClearance.controlsTop, `Subtitle overlaps fullscreen controls: ${JSON.stringify(subtitleClearance)}`)
   await page.evaluate(id => window.api.playback.control(id, { kind: 'pause', paused: false }), withSubtitles.sessionId)
   // Win32 controls deliberately stay visible while a native control has focus.
   // Claim the window before testing inactivity so its video receives focus.
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus())
   await waitForState(page, state => state.phase === 'playing', 'resume before auto-hide')
+  if (fullscreenState.rendererFullscreenControls) {
+    const size = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+    await page.mouse.move(size.width / 2, size.height / 2)
+  }
   await page.waitForTimeout(3500)
   const hiddenControls = await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
@@ -164,11 +261,15 @@ try {
     return { width, height, controlsTop }
   })
   assert.equal(hiddenControls.controlsTop, undefined, 'fullscreen controls auto-hide while playing')
-  assert.ok(hiddenControls.height > subtitleClearance.height, 'auto-hide releases the native video inset')
+  if (fullscreenState.rendererFullscreenControls) {
+    assert.equal(await page.getByRole('slider', { name: '播放进度', exact: true }).isVisible(), false, 'renderer toolbar auto-hides while playing')
+    assert.deepEqual({ width: hiddenControls.width, height: hiddenControls.height },
+      { width: subtitleClearance.width, height: subtitleClearance.height }, 'showing and hiding chrome keeps the native video size unchanged')
+  } else assert.ok(hiddenControls.height > subtitleClearance.height, 'auto-hide releases the native video inset')
   await page.evaluate(id => window.api.playback.control(id, { kind: 'pause', paused: true }), withSubtitles.sessionId)
   await page.evaluate(id => window.api.playback.control(id, { kind: 'presentation', value: 'expanded' }), withSubtitles.sessionId)
   await page.waitForTimeout(1500)
-  await page.getByRole('button', { name: '停止播放', exact: true }).click()
+  await clickChrome('停止播放', true)
   await waitForState(page, state => state === null, 'stop before resume acceptance')
   const progressFile = path.join(directory, 'playback-progress.json')
   assert.equal(fs.existsSync(progressFile), false, 'default-off playback creates no progress file')
@@ -190,7 +291,7 @@ try {
   const savedPoint = JSON.parse(fs.readFileSync(progressFile, 'utf8')).entries[0]
   assert.ok(savedPoint.position > 40 && savedPoint.position < 45)
   assert.equal((await page.evaluate(() => window.api.playback.snapshot())).recordingProgress, true)
-  await page.getByRole('button', { name: '停止播放', exact: true }).click()
+  await clickChrome('停止播放', true)
   assert.equal((await page.evaluate(target => window.api.player.play(target.libraryId, target.videoId), target)).ok, true)
   const waitingResume = await waitForState(page, state => state?.resumePosition > 40 && state.phase === 'paused', 'waiting for resume decision')
   await page.waitForTimeout(400)
@@ -220,7 +321,7 @@ try {
   await page.screenshot({ path: path.join(output, 'resume-choice.png') })
   await page.getByRole('button', { name: /^继续 / }).click()
   await waitForState(page, state => state?.resumePosition === null && state.phase === 'playing' && state.position > waitingResume.resumePosition + 0.5, 'continued from saved position')
-  await page.getByRole('button', { name: '停止播放', exact: true }).click()
+  await clickChrome('停止播放', true)
   const beforePrivate = fs.readFileSync(progressFile, 'utf8')
   assert.equal((await page.evaluate(target => window.api.playback.open(target, { privateSession: true }), target)).ok, true)
   const privatePlayback = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5 && state.position < 3, 'private playback starts from zero')
@@ -228,7 +329,7 @@ try {
   assert.equal(privatePlayback.recordingProgress, false)
   await page.evaluate(id => window.api.playback.control(id, { kind: 'seek', seconds: 119 }), privatePlayback.sessionId)
   await waitForState(page, state => state?.phase === 'ended', 'private playback EOF')
-  await page.getByRole('button', { name: '停止播放', exact: true }).click()
+  await clickChrome('停止播放', true)
   assert.equal(fs.readFileSync(progressFile, 'utf8'), beforePrivate, 'private EOF and stop leave old progress untouched')
   assert.equal((await page.evaluate(target => window.api.player.play(target.libraryId, target.videoId), target)).ok, true)
   await waitForState(page, state => state?.resumePosition > 40 && state.phase === 'paused', 'resume before from-start choice')
@@ -239,7 +340,7 @@ try {
   await recordingSwitch.uncheck()
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await waitForState(page, state => state?.recordingProgress === false, 'global off immediately stops current recording')
-  await page.getByRole('button', { name: '停止播放', exact: true }).click()
+  await clickChrome('停止播放', true)
   assert.equal(fs.readFileSync(progressFile, 'utf8'), beforePrivate, 'global off does not update or remove old progress')
   await page.getByRole('button', { name: '清除全部本机续播进度', exact: true }).click()
   await page.getByRole('dialog', { name: '清除全部本机续播进度', exact: true }).getByRole('button', { name: '取消', exact: true }).click()
@@ -300,10 +401,10 @@ try {
   await page.evaluate(id => window.api.playback.control(id, { kind: 'pause', paused: true }), historyId)
   await waitForState(page, state => state?.phase === 'paused', 'history pause')
   const historyPosition = (await page.evaluate(() => window.api.playback.snapshot())).position
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await clickChrome('播放设置')
   await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-options')
   await page.evaluate(() => window.history.back())
-  await page.getByRole('complementary', { name: '播放选项', exact: true }).waitFor({ state: 'hidden' })
+  await page.getByRole('complementary', { name: '播放设置', exact: true }).waitFor({ state: 'hidden' })
   assert.equal(await page.evaluate(() => window.history.state?.avOverlay?.kind), 'playback-expanded')
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state?.presentation === 'fullscreen', 'history fullscreen')
@@ -332,7 +433,7 @@ try {
   await page.getByRole('button', { name: /^PLAYBACK-1 未刮削/ }).click()
   await page.getByRole('button', { name: '恢复展开', exact: true }).click()
   await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-expanded')
-  await page.getByRole('button', { name: '停止播放', exact: true }).click()
+  await clickChrome('停止播放', true)
   await waitForState(page, state => state === null, 'history explicit stop')
   await page.waitForFunction(() => !window.history.state?.avOverlay)
   assert.equal(await page.evaluate(() => window.location.hash), detailRoute)
@@ -345,7 +446,7 @@ try {
   const errorChecks = { controlledMessage: failed.error, retriedSameResource: true, nativeReleased: true }
   report = { status: 'partial acceptance passed', directory, initial, paused, adjustedSubtitles, subtitleClearance, hiddenControls, resumeChecks, errorChecks, focusChecks, historyChecks,
     platform: `${process.platform}/${process.arch}`,
-    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', 'fullscreen subtitle/control separation', 'auto-hide restores native viewport', 'default-off progress file absent', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus and detail trigger restoration', 'real browser history closes options/fullscreen/expanded before page back', 'explicit stop consumes viewing marker'],
+    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', fullscreenState.rendererFullscreenControls ? 'fullscreen video size stays fixed behind chrome and settings' : 'fullscreen subtitle/control separation', fullscreenState.rendererFullscreenControls ? 'auto-hide reveals the full frame without resizing' : 'auto-hide restores native viewport', 'default-off progress file absent', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus and detail trigger restoration', 'real browser history closes options/fullscreen/expanded before page back', 'explicit stop consumes viewing marker'],
     pending: ['native screen/mini-video frame inspection', 'fullscreen native control interaction', 'remote source', 'full feature/packaging acceptance'], errors }
   assert.deepEqual(errors, [])
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))
@@ -388,7 +489,7 @@ try {
     await new Promise(resolve => application.on('close', resolve))
     if (observation) clearInterval(observation)
   } else {
-    await page.getByRole('button', { name: '停止播放', exact: true }).click()
+    await clickChrome('停止播放', true)
     await waitForState(page, state => state === null, 'stop')
     assert.equal(await page.locator('[data-playback-session]').count(), 0)
     console.log(`${process.platform} partial application playback acceptance passed`)

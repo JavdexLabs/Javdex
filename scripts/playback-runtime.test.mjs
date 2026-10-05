@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { inspectLinuxPlaybackBinary, inspectMacPlaybackBinary, inspectWindowsPlaybackBinary, stagePackagedPlaybackRuntime, validatePackagedPlaybackRuntime, validatePlaybackRuntime, verifyPackagedPlaybackRuntime } from './playback-runtime.mjs'
+import { stageWindowsDevelopmentLibraries } from './playback-native-build.mjs'
 
 const target = { platformName: 'darwin', archName: process.arch === 'x64' ? 'x64' : 'arm64', electronVersion: '43.4.1' }
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -200,6 +201,33 @@ function peFixture(t, { machine = 0x8664, imports = ['kernel32.dll', 'libmpv-2.d
   const check = () => { writeFileSync(file, data); return inspectWindowsPlaybackBinary(file, input) }
   return { directory, file, data, input, check }
 }
+
+test('Windows development stages the transitive DLL closure and rejects missing/wrong-architecture libraries before copying', t => {
+  const f = peFixture(t)
+  writeFileSync(f.file, f.data)
+  const libraryDirectory = path.join(f.directory, 'prefix', 'bin')
+  mkdirSync(libraryDirectory, { recursive: true })
+  const mpv = peFixture(t, { imports: ['kernel32.dll', 'helper.dll', 'opengl32.dll'], delayed: [] })
+  const helper = peFixture(t, { imports: ['kernel32.dll'], delayed: [] })
+  writeFileSync(path.join(libraryDirectory, 'libmpv-2.dll'), mpv.data)
+  // A prefix may contain Mesa OpenGL or unrelated DLLs. Neither belongs here.
+  writeFileSync(path.join(libraryDirectory, 'opengl32.dll'), 'must not shadow system OpenGL')
+  writeFileSync(path.join(libraryDirectory, 'unused.dll'), 'unrelated library')
+  const input = { output: f.directory, libraryDirectory, arch: 'x64' }
+  assert.throws(() => stageWindowsDevelopmentLibraries(input), /helper.dll/)
+  assert.equal(readFileSync(path.join(f.directory, 'libmpv-2.dll'), 'utf8'), 'parser-only fixture')
+  const wrong = peFixture(t, { machine: 0xaa64, imports: ['kernel32.dll'], delayed: [] })
+  writeFileSync(path.join(libraryDirectory, 'helper.dll'), wrong.data)
+  assert.throws(() => stageWindowsDevelopmentLibraries(input), /architecture/)
+  writeFileSync(path.join(libraryDirectory, 'helper.dll'), helper.data)
+  const copied = stageWindowsDevelopmentLibraries(input)
+  assert.deepEqual(copied.map(file => path.basename(file)).sort(), ['helper.dll', 'libmpv-2.dll'])
+  assert.deepEqual(readFileSync(path.join(f.directory, 'libmpv-2.dll')), mpv.data)
+  assert.deepEqual(readFileSync(path.join(f.directory, 'helper.dll')), helper.data)
+  assert.equal(existsSync(path.join(f.directory, 'opengl32.dll')), false)
+  assert.equal(existsSync(path.join(f.directory, 'unused.dll')), false)
+  assert.deepEqual(stageWindowsDevelopmentLibraries(input), copied, 'repeated staging remains usable')
+})
 
 test('PE checks x64/ARM64 imports and the Electron delayed host without executing DLLs', t => {
   for (const machine of [0x8664, 0xaa64]) {

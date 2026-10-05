@@ -30,5 +30,6 @@ export const playbackViewportSchema = z.object({
   sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   presentation,
   rect: z.object({ x: coordinate, y: coordinate, width: coordinate, height: coordinate }).strict(),
-  visible: z.boolean()
+  visible: z.boolean(),
+  occlusions: z.array(z.object({ x: coordinate, y: coordinate, width: coordinate, height: coordinate }).strict()).max(32).optional()
 }).strict()

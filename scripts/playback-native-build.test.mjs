@@ -23,7 +23,7 @@ test('macOS build executes shared-core and navigation regressions before its Coc
 test('Windows command plan selects installed inputs and CMake, without macOS flags', () => {
   for (const [arch, cmakeArch] of [['x64', 'x64'], ['arm64', 'ARM64']]) {
     const steps = playbackNativeBuild({ ...input, platform: 'win32', arch })
-    assert.deepEqual(steps.map(step => step.command), ['cmake', 'cmake', path.join(input.output, 'mpv-core-test.exe')])
+    assert.deepEqual(steps.map(step => step.command), ['cmake', 'cmake', path.join(input.output, 'mpv-core-test.exe'), path.join(input.output, 'slider-feedback-test.exe')])
     assert.equal(steps[0].args[steps[0].args.indexOf('-A') + 1], cmakeArch)
     assert.ok(steps[0].args.includes(`-DELECTRON_NODE_LIBRARY=${input.nodeLibrary}`))
     assert.ok(steps[0].args.includes(`-DELECTRON_DELAY_LOAD_HOOK=${input.delayHook}`))

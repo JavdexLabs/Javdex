@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { hasPlaybackOcclusion } from './playbackOcclusion'
+import { hasPlaybackOcclusion, playbackOcclusions } from './playbackOcclusion'
 
 const video = { left: 0, top: 0, right: 100, bottom: 100 }
 function surface(bounds: typeof video, visible = true) {
@@ -27,4 +27,9 @@ test('only positive-area intersections with visible occluders hide native video'
   assert.equal(hasPlaybackOcclusion(video, [surface(video, false)]), false)
   assert.equal(hasPlaybackOcclusion(video, [surface(video, false), surface(video)]), true)
   assert.equal(hasPlaybackOcclusion({ ...video, right: 0 }, [surface(video)]), false)
+})
+test('popup cutouts contain only their intersection with the video', () => {
+  assert.deepEqual(playbackOcclusions(video, [surface({ left: 80, top: 70, right: 160, bottom: 120 }),
+    surface({ left: -20, top: -30, right: 20, bottom: 10 }), surface(video, false)]),
+  [{ x: 80, y: 70, width: 20, height: 30 }, { x: 0, y: 0, width: 20, height: 10 }])
 })

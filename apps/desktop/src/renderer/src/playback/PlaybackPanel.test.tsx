@@ -6,6 +6,7 @@ import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewpor
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import type { ElectronApi } from '../../../preload/index'
 import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
+import { interactionLayers, type InteractionLayer } from '../interaction/interactionLayers'
 
 const target: PlaybackTarget = { libraryId: 1, videoId: 2, resourceId: 3 }
 const snapshot = (sessionId = 'first'): PlaybackSnapshot => ({
@@ -68,7 +69,7 @@ function button(label: string) {
   assert.ok(result, label)
   return result
 }
-async function options(): Promise<void> { await act(async () => button('播放选项').props.onClick()) }
+async function options(): Promise<void> { await act(async () => button('播放设置').props.onClick()) }
 function source() { return renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '播放来源')! }
 afterEach(async () => {
   await act(async () => renderer?.unmount())
@@ -86,6 +87,47 @@ test('options offer only files belonging to the playing video and preserve priva
   assert.equal(opened.length, 0)
   await act(async () => source().props.onChange({ target: { value: '4' } }))
   assert.deepEqual(opened, [{ target: { ...target, resourceId: 4 }, privateSession: true }])
+})
+
+test('released seek thumb ignores stale clocks until native seek acknowledgement, then follows playback', async () => {
+  await mount()
+  const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+  await act(async () => slider().props.onChange({ target: { value: '60' } }))
+  await act(async () => { slider().props.onPointerUp(); slider().props.onBlur() })
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'seek', seconds: 60 } }])
+  assert.equal(slider().props.value, 60, 'accepting the command cannot reset the thumb')
+  await act(async () => changed({ ...snapshot(), position: 2 }))
+  assert.equal(slider().props.value, 60, 'the old native clock may arrive after pointer-up')
+  await act(async () => changed({ ...snapshot(), seeking: true, position: 3 }))
+  assert.equal(slider().props.value, 60)
+  await act(async () => changed({ ...snapshot(), seeking: true, position: 60 }))
+  assert.equal(slider().props.value, 60)
+  await act(async () => changed({ ...snapshot(), seeking: false, position: 60.25 }))
+  assert.equal(slider().props.value, 60.25)
+  await act(async () => changed({ ...snapshot(), position: 61 }))
+  assert.equal(slider().props.value, 61)
+})
+
+test('replacement seeks, drag cancellation and session replacement release only their own preview', async () => {
+  await mount()
+  const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+  await act(async () => slider().props.onChange({ target: { value: '60' } }))
+  await act(async () => slider().props.onKeyUp())
+  await act(async () => slider().props.onChange({ target: { value: '90' } }))
+  await act(async () => changed({ ...snapshot(), position: 60 }))
+  assert.equal(slider().props.value, 90, 'acknowledging the previous seek cannot overwrite a new drag')
+  await act(async () => slider().props.onPointerUp())
+  await act(async () => changed({ ...snapshot(), position: 61 }))
+  assert.equal(slider().props.value, 90)
+  await act(async () => changed({ ...snapshot(), position: 90.1 }))
+  assert.equal(slider().props.value, 90.1)
+  await act(async () => slider().props.onChange({ target: { value: '40' } }))
+  await act(async () => slider().props.onPointerCancel())
+  assert.equal(slider().props.value, 90.1)
+  await act(async () => slider().props.onChange({ target: { value: '80' } }))
+  await act(async () => slider().props.onPointerUp())
+  await act(async () => changed(snapshot('replacement')))
+  assert.equal(slider().props.value, 1)
 })
 
 test('source selection synchronously excludes duplicate opens while its request is pending', async () => {
@@ -196,4 +238,153 @@ test('viewport polling hides only intersecting visible toast surfaces and restor
   assert.ok(viewports.every(value => value.sessionId === 'first' && value.presentation === 'expanded'))
   assert.deepEqual(controls, [], 'visual occlusion neither pauses nor stops the decoder')
   assert.deepEqual(opened, [], 'restoring video does not reopen the source')
+})
+
+test('owned dropdowns keep video visible unless their surface overlaps; nested modals still hide it', async context => {
+  let poll = (): void => {}
+  context.mock.method(window, 'setInterval', (callback: () => void) => { poll = callback; return 1 })
+  context.mock.method(window, 'clearInterval', () => {})
+  let playerLayer: InteractionLayer | undefined
+  const register = interactionLayers.register.bind(interactionLayers)
+  context.mock.method(interactionLayers, 'register', (layer: InteractionLayer) => {
+    if (layer.modal && !layer.parentId) playerLayer = layer
+    return register(layer)
+  })
+  const video = { x: 10, y: 20, width: 100, height: 80, left: 10, top: 20, right: 110, bottom: 100 }
+  let menuBounds = { left: 200, top: 20, right: 300, bottom: 60 }
+  const menu = { getBoundingClientRect: () => menuBounds, checkVisibility: () => true }
+  let surfaces: typeof menu[] = []
+  context.mock.method(document, 'querySelectorAll', () => surfaces)
+  await mount({ createNodeMock: element => element.type === 'button' && String(element.props['aria-label']).startsWith('视频画面')
+    ? { getBoundingClientRect: () => video, closest: () => null } : null })
+  assert.ok(playerLayer)
+  const removeSelect = register({ id: 'playback-dropdown', parentId: playerLayer.id, root: () => null })
+  context.after(removeSelect)
+  surfaces = [menu]
+  await act(async () => poll())
+  assert.equal(interactionLayers.isTop(playerLayer.id), false, 'dropdown owns Escape and keyboard input')
+  assert.deepEqual(viewports.map(value => value.visible), [true], 'a dropdown in the option rail does not black out video')
+  menuBounds = { left: 109, top: 20, right: 200, bottom: 60 }
+  await act(async () => poll())
+  assert.deepEqual(viewports.map(value => value.visible), [true, false])
+  menuBounds = { left: 200, top: 20, right: 300, bottom: 60 }
+  await act(async () => poll())
+  const removeModal = register({ id: 'playback-confirmation', parentId: playerLayer.id, modal: true, root: () => null })
+  context.after(removeModal)
+  await act(async () => poll())
+  removeModal()
+  removeSelect()
+  surfaces = []
+  await act(async () => poll())
+  assert.deepEqual(viewports.map(value => value.visible), [true, false, true, false, true])
+  assert.deepEqual(controls, [], 'opening and closing menus does not pause or stop the decoder')
+  assert.deepEqual(opened, [], 'the same playback source remains open')
+})
+
+test('Windows fullscreen uses the classic toolbar and the same three settings tabs', async () => {
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation: 'fullscreen', rendererFullscreenControls: true, interactionSequence: 1 }))
+  assert.ok(button('退出全屏'))
+  assert.ok(renderer!.root.findAllByType(Select).some(node => node.props['aria-label'] === '快捷音轨'))
+  await options()
+  assert.ok(source())
+  const panels = () => renderer!.root.findAll(node => node.props.role === 'tabpanel')
+  assert.equal(panels().filter(node => !node.props.hidden).length, 1)
+  await act(async () => button('字幕').props.onClick())
+  assert.equal(panels().find(node => String(node.props.id).endsWith('-subtitle'))!.props.hidden, false)
+  await act(async () => button('信息').props.onClick())
+  assert.equal(panels().find(node => String(node.props.id).endsWith('-info'))!.props.hidden, false)
+  assert.deepEqual(controls, [], 'opening settings never replaces the native decoder or changes pause intent')
+  await act(async () => button('关闭播放设置').props.onClick())
+  assert.equal(button('播放设置').props['aria-expanded'], false)
+})
+
+test('fullscreen volume previews survive old snapshots and resume following confirmed volume', async () => {
+  await mount()
+  const current = { ...snapshot(), presentation: 'fullscreen' as const, rendererFullscreenControls: true }
+  await act(async () => changed(current))
+  const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '音量')!
+  await act(async () => slider().props.onChange({ target: { value: '75' } }))
+  assert.equal(slider().props.value, 75)
+  await act(async () => changed({ ...current, volume: 51 }))
+  assert.equal(slider().props.value, 75)
+  await act(async () => changed({ ...current, volume: 75 }))
+  await act(async () => changed({ ...current, volume: 76 }))
+  assert.equal(slider().props.value, 76)
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'volume', value: 75 } }])
+})
+test('a docked resume decision can always expand back to its resume controls', async () => {
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation: 'docked', paused: true, phase: 'paused', resumePosition: 42 }))
+  assert.equal(button('恢复展开').props.disabled, false)
+  await act(async () => button('恢复展开').props.onClick())
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'expanded' } }])
+})
+
+test('fullscreen mouse hover reveals only its own edge, including while paused', async context => {
+  let hide: (() => void) | undefined
+  context.mock.method(window, 'setTimeout', (callback: () => void, ms: number) => { if (ms === 3000) hide = callback; return 1 })
+  context.mock.method(window, 'clearTimeout', () => {})
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+  await mount()
+  const current = { ...snapshot(), presentation: 'fullscreen' as const, rendererFullscreenControls: true, fullscreenPointerY: 400 }
+  const panel = () => renderer!.root.find(node => node.props['data-playback-session'] === 'first')
+  await act(async () => changed(current))
+  assert.equal(panel().props['data-controls-visible'], false)
+  assert.equal(panel().props['data-header-visible'], false)
+  await act(async () => changed({ ...current, fullscreenPointerY: 450, interactionSequence: 2 }))
+  assert.equal(panel().props['data-controls-visible'], false, 'native motion in the middle cannot summon chrome')
+  await act(async () => changed({ ...current, fullscreenPointerY: 8 }))
+  assert.equal(panel().props['data-header-visible'], true)
+  assert.equal(panel().props['data-controls-visible'], false)
+  await act(async () => changed({ ...current, fullscreenPointerY: 780 }))
+  assert.equal(panel().props['data-controls-visible'], true)
+  assert.equal(panel().props['data-header-visible'], false)
+  await act(async () => panel().props.onPointerMove({ clientY: 400 }))
+  assert.equal(panel().props['data-controls-visible'], false, 'HTML motion obeys the same regions')
+  await act(async () => changed({ ...current, paused: true, phase: 'paused' }))
+  assert.equal(panel().props['data-controls-visible'], false, 'pause does not bypass hover activation')
+  await act(async () => changed({ ...current, paused: true, phase: 'paused', fullscreenPointerY: 780 }))
+  assert.equal(panel().props['data-controls-visible'], true)
+  await act(async () => changed(current))
+  await act(async () => { panel().props.onKeyDownCapture({ key: 'Tab' }); panel().props.onFocusCapture({ target: {} }) })
+  await act(async () => hide!())
+  assert.equal(panel().props['data-controls-visible'], true, 'keyboard focus keeps chrome reachable')
+  await act(async () => changed({ ...current, nativeVideoFocused: true }))
+  await act(async () => hide!())
+  assert.equal(panel().props['data-controls-visible'], false, 'native focus overrides stale HTML focus')
+  await act(async () => changed(current))
+  await act(async () => panel().props.onPointerDownCapture())
+  await act(async () => panel().props.onFocusCapture({ target: { closest: () => ({}) } }))
+  assert.equal(panel().props['data-controls-visible'], true, 'an owned popup stays reachable')
+  await act(async () => changed(current))
+  await act(async () => panel().props.onPointerDownCapture())
+  await options()
+  assert.equal(panel().props['data-controls-visible'], true, 'settings keep their toolbar entry visible')
+  assert.equal(panel().props['data-header-visible'], true, 'settings fill the reserved title bar region')
+  await act(async () => button('关闭播放设置').props.onClick())
+  assert.equal(panel().props['data-header-visible'], false, 'closing settings restores header hover activation')
+  assert.equal(panel().props['data-controls-visible'], false, 'closing settings restores toolbar hover activation')
+})
+
+test('Windows popup clipping keeps the remaining video visible and restores its complete region', async context => {
+  let poll = (): void => {}
+  context.mock.method(window, 'setInterval', (callback: () => void) => { poll = callback; return 1 })
+  context.mock.method(window, 'clearInterval', () => {})
+  const video = { x: 10, y: 20, width: 100, height: 80, left: 10, top: 20, right: 110, bottom: 100 }
+  const popup = { getBoundingClientRect: () => ({ left: 80, top: 70, right: 160, bottom: 140 }), checkVisibility: () => true }
+  let surfaces: typeof popup[] = []
+  context.mock.method(document, 'querySelectorAll', () => surfaces)
+  await mount({ createNodeMock: element => element.type === 'button' && String(element.props['aria-label']).startsWith('视频画面')
+    ? { getBoundingClientRect: () => video, closest: () => null } : null })
+  await act(async () => changed({ ...snapshot(), rendererFullscreenControls: true }))
+  await act(async () => poll())
+  surfaces = [popup]
+  await act(async () => poll())
+  assert.equal(viewports.at(-1)!.visible, true)
+  assert.deepEqual(viewports.at(-1)!.occlusions, [{ x: 80, y: 70, width: 30, height: 30 }])
+  surfaces = []
+  await act(async () => poll())
+  assert.deepEqual(viewports.at(-1)!.occlusions, [])
+  assert.deepEqual(controls, [])
 })

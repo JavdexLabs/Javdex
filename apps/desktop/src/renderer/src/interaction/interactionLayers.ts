@@ -38,6 +38,7 @@ export function createInteractionLayers() {
       return () => { const index = layers.indexOf(layer); if (index >= 0) layers.splice(index, 1) }
     },
     isTop(id: string): boolean { return top()?.id === id },
+    isActiveModal(id: string): boolean { return modal()?.id === id },
     contains(id: string, target: Node): boolean {
       const owner = layers.find(layer => layer.id === id)
       return Boolean(owner && layers.some(layer => (layer === owner || isDescendant(layer, owner))

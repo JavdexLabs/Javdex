@@ -253,6 +253,7 @@ export default function SelectControl({
               id={listboxId}
               className={styles.menu}
               data-select-control-menu="true"
+              data-native-playback-occluder="true"
               data-placement={menuPlacement}
               role="listbox"
               tabIndex={-1}

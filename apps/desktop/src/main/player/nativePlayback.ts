@@ -3,6 +3,10 @@ import type { PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback
 /** Private seam: renderer cannot see this interface or call native commands. */
 export interface NativePlaybackState {
   alive: boolean
+  rendererFullscreenControls?: boolean
+  nativeVideoFocused?: boolean
+  interactionSequence?: number
+  fullscreenPointerY?: number
   nativeFrames?: number
   /** New-frame swaps submitted while the surface is visible; not screen capture proof. */
   presentedFrames?: number
@@ -37,7 +41,8 @@ export interface NativePlayback {
   load(locator: string, options?: { paused: boolean }): void
   command(command: PlaybackControl): void
   read(): NativePlaybackState
-  viewport(rect: { x: number; y: number; width: number; height: number }, visible: boolean, state: PlaybackSnapshot): void
+  viewport(rect: { x: number; y: number; width: number; height: number }, visible: boolean, state: PlaybackSnapshot,
+    occlusions?: Array<{ x: number; y: number; width: number; height: number }>): void
   render(): void
   addSubtitle(file: string): void
   destroy(): void

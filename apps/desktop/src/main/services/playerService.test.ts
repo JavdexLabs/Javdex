@@ -1,7 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import type { VideoResource } from '@shared/videoTypes'
 import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
+import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../desktop/thisComputerSettingsStore'
 import { createPlayerService } from './playerService'
 
 function resource(overrides: Partial<VideoResource> = {}): VideoResource {
@@ -27,7 +31,10 @@ function resource(overrides: Partial<VideoResource> = {}): VideoResource {
 
 describe('PlayerService', () => {
   for (const mode of ['local', 'remote'] as const) {
-    it(`routes ${mode} primary and explicit files to the native owner without launching external programs or marking started`, async () => {
+    it(`uses fresh default settings to route ${mode} primary and explicit files to the native owner without launching external programs or marking started`, async t => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-default-player-'))
+      t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+      const settings = createThisComputerSettingsStore(thisComputerSettingsPath(directory))
       const file = resource({ kind: 'local', locator: '/catalog/movie.mp4' })
       const targets: unknown[] = []
       let externalStarts = 0
@@ -38,7 +45,7 @@ describe('PlayerService', () => {
         catalog: mode === 'remote' ? { mode, queries: {
           getVideo: async () => ({ resources: [file] }), getResource: async () => file
         }, assets: { grantPlayback: async () => { throw new Error('Only the native owner may grant here') } } } as never : undefined,
-        readPlayerPreference: async () => 'builtin',
+        readPlayerPreference: async () => (await settings.read()).playerPreference,
         openBuiltin: async target => { targets.push(target); return { ok: true } },
         fileExists: () => { throw new Error('Do not probe a native/remote locator through the external path') },
         openPath: async () => { throw new Error('Unexpected external player') },

@@ -9,7 +9,7 @@ export const DEFAULT_THIS_COMPUTER_SETTINGS: ThisComputerSettings = {
   closeToTray: false,
   theme: 'graphite',
   playerPath: null,
-  playerPreference: 'external',
+  playerPreference: 'builtin',
   playbackVolume: 50,
   resumePlayback: false,
   proxyUrl: '',
@@ -31,7 +31,7 @@ function normalized(value: Partial<ThisComputerSettings>): ThisComputerSettings 
     theme: typeof value.theme === 'string' && value.theme.trim() ? value.theme.trim() : 'graphite',
     playerPath:
       typeof value.playerPath === 'string' && value.playerPath.trim() ? value.playerPath.trim() : null,
-    // Keep existing installations on their external player until they explicitly opt in.
+    // Legacy settings without a preference retain external playback; only fresh defaults use builtin.
     playerPreference: value.playerPreference === 'builtin' ? 'builtin' : 'external',
     playbackVolume: typeof value.playbackVolume === 'number' && Number.isFinite(value.playbackVolume)
       ? Math.max(0, Math.min(100, value.playbackVolume)) : 50,

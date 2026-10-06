@@ -48,7 +48,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
     remoteBaseUrl: savedSettings?.remoteBaseUrl ?? ''
   }
   const form = useSettingsDraft(saved)
-  const playerForm = useSettingsDraft({ playerPath: savedSettings?.playerPath ?? '', playerPreference: savedSettings?.playerPreference ?? 'external', resumePlayback: savedSettings?.resumePlayback ?? false })
+  const playerForm = useSettingsDraft({ playerPath: savedSettings?.playerPath ?? '', playerPreference: savedSettings?.playerPreference ?? 'builtin', resumePlayback: savedSettings?.resumePlayback ?? false })
   const [clearProgress, setClearProgress] = useState(false)
   const [savingPlayer, setSavingPlayer] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -162,7 +162,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
     try {
       const result = await api.thisComputer.update({ playerPath: submitted.playerPath.trim() || null, playerPreference: submitted.playerPreference, resumePlayback: submitted.resumePlayback })
       setSavedSettings(result.settings)
-      playerForm.accept({ playerPath: result.settings.playerPath ?? '', playerPreference: result.settings.playerPreference ?? 'external', resumePlayback: result.settings.resumePlayback ?? false }, submitted)
+      playerForm.accept({ playerPath: result.settings.playerPath ?? '', playerPreference: result.settings.playerPreference ?? 'builtin', resumePlayback: result.settings.resumePlayback ?? false }, submitted)
       setPlayerDetectionHint(null)
       return true
     } catch (reason) {
@@ -367,8 +367,8 @@ export default function CatalogConnectionPanel(): JSX.Element {
               <SelectControl aria-label="默认播放方式" value={playerForm.draft.playerPreference}
                 disabled={savingPlayer || saving || !savedSettings}
                 onChange={event => playerForm.setDraft(current => ({ ...current, playerPreference: event.target.value as 'builtin' | 'external' }))}>
+                <option value="builtin">内置播放器</option>
                 <option value="external">外部播放器</option>
-                <option value="builtin">内置播放器（验证中）</option>
               </SelectControl>
             </AppFormField>
             <div className={styles.playerInputRow}>

@@ -22,7 +22,7 @@ it('detects a player into the draft only and retains the chosen path on failed d
   let result: DefaultPlayerDetectionResult = { status: 'found', path: 'D:\\播放器\\Player.exe', extension: '.mp4' }
   let writes = 0
   const patches: ThisComputerSettingsPatch[] = []
-  const settings = { mode: 'remote', remoteBaseUrl: 'http://localhost:8096', playerPath: null } as ThisComputerSettings
+  const settings = { mode: 'remote', remoteBaseUrl: 'http://localhost:8096', playerPath: null, playerPreference: 'external' } as ThisComputerSettings
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
     addEventListener() {}, removeEventListener() {}, api: { thisComputer: {
       get: async () => settings,
@@ -78,6 +78,65 @@ function textOf(node: TestRenderer.ReactTestInstance | string): string {
     ? node
     : node.children.map((child) => textOf(child as TestRenderer.ReactTestInstance)).join('')
 }
+
+it('shows built-in playback as the default and saves an external selection only after confirmation', async () => {
+  const previousWindow = globalThis.window
+  let settings: ThisComputerSettings = {
+    mode: 'local', remoteBaseUrl: null, closeToTray: false, theme: 'graphite',
+    playerPath: '/Applications/Player.app', playerPreference: 'builtin',
+    playbackVolume: 50, resumePlayback: false,
+    proxyUrl: '', proxyUrlEnabled: false, llmProxyUrl: '', llmProxyUrlEnabled: false
+  }
+  let resolveSettings: (settings: ThisComputerSettings) => void = () => {}
+  const loading = new Promise<ThisComputerSettings>(resolve => { resolveSettings = resolve })
+  const patches: ThisComputerSettingsPatch[] = []
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    addEventListener() {}, removeEventListener() {}, api: { thisComputer: {
+      get: async () => loading,
+      update: async (patch: ThisComputerSettingsPatch) => {
+        patches.push(patch)
+        settings = { ...settings, ...patch }
+        return { settings, restartRequired: false }
+      }
+    } }
+  } })
+  let tree: TestRenderer.ReactTestRenderer | undefined
+  let router: ReturnType<typeof createMemoryRouter> | undefined
+  try {
+    const { default: Panel } = await import('./CatalogConnectionPanel')
+    const { api } = await import('../../api')
+    const { default: SelectControl } = await import('../SelectControl')
+    api.thisComputer = window.api.thisComputer
+    router = createMemoryRouter([{ path: '*', element: <DesktopSessionContext.Provider value={{
+      session: { ...EMPTY_DESKTOP_SESSION, state: 'available', mode: 'local' },
+      capabilities: {} as never, catalogReadsEnabled: true,
+      reconnect: async () => {}, claimWriter: async () => { throw new Error('unused') }
+    }}><SettingsLeaveGuard><Panel /></SettingsLeaveGuard></DesktopSessionContext.Provider> }])
+    await act(async () => { tree = TestRenderer.create(<RouterProvider router={router!} />) })
+    const preference = () => tree!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '默认播放方式')!
+    assert.equal(preference().props.value, 'builtin')
+    assert.equal(preference().props.disabled, true, 'loading settings cannot overwrite a saved preference')
+    await act(async () => { resolveSettings(settings) })
+    assert.equal(preference().props.value, 'builtin')
+    assert.equal(preference().props.disabled, false)
+    assert.equal(textOf(preference()), '内置播放器')
+    assert.match(textOf(tree!.root), /内置播放支持本机\/远程媒体库的影片文件/)
+    assert.equal(patches.length, 0, 'loading the default does not save settings')
+    act(() => preference().props.onChange({ target: { value: 'external' } }))
+    assert.equal(settings.playerPreference, 'builtin', 'selecting external is still a draft')
+    assert.equal(patches.length, 0)
+    await act(async () => { tree!.root.findAllByType('button').find(node => textOf(node) === '保存')!.props.onClick() })
+    assert.deepEqual(patches, [{ playerPath: '/Applications/Player.app', playerPreference: 'external', resumePlayback: false }])
+    assert.equal(preference().props.value, 'external')
+    assert.equal(textOf(preference()), '外部播放器')
+    assert.equal(settings.playerPath, '/Applications/Player.app')
+    assert.doesNotMatch(textOf(tree!.root), /有未保存的更改/)
+  } finally {
+    act(() => tree?.unmount())
+    router?.dispose()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
 
 it('shows both actual versions inside connection details, including mismatched and unknown servers', async () => {
   const previousWindow = globalThis.window

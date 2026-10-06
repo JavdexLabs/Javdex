@@ -49,8 +49,9 @@ try {
   page.on('pageerror', error => errors.push(error.message))
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   const target = JSON.parse(fs.readFileSync(path.join(directory, 'targets.json'), 'utf8'))[0]
-  await page.evaluate(() => window.api.thisComputer.update({ playerPreference: 'builtin' }))
-  assert.equal(await page.evaluate(async () => (await window.api.thisComputer.get()).playerPreference), 'builtin')
+  const defaults = await page.evaluate(() => window.api.thisComputer.get())
+  assert.equal(defaults.playerPreference, 'builtin', 'fresh installations use built-in playback without opting in')
+  assert.equal(defaults.resumePlayback, false, 'switching the default player does not enable resume recording')
   const result = await page.evaluate(target => window.api.player.play(target.libraryId, target.videoId), target)
   assert.equal(result.ok, true, JSON.stringify(result))
   const initial = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5, 'video did not start')

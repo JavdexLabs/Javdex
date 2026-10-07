@@ -23,6 +23,7 @@ import {
 } from '@library/assetStoragePaths'
 import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
+import { getLocalModels } from '../services/localModels/desktopLocalModels'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
@@ -287,6 +288,27 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
   appCommandAdapter.register(IPC.LLM_TRANSLATE_TO_CHINESE, async (text): Promise<string> => {
     if (typeof text !== 'string') throw new Error('无效的翻译内容')
     return translateTextToChinese(text)
+  })
+  appCommandAdapter.register(IPC.LOCAL_MODELS_SNAPSHOT, () => getLocalModels().snapshot())
+  appCommandAdapter.register(IPC.LOCAL_MODELS_COMMAND, async command => {
+    const models = getLocalModels(), window = ctx.getWindow()
+    if (command.action === 'download') await models.download(command.model)
+    else if (command.action === 'cancel-download') models.cancel()
+    else if (command.action === 'translation') await models.setTranslation(command.mode)
+    else if (command.action === 'delete') {
+      const options = { type: 'question' as const, title: '删除本地模型', message: '删除此本地模型？',
+        detail: '需要时可以重新下载，字幕缓存和影片资料会保留。', buttons: ['取消', '删除'], defaultId: 0, cancelId: 0 }
+      const result = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
+      if (result.response === 1) await models.remove(command.model)
+    } else if (command.action === 'export' || command.action === 'choose-location') {
+      const options = { title: command.action === 'export' ? '选择模型导出目录' : '选择本地模型保存位置', properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'> }
+      const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
+      if (!result.canceled && result.filePaths[0]) {
+        if (command.action === 'export') await models.exportModel(command.model, result.filePaths[0])
+        else await models.relocate(result.filePaths[0])
+      }
+    } else if (command.action === 'reset-location') await models.relocate((await models.snapshot()).defaultDirectory)
+    return models.snapshot()
   })
 
   appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<SettingsSnapshot> => {

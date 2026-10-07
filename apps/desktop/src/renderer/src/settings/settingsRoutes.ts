@@ -17,6 +17,7 @@ export type SettingsTab =
   | MediaLibrarySettingsTab
   | 'video'
   | 'providers'
+  | 'local'
   | 'theme'
   | 'assets'
   | 'proxy'
@@ -73,11 +74,12 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
   {
     id: 'models',
     label: 'AI 模型',
-    hint: 'LLM 供应商',
+    hint: '用途、提供商与本地模型',
     defaultTab: 'usage',
     tabs: [
       { id: 'usage', label: '用途与运行' },
       { id: 'providers', label: '提供商与模型' },
+      { id: 'local', label: '本地模型' },
       { id: 'advanced', label: '高级' }
     ]
   },

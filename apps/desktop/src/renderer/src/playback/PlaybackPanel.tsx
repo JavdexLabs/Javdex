@@ -16,6 +16,7 @@ import { createPlaybackHistory } from './playbackHistory'
 import { playbackTrackLabel } from './playbackTrackLabel'
 import { playbackOcclusions } from './playbackOcclusion'
 import styles from './PlaybackPanel.module.css'
+import AiSubtitleSettings from './AiSubtitleSettings'
 
 let viewportSequence = 0
 
@@ -365,6 +366,7 @@ export default function PlaybackPanel(): JSX.Element | null {
           </SelectControl></label>}
           </div>
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-subtitle`} aria-labelledby={`${settingsId}-subtitle-tab`} hidden={optionTab !== 'subtitle'}>
+          <AiSubtitleSettings playback={state} />
           <label>字幕{trackSelect('sub')}</label>
           <Button size="sm" onClick={() => void api.playback.subtitle(state.sessionId).catch(error => toast.show((error as Error).message, 'error'))}>选择本机外挂字幕</Button>
           <label>字幕字号<SelectControl aria-label="字幕字号" value={state.subtitleSize ?? ''}

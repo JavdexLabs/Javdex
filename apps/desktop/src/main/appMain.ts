@@ -41,6 +41,7 @@ import { videoMaintenanceService } from './services/videoMaintenanceService'
 import { videoLifecycleService } from './services/videoLifecycleService'
 import { videoQueryService } from './services/videoQueryService'
 import { disposeBuiltinPlayback, stopBuiltinPlayback } from './player/desktopPlayback'
+import { closeLocalModels } from './services/localModels/desktopLocalModels'
 
 let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
@@ -285,13 +286,15 @@ if (gotSingleInstanceLock) {
     event.preventDefault()
     if (shutdownInProgress) return
     shutdownInProgress = true
-    disposeBuiltinPlayback()
+    const playbackDisposal = disposeBuiltinPlayback()
     if (desktopRuntime?.mode === 'local') {
       automaticScanScheduler.stop()
       powerMonitor.off('resume', handleSystemResume)
     }
     let readerTerminationFailed = false
     void Promise.allSettled([
+      playbackDisposal,
+      closeLocalModels(),
       scanCoordinator.stopAndDrain(),
       catalogReadService.dispose().catch((error: unknown) => {
         readerTerminationFailed = true

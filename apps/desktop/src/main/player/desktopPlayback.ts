@@ -14,15 +14,23 @@ import { createPlaybackVolume } from './playbackVolume'
 import { createPlaybackResumeStore } from './playbackResumeStore'
 import { PlaybackFailure, playbackFailure } from './playbackFailure'
 import { navigateWindowHistory } from '../desktop/windowNavigation'
+import fs from 'node:fs/promises'
+import { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
+import { getLocalModels } from '../services/localModels/desktopLocalModels'
 
 let active: ReturnType<typeof createPlaybackSession> | null = null
-let dispose: (() => void) | null = null
+let dispose: (() => Promise<void>) | null = null
 export function pauseBuiltinPlayback(): void { active?.pause() }
 export function stopBuiltinPlayback(): void { active?.stop() }
-export function disposeBuiltinPlayback(): void { dispose?.(); dispose = null; active = null }
+export function disposeBuiltinPlayback(): Promise<void> {
+  const pending = dispose?.() ?? Promise.resolve()
+  dispose = null; active = null
+  return pending
+}
 
 export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore): (target: PlaybackTarget) => Promise<PlayResult> {
   const native = createLibmpvPlayback(getWindow)
+  const resolver = createPlaybackSourceResolver(backend)
   const volume = createPlaybackVolume(settings)
   let recordingEnabled = false
   const progress = createPlaybackResumeStore(path.join(app.getPath('userData'), 'playback-progress.json'), () => recordingEnabled)
@@ -54,7 +62,7 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     window.webContents.once('render-process-gone', onClosed)
   }
   const session = createPlaybackSession({
-    native, ...createPlaybackSourceResolver(backend),
+    native, ...resolver,
     readVolume: volume.read,
     volumeChanged: volume.remember,
     progress: {
@@ -98,11 +106,37 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     }
   })
   active = session
+  const aiSubtitles = createAiSubtitleController({
+    root: path.join(app.getPath('userData'), 'ai-subtitles'), native,
+    runtime: getLocalModels().subtitleRuntime(),
+    acquireRuntime: () => getLocalModels().acquire(['kotoba', 'qwen3']),
+    onRuntimeChanged: listener => getLocalModels().onChanged(listener),
+    playback: session.snapshot, source: session.aiSubtitleSource,
+    resolve: async source => {
+      await resolver.validate(source)
+      if (source.mode === 'local') return source
+      const renewed = await resolver.resolve(source.target)
+      if (renewed.identityKey !== source.identityKey || renewed.revision !== source.revision) throw new Error('影片资源已变化，请重新打开影片')
+      return renewed
+    },
+    changed: state => {
+      const window = getWindow()
+      if (window && !window.isDestroyed()) appEventAdapter.send(window.webContents, IPC.PLAYBACK_AI_SUBTITLE_CHANGED, state)
+    },
+    exportFile: async content => {
+      const window = getWindow()
+      if (!window || window.isDestroyed()) return
+      const selected = await dialog.showSaveDialog(window, { title: '导出 AI 字幕', defaultPath: 'AI-日中字幕.ass',
+        filters: [{ name: 'ASS 字幕', extensions: ['ass'] }, { name: 'SRT 字幕', extensions: ['srt'] }] })
+      if (!selected.canceled && selected.filePath) await fs.writeFile(selected.filePath, path.extname(selected.filePath).toLowerCase() === '.srt' ? content.srt : content.ass, 'utf8')
+    }
+  })
   const renderTimer = setInterval(() => {
     try { native.render() } catch { session.fail(new PlaybackFailure('video').message) }
   }, 16)
   const stateTimer = setInterval(() => {
     try { session.tick() } catch { session.fail(new PlaybackFailure('native').message) }
+    try { aiSubtitles.tick(session.snapshot()) } catch { /* Optional subtitles cannot fail the video decoder. */ }
   }, 200)
   renderTimer.unref(); stateTimer.unref()
   const onSuspend = (): void => { session.pause() }
@@ -118,9 +152,12 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     bound?.off('closed', onClosed); bound?.off('hide', onHidden); bound?.off('leave-full-screen', onFullscreenExit)
     bound?.off('minimize', onMinimized)
     session.stop()
+    return aiSubtitles.close()
   }
   appCommandAdapter.register(IPC.PLAYBACK_AVAILABILITY, builtinPlaybackAvailability)
   appCommandAdapter.register(IPC.PLAYBACK_SNAPSHOT, () => session.snapshot())
+  appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT, aiSubtitles.snapshot)
+  appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, aiSubtitles.command)
   const open = async (target: PlaybackTarget, options?: PlaybackOpenOptions): Promise<PlayResult> => {
     const availability = builtinPlaybackAvailability()
     if (!availability.available) return { ok: false, error: availability.reason ?? '内置播放不可用' }

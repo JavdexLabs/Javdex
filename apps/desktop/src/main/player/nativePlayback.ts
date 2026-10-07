@@ -45,5 +45,10 @@ export interface NativePlayback {
     occlusions?: Array<{ x: number; y: number; width: number; height: number }>): void
   render(): void
   addSubtitle(file: string): void
+  /** Main-owned generated files only; renderer cannot provide a path. */
+  updateGeneratedSubtitle?(file: string, select: boolean): void
+  removeGeneratedSubtitle?(file: string, restoreId: number | null): void
+  generatedSubtitleSelected?(file: string): boolean
+  selectedAudioStream?(): number | null
   destroy(): void
 }

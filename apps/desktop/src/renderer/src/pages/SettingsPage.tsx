@@ -69,6 +69,7 @@ import { useStorageSettingsController } from '../settings/useStorageSettingsCont
 const PluginDevPanel = lazy(() => import('../components/pluginDev/PluginDevPanel'))
 const AppearanceSettingsPanel = lazy(() => import('../components/settings/AppearanceSettingsPanel'))
 const ModelSettingsPanel = lazy(() => import('../components/settings/ModelSettingsPanel'))
+const LocalModelsPanel = lazy(() => import('../components/settings/LocalModelsPanel'))
 const BackupSettingsPanel = lazy(() => import('../components/settings/BackupSettingsPanel'))
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
@@ -891,7 +892,7 @@ export default function SettingsPage(): JSX.Element {
               )}
 
               {activeGroup.id === 'models' && (
-                <ModelSettingsPanel settings={settings} activeTab={activeTab === 'advanced' ? 'advanced' : activeTab === 'providers' ? 'providers' : 'usage'} />
+                activeTab === 'local' ? <LocalModelsPanel /> : <ModelSettingsPanel settings={settings} activeTab={activeTab === 'advanced' ? 'advanced' : activeTab === 'providers' ? 'providers' : 'usage'} />
               )}
 
               {activeGroup.id === 'network' && activeTab === 'proxy' && settings && (

@@ -10,7 +10,7 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
-import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackOpenOptionsSchema, playbackClearProgressSchema } from '../player/playbackSchemas'
+import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackOpenOptionsSchema, playbackClearProgressSchema, aiSubtitleCommandSchema } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
@@ -736,6 +736,12 @@ export const appIpcSchemas = {
     z.string().regex(/^[a-f0-9]{64}$/)
   ]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: noArgs,
+  [IPC.LOCAL_MODELS_SNAPSHOT]: noArgs,
+  [IPC.LOCAL_MODELS_COMMAND]: z.tuple([z.discriminatedUnion('action', [
+    z.object({ action: z.literal('translation'), mode: z.enum(['app-default', 'local']) }).strict(),
+    ...(['download', 'delete', 'export'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(['kotoba', 'qwen3']) }).strict()),
+    ...(['cancel-download', 'choose-location', 'reset-location'] as const).map(action => z.object({ action: z.literal(action) }).strict())
+  ])]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: z.tuple([modelManagementApply]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: z.tuple([nonEmptyText]),
@@ -973,6 +979,8 @@ export const appIpcSchemas = {
   [IPC.PLAYBACK_CONTROL]: z.tuple([playbackSessionIdSchema, playbackControlSchema]),
   [IPC.PLAYBACK_VIEWPORT]: z.tuple([playbackViewportSchema]),
   [IPC.PLAYBACK_SUBTITLE]: z.tuple([playbackSessionIdSchema]),
+  [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: z.tuple([]),
+  [IPC.PLAYBACK_AI_SUBTITLE_COMMAND]: z.tuple([playbackSessionIdSchema, aiSubtitleCommandSchema]),
   [IPC.PLAYBACK_CLEAR_PROGRESS]: z.tuple([playbackClearProgressSchema]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),

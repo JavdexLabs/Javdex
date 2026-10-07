@@ -195,6 +195,8 @@ export interface AppIpcContract {
     result: PendingLibraryPathCleanup
   }
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: { args: []; result: ModelManagementSnapshot }
+  [IPC.LOCAL_MODELS_SNAPSHOT]: { args: []; result: import('./desktop/localModels').LocalModelSnapshot }
+  [IPC.LOCAL_MODELS_COMMAND]: { args: [command: import('./desktop/localModels').LocalModelCommand]; result: import('./desktop/localModels').LocalModelSnapshot }
   [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: {
     args: [input: ModelManagementApplyInput]
     result: ModelManagementApplyResult
@@ -455,6 +457,8 @@ export interface AppIpcContract {
   [IPC.PLAYBACK_CONTROL]: { args: [sessionId: string, command: import('./desktop/playback').PlaybackControl]; result: void }
   [IPC.PLAYBACK_VIEWPORT]: { args: [viewport: import('./desktop/playback').PlaybackViewport]; result: void }
   [IPC.PLAYBACK_SUBTITLE]: { args: [sessionId: string]; result: void }
+  [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: { args: []; result: import('./desktop/aiSubtitles').AiSubtitleSnapshot }
+  [IPC.PLAYBACK_AI_SUBTITLE_COMMAND]: { args: [sessionId: string, command: import('./desktop/aiSubtitles').AiSubtitleCommand]; result: import('./desktop/aiSubtitles').AiSubtitleSnapshot }
   [IPC.PLAYBACK_CLEAR_PROGRESS]: { args: [input: import('./desktop/playback').PlaybackClearProgress]; result: void }
   [IPC.PLAYER_REVEAL]: {
     args: [libraryId: number, videoId: number]
@@ -477,6 +481,8 @@ export interface AppIpcContract {
 
 export interface AppIpcEventContract {
   [IPC.PLAYBACK_CHANGED]: import('./desktop/playback').PlaybackSnapshot | null
+  [IPC.PLAYBACK_AI_SUBTITLE_CHANGED]: import('./desktop/aiSubtitles').AiSubtitleSnapshot
+  [IPC.LOCAL_MODELS_CHANGED]: import('./desktop/localModels').LocalModelSnapshot
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState
   [IPC.SCAN_PROGRESS]: LibraryScanProgressEvent
   [IPC.SCAN_STATE_CHANGED]: LibraryScanEvent

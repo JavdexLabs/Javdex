@@ -1,0 +1,87 @@
+.root {
+  display: grid;
+  gap: var(--form-section-gap);
+}
+
+.card {
+  display: grid;
+  gap: var(--form-field-gap);
+  padding: var(--form-section-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: inherit;
+}
+
+.path {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.note {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.field {
+  display: grid;
+  gap: var(--form-label-gap);
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--form-label-gap);
+}
+
+.model {
+  display: grid;
+  gap: var(--form-label-gap);
+  padding-block: var(--form-label-gap);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.modelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--form-label-gap);
+  color: var(--text-secondary);
+}
+
+.modelName {
+  color: var(--text-primary);
+}
+
+.feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--form-label-gap);
+  min-height: var(--control-h-md);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+}
+
+.progress {
+  flex-basis: 100%;
+  width: 100%;
+  accent-color: var(--text-accent);
+}

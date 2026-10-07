@@ -1,6 +1,7 @@
 import type { ResolvedLlmModelRequestConfig } from './llmClient'
 import { modelManagement } from '../agent-platform/modelManagement'
 import { llmFetch } from '../utils/llmFetch'
+import { getLocalModels } from './localModels/desktopLocalModels'
 
 const TRANSLATE_TIMEOUT_MS = 60_000
 
@@ -37,6 +38,12 @@ export function normalizeTranslationOutput(text: string): string {
 export async function translateTextToChinese(text: string): Promise<string> {
   const trimmed = text.trim()
   if (!trimmed) throw new Error('没有可翻译的内容')
+  const local = getLocalModels()
+  if (await local.mode() === 'local') {
+    const output = normalizeTranslationOutput(await local.translateText(trimmed))
+    if (!output) throw new Error('本地模型未返回有效译文')
+    return output
+  }
 
   const config = await resolveDefaultTranslationConfig()
   const raw =

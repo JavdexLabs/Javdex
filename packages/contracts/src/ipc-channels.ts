@@ -39,6 +39,9 @@ export const IPC = {
   SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW: 'settings:libraryPathRemovePreview',
   SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM: 'settings:libraryPathRemoveConfirm',
   SETTINGS_MODEL_MANAGEMENT_GET: 'settings:modelManagementGet',
+  LOCAL_MODELS_SNAPSHOT: 'localModels:snapshot',
+  LOCAL_MODELS_COMMAND: 'localModels:command',
+  LOCAL_MODELS_CHANGED: 'localModels:changed',
   SETTINGS_MODEL_MANAGEMENT_APPLY: 'settings:modelManagementApply',
   SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS: 'settings:modelManagementDiscoverModels',
   SETTINGS_MODEL_MANAGEMENT_TEST_MODEL: 'settings:modelManagementTestModel',
@@ -336,6 +339,9 @@ export const IPC = {
   PLAYBACK_SUBTITLE: 'playback:subtitle',
   PLAYBACK_CLEAR_PROGRESS: 'playback:clear-progress',
   PLAYBACK_CHANGED: 'playback:changed',
+  PLAYBACK_AI_SUBTITLE_SNAPSHOT: 'playback:ai-subtitle-snapshot',
+  PLAYBACK_AI_SUBTITLE_COMMAND: 'playback:ai-subtitle-command',
+  PLAYBACK_AI_SUBTITLE_CHANGED: 'playback:ai-subtitle-changed',
 
   // Asset encryption
   ASSET_CRYPTO_SET: 'assetCrypto:set',

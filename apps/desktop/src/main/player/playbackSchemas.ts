@@ -8,6 +8,11 @@ export const playbackClearProgressSchema = z.discriminatedUnion('scope', [
   z.object({ scope: z.literal('current'), sessionId: z.string().uuid() }).strict()
 ])
 export const playbackSessionIdSchema = z.string().uuid()
+export const aiSubtitleCommandSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.enum(['start', 'stop', 'retry', 'clear-cache', 'export']) }).strict(),
+  z.object({ action: z.literal('display'), value: z.enum(['bilingual', 'chinese', 'japanese']) }).strict(),
+  z.object({ action: z.literal('font-size'), value: z.number().int().min(20).max(72) }).strict()
+])
 export const playbackControlSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('pause'), paused: z.boolean() }).strict(),
   z.object({ kind: z.literal('seek'), seconds: z.number().finite().min(-604800).max(604800), relative: z.boolean().optional() }).strict(),

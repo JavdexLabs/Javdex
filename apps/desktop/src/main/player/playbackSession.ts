@@ -58,6 +58,7 @@ export function createPlaybackSession(deps: Dependencies) {
   let subtitleRefresh: { id: number; target: number; requestedAt: number } | null = null
   let openedAt = 0
   let focusSequence = 0
+  let privatePlayback = false
   const now = deps.now ?? Date.now
   const publish = (): void => { deps.changed(snapshot ? structuredClone(snapshot) : null) }
   function saveProgress(force = false): void {
@@ -121,6 +122,7 @@ export function createPlaybackSession(deps: Dependencies) {
     const state = current(id)
     if (command.kind === 'stop') { stop(); return }
     if (command.kind === 'private-session') {
+      privatePlayback = true
       stopRecording(); return
     }
     if (command.kind === 'presentation') {
@@ -217,6 +219,7 @@ export function createPlaybackSession(deps: Dependencies) {
         resumePosition, recordingProgress: progress.enabled, progressError,
         info: { videoCodec: null, audioCodec: null, width: null, height: null, hardwareDecoder: null, audioOutput: null, droppedFrames: null }
       }
+      privatePlayback = privateSession
       try {
         deps.native.create()
         deps.native.command({ kind: 'volume', value: volume })
@@ -253,6 +256,11 @@ export function createPlaybackSession(deps: Dependencies) {
       deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot, occlusions)
     },
     addSubtitle(id: string, file: string): void { current(id); deps.native.addSubtitle(file) },
+    aiSubtitleSource(id: string): { source: PlaybackSource; privateSession: boolean } {
+      current(id)
+      if (!source) throw new Error('播放会话已结束')
+      return { source: structuredClone(source), privateSession: privatePlayback }
+    },
     tick(): void {
       if (!snapshot || !source || snapshot.phase === 'error') return
       const state = snapshot

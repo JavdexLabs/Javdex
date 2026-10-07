@@ -38,6 +38,17 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
     if (!alive || !bridge) throw new Error('播放内核未启动')
     bridge.command(args)
   }
+  const nativeTracks = (): Array<Record<string, unknown>> => {
+    try {
+      const value: unknown = JSON.parse(bridge?.state()['track-list'] ?? '[]')
+      return Array.isArray(value) ? value.filter(item => item && typeof item === 'object') : []
+    } catch { return [] }
+  }
+  const ownedSubtitle = (file: string): Record<string, unknown> | undefined => nativeTracks().find(track => {
+    if (track.type !== 'sub' || typeof track['external-filename'] !== 'string') return false
+    const normalize = (filename: string): string => process.platform === 'win32' ? path.resolve(filename).toLowerCase() : path.resolve(filename)
+    return normalize(track['external-filename']) === normalize(file)
+  })
   return {
     create(): void {
       const availability = builtinPlaybackAvailability()
@@ -91,6 +102,26 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
     },
     render(): void { if (alive) bridge?.render() },
     addSubtitle(file): void { command(['sub-add', file, 'select']) },
+    updateGeneratedSubtitle(file, select): void {
+      const track = ownedSubtitle(file)
+      if (track && typeof track.id === 'number') {
+        command(['sub-reload', String(track.id)])
+        if (select) command(['set', 'sid', String(track.id)])
+      } else command(['sub-add', file, select ? 'select' : 'auto', 'AI 日中字幕'])
+    },
+    removeGeneratedSubtitle(file, restoreId): void {
+      const list = nativeTracks()
+      const track = ownedSubtitle(file)
+      if (!track || typeof track.id !== 'number') return
+      command(['sub-remove', String(track.id)])
+      if (track.selected) command(['set', 'sid', restoreId !== null && list.some(item => item.type === 'sub' && item.id === restoreId) ? String(restoreId) : 'no'])
+    },
+    generatedSubtitleSelected: file => ownedSubtitle(file)?.selected === true,
+    selectedAudioStream(): number | null {
+      const track = nativeTracks().find(track => track.type === 'audio' && track.selected === true)
+      const index = track?.['ff-index']
+      return track && !track.external && typeof index === 'number' && Number.isInteger(index) && index >= 0 ? index : null
+    },
     destroy(): void { bridge?.destroy(); alive = false }
   }
 }

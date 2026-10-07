@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import React from 'react'
+import { MemoryRouter } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewport } from '@shared/desktop/playback'
+import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import type { ElectronApi } from '../../../preload/index'
 import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
@@ -33,8 +35,17 @@ const viewports: PlaybackViewport[] = []
 let getDetail = async (): Promise<ScopedVideoDetail | null> => detail()
 let open = async () => ({ ok: true })
 let openExternal = async () => ({ ok: true })
+const aiSnapshot = (): AiSubtitleSnapshot => ({ sessionId: null, supported: false, installed: false, enabled: false,
+  phase: 'idle', activeStart: null, recognizedSeconds: 0, translatedSeconds: 0, duration: null,
+  display: 'bilingual', fontSize: 42, error: null })
+let aiState = aiSnapshot()
+let aiChanged: (value: AiSubtitleSnapshot) => void = () => {}
+let aiCommand = async (): Promise<AiSubtitleSnapshot> => aiState
 const fake = {
   playback: {
+    aiSubtitleSnapshot: async () => aiState,
+    onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
+    aiSubtitleCommand: () => aiCommand(),
     snapshot: async () => snapshot(),
     onChanged: (listener: typeof changed) => { changed = listener; return () => { changed = () => {} } },
     open: async (value: PlaybackTarget, options: { privateSession: boolean }) => { opened.push({ target: value, privateSession: options.privateSession }); return open() },
@@ -62,7 +73,7 @@ let Select: typeof import('../components/SelectControl').default
 async function mount(options?: TestRenderer.TestRendererOptions): Promise<void> {
   const Panel = (await import('./PlaybackPanel')).default
   Select = (await import('../components/SelectControl')).default
-  await act(async () => { renderer = TestRenderer.create(<OverlayHistoryProvider><Panel /></OverlayHistoryProvider>, options) })
+  await act(async () => { renderer = TestRenderer.create(<MemoryRouter><OverlayHistoryProvider><Panel /></OverlayHistoryProvider></MemoryRouter>, options) })
 }
 function button(label: string) {
   const result = renderer!.root.findAllByType('button').find(node => node.props['aria-label'] === label || node.children.includes(label))
@@ -76,6 +87,37 @@ afterEach(async () => {
   renderer = undefined
   opened.length = external.length = controls.length = queried.length = viewports.length = 0
   getDetail = async () => detail(); open = openExternal = async () => ({ ok: true }); history.state = null
+  aiState = aiSnapshot(); aiCommand = async () => aiState
+})
+
+test('AI subtitle command results cannot overwrite newer subtitle events', async () => {
+  aiState = { ...aiSnapshot(), supported: true, installed: true }
+  let finish!: (value: AiSubtitleSnapshot) => void
+  aiCommand = () => new Promise(resolve => { finish = resolve })
+  await mount(); await options()
+  const display = () => renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === 'AI 字幕显示')!
+  await act(async () => display().props.onChange({ target: { value: 'japanese' } }))
+  await act(async () => aiChanged({ ...aiState, display: 'chinese' }))
+  await act(async () => finish({ ...aiState, display: 'japanese' }))
+  assert.equal(display().props.value, 'chinese')
+  assert.equal(display().props.disabled, false)
+})
+
+test('a replacement playback session releases AI subtitle busy state and rejects the previous result', async () => {
+  aiState = { ...aiSnapshot(), supported: true, installed: true }
+  let finish!: (value: AiSubtitleSnapshot) => void
+  aiCommand = () => new Promise(resolve => { finish = resolve })
+  const AiSettings = (await import('./AiSubtitleSettings')).default
+  const component = (id: string) => <MemoryRouter><OverlayHistoryProvider><AiSettings playback={snapshot(id)} /></OverlayHistoryProvider></MemoryRouter>
+  await act(async () => { renderer = TestRenderer.create(component('first')) })
+  await act(async () => button('开启 AI 字幕').props.onClick())
+  assert.equal(button('开启 AI 字幕').props.disabled, true)
+  await act(async () => renderer!.update(component('second')))
+  assert.equal(button('开启 AI 字幕').props.disabled, false)
+  await act(async () => finish({ ...aiState, display: 'japanese', enabled: true, sessionId: 'first' }))
+  assert.equal(button('开启 AI 字幕').props.disabled, false)
+  const SelectControl = (await import('../components/SelectControl')).default
+  assert.equal(renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === 'AI 字幕显示')!.props.value, 'bilingual')
 })
 
 test('options offer only files belonging to the playing video and preserve private playback on explicit source selection', async () => {

@@ -340,6 +340,9 @@ const api = {
         expectedImpactRevision
       ),
     getModelManagement: () => invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_GET),
+    getLocalModels: () => invokeApp(IPC.LOCAL_MODELS_SNAPSHOT),
+    localModelCommand: (command: import('@shared/desktop/localModels').LocalModelCommand) => invokeApp(IPC.LOCAL_MODELS_COMMAND, command),
+    onLocalModelsChanged: (callback: (state: import('@shared/desktop/localModels').LocalModelSnapshot) => void) => onAppEvent(IPC.LOCAL_MODELS_CHANGED, callback),
     applyModelManagement: (input: ModelManagementApplyInput) =>
       invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_APPLY, input),
     discoverManagedModels: (connectionId: string) =>
@@ -853,6 +856,9 @@ const api = {
     control: (sessionId: string, command: import('@shared/desktop/playback').PlaybackControl) => invokeApp(IPC.PLAYBACK_CONTROL, sessionId, command),
     viewport: (viewport: import('@shared/desktop/playback').PlaybackViewport) => invokeApp(IPC.PLAYBACK_VIEWPORT, viewport),
     subtitle: (sessionId: string) => invokeApp(IPC.PLAYBACK_SUBTITLE, sessionId),
+    aiSubtitleSnapshot: () => invokeApp(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT),
+    aiSubtitleCommand: (sessionId: string, command: import('@shared/desktop/aiSubtitles').AiSubtitleCommand) => invokeApp(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, sessionId, command),
+    onAiSubtitleChanged: (cb: (state: import('@shared/desktop/aiSubtitles').AiSubtitleSnapshot) => void) => onAppEvent(IPC.PLAYBACK_AI_SUBTITLE_CHANGED, cb),
     clearProgress: (input: import('@shared/desktop/playback').PlaybackClearProgress) => invokeApp(IPC.PLAYBACK_CLEAR_PROGRESS, input),
     onChanged: (cb: (state: import('@shared/desktop/playback').PlaybackSnapshot | null) => void) => onAppEvent(IPC.PLAYBACK_CHANGED, cb)
   },

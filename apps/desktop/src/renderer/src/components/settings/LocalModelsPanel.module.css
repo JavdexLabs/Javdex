@@ -64,6 +64,31 @@
   color: var(--text-primary);
 }
 
+.catalogHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--form-field-gap);
+}
+
+.details {
+  display: grid;
+  gap: var(--form-label-gap);
+  color: var(--text-muted);
+}
+
+.detailsToggle {
+  cursor: pointer;
+  min-height: var(--control-h-sm);
+  line-height: var(--control-h-sm);
+}
+
+.detailsToggle:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-ring-space);
+}
+
 .feedback {
   display: flex;
   flex-wrap: wrap;

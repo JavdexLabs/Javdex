@@ -8,7 +8,7 @@ import type { PlaybackSnapshot } from '@shared/desktop/playback'
 import type { NativePlayback } from '../nativePlayback'
 import type { PlaybackSource } from '../playbackSource'
 import { createAiSubtitleController } from './aiSubtitleController'
-import { createAiRuntimeInstaller } from './runtimeInstaller'
+import { createAiRuntimeInstaller, type AiRuntimePaths } from './runtimeInstaller'
 import { createOfflineSubtitleInference } from './offlineInference'
 
 async function until(predicate: () => boolean): Promise<void> {
@@ -19,8 +19,10 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-controller-'))
   let playback = { sessionId: 'one', phase: 'playing', seekable: true, duration: 15, position: 0,
     tracks: [{ type: 'sub', id: 8, title: null, language: null, codec: null, channelCountHint: null, selected: true }] } as PlaybackSnapshot
-  let audio = 1, privateSession = false, closeCount = 0, recognizeCount = 0, selected = false
+  let audio = 1, privateSession = false, closeCount = 0, recognizeCount = 0, translateCount = 0, selected = false
+  let asrVersion = 'asr-original', translationVersion = 'qwen-original'
   let leases = 0, finishClose = async (): Promise<void> => {}
+  let installed = async () => true, runtimeChanged = (): void => {}
   const updates: Array<{ filename: string; select: boolean }> = [], removals: Array<number | null> = []
   const source: PlaybackSource = { target: { libraryId: 1, videoId: 1, resourceId: 1 }, mode: 'remote',
     locator: 'https://fixture.invalid/grant?secret=original', identityKey: 'fixture', revision: 'one', resumeKey: 'one', title: 'fixture' }
@@ -39,19 +41,21 @@ async function fixture() {
       playback = { ...playback, tracks: [{ type: 'sub', id: 8, title: null, language: null, codec: null, channelCountHint: null, selected: restore === 8 }] }
     }
   }
-  const runtime = { ...createAiRuntimeInstaller(path.join(root, 'models')), installed: async () => true }
+  const base = createAiRuntimeInstaller(path.join(root, 'models'))
+  const runtime = { ...base, installed: () => installed(), paths: () => ({ ...base.paths(), asrVersion, translationVersion }) }
   let resolve = async (value: PlaybackSource) => ({ ...value, locator: 'https://fixture.invalid/grant?secret=renewed' })
   const controller = createAiSubtitleController({ root, runtime, native, playback: () => playback,
     source: () => ({ source, privateSession }), resolve: value => resolve(value), changed: () => {}, exportFile: async () => {},
     acquireRuntime: async () => { leases++; return () => { leases-- } },
-    inference: (() => ({
+    onRuntimeChanged: listener => { runtimeChanged = listener; return () => { runtimeChanged = () => {} } },
+    inference: ((paths: AiRuntimePaths) => ({
       probe: async (_: string, index: number) => ({ index, identity: `audio-${index}` }),
       recognize: async (locator: string, index: number, start: number, end: number, signal: AbortSignal) => {
         assert.ok(locator.includes('renewed')); recognizeCount++
         await delay(5, undefined, { signal })
         return [{ start, end, japanese: `音轨${index}` }]
       },
-      translate: async cues => cues.map(cue => ({ ...cue, chinese: '译文' })),
+      translate: async cues => { translateCount++; return cues.map(cue => ({ ...cue, chinese: `译文-${paths.translationVersion}` })) },
       translateText: async () => '译文',
       close: async () => { closeCount++; await finishClose() }
     })) as typeof createOfflineSubtitleInference
@@ -59,7 +63,9 @@ async function fixture() {
   return { controller, root, updates, removals, setAudio: (value: number) => { audio = value },
     setPrivate: () => { privateSession = true }, setSession: () => { playback = { ...playback, sessionId: 'two' } },
     setResolve: (value: typeof resolve) => { resolve = value }, tick: () => controller.tick(playback),
-    recognizes: () => recognizeCount, closes: () => closeCount,
+    recognizes: () => recognizeCount, translations: () => translateCount, closes: () => closeCount,
+    setInstalled: (read: typeof installed) => { installed = read }, runtimeChanged: () => runtimeChanged(),
+    setVersions: (asr: string, translation: string) => { asrVersion = asr; translationVersion = translation },
     leases: () => leases, setClose: (value: typeof finishClose) => { finishClose = value },
     cleanup: async () => { await controller.close(); await fs.rm(root, { recursive: true, force: true }) }
   }
@@ -80,6 +86,41 @@ test('incremental display preserves selection, restores original subtitles and r
     await f.controller.command('one', { action: 'start' })
     await until(() => f.controller.snapshot().translatedSeconds === 15)
     assert.equal(f.recognizes(), 1)
+  } finally { await f.cleanup() }
+})
+
+test('a late runtime-read result cannot override a newer model selection or deletion event', async () => {
+  const f = await fixture()
+  try {
+    await until(() => f.controller.snapshot().installed)
+    let finish!: (value: boolean) => void
+    f.setInstalled(() => new Promise(resolve => { finish = resolve })); f.runtimeChanged()
+    f.setInstalled(async () => false); f.runtimeChanged()
+    await until(() => !f.controller.snapshot().installed)
+    finish(true); await delay(10)
+    assert.equal(f.controller.snapshot().installed, false)
+    f.setInstalled(async () => true); f.runtimeChanged()
+    await until(() => f.controller.snapshot().installed)
+  } finally { await f.cleanup() }
+})
+
+test('restarting after a precision switch retranslates without recognizing again unless the ASR weight changes', async () => {
+  const f = await fixture()
+  try {
+    await f.controller.command('one', { action: 'start' })
+    await until(() => f.controller.snapshot().translatedSeconds === 15)
+    await f.controller.command('one', { action: 'stop' })
+    f.setVersions('asr-original', 'qwen-new')
+    await f.controller.command('one', { action: 'start' })
+    await until(() => f.controller.snapshot().translatedSeconds === 15)
+    assert.equal(f.recognizes(), 1)
+    assert.equal(f.translations(), 2)
+    await f.controller.command('one', { action: 'stop' })
+    f.setVersions('asr-new', 'qwen-new')
+    await f.controller.command('one', { action: 'start' })
+    await until(() => f.controller.snapshot().translatedSeconds === 15)
+    assert.equal(f.recognizes(), 2)
+    assert.equal(f.translations(), 3)
   } finally { await f.cleanup() }
 })
 

@@ -48,15 +48,22 @@ export function createAiSubtitleController(deps: Dependencies) {
   let document = '', requestedDocument = '', renderLoop: Promise<void> | null = null
   let firstSelection = false
   let intent = 0
+  let runtimeRevision = 0, closed = false
   const state: AiSubtitleSnapshot = { sessionId: null, supported: aiSubtitleSupported(), installed: false,
     enabled: false, phase: 'idle', activeStart: null, recognizedSeconds: 0, translatedSeconds: 0,
     duration: null, display: 'bilingual', fontSize: 42, error: null }
   const snapshot = (): AiSubtitleSnapshot => structuredClone(state)
   const publish = (): void => deps.changed(snapshot())
-  const initialization = cleanStaleWork(deps.root).then(() => installer.installed()).then(value => { state.installed = value; publish() })
-    .catch(() => { state.error = '离线字幕工作目录无法清理，请检查本机存储权限'; publish() })
+  async function refreshRuntime(): Promise<void> {
+    const revision = ++runtimeRevision
+    const value = await installer.installed()
+    if (closed || revision !== runtimeRevision) return
+    state.installed = value; publish()
+  }
+  const initialization = cleanStaleWork(deps.root).then(refreshRuntime)
+    .catch(() => { if (!closed) { state.error = '离线字幕工作目录无法清理，请检查本机存储权限'; publish() } })
   const unsubscribe = deps.onRuntimeChanged?.(() => {
-    void installer.installed().then(value => { if (value !== state.installed) { state.installed = value; publish() } })
+    void refreshRuntime().catch(() => {})
   })
   function current(id: string): PlaybackSnapshot {
     const playback = deps.playback()
@@ -136,7 +143,8 @@ export function createAiSubtitleController(deps: Dependencies) {
     firstSelection = true
     // mpv sub-reload resets the track title to the filename, so keep a readable stable basename.
     file = path.join(deps.root, 'active', randomUUID(), 'AI 日中字幕.ass')
-    const engine = (deps.inference ?? createOfflineSubtitleInference)(installer.paths(), path.join(deps.root, 'work'))
+    const runtimePaths = installer.paths()
+    const engine = (deps.inference ?? createOfflineSubtitleInference)(runtimePaths, path.join(deps.root, 'work'))
     inference = engine
     publish()
     try {
@@ -144,7 +152,8 @@ export function createAiSubtitleController(deps: Dependencies) {
       generation.signal.throwIfAborted(); current(id)
       const stream = await engine.probe(resolved.locator, selected, generation.signal)
       generation.signal.throwIfAborted()
-      const storage = createSubtitleCache(path.join(deps.root, 'cache'), subtitleCacheKey(resolved, stream.identity), !privateSession)
+      const storage = createSubtitleCache(path.join(deps.root, 'cache'), subtitleCacheKey(resolved, stream.identity, runtimePaths.asrVersion),
+        !privateSession, runtimePaths.translationVersion)
       cache = storage
       const run = createSubtitleScheduler(playback.duration, {
         read: index => storage.read(index), write: chunk => storage.write(chunk),
@@ -198,6 +207,6 @@ export function createAiSubtitleController(deps: Dependencies) {
       }
       if (playback.position != null) scheduler?.position(playback.position)
     },
-    async close(): Promise<void> { unsubscribe?.(); await stop() }
+    async close(): Promise<void> { closed = true; runtimeRevision++; unsubscribe?.(); await stop() }
   }
 }

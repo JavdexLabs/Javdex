@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import type { PlaybackSource } from '../playbackSource'
-import { AI_SUBTITLE_ASR_VERSION, AI_SUBTITLE_TRANSLATION_VERSION } from './runtimeManifest'
+import { AI_SUBTITLE_ASSETS, AI_SUBTITLE_ASR_VERSION, AI_SUBTITLE_TRANSLATION_VERSION } from './runtimeManifest'
 import type { SubtitleCue } from './subtitleDocument'
 
 const cueSchema = z.object({ start: z.number().finite().nonnegative(), end: z.number().finite().nonnegative(),
@@ -11,10 +11,13 @@ const cueSchema = z.object({ start: z.number().finite().nonnegative(), end: z.nu
 const chunkSchema = z.object({ version: z.literal(1), index: z.number().int().nonnegative(),
   translated: z.boolean(), translationVersion: z.string().max(128).optional(), cues: z.array(cueSchema).max(1000) }).strict()
 export interface SubtitleChunk { index: number; translated: boolean; cues: SubtitleCue[] }
-export function subtitleCacheKey(source: PlaybackSource, audioIdentity: string): string {
+export function subtitleCacheKey(source: PlaybackSource, audioIdentity: string, asrVersion = AI_SUBTITLE_ASR_VERSION): string {
   // Grant URLs are intentionally excluded. Local replacement and catalog/server identity invalidate caches.
+  // Exact default weights keep the original cache identity across the model-store upgrade.
+  const asrIdentity = asrVersion === AI_SUBTITLE_ASR_VERSION || asrVersion === AI_SUBTITLE_ASSETS.find(asset => asset.id === 'kotoba')!.sha256
+    ? AI_SUBTITLE_ASR_VERSION : [AI_SUBTITLE_ASR_VERSION, asrVersion]
   return createHash('sha256').update(JSON.stringify([source.identityKey, source.revision, source.target,
-    source.fileIdentity ?? source.resumeKey, audioIdentity, AI_SUBTITLE_ASR_VERSION, 'ja'])).digest('hex')
+    source.fileIdentity ?? source.resumeKey, audioIdentity, asrIdentity, 'ja'])).digest('hex')
 }
 export async function atomicWrite(filename: string, data: string): Promise<void> {
   await fs.mkdir(path.dirname(filename), { recursive: true })
@@ -22,8 +25,12 @@ export async function atomicWrite(filename: string, data: string): Promise<void>
   try { await fs.writeFile(temporary, data, { encoding: 'utf8', mode: 0o600 }); await fs.rename(temporary, filename) }
   finally { await fs.rm(temporary, { force: true }) }
 }
-export function createSubtitleCache(root: string, key: string, persist = true) {
+export function createSubtitleCache(root: string, key: string, persist = true, translationVersion = AI_SUBTITLE_TRANSLATION_VERSION) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('字幕缓存身份无效')
+  // Keep prompt/decoder changes authoritative even when a selected weight hash is supplied.
+  const translationIdentity = translationVersion === AI_SUBTITLE_TRANSLATION_VERSION
+    || translationVersion === AI_SUBTITLE_ASSETS.find(asset => asset.id === 'translation-model')!.sha256 ? AI_SUBTITLE_TRANSLATION_VERSION
+    : createHash('sha256').update(JSON.stringify([AI_SUBTITLE_TRANSLATION_VERSION, translationVersion])).digest('hex')
   const directory = path.join(root, key)
   const memory = new Map<number, SubtitleChunk>()
   return {
@@ -38,7 +45,7 @@ export function createSubtitleCache(root: string, key: string, persist = true) {
         const parsed = chunkSchema.safeParse(JSON.parse(await fs.readFile(file, 'utf8')))
         if (!parsed.success || parsed.data.index !== index || parsed.data.cues.some(cue => cue.end <= cue.start)) return null
         const chunk: SubtitleChunk = { index, translated: parsed.data.translated, cues: parsed.data.cues }
-        if (parsed.data.translationVersion !== AI_SUBTITLE_TRANSLATION_VERSION) {
+        if (parsed.data.translationVersion !== translationIdentity) {
           chunk.translated = false; chunk.cues = chunk.cues.map(({ start, end, japanese }) => ({ start, end, japanese }))
         }
         memory.set(index, chunk)
@@ -46,7 +53,7 @@ export function createSubtitleCache(root: string, key: string, persist = true) {
       } catch { return null }
     },
     async write(chunk: SubtitleChunk): Promise<void> {
-      const parsed = chunkSchema.parse({ ...chunk, version: 1, translationVersion: AI_SUBTITLE_TRANSLATION_VERSION })
+      const parsed = chunkSchema.parse({ ...chunk, version: 1, translationVersion: translationIdentity })
       if (persist) await atomicWrite(path.join(directory, `${chunk.index}.json`), JSON.stringify(parsed))
       memory.set(chunk.index, structuredClone(chunk))
     },

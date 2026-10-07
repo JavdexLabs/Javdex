@@ -109,7 +109,7 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
   const aiSubtitles = createAiSubtitleController({
     root: path.join(app.getPath('userData'), 'ai-subtitles'), native,
     runtime: getLocalModels().subtitleRuntime(),
-    acquireRuntime: () => getLocalModels().acquire(['kotoba', 'qwen3']),
+    acquireRuntime: () => getLocalModels().acquireSubtitleRuntime(),
     onRuntimeChanged: listener => getLocalModels().onChanged(listener),
     playback: session.snapshot, source: session.aiSubtitleSource,
     resolve: async source => {

@@ -5,9 +5,10 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { runSubtitleProcess } from './processRunner'
+import { runSubtitleProcess, subtitleProcessEnvironment } from './processRunner'
 import type { AiRuntimePaths } from './runtimeInstaller'
 import { parseWhisperCues, SUBTITLE_CONTEXT_SECONDS, type SubtitleCue } from './subtitleDocument'
+import { localSubtitleTranslationPrompt, localTextTranslationPrompt, localTranslationSettings, localTranslationOutput } from './localTranslation'
 
 export interface SubtitleAudioStream { index: number; identity: string }
 async function unusedPort(): Promise<number> {
@@ -20,15 +21,16 @@ async function unusedPort(): Promise<number> {
     })
   })
 }
-export function subtitleProcessEnvironment(): NodeJS.ProcessEnv {
-  // Prevent ambient llama server/model/tool configuration from changing the offline boundary.
-  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(LLAMA_|HF_|HUGGING_FACE_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY)/i.test(key)))
-}
+export { subtitleProcessEnvironment } from './processRunner'
 export function translationPrompt(japanese: string, context: string[] = []): string {
-  const surrounding = context.length ? `以下是相邻日语对白，仅供理解上下文，不要翻译这些句子：\n${context.join('\n')}\n\n` : ''
-  return `${surrounding}将以下日语文本翻译为简体中文。忠实保留口语含义，只输出译文，不要解释或补充原文没有的信息：\n\n${japanese}`
+  return localSubtitleTranslationPrompt('qwen3', japanese, context)
 }
-export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: string) {
+export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: string, options: {
+  spawn?: typeof spawn; request?: typeof fetch; port?: typeof unusedPort
+} = {}) {
+  const model = paths.translationModelId ?? 'qwen3'
+  const settings = localTranslationSettings(model)
+  const request = options.request ?? fetch
   let server: ChildProcess | null = null
   let endpoint = ''
   let key = ''
@@ -41,11 +43,11 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
     if (!starting) {
       const generation = lifetime
       starting = (async () => {
-        const port = await unusedPort()
+        const port = await (options.port ?? unusedPort)()
         generation.signal.throwIfAborted()
         const token = randomBytes(32).toString('hex')
-        const child = spawn(paths.translator, ['-m', paths.translationModel, '--host', '127.0.0.1', '--port', String(port),
-          '--offline', '--no-agent', '--no-webui', '--no-slots', '-c', '8192', '-np', '1', '-t', threads, '--prio', '-1'], {
+        const child = (options.spawn ?? spawn)(paths.translator, ['-m', paths.translationModel, '--host', '127.0.0.1', '--port', String(port),
+          '--offline', '--no-agent', '--no-webui', '--no-slots', '-c', '8192', '-np', '1', '-t', threads, '--prio', '-1', ...settings.serverArguments], {
           windowsHide: true, shell: false, stdio: 'ignore', env: { ...subtitleProcessEnvironment(), LLAMA_API_KEY: token }
         })
         server = child
@@ -61,7 +63,7 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
           if (failed) throw new Error('离线中文翻译运行库启动失败')
           try {
             // /health is public; authenticate against /v1/models to verify the owned server.
-            const response = await fetch(`${address}/v1/models`, { headers: { Authorization: `Bearer ${token}` },
+            const response = await request(`${address}/v1/models`, { headers: { Authorization: `Bearer ${token}` },
               signal: AbortSignal.any([generation.signal, AbortSignal.timeout(1000)]) })
             if (response.ok) { endpoint = address; key = token; return }
           } catch { /* Model loading can take time; no transcript is sent during startup. */ }
@@ -82,23 +84,24 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
   }
   async function translateContent(prompt: string, signal: AbortSignal, maxTokens: number): Promise<string> {
     await ready(signal)
-    const response = await fetch(`${endpoint}/v1/chat/completions`, { method: 'POST',
+    const response = await request(`${endpoint}/v1/chat/completions`, { method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       signal: AbortSignal.any([signal, lifetime.signal, AbortSignal.timeout(90000)]),
       body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], max_tokens: maxTokens,
-        temperature: 0.7, top_k: 20, top_p: 0.8, repeat_penalty: 1.05,
-        chat_template_kwargs: { enable_thinking: false }, stream: false }) })
+        ...settings.request, stream: false }) })
     if (!response.ok) throw new Error('离线中文翻译失败')
     const value = await response.json() as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }> }
     const text = value.choices?.[0]?.message?.content
-    if (typeof text !== 'string' || !text.trim() || text.length > 6000 || value.choices?.[0]?.finish_reason === 'length') {
+    if (typeof text !== 'string' || text.length > 6000 || value.choices?.[0]?.finish_reason === 'length') {
       throw new Error('中文译文不完整，请重试')
     }
-    return text.trim()
+    const output = localTranslationOutput(model, text)
+    if (!output) throw new Error('中文译文不完整，请重试')
+    return output
   }
   return {
     translateText(text: string, signal: AbortSignal): Promise<string> {
-      return translateContent(`将以下文本翻译成简体中文。只输出译文，不要标题、引号或解释；原文已是中文则原样返回。保留番号、作品代号等标识，不补充原文没有的信息：\n\n${text}`, signal, 1536)
+      return translateContent(localTextTranslationPrompt(model, text), signal, 1536)
     },
     async probe(locator: string, expectedIndex: number, signal: AbortSignal): Promise<SubtitleAudioStream> {
       const value = JSON.parse(await runSubtitleProcess(paths.ffprobe, ['-v', 'error', '-show_entries',
@@ -133,7 +136,7 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
       for (let index = 0; index < result.length; index++) {
         signal.throwIfAborted()
         if (result[index].chinese) continue
-        result[index].chinese = await translateContent(translationPrompt(result[index].japanese,
+        result[index].chinese = await translateContent(localSubtitleTranslationPrompt(model, result[index].japanese,
           result.slice(Math.max(0, index - 2), index).map(cue => cue.japanese)), signal, 768)
         await updated(structuredClone(result))
       }

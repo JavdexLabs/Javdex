@@ -12,6 +12,8 @@ import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
 import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackOpenOptionsSchema, playbackClearProgressSchema, aiSubtitleCommandSchema } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
+import { localModelVariant } from '../services/localModels/modelCatalog'
+import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS } from '@shared/desktop/localModels'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
 const scanAuditViewQuery = z.object({
@@ -739,9 +741,16 @@ export const appIpcSchemas = {
   [IPC.LOCAL_MODELS_SNAPSHOT]: noArgs,
   [IPC.LOCAL_MODELS_COMMAND]: z.tuple([z.discriminatedUnion('action', [
     z.object({ action: z.literal('translation'), mode: z.enum(['app-default', 'local']) }).strict(),
-    ...(['download', 'delete', 'export'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(['kotoba', 'qwen3']) }).strict()),
+    z.object({ action: z.literal('translation-model'), model: z.enum(LOCAL_TRANSLATION_MODEL_IDS) }).strict(),
+    ...(['download', 'delete', 'export'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64).optional() }).strict()),
+    z.object({ action: z.literal('select'), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
     ...(['cancel-download', 'choose-location', 'reset-location'] as const).map(action => z.object({ action: z.literal(action) }).strict())
-  ])]),
+  ]).superRefine((command, context) => {
+    if ('variant' in command && command.variant !== undefined) {
+      try { localModelVariant(command.model, command.variant) }
+      catch { context.addIssue({ code: 'custom', message: '未知或不匹配的本地模型精度', path: ['variant'] }) }
+    }
+  })]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: z.tuple([modelManagementApply]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: z.tuple([nonEmptyText]),

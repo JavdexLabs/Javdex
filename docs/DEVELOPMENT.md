@@ -73,6 +73,18 @@ npm run dist:linux           # Linux 目标
 
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
 
+### 本地 AI 运行库（开发分支）
+
+本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/player/aiSubtitles/runtimeInstaller.ts)：Windows x64 保留原目录与 ZIP；macOS、Linux 的 arm64／x64 工具在 `tools/<platform>-<arch>/` 隔离，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
+
+macOS 上 `npm run ai-runtime:build` 使用固定 commit 的 whisper.cpp b5130 与 FFmpeg 8.1.3 源码，验证 SHA-256 后编译静态 CLI。首次开发构建需要 Xcode Command Line Tools、CMake、make 及网络；不自动安装系统工具。`dev`、`desktop:build`、`start`／`preview` 自动准备本机产物，后续复用已验证的构建缓存。Mac 打包另按目标架构编译，输出 `out/ai-runtime/darwin-<arch>/`，支持 arm64 和 x64 单架构包，不支持 universal AI 工具包。
+
+工具只链接系统库，识别启用 Metal／Accelerate，FFmpeg 仅输出 PCM／WAV，不启用 GPL、nonfree 或自动探测的第三方编解码库。源文件、构建参数、许可证与哈希写入 bundle 清单；打包放入 `Resources/ai-runtime`，不进 asar。CLI 在外层 app 签名前单独签名并更新清单，外层签名跳过重复签 CLI；`afterSign` 只校验，不能修改已封装资源。此流程有真实 ad-hoc 签名回归，不等于正式 DMG、Developer ID 签名或公证已经验收。源码与构建资料发布要求见 [第三方说明](THIRD_PARTY_NOTICES.md#本地-ai-运行库)。
+
+Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校验压缩包 SHA，保留 POSIX `bin/lib` 布局，把安全的库别名转为普通文件。解压在独立暂存目录，完成后替换工具目录，失败保留旧安装。模型目录迁移不需要放宽原有禁止符号链接的规则。开发构建源码、合成音频、下载权重与验收产物均从安装包排除。
+
+无 GUI 的实际推理检查：生成／提供一段公开或合成日语音频后，运行 `node --import tsx scripts/local-ai-platform-acceptance.ts --audio <音频>`。默认仅使用忽略目录 `out/ai-runtime-acceptance/`，不访问应用用户目录；首次联网下载权重，后续可用 `--offline`。Linux 验证镜像由 `scripts/local-ai-linux-acceptance.Dockerfile` 构建，只挂载此专用目录，在 `--network none` 下运行编译后的检查脚本；不是服务端或 GUI 验收。详细命令与边界见 [AI 字幕实施记录](AI_SUBTITLES_IMPLEMENTATION.md#macoslinux-运行库适配2026-10-07)。
+
 ### 内置播放运行库（开发分支）
 
 Windows 新版 adapter 通过 `rendererFullscreenControls` 能力统一使用 renderer 经典工具栏与播放设置，原生 child window 只负责画面、输入和帧提交；旧 adapter 保留原生全屏控件。全屏按指针所在的顶部／底部区域分别显示标题栏／控制栏，鼠标在画面中间移动或暂停不会唤出它们；打开播放设置时同时固定显示标题栏与控制栏，关闭后恢复分区触发；键盘焦点、拖动和子菜单所有权保持操作区域可见。原生指针由 Windows 客户区像素换算为 DIP，再按网页缩放倍率换算为 CSS 像素，不能用播放时钟更新或任意鼠标活动唤出控制栏。全屏视频始终占满窗口，标题栏、控制栏和设置使用覆盖布局，显隐不改变 drawable 尺寸；renderer 报告这些表面及菜单与视频的交叠矩形，Windows 用窗口区域裁剪让 HTML 控件可见，关闭覆盖层后恢复完整画面。此改动同时涉及 renderer 与 addon，开发调试需重建两者并完整退出、重启 Electron；仅刷新页面仍会保留已加载的旧 addon。

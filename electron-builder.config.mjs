@@ -6,6 +6,7 @@ import {
   prunePackagedRuntime
 } from './scripts/packaging-runtime.mjs'
 import { stagePackagedPlaybackRuntime, verifyPackagedPlaybackRuntime } from './scripts/playback-runtime.mjs'
+import { preparePackagedAiRuntime, stagePackagedAiRuntime, signPackagedAiTools, verifySignedAiRuntime } from './scripts/ai-runtime-build.mjs'
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
 
@@ -24,6 +25,11 @@ async function signMacApp(options) {
       entitlements: adHocEntitlements
     })
   }
+
+  const originalIgnore = options.ignore
+  const aiTools = await signPackagedAiTools(options.app, identity, adHocEntitlements)
+  signOptions.ignore = file => aiTools(file) || (typeof originalIgnore === 'function' ? originalIgnore(file)
+    : (Array.isArray(originalIgnore) ? originalIgnore : originalIgnore ? [originalIgnore] : []).some(pattern => file.match(pattern)))
 
   await signAsync(signOptions)
 }
@@ -52,6 +58,9 @@ const base = {
     '!out/playback-acceptance/**/*',
     '!out/libmpv-prototype/**/*',
     '!out/playback-runtime/**/*',
+    '!out/ai-runtime/**/*',
+    '!out/ai-runtime-build/**/*',
+    '!out/ai-runtime-acceptance/**/*',
     '!out/server/**/*',
     '!out/resources/**/*',
     '!out/renderer/icon-{16,32,48,512}.png',
@@ -142,11 +151,13 @@ export default function buildConfig() {
   // only matcher defaults to **/*, so retain the desktop allowlist here too.
   config.win.files.unshift(...config.files)
 
-  config.beforePack = context => { verifyPackagedPlaybackRuntime(context) }
-  config.afterPack = context => {
+  config.beforePack = async context => { verifyPackagedPlaybackRuntime(context); await preparePackagedAiRuntime(context) }
+  config.afterPack = async context => {
     prunePackagedRuntime(context)
     stagePackagedPlaybackRuntime(context)
+    await stagePackagedAiRuntime(context)
   }
+  config.afterSign = verifySignedAiRuntime
   config.mac.sign = signMacApp
 
   if (selected?.win) config.win.target = selected.win

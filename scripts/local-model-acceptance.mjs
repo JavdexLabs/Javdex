@@ -1,4 +1,4 @@
-// Isolated Windows settings acceptance with real Qwen inference and filesystem operations.
+// Isolated desktop settings acceptance with real Qwen inference and filesystem operations.
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -6,14 +6,22 @@ import os from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { AI_SUBTITLE_RUNTIME_VERSION, AI_SUBTITLE_ASSETS } from '../apps/desktop/src/main/player/aiSubtitles/runtimeManifest.ts'
+import runtimeManifest from '../apps/desktop/src/main/player/aiSubtitles/runtimeManifest.ts'
 import { createAcceptanceDirectory, launchAcceptance, closeAcceptance, recordAcceptanceCleanup } from './playback-acceptance-support.mjs'
+const { AI_SUBTITLE_RUNTIME_VERSION, AI_SUBTITLE_ASSETS } = runtimeManifest
 
 const output = path.resolve('out/playback-acceptance/local-models')
 await fs.mkdir(output, { recursive: true })
 const directory = createAcceptanceDirectory('local-models-')
 const models = path.join(directory, 'ai-subtitles/models', AI_SUBTITLE_RUNTIME_VERSION)
-await fs.cp(path.resolve('.tmp-ai-subtitle/runtime', AI_SUBTITLE_RUNTIME_VERSION), models, { recursive: true })
+const argumentIndex = process.argv.indexOf('--runtime-root')
+const runtimeRoot = path.resolve(argumentIndex >= 0 ? process.argv[argumentIndex + 1] : '.tmp-ai-subtitle/runtime')
+await fs.cp(path.join(runtimeRoot, AI_SUBTITLE_RUNTIME_VERSION), models, { recursive: true })
+if (process.platform === 'darwin') {
+  // Only the isolated copy is changed: prove the desktop assembly finds bundled tools.
+  const tools = path.join(models, 'tools', `darwin-${process.arch}`)
+  for (const id of ['whisper', 'ffmpeg']) await fs.rm(path.join(tools, id), { recursive: true, force: true })
+}
 const moved = path.join(directory, 'relocated-models'), exported = path.join(directory, 'exported')
 await fs.mkdir(exported, { recursive: true })
 const report = { status: 'running', checks: [] }
@@ -28,7 +36,9 @@ try {
   await page.getByRole('heading', { name: '保存位置', exact: true }).waitFor()
   const command = command => page.evaluate(command => window.api.settings.localModelCommand(command), command)
   const snapshot = () => page.evaluate(() => window.api.settings.getLocalModels())
-  assert.ok((await snapshot()).models.every(model => model.installed))
+  const initial = await snapshot()
+  assert.equal(initial.supported, true)
+  assert.ok(initial.models.filter(model => ['kotoba', 'qwen3'].includes(model.id)).every(model => model.installed))
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.screenshot({ path: path.join(output, 'settings-wide.png') })
   await page.setViewportSize({ width: 1000, height: 640 })
@@ -43,6 +53,16 @@ try {
       return original(input, init)
     }
   })
+  if (process.platform === 'darwin') {
+    await command({ action: 'download', model: 'kotoba' })
+    const deadline = Date.now() + 120000
+    while ((await snapshot()).operation) {
+      assert.ok(Date.now() < deadline, 'Bundled runtime repair timed out')
+      await delay(100)
+    }
+    assert.equal((await snapshot()).error, null)
+    report.checks.push({ name: 'desktop-ipc-installs-bundled-mac-tools-without-network' })
+  }
   const started = Date.now()
   const chinese = await page.evaluate(() => window.api.llm.translateToChinese('今日は天気がいいです。図書館に行きます。'))
   assert.match(chinese, /天气|图书馆/)
@@ -52,7 +72,7 @@ try {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [moved] })
   }, moved)
   await command({ action: 'choose-location' })
-  assert.equal((await snapshot()).directory, moved)
+  assert.equal((await snapshot()).directory, await fs.realpath(moved))
   assert.equal(await fs.access(models).then(() => true, () => false), false)
   const afterMove = await page.evaluate(() => window.api.llm.translateToChinese('字幕を表示してください。'))
   assert.match(afterMove, /字幕/)
@@ -62,10 +82,10 @@ try {
   }, exported)
   await command({ action: 'export', model: 'qwen3' })
   const hash = createHash('sha256')
-  const exportedFile = path.join(exported, 'Qwen3-1.7B-Q4/qwen3-q4.gguf')
+  const exportedFile = path.join(exported, 'Qwen3-1.7B-Q4_K_M-bartowski/qwen3-q4.gguf')
   for await (const chunk of createReadStream(exportedFile)) hash.update(chunk)
   assert.equal(hash.digest('hex'), AI_SUBTITLE_ASSETS.find(asset => asset.id === 'translation-model').sha256)
-  assert.ok((await fs.readFile(path.join(exported, 'Qwen3-1.7B-Q4/LICENSE.txt'), 'utf8')).includes('Apache License'))
+  assert.ok((await fs.readFile(path.join(exported, 'Qwen3-1.7B-Q4_K_M-bartowski/LICENSE.txt'), 'utf8')).includes('Apache License'))
   report.checks.push({ name: 'export-exact-model-and-license' })
   await application.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false }) })
   await command({ action: 'delete', model: 'qwen3' })
@@ -76,6 +96,9 @@ try {
   report.checks.push({ name: 'delete-isolated-and-no-online-fallback' })
   await command({ action: 'reset-location' })
   assert.equal((await snapshot()).directory, (await snapshot()).defaultDirectory)
+  await page.getByRole('button', { name: '恢复默认位置', exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '恢复默认位置', exact: true }).isDisabled(), true)
+  report.checks.push({ name: 'reset-default-location-and-disabled-reset-control' })
   assert.deepEqual(rendererErrors, [])
   report.status = 'pass'
 } catch (cause) { report.status = 'failed'; report.failure = cause.stack ?? String(cause); throw cause }

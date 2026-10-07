@@ -3,6 +3,16 @@ import { test } from 'node:test'
 import { runSubtitleProcess, SubtitleProcessFailure } from './processRunner'
 
 const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+test('all offline child launches remove model, proxy and loader overrides while preserving explicit safe variables', async () => {
+  const keys = ['LLAMA_ARG_MODEL', 'HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN', 'HTTP_PROXY', 'https_proxy', 'ALL_PROXY',
+    'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH']
+  const inherited = { ...env, ...Object.fromEntries(keys.map(key => [key, 'fixture-override'])), JAVDEX_AI_TEST_SAFE: 'kept' }
+  const output = await runSubtitleProcess(process.execPath, ['-e', `process.stdout.write(JSON.stringify({
+    overrides: ${JSON.stringify(keys)}.filter(key => process.env[key] !== undefined), safe: process.env.JAVDEX_AI_TEST_SAFE
+  }))`], { env: inherited })
+  assert.deepEqual(JSON.parse(output), { overrides: [], safe: 'kept' })
+})
+
 test('offline child failures never expose decoder paths or grants', async () => {
   await assert.rejects(runSubtitleProcess(process.execPath, ['-e', "console.error('https://secret.invalid/grant');process.exit(7)"], { env }),
     error => error instanceof SubtitleProcessFailure && error.exitCode === 7 && !error.message.includes('secret'))

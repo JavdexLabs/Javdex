@@ -1,46 +1,36 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import React from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
-import type { LocalModelCommand, LocalModelSnapshot } from '@shared/desktop/localModels'
+import type { LocalModelCommand, LocalModelSnapshot, LocalModelView } from '@shared/desktop/localModels'
 import type { ElectronApi } from '../../../../preload/index'
 import { OverlayHistoryProvider } from '../../interaction/OverlayHistoryContext'
+import FloatingLayer from '../FloatingLayer'
+import Modal from '../Modal'
+import Button from '../Button'
+import { renderedText } from '../../test/renderedText'
 
+function family(id: LocalModelView['id'], name: string, publisher: string, bytes: number): LocalModelView {
+  return { id, name, version: name, purpose: id === 'kotoba' ? '日语语音转写' : '本地文本翻译', bytes, installed: true, inUse: false,
+    selectedVariant: `${id}-q4_k_m`, variants: [
+      { id: `${id}-q4_k_m`, precision: 'Q4_K_M', format: id === 'kotoba' ? 'GGML' : 'GGUF', bytes, installed: true, inUse: false,
+        recommended: true, publisher, source: `https://huggingface.co/${publisher}/${name}`, references: [], ready: true, readiness: 'ready' },
+      { id: `${id}-q8_0`, precision: 'Q8_0', format: id === 'kotoba' ? 'GGML' : 'GGUF', bytes: bytes * 2, installed: false, inUse: false,
+        recommended: false, publisher, source: `https://huggingface.co/${publisher}/${name}`, references: [], ready: false, readiness: 'missing-model' }
+    ] }
+}
 function snapshot(): LocalModelSnapshot {
-  return { supported: true, directory: '/models', defaultDirectory: '/models', translation: 'app-default', translationModel: 'qwen3',
+  const qwen = family('qwen3', 'Qwen3 1.7B', 'bartowski', 1280000000)
+  qwen.variants.push({ ...qwen.variants[0], id: 'qwen3-official-q8_0', precision: 'Q8_0', publisher: 'Qwen', recommended: false,
+    source: 'https://huggingface.co/Qwen/Qwen3-1.7B-GGUF' })
+  return { revision: 'r1', usage: {
+    subtitleRecognition: { model: 'kotoba', variant: 'kotoba-q4_k_m' }, subtitleTranslation: { model: 'qwen3', variant: 'qwen3-q4_k_m' },
+    textTranslation: { model: 'qwen3', variant: 'qwen3-q4_k_m', mode: 'app-default' }
+  }, downloadSource: 'official', supported: true, directory: '/models', defaultDirectory: '/models', translation: 'app-default', translationModel: 'qwen3',
     operation: null, activeModel: null, activeVariant: null, downloadBytes: 0, downloadTotal: 0, downloadLabel: null, error: null,
-    models: [{ id: 'qwen3', name: 'Qwen3 1.7B', version: 'Qwen3-1.7B', purpose: '本地翻译', bytes: 100,
-      selectedVariant: 'qwen3-q4_k_m', installed: true, inUse: false, variants: [
-        { id: 'qwen3-q4_k_m', precision: 'Q4_K_M', format: 'GGUF', bytes: 100, installed: true, inUse: false,
-          recommended: true, publisher: 'bartowski', source: 'https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF' },
-        { id: 'qwen3-q8_0', precision: 'Q8_0', format: 'GGUF', bytes: 200, installed: false, inUse: false,
-          recommended: false, publisher: 'bartowski', source: 'https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF' },
-        { id: 'qwen3-official-q8_0', precision: 'Q8_0', format: 'GGUF', bytes: 250, installed: true, inUse: false,
-          recommended: false, publisher: 'Qwen', source: 'https://huggingface.co/Qwen/Qwen3-1.7B-GGUF' }
-      ] }] }
-}
-function addHy(installed = true): void {
-  state.models.push({ id: 'hy-mt2-7b', name: 'HY-MT2 7B', version: 'Hy-MT2-7B', purpose: '本地翻译', bytes: 4624648896,
-    selectedVariant: 'hy-mt2-7b-q4_k_m', installed, inUse: false, variants: [
-      { id: 'hy-mt2-7b-q4_k_m', precision: 'Q4_K_M', format: 'GGUF', bytes: 4624648896, installed, inUse: false,
-        recommended: true, publisher: 'tencent', source: 'https://huggingface.co/tencent/Hy-MT2-7B-GGUF' },
-      { id: 'hy-mt2-7b-q6_k', precision: 'Q6_K', format: 'GGUF', bytes: 6164482720, installed: false, inUse: false,
-        recommended: false, publisher: 'tencent', source: 'https://huggingface.co/tencent/Hy-MT2-7B-GGUF' },
-      { id: 'hy-mt2-7b-q8_0', precision: 'Q8_0', format: 'GGUF', bytes: 7981928896, installed: false, inUse: false,
-        recommended: false, publisher: 'tencent', source: 'https://huggingface.co/tencent/Hy-MT2-7B-GGUF' }
-    ] })
-}
-function addIndex(installed = true): void {
-  state.models.push({ id: 'index-translate-9b', name: 'Index-Translate 9B', version: 'Index-Translate-9B', purpose: '本地翻译', bytes: 5780090304,
-    selectedVariant: 'index-translate-9b-q4_k_m', installed, inUse: false, variants: [
-      { id: 'index-translate-9b-q4_k_m', precision: 'Q4_K_M', format: 'GGUF', bytes: 5780090304, installed, inUse: false,
-        recommended: true, publisher: 'IndexTeam', source: 'https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF' },
-      { id: 'index-translate-9b-q8_0', precision: 'Q8_0', format: 'GGUF', bytes: 9786060224, installed: false, inUse: false,
-        recommended: false, publisher: 'IndexTeam', source: 'https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF' },
-      { id: 'index-translate-9b-f16', precision: 'F16', format: 'GGUF', bytes: 18407321024, installed: false, inUse: false,
-        recommended: false, publisher: 'IndexTeam', source: 'https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF' }
-    ] })
+    models: [qwen, family('kotoba', 'Kotoba v2.0', 'kotoba-tech', 1520000000), family('hy-mt2-7b', 'HY-MT2 7B', 'tencent', 4624648896),
+      family('index-translate-9b', 'Index-Translate 9B', 'IndexTeam', 5780090304)] }
 }
 let state = snapshot()
 let changed: (value: LocalModelSnapshot) => void = () => {}
@@ -56,168 +46,250 @@ Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), {
   api: fake, location: { href: 'http://localhost/' }, history: { state: null, pushState() {}, go() {} }, setTimeout, clearTimeout
 }) })
-Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-  body: { style: { overflow: '' } }, activeElement: null
-} })
+Object.defineProperty(globalThis, 'document', { configurable: true, value: { body: { style: { overflow: '' } }, activeElement: null } })
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let Select: typeof import('../SelectControl').default
-async function mount(): Promise<void> {
+let currentLocation = ''
+function LocationProbe(): null {
+  const location = useLocation(); currentLocation = location.pathname + location.search + location.hash; return null
+}
+async function mount(path = '/settings/models/local'): Promise<void> {
   const Panel = (await import('./LocalModelsPanel')).default
   Select = (await import('../SelectControl')).default
-  await act(async () => { renderer = TestRenderer.create(<MemoryRouter><OverlayHistoryProvider><Panel /></OverlayHistoryProvider></MemoryRouter>) })
+  await act(async () => { renderer = TestRenderer.create(<MemoryRouter initialEntries={[path]}><OverlayHistoryProvider><Panel /><LocationProbe /></OverlayHistoryProvider></MemoryRouter>) })
 }
 function select(label: string) {
   const result = renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === label)
   assert.ok(result, label); return result
 }
-function button(label: string) {
-  const result = renderer!.root.findAllByType('button').find(node => node.children.includes(label))
+function button(label: string, root = renderer!.root) {
+  const result = root.findAllByType('button').find(node => renderedText(node) === label || node.props['aria-label'] === label)
+    // Hidden feedback placeholders are not accessible labels, but their layout contract is still inspected.
+    ?? root.findAllByType(Button).find(node => node.props['aria-hidden'] === true && node.props.children === label)?.findByType('button')
   assert.ok(result, label); return result
+}
+function row(variant: string) {
+  const result = renderer!.root.findAllByProps({ 'data-variant': variant })[0]; assert.ok(result, variant); return result
+}
+// Inspect the canonical floating menu's declarative children without a DOM portal in this renderer.
+function menuItem(variant: string, label: string): React.ReactElement {
+  const menu = row(variant).findByType(FloatingLayer)
+  const items = React.Children.toArray(menu.props.children.props.children) as React.ReactElement[]
+  const result = items.find(item => item.props.children === label); assert.ok(result, label); return result
+}
+async function expand(name = 'Qwen3 1.7B'): Promise<void> {
+  await act(async () => button(`${name} 管理精度`).props.onClick())
+}
+async function all(name = 'Qwen3 1.7B'): Promise<void> {
+  await act(async () => select(`${name} 精度范围`).props.onChange({ target: { value: 'all' } }))
 }
 afterEach(async () => {
   await act(async () => renderer?.unmount()); renderer = undefined
   commands.length = 0; state = snapshot(); read = command = async () => state
 })
 
-test('browsing precisions does not switch the active model, and downloads carry the exact selected catalog identity', async () => {
+test('local models separate speech and text modalities, keep families compact, and do not expose usage selectors', async () => {
   await mount()
-  const options = React.Children.toArray(select('Qwen3 1.7B 查看精度').props.children) as React.ReactElement[]
-  assert.deepEqual(options.map(item => item.props.value), ['qwen3-q4_k_m', 'qwen3-q8_0', 'qwen3-official-q8_0'])
-  await act(async () => select('Qwen3 1.7B 查看精度').props.onChange({ target: { value: 'qwen3-q8_0' } }))
-  assert.deepEqual(commands, [])
-  assert.equal(button('使用此精度').props.disabled, true)
-  await act(async () => button('下载模型').props.onClick())
+  const speech = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音输入 → 文本')!
+  const text = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '文本输入 → 文本')!
+  assert.equal(speech.findAllByType('article').length, 1)
+  assert.equal(text.findAllByType('article').length, 3)
+  assert.equal(renderer!.root.findAllByProps({ role: 'table' }).length, 0)
+  const labels = renderer!.root.findAllByType(Select).map(node => node.props['aria-label'])
+  assert.deepEqual(labels, ['模型文件范围', '模型下载来源'])
+})
+
+test('precision browsing retains exact publisher identity and downloads never change usage', async () => {
+  await mount(); await expand()
+  assert.ok(row('qwen3-official-q8_0'))
+  assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-q8_0' }).length, 0)
+  await all()
+  assert.equal(commands.length, 0)
+  await act(async () => button('下载模型', row('qwen3-q8_0')).props.onClick())
   assert.deepEqual(commands, [{ action: 'download', model: 'qwen3', variant: 'qwen3-q8_0' }])
-  assert.ok(JSON.stringify(renderer!.toJSON()).includes('当前选择：'))
-  assert.equal(state.models[0].selectedVariant, 'qwen3-q4_k_m')
+  assert.equal(state.usage.subtitleTranslation.variant, 'qwen3-q4_k_m')
 })
 
-test('switch, deletion and export address an installed precision explicitly, including a second publisher of the same precision', async () => {
-  await mount()
-  await act(async () => select('Qwen3 1.7B 查看精度').props.onChange({ target: { value: 'qwen3-official-q8_0' } }))
-  assert.equal(button('使用此精度').props.disabled, false)
-  await act(async () => button('使用此精度').props.onClick())
-  await act(async () => button('导出模型').props.onClick())
-  await act(async () => button('删除此精度').props.onClick())
-  assert.deepEqual(commands, ['select', 'export', 'delete'].map(action => ({ action, model: 'qwen3', variant: 'qwen3-official-q8_0' })))
+test('copy, import and export carry the exact precision and publisher with clipboard feedback', async () => {
+  await mount(); await expand()
+  for (const label of ['复制下载地址', '导入模型文件', '导出模型文件']) {
+    await act(async () => menuItem('qwen3-official-q8_0', label).props.onClick())
+  }
+  assert.deepEqual(commands, ['copy-download-url', 'import', 'export'].map(action => ({ action, model: 'qwen3', variant: 'qwen3-official-q8_0' })))
+  await act(async () => menuItem('qwen3-official-q8_0', '复制下载地址').props.onClick())
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('下载地址已复制'))
+  await act(async () => changed({ ...state, operation: 'import' }))
+  assert.equal(menuItem('qwen3-official-q8_0', '导入模型文件').props.disabled, true)
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('正在复制并校验模型文件'))
 })
 
-test('installed-only filter retains installed variants and gives an actionable empty state', async () => {
-  await mount()
-  await act(async () => select('模型商店范围').props.onChange({ target: { value: 'installed' } }))
-  assert.deepEqual((React.Children.toArray(select('Qwen3 1.7B 查看精度').props.children) as React.ReactElement[]).map(item => item.props.value),
-    ['qwen3-q4_k_m', 'qwen3-official-q8_0'])
-  const empty = snapshot(); empty.models[0].installed = false
-  empty.models[0].variants.forEach(item => { item.installed = false })
+test('deletion confirms the exact precision and excludes referenced or running files', async () => {
+  state.models[0].variants[0].references = ['字幕翻译']
+  await mount(); await expand()
+  assert.equal(menuItem('qwen3-q4_k_m', '删除此精度').props.disabled, true)
+  await act(async () => menuItem('qwen3-official-q8_0', '删除此精度').props.onClick())
+  assert.equal(commands.length, 0)
+  assert.equal(renderer!.root.findByType(Modal).props.confirmDisabled, false)
+  await act(async () => renderer!.root.findByType(Modal).props.onConfirm())
+  assert.deepEqual(commands, [{ action: 'delete', model: 'qwen3', variant: 'qwen3-official-q8_0' }])
+  assert.equal(renderer!.root.findAllByType(Modal).length, 0)
+})
+
+test('a reference arriving while deletion confirmation is open disables the confirmation', async () => {
+  await mount(); await expand()
+  await act(async () => menuItem('qwen3-official-q8_0', '删除此精度').props.onClick())
+  const newer = structuredClone(state); newer.models[0].variants[2].references = ['文本翻译']
+  await act(async () => changed(newer))
+  assert.equal(renderer!.root.findByType(Modal).props.confirmDisabled, true)
+})
+
+test('installed-only browsing omits missing files and supplies a compact empty state', async () => {
+  await mount(); await expand()
+  await act(async () => select('模型文件范围').props.onChange({ target: { value: 'installed' } }))
+  assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-q8_0' }).length, 0)
+  const empty = structuredClone(state); empty.models.forEach(model => model.variants.forEach(variant => { variant.installed = false }))
   await act(async () => changed(empty))
   assert.equal(renderer!.root.findAllByType('article').length, 0)
-  assert.ok(JSON.stringify(renderer!.toJSON()).includes('尚未下载模型精度'))
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('尚未下载此模态的模型精度'))
 })
 
-test('model file management remains available on unsupported runtime platforms without offering local inference', async () => {
-  state.supported = false
-  await mount()
-  assert.equal(button('校验与修复').props.disabled, false)
-  const options = React.Children.toArray(select('AI 文本翻译模型来源').props.children) as React.ReactElement[]
-  assert.equal(options.find(item => item.props.value === 'local')!.props.disabled, true)
-  assert.ok(JSON.stringify(renderer!.toJSON()).includes('下载不代表能在其他平台运行'))
+test('targeted installation expands and highlights a missing nonrecommended precision, with a return route preserving scope', async () => {
+  await mount('/settings/models/local?scope=library&model=index-translate-9b&variant=index-translate-9b-q8_0')
+  assert.equal(row('index-translate-9b-q8_0').props['data-target'], true)
+  assert.equal(renderer!.root.findAllByProps({ role: 'table' }).length, 1)
+  await act(async () => button('返回用途配置').props.onClick())
+  assert.equal(currentLocation, '/settings/models/usage?scope=library#ai-subtitles')
 })
 
-test('commands synchronously exclude duplicate clicks and stale command results cannot overwrite newer model events', async () => {
+test('runtime readiness stays distinct from installed weights on unsupported and incomplete platforms', async () => {
+  state.supported = false; state.models[0].variants[0].ready = false; state.models[0].variants[0].readiness = 'unsupported'
+  await mount(); await expand()
+  assert.equal(button('校验与修复', row('qwen3-q4_k_m')).props.disabled, false)
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('仅管理文件'))
+  const incomplete = structuredClone(state); incomplete.supported = true; incomplete.models[0].variants[0].readiness = 'missing-runtime'
+  await act(async () => changed(incomplete))
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('需补齐运行依赖'))
+})
+
+test('duplicate commands are excluded synchronously and newer events win over command responses', async () => {
   let finish!: (value: LocalModelSnapshot) => void
   command = () => new Promise(resolve => { finish = resolve })
-  await mount()
-  const click = button('校验与修复').props.onClick
+  await mount(); await expand()
+  const click = button('校验与修复', row('qwen3-q4_k_m')).props.onClick
   await act(async () => { click(); click() })
   assert.equal(commands.length, 1)
-  const newer = snapshot(); newer.models[0].selectedVariant = 'qwen3-official-q8_0'
+  const newer = structuredClone(state); newer.directory = '/newer-event'
   await act(async () => changed(newer))
   await act(async () => finish(state))
-  assert.equal(select('Qwen3 1.7B 查看精度').props.value, 'qwen3-official-q8_0')
-  assert.equal(button('使用此精度').props.disabled, true)
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('/newer-event'))
 })
 
-test('usage and operation snapshots disable conflicting mutations while retaining non-mutating browsing', async () => {
-  state.models[0].inUse = true
+test('an initial read completing after an event does not replace newer state', async () => {
+  let finish!: (value: LocalModelSnapshot) => void
+  read = () => new Promise(resolve => { finish = resolve })
   await mount()
-  assert.equal(button('更改并迁移').props.disabled, true)
-  assert.equal(button('校验与修复').props.disabled, true)
-  assert.equal(button('删除此精度').props.disabled, true)
-  assert.equal(select('Qwen3 1.7B 查看精度').props.disabled, false)
-  await act(async () => changed({ ...state, operation: 'download', activeModel: 'qwen3', activeVariant: 'qwen3-q4_k_m' }))
-  assert.equal(select('Qwen3 1.7B 查看精度').props.disabled, true)
+  const newer = structuredClone(state); newer.directory = '/event-directory'
+  await act(async () => changed(newer))
+  await act(async () => finish(state))
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('/event-directory'))
+})
+
+test('downloading retains precision browsing, copy links and stable actions while excluding conflicting mutations', async () => {
+  state.operation = 'download'; state.activeModel = 'qwen3'; state.activeVariant = 'qwen3-q4_k_m'
+  await mount(); await expand(); await all()
+  assert.equal(select('Qwen3 1.7B 精度范围').props.disabled, undefined)
+  assert.equal(menuItem('qwen3-q8_0', '复制下载地址').props.disabled, false)
+  assert.equal(menuItem('qwen3-q8_0', '导入模型文件').props.disabled, true)
+  assert.equal(button('下载模型', row('qwen3-q8_0')).props.disabled, true)
+  assert.equal(button('校验与修复', row('qwen3-q4_k_m')).props['aria-busy'], true)
   assert.equal(button('取消下载').props.disabled, false)
+  await act(async () => menuItem('qwen3-q8_0', '复制下载地址').props.onClick())
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('下载地址已复制'))
+  await act(async () => button('取消下载').props.onClick())
+  assert.deepEqual(commands, [{ action: 'copy-download-url', model: 'qwen3', variant: 'qwen3-q8_0' }, { action: 'cancel-download' }])
 })
 
-test('HY catalog browsing and downloads do not switch the active translator; family selection is an explicit independent command', async () => {
-  addHy()
-  await mount()
-  const options = React.Children.toArray(select('HY-MT2 7B 查看精度').props.children) as React.ReactElement[]
-  assert.deepEqual(options.map(item => item.props.value), ['hy-mt2-7b-q4_k_m', 'hy-mt2-7b-q6_k', 'hy-mt2-7b-q8_0'])
-  await act(async () => select('HY-MT2 7B 查看精度').props.onChange({ target: { value: 'hy-mt2-7b-q6_k' } }))
-  assert.deepEqual(commands, [])
-  assert.equal(select('本地翻译模型').props.value, 'qwen3')
-  const article = renderer!.root.findAllByType('article').find(node => node.props['aria-label'] === 'HY-MT2 7B 模型精度')!
-  const download = article.findAllByType('button').find(node => node.children.includes('下载模型'))!
-  await act(async () => download.props.onClick())
-  assert.deepEqual(commands, [{ action: 'download', model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' }])
-  await act(async () => select('本地翻译模型').props.onChange({ target: { value: 'hy-mt2-7b' } }))
-  assert.deepEqual(commands[1], { action: 'translation-model', model: 'hy-mt2-7b' })
-  assert.equal(select('AI 文本翻译模型来源').props.value, 'app-default')
-  assert.ok(JSON.stringify(renderer!.toJSON()).includes('文件大小不是运行内存需求'))
+test('an active text runtime blocks other text repairs while leaving speech repair and precision browsing available', async () => {
+  state.models.find(model => model.id === 'index-translate-9b')!.inUse = true
+  await mount(); await expand(); await expand('HY-MT2 7B'); await expand('Kotoba v2.0')
+  assert.equal(button('校验与修复', row('qwen3-q4_k_m')).props.disabled, true)
+  assert.equal(button('校验与修复', row('hy-mt2-7b-q4_k_m')).props.disabled, true)
+  assert.equal(button('校验与修复', row('kotoba-q4_k_m')).props.disabled, false)
+  assert.equal(select('Qwen3 1.7B 精度范围').props.disabled, undefined)
+  assert.equal(button('更改并迁移').props.disabled, true)
 })
 
-test('local text availability follows HY rather than an installed Qwen, and shared repairs are disabled during active translation', async () => {
-  addHy(false); state.translationModel = 'hy-mt2-7b'
-  await mount()
-  const sourceOptions = React.Children.toArray(select('AI 文本翻译模型来源').props.children) as React.ReactElement[]
-  assert.equal(sourceOptions.find(item => item.props.value === 'local')!.props.disabled, true)
-  const families = React.Children.toArray(select('本地翻译模型').props.children) as React.ReactElement[]
-  assert.equal(families.find(item => item.props.value === 'hy-mt2-7b')!.props.disabled, true)
-  const used = structuredClone(state)
-  used.models[1].installed = true; used.models[1].inUse = true
-  await act(async () => changed(used))
-  assert.equal(select('本地翻译模型').props.disabled, true)
-  assert.equal(button('校验与修复').props.disabled, true, 'Qwen repair would touch the shared translator executable')
-  assert.equal(select('HY-MT2 7B 查看精度').props.disabled, false, 'non-mutating browsing remains available')
-})
-
-test('Index precision browsing and downloads preserve the active family until an explicit family selection', async () => {
-  addIndex()
-  await mount()
-  const options = React.Children.toArray(select('Index-Translate 9B 查看精度').props.children) as React.ReactElement[]
-  assert.deepEqual(options.map(item => item.props.value), ['index-translate-9b-q4_k_m', 'index-translate-9b-q8_0', 'index-translate-9b-f16'])
-  await act(async () => select('Index-Translate 9B 查看精度').props.onChange({ target: { value: 'index-translate-9b-f16' } }))
-  assert.deepEqual(commands, [])
-  assert.equal(select('本地翻译模型').props.value, 'qwen3')
-  const article = renderer!.root.findAllByType('article').find(node => node.props['aria-label'] === 'Index-Translate 9B 模型精度')!
-  assert.equal(article.findAllByType('button').find(node => node.children.includes('使用此精度'))!.props.disabled, true)
-  await act(async () => article.findAllByType('button').find(node => node.children.includes('下载模型'))!.props.onClick())
-  assert.deepEqual(commands, [{ action: 'download', model: 'index-translate-9b', variant: 'index-translate-9b-f16' }])
-  await act(async () => select('本地翻译模型').props.onChange({ target: { value: 'index-translate-9b' } }))
-  assert.deepEqual(commands[1], { action: 'translation-model', model: 'index-translate-9b' })
-  assert.equal(select('AI 文本翻译模型来源').props.value, 'app-default')
+test('HY and Index expose all catalog precisions, sizes and modalities without selecting uses', async () => {
+  await mount(); await expand('HY-MT2 7B'); await all('HY-MT2 7B'); await expand('Index-Translate 9B'); await all('Index-Translate 9B')
+  await act(async () => button('下载模型', row('hy-mt2-7b-q8_0')).props.onClick())
+  await act(async () => button('下载模型', row('index-translate-9b-q8_0')).props.onClick())
+  assert.deepEqual(commands, [ { action: 'download', model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q8_0' },
+    { action: 'download', model: 'index-translate-9b', variant: 'index-translate-9b-q8_0' } ])
   const rendered = JSON.stringify(renderer!.toJSON())
-  assert.ok(rendered.includes('全部 12 档纯文本 GGUF'))
-  assert.ok(rendered.includes('不包含视觉附件或语音模型'))
-  assert.ok(rendered.includes('许可正文来自官方项目'))
+  const size = row('index-translate-9b-q4_k_m').findAllByType('span').find(node => node.children.join('') === '5.78 GB')
+  assert.ok(size)
+  assert.ok(rendered.includes('不接收语音、图片或视频'))
 })
 
-test('Index availability follows its selected precision and its lease disables repairs of all shared translators', async () => {
-  addHy(); addIndex(false); state.translationModel = 'index-translate-9b'
+test('download source is saved immediately and locked while a download is running', async () => {
   await mount()
-  const options = React.Children.toArray(select('AI 文本翻译模型来源').props.children) as React.ReactElement[]
-  assert.equal(options.find(item => item.props.value === 'local')!.props.disabled, true)
-  const families = React.Children.toArray(select('本地翻译模型').props.children) as React.ReactElement[]
-  assert.equal(families.find(item => item.props.value === 'index-translate-9b')!.props.disabled, true)
-  const used = structuredClone(state)
-  const index = used.models.find(model => model.id === 'index-translate-9b')!
-  index.installed = true; index.inUse = true
-  index.variants.find(variant => variant.id === index.selectedVariant)!.installed = true
-  await act(async () => changed(used))
-  assert.equal(select('本地翻译模型').props.disabled, true)
-  const repairs = renderer!.root.findAllByType('button').filter(node => node.children.includes('校验与修复'))
-  assert.equal(repairs.length, 3)
-  assert.equal(repairs.every(node => node.props.disabled), true)
-  assert.equal(select('Index-Translate 9B 查看精度').props.disabled, false)
+  await act(async () => select('模型下载来源').props.onChange({ target: { value: 'hf-mirror' } }))
+  assert.deepEqual(commands, [{ action: 'download-source', source: 'hf-mirror' }])
+  await act(async () => changed({ ...state, downloadSource: 'hf-mirror', operation: 'download' }))
+  assert.equal(select('模型下载来源').props.value, 'hf-mirror')
+  assert.equal(select('模型下载来源').props.disabled, true)
+})
+
+test('long operation errors stay in the stable feedback row and full detail is keyboard accessible', async () => {
+  const detail = '无法写入模型目录：' + '/very-long-path'.repeat(20)
+  command = async () => { throw new Error(detail) }
+  await mount(); await expand()
+  const before = button('错误详情').props.className
+  assert.equal(button('错误详情').props.tabIndex, -1)
+  await act(async () => button('校验与修复', row('qwen3-q4_k_m')).props.onClick())
+  assert.equal(button('错误详情').props.className, before)
+  assert.equal(button('错误详情').props.tabIndex, 0)
+  assert.equal(JSON.stringify(renderer!.toJSON()).includes(detail), false)
+  await act(async () => button('错误详情').props.onClick())
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes(detail))
+})
+
+for (const failedAction of ['download', 'import'] as const) {
+  test(`successful copy after failed ${failedAction} acknowledges only the historical snapshot error`, async () => {
+    await mount(); await expand()
+    command = async () => {
+      state = { ...state, error: '上次模型操作失败' }; changed(state)
+      throw new Error('上次失败的技术明细')
+    }
+    await act(async () => failedAction === 'download'
+      ? button('校验与修复', row('qwen3-q4_k_m')).props.onClick()
+      : menuItem('qwen3-q4_k_m', '导入模型文件').props.onClick())
+    assert.equal(button('错误详情').props.tabIndex, 0)
+    command = async () => state // Copy does not clear the manager's historical error.
+    await act(async () => menuItem('qwen3-q4_k_m', '复制下载地址').props.onClick())
+    assert.ok(JSON.stringify(renderer!.toJSON()).includes('下载地址已复制'))
+    assert.equal(renderer!.root.findAllByProps({ role: 'alert' }).length, 0)
+    assert.equal(button('错误详情').props.tabIndex, -1)
+    await act(async () => changed({ ...state }))
+    assert.equal(button('错误详情').props.tabIndex, -1, 'repeated idle snapshots must not resurrect the same historical failure')
+    await act(async () => changed({ ...state, operation: 'download', error: null }))
+    assert.ok(JSON.stringify(renderer!.toJSON()).includes('模型下载进度'))
+    await act(async () => changed({ ...state, operation: null }))
+    assert.equal(button('错误详情').props.tabIndex, 0, 'a new failed operation with the same message must remain visible')
+    assert.equal(renderer!.root.findAllByProps({ role: 'alert' }).length, 1)
+  })
+}
+
+test('a newer operation failure arriving during successful copy retains the current error', async () => {
+  state.error = '下载校验失败'
+  let finish!: (value: LocalModelSnapshot) => void
+  command = () => new Promise(resolve => { finish = resolve })
+  await mount(); await expand()
+  await act(async () => menuItem('qwen3-q4_k_m', '复制下载地址').props.onClick())
+  await act(async () => changed({ ...state, operation: 'download', error: null }))
+  await act(async () => changed({ ...state, operation: null }))
+  await act(async () => finish(state))
+  assert.equal(button('错误详情').props.tabIndex, 0)
+  assert.equal(renderer!.root.findAllByProps({ role: 'alert' }).length, 1)
+  assert.ok(JSON.stringify(renderer!.toJSON()).includes('操作失败，请查看错误详情'))
 })

@@ -137,7 +137,9 @@
 
 设置工作区使用 Data Router 的 hash history。`NavigationGuardProvider` 持有唯一 `useBlocker`，组合设置未保存表单和插件未安装更改的离开保护；各功能只注册当前条件和确认决策，不创建额外 blocker 或 history trap。应用根由 `createHashRouter` / `RouterProvider` 提供，原有 `App` 内嵌路由树继续负责页面布局。
 
-设置子页统一写入路径：`models/usage`、`models/providers`、`models/advanced`；`plugins/video`、`plugins/actress`；`storage/mode`、`storage/assets`、`storage/export`。旧 `network/mode` 入口用 replace 跳转至 `storage/mode`。媒体库作用域继续使用现有 query，构建目标路径时保留该作用域，不在子面板维护第二套页签状态。
+设置子页统一写入路径：`models/usage`（用途配置）、`models/providers`、`models/local`；`plugins/video`、`plugins/actress`；`storage/mode`、`storage/assets`、`storage/export`。旧 `network/mode` 入口用 replace 跳转至 `storage/mode`，旧 `models/advanced` 跳转至 `models/providers`，能力与上限在提供商的模型详情中编辑。媒体库作用域继续使用现有 query，构建目标路径时保留该作用域，不在子面板维护第二套页签状态。
+
+AI 模型三页签之间保留已挂载的用途草稿；下载跳转用 `model`、`variant` query 定位文件，返回用途配置删除这两个定位参数并保留其余作用域。用途表单仅对这些确实保持挂载的目标声明 `preserveOnNavigate`；离开 AI 模型、关闭窗口及保存中的导航仍执行原离开保护。播放器的字幕模型入口定位 `models/usage#ai-subtitles`。
 
 ## Overlay History
 

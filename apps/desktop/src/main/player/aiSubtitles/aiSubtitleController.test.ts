@@ -24,6 +24,7 @@ async function fixture() {
   let leases = 0, finishClose = async (): Promise<void> => {}
   let installed = async () => true, runtimeChanged = (): void => {}
   const updates: Array<{ filename: string; select: boolean }> = [], removals: Array<number | null> = []
+  const logs: string[] = []
   const source: PlaybackSource = { target: { libraryId: 1, videoId: 1, resourceId: 1 }, mode: 'remote',
     locator: 'https://fixture.invalid/grant?secret=original', identityKey: 'fixture', revision: 'one', resumeKey: 'one', title: 'fixture' }
   const native: NativePlayback = { create: () => {}, load: () => {}, command: () => {}, read: () => ({ alive: true }),
@@ -46,6 +47,7 @@ async function fixture() {
   let resolve = async (value: PlaybackSource) => ({ ...value, locator: 'https://fixture.invalid/grant?secret=renewed' })
   const controller = createAiSubtitleController({ root, runtime, native, playback: () => playback,
     source: () => ({ source, privateSession }), resolve: value => resolve(value), changed: () => {}, exportFile: async () => {},
+    openLog: async content => { logs.push(content) },
     acquireRuntime: async () => { leases++; return () => { leases-- } },
     onRuntimeChanged: listener => { runtimeChanged = listener; return () => { runtimeChanged = () => {} } },
     inference: ((paths: AiRuntimePaths) => ({
@@ -60,7 +62,7 @@ async function fixture() {
       close: async () => { closeCount++; await finishClose() }
     })) as typeof createOfflineSubtitleInference
   })
-  return { controller, root, updates, removals, setAudio: (value: number) => { audio = value },
+  return { controller, root, updates, removals, logs, setAudio: (value: number) => { audio = value },
     setPrivate: () => { privateSession = true }, setSession: () => { playback = { ...playback, sessionId: 'two' } },
     setResolve: (value: typeof resolve) => { resolve = value }, tick: () => controller.tick(playback),
     recognizes: () => recognizeCount, translations: () => translateCount, closes: () => closeCount,
@@ -70,6 +72,22 @@ async function fixture() {
     cleanup: async () => { await controller.close(); await fs.rm(root, { recursive: true, force: true }) }
   }
 }
+
+test('logs remain readable after stopping but do not leak into another playback session', async () => {
+  const f = await fixture()
+  try {
+    await f.controller.command('one', { action: 'start' })
+    await until(() => f.controller.snapshot().translatedSeconds === 15)
+    await f.controller.command('one', { action: 'stop' })
+    await f.controller.command('one', { action: 'view-log' })
+    assert.match(f.logs.at(-1)!, /开始 AI 字幕/)
+    assert.doesNotMatch(f.logs.at(-1)!, /secret=|fixture.invalid/)
+    f.setSession()
+    await f.controller.command('two', { action: 'view-log' })
+    assert.match(f.logs.at(-1)!, /暂无推理记录/)
+    assert.doesNotMatch(f.logs.at(-1)!, /开始 AI 字幕/)
+  } finally { await f.cleanup() }
+})
 
 test('incremental display preserves selection, restores original subtitles and reuses cache', async () => {
   const f = await fixture()

@@ -13,6 +13,13 @@
   background: var(--surface-panel);
 }
 
+.embeddedCard {
+  margin-top: 10px;
+  padding: 12px;
+  border-color: var(--border-subtle);
+  background: var(--surface-panel);
+}
+
 .cardHeader {
   display: flex;
   align-items: flex-start;
@@ -79,9 +86,9 @@
   font: inherit;
 }
 
-.controlInput:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: 1px;
+.controlInput:focus {
+  outline: none;
+  border-color: var(--border-accent);
   box-shadow: var(--focus-ring);
 }
 

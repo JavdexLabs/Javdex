@@ -9,6 +9,7 @@ import { runSubtitleProcess, subtitleProcessEnvironment } from './processRunner'
 import type { AiRuntimePaths } from './runtimeInstaller'
 import { parseWhisperCues, SUBTITLE_CONTEXT_SECONDS, type SubtitleCue } from './subtitleDocument'
 import { localSubtitleTranslationPrompt, localTextTranslationPrompt, localTranslationSettings, localTranslationOutput } from './localTranslation'
+import type { SubtitleLogWriter } from './subtitleLog'
 
 export interface SubtitleAudioStream { index: number; identity: string }
 async function unusedPort(): Promise<number> {
@@ -26,7 +27,7 @@ export function translationPrompt(japanese: string, context: string[] = []): str
   return localSubtitleTranslationPrompt('qwen3', japanese, context)
 }
 export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: string, options: {
-  spawn?: typeof spawn; request?: typeof fetch; port?: typeof unusedPort
+  spawn?: typeof spawn; request?: typeof fetch; port?: typeof unusedPort; log?: SubtitleLogWriter
 } = {}) {
   const model = paths.translationModelId ?? 'qwen3'
   const settings = localTranslationSettings(model)
@@ -83,14 +84,17 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
     signal.throwIfAborted()
   }
   async function translateContent(prompt: string, signal: AbortSignal, maxTokens: number): Promise<string> {
+    options.log?.('翻译请求', { model, prompt, maxTokens })
     await ready(signal)
     const response = await request(`${endpoint}/v1/chat/completions`, { method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       signal: AbortSignal.any([signal, lifetime.signal, AbortSignal.timeout(90000)]),
       body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], max_tokens: maxTokens,
         ...settings.request, stream: false }) })
+    const raw = await response.text()
+    options.log?.('翻译原始响应', { model, status: response.status, response: raw })
     if (!response.ok) throw new Error('离线中文翻译失败')
-    const value = await response.json() as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }> }
+    const value = JSON.parse(raw) as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }> }
     const text = value.choices?.[0]?.message?.content
     if (typeof text !== 'string' || text.length > 6000 || value.choices?.[0]?.finish_reason === 'length') {
       throw new Error('中文译文不完整，请重试')
@@ -114,6 +118,7 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
       if (!Number.isInteger(audioIndex) || audioIndex < 0 || !Number.isFinite(start) || !Number.isFinite(end)
         || start < 0 || end <= start || end - start > 30) throw new Error('音频识别区间无效')
       signal.throwIfAborted()
+      options.log?.('识别开始', { model: 'Kotoba', audioIndex, start, end })
       await fs.mkdir(workRoot, { recursive: true })
       const directory = await fs.mkdtemp(path.join(workRoot, 'chunk-'))
       const wav = path.join(directory, 'audio.wav'), output = path.join(directory, 'recognized')
@@ -126,7 +131,9 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
         await runSubtitleProcess(paths.whisper, ['-m', paths.kotoba, '-f', wav, '-l', 'ja', '-ojf', '-of', output,
           '-t', threads, '-np', '-mc', '0', '--vad', '--vad-model', paths.vad], { signal, timeoutMs: 240000 })
         if ((await fs.stat(`${output}.json`)).size > 4 * 1024 * 1024) throw new Error('日语识别结果超限')
-        return parseWhisperCues(JSON.parse(await fs.readFile(`${output}.json`, 'utf8')), extractStart, start, end)
+        const raw = await fs.readFile(`${output}.json`, 'utf8')
+        options.log?.('识别原始响应', { start, end, extractStart, response: raw })
+        return parseWhisperCues(JSON.parse(raw), extractStart, start, end)
       } finally { await fs.rm(directory, { recursive: true, force: true }) }
     },
     async translate(cues: SubtitleCue[], signal: AbortSignal, updated: (cues: SubtitleCue[]) => Promise<void>): Promise<SubtitleCue[]> {
@@ -136,6 +143,7 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
       for (let index = 0; index < result.length; index++) {
         signal.throwIfAborted()
         if (result[index].chinese) continue
+        options.log?.('翻译字幕区间', { start: result[index].start, end: result[index].end })
         result[index].chinese = await translateContent(localSubtitleTranslationPrompt(model, result[index].japanese,
           result.slice(Math.max(0, index - 2), index).map(cue => cue.japanese)), signal, 768)
         await updated(structuredClone(result))

@@ -72,3 +72,18 @@ test('Index 9B lists all twelve official text precisions without mixing in visio
   assert.throws(() => localModelVariant('index-translate-9b', 'hy-mt2-7b-q4_k_m'), /不匹配/)
   assert.throws(() => localModelVariant('qwen3', 'index-translate-9b-q4_k_m'), /不匹配/)
 })
+
+
+test('mirror preserves every pinned model identity and only rewrites Hugging Face downloads', () => {
+  for (const variant of LOCAL_MODEL_VARIANTS) {
+    const selection = { ...DEFAULT_LOCAL_MODEL_VARIANTS, [variant.model]: variant.id }
+    const model = variant.model === 'kotoba' ? 'qwen3' : variant.model
+    const original = localModelAssets(selection, model)
+    const mirrored = localModelAssets(selection, model, undefined, 'hf-mirror')
+    original.forEach((asset, index) => {
+      const expected = asset.url.replace('https://huggingface.co/', 'https://hf-mirror.com/')
+      assert.deepEqual(mirrored[index], { ...asset, url: expected })
+    })
+    assert.deepEqual(localModelAssets(selection, model), original)
+  }
+})

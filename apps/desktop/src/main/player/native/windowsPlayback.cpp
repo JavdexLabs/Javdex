@@ -298,7 +298,12 @@ HWND widget(const wchar_t *klass, const wchar_t *label, DWORD style, int id) {
     if (id && !SetWindowSubclass(result, controlInput, 1, 0)) throw std::runtime_error("Cannot bind native playback control input");
     return result;
 }
-double scale() { const UINT dpi = parent ? GetDpiForWindow(parent) : 96; return (dpi ? dpi : 96) / 96.0; }
+double viewportScale = 0;
+double scale() {
+    if (viewportScale > 0) return viewportScale;
+    const UINT dpi = parent ? GetDpiForWindow(parent) : 96;
+    return (dpi ? dpi : 96) / 96.0;
+}
 void updateFont() {
     const UINT dpi = GetDpiForWindow(parent);
     if (!controls || !dpi || controlsDpi == dpi) return;
@@ -428,6 +433,10 @@ void destroyPlayer() {
     pixelWidth = pixelHeight = 0; closing = false;
 }
 void updateBounds(napi_env env, napi_value rect) {
+    bool hasScale = false; napi_has_named_property(env, rect, "scale", &hasScale);
+    const double nextScale = hasScale ? namedNumber(env, rect, "scale") : 0;
+    if (hasScale && (nextScale <= 0 || nextScale > 16)) throw std::runtime_error("Invalid playback viewport scale");
+    viewportScale = nextScale;
     requested = {namedNumber(env, rect, "x"), namedNumber(env, rect, "y"), namedNumber(env, rect, "width"), namedNumber(env, rect, "height")};
     layout();
 }
@@ -564,6 +573,10 @@ napi_value read(napi_env env, bool drain) {
     if (!playback.alive()) return result;
     setNumber(env, result, "pixelWidth", pixelWidth); setNumber(env, result, "pixelHeight", pixelHeight);
     setNumber(env, result, "dpi", GetDpiForWindow(parent));
+    RECT surface{}; GetClientRect(video, &surface);
+    POINT origin{}; MapWindowPoints(video, parent, &origin, 1);
+    setNumber(env, result, "surfaceX", origin.x); setNumber(env, result, "surfaceY", origin.y);
+    setNumber(env, result, "surfaceWidth", surface.right); setNumber(env, result, "surfaceHeight", surface.bottom);
     setNumber(env, result, "renderCalls", static_cast<double>(renderCalls));
     setNumber(env, result, "frameWakeups", static_cast<double>(frameWakeups));
     setNumber(env, result, "measuredFrames", static_cast<double>(measuredFrames));

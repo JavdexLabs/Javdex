@@ -741,11 +741,23 @@ export const appIpcSchemas = {
   [IPC.LOCAL_MODELS_SNAPSHOT]: noArgs,
   [IPC.LOCAL_MODELS_COMMAND]: z.tuple([z.discriminatedUnion('action', [
     z.object({ action: z.literal('translation'), mode: z.enum(['app-default', 'local']) }).strict(),
+    z.object({ action: z.literal('download-source'), source: z.enum(['official', 'hf-mirror']) }).strict(),
     z.object({ action: z.literal('translation-model'), model: z.enum(LOCAL_TRANSLATION_MODEL_IDS) }).strict(),
-    ...(['download', 'delete', 'export'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64).optional() }).strict()),
+    z.object({ action: z.literal('usage'), expectedRevision: z.string().min(1).max(128).optional(), usage: z.object({
+      subtitleRecognition: z.object({ model: z.literal('kotoba'), variant: z.string().min(1).max(64) }).strict(),
+      subtitleTranslation: z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
+      textTranslation: z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1).max(64), mode: z.enum(['app-default', 'local']) }).strict()
+    }).strict() }).strict(),
+    ...(['download', 'delete', 'export', 'import', 'copy-download-url'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64).optional() }).strict()),
     z.object({ action: z.literal('select'), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
     ...(['cancel-download', 'choose-location', 'reset-location'] as const).map(action => z.object({ action: z.literal(action) }).strict())
   ]).superRefine((command, context) => {
+    if (command.action === 'usage') {
+      for (const [purpose, ref] of Object.entries(command.usage)) {
+        try { localModelVariant(ref.model, ref.variant) }
+        catch { context.addIssue({ code: 'custom', message: '未知或不匹配的本地模型精度', path: ['usage', purpose, 'variant'] }) }
+      }
+    }
     if ('variant' in command && command.variant !== undefined) {
       try { localModelVariant(command.model, command.variant) }
       catch { context.addIssue({ code: 'custom', message: '未知或不匹配的本地模型精度', path: ['variant'] }) }

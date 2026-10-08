@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { LlmApiKeyAction, LlmProviderProtocol } from '@shared/llmProviders'
 import type { ModelCandidate, ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import Button from '../Button'
@@ -10,6 +10,7 @@ import Modal from '../Modal'
 import SelectControl from '../SelectControl'
 import { useToast } from '../Toast'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
+import { ModelOverrideCard } from './ModelAdvancedPanel'
 import styles from './ProviderDetailModal.module.css'
 
 export default function ProviderDetailModal({
@@ -33,6 +34,20 @@ export default function ProviderDetailModal({
     () => snapshot.models.filter((item) => item.connectionId === connection?.id),
     [connection?.id, snapshot.models]
   )
+  const referencedModelRefs = useMemo(() => {
+    const refs = new Set<string>()
+    for (const assignment of snapshot.assignments) {
+      if (assignment.resolution.modelRef) refs.add(assignment.resolution.modelRef)
+      if (assignment.model.mode === 'explicit') refs.add(assignment.model.modelRef)
+    }
+    return refs
+  }, [snapshot.assignments])
+  const referencedConnectionIds = useMemo(
+    () => new Set(snapshot.models
+      .filter((model) => referencedModelRefs.has(model.id))
+      .map((model) => model.connectionId)),
+    [referencedModelRefs, snapshot.models]
+  )
   const custom = !connection || connection.source === 'custom'
   const [draftProviderId, setDraftProviderId] = useState(
     () => providerId ?? `custom-${crypto.randomUUID().slice(0, 8)}`
@@ -54,6 +69,18 @@ export default function ProviderDetailModal({
   const [showKey, setShowKey] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [expandedModelId, setExpandedModelId] = useState<string | null>(() => models[0]?.id ?? null)
+  const [dirtyModelRefs, setDirtyModelRefs] = useState<Set<string>>(() => new Set())
+  const handleModelDirtyChange = useCallback((modelRef: string, dirty: boolean): void => {
+    setDirtyModelRefs((current) => {
+      if (dirty === current.has(modelRef)) return current
+      const next = new Set(current)
+      if (dirty) next.add(modelRef)
+      else next.delete(modelRef)
+      return next
+    })
+  }, [])
+  const hasDirtyModelOverride = models.some((model) => dirtyModelRefs.has(model.id))
   const connectionValue = JSON.stringify({ draftProviderId, name, protocol, baseUrl })
   const initial = useRef(connectionValue)
   const dirty = initial.current !== connectionValue || Boolean(apiKey) || apiKeyAction !== 'keep'
@@ -96,6 +123,14 @@ export default function ProviderDetailModal({
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9_-]+/g, '-')
+      if (!normalizedId) {
+        setSaveError('连接标识不能为空。')
+        return false
+      }
+      if (!connection && snapshot.connections.some((item) => item.providerId === normalizedId)) {
+        setSaveError('连接标识已存在，请使用其他标识。')
+        return false
+      }
       const saved = await apply(
         {
           type: 'save-connection',
@@ -115,9 +150,19 @@ export default function ProviderDetailModal({
         '提供商连接已保存'
       )
       if (saved) {
-        initial.current = connectionValue
+        const nextValue = JSON.stringify({
+          draftProviderId: normalizedId,
+          name: name.trim(),
+          protocol,
+          baseUrl: baseUrl.trim()
+        })
+        initial.current = nextValue
+        setDraftProviderId(normalizedId)
+        setName(name.trim())
+        setBaseUrl(baseUrl.trim())
         setApiKey('')
         setApiKeyAction('keep')
+        setDiscovered([])
         setTestResult(null)
         if (!connection) onProviderSaved(normalizedId)
       }
@@ -135,7 +180,7 @@ export default function ProviderDetailModal({
   })
 
   const discover = async (): Promise<void> => {
-    if (!connection) return
+    if (!connection || dirty || busy || saving || remoteBusy !== null) return
     setRemoteBusy('discover')
     try {
       setDiscovered(await window.api.settings.discoverManagedModels(connection.id))
@@ -148,6 +193,7 @@ export default function ProviderDetailModal({
   }
 
   const test = async (modelRef: string): Promise<void> => {
+    if (dirty || busy || saving || remoteBusy !== null) return
     setRemoteBusy(modelRef)
     try {
       const result = await window.api.settings.testManagedModel(modelRef)
@@ -161,7 +207,7 @@ export default function ProviderDetailModal({
   }
 
   const addModel = async (modelId: string, modelName: string): Promise<void> => {
-    if (!connection) return
+    if (!connection || busy || saving) return
     const added = await apply(
       {
         type: 'add-model',
@@ -196,15 +242,6 @@ export default function ProviderDetailModal({
             </header>
             <fieldset className={styles.gridTwo} disabled={saving} aria-label="提供商连接">
               <label className={styles.field}>
-                <span>连接标识（自动生成，可修改）</span>
-                <input
-                  className={styles.controlInput}
-                  value={draftProviderId}
-                  disabled={Boolean(connection)}
-                  onChange={(event) => setDraftProviderId(event.target.value)}
-                />
-              </label>
-              <label className={styles.field}>
                 <span>名称</span>
                 <input
                   className={styles.controlInput}
@@ -212,16 +249,6 @@ export default function ProviderDetailModal({
                   disabled={connection?.source === 'builtin'}
                   onChange={(event) => setName(event.target.value)}
                 />
-              </label>
-              <label className={styles.field}>
-                <span>协议</span>
-                <SelectControl
-                  value={protocol}
-                  onChange={(event) => setProtocol(event.target.value as LlmProviderProtocol)}
-                >
-                  <option value="openai-chat">OpenAI Chat Completions</option>
-                  <option value="anthropic-messages">Anthropic Messages</option>
-                </SelectControl>
               </label>
               <label className={styles.field}>
                 <span>服务地址（Base URL）</span>
@@ -259,6 +286,30 @@ export default function ProviderDetailModal({
                 </SelectControl>
               </label>
             </fieldset>
+            <details className={styles.advancedConnection}>
+              <summary className={styles.advancedConnectionSummary}>高级连接选项</summary>
+              <fieldset className={`${styles.gridTwo} ${styles.advancedConnectionFields}`} disabled={saving} aria-label="高级连接选项">
+                <label className={styles.field}>
+                  <span>协议</span>
+                  <SelectControl
+                    value={protocol}
+                    onChange={(event) => setProtocol(event.target.value as LlmProviderProtocol)}
+                  >
+                    <option value="openai-chat">OpenAI Chat Completions</option>
+                    <option value="anthropic-messages">Anthropic Messages</option>
+                  </SelectControl>
+                </label>
+                <label className={styles.field}>
+                  <span>内部连接 ID（自动生成，可修改）</span>
+                  <input
+                    className={styles.controlInput}
+                    value={draftProviderId}
+                    disabled={Boolean(connection)}
+                    onChange={(event) => setDraftProviderId(event.target.value)}
+                  />
+                </label>
+              </fieldset>
+            </details>
             <SettingsFormActions
               dirty={dirty}
               idleLabel={connection ? '已保存' : '尚未配置'}
@@ -291,36 +342,86 @@ export default function ProviderDetailModal({
                   : testResult || '查询和测试使用已保存的连接；测试不会改变默认模型。'}
                 detail={!dirty && !remoteBusy ? testResult : null} />
               <div className={styles.modelRows}>
-                {models.map((model) => (
-                  <div key={model.id} className={styles.modelRow}>
-                    <span className={styles.rowIdentity}>
-                      <strong className={styles.truncate}>{model.name}</strong>
-                      <small
-                        className={`${styles.metaText} ${styles.truncate}`}
-                        title={model.modelId}
-                      >
-                        {model.modelId}
-                      </small>
-                    </span>
-                    <span>{model.builtin ? '内置' : '自定义'}</span>
-                    <Button
-                      size="sm"
-                      disabled={remoteBusy !== null || dirty || busy}
-                      onClick={() => void test(model.id)}
+                {models.map((model) => {
+                  const modelInUse = referencedModelRefs.has(model.id)
+                  const modelOverrideDirty = dirtyModelRefs.has(model.id)
+                  const modelDeleteBlocked = remoteBusy !== null || dirty || saving || busy || modelInUse || modelOverrideDirty
+                  return (
+                    <details
+                      key={model.id}
+                      className={styles.modelDetail}
+                      open={expandedModelId === model.id}
+                      onToggle={(event) => setExpandedModelId((current) =>
+                        event.currentTarget.open ? model.id : current === model.id ? null : current
+                      )}
                     >
-                      测试
-                    </Button>
-                    {!model.builtin ? (
-                      <Button
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => setConfirmModelRef(model.id)}
-                      >
-                        删除
-                      </Button>
-                    ) : null}
-                  </div>
-                ))}
+                      <summary className={styles.modelSummary}>
+                        <span
+                          className={styles.modelDisclosureIcon}
+                          data-open={expandedModelId === model.id}
+                          aria-hidden="true"
+                        >
+                          ▸
+                        </span>
+                        <span className={styles.rowIdentity}>
+                          <strong className={styles.truncate}>{model.name}</strong>
+                          <small
+                            className={`${styles.metaText} ${styles.truncate}`}
+                            title={model.modelId}
+                          >
+                            {model.modelId}
+                          </small>
+                        </span>
+                        <span className={styles.modelKind}>{model.builtin ? '内置' : '自定义'}</span>
+                        <span className={styles.modelUsage}>
+                          {modelInUse ? '用途使用中' : '未被用途引用'}
+                        </span>
+                      </summary>
+                      <div className={styles.modelDetailBody}>
+                        <div className={styles.modelRow}>
+                          <span className={styles.modelState}>
+                            {model.kind === 'embedding' ? 'Embedding 模型' : '生成模型'}
+                          </span>
+                          <span className={styles.metaText}>
+                            {model.hasManualOverrides ? '能力已覆盖' : '自动识别'}
+                          </span>
+                          <Button
+                            size="sm"
+                            disabled={remoteBusy !== null || dirty || saving || busy}
+                            onClick={() => void test(model.id)}
+                          >
+                            测试
+                          </Button>
+                          {!model.builtin ? (
+                            <Button
+                              size="sm"
+                              disabled={modelDeleteBlocked}
+                              title={modelInUse
+                                ? '该模型仍被用途引用，请先更换用途模型'
+                                : modelOverrideDirty
+                                  ? '请先保存或取消能力与上限更改'
+                                  : undefined}
+                              onClick={() => {
+                                if (modelDeleteBlocked) return
+                                setConfirmModelRef(model.id)
+                              }}
+                            >
+                              {modelInUse ? '使用中' : '删除'}
+                            </Button>
+                          ) : null}
+                        </div>
+                        <ModelOverrideCard
+                          snapshot={snapshot}
+                          model={model}
+                          busy={busy || saving}
+                          apply={apply}
+                          embedded
+                          onDirtyChange={handleModelDirtyChange}
+                        />
+                      </div>
+                    </details>
+                  )
+                })}
               </div>
               <div className={styles.manualModel}>
                 <input
@@ -340,7 +441,7 @@ export default function ProviderDetailModal({
                 <Button
                   size="sm"
                   variant="primary"
-                  disabled={!manualModelId.trim() || busy}
+                  disabled={!manualModelId.trim() || busy || saving}
                   onClick={() => void addModel(manualModelId.trim(), manualModelName.trim())}
                 >
                   添加模型
@@ -364,6 +465,7 @@ export default function ProviderDetailModal({
                         disabled={
                           candidate.kind !== 'chat' ||
                           busy ||
+                          saving ||
                           models.some((model) => model.modelId === candidate.id)
                         }
                         onClick={() => void addModel(candidate.id, candidate.name)}
@@ -382,10 +484,28 @@ export default function ProviderDetailModal({
               <div className={styles.dangerCopy}>
                 <strong>删除自定义提供商</strong>
                 <span className={styles.dangerHint}>
-                  在被任何用途引用时，系统会拒绝删除并列出具体用途。
+                  {referencedConnectionIds.has(connection.id)
+                    ? '该提供商仍被用途引用，请先更换用途模型。'
+                    : hasDirtyModelOverride
+                      ? '请先保存或取消能力与上限更改，再删除提供商。'
+                    : dirty
+                      ? '请先保存或取消连接更改，再删除提供商。'
+                      : '删除后将同时移除该连接下的自定义模型。'}
                 </span>
               </div>
-              <Button size="sm" disabled={busy} onClick={() => setConfirmDelete(true)}>
+              <Button
+                size="sm"
+                disabled={busy || saving || dirty || hasDirtyModelOverride || referencedConnectionIds.has(connection.id)}
+                title={referencedConnectionIds.has(connection.id)
+                  ? '该提供商仍被用途引用'
+                  : hasDirtyModelOverride
+                    ? '请先保存或取消能力与上限更改'
+                    : undefined}
+                onClick={() => {
+                  if (busy || saving || dirty || hasDirtyModelOverride || referencedConnectionIds.has(connection.id)) return
+                  setConfirmDelete(true)
+                }}
+              >
                 删除提供商…
               </Button>
             </section>
@@ -397,11 +517,13 @@ export default function ProviderDetailModal({
           title="删除提供商"
           confirmText="删除提供商"
           danger
-          busy={busy}
+          busy={busy || saving}
+          confirmDisabled={!connection || dirty || hasDirtyModelOverride || referencedConnectionIds.has(connection.id)}
           onCancel={() => setConfirmDelete(false)}
-          onConfirm={() =>
-            void apply(
-              { type: 'remove-connection', connectionId: connection!.id },
+          onConfirm={() => {
+            if (!connection || busy || saving || dirty || hasDirtyModelOverride || referencedConnectionIds.has(connection.id)) return
+            return apply(
+              { type: 'remove-connection', connectionId: connection.id },
               '提供商已删除'
             ).then((ok) => {
               if (ok) {
@@ -409,7 +531,7 @@ export default function ProviderDetailModal({
                 onClose()
               }
             })
-          }
+          }}
         >
           <p>
             将删除“{connection?.name}”及连接配置。仍被用途引用时无法删除，请先更换对应用途的模型。
@@ -421,15 +543,17 @@ export default function ProviderDetailModal({
           title="删除模型"
           confirmText="删除模型"
           danger
-          busy={busy}
+          busy={busy || saving || remoteBusy !== null}
+          confirmDisabled={referencedModelRefs.has(confirmModelRef) || dirtyModelRefs.has(confirmModelRef)}
           onCancel={() => setConfirmModelRef(null)}
-          onConfirm={() =>
-            void apply({ type: 'remove-model', modelRef: confirmModelRef }, '模型已删除').then(
+          onConfirm={() => {
+            if (busy || saving || remoteBusy !== null || referencedModelRefs.has(confirmModelRef) || dirtyModelRefs.has(confirmModelRef)) return
+            return apply({ type: 'remove-model', modelRef: confirmModelRef }, '模型已删除').then(
               (ok) => {
                 if (ok) setConfirmModelRef(null)
               }
             )
-          }
+          }}
         >
           <p>
             将从可选模型中移除“{models.find((model) => model.id === confirmModelRef)?.name}

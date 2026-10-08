@@ -23,6 +23,12 @@ Object.defineProperty(globalThis, 'document', {
 
 let renderer: TestRenderer.ReactTestRenderer | null = null
 
+function textContent(node: TestRenderer.ReactTestInstance | string): string {
+  if (typeof node === 'string') return node
+  if (node.props['aria-hidden'] === true || node.props['aria-hidden'] === 'true') return ''
+  return node.children.map(textContent).join('')
+}
+
 afterEach(() => {
   renderer?.unmount()
   renderer = null
@@ -71,7 +77,7 @@ describe('VideoResourceImportModal', () => {
     assert.ok(
       mounted.root
         .findAllByType('button')
-        .some((button) => button.children.includes('读取大小'))
+        .some((button) => textContent(button) === '读取大小')
     )
     assert.match(JSON.stringify(mounted.toJSON()), /请修改源文件内容并重新扫描/)
   })
@@ -99,7 +105,7 @@ describe('VideoResourceImportModal', () => {
     assert.ok(
       mounted.root
         .findAllByType('button')
-        .some((button) => button.children.includes('添加链接'))
+        .some((button) => textContent(button) === '添加链接')
     )
   })
 
@@ -119,7 +125,7 @@ describe('VideoResourceImportModal', () => {
     )
     const addResource = mounted.root
       .findAllByType('button')
-      .find((button) => button.children.includes('添加链接'))
+      .find((button) => textContent(button) === '添加链接')
     assert.ok(addResource)
     act(() => {
       addResource.props.onClick()
@@ -133,14 +139,14 @@ describe('VideoResourceImportModal', () => {
       urlInput.props.onChange({ target: { value: 'https://github.com/JavdexLabs/Javdex' } })
     })
     assert.equal(
-      mounted.root.findAllByType('button').some((button) => button.children.includes('读取大小')),
+      mounted.root.findAllByType('button').some((button) => textContent(button) === '读取大小'),
       false
     )
     act(() => {
       urlInput.props.onChange({ target: { value: 'https://cdn.example/movie.mp4' } })
     })
     assert.ok(
-      mounted.root.findAllByType('button').some((button) => button.children.includes('读取大小'))
+      mounted.root.findAllByType('button').some((button) => textContent(button) === '读取大小')
     )
   })
 })

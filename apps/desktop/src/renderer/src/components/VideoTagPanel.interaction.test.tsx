@@ -4,6 +4,7 @@ import { afterEach, before, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { TagOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
+import { renderedText } from '../test/renderedText'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -51,7 +52,7 @@ async function show(videoId = 1) {
   })
 }
 function button(label: string) {
-  return renderer!.root.findAllByType('button').find(node => node.props['aria-label'] === label || node.props.children === label)!
+  return renderer!.root.findAllByType('button').find(node => node.props['aria-label'] === label || renderedText(node) === label)!
 }
 async function click(label: string) {
   if (label === '下一页' || label === '上一页') {

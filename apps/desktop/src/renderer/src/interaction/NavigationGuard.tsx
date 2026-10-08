@@ -3,7 +3,7 @@ import { UNSAFE_DataRouterContext, useBlocker, useLocation, useNavigate, type Lo
 import { useOverlayHistory } from './OverlayHistoryContext'
 
 export interface NavigationDecision { proceed(): void; reset(): void }
-interface Guard { enabled(): boolean; blocked(decision: NavigationDecision): void }
+interface Guard { enabled(nextPath?: string): boolean; blocked(decision: NavigationDecision): void }
 const Context = createContext<Map<string, Guard> | null>(null)
 interface NavigationIntent {
   location: Location
@@ -43,7 +43,7 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }): 
     pending.current?.cancelWait?.()
     pending.current = null
     replay.current = null
-    if (!history.isTraversing() && ![...guards].some(([id, guard]) => !resumed?.approved.has(id) && guard.enabled())) return false
+    if (!history.isTraversing() && ![...guards].some(([id, guard]) => !resumed?.approved.has(id) && guard.enabled(nextLocation.pathname))) return false
     pending.current = resumed ?? {
       location: nextLocation, action: historyAction, index: historyAction === 'POP' ? historyIndex() : null,
       approved: new Set(), prompting: null
@@ -57,7 +57,7 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }): 
       if (!intent.cancelWait) intent.cancelWait = history.afterTraversal(() => { intent.cancelWait = undefined; advance() })
       return
     }
-    const entry = [...guards].find(([id, guard]) => !intent.approved.has(id) && guard.enabled())
+    const entry = [...guards].find(([id, guard]) => !intent.approved.has(id) && guard.enabled(intent.location.pathname))
     if (entry) {
       const [id, guard] = entry
       intent.prompting = id
@@ -96,14 +96,14 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }): 
   }, [])
   return <Context.Provider value={guards}>{children}</Context.Provider>
 }
-export function useNavigationGuard(enabled: () => boolean, blocked: Guard['blocked']): void {
+export function useNavigationGuard(enabled: (nextPath?: string) => boolean, blocked: Guard['blocked']): void {
   const guards = useContext(Context)
   if (!guards) throw new Error('useNavigationGuard must be used inside NavigationGuardProvider')
   const id = useId()
   const current = useRef({ enabled, blocked })
   current.current = { enabled, blocked }
   useEffect(() => {
-    guards.set(id, { enabled: () => current.current.enabled(), blocked: decision => current.current.blocked(decision) })
+    guards.set(id, { enabled: nextPath => current.current.enabled(nextPath), blocked: decision => current.current.blocked(decision) })
     return () => { guards.delete(id) }
   }, [guards, id])
 }

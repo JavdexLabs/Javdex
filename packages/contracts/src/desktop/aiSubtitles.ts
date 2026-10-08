@@ -1,7 +1,7 @@
 /** No model paths, source locators, local inference credentials or transcript text cross IPC. */
 export type AiSubtitleDisplay = 'bilingual' | 'chinese' | 'japanese'
 export type AiSubtitleCommand =
-  | { action: 'start' | 'stop' | 'retry' | 'clear-cache' | 'export' }
+  | { action: 'start' | 'stop' | 'retry' | 'clear-cache' | 'export' | 'view-log' }
   | { action: 'display'; value: AiSubtitleDisplay }
   | { action: 'font-size'; value: number }
 export interface AiSubtitleSnapshot {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, before, test } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { renderedText } from '../test/renderedText'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { VideoQuery } from '@shared/videoTypes'
@@ -134,9 +135,9 @@ test('actual bulk dialog gates held preview, cancels queued IPC on close, and re
 test('initial catalog failure presents actionable retry instead of empty library', async () => {
   failList = true
   await mount()
-  await wait(() => renderer!.root.findAllByType('button').some(button => button.children.join('') === '重试'))
+  await wait(() => renderer!.root.findAllByType('button').some(button => renderedText(button) === '重试'))
   failList = false
-  act(() => renderer!.root.findAllByType('button').find(button => button.children.join('') === '重试')!.props.onClick())
+  act(() => renderer!.root.findAllByType('button').find(button => renderedText(button) === '重试')!.props.onClick())
   await wait(() => renderer!.root.findAllByType(Grid).length === 1)
 })
 

@@ -196,7 +196,7 @@ export default function PlaybackPanel(): JSX.Element | null {
         && (current.rendererFullscreenControls || occlusions.length === 0)
       const rect = { x: Math.max(0, bounds.x), y: Math.max(0, bounds.y), width: bounds.width, height: bounds.height }
       const popupRects = current.rendererFullscreenControls ? occlusions.slice(0, 32) : undefined
-      const key = JSON.stringify([rect, visible, popupRects])
+      const key = JSON.stringify([rect, visible, popupRects, window.devicePixelRatio])
       if (key === last) return
       last = key
       void api.playback.viewport({ sessionId, sequence: ++viewportSequence, presentation, presentationRevision, rect, visible,
@@ -412,6 +412,17 @@ export default function PlaybackPanel(): JSX.Element | null {
           <span className={styles.currentTime}>{playbackTime(seekDraft ?? state.position)}</span>
           <input className={styles.range} aria-label="播放进度" type="range" min={0} max={state.duration || 1} step={0.1} disabled={seekDisabled || !state.duration}
             style={rangeFill(position, state.duration || 1)} value={position} onChange={event => { seekDraftRef.current = Number(event.target.value); setSeekDraft(seekDraftRef.current) }}
+            onKeyDown={event => {
+              if (event.defaultPrevented || event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || !document.hasFocus()
+                || seekDisabled || !state.duration || (docked ? interactionLayers.hasModal() : !layer.isTop())) return
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+              event.preventDefault(); event.stopPropagation()
+              keyboardChrome.current = true; setControlsFocused(true); revealChrome()
+              const pending = pendingSeekRef.current
+              const from = seekDraftRef.current ?? (pending?.sessionId === state.sessionId ? pending.seconds : null) ?? state.position ?? 0
+              const seconds = Math.max(0, Math.min(state.duration, from + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 30 : 5)))
+              seekDraftRef.current = seconds; setSeekDraft(seconds); commitSeek()
+            }}
             onPointerDown={event => { setAdjusting(true); event.currentTarget.setPointerCapture(event.pointerId) }}
             onPointerUp={() => { setAdjusting(false); commitSeek() }} onKeyUp={commitSeek} onBlur={() => { setAdjusting(false); commitSeek() }} onPointerCancel={() => { setAdjusting(false); seekDraftRef.current = null; setSeekDraft(null) }}
             aria-valuetext={`${playbackTime(seekDraft ?? state.position)} / ${playbackTime(state.duration)}`} />

@@ -1,4 +1,4 @@
-import { app, dialog, powerSaveBlocker, powerMonitor, type BrowserWindow } from 'electron'
+import { app, dialog, shell, powerSaveBlocker, powerMonitor, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { removePlayedWatchLater } from '../application/watchLaterPlayback'
@@ -129,6 +129,14 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       const selected = await dialog.showSaveDialog(window, { title: '导出 AI 字幕', defaultPath: 'AI-日中字幕.ass',
         filters: [{ name: 'ASS 字幕', extensions: ['ass'] }, { name: 'SRT 字幕', extensions: ['srt'] }] })
       if (!selected.canceled && selected.filePath) await fs.writeFile(selected.filePath, path.extname(selected.filePath).toLowerCase() === '.srt' ? content.srt : content.ass, 'utf8')
+    },
+    openLog: async content => {
+      const directory = path.join(app.getPath('userData'), 'ai-subtitles', 'work')
+      await fs.mkdir(directory, { recursive: true })
+      const filename = path.join(directory, 'AI-subtitle-log.html')
+      await fs.writeFile(filename, content, 'utf8')
+      const error = await shell.openPath(filename)
+      if (error) throw new Error('无法打开日志，请检查系统的默认浏览器')
     }
   })
   const renderTimer = setInterval(() => {

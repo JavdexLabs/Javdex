@@ -4,6 +4,7 @@ import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { AgentMetadataSnapshot } from '@shared/agentMetadataTypes'
 import AgentMetadataActivityFeed from './AgentMetadataActivityFeed'
+import { renderedText } from '../../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -116,7 +117,7 @@ describe('AgentMetadataActivityFeed', () => {
       renderer?.root.findByType('details').props.onToggle({ currentTarget: { open: false } })
     })
     assert.equal(
-      renderer.root.findAllByType('button').some((node) => node.children.includes('回到最新')),
+      renderer.root.findAllByType('button').some((node) => renderedText(node) === '回到最新'),
       false
     )
   })

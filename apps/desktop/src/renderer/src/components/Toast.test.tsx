@@ -4,6 +4,7 @@ import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { ToastProvider, useToast } from './Toast'
 import { interactionLayers } from '../interaction/interactionLayers'
+import { renderedText } from '../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() })
@@ -16,7 +17,7 @@ function Actions() {
   return <><button onClick={() => toast.show(error, 'error')}>失败</button>
     <button onClick={() => toast.show('已保存', 'success')}>成功</button></>
 }
-const button = (label: string) => renderer!.root.findAllByType('button').find(node => node.children.join('') === label)!
+const button = (label: string) => renderer!.root.findAllByType('button').find(node => renderedText(node) === label)!
 afterEach(() => { act(() => renderer?.unmount()); renderer = undefined })
 
 test('errors persist and deduplicate while successes expire, full errors can be copied and dismissed', async context => {
@@ -24,7 +25,7 @@ test('errors persist and deduplicate while successes expire, full errors can be 
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async (value: string) => { copied = value } } } })
   act(() => { renderer = TestRenderer.create(<ToastProvider><Actions /></ToastProvider>) })
   act(() => { button('失败').props.onClick(); button('失败').props.onClick(); button('成功').props.onClick() })
-  assert.equal(renderer!.root.findAllByType('button').filter(node => node.children.join('') === '查看详情').length, 1)
+  assert.equal(renderer!.root.findAllByType('button').filter(node => renderedText(node) === '查看详情').length, 1)
   act(() => context.mock.timers.tick(4000))
   assert.ok(!JSON.stringify(renderer!.toJSON()).includes('已保存'))
   assert.ok(JSON.stringify(renderer!.toJSON()).includes(error))
@@ -33,7 +34,7 @@ test('errors persist and deduplicate while successes expire, full errors can be 
   await act(async () => { button('复制').props.onClick(); await Promise.resolve() })
   assert.equal(copied, error)
   const dialog = renderer!.root.findByProps({ role: 'dialog' })
-  act(() => dialog.findAllByType('button').find(node => node.children.join('') === '关闭')!.props.onClick())
+  act(() => dialog.findAllByType('button').find(node => renderedText(node) === '关闭')!.props.onClick())
   act(() => button('关闭').props.onClick())
   assert.ok(!JSON.stringify(renderer!.toJSON()).includes(error))
 })
@@ -48,7 +49,7 @@ test('a late clipboard completion cannot update a reopened error detail session'
   act(() => button('查看详情').props.onClick())
   act(() => button('复制').props.onClick())
   act(() => renderer!.root.findByProps({ role: 'dialog' }).findAllByType('button')
-    .find(node => node.children.join('') === '关闭')!.props.onClick())
+    .find(node => renderedText(node) === '关闭')!.props.onClick())
   act(() => button('查看详情').props.onClick())
   await act(async () => { finish(); await Promise.resolve() })
   assert.ok(!JSON.stringify(renderer!.toJSON()).includes('已复制'))
@@ -69,7 +70,7 @@ test('only a visible nonempty toast stack marks visual occlusion without claimin
   assert.equal(stack().props['data-native-playback-occluder'], undefined)
   assert.equal(stack().props['data-interaction-preserve-surface'], undefined)
   act(() => renderer!.root.findByProps({ role: 'dialog' }).findAllByType('button')
-    .find(node => node.children.join('') === '关闭')!.props.onClick())
+    .find(node => renderedText(node) === '关闭')!.props.onClick())
   assert.equal(stack().props['data-native-playback-occluder'], true)
   act(() => button('关闭').props.onClick())
   assert.equal(stack().props['data-native-playback-occluder'], undefined)

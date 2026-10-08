@@ -53,6 +53,7 @@
 .button:focus {
   --select-arrow-color: var(--text-accent);
 
+  outline: none;
   border-color: var(--border-accent);
   background-color: color-mix(in srgb, var(--surface-control-hover) 82%, var(--surface-control));
   box-shadow: var(--focus-ring);

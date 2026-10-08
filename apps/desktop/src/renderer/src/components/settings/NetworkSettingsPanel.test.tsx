@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { renderedText } from '../../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -54,7 +55,7 @@ it('saves proxy address and mode only on explicit commit; testing stays independ
     assert.deepEqual(updates, [])
     const save = renderer.root
       .findAllByType('button')
-      .find((button) => button.children.includes('保存'))!
+      .find((button) => renderedText(button) === '保存')!
     await act(async () => {
       save.props.onClick()
     })

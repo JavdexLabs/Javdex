@@ -171,10 +171,15 @@
 
 .providerRow:focus-visible,
 .disclosure:focus-visible,
-.availableProvider:focus-visible,
-.controlInput:focus-visible {
+.availableProvider:focus-visible {
   outline: var(--focus-outline);
   outline-offset: 1px;
+  box-shadow: var(--focus-ring);
+}
+
+.controlInput:focus {
+  outline: none;
+  border-color: var(--border-accent);
   box-shadow: var(--focus-ring);
 }
 

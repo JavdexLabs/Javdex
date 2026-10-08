@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test'
 import React, { useState } from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import RelatedLinksEditor from './RelatedLinksEditor'
+import { renderedText } from '../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -48,7 +49,7 @@ describe('RelatedLinksEditor', () => {
     act(() => { renderer!.root.findAllByType('input')[0].props.onChange({ target: { value: '更新名称' } }) })
     assert.deepEqual(labels(), ['更新名称', '官网'])
 
-    act(() => { renderer!.root.findAllByType('button').find((item) => item.children.includes('添加链接'))!.props.onClick() })
+    act(() => { renderer!.root.findAllByType('button').find((item) => renderedText(item) === '添加链接')!.props.onClick() })
     assert.deepEqual(labels(), ['更新名称', '官网', ''])
     act(() => { button('移除链接 3').props.onClick() })
     assert.deepEqual(labels(), ['更新名称', '官网'])

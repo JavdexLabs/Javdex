@@ -4,6 +4,7 @@ import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { PluginDevPendingUserRequest } from '@shared/pluginDevTypes'
 import PluginDevConversation from './PluginDevConversation'
+import { renderedText } from '../../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -58,7 +59,7 @@ describe('PluginDevConversation history controls', () => {
     assert.match(renderer?.root.findByType('textarea').props.placeholder ?? '', /具体反馈/)
     const continueButton = renderer?.root
       .findAllByType('button')
-      .find((button) => button.children.includes('继续 Agent'))
+      .find((button) => renderedText(button) === '继续 Agent')
     assert.ok(continueButton)
     assert.equal(continueButton.props.disabled, true)
   })
@@ -437,7 +438,7 @@ describe('PluginDevConversation history controls', () => {
       )
     })
     const challenge = renderer?.root.findAllByType('button').find((candidate) =>
-      candidate.children.includes('我已完成，继续')
+      renderedText(candidate) === '我已完成，继续'
     )
     assert.ok(challenge)
     act(() => challenge.props.onClick())

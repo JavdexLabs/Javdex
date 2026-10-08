@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import type {
   ModelManagementSnapshot,
   ModelWorkloadAssignmentView,
@@ -12,17 +12,20 @@ import SelectControl from '../SelectControl'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
 import styles from './ModelUsagePanel.module.css'
 import { modelConnectionName } from './modelSettingsView'
+import { preservesModelUsageDraft } from '../../settings/settingsRoutes'
 
 function ModelSelect({
   snapshot,
   value,
   onChange,
-  agentOnly = false
+  agentOnly = false,
+  disabled = false
 }: {
   snapshot: ModelManagementSnapshot
   value: string
   onChange: (value: string) => void
   agentOnly?: boolean
+  disabled?: boolean
 }): JSX.Element {
   const readyConnections = new Set(
     snapshot.connections
@@ -36,7 +39,7 @@ function ModelSelect({
       (!agentOnly || model.effective.capabilities.tools === true)
   )
   return (
-    <SelectControl value={value} onChange={(event) => onChange(event.target.value)}>
+    <SelectControl disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)}>
       {!models.some((model) => model.id === value) ? (
         <option value={value}>
           {value ? '当前模型不可用，请重新选择' : '暂无可用模型，请先添加提供商与模型'}
@@ -96,7 +99,8 @@ function AgentAssignmentCard({
       setSaving(false)
     }
   }
-  useSettingsFormGuard({ label: title, dirty: form.dirty, busy: saving, save, discard: form.reset })
+  useSettingsFormGuard({ label: title, dirty: form.dirty, busy: saving, save, discard: form.reset,
+    preserveOnNavigate: preservesModelUsageDraft })
   const setNumber = (
     section: 'runtime' | 'limits',
     key: string,
@@ -142,18 +146,13 @@ function AgentAssignmentCard({
         </label>
         <label className={styles.field}>
           <span>实际模型</span>
-          {inherited ? (
-            <span className={styles.inheritedModel}>
-              {assignment.resolution.modelName ?? '尚未配置默认模型'}
-            </span>
-          ) : (
             <ModelSelect
               snapshot={snapshot}
               value={selectedRef}
+              disabled={inherited || busy || saving}
               agentOnly
               onChange={(modelRef) => updateSelection('explicit', modelRef)}
             />
-          )}
         </label>
         <details className={styles.advanced}>
           <summary>
@@ -232,20 +231,30 @@ function AgentAssignmentCard({
   )
 }
 
-export default function ModelUsagePanel({
-  snapshot,
-  busy,
-  apply
-}: {
+export function ModelAgentUsagePanel({ snapshot, busy, apply }: {
   snapshot: ModelManagementSnapshot
   busy: boolean
   apply: ApplyModelManagementCommand
 }): JSX.Element {
+  const assignments = useMemo(() => snapshot.assignments.filter(item => item.workloadId !== 'app-default'), [snapshot.assignments])
+  return <div className={styles.stack}>{assignments.map(assignment => <AgentAssignmentCard
+    key={assignment.workloadId} snapshot={snapshot} assignment={assignment} busy={busy} apply={apply} />)}</div>
+}
+
+export default function ModelUsagePanel({
+  snapshot,
+  busy,
+  apply,
+  children,
+  defaultOnly = false
+}: {
+  snapshot: ModelManagementSnapshot
+  busy: boolean
+  apply: ApplyModelManagementCommand
+  children?: ReactNode
+  defaultOnly?: boolean
+}): JSX.Element {
   const defaultAssignment = snapshot.assignments.find((item) => item.workloadId === 'app-default')!
-  const agentAssignments = useMemo(
-    () => snapshot.assignments.filter((item) => item.workloadId !== 'app-default'),
-    [snapshot.assignments]
-  )
   const defaultRef =
     defaultAssignment.model.mode === 'explicit' ? defaultAssignment.model.modelRef : ''
   const form = useSettingsDraft(defaultRef)
@@ -270,7 +279,8 @@ export default function ModelUsagePanel({
     dirty: form.dirty,
     busy: saving,
     save,
-    discard: form.reset
+    discard: form.reset,
+    preserveOnNavigate: preservesModelUsageDraft
   })
 
   return (
@@ -301,15 +311,8 @@ export default function ModelUsagePanel({
         </div>
         <p className={styles.sectionHint}>默认模型及各用途配置保存后仅影响新任务。</p>
       </section>
-      {agentAssignments.map((assignment) => (
-        <AgentAssignmentCard
-          key={assignment.workloadId}
-          snapshot={snapshot}
-          assignment={assignment}
-          busy={busy}
-          apply={apply}
-        />
-      ))}
+      {children}
+      {!defaultOnly && <ModelAgentUsagePanel snapshot={snapshot} busy={busy} apply={apply} />}
     </div>
   )
 }

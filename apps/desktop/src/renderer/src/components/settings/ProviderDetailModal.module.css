@@ -59,6 +59,33 @@
   gap: 10px 12px;
 }
 
+.advancedConnection {
+  margin-top: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.advancedConnectionSummary {
+  min-height: var(--control-h-sm);
+  padding: 6px 9px;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.advancedConnectionSummary:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -1px;
+  box-shadow: var(--focus-ring);
+}
+
+.advancedConnectionFields {
+  padding: 10px;
+}
+
 .field {
   display: flex;
   min-width: 0;
@@ -85,9 +112,9 @@
   opacity: 0.72;
 }
 
-.controlInput:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: 1px;
+.controlInput:focus {
+  outline: none;
+  border-color: var(--border-accent);
   box-shadow: var(--focus-ring);
 }
 
@@ -114,6 +141,60 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--surface-control);
+}
+
+.modelDetail {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+}
+
+.modelSummary {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto minmax(90px, auto);
+  align-items: center;
+  gap: var(--settings-gap-sm, 8px);
+  min-height: 42px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-elevated);
+  cursor: pointer;
+  list-style: none;
+}
+
+.modelDisclosureIcon {
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+
+.modelDisclosureIcon[data-open='true'] {
+  transform: rotate(90deg);
+}
+
+.modelSummary::-webkit-details-marker {
+  display: none;
+}
+
+.modelSummary:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -1px;
+  box-shadow: var(--focus-ring);
+}
+
+.modelDetailBody {
+  padding: 8px;
+}
+
+.modelKind,
+.modelUsage,
+.modelState {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.modelUsage {
+  text-align: right;
 }
 
 .rowIdentity,
@@ -171,5 +252,14 @@
 
   .manualModel {
     grid-template-columns: 1fr;
+  }
+
+  .modelSummary {
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+  }
+
+  .modelUsage {
+    grid-column: 2 / -1;
+    text-align: left;
   }
 }

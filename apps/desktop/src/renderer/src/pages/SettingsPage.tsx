@@ -69,7 +69,6 @@ import { useStorageSettingsController } from '../settings/useStorageSettingsCont
 const PluginDevPanel = lazy(() => import('../components/pluginDev/PluginDevPanel'))
 const AppearanceSettingsPanel = lazy(() => import('../components/settings/AppearanceSettingsPanel'))
 const ModelSettingsPanel = lazy(() => import('../components/settings/ModelSettingsPanel'))
-const LocalModelsPanel = lazy(() => import('../components/settings/LocalModelsPanel'))
 const BackupSettingsPanel = lazy(() => import('../components/settings/BackupSettingsPanel'))
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
@@ -106,9 +105,9 @@ export default function SettingsPage(): JSX.Element {
   const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
 
   useEffect(() => {
-    if (location.pathname === '/settings/network/mode') {
+    if (location.pathname === '/settings/network/mode' || location.pathname === '/settings/models/advanced') {
       navigate({
-        pathname: settingsPath('storage', 'mode'),
+        pathname: location.pathname === '/settings/models/advanced' ? settingsPath('models', 'providers') : settingsPath('storage', 'mode'),
         search: location.search,
         hash: location.hash
       }, { replace: true })
@@ -892,7 +891,7 @@ export default function SettingsPage(): JSX.Element {
               )}
 
               {activeGroup.id === 'models' && (
-                activeTab === 'local' ? <LocalModelsPanel /> : <ModelSettingsPanel settings={settings} activeTab={activeTab === 'advanced' ? 'advanced' : activeTab === 'providers' ? 'providers' : 'usage'} />
+                <ModelSettingsPanel settings={settings} activeTab={activeTab === 'local' ? 'local' : activeTab === 'providers' ? 'providers' : 'usage'} />
               )}
 
               {activeGroup.id === 'network' && activeTab === 'proxy' && settings && (

@@ -8,9 +8,11 @@ import SelectControl from '../components/SelectControl'
 import { playbackTime } from './playbackTime'
 import { settingsPath } from '../settings/settingsRoutes'
 import styles from './AiSubtitleSettings.module.css'
+import { useLocalModels } from '../components/settings/useLocalModels'
 
 export default function AiSubtitleSettings({ playback }: { playback: PlaybackSnapshot }): JSX.Element {
   const navigate = useNavigate()
+  const { state: models } = useLocalModels()
   const [state, setState] = useState<AiSubtitleSnapshot | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,7 +36,7 @@ export default function AiSubtitleSettings({ playback }: { playback: PlaybackSna
     setBusy(true); setError(null)
     try {
       await api.playback.control(playback.sessionId, { kind: 'presentation', value: 'docked' })
-      if (revision === request.current.revision) navigate(settingsPath('models', 'local'))
+      if (revision === request.current.revision) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
     } catch { if (revision === request.current.revision) setError('无法打开模型设置，请先收起播放器后打开设置') }
     finally { if (revision === request.current.revision) setBusy(false) }
   }
@@ -49,19 +51,28 @@ export default function AiSubtitleSettings({ playback }: { playback: PlaybackSna
     finally { if (revision === request.current.revision) setBusy(false) }
   }
   const status = !state ? '正在读取状态'
-    : !enabled ? state.installed ? '离线模型已就绪' : '请在设置 → AI 模型 → 本地模型下载 Kotoba 和 Qwen3'
+    : !enabled ? state.installed ? '字幕模型与运行依赖已就绪' : '请在字幕模型设置中选择模型并下载所需文件'
       : state.phase === 'preparing' ? '正在准备当前音轨'
         : state.phase === 'recognizing' ? `正在识别 ${playbackTime(state.activeStart ?? 0)} 附近的日语`
           : state.phase === 'translating' ? `正在翻译 ${playbackTime(state.activeStart ?? 0)} 附近的对白`
             : state.phase === 'error' ? '部分字幕未完成，可重试'
               : '已生成字幕可播放'
+  const modelLabel = (ref: { model: string; variant: string } | undefined): string => {
+    const model = models?.models.find(item => item.id === ref?.model)
+    const variant = model?.variants.find(item => item.id === ref?.variant)
+    return model ? `${model.name} · ${variant?.precision ?? '未选择精度'}` : '正在读取模型配置'
+  }
   return <section className={styles.root} aria-label="离线 AI 日中字幕">
     <div className={styles.heading}>AI 日中字幕</div>
-    <p className={styles.note}>Kotoba 识别日语，本机模型翻译中文；音频与字幕文本留在本机。</p>
+    <p className={styles.note}>日语识别：{modelLabel(models?.usage.subtitleRecognition)}；中文翻译：{modelLabel(models?.usage.subtitleTranslation)}。</p>
+    <p className={styles.note}>音频与字幕文本留在本机。</p>
     <p className={styles.note}>首次生成需要等待，可先暂停预生成；识别与译文可能有误。</p>
-    {state?.supported === false ? <p className={styles.note}>当前支持 Windows x64。</p> : <>
+    <div className={styles.actions}>
+      <Button size="sm" disabled={busy} onClick={() => void openModels()}>字幕模型设置</Button>
+      <Button size="sm" disabled={busy} onClick={() => void execute({ action: 'view-log' })}>查看日志</Button>
+    </div>
+    {state?.supported === false ? <p className={styles.note}>当前平台无法运行内置字幕模型，请在模型设置中查看运行环境。</p> : <>
       <div className={styles.actions}>
-        <Button size="sm" disabled={busy} onClick={() => void openModels()}>管理本地模型</Button>
         {state?.installed && <Button size="sm" variant={enabled ? 'default' : 'primary'}
           disabled={!enabled && (busy || !playback.seekable || playback.duration == null || playback.phase === 'error')}
           onClick={() => void execute({ action: enabled ? 'stop' : 'start' })}>{enabled ? '停止 AI 字幕' : '开启 AI 字幕'}</Button>}

@@ -10,6 +10,7 @@ import type {
   OrganizationMergeResult
 } from '@shared/classificationTypes'
 import type { ElectronApi } from '../../../preload/index'
+import { renderedText as renderedNodeText } from '../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', {
   configurable: true,
@@ -121,7 +122,7 @@ function confirmButton(): TestRenderer.ReactTestInstance {
   assert.ok(renderer)
   const button = renderer.root
     .findAllByType('button')
-    .find((item) => item.props.children === '确认合并')
+    .find((item) => renderedNodeText(item) === '确认合并')
   assert.ok(button)
   return button
 }

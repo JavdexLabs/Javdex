@@ -254,6 +254,11 @@
   width: 100%;
 }
 
+.numberStepper:has(.stepperValue:focus) {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
 .stepperField {
   display: inline-flex;
   align-items: flex-start;
@@ -326,6 +331,7 @@
 }
 
 .stepperValue:focus {
+  outline: none;
   background: color-mix(in srgb, var(--surface-control) 55%, transparent);
 }
 

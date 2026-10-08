@@ -9,7 +9,7 @@ export const playbackClearProgressSchema = z.discriminatedUnion('scope', [
 ])
 export const playbackSessionIdSchema = z.string().uuid()
 export const aiSubtitleCommandSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.enum(['start', 'stop', 'retry', 'clear-cache', 'export']) }).strict(),
+  z.object({ action: z.enum(['start', 'stop', 'retry', 'clear-cache', 'export', 'view-log']) }).strict(),
   z.object({ action: z.literal('display'), value: z.enum(['bilingual', 'chinese', 'japanese']) }).strict(),
   z.object({ action: z.literal('font-size'), value: z.number().int().min(20).max(72) }).strict()
 ])

@@ -5,6 +5,7 @@ import TestRenderer, { act } from 'react-test-renderer'
 import { DesktopSessionContext } from '../../desktop/DesktopSessionContext'
 import { DESKTOP_CAPABILITY_ACTIONS, type DesktopCapabilityMap } from '@shared/desktop/capabilities'
 import type { DesktopSession } from '@shared/desktop/session'
+import { renderedText } from '../../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -33,7 +34,7 @@ it('opens remote pairing through the existing panel and removes controls when th
     await act(async () => { renderer = TestRenderer.create(render('available')) })
     assert.equal(renderer!.root.findAllByType('input').some(input => input.props['aria-label'] === '端口'), false)
     assert.ok(JSON.stringify(renderer!.toJSON()).includes('server.test:8096'))
-    const button = (name: string) => renderer!.root.findAllByType('button').find(item => item.children.includes(name))!
+    const button = (name: string) => renderer!.root.findAllByType('button').find(item => renderedText(item) === name)!
     await act(async () => button('开启配对').props.onClick())
     const code = renderer!.root.findAllByType('input').find(input => input.props.autoComplete === 'one-time-code')!
     act(() => code.props.onChange({ target: { value: '123456' } }))

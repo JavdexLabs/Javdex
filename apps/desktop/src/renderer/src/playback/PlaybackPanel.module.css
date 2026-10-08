@@ -223,7 +223,16 @@
   cursor: default;
 }
 
-.range:focus-visible,
+.range:focus-visible {
+  outline: none;
+}
+
+.range:focus-visible::-webkit-slider-thumb {
+  outline: var(--focus-outline);
+  outline-offset: calc(var(--focus-ring-space) / 2);
+  box-shadow: var(--focus-ring);
+}
+
 .video:focus-visible {
   outline: var(--focus-outline);
   outline-offset: calc(-1 * var(--focus-ring-space));

@@ -32,6 +32,10 @@
   color: var(--text-muted);
 }
 
+.input:focus {
+  outline: none;
+}
+
 .input:disabled {
   cursor: not-allowed;
 }

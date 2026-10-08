@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import React, { useState, type ReactNode } from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { renderedText } from '../test/renderedText'
 import { createHashRouter, createMemoryRouter, RouterProvider, Routes, Route, useNavigate } from 'react-router-dom'
 import { NavigationGuardProvider, useNavigationGuard, type NavigationDecision } from './NavigationGuard'
 import { OverlayHistoryProvider, useOverlayHistory } from './OverlayHistoryContext'
@@ -191,7 +192,7 @@ test('hash-router replay asks settings and plugin drafts once, only after the ow
   }
   const f = await hashFixture(<Form />)
   const click = async (label: string) => act(async () => {
-    const button = f.tree.root.findAllByType('button').find(value => value.children.includes(label))
+    const button = f.tree.root.findAllByType('button').find(value => renderedText(value) === label)
     assert.ok(button, label); await button.props.onClick()
   })
   const titles = () => f.tree.root.findAllByType('h3').map(value => value.children.join(''))
@@ -305,7 +306,7 @@ test('settings and plugin guards compose through one router blocker, ignoring sa
   }])
   let tree: TestRenderer.ReactTestRenderer | undefined
   const click = async (text: string) => act(async () => {
-    const button = tree!.root.findAllByType('button').find(value => value.children.includes(text))
+    const button = tree!.root.findAllByType('button').find(value => renderedText(value) === text)
     assert.ok(button, text); await button.props.onClick()
   })
   const text = () => tree!.root.findAllByType('h3').map(value => value.children.join('')).join(' ')

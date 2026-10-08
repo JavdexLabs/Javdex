@@ -1,5 +1,5 @@
 import Switch from '../Switch'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ModelCapabilityState } from '@shared/aiConfigurationTypes'
 import type {
   ManagedModelView,
@@ -27,16 +27,36 @@ function capabilityValue(value: string): ModelCapabilityState {
   return 'unknown'
 }
 
-function ModelOverrideCard({
+function formatEvidenceTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function draftFromMetadata(model: ManagedModelView) {
+  return {
+    contextWindow: model.baseline.contextWindow,
+    maxTokens: model.baseline.maxTokens,
+    tools: model.baseline.capabilities.tools,
+    reasoning: model.baseline.capabilities.reasoning,
+    promptCache: model.baseline.cache.supportsPromptCache,
+    longCache: model.baseline.cache.supportsLongCacheRetention
+  }
+}
+
+export function ModelOverrideCard({
   snapshot,
   model,
   busy,
-  apply
+  apply,
+  embedded = false,
+  onDirtyChange
 }: {
   snapshot: ModelManagementSnapshot
   model: ManagedModelView
   busy: boolean
   apply: ApplyModelManagementCommand
+  embedded?: boolean
+  onDirtyChange?: (modelRef: string, dirty: boolean) => void
 }): JSX.Element {
   const form = useSettingsDraft({
     contextWindow: model.effective.contextWindow,
@@ -77,6 +97,19 @@ function ModelOverrideCard({
       setSaving(false)
     }
   }
+  const resetOverride = async (): Promise<void> => {
+    if (busy || saving) return
+    setSaving(true)
+    try {
+      const ok = await apply(
+        { type: 'reset-model-override', modelRef: model.id },
+        `${model.name} 已恢复自动识别值`
+      )
+      if (ok) form.accept(draftFromMetadata(model), form.draft)
+    } finally {
+      setSaving(false)
+    }
+  }
   useSettingsFormGuard({
     label: model.name,
     dirty: form.dirty,
@@ -84,13 +117,17 @@ function ModelOverrideCard({
     save,
     discard: form.reset
   })
+  useEffect(() => {
+    onDirtyChange?.(model.id, form.dirty)
+    return () => onDirtyChange?.(model.id, false)
+  }, [form.dirty, model.id, onDirtyChange])
 
   return (
-    <section className={styles.advancedCard}>
+    <section className={`${styles.advancedCard} ${embedded ? styles.embeddedCard : ''}`}>
       <header className={styles.cardHeader}>
         <div className={styles.modelTitle}>
           <h3 className={`${styles.sectionTitle} ${styles.truncate}`} title={model.name}>
-            {model.name}
+            {embedded ? '能力与上限' : model.name}
           </h3>
           <p className={`${styles.sectionHint} ${styles.truncate}`} title={model.modelId}>
             {modelConnectionName(snapshot, model.connectionId)} · {model.modelId}
@@ -100,13 +137,8 @@ function ModelOverrideCard({
           {model.hasManualOverrides ? (
             <Button
               size="sm"
-              disabled={busy}
-              onClick={() =>
-                void apply(
-                  { type: 'reset-model-override', modelRef: model.id },
-                  `${model.name} 已恢复自动识别值`
-                )
-              }
+              disabled={busy || saving}
+              onClick={() => void resetOverride()}
             >
               恢复自动识别值
             </Button>
@@ -123,8 +155,15 @@ function ModelOverrideCard({
       </header>
 
       <div className={styles.baselineMeta}>
-        <span>能力来源：{model.baseline.cache.evidence.source}</span>
-        <span>{new Date(model.baseline.cache.evidence.checkedAt).toLocaleString()}</span>
+        <span>
+          自动识别：{model.baseline.cache.evidence.source} · {formatEvidenceTime(model.baseline.cache.evidence.checkedAt)}
+        </span>
+        <span>
+          当前生效：{model.effective.cache.evidence.source} · {formatEvidenceTime(model.effective.cache.evidence.checkedAt)}
+        </span>
+        {model.effective.cache.evidence.note ? (
+          <span title={model.effective.cache.evidence.note}>{model.effective.cache.evidence.note}</span>
+        ) : null}
         {model.hasManualOverrides ? (
           <strong className={styles.overrideBadge}>已人工覆盖</strong>
         ) : null}

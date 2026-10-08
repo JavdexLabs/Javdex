@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { renderedText } from '../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), {
@@ -20,7 +21,7 @@ test('partial image import preserves only failed items and retries without dupli
     emptyText="空" urlHint="链接" onCancel={() => { closed++ }} onChanged={() => { changed++ }}
     onImportFilePath={async () => { throw new Error('unexpected file') }}
     onImportUrl={async url => { calls.push(url); if (calls.length === 2) throw new Error('第二张失败') }} />) })
-  const button = (text: string) => renderer.root.findAllByType('button').find(node => node.children.includes(text))!
+  const button = (text: string) => renderer.root.findAllByType('button').find(node => renderedText(node) === text)!
   try {
     act(() => button('图片链接').props.onClick())
     for (const url of ['https://example.test/one.png', 'https://example.test/two.png']) {

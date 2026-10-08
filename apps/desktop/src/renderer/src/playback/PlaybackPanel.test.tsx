@@ -5,10 +5,12 @@ import { MemoryRouter } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewport } from '@shared/desktop/playback'
 import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
+import type { LocalModelSnapshot } from '@shared/desktop/localModels'
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import type { ElectronApi } from '../../../preload/index'
 import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
 import { interactionLayers, type InteractionLayer } from '../interaction/interactionLayers'
+import { renderedText } from '../test/renderedText'
 
 const target: PlaybackTarget = { libraryId: 1, videoId: 2, resourceId: 3 }
 const snapshot = (sessionId = 'first'): PlaybackSnapshot => ({
@@ -41,7 +43,15 @@ const aiSnapshot = (): AiSubtitleSnapshot => ({ sessionId: null, supported: fals
 let aiState = aiSnapshot()
 let aiChanged: (value: AiSubtitleSnapshot) => void = () => {}
 let aiCommand = async (): Promise<AiSubtitleSnapshot> => aiState
+const localModels = (): LocalModelSnapshot => ({
+  revision: 'fixture', supported: false, directory: '/fixture/models', defaultDirectory: '/fixture/models', downloadSource: 'official',
+  translation: 'app-default', translationModel: 'qwen3', models: [], operation: null, activeModel: null, activeVariant: null,
+  downloadBytes: 0, downloadTotal: 0, downloadLabel: null, error: null,
+  usage: { subtitleRecognition: { model: 'kotoba', variant: 'fixture' }, subtitleTranslation: { model: 'qwen3', variant: 'fixture' },
+    textTranslation: { model: 'qwen3', variant: 'fixture', mode: 'app-default' } }
+})
 const fake = {
+  settings: { getLocalModels: async () => localModels(), onLocalModelsChanged: () => () => {} },
   playback: {
     aiSubtitleSnapshot: async () => aiState,
     onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
@@ -65,7 +75,7 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.
   api: fake, location: { href: 'http://localhost/' }, history, setTimeout, clearTimeout, setInterval, clearInterval
 }) })
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-  body: { style: { overflow: '' } }, activeElement: null, visibilityState: 'visible', querySelectorAll: () => []
+  body: { style: { overflow: '' } }, activeElement: null, visibilityState: 'visible', hasFocus: () => true, querySelectorAll: () => []
 } })
 Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: class { observe() {} disconnect() {} } })
 let renderer: TestRenderer.ReactTestRenderer | undefined
@@ -76,12 +86,18 @@ async function mount(options?: TestRenderer.TestRendererOptions): Promise<void> 
   await act(async () => { renderer = TestRenderer.create(<MemoryRouter><OverlayHistoryProvider><Panel /></OverlayHistoryProvider></MemoryRouter>, options) })
 }
 function button(label: string) {
-  const result = renderer!.root.findAllByType('button').find(node => node.props['aria-label'] === label || node.children.includes(label))
+  const result = renderer!.root.findAllByType('button').find(node => node.props['aria-label'] === label || renderedText(node) === label)
   assert.ok(result, label)
   return result
 }
 async function options(): Promise<void> { await act(async () => button('播放设置').props.onClick()) }
 function source() { return renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '播放来源')! }
+function seekKey(key: string, modifiers: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; isComposing?: boolean } = {}) {
+  const event = { key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...modifiers,
+    nativeEvent: { isComposing: modifiers.isComposing ?? false }, defaultPrevented: false, propagationStopped: false,
+    preventDefault: () => { event.defaultPrevented = true }, stopPropagation: () => { event.propagationStopped = true } }
+  return event
+}
 afterEach(async () => {
   await act(async () => renderer?.unmount())
   renderer = undefined
@@ -129,6 +145,106 @@ test('options offer only files belonging to the playing video and preserve priva
   assert.equal(opened.length, 0)
   await act(async () => source().props.onChange({ target: { value: '4' } }))
   assert.deepEqual(opened, [{ target: { ...target, resourceId: 4 }, privateSession: true }])
+})
+
+test('progress arrows after a pointer seek accumulate pending targets and never change pause intent', async () => {
+  await mount()
+  const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+  for (const paused of [false, true]) {
+    const current = { ...snapshot(), position: 10, paused, phase: paused ? 'paused' as const : 'playing' as const }
+    await act(async () => changed(current))
+    controls.length = 0
+    await act(async () => slider().props.onChange({ target: { value: '60' } }))
+    await act(async () => slider().props.onPointerUp())
+    const firstRight = seekKey('ArrowRight')
+    await act(async () => slider().props.onKeyDown(firstRight))
+    assert.equal(firstRight.defaultPrevented, true, 'avoid the browser default 0.1-second increment')
+    assert.equal(firstRight.propagationStopped, true, 'one keypress must not also reach the player shortcut')
+    assert.equal(slider().props.value, 65, 'start from the clicked target while its old clock remains pending')
+    await act(async () => changed({ ...current, seeking: true, position: 12 }))
+    assert.equal(slider().props.value, 65)
+    await act(async () => slider().props.onKeyDown(seekKey('ArrowRight')))
+    assert.equal(slider().props.value, 70)
+    await act(async () => changed({ ...current, position: 65 }))
+    assert.equal(slider().props.value, 70, 'the preceding keyboard seek acknowledgement cannot overwrite the latest preview')
+    await act(async () => slider().props.onKeyDown(seekKey('ArrowLeft', { shiftKey: true })))
+    assert.equal(slider().props.value, 40)
+    await act(async () => { slider().props.onKeyUp(); slider().props.onBlur() })
+    assert.deepEqual(controls, [60, 65, 70, 40].map(seconds => ({ id: 'first', command: { kind: 'seek', seconds } })),
+      `keydown must commit once without pause or duplicate release commands while paused=${paused}`)
+    await act(async () => changed({ ...current, position: 70 }))
+    assert.equal(slider().props.value, 40)
+    await act(async () => changed({ ...current, position: 40 }))
+    await act(async () => changed({ ...current, position: 41 }))
+    assert.equal(slider().props.value, 41, 'after the final acknowledgement the thumb follows the native clock again')
+  }
+})
+
+test('progress keyboard focus reveals fullscreen controls and cancels their auto-hide timer', async context => {
+  let nextTimer = 1
+  const hideTimers = new Map<number, () => void>()
+  context.mock.method(window, 'setTimeout', (callback: () => void, milliseconds: number) => {
+    const id = nextTimer++
+    if (milliseconds === 3000) hideTimers.set(id, callback)
+    return id
+  })
+  context.mock.method(window, 'clearTimeout', (id: number) => { hideTimers.delete(id) })
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation: 'fullscreen', rendererFullscreenControls: true, nativeVideoFocused: false }))
+  const panel = () => renderer!.root.find(node => node.props['data-playback-session'] === 'first')
+  const slider = renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+  assert.equal(panel().props['data-controls-visible'], false)
+  assert.equal(hideTimers.size, 1)
+  await act(async () => slider.props.onKeyDown(seekKey('ArrowRight')))
+  assert.equal(panel().props['data-controls-visible'], true)
+  assert.equal(hideTimers.size, 0, 'focused keyboard adjustment must cancel auto-hide, rather than merely restart it')
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'seek', seconds: 6 } }])
+})
+
+test('progress keyboard seeks clamp both bounds and start from an uncommitted pointer draft', async () => {
+  await mount()
+  const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+  await act(async () => changed({ ...snapshot(), position: 60 }))
+  await act(async () => slider().props.onChange({ target: { value: '3' } }))
+  await act(async () => slider().props.onKeyDown(seekKey('ArrowLeft')))
+  assert.equal(slider().props.value, 0)
+  await act(async () => { slider().props.onPointerUp(); slider().props.onKeyUp(); slider().props.onBlur() })
+  await act(async () => changed({ ...snapshot(), position: 0 }))
+  await act(async () => changed({ ...snapshot(), position: 119 }))
+  await act(async () => slider().props.onKeyDown(seekKey('ArrowRight', { shiftKey: true })))
+  assert.equal(slider().props.value, 120)
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'seek', seconds: 0 } }, { id: 'first', command: { kind: 'seek', seconds: 120 } }])
+})
+
+test('progress keyboard handling leaves modified input, disabled seeking, child layers and volume alone', async () => {
+  await mount()
+  const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+  for (const modifiers of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { isComposing: true }]) {
+    const event = seekKey('ArrowRight', modifiers)
+    await act(async () => slider().props.onKeyDown(event))
+    assert.equal(event.defaultPrevented, false)
+    assert.equal(event.propagationStopped, false)
+  }
+  for (const value of [{ ...snapshot(), seekable: false }, { ...snapshot(), phase: 'opening' as const },
+    { ...snapshot(), resumePosition: 30 }, { ...snapshot(), duration: null }]) {
+    await act(async () => changed(value))
+    assert.equal(slider().props.disabled, true)
+    const event = seekKey('ArrowRight')
+    await act(async () => slider().props.onKeyDown(event))
+    assert.equal(event.defaultPrevented, false)
+  }
+  await act(async () => changed(snapshot()))
+  const removeChild = interactionLayers.register({ id: 'seek-test-child', root: () => null })
+  try {
+    const event = seekKey('ArrowRight')
+    await act(async () => slider().props.onKeyDown(event))
+    assert.equal(event.defaultPrevented, false)
+  } finally { removeChild() }
+  assert.deepEqual(controls, [], 'ignored input must not send seek or pause commands')
+  const volume = renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '音量')!
+  assert.equal(volume.props.onKeyDown, undefined, 'the volume range retains its own browser keyboard behavior')
+  await act(async () => volume.props.onChange({ target: { value: '51' } }))
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'volume', value: 51 } }])
 })
 
 test('released seek thumb ignores stale clocks until native seek acknowledgement, then follows playback', async () => {

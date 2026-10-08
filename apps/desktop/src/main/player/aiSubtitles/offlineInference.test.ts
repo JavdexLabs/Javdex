@@ -7,6 +7,7 @@ import { createOfflineSubtitleInference } from './offlineInference'
 import { createAiRuntimeInstaller } from './runtimeInstaller'
 
 function fixture(model: LocalTranslationModelId, result: unknown = '中文译文', finishReason = 'stop') {
+  const logs: Array<{ stage: string; value: unknown }> = []
   const launches: Array<{ executable: string; args: string[]; options: SpawnOptions }> = []
   const requests: Array<{ url: string; body: Record<string, unknown> }> = []
   let kills = 0
@@ -27,8 +28,9 @@ function fixture(model: LocalTranslationModelId, result: unknown = '中文译文
     return Response.json({ choices: [{ message: { content: result }, finish_reason: finishReason }] })
   }
   const paths = { ...createAiRuntimeInstaller('/fixture').paths(), translationModelId: model }
-  const inference = createOfflineSubtitleInference(paths, '/work', { spawn: launch, request, port: async () => 32101 })
-  return { inference, launches, requests, kills: () => kills }
+  const inference = createOfflineSubtitleInference(paths, '/work', { spawn: launch, request, port: async () => 32101,
+    log: (stage, value) => logs.push({ stage, value }) })
+  return { inference, launches, requests, logs, kills: () => kills }
 }
 
 for (const model of ['qwen3', 'hy-mt2-7b', 'index-translate-9b'] as const) {
@@ -96,4 +98,17 @@ test('Index strips complete reasoning blocks but rejects unfinished, empty, over
     try { await assert.rejects(f.inference.translateText('日本語', new AbortController().signal), /译文不完整/) }
     finally { await f.inference.close() }
   }
+})
+
+test('diagnostics preserve raw rejected output and prompt without request credentials', async () => {
+  const f = fixture('qwen3', '尚未完成的译文', 'length')
+  try {
+    await assert.rejects(f.inference.translateText('日本語', new AbortController().signal), /译文不完整/)
+    const text = JSON.stringify(f.logs)
+    assert.match(text, /日本語/)
+    assert.match(text, /尚未完成的译文/)
+    assert.match(text, /length/)
+    assert.equal(text.includes(f.launches[0].options.env!.LLAMA_API_KEY!), false)
+    assert.equal(text.includes('127.0.0.1'), false)
+  } finally { await f.inference.close() }
 })

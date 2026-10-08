@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises'
+import { importModelFile } from './importModelFile'
 import { createReadStream } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { z } from 'zod'
-import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS, type LocalModelId, type LocalModelSnapshot,
+import { LOCAL_MODEL_DOWNLOAD_SOURCES, type LocalModelDownloadSource, LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS, type LocalModelId, type LocalModelSnapshot,
   type LocalTranslationMode, type LocalTranslationModelId } from '@shared/desktop/localModels'
+import type { LocalModelRef, LocalModelUsage, LocalModelReadiness } from '@shared/desktop/localModels'
 import { createAiRuntimeInstaller, aiSubtitleSupported } from '../../player/aiSubtitles/runtimeInstaller'
 import { AI_SUBTITLE_RUNTIME_VERSION, AI_RUNTIME_PLATFORM_MESSAGE } from '../../player/aiSubtitles/runtimeManifest'
 import { AI_RUNTIME_LICENSES } from '../../player/aiSubtitles/runtimeLicenses'
@@ -12,13 +14,22 @@ import { atomicWrite } from '../../player/aiSubtitles/subtitleCache'
 import { createOfflineSubtitleInference } from '../../player/aiSubtitles/offlineInference'
 import { DEFAULT_LOCAL_MODEL_VARIANTS, LOCAL_MODEL_DEFINITIONS, LOCAL_MODEL_VARIANTS, localModelAssets, localModelVariant } from './modelCatalog'
 const configFields = { directory: z.string().min(1), translation: z.enum(['app-default', 'local']) }
+const selectedSchema = z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string(), 'index-translate-9b': z.string() }).strict()
+const translationRefSchema = z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1) }).strict()
+const usageSchema = z.object({
+  subtitleRecognition: z.object({ model: z.literal('kotoba'), variant: z.string().min(1) }).strict(),
+  subtitleTranslation: translationRefSchema,
+  textTranslation: translationRefSchema.extend({ mode: z.enum(['app-default', 'local']) }).strict()
+}).strict()
 const configSchema = z.discriminatedUnion('version', [
   z.object({ version: z.literal(1), ...configFields }).strict(),
   z.object({ version: z.literal(2), ...configFields, selected: z.object({ kotoba: z.string(), qwen3: z.string() }).strict() }).strict(),
   z.object({ version: z.literal(3), ...configFields, translationModel: z.enum(['qwen3', 'hy-mt2-7b']),
     selected: z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string() }).strict() }).strict(),
-  z.object({ version: z.literal(4), ...configFields, translationModel: z.enum(LOCAL_TRANSLATION_MODEL_IDS),
-    selected: z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string(), 'index-translate-9b': z.string() }).strict() }).strict()
+  z.object({ version: z.literal(4), ...configFields, downloadSource: z.enum(LOCAL_MODEL_DOWNLOAD_SOURCES).default('official'), translationModel: z.enum(LOCAL_TRANSLATION_MODEL_IDS),
+    selected: selectedSchema }).strict(),
+  z.object({ version: z.literal(5), ...configFields, downloadSource: z.enum(LOCAL_MODEL_DOWNLOAD_SOURCES), translationModel: z.enum(LOCAL_TRANSLATION_MODEL_IDS),
+    selected: selectedSchema, usage: usageSchema, revision: z.string().min(1) }).strict()
 ])
 export async function localModelFileHash(file: string): Promise<string> {
   const hash = createHash('sha256')
@@ -42,8 +53,15 @@ export function createLocalModelManager(userData: string, options: {
   const defaultDirectory = path.join(userData, 'ai-subtitles', 'models')
   const configFile = path.join(userData, 'local-models.json')
   let directory = defaultDirectory, translation: LocalTranslationMode = 'app-default'
+  let downloadSource: LocalModelDownloadSource = 'official'
   let translationModel: LocalTranslationModelId = 'qwen3'
   let selected = { ...DEFAULT_LOCAL_MODEL_VARIANTS }
+  let usage: LocalModelUsage = {
+    subtitleRecognition: { model: 'kotoba', variant: selected.kotoba },
+    subtitleTranslation: { model: 'qwen3', variant: selected.qwen3 },
+    textTranslation: { mode: 'app-default', model: 'qwen3', variant: selected.qwen3 }
+  }
+  let revision: string = randomUUID()
   let configInvalid = false
   let operation: LocalModelSnapshot['operation'] = null, activeModel: LocalModelId | null = null
   let activeVariant: string | null = null
@@ -51,14 +69,30 @@ export function createLocalModelManager(userData: string, options: {
   let controller: AbortController | null = null, pending: Promise<void> | null = null
   let closed = false, idle: ReturnType<typeof setTimeout> | null = null
   let engine: ReturnType<typeof createOfflineSubtitleInference> | null = null
+  let engineVariant: string | null = null
   const counts = Object.fromEntries(LOCAL_MODEL_IDS.map(id => [id, 0])) as Record<LocalModelId, number>
   const installed = Object.fromEntries(LOCAL_MODEL_IDS.map(id => [id, false])) as Record<LocalModelId, boolean>
   const installedVariants = new Map<string, boolean>()
+  const runtimeReady = new Map<LocalModelId, boolean>()
+  const variantCounts = new Map<string, number>()
+  const purposeCounts = { subtitleRecognition: 0, subtitleTranslation: 0, textTranslation: 0 }
+  let subtitleLeaseInstaller: ReturnType<typeof createAiRuntimeInstaller> | null = null
   const listeners = new Set<() => void>()
   const supported = options.runtimeSupported ?? aiSubtitleSupported
-  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model), { bundleRoot: options.bundleRoot })
-  const snapshotValue = (): LocalModelSnapshot => ({ supported: supported(), directory, defaultDirectory,
+  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource), { bundleRoot: options.bundleRoot })
+  const referenceLabels = (variant: string): string[] => [
+    ...(usage.subtitleRecognition.variant === variant ? ['AI 字幕 · 语音识别'] : []),
+    ...(usage.subtitleTranslation.variant === variant ? ['AI 字幕 · 文本翻译'] : []),
+    ...(usage.textTranslation.mode === 'local' && usage.textTranslation.variant === variant ? ['文本翻译'] : [])
+  ]
+  const variantReadiness = (model: LocalModelId, variant: string): LocalModelReadiness => !supported() ? 'unsupported'
+    : !installedVariants.get(variant) ? 'missing-model' : !runtimeReady.get(model) ? 'missing-runtime' : 'ready'
+  const subtitleSelection = (): typeof selected => ({ ...selected, kotoba: usage.subtitleRecognition.variant,
+    [usage.subtitleTranslation.model]: usage.subtitleTranslation.variant })
+  const subtitleInstaller = (): ReturnType<typeof createAiRuntimeInstaller> => subtitleLeaseInstaller ?? installer(subtitleSelection(), usage.subtitleTranslation.model)
+  const snapshotValue = (): LocalModelSnapshot => ({ revision, usage: structuredClone(usage), supported: supported(), directory, defaultDirectory, downloadSource,
     translation, translationModel, operation, activeModel, activeVariant, downloadBytes, downloadTotal, downloadLabel, error,
+    configurationError: configInvalid ? '本地模型用途配置无法读取，请重新保存用途设置后重试' : null,
     models: LOCAL_MODEL_IDS.map(id => ({ id,
       name: LOCAL_MODEL_DEFINITIONS[id].name,
       version: LOCAL_MODEL_DEFINITIONS[id].version,
@@ -69,7 +103,8 @@ export function createLocalModelManager(userData: string, options: {
       variants: LOCAL_MODEL_VARIANTS.filter(variant => variant.model === id).map(variant => ({
         id: variant.id, precision: variant.precision, format: variant.format, bytes: variant.asset.bytes,
         recommended: variant.recommended, source: variant.asset.url.split('/resolve/')[0], publisher: variant.publisher,
-        installed: installedVariants.get(variant.id) === true, inUse: variant.id === selected[id] && counts[id] > 0
+        installed: installedVariants.get(variant.id) === true, inUse: (variantCounts.get(variant.id) ?? 0) > 0,
+        references: referenceLabels(variant.id), readiness: variantReadiness(id, variant.id), ready: variantReadiness(id, variant.id) === 'ready'
       })) })) })
   const publish = (): void => { for (const listener of listeners) listener() }
   async function refresh(): Promise<void> {
@@ -78,25 +113,44 @@ export function createLocalModelManager(userData: string, options: {
         variant.model === 'kotoba' ? translationModel : variant.model).assetsInstalled([LOCAL_MODEL_DEFINITIONS[variant.model].assetId]))
     }
     for (const id of LOCAL_MODEL_IDS) installed[id] = installedVariants.get(selected[id]) === true
+    for (const id of LOCAL_MODEL_IDS) runtimeReady.set(id, supported() && await installer(selected, id === 'kotoba' ? translationModel : id)
+      .assetsInstalled(LOCAL_MODEL_DEFINITIONS[id].runtimeAssets.filter(asset => asset !== LOCAL_MODEL_DEFINITIONS[id].assetId)))
     publish()
   }
   const ready = (async () => {
     try {
       const config = configSchema.parse(JSON.parse(await fs.readFile(configFile, 'utf8')))
       if (!path.isAbsolute(config.directory)) throw new Error('invalid directory')
+      // Storage metadata is independent of purpose bindings. Keep the known location
+      // when a purpose reference is damaged so explicit recovery cannot orphan files.
+      directory = path.normalize(config.directory)
+      downloadSource = config.version >= 4 && 'downloadSource' in config ? config.downloadSource : 'official'
+      if (config.version === 5) revision = config.revision
       const next = config.version === 1 ? { ...DEFAULT_LOCAL_MODEL_VARIANTS } : { ...DEFAULT_LOCAL_MODEL_VARIANTS, ...config.selected }
       for (const id of LOCAL_MODEL_IDS) localModelVariant(id, next[id])
-      directory = path.normalize(config.directory); translation = config.translation; selected = next
-      translationModel = 'translationModel' in config ? config.translationModel : 'qwen3'
+      const nextModel = 'translationModel' in config ? config.translationModel : 'qwen3'
+      const migratedUsage: LocalModelUsage = {
+        subtitleRecognition: { model: 'kotoba', variant: next.kotoba },
+        subtitleTranslation: { model: nextModel, variant: next[nextModel] },
+        textTranslation: { mode: config.translation, model: nextModel, variant: next[nextModel] }
+      }
+      selected = next; usage = migratedUsage; translation = config.translation; translationModel = nextModel
+      const nextUsage = config.version === 5 ? config.usage : migratedUsage
+      for (const ref of Object.values(nextUsage)) localModelVariant(ref.model, ref.variant)
+      usage = nextUsage
+      translation = usage.textTranslation.mode; translationModel = usage.subtitleTranslation.model
+      if (config.version !== 5) await save()
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
-        configInvalid = true; error = '本地模型设置无法读取，请重新选择翻译方式后重试'
+        configInvalid = true; error = '本地模型用途配置无法读取，请重新保存用途设置后重试'
       }
     }
     await refresh()
   })()
-  const save = async (nextDirectory = directory, nextTranslation = translation, nextSelected = selected, nextModel = translationModel): Promise<void> => {
-    await atomicWrite(configFile, JSON.stringify({ version: 4, directory: nextDirectory, translation: nextTranslation, selected: nextSelected, translationModel: nextModel }))
+  async function save(nextDirectory = directory, nextTranslation = translation, nextSelected = selected, nextModel = translationModel, nextSource = downloadSource, nextUsage = usage): Promise<void> {
+    const nextRevision = randomUUID()
+    await atomicWrite(configFile, JSON.stringify({ version: 5, revision: nextRevision, usage: nextUsage, downloadSource: nextSource, directory: nextDirectory, translation: nextTranslation, selected: nextSelected, translationModel: nextModel }))
+    revision = nextRevision
   }
   function available(models: LocalModelId[] = []): void {
     if (closed) throw new Error('本地模型管理已关闭')
@@ -106,28 +160,38 @@ export function createLocalModelManager(userData: string, options: {
   async function shutdownEngine(): Promise<void> {
     if (idle) clearTimeout(idle); idle = null
     const previous = engine; engine = null
+    engineVariant = null
     await previous?.close()
   }
   async function acquire(models: LocalModelId[]): Promise<() => void> {
     await ready
-    return acquireReady(models)
+    return acquireReady(models.map(model => ({ model, variant: selected[model] })))
   }
   // Call only after ready. Counts are claimed synchronously before filesystem checks,
   // so choosing a family cannot race the frozen paths of a new translation/subtitle run.
-  async function acquireReady(requestedModels: LocalModelId[]): Promise<() => void> {
-    const models = [...new Set(requestedModels)]
+  async function acquireReady(requestedRefs: LocalModelRef[], purposes: Array<keyof LocalModelUsage> = []): Promise<() => void> {
+    const refs = [...new Map(requestedRefs.map(ref => [ref.variant, { ...ref }])).values()]
+    const models = refs.map(ref => ref.model)
     if (models.filter(id => id !== 'kotoba').length > 1) throw new Error('一次运行只能使用一个本地翻译模型')
     available()
     if (configInvalid) throw new Error('本地模型设置损坏，请重新选择模型设置')
     if (!supported()) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
-    for (const id of models) if (!installed[id]) throw new Error('本地模型未安装，请到设置 → AI 模型 → 本地模型下载')
-    for (const id of models) counts[id]++
+    for (const ref of refs) if (!installedVariants.get(ref.variant)) throw new Error('本地模型未安装，请到设置 → AI 模型 → 本地模型下载')
+    for (const ref of refs) { counts[ref.model]++; variantCounts.set(ref.variant, (variantCounts.get(ref.variant) ?? 0) + 1) }
+    for (const purpose of purposes) purposeCounts[purpose]++
     publish()
     let released = false
-    const release = (): void => { if (released) return; released = true; for (const id of models) counts[id]--; publish() }
+    const release = (): void => {
+      if (released) return; released = true
+      for (const ref of refs) { counts[ref.model]--; variantCounts.set(ref.variant, (variantCounts.get(ref.variant) ?? 1) - 1) }
+      for (const purpose of purposes) purposeCounts[purpose]--
+      if (!purposeCounts.subtitleRecognition && !purposeCounts.subtitleTranslation) subtitleLeaseInstaller = null
+      publish()
+    }
     try {
       const model = models.find((id): id is LocalTranslationModelId => id !== 'kotoba') ?? translationModel
-      if (!await installer(selected, model).assetsInstalled([...new Set(models.flatMap(id => LOCAL_MODEL_DEFINITIONS[id].runtimeAssets))])) {
+      const selection = { ...selected, ...Object.fromEntries(refs.map(ref => [ref.model, ref.variant])) }
+      if (!await installer(selection, model).assetsInstalled([...new Set(models.flatMap(id => LOCAL_MODEL_DEFINITIONS[id].runtimeAssets))])) {
         throw new Error('本地模型运行库不完整，请到模型商店校验与修复当前精度')
       }
       if (closed) throw new Error('本地模型管理已关闭')
@@ -163,11 +227,14 @@ export function createLocalModelManager(userData: string, options: {
     }
   }
   async function remove(id: LocalModelId, requestedVariant?: string): Promise<void> {
-    await ready; available([id])
+    await ready; available()
     const variant = localModelVariant(id, requestedVariant ?? selected[id]).id
+    if ((variantCounts.get(variant) ?? 0) > 0) throw new Error('模型正在使用，请先停止 AI 字幕或等待翻译完成')
+    const references = referenceLabels(variant)
+    if (references.length) throw new Error(`此精度已被 ${references.join('、')} 引用，请先在用途页更换模型`)
     operation = 'delete'; activeModel = id; activeVariant = variant; error = null; publish()
     try {
-      if (id === translationModel && variant === selected[id]) await shutdownEngine()
+      if (variant === engineVariant) await shutdownEngine()
       await installer({ ...selected, [id]: variant }, id === 'kotoba' ? translationModel : id).removeAsset(LOCAL_MODEL_DEFINITIONS[id].assetId)
     } finally {
       try { await refresh() }
@@ -183,8 +250,10 @@ export function createLocalModelManager(userData: string, options: {
     operation = 'configure'; error = null; publish()
     try {
       if (!await installer(next, id === 'kotoba' ? translationModel : id).assetsInstalled([LOCAL_MODEL_DEFINITIONS[id].assetId])) throw new Error('请先下载所选精度的模型')
-      if (id === translationModel) await shutdownEngine()
-      await save(directory, translation, next); selected = next
+      const nextUsage = structuredClone(usage)
+      for (const ref of Object.values(nextUsage)) if (ref.model === id) ref.variant = variant
+      if (nextUsage.textTranslation.variant !== usage.textTranslation.variant) await shutdownEngine()
+      await save(directory, translation, next, translationModel, downloadSource, nextUsage); selected = next; usage = nextUsage
       await refresh()
     } finally { operation = null; publish() }
   }
@@ -197,7 +266,30 @@ export function createLocalModelManager(userData: string, options: {
     try {
       if (!await installer(selected, model).assetsInstalled(['translation-model'])) throw new Error('请先下载所选本地翻译模型的当前精度')
       await shutdownEngine()
-      await save(directory, translation, selected, model); translationModel = model
+      const nextUsage = { ...usage, subtitleTranslation: { model, variant: selected[model] },
+        textTranslation: { ...usage.textTranslation, model, variant: selected[model] } }
+      await save(directory, translation, selected, model, downloadSource, nextUsage); translationModel = model; usage = nextUsage
+      await refresh()
+    } finally { operation = null; publish() }
+  }
+  async function setUsage(value: LocalModelUsage, expectedRevision?: string): Promise<void> {
+    const nextUsage = usageSchema.parse(value)
+    for (const ref of Object.values(nextUsage)) localModelVariant(ref.model, ref.variant)
+    await ready; available()
+    if (expectedRevision !== undefined && expectedRevision !== revision) throw new Error('模型用途设置已更新，请重新读取后再保存')
+    const changed = (Object.keys(purposeCounts) as Array<keyof LocalModelUsage>).filter(purpose =>
+      JSON.stringify(nextUsage[purpose]) !== JSON.stringify(usage[purpose]))
+    if (changed.some(purpose => purposeCounts[purpose] > 0)) throw new Error('该用途正在使用模型，请先停止 AI 字幕或等待文本翻译完成')
+    if (!changed.length && !configInvalid) return
+    operation = 'configure'; error = null; publish()
+    try {
+      if (changed.includes('textTranslation')) await shutdownEngine()
+      const nextSelected = { ...selected, kotoba: nextUsage.subtitleRecognition.variant,
+        [nextUsage.textTranslation.model]: nextUsage.textTranslation.variant,
+        [nextUsage.subtitleTranslation.model]: nextUsage.subtitleTranslation.variant }
+      await save(directory, nextUsage.textTranslation.mode, nextSelected, nextUsage.subtitleTranslation.model, downloadSource, nextUsage)
+      usage = nextUsage; selected = nextSelected; translation = nextUsage.textTranslation.mode; translationModel = nextUsage.subtitleTranslation.model
+      configInvalid = false
       await refresh()
     } finally { operation = null; publish() }
   }
@@ -283,10 +375,13 @@ export function createLocalModelManager(userData: string, options: {
   }
   async function translateText(text: string): Promise<string> {
     await ready
-    const model = translationModel, release = await acquireReady([model])
+    const ref = { ...usage.textTranslation }, model = ref.model
+    const release = await acquireReady([ref], ['textTranslation'])
     if (idle) clearTimeout(idle)
     try {
-      engine ??= (options.inference ?? createOfflineSubtitleInference)(installer().paths(), path.join(userData, 'local-model-work'))
+      if (engine && engineVariant !== ref.variant) await shutdownEngine()
+      engine ??= (options.inference ?? createOfflineSubtitleInference)(installer({ ...selected, [model]: ref.variant }, model).paths(), path.join(userData, 'local-model-work'))
+      engineVariant = ref.variant
       const output: string[] = []
       const characters = Array.from(text)
       if (characters.length > 20000) throw new Error('本地翻译单次最多支持 20000 字，请分段翻译')
@@ -302,19 +397,54 @@ export function createLocalModelManager(userData: string, options: {
   return {
     async snapshot(): Promise<LocalModelSnapshot> { await ready; return snapshotValue() },
     onChanged(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener) },
-    acquire, translateText, relocate, exportModel, remove, selectVariant, selectTranslationModel,
-    async acquireSubtitleRuntime(): Promise<() => void> { await ready; return acquireReady(['kotoba', translationModel]) },
+    acquire, translateText, relocate, exportModel, remove, selectVariant, selectTranslationModel, setUsage,
+    async acquireSubtitleRuntime(): Promise<() => void> {
+      await ready
+      const runtime = installer(subtitleSelection(), usage.subtitleTranslation.model)
+      const lease = acquireReady([usage.subtitleRecognition, usage.subtitleTranslation], ['subtitleRecognition', 'subtitleTranslation'])
+      subtitleLeaseInstaller = runtime
+      try { return await lease } catch (cause) { if (!purposeCounts.subtitleRecognition) subtitleLeaseInstaller = null; throw cause }
+    },
     async mode(): Promise<LocalTranslationMode> {
       await ready
       if (configInvalid) throw new Error('本地翻译设置损坏，请在设置中重新选择翻译方式')
-      return translation
+      return usage.textTranslation.mode
+    },
+    async downloadUrl(id: LocalModelId, requestedVariant?: string): Promise<string> {
+      await ready
+      const entry = localModelVariant(id, requestedVariant ?? selected[id])
+      return localModelAssets({ ...selected, [id]: entry.id }, id === 'kotoba' ? translationModel : id, undefined, downloadSource)
+        .find(asset => asset.id === LOCAL_MODEL_DEFINITIONS[id].assetId)!.url
+    },
+    async importModel(id: LocalModelId, source: string, requestedVariant?: string): Promise<void> {
+      await ready; available()
+      const entry = localModelVariant(id, requestedVariant ?? selected[id])
+      if ((variantCounts.get(entry.id) ?? 0) > 0) throw new Error('模型正在使用，请先停止 AI 字幕或等待翻译完成')
+      operation = 'import'; activeModel = id; activeVariant = entry.id; error = null; publish()
+      try {
+        if (entry.id === engineVariant) await shutdownEngine()
+        await importModelFile(source, path.join(installer().directory, entry.asset.id, entry.asset.filename), entry.asset)
+      } finally {
+        try { await refresh() }
+        finally { operation = null; activeModel = null; activeVariant = null; publish() }
+      }
+    },
+    async setDownloadSource(value: LocalModelDownloadSource): Promise<void> {
+      if (!LOCAL_MODEL_DOWNLOAD_SOURCES.includes(value)) throw new Error('未知的模型下载来源')
+      await ready; available()
+      if (configInvalid) throw new Error('本地模型设置损坏，请重新选择翻译方式后重试')
+      operation = 'configure'; publish()
+      try { await save(directory, translation, selected, translationModel, value); downloadSource = value; error = null }
+      finally { operation = null; publish() }
     },
     async setTranslation(value: LocalTranslationMode): Promise<void> {
       await ready; available()
       if (value === 'local' && !supported()) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
-      if (value === 'local' && !installed[translationModel]) throw new Error(`请先下载 ${LOCAL_MODEL_DEFINITIONS[translationModel].name} 本地翻译模型`)
+      if (value === 'local' && !installedVariants.get(usage.textTranslation.variant)) throw new Error(`请先下载 ${LOCAL_MODEL_DEFINITIONS[usage.textTranslation.model].name} 本地翻译模型`)
+      if (purposeCounts.textTranslation > 0 && value !== usage.textTranslation.mode) throw new Error('模型正在使用，请等待文本翻译完成')
       operation = 'configure'; publish()
-      try { await save(directory, value); translation = value; configInvalid = false; error = null }
+      const nextUsage = { ...usage, textTranslation: { ...usage.textTranslation, mode: value } }
+      try { await save(directory, value, selected, translationModel, downloadSource, nextUsage); translation = value; usage = nextUsage; configInvalid = false; error = null }
       finally { operation = null; publish() }
     },
     async download(id: LocalModelId, variant?: string): Promise<void> {
@@ -329,11 +459,16 @@ export function createLocalModelManager(userData: string, options: {
     },
     cancel(): void { controller?.abort() },
     subtitleRuntime(): ReturnType<typeof createAiRuntimeInstaller> {
-      return { get directory() { return installer().directory }, paths: () => installer().paths(),
-        installed: async () => { await ready; return installer().installed() },
-        assetsInstalled: ids => installer().assetsInstalled(ids), removeAsset: id => installer().removeAsset(id),
-        install: async (signal, progress) => { await ready; return installModels(['kotoba', translationModel], signal, progress) },
-        remove: async () => { await remove('kotoba'); await remove(translationModel) }
+      return { get directory() { return subtitleInstaller().directory }, paths: () => subtitleInstaller().paths(),
+        installed: async () => { await ready; return subtitleInstaller().installed() },
+        assetsInstalled: async ids => { await ready; return subtitleInstaller().assetsInstalled(ids) },
+        removeAsset: async id => {
+          if (id === 'kotoba') await remove('kotoba', usage.subtitleRecognition.variant)
+          else if (id === 'translation-model') await remove(usage.subtitleTranslation.model, usage.subtitleTranslation.variant)
+          else { await ready; available([...LOCAL_MODEL_IDS]); await subtitleInstaller().removeAsset(id); await refresh() }
+        },
+        install: async (signal, progress) => { await ready; return installModels(['kotoba', usage.subtitleTranslation.model], signal, progress, subtitleSelection()) },
+        remove: async () => { await remove('kotoba', usage.subtitleRecognition.variant); await remove(usage.subtitleTranslation.model, usage.subtitleTranslation.variant) }
       }
     },
     async close(): Promise<void> { closed = true; controller?.abort(); await pending; await shutdownEngine() }

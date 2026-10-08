@@ -6,6 +6,7 @@ import type { ActressGalleryPage, ActressGalleryPageQuery } from '@shared/actres
 import type { ElectronApi } from '../../../preload/index'
 import type { ImagePreviewLightboxProps } from './ImagePreviewLightbox'
 import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
+import { renderedText } from '../test/renderedText'
 
 const calls: ActressGalleryPageQuery[] = []
 let entries = Array.from({length:125}, (_,n) => n+1)
@@ -49,7 +50,7 @@ async function mount(t: TestContext) {
 }
 function preview() { return renderer!.root.findAllByType('div').find(n=>n.props['data-lightbox'])?.props['data-lightbox'] as ImagePreviewLightboxProps | undefined }
 const tiles=()=>renderer!.root.findAllByType('button').filter(n=>/^写真 \d+$/.test(n.props['aria-label']??''))
-async function click(label:string) { await act(async()=>{const n=renderer!.root.findAllByType('button').find(n=>n.props['aria-label']===label || n.children.join('')===label)!;assert.ok(n,label);assert.ok(!n.props.disabled);n.props.onClick({stopPropagation(){},preventDefault(){},currentTarget:{blur(){}}})}) }
+async function click(label:string) { await act(async()=>{const n=renderer!.root.findAllByType('button').find(n=>n.props['aria-label']===label || renderedText(n)===label)!;assert.ok(n,label);assert.ok(!n.props.disabled);n.props.onClick({stopPropagation(){},preventDefault(){},currentTarget:{blur(){}}})}) }
 afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;calls.length=0;entries=Array.from({length:125},(_,n)=>n+1);hold=null;fail=false;historyCount=0;revision={generation:1,revision:1}})
 
 it('bounds grid and preview windows, crosses both page edges and preserves one history entry', async t=>{

@@ -10,6 +10,7 @@ import { atomicWrite, createSubtitleCache, subtitleCacheKey } from './subtitleCa
 import { createOfflineSubtitleInference } from './offlineInference'
 import { createSubtitleScheduler } from './subtitleScheduler'
 import { renderSubtitleAss, renderSubtitleSrt, type SubtitleCue } from './subtitleDocument'
+import { createSubtitleLog } from './subtitleLog'
 
 interface Dependencies {
   root: string
@@ -19,6 +20,7 @@ interface Dependencies {
   resolve(source: PlaybackSource): Promise<PlaybackSource>
   changed(state: AiSubtitleSnapshot): void
   exportFile(content: { ass: string; srt: string }): Promise<void>
+  openLog?(content: string): Promise<void>
   runtime?: Pick<ReturnType<typeof createAiRuntimeInstaller>, 'installed' | 'paths'>
   inference?: typeof createOfflineSubtitleInference
   acquireRuntime?: () => Promise<() => void>
@@ -32,6 +34,8 @@ async function cleanStaleWork(root: string): Promise<void> {
   await Promise.all(['active', 'work'].map(name => fs.rm(path.join(root, name), { recursive: true, force: true })))
 }
 export function createAiSubtitleController(deps: Dependencies) {
+  const log = createSubtitleLog()
+  let logSession: string | null = null
   const installer = deps.runtime ?? createAiRuntimeInstaller(path.join(deps.root, 'models'))
   let inference: ReturnType<typeof createOfflineSubtitleInference> | null = null
   let scheduler: ReturnType<typeof createSubtitleScheduler> | null = null
@@ -144,7 +148,11 @@ export function createAiSubtitleController(deps: Dependencies) {
     // mpv sub-reload resets the track title to the filename, so keep a readable stable basename.
     file = path.join(deps.root, 'active', randomUUID(), 'AI 日中字幕.ass')
     const runtimePaths = installer.paths()
-    const engine = (deps.inference ?? createOfflineSubtitleInference)(runtimePaths, path.join(deps.root, 'work'))
+    log.clear(); logSession = id
+    log.write('开始 AI 字幕', { audioIndex: selected, translationModel: runtimePaths.translationModelId ?? 'qwen3' })
+    const engine = (deps.inference ?? createOfflineSubtitleInference)(runtimePaths, path.join(deps.root, 'work'), {
+      log: (stage, value) => { if (task === generation && !generation.signal.aborted) log.write(stage, value) }
+    })
     inference = engine
     publish()
     try {
@@ -156,7 +164,11 @@ export function createAiSubtitleController(deps: Dependencies) {
         !privateSession, runtimePaths.translationVersion)
       cache = storage
       const run = createSubtitleScheduler(playback.duration, {
-        read: index => storage.read(index), write: chunk => storage.write(chunk),
+        read: async index => {
+          const chunk = await storage.read(index)
+          if (chunk) log.write('字幕缓存命中（未重新推理）', { index })
+          return chunk
+        }, write: chunk => storage.write(chunk),
         recognize: async (start, end, signal) => {
           const renewed = await deps.resolve(source.source)
           signal.throwIfAborted()
@@ -165,7 +177,9 @@ export function createAiSubtitleController(deps: Dependencies) {
         translate: (cues, signal, updated) => engine.translate(cues, signal, updated),
         changed: value => {
           if (generation.signal.aborted || task !== generation) return
+          if (value.error && value.error !== state.error) log.write('字幕任务失败', value.error)
           cues = value.cues
+          log.update(cues, value.error)
           state.phase = value.phase; state.activeStart = value.activeStart; state.error = value.error
           state.recognizedSeconds = value.recognizedSeconds; state.translatedSeconds = value.translatedSeconds
           if (cues.length) render()
@@ -174,14 +188,21 @@ export function createAiSubtitleController(deps: Dependencies) {
       })
       scheduler = run; run.position(deps.playback()?.position ?? 0); run.start()
     } catch (error) {
-      if (!generation.signal.aborted) { state.phase = 'error'; state.error = error instanceof Error ? error.message : '离线字幕初始化失败'; publish() }
+      if (!generation.signal.aborted) {
+        state.phase = 'error'; state.error = error instanceof Error ? error.message : '离线字幕初始化失败'
+        log.write('字幕初始化失败', state.error); log.update([], state.error); publish()
+      }
     }
   }
   return {
     snapshot,
     async command(id: string, command: AiSubtitleCommand): Promise<AiSubtitleSnapshot> {
       current(id); await initialization
-      if (command.action === 'start') { if (!state.enabled) await start(id) }
+      if (command.action === 'view-log') {
+        if (!deps.openLog) throw new Error('当前环境不支持查看日志')
+        if (logSession !== id) { log.clear(); logSession = id }
+        await deps.openLog(log.html())
+      } else if (command.action === 'start') { if (!state.enabled) await start(id) }
       else if (command.action === 'stop') await stop()
       else if (command.action === 'retry') {
         if (scheduler) { state.error = null; scheduler.retry() }

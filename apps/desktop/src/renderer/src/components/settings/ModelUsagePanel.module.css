@@ -95,9 +95,9 @@
   opacity: 0.72;
 }
 
-.controlInput:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: 1px;
+.controlInput:focus {
+  outline: none;
+  border-color: var(--border-accent);
   box-shadow: var(--focus-ring);
 }
 
@@ -107,9 +107,52 @@
   gap: 6px;
 }
 
+.binding {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: var(--form-field-gap);
+}
+
+.bindingStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--settings-gap-sm, 8px);
+  min-height: var(--control-h-sm);
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.bindingStatusLabel[data-ready='true'] {
+  color: var(--text-accent);
+}
+
+.textBinding {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--form-field-gap);
+}
+
+.inlineBinding {
+  display: contents;
+}
+
+.inlineBindingStatus {
+  grid-column: 2 / -1;
+}
+
 @media (width <= 720px) {
   .gridTwo {
     grid-template-columns: 1fr;
+  }
+
+  .textBinding {
+    grid-template-columns: 1fr;
+  }
+
+  .inlineBindingStatus {
+    grid-column: 1;
   }
 
   .cardHeader {

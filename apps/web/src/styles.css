@@ -23,6 +23,7 @@
   --border-strong: #596460;
   --focus-outline: 2px solid var(--text-accent);
   --focus-ring: 0 0 0 1px var(--text-accent);
+  --focus-input-ring: 0 0 0 3px color-mix(in srgb, var(--text-accent) 18%, transparent);
   --shadow-feedback: 0 4px 20px #0004;
   --control-h-md: 44px;
   --choice-control-size: 16px;
@@ -142,11 +143,11 @@ html {
   select { font-size: 16px; }
 }
 
-/* One attached focus ring for standalone controls; compound search owns its ring. */
+/* Text fields own one accent border and a soft halo; other controls retain their ring. */
 select:focus {
   outline: none;
   border-color: var(--text-accent);
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-input-ring);
 }
 input[type='checkbox']:focus-visible {
   outline: var(--focus-outline);

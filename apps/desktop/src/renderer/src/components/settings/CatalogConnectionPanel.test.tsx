@@ -10,6 +10,7 @@ import { DesktopSessionContext } from '../../desktop/DesktopSessionContext'
 import LeaveGuard from '../../settings/SettingsLeaveGuard'
 import { OverlayHistoryProvider } from '../../interaction/OverlayHistoryContext'
 import { NavigationGuardProvider } from '../../interaction/NavigationGuard'
+import { renderedText } from '../../test/renderedText'
 
 function SettingsLeaveGuard({ children }: { children: React.ReactNode }): JSX.Element {
   return <OverlayHistoryProvider><NavigationGuardProvider><LeaveGuard>{children}</LeaveGuard></NavigationGuardProvider></OverlayHistoryProvider>
@@ -249,7 +250,7 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     await act(async () => { renderer = TestRenderer.create(<RouterProvider router={activeRouter} />) })
     act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'local' } }))
     assert.match(textOf(renderer!.root), /有未保存的更改/)
-    const save = renderer!.root.findAllByType('button').find((button) => button.children.includes('应用连接'))!
+    const save = renderer!.root.findAllByType('button').find((button) => renderedText(button) === '应用连接')!
     await act(async () => { save.props.onClick() })
     assert.deepEqual(writes, [{ mode: 'local', remoteBaseUrl: serverUrl }])
     assert.equal(persisted.mode, 'local')
@@ -264,7 +265,7 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     assert.match(textOf(renderer!.root), /当前使用：远程资料库.*重启后使用：本地资料库/)
     act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'remote' } }))
     assert.equal(renderer!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.value, serverUrl)
-    const probe = renderer!.root.findAllByType('button').find((button) => button.children.includes('测试连接'))!
+    const probe = renderer!.root.findAllByType('button').find((button) => renderedText(button) === '测试连接')!
     await act(async () => { probe.props.onClick() })
     assert.match(textOf(renderer!.root), /服务可达，版本匹配/)
     assert.equal(renderer!.root.findAllByType('button').filter(button => textOf(button) === '查看详情' && !button.props['aria-hidden']).length, 0)

@@ -95,7 +95,9 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
       if (!visible) bridge.setVisible(false)
       const zoom = window.webContents.getZoomFactor()
       bridge.setBounds({ x: rect.x * zoom, y: rect.y * zoom, width: rect.width * zoom, height: rect.height * zoom,
-        ...(process.platform === 'linux' ? { scale: screen.getDisplayMatching(window.getBounds()).scaleFactor } : {}) })
+        // Chromium's effective scale can include Windows accessibility text
+        // scaling, which GetDpiForWindow alone does not include.
+        ...(['linux', 'win32'].includes(process.platform) ? { scale: screen.getDisplayMatching(window.getBounds()).scaleFactor } : {}) })
       bridge.setOcclusions?.(occlusions.map(area => ({ x: area.x * zoom, y: area.y * zoom, width: area.width * zoom, height: area.height * zoom })))
       bridge.setPresentation(state.presentation)
       if (visible) bridge.setVisible(true)

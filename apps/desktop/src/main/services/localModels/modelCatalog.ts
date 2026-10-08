@@ -1,4 +1,4 @@
-import type { LocalModelId, LocalTranslationModelId } from '@shared/desktop/localModels'
+import type { LocalModelDownloadSource, LocalModelId, LocalTranslationModelId } from '@shared/desktop/localModels'
 import { AI_SUBTITLE_ASSETS, aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget } from '../../player/aiSubtitles/runtimeManifest'
 import repositories from './modelCatalogAssets.json'
 import { LOCAL_MODEL_NOTICES } from '../../player/aiSubtitles/modelNotices'
@@ -71,7 +71,12 @@ export function localModelVariant(model: LocalModelId, variant = DEFAULT_LOCAL_M
   return match
 }
 
-export function localModelAssets(selection: Record<LocalModelId, string>, translationModel: LocalTranslationModelId = 'qwen3', target?: AiRuntimeTarget): readonly AiRuntimeAsset[] {
+export function localModelAssets(selection: Record<LocalModelId, string>, translationModel: LocalTranslationModelId = 'qwen3', target?: AiRuntimeTarget, source: LocalModelDownloadSource = 'official'): readonly AiRuntimeAsset[] {
   return aiRuntimeAssets(target).map(asset => asset.id === 'kotoba' ? localModelVariant('kotoba', selection.kotoba).asset
-    : asset.id === 'translation-model' ? localModelVariant(translationModel, selection[translationModel]).asset : asset)
+    : asset.id === 'translation-model' ? localModelVariant(translationModel, selection[translationModel]).asset : asset).map(asset => {
+    const url = new URL(asset.url)
+    if (source !== 'hf-mirror' || url.origin !== 'https://huggingface.co') return asset
+    url.hostname = 'hf-mirror.com'
+    return { ...asset, url: url.href }
+  })
 }

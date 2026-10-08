@@ -65,6 +65,10 @@
   color: transparent;
 }
 
+.input:focus {
+  outline: none;
+}
+
 .placeholder {
   color: var(--text-muted);
 }

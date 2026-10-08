@@ -75,6 +75,10 @@ npm run dist:linux           # Linux 目标
 
 ### 本地 AI 运行库（开发分支）
 
+AI 模型设置分为用途配置、提供商与模型、本地模型三个页签。提供商模型的能力覆盖在模型详情内维护；本地文件按语音输入／文本输入分组。本地配置 `local-models.json` v5 为字幕识别、字幕翻译和普通文本翻译保存独立的模型系列及精度 ID。v1–v4 升级沿用保存目录、下载来源及精度，将原共享翻译选择复制到两个翻译用途；不重命名或重新下载权重。
+
+每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
+
 本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/player/aiSubtitles/runtimeInstaller.ts)：Windows x64 保留原目录与 ZIP；macOS、Linux 的 arm64／x64 工具在 `tools/<platform>-<arch>/` 隔离，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
 
 macOS 上 `npm run ai-runtime:build` 使用固定 commit 的 whisper.cpp b5130 与 FFmpeg 8.1.3 源码，验证 SHA-256 后编译静态 CLI。首次开发构建需要 Xcode Command Line Tools、CMake、make 及网络；不自动安装系统工具。`dev`、`desktop:build`、`start`／`preview` 自动准备本机产物，后续复用已验证的构建缓存。Mac 打包另按目标架构编译，输出 `out/ai-runtime/darwin-<arch>/`，支持 arm64 和 x64 单架构包，不支持 universal AI 工具包。
@@ -243,3 +247,9 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 ### 局域网 Web 端
 
 浏览器入口与桌面 renderer 独立，构建、认证、只读目录约束和验证命令见 [LAN_WEB.md](LAN_WEB.md)。`npm run dev` 会先构建 Web 页面；`npm run web:dev` 可持续监听重建。
+
+### Windows 播放窗口缩放回归
+
+原生播放区域、弹层遮挡和全屏指针坐标使用 Electron 当前显示器的有效 `scaleFactor`，再结合网页 `zoomFactor` 换算。不能只用 `GetDpiForWindow / 96`：Windows 辅助功能文字缩放可能让 Chromium 的有效缩放与 HWND DPI 不同，例如 175% 显示缩放加 110% 文字缩放时为 192.5%。网页 DPR 变化时，即使 CSS 矩形未变，也需重新上报播放区域。
+
+构建原生运行库后，在未设置 `ELECTRON_RUN_AS_NODE` 的环境运行 `node_modules/electron/dist/electron.exe scripts/playback-windows-geometry-acceptance.cjs`。该检查使用隔离空窗口，不读取个人资料库，核对底栏／展开／全屏模式下多档显示和网页缩放的实际 HWND 位置与尺寸；不代替真实跨屏移动和播放画面验收。更新原生运行库与主进程后须完整退出并重新启动应用。

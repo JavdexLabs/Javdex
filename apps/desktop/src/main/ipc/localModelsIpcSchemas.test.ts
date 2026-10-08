@@ -13,7 +13,12 @@ test('local model commands reject renderer-selected paths, URLs and arbitrary mo
   assert.equal(schema.safeParse([{ action: 'translation-model', model: 'hy-mt2-7b' }]).success, true)
   assert.equal(schema.safeParse([{ action: 'translation-model', model: 'index-translate-9b' }]).success, true)
   assert.equal(schema.safeParse([{ action: 'download', model: 'index-translate-9b', variant: 'index-translate-9b-f16' }]).success, true)
+  assert.equal(schema.safeParse([{ action: 'download-source', source: 'hf-mirror' }]).success, true)
+  for (const action of ['import', 'copy-download-url']) assert.equal(schema.safeParse([{ action, model: 'qwen3', variant: 'qwen3-official-q8_0' }]).success, true)
   for (const command of [
+    { action: 'import', model: 'qwen3', source: 'C:/untrusted.gguf' },
+    { action: 'copy-download-url', model: 'qwen3', url: 'https://example.com' },
+    { action: 'download-source', source: 'https://example.com' },
     { action: 'export', model: 'qwen3', destination: 'C:/Windows' },
     { action: 'delete', model: '../other-files' },
     { action: 'download', model: 'qwen3', url: 'https://example.com/model' },
@@ -45,4 +50,21 @@ test('player subtitle IPC cannot bypass the central model management and deletio
   for (const action of ['install', 'cancel-install', 'remove-models']) {
     assert.equal(schema.safeParse([sessionId, { action }]).success, false)
   }
+})
+
+test('purpose bindings allow independent exact variants but reject cross-family or injected identities', () => {
+  const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
+  const usage = {
+    subtitleRecognition: { model: 'kotoba', variant: 'kotoba-q5_0' },
+    subtitleTranslation: { model: 'qwen3', variant: 'qwen3-q4_k_m' },
+    textTranslation: { mode: 'local', model: 'qwen3', variant: 'qwen3-official-q8_0' }
+  }
+  assert.equal(schema.safeParse([{ action: 'usage', usage, expectedRevision: 'current-revision' }]).success, true)
+  for (const invalid of [
+    { ...usage, subtitleRecognition: { model: 'qwen3', variant: 'qwen3-q4_k_m' } },
+    { ...usage, subtitleTranslation: { model: 'qwen3', variant: 'hy-mt2-7b-q8_0' } },
+    { ...usage, textTranslation: { ...usage.textTranslation, variant: '../file.gguf' } },
+    { ...usage, textTranslation: { ...usage.textTranslation, mode: 'online-fallback' } },
+    { ...usage, subtitleTranslation: { ...usage.subtitleTranslation, path: 'C:/external.gguf' } }
+  ]) assert.equal(schema.safeParse([{ action: 'usage', usage: invalid }]).success, false)
 })

@@ -8,19 +8,21 @@ import { createLocalModelManager } from './localModelManager'
 import { createAiRuntimeInstaller } from '../../player/aiSubtitles/runtimeInstaller'
 import { createOfflineSubtitleInference } from '../../player/aiSubtitles/offlineInference'
 
-async function fixture(options: { inference?: typeof createOfflineSubtitleInference; runtimeSupported?: () => boolean } = {}) {
+async function fixture(options: { inference?: typeof createOfflineSubtitleInference; runtimeSupported?: () => boolean; runtimeAvailable?: () => boolean } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-local-models-'))
   let fail = false, attempts = 0
+  const downloadUrls: string[] = []
   const installer: typeof createAiRuntimeInstaller = (directory, download, assets) => {
     const base = createAiRuntimeInstaller(directory, download, assets)
     const modelFile = (id: string): string => `${id === 'kotoba' ? base.paths().kotoba : base.paths().translationModel}.ready`
     const weights = (ids: readonly string[]) => ids.filter(id => id === 'kotoba' || id === 'translation-model')
-    const assetsInstalled = async (ids: readonly string[]) => (await Promise.all(weights(ids).map(id =>
-      fs.access(modelFile(id)).then(() => true, () => false)))).every(Boolean)
+    const assetsInstalled = async (ids: readonly string[]) => (!ids.some(id => id !== 'kotoba' && id !== 'translation-model') || options.runtimeAvailable?.() !== false)
+      && (await Promise.all(weights(ids).map(id => fs.access(modelFile(id)).then(() => true, () => false)))).every(Boolean)
     return { ...base,
       installed: () => assetsInstalled(['kotoba', 'translation-model']), assetsInstalled,
       removeAsset: async id => { await fs.rm(modelFile(id), { force: true }) },
       install: async (signal, progress, ids = []) => {
+        downloadUrls.push(...(assets ?? []).map(asset => asset.url))
         attempts++; await delay(20, undefined, { signal })
         if (fail) throw new Error('fixture download failed')
         for (const id of weights(ids)) {
@@ -33,12 +35,22 @@ async function fixture(options: { inference?: typeof createOfflineSubtitleInfere
     }
   }
   const manager = createLocalModelManager(root, { installer, runtimeSupported: () => true, ...options })
-  return { root, manager, installer, setFail: (value: boolean) => { fail = value }, attempts: () => attempts,
+  return { root, manager, installer, downloadUrls, setFail: (value: boolean) => { fail = value }, attempts: () => attempts,
     cleanup: async () => { await manager.close(); await fs.rm(root, { recursive: true, force: true }) } }
 }
 async function idle(manager: ReturnType<typeof createLocalModelManager>): Promise<void> {
   for (let count = 0; count < 200; count++) { if (!(await manager.snapshot()).operation) return; await delay(5) }
   assert.fail('model operation did not settle')
+}
+async function removeAfterUnreferencing(manager: ReturnType<typeof createLocalModelManager>, model: 'qwen3' | 'hy-mt2-7b' | 'index-translate-9b'): Promise<void> {
+  const state = await manager.snapshot(), family = state.models.find(item => item.id === model)!
+  const variant = family.selectedVariant
+  await assert.rejects(manager.remove(model, variant), /引用/)
+  const replacement = family.variants.find(item => item.id !== variant && !item.installed)!
+  const usage = structuredClone(state.usage)
+  for (const ref of Object.values(usage)) if (ref.model === model && ref.variant === variant) ref.variant = replacement.id
+  await manager.setUsage(usage, state.revision)
+  await manager.remove(model, variant)
 }
 test('download is exclusive, supports cancellation/retry, and prevents use until installation completes', async () => {
   const f = await fixture()
@@ -59,7 +71,7 @@ test('download is exclusive, supports cancellation/retry, and prevents use until
     assert.equal(await f.manager.mode(), 'local')
   } finally { await f.cleanup() }
 })
-test('runtime leases guard deletion/migration and deleting the selected translation model never changes mode to online', async () => {
+test('runtime leases and configured purposes guard deletion; missing weights never enable online fallback', async () => {
   const f = await fixture()
   try {
     await f.manager.download('qwen3'); await idle(f.manager); await f.manager.setTranslation('local')
@@ -67,7 +79,7 @@ test('runtime leases guard deletion/migration and deleting the selected translat
     await assert.rejects(f.manager.remove('qwen3'), /正在使用/)
     await assert.rejects(f.manager.relocate(path.join(f.root, 'elsewhere')), /正在使用/)
     release(); release()
-    await f.manager.remove('qwen3')
+    await removeAfterUnreferencing(f.manager, 'qwen3')
     assert.equal(await f.manager.mode(), 'local')
     await assert.rejects(f.manager.translateText('日本語'), /未安装/)
   } finally { await f.cleanup() }
@@ -151,21 +163,21 @@ test('downloading another precision does not select it; selection and all instal
     await f.manager.setTranslation('local')
     const release = await f.manager.acquire(['qwen3'])
     await assert.rejects(f.manager.selectVariant('qwen3', 'qwen3-q4_k_m'), /正在使用/)
-    await assert.rejects(f.manager.remove('qwen3', 'qwen3-q4_k_m'), /正在使用/)
+    await f.manager.remove('qwen3', 'qwen3-q4_k_m')
     release()
     await f.manager.relocate(path.join(f.root, 'new-models'))
     const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
     try {
       const state = await restarted.snapshot(), qwen = state.models.find(item => item.id === 'qwen3')!
       assert.equal(qwen.selectedVariant, 'qwen3-q8_0')
-      assert.equal(qwen.variants.filter(item => item.installed).length, 2)
+      assert.equal(qwen.variants.filter(item => item.installed).length, 1)
       assert.equal(await restarted.mode(), 'local')
       await restarted.remove('qwen3', 'qwen3-q4_k_m')
       const after = (await restarted.snapshot()).models.find(item => item.id === 'qwen3')!
       assert.equal(after.installed, true)
       assert.equal(after.selectedVariant, 'qwen3-q8_0')
       assert.deepEqual(after.variants.filter(item => item.installed).map(item => item.id), ['qwen3-q8_0'])
-      await restarted.remove('qwen3')
+      await removeAfterUnreferencing(restarted, 'qwen3')
       assert.equal(await restarted.mode(), 'local')
       await assert.rejects(restarted.translateText('日本語'), /未安装/)
     } finally { await restarted.close() }
@@ -297,7 +309,7 @@ test('HY choices and all family weights survive restart and migration, with no f
       const used = await restarted.snapshot()
       assert.deepEqual(used.models.filter(model => model.inUse).map(model => model.id), ['kotoba', 'hy-mt2-7b'])
       release(); release()
-      await restarted.remove('hy-mt2-7b')
+      await removeAfterUnreferencing(restarted, 'hy-mt2-7b')
       const after = await restarted.snapshot()
       assert.equal(after.translationModel, 'hy-mt2-7b')
       assert.equal(after.translation, 'local')
@@ -330,7 +342,7 @@ test('active HY leases block family changes and repairs of either shared transla
   } finally { await f.cleanup() }
 })
 
-test('v2 Qwen precision settings are read without changing mode or files and upgrade only after explicit configuration', async () => {
+test('v2 Qwen settings migrate exact shared purpose bindings to v5 without changing mode or files', async () => {
   const f = await fixture()
   try {
     const directory = (await f.manager.snapshot()).directory
@@ -344,10 +356,12 @@ test('v2 Qwen precision settings are read without changing mode or files and upg
       assert.equal(state.translation, 'local')
       assert.equal(state.models.find(model => model.id === 'qwen3')!.selectedVariant, 'qwen3-official-q8_0')
       assert.equal(state.models.find(model => model.id === 'kotoba')!.selectedVariant, 'kotoba-f16')
-      assert.equal(await fs.readFile(configFile, 'utf8'), original)
+      assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 5)
+      assert.deepEqual(state.usage.subtitleTranslation, { model: 'qwen3', variant: 'qwen3-official-q8_0' })
+      assert.deepEqual(state.usage.textTranslation, { mode: 'local', model: 'qwen3', variant: 'qwen3-official-q8_0' })
       await restarted.setTranslation('app-default')
       const saved = JSON.parse(await fs.readFile(configFile, 'utf8'))
-      assert.equal(saved.version, 4)
+      assert.equal(saved.version, 5)
       assert.equal(saved.translationModel, 'qwen3')
       assert.equal(saved.selected.qwen3, 'qwen3-official-q8_0')
     } finally { await restarted.close() }
@@ -418,7 +432,7 @@ test('all four families and Index precision choices survive migration and restar
       assert.equal(index.variants.filter(variant => variant.installed).length, 2)
       assert.equal(restarted.subtitleRuntime().paths().translationModelId, 'index-translate-9b')
       assert.match(restarted.subtitleRuntime().paths().translationModel, /Index-Translate-9B\.f16\.gguf$/)
-      await restarted.remove('index-translate-9b')
+      await removeAfterUnreferencing(restarted, 'index-translate-9b')
       assert.equal((await restarted.snapshot()).translationModel, 'index-translate-9b')
       assert.equal(await restarted.mode(), 'local')
       await assert.rejects(restarted.translateText('はい'), /未安装/)
@@ -449,7 +463,7 @@ test('Index subtitles do not require other translators and their leases protect 
   } finally { await f.cleanup() }
 })
 
-test('v3 HY settings are read unchanged and upgrade to v4 with the new family only after explicit configuration', async () => {
+test('v3 HY settings migrate exact shared purpose bindings to v5 while preserving other family selections', async () => {
   const f = await fixture()
   try {
     const directory = (await f.manager.snapshot()).directory
@@ -464,10 +478,12 @@ test('v3 HY settings are read unchanged and upgrade to v4 with the new family on
       assert.equal(state.translationModel, 'hy-mt2-7b')
       assert.equal(state.translation, 'local')
       assert.deepEqual(state.models.map(model => model.selectedVariant), ['qwen3-official-q8_0', 'kotoba-f16', 'hy-mt2-7b-q6_k', 'index-translate-9b-q4_k_m'])
-      assert.equal(await fs.readFile(configFile, 'utf8'), original)
+      assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 5)
+      assert.deepEqual(state.usage.subtitleTranslation, { model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' })
+      assert.deepEqual(state.usage.textTranslation, { mode: 'local', model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' })
       await restarted.setTranslation('app-default')
       const saved = JSON.parse(await fs.readFile(configFile, 'utf8'))
-      assert.equal(saved.version, 4)
+      assert.equal(saved.version, 5)
       assert.equal(saved.translationModel, 'hy-mt2-7b')
       assert.equal(saved.selected['hy-mt2-7b'], 'hy-mt2-7b-q6_k')
       assert.equal(saved.selected['index-translate-9b'], 'index-translate-9b-q4_k_m')
@@ -502,4 +518,190 @@ test('portable Index weights and family selection cannot enable inference on an 
     await assert.rejects(f.manager.translateText('はい'), /Windows x64/)
     assert.equal(await f.manager.mode(), 'app-default')
   } finally { await f.cleanup() }
+})
+
+
+test('download source persists, covers repair and rejects changes during downloads', async () => {
+  const f = await fixture()
+  try {
+    assert.equal((await f.manager.snapshot()).downloadSource, 'official')
+    await f.manager.setDownloadSource('hf-mirror')
+    await f.manager.download('qwen3')
+    await assert.rejects(f.manager.setDownloadSource('official'), /等待/)
+    await idle(f.manager)
+    assert.ok(f.downloadUrls.some(url => url.startsWith('https://hf-mirror.com/')))
+    assert.ok(!f.downloadUrls.some(url => url.startsWith('https://huggingface.co/')))
+    const reopened = createLocalModelManager(f.root, { installer: f.installer })
+    try { assert.equal((await reopened.snapshot()).downloadSource, 'hf-mirror') }
+    finally { await reopened.close() }
+    f.downloadUrls.length = 0
+    await f.manager.setDownloadSource('official')
+    await f.manager.download('qwen3'); await idle(f.manager)
+    assert.ok(f.downloadUrls.some(url => url.startsWith('https://huggingface.co/')))
+    assert.equal((await f.manager.snapshot()).models.find(model => model.id === 'qwen3')?.installed, true)
+  } finally { await f.cleanup() }
+})
+
+
+test('copy addresses use the selected download source and imports reject mismatched files without selecting variants', async () => {
+  const f = await fixture()
+  try {
+    const official = await f.manager.downloadUrl('qwen3', 'qwen3-official-q8_0')
+    assert.match(official, /^https:\/\/huggingface.co\/Qwen\//)
+    await f.manager.setDownloadSource('hf-mirror')
+    assert.equal(await f.manager.downloadUrl('qwen3', 'qwen3-official-q8_0'), official.replace('huggingface.co', 'hf-mirror.com'))
+    const source = path.join(f.root, 'bad.gguf')
+    await fs.writeFile(source, 'not a model')
+    await assert.rejects(f.manager.importModel('qwen3', source, 'qwen3-official-q8_0'), /大小/)
+    const state = await f.manager.snapshot()
+    assert.equal(state.operation, null)
+    assert.equal(state.models.find(model => model.id === 'qwen3')?.selectedVariant, 'qwen3-q4_k_m')
+    assert.equal(f.attempts(), 0)
+  } finally { await f.cleanup() }
+})
+
+test('purpose bindings keep separate exact translator variants across restart and freeze active subtitle paths', async () => {
+  const opened: string[] = []
+  const f = await fixture({ inference: paths => {
+    opened.push(paths.translationModel)
+    return { translateText: async () => '译文', close: async () => {}, probe: async () => { throw new Error('unexpected probe') },
+      recognize: async () => [], translate: async cues => cues }
+  } })
+  try {
+    for (const model of ['kotoba', 'qwen3'] as const) { await f.manager.download(model); await idle(f.manager) }
+    await f.manager.download('qwen3', 'qwen3-official-q8_0'); await idle(f.manager)
+    const initial = await f.manager.snapshot()
+    const usage = { ...initial.usage, textTranslation: { mode: 'local' as const, model: 'qwen3' as const, variant: 'qwen3-official-q8_0' } }
+    await f.manager.setUsage(usage, initial.revision)
+    const subtitlePath = f.manager.subtitleRuntime().paths().translationModel
+    assert.match(subtitlePath, /qwen3-q4\.gguf$/)
+    await f.manager.translateText('はい')
+    assert.match(opened[0], /Q8_0\.gguf$/)
+    const release = await f.manager.acquireSubtitleRuntime()
+    const active = await f.manager.snapshot(), variants = active.models.find(model => model.id === 'qwen3')!.variants
+    assert.equal(variants.find(variant => variant.id === 'qwen3-q4_k_m')!.inUse, true)
+    assert.equal(variants.find(variant => variant.id === 'qwen3-official-q8_0')!.inUse, false)
+    assert.deepEqual(variants.find(variant => variant.id === 'qwen3-q4_k_m')!.references, ['AI 字幕 · 文本翻译'])
+    assert.deepEqual(variants.find(variant => variant.id === 'qwen3-official-q8_0')!.references, ['文本翻译'])
+    await f.manager.setUsage({ ...usage, textTranslation: { mode: 'local', model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' } }, active.revision)
+    assert.equal(f.manager.subtitleRuntime().paths().translationModel, subtitlePath)
+    await assert.rejects(f.manager.setUsage({ ...usage, subtitleRecognition: { model: 'kotoba', variant: 'kotoba-f16' } }), /正在使用/)
+    await assert.rejects(f.manager.setUsage({ ...usage, subtitleTranslation: { model: 'qwen3', variant: 'qwen3-official-q8_0' } }), /正在使用/)
+    await f.manager.remove('qwen3', 'qwen3-official-q8_0')
+    await assert.rejects(f.manager.remove('qwen3', 'qwen3-q4_k_m'), /正在使用/)
+    await assert.rejects(f.manager.download('index-translate-9b'), /正在使用/)
+    release()
+    await assert.rejects(f.manager.remove('qwen3', 'qwen3-q4_k_m'), /引用/)
+    const saved = await f.manager.snapshot()
+    const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
+    try {
+      assert.deepEqual((await restarted.snapshot()).usage, saved.usage)
+      assert.equal((await restarted.snapshot()).revision, saved.revision)
+      await assert.rejects(restarted.translateText('はい'), /未安装/)
+      assert.equal(await restarted.mode(), 'local')
+    } finally { await restarted.close() }
+  } finally { await f.cleanup() }
+})
+
+test('atomic purpose saves reject stale drafts and mismatched variants while permitting missing files', async () => {
+  const f = await fixture()
+  try {
+    const initial = await f.manager.snapshot()
+    const usage = { ...initial.usage, subtitleTranslation: { model: 'index-translate-9b' as const, variant: 'index-translate-9b-f16' } }
+    await f.manager.setUsage(usage, initial.revision)
+    const saved = await f.manager.snapshot()
+    assert.notEqual(saved.revision, initial.revision)
+    assert.equal(saved.models.find(model => model.id === 'index-translate-9b')!.variants.find(variant => variant.id === 'index-translate-9b-f16')!.readiness, 'missing-model')
+    await assert.rejects(f.manager.setUsage(initial.usage, initial.revision), /已更新/)
+    await assert.rejects(f.manager.setUsage({ ...usage, subtitleTranslation: { model: 'qwen3', variant: 'index-translate-9b-f16' } }), /不匹配/)
+    assert.deepEqual((await f.manager.snapshot()).usage, saved.usage)
+    const file = JSON.parse(await fs.readFile(path.join(f.root, 'local-models.json'), 'utf8'))
+    assert.equal(file.version, 5); assert.deepEqual(file.usage, saved.usage)
+    assert.equal((await f.manager.snapshot()).operation, null)
+  } finally { await f.cleanup() }
+})
+
+test('v4 migration preserves mirror source, directory, weights and both formerly shared translation bindings', async () => {
+  const f = await fixture()
+  try {
+    for (const model of ['kotoba', 'qwen3'] as const) { await f.manager.download(model); await idle(f.manager) }
+    const before = await f.manager.snapshot(), runtime = f.installer(before.directory)
+    const filename = `${runtime.paths().translationModel}.ready`, contents = await fs.readFile(filename, 'utf8')
+    const selected = Object.fromEntries(before.models.map(model => [model.id, model.selectedVariant]))
+    const configFile = path.join(f.root, 'local-models.json')
+    await fs.writeFile(configFile, JSON.stringify({ version: 4, directory: before.directory, translation: 'local',
+      translationModel: 'qwen3', downloadSource: 'hf-mirror', selected }))
+    const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
+    try {
+      const after = await restarted.snapshot()
+      assert.equal(after.downloadSource, 'hf-mirror'); assert.equal(after.directory, before.directory)
+      assert.deepEqual(after.models.map(model => model.selectedVariant), before.models.map(model => model.selectedVariant))
+      assert.deepEqual(after.usage.subtitleRecognition, { model: 'kotoba', variant: selected.kotoba })
+      assert.deepEqual(after.usage.subtitleTranslation, { model: 'qwen3', variant: selected.qwen3 })
+      assert.deepEqual(after.usage.textTranslation, { mode: 'local', model: 'qwen3', variant: selected.qwen3 })
+      assert.equal(await fs.readFile(filename, 'utf8'), contents)
+      assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 5)
+      assert.equal(await restarted.subtitleRuntime().installed(), true)
+    } finally { await restarted.close() }
+  } finally { await f.cleanup() }
+})
+
+test('damaged v5 purpose references never reach the snapshot and explicit recovery preserves valid storage metadata', async () => {
+  const f = await fixture()
+  try {
+    await f.manager.download('qwen3'); await idle(f.manager)
+    await f.manager.setDownloadSource('hf-mirror')
+    await f.manager.relocate(path.join(f.root, 'custom-models'))
+    const configFile = path.join(f.root, 'local-models.json'), config = JSON.parse(await fs.readFile(configFile, 'utf8'))
+    config.usage.subtitleTranslation = { model: 'qwen3', variant: 'hy-mt2-7b-q8_0' }
+    const damaged = JSON.stringify(config)
+    await fs.writeFile(configFile, damaged)
+    const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
+    try {
+      const state = await restarted.snapshot()
+      assert.match(state.configurationError ?? '', /重新保存/)
+      assert.equal(state.directory, config.directory); assert.equal(state.downloadSource, 'hf-mirror')
+      assert.deepEqual(state.usage.subtitleTranslation, { model: 'qwen3', variant: config.selected.qwen3 })
+      assert.equal(await fs.readFile(configFile, 'utf8'), damaged, 'bad configuration must not be silently overwritten')
+      await assert.rejects(restarted.acquireSubtitleRuntime(), /设置损坏/)
+      await restarted.setUsage(state.usage, state.revision)
+      const recovered = await restarted.snapshot()
+      assert.equal(recovered.configurationError, null)
+      assert.equal(recovered.directory, config.directory)
+      assert.equal(recovered.models.find(model => model.id === 'qwen3')!.variants.find(variant => variant.id === config.selected.qwen3)!.installed, true)
+      assert.deepEqual(JSON.parse(await fs.readFile(configFile, 'utf8')).usage, recovered.usage)
+    } finally { await restarted.close() }
+  } finally { await f.cleanup() }
+})
+
+test('readiness distinguishes downloaded weights, missing runtime and unsupported inference', async () => {
+  for (const supported of [true, false]) {
+    const f = await fixture({ runtimeSupported: () => supported, runtimeAvailable: () => false })
+    try {
+      await f.manager.download('qwen3'); await idle(f.manager)
+      const variant = (await f.manager.snapshot()).models.find(model => model.id === 'qwen3')!.variants.find(item => item.id === 'qwen3-q4_k_m')!
+      assert.equal(variant.installed, true)
+      assert.equal(variant.ready, false)
+      assert.equal(variant.readiness, supported ? 'missing-runtime' : 'unsupported')
+    } finally { await f.cleanup() }
+  }
+})
+
+test('active text translation rejects purpose changes and shared runtime repair until its exact lease ends', async () => {
+  let resume!: () => void, entered!: () => void
+  const running = new Promise<void>(resolve => { entered = resolve })
+  const gate = new Promise<void>(resolve => { resume = resolve })
+  const f = await fixture({ inference: () => ({ translateText: async () => { entered(); await gate; return '译文' }, close: async () => {},
+    probe: async () => { throw new Error('unexpected probe') }, recognize: async () => [], translate: async cues => cues }) })
+  try {
+    await f.manager.download('qwen3'); await idle(f.manager)
+    const pending = f.manager.translateText('はい')
+    await running
+    const state = await f.manager.snapshot()
+    await assert.rejects(f.manager.setUsage({ ...state.usage, textTranslation: { ...state.usage.textTranslation, variant: 'qwen3-official-q8_0' } }), /正在使用/)
+    await assert.rejects(f.manager.download('hy-mt2-7b'), /正在使用/)
+    assert.equal(state.models.find(model => model.id === 'qwen3')!.variants.find(variant => variant.id === 'qwen3-q4_k_m')!.inUse, true)
+    resume(); assert.equal(await pending, '译文')
+    assert.equal((await f.manager.snapshot()).models.some(model => model.inUse), false)
+  } finally { resume(); await f.cleanup() }
 })

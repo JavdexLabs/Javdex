@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { renderedText } from '../../test/renderedText'
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
 it('retries a failed service with saved configuration, and prevents submitting unsaved drafts via retry', async () => {
@@ -22,7 +23,7 @@ it('retries a failed service with saved configuration, and prevents submitting u
   try {
     const { default: Panel } = await import('./WebAccessPanel')
     await act(async () => { renderer = TestRenderer.create(<Panel />) })
-    const retry = () => renderer.root.findAllByType('button').find(button => button.children.includes('重试启动'))!
+    const retry = () => renderer.root.findAllByType('button').find(button => renderedText(button) === '重试启动')!
     assert.equal(retry().props.disabled, false)
     const port = renderer.root.findAllByType('input').find(input => input.props.value === '8088')!
     act(() => port.props.onChange({ target: { value: '8090' } }))
@@ -31,7 +32,7 @@ it('retries a failed service with saved configuration, and prevents submitting u
     await act(async () => { retry().props.onClick() })
     assert.equal(applied.length, 1)
     assert.equal(retry(), undefined)
-    const button = (text: string) => renderer.root.findAllByType('button').find(item => item.children.includes(text))!
+    const button = (text: string) => renderer.root.findAllByType('button').find(item => renderedText(item) === text)!
     await act(async () => { button('打开').props.onClick() })
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 3100)) })
     assert.ok(JSON.stringify(renderer.toJSON()).includes('无法打开浏览器'), 'errors remain after the success timeout')

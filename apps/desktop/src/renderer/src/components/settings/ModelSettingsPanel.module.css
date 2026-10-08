@@ -77,3 +77,9 @@
   background: var(--surface-control);
   color: var(--text-primary);
 }
+
+.usageStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-gap, 12px);
+}

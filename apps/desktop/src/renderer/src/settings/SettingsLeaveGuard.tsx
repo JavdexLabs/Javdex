@@ -20,6 +20,8 @@ type FormEntry = {
   busy?: boolean
   save?: () => Promise<boolean>
   discard: () => void
+  /** Only for forms kept mounted across these routes; other navigation still asks to save. */
+  preserveOnNavigate?: (nextPath: string) => boolean
 }
 type GuardContext = {
   entries: Map<string, FormEntry>
@@ -48,7 +50,8 @@ export function useSettingsFormGuard(entry: FormEntry): (action: () => void) => 
       get save() {
         return entryRef.current.save
       },
-      discard: () => entryRef.current.discard()
+      discard: () => entryRef.current.discard(),
+      preserveOnNavigate: nextPath => entryRef.current.preserveOnNavigate?.(nextPath) === true
     })
     context.notify()
     return () => {
@@ -79,7 +82,8 @@ export default function SettingsLeaveGuard({ children }: { children: ReactNode }
     [entries]
   )
   const context = useMemo(() => ({ entries, requestLeave, notify }), [entries, requestLeave])
-  useNavigationGuard(() => Array.from(entries.values()).some(entry => entry.dirty || entry.busy),
+  useNavigationGuard(nextPath => Array.from(entries.values()).some(entry =>
+    entry.busy || (entry.dirty && !(nextPath && entry.preserveOnNavigate?.(nextPath)))),
     decision => { setError(null); setRoutePending(decision) })
   const forms = Array.from(entries.values()).filter((entry) => entry.dirty || entry.busy)
   const visible = routePending !== null || pending !== null

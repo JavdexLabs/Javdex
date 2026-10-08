@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act, type ReactTestRendererJSON } from 'react-test-renderer'
 import DirectorScrapeChoiceModal from './DirectorScrapeChoiceModal'
+import { renderedText as renderedNodeText } from '../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', {
@@ -67,7 +68,7 @@ describe('DirectorScrapeChoiceModal', () => {
     assert.ok(renderer)
     const confirm = renderer.root
       .findAllByType('button')
-      .find((button) => button.props.children === '应用所选导演')
+      .find((button) => renderedNodeText(button) === '应用所选导演')
     assert.ok(confirm)
     assert.equal(confirm.props.disabled, true)
 

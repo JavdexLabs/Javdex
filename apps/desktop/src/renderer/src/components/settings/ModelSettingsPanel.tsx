@@ -5,9 +5,10 @@ import type { ModelManagementCommand, ModelManagementSnapshot } from '@shared/mo
 import { api } from '../../api'
 import { useToast } from '../Toast'
 import Button from '../Button'
-import ModelUsagePanel from './ModelUsagePanel'
+import ModelUsagePanel, { ModelAgentUsagePanel } from './ModelUsagePanel'
 import ModelProvidersPanel from './ModelProvidersPanel'
-import ModelAdvancedPanel from './ModelAdvancedPanel'
+import LocalModelsPanel from './LocalModelsPanel'
+import LocalModelUsagePanel from './LocalModelUsagePanel'
 import styles from './ModelSettingsPanel.module.css'
 import { settingsPath } from '../../settings/settingsRoutes'
 
@@ -16,7 +17,7 @@ export type ApplyModelManagementCommand = (
   successMessage?: string
 ) => Promise<boolean>
 
-export type ModelSettingsTab = 'usage' | 'providers' | 'advanced'
+export type ModelSettingsTab = 'usage' | 'providers' | 'local'
 
 export default function ModelSettingsPanel({
   settings,
@@ -83,7 +84,7 @@ export default function ModelSettingsPanel({
 
   return (
     <div className={styles.root}>
-      {settings.llmSecretStorage.protection !== 'secure' ? (
+      {activeTab === 'providers' && settings.llmSecretStorage.protection !== 'secure' ? (
         <div className={styles.warning} role="status">
           <strong>
             {settings.llmSecretStorage.protection === 'degraded'
@@ -97,26 +98,28 @@ export default function ModelSettingsPanel({
           </span>
         </div>
       ) : null}
-      {settings.llmSecretStorage.migrationError ? (
+      {activeTab === 'providers' && settings.llmSecretStorage.migrationError ? (
         <div className={styles.warning} role="alert">
           <strong>旧版密钥尚未迁移</strong>
           <span>{settings.llmSecretStorage.migrationError}</span>
         </div>
       ) : null}
 
-      {loadingError ? (
+      {loadingError && activeTab !== 'local' ? (
         <div className={styles.error} role="alert">
           <span>{loadingError}</span>
           <button className={styles.retryButton} type="button" onClick={() => void refresh()}>
             重试
           </button>
         </div>
-      ) : !snapshot ? (
+      ) : null}
+      {!snapshot && !loadingError && activeTab !== 'local' ? (
         <div className={styles.loading}>正在读取模型配置…</div>
-      ) : (
+      ) : null}
         <div id="model-settings-tabpanel" className={styles.content}>
-          {activeTab === 'usage' ? (
-            <>
+          <div hidden={activeTab !== 'usage'}>
+            <div className={styles.usageStack}>
+            {snapshot ? <>
               {!snapshot.assignments.find((item) => item.workloadId === 'app-default')?.resolution
                 .ready ? (
                 <div className={styles.warning}>
@@ -136,15 +139,17 @@ export default function ModelSettingsPanel({
                   </Button>
                 </div>
               ) : null}
-              <ModelUsagePanel snapshot={snapshot} busy={busy} apply={apply} />
-            </>
-          ) : activeTab === 'providers' ? (
+              <ModelUsagePanel snapshot={snapshot} busy={busy} apply={apply} defaultOnly />
+            </> : null}
+            <LocalModelUsagePanel />
+            {snapshot ? <ModelAgentUsagePanel snapshot={snapshot} busy={busy} apply={apply} /> : null}
+            </div>
+          </div>
+          {activeTab === 'providers' && snapshot ? (
             <ModelProvidersPanel snapshot={snapshot} busy={busy} apply={apply} />
-          ) : (
-            <ModelAdvancedPanel snapshot={snapshot} busy={busy} apply={apply} />
-          )}
+          ) : null}
+          {activeTab === 'local' ? <LocalModelsPanel /> : null}
         </div>
-      )}
     </div>
   )
 }

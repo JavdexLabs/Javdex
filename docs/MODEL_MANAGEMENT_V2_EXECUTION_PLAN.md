@@ -43,7 +43,7 @@ connection not ready, model lacks tools, unsupported long cache and validation f
 
 - IPC: modelManagementGet, modelManagementApply, modelManagementDiscoverModels and modelManagementTestModel.
 - Renderer code cannot access raw AI configuration or legacy provider/model mutations.
-- Model settings tabs: `用途与运行`, `提供商与模型`, `高级`.
+- Model settings tabs: `用途配置`, `提供商与模型`, `本地模型`. Model capability overrides live in each provider model detail; the old advanced path redirects to providers.
 - Assignment and connection edits require explicit Save. Discovery does not persist until Add.
 - Configured providers appear first; unconfigured built-ins are collapsed.
 - PluginDeveloper preflight uses the workload snapshot; active sessions show their frozen model.

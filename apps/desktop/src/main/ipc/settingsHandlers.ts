@@ -1,6 +1,6 @@
 import { setCloseToTrayEnabled } from '../appTray'
 import { webAccess } from '../web/webAccess'
-import { dialog, shell } from 'electron'
+import { clipboard, dialog, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { IPC } from '@shared/ipc-channels'
@@ -293,10 +293,22 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
   appCommandAdapter.register(IPC.LOCAL_MODELS_COMMAND, async command => {
     const models = getLocalModels(), window = ctx.getWindow()
     if (command.action === 'download') await models.download(command.model, command.variant)
+    else if (command.action === 'copy-download-url') clipboard.writeText(await models.downloadUrl(command.model, command.variant))
+    else if (command.action === 'import') {
+      const model = (await models.snapshot()).models.find(item => item.id === command.model)!
+      const variant = model.variants.find(item => item.id === (command.variant ?? model.selectedVariant))!
+      const options = { title: `导入 ${model.name} · ${variant.precision} · ${variant.publisher}`,
+        properties: ['openFile'] as Array<'openFile'>,
+        filters: [{ name: '模型文件', extensions: variant.format === 'GGUF' ? ['gguf'] : ['bin'] }, { name: '所有文件', extensions: ['*'] }] }
+      const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
+      if (!result.canceled && result.filePaths[0]) await models.importModel(command.model, result.filePaths[0], variant.id)
+    }
     else if (command.action === 'select') await models.selectVariant(command.model, command.variant)
     else if (command.action === 'cancel-download') models.cancel()
     else if (command.action === 'translation') await models.setTranslation(command.mode)
+    else if (command.action === 'download-source') await models.setDownloadSource(command.source)
     else if (command.action === 'translation-model') await models.selectTranslationModel(command.model)
+    else if (command.action === 'usage') await models.setUsage(command.usage, command.expectedRevision)
     else if (command.action === 'delete') {
       const model = (await models.snapshot()).models.find(item => item.id === command.model)!
       const variant = model.variants.find(item => item.id === (command.variant ?? model.selectedVariant))!

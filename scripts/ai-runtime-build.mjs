@@ -75,7 +75,8 @@ export async function verifyAiBundle(directory, arch, requireFingerprint = false
       assert.ok(path.basename(entry.name) === entry.name && !['.', '..'].includes(entry.name))
       const filename = path.join(directory, id, entry.name), stat = await fs.lstat(filename)
       assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.size === entry.bytes)
-      if (executables.includes(entry.name)) assert.ok(stat.mode & 0o111, 'AI tool is not executable')
+      // Windows stat cannot represent POSIX executable bits; macOS builds still enforce them.
+      if (process.platform !== 'win32' && executables.includes(entry.name)) assert.ok(stat.mode & 0o111, 'AI tool is not executable')
       assert.equal(await sha256(filename), entry.sha256)
     }
   }

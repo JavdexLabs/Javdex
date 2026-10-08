@@ -24,7 +24,7 @@ test('POSIX extraction preserves the loader layout and materializes library alia
     { path: 'release/LICENSE', contents: 'license' }, { path: 'release/bin/unused', contents: 'ignored' }
   ], async (directory, run) => {
     await run()
-    assert.ok((await fs.stat(path.join(directory, 'bin/ffmpeg'))).mode & 0o111)
+    if (process.platform !== 'win32') assert.ok((await fs.stat(path.join(directory, 'bin/ffmpeg'))).mode & 0o111)
     for (const name of ['libaudio.so', 'libaudio.so.1', 'libhard.so']) {
       assert.equal((await fs.lstat(path.join(directory, 'lib', name))).isSymbolicLink(), false)
       assert.equal(await fs.readFile(path.join(directory, 'lib', name), 'utf8'), 'library')

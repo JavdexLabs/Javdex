@@ -47,6 +47,12 @@ test('bundle validation rejects wrong targets, mutated files and missing mandato
   await fs.rm(path.join(f.directory, 'ffmpeg/ffprobe'))
   await assert.rejects(refreshAiBundleInventory(f.directory, 'arm64'))
 })
+
+test('bundle validation rejects non-executable tools on POSIX hosts', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t)
+  await fs.chmod(path.join(f.directory, 'whisper/whisper-cli'), 0o644)
+  await assert.rejects(verifyAiBundle(f.directory, 'arm64'), /AI tool is not executable/)
+})
 test('packaging stages tools outside asar, signs them before sealing the app and verifies without modifying resources', async t => {
   const f = await fixture(t)
   await stagePackagedAiRuntime(f.context)

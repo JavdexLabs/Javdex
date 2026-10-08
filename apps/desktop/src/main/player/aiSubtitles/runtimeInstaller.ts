@@ -119,7 +119,8 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
         if (fullHash && await hashFile(filename) !== entry.sha256) return false
       }
       for (const name of requiredTools(id)) {
-        if (!names.has(name) || (!windows && !((await fs.stat(path.join(base, name))).mode & 0o111))) return false
+        // Cross-target inventories can be inspected on Windows, where stat has no POSIX executable bits.
+        if (!names.has(name) || (!windows && process.platform !== 'win32' && !((await fs.stat(path.join(base, name))).mode & 0o111))) return false
       }
       return true
     } catch { return false }

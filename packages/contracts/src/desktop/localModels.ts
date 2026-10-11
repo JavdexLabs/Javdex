@@ -1,5 +1,5 @@
-export const LOCAL_TRANSLATION_MODEL_IDS = ['qwen3', 'hy-mt2-7b', 'index-translate-9b'] as const
-export const LOCAL_MODEL_IDS = ['qwen3', 'kotoba', 'hy-mt2-7b', 'index-translate-9b'] as const
+export const LOCAL_TRANSLATION_MODEL_IDS = ['qwen3', 'hy-mt2-7b'] as const
+export const LOCAL_MODEL_IDS = ['qwen3', 'kotoba', 'hy-mt2-7b'] as const
 export type LocalTranslationModelId = typeof LOCAL_TRANSLATION_MODEL_IDS[number]
 export type LocalModelId = typeof LOCAL_MODEL_IDS[number]
 export const LOCAL_MODEL_DOWNLOAD_SOURCES = ['official', 'hf-mirror'] as const
@@ -16,7 +16,7 @@ export type LocalModelCommand =
   | { action: 'download' | 'delete' | 'export' | 'import' | 'copy-download-url'; model: LocalModelId; variant?: string }
   | { action: 'select'; model: LocalModelId; variant: string }
   | { action: 'download-source'; source: LocalModelDownloadSource }
-  | { action: 'cancel-download' }
+  | { action: 'cancel-download' | 'clean-downloads' | 'clear-cache' }
   | { action: 'choose-location' }
   | { action: 'reset-location' }
   | { action: 'translation'; mode: LocalTranslationMode }
@@ -57,7 +57,7 @@ export interface LocalModelSnapshot {
   translation: LocalTranslationMode
   translationModel: LocalTranslationModelId
   models: LocalModelView[]
-  operation: 'import' | 'download' | 'delete' | 'export' | 'relocate' | 'configure' | null
+  operation: 'import' | 'download' | 'delete' | 'export' | 'relocate' | 'configure' | 'cleanup' | null
   activeModel: LocalModelId | null
   activeVariant: string | null
   downloadBytes: number

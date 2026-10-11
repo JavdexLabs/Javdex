@@ -3,15 +3,15 @@ import fs from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { AI_SUBTITLE_RUNTIME_VERSION, AI_MAC_BUNDLE_VERSION, AI_RUNTIME_ASSET_IDS, AI_RUNTIME_PLATFORM_MESSAGE,
+import { AI_MAC_BUNDLE_VERSION, AI_RUNTIME_ASSET_IDS, AI_RUNTIME_PLATFORM_MESSAGE,
   aiRuntimeAssets, aiRuntimeTargetSupported, currentAiRuntimeTarget, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
-import { runSubtitleProcess } from './processRunner'
-import { atomicWrite } from './subtitleCache'
-import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
-import { LOCAL_MODEL_NOTICES } from './modelNotices'
+import { runLocalModelProcess } from './processRunner'
+import { atomicWrite } from '../../utils/atomicWrite'
 import type { LocalTranslationModelId } from '@shared/desktop/localModels'
 import { localTranslationVersion } from './localTranslation'
 import { extractPosixRuntime, safeRuntimePath } from './runtimeArchive'
+import { ensureModelStore, ensureStorageDirectory, modelAssetDirectory, runtimeAssetDirectory, modelDownloadDirectory, modelDownloadFile, writeModelManifest } from './modelStorage'
+import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
 
 export interface AiRuntimePaths {
   whisper: string; translator: string; ffmpeg: string; ffprobe: string; kotoba: string; translationModel: string; vad: string
@@ -36,7 +36,7 @@ function hostRuntimeVersion(): string | null | undefined {
   return undefined
 }
 const runtimeHostVersion = hostRuntimeVersion()
-export const aiSubtitleSupported = (): boolean => aiRuntimeHostSupported(currentAiRuntimeTarget(), runtimeHostVersion)
+export const localModelRuntimeSupported = (): boolean => aiRuntimeHostSupported(currentAiRuntimeTarget(), runtimeHostVersion)
 async function hashFile(filename: string): Promise<string> {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(filename)) hash.update(chunk)
@@ -78,10 +78,10 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   const target = options.target ?? currentAiRuntimeTarget()
   const assets = manifest ?? aiRuntimeAssets(target)
   const windows = target.platform === 'win32', targetId = `${target.platform}-${target.arch}`
-  const supported = (): boolean => options.target ? aiRuntimeTargetSupported(target) : aiSubtitleSupported()
-  const directory = path.join(root, AI_SUBTITLE_RUNTIME_VERSION)
-  const toolDirectory = (id: AiRuntimeAsset['id']): string => windows ? path.join(directory, id) : path.join(directory, 'tools', targetId, id)
-  const assetDirectory = (asset: AiRuntimeAsset): string => asset.archive ? toolDirectory(asset.id) : path.join(directory, asset.id)
+  const supported = (): boolean => options.target ? aiRuntimeTargetSupported(target) : localModelRuntimeSupported()
+  const directory = root
+  const toolDirectory = (id: AiRuntimeAsset['id']): string => runtimeAssetDirectory(root, id, target)
+  const assetDirectory = (asset: AiRuntimeAsset): string => asset.archive ? toolDirectory(asset.id) : modelAssetDirectory(root, asset)
   const modelFile = (asset: AiRuntimeAsset): string => path.join(assetDirectory(asset), asset.filename)
   const requiredTools = (id: AiRuntimeAsset['id']): string[] => {
     const names = id === 'ffmpeg' ? ['ffmpeg', 'ffprobe'] : [id === 'whisper' ? 'whisper-cli' : 'llama-server']
@@ -143,10 +143,15 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   const installed = (): Promise<boolean> => assetsInstalled(AI_RUNTIME_ASSET_IDS)
   async function promoteTools(id: AiRuntimeAsset['id'], populate: (staging: string) => Promise<void>): Promise<void> {
     const destination = toolDirectory(id)
-    await fs.mkdir(path.dirname(destination), { recursive: true })
-    const staging = await fs.mkdtemp(`${destination}.staging-`), backup = `${destination}.previous-${randomUUID()}`
+    await ensureStorageDirectory(root, path.dirname(destination))
+    await ensureStorageDirectory(root, path.join(root, 'staging'))
+    const staging = path.join(root, 'staging', `install-${randomUUID()}`), backup = path.join(root, 'staging', `install-${randomUUID()}`)
+    await fs.mkdir(staging)
     try {
       await populate(staging)
+      if (id === 'whisper' || id === 'translator') {
+        await fs.writeFile(path.join(staging, 'LICENSE.txt'), AI_RUNTIME_LICENSES[id === 'whisper' ? 'Whisper-MIT.txt' : 'Llama-MIT.txt'])
+      }
       for (const name of requiredTools(id)) {
         if (!(await fs.lstat(path.join(staging, name))).isFile()) throw new Error('运行库缺少必需工具')
         if (!windows) await fs.chmod(path.join(staging, name), 0o755)
@@ -185,7 +190,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   async function install(signal: AbortSignal, progress: (bytes: number, label: string) => void,
     ids: readonly AiRuntimeAsset['id'][] = AI_RUNTIME_ASSET_IDS): Promise<void> {
     if (!supported() && ids.some(id => ['whisper', 'translator', 'ffmpeg'].includes(id))) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
-    await fs.mkdir(directory, { recursive: true })
+    await ensureModelStore(root)
     let completed = 0
     for (const id of new Set(ids)) {
       signal.throwIfAborted()
@@ -193,16 +198,21 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       const asset = assets.find(asset => asset.id === id)
       if (!asset) throw new Error('未知或缺失的本地模型资源')
       const targetDirectory = assetDirectory(asset)
-      await fs.mkdir(targetDirectory, { recursive: true })
+      await ensureStorageDirectory(root, targetDirectory)
       const filename = modelFile(asset)
       if (asset.archive) {
         if (await validTools(id, true)) { completed += asset.bytes; progress(completed, asset.label); continue }
       }
       if (!asset.archive && await fs.stat(filename).then(stat => stat.size === asset.bytes, () => false)
         && await hashFile(filename) === asset.sha256) {
+        await writeModelManifest(root, asset)
         completed += asset.bytes; progress(completed, asset.label); continue
       }
-      const partial = asset.archive && !windows ? `${targetDirectory}.${asset.filename}.part` : `${filename}.part`
+      const downloadDirectory = modelDownloadDirectory(root, asset)
+      await ensureStorageDirectory(root, downloadDirectory)
+      await atomicWrite(path.join(downloadDirectory, 'manifest.json'), JSON.stringify({ version: 1, sha256: asset.sha256, bytes: asset.bytes, filename: asset.filename, source: asset.url }))
+      const partial = modelDownloadFile(root, asset)
+      if (await fs.lstat(partial).then(stat => !stat.isFile() || stat.isSymbolicLink(), cause => { if (cause.code !== 'ENOENT') throw cause; return false })) throw new Error('模型下载临时文件无效')
       let received = await fs.stat(partial).then(stat => stat.size, () => 0)
       if (received > asset.bytes) { await fs.rm(partial, { force: true }); received = 0 }
       if (received !== asset.bytes) {
@@ -225,7 +235,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       signal.throwIfAborted()
       if (asset.archive) {
         await promoteTools(id, async expanded => {
-          if (windows) await runSubtitleProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', extractScript], {
+          if (windows) await runLocalModelProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', extractScript], {
             signal, env: { ...process.env, JAVDEX_AI_ARCHIVE: partial, JAVDEX_AI_DIRECTORY: expanded }
           })
           else {
@@ -235,28 +245,35 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
           signal.throwIfAborted()
         })
         await fs.rm(partial, { force: true })
-      } else await fs.rename(partial, filename)
+      } else { await fs.rename(partial, filename); await writeModelManifest(root, asset) }
+      await fs.rm(downloadDirectory, { recursive: true, force: true })
       completed += asset.bytes; progress(completed, asset.label)
     }
-    for (const [name, license] of Object.entries(AI_RUNTIME_LICENSES)) await atomicWrite(path.join(directory, name), license)
-    await atomicWrite(path.join(directory, 'NOTICE.txt'), 'Offline AI subtitles\nKotoba-Whisper v2.0: Apache-2.0\nhttps://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml\nQwen3-1.7B: Apache-2.0; GGUF published by Qwen or bartowski\nhttps://huggingface.co/Qwen/Qwen3-1.7B\nhttps://huggingface.co/Qwen/Qwen3-1.7B-GGUF\nhttps://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF\nSilero VAD: MIT\nhttps://github.com/snakers4/silero-vad\nwhisper.cpp and llama.cpp: MIT\nFFmpeg LGPL build: license/source notices in the platform ffmpeg directory\n')
-    await atomicWrite(path.join(directory, 'Hy-MT2-NOTICE.txt'), LOCAL_MODEL_NOTICES['hy-mt2-7b'])
-    if (assets.some(asset => asset.translationModelId === 'index-translate-9b')) {
-      await atomicWrite(path.join(directory, 'Index-Translate-NOTICE.txt'), LOCAL_MODEL_NOTICES['index-translate-9b'])
-    }
-    if (await installed()) await atomicWrite(path.join(directory, 'installed.json'), JSON.stringify({ version: AI_SUBTITLE_RUNTIME_VERSION }))
   }
-  return { directory, installed, assetsInstalled, install, paths,
+  return { directory, installed, assetsInstalled, install, paths, modelFile,
     async removeAsset(id: AiRuntimeAsset['id']): Promise<void> {
       const asset = assets.find(asset => asset.id === id)
       if (!asset && !bundled(id)) throw new Error('未知本地模型')
-      if (asset?.archive || bundled(id)) await fs.rm(toolDirectory(id), { recursive: true, force: true })
-      else {
-        await fs.rm(modelFile(asset!), { force: true })
-        await fs.rm(`${modelFile(asset!)}.part`, { force: true })
+      if (asset?.archive || bundled(id)) {
+        await ensureStorageDirectory(root, toolDirectory(id))
+        await fs.rm(toolDirectory(id), { recursive: true, force: true })
       }
-      await fs.rm(path.join(directory, 'installed.json'), { force: true })
+      else {
+        await ensureStorageDirectory(root, assetDirectory(asset!))
+        await fs.rm(assetDirectory(asset!), { recursive: true, force: true })
+        await ensureStorageDirectory(root, path.join(root, 'downloads'))
+        const download = modelDownloadDirectory(root, asset!)
+        const stat = await fs.lstat(download).catch(cause => { if (cause.code !== 'ENOENT') throw cause; return null })
+        if (stat?.isSymbolicLink()) throw new Error('模型下载目录不能是链接')
+        await fs.rm(download, { recursive: true, force: true })
+      }
     },
-    async remove(): Promise<void> { await fs.rm(directory, { recursive: true, force: true }) }
+    async remove(): Promise<void> {
+      await ensureModelStore(root)
+      for (const entry of ['models', 'runtimes', 'downloads', 'staging']) {
+        await ensureStorageDirectory(root, path.join(root, entry))
+        await fs.rm(path.join(root, entry), { recursive: true, force: true })
+      }
+    }
   }
 }

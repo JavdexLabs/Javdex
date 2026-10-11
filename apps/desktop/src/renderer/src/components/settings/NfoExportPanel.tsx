@@ -20,7 +20,7 @@ import { AppFormField } from '../FormPrimitives'
 import { UI_ICON_SM } from '../iconDefaults'
 import { shouldBlockNfoExportShortcut } from '@shared/nfoExportForegroundGuard'
 import { InteractionLayerOwner, useInteractionLayer } from '../../interaction/useInteractionLayer'
-import { SettingsCard, SettingsStatusPill } from './SettingsPrimitives'
+import { SettingsCard, SettingsDisclosure, SettingsStatusPill } from './SettingsPrimitives'
 import styles from './NfoExportPanel.module.css'
 
 export interface ExportModalState {
@@ -302,8 +302,7 @@ export default function NfoExportPanel({
               </div>
             </fieldset>
 
-            <details className={styles.disclosure}>
-              <summary className={styles.fileSummary}>更多图片<span className={styles.disclosureHint}> · {selectedExtras.length ? `已选${selectedExtras.join('、')}` : '可选附件'}</span></summary>
+            <SettingsDisclosure title={<>更多图片<span className={styles.disclosureHint}> · {selectedExtras.length ? `已选${selectedExtras.join('、')}` : '可选附件'}</span></>}>
               <fieldset className={styles.extraOptions} aria-label="更多图片" disabled={disabled || busy}>
                 {([
                   ['includeSamples', '样张备份', '供 Javdex 备份、迁移和回读，不作为播放器画廊。'],
@@ -315,10 +314,9 @@ export default function NfoExportPanel({
                   </label>
                 ))}
               </fieldset>
-            </details>
+            </SettingsDisclosure>
             {unverifiedAvatars ? <p className={styles.muted}>当前目标软件的本地演员头像兼容性尚未验证；头像仍可供 Javdex 回读。</p> : null}
-            <details className={styles.disclosure}>
-              <summary className={styles.fileSummary}>导出说明与文件示例</summary>
+            <SettingsDisclosure title="导出说明与文件示例">
               <div className={styles.helpContent}>
                 <p>{selectedProfile?.description}</p>
                 <p>封面：横版保留原图，并从右侧裁剪 2:3 竖版海报；竖版只导出海报。详情背景使用已有背景图片。</p>
@@ -332,7 +330,7 @@ export default function NfoExportPanel({
                 </ul>
                 <p>文件保存在本地视频或 STRM 文件旁；没有这些本地文件的资源会跳过。源视频不会被移动或修改。</p>
               </div>
-            </details>
+            </SettingsDisclosure>
 
             {preview ? <PlanPreview key={preview.planId} preview={preview} /> : null}
 

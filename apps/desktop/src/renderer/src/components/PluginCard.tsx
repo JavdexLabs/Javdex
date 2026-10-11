@@ -110,28 +110,12 @@ export default function PluginCard({
               </span>
             )}
           </div>
-          <div className={styles.meta}>
-            <span>{delayLabel}</span>
-            <span className={styles.fieldCount}>
-              字段 {plugin.supportedFields.length}/{allFieldCount}
-            </span>
+          <div className={styles.meta} title={delayLabel}>
+            <span className={styles.fieldCount}>支持 {plugin.supportedFields.length}/{allFieldCount} 个字段 · {coveragePct}%</span>
           </div>
           <p className={styles.description} title={summaryLabel || undefined}>
             {summaryLabel || ' '}
           </p>
-          <div
-            className={styles.fieldBar}
-            role="progressbar"
-            aria-valuenow={coveragePct}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={`字段支持 ${plugin.supportedFields.length}/${allFieldCount}`}
-          >
-            <div
-              className={`${styles.fieldFill}${coverage >= 1 ? ` ${styles.fieldFillFull}` : ''}`}
-              style={{ width: `${coveragePct}%` }}
-            />
-          </div>
         </div>
         <div className={styles.actions}>
           {plugin.requiresConfiguration && plugin.configured === false ? (

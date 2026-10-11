@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import type { AiSubtitleCommand, AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
 import type { PlaybackSnapshot } from '@shared/desktop/playback'
 import { api } from '../api'
 import Button from '../components/Button'
 import SelectControl from '../components/SelectControl'
 import { playbackTime } from './playbackTime'
-import { settingsPath } from '../settings/settingsRoutes'
 import styles from './AiSubtitleSettings.module.css'
 import { useLocalModels } from '../components/settings/useLocalModels'
 
-export default function AiSubtitleSettings({ playback }: { playback: PlaybackSnapshot }): JSX.Element {
-  const navigate = useNavigate()
+export default function AiSubtitleSettings({ playback, onOpenModels }: {
+  playback: PlaybackSnapshot
+  onOpenModels: (sessionId: string) => Promise<void>
+}): JSX.Element {
   const { state: models } = useLocalModels()
   const [state, setState] = useState<AiSubtitleSnapshot | null>(null)
   const [busy, setBusy] = useState(false)
@@ -35,8 +35,7 @@ export default function AiSubtitleSettings({ playback }: { playback: PlaybackSna
     const revision = ++request.current.revision
     setBusy(true); setError(null)
     try {
-      await api.playback.control(playback.sessionId, { kind: 'presentation', value: 'docked' })
-      if (revision === request.current.revision) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
+      await onOpenModels(playback.sessionId)
     } catch { if (revision === request.current.revision) setError('无法打开模型设置，请先收起播放器后打开设置') }
     finally { if (revision === request.current.revision) setBusy(false) }
   }

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { resetSettingsCacheForTests } from '../../settings/settingsStore'
 import { requestResponsesJson, requestResponsesText } from './adapters/openaiResponsesAdapter'
 import { requestGoogleJson, requestGoogleText } from './adapters/googleGenerativeAdapter'
+import { requestAnthropicJson } from './adapters/anthropicMessagesAdapter'
 import { llmRequestEndpoints, type ResolvedLlmModelRequestConfig } from '../llmClient'
 import { listResolvedLlmProviderModels, testResolvedLlmModelConnection } from '../llmConnectionTest'
 import { ModelInvocation } from '../../agent-platform/modelInvocation'
@@ -63,6 +64,49 @@ function google(text: string) {
 }
 
 describe('native cloud protocols', () => {
+  it('uses MiniMax Messages for probes, translation, JSON and discovery without exposing thinking as output', async () => {
+    const baseUrl = 'https://gateway.example/minimax/anthropic'
+    const input: ResolvedLlmModelRequestConfig = {
+      protocol: 'anthropic-messages', providerId: 'minimax', providerName: 'MiniMax', baseUrl,
+      local: false, apiKey: 'test-key', modelId: 'MiniMax-M2.7',
+      ...llmRequestEndpoints('anthropic-messages', baseUrl)
+    }
+    const response = (text: string) => Response.json({ content: [
+      { type: 'thinking', thinking: 'hidden reasoning' }, { type: 'text', text }
+    ] })
+    respond = () => response('JAVDEX_OK')
+    assert.equal(await testResolvedLlmModelConnection(input), 'JAVDEX_OK')
+    assert.equal(requests[0].body.max_tokens, 2048)
+    respond = () => response('译文')
+    assert.equal(await translateCloudTextToChinese('Hello', input), '译文')
+    assert.equal(requests[1].body.max_tokens, 2048)
+    respond = () => response('{"ok":true}')
+    assert.deepEqual((await requestAnthropicJson([{ role: 'user', content: 'Return JSON' }], input)).json, { ok: true })
+    for (const request of requests) {
+      assert.equal(request.url, `${baseUrl}/v1/messages`)
+      assert.equal(new Headers(request.init?.headers).get('x-api-key'), 'test-key')
+    }
+    respond = () => Response.json({ data: [{ id: 'MiniMax-M2.7', display_name: 'MiniMax M2.7' }] })
+    const models = await listResolvedLlmProviderModels(input)
+    assert.equal(models[0].id, 'MiniMax-M2.7')
+    assert.equal(requests.at(-1)?.url, `${baseUrl}/v1/models`)
+    respond = () => Response.json({ error: { message: 'Invalid key' } }, { status: 401 })
+    await assert.rejects(listResolvedLlmProviderModels(input), /Invalid key/)
+  })
+
+  it('retains MiniMax Chat compatibility and leaves other providers probe budgets unchanged', async () => {
+    const baseUrl = 'https://saved.example/v1'
+    const input: ResolvedLlmModelRequestConfig = { providerId: 'minimax', providerName: 'MiniMax',
+      protocol: 'openai-chat', baseUrl, local: false, apiKey: 'test-key', modelId: 'MiniMax-M2.7',
+      ...llmRequestEndpoints('openai-chat', baseUrl) }
+    respond = () => Response.json({ choices: [{ message: { content: 'JAVDEX_OK' } }] })
+    await testResolvedLlmModelConnection(input)
+    assert.equal(requests[0].url, `${baseUrl}/chat/completions`)
+    assert.equal(requests[0].body.max_tokens, 2048)
+    await testResolvedLlmModelConnection({ ...input, providerId: 'deepseek' })
+    assert.equal(requests[1].body.max_tokens, 128)
+  })
+
   it('uses Responses input/text.format and parses typed output and token accounting', async () => {
     respond = () => Response.json(responses('{"ok":true}'))
     const result = await requestResponsesJson<{ ok: boolean }>([

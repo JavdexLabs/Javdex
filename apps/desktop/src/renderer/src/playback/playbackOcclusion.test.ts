@@ -33,3 +33,18 @@ test('popup cutouts contain only their intersection with the video', () => {
     surface({ left: -20, top: -30, right: 20, bottom: 10 }), surface(video, false)]),
   [{ x: 80, y: 70, width: 20, height: 30 }, { x: 0, y: 0, width: 20, height: 10 }])
 })
+test('rounded popups preserve all four CSS corners and original bounds across the video edge', () => {
+  const popup = { ...surface({ left: -10, top: 70, right: 160, bottom: 120 }),
+    ownerDocument: { defaultView: { getComputedStyle: () => ({ borderTopLeftRadius: '8px', borderTopRightRadius: '12px',
+      borderBottomRightRadius: '16px', borderBottomLeftRadius: '4px' }) } } as unknown as Document }
+  assert.deepEqual(playbackOcclusions(video, [popup]), [{ x: -10, y: 70, width: 170, height: 50, radii: [8, 12, 16, 4] }])
+})
+test('zero radius keeps rectangular clipping; oversized radii cannot exceed the popup dimensions', () => {
+  const popup = { ...surface({ left: 80, top: 70, right: 160, bottom: 120 }),
+    ownerDocument: { defaultView: { getComputedStyle: () => ({ borderTopLeftRadius: '0px', borderTopRightRadius: '0px',
+      borderBottomRightRadius: '0px', borderBottomLeftRadius: '0px' }) } } as unknown as Document }
+  assert.deepEqual(playbackOcclusions(video, [popup]), [{ x: 80, y: 70, width: 20, height: 30 }])
+  popup.ownerDocument = { defaultView: { getComputedStyle: () => ({ borderTopLeftRadius: '999px', borderTopRightRadius: '999px',
+    borderBottomRightRadius: '999px', borderBottomLeftRadius: '999px' }) } } as unknown as Document
+  assert.deepEqual(playbackOcclusions(video, [popup])[0].radii, [25, 25, 25, 25])
+})

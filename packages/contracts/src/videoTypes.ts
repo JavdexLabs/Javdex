@@ -163,8 +163,20 @@ export type VideoFieldUpdateInput = Partial<
   Pick<Video, (typeof VIDEO_FIELD_UPDATE_KEYS)[number]>
 >
 
+export interface ExternalRatingEditInput {
+  /** Null creates a source; an existing source identifies the row being edited. */
+  originalSource: string | null
+  source: string
+  ratingAverage: number | null
+  ratingCount: number | null
+}
+
 export interface VideoEditInput {
-  externalRatings?: { deletedSources: string[]; defaultSource: string | null }
+  externalRatings?: {
+    deletedSources: string[]
+    defaultSource: string | null
+    entries?: ExternalRatingEditInput[]
+  }
   title?: string | null
   summary?: string | null
   release_date?: string | null

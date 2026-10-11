@@ -647,6 +647,7 @@ export function MediaLibrarySettingsContent({
           </div>
         </header>
 
+        <div className={styles.libraryTabs}>
         <SettingsTabBar
           group="library"
           tabs={MEDIA_LIBRARY_SETTINGS_TABS.map((id) => ({
@@ -660,6 +661,7 @@ export function MediaLibrarySettingsContent({
           }}
           onKeyDown={onTabKeyDown}
         />
+        </div>
 
         <section
           className={`${styles.panel}${tab === 'sources' ? ` ${styles.importPanel}` : ''}`}

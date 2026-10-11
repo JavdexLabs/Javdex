@@ -7,7 +7,7 @@ import { createPlaybackSourceResolver } from './playbackSource'
 import { builtinPlaybackAvailability, createLibmpvPlayback } from './libmpvPlayback'
 import { appCommandAdapter, appEventAdapter } from '../ipc/appContractAdapter'
 import { IPC } from '@shared/ipc-channels'
-import type { PlaybackTarget, PlaybackOpenOptions } from '@shared/desktop/playback'
+import type { PlaybackTarget } from '@shared/desktop/playback'
 import type { PlayResult } from '@shared/libraryTypes'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
 import { createPlaybackVolume } from './playbackVolume'
@@ -15,6 +15,7 @@ import { createPlaybackResumeStore } from './playbackResumeStore'
 import { PlaybackFailure, playbackFailure } from './playbackFailure'
 import { navigateWindowHistory } from '../desktop/windowNavigation'
 import fs from 'node:fs/promises'
+import { localAiDirectories } from '../services/localModels/modelStorage'
 import { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
 import { getLocalModels } from '../services/localModels/desktopLocalModels'
 
@@ -106,8 +107,9 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     }
   })
   active = session
+  const aiPaths = localAiDirectories(app.getPath('userData'))
   const aiSubtitles = createAiSubtitleController({
-    root: path.join(app.getPath('userData'), 'ai-subtitles'), native,
+    root: aiPaths.cache, workRoot: aiPaths.work, native,
     runtime: getLocalModels().subtitleRuntime(),
     acquireRuntime: () => getLocalModels().acquireSubtitleRuntime(),
     onRuntimeChanged: listener => getLocalModels().onChanged(listener),
@@ -131,7 +133,7 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       if (!selected.canceled && selected.filePath) await fs.writeFile(selected.filePath, path.extname(selected.filePath).toLowerCase() === '.srt' ? content.srt : content.ass, 'utf8')
     },
     openLog: async content => {
-      const directory = path.join(app.getPath('userData'), 'ai-subtitles', 'work')
+      const directory = aiPaths.work
       await fs.mkdir(directory, { recursive: true })
       const filename = path.join(directory, 'AI-subtitle-log.html')
       await fs.writeFile(filename, content, 'utf8')
@@ -166,12 +168,12 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
   appCommandAdapter.register(IPC.PLAYBACK_SNAPSHOT, () => session.snapshot())
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT, aiSubtitles.snapshot)
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, aiSubtitles.command)
-  const open = async (target: PlaybackTarget, options?: PlaybackOpenOptions): Promise<PlayResult> => {
+  const open = async (target: PlaybackTarget): Promise<PlayResult> => {
     const availability = builtinPlaybackAvailability()
     if (!availability.available) return { ok: false, error: availability.reason ?? '内置播放不可用' }
     try {
       bind()
-      if (!await session.open(target, options?.privateSession)) return { ok: false, error: '播放请求已更新或取消' }
+      if (!await session.open(target)) return { ok: false, error: '播放请求已更新或取消' }
       return { ok: true }
     }
     catch (error) {

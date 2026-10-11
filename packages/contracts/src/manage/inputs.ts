@@ -362,7 +362,13 @@ const videoEditFields = z
   .object({
     externalRatings: z.object({
       deletedSources: z.array(z.string().min(1).max(256)).max(200),
-      defaultSource: z.string().min(1).max(256).nullable()
+      defaultSource: z.string().min(1).max(256).nullable(),
+      entries: z.array(z.object({
+        originalSource: z.string().min(1).max(256).nullable(),
+        source: z.string().trim().min(1).max(256),
+        ratingAverage: z.number().nonnegative().nullable(),
+        ratingCount: z.number().int().nonnegative().nullable()
+      }).strict()).max(200).optional()
     }).strict().optional(),
     title: limitedTextSchema.nullable().optional(),
     summary: limitedTextSchema.nullable().optional(),

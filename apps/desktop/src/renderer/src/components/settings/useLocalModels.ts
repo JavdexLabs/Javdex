@@ -59,7 +59,9 @@ export function useLocalModels() {
       setError(null)
       setFeedback(command.action === 'copy-download-url' ? '下载地址已复制'
         : command.action === 'cancel-download' ? '下载已暂停，下次可继续下载'
-          : command.action === 'export' ? '导出操作已结束' : '')
+          : command.action === 'clean-downloads' ? '未完成下载已清理'
+            : command.action === 'clear-cache' ? '推理缓存已清理'
+              : command.action === 'export' ? '导出操作已结束' : '')
       return true
     } catch (cause) {
       if (counter.mounted && request === counter.request) {

@@ -9,19 +9,21 @@ import { importModelFile } from './importModelFile'
 test('import verifies copied bytes, preserves originals and existing models on rejection, and cleans staging files', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-import-'))
   const source = path.join(root, 'download.gguf'), destination = path.join(root, 'installed', 'model.gguf')
+  const staging = path.join(root, 'staging')
   const data = Buffer.from('valid model'), expected = { bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') }
   try {
     await fs.writeFile(source, data)
-    await importModelFile(source, destination, expected)
+    await importModelFile(source, destination, expected, staging)
     assert.deepEqual(await fs.readFile(source), data)
     assert.deepEqual(await fs.readFile(destination), data)
     await fs.writeFile(source, 'short')
-    await assert.rejects(importModelFile(source, destination, expected), /大小/)
+    await assert.rejects(importModelFile(source, destination, expected, staging), /大小/)
     await fs.writeFile(source, Buffer.alloc(data.length))
-    await assert.rejects(importModelFile(source, destination, expected), /SHA-256/)
+    await assert.rejects(importModelFile(source, destination, expected, staging), /SHA-256/)
     assert.deepEqual(await fs.readFile(destination), data)
     assert.deepEqual(await fs.readdir(path.dirname(destination)), ['model.gguf'])
-    await importModelFile(destination, destination, expected)
+    await importModelFile(destination, destination, expected, staging)
+    assert.deepEqual(await fs.readdir(staging), [])
     assert.deepEqual(await fs.readFile(destination), data)
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })

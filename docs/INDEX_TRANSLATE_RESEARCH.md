@@ -1,9 +1,11 @@
 # Index-Translate：B站开源翻译模型有限调研
 
+历史研究记录：内置 Index-Translate 9B 已于 2026-10-08 移除；本文保留当时的上游核对证据，不代表当前模型目录或使用指南。
+
 核对日期：2026-10-07。问题仅为“B站是不是也有开源翻译模型”。按 research 工作流核对官方 GitHub、IndexTeam Hugging Face 模型卡、配置与文件 API，已读 AGENTS.md；本轮仅写本文。
 未下载完整权重、安装依赖、接受访问条款、调用托管推理、运行真实推理、改接入代码、提交或推送；不作质量优越性结论。
 
-以上两句描述最初调研轮次。用户随后要求“接入9B的”，下方新增接入核对记录；当前代码及验证范围见 [实施记录](AI_SUBTITLES_IMPLEMENTATION.md#index-translate-9b-可选翻译模型2026-10-07)。完整权重下载与真实 9B 推理仍未执行。
+以上两句描述最初调研轮次。用户随后要求“接入9B的”，下方新增接入核对记录；当时的接入及验证范围见 [实施记录](AI_SUBTITLES_IMPLEMENTATION.md#index-translate-9b-可选翻译模型2026-10-07)。完整权重下载与真实 9B 推理仍未执行。
 
 ## 答案与发布范围
 
@@ -49,7 +51,7 @@ Index-Echo GGUF 只包含 LLM backbone，未包含音频塔、connector 和完�
 
 ## 9B 接入核对补充（2026-10-07）
 
-采用已有 llama.cpp 本地翻译链路，供 AI 字幕及本地文本翻译共用；默认 Qwen 与已保存 HY 选择不改变。只注册官方 9B 的全部 12 档纯文本 GGUF，下表的文件名、bytes 和 SHA-256 逐一与固定 [文件 API][api-9b-gguf] 及 [`SHA256SUMS.txt`](https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF/blob/d01404384ba429b93f5f63d43573812d103b5bcd/SHA256SUMS.txt) 核对，哈希完整值保存在 `apps/desktop/src/main/services/localModels/modelCatalogAssets.json`。这里是上游元数据比对，不是下载完整文件后重算哈希。
+当时采用已有 llama.cpp 本地翻译链路，供 AI 字幕及本地文本翻译共用；默认 Qwen 与已保存 HY 选择不改变。只注册官方 9B 的全部 12 档纯文本 GGUF，下表的文件名、bytes 和 SHA-256 逐一与固定 [文件 API][api-9b-gguf] 及 [`SHA256SUMS.txt`](https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF/blob/d01404384ba429b93f5f63d43573812d103b5bcd/SHA256SUMS.txt) 核对，哈希完整值当时保存在 `apps/desktop/src/main/services/localModels/modelCatalogAssets.json`，现已随内置目录项移除。这里是上游元数据比对，不是下载完整文件后重算哈希。
 
 | 精度 | 官方文件名 | bytes |
 | --- | --- | ---: |

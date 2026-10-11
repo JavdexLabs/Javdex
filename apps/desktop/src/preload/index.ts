@@ -851,7 +851,7 @@ const api = {
   },
   playback: {
     availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
-    open: (target: import('@shared/desktop/playback').PlaybackTarget, options?: import('@shared/desktop/playback').PlaybackOpenOptions) => invokeApp(IPC.PLAYBACK_OPEN, target, options),
+    open: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.PLAYBACK_OPEN, target),
     snapshot: () => invokeApp(IPC.PLAYBACK_SNAPSHOT),
     control: (sessionId: string, command: import('@shared/desktop/playback').PlaybackControl) => invokeApp(IPC.PLAYBACK_CONTROL, sessionId, command),
     viewport: (viewport: import('@shared/desktop/playback').PlaybackViewport) => invokeApp(IPC.PLAYBACK_VIEWPORT, viewport),

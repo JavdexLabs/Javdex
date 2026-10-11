@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
-import { AI_SUBTITLE_RUNTIME_VERSION } from '../apps/desktop/src/main/player/aiSubtitles/runtimeManifest.ts'
+import { createAiRuntimeInstaller } from '../apps/desktop/src/main/services/localModels/runtimeInstaller.ts'
 import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, waitForState, nativeEvidence,
   captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup } from './playback-acceptance-support.mjs'
 
@@ -13,21 +13,19 @@ assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64')
 const argument = (name, fallback) => { const index = process.argv.indexOf(name); return path.resolve(index >= 0 ? process.argv[index + 1] : fallback) }
 const runtimeRoot = argument('--runtime-root', '.tmp-ai-subtitle/runtime')
 const audio = argument('--audio', '.tmp-ai-subtitle/sample-ja.wav')
-const runtime = path.join(runtimeRoot, AI_SUBTITLE_RUNTIME_VERSION)
-assert.equal(JSON.parse(fs.readFileSync(path.join(runtime, 'installed.json'), 'utf8')).version, AI_SUBTITLE_RUNTIME_VERSION)
+assert.equal(await createAiRuntimeInstaller(runtimeRoot).installed(), true)
 assert.ok(fs.statSync(audio).isFile())
 const output = path.resolve('out/playback-acceptance/ai-subtitles')
 fs.mkdirSync(output, { recursive: true })
 const video = path.join(output, 'japanese-two-tracks.mp4')
-const ffmpeg = path.join(runtime, 'ffmpeg/ffmpeg.exe')
+const ffmpeg = createAiRuntimeInstaller(runtimeRoot).paths().ffmpeg
 const encoded = spawnSync(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x1f3e60:s=960x540:r=24',
   '-i', audio, '-f', 'lavfi', '-i', 'anullsrc=r=16000:cl=mono', '-t', '90', '-map', '0:v', '-map', '1:a', '-map', '2:a',
   '-c:v', 'mpeg4', '-q:v', '3', '-c:a', 'aac', '-metadata:s:a:0', 'language=jpn', '-metadata:s:a:1', 'title=Silence', '-y', video],
 { windowsHide: true, timeout: 60000, encoding: 'utf8' })
 assert.equal(encoded.status, 0, encoded.stderr)
 const directory = createAcceptanceDirectory('ai-subtitles-')
-fs.mkdirSync(path.join(directory, 'ai-subtitles'), { recursive: true })
-fs.symlinkSync(runtimeRoot, path.join(directory, 'ai-subtitles/models'), 'junction')
+fs.cpSync(runtimeRoot, path.join(directory, 'local-ai'), { recursive: true })
 const [target] = seedAcceptanceCatalog(directory, [video])
 const report = { status: 'running', scope: 'Windows x64, public Japanese sample, two audio tracks, actual local inference and mpv pixels', checks: [] }
 let application

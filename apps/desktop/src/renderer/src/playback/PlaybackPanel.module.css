@@ -64,6 +64,25 @@
   font-size: 11px;
 }
 
+.titleLink {
+  display: block;
+  min-height: var(--control-h-sm);
+  padding-block: var(--focus-ring-space);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  line-height: calc(var(--control-h-sm) - var(--focus-ring-space) * 2);
+  text-decoration: none;
+}
+
+.titleLink:hover {
+  color: var(--text-accent);
+}
+
+.titleLink:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-ring-space);
+}
+
 .middle {
   flex: 1;
   min-width: 0;
@@ -352,12 +371,60 @@
   margin: 0;
 }
 
-.exactTime,
-.exactTime > label {
+.shortcuts {
+  padding-top: var(--form-field-gap);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.shortcuts > h3 {
+  margin: 0 0 var(--form-field-gap);
+  color: var(--text-secondary);
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.shortcuts > dl {
   display: flex;
   flex-direction: column;
   gap: var(--form-label-gap);
-  font-size: 12px;
+  margin: 0;
+}
+
+.shortcuts > dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--form-label-gap);
+  min-height: calc(var(--control-h-sm) * 0.75);
+}
+
+.shortcutAction {
+  color: var(--text-secondary);
+}
+
+.shortcutKeys {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-ring-space);
+  margin: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.shortcutKey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(var(--control-h-sm) * 0.75);
+  min-height: calc(var(--control-h-sm) * 0.75);
+  padding: 0 var(--form-label-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1;
 }
 
 .adjustment {

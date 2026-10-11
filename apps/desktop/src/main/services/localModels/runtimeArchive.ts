@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Parser } from 'tar'
-import { subtitleProcessEnvironment } from './processRunner'
+import { localModelProcessEnvironment } from './processRunner'
 
 export function safeRuntimePath(name: string): boolean {
   return name.length > 0 && name.length < 1024 && !/[\\:\x00-\x1f]/.test(name)
@@ -52,7 +52,7 @@ export async function extractPosixRuntime(archive: string, destination: string, 
     } catch (error) { entry.resume(); parser.abort(error as Error) }
   })
   const decompressor = /\.xz(?:\.part)?$/.test(archive) ? spawn('xz', ['-dc', '--', archive], {
-    stdio: ['ignore', 'pipe', 'pipe'], shell: false, signal, env: subtitleProcessEnvironment()
+    stdio: ['ignore', 'pipe', 'pipe'], shell: false, signal, env: localModelProcessEnvironment()
   }) : null
   // Drain stderr, but do not expose local paths or accept instructions from it.
   decompressor?.stderr.resume()

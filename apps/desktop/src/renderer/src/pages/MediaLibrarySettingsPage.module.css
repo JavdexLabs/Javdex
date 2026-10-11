@@ -6,6 +6,13 @@
   gap: 16px;
 }
 
+.libraryTabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-base);
+}
+
 .header {
   display: grid;
   min-width: 0;
@@ -60,8 +67,8 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: var(--control-h-lg);
-  height: var(--control-h-lg);
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   border: 1px solid
     color-mix(
       in srgb,
@@ -82,7 +89,7 @@
   margin: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 20px;
+  font-size: var(--settings-fs-title, 14px);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -448,10 +455,6 @@
 
 .scanHistorySummary {
   display: grid;
-  padding: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-control) 38%, transparent);
   gap: 10px;
 }
 
@@ -524,10 +527,7 @@
   justify-content: space-between;
   min-width: 0;
   margin-top: 8px;
-  padding: 9px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-control) 44%, transparent);
+  padding: 9px 0;
   gap: 16px;
 }
 
@@ -535,18 +535,19 @@
   display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  gap: 2px;
+  gap: 3px;
 }
 
 .scanAutoInterval strong {
   color: var(--text-primary);
   font-size: var(--settings-fs-body, 13px);
-  font-weight: var(--settings-fw-label, 600);
+  font-weight: inherit;
+  line-height: var(--settings-lh-tight, 1.35);
 }
 
 .scanAutoInterval small {
   color: var(--text-muted);
-  font-size: var(--settings-fs-caption, 11px);
+  font-size: var(--settings-fs-secondary, 12px);
   line-height: var(--settings-lh, 1.45);
 }
 
@@ -561,40 +562,10 @@
   opacity: 0.58;
 }
 
-.scanCleanupNotice {
-  display: flex;
-  align-items: flex-start;
-  margin-top: 8px;
-  padding: 9px 10px;
-  border: 1px solid var(--border-warning);
-  border-radius: var(--radius-sm);
-  background: var(--surface-warning);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
-  gap: 8px;
-}
 
-.scanCleanupNotice > svg {
-  flex: 0 0 auto;
-  color: var(--text-warning);
-}
 
-.scanCleanupCopy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
 
-.scanCleanupCopy strong {
-  color: var(--text-warning);
-  font-size: var(--settings-fs-caption, 11px);
-  font-weight: 700;
-}
 
-.scanCleanupCopy > span {
-  color: var(--text-muted);
-}
 
 .scanNotice {
   padding: 10px 12px;
@@ -618,7 +589,7 @@
 
 .rootList {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   max-height: 220px;
   padding-inline-end: var(--scrollbar-safe-pad);

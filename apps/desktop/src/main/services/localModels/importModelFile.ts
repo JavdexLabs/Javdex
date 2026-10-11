@@ -6,11 +6,14 @@ import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 
 /** Validate the copied bytes before publishing; the user's original is never moved. */
-export async function importModelFile(source: string, destination: string, expected: { bytes: number; sha256: string }): Promise<void> {
+export async function importModelFile(source: string, destination: string, expected: { bytes: number; sha256: string }, stagingRoot: string): Promise<void> {
   const stat = await fs.stat(source)
   if (!stat.isFile() || stat.size !== expected.bytes) throw new Error('文件大小与所选模型精度不匹配，请检查下载是否完整')
   await fs.mkdir(path.dirname(destination), { recursive: true })
-  const stage = `${destination}.import-${randomUUID()}`
+  await fs.mkdir(stagingRoot, { recursive: true })
+  const task = path.join(stagingRoot, `import-${randomUUID()}`)
+  await fs.mkdir(task)
+  const stage = path.join(task, path.basename(destination))
   const hash = createHash('sha256')
   let bytes = 0
   try {
@@ -23,5 +26,5 @@ export async function importModelFile(source: string, destination: string, expec
     }), createWriteStream(stage, { flags: 'wx', mode: 0o600 }))
     if (bytes !== expected.bytes || hash.digest('hex') !== expected.sha256) throw new Error('SHA-256 校验失败，文件与所选模型、精度或发布者不匹配')
     await fs.rename(stage, destination)
-  } finally { await fs.rm(stage, { force: true }) }
+  } finally { await fs.rm(task, { recursive: true, force: true }) }
 }

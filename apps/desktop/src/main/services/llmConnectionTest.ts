@@ -114,7 +114,7 @@ async function requestOpenAiProbe(config: ResolvedLlmModelRequestConfig): Promis
           { role: 'user', content: TEST_PROMPT }
         ],
         temperature: 0,
-        max_tokens: TEST_MAX_TOKENS,
+        max_tokens: config.providerId === 'minimax' ? 2048 : TEST_MAX_TOKENS,
         stream: false
       }),
       signal: config.signal ?? AbortSignal.timeout(TEST_TIMEOUT_MS)
@@ -170,7 +170,8 @@ async function requestAnthropicProbe(config: ResolvedLlmModelRequestConfig): Pro
       body: JSON.stringify({
         model: config.modelId,
         system: `You are a connection probe. Output only ${TEST_EXPECTED_TEXT}.`,
-        max_tokens: TEST_MAX_TOKENS,
+        // MiniMax M2 includes mandatory thinking in the output budget.
+        max_tokens: config.providerId === 'minimax' ? 2048 : TEST_MAX_TOKENS,
         temperature: 0,
         messages: [{ role: 'user', content: TEST_PROMPT }]
       }),

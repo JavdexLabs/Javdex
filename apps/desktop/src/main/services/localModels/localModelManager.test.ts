@@ -5,10 +5,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createLocalModelManager } from './localModelManager'
-import { createAiRuntimeInstaller } from '../../player/aiSubtitles/runtimeInstaller'
-import { createOfflineSubtitleInference } from '../../player/aiSubtitles/offlineInference'
+import { createAiRuntimeInstaller } from './runtimeInstaller'
+import { localAiDirectories } from './modelStorage'
 
-async function fixture(options: { inference?: typeof createOfflineSubtitleInference; runtimeSupported?: () => boolean; runtimeAvailable?: () => boolean } = {}) {
+async function fixture(options: { inference?: NonNullable<Parameters<typeof createLocalModelManager>[1]>['inference']; runtimeSupported?: () => boolean; runtimeAvailable?: () => boolean } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-local-models-'))
   let fail = false, attempts = 0
   const downloadUrls: string[] = []
@@ -42,7 +42,7 @@ async function idle(manager: ReturnType<typeof createLocalModelManager>): Promis
   for (let count = 0; count < 200; count++) { if (!(await manager.snapshot()).operation) return; await delay(5) }
   assert.fail('model operation did not settle')
 }
-async function removeAfterUnreferencing(manager: ReturnType<typeof createLocalModelManager>, model: 'qwen3' | 'hy-mt2-7b' | 'index-translate-9b'): Promise<void> {
+async function removeAfterUnreferencing(manager: ReturnType<typeof createLocalModelManager>, model: 'qwen3' | 'hy-mt2-7b'): Promise<void> {
   const state = await manager.snapshot(), family = state.models.find(item => item.id === model)!
   const variant = family.selectedVariant
   await assert.rejects(manager.remove(model, variant), /引用/)
@@ -55,6 +55,9 @@ async function removeAfterUnreferencing(manager: ReturnType<typeof createLocalMo
 test('download is exclusive, supports cancellation/retry, and prevents use until installation completes', async () => {
   const f = await fixture()
   try {
+    const initial = await f.manager.snapshot()
+    assert.equal(initial.directory, path.join(f.root, 'local-ai'))
+    assert.equal(initial.defaultDirectory, initial.directory)
     await assert.rejects(f.manager.setTranslation('local'), /请先下载/)
     await f.manager.download('qwen3')
     await assert.rejects(f.manager.download('kotoba'), /等待/)
@@ -90,6 +93,7 @@ test('migration preserves exact model contents, persists location across restart
     await f.manager.download('qwen3'); await idle(f.manager); await f.manager.setTranslation('local')
     const old = (await f.manager.snapshot()).directory
     await assert.rejects(f.manager.relocate(path.join(f.installer(old).directory, 'nested')), /互相包含/)
+    await assert.rejects(fs.access(path.join(old, 'nested')))
     const destination = path.join(f.root, 'new-models')
     const moving = f.manager.relocate(destination)
     await assert.rejects(f.manager.acquire(['qwen3']), /等待/)
@@ -103,8 +107,53 @@ test('migration preserves exact model contents, persists location across restart
     assert.equal(await restarted.mode(), 'local'); await restarted.close()
     const collision = path.join(f.root, 'collision')
     await fs.mkdir(f.installer(collision).directory, { recursive: true })
+    await fs.writeFile(path.join(collision, 'store.json'), '{}')
     await assert.rejects(f.manager.relocate(collision), /已有/)
     assert.equal((await f.manager.snapshot()).directory, canonical)
+  } finally { await f.cleanup() }
+})
+
+test('a failed location config commit rolls back promoted entries and leaves original weights usable', async () => {
+  const f = await fixture()
+  try {
+    await f.manager.download('qwen3'); await idle(f.manager)
+    await f.manager.setTranslation('local')
+    const old = (await f.manager.snapshot()).directory, target = path.join(f.root, 'rejected-target')
+    // Make atomic config replacement fail after copy and promotion have completed.
+    await fs.rm(path.join(f.root, 'local-models.json')); await fs.mkdir(path.join(f.root, 'local-models.json'))
+    await assert.rejects(f.manager.relocate(target))
+    assert.equal((await f.manager.snapshot()).directory, old)
+    assert.equal((await f.manager.snapshot()).operation, null)
+    assert.equal(await fs.readFile(`${f.installer(old).paths().translationModel}.ready`, 'utf8'), 'translation-model')
+    assert.deepEqual(await fs.readdir(target), [])
+  } finally { await f.cleanup() }
+})
+
+test('relocation carries resume data, leaves caches and unrelated files, and cleanup respects inference leases', async () => {
+  const f = await fixture()
+  try {
+    await f.manager.download('qwen3'); await idle(f.manager)
+    const old = (await f.manager.snapshot()).directory
+    const download = path.join(old, 'downloads', 'a'.repeat(64))
+    const locations = localAiDirectories(f.root)
+    await fs.mkdir(download, { recursive: true }); await fs.writeFile(path.join(download, 'weight.part'), 'resume')
+    await fs.writeFile(path.join(old, 'unrelated.txt'), 'keep')
+    for (const root of [locations.cache, locations.work]) {
+      await fs.mkdir(root, { recursive: true }); await fs.writeFile(path.join(root, 'cache'), 'cached')
+    }
+    const next = path.join(f.root, 'relocated')
+    await f.manager.relocate(next)
+    assert.equal(await fs.readFile(path.join(next, 'downloads', 'a'.repeat(64), 'weight.part'), 'utf8'), 'resume')
+    assert.equal(await fs.readFile(path.join(old, 'unrelated.txt'), 'utf8'), 'keep')
+    await fs.access(path.join(locations.cache, 'cache'))
+    const release = await f.manager.acquire(['qwen3'])
+    await assert.rejects(f.manager.cleanDownloads(), /正在使用/)
+    await assert.rejects(f.manager.clearCache(), /正在使用/)
+    release()
+    await f.manager.cleanDownloads(); await f.manager.clearCache()
+    await assert.rejects(fs.access(path.join(next, 'downloads', 'a'.repeat(64))))
+    for (const root of [locations.cache, locations.work]) await assert.rejects(fs.access(root))
+    assert.equal((await f.manager.snapshot()).models.find(item => item.id === 'qwen3')?.installed, true)
   } finally { await f.cleanup() }
 })
 
@@ -154,12 +203,12 @@ test('downloading another precision does not select it; selection and all instal
   const f = await fixture()
   try {
     const model = () => f.manager.snapshot().then(state => state.models.find(item => item.id === 'qwen3')!)
-    await assert.rejects(f.manager.selectVariant('qwen3', 'qwen3-q8_0'), /先下载/)
+    await assert.rejects(f.manager.selectVariant('qwen3', 'qwen3-q6_k'), /先下载/)
     await f.manager.download('qwen3'); await idle(f.manager)
-    await f.manager.download('qwen3', 'qwen3-q8_0'); await idle(f.manager)
+    await f.manager.download('qwen3', 'qwen3-q6_k'); await idle(f.manager)
     assert.equal((await model()).selectedVariant, 'qwen3-q4_k_m')
     assert.equal((await model()).variants.filter(item => item.installed).length, 2)
-    await f.manager.selectVariant('qwen3', 'qwen3-q8_0')
+    await f.manager.selectVariant('qwen3', 'qwen3-q6_k')
     await f.manager.setTranslation('local')
     const release = await f.manager.acquire(['qwen3'])
     await assert.rejects(f.manager.selectVariant('qwen3', 'qwen3-q4_k_m'), /正在使用/)
@@ -169,14 +218,14 @@ test('downloading another precision does not select it; selection and all instal
     const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
     try {
       const state = await restarted.snapshot(), qwen = state.models.find(item => item.id === 'qwen3')!
-      assert.equal(qwen.selectedVariant, 'qwen3-q8_0')
+      assert.equal(qwen.selectedVariant, 'qwen3-q6_k')
       assert.equal(qwen.variants.filter(item => item.installed).length, 1)
       assert.equal(await restarted.mode(), 'local')
       await restarted.remove('qwen3', 'qwen3-q4_k_m')
       const after = (await restarted.snapshot()).models.find(item => item.id === 'qwen3')!
       assert.equal(after.installed, true)
-      assert.equal(after.selectedVariant, 'qwen3-q8_0')
-      assert.deepEqual(after.variants.filter(item => item.installed).map(item => item.id), ['qwen3-q8_0'])
+      assert.equal(after.selectedVariant, 'qwen3-q6_k')
+      assert.deepEqual(after.variants.filter(item => item.installed).map(item => item.id), ['qwen3-q6_k'])
       await removeAfterUnreferencing(restarted, 'qwen3')
       assert.equal(await restarted.mode(), 'local')
       await assert.rejects(restarted.translateText('日本語'), /未安装/)
@@ -191,7 +240,7 @@ test('legacy configuration retains the exact original precision and invalid vari
     await fs.writeFile(path.join(f.root, 'local-models.json'), JSON.stringify({ version: 1, directory, translation: 'app-default' }))
     const restarted = createLocalModelManager(f.root, { installer: f.installer })
     try {
-      assert.deepEqual((await restarted.snapshot()).models.map(item => item.selectedVariant), ['qwen3-q4_k_m', 'kotoba-q5_0', 'hy-mt2-7b-q4_k_m', 'index-translate-9b-q4_k_m'])
+      assert.deepEqual((await restarted.snapshot()).models.map(item => item.selectedVariant), ['qwen3-q4_k_m', 'kotoba-q5_0', 'hy-mt2-7b-q4_k_m'])
       await assert.rejects(restarted.selectVariant('qwen3', 'kotoba-q5_0'), /不匹配/)
       await assert.rejects(restarted.download('kotoba', '../custom-file'), /不匹配/)
       await assert.rejects(restarted.remove('qwen3', 'missing-precision'), /不匹配/)
@@ -217,10 +266,7 @@ test('selection retires the idle translator and the next invocation uses the new
   let closed = 0
   const f = await fixture({ inference: paths => {
     opened.push(paths.translationModel)
-    return { translateText: async () => '译文', close: async () => { closed++ },
-      probe: async () => { throw new Error('unexpected subtitle probe') },
-      recognize: async () => { throw new Error('unexpected subtitle recognition') },
-      translate: async () => { throw new Error('unexpected subtitle translation') } }
+    return { translateText: async () => '译文', close: async () => { closed++ } }
   } })
   try {
     await f.manager.download('qwen3'); await idle(f.manager)
@@ -243,8 +289,8 @@ test('selection retires the idle translator and the next invocation uses the new
 test('storing and selecting portable weights does not enable inference on an unsupported platform', async () => {
   const f = await fixture({ runtimeSupported: () => false })
   try {
-    await f.manager.download('qwen3', 'qwen3-q8_0'); await idle(f.manager)
-    await f.manager.selectVariant('qwen3', 'qwen3-q8_0')
+    await f.manager.download('qwen3', 'qwen3-q6_k'); await idle(f.manager)
+    await f.manager.selectVariant('qwen3', 'qwen3-q6_k')
     const state = await f.manager.snapshot()
     assert.equal(state.supported, false)
     assert.equal(state.models.find(item => item.id === 'qwen3')!.installed, true)
@@ -259,8 +305,7 @@ test('HY download and precision selection remain separate from the active transl
   let closed = 0
   const f = await fixture({ inference: paths => {
     opened.push({ file: paths.translationModel, model: paths.translationModelId })
-    return { translateText: async () => paths.translationModelId!, close: async () => { closed++ },
-      probe: async () => { throw new Error('unexpected probe') }, recognize: async () => [], translate: async cues => cues }
+    return { translateText: async () => paths.translationModelId!, close: async () => { closed++ } }
   } })
   try {
     await assert.rejects(f.manager.selectTranslationModel('hy-mt2-7b'), /先下载/)
@@ -380,29 +425,28 @@ test('portable HY family selection does not enable unsupported inference', async
   } finally { await f.cleanup() }
 })
 
-test('Index download and precision selection require an explicit family change and retire the idle translator', async () => {
+test('HY download and precision selection require an explicit family change and retire the idle translator', async () => {
   const opened: Array<{ file: string; model: string | undefined }> = []
   let closed = 0
   const f = await fixture({ inference: paths => {
     opened.push({ file: paths.translationModel, model: paths.translationModelId })
-    return { translateText: async () => paths.translationModelId!, close: async () => { closed++ },
-      probe: async () => { throw new Error('unexpected probe') }, recognize: async () => [], translate: async cues => cues }
+    return { translateText: async () => paths.translationModelId!, close: async () => { closed++ } }
   } })
   try {
-    await assert.rejects(f.manager.selectTranslationModel('index-translate-9b'), /先下载/)
+    await assert.rejects(f.manager.selectTranslationModel('hy-mt2-7b'), /先下载/)
     await f.manager.download('qwen3'); await idle(f.manager)
     await f.manager.translateText('はい')
-    await f.manager.download('index-translate-9b', 'index-translate-9b-q8_0'); await idle(f.manager)
+    await f.manager.download('hy-mt2-7b', 'hy-mt2-7b-q6_k'); await idle(f.manager)
     assert.equal((await f.manager.snapshot()).translationModel, 'qwen3')
-    await assert.rejects(f.manager.selectTranslationModel('index-translate-9b'), /当前精度/)
-    await f.manager.selectVariant('index-translate-9b', 'index-translate-9b-q8_0')
+    await assert.rejects(f.manager.selectTranslationModel('hy-mt2-7b'), /当前精度/)
+    await f.manager.selectVariant('hy-mt2-7b', 'hy-mt2-7b-q6_k')
     assert.equal((await f.manager.snapshot()).translationModel, 'qwen3')
-    await f.manager.selectTranslationModel('index-translate-9b')
+    await f.manager.selectTranslationModel('hy-mt2-7b')
     assert.equal(await f.manager.mode(), 'app-default')
     await f.manager.setTranslation('local')
-    assert.equal(await f.manager.translateText('はい'), 'index-translate-9b')
-    assert.equal(opened[1].model, 'index-translate-9b')
-    assert.match(opened[1].file, /Index-Translate-9B\.Q8_0\.gguf$/)
+    assert.equal(await f.manager.translateText('はい'), 'hy-mt2-7b')
+    assert.equal(opened[1].model, 'hy-mt2-7b')
+    assert.match(opened[1].file, /HY-MT2-7B-Q6_K\.gguf$/)
     assert.equal(closed, 1)
     await f.manager.selectTranslationModel('qwen3')
     assert.equal(closed, 2)
@@ -411,54 +455,54 @@ test('Index download and precision selection require an explicit family change a
   } finally { await f.cleanup() }
 })
 
-test('all four families and Index precision choices survive migration and restart without fallback after deletion', async () => {
+test('all three families and HY precision choices survive migration and restart without fallback after deletion', async () => {
   const f = await fixture()
   try {
-    for (const model of ['kotoba', 'qwen3', 'hy-mt2-7b', 'index-translate-9b'] as const) {
+    for (const model of ['kotoba', 'qwen3', 'hy-mt2-7b'] as const) {
       await f.manager.download(model); await idle(f.manager)
     }
-    await f.manager.download('index-translate-9b', 'index-translate-9b-f16'); await idle(f.manager)
-    await f.manager.selectVariant('index-translate-9b', 'index-translate-9b-f16')
-    await f.manager.selectTranslationModel('index-translate-9b'); await f.manager.setTranslation('local')
-    await f.manager.relocate(path.join(f.root, 'new-index-models'))
+    await f.manager.download('hy-mt2-7b', 'hy-mt2-7b-q8_0'); await idle(f.manager)
+    await f.manager.selectVariant('hy-mt2-7b', 'hy-mt2-7b-q8_0')
+    await f.manager.selectTranslationModel('hy-mt2-7b'); await f.manager.setTranslation('local')
+    await f.manager.relocate(path.join(f.root, 'new-hy-models'))
     const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
     try {
       const before = await restarted.snapshot()
-      assert.equal(before.translationModel, 'index-translate-9b')
+      assert.equal(before.translationModel, 'hy-mt2-7b')
       assert.equal(before.translation, 'local')
       assert.equal(before.models.every(model => model.installed), true)
-      const index = before.models.find(model => model.id === 'index-translate-9b')!
-      assert.equal(index.selectedVariant, 'index-translate-9b-f16')
-      assert.equal(index.variants.filter(variant => variant.installed).length, 2)
-      assert.equal(restarted.subtitleRuntime().paths().translationModelId, 'index-translate-9b')
-      assert.match(restarted.subtitleRuntime().paths().translationModel, /Index-Translate-9B\.f16\.gguf$/)
-      await removeAfterUnreferencing(restarted, 'index-translate-9b')
-      assert.equal((await restarted.snapshot()).translationModel, 'index-translate-9b')
+      const hy = before.models.find(model => model.id === 'hy-mt2-7b')!
+      assert.equal(hy.selectedVariant, 'hy-mt2-7b-q8_0')
+      assert.equal(hy.variants.filter(variant => variant.installed).length, 2)
+      assert.equal(restarted.subtitleRuntime().paths().translationModelId, 'hy-mt2-7b')
+      assert.match(restarted.subtitleRuntime().paths().translationModel, /HY-MT2-7B-Q8_0\.gguf$/)
+      await removeAfterUnreferencing(restarted, 'hy-mt2-7b')
+      assert.equal((await restarted.snapshot()).translationModel, 'hy-mt2-7b')
       assert.equal(await restarted.mode(), 'local')
       await assert.rejects(restarted.translateText('はい'), /未安装/)
       assert.equal(await restarted.subtitleRuntime().installed(), false)
-      assert.equal((await restarted.snapshot()).models.filter(model => model.id !== 'index-translate-9b').every(model => model.installed), true)
+      assert.equal((await restarted.snapshot()).models.filter(model => model.id !== 'hy-mt2-7b').every(model => model.installed), true)
     } finally { await restarted.close() }
   } finally { await f.cleanup() }
 })
 
-test('Index subtitles do not require other translators and their leases protect the shared runtime against every family repair', async () => {
+test('HY subtitles do not require other translators and their leases protect the shared runtime against every family repair', async () => {
   const f = await fixture()
   try {
-    for (const model of ['kotoba', 'index-translate-9b'] as const) { await f.manager.download(model); await idle(f.manager) }
-    await f.manager.selectTranslationModel('index-translate-9b')
+    for (const model of ['kotoba', 'hy-mt2-7b'] as const) { await f.manager.download(model); await idle(f.manager) }
+    await f.manager.selectTranslationModel('hy-mt2-7b')
     assert.equal(await f.manager.subtitleRuntime().installed(), true)
     const release = await f.manager.acquireSubtitleRuntime()
-    assert.deepEqual((await f.manager.snapshot()).models.filter(model => model.inUse).map(model => model.id), ['kotoba', 'index-translate-9b'])
-    for (const model of ['qwen3', 'hy-mt2-7b', 'index-translate-9b'] as const) {
+    assert.deepEqual((await f.manager.snapshot()).models.filter(model => model.inUse).map(model => model.id), ['kotoba', 'hy-mt2-7b'])
+    for (const model of ['qwen3', 'hy-mt2-7b'] as const) {
       await assert.rejects(f.manager.download(model), /正在使用/)
       await assert.rejects(f.manager.selectTranslationModel(model), /正在使用/)
     }
-    await assert.rejects(f.manager.remove('index-translate-9b'), /正在使用/)
-    await assert.rejects(f.manager.selectVariant('index-translate-9b', 'index-translate-9b-q8_0'), /正在使用/)
+    await assert.rejects(f.manager.remove('hy-mt2-7b'), /正在使用/)
+    await assert.rejects(f.manager.selectVariant('hy-mt2-7b', 'hy-mt2-7b-q6_k'), /正在使用/)
     await assert.rejects(f.manager.relocate(path.join(f.root, 'another')), /正在使用/)
     release(); release()
-    await assert.rejects(f.manager.acquire(['hy-mt2-7b', 'index-translate-9b']), /一个本地翻译模型/)
+    await assert.rejects(f.manager.acquire(['qwen3', 'hy-mt2-7b']), /一个本地翻译模型/)
     assert.equal((await f.manager.snapshot()).models.some(model => model.inUse), false)
   } finally { await f.cleanup() }
 })
@@ -477,7 +521,7 @@ test('v3 HY settings migrate exact shared purpose bindings to v5 while preservin
       assert.equal(state.directory, directory)
       assert.equal(state.translationModel, 'hy-mt2-7b')
       assert.equal(state.translation, 'local')
-      assert.deepEqual(state.models.map(model => model.selectedVariant), ['qwen3-official-q8_0', 'kotoba-f16', 'hy-mt2-7b-q6_k', 'index-translate-9b-q4_k_m'])
+      assert.deepEqual(state.models.map(model => model.selectedVariant), ['qwen3-official-q8_0', 'kotoba-f16', 'hy-mt2-7b-q6_k'])
       assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 5)
       assert.deepEqual(state.usage.subtitleTranslation, { model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' })
       assert.deepEqual(state.usage.textTranslation, { mode: 'local', model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' })
@@ -486,7 +530,7 @@ test('v3 HY settings migrate exact shared purpose bindings to v5 while preservin
       assert.equal(saved.version, 5)
       assert.equal(saved.translationModel, 'hy-mt2-7b')
       assert.equal(saved.selected['hy-mt2-7b'], 'hy-mt2-7b-q6_k')
-      assert.equal(saved.selected['index-translate-9b'], 'index-translate-9b-q4_k_m')
+      assert.equal(Object.keys(saved.selected).length, 3)
     } finally { await restarted.close() }
   } finally { await f.cleanup() }
 })
@@ -496,8 +540,8 @@ test('v4 rejects cross-family precision identities without silently routing to Q
   try {
     const directory = (await f.manager.snapshot()).directory
     await fs.writeFile(path.join(f.root, 'local-models.json'), JSON.stringify({ version: 4, directory, translation: 'local',
-      translationModel: 'index-translate-9b', selected: { kotoba: 'kotoba-q5_0', qwen3: 'qwen3-q4_k_m',
-        'hy-mt2-7b': 'hy-mt2-7b-q4_k_m', 'index-translate-9b': 'hy-mt2-7b-q4_k_m' } }))
+      translationModel: 'hy-mt2-7b', selected: { kotoba: 'kotoba-q5_0', qwen3: 'qwen3-q4_k_m',
+        'hy-mt2-7b': 'qwen3-q4_k_m' } }))
     const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
     try {
       await assert.rejects(restarted.mode(), /设置损坏/)
@@ -507,19 +551,6 @@ test('v4 rejects cross-family precision identities without silently routing to Q
     } finally { await restarted.close() }
   } finally { await f.cleanup() }
 })
-
-test('portable Index weights and family selection cannot enable inference on an unsupported platform', async () => {
-  const f = await fixture({ runtimeSupported: () => false })
-  try {
-    await f.manager.download('index-translate-9b'); await idle(f.manager)
-    await f.manager.selectTranslationModel('index-translate-9b')
-    assert.equal((await f.manager.snapshot()).translationModel, 'index-translate-9b')
-    await assert.rejects(f.manager.setTranslation('local'), /Windows x64/)
-    await assert.rejects(f.manager.translateText('はい'), /Windows x64/)
-    assert.equal(await f.manager.mode(), 'app-default')
-  } finally { await f.cleanup() }
-})
-
 
 test('download source persists, covers repair and rejects changes during downloads', async () => {
   const f = await fixture()
@@ -542,7 +573,6 @@ test('download source persists, covers repair and rejects changes during downloa
   } finally { await f.cleanup() }
 })
 
-
 test('copy addresses use the selected download source and imports reject mismatched files without selecting variants', async () => {
   const f = await fixture()
   try {
@@ -564,8 +594,7 @@ test('purpose bindings keep separate exact translator variants across restart an
   const opened: string[] = []
   const f = await fixture({ inference: paths => {
     opened.push(paths.translationModel)
-    return { translateText: async () => '译文', close: async () => {}, probe: async () => { throw new Error('unexpected probe') },
-      recognize: async () => [], translate: async cues => cues }
+    return { translateText: async () => '译文', close: async () => {} }
   } })
   try {
     for (const model of ['kotoba', 'qwen3'] as const) { await f.manager.download(model); await idle(f.manager) }
@@ -574,7 +603,7 @@ test('purpose bindings keep separate exact translator variants across restart an
     const usage = { ...initial.usage, textTranslation: { mode: 'local' as const, model: 'qwen3' as const, variant: 'qwen3-official-q8_0' } }
     await f.manager.setUsage(usage, initial.revision)
     const subtitlePath = f.manager.subtitleRuntime().paths().translationModel
-    assert.match(subtitlePath, /qwen3-q4\.gguf$/)
+    assert.match(subtitlePath, /Qwen_Qwen3-1\.7B-Q4_K_M\.gguf$/)
     await f.manager.translateText('はい')
     assert.match(opened[0], /Q8_0\.gguf$/)
     const release = await f.manager.acquireSubtitleRuntime()
@@ -589,7 +618,7 @@ test('purpose bindings keep separate exact translator variants across restart an
     await assert.rejects(f.manager.setUsage({ ...usage, subtitleTranslation: { model: 'qwen3', variant: 'qwen3-official-q8_0' } }), /正在使用/)
     await f.manager.remove('qwen3', 'qwen3-official-q8_0')
     await assert.rejects(f.manager.remove('qwen3', 'qwen3-q4_k_m'), /正在使用/)
-    await assert.rejects(f.manager.download('index-translate-9b'), /正在使用/)
+    await assert.rejects(f.manager.download('hy-mt2-7b'), /正在使用/)
     release()
     await assert.rejects(f.manager.remove('qwen3', 'qwen3-q4_k_m'), /引用/)
     const saved = await f.manager.snapshot()
@@ -607,13 +636,13 @@ test('atomic purpose saves reject stale drafts and mismatched variants while per
   const f = await fixture()
   try {
     const initial = await f.manager.snapshot()
-    const usage = { ...initial.usage, subtitleTranslation: { model: 'index-translate-9b' as const, variant: 'index-translate-9b-f16' } }
+    const usage = { ...initial.usage, subtitleTranslation: { model: 'hy-mt2-7b' as const, variant: 'hy-mt2-7b-q8_0' } }
     await f.manager.setUsage(usage, initial.revision)
     const saved = await f.manager.snapshot()
     assert.notEqual(saved.revision, initial.revision)
-    assert.equal(saved.models.find(model => model.id === 'index-translate-9b')!.variants.find(variant => variant.id === 'index-translate-9b-f16')!.readiness, 'missing-model')
+    assert.equal(saved.models.find(model => model.id === 'hy-mt2-7b')!.variants.find(variant => variant.id === 'hy-mt2-7b-q8_0')!.readiness, 'missing-model')
     await assert.rejects(f.manager.setUsage(initial.usage, initial.revision), /已更新/)
-    await assert.rejects(f.manager.setUsage({ ...usage, subtitleTranslation: { model: 'qwen3', variant: 'index-translate-9b-f16' } }), /不匹配/)
+    await assert.rejects(f.manager.setUsage({ ...usage, subtitleTranslation: { model: 'qwen3', variant: 'hy-mt2-7b-q8_0' } }), /不匹配/)
     assert.deepEqual((await f.manager.snapshot()).usage, saved.usage)
     const file = JSON.parse(await fs.readFile(path.join(f.root, 'local-models.json'), 'utf8'))
     assert.equal(file.version, 5); assert.deepEqual(file.usage, saved.usage)
@@ -691,8 +720,7 @@ test('active text translation rejects purpose changes and shared runtime repair 
   let resume!: () => void, entered!: () => void
   const running = new Promise<void>(resolve => { entered = resolve })
   const gate = new Promise<void>(resolve => { resume = resolve })
-  const f = await fixture({ inference: () => ({ translateText: async () => { entered(); await gate; return '译文' }, close: async () => {},
-    probe: async () => { throw new Error('unexpected probe') }, recognize: async () => [], translate: async cues => cues }) })
+  const f = await fixture({ inference: () => ({ translateText: async () => { entered(); await gate; return '译文' }, close: async () => {} }) })
   try {
     await f.manager.download('qwen3'); await idle(f.manager)
     const pending = f.manager.translateText('はい')

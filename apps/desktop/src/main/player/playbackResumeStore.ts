@@ -69,14 +69,14 @@ export function createPlaybackResumeStore(file: string, enabled: () => boolean, 
     }
   }
   return {
-    get(key: string, privateSession = false): ResumePoint | null {
-      if (!enabled() || privateSession) return null
+    get(key: string): ResumePoint | null {
+      if (!enabled()) return null
       keySchema.parse(key)
       const entry = read().find(item => item.key === key)
       return entry ? { position: entry.position, duration: entry.duration } : null
     },
-    save(key: string, point: ResumePoint | null, privateSession = false): void {
-      if (!enabled() || privateSession) return
+    save(key: string, point: ResumePoint | null): void {
+      if (!enabled()) return
       keySchema.parse(key)
       const entry = point == null ? null : entrySchema.parse({ key, position: point.position, duration: point.duration, updatedAt: now() })
       const entries = read().filter(item => item.key !== key)

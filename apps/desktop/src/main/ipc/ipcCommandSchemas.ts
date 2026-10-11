@@ -11,7 +11,7 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
-import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackOpenOptionsSchema, playbackClearProgressSchema, aiSubtitleCommandSchema } from '../player/playbackSchemas'
+import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackClearProgressSchema, aiSubtitleCommandSchema } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
 import { localModelVariant } from '../services/localModels/modelCatalog'
 import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS } from '@shared/desktop/localModels'
@@ -751,7 +751,7 @@ export const appIpcSchemas = {
     }).strict() }).strict(),
     ...(['download', 'delete', 'export', 'import', 'copy-download-url'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64).optional() }).strict()),
     z.object({ action: z.literal('select'), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
-    ...(['cancel-download', 'choose-location', 'reset-location'] as const).map(action => z.object({ action: z.literal(action) }).strict())
+    ...(['cancel-download', 'choose-location', 'reset-location', 'clean-downloads', 'clear-cache'] as const).map(action => z.object({ action: z.literal(action) }).strict())
   ]).superRefine((command, context) => {
     if (command.action === 'usage') {
       for (const [purpose, ref] of Object.entries(command.usage)) {
@@ -996,7 +996,7 @@ export const appIpcSchemas = {
   [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id, id.optional(), z.literal('external').optional()]),
   [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id, id]),
   [IPC.PLAYBACK_AVAILABILITY]: z.tuple([]),
-  [IPC.PLAYBACK_OPEN]: z.tuple([playbackTargetSchema, playbackOpenOptionsSchema.optional()]),
+  [IPC.PLAYBACK_OPEN]: z.tuple([playbackTargetSchema]),
   [IPC.PLAYBACK_SNAPSHOT]: z.tuple([]),
   [IPC.PLAYBACK_CONTROL]: z.tuple([playbackSessionIdSchema, playbackControlSchema]),
   [IPC.PLAYBACK_VIEWPORT]: z.tuple([playbackViewportSchema]),

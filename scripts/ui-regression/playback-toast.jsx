@@ -1,5 +1,6 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import { MemoryRouter } from 'react-router-dom'
 import '../../apps/desktop/src/renderer/src/styles/global.css'
 
 window.React = React
@@ -14,9 +15,15 @@ const snapshot = {
   info: { videoCodec: 'fixture', audioCodec: null, width: 640, height: 360, hardwareDecoder: null, audioOutput: null, droppedFrames: null }
 }
 window.api = {
+  settings: {
+    onLocalModelsChanged: () => () => {},
+    getLocalModels: async () => { throw new Error('Synthetic model store is unavailable') }
+  },
   playback: {
     snapshot: async () => snapshot,
     onChanged: () => () => {},
+    aiSubtitleSnapshot: async () => null,
+    onAiSubtitleChanged: () => () => {},
     viewport: async value => { window.fixtureViewports.push(value) },
     control: async (_id, command) => { window.fixtureControls.push(command) },
     subtitle: async () => { throw new Error('不支持此外挂字幕格式。请选择 SRT 或 ASS 字幕。') }
@@ -32,7 +39,7 @@ const [{ default: PlaybackPanel }, { ToastProvider }, { OverlayHistoryProvider }
 document.addEventListener('pointerdown', event => {
   if (event.target.closest('[data-playback-session]')) window.fixturePlaybackPointerDowns++
 })
-createRoot(document.getElementById('root')).render(<ToastProvider><OverlayHistoryProvider>
+createRoot(document.getElementById('root')).render(<MemoryRouter><ToastProvider><OverlayHistoryProvider>
   <button id="fixture-background">Background control</button>
   <PlaybackPanel />
-</OverlayHistoryProvider></ToastProvider>)
+</OverlayHistoryProvider></ToastProvider></MemoryRouter>)

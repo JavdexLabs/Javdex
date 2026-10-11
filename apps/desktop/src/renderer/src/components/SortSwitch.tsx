@@ -31,12 +31,14 @@ export default function SortSwitch<T extends string>({
 }: Props<T>): JSX.Element {
   const active = options.find((option) => option.value === value)
   const nextDir = dir === 'asc' ? 'desc' : 'asc'
-  const moreActive = quickValues && !quickValues.includes(value)
+  const quickOptions = options.filter((option) => !quickValues || quickValues.includes(option.value))
+  const moreOptions = quickValues ? options.filter((option) => !quickValues.includes(option.value)) : []
+  const moreActive = moreOptions.some((option) => option.value === value)
 
   return (
     <div className={styles.root} data-compact={compact || undefined} aria-label={label}>
       <div className={styles.fields} role="group" aria-label={`${label}字段`}>
-        {options.filter((option) => !quickValues || quickValues.includes(option.value)).map((option) => (
+        {quickOptions.map((option) => (
           <button
             key={option.value}
             type="button"
@@ -49,16 +51,16 @@ export default function SortSwitch<T extends string>({
           </button>
         ))}
       </div>
-      {quickValues && (
+      {moreOptions.length > 0 && (
         <SelectControl
           className={styles.more}
           buttonClassName={`${styles.moreButton}${moreActive ? ` ${styles.selected}` : ''}`}
-          aria-label={`${label}全部选项`}
+          aria-label={`${label}更多选项`}
           value={value}
           displayLabel="更多"
           onChange={(event) => onChange(event.target.value as T, dir)}
         >
-          {options.map((option) => (
+          {moreOptions.map((option) => (
             <option key={option.value} value={option.value}>{option.title ?? option.label}</option>
           ))}
         </SelectControl>

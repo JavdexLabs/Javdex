@@ -8,6 +8,7 @@ import { ExportProgressModal } from '../../apps/desktop/src/renderer/src/compone
 import PluginCard from '../../apps/desktop/src/renderer/src/components/PluginCard'
 import ClassificationPicker from '../../apps/desktop/src/renderer/src/components/ClassificationPicker'
 import { ImagePreviewOverlayProvider, useHistoryBackedImagePreviewState } from '../../apps/desktop/src/renderer/src/components/ImagePreviewOverlayContext'
+import { OverlayHistoryProvider } from '../../apps/desktop/src/renderer/src/interaction/OverlayHistoryContext'
 import { useContinuousPage } from '../../apps/desktop/src/renderer/src/hooks/useContinuousPage'
 import '../../apps/desktop/src/renderer/src/styles/global.css'
 
@@ -75,4 +76,4 @@ window.terminationRequests = 0
 window.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') window.globalShortcutCalls++
 })
-createRoot(document.getElementById('root')).render(<React.StrictMode><ImagePreviewOverlayProvider><Fixture /></ImagePreviewOverlayProvider></React.StrictMode>)
+createRoot(document.getElementById('root')).render(<React.StrictMode><OverlayHistoryProvider><ImagePreviewOverlayProvider><Fixture /></ImagePreviewOverlayProvider></OverlayHistoryProvider></React.StrictMode>)

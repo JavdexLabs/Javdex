@@ -1,7 +1,6 @@
 import type { LocalTranslationModelId } from '@shared/desktop/localModels'
 
 const HY_TRANSLATION_VERSION = 'hy-mt2-7b-llama-b11435-prompt-v1'
-const INDEX_TRANSLATION_VERSION = 'index-translate-9b-llama-b11435-prompt-v1'
 
 interface TranslationSettings {
   serverArguments: string[]
@@ -35,13 +34,6 @@ const policies: Record<LocalTranslationModelId, TranslationPolicy> = {
     version: HY_TRANSLATION_VERSION,
     textPrompt: text => `将以下文本翻译为简体中文，注意只需要输出翻译后的结果，不要额外解释。保留番号、作品代号、人名标识和原文结构；原文已是简体中文则原样返回，不补充原文没有的信息：\n\n${text}`,
     subtitlePrompt: japanese => `将以下日语对白翻译为简体中文，注意只需要输出翻译后的结果，不要额外解释。忠实保留口语含义、说话人标签和原文换行，不补充原文没有的信息：\n\n${japanese}`
-  },
-  'index-translate-9b': {
-    settings: { serverArguments: ['--jinja'], request: { temperature: 0, repeat_penalty: 1,
-      chat_template_kwargs: { enable_thinking: false }, stop: ['<|endoftext|>', '<|im_end|>'] } },
-    version: INDEX_TRANSLATION_VERSION,
-    textPrompt: text => `请将以下文本翻译成简体中文，并且严格遵循所有约束要求。\n\n【源文】\n${text}\n\n【约束要求】\n1. 【硬性要求】保留番号、作品代号、人名标识、原文格式和换行；原文已是简体中文则原样返回，不补充原文没有的信息。\n\n只输出译文，不要有任何额外说明。`,
-    subtitlePrompt: japanese => `请将以下日语对白翻译成简体中文，并且严格遵循所有约束要求。\n\n【源文】\n${japanese}\n\n【约束要求】\n1. 【硬性要求】忠实保留口语含义、说话人标签和原文换行；不补充原文没有的信息，不翻译相邻上下文。\n\n只输出译文，不要有任何额外说明。`
   }
 }
 function policy(model: LocalTranslationModelId): TranslationPolicy {
@@ -65,15 +57,4 @@ export function localTextTranslationPrompt(model: LocalTranslationModelId, text:
 export function localSubtitleTranslationPrompt(model: LocalTranslationModelId, japanese: string, context: string[]): string {
   const surrounding = context.length ? `以下是相邻日语对白，仅供理解上下文，不要翻译这些句子：\n${context.join('\n')}\n\n` : ''
   return surrounding + policy(model).subtitlePrompt(japanese)
-}
-
-export function localTranslationOutput(model: LocalTranslationModelId, content: string): string {
-  const text = content.trim()
-  // The official Index client drops a leading think block as a safety net.
-  // Never publish an unfinished block or reinterpret tags inside the actual translation.
-  if (model === 'index-translate-9b' && text.startsWith('<think>')) {
-    const end = text.indexOf('</think>')
-    return end < 0 ? '' : text.slice(end + '</think>'.length).trim()
-  }
-  return text
 }

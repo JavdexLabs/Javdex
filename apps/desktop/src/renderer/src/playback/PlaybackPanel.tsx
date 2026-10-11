@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX, X, SlidersHorizontal, PanelTop } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
 import type { PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback'
 import { api } from '../api'
 import Button from '../components/Button'
 import IconButton from '../components/IconButton'
 import SelectControl from '../components/SelectControl'
-import TextInput from '../components/TextInput'
-import Modal from '../components/Modal'
-import { parsePlaybackTime, playbackTime } from './playbackTime'
+import { playbackTime } from './playbackTime'
 import { useToast } from '../components/Toast'
 import { InteractionLayerOwner, useInteractionLayer } from '../interaction/useInteractionLayer'
 import { interactionLayers } from '../interaction/interactionLayers'
@@ -17,18 +16,18 @@ import { playbackTrackLabel } from './playbackTrackLabel'
 import { playbackOcclusions } from './playbackOcclusion'
 import styles from './PlaybackPanel.module.css'
 import AiSubtitleSettings from './AiSubtitleSettings'
+import { settingsPath } from '../settings/settingsRoutes'
+import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
 
 let viewportSequence = 0
 
 export default function PlaybackPanel(): JSX.Element | null {
+  const navigate = useNavigate()
   const [state, setState] = useState<PlaybackSnapshot | null>(null)
   const [seekDraft, setSeekDraft] = useState<number | null>(null)
   const seekDraftRef = useRef<number | null>(null)
   const pendingSeekRef = useRef<{ sessionId: string; seconds: number } | null>(null)
-  const [exactTime, setExactTime] = useState('')
-  const [timeError, setTimeError] = useState<string | null>(null)
   const [remaining, setRemaining] = useState(false)
-  const timeHelpId = useId()
   const [options, setOptions] = useState(false)
   const [optionTab, setOptionTab] = useState<'playback' | 'subtitle' | 'info'>('playback')
   const settingsId = useId()
@@ -42,10 +41,10 @@ export default function PlaybackPanel(): JSX.Element | null {
   const [adjusting, setAdjusting] = useState(false)
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null)
   const pendingVolume = useRef<{ sessionId: string; value: number } | null>(null)
-  const [clearProgress, setClearProgress] = useState<string | null>(null)
   const [recoverySession, setRecoverySession] = useState<string | null>(null)
   const recoveryRef = useRef<string | null>(null)
   const [sources, setSources] = useState<{ sessionId: string; items: Array<{ id: number; label: string }>; error: string | null } | null>(null)
+  const [videoTitle, setVideoTitle] = useState<{ sessionId: string; label: string } | null>(null)
   const stateRef = useRef(state)
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
@@ -63,6 +62,12 @@ export default function PlaybackPanel(): JSX.Element | null {
     const id = stateRef.current?.sessionId
     if (id) void api.playback.control(id, command).catch(error => toast.show((error as Error).message, 'error'))
   }, [toast])
+  const openSubtitleModels = async (sessionId: string): Promise<void> => {
+    // Docking unmounts the subtitle controls before IPC can acknowledge it.
+    // Keep navigation in the stable panel and reject acknowledgements for old sessions.
+    await api.playback.control(sessionId, { kind: 'presentation', value: 'docked' })
+    if (stateRef.current?.sessionId === sessionId) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
+  }
   const layer = useInteractionLayer({
     enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true,
     onDismiss: () => {
@@ -86,7 +91,7 @@ export default function PlaybackPanel(): JSX.Element | null {
     let revision = 0
     const off = api.playback.onChanged(value => { revision++; presentationHistory.observe(value); setState(value) })
     void api.playback.snapshot().then(value => { if (!disposed && revision === 0) { presentationHistory.observe(value, true); setState(value) } })
-    return () => { disposed = true; off() }
+    return () => { disposed = true; stateRef.current = null; off() }
   }, [presentationHistory])
   useEffect(() => {
     seekDraftRef.current = null; pendingSeekRef.current = null; setSeekDraft(null)
@@ -108,26 +113,27 @@ export default function PlaybackPanel(): JSX.Element | null {
       if (seekDraftRef.current == null) setSeekDraft(null)
     }
   }, [state])
-  useEffect(() => { setExactTime(''); setTimeError(null); setClearProgress(null); setRecoverySession(null); recoveryRef.current = null }, [state?.sessionId])
+  useEffect(() => { setRecoverySession(null); recoveryRef.current = null }, [state?.sessionId])
   const sessionId = state?.sessionId
   const libraryId = state?.target.libraryId
   const videoId = state?.target.videoId
+  const presentation = state?.presentation
   useEffect(() => {
-    if (!options || !sessionId || libraryId == null || videoId == null) return
+    if ((!options && presentation !== 'docked') || !sessionId || libraryId == null || videoId == null) return
     let disposed = false
     setSources(null)
     void api.videos.get({ kind: 'library', libraryId }, videoId).then(detail => {
       if (disposed) return
       if (!detail || detail.activeLibraryId !== libraryId) throw new Error('Video no longer belongs to this library')
+      setVideoTitle({ sessionId, label: [detail.code?.trim(), detail.title?.trim()].filter(Boolean).join(' ') })
       const items = detail.resources.filter(resource => resource.kind === 'local' && resource.library_id === libraryId && resource.video_id === videoId)
-        .map(resource => ({ id: resource.id, label: resource.display_name?.trim() || `来源 ${resource.id}` }))
+        .map(resource => ({ id: resource.id, label: resource.display_name?.trim() || resource.display_locator.split(/[\\/]/).pop() || '当前文件' }))
       setSources({ sessionId, items, error: null })
     }).catch(() => {
       if (!disposed) setSources({ sessionId, items: [], error: '无法读取播放来源，请关闭再打开播放选项重试。' })
     })
     return () => { disposed = true }
-  }, [options, sessionId, libraryId, videoId])
-  const presentation = state?.presentation
+  }, [options, sessionId, libraryId, videoId, presentation])
   const presentationRevision = state?.presentationRevision
   const focusSequence = state?.focusRequest?.sequence
   const rendererFullscreen = presentation === 'fullscreen' && state?.rendererFullscreenControls === true
@@ -234,8 +240,7 @@ export default function PlaybackPanel(): JSX.Element | null {
   }
   const subtitle = state.tracks.find(track => track.type === 'sub' && track.selected)
   const sizeSupported = Boolean(subtitle?.codec && ['subrip', 'srt', 'webvtt', 'text', 'mov_text'].includes(subtitle.codec))
-  const trackSelect = (type: 'audio' | 'sub', quick = false): JSX.Element => <SelectControl aria-label={quick ? type === 'audio' ? '快捷音轨' : '快捷字幕' : type === 'audio' ? '音轨' : '字幕'}
-    className={quick ? styles.quickSelect : undefined} displayLabel={quick ? type === 'audio' ? '音轨' : '字幕' : undefined}
+  const trackSelect = (type: 'audio' | 'sub'): JSX.Element => <SelectControl aria-label={type === 'audio' ? '音轨' : '字幕'}
     disabled={disabled}
     value={state.tracks.find(track => track.type === type && track.selected)?.id ?? 'no'}
     onChange={event => control({ kind: 'track', type, id: event.target.value === 'no' ? null : Number(event.target.value) })}>
@@ -245,10 +250,11 @@ export default function PlaybackPanel(): JSX.Element | null {
   const speedSelect = (quick = false): JSX.Element => <SelectControl aria-label={quick ? '快捷倍速' : '倍速'}
     className={quick ? styles.quickSelect : undefined} displayLabel={quick ? `${state.speed}×` : undefined}
     value={state.speed} disabled={disabled} onChange={event => control({ kind: 'speed', value: Number(event.target.value) })}>
-    {[0.5, 0.75, 1, 1.25, 1.5, 2].map(value => <option key={value} value={value}>{value}×</option>)}
+    {[0.5, 0.75, 1, 1.25, 1.5, 2, 3].map(value => <option key={value} value={value}>{value}×</option>)}
   </SelectControl>
   const volume = volumeDraft ?? state.volume
   const position = seekDraft ?? state.position ?? 0
+  const dockedTitle = (videoTitle?.sessionId === state.sessionId && videoTitle.label) || state.title
   const rangeFill = (value: number, max: number): CSSProperties => ({ '--playback-fill': `${Math.max(0, Math.min(100, value / Math.max(1, max) * 100))}%` } as CSSProperties)
   const status = state.error ?? state.progressError ?? (waitingResume ? '等待续播选择' : { opening: '打开中…', buffering: '缓冲中…', paused: '', ended: '播放结束', playing: '', error: '播放错误' }[state.phase])
   const recover = async (external: boolean, resourceId?: number): Promise<void> => {
@@ -262,7 +268,7 @@ export default function PlaybackPanel(): JSX.Element | null {
     try {
       const result = external
         ? await api.player.openResource(current.target.libraryId, current.target.resourceId, current.target.videoId, 'external')
-        : await api.playback.open({ ...current.target, resourceId: resourceId ?? current.target.resourceId }, { privateSession: !current.recordingProgress })
+        : await api.playback.open({ ...current.target, resourceId: resourceId ?? current.target.resourceId })
       if (stateRef.current?.sessionId !== current.sessionId) return
       if (!result.ok) toast.show(result.error ?? '无法打开所选资源', 'error')
       else if (external) await api.playback.control(current.sessionId, { kind: 'stop' })
@@ -347,26 +353,12 @@ export default function PlaybackPanel(): JSX.Element | null {
           <label>音轨{trackSelect('audio')}</label>
           <p className={styles.note}>声道数来自文件标记，不代表设备实际输出。</p>
           <label>倍速{speedSelect()}</label>
-          <form className={styles.exactTime} onSubmit={event => {
-            event.preventDefault()
-            if (seekDisabled) return
-            const seconds = parsePlaybackTime(exactTime)
-            if (seconds == null) { setTimeError('请输入秒数、分:秒或时:分:秒，最大 168 小时。'); return }
-            if (state.duration != null && seconds > state.duration) { setTimeError('指定时间超过影片时长。'); return }
-            setTimeError(null); control({ kind: 'seek', seconds })
-          }}>
-            <label>指定时间<TextInput aria-label="指定时间" value={exactTime} placeholder="00:12:34" maxLength={12}
-              aria-describedby={timeHelpId} aria-invalid={Boolean(timeError)} disabled={seekDisabled}
-              onChange={event => { setExactTime(event.target.value); setTimeError(null) }} /></label>
-            <p id={timeHelpId} className={styles.note} role={timeError ? 'alert' : undefined}>{timeError ?? (state.seekable ? '支持秒数、分:秒或时:分:秒。' : '此资源当前不能定位。')}</p>
-            <Button size="sm" type="submit" disabled={seekDisabled}>跳转到指定时间</Button>
-          </form>
           {state.chapters.length > 0 && <label>章节<SelectControl aria-label="章节" value="none" disabled={seekDisabled} onChange={event => control({ kind: 'seek', seconds: Number(event.target.value) })}>
             <option value="none">跳到章节…</option>{state.chapters.map((chapter, index) => <option key={index} value={chapter.time}>{chapter.title}</option>)}
           </SelectControl></label>}
           </div>
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-subtitle`} aria-labelledby={`${settingsId}-subtitle-tab`} hidden={optionTab !== 'subtitle'}>
-          <AiSubtitleSettings playback={state} />
+          <AiSubtitleSettings playback={state} onOpenModels={openSubtitleModels} />
           <label>字幕{trackSelect('sub')}</label>
           <Button size="sm" onClick={() => void api.playback.subtitle(state.sessionId).catch(error => toast.show((error as Error).message, 'error'))}>选择本机外挂字幕</Button>
           <label>字幕字号<SelectControl aria-label="字幕字号" value={state.subtitleSize ?? ''}
@@ -392,10 +384,17 @@ export default function PlaybackPanel(): JSX.Element | null {
             <dt>视频</dt><dd>{state.info.videoCodec ?? '未知'} · {state.info.width ?? '?'}×{state.info.height ?? '?'}</dd>
             <dt>实际硬解</dt><dd>{state.info.hardwareDecoder || '软件解码'}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
           </dl>
-          <p className={styles.note}>{state.recordingProgress ? '本次播放在此电脑保存续播进度。' : '本次播放不保存续播进度。'}</p>
-          {state.recordingProgress && <Button size="sm" onClick={() => control({ kind: 'private-session' })}>本次停止保存进度</Button>}
-          <Button size="sm" variant="ghost" onClick={() => setClearProgress(state.sessionId)}>清除此资源续播进度</Button>
-          <p className={styles.note}>画面快捷键：空格播放/暂停，←/→ 跳转 5 秒，Shift+←/→ 跳转 30 秒，M 静音，F 全屏，Esc 返回。</p>
+          <section className={styles.shortcuts} aria-label="画面快捷键">
+            <h3>画面快捷键</h3>
+            <dl>
+              <div><dt className={styles.shortcutAction}>播放 / 暂停</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>Space</kbd></dd></div>
+              <div><dt className={styles.shortcutAction}>跳转 5 秒</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>←</kbd><span>/</span><kbd className={styles.shortcutKey}>→</kbd></dd></div>
+              <div><dt className={styles.shortcutAction}>跳转 30 秒</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>Shift</kbd><span>+</span><kbd className={styles.shortcutKey}>←</kbd><span>/</span><kbd className={styles.shortcutKey}>→</kbd></dd></div>
+              <div><dt className={styles.shortcutAction}>静音</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>M</kbd></dd></div>
+              <div><dt className={styles.shortcutAction}>全屏</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>F</kbd></dd></div>
+              <div><dt className={styles.shortcutAction}>返回</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>Esc</kbd></dd></div>
+            </dl>
+          </section>
           </div>
         </aside>}
       </div>
@@ -404,7 +403,6 @@ export default function PlaybackPanel(): JSX.Element | null {
         <Button size="sm" variant="primary" disabled={disabled || !state.seekable || state.duration != null && state.duration - state.resumePosition! <= 30}
           onClick={() => control({ kind: 'resume', choice: 'continue' })}>继续 {playbackTime(state.resumePosition)}</Button>
         <Button size="sm" disabled={disabled} onClick={() => control({ kind: 'resume', choice: 'start' })}>从头播放</Button>
-        <Button size="sm" variant="ghost" onClick={() => control({ kind: 'private-session' })}>本次不保存进度</Button>
       </div>}
       {!nativeFullscreen && state.phase !== 'error' && <div ref={toolbar} className={styles.controls} hidden={!chromeShown && !rendererFullscreen}
         data-chrome-visible={chromeShown} aria-hidden={rendererFullscreen && !chromeShown || undefined} data-native-playback-occluder={rendererFullscreen || undefined}>
@@ -431,7 +429,9 @@ export default function PlaybackPanel(): JSX.Element | null {
           </Button>
         </div>
         <div className={styles.transport} aria-label="播放控制">
-          {docked && <span className={styles.title}>{state.title}</span>}
+          {docked && <Link className={`${styles.title} ${styles.titleLink}`} draggable={false}
+            to={mediaLibraryVideoDetailPath(state.target.libraryId, state.target.videoId)}
+            title={dockedTitle} aria-label={`查看影片详情：${dockedTitle}`}>{dockedTitle}</Link>}
           <IconButton size="control" tone="accent" icon={state.phase === 'ended' ? <RotateCcw size={18} /> : state.paused ? <Play size={18} /> : <Pause size={18} />}
             label={state.phase === 'ended' ? '从头重播' : state.paused ? '播放' : '暂停'} disabled={disabled || waitingResume}
             onClick={() => control(state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused })} />
@@ -451,7 +451,7 @@ export default function PlaybackPanel(): JSX.Element | null {
               }} aria-valuetext={`${volume}%`} />
             <span className={styles.volumeValue}>{volume}%</span>
           </div>
-          {!docked && <><span className={styles.spacer} /><div className={styles.quickControls}>{trackSelect('audio', true)}{trackSelect('sub', true)}{speedSelect(true)}</div>
+          {!docked && <><span className={styles.spacer} /><div className={styles.quickControls}>{speedSelect(true)}</div>
             <span className={styles.separator} /><IconButton size="control" icon={<SlidersHorizontal size={18} />} label="播放设置" aria-expanded={options} aria-controls={settingsId} aria-pressed={options} onClick={() => presentationHistory.setOptions(!options)} /></>}
           <IconButton size="control" icon={docked ? <PanelTop size={18} /> : fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             label={docked ? '恢复展开' : fullscreen ? '退出全屏' : '全屏'} disabled={waitingResume && !docked}
@@ -460,10 +460,6 @@ export default function PlaybackPanel(): JSX.Element | null {
           <span className={styles.status} role="status">{status}</span>
         </div>
       </div>}
-      {clearProgress && <Modal title="清除此资源续播进度" confirmText="清除进度" danger onCancel={() => setClearProgress(null)}
-        onConfirm={async () => { await api.playback.clearProgress({ scope: 'current', sessionId: clearProgress }); setClearProgress(null) }}>
-        <p>清除此资源在这台电脑上的续播位置，无法撤销。本次播放停止保存进度，影片和资料保留。</p>
-      </Modal>}
     </div>
   </InteractionLayerOwner.Provider>
 }

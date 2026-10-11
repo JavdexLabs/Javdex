@@ -23,6 +23,8 @@ export interface LlmModelDefinition {
   kind?: LlmModelKind
   /** Shipped with the app; cannot be removed in UI. */
   builtin?: boolean
+  /** A preset can require a different API from the connection's discovery protocol. */
+  protocol?: LlmProviderProtocol
 }
 
 export interface BuiltInLlmProviderDefinition {
@@ -85,12 +87,16 @@ export interface LlmProviderViewModel {
   models: LlmModelDefinition[]
 }
 
-const BUILTIN_MODEL = (id: string, name: string): LlmModelDefinition => ({
+const BUILTIN_MODEL = (id: string, name: string, protocol?: LlmProviderProtocol): LlmModelDefinition => ({
   id,
   name,
   kind: 'chat',
-  builtin: true
+  builtin: true,
+  ...(protocol ? { protocol } : {})
 })
+
+/** Bump when shipped model choices change; saved choices become user-managed. */
+export const BUILT_IN_LLM_CATALOG_VERSION = 20261011
 
 export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
   {
@@ -118,21 +124,20 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     defaultBaseUrl: 'https://api.deepseek.com',
     agentCompatible: true,
     models: [
-      BUILTIN_MODEL('deepseek-v4-flash', 'DeepSeek V4 Flash'),
+      BUILTIN_MODEL('deepseek-flash', 'DeepSeek V4.1 Flash'),
       BUILTIN_MODEL('deepseek-v4-pro', 'DeepSeek V4 Pro')
     ]
   },
   {
     id: 'openai',
     name: 'OpenAI',
-    protocol: 'openai-chat',
+    protocol: 'openai-responses',
     defaultBaseUrl: 'https://api.openai.com/v1',
     agentCompatible: true,
     models: [
-      BUILTIN_MODEL('gpt-5.5', 'GPT-5.5'),
-      BUILTIN_MODEL('gpt-5.5-pro', 'GPT-5.5 Pro'),
-      BUILTIN_MODEL('gpt-5.4-mini', 'GPT-5.4 Mini'),
-      BUILTIN_MODEL('gpt-5.4-nano', 'GPT-5.4 Nano')
+      BUILTIN_MODEL('gpt-6-astra', 'GPT-6 Astra', 'openai-responses'),
+      BUILTIN_MODEL('gpt-6.1-sol', 'GPT-6.1 Sol', 'openai-responses'),
+      BUILTIN_MODEL('gpt-6-luna', 'GPT-6 Luna', 'openai-responses')
     ]
   },
   {
@@ -142,9 +147,9 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     defaultBaseUrl: 'https://openrouter.ai/api/v1',
     agentCompatible: true,
     models: [
-      BUILTIN_MODEL('openai/gpt-5.5', 'OpenAI GPT-5.5'),
-      BUILTIN_MODEL('anthropic/claude-sonnet-4.6', 'Claude Sonnet 4.6'),
-      BUILTIN_MODEL('deepseek/deepseek-v4-flash', 'DeepSeek V4 Flash')
+      BUILTIN_MODEL('openai/gpt-6.1-sol', 'OpenAI GPT-6.1 Sol'),
+      BUILTIN_MODEL('anthropic/claude-sonnet-5.5', 'Claude Sonnet 5.5'),
+      BUILTIN_MODEL('deepseek/deepseek-v4.1-flash', 'DeepSeek V4.1 Flash')
     ]
   },
   {
@@ -154,9 +159,7 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     defaultBaseUrl: 'https://api.moonshot.cn/v1',
     agentCompatible: true,
     models: [
-      BUILTIN_MODEL('kimi-k2.6', 'Kimi K2.6'),
-      BUILTIN_MODEL('kimi-k2.5', 'Kimi K2.5'),
-      BUILTIN_MODEL('kimi-k2.7-code', 'Kimi K2.7 Code')
+      BUILTIN_MODEL('kimi-k3', 'Kimi K3')
     ]
   },
   {
@@ -166,11 +169,9 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     agentCompatible: true,
     models: [
-      BUILTIN_MODEL('glm-5.2', 'GLM-5.2'),
-      BUILTIN_MODEL('glm-5.1', 'GLM-5.1'),
-      BUILTIN_MODEL('glm-5', 'GLM-5'),
-      BUILTIN_MODEL('glm-4.7', 'GLM-4.7'),
-      BUILTIN_MODEL('glm-4-flash', 'GLM-4 Flash')
+      BUILTIN_MODEL('glm-5.3', 'GLM-5.3'),
+      BUILTIN_MODEL('glm-5.3-flash', 'GLM-5.3 Flash'),
+      BUILTIN_MODEL('glm-5.3-flashx', 'GLM-5.3 FlashX')
     ]
   },
   {
@@ -182,21 +183,21 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     models: [
       BUILTIN_MODEL('deepseek-ai/DeepSeek-V4-Flash', 'DeepSeek V4 Flash'),
       BUILTIN_MODEL('deepseek-ai/DeepSeek-V4-Pro', 'DeepSeek V4 Pro'),
-      BUILTIN_MODEL('Qwen/Qwen3-235B-A22B-Instruct-2507', 'Qwen3 235B Instruct'),
-      BUILTIN_MODEL('Qwen/Qwen3-32B', 'Qwen3 32B')
+      BUILTIN_MODEL('Qwen/Qwen3.6-27B', 'Qwen3.6 27B'),
+      BUILTIN_MODEL('Qwen/Qwen3.6-35B-A3B', 'Qwen3.6 35B A3B'),
+      BUILTIN_MODEL('Pro/zai-org/GLM-5.1', 'GLM-5.1')
     ]
   },
   {
     id: 'minimax',
     name: 'MiniMax',
-    protocol: 'openai-chat',
-    defaultBaseUrl: 'https://api.minimaxi.com/v1',
+    protocol: 'anthropic-messages',
+    defaultBaseUrl: 'https://api.minimax.cn/anthropic',
     agentCompatible: true,
     models: [
       BUILTIN_MODEL('MiniMax-M3', 'MiniMax M3'),
       BUILTIN_MODEL('MiniMax-M2.7', 'MiniMax M2.7'),
-      BUILTIN_MODEL('MiniMax-M2.5', 'MiniMax M2.5'),
-      BUILTIN_MODEL('MiniMax-M2.1', 'MiniMax M2.1')
+      BUILTIN_MODEL('MiniMax-M2.7-highspeed', 'MiniMax M2.7 Highspeed')
     ]
   },
   {
@@ -205,7 +206,10 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     protocol: 'google-generative-ai',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     agentCompatible: true,
-    models: [BUILTIN_MODEL('gemini-3.8-flash', 'Gemini 3.8 Flash')]
+    models: [
+      BUILTIN_MODEL('gemini-3.8-flash', 'Gemini 3.8 Flash'),
+      BUILTIN_MODEL('gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite')
+    ]
   },
   {
     id: 'bailian',
@@ -213,7 +217,11 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     protocol: 'openai-chat',
     defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     agentCompatible: true,
-    models: [BUILTIN_MODEL('qwen-plus', 'Qwen Plus')]
+    models: [
+      BUILTIN_MODEL('qwen3.8-max', 'Qwen3.8 Max'),
+      BUILTIN_MODEL('qwen3.7-plus', 'Qwen3.7 Plus'),
+      BUILTIN_MODEL('qwen3.8-flash', 'Qwen3.8 Flash')
+    ]
   },
   {
     id: 'anthropic',
@@ -222,9 +230,10 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     defaultBaseUrl: 'https://api.anthropic.com',
     agentCompatible: true,
     models: [
-      BUILTIN_MODEL('claude-sonnet-4-6', 'Claude Sonnet 4.6'),
-      BUILTIN_MODEL('claude-opus-4-8', 'Claude Opus 4.8'),
-      BUILTIN_MODEL('claude-haiku-4-5', 'Claude Haiku 4.5')
+      BUILTIN_MODEL('claude-fable-5-1', 'Claude Fable 5.1'),
+      BUILTIN_MODEL('claude-opus-5-5', 'Claude Opus 5.5'),
+      BUILTIN_MODEL('claude-sonnet-5-5', 'Claude Sonnet 5.5'),
+      BUILTIN_MODEL('claude-haiku-5-5', 'Claude Haiku 5.5')
     ]
   }
 ]

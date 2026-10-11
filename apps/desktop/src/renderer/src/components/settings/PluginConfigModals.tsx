@@ -21,7 +21,7 @@ import { isLoopbackScraperServiceUrl } from '@shared/scraperServiceTypes'
 import Modal from '../Modal'
 import ConfirmModal from '../ConfirmModal'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
-import { SettingsNumberStepper } from './SettingsPrimitives'
+import { SettingsDisclosure, SettingsNumberStepper } from './SettingsPrimitives'
 import { defaultPluginDelay, pluginSourceLabel } from '../../settings/settingsDisplay'
 import Button from '../Button'
 import SettingsFeedback from './SettingsFeedback'
@@ -475,18 +475,19 @@ export function PluginConfigModal({
           {plugin.preLoginAvailable ? (
             <section className={styles.panel}>
               <h4 className={styles.panelTitle}>预登入</h4>
-              <p className={`${styles.caption} ${styles.captionBlock}`}>
-                刮削前打开网站主页，由你在当前页完成登入
-              </p>
               <div className={styles.toggleList}>
                 <SettingsSwitchRow
                   title="刮削前预登入"
-                  description="开启后，该插件每次刮削任务会先打开主页。请在当前页登入或通过验证，再点窗口顶部操作栏「登入完成」。不支持弹出新窗口的登入。批量刮削同一插件只询问一次。组合来源会按字段源依次打开需要登入的主页。"
+                  description="先打开主页，由你完成登入或验证，再继续刮削。"
                   checked={preLogin}
                   disabled={saving}
                   onChange={setPreLogin}
                 />
               </div>
+              <SettingsDisclosure title="预登入流程与限制">
+                <p>请在当前页登入或通过验证，再点窗口顶部操作栏「登入完成」。不支持弹出新窗口的登入。</p>
+                <p>批量刮削同一插件只询问一次；组合来源按字段源依次打开需要登入的主页。</p>
+              </SettingsDisclosure>
             </section>
           ) : null}
 

@@ -1,6 +1,6 @@
 import { getDb } from './database'
 import { DEFAULT_EXTERNAL_RATING_SQL } from './externalRatingSql'
-import { ensureDefaultExternalRating } from './externalRatings'
+import { editExternalRatings, ensureDefaultExternalRating } from './externalRatings'
 import type Database from 'better-sqlite3'
 import {
   VIDEO_FIELD_UPDATE_KEYS,
@@ -1681,18 +1681,7 @@ export function editVideoRecord(
     const assignments: string[] = []
     const bind: Record<string, unknown> = { id }
     if (input.externalRatings) {
-      const { deletedSources, defaultSource } = input.externalRatings
-      for (const source of deletedSources) {
-        db.prepare('DELETE FROM video_external_stats WHERE video_id = ? AND source = ?').run(id, source)
-      }
-      if (defaultSource !== null && !db.prepare(
-        'SELECT id FROM video_external_stats WHERE video_id = ? AND source = ? AND rating_average IS NOT NULL'
-      ).get(id, defaultSource)) {
-        throw new Error('默认外部评分不存在，请重新选择')
-      }
-      db.prepare('UPDATE video_external_stats SET is_default = CASE WHEN source = ? THEN 1 ELSE 0 END WHERE video_id = ?')
-        .run(defaultSource, id)
-      ensureDefaultExternalRating(db, id)
+      editExternalRatings(db, id, input.externalRatings)
     }
     for (const key of scalarKeys) {
       if (key in input && input[key] !== undefined) {

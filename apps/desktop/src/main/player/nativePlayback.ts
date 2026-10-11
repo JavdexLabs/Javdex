@@ -1,4 +1,4 @@
-import type { PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback'
+import type { PlaybackControl, PlaybackOcclusion, PlaybackSnapshot } from '@shared/desktop/playback'
 
 /** Private seam: renderer cannot see this interface or call native commands. */
 export interface NativePlaybackState {
@@ -42,7 +42,7 @@ export interface NativePlayback {
   command(command: PlaybackControl): void
   read(): NativePlaybackState
   viewport(rect: { x: number; y: number; width: number; height: number }, visible: boolean, state: PlaybackSnapshot,
-    occlusions?: Array<{ x: number; y: number; width: number; height: number }>): void
+    occlusions?: PlaybackOcclusion[]): void
   render(): void
   addSubtitle(file: string): void
   /** Main-owned generated files only; renderer cannot provide a path. */

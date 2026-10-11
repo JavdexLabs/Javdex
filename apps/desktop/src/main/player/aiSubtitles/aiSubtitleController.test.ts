@@ -8,7 +8,7 @@ import type { PlaybackSnapshot } from '@shared/desktop/playback'
 import type { NativePlayback } from '../nativePlayback'
 import type { PlaybackSource } from '../playbackSource'
 import { createAiSubtitleController } from './aiSubtitleController'
-import { createAiRuntimeInstaller, type AiRuntimePaths } from './runtimeInstaller'
+import { createAiRuntimeInstaller, type AiRuntimePaths } from '../../services/localModels/runtimeInstaller'
 import { createOfflineSubtitleInference } from './offlineInference'
 
 async function until(predicate: () => boolean): Promise<void> {
@@ -19,7 +19,7 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-controller-'))
   let playback = { sessionId: 'one', phase: 'playing', seekable: true, duration: 15, position: 0,
     tracks: [{ type: 'sub', id: 8, title: null, language: null, codec: null, channelCountHint: null, selected: true }] } as PlaybackSnapshot
-  let audio = 1, privateSession = false, closeCount = 0, recognizeCount = 0, translateCount = 0, selected = false
+  let audio = 1, closeCount = 0, recognizeCount = 0, translateCount = 0, selected = false
   let asrVersion = 'asr-original', translationVersion = 'qwen-original'
   let leases = 0, finishClose = async (): Promise<void> => {}
   let installed = async () => true, runtimeChanged = (): void => {}
@@ -46,7 +46,7 @@ async function fixture() {
   const runtime = { ...base, installed: () => installed(), paths: () => ({ ...base.paths(), asrVersion, translationVersion }) }
   let resolve = async (value: PlaybackSource) => ({ ...value, locator: 'https://fixture.invalid/grant?secret=renewed' })
   const controller = createAiSubtitleController({ root, runtime, native, playback: () => playback,
-    source: () => ({ source, privateSession }), resolve: value => resolve(value), changed: () => {}, exportFile: async () => {},
+    source: () => source, resolve: value => resolve(value), changed: () => {}, exportFile: async () => {},
     openLog: async content => { logs.push(content) },
     acquireRuntime: async () => { leases++; return () => { leases-- } },
     onRuntimeChanged: listener => { runtimeChanged = listener; return () => { runtimeChanged = () => {} } },
@@ -63,7 +63,7 @@ async function fixture() {
     })) as typeof createOfflineSubtitleInference
   })
   return { controller, root, updates, removals, logs, setAudio: (value: number) => { audio = value },
-    setPrivate: () => { privateSession = true }, setSession: () => { playback = { ...playback, sessionId: 'two' } },
+    setSession: () => { playback = { ...playback, sessionId: 'two' } },
     setResolve: (value: typeof resolve) => { resolve = value }, tick: () => controller.tick(playback),
     recognizes: () => recognizeCount, translations: () => translateCount, closes: () => closeCount,
     setInstalled: (read: typeof installed) => { installed = read }, runtimeChanged: () => runtimeChanged(),
@@ -142,20 +142,16 @@ test('restarting after a precision switch retranslates without recognizing again
   } finally { await f.cleanup() }
 })
 
-test('audio and private-session changes invalidate current work without persisting private cues', async () => {
+test('audio changes invalidate current work and session replacement stops subtitles', async () => {
   const f = await fixture()
   try {
     await f.controller.command('one', { action: 'start' })
     await until(() => f.controller.snapshot().translatedSeconds === 15)
     f.setAudio(2); f.tick()
     await until(() => f.recognizes() === 2 && f.controller.snapshot().translatedSeconds === 15)
-    const before = await fs.readdir(path.join(f.root, 'cache'))
-    f.setPrivate(); f.tick()
-    await until(() => f.recognizes() === 3 && f.controller.snapshot().translatedSeconds === 15)
-    assert.deepEqual(await fs.readdir(path.join(f.root, 'cache')), before)
     f.setSession(); f.tick()
     await until(() => f.controller.snapshot().sessionId === null)
-    assert.equal(f.controller.snapshot().enabled, false); assert.ok(f.closes() >= 3)
+    assert.equal(f.controller.snapshot().enabled, false); assert.ok(f.closes() >= 2)
   } finally { await f.cleanup() }
 })
 

@@ -156,8 +156,9 @@ try {
   const playback = page.getByRole('dialog', { name: '内置播放器', exact: true })
   await playback.waitFor()
   await page.waitForFunction(() => window.fixtureViewports.at(-1)?.visible === true)
-  const playbackOptions = page.getByRole('button', { name: '播放选项', exact: true })
+  const playbackOptions = page.getByRole('button', { name: '播放设置', exact: true })
   await playbackOptions.click()
+  await page.getByRole('tab', { name: '字幕', exact: true }).click()
   const subtitle = page.getByRole('button', { name: '选择本机外挂字幕', exact: true })
   await subtitle.click()
   const toast = page.locator('[data-interaction-preserve-surface]')
@@ -181,6 +182,9 @@ try {
   await toast.waitFor()
   await playbackOptions.focus()
   await page.keyboard.press('Tab')
+  assert.equal(await page.getByRole('button', { name: '全屏', exact: true }).evaluate(element => document.activeElement === element), true,
+    'keyboard traversal retains the fullscreen control before feedback actions')
+  await page.keyboard.press('Tab')
   assert.equal(await toast.getByRole('button', { name: '查看详情', exact: true }).evaluate(element => document.activeElement === element), true,
     'modal Tab cycle includes preserved feedback controls')
   await page.keyboard.press('Tab')
@@ -190,8 +194,45 @@ try {
   await page.waitForFunction(() => window.fixtureViewports.at(-1)?.visible === true)
   assert.deepEqual(await page.evaluate(() => window.fixtureControls), [], 'toast dismissal does not alter playback or start another session')
   assert.ok(await page.evaluate(() => window.fixtureViewports.every(value => value.sessionId === 'toast-fixture')))
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/settings.html`)
+  await page.getByRole('button', { name: '管理精度', exact: false }).first().waitFor()
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1000, height: 640 }]) {
+    await page.setViewportSize(viewport)
+    for (const theme of ['slate', 'light']) {
+      await page.evaluate(value => window.setSettingsTheme(value), theme)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
+        `settings have no document overflow at ${viewport.width} in ${theme}`)
+      for (const name of ['更改并迁移', '恢复默认位置', '清理未完成下载', '清理推理缓存']) {
+        const action = page.getByRole('button', { name, exact: true })
+        await action.scrollIntoViewIfNeeded()
+        const box = await action.boundingBox()
+        assert.ok(box.x >= 220 && box.x + box.width <= viewport.width, `${name} remains inside the workspace`)
+      }
+      await page.getByText('下载校验与目录迁移说明', { exact: true }).click()
+      assert.equal(await page.getByText('下载校验与目录迁移说明', { exact: true }).evaluate(element => element.closest('details').open), true)
+      await page.getByText('下载校验与目录迁移说明', { exact: true }).click()
+    }
+  }
+  await page.getByRole('tab', { name: '功能', exact: true }).click()
+  const stages = page.getByRole('group', { name: /语音识别|字幕翻译/ })
+  await stages.first().waitFor()
+  const stageBoxes = await stages.evaluateAll(elements => elements.map(element => {
+    const box = element.getBoundingClientRect(); return { x: box.x, y: box.y }
+  }))
+  assert.ok(stageBoxes[1].y > stageBoxes[0].y, 'subtitle stages stack at a narrow workspace width')
+  await page.getByRole('navigation', { name: '设置分类' }).getByText('网络', { exact: true }).click()
+  await page.getByRole('button', { name: '开启配对', exact: true }).waitFor()
+  const pairCard = page.getByRole('region', { name: '设备配对', exact: true })
+  const beforePair = await pairCard.boundingBox()
+  assert.equal(await page.getByPlaceholder('123456').count(), 0)
+  await page.getByRole('button', { name: '开启配对', exact: true }).click()
+  const code = page.getByPlaceholder('123456')
+  await code.waitFor()
+  assert.equal(await code.evaluate(element => document.activeElement === element), true, 'pairing focuses the newly available field')
+  const afterPair = await pairCard.boundingBox()
+  assert.equal(afterPair.height, beforePair.height, 'pairing instructions and input share a stable card height')
   assert.deepEqual(errors, [])
-  console.log('UI regression passed: stale session, portal ownership, combobox Tab/focus, composition, nested Escape, preview Back/history/scroll lock, inert restoration, async confirmation, foreground task/detail shortcuts, playback toast pointer/keyboard dismissal and viewport restoration.')
+  console.log('UI regression passed: stale session, portal ownership, combobox Tab/focus, composition, nested Escape, preview Back/history/scroll lock, inert restoration, async confirmation, foreground task/detail shortcuts, playback toast pointer/keyboard dismissal, viewport restoration, settings narrow/light/dark layouts, disclosures and stable pairing focus.')
 } finally {
   await browser?.close()
   await server?.close()

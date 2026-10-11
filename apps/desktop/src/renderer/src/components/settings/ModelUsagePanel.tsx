@@ -1,4 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { Sparkles, Bot } from 'lucide-react'
+import { UI_ICON_SM } from '../iconDefaults'
 import type {
   ModelManagementSnapshot,
   ModelWorkloadAssignmentView,
@@ -6,6 +8,7 @@ import type {
   WorkloadModelSelection
 } from '@shared/modelManagementTypes'
 import SettingsFormActions from './SettingsFormActions'
+import { SettingsSaveDetailsScope, SettingsSaveDetailsSlot } from './SettingsSaveDetailsScope'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import SelectControl from '../SelectControl'
@@ -13,6 +16,7 @@ import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
 import styles from './ModelUsagePanel.module.css'
 import { modelConnectionName } from './modelSettingsView'
 import { preservesModelUsageDraft } from '../../settings/settingsRoutes'
+import { SettingsDisclosure, SettingsValueRow } from './SettingsPrimitives'
 
 function ModelSelect({
   snapshot,
@@ -72,6 +76,7 @@ function AgentAssignmentCard({
   })
   const { draft, setDraft } = form
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const title = assignment.workloadId === 'plugin-developer' ? '插件开发 Agent' : '媒体库整理 Agent'
   const inherited = draft.model.mode === 'inherit-default'
   const selectedRef =
@@ -84,6 +89,7 @@ function AgentAssignmentCard({
   }
   const save = async (): Promise<boolean> => {
     setSaving(true)
+    setSaveError(null)
     try {
       const ok = await apply(
         {
@@ -91,7 +97,8 @@ function AgentAssignmentCard({
           workloadId: assignment.workloadId as Exclude<ModelWorkloadId, 'app-default'>,
           ...draft
         },
-        `${title}设置已保存`
+        `${title}设置已保存`,
+        { onError: setSaveError, notifySuccess: false }
       )
       if (ok) form.accept(draft)
       return ok
@@ -112,25 +119,37 @@ function AgentAssignmentCard({
     }))
 
   return (
-    <section className={styles.assignmentCard}>
+    <section className={styles.assignmentCard}><SettingsSaveDetailsScope>
       <header className={styles.cardHeader}>
-        <div>
-          <h3 className={styles.sectionTitle}>{title}</h3>
-          <p className={styles.sectionHint}>
-            {inherited ? '当前继承：' : ''}
-            {assignment.resolution.providerName ?? '未配置'} ·{' '}
-            {assignment.resolution.modelName ?? '未选择'}
-          </p>
+        <div className={styles.cardHeaderMain}>
+          <span className={styles.cardIcon}>
+            <Bot {...UI_ICON_SM} />
+          </span>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 className={styles.sectionTitle}>{title}</h3>
+              <span
+                className={`${styles.statusBadge} ${assignment.resolution.ready ? styles.statusBadgeReady : styles.statusBadgeWarning}`}
+              >
+                {assignment.resolution.ready ? '已就绪' : '未就绪'}
+              </span>
+            </div>
+            <p className={styles.sectionHint}>
+              {inherited ? '跟随应用默认模型；可为此功能单独指定。' : '独立选择模型；保存后用于新任务。'}
+            </p>
+          </div>
         </div>
         <SettingsFormActions placement="header"
           dirty={form.dirty}
           saving={saving}
           disabled={busy}
           conflict={form.conflict}
+          error={saveError}
           onSave={() => void save()}
-          onCancel={form.reset}
+          onCancel={() => { form.reset(); setSaveError(null) }}
         />
       </header>
+      <SettingsSaveDetailsSlot />
       <div className={styles.gridTwo}>
         <label className={styles.field}>
           <span>模型来源</span>
@@ -144,7 +163,7 @@ function AgentAssignmentCard({
             <option value="explicit">独立指定</option>
           </SelectControl>
         </label>
-        <label className={styles.field}>
+        {inherited ? <SettingsValueRow label="实际模型" value={`${assignment.resolution.providerName ?? '未配置'} · ${assignment.resolution.modelName ?? '未选择'}`} /> : <label className={styles.field}>
           <span>实际模型</span>
             <ModelSelect
               snapshot={snapshot}
@@ -153,11 +172,8 @@ function AgentAssignmentCard({
               agentOnly
               onChange={(modelRef) => updateSelection('explicit', modelRef)}
             />
-        </label>
-        <details className={styles.advanced}>
-          <summary>
-            运行参数 <span>思考、超时与上下文</span>
-          </summary>
+        </label>}
+        <div className={styles.advanced}><SettingsDisclosure title="高级参数 · 思考强度、超时与上下文">
           <div className={styles.gridTwo}>
             <label className={styles.field}>
               <span>思考强度</span>
@@ -225,9 +241,9 @@ function AgentAssignmentCard({
             </label>
 
           </div>
-        </details>
+        </SettingsDisclosure></div>
       </div>
-    </section>
+    </SettingsSaveDetailsScope></section>
   )
 }
 
@@ -260,13 +276,16 @@ export default function ModelUsagePanel({
   const form = useSettingsDraft(defaultRef)
   const { draft: draftDefault, setDraft: setDraftDefault } = form
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const save = async (): Promise<boolean> => {
     if (!draftDefault) return false
     setSaving(true)
+    setSaveError(null)
     try {
       const ok = await apply(
         { type: 'set-default-model', modelRef: draftDefault },
-        '应用默认模型已保存'
+        '应用默认模型已保存',
+        { onError: setSaveError, notifySuccess: false }
       )
       if (ok) form.accept(draftDefault)
       return ok
@@ -285,24 +304,39 @@ export default function ModelUsagePanel({
 
   return (
     <div className={styles.stack}>
-      <section className={styles.assignmentCard}>
+      <section className={styles.assignmentCard}><SettingsSaveDetailsScope>
         <header className={styles.cardHeader}>
-          <div>
-            <h3 className={styles.sectionTitle}>应用默认模型</h3>
-            <p className={styles.sectionHint}>
-              {defaultAssignment.resolution.providerName ?? '未配置'} ·{' '}
-              {defaultAssignment.resolution.modelName ?? '未选择'}
-            </p>
+          <div className={styles.cardHeaderMain}>
+            <span className={styles.cardIcon}>
+              <Sparkles {...UI_ICON_SM} />
+            </span>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 className={styles.sectionTitle}>应用默认模型</h3>
+                <span
+                  className={`${styles.statusBadge} ${defaultAssignment.resolution.ready ? styles.statusBadgeReady : styles.statusBadgeWarning}`}
+                >
+                  {defaultAssignment.resolution.ready ? '已就绪' : '未就绪'}
+                </span>
+              </div>
+              <p className={styles.sectionHint}>
+                {defaultAssignment.resolution.providerName ?? '未配置'} ·{' '}
+                {defaultAssignment.resolution.modelName ?? '未选择'}
+                {' · 其他功能未单独指定时默认使用'}
+              </p>
+            </div>
           </div>
           <SettingsFormActions placement="header"
             dirty={form.dirty}
             saving={saving}
             disabled={busy || !draftDefault}
             conflict={form.conflict}
+            error={saveError}
             onSave={() => void save()}
-            onCancel={form.reset}
+            onCancel={() => { form.reset(); setSaveError(null) }}
           />
         </header>
+        <SettingsSaveDetailsSlot />
         <div className={styles.singleField}>
           <label className={styles.field}>
             <span>提供商与模型</span>
@@ -310,7 +344,7 @@ export default function ModelUsagePanel({
           </label>
         </div>
         <p className={styles.sectionHint}>默认模型及各用途配置保存后仅影响新任务。</p>
-      </section>
+      </SettingsSaveDetailsScope></section>
       {children}
       {!defaultOnly && <ModelAgentUsagePanel snapshot={snapshot} busy={busy} apply={apply} />}
     </div>

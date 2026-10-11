@@ -305,6 +305,8 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
     }
     else if (command.action === 'select') await models.selectVariant(command.model, command.variant)
     else if (command.action === 'cancel-download') models.cancel()
+    else if (command.action === 'clean-downloads') await models.cleanDownloads()
+    else if (command.action === 'clear-cache') await models.clearCache()
     else if (command.action === 'translation') await models.setTranslation(command.mode)
     else if (command.action === 'download-source') await models.setDownloadSource(command.source)
     else if (command.action === 'translation-model') await models.selectTranslationModel(command.model)

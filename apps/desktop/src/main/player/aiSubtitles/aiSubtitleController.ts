@@ -5,8 +5,9 @@ import type { AiSubtitleCommand, AiSubtitleSnapshot } from '@shared/desktop/aiSu
 import type { PlaybackSnapshot } from '@shared/desktop/playback'
 import type { NativePlayback } from '../nativePlayback'
 import type { PlaybackSource } from '../playbackSource'
-import { createAiRuntimeInstaller, aiSubtitleSupported } from './runtimeInstaller'
-import { atomicWrite, createSubtitleCache, subtitleCacheKey } from './subtitleCache'
+import { createAiRuntimeInstaller, localModelRuntimeSupported } from '../../services/localModels/runtimeInstaller'
+import { createSubtitleCache, subtitleCacheKey } from './subtitleCache'
+import { atomicWrite } from '../../utils/atomicWrite'
 import { createOfflineSubtitleInference } from './offlineInference'
 import { createSubtitleScheduler } from './subtitleScheduler'
 import { renderSubtitleAss, renderSubtitleSrt, type SubtitleCue } from './subtitleDocument'
@@ -14,36 +15,37 @@ import { createSubtitleLog } from './subtitleLog'
 
 interface Dependencies {
   root: string
+  workRoot?: string
   native: NativePlayback
   playback(): PlaybackSnapshot | null
-  source(id: string): { source: PlaybackSource; privateSession: boolean }
+  source(id: string): PlaybackSource
   resolve(source: PlaybackSource): Promise<PlaybackSource>
   changed(state: AiSubtitleSnapshot): void
   exportFile(content: { ass: string; srt: string }): Promise<void>
   openLog?(content: string): Promise<void>
-  runtime?: Pick<ReturnType<typeof createAiRuntimeInstaller>, 'installed' | 'paths'>
+  runtime: Pick<ReturnType<typeof createAiRuntimeInstaller>, 'installed' | 'paths'>
   inference?: typeof createOfflineSubtitleInference
   acquireRuntime?: () => Promise<() => void>
   onRuntimeChanged?: (listener: () => void) => () => void
 }
 const cleanedRoots = new Set<string>()
-async function cleanStaleWork(root: string): Promise<void> {
+async function cleanStaleWork(root: string, workRoot: string): Promise<void> {
   if (cleanedRoots.has(root)) return
   cleanedRoots.add(root)
   // Crash leftovers contain extracted audio and display text; never treat them as persistent caches.
-  await Promise.all(['active', 'work'].map(name => fs.rm(path.join(root, name), { recursive: true, force: true })))
+  await Promise.all([path.join(root, 'active'), workRoot].map(directory => fs.rm(directory, { recursive: true, force: true })))
 }
 export function createAiSubtitleController(deps: Dependencies) {
+  const workRoot = deps.workRoot ?? path.join(deps.root, 'work')
   const log = createSubtitleLog()
   let logSession: string | null = null
-  const installer = deps.runtime ?? createAiRuntimeInstaller(path.join(deps.root, 'models'))
+  const installer = deps.runtime
   let inference: ReturnType<typeof createOfflineSubtitleInference> | null = null
   let scheduler: ReturnType<typeof createSubtitleScheduler> | null = null
   let cache: ReturnType<typeof createSubtitleCache> | null = null
   let stopping: Promise<void> | null = null
   let task: AbortController | null = null
   let audioIndex: number | null = null
-  let privateSession = false
   let releaseRuntime: (() => void) | null = null
   let file: string | null = null
   let stoppingFile: string | null = null
@@ -53,7 +55,7 @@ export function createAiSubtitleController(deps: Dependencies) {
   let firstSelection = false
   let intent = 0
   let runtimeRevision = 0, closed = false
-  const state: AiSubtitleSnapshot = { sessionId: null, supported: aiSubtitleSupported(), installed: false,
+  const state: AiSubtitleSnapshot = { sessionId: null, supported: localModelRuntimeSupported(), installed: false,
     enabled: false, phase: 'idle', activeStart: null, recognizedSeconds: 0, translatedSeconds: 0,
     duration: null, display: 'bilingual', fontSize: 42, error: null }
   const snapshot = (): AiSubtitleSnapshot => structuredClone(state)
@@ -64,7 +66,7 @@ export function createAiSubtitleController(deps: Dependencies) {
     if (closed || revision !== runtimeRevision) return
     state.installed = value; publish()
   }
-  const initialization = cleanStaleWork(deps.root).then(refreshRuntime)
+  const initialization = cleanStaleWork(deps.root, workRoot).then(refreshRuntime)
     .catch(() => { if (!closed) { state.error = '离线字幕工作目录无法清理，请检查本机存储权限'; publish() } })
   const unsubscribe = deps.onRuntimeChanged?.(() => {
     void refreshRuntime().catch(() => {})
@@ -141,7 +143,7 @@ export function createAiSubtitleController(deps: Dependencies) {
     if (request !== intent) { release?.(); return }
     releaseRuntime = release ?? null
     const generation = new AbortController(); task = generation
-    audioIndex = selected; privateSession = source.privateSession
+    audioIndex = selected
     previousSubtitle = restoreSubtitle
     state.sessionId = id; state.enabled = true; state.error = null; state.phase = 'preparing'; state.duration = playback.duration
     firstSelection = true
@@ -150,18 +152,18 @@ export function createAiSubtitleController(deps: Dependencies) {
     const runtimePaths = installer.paths()
     log.clear(); logSession = id
     log.write('开始 AI 字幕', { audioIndex: selected, translationModel: runtimePaths.translationModelId ?? 'qwen3' })
-    const engine = (deps.inference ?? createOfflineSubtitleInference)(runtimePaths, path.join(deps.root, 'work'), {
+    const engine = (deps.inference ?? createOfflineSubtitleInference)(runtimePaths, workRoot, {
       log: (stage, value) => { if (task === generation && !generation.signal.aborted) log.write(stage, value) }
     })
     inference = engine
     publish()
     try {
-      const resolved = await deps.resolve(source.source)
+      const resolved = await deps.resolve(source)
       generation.signal.throwIfAborted(); current(id)
       const stream = await engine.probe(resolved.locator, selected, generation.signal)
       generation.signal.throwIfAborted()
       const storage = createSubtitleCache(path.join(deps.root, 'cache'), subtitleCacheKey(resolved, stream.identity, runtimePaths.asrVersion),
-        !privateSession, runtimePaths.translationVersion)
+        true, runtimePaths.translationVersion)
       cache = storage
       const run = createSubtitleScheduler(playback.duration, {
         read: async index => {
@@ -170,7 +172,7 @@ export function createAiSubtitleController(deps: Dependencies) {
           return chunk
         }, write: chunk => storage.write(chunk),
         recognize: async (start, end, signal) => {
-          const renewed = await deps.resolve(source.source)
+          const renewed = await deps.resolve(source)
           signal.throwIfAborted()
           return engine.recognize(renewed.locator, stream.index, start, end, signal)
         },
@@ -221,8 +223,7 @@ export function createAiSubtitleController(deps: Dependencies) {
       if (!playback || playback.sessionId !== state.sessionId || playback.phase === 'error') { void stop(); return }
       const selected = deps.native.selectedAudioStream?.()
       if (selected == null) return
-      const privateNow = deps.source(playback.sessionId).privateSession
-      if (selected !== audioIndex || privateNow !== privateSession) {
+      if (selected !== audioIndex) {
         if (state.phase !== 'preparing') void start(playback.sessionId).catch(() => { void stop() })
         return
       }

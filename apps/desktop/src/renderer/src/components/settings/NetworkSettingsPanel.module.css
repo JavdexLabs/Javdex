@@ -35,12 +35,6 @@
   height: var(--control-h-sm);
 }
 
-.testHint {
-  color: var(--text-muted);
-  font-size: var(--settings-fs-caption, 11px);
-  line-height: var(--settings-lh, 1.45);
-}
-
 .feedback {
   display: flex;
   align-items: center;

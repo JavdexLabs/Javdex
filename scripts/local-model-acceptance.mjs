@@ -6,21 +6,20 @@ import os from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import runtimeManifest from '../apps/desktop/src/main/player/aiSubtitles/runtimeManifest.ts'
+import runtimeManifest from '../apps/desktop/src/main/services/localModels/runtimeManifest.ts'
 import { createAcceptanceDirectory, launchAcceptance, closeAcceptance, recordAcceptanceCleanup } from './playback-acceptance-support.mjs'
-const { AI_SUBTITLE_RUNTIME_VERSION, AI_SUBTITLE_ASSETS } = runtimeManifest
+const { LOCAL_MODEL_ASSETS } = runtimeManifest
 
 const output = path.resolve('out/playback-acceptance/local-models')
 await fs.mkdir(output, { recursive: true })
 const directory = createAcceptanceDirectory('local-models-')
-const models = path.join(directory, 'ai-subtitles/models', AI_SUBTITLE_RUNTIME_VERSION)
+const models = path.join(directory, 'local-ai')
 const argumentIndex = process.argv.indexOf('--runtime-root')
 const runtimeRoot = path.resolve(argumentIndex >= 0 ? process.argv[argumentIndex + 1] : '.tmp-ai-subtitle/runtime')
-await fs.cp(path.join(runtimeRoot, AI_SUBTITLE_RUNTIME_VERSION), models, { recursive: true })
+await fs.cp(runtimeRoot, models, { recursive: true })
 if (process.platform === 'darwin') {
   // Only the isolated copy is changed: prove the desktop assembly finds bundled tools.
-  const tools = path.join(models, 'tools', `darwin-${process.arch}`)
-  for (const id of ['whisper', 'ffmpeg']) await fs.rm(path.join(tools, id), { recursive: true, force: true })
+  for (const name of ['whisper.cpp', 'ffmpeg']) await fs.rm(path.join(models, 'runtimes', name), { recursive: true, force: true })
 }
 const moved = path.join(directory, 'relocated-models'), exported = path.join(directory, 'exported')
 await fs.mkdir(exported, { recursive: true })
@@ -33,7 +32,7 @@ try {
   page.on('pageerror', cause => rendererErrors.push(cause.message))
   await page.waitForFunction(() => window.api?.settings)
   await page.evaluate(() => { window.location.hash = '/settings/models/local' })
-  await page.getByRole('heading', { name: '保存位置', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '模型文件', exact: true }).waitFor()
   const command = command => page.evaluate(command => window.api.settings.localModelCommand(command), command)
   const snapshot = () => page.evaluate(() => window.api.settings.getLocalModels())
   const initial = await snapshot()
@@ -82,9 +81,9 @@ try {
   }, exported)
   await command({ action: 'export', model: 'qwen3' })
   const hash = createHash('sha256')
-  const exportedFile = path.join(exported, 'Qwen3-1.7B-Q4_K_M-bartowski/qwen3-q4.gguf')
+  const exportedFile = path.join(exported, 'Qwen3-1.7B-Q4_K_M-bartowski/Qwen_Qwen3-1.7B-Q4_K_M.gguf')
   for await (const chunk of createReadStream(exportedFile)) hash.update(chunk)
-  assert.equal(hash.digest('hex'), AI_SUBTITLE_ASSETS.find(asset => asset.id === 'translation-model').sha256)
+  assert.equal(hash.digest('hex'), LOCAL_MODEL_ASSETS.find(asset => asset.id === 'translation-model').sha256)
   assert.ok((await fs.readFile(path.join(exported, 'Qwen3-1.7B-Q4_K_M-bartowski/LICENSE.txt'), 'utf8')).includes('Apache License'))
   report.checks.push({ name: 'export-exact-model-and-license' })
   await application.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false }) })

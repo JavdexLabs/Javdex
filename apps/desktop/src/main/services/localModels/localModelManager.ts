@@ -7,14 +7,16 @@ import { z } from 'zod'
 import { LOCAL_MODEL_DOWNLOAD_SOURCES, type LocalModelDownloadSource, LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS, type LocalModelId, type LocalModelSnapshot,
   type LocalTranslationMode, type LocalTranslationModelId } from '@shared/desktop/localModels'
 import type { LocalModelRef, LocalModelUsage, LocalModelReadiness } from '@shared/desktop/localModels'
-import { createAiRuntimeInstaller, aiSubtitleSupported } from '../../player/aiSubtitles/runtimeInstaller'
-import { AI_SUBTITLE_RUNTIME_VERSION, AI_RUNTIME_PLATFORM_MESSAGE } from '../../player/aiSubtitles/runtimeManifest'
-import { AI_RUNTIME_LICENSES } from '../../player/aiSubtitles/runtimeLicenses'
-import { atomicWrite } from '../../player/aiSubtitles/subtitleCache'
-import { createOfflineSubtitleInference } from '../../player/aiSubtitles/offlineInference'
+import { createAiRuntimeInstaller, localModelRuntimeSupported } from './runtimeInstaller'
+import { AI_RUNTIME_PLATFORM_MESSAGE } from './runtimeManifest'
+import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
+import { atomicWrite } from '../../utils/atomicWrite'
+import { MODEL_STORE_ENTRIES, canonicalStoragePath, localAiDirectories, ensureModelStore, ensureStorageDirectory, cleanModelTemporaryFiles, writeModelManifest } from './modelStorage'
+import { createLocalTextInference } from './textInference'
+type TextEngine = Pick<ReturnType<typeof createLocalTextInference>, 'translateText' | 'close'>
 import { DEFAULT_LOCAL_MODEL_VARIANTS, LOCAL_MODEL_DEFINITIONS, LOCAL_MODEL_VARIANTS, localModelAssets, localModelVariant } from './modelCatalog'
 const configFields = { directory: z.string().min(1), translation: z.enum(['app-default', 'local']) }
-const selectedSchema = z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string(), 'index-translate-9b': z.string() }).strict()
+const selectedSchema = z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string() }).strict()
 const translationRefSchema = z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1) }).strict()
 const usageSchema = z.object({
   subtitleRecognition: z.object({ model: z.literal('kotoba'), variant: z.string().min(1) }).strict(),
@@ -46,11 +48,12 @@ async function files(directory: string): Promise<string[]> {
 }
 export function createLocalModelManager(userData: string, options: {
   installer?: typeof createAiRuntimeInstaller
-  inference?: typeof createOfflineSubtitleInference
-  runtimeSupported?: typeof aiSubtitleSupported
+  inference?: (paths: Parameters<typeof createLocalTextInference>[0]) => TextEngine
+  runtimeSupported?: typeof localModelRuntimeSupported
   bundleRoot?: string
 } = {}) {
-  const defaultDirectory = path.join(userData, 'ai-subtitles', 'models')
+  const locations = localAiDirectories(userData)
+  const defaultDirectory = locations.store
   const configFile = path.join(userData, 'local-models.json')
   let directory = defaultDirectory, translation: LocalTranslationMode = 'app-default'
   let downloadSource: LocalModelDownloadSource = 'official'
@@ -68,7 +71,7 @@ export function createLocalModelManager(userData: string, options: {
   let downloadBytes = 0, downloadTotal = 0, downloadLabel: string | null = null, error: string | null = null
   let controller: AbortController | null = null, pending: Promise<void> | null = null
   let closed = false, idle: ReturnType<typeof setTimeout> | null = null
-  let engine: ReturnType<typeof createOfflineSubtitleInference> | null = null
+  let engine: TextEngine | null = null
   let engineVariant: string | null = null
   const counts = Object.fromEntries(LOCAL_MODEL_IDS.map(id => [id, 0])) as Record<LocalModelId, number>
   const installed = Object.fromEntries(LOCAL_MODEL_IDS.map(id => [id, false])) as Record<LocalModelId, boolean>
@@ -78,7 +81,7 @@ export function createLocalModelManager(userData: string, options: {
   const purposeCounts = { subtitleRecognition: 0, subtitleTranslation: 0, textTranslation: 0 }
   let subtitleLeaseInstaller: ReturnType<typeof createAiRuntimeInstaller> | null = null
   const listeners = new Set<() => void>()
-  const supported = options.runtimeSupported ?? aiSubtitleSupported
+  const supported = options.runtimeSupported ?? localModelRuntimeSupported
   const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource), { bundleRoot: options.bundleRoot })
   const referenceLabels = (variant: string): string[] => [
     ...(usage.subtitleRecognition.variant === variant ? ['AI 字幕 · 语音识别'] : []),
@@ -145,6 +148,7 @@ export function createLocalModelManager(userData: string, options: {
         configInvalid = true; error = '本地模型用途配置无法读取，请重新保存用途设置后重试'
       }
     }
+    await cleanModelTemporaryFiles(directory)
     await refresh()
   })()
   async function save(nextDirectory = directory, nextTranslation = translation, nextSelected = selected, nextModel = translationModel, nextSource = downloadSource, nextUsage = usage): Promise<void> {
@@ -155,7 +159,7 @@ export function createLocalModelManager(userData: string, options: {
   function available(models: LocalModelId[] = []): void {
     if (closed) throw new Error('本地模型管理已关闭')
     if (operation) throw new Error('请等待当前本地模型操作完成')
-    if (models.some(id => counts[id] > 0)) throw new Error('模型正在使用，请先停止 AI 字幕或等待翻译完成')
+    if (models.some(id => counts[id] > 0)) throw new Error('模型正在使用，请先停止使用此模型的任务')
   }
   async function shutdownEngine(): Promise<void> {
     if (idle) clearTimeout(idle); idle = null
@@ -214,6 +218,7 @@ export function createLocalModelManager(userData: string, options: {
     try {
       // Windows keeps loaded executables/DLLs locked; retire even an idle translator before repair.
       if (includesTranslation) await shutdownEngine()
+      await cleanModelTemporaryFiles(directory)
       await installer(selection, model).install(combined, (bytes, label) => {
         const labelChanged = label !== downloadLabel
         downloadBytes = bytes; downloadLabel = label; progress?.(bytes, label)
@@ -229,7 +234,7 @@ export function createLocalModelManager(userData: string, options: {
   async function remove(id: LocalModelId, requestedVariant?: string): Promise<void> {
     await ready; available()
     const variant = localModelVariant(id, requestedVariant ?? selected[id]).id
-    if ((variantCounts.get(variant) ?? 0) > 0) throw new Error('模型正在使用，请先停止 AI 字幕或等待翻译完成')
+    if ((variantCounts.get(variant) ?? 0) > 0) throw new Error('模型正在使用，请先停止使用此模型的任务')
     const references = referenceLabels(variant)
     if (references.length) throw new Error(`此精度已被 ${references.join('、')} 引用，请先在用途页更换模型`)
     operation = 'delete'; activeModel = id; activeVariant = variant; error = null; publish()
@@ -298,15 +303,14 @@ export function createLocalModelManager(userData: string, options: {
     if (configInvalid) throw new Error('本地翻译设置损坏，请在设置中重新选择翻译方式')
     if (!path.isAbsolute(destination)) throw new Error('请选择绝对路径的模型保存目录')
     operation = 'relocate'; error = null; publish()
-    let stage: string | null = null, target: string | null = null
-    let copied = false, committed = false
+    let stage: string | null = null
+    let committed = false
     try {
-      await fs.mkdir(destination, { recursive: true })
-      const next = await fs.realpath(destination)
+      const next = await canonicalStoragePath(path.resolve(destination))
       const old = await fs.realpath(directory).catch(() => path.resolve(directory))
       const normalize = (value: string): string => process.platform === 'win32' ? value.toLowerCase() : value
       // Preserve the default location's identity even when macOS resolves /var to /private/var.
-      const canonicalDefault = await fs.realpath(defaultDirectory).catch(() => path.resolve(defaultDirectory))
+      const canonicalDefault = await canonicalStoragePath(defaultDirectory)
       const nextDirectory = normalize(next) === normalize(canonicalDefault) ? defaultDirectory : next
       if (normalize(next) === normalize(old)) {
         if (directory !== nextDirectory) { await save(nextDirectory); directory = nextDirectory }
@@ -316,29 +320,45 @@ export function createLocalModelManager(userData: string, options: {
         const relative = path.relative(normalize(parent), normalize(child))
         return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
       }
-      const source = path.join(old, AI_SUBTITLE_RUNTIME_VERSION)
-      target = path.join(next, AI_SUBTITLE_RUNTIME_VERSION)
-      if (contains(source, next) || contains(target, source)) throw new Error('模型新旧目录不能互相包含')
-      if (await fs.access(target).then(() => true, () => false)) throw new Error('目标目录已有同版本模型，请选择空目录')
-      stage = path.join(next, `.javdex-models-${randomUUID()}`)
-      await shutdownEngine()
-      const exists = await fs.lstat(source).then(stat => { if (stat.isSymbolicLink()) throw new Error('模型目录不能是符号链接'); return true }, cause => {
-        if (cause.code !== 'ENOENT') throw cause; return false
-      })
-      if (exists) {
-        const sourceFiles = await files(source)
-        await fs.cp(source, stage, { recursive: true, errorOnExist: true, force: false })
-        for (const file of sourceFiles) if (await localModelFileHash(file) !== await localModelFileHash(path.join(stage, path.relative(source, file)))) throw new Error('模型迁移校验失败')
-        await fs.rename(stage, target); copied = true
+      if (contains(old, next) || contains(next, old)) throw new Error('模型新旧目录不能互相包含')
+      await ensureStorageDirectory(next)
+      await ensureModelStore(old)
+      for (const entry of MODEL_STORE_ENTRIES) {
+        if (await fs.access(path.join(next, entry)).then(() => true, () => false)) throw new Error('目标目录已有模型存储内容，请选择空目录')
       }
-      await save(nextDirectory); directory = nextDirectory; committed = true
-      if (exists) await fs.rm(source, { recursive: true, force: true })
+      stage = path.join(next, `.javdex-models-${randomUUID()}`)
+      await fs.mkdir(stage)
+      await shutdownEngine()
+      const existing: string[] = []
+      for (const entry of MODEL_STORE_ENTRIES) {
+        const source = path.join(old, entry)
+        const stat = await fs.lstat(source).catch(cause => { if (cause.code !== 'ENOENT') throw cause; return null })
+        if (!stat) continue
+        if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) throw new Error('模型目录包含不支持的链接或文件')
+        const sourceFiles = stat.isDirectory() ? await files(source) : [source]
+        await fs.cp(source, path.join(stage, entry), { recursive: true, errorOnExist: true, force: false })
+        for (const file of sourceFiles) {
+          if (await localModelFileHash(file) !== await localModelFileHash(path.join(stage, path.relative(old, file)))) throw new Error('模型迁移校验失败')
+        }
+        existing.push(entry)
+      }
+      const promoted: string[] = []
+      try {
+        for (const entry of existing) { await fs.rename(path.join(stage, entry), path.join(next, entry)); promoted.push(entry) }
+        await save(nextDirectory); directory = nextDirectory; committed = true
+      } catch (cause) {
+        for (const entry of promoted.reverse()) await fs.rename(path.join(next, entry), path.join(stage, entry))
+        throw cause
+      }
+      for (const entry of existing) await fs.rm(path.join(old, entry), { recursive: true, force: true })
+      await fs.rmdir(path.join(old, 'staging')).catch(cause => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(cause.code)) throw cause })
+      // Old roots can contain unrelated files: remove only an empty managed root.
+      await fs.rmdir(old).catch(cause => { if (!['ENOTEMPTY', 'EEXIST'].includes(cause.code)) throw cause })
     } catch (cause) {
       error = committed ? '新位置已生效，旧模型目录未能清理，可在文件管理器检查' : '模型位置变更失败，原位置仍有效'
       throw cause
     } finally {
       if (stage) await fs.rm(stage, { recursive: true, force: true }).catch(() => {})
-      if (target && copied && !committed) await fs.rm(target, { recursive: true, force: true }).catch(() => {})
       try { await refresh() }
       finally { operation = null; publish() }
     }
@@ -358,7 +378,7 @@ export function createLocalModelManager(userData: string, options: {
       stage = path.join(root, `.javdex-export-${randomUUID()}`)
       if (await fs.access(target).then(() => true, () => false)) throw new Error('导出目录已有同名模型，请选择其他目录')
       const asset = entry.asset
-      const source = path.join(installer().directory, asset.id, asset.filename)
+      const source = installer().modelFile(asset)
       await fs.mkdir(stage, { recursive: true })
       const filename = path.join(stage, asset.filename)
       await fs.copyFile(source, filename)
@@ -380,7 +400,7 @@ export function createLocalModelManager(userData: string, options: {
     if (idle) clearTimeout(idle)
     try {
       if (engine && engineVariant !== ref.variant) await shutdownEngine()
-      engine ??= (options.inference ?? createOfflineSubtitleInference)(installer({ ...selected, [model]: ref.variant }, model).paths(), path.join(userData, 'local-model-work'))
+      engine ??= (options.inference ?? createLocalTextInference)(installer({ ...selected, [model]: ref.variant }, model).paths())
       engineVariant = ref.variant
       const output: string[] = []
       const characters = Array.from(text)
@@ -397,6 +417,22 @@ export function createLocalModelManager(userData: string, options: {
   return {
     async snapshot(): Promise<LocalModelSnapshot> { await ready; return snapshotValue() },
     onChanged(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener) },
+    async cleanDownloads(): Promise<void> {
+      await ready; available([...LOCAL_MODEL_IDS])
+      operation = 'cleanup'; error = null; publish()
+      try { await cleanModelTemporaryFiles(directory, true) }
+      finally { operation = null; publish() }
+    },
+    async clearCache(): Promise<void> {
+      await ready; available([...LOCAL_MODEL_IDS])
+      operation = 'cleanup'; error = null; publish()
+      try {
+        for (const root of [locations.cache, locations.work]) {
+          await ensureStorageDirectory(root)
+          await fs.rm(root, { recursive: true, force: true })
+        }
+      } finally { operation = null; publish() }
+    },
     acquire, translateText, relocate, exportModel, remove, selectVariant, selectTranslationModel, setUsage,
     async acquireSubtitleRuntime(): Promise<() => void> {
       await ready
@@ -419,11 +455,16 @@ export function createLocalModelManager(userData: string, options: {
     async importModel(id: LocalModelId, source: string, requestedVariant?: string): Promise<void> {
       await ready; available()
       const entry = localModelVariant(id, requestedVariant ?? selected[id])
-      if ((variantCounts.get(entry.id) ?? 0) > 0) throw new Error('模型正在使用，请先停止 AI 字幕或等待翻译完成')
+      if ((variantCounts.get(entry.id) ?? 0) > 0) throw new Error('模型正在使用，请先停止使用此模型的任务')
       operation = 'import'; activeModel = id; activeVariant = entry.id; error = null; publish()
       try {
         if (entry.id === engineVariant) await shutdownEngine()
-        await importModelFile(source, path.join(installer().directory, entry.asset.id, entry.asset.filename), entry.asset)
+        await ensureModelStore(directory)
+        const destination = installer().modelFile(entry.asset)
+        await ensureStorageDirectory(directory, path.dirname(destination))
+        await ensureStorageDirectory(directory, path.join(directory, 'staging'))
+        await importModelFile(source, destination, entry.asset, path.join(directory, 'staging'))
+        await writeModelManifest(directory, entry.asset)
       } finally {
         try { await refresh() }
         finally { operation = null; activeModel = null; activeVariant = null; publish() }
@@ -460,6 +501,7 @@ export function createLocalModelManager(userData: string, options: {
     cancel(): void { controller?.abort() },
     subtitleRuntime(): ReturnType<typeof createAiRuntimeInstaller> {
       return { get directory() { return subtitleInstaller().directory }, paths: () => subtitleInstaller().paths(),
+        modelFile: asset => subtitleInstaller().modelFile(asset),
         installed: async () => { await ready; return subtitleInstaller().installed() },
         assetsInstalled: async ids => { await ready; return subtitleInstaller().assetsInstalled(ids) },
         removeAsset: async id => {

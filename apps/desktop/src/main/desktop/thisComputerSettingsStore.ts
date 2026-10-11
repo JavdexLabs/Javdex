@@ -11,7 +11,7 @@ export const DEFAULT_THIS_COMPUTER_SETTINGS: ThisComputerSettings = {
   playerPath: null,
   playerPreference: 'builtin',
   playbackVolume: 50,
-  resumePlayback: false,
+  resumePlayback: true,
   proxyUrl: '',
   proxyUrlEnabled: false,
   llmProxyUrl: '',
@@ -31,11 +31,10 @@ function normalized(value: Partial<ThisComputerSettings>): ThisComputerSettings 
     theme: typeof value.theme === 'string' && value.theme.trim() ? value.theme.trim() : 'graphite',
     playerPath:
       typeof value.playerPath === 'string' && value.playerPath.trim() ? value.playerPath.trim() : null,
-    // Legacy settings without a preference retain external playback; only fresh defaults use builtin.
-    playerPreference: value.playerPreference === 'builtin' ? 'builtin' : 'external',
+    playerPreference: value.playerPreference === 'external' ? 'external' : 'builtin',
     playbackVolume: typeof value.playbackVolume === 'number' && Number.isFinite(value.playbackVolume)
       ? Math.max(0, Math.min(100, value.playbackVolume)) : 50,
-    resumePlayback: value.resumePlayback === true,
+    resumePlayback: typeof value.resumePlayback === 'boolean' ? value.resumePlayback : true,
     proxyUrl: typeof value.proxyUrl === 'string' ? value.proxyUrl : '',
     proxyUrlEnabled: value.proxyUrlEnabled === true,
     llmProxyUrl: typeof value.llmProxyUrl === 'string' ? value.llmProxyUrl : '',

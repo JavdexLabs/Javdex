@@ -7,12 +7,16 @@ test('local model commands reject renderer-selected paths, URLs and arbitrary mo
   const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
   assert.equal(schema.safeParse([{ action: 'export', model: 'qwen3' }]).success, true)
   assert.equal(schema.safeParse([{ action: 'choose-location' }]).success, true)
+  for (const action of ['clean-downloads', 'clear-cache']) {
+    assert.equal(schema.safeParse([{ action }]).success, true)
+    assert.equal(schema.safeParse([{ action, path: 'C:/Windows' }]).success, false)
+  }
   assert.equal(schema.safeParse([{ action: 'select', model: 'qwen3', variant: 'qwen3-official-q8_0' }]).success, true)
   assert.equal(schema.safeParse([{ action: 'download', model: 'kotoba', variant: 'kotoba-f16' }]).success, true)
   assert.equal(schema.safeParse([{ action: 'download', model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' }]).success, true)
   assert.equal(schema.safeParse([{ action: 'translation-model', model: 'hy-mt2-7b' }]).success, true)
-  assert.equal(schema.safeParse([{ action: 'translation-model', model: 'index-translate-9b' }]).success, true)
-  assert.equal(schema.safeParse([{ action: 'download', model: 'index-translate-9b', variant: 'index-translate-9b-f16' }]).success, true)
+  assert.equal(schema.safeParse([{ action: 'translation-model', model: 'index-translate-9b' }]).success, false)
+  assert.equal(schema.safeParse([{ action: 'download', model: 'index-translate-9b', variant: 'index-translate-9b-f16' }]).success, false)
   assert.equal(schema.safeParse([{ action: 'download-source', source: 'hf-mirror' }]).success, true)
   for (const action of ['import', 'copy-download-url']) assert.equal(schema.safeParse([{ action, model: 'qwen3', variant: 'qwen3-official-q8_0' }]).success, true)
   for (const command of [

@@ -73,12 +73,12 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
   },
   {
     id: 'models',
-    label: 'AI 模型',
-    hint: '用途、提供商与本地模型',
+    label: 'AI 服务',
+    hint: '功能、云端服务与本地模型',
     defaultTab: 'usage',
     tabs: [
-      { id: 'usage', label: '用途配置' },
-      { id: 'providers', label: '提供商与模型' },
+      { id: 'usage', label: '功能' },
+      { id: 'providers', label: '云端服务' },
       { id: 'local', label: '本地模型' }
     ]
   },

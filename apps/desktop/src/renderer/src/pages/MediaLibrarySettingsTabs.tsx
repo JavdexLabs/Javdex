@@ -2,7 +2,6 @@ import TextInput from '../components/TextInput'
 import type { Dispatch, SetStateAction, ChangeEvent } from 'react'
 import type { NavigateFunction } from 'react-router-dom'
 import {
-  AlertTriangle,
   Archive,
   Clock,
   FolderOpen,
@@ -37,6 +36,7 @@ import LibraryScanAuditPanel from '../components/settings/LibraryScanAuditPanel'
 import MediaLibraryScanRunButton from '../components/settings/MediaLibraryScanRunButton'
 import {
   SettingsEmptyPanel,
+  SettingsDisclosure,
   SettingsNumberStepper,
   SettingsSectionBlock,
   SettingsStatusPill
@@ -168,15 +168,18 @@ function ScanHistorySummary({
           {SCAN_STATUS_LABEL[summary.status]}
         </SettingsStatusPill>
       </div>
-      <LibraryScanAuditPanel
-        summary={summary}
-        revision={revision}
-        onRefreshHistory={onRefreshHistory}
-        selected={selected}
-        onSelect={onSelect}
-        onOpenPending={onOpenPending}
-        onOpenVideo={onOpenVideo}
-      />
+      <SettingsDisclosure title={`扫描明细 · ${summary.scannedFiles} 个文件`}
+        defaultOpen={summary.status !== 'success' || summary.failedFiles > 0 || summary.pendingScanGroups > 0 || summary.pendingScanResources > 0}>
+        <LibraryScanAuditPanel
+          summary={summary}
+          revision={revision}
+          onRefreshHistory={onRefreshHistory}
+          selected={selected}
+          onSelect={onSelect}
+          onOpenPending={onOpenPending}
+          onOpenVideo={onOpenVideo}
+        />
+      </SettingsDisclosure>
       {summary.offlineFolders.length > 0 ? (
         <div className={`${styles.scanHistoryDetail} ${styles.warningDetail}`}>
           <strong>{summary.offlineFolders.length} 个离线目录</strong>
@@ -275,17 +278,15 @@ export function OverviewSettingsTab({
           label="导航排序"
           hint="数字越小越靠前；相同时按创建顺序排列。"
         >
-          <TextInput
-            density="workspace" className={styles.textControl}
-            type="number"
+          <SettingsNumberStepper
+            aria-label="导航排序"
             min={0}
-            step={1}
             value={identityDraft.position}
             disabled={formDisabled}
-            onChange={(event) =>
+            onChange={(value) =>
               setIdentityDraft((current) =>
                 current
-                  ? { ...current, position: Number(event.target.value) }
+                  ? { ...current, position: value }
                   : current
               )
             }
@@ -599,12 +600,11 @@ export function ScanSettingsTab({
         <SettingsSectionBlock
           className={styles.scanSettingsBlock}
           title="资源归属"
-          hint="只影响之后扫描发现的新资源；不会自动处理已有待确认组。"
         >
           <SettingsToggleList compact>
             <SettingsSwitchRow
               title="同番号自动合并资源"
-              description="同一媒体库扫描到同番号文件时，直接加入现有影片成员。"
+              description="新发现的同番号文件加入现有影片；已有待确认组保留。"
               checked={configDraft.autoMergeSameCodeResources}
               disabled={formDisabled}
               onChange={(value) =>
@@ -616,12 +616,11 @@ export function ScanSettingsTab({
         <SettingsSectionBlock
           className={styles.scanSettingsBlock}
           title="本地元数据"
-          hint="只在资源首次发现时读取；不会持续同步相邻文件。"
         >
           <SettingsToggleList compact>
             <SettingsSwitchRow
               title="自动导入本地 NFO"
-              description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
+              description="首次发现资源时读取相邻 NFO；已刮削影片跳过，不持续同步。"
               checked={configDraft.autoImportLocalNfo}
               disabled={formDisabled}
               onChange={(value) =>
@@ -633,12 +632,11 @@ export function ScanSettingsTab({
         <SettingsSectionBlock
           className={styles.scanSettingsBlock}
           title="自动扫描"
-          hint="应用启动、系统唤醒及运行期间会检查是否已达到扫描间隔。"
         >
           <SettingsToggleList compact>
             <SettingsSwitchRow
               title="按固定间隔自动扫描媒体库"
-              description="默认关闭；开启后不会立即扫描"
+              description="启动、唤醒及运行期间检查间隔；开启后不会立即扫描。"
               checked={configDraft.autoScanEnabled}
               disabled={formDisabled}
               onChange={(value) =>
@@ -689,13 +687,6 @@ export function ScanSettingsTab({
               }
             />
           </SettingsToggleList>
-          <div className={styles.scanCleanupNotice}>
-            <AlertTriangle {...UI_ICON_SM} aria-hidden />
-            <span className={styles.scanCleanupCopy}>
-              <strong>成员清理</strong>
-              <span>扫描失败、取消或存在离线目录时不会执行清理。</span>
-            </span>
-          </div>
         </SettingsSectionBlock>
       </section>
     </>
@@ -777,7 +768,7 @@ export function DisplaySettingsTab({
     <div className={styles.sectionStack}>
       <AppFormSection
         title="媒体库列表默认值"
-        hint="URL 中显式选择的排序仍优先；未指定时使用这里的默认值。"
+        hint="进入媒体库时使用；在列表中选择其他排序后，以你的选择为准。"
       >
         <div className={styles.fieldGrid}>
           <AppFormField label="默认排序">

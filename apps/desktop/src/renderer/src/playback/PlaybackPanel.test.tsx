@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import React from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewport } from '@shared/desktop/playback'
 import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
@@ -29,9 +29,16 @@ function detail(ids = [3, 4]): ScopedVideoDetail {
   ] } as ScopedVideoDetail
 }
 let changed: (value: PlaybackSnapshot | null) => void = () => {}
-const opened: Array<{ target: PlaybackTarget; privateSession: boolean }> = []
+const opened: PlaybackTarget[] = []
 const external: unknown[][] = []
 const controls: Array<{ id: string; command: PlaybackControl }> = []
+let sendControl = async (_id: string, _command: PlaybackControl): Promise<void> => {}
+let currentLocation = ''
+function LocationProbe(): null {
+  const location = useLocation()
+  currentLocation = location.pathname + location.hash
+  return null
+}
 const queried: unknown[][] = []
 const viewports: PlaybackViewport[] = []
 let getDetail = async (): Promise<ScopedVideoDetail | null> => detail()
@@ -58,8 +65,8 @@ const fake = {
     aiSubtitleCommand: () => aiCommand(),
     snapshot: async () => snapshot(),
     onChanged: (listener: typeof changed) => { changed = listener; return () => { changed = () => {} } },
-    open: async (value: PlaybackTarget, options: { privateSession: boolean }) => { opened.push({ target: value, privateSession: options.privateSession }); return open() },
-    control: async (id: string, command: PlaybackControl) => { controls.push({ id, command }) },
+    open: async (value: PlaybackTarget) => { opened.push(value); return open() },
+    control: async (id: string, command: PlaybackControl) => { controls.push({ id, command }); await sendControl(id, command) },
     viewport: async (value: PlaybackViewport) => { viewports.push(value) }
   },
   player: { openResource: async (...args: unknown[]) => { external.push(args); return openExternal() } },
@@ -80,10 +87,10 @@ Object.defineProperty(globalThis, 'document', { configurable: true, value: {
 Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: class { observe() {} disconnect() {} } })
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let Select: typeof import('../components/SelectControl').default
-async function mount(options?: TestRenderer.TestRendererOptions): Promise<void> {
+async function mount(options?: TestRenderer.TestRendererOptions, entry = '/'): Promise<void> {
   const Panel = (await import('./PlaybackPanel')).default
   Select = (await import('../components/SelectControl')).default
-  await act(async () => { renderer = TestRenderer.create(<MemoryRouter><OverlayHistoryProvider><Panel /></OverlayHistoryProvider></MemoryRouter>, options) })
+  await act(async () => { renderer = TestRenderer.create(<MemoryRouter initialEntries={[entry]}><LocationProbe /><OverlayHistoryProvider><Panel /></OverlayHistoryProvider></MemoryRouter>, options) })
 }
 function button(label: string) {
   const result = renderer!.root.findAllByType('button').find(node => node.props['aria-label'] === label || renderedText(node) === label)
@@ -104,6 +111,55 @@ afterEach(async () => {
   opened.length = external.length = controls.length = queried.length = viewports.length = 0
   getDetail = async () => detail(); open = openExternal = async () => ({ ok: true }); history.state = null
   aiState = aiSnapshot(); aiCommand = async () => aiState
+  sendControl = async () => {}; currentLocation = ''
+})
+
+test('docked title uses video metadata and links to the playing library without transport commands', async () => {
+  const label = `TEST-002 ${'一个较长的影片标题'.repeat(12)}`
+  getDetail = async () => ({ ...detail(), code: 'TEST-002', title: '一个较长的影片标题'.repeat(12) })
+  await mount(undefined, '/libraries/9')
+  await act(async () => changed({ ...snapshot(), presentation: 'docked', title: '影片播放' }))
+  const link = renderer!.root.findByType('a')
+  assert.equal(renderedText(link), label)
+  assert.equal(link.props.title, label)
+  assert.equal(link.props.draggable, false)
+  assert.equal(link.props.href, '/libraries/1/video/2')
+  await act(async () => link.props.onClick({ button: 0, defaultPrevented: false, preventDefault() {} }))
+  assert.equal(currentLocation, '/libraries/1/video/2')
+  assert.deepEqual(controls, [], 'opening detail keeps the docked playback session unchanged')
+})
+
+test('late docked metadata cannot overwrite the replacement video title', async () => {
+  let finish!: (value: ScopedVideoDetail) => void
+  getDetail = () => new Promise(resolve => { finish = resolve })
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  const first = finish
+  await act(async () => changed({ ...snapshot('second'), target: { ...target, videoId: 8 }, presentation: 'docked', title: 'New video' }))
+  await act(async () => first({ ...detail(), code: 'OLD-002', title: 'Old video' }))
+  assert.equal(renderedText(renderer!.root.findByType('a')), 'New video')
+})
+
+test('subtitle model navigation survives settings unmount before docking acknowledgement', async () => {
+  let acknowledge!: () => void
+  sendControl = () => new Promise(resolve => { acknowledge = resolve })
+  await mount(); await options()
+  await act(async () => button('字幕模型设置').props.onClick())
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'docked' } }])
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  assert.equal(renderer!.root.findAllByType('button').some(node => renderedText(node) === '字幕模型设置'), false)
+  await act(async () => acknowledge())
+  assert.equal(currentLocation, '/settings/models/usage#ai-subtitles')
+})
+
+test('a stale docking acknowledgement cannot navigate after playback session replacement', async () => {
+  let acknowledge!: () => void
+  sendControl = () => new Promise(resolve => { acknowledge = resolve })
+  await mount(); await options()
+  await act(async () => button('字幕模型设置').props.onClick())
+  await act(async () => changed({ ...snapshot('second'), presentation: 'docked' }))
+  await act(async () => acknowledge())
+  assert.equal(currentLocation, '/')
 })
 
 test('AI subtitle command results cannot overwrite newer subtitle events', async () => {
@@ -124,7 +180,7 @@ test('a replacement playback session releases AI subtitle busy state and rejects
   let finish!: (value: AiSubtitleSnapshot) => void
   aiCommand = () => new Promise(resolve => { finish = resolve })
   const AiSettings = (await import('./AiSubtitleSettings')).default
-  const component = (id: string) => <MemoryRouter><OverlayHistoryProvider><AiSettings playback={snapshot(id)} /></OverlayHistoryProvider></MemoryRouter>
+  const component = (id: string) => <MemoryRouter><OverlayHistoryProvider><AiSettings playback={snapshot(id)} onOpenModels={async () => {}} /></OverlayHistoryProvider></MemoryRouter>
   await act(async () => { renderer = TestRenderer.create(component('first')) })
   await act(async () => button('开启 AI 字幕').props.onClick())
   assert.equal(button('开启 AI 字幕').props.disabled, true)
@@ -136,7 +192,7 @@ test('a replacement playback session releases AI subtitle busy state and rejects
   assert.equal(renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === 'AI 字幕显示')!.props.value, 'bilingual')
 })
 
-test('options offer only files belonging to the playing video and preserve private playback on explicit source selection', async () => {
+test('options offer only files belonging to the playing video and open an explicitly selected source without session overrides', async () => {
   await mount(); await options()
   assert.deepEqual(queried, [[{ kind: 'library', libraryId: 1 }, 2]])
   assert.deepEqual(React.Children.toArray(source().props.children).map(child => (child as React.ReactElement).props.value), [3, 4])
@@ -144,7 +200,7 @@ test('options offer only files belonging to the playing video and preserve priva
   await act(async () => source().props.onChange({ target: { value: '6' } }))
   assert.equal(opened.length, 0)
   await act(async () => source().props.onChange({ target: { value: '4' } }))
-  assert.deepEqual(opened, [{ target: { ...target, resourceId: 4 }, privateSession: true }])
+  assert.deepEqual(opened, [{ ...target, resourceId: 4 }])
 })
 
 test('progress arrows after a pointer seek accumulate pending targets and never change pause intent', async () => {
@@ -329,14 +385,14 @@ test('external open failure leaves the built-in playback running', async () => {
   assert.equal(controls.length, 0)
 })
 
-test('source selection retains an explicitly enabled recording session, including when the current resource was removed', async () => {
+test('source selection has no recording override, including when the current resource was removed', async () => {
   getDetail = async () => detail([4])
   await mount()
   await act(async () => changed({ ...snapshot(), recordingProgress: true }))
   await options()
   assert.equal(source().props.disabled, false)
   await act(async () => source().props.onChange({ target: { value: '4' } }))
-  assert.deepEqual(opened, [{ target: { ...target, resourceId: 4 }, privateSession: false }])
+  assert.deepEqual(opened, [{ ...target, resourceId: 4 }])
 })
 
 test('late source queries are discarded after session replacement', async () => {
@@ -443,7 +499,10 @@ test('Windows fullscreen uses the classic toolbar and the same three settings ta
   await mount()
   await act(async () => changed({ ...snapshot(), presentation: 'fullscreen', rendererFullscreenControls: true, interactionSequence: 1 }))
   assert.ok(button('退出全屏'))
-  assert.ok(renderer!.root.findAllByType(Select).some(node => node.props['aria-label'] === '快捷音轨'))
+  const quickSpeed = renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '快捷倍速')!
+  assert.ok(quickSpeed)
+  assert.equal(renderer!.root.findAllByType(Select).some(node => ['快捷音轨', '快捷字幕'].includes(node.props['aria-label'])), false)
+  assert.ok(React.Children.toArray(quickSpeed.props.children).some(child => (child as React.ReactElement).props.value === 3))
   await options()
   assert.ok(source())
   const panels = () => renderer!.root.findAll(node => node.props.role === 'tabpanel')
@@ -477,6 +536,20 @@ test('a docked resume decision can always expand back to its resume controls', a
   assert.equal(button('恢复展开').props.disabled, false)
   await act(async () => button('恢复展开').props.onClick())
   assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'expanded' } }])
+})
+
+test('resume decisions offer continue and start only, without a per-session recording override', async () => {
+  await mount()
+  await act(async () => changed({ ...snapshot(), paused: true, phase: 'paused', resumePosition: 42, recordingProgress: true }))
+  const group = renderer!.root.findByProps({ 'aria-label': '选择续播方式' })
+  assert.deepEqual(group.findAllByType('button').map(renderedText), ['继续 00:00:42', '从头播放'])
+  await act(async () => button('从头播放').props.onClick())
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'resume', choice: 'start' } }])
+  await act(async () => button('继续 00:00:42').props.onClick())
+  assert.deepEqual(controls.at(-1), { id: 'first', command: { kind: 'resume', choice: 'continue' } })
+  await options()
+  await act(async () => button('信息').props.onClick())
+  assert.doesNotMatch(renderedText(renderer!.root), /本次停止保存进度|本次不保存进度/)
 })
 
 test('fullscreen mouse hover reveals only its own edge, including while paused', async context => {

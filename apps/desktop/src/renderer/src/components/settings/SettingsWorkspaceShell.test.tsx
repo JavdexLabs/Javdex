@@ -35,3 +35,26 @@ test('plugin settings shell retains fill viewport without a descendant styling m
   assert.doesNotMatch(host.props.className, /scroll-body-inner--settings/)
   assert.equal(host.findByType('p').children.join(''), '开发工作区')
 })
+
+test('settings navigation starts new panels at the top and restores visited panels', () => {
+  const scrollNode = { scrollTop: 0 }
+  const panel = (tab: 'usage' | 'local') => <MemoryRouter>
+    <SettingsWorkspaceShell activeGroup={SETTINGS_GROUPS.find(group => group.id === 'models')!}
+      activeTab={tab} onNavigate={() => {}} onTabKeyDown={() => {}}><p>设置正文</p>
+    </SettingsWorkspaceShell>
+  </MemoryRouter>
+  act(() => { renderer = TestRenderer.create(panel('usage'), {
+    createNodeMock: element => element.type === 'div' && element.props.onScroll ? scrollNode : null
+  }) })
+  const scroll = () => renderer!.root.find(node => node.type === 'div' && typeof node.props.onScroll === 'function')
+  scrollNode.scrollTop = 320
+  act(() => scroll().props.onScroll({ currentTarget: scrollNode }))
+  act(() => renderer!.update(panel('local')))
+  assert.equal(scrollNode.scrollTop, 0)
+  scrollNode.scrollTop = 120
+  act(() => scroll().props.onScroll({ currentTarget: scrollNode }))
+  act(() => renderer!.update(panel('usage')))
+  assert.equal(scrollNode.scrollTop, 320)
+  act(() => renderer!.update(panel('local')))
+  assert.equal(scrollNode.scrollTop, 120)
+})

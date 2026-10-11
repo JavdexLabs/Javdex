@@ -99,7 +99,8 @@
   min-width: 0;
 }
 
-.playerPickButton {
+.playerPickButton,
+.defaultPlayerButton {
   gap: var(--settings-gap-sm, 8px);
   white-space: nowrap;
 }

@@ -42,7 +42,8 @@ bool parentClipChildrenAdded = false;
 std::vector<HWND> siblingClipAdded;
 std::string presentation = "expanded";
 struct Bounds { double x = 0, y = 0, width = 1, height = 1; } requested;
-std::vector<Bounds> occlusions;
+struct Occlusion : Bounds { std::array<double, 4> radii{}; };
+std::vector<Occlusion> occlusions;
 bool regionApplied = false;
 ULONGLONG lastInteraction = 0, singleClickAt = 0;
 POINT lastMouse{};
@@ -191,6 +192,13 @@ LRESULT CALLBACK controlInput(HWND window, UINT message, WPARAM wparam, LPARAM l
 LRESULT CALLBACK surfaceInput(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     // The hidden cleanup drawable never handles input or playback frames.
     if (window != video && window != controls) return DefWindowProcW(window, message, wparam, lparam);
+    if (window == video && message == WM_MOUSEACTIVATE && presentation != "docked"
+        && HIWORD(lparam) == WM_LBUTTONDOWN && GetForegroundWindow() != parent) {
+        // Activate the Electron owner, but consume the click which brought it
+        // forward before it can arm the delayed single-click pause action.
+        singleClickAt = 0; interact();
+        return MA_ACTIVATEANDEAT;
+    }
     if (window == video && key(window, message, wparam, lparam)) return 0;
     if (message == WM_GETDLGCODE && window == video) return DLGC_WANTTAB | DLGC_WANTARROWS;
     if (message == WM_XBUTTONDOWN) { queue(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? "history-back" : "history-forward"); return TRUE; }
@@ -335,11 +343,29 @@ void clipOcclusions() {
     if (!region) throw std::runtime_error("Cannot create playback window region");
     const double dpi = scale();
     for (const auto &area : occlusions) {
-        HRGN cutout = CreateRectRgn(static_cast<int>(std::floor(area.x * dpi)) - origin.x,
-            static_cast<int>(std::floor(area.y * dpi)) - origin.y,
-            static_cast<int>(std::ceil((area.x + area.width) * dpi)) - origin.x,
-            static_cast<int>(std::ceil((area.y + area.height) * dpi)) - origin.y);
+        const int left = static_cast<int>(std::floor(area.x * dpi)) - origin.x;
+        const int top = static_cast<int>(std::floor(area.y * dpi)) - origin.y;
+        const int right = static_cast<int>(std::ceil((area.x + area.width) * dpi)) - origin.x;
+        const int bottom = static_cast<int>(std::ceil((area.y + area.height) * dpi)) - origin.y;
+        HRGN cutout = CreateRectRgn(left, top, right, bottom);
         if (!cutout) { DeleteObject(region); throw std::runtime_error("Cannot create playback popup region"); }
+        // Subtract only the area painted by the popup. Rectangular holes reveal
+        // the black HTML video backing at rounded corners. Keep original popup
+        // bounds: the video region itself clips shapes crossing its edges.
+        for (size_t corner = 0; corner < area.radii.size(); corner++) {
+            const int radius = static_cast<int>(std::lround(std::min({area.radii[corner], area.width / 2, area.height / 2}) * dpi));
+            if (radius <= 0) continue;
+            const bool onRight = corner == 1 || corner == 2, onBottom = corner >= 2;
+            const int x = onRight ? right - radius : left, y = onBottom ? bottom - radius : top;
+            HRGN square = CreateRectRgn(x, y, x + radius, y + radius);
+            HRGN circle = CreateEllipticRgn(onRight ? right - 2 * radius : left, onBottom ? bottom - 2 * radius : top,
+                onRight ? right : left + 2 * radius, onBottom ? bottom : top + 2 * radius);
+            const bool failed = !square || !circle || CombineRgn(square, square, circle, RGN_DIFF) == ERROR
+                || CombineRgn(cutout, cutout, square, RGN_DIFF) == ERROR;
+            if (square) DeleteObject(square);
+            if (circle) DeleteObject(circle);
+            if (failed) { DeleteObject(cutout); DeleteObject(region); throw std::runtime_error("Cannot round playback popup region"); }
+        }
         const int combined = CombineRgn(region, region, cutout, RGN_DIFF); DeleteObject(cutout);
         if (combined == ERROR) { DeleteObject(region); throw std::runtime_error("Cannot clip playback popup region"); }
     }
@@ -555,11 +581,24 @@ napi_value setOcclusions(napi_env env, napi_callback_info info) {
         requireOwner(); uint32_t length = 0; bool array = false;
         if (count != 1 || napi_is_array(env, args[0], &array) != napi_ok || !array
             || napi_get_array_length(env, args[0], &length) != napi_ok || length > 32) throw std::runtime_error("Invalid playback popup regions");
-        std::vector<Bounds> next;
+        std::vector<Occlusion> next;
         for (uint32_t index = 0; index < length; index++) {
             napi_value value; napi_get_element(env, args[0], index, &value);
-            Bounds area{namedNumber(env, value, "x"), namedNumber(env, value, "y"), namedNumber(env, value, "width"), namedNumber(env, value, "height")};
-            for (const double number : {area.x, area.y, area.width, area.height})
+            Occlusion area{{namedNumber(env, value, "x"), namedNumber(env, value, "y"), namedNumber(env, value, "width"), namedNumber(env, value, "height")}, {}};
+            bool hasRadii = false; napi_has_named_property(env, value, "radii", &hasRadii);
+            if (hasRadii) {
+                napi_value radii; napi_get_named_property(env, value, "radii", &radii);
+                uint32_t size = 0;
+                if (napi_get_array_length(env, radii, &size) != napi_ok || size != 4) throw std::runtime_error("Invalid playback popup radii");
+                for (uint32_t corner = 0; corner < size; corner++) {
+                    napi_value radius; napi_get_element(env, radii, corner, &radius);
+                    if (napi_get_value_double(env, radius, &area.radii[corner]) != napi_ok || !std::isfinite(area.radii[corner])
+                        || area.radii[corner] < 0 || area.radii[corner] > 65536) throw std::runtime_error("Invalid playback popup radius");
+                }
+            }
+            for (const double number : {area.x, area.y})
+                if (!std::isfinite(number) || number < -65536 || number > 65536) throw std::runtime_error("Invalid playback popup position");
+            for (const double number : {area.width, area.height})
                 if (!std::isfinite(number) || number < 0 || number > 65536) throw std::runtime_error("Invalid playback popup bounds");
             if (area.width > 0 && area.height > 0) next.push_back(area);
         }

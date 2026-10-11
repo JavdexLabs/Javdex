@@ -17,7 +17,7 @@ function fixture(t: TestContext) {
     enable: (value = true) => { enabled = value }, advance: (ms: number) => { time += ms }, now: () => time }
 }
 
-test('disabled and private sessions neither read malformed data nor write/delete/clean it', t => {
+test('disabled recording neither reads malformed data nor writes/deletes/cleans it', t => {
   const f = fixture(t)
   f.store.save(key(), { position: 60, duration: 300 })
   assert.equal(fs.existsSync(f.file), false)
@@ -25,9 +25,6 @@ test('disabled and private sessions neither read malformed data nor write/delete
   assert.equal(f.store.get(key()), null)
   f.store.save(key(), null)
   f.enable()
-  assert.equal(f.store.get(key(), true), null)
-  f.store.save(key(), { position: 90, duration: 300 }, true)
-  f.store.save(key(), null, true)
   assert.equal(fs.readFileSync(f.file, 'utf8'), 'old or malformed progress')
   assert.throws(() => f.store.get(key()), /无法读取/)
   assert.throws(() => f.store.save(key(), { position: 60, duration: 300 }), /无法读取/)

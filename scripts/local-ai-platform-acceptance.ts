@@ -4,10 +4,10 @@ import fs from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
-import { createAiRuntimeInstaller } from '../apps/desktop/src/main/player/aiSubtitles/runtimeInstaller'
-import { aiRuntimeAssets, currentAiRuntimeTarget } from '../apps/desktop/src/main/player/aiSubtitles/runtimeManifest'
+import { createAiRuntimeInstaller } from '../apps/desktop/src/main/services/localModels/runtimeInstaller'
+import { aiRuntimeAssets, currentAiRuntimeTarget } from '../apps/desktop/src/main/services/localModels/runtimeManifest'
 import { createOfflineSubtitleInference } from '../apps/desktop/src/main/player/aiSubtitles/offlineInference'
-import { runSubtitleProcess } from '../apps/desktop/src/main/player/aiSubtitles/processRunner'
+import { runLocalModelProcess } from '../apps/desktop/src/main/services/localModels/processRunner'
 
 async function main(): Promise<void> {
   const argument = (name: string, fallback: string): string => { const index = process.argv.indexOf(name); return path.resolve(index < 0 ? fallback : process.argv[index + 1]) }
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
       ['translator', paths.translator, ['--version']], ['ffmpeg', paths.ffmpeg, ['-version']],
       ['ffprobe', paths.ffprobe, ['-version']], ['whisper', paths.whisper, ['-h']]
     ] as const) {
-      await runSubtitleProcess(filename, [...args], { signal, timeoutMs: 15000 })
+      await runLocalModelProcess(filename, [...args], { signal, timeoutMs: 15000 })
       report.checks.push(`${name}-native-launch`)
     }
     if (process.argv.includes('--install-only')) { report.status = 'pass'; return }

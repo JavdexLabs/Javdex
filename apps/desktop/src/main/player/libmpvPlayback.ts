@@ -2,7 +2,7 @@ import { app, screen, type BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import type { PlaybackAvailability, PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback'
+import type { PlaybackAvailability, PlaybackControl, PlaybackOcclusion, PlaybackSnapshot } from '@shared/desktop/playback'
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
 import { linuxPlaybackBackend } from './playbackDisplay'
 import { createLinuxPlaybackBridge } from './linuxPlaybackBridge'
@@ -13,7 +13,7 @@ interface Bridge {
   setVisible(visible: boolean): void
   setPresentation(presentation: string): void
   setRendererControls?(enabled: boolean): void
-  setOcclusions?(rects: Array<{ x: number; y: number; width: number; height: number }>): void
+  setOcclusions?(rects: PlaybackOcclusion[]): void
   command(args: string[]): void
   render(): void
   state(): NativePlaybackState
@@ -98,7 +98,8 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
         // Chromium's effective scale can include Windows accessibility text
         // scaling, which GetDpiForWindow alone does not include.
         ...(['linux', 'win32'].includes(process.platform) ? { scale: screen.getDisplayMatching(window.getBounds()).scaleFactor } : {}) })
-      bridge.setOcclusions?.(occlusions.map(area => ({ x: area.x * zoom, y: area.y * zoom, width: area.width * zoom, height: area.height * zoom })))
+      bridge.setOcclusions?.(occlusions.map(area => ({ x: area.x * zoom, y: area.y * zoom, width: area.width * zoom, height: area.height * zoom,
+        ...(area.radii ? { radii: area.radii.map(radius => radius * zoom) as PlaybackOcclusion['radii'] } : {}) })))
       bridge.setPresentation(state.presentation)
       if (visible) bridge.setVisible(true)
     },

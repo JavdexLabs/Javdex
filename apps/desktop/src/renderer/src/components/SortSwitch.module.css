@@ -1,16 +1,24 @@
 .more {
-  width: 64px;
-  flex: 0 0 64px;
+  width: max-content;
+  flex: 0 0 auto;
   height: 100%;
 }
 
 .moreButton {
+  --focus-ring: inset 0 0 0 2px var(--accent-soft);
+
+  width: auto;
   height: 100%;
   min-height: 0;
+  padding: 0 26px 0 9px;
   border: 0;
   border-left: 1px solid var(--border-subtle);
   border-radius: 0;
   background-color: var(--surface-control);
+  background-position:
+    calc(100% - 14px) calc(50% - 2px),
+    calc(100% - 9px) calc(50% - 2px),
+    0 0;
   font-size: 12px;
 }
 

@@ -7,7 +7,7 @@ import SelectControl from './SelectControl'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
-it('keeps two shortcuts and exposes every field without changing the direction', () => {
+it('keeps shortcuts outside the more menu without changing the direction', () => {
   const options = [
     { value: 'release_date', label: '发行' }, { value: 'add_time', label: '添加' },
     { value: 'rating', label: '自定义评分' }, { value: 'external_rating', label: '外部评分' },
@@ -21,7 +21,8 @@ it('keeps two shortcuts and exposes every field without changing the direction',
     onChange={(next, nextDir) => { value = next; dir = nextDir }} />
   act(() => { tree = TestRenderer.create(render()) })
   const menu = tree!.root.findByType(SelectControl)
-  assert.equal(menu.props.children.length, 5)
+  assert.deepEqual(menu.props.children.map((option: React.ReactElement<{ value: string }>) => option.props.value),
+    ['rating', 'external_rating', 'code'])
   assert.equal(menu.props.displayLabel, '更多')
   act(() => { menu.props.onChange({ target: { value: 'external_rating' } }) })
   act(() => { tree.update(render()) })
@@ -32,5 +33,18 @@ it('keeps two shortcuts and exposes every field without changing the direction',
   act(() => { buttons[3].props.onClick() })
   assert.equal(value, 'external_rating')
   assert.equal(dir, 'asc')
+  act(() => { tree.update(render()) })
+  act(() => { tree!.root.findAllByType('button')[0].props.onClick() })
+  assert.equal(value, 'release_date')
+  assert.equal(dir, 'asc')
+  act(() => { tree.unmount() })
+})
+
+it('omits the more menu when all options are already shown outside', () => {
+  let tree: TestRenderer.ReactTestRenderer
+  act(() => { tree = TestRenderer.create(<SortSwitch label="排序"
+    options={[{ value: 'release_date', label: '发行' }, { value: 'add_time', label: '添加' }]}
+    quickValues={['release_date', 'add_time']} value="release_date" dir="desc" onChange={() => {}} />) })
+  assert.equal(tree!.root.findAllByType(SelectControl).length, 0)
   act(() => { tree.unmount() })
 })

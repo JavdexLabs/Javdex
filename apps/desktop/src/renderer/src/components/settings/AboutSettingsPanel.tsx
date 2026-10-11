@@ -5,7 +5,7 @@ import { UI_ICON_MD, UI_ICON_SM } from '../iconDefaults'
 import AppUpdatePanel from './AppUpdatePanel'
 import Button from '../Button'
 import styles from './AboutSettingsPanel.module.css'
-import { SettingsCard } from './SettingsPrimitives'
+import { SettingsCard, SettingsDisclosure } from './SettingsPrimitives'
 
 const appLogoUrl = `${import.meta.env?.BASE_URL ?? '/'}icon-192.png`
 
@@ -13,7 +13,7 @@ const PROJECT_FACTS = [
   { label: '运行方式', value: '桌面应用' },
   { label: '技术栈', value: 'Electron · React · TypeScript · SQLite' },
   { label: '开源许可', value: 'GPL-3.0-or-later' },
-  { label: '数据原则', value: '媒体库与资源保存在本机' }
+  { label: '数据存储', value: '本机或自建服务端；原始媒体由你管理' }
 ]
 
 export default function AboutSettingsPanel(): JSX.Element {
@@ -50,7 +50,7 @@ export default function AboutSettingsPanel(): JSX.Element {
             <Library {...UI_ICON_MD} aria-hidden />
             <div>
               <h3 id="about-project-title">项目信息</h3>
-              <p>软件不提供媒体内容，播放由系统默认播放器完成。</p>
+              <p>软件不提供媒体内容，支持内置与外部播放器。</p>
             </div>
           </div>
           <dl className={styles.factList}>
@@ -72,7 +72,7 @@ export default function AboutSettingsPanel(): JSX.Element {
             <ShieldCheck {...UI_ICON_MD} aria-hidden />
             <div>
               <h3 id="about-open-source-title">开源与隐私</h3>
-              <p>源代码按 GPL v3 或后续版本发布，可按许可再分发，不提供任何保证；版本检测仅请求公开 GitHub Release。</p>
+              <p>开源、本地优先；版本检测使用公开 GitHub Release。</p>
             </div>
           </div>
           <div className={styles.linkList}>
@@ -85,6 +85,10 @@ export default function AboutSettingsPanel(): JSX.Element {
               <ExternalLink {...UI_ICON_SM} aria-hidden />
             </button>
           </div>
+          <SettingsDisclosure title="许可与数据说明">
+            <p>源代码按 GPL v3 或后续版本发布，可按许可再分发，不提供任何保证。</p>
+            <p>资料库可保存在本机或自建服务端。云端模型仅在所选功能调用时接收请求内容。</p>
+          </SettingsDisclosure>
         </SettingsCard>
       </div>
 

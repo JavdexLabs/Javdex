@@ -97,20 +97,26 @@ export function AppFormSection({
 export function EditFormSection({
   title,
   hint,
+  actions,
   variant = 'default',
   children
 }: {
-  title: string
+  title: ReactNode
   hint?: ReactNode
+  actions?: ReactNode
   variant?: 'default' | 'media'
   children: ReactNode
 }): JSX.Element {
+  const heading = <>
+    <h4 className={styles.editSectionTitle}>{title}</h4>
+    {hint ? <p className={styles.editHint}>{hint}</p> : null}
+  </>
   return (
     <section className={styles.editSection} data-variant={variant}>
-      <h4 className={styles.editSectionTitle}>{title}</h4>
-      {hint ? (
-        <p className={styles.editHint}>{hint}</p>
-      ) : null}
+      {actions ? <div className={styles.editSectionHead}>
+        <div className={styles.editSectionHeading}>{heading}</div>
+        <div className={styles.sectionActions}>{actions}</div>
+      </div> : heading}
       {children}
     </section>
   )

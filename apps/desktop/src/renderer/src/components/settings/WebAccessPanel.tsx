@@ -160,6 +160,7 @@ function WebAccessForm({
             dirty={form.dirty}
             saving={saving}
             conflict={form.conflict}
+            error={error}
             onSave={() => void save()}
             onCancel={() => {
               form.reset();
@@ -253,11 +254,6 @@ function WebAccessForm({
               )}
             </div>
           </div>
-          )}
-          {error && (
-            <p className={styles.statusCopy} role="alert">
-              {error}
-            </p>
           )}
           <p className={styles.hint}>
             仅在自己的网络使用，请勿把端口映射到公网。

@@ -1,7 +1,7 @@
 import type { SettingsSnapshot } from '@shared/settingsTypes'
 import { FolderOpen, HardDrive, RotateCcw, ShieldCheck, ShieldOff } from 'lucide-react'
 import { UI_ICON_SM } from '../iconDefaults'
-import { SettingsCard, SettingsStatusPill } from './SettingsPrimitives'
+import { SettingsCard, SettingsDisclosure, SettingsStatusPill } from './SettingsPrimitives'
 import Button from '../Button'
 import styles from './StorageSettingsPanel.module.css'
 import NfoExportPanel from './NfoExportPanel'
@@ -148,7 +148,7 @@ export default function StorageSettingsPanel({
                   <h4>图片加密</h4>
                   <p>
                     {encryptionEnabled
-                      ? '资源以 .enc 与哈希文件名保存。'
+                      ? '图片内容已加密，磁盘文件不能直接查看。'
                       : '资源以可直接查看的图片文件保存。'}
                   </p>
                 </div>
@@ -164,11 +164,14 @@ export default function StorageSettingsPanel({
 
               <div className={styles.cryptoSummary}>
                 <div className={styles.cryptoState}>
-                  <span>{encryptionEnabled ? '已保护' : '未加密'}</span>
-                  <strong>{encryptionEnabled ? '.enc' : '原始图片'}</strong>
+                  <span>保护状态</span>
+                  <strong>{encryptionEnabled ? '已加密' : '未加密'}</strong>
                 </div>
                 <p>更改加密方式会处理全库图片；处理中应用暂时锁定。</p>
               </div>
+              <SettingsDisclosure title="磁盘文件格式与保护范围">
+                <p>加密图片使用 .enc 后缀与哈希文件名，应用内仍可正常查看；关闭加密后恢复为普通图片。此设置不加密原始视频或备份文件。</p>
+              </SettingsDisclosure>
             </section>
           </div>
 

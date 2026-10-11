@@ -80,6 +80,8 @@ export interface ModelWorkloadAssignment {
 
 export interface ModelManagementDocument {
   schemaVersion: typeof MODEL_MANAGEMENT_SCHEMA_VERSION
+  /** Absent in documents saved before versioned preset refreshes. */
+  builtinCatalogVersion?: number
   revision: string
   updatedAt: string
   connections: ManagedModelConnection[]

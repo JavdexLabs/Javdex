@@ -1,0 +1,151 @@
+.root {
+  min-width: 0;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: var(--control-h-md);
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.control:focus-within {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.control[data-disabled] {
+  opacity: 0.55;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: var(--target-min);
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.input {
+  flex: 1 1 100px;
+  min-width: 0;
+  width: 100%;
+  min-height: var(--target-min);
+  padding: 2px 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.feedback {
+  display: block;
+  min-height: 18px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.options {
+  max-height: 240px;
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-floating-control);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--control-h-md);
+  padding: 8px var(--control-pad-x);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 13px;
+}
+
+.option:hover, .option[data-active] {
+  background: var(--surface-control-hover);
+}
+
+.option:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.optionText {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.optionDescription, .notice {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.added {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--text-accent);
+  font-size: 11px;
+}
+
+.create {
+  color: var(--text-accent);
+  overflow-wrap: anywhere;
+}
+
+.notice {
+  padding: 6px var(--control-pad-x);
+}
+
+.keyboard {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px var(--control-pad-x);
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.keycap {
+  padding: 1px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}

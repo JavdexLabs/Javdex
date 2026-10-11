@@ -10,6 +10,7 @@ import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import { useVideoLifecycleController } from './useVideoLifecycleController'
 import { useVideoResourceController } from './useVideoResourceController'
 import { useVideoScrapeController } from './useVideoScrapeController'
+import { useVideoRatingController } from './useVideoRatingController'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -398,10 +399,10 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const handleBuiltinResource = async (resourceId: number, privateSession = false): Promise<void> => {
+  const handleBuiltinResource = async (resourceId: number): Promise<void> => {
     if (!video) return
     try {
-      const result = await api.playback.open({ libraryId: video.activeLibraryId, videoId, resourceId }, { privateSession })
+      const result = await api.playback.open({ libraryId: video.activeLibraryId, videoId, resourceId })
       if (!result.ok) toast.show(result.error ?? '内置播放不可用', 'error')
     } catch (error) { toast.show((error as Error).message, 'error') }
   }
@@ -516,15 +517,13 @@ export default function DetailPage(): JSX.Element {
     void executeRescrape(fields, site, mode)
   }
 
-  const handleRating = async (rating: number): Promise<void> => {
-    if (!video) return
-    try {
-      await api.videos.setRating(videoId, rating, expectedVideoVersion(video))
-      setVideo((v) => (v ? { ...v, rating } : v))
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
+  const { handleRating, rating: displayedRating } = useVideoRatingController({
+    scopeKey: detailScopeKey,
+    video,
+    updateVideo: detail => { detailRequestRef.current += 1; setVideo(detail) },
+    invalidateVideos,
+    notifyError: message => toast.show(message, 'error')
+  })
 
   const handleEditSave = async (input: VideoEditInput): Promise<void> => {
     if (!video) return
@@ -737,7 +736,7 @@ export default function DetailPage(): JSX.Element {
             </div>
 
             <div className={styles.info}>
-              <VideoDetailRatings video={video} onRatingChange={handleRating} />
+              <VideoDetailRatings video={video} rating={displayedRating} onRatingChange={handleRating} />
 
               <VideoDetailPrimaryMeta video={video} />
 
@@ -897,7 +896,7 @@ export default function DetailPage(): JSX.Element {
 
       <VideoDetailSecondaryMeta
         video={video}
-        onBuiltinResource={(resourceId, privateSession) => { void handleBuiltinResource(resourceId, privateSession) }}
+        onBuiltinResource={(resourceId) => { void handleBuiltinResource(resourceId) }}
         onOpenResource={(resourceId, player) => {
           void handleOpenResource(resourceId, player)
         }}

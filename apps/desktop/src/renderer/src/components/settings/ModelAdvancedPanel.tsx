@@ -8,6 +8,7 @@ import type {
 } from '@shared/modelManagementTypes'
 import Button from '../Button'
 import SettingsFormActions from './SettingsFormActions'
+import { SettingsSaveDetailsScope, SettingsSaveDetailsSlot } from './SettingsSaveDetailsScope'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import SelectControl from '../SelectControl'
@@ -67,10 +68,14 @@ export function ModelOverrideCard({
     longCache: model.effective.cache.supportsLongCacheRetention
   })
   const { contextWindow, maxTokens, tools, reasoning, promptCache, longCache } = form.draft
-  const update = <K extends keyof typeof form.draft>(key: K, value: (typeof form.draft)[K]): void =>
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const update = <K extends keyof typeof form.draft>(key: K, value: (typeof form.draft)[K]): void => {
+    setSaveError(null)
     form.setDraft((current) => ({ ...current, [key]: value }))
+  }
   const [saving, setSaving] = useState(false)
   const save = async (): Promise<boolean> => {
+    setSaveError(null)
     setSaving(true)
     const patch: ManualModelOverrides = {
       contextWindow,
@@ -89,7 +94,8 @@ export function ModelOverrideCard({
     try {
       const ok = await apply(
         { type: 'set-model-override', modelRef: model.id, patch },
-        `${model.name} 的人工覆盖已保存`
+        `${model.name} 的人工覆盖已保存`,
+        embedded ? { onError: setSaveError, notifySuccess: false } : undefined
       )
       if (ok) form.accept(form.draft)
       return ok
@@ -100,10 +106,12 @@ export function ModelOverrideCard({
   const resetOverride = async (): Promise<void> => {
     if (busy || saving) return
     setSaving(true)
+    setSaveError(null)
     try {
       const ok = await apply(
         { type: 'reset-model-override', modelRef: model.id },
-        `${model.name} 已恢复自动识别值`
+        `${model.name} 已恢复自动识别值`,
+        embedded ? { onError: setSaveError, notifySuccess: false } : undefined
       )
       if (ok) form.accept(draftFromMetadata(model), form.draft)
     } finally {
@@ -122,8 +130,74 @@ export function ModelOverrideCard({
     return () => onDirtyChange?.(model.id, false)
   }, [form.dirty, model.id, onDirtyChange])
 
+  const resetButton = model.hasManualOverrides ? (
+    <Button size="sm" disabled={busy || saving} onClick={() => void resetOverride()}>
+      恢复自动识别值
+    </Button>
+  ) : null
+  const formActions = (
+    <SettingsFormActions
+      placement={embedded ? 'footer' : 'header'}
+      dirty={form.dirty}
+      saving={saving}
+      disabled={busy}
+      conflict={form.conflict}
+      error={saveError}
+      onSave={() => void save()}
+      onCancel={() => { setSaveError(null); form.reset() }}
+    >
+      {embedded ? resetButton : null}
+    </SettingsFormActions>
+  )
+
+  const baselineMetadata = (
+    <div className={styles.baselineMeta}>
+      <span>
+        自动识别：{model.baseline.cache.evidence.source} · {formatEvidenceTime(model.baseline.cache.evidence.checkedAt)}
+      </span>
+      <span>
+        当前生效：{model.effective.cache.evidence.source} · {formatEvidenceTime(model.effective.cache.evidence.checkedAt)}
+      </span>
+      {model.effective.cache.evidence.note ? (
+        <span title={model.effective.cache.evidence.note}>{model.effective.cache.evidence.note}</span>
+      ) : null}
+      {model.hasManualOverrides ? (
+        <strong className={styles.overrideBadge}>已人工覆盖</strong>
+      ) : null}
+    </div>
+  )
+  const baselineSummary = (
+    <dl className={`${styles.baselineSummary} ${embedded ? styles.embeddedSummary : ''}`}>
+      <div className={styles.baselineItem}>
+        <dt className={styles.baselineLabel}>工具调用</dt>
+        <dd className={styles.baselineValue}>
+          {capabilityLabel(model.baseline.capabilities.tools)}
+        </dd>
+      </div>
+      <div className={styles.baselineItem}>
+        <dt className={styles.baselineLabel}>推理能力</dt>
+        <dd className={styles.baselineValue}>
+          {capabilityLabel(model.baseline.capabilities.reasoning)}
+        </dd>
+      </div>
+      <div className={styles.baselineItem}>
+        <dt className={styles.baselineLabel}>提示缓存</dt>
+        <dd className={styles.baselineValue}>
+          {capabilityLabel(model.baseline.cache.supportsPromptCache)}
+        </dd>
+      </div>
+      <div className={styles.baselineItem}>
+        <dt className={styles.baselineLabel}>长期缓存</dt>
+        <dd className={styles.baselineValue}>
+          {model.baseline.cache.supportsLongCacheRetention ? '支持' : '不支持'}
+        </dd>
+      </div>
+    </dl>
+  )
+
   return (
     <section className={`${styles.advancedCard} ${embedded ? styles.embeddedCard : ''}`}>
+      <SettingsSaveDetailsScope>
       <header className={styles.cardHeader}>
         <div className={styles.modelTitle}>
           <h3 className={`${styles.sectionTitle} ${styles.truncate}`} title={model.name}>
@@ -133,41 +207,15 @@ export function ModelOverrideCard({
             {modelConnectionName(snapshot, model.connectionId)} · {model.modelId}
           </p>
         </div>
-        <div className={styles.cardActions}>
-          {model.hasManualOverrides ? (
-            <Button
-              size="sm"
-              disabled={busy || saving}
-              onClick={() => void resetOverride()}
-            >
-              恢复自动识别值
-            </Button>
-          ) : null}
-          <SettingsFormActions placement="header"
-            dirty={form.dirty}
-            saving={saving}
-            disabled={busy}
-            conflict={form.conflict}
-            onSave={() => void save()}
-            onCancel={form.reset}
-          />
-        </div>
+        {!embedded ? (
+          <div className={styles.cardActions}>
+            {resetButton}
+            {formActions}
+          </div>
+        ) : null}
       </header>
-
-      <div className={styles.baselineMeta}>
-        <span>
-          自动识别：{model.baseline.cache.evidence.source} · {formatEvidenceTime(model.baseline.cache.evidence.checkedAt)}
-        </span>
-        <span>
-          当前生效：{model.effective.cache.evidence.source} · {formatEvidenceTime(model.effective.cache.evidence.checkedAt)}
-        </span>
-        {model.effective.cache.evidence.note ? (
-          <span title={model.effective.cache.evidence.note}>{model.effective.cache.evidence.note}</span>
-        ) : null}
-        {model.hasManualOverrides ? (
-          <strong className={styles.overrideBadge}>已人工覆盖</strong>
-        ) : null}
-      </div>
+      {!embedded ? <SettingsSaveDetailsSlot /> : null}
+      {!embedded ? baselineMetadata : null}
 
       <div className={styles.advancedGrid}>
         <label className={styles.field}>
@@ -235,32 +283,15 @@ export function ModelOverrideCard({
         </label>
       </div>
 
-      <dl className={styles.baselineSummary}>
-        <div className={styles.baselineItem}>
-          <dt className={styles.baselineLabel}>工具调用</dt>
-          <dd className={styles.baselineValue}>
-            {capabilityLabel(model.baseline.capabilities.tools)}
-          </dd>
-        </div>
-        <div className={styles.baselineItem}>
-          <dt className={styles.baselineLabel}>推理能力</dt>
-          <dd className={styles.baselineValue}>
-            {capabilityLabel(model.baseline.capabilities.reasoning)}
-          </dd>
-        </div>
-        <div className={styles.baselineItem}>
-          <dt className={styles.baselineLabel}>提示缓存</dt>
-          <dd className={styles.baselineValue}>
-            {capabilityLabel(model.baseline.cache.supportsPromptCache)}
-          </dd>
-        </div>
-        <div className={styles.baselineItem}>
-          <dt className={styles.baselineLabel}>长期缓存</dt>
-          <dd className={styles.baselineValue}>
-            {model.baseline.cache.supportsLongCacheRetention ? '支持' : '不支持'}
-          </dd>
-        </div>
-      </dl>
+      {embedded ? (
+        <details className={styles.evidence}>
+          <summary className={styles.evidenceToggle}>自动识别依据</summary>
+          {baselineMetadata}
+          {baselineSummary}
+        </details>
+      ) : baselineSummary}
+      {embedded ? formActions : null}
+      </SettingsSaveDetailsScope>
     </section>
   )
 }

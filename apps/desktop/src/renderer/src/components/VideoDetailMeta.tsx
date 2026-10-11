@@ -225,7 +225,7 @@ function VideoLocalResourceRow({
   resource: VideoResourceDetail
   multiResources: boolean
   onOpenResource?: (resourceId: number, player?: 'external') => void
-  onBuiltinResource?: (resourceId: number, privateSession?: boolean) => void
+  onBuiltinResource?: (resourceId: number) => void
   onRevealResource?: (resourceId: number) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onSplitResource?: (resource: VideoResourceDetail) => void
@@ -305,9 +305,6 @@ function VideoLocalResourceRow({
             <DetailMenuPanel>
               {onBuiltinResource && <DetailMenuItem onClick={() => { setMenuOpen(false); onBuiltinResource(resource.id) }}>
                 内置播放
-              </DetailMenuItem>}
-              {onBuiltinResource && <DetailMenuItem onClick={() => { setMenuOpen(false); onBuiltinResource(resource.id, true) }}>
-                内置播放（本次不保存进度）
               </DetailMenuItem>}
               {onOpenResource && <DetailMenuItem onClick={() => { setMenuOpen(false); onOpenResource(resource.id, 'external') }}>
                 外部播放
@@ -614,7 +611,7 @@ export function VideoDetailSecondaryMeta({
 }: {
   video: VideoDetail
   onOpenResource?: (resourceId: number, player?: 'external') => void
-  onBuiltinResource?: (resourceId: number, privateSession?: boolean) => void
+  onBuiltinResource?: (resourceId: number) => void
   onRevealResource?: (resourceId: number) => void
   onReadResourceLocator?: (resourceId: number) => Promise<string | null>
   onEditResource?: (resource: VideoResourceDetail) => void

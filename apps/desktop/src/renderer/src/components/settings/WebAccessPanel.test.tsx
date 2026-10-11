@@ -25,6 +25,8 @@ it('retries a failed service with saved configuration, and prevents submitting u
     await act(async () => { renderer = TestRenderer.create(<Panel />) })
     const retry = () => renderer.root.findAllByType('button').find(button => renderedText(button) === '重试启动')!
     assert.equal(retry().props.disabled, false)
+    assert.equal(renderer.root.findAllByType('input').some(input => input.props.autoComplete === 'one-time-code'), false,
+      'the inactive pairing flow shows instructions without an unusable code field')
     const port = renderer.root.findAllByType('input').find(input => input.props.value === '8088')!
     act(() => port.props.onChange({ target: { value: '8090' } }))
     assert.equal(retry().props.disabled, true)
@@ -42,6 +44,7 @@ it('retries a failed service with saved configuration, and prevents submitting u
     const codeInput = () => renderer.root.findAllByType('input').find(input => input.props.autoComplete === 'one-time-code')!
     act(() => codeInput().props.onPaste({ preventDefault() {}, currentTarget: { selectionStart: 0, selectionEnd: 0 }, clipboardData: { getData: () => '897 982' } }))
     assert.equal(codeInput().props.value, '897982')
+    assert.equal(codeInput().props.disabled, false)
     assert.equal(codeInput().props.maxLength, 6)
     await act(async () => { button('核对设备').props.onClick() })
     assert.deepEqual(inspected, ['897982'])

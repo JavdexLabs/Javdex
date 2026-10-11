@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import styles from './FacetCard.module.css'
 
 interface Props {
@@ -11,6 +11,17 @@ interface Props {
   onOpen: () => void
 }
 
+const COVER_ASPECT = 1.49
+const BORDER_WIDTH = 1
+const META_HEIGHT = 62
+const SERIES_META_HEIGHT = 80
+
+/** Match the rendered cover, metadata block and borders to the virtual cell. */
+export function facetCardHeight(width: number, kind: Props['kind']): number {
+  return (width - BORDER_WIDTH * 2) / COVER_ASPECT
+    + (kind === 'series' ? SERIES_META_HEIGHT : META_HEIGHT) + BORDER_WIDTH * 2
+}
+
 export default function FacetCard({
   kind,
   name,
@@ -21,7 +32,10 @@ export default function FacetCard({
   onOpen
 }: Props): JSX.Element {
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} style={{
+      '--facet-cover-aspect': COVER_ASPECT,
+      '--facet-meta-height': `${kind === 'series' ? SERIES_META_HEIGHT : META_HEIGHT}px`
+    } as CSSProperties}>
       <button
         type="button"
         className={styles.card}
@@ -36,9 +50,11 @@ export default function FacetCard({
             <span className={styles.placeholder} aria-hidden>{placeholder}</span>
           )}
         </div>
-        <div className={styles.name}>{name}</div>
-        {subtitle ? <div className={styles.subtitle}>{subtitle}</div> : null}
-        <div className={styles.count}>{videoCount} 部</div>
+        <div className={styles.metadata}>
+          <div className={styles.name}>{name}</div>
+          {subtitle ? <div className={styles.subtitle}>{subtitle}</div> : null}
+          <div className={styles.count}>{videoCount} 部</div>
+        </div>
       </button>
     </div>
   )

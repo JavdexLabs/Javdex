@@ -133,6 +133,21 @@
   font-weight: 600;
 }
 
+.editSectionHeading {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.editSectionHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--form-field-gap);
+}
+
 .editField {
   display: flex;
   flex-direction: column;

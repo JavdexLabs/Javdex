@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { PlaybackControl, PlaybackSnapshot, PlaybackTarget } from '@shared/desktop/playback'
+import type { PlaybackControl, PlaybackOcclusion, PlaybackSnapshot, PlaybackTarget } from '@shared/desktop/playback'
 import { createPlaybackSession } from './playbackSession'
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
 import type { PlaybackSource } from './playbackSource'
@@ -13,6 +13,7 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   const loadOptions: Array<{ paused: boolean } | undefined> = []
   const commands: PlaybackControl[] = []
   const viewports: Array<{ visible: boolean; width: number }> = []
+  const occlusionShapes: PlaybackOcclusion[][] = []
   const presentations: string[] = []
   const awake: boolean[] = []
   const navigations: string[] = []
@@ -24,7 +25,7 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   let raw: NativePlaybackState = { alive: true, loadedFiles: 1, pause: false, seekable: true, duration: 120, 'time-pos': 0, presentedFrames: 0 }
   const native: NativePlayback = {
     create() {}, load: (locator, options) => { loads.push(locator); loadOptions.push(options); raw.pause = options?.paused ?? false }, command: value => { commands.push(value) },
-    read: () => raw, viewport: (rect, visible) => { viewports.push({ visible, width: rect.width }) },
+    read: () => raw, viewport: (rect, visible, _state, occlusions = []) => { viewports.push({ visible, width: rect.width }); occlusionShapes.push(occlusions) },
     render() {}, addSubtitle() {}, destroy: () => { destroys++ }
   }
   let resolve = async (input: PlaybackTarget): Promise<PlaybackSource> => ({ target: input, title: 'Synthetic', mode: 'remote',
@@ -38,7 +39,7 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
     navigate: direction => { navigations.push(direction) },
     readVolume: volume?.read, volumeChanged: volume?.remember, progress, now: () => time
   })
-  return { session, native, loads, loadOptions, commands, events, viewports, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses,
+  return { session, native, loads, loadOptions, commands, events, viewports, occlusionShapes, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses,
     raw: (patch: Partial<NativePlaybackState>) => { raw = { ...raw, ...patch } },
     resolve: (next: typeof resolve) => { resolve = next }, validate: (next: typeof validate) => { validate = next } }
 }
@@ -278,20 +279,13 @@ test('a resume point loads paused and transport controls cannot bypass the expli
   assert.equal(f.saves[0].point?.position, 60.2)
 })
 
-test('private opening skips resume reads, writes and EOF clearing; stopping a waiting resume preserves the old point', async () => {
+test('stopping a waiting resume preserves the old point', async () => {
   const f = progressFixture({ position: 60, duration: 120 })
-  await f.session.open(target, true)
-  assert.equal(f.preparations(), 0)
-  assert.deepEqual(f.loadOptions, [{ paused: false }])
-  assert.equal(f.session.snapshot()!.recordingProgress, false)
-  f.start(); f.advance(20000); f.session.tick()
-  f.raw({ 'eof-reached': true, 'time-pos': 120 }); f.session.tick(); f.session.stop()
-  assert.equal(f.saves.length, 0)
-  assert.deepEqual(f.clears, [])
   await f.session.open(target)
   f.raw({ 'eof-reached': false, 'time-pos': 0 }); f.session.tick(); f.session.stop()
   assert.equal(f.preparations(), 1)
   assert.equal(f.saves.length, 0)
+  assert.equal(playbackControlSchema.safeParse({ kind: 'private-session' }).success, false)
 })
 
 test('progress saves only after actual start, every ten seconds and on pause/stop; pending seeks cannot save stale positions', async () => {
@@ -319,7 +313,7 @@ test('progress saves only after actual start, every ten seconds and on pause/sto
   assert.equal(f.saves.at(-1)?.point?.position, 80)
 })
 
-test('from-start decision, switching sources, EOF and live opt-out retain the correct resource identity', async () => {
+test('from-start decision, switching sources, EOF and disabling recording in settings retain the correct resource identity', async () => {
   const f = progressFixture({ position: 60, duration: 120 })
   await f.session.open(target); f.session.tick()
   f.session.control(f.session.snapshot()!.sessionId, { kind: 'resume', choice: 'start' })
@@ -419,7 +413,24 @@ test('actual-start requires advancing rendered video and clock; paused/seek-only
   f.raw({ presentedFrames: 5, 'time-pos': 20.4 }); f.session.tick()
   assert.equal(f.starts(), 1)
 })
+test('viewport preserves rounded popup geometry while clipping square popups and discarding nonintersections', async () => {
+  const f = fixture()
+  await f.session.open(target)
+  const state = f.session.snapshot()!
+  const rounded: PlaybackOcclusion = { x: -10, y: 70, width: 170, height: 50, radii: [8, 12, 16, 4] }
+  const viewport = { sessionId: state.sessionId, presentation: state.presentation, presentationRevision: state.presentationRevision, sequence: 1,
+    rect: { x: 0, y: 0, width: 100, height: 100 }, visible: true,
+    occlusions: [rounded, { x: 80, y: 70, width: 80, height: 50 }, { x: 200, y: 200, width: 10, height: 10 }] }
+  assert.equal(playbackViewportSchema.safeParse(viewport).success, true)
+  f.session.viewport(viewport)
+  assert.deepEqual(f.occlusionShapes.at(-1), [rounded, { x: 80, y: 70, width: 20, height: 30 }])
+  for (const radii of [[8, 8], [-1, 0, 0, 0], [Infinity, 0, 0, 0]]) {
+    assert.equal(playbackViewportSchema.safeParse({ ...viewport, occlusions: [{ ...rounded, radii }] }).success, false)
+  }
+})
+
 test('boundary schemas reject arbitrary commands, host paths, unknown keys and invalid geometry', () => {
+  assert.deepEqual(playbackControlSchema.parse({ kind: 'speed', value: 3 }), { kind: 'speed', value: 3 })
   for (const command of [{ kind: 'loadfile', url: '/private/a' }, { kind: 'volume', value: 101 }, { kind: 'speed', value: 99 }, { kind: 'pause', paused: true, locator: 'http://x' }]) {
     assert.equal(playbackControlSchema.safeParse(command).success, false)
   }

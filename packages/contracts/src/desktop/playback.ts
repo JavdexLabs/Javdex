@@ -5,8 +5,13 @@ export interface PlaybackTarget {
   videoId: number
   resourceId: number
 }
-export interface PlaybackOpenOptions { privateSession?: boolean }
 export type PlaybackClearProgress = { scope: 'all' } | { scope: 'current'; sessionId: string }
+export interface PlaybackOcclusion {
+  x: number; y: number; width: number; height: number
+  /** CSS corner radii: top left, top right, bottom right, bottom left.
+   * Rounded shapes retain their original bounds when crossing the video edge. */
+  radii?: [number, number, number, number]
+}
 export interface PlaybackViewport {
   sessionId: string
   presentationRevision: number
@@ -14,8 +19,8 @@ export interface PlaybackViewport {
   presentation: PlaybackPresentation
   rect: { x: number; y: number; width: number; height: number }
   visible: boolean
-  /** Visible HTML popup intersections, clipped to this viewport. */
-  occlusions?: Array<{ x: number; y: number; width: number; height: number }>
+  /** Visible HTML popup shapes intersecting this viewport. */
+  occlusions?: PlaybackOcclusion[]
 }
 export type PlaybackControl =
   | { kind: 'pause'; paused: boolean }
@@ -29,7 +34,6 @@ export type PlaybackControl =
   | { kind: 'presentation'; value: PlaybackPresentation }
   | { kind: 'restart' }
   | { kind: 'resume'; choice: 'continue' | 'start' }
-  | { kind: 'private-session' }
   | { kind: 'stop' }
 export interface PlaybackTrack {
   id: number

@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import type { ChildProcess, spawn, SpawnOptions } from 'node:child_process'
 import type { LocalTranslationModelId } from '@shared/desktop/localModels'
 import { createOfflineSubtitleInference } from './offlineInference'
-import { createAiRuntimeInstaller } from './runtimeInstaller'
+import { createAiRuntimeInstaller } from '../../services/localModels/runtimeInstaller'
 
 function fixture(model: LocalTranslationModelId, result: unknown = '中文译文', finishReason = 'stop') {
   const logs: Array<{ stage: string; value: unknown }> = []
@@ -33,7 +33,7 @@ function fixture(model: LocalTranslationModelId, result: unknown = '中文译文
   return { inference, launches, requests, logs, kills: () => kills }
 }
 
-for (const model of ['qwen3', 'hy-mt2-7b', 'index-translate-9b'] as const) {
+for (const model of ['qwen3', 'hy-mt2-7b'] as const) {
   test(`${model} serializes owned offline text and subtitle requests with its own model policy`, async () => {
     const f = fixture(model)
     try {
@@ -58,16 +58,15 @@ for (const model of ['qwen3', 'hy-mt2-7b', 'index-translate-9b'] as const) {
       assert.deepEqual(f.requests.map(request => request.body.max_tokens), [1536, 768])
       for (const { body } of f.requests) {
         assert.equal(body.stream, false)
-        assert.equal(body.top_p, model === 'hy-mt2-7b' ? 0.6 : model === 'qwen3' ? 0.8 : undefined)
-        assert.equal(body.temperature, model === 'index-translate-9b' ? 0 : 0.7)
+        assert.equal(body.top_p, model === 'hy-mt2-7b' ? 0.6 : 0.8)
+        assert.equal(body.temperature, 0.7)
         assert.equal(body.chat_template_kwargs === undefined, model === 'hy-mt2-7b')
-        assert.deepEqual(body.stop, model === 'hy-mt2-7b' ? ['<|eos|>', '<|extra_5|>']
-          : model === 'index-translate-9b' ? ['<|endoftext|>', '<|im_end|>'] : undefined)
+        assert.deepEqual(body.stop, model === 'hy-mt2-7b' ? ['<|eos|>', '<|extra_5|>'] : undefined)
         assert.equal((body.messages as Array<{ role: string }>)[0].role, 'user')
       }
       const message = (f.requests[1].body.messages as Array<{ content: string }>)[0].content
       assert.match(message, /不要翻译这些句子：\nもう翻訳済み/)
-      assert.ok(model === 'index-translate-9b' ? message.includes('【源文】\nはい\n\n【约束要求】') : message.endsWith('はい'))
+      assert.ok(message.endsWith('はい'))
     } finally { await f.inference.close() }
     assert.equal(f.kills(), 1)
   })
@@ -89,16 +88,6 @@ test('an already cancelled HY request never starts a translator', async () => {
   } finally { await f.inference.close() }
 })
 
-test('Index strips complete reasoning blocks but rejects unfinished, empty, oversized or truncated output', async () => {
-  const valid = fixture('index-translate-9b', '<think>\n内部推理\n</think>\n中文译文')
-  try { assert.equal(await valid.inference.translateText('日本語', new AbortController().signal), '中文译文') }
-  finally { await valid.inference.close() }
-  for (const [content, reason] of [['<think>不完整', 'stop'], ['<think></think>', 'stop'], ['', 'stop'], ['中文', 'length'], ['文'.repeat(6001), 'stop']] as const) {
-    const f = fixture('index-translate-9b', content, reason)
-    try { await assert.rejects(f.inference.translateText('日本語', new AbortController().signal), /译文不完整/) }
-    finally { await f.inference.close() }
-  }
-})
 
 test('diagnostics preserve raw rejected output and prompt without request credentials', async () => {
   const f = fixture('qwen3', '尚未完成的译文', 'length')

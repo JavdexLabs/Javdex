@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DEFAULT_SETTINGS, type AppSettings } from '@shared/settingsTypes'
-import type { ResolvedLlmRequestConfig } from '../services/llmClient'
+import { BUILT_IN_LLM_CATALOG_VERSION } from '@shared/llmProviders'
+import type { ResolvedLlmModelRequestConfig, ResolvedLlmRequestConfig } from '../services/llmClient'
 import type {
   ModelCandidate,
   ModelManagementDocument,
@@ -75,7 +76,7 @@ class FakeTransport implements ProviderTransportPort {
     return structuredClone(this.candidates)
   }
 
-  async test(): Promise<string> {
+  async test(_config: ResolvedLlmModelRequestConfig): Promise<string> {
     this.testCalls += 1
     return 'JAVDEX_OK'
   }
@@ -107,6 +108,158 @@ function assignment(snapshot: ModelManagementSnapshot, workloadId: string) {
 }
 
 describe('ModelManagementModule', () => {
+  it('defaults new MiniMax connections to Messages and retains saved Chat connections and bindings', async () => {
+    const fresh = harness()
+    let snapshot = fresh.module.read()
+    const connection = snapshot.connections.find(item => item.providerId === 'minimax')!
+    const model = snapshot.models.find(item => item.connectionId === connection.id)!
+    assert.equal(connection.protocol, 'anthropic-messages')
+    assert.equal(connection.baseUrl, 'https://api.minimax.cn/anthropic')
+    fresh.credentials.values.set('minimax', 'test-key')
+    snapshot = fresh.module.apply({ expectedRevision: snapshot.revision, command: { type: 'set-default-model', modelRef: model.id } })
+    assert.equal(fresh.module.resolve('app-default').model.api, 'anthropic-messages')
+    fresh.transport.test = async config => {
+      assert.equal(config.messagesUrl, 'https://api.minimax.cn/anthropic/v1/messages')
+      assert.equal(config.apiKey, 'test-key')
+      return 'JAVDEX_OK'
+    }
+    await fresh.module.testModel(model.id, new AbortController().signal)
+    const stored = structuredClone(fresh.store.value) as ModelManagementDocument
+    const savedConnection = stored.connections.find(item => item.id === connection.id)!
+    savedConnection.protocol = 'openai-chat'
+    savedConnection.baseUrl = 'https://api.minimaxi.com/v1'
+    for (const savedModel of stored.models.filter(item => item.connectionId === connection.id)) {
+      savedModel.baseline.api = 'openai-completions'
+    }
+    stored.builtinCatalogVersion = BUILT_IN_LLM_CATALOG_VERSION - 1
+    const restored = harness({ stored })
+    restored.credentials.values.set('minimax', 'test-key')
+    const result = restored.module.read()
+    assert.deepEqual((restored.store.value as ModelManagementDocument).connections, stored.connections)
+    assert.deepEqual(result.assignments, snapshot.assignments)
+    assert.equal(restored.module.resolve('app-default').model.api, 'openai-completions')
+    assert.equal(restored.module.resolve('app-default').model.baseUrl, savedConnection.baseUrl)
+  })
+
+  it('demotes referenced retired presets and retains current presets, identities, overrides and bindings', () => {
+    const stored = migrateModelManagementDocument(DEFAULT_SETTINGS, 'before-refresh', new Date())
+    delete stored.builtinCatalogVersion
+    const connection = stored.connections.find(item => item.providerId === 'openai')!
+    connection.protocol = 'openai-chat'
+    connection.baseUrl = 'https://saved.example/v1'
+    const oldModel = stored.models.find(item => item.connectionId === connection.id)!
+    oldModel.id = 'model:openai:gpt-4o'
+    oldModel.modelId = 'gpt-4o'
+    oldModel.name = 'My saved GPT-4o'
+    oldModel.baseline.api = 'openai-completions'
+    oldModel.manualOverrides = { contextWindow: 64000, maxTokens: 2048 }
+    const sharedId = stored.models.find(item => item.modelId === 'gpt-6.1-sol')!
+    sharedId.name = 'My Sol'
+    stored.assignments[0]!.model = { mode: 'explicit', modelRef: oldModel.id }
+    stored.assignments[1]!.model = { mode: 'explicit', modelRef: sharedId.id }
+    const { module, store, credentials } = harness({ stored })
+    const refreshed = module.read()
+    const saved = store.value as ModelManagementDocument
+    assert.equal(saved.builtinCatalogVersion, BUILT_IN_LLM_CATALOG_VERSION)
+    for (const original of stored.models) {
+      assert.deepEqual(saved.models.find(item => item.id === original.id), {
+        ...original, builtin: original.id === oldModel.id ? false : original.builtin
+      })
+    }
+    assert.deepEqual(saved.connections, stored.connections)
+    assert.deepEqual(saved.assignments, stored.assignments)
+    assert.equal(credentials.writes, 0)
+    assert.equal(saved.models.filter(item => item.connectionId === connection.id && item.modelId === sharedId.modelId).length, 1)
+    assert.equal(module.resolve('app-default').model.modelId, 'gpt-4o')
+    assert.equal(module.resolve('app-default').model.maxTokens, 2048)
+    assert.equal(module.resolve('app-default').model.api, 'openai-completions')
+    const newModel = refreshed.models.find(item => item.modelId === 'gpt-6-astra')!
+    assert.equal(newModel.builtin, true)
+    assert.equal(newModel.effective.api, 'openai-responses')
+    assert.equal(store.writes, 1)
+    module.read()
+    assert.equal(store.writes, 1)
+    const restarted = harness({ stored: store.value })
+    assert.deepEqual(restarted.module.read(), refreshed)
+    assert.equal(restarted.store.writes, 0)
+  })
+
+  it('deletes unused retired presets, preserves manual models and protects referenced retired presets', () => {
+    const stored = migrateModelManagementDocument(DEFAULT_SETTINGS, 'old', new Date())
+    stored.builtinCatalogVersion = BUILT_IN_LLM_CATALOG_VERSION - 1
+    const template = structuredClone(stored.models[0]!)
+    const bound = { ...structuredClone(template), id: 'retired-bound', modelId: 'retired-bound' }
+    const unused = { ...structuredClone(template), id: 'retired-unused', modelId: 'retired-unused',
+      manualOverrides: { maxTokens: 1234 } }
+    const manual = { ...structuredClone(template), id: 'manual-unused', modelId: 'manual-unused', builtin: false }
+    stored.models.push(bound, unused, manual)
+    stored.assignments[1]!.model = { mode: 'explicit', modelRef: bound.id }
+    const { module, store } = harness({ stored })
+    const snapshot = module.read()
+    assert.equal(snapshot.models.some(item => item.id === unused.id), false)
+    assert.equal(snapshot.models.find(item => item.id === bound.id)!.builtin, false)
+    assert.deepEqual((store.value as ModelManagementDocument).models.find(item => item.id === manual.id), manual)
+    const boundRef = bound.id
+    assert.throws(() => module.apply({ expectedRevision: snapshot.revision, command: {
+      type: 'remove-model', modelRef: boundRef
+    } }), /用途|使用|引用/)
+    const after = module.apply({ expectedRevision: snapshot.revision, command: {
+      type: 'remove-model', modelRef: manual.id
+    } })
+    assert.equal(after.models.some(item => item.id === manual.id), false)
+    const restarted = harness({ stored: store.value })
+    assert.equal(restarted.module.read().models.some(item => item.id === unused.id), false)
+    assert.equal(restarted.module.read().models.some(item => item.id === manual.id), false)
+    assert.equal(restarted.store.writes, 0)
+  })
+
+  it('does not cache a catalog refresh that failed to persist and retries without duplicates', () => {
+    const stored = migrateModelManagementDocument(DEFAULT_SETTINGS, 'old', new Date())
+    delete stored.builtinCatalogVersion
+    stored.models = stored.models.filter(item => item.modelId !== 'gpt-6-astra')
+    const { module, store } = harness({ stored })
+    store.failWrite = true
+    assert.throws(() => module.read(), /disk full/)
+    assert.deepEqual(store.value, stored)
+    store.failWrite = false
+    const snapshot = module.read()
+    assert.equal(snapshot.models.filter(item => item.modelId === 'gpt-6-astra').length, 1)
+    assert.equal(snapshot.models.find(item => item.modelId === 'gpt-6.1-sol')!.builtin, true)
+    assert.equal((store.value as ModelManagementDocument).builtinCatalogVersion, BUILT_IN_LLM_CATALOG_VERSION)
+  })
+
+  it('preserves a retired model selected in legacy settings as a manual model', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.defaultLlmProviderId = 'openai'
+    settings.defaultLlmModelId = 'gpt-4o'
+    settings.llmProviderConfigs.openai = { protocol: 'openai-chat' }
+    const { module } = harness({ settings })
+    const snapshot = module.read()
+    const model = snapshot.models.find(item => item.modelId === 'gpt-4o')!
+    assert.equal(model.builtin, false)
+    assert.equal(assignment(snapshot, 'app-default').resolution.modelRef, model.id)
+    assert.equal(module.resolve('app-default').model.api, 'openai-completions')
+  })
+
+  it('probes new OpenAI presets with their effective API without changing an existing connection', async () => {
+    const stored = migrateModelManagementDocument(DEFAULT_SETTINGS, 'old', new Date())
+    delete stored.builtinCatalogVersion
+    stored.connections.find(item => item.providerId === 'openai')!.protocol = 'openai-chat'
+    stored.models = stored.models.filter(item => item.modelId !== 'gpt-6-astra')
+    const { module, transport } = harness({ stored })
+    const snapshot = module.read()
+    const model = snapshot.models.find(item => item.modelId === 'gpt-6-astra')!
+    transport.test = async (config: ResolvedLlmModelRequestConfig) => {
+      assert.equal(config.protocol, 'openai-responses')
+      assert.equal(config.responsesUrl, 'https://api.openai.com/v1/responses')
+      assert.equal(config.chatCompletionsUrl, undefined)
+      assert.equal(config.modelId, 'gpt-6-astra')
+      return 'JAVDEX_OK'
+    }
+    assert.equal((await module.testModel(model.id, new AbortController().signal)).sample, 'JAVDEX_OK')
+    assert.equal(module.read().connections.find(item => item.providerId === 'openai')!.protocol, 'openai-chat')
+  })
+
   it('adds new cloud presets to saved documents once without changing existing choices', () => {
     const stored = migrateModelManagementDocument(DEFAULT_SETTINGS, 'saved-revision', new Date())
     stored.connections = stored.connections.filter(item => !['gemini', 'bailian'].includes(item.providerId))

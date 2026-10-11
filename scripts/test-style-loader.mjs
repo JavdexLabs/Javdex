@@ -7,7 +7,7 @@ export async function load(url, context, nextLoad) {
     return { ...result, source: patchPiGoogleTransport(String(result.source)) }
   }
   // Browser bundlers turn imported icons into URL strings; no pixels are mocked here.
-  if (url.endsWith('.png')) {
+  if (url.endsWith('.png') || url.endsWith('.svg')) {
     return {
       format: 'module',
       shortCircuit: true,

@@ -452,7 +452,7 @@ export interface AppIpcContract {
     result: PlayResult
   }
   [IPC.PLAYBACK_AVAILABILITY]: { args: []; result: import('./desktop/playback').PlaybackAvailability }
-  [IPC.PLAYBACK_OPEN]: { args: [target: import('./desktop/playback').PlaybackTarget, options?: import('./desktop/playback').PlaybackOpenOptions]; result: PlayResult }
+  [IPC.PLAYBACK_OPEN]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: PlayResult }
   [IPC.PLAYBACK_SNAPSHOT]: { args: []; result: import('./desktop/playback').PlaybackSnapshot | null }
   [IPC.PLAYBACK_CONTROL]: { args: [sessionId: string, command: import('./desktop/playback').PlaybackControl]; result: void }
   [IPC.PLAYBACK_VIEWPORT]: { args: [viewport: import('./desktop/playback').PlaybackViewport]; result: void }

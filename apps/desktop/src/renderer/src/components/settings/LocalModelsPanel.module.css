@@ -5,16 +5,6 @@
   container-name: local-models;
 }
 
-.card {
-  display: grid;
-  min-width: 0;
-  gap: var(--form-field-gap);
-  padding: var(--form-section-gap);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-panel);
-}
-
 .title {
   display: flex;
   align-items: center;
@@ -42,8 +32,7 @@
 }
 
 .actions,
-.variantActions,
-.headingActions {
+.variantActions {
   display: flex;
   align-items: center;
   gap: var(--form-label-gap);
@@ -51,47 +40,6 @@
 
 .actions {
   flex-wrap: wrap;
-}
-
-.catalogHeading,
-.variantToolbar {
-  display: flex;
-  min-width: 0;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--form-field-gap);
-}
-
-.headingActions {
-  margin-left: auto;
-}
-
-.details {
-  min-width: 0;
-  color: var(--text-secondary);
-}
-
-.details > summary {
-  min-height: var(--control-h-sm);
-  line-height: var(--control-h-sm);
-  cursor: pointer;
-}
-
-.details > summary:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: var(--focus-ring-space);
-}
-
-.detailBody {
-  display: grid;
-  gap: var(--form-field-gap);
-  padding-top: var(--form-label-gap);
-}
-
-.sourceField {
-  display: grid;
-  gap: var(--form-label-gap);
-  max-width: 26rem;
 }
 
 .feedback {
@@ -118,7 +66,8 @@
 }
 
 .progress[data-visible='false'],
-.errorButton[data-visible='false'] {
+.errorButton[data-visible='false'],
+.cancelButton[data-visible='false'] {
   visibility: hidden;
 }
 
@@ -312,20 +261,9 @@
     height: 8px;
   }
 
-  .variantToolbar {
-    flex-wrap: wrap;
-  }
 }
 
 @container local-models (width <= 500px) {
-  .catalogHeading {
-    flex-wrap: wrap;
-  }
-
-  .headingActions {
-    margin-left: 0;
-  }
-
   .feedback {
     grid-template-columns: minmax(0, 1fr) auto;
   }

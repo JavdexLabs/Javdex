@@ -58,6 +58,10 @@ node scripts/run-electron-tests.mjs packages/library/src/nfo/nfoArtifactCodec.te
 
 云端模型协议在 `packages/contracts/src/llmProviders.ts` 统一声明，Agent 流式请求仍由 Pi 处理。Pi 0.84.2 的 Gemini 适配器没有自定义 fetch 入口，构建与测试加载器通过 `scripts/pi-google-transport.mjs` 对固定版本进行小范围网络透传补丁：把 Javdex 的 fetch 注入每个 Google SDK 客户端的 `apiClient.apiCall`，保持原生消息转换、工具调用和流式解析，不修改全局 fetch 或 `node_modules`。补丁匹配失败会中止构建；升级 Pi／Google SDK 时须复核该私有入口，并运行 Pi 原生协议测试和 `check-built-pi-runtime.mjs` 的 Responses／Gemini 构建产物验证。
 
+内置云端模型的核对依据见 [云端模型目录](CLOUD_MODEL_CATALOG.md)。修改预设时同步递增 `BUILT_IN_LLM_CATALOG_VERSION`；配置文件的 `builtinCatalogVersion` 记录已应用的目录版本，缺失时视为旧目录。首次读取旧目录时，按连接的 providerId 和模型 ID 判断内置模型是否过时：仍在目录中的记录保持内置；退出目录且无用途引用的记录删除；有用途引用的记录转为手动模型，保留身份、能力覆盖和用途绑定。引用按显式 modelRef 判断，包括 app-default（其继承用途自然保留）；用户手动模型不参与自动删除。随后按连接和模型 ID 去重添加新预设，不改已有连接；原子写入成功后才缓存结果。同版本启动不再次添加已删除的手动模型。预设可声明模型级协议（如 OpenAI Responses），发现列表沿用连接协议，生成测试与实际调用使用模型有效协议。
+
+仅调整新连接的默认协议或地址时，不触发目录刷新，也不覆盖已保存连接。MiniMax 新连接使用 Anthropic Messages；同一连接内的新模型沿用该连接协议，不强制将已有 Chat 连接的模型切换为 Messages。MiniMax 的连接测试与短文本翻译预留思考预算；Pi 注册该供应商时允许无签名 thinking 块，工具后续轮次及恢复保持其内容类型。
+
 桌面构建同时生成 renderer manifest 并运行 `measure:renderer`：按静态依赖闭包去重统计 JS/CSS 与 gzip 字节，检查设置页及四个低频面板仍为延迟 chunk。该报告衡量产物体积，不宣称已验证启动时间或内存收益。职责边界、阶段计划与本轮证据见 [UI 架构优化记录](UI_ARCHITECTURE_OPTIMIZATION.md)。
 
 ## 打包与发布
@@ -77,11 +81,13 @@ npm run dist:linux           # Linux 目标
 
 ### 本地 AI 运行库（开发分支）
 
-AI 模型设置分为用途配置、提供商与模型、本地模型三个页签。提供商模型的能力覆盖在模型详情内维护；本地文件按语音输入／文本输入分组。本地配置 `local-models.json` v5 为字幕识别、字幕翻译和普通文本翻译保存独立的模型系列及精度 ID。v1–v4 升级沿用保存目录、下载来源及精度，将原共享翻译选择复制到两个翻译用途；不重命名或重新下载权重。
+本地模型是独立底层能力，默认存储于 Windows 标准用户配置的 `%LOCALAPPDATA%/Javdex/local-ai`，其他平台及隔离配置使用 `<userData>/local-ai`，由 `main/services/localModels` 管理目录、文件、运行依赖及文本推理。该服务层不依赖播放器或字幕模块；AI 字幕通过注入的模型运行接口调用它，字幕缓存位于同级 `cache/ai-subtitles`，抽取音频和任务日志位于 `cache/local-ai/work/ai-subtitles`。普通文本翻译直接调用共用文本引擎，不创建字幕引擎或字幕工作目录。文件管理和各功能的用途绑定保持独立。权重路径为 `models/<family>/<publisher>/<revision>/<precision>/<upstream-filename>`，各精度附来源、哈希、大小与许可；引擎使用 `runtimes/<engine>/<version>/<platform-arch[-cpu]>`，不与模型家族版本绑在一起。`downloads/<sha256>` 保留续传数据七天，`staging/install-<uuid>` 与 `staging/import-<uuid>` 保留遗留文件一天；启动与下载前清理过期项，操作期间持有排他锁。迁移仅复制并逐文件校验模型、运行库、下载和存储标识，配置提交后清理原副本，保留无关文件；缓存不迁移。
+
+AI 服务设置分为功能、云端服务、本地模型三个页签。提供商模型的能力覆盖在模型详情内维护；本地文件按语音输入／文本输入分组。本地配置 `local-models.json` v5 为字幕识别、字幕翻译和普通文本翻译保存独立的模型系列及精度 ID。v1–v4 升级沿用保存目录、下载来源及精度，将原共享翻译选择复制到两个翻译用途；不重命名或重新下载权重。
 
 每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
 
-本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/player/aiSubtitles/runtimeInstaller.ts)：Windows x64 保留原目录与 ZIP；macOS、Linux 的 arm64／x64 工具在 `tools/<platform>-<arch>/` 隔离，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
+本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/services/localModels/runtimeInstaller.ts)：Windows x64 保留原目录与 ZIP；macOS、Linux 的 arm64／x64 工具在 `tools/<platform>-<arch>/` 隔离，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
 
 macOS 上 `npm run ai-runtime:build` 使用固定 commit 的 whisper.cpp b5130 与 FFmpeg 8.1.3 源码，验证 SHA-256 后编译静态 CLI。首次开发构建需要 Xcode Command Line Tools、CMake、make 及网络；不自动安装系统工具。`dev`、`desktop:build`、`start`／`preview` 自动准备本机产物，后续复用已验证的构建缓存。Mac 打包另按目标架构编译，输出 `out/ai-runtime/darwin-<arch>/`，支持 arm64 和 x64 单架构包，不支持 universal AI 工具包。
 

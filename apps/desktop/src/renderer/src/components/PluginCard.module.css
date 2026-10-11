@@ -1,5 +1,9 @@
 .version {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-secondary);
   font-size: 11px;
 }
@@ -124,29 +128,20 @@
 }
 
 .body {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: repeat(2, calc(var(--control-h-sm) - 8px)) 17px 17px;
+  align-content: start;
   gap: 5px;
   min-width: 0;
   flex: 1;
 }
 
-.card .body {
-  display: grid;
-  grid-template-rows: repeat(2, calc(var(--control-h-sm) - 8px)) 17px 17px 3px;
-  align-content: start;
-}
-
 .titleRow {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 6px;
   min-width: 0;
-}
-
-.card .titleRow {
-  align-items: center;
 }
 
 .name {
@@ -214,21 +209,9 @@
 .tags {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px 6px;
   min-width: 0;
-}
-
-.card .tags {
-  flex-wrap: nowrap;
-}
-
-.tags .version {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .meta {
@@ -239,14 +222,11 @@
   font-size: 11px;
 }
 
-.meta span {
+.fieldCount {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.fieldCount {
   flex-shrink: 0;
   text-align: right;
 }
@@ -262,28 +242,10 @@
   white-space: nowrap;
 }
 
-.fieldBar {
-  height: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--border-subtle) 80%, transparent);
-  overflow: hidden;
-}
-
-.fieldFill {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--text-muted);
-  transition: width var(--motion-med);
-}
-
-.fieldFillFull {
-  background: var(--text-accent);
-}
-
 .actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 4px;
   margin: 0;
   min-height: 32px;
@@ -292,10 +254,6 @@
   transform: none;
   transition:
     opacity var(--motion-fast);
-}
-
-.card .actions {
-  justify-content: flex-start;
 }
 
 .card:where(:hover, :focus-within, .cardMenuOpen) .actions {

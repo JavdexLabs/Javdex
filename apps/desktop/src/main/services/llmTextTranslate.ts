@@ -124,7 +124,7 @@ async function requestOpenAiTranslate(
         ],
         stream: false,
         temperature: 0.2,
-        max_tokens: estimateMaxTokens(text)
+        max_tokens: config.providerId === 'minimax' ? Math.max(2048, estimateMaxTokens(text)) : estimateMaxTokens(text)
       }),
       signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS)
     })
@@ -177,7 +177,7 @@ async function requestAnthropicTranslate(
         model: config.modelId,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: text }],
-        max_tokens: estimateMaxTokens(text),
+        max_tokens: config.providerId === 'minimax' ? Math.max(2048, estimateMaxTokens(text)) : estimateMaxTokens(text),
         temperature: 0.2
       }),
       signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS)

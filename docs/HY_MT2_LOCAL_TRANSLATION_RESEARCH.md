@@ -18,7 +18,7 @@
 
 ## Javdex 接入范围与代码边界
 
-- **翻译而非识别**：作为千问之外的可选字幕/资料翻译模型，不替代 Kotoba 音频识别；说话人区分、识别标点增强仍属于独立的 Kotoba 2.2 接入范围。当前只有可行性结论，不变更默认模型。
+- **翻译而非识别**：作为千问之外的可选字幕/资料翻译模型，不替代 Kotoba 音频识别。当前只有可行性结论，不变更默认模型。
 - **复用既有运行库**：`runtimeManifest.ts` 固定 llama.cpp `b11435`。该版本转换器已注册 `HunYuanDenseV1ForCausalLM` → `HUNYUAN_DENSE`，模型 loader 和图中存在 Q/K norm 支持；官方普通 GGUF API 的架构为 `hunyuan-dense`。这提供接入依据，不能代替实际文件加载和生成验收。[固定转换器](https://github.com/ggml-org/llama.cpp/blob/b11435/conversion/hunyuan.py)、[固定模型定义](https://github.com/ggml-org/llama.cpp/blob/b11435/src/models/models.h)、[固定计算图](https://github.com/ggml-org/llama.cpp/blob/b11435/src/models/hunyuan-vl.cpp)、[官方 GGUF 元数据][api-a]。
 - **模型身份必须解耦**：当前 `packages/contracts/src/desktop/localModels.ts` 仅有 `kotoba` / `qwen3`，`modelCatalog.ts` 把非 `kotoba-tech/` 发布者都归为千问，`localModelManager.ts` 把本地翻译选择和运行库租约固定绑定 `qwen3`。新增下载地址不够；需要显式模型家族/版本注册，以及独立的活动翻译模型选择。下载、校验、精度切换、删除、导出、目录迁移可以复用已有模型管理，不另起一套服务。
 - **独立翻译 profile**：`offlineInference.ts` 当前使用 Qwen 的提示词和 `enable_thinking=false`。官方 Hy 1.8B 模板使用专属 HY token，没有这个开关分支；应让 llama-server 使用经过验证的官方 GGUF 模板/Jinja 路径，并分别配置提示、采样、输出处理。切换家族、精度或提示版本应隔离中文翻译缓存，保留未受影响的日语识别缓存。[官方固定模板](https://huggingface.co/tencent/Hy-MT2-1.8B/blob/9a341cd1b679d3efd23b46e847b01745a71ed792/chat_template.jinja)、[GGUF 内嵌模板][api-a]。本文未决定最终采样值，来源差异见下文。

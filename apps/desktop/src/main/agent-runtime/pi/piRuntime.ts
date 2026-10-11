@@ -290,7 +290,10 @@ async function createControlledModelRuntime(input: RuntimeSessionInit) {
     : api === 'anthropic-messages'
     ? {
         supportsLongCacheRetention: input.model.cacheCompatibility.supportsLongCacheRetention,
-        sendSessionAffinityHeaders: input.model.cacheCompatibility.sendSessionAffinityHeaders
+        sendSessionAffinityHeaders: input.model.cacheCompatibility.sendSessionAffinityHeaders,
+        // MiniMax requires thinking blocks to survive subsequent tool turns,
+        // including responses without an Anthropic signature.
+        allowEmptySignature: input.model.model.providerId === 'minimax'
       }
     : api === 'openai-responses'
       ? {

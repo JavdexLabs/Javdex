@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DEFAULT_SETTINGS, type AppSettings } from '@shared/settingsTypes'
+import type { ResolvedLlmRequestConfig } from '../services/llmClient'
 import type {
   ModelCandidate,
   ModelManagementDocument,
@@ -69,7 +70,7 @@ class FakeTransport implements ProviderTransportPort {
   testCalls = 0
   candidates: ModelCandidate[] = [{ id: 'remote-chat', name: 'Remote Chat', kind: 'chat' }]
 
-  async discover(): Promise<ModelCandidate[]> {
+  async discover(_config: ResolvedLlmRequestConfig): Promise<ModelCandidate[]> {
     this.discoverCalls += 1
     return structuredClone(this.candidates)
   }
@@ -106,6 +107,72 @@ function assignment(snapshot: ModelManagementSnapshot, workloadId: string) {
 }
 
 describe('ModelManagementModule', () => {
+  it('adds new cloud presets to saved documents once without changing existing choices', () => {
+    const stored = migrateModelManagementDocument(DEFAULT_SETTINGS, 'saved-revision', new Date())
+    stored.connections = stored.connections.filter(item => !['gemini', 'bailian'].includes(item.providerId))
+    const ids = new Set(stored.connections.map(item => item.id))
+    stored.models = stored.models.filter(item => ids.has(item.connectionId))
+    stored.connections.find(item => item.providerId === 'openai')!.baseUrl = 'https://saved.example/v1'
+    const { module, store } = harness({ stored })
+    const snapshot = module.read()
+    assert.equal(snapshot.connections.find(item => item.providerId === 'gemini')!.protocol, 'google-generative-ai')
+    assert.equal(snapshot.connections.find(item => item.providerId === 'bailian')!.baseUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+    assert.deepEqual((store.value as ModelManagementDocument).assignments, stored.assignments)
+    assert.deepEqual((store.value as ModelManagementDocument).connections.filter(item => ids.has(item.id)), stored.connections)
+    assert.equal(store.writes, 1)
+    module.read()
+    assert.equal(store.writes, 1)
+    const restarted = harness({ stored: store.value })
+    assert.equal(restarted.module.read().revision, snapshot.revision)
+    assert.equal(restarted.store.writes, 0)
+  })
+
+  it('retains a custom Gemini endpoint and models when a shipped preset appears', () => {
+    const stored = migrateModelManagementDocument(DEFAULT_SETTINGS, 'saved-revision', new Date())
+    const connection = stored.connections.find(item => item.providerId === 'gemini')!
+    connection.source = 'custom'
+    connection.protocol = 'openai-chat'
+    connection.baseUrl = 'https://gateway.example/v1'
+    const { module, store } = harness({ stored })
+    module.read()
+    const saved = store.value as ModelManagementDocument
+    assert.equal(saved.connections.find(item => item.id === connection.id)!.baseUrl, connection.baseUrl)
+    assert.equal(saved.connections.find(item => item.id === connection.id)!.protocol, 'openai-chat')
+    assert.deepEqual(saved.models, stored.models)
+    assert.deepEqual(saved.assignments, stored.assignments)
+  })
+
+  for (const protocol of ['openai-responses', 'google-generative-ai'] as const) {
+    it(`persists and resolves ${protocol} and sends the correct discovery/probe endpoints`, async () => {
+      const { module, store, transport } = harness()
+      const before = module.read()
+      const snapshot = module.apply({ expectedRevision: before.revision, command: {
+        type: 'save-connection', connection: {
+          providerId: 'openai', name: 'OpenAI', source: 'builtin', protocol,
+          baseUrl: protocol === 'google-generative-ai' ? 'https://google.example/v1beta' : 'https://responses.example/v1',
+          apiKeyAction: 'keep'
+        }
+      } })
+      const connection = snapshot.connections.find(item => item.providerId === 'openai')!
+      const model = snapshot.models.find(item => item.connectionId === connection.id)!
+      const selected = module.apply({ expectedRevision: snapshot.revision, command: { type: 'set-default-model', modelRef: model.id } })
+      assert.equal(module.resolve('app-default').model.api, protocol)
+      assert.deepEqual(module.read().assignments, selected.assignments)
+      let discovered = false
+      transport.discover = async config => {
+        assert.equal(config.protocol, protocol)
+        assert.equal(config.chatCompletionsUrl, undefined)
+        if (protocol === 'google-generative-ai') assert.equal(config.googleModelsUrl, 'https://google.example/v1beta/models')
+        else assert.equal(config.responsesUrl, 'https://responses.example/v1/responses')
+        discovered = true
+        return []
+      }
+      await module.discoverModels(connection.id, new AbortController().signal)
+      assert.ok(discovered)
+      assert.equal(harness({ stored: store.value }).module.read().connections.find(item => item.id === connection.id)!.protocol, protocol)
+    })
+  }
+
   it('builds the migration backup from a strict non-secret provider whitelist', () => {
     const settings = structuredClone(DEFAULT_SETTINGS) as AppSettings & {
       llmProviderConfigs: Record<string, { baseUrl?: string; protocol?: string; apiKey?: string }>

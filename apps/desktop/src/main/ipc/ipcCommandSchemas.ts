@@ -1,6 +1,7 @@
 import { backupRequestSchema, desktopBackupFileSchema } from '@shared/protocol/backup'
 import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import { z } from 'zod'
+import { LLM_PROVIDER_PROTOCOLS } from '@shared/llmProviders'
 import { IPC } from '@shared/ipc-channels'
 import type { ActressIpcContract } from '@shared/actressIpcContract'
 import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
@@ -284,7 +285,7 @@ const saveConnection = z.object({
   providerId: nonEmptyText,
   name: nonEmptyText,
   source: z.enum(['builtin', 'custom']),
-  protocol: z.enum(['openai-chat', 'anthropic-messages']),
+  protocol: z.enum(LLM_PROVIDER_PROTOCOLS),
   baseUrl: nonEmptyText,
   local: z.boolean().optional(),
   agentCompatible: z.boolean().optional(),

@@ -82,6 +82,8 @@
 
 先在“设置 → AI 模型 → 提供商与模型”配置连接和可用模型，再到“用途配置”选择并保存应用默认模型或对应助手的模型。模型配置保存后只影响新任务。本机部署的 Ollama 等 API 服务也在提供商页配置；应用直接下载和管理的模型文件位于“本地模型”页。
 
+云端服务支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Gemini 原生协议。Responses 用于提供 `/responses` 的服务；现有 OpenAI 连接升级后保留原协议，可在高级连接选项中显式切换。Google Gemini 预设使用原生接口，地址默认为 `https://generativelanguage.googleapis.com/v1beta`；若使用 Google 的 OpenAI 兼容入口，请另建 Chat Completions 连接并填写 `https://generativelanguage.googleapis.com/v1beta/openai`。填写基础地址，不要附加具体请求路径。
+
 提供商详情中可测试连接、获取或手动添加模型；连接有未保存更改时，先保存再测试或获取。每个模型的“能力与上限”集中展示自动识别值、手动覆盖及依据，可重置为自动值。
 
 插件开发可独立选模型；影片/演员采集、清单导入与媒体库整理共用整理用途的模型。思考强度及输出、超时等限制仍可调整；缓存与上下文压缩自动管理。已有任务继续使用启动时保存的设置。

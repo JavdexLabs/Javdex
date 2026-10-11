@@ -1,6 +1,10 @@
+import { setTimeout as wait } from 'node:timers/promises'
 import type { ResolvedLlmModelRequestConfig, ResolvedLlmRequestConfig } from './llmClient'
 import { llmFetch } from '../utils/llmFetch'
 import { inferLlmModelKind, type LlmModelDefinition } from '@shared/llmProviders'
+import { requestResponsesText } from './llm/adapters/openaiResponsesAdapter'
+import { requestGoogleText } from './llm/adapters/googleGenerativeAdapter'
+import { LlmHttpError } from './llm/adapters/nativeTextTransport'
 
 const TEST_TIMEOUT_MS = 30_000
 const TEST_MAX_ATTEMPTS = 4
@@ -48,6 +52,29 @@ export async function testResolvedLlmModelConnection(
   if (config.protocol === 'anthropic-messages') {
     return pingAnthropic(config)
   }
+  if (config.protocol === 'openai-responses' || config.protocol === 'google-generative-ai') {
+    return runProbeWithRetries(async () => {
+      try {
+        const request = config.protocol === 'openai-responses' ? requestResponsesText : requestGoogleText
+        const result = await request([{ role: 'user', content: TEST_PROMPT }], {
+          ...config, maxTokens: 2048, timeoutMs: TEST_TIMEOUT_MS
+        })
+        return result.text
+      } catch (error) {
+        if (config.signal?.aborted) throw error
+        if (error instanceof LlmHttpError) {
+          if (RETRYABLE_HTTP_STATUS.has(error.status)) {
+            throw new RetryableProbeError(error.message, parseRetryAfterMs(error.headers))
+          }
+          throw error
+        }
+        if (error instanceof Error && (error.name === 'TypeError' || error.name === 'TimeoutError')) {
+          throw wrapNetworkError(error)
+        }
+        throw error
+      }
+    }, config.signal)
+  }
   return pingOpenAiCompatible(config)
 }
 
@@ -56,6 +83,7 @@ export async function listResolvedLlmProviderModels(
   signal?: AbortSignal
 ): Promise<LlmModelDefinition[]> {
   if (config.protocol === 'anthropic-messages') return listAnthropicModels(config, signal)
+  if (config.protocol === 'google-generative-ai') return listGoogleModels(config, signal)
   return listOpenAiCompatibleModels(config, signal)
 }
 
@@ -64,7 +92,7 @@ async function pingOpenAiCompatible(config: ResolvedLlmModelRequestConfig): Prom
     throw new Error('OpenAI 兼容端点未配置')
   }
 
-  return runProbeWithRetries(() => requestOpenAiProbe(config))
+  return runProbeWithRetries(() => requestOpenAiProbe(config), config.signal)
 }
 
 async function requestOpenAiProbe(config: ResolvedLlmModelRequestConfig): Promise<string> {
@@ -126,7 +154,7 @@ async function pingAnthropic(config: ResolvedLlmModelRequestConfig): Promise<str
     throw new Error(`请先在设置 → 模型中为「${config.providerName}」填写 API Key`)
   }
 
-  return runProbeWithRetries(() => requestAnthropicProbe(config))
+  return runProbeWithRetries(() => requestAnthropicProbe(config), config.signal)
 }
 
 async function requestAnthropicProbe(config: ResolvedLlmModelRequestConfig): Promise<string> {
@@ -175,18 +203,20 @@ async function requestAnthropicProbe(config: ResolvedLlmModelRequestConfig): Pro
   return extractAnthropicText(payload)
 }
 
-async function runProbeWithRetries(requestProbe: () => Promise<string>): Promise<string> {
+async function runProbeWithRetries(requestProbe: () => Promise<string>, signal?: AbortSignal): Promise<string> {
   let lastRetryableError: Error | undefined
   for (let attempt = 0; attempt < TEST_MAX_ATTEMPTS; attempt += 1) {
+    signal?.throwIfAborted()
     try {
       const content = await requestProbe()
       if (content.trim()) return content.trim().slice(0, 160)
       throw new RetryableProbeError('模型服务已响应，但没有返回可用文本内容')
     } catch (err) {
+      signal?.throwIfAborted()
       if (!(err instanceof RetryableProbeError)) throw err
       lastRetryableError = err
       if (attempt >= TEST_MAX_ATTEMPTS - 1) break
-      await wait(getRetryDelayMs(attempt, err.retryAfterMs))
+      await wait(getRetryDelayMs(attempt, err.retryAfterMs), undefined, { signal })
     }
   }
   throw new Error(
@@ -270,6 +300,46 @@ async function listAnthropicModels(
   return normalizeModelList(payload.data?.map((model) => ({ id: model.id, name: model.display_name })))
 }
 
+async function listGoogleModels(config: ResolvedLlmRequestConfig, signal?: AbortSignal): Promise<LlmModelDefinition[]> {
+  if (!config.googleModelsUrl) throw new Error('Google Gemini 模型列表端点未配置')
+  if (!config.apiKey.trim()) throw new Error(`请先为「${config.providerName}」填写 API Key`)
+  const models: LlmModelDefinition[] = []
+  const seenTokens = new Set<string>()
+  const timeout = AbortSignal.timeout(TEST_TIMEOUT_MS)
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
+  let pageToken: string | undefined
+  do {
+    requestSignal.throwIfAborted()
+    const url = new URL(config.googleModelsUrl)
+    url.searchParams.set('pageSize', '1000')
+    if (pageToken) url.searchParams.set('pageToken', pageToken)
+    const response = await llmFetch(url.href, {
+      headers: { 'x-goog-api-key': config.apiKey }, signal: requestSignal
+    })
+    const payload = await response.json() as {
+      error?: { message?: string }
+      models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }>
+      nextPageToken?: string
+    }
+    if (!response.ok) throw new Error(payload.error?.message || `查询模型失败：HTTP ${response.status}`)
+    for (const item of payload.models ?? []) {
+      const id = item.name?.replace(/^models\//, '').trim()
+      if (!id) continue
+      const methods = item.supportedGenerationMethods ?? []
+      const kind = methods.includes('generateContent') ? 'chat' : methods.includes('embedContent') ? 'embedding' : undefined
+      if (!kind) continue
+      models.push({ id, name: item.displayName?.trim() || id, kind })
+    }
+    pageToken = payload.nextPageToken
+    if (pageToken) {
+      if (seenTokens.has(pageToken) || seenTokens.size >= 100) throw new Error('Gemini 模型列表分页异常')
+      seenTokens.add(pageToken)
+    }
+  } while (pageToken)
+  return [...new Map(models.map(model => [model.id, model])).values()]
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+}
+
 function normalizeModelList(input: Array<{ id?: string; name?: string } | undefined> | undefined): LlmModelDefinition[] {
   const seen = new Set<string>()
   const models: LlmModelDefinition[] = []
@@ -337,8 +407,4 @@ function parseRetryAfterMs(headers: Headers): number | undefined {
   const timestamp = Date.parse(value)
   if (Number.isFinite(timestamp)) return Math.max(0, timestamp - Date.now())
   return undefined
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

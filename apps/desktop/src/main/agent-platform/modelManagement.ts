@@ -7,6 +7,11 @@ import { readTestUserDataPath } from '@shared/appIdentity'
 import type { ModelCacheCompatibility } from '@shared/aiConfigurationTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
+  BUILT_IN_LLM_PROVIDERS,
+  LLM_PROVIDER_PROTOCOLS,
+  isLlmProviderProtocol,
+  llmProtocolToRuntimeApi,
+  type LlmProviderProtocol,
   buildLlmProviderViewModels,
   inferLlmModelKind,
   isReservedLlmProviderId,
@@ -14,6 +19,7 @@ import {
   normalizeDefaultLlmSelection
 } from '@shared/llmProviders'
 import type { AppSettings } from '@shared/settingsTypes'
+import { llmRequestEndpoints } from '../services/llmClient'
 import {
   MODEL_MANAGEMENT_SCHEMA_VERSION,
   type ManagedModel,
@@ -86,7 +92,7 @@ const capabilitiesSchema = z.object({
   reasoning: capabilityStateSchema
 }).strict()
 const runtimeMetadataSchema = z.object({
-  api: z.enum(['openai-completions', 'anthropic-messages']),
+  api: z.enum(['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai']),
   contextWindow: safePositiveInteger,
   maxTokens: safePositiveInteger,
   capabilities: capabilitiesSchema,
@@ -105,7 +111,7 @@ const connectionSchema = z.object({
   providerId: nonEmptyString,
   name: nonEmptyString,
   source: z.enum(['builtin', 'custom']),
-  protocol: z.enum(['openai-chat', 'anthropic-messages']),
+  protocol: z.enum(LLM_PROVIDER_PROTOCOLS),
   baseUrl: nonEmptyString,
   proxyUrl: z.string().optional(),
   credentialRef: nonEmptyString,
@@ -233,7 +239,7 @@ function cacheCompatibility(
       evidence: { source: 'migration', checkedAt, note: 'Anthropic-compatible 连接未提供缓存证据' }
     }
   }
-  if (providerId === 'openai') {
+  if (providerId === 'openai' && (protocol === 'openai-chat' || protocol === 'openai-responses')) {
     return {
       supportsPromptCache: true,
       supportsLongCacheRetention: true,
@@ -242,7 +248,7 @@ function cacheCompatibility(
       evidence: { source: 'migration', checkedAt, note: 'OpenAI 显式兼容配置' }
     }
   }
-  if (providerId === 'openrouter') {
+  if (providerId === 'openrouter' && protocol === 'openai-chat') {
     return {
       supportsPromptCache: true,
       supportsLongCacheRetention: false,
@@ -261,12 +267,12 @@ function cacheCompatibility(
 
 function defaultMetadata(
   providerId: string,
-  protocol: 'openai-chat' | 'anthropic-messages',
+  protocol: LlmProviderProtocol,
   agentCompatible: boolean,
   checkedAt: string
 ): ModelRuntimeMetadata {
   return {
-    api: protocol === 'anthropic-messages' ? 'anthropic-messages' : 'openai-completions',
+    api: llmProtocolToRuntimeApi(protocol),
     contextWindow: MODEL_CONTEXT_DEFAULT,
     maxTokens: MODEL_OUTPUT_DEFAULT,
     capabilities: {
@@ -416,7 +422,7 @@ function getPublicSettingsWithoutSecrets(
       id,
       {
         ...(typeof config.baseUrl === 'string' ? { baseUrl: config.baseUrl } : {}),
-        ...(config.protocol === 'openai-chat' || config.protocol === 'anthropic-messages'
+        ...(isLlmProviderProtocol(config.protocol)
           ? { protocol: config.protocol }
           : {}),
         hasApiKey: false
@@ -552,12 +558,6 @@ function mergeOverrides(
     capabilities: { ...current?.capabilities, ...patch.capabilities },
     ...(patch.cache ? { cache: { ...current?.cache, ...patch.cache } } : {})
   }
-}
-
-function endpoint(baseUrl: string, suffix: string, ensureV1 = false): string {
-  const root = baseUrl.replace(/\/+$/, '')
-  if (ensureV1 && !root.endsWith('/v1')) return `${root}/v1/${suffix}`
-  return `${root}/${suffix}`
 }
 
 function rendererSafeBaseUrl(value: string): string {
@@ -700,9 +700,14 @@ export class ModelManagementModule {
         throw new Error(`读取模型配置失败：${formatSchemaIssues(parsed.error).join('；')}`)
       }
       const document = parsed.data as ModelManagementDocument
+      const addedProviders = this.addMissingBuiltInConnections(document)
       const errors = validateModelManagementDocument(document)
       if (errors.length > 0) throw new Error(`读取模型配置失败：${errors.join('；')}`)
-      if (legacy.success) this.dependencies.store.write(document)
+      if (addedProviders && !legacy.success) {
+        document.revision = this.dependencies.nextRevision()
+        document.updatedAt = this.dependencies.now().toISOString()
+      }
+      if (legacy.success || addedProviders) this.dependencies.store.write(document)
       this.cache = structuredClone(document)
       return structuredClone(document)
     }
@@ -718,6 +723,40 @@ export class ModelManagementModule {
     this.dependencies.store.write(migrated)
     this.cache = structuredClone(migrated)
     return structuredClone(migrated)
+  }
+
+  /** Append new presets without changing saved connections, model overrides or assignments. */
+  private addMissingBuiltInConnections(document: ModelManagementDocument): boolean {
+    let changed = false
+    const checkedAt = this.dependencies.now().toISOString()
+    for (const provider of BUILT_IN_LLM_PROVIDERS) {
+      const existing = document.connections.find(connection => connection.providerId === provider.id)
+      if (existing) {
+        // A previously custom connection can now have a shipped preset. Keep
+        // its endpoint, protocol, credentials and models when promoting it.
+        if (existing.source === 'custom' && (provider.id === 'gemini' || provider.id === 'bailian')) {
+          existing.source = 'builtin'
+          changed = true
+        }
+        continue
+      }
+      const connection: ManagedModelConnection = {
+        id: connectionId(provider.id), providerId: provider.id, name: provider.name,
+        source: 'builtin', protocol: provider.protocol, baseUrl: provider.defaultBaseUrl,
+        credentialRef: `llm-provider:${provider.id}`, local: provider.local === true,
+        agentCompatible: provider.agentCompatible, enabled: true
+      }
+      document.connections.push(connection)
+      for (const model of provider.models) {
+        document.models.push({
+          id: modelRef(provider.id, model.id), connectionId: connection.id,
+          modelId: model.id, name: model.name, kind: 'chat', builtin: true,
+          baseline: defaultMetadata(provider.id, provider.protocol, provider.agentCompatible, checkedAt)
+        })
+      }
+      changed = true
+    }
+    return changed
   }
 
   private snapshot(document: ModelManagementDocument): ModelManagementSnapshot {
@@ -873,9 +912,7 @@ export class ModelManagementModule {
         previousAgentCompatible !== next.agentCompatible
       if (connectionContractChanged) {
         for (const model of document.models.filter((item) => item.connectionId === next.id)) {
-          model.baseline.api = next.protocol === 'anthropic-messages'
-            ? 'anthropic-messages'
-            : 'openai-completions'
+          model.baseline.api = llmProtocolToRuntimeApi(next.protocol)
           model.baseline.capabilities.tools = next.agentCompatible
           model.baseline.cache = cacheCompatibility(
             next.providerId,
@@ -1041,7 +1078,6 @@ export class ModelManagementModule {
     if (!connection.local && !apiKey) {
       throw new Error(`请先为「${connection.name}」填写 API Key`)
     }
-    const anthropic = connection.protocol === 'anthropic-messages'
     return {
       providerId: connection.providerId,
       providerName: connection.name,
@@ -1049,10 +1085,7 @@ export class ModelManagementModule {
       apiKey,
       baseUrl: connection.baseUrl,
       local: connection.local,
-      chatCompletionsUrl: anthropic ? undefined : endpoint(connection.baseUrl, 'chat/completions'),
-      openAiModelsUrl: anthropic ? undefined : endpoint(connection.baseUrl, 'models'),
-      messagesUrl: anthropic ? endpoint(connection.baseUrl, 'messages', true) : undefined,
-      anthropicModelsUrl: anthropic ? endpoint(connection.baseUrl, 'models', true) : undefined
+      ...llmRequestEndpoints(connection.protocol, connection.baseUrl)
     }
   }
 

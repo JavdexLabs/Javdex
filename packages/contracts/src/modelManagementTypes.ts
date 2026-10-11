@@ -23,7 +23,7 @@ export interface ManagedModelConnection {
 }
 
 export interface ModelRuntimeMetadata {
-  api: 'openai-completions' | 'anthropic-messages'
+  api: import('./llmProviders').LlmRuntimeApi
   contextWindow: number
   maxTokens: number
   capabilities: {

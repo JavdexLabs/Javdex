@@ -38,7 +38,7 @@ export interface ResolvedPiModelDescriptor {
   providerId: string
   modelId: string
   name: string
-  api: 'openai-completions' | 'anthropic-messages'
+  api: import('@shared/llmProviders').LlmRuntimeApi
   baseUrl: string
   contextWindow: number
   maxTokens: number

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import type { LlmApiKeyAction, LlmProviderProtocol } from '@shared/llmProviders'
+import { LLM_PROVIDER_PROTOCOL_OPTIONS, type LlmApiKeyAction, type LlmProviderProtocol } from '@shared/llmProviders'
 import type { ModelCandidate, ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import Button from '../Button'
 import SettingsFeedback from './SettingsFeedback'
@@ -295,8 +295,9 @@ export default function ProviderDetailModal({
                     value={protocol}
                     onChange={(event) => setProtocol(event.target.value as LlmProviderProtocol)}
                   >
-                    <option value="openai-chat">OpenAI Chat Completions</option>
-                    <option value="anthropic-messages">Anthropic Messages</option>
+                    {LLM_PROVIDER_PROTOCOL_OPTIONS.map(option => (
+                      <option key={option.id} value={option.id}>{option.label}</option>
+                    ))}
                   </SelectControl>
                 </label>
                 <label className={styles.field}>

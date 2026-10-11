@@ -56,6 +56,8 @@ node scripts/run-electron-tests.mjs packages/library/src/nfo/nfoArtifactCodec.te
 
 `npm run build` 生成 `out/`，并校验人脸检测资源与 Pi 运行时。生产构建通过不等于各平台安装包已完成验证。
 
+云端模型协议在 `packages/contracts/src/llmProviders.ts` 统一声明，Agent 流式请求仍由 Pi 处理。Pi 0.84.2 的 Gemini 适配器没有自定义 fetch 入口，构建与测试加载器通过 `scripts/pi-google-transport.mjs` 对固定版本进行小范围网络透传补丁：把 Javdex 的 fetch 注入每个 Google SDK 客户端的 `apiClient.apiCall`，保持原生消息转换、工具调用和流式解析，不修改全局 fetch 或 `node_modules`。补丁匹配失败会中止构建；升级 Pi／Google SDK 时须复核该私有入口，并运行 Pi 原生协议测试和 `check-built-pi-runtime.mjs` 的 Responses／Gemini 构建产物验证。
+
 桌面构建同时生成 renderer manifest 并运行 `measure:renderer`：按静态依赖闭包去重统计 JS/CSS 与 gzip 字节，检查设置页及四个低频面板仍为延迟 chunk。该报告衡量产物体积，不宣称已验证启动时间或内存收益。职责边界、阶段计划与本轮证据见 [UI 架构优化记录](UI_ARCHITECTURE_OPTIMIZATION.md)。
 
 ## 打包与发布

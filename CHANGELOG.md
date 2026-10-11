@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### AI 云端服务
+
+- 补齐 OpenAI Responses 与 Google Gemini 原生协议，接通模型查询、连接测试、在线文本翻译、JSON 调用及 Agent 流式工具调用与会话恢复；新增 Gemini、阿里云百炼预设。升级保留已有连接和用途选择，并补齐新预设；Gemini Agent 网络请求继续遵循 AI 服务代理设置。
+
 ### 许可证
 
 - 当前源码整体采用 GPL-3.0-or-later（GPL v3 或后续版本），同步项目、workspace、关于页及官网许可说明；此前按 MIT 发布的版本保留原有授权，第三方版权与许可声明保持。

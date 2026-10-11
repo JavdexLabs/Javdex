@@ -1,6 +1,20 @@
 /** LLM provider catalog and helpers shared by main process and renderer. */
 
-export type LlmProviderProtocol = 'openai-chat' | 'anthropic-messages'
+export const LLM_PROVIDER_PROTOCOLS = ['openai-chat', 'openai-responses', 'anthropic-messages', 'google-generative-ai'] as const
+export type LlmProviderProtocol = typeof LLM_PROVIDER_PROTOCOLS[number]
+export type LlmRuntimeApi = 'openai-completions' | Exclude<LlmProviderProtocol, 'openai-chat'>
+
+export function isLlmProviderProtocol(value: unknown): value is LlmProviderProtocol {
+  return typeof value === 'string' && LLM_PROVIDER_PROTOCOLS.includes(value as LlmProviderProtocol)
+}
+
+export function llmProtocolToRuntimeApi(protocol: LlmProviderProtocol): LlmRuntimeApi {
+  return protocol === 'openai-chat' ? 'openai-completions' : protocol
+}
+
+export function llmRuntimeApiToProtocol(api: LlmRuntimeApi): LlmProviderProtocol {
+  return api === 'openai-completions' ? 'openai-chat' : api
+}
 export type LlmModelKind = 'chat' | 'embedding'
 
 export interface LlmModelDefinition {
@@ -18,7 +32,7 @@ export interface BuiltInLlmProviderDefinition {
   defaultBaseUrl: string
   /** Local inference server; API key optional. */
   local?: boolean
-  /** Agent tool-calling requires OpenAI-compatible chat completions. */
+  /** The protocol supports Agent tool calling; individual model capabilities may vary. */
   agentCompatible: boolean
   models: LlmModelDefinition[]
 }
@@ -186,6 +200,22 @@ export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
     ]
   },
   {
+    id: 'gemini',
+    name: 'Google Gemini',
+    protocol: 'google-generative-ai',
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    agentCompatible: true,
+    models: [BUILTIN_MODEL('gemini-3.8-flash', 'Gemini 3.8 Flash')]
+  },
+  {
+    id: 'bailian',
+    name: '阿里云百炼',
+    protocol: 'openai-chat',
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    agentCompatible: true,
+    models: [BUILTIN_MODEL('qwen-plus', 'Qwen Plus')]
+  },
+  {
     id: 'anthropic',
     name: 'Anthropic',
     protocol: 'anthropic-messages',
@@ -209,7 +239,9 @@ const BUILT_IN_LLM_PROVIDER_ORDER = new Map(
 
 export const LLM_PROVIDER_PROTOCOL_OPTIONS: Array<{ id: LlmProviderProtocol; label: string }> = [
   { id: 'openai-chat', label: 'OpenAI Chat Completions' },
-  { id: 'anthropic-messages', label: 'Anthropic Messages' }
+  { id: 'openai-responses', label: 'OpenAI Responses' },
+  { id: 'anthropic-messages', label: 'Anthropic Messages' },
+  { id: 'google-generative-ai', label: 'Google Gemini' }
 ]
 
 export function getLlmProtocolLabel(protocol: LlmProviderProtocol): string {

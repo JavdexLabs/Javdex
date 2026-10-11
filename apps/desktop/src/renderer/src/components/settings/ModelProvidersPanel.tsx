@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
+import { getLlmProtocolLabel, type LlmProviderProtocol } from '@shared/llmProviders'
 import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import Button from '../Button'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
 import ProviderDetailModal from './ProviderDetailModal'
 import styles from './ModelProvidersPanel.module.css'
 
-function protocolLabel(value: string): string {
-  return value === 'anthropic-messages' ? 'Anthropic Messages' : 'OpenAI Chat Completions'
+function protocolLabel(value: LlmProviderProtocol): string {
+  return getLlmProtocolLabel(value)
 }
 
 export default function ModelProvidersPanel({

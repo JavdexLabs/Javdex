@@ -6,20 +6,12 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import electron from 'electron'
 import { _electron } from 'playwright-core'
+export { recordAcceptanceCleanup } from './playback-acceptance-cleanup.mjs'
 
 export const root = process.cwd()
 export const output = path.join(root, 'out/playback-acceptance')
 const acceptanceProcesses = new WeakMap()
 export const acceptanceProcess = application => acceptanceProcesses.get(application) ?? application.process()
-
-export function recordAcceptanceCleanup(report, cleanup) {
-  report.cleanup = cleanup
-  if (cleanup.forced || cleanup.code !== 0 || cleanup.signal !== null) {
-    report.status = 'failed'
-    report.error ??= 'acceptance host did not exit normally'
-    process.exitCode = 1
-  }
-}
 
 export function createAcceptanceDirectory(suffix = '') {
   assert.match(suffix, /^[a-z-]*$/)

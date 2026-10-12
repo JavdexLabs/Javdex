@@ -31,3 +31,28 @@ test('keyboard, app commands and legacy OS swipes use one bounded navigation ent
   canBack = false; navigateWindowHistory(target, 'back'); assert.equal(back, 3)
   destroyed = true; navigateWindowHistory(target, 'forward'); assert.equal(forward, 1)
 })
+
+test('history entries respect earlier event vetoes and a foreground task across keyboard, OS and native input', () => {
+  const window = new EventEmitter() as EventEmitter & { webContents: EventEmitter & { navigationHistory: unknown }; isDestroyed(): boolean }
+  let blocked = true, navigations = 0
+  window.isDestroyed = () => false
+  window.webContents = Object.assign(new EventEmitter(), { navigationHistory: {
+    canGoBack: () => true, canGoForward: () => true, goBack: () => navigations++, goForward: () => navigations++
+  } })
+  const target = window as unknown as BrowserWindow
+  bindWindowNavigation(target, 'darwin', () => !blocked)
+  const veto = { defaultPrevented: true, preventDefault: () => assert.fail('must respect the preceding guard') }
+  window.webContents.emit('before-input-event', veto, { type: 'keyDown', key: '[', meta: true })
+  window.emit('app-command', veto, 'browser-backward')
+  window.emit('swipe', veto, 'right')
+  window.webContents.emit('before-input-event', { preventDefault() {} }, { type: 'keyDown', key: 'ArrowLeft', alt: true })
+  window.emit('app-command', {}, 'browser-forward')
+  window.emit('swipe', {}, 'left')
+  navigateWindowHistory(target, 'back')
+  assert.equal(navigations, 0)
+  blocked = false
+  window.webContents.emit('before-input-event', veto, { type: 'keyDown', key: '[', meta: true })
+  assert.equal(navigations, 0, 'an unrelated veto still applies after the task is no longer blocking')
+  navigateWindowHistory(target, 'back')
+  assert.equal(navigations, 1)
+})

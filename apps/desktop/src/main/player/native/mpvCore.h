@@ -88,6 +88,13 @@ inline std::string nodeJson(const mpv_node &node) {
 struct ObservedValue { mpv_format format = MPV_FORMAT_NONE; double number = 0; std::string text; };
 struct NativeAction { std::string kind; double value; };
 
+inline bool optionalSubtitleCommand(const std::vector<std::string> &values) {
+    if (values.empty()) return false;
+    if (values[0] == "sub-add" || values[0] == "sub-reload" || values[0] == "sub-remove") return true;
+    return values.size() > 1 && values[0] == "set" &&
+        (values[1] == "sid" || values[1] == "sub-delay" || values[1] == "sub-font-size");
+}
+
 class MpvCore {
     mpv_handle *handle = nullptr;
     mpv_render_context *renderer = nullptr;
@@ -98,7 +105,7 @@ class MpvCore {
     std::deque<NativeAction> actions;
     std::string lastError;
     int lastErrorCode = 0;
-    uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0;
+    uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0, subtitleCommandErrors = 0;
     static void request(void *context) {
         auto core = static_cast<MpvCore *>(context);
         if (!core->requested.exchange(true)) {
@@ -116,7 +123,7 @@ public:
         void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
-        frames = presentedFrames = loadedFiles = restarts = commandErrors = 0; requested.store(false);
+        frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = 0; requested.store(false);
         renderWakeupContext.store(wakeupContext); renderWakeup.store(wakeup);
         handle = mpv_create();
         if (!handle) throw std::runtime_error("mpv_create failed");
@@ -184,7 +191,7 @@ public:
         for (const auto &value : values) args.push_back(value.c_str());
         args.push_back(nullptr);
         // Never synchronously wait on the mpv client from the platform GL thread.
-        const int error = mpv_command_async(handle, 0, args.data());
+        const int error = mpv_command_async(handle, optionalSubtitleCommand(values) ? 1 : 0, args.data());
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
     }
     void queue(const char *kind, double value = 0) { if (actions.size() < 32) actions.push_back({kind, value}); }
@@ -218,7 +225,11 @@ public:
         if (event.event_id == MPV_EVENT_PLAYBACK_RESTART) restarts++;
         int error = event.event_id == MPV_EVENT_COMMAND_REPLY ? event.error : event.event_id == MPV_EVENT_END_FILE ? static_cast<mpv_event_end_file *>(event.data)->error : 0;
         if (error < 0) {
-            if (event.event_id == MPV_EVENT_COMMAND_REPLY) commandErrors++;
+            if (event.event_id == MPV_EVENT_COMMAND_REPLY) {
+                commandErrors++;
+                // Optional track/display failures must not destroy the video session.
+                if (event.reply_userdata == 1) { subtitleCommandErrors++; return; }
+            }
             lastErrorCode = error; lastError = mpv_error_string(error);
         }
     }
@@ -250,6 +261,7 @@ public:
         }
         number("nativeFrames", frames); number("presentedFrames", presentedFrames); number("loadedFiles", loadedFiles);
         number("playbackRestarts", restarts); number("commandErrors", commandErrors);
+        number("subtitleCommandErrors", subtitleCommandErrors);
         result += ",\"errorKind\":" + jsonString(errorKind()) + ",\"error\":" + jsonString(lastError.c_str()) + ",\"actions\":[";
         for (size_t i = 0; i < actions.size(); i++) {
             if (i) result += ',';
@@ -276,6 +288,7 @@ public:
         }
         setNumber(env, result, "nativeFrames", frames); setNumber(env, result, "presentedFrames", presentedFrames);
         setNumber(env, result, "loadedFiles", loadedFiles); setNumber(env, result, "playbackRestarts", restarts); setNumber(env, result, "commandErrors", commandErrors);
+        setNumber(env, result, "subtitleCommandErrors", subtitleCommandErrors);
         setString(env, result, "error", lastError);
         if (lastErrorCode < 0) setString(env, result, "errorKind", errorKind());
         return result;

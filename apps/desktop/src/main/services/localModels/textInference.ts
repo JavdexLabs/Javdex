@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import net from 'node:net'
 import os from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
-import { localModelProcessEnvironment } from './processRunner'
+import { localModelProcessEnvironment, stopLocalModelProcess } from './processRunner'
 import type { AiRuntimePaths } from './runtimeInstaller'
 import { localTextTranslationPrompt, localTranslationSettings } from './localTranslation'
 
@@ -49,23 +49,32 @@ export function createLocalTextInference(paths: Pick<AiRuntimePaths, 'translator
         server = child
         let failed = false
         child.once('error', () => { failed = true })
-        child.once('exit', () => { failed = true; if (server === child) { server = null; endpoint = ''; key = '' } })
-        const abort = (): void => { child.kill() }
+        child.once('exit', () => { failed = true })
+        child.once('close', () => { failed = true; if (server === child) { server = null; endpoint = ''; key = '' } })
+        const abort = (): void => { void stopLocalModelProcess(child) }
         generation.signal.addEventListener('abort', abort, { once: true })
         child.once('close', () => generation.signal.removeEventListener('abort', abort))
         const address = `http://127.0.0.1:${port}`
-        for (let attempt = 0; attempt < 180; attempt++) {
-          generation.signal.throwIfAborted()
-          if (failed) throw new Error('离线中文翻译运行库启动失败')
-          try {
-            // /health is public; authenticate against /v1/models to verify the owned server.
-            const response = await request(`${address}/v1/models`, { headers: { Authorization: `Bearer ${token}` },
-              signal: AbortSignal.any([generation.signal, AbortSignal.timeout(1000)]) })
-            if (response.ok) { endpoint = address; key = token; return }
-          } catch { /* Model loading can take time; no transcript is sent during startup. */ }
-          await delay(500, undefined, { signal: generation.signal })
+        let initialized = false
+        try {
+          for (let attempt = 0; attempt < 180; attempt++) {
+            generation.signal.throwIfAborted()
+            if (failed) throw new Error('离线中文翻译运行库启动失败')
+            try {
+              // /health is public; authenticate against /v1/models to verify the owned server.
+              const response = await request(`${address}/v1/models`, { headers: { Authorization: `Bearer ${token}` },
+                signal: AbortSignal.any([generation.signal, AbortSignal.timeout(1000)]) })
+              if (response.ok) { endpoint = address; key = token; initialized = true; return }
+            } catch { /* Model loading can take time; no transcript is sent during startup. */ }
+            await delay(500, undefined, { signal: generation.signal })
+          }
+          throw new Error('离线中文翻译模型加载超时')
+        } finally {
+          if (!initialized && server === child) {
+            await stopLocalModelProcess(child)
+            if (server === child) { server = null; endpoint = ''; key = '' }
+          }
         }
-        child.kill(); throw new Error('离线中文翻译模型加载超时')
       })().finally(() => { starting = null })
     }
     let abort: (() => void) | undefined
@@ -104,14 +113,10 @@ export function createLocalTextInference(paths: Pick<AiRuntimePaths, 'translator
       return translateContent(localTextTranslationPrompt(model, text), signal, 1536)
     },
     async close(): Promise<void> {
+      const child = server
       lifetime.abort(); lifetime = new AbortController()
-      const child = server; server = null; endpoint = ''; key = ''
-      if (child && child.exitCode === null && child.signalCode === null) {
-        await new Promise<void>(resolve => {
-          const timer = setTimeout(resolve, 5000)
-          child.once('close', () => { clearTimeout(timer); resolve() }); child.kill()
-        })
-      }
+      server = null; endpoint = ''; key = ''
+      if (child) await stopLocalModelProcess(child)
     }
   }
 }

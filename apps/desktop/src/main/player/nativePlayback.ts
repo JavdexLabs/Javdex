@@ -11,6 +11,7 @@ export interface NativePlaybackState {
   /** New-frame swaps submitted while the surface is visible; not screen capture proof. */
   presentedFrames?: number
   loadedFiles?: number
+  subtitleCommandErrors?: number
   error?: string
   errorKind?: 'format' | 'streams' | 'audio' | 'video' | 'load' | 'native'
   pause?: boolean
@@ -50,5 +51,7 @@ export interface NativePlayback {
   removeGeneratedSubtitle?(file: string, restoreId: number | null): void
   generatedSubtitleSelected?(file: string): boolean
   selectedAudioStream?(): number | null
+  /** Non-consuming optional-command counter; never drains playback input. */
+  subtitleCommandErrors?(): number
   destroy(): void
 }

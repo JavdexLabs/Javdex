@@ -125,11 +125,12 @@ function SubtitleUsage({ state, busy, execute, operationError }: {
   </SettingsSaveDetailsScope></section>
 }
 
-function TextUsage({ state, busy, execute, operationError }: {
+function TextUsage({ state, busy, execute, operationError, appDefaultReady }: {
   state: LocalModelSnapshot
   busy: boolean
   execute: ReturnType<typeof useLocalModels>['execute']
   operationError: string | null
+  appDefaultReady: boolean
 }): JSX.Element {
   const form = useSettingsDraft(state.usage.textTranslation)
   const [saving, setSaving] = useState(false)
@@ -148,7 +149,7 @@ function TextUsage({ state, busy, execute, operationError }: {
   useSettingsFormGuard({ label: '文本翻译模型', dirty: form.dirty, busy: saving, save,
     discard: form.reset, preserveOnNavigate: preservesModelUsageDraft })
   const textLocalReady = state.models.find(m => m.id === form.draft.model)?.variants.find(v => v.id === form.draft.variant)?.ready === true
-  const textReady = form.draft.mode === 'app-default' || textLocalReady
+  const textReady = form.draft.mode === 'app-default' ? appDefaultReady : textLocalReady
   return <section className={styles.assignmentCard}><SettingsSaveDetailsScope>
     <header className={styles.cardHeader}>
       <div className={styles.cardHeaderMain}>
@@ -184,7 +185,7 @@ function TextUsage({ state, busy, execute, operationError }: {
   </SettingsSaveDetailsScope></section>
 }
 
-export default function LocalModelUsagePanel({ layoutReady = true }: { layoutReady?: boolean }): JSX.Element {
+export default function LocalModelUsagePanel({ layoutReady = true, appDefaultReady = false }: { layoutReady?: boolean; appDefaultReady?: boolean }): JSX.Element {
   const { state, busy, execute, error } = useLocalModels()
   const location = useLocation()
   const anchor = useRef<HTMLDivElement>(null)
@@ -206,7 +207,7 @@ export default function LocalModelUsagePanel({ layoutReady = true }: { layoutRea
       </header>
       <SettingsFeedback error message="模型用途配置无法读取" detail={error ?? state.configurationError} />
     </section> : null}
-    {state ? <><TextUsage state={state} busy={busy || state.operation !== null} execute={execute} operationError={error} /><SubtitleUsage state={state} busy={busy || state.operation !== null} execute={execute} operationError={error} /></>
+    {state ? <><TextUsage state={state} busy={busy || state.operation !== null} execute={execute} operationError={error} appDefaultReady={appDefaultReady} /><SubtitleUsage state={state} busy={busy || state.operation !== null} execute={execute} operationError={error} /></>
       : <section className={styles.assignmentCard} role="status">{error ?? '正在读取本地模型用途配置…'}</section>}
   </div>
 }

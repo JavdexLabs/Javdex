@@ -21,7 +21,8 @@ export function subtitleCacheKey(source: PlaybackSource, audioIdentity: string, 
   // Exact default weights keep the original cache identity across the model-store upgrade.
   const asrIdentity = asrVersion === AI_SUBTITLE_ASR_VERSION || asrVersion === LOCAL_MODEL_ASSETS.find(asset => asset.id === 'kotoba')!.sha256
     ? AI_SUBTITLE_ASR_VERSION : [AI_SUBTITLE_ASR_VERSION, asrVersion]
-  return createHash('sha256').update(JSON.stringify([source.identityKey, source.revision, source.target,
+  // resumeKey owns stable catalog/server/resource identity; identityKey also contains connection epochs.
+  return createHash('sha256').update(JSON.stringify([source.resumeKey, source.revision, source.target,
     source.fileIdentity ?? source.resumeKey, audioIdentity, asrIdentity, 'ja'])).digest('hex')
 }
 export function createSubtitleCache(root: string, key: string, persist = true, translationVersion = AI_SUBTITLE_TRANSLATION_VERSION) {

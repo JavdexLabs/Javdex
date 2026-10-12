@@ -61,5 +61,18 @@ int main() {
     assert(transport.find("\"actions\":[{\"kind\":\"seek-relative\",\"value\":-5.000000}]") != std::string::npos);
     assert(core.stateJson().find("\"actions\":[]") != std::string::npos);
     assert(transport.find("\"time-pos\":null") == std::string::npos); // invalidated value omitted
+    assert(javdex::optionalSubtitleCommand({"sub-add", "/fixture.ass", "select"}));
+    assert(javdex::optionalSubtitleCommand({"sub-reload", "2"}));
+    assert(javdex::optionalSubtitleCommand({"set", "sid", "2"}));
+    assert(!javdex::optionalSubtitleCommand({"loadfile", "/fixture.mp4", "replace"}));
+    assert(!javdex::optionalSubtitleCommand({"set", "pause", "yes"}));
+    event = {MPV_EVENT_COMMAND_REPLY, MPV_ERROR_COMMAND, 1, nullptr};
+    core.consume(event);
+    const auto subtitleFailure = core.stateJson();
+    assert(subtitleFailure.find("\"subtitleCommandErrors\":1") != std::string::npos);
+    assert(subtitleFailure.find("\"error\":\"\"") != std::string::npos);
+    event.reply_userdata = 0;
+    core.consume(event);
+    assert(core.stateJson().find("\"error\":\"\"") == std::string::npos);
     core.shutdown(); core.shutdown(); assert(!core.alive());
 }

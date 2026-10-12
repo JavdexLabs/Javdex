@@ -53,6 +53,8 @@ export function createAiSubtitleController(deps: Dependencies) {
   let cues: SubtitleCue[] = []
   let document = '', requestedDocument = '', renderLoop: Promise<void> | null = null
   let firstSelection = false
+  let subtitleCommandErrors = 0
+  let displayError: string | null = null
   let intent = 0
   let runtimeRevision = 0, closed = false
   const state: AiSubtitleSnapshot = { sessionId: null, supported: localModelRuntimeSupported(), installed: false,
@@ -60,6 +62,11 @@ export function createAiSubtitleController(deps: Dependencies) {
     duration: null, display: 'bilingual', fontSize: 42, error: null }
   const snapshot = (): AiSubtitleSnapshot => structuredClone(state)
   const publish = (): void => deps.changed(snapshot())
+  const markDisplayFailure = (): void => {
+    displayError = '字幕显示更新失败；播放不受影响，可重试字幕显示'
+    state.error = displayError
+    log.write('字幕显示失败', displayError); log.update(cues, displayError); publish()
+  }
   async function refreshRuntime(): Promise<void> {
     const revision = ++runtimeRevision
     const value = await installer.installed()
@@ -90,7 +97,7 @@ export function createAiSubtitleController(deps: Dependencies) {
         firstSelection = false; document = value
       }
     })().catch(() => {
-      if (!generation.signal.aborted) { state.error = '字幕显示更新失败；播放不受影响，可停止后重新生成'; publish() }
+      if (!generation.signal.aborted) markDisplayFailure()
     }).finally(() => { renderLoop = null })
   }
   function stop(invalidate = true): Promise<void> {
@@ -145,8 +152,10 @@ export function createAiSubtitleController(deps: Dependencies) {
     const generation = new AbortController(); task = generation
     audioIndex = selected
     previousSubtitle = restoreSubtitle
+    displayError = null
     state.sessionId = id; state.enabled = true; state.error = null; state.phase = 'preparing'; state.duration = playback.duration
     firstSelection = true
+    subtitleCommandErrors = deps.native.subtitleCommandErrors?.() ?? 0
     // mpv sub-reload resets the track title to the filename, so keep a readable stable basename.
     file = path.join(deps.root, 'active', randomUUID(), 'AI 日中字幕.ass')
     const runtimePaths = installer.paths()
@@ -181,8 +190,8 @@ export function createAiSubtitleController(deps: Dependencies) {
           if (generation.signal.aborted || task !== generation) return
           if (value.error && value.error !== state.error) log.write('字幕任务失败', value.error)
           cues = value.cues
-          log.update(cues, value.error)
-          state.phase = value.phase; state.activeStart = value.activeStart; state.error = value.error
+          state.phase = value.phase; state.activeStart = value.activeStart; state.error = value.error ?? displayError
+          log.update(cues, state.error)
           state.recognizedSeconds = value.recognizedSeconds; state.translatedSeconds = value.translatedSeconds
           if (cues.length) render()
           publish()
@@ -207,7 +216,7 @@ export function createAiSubtitleController(deps: Dependencies) {
       } else if (command.action === 'start') { if (!state.enabled) await start(id) }
       else if (command.action === 'stop') await stop()
       else if (command.action === 'retry') {
-        if (scheduler) { state.error = null; scheduler.retry() }
+        if (scheduler) { displayError = null; state.error = null; document = ''; firstSelection = true; render(); scheduler.retry() }
         else await start(id)
       } else if (command.action === 'display') { state.display = command.value; render(); publish() }
       else if (command.action === 'font-size') { state.fontSize = command.value; render(); publish() }
@@ -221,6 +230,11 @@ export function createAiSubtitleController(deps: Dependencies) {
     tick(playback: PlaybackSnapshot | null): void {
       if (!state.enabled) return
       if (!playback || playback.sessionId !== state.sessionId || playback.phase === 'error') { void stop(); return }
+      const errors = deps.native.subtitleCommandErrors?.() ?? 0
+      if (errors > subtitleCommandErrors) {
+        subtitleCommandErrors = errors
+        markDisplayFailure()
+      }
       const selected = deps.native.selectedAudioStream?.()
       if (selected == null) return
       if (selected !== audioIndex) {

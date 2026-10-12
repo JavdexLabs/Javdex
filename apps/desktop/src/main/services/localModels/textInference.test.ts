@@ -35,3 +35,24 @@ test('standalone text inference needs only a translator and text weights and rel
   } finally { await engine.close() }
   assert.equal(closed, 1)
 })
+
+test('closing a translator that ignores graceful termination does not abandon its owned process', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const signals: Array<NodeJS.Signals | undefined> = []
+  const child = Object.assign(new EventEmitter(), { exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+    kill(signal?: NodeJS.Signals) {
+      signals.push(signal)
+      if (signal === 'SIGKILL') { child.signalCode = signal; child.emit('exit', null, signal); child.emit('close', null, signal) }
+      return true
+    } })
+  const engine = createLocalTextInference({ translator: '/fixture/llama-server', translationModel: '/fixture/model.gguf' }, {
+    spawn: (() => child as unknown as ChildProcess) as typeof spawn,
+    request: async () => Response.json({ data: [] }), port: async () => 32102
+  })
+  await engine.ready(new AbortController().signal)
+  const closed = engine.close()
+  t.mock.timers.tick(5000)
+  await closed
+  assert.ok(signals.includes('SIGKILL'), 'close must reap an unresponsive owned child before releasing it')
+  assert.equal(child.signalCode, 'SIGKILL')
+})

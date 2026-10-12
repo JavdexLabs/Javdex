@@ -96,6 +96,10 @@ export function createLinuxPlaybackBridge(executable: string) {
       if (failure) throw failure
       const value = { ...snapshot, actions }; actions = []; return value
     },
+    inspect(): NativePlaybackState {
+      if (failure) throw failure
+      return { ...snapshot }
+    },
     destroy
   }
 }

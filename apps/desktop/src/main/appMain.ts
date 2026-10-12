@@ -120,7 +120,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   bindNfoExportWindowGuard(mainWindow, nfoExportTaskController, () => shutdownInProgress)
   bindMainWindow(mainWindow)
-  bindWindowNavigation(mainWindow)
+  bindWindowNavigation(mainWindow, process.platform, () => !nfoExportTaskController.isForegroundBlocking)
   const window = mainWindow
   window.on('close', (event) => {
     if (event.defaultPrevented || shutdownInProgress || !getSettings().closeToTray || !hasAppTray()) return

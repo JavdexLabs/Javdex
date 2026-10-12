@@ -19,7 +19,7 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-controller-'))
   let playback = { sessionId: 'one', phase: 'playing', seekable: true, duration: 15, position: 0,
     tracks: [{ type: 'sub', id: 8, title: null, language: null, codec: null, channelCountHint: null, selected: true }] } as PlaybackSnapshot
-  let audio = 1, closeCount = 0, recognizeCount = 0, translateCount = 0, selected = false
+  let audio = 1, closeCount = 0, recognizeCount = 0, translateCount = 0, selected = false, subtitleErrors = 0
   let asrVersion = 'asr-original', translationVersion = 'qwen-original'
   let leases = 0, finishClose = async (): Promise<void> => {}
   let installed = async () => true, runtimeChanged = (): void => {}
@@ -30,6 +30,7 @@ async function fixture() {
   const native: NativePlayback = { create: () => {}, load: () => {}, command: () => {}, read: () => ({ alive: true }),
     viewport: () => {}, render: () => {}, addSubtitle: () => {}, destroy: () => {},
     selectedAudioStream: () => audio, generatedSubtitleSelected: () => selected,
+    subtitleCommandErrors: () => subtitleErrors,
     updateGeneratedSubtitle: (filename: string, select: boolean) => {
       updates.push({ filename, select })
       if (select) {
@@ -66,6 +67,7 @@ async function fixture() {
     setSession: () => { playback = { ...playback, sessionId: 'two' } },
     setResolve: (value: typeof resolve) => { resolve = value }, tick: () => controller.tick(playback),
     recognizes: () => recognizeCount, translations: () => translateCount, closes: () => closeCount,
+    failSubtitleCommand: () => { subtitleErrors++ }, playback: () => playback,
     setInstalled: (read: typeof installed) => { installed = read }, runtimeChanged: () => runtimeChanged(),
     setVersions: (asr: string, translation: string) => { asrVersion = asr; translationVersion = translation },
     leases: () => leases, setClose: (value: typeof finishClose) => { finishClose = value },
@@ -104,6 +106,23 @@ test('incremental display preserves selection, restores original subtitles and r
     await f.controller.command('one', { action: 'start' })
     await until(() => f.controller.snapshot().translatedSeconds === 15)
     assert.equal(f.recognizes(), 1)
+  } finally { await f.cleanup() }
+})
+
+test('an asynchronous subtitle command failure is reported and retried without stopping playback or recognition', async () => {
+  const f = await fixture()
+  try {
+    await f.controller.command('one', { action: 'start' })
+    await until(() => f.controller.snapshot().translatedSeconds === 15 && f.updates.length > 0)
+    f.failSubtitleCommand(); f.tick()
+    assert.match(f.controller.snapshot().error!, /播放不受影响/)
+    assert.equal(f.playback().phase, 'playing')
+    assert.equal(f.controller.snapshot().enabled, true)
+    const updates = f.updates.length
+    await f.controller.command('one', { action: 'retry' })
+    await until(() => f.updates.length > updates)
+    assert.equal(f.recognizes(), 1)
+    assert.equal(f.updates.at(-1)?.select, true)
   } finally { await f.cleanup() }
 })
 

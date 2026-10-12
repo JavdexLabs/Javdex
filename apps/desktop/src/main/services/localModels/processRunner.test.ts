@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import childProcess, { type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { syncBuiltinESMExports } from 'node:module'
 import { runLocalModelProcess, LocalModelProcessFailure } from './processRunner'
 
 const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -24,4 +26,42 @@ test('abort, timeout and oversized output terminate the owned inference child', 
   await assert.rejects(pending, /任务已取消/)
   await assert.rejects(runLocalModelProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { env, timeoutMs: 100 }), /任务超时/)
   await assert.rejects(runLocalModelProcess(process.execPath, ['-e', "process.stdout.write('x'.repeat(4096))"], { env, maxBytes: 64 }), /结果超限/)
+})
+
+test('cancellation reaps a real owned child even when it ignores SIGTERM', { skip: process.platform === 'win32' }, async t => {
+  const originalSpawn = childProcess.spawn
+  let child: ChildProcessWithoutNullStreams | null = null, closed = false
+  let ready!: () => void
+  const initialized = new Promise<void>(resolve => { ready = resolve })
+  // Retain the actual owned handle, never infer ownership or kill another process by a reused PID.
+  t.mock.method(childProcess, 'spawn', (...args: Parameters<typeof originalSpawn>) => {
+    child = originalSpawn(...args) as ChildProcessWithoutNullStreams
+    child.stdout.on('data', (data: Buffer) => { if (data.toString().includes('ready')) ready() })
+    child.once('close', () => { closed = true })
+    return child
+  })
+  syncBuiltinESMExports()
+  const controller = new AbortController()
+  const pending = runLocalModelProcess(process.execPath, ['-e', `process.on('SIGTERM',()=>{});
+    process.stdout.write('ready');setInterval(()=>{},1000)`], { env, signal: controller.signal })
+  void pending.catch(() => {})
+  let deadline: NodeJS.Timeout | undefined
+  try {
+    await Promise.race([initialized, new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => reject(new Error('owned child did not initialize')), 5000)
+    })])
+    clearTimeout(deadline)
+    controller.abort()
+    await assert.rejects(Promise.race([pending, new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => reject(new Error('owned child was not reaped within the cancellation bound')), 3500)
+    })]), /任务已取消/)
+    assert.equal(closed, true, 'the wrapper must wait for its actual owned child close event')
+    assert.equal((child as ChildProcessWithoutNullStreams | null)?.signalCode, 'SIGKILL')
+  } finally {
+    if (deadline) clearTimeout(deadline)
+    const owned = child as ChildProcessWithoutNullStreams | null
+    if (owned && !closed) owned.kill('SIGKILL')
+    await pending.catch(() => {})
+    t.mock.restoreAll(); syncBuiltinESMExports()
+  }
 })

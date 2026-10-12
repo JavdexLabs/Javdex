@@ -202,7 +202,8 @@ export default function ModelSettingsPanel({
               ) : null}
               <ModelUsagePanel snapshot={snapshot} busy={busy} apply={apply} defaultOnly />
             </> : null}
-            <LocalModelUsagePanel layoutReady={snapshot !== null || loadingError !== null} />
+            <LocalModelUsagePanel layoutReady={snapshot !== null || loadingError !== null}
+              appDefaultReady={snapshot?.assignments.find(item => item.workloadId === 'app-default')?.resolution.ready === true} />
             {snapshot ? <ModelAgentUsagePanel snapshot={snapshot} busy={busy} apply={apply} /> : null}
             </div>
           </div>

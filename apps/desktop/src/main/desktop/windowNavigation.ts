@@ -5,6 +5,7 @@ interface NavigationWindow {
   isDestroyed(): boolean
   webContents: { navigationHistory: { canGoBack(): boolean; canGoForward(): boolean; goBack(): void; goForward(): void } }
 }
+const navigationAllowed = new WeakMap<NavigationWindow, () => boolean>()
 interface KeyInput {
   type: string; key: string; code?: string; isAutoRepeat?: boolean; isComposing?: boolean
   shift?: boolean; control?: boolean; meta?: boolean; alt?: boolean
@@ -22,29 +23,33 @@ export function historyKey(input: KeyInput, platform: NodeJS.Platform): Directio
   return null
 }
 export function navigateWindowHistory(window: NavigationWindow | null, direction: Direction): void {
-  if (!window || window.isDestroyed()) return
+  if (!window || window.isDestroyed() || navigationAllowed.get(window)?.() === false) return
   const history = window.webContents.navigationHistory
   if (direction === 'back' && history.canGoBack()) history.goBack()
   if (direction === 'forward' && history.canGoForward()) history.goForward()
 }
 const bound = new WeakSet<BrowserWindow>()
 /** All entries traverse the real browser history; the renderer owns overlay/leave policy. */
-export function bindWindowNavigation(window: BrowserWindow, platform = process.platform): void {
+export function bindWindowNavigation(window: BrowserWindow, platform = process.platform, canNavigate: () => boolean = () => true): void {
   if (bound.has(window)) return
   bound.add(window)
+  navigationAllowed.set(window, canNavigate)
   window.webContents.on('before-input-event', (event, input) => {
+    if (event.defaultPrevented) return
     const direction = historyKey(input, platform)
     if (!direction) return
     event.preventDefault()
     navigateWindowHistory(window, direction)
   })
-  window.on('app-command', (_event, command) => {
+  window.on('app-command', (event, command) => {
+    if (event.defaultPrevented) return
     if (command === 'browser-backward') navigateWindowHistory(window, 'back')
     else if (command === 'browser-forward') navigateWindowHistory(window, 'forward')
   })
   // Electron's macOS swipe event is the legacy OS gesture, not a promise that
   // every modern two-finger trackpad configuration emits it.
-  window.on('swipe', (_event, direction) => {
+  window.on('swipe', (event, direction) => {
+    if (event.defaultPrevented) return
     if (direction === 'right') navigateWindowHistory(window, 'back')
     else if (direction === 'left') navigateWindowHistory(window, 'forward')
   })

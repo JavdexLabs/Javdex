@@ -17,6 +17,7 @@ interface Bridge {
   command(args: string[]): void
   render(): void
   state(): NativePlaybackState
+  inspect(): NativePlaybackState
   destroy(): void
 }
 function runtimePath(): string {
@@ -40,7 +41,7 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
   }
   const nativeTracks = (): Array<Record<string, unknown>> => {
     try {
-      const value: unknown = JSON.parse(bridge?.state()['track-list'] ?? '[]')
+      const value: unknown = JSON.parse(bridge?.inspect()['track-list'] ?? '[]')
       return Array.isArray(value) ? value.filter(item => item && typeof item === 'object') : []
     } catch { return [] }
   }
@@ -120,6 +121,7 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
       if (track.selected) command(['set', 'sid', restoreId !== null && list.some(item => item.type === 'sub' && item.id === restoreId) ? String(restoreId) : 'no'])
     },
     generatedSubtitleSelected: file => ownedSubtitle(file)?.selected === true,
+    subtitleCommandErrors: () => bridge?.inspect().subtitleCommandErrors ?? 0,
     selectedAudioStream(): number | null {
       const track = nativeTracks().find(track => track.type === 'audio' && track.selected === true)
       const index = track?.['ff-index']

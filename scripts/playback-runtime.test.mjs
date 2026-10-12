@@ -20,7 +20,7 @@ test('acceptance cleanup cannot report success after forced, failed or signalled
     { forced: false, code: 5, signal: null },
     { forced: false, code: null, signal: 'SIGTERM' }
   ]) {
-    const helper = new URL('./playback-acceptance-support.mjs', import.meta.url).href
+    const helper = new URL('./playback-acceptance-cleanup.mjs', import.meta.url).href
     const script = `import { recordAcceptanceCleanup } from ${JSON.stringify(helper)};
       const report = { status: 'partial-pass' };
       recordAcceptanceCleanup(report, ${JSON.stringify(cleanup)});

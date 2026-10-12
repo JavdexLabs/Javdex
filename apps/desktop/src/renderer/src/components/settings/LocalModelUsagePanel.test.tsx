@@ -84,6 +84,15 @@ test('subtitle anchor waits for preceding model configuration and scrolls only t
   await act(async () => fail(new Error('提供商配置读取失败')))
   assert.equal(scroller.scrollTop, 290, 'provider failure still settles the preceding layout and permits positioning')
 })
+
+test('inherited text translation is not ready without a resolved default, independently of installed local models', async () => {
+  await mount()
+  const textSection = renderer!.root.findAllByType('section').find(section => renderedText(section).includes('文本翻译'))!
+  assert.match(renderedText(textSection), /未就绪/)
+  assert.equal(renderer!.root.findByProps({ id: 'ai-subtitles' }).findAllByType('span').some(span => renderedText(span) === '已就绪'), true)
+  await choose('文本翻译模型来源', 'local')
+  assert.doesNotMatch(renderedText(textSection), /未就绪/)
+})
 async function choose(label: string, value: string): Promise<void> {
   const Select = (await import('../SelectControl')).default
   const input = renderer!.root.findAllByType(Select).find(item => item.props['aria-label'] === label)!

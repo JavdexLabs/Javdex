@@ -1,8 +1,25 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 
 export class LocalModelProcessFailure extends Error {
   constructor(readonly tool: string, readonly exitCode: number | null) { super('本地模型运行库执行失败') }
+}
+
+const stopping = new WeakMap<ChildProcess, Promise<void>>()
+
+/** Keep ownership until close; a decoder ignoring SIGTERM must not survive cancellation. */
+export function stopLocalModelProcess(child: ChildProcess): Promise<void> {
+  const existing = stopping.get(child)
+  if (existing) return existing
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
+  const pending = new Promise<void>(resolve => {
+    const timeout = setTimeout(() => { child.kill('SIGKILL') }, 2000)
+    timeout.unref()
+    child.once('close', () => { clearTimeout(timeout); resolve() })
+    child.kill()
+  })
+  stopping.set(child, pending)
+  return pending
 }
 
 export function localModelProcessEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -18,12 +35,17 @@ export function runLocalModelProcess(executable: string, args: string[], options
     const child = spawn(executable, args, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: localModelProcessEnvironment(options.env) })
     const chunks: Buffer[] = []
     let bytes = 0, failure: Error | null = null
-    const abort = (): void => { failure = new Error('任务已取消'); child.kill() }
-    const timeout = setTimeout(() => { failure = new Error('本地模型任务超时'); child.kill() }, options.timeoutMs ?? 180000)
+    const terminate = (error: Error): void => {
+      if (failure) return
+      failure = error
+      void stopLocalModelProcess(child)
+    }
+    const abort = (): void => terminate(new Error('任务已取消'))
+    const timeout = setTimeout(() => terminate(new Error('本地模型任务超时')), options.timeoutMs ?? 180000)
     options.signal?.addEventListener('abort', abort, { once: true })
     child.stdout.on('data', (data: Buffer) => {
       bytes += data.length
-      if (bytes > (options.maxBytes ?? 4 * 1024 * 1024)) { failure = new Error('本地模型结果超限'); child.kill() }
+      if (bytes > (options.maxBytes ?? 4 * 1024 * 1024)) terminate(new Error('本地模型结果超限'))
       else chunks.push(data)
     })
     // Do not copy decoder stderr into application logs: it can include grants and file paths.

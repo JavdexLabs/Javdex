@@ -6,6 +6,9 @@ import { bindWindowNavigation, historyKey, navigateWindowHistory } from './windo
 
 test('history shortcuts do not intercept editing arrows, combinations, IME or repeats', () => {
   assert.equal(historyKey({ type: 'keyDown', key: 'ArrowLeft', alt: true }, 'win32'), 'back')
+  assert.equal(historyKey({ type: 'keyDown', key: 'ArrowRight', alt: true }, 'linux'), 'forward')
+  assert.equal(historyKey({ type: 'keyDown', key: 'ArrowLeft', alt: true }, 'darwin'), null)
+  assert.equal(historyKey({ type: 'keyDown', key: 'ArrowRight', alt: true }, 'darwin'), null)
   assert.equal(historyKey({ type: 'keyDown', key: '[', meta: true }, 'darwin'), 'back')
   assert.equal(historyKey({ type: 'keyDown', key: ']', meta: true }, 'darwin'), 'forward')
   for (const input of [{ key: 'ArrowLeft' }, { key: 'ArrowLeft', alt: true, control: true }, { key: '[', meta: true, shift: true },
@@ -23,6 +26,8 @@ test('keyboard, app commands and legacy OS swipes use one bounded navigation ent
   } })
   const target = window as unknown as BrowserWindow
   bindWindowNavigation(target, 'darwin'); bindWindowNavigation(target, 'darwin')
+  window.webContents.emit('before-input-event', { preventDefault: () => prevented++ }, { type: 'keyDown', key: 'ArrowLeft', alt: true })
+  assert.equal(back, 0); assert.equal(prevented, 0, 'Option-arrows must remain available for macOS text editing')
   window.webContents.emit('before-input-event', { preventDefault: () => prevented++ }, { type: 'keyDown', key: '[', meta: true })
   window.emit('app-command', {}, 'browser-backward')
   window.emit('swipe', {}, 'right')

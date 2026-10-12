@@ -21,6 +21,54 @@ async function until(predicate: () => boolean): Promise<void> {
   assert.fail('subtitle display regression did not reach the expected state')
 }
 
+test('display changes arriving during render completion redraw without another inference publication', { timeout: 5000 }, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-display-tail-'))
+  const playback = { sessionId: 'display-tail', phase: 'playing', seekable: true, duration: 30, position: 0, tracks: [] } as unknown as PlaybackSnapshot
+  const source: PlaybackSource = {
+    target: { libraryId: 1, videoId: 1, resourceId: 1 }, mode: 'local', locator: path.join(root, 'fixture.mp4'),
+    identityKey: 'display-tail', resumeKey: 'display-tail', revision: 'one', title: 'fixture'
+  }
+  const updates: string[] = []
+  let queued = false
+  let changedDisplay: Promise<AiSubtitleSnapshot> | null = null
+  const runtime = createAiRuntimeInstaller(path.join(root, 'models'))
+  const native: NativePlayback = {
+    create: () => {}, load: () => {}, command: () => {}, read: () => ({ alive: true }),
+    viewport: () => {}, render: () => {}, addSubtitle: () => {}, destroy: () => {}, selectedAudioStream: () => 1,
+    updateGeneratedSubtitle: filename => {
+      const document = readFileSync(filename, 'utf8')
+      updates.push(document)
+      if (document.includes('你好') && !queued) {
+        queued = true
+        // A real IPC command resumes after initialization in the microtask gap
+        // between the completed write loop and its Promise.finally cleanup.
+        queueMicrotask(() => { changedDisplay = controller.command(playback.sessionId, { action: 'display', value: 'japanese' }) })
+      }
+    }
+  }
+  const controller = createAiSubtitleController({
+    root, native, runtime: { installed: async () => true, paths: runtime.paths },
+    playback: () => playback, source: () => source, resolve: async value => value, changed: () => {}, exportFile: async () => {},
+    inference: () => ({
+      probe: async (_locator, index) => ({ index, identity: 'fixture-audio' }),
+      recognize: async () => [{ start: 0, end: 2, japanese: 'こんにちは' }],
+      translate: async cues => cues.map(cue => ({ ...cue, chinese: '你好' })),
+      translateText: async () => '你好', close: async () => {}
+    })
+  })
+  try {
+    await controller.command(playback.sessionId, { action: 'start' })
+    await until(() => changedDisplay !== null)
+    await changedDisplay!
+    await until(() => updates.at(-1)?.includes('こんにちは') === true && !updates.at(-1)?.includes('你好'))
+    assert.equal(controller.snapshot().display, 'japanese')
+    assert.equal(controller.snapshot().error, null)
+  } finally {
+    await controller.close()
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('silent scheduler publications retain a display warning until explicit retry clears and redraws it', { timeout: 5000 }, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-display-error-'))
   const playback = {

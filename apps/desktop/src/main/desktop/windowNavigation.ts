@@ -12,7 +12,7 @@ interface KeyInput {
 }
 export function historyKey(input: KeyInput, platform: NodeJS.Platform): Direction | null {
   if (input.type !== 'keyDown' || input.isComposing || input.isAutoRepeat || input.shift || input.control) return null
-  if (input.alt && !input.meta) {
+  if (platform !== 'darwin' && input.alt && !input.meta) {
     if (input.key === 'ArrowLeft') return 'back'
     if (input.key === 'ArrowRight') return 'forward'
   }

@@ -88,6 +88,7 @@ export function createAiSubtitleController(deps: Dependencies) {
     requestedDocument = renderSubtitleAss(cues, state.display, state.fontSize)
     if (renderLoop || requestedDocument === document) return
     const generation = task, filename = file
+    let failed = false
     renderLoop = (async () => {
       while (!generation.signal.aborted && requestedDocument !== document) {
         const value = requestedDocument
@@ -97,8 +98,15 @@ export function createAiSubtitleController(deps: Dependencies) {
         firstSelection = false; document = value
       }
     })().catch(() => {
+      failed = true
       if (!generation.signal.aborted) markDisplayFailure()
-    }).finally(() => { renderLoop = null })
+    }).finally(() => {
+      renderLoop = null
+      // Commands can arrive after the loop ends but before this Promise settles.
+      // Drain that request, but leave write failures for an explicit user retry.
+      if (!failed && !generation.signal.aborted && task === generation && file === filename
+        && requestedDocument !== document) render()
+    })
   }
   function stop(invalidate = true): Promise<void> {
     if (invalidate) intent++

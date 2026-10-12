@@ -79,6 +79,11 @@ try {
     candidate: { claimId: randomUUID(), secretDigest: digest(secret) } }, null)
   identity = { ...identity, writerEpoch: claimed.writerEpoch ?? claimed.identity?.writerEpoch ?? 1 }
   await post('playlists.create', { name: '备份清单' }, secret, true)
+  const playlistIdentity = item => ({ id: item.id, name: item.name, system_kind: item.system_kind ?? null })
+  const originalPlaylists = (await post('playlists.listPage', { limit: 60 })).items.map(playlistIdentity)
+  assert.equal(originalPlaylists.length, 3)
+  assert.deepEqual(originalPlaylists.filter(item => item.system_kind).map(item => item.system_kind).sort(), ['favorites', 'watch_later'])
+  assert.deepEqual(originalPlaylists.filter(item => !item.system_kind).map(item => item.name), ['备份清单'])
   const login = await fetch(`${base}/api/login`, { method: 'POST', headers: {
     Origin: base, 'Content-Type': 'application/json', 'X-Javdex-Client': 'web'
   }, body: JSON.stringify({ username: 'viewer', password: 'backup-smoke-test-only', remember: true }) })
@@ -87,7 +92,7 @@ try {
   const backupId = randomUUID()
   await post('backup.control', { action: 'create', id: backupId })
   const backup = await wait(backupId, 'completed')
-  assert.equal(backup.summary.counts.playlists, 1)
+  assert.equal(backup.summary.counts.playlists, originalPlaylists.length, 'backup must include the two built-in playlists')
   await post('playlists.create', { name: '仅存在目标的清单' }, secret, true)
   const chunks = []
   for (let offset = 0; offset < backup.bytes;) {
@@ -125,13 +130,15 @@ try {
   assert.equal(identity.catalogId, completed.newCatalogId)
   assert.equal(identity.serverId, previous.serverId)
   assert.notEqual(identity.catalogId, previous.catalogId)
+  assert.deepEqual((await post('playlists.listPage', { limit: 60 })).items.map(playlistIdentity), originalPlaylists,
+    'restore must preserve built-in identities and replace the target-only custom playlist')
   assert.equal((await post('backup.control', { action: 'restore', id: restoreId, digest: preview.digest })).jobs[0].phase, 'completed')
   assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 401)
   assert.equal((await post('backup.control', { action: 'status', id: completed.automaticBackupId })).jobs[0].phase, 'completed')
   docker('restart', name); await healthy()
   const verificationId = randomUUID()
   await post('backup.control', { action: 'create', id: verificationId })
-  assert.equal((await wait(verificationId, 'completed')).summary.counts.playlists, 1)
+  assert.equal((await wait(verificationId, 'completed')).summary.counts.playlists, originalPlaylists.length)
   // Exercise the actual packaged desktop exporter, including encrypted images, then
   // restore its host-platform paths into a Docker mount subdirectory.
   const fixtureDir = path.join(configDir, 'host-fixture')
@@ -163,6 +170,10 @@ try {
   catch (error) { if (!(error instanceof TypeError)) throw error }
   const importedJob = await wait(importId, 'completed')
   identity.catalogId = importedJob.newCatalogId
+  const importedPlaylists = (await post('playlists.listPage', { limit: 60 })).items
+  assert.equal(importedPlaylists.length, 2)
+  assert.deepEqual(importedPlaylists.map(item => item.system_kind).sort(), ['favorites', 'watch_later'])
+  assert.ok(importedPlaylists.every(item => item.video_count === 1), 'desktop import must retain both built-in video memberships')
   const restored = JSON.parse(docker('exec', name, 'node', '-e', 'const D=require("better-sqlite3"),fs=require("fs");const d=new D("/data/library.db",{readonly:true});const v=d.prepare("SELECT cover_path FROM videos").get();console.log(JSON.stringify({image:fs.readFileSync("/data/media_assets/"+v.cover_path,"utf8"),locator:d.prepare("SELECT locator FROM video_resources").get().locator}))'))
   assert.equal(restored.image, 'original-image-plaintext')
   assert.equal(restored.locator, `${targetDirectory}/电影 avi.avi`)

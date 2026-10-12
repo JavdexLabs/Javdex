@@ -161,6 +161,28 @@ test('restarting after a precision switch retranslates without recognizing again
   } finally { await f.cleanup() }
 })
 
+test('a session replaced during an ASS write does not drain stale documents before the next tick', async t => {
+  const f = await fixture()
+  const rename = fs.rename
+  let writes = 0
+  t.mock.method(fs, 'rename', async (from: Parameters<typeof fs.rename>[0], to: Parameters<typeof fs.rename>[1]) => {
+    await rename(from, to)
+    if (typeof to === 'string' && to.startsWith(f.root) && to.endsWith('.ass')) {
+      writes++
+      if (writes === 1) f.setSession()
+    }
+  })
+  try {
+    await f.controller.command('one', { action: 'start' })
+    await until(() => writes > 0)
+    await delay(50)
+    assert.equal(writes, 1, 'the old session must not keep rewriting ASS while waiting for a playback tick')
+    assert.equal(f.updates.length, 0, 'a stale write must never update the new playback session')
+    f.tick()
+    await until(() => f.controller.snapshot().sessionId === null)
+  } finally { await f.cleanup() }
+})
+
 test('audio changes invalidate current work and session replacement stops subtitles', async () => {
   const f = await fixture()
   try {

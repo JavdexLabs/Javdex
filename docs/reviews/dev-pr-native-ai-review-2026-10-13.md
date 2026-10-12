@@ -26,11 +26,13 @@
 - PR 初轮 desktop CI 失败：退出状态纯测试导入验收 GUI 宿主，Electron 43 首次懒下载产生 stdout，导致 `JSON.parse` 失败。纯退出判定抽到不依赖 Electron/Playwright 的模块，原宿主保留 re-export；测试仍验证正常、强制、异常和信号退出，不通过忽略下载输出或削弱断言处理。
 - 后续容器备份验收发现旧夹具只计算自定义清单，断言 1 而真实备份包含 2 个内置清单和 1 个测试清单。修正计数并验证精确内置身份、源清单恢复以及目标额外清单被覆盖；桌面→服务器→桌面链路增加两个内置清单的影片关联保留验证，不排除内置数据、不放宽为仅检查备份成功。
 - 远程追加审查确认两个 P2 并补上先失败后通过的回归：macOS Option+方向键不再按 Alt 导航拦截，保留按词编辑，Windows/Linux Alt 及 macOS Command 导航不变；字幕写循环结束但 Promise 尚未释放时到达的显示模式请求在释放后继续排空，写入失败仍由用户显式重试，禁止自动失败重试循环。它们作为补充发现单独记录，不重排初审双轴结果。
+- 排空逻辑再次复检补齐会话归属：播放会话在实际 ASS 原子写入中更换时，旧写入不得发布原生字幕，也不能等待下一个 tick 期间反复重写。回归复现 50ms 内重复写入，修复后旧会话只完成已发起的一次写入；正常收尾重绘与停止回归共同通过。
+- 独立 Spec 复检补齐显示失败保护：仅阻止 finalizer 自动重试不够，后续推理发布也不得再次触发失败写入。实际 ASS rename 失败与受控后续推理发布回归先复现 1 次变成 3 次未授权重试，显示失败状态现在暂停后续渲染直至显式重试；恢复继续同一字幕文件且不重复识别。
 - 固定目录与哈希、运行库解压路径/链接/大小限制、安装原子交割与租约、远程来源/物理身份守卫、原生固定配置与禁用脚本/附加引用均纳入检查。没有新增任意 renderer 路径、URL、mpv 命令或服务器转码接口。
 
 ## 验证与边界
 
 - 新问题有先失败后通过的回归：受阻 SIGTERM 子进程、翻译退出、三适配 wrapper 动作消费；其余定向回归覆盖保护/缓存/就绪/字幕错误。原生 macOS arm64 开发编译与 C++ 核心回归已退出 0。
-- 本轮本机 server build（含 Web）、desktop build、server tests 已成功；server 测试两组为 42/46 与 5/7 通过，分别跳过 4 与 2，零失败。完整测试的最终提交结果以 PR 验证记录和检查为准，合入前必须全部通过，不使用修改期间的测试结果代表最终提交。最终日志为 `out/dev-pr-review-merge-tests.log`、`dev-pr-review-final-desktop-build.log`、`dev-pr-review-final-server-build.log`、`dev-pr-review-final-server-tests.log`；本机跳过的平台用例不算通过。
+- 本轮本机 server build（含 Web）、desktop build、server tests 已成功；server 测试两组为 42/46 与 5/7 通过，分别跳过 4 与 2，零失败。完整测试的最终提交结果以 PR 验证记录和检查为准，合入前必须全部通过，不使用修改期间的测试结果代表最终提交。本机最终核验日志采用 `out/dev-pr-final-verified-tests.log`、`out/dev-pr-final-verified-desktop-build.log`；前轮 server 日志为 `out/dev-pr-review-final-server-build.log`、`out/dev-pr-review-final-server-tests.log`。本机跳过的平台用例不算通过。
 - 本轮不发布、不变更系统文件关联、不读取或改写个人媒体库、不重新下载用户模型。Windows/Linux 原生实际播放、完整音画/无障碍/设备/安装包证据继续以各验收文档为准；模拟适配测试与本机 C++ 编译不等同于三平台实机验收。
 - 用户此前报告连续自定义评分报错，但未提供实际错误或模式；已运行连续评分与后端版本/IPC 回归，暂未复现，不将其列为已修复。需要实际错误信息才能确认是否属于当前分支缺陷。

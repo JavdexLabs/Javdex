@@ -84,13 +84,14 @@ export function createAiSubtitleController(deps: Dependencies) {
     return playback
   }
   function render(): void {
-    if (!state.enabled || !task || !file) return
+    if (!state.enabled || !task || !file || displayError || deps.playback()?.sessionId !== state.sessionId) return
     requestedDocument = renderSubtitleAss(cues, state.display, state.fontSize)
     if (renderLoop || requestedDocument === document) return
     const generation = task, filename = file
     let failed = false
     renderLoop = (async () => {
-      while (!generation.signal.aborted && requestedDocument !== document) {
+      while (!generation.signal.aborted && !displayError && deps.playback()?.sessionId === state.sessionId
+        && requestedDocument !== document) {
         const value = requestedDocument
         await atomicWrite(filename, value)
         if (generation.signal.aborted || file !== filename || deps.playback()?.sessionId !== state.sessionId) return
@@ -105,7 +106,7 @@ export function createAiSubtitleController(deps: Dependencies) {
       // Commands can arrive after the loop ends but before this Promise settles.
       // Drain that request, but leave write failures for an explicit user retry.
       if (!failed && !generation.signal.aborted && task === generation && file === filename
-        && requestedDocument !== document) render()
+        && deps.playback()?.sessionId === state.sessionId && requestedDocument !== document) render()
     })
   }
   function stop(invalidate = true): Promise<void> {

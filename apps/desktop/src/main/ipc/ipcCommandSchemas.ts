@@ -836,6 +836,12 @@ export const appIpcSchemas = {
     locale: z.string().min(1).max(100).refine(value => { try { Intl.getCanonicalLocales(value); return true } catch { return false } }).optional()
   }).strict()]),
   [IPC.PLAYLIST_LIST]: noArgs,
+  [IPC.RECENT_PLAYBACK_METADATA]: noArgs,
+  [IPC.RECENT_PLAYBACK_PAGE]: z.tuple([z.object({ limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional() }).strict()]),
+  [IPC.RECENT_PLAYBACK_REMOVE]: z.tuple([positiveSafeInteger]),
+  [IPC.RECENT_PLAYBACK_CLEAR]: noArgs,
   [IPC.PLAYLIST_GET]: z.tuple([
     id,
     z.enum(['added_at', 'release_date']).optional(),

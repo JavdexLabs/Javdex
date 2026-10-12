@@ -33,7 +33,7 @@ it('matches full global list order, counts, cover fallback and per-video members
     const page=listPlaylistBrowsePage({videoId:1,offset})
     assert.equal(page.total,125);assert.ok(page.items.length<=60);actual.push(...page.items)
   }
-  assert.deepEqual(actual.map(({generation:_generation,revision:_revision,...item})=>item),full.map(item=>({id:item.id,name:item.name,description:item.description,preview_cover_path:item.preview_cover_path,video_count:item.video_count,contains_video:item.contains_video})))
+  assert.deepEqual(actual.map(({generation:_generation,revision:_revision,...item})=>item),full.map(item=>({id:item.id,name:item.name,description:item.description,system_kind:item.system_kind,cover_path:item.cover_path,preview_cover_path:item.preview_cover_path,video_count:item.video_count,contains_video:item.contains_video})))
   assert.ok(actual.every(item=>Number.isSafeInteger(item.generation)&&Number.isSafeInteger(item.revision)))
   assert.equal(actual.find(item=>item.id===4)!.preview_cover_path,'')
   assert.equal(listPlaylistBrowsePage({offset:9999}).offset,120)
@@ -62,6 +62,20 @@ it('bounds NUL/UTF8 display fields and preserves stored full identity without pr
   assert.equal((db.prepare('SELECT name FROM playlists WHERE id=1').get() as {name:string}).name,name)
   db.prepare('UPDATE playlists SET cover_path=? WHERE id=1').run('x'.repeat(4097))
   assert.equal(listPlaylistBrowsePage({search:'',offset:120}).items.find(item=>item.id===1)?.preview_cover_path,null)
+  assert.equal(listPlaylistBrowsePage({search:'',offset:120}).items.find(item=>item.id===1)?.cover_path,null)
+})
+it('projects built-in identity and separates a custom cover from the first video cover',()=>{
+  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
+  insertTestVideoWithFile(db,{code:'PL-1',filePath:'/synthetic/1.mp4'})
+  db.exec("UPDATE videos SET cover_path='covers/video.png'; INSERT INTO playlist_video(playlist_id,video_id,position) SELECT id,1,0 FROM playlists")
+  const favorite=listPlaylistBrowsePage().items.find(item=>item.system_kind==='favorites')!
+  assert.equal(favorite.cover_path,null)
+  assert.equal(favorite.preview_cover_path,'covers/video.png')
+  db.prepare('UPDATE playlists SET cover_path=? WHERE id=?').run('playlist_covers/custom.png',favorite.id)
+  const custom=listPlaylistBrowsePage().items.find(item=>item.id===favorite.id)!
+  assert.equal(custom.system_kind,'favorites')
+  assert.equal(custom.cover_path,'playlist_covers/custom.png')
+  assert.equal(custom.preview_cover_path,'playlist_covers/custom.png')
 })
 it('keeps total, page, membership and exact-name checks on one WAL snapshot',t=>{
   const db=setup(),external=new Database(db.name),prepare=db.prepare.bind(db)

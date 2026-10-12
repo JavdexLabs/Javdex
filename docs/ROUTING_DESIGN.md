@@ -33,6 +33,7 @@
 - `/playlists`: 清单列表。
 - `/playlists/:playlistId`: 清单详情。
 - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
+- `/playlists/0`：桌面本机“最近播放”虚拟清单，复用详情与嵌套影片返回栈；`0` 不是资料库清单 ID，只调用独立的桌面历史接口，不传给资料库清单读写或选择器。
 - `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。扫描组合队列使用 `scanOffset`，刮削队列使用 `scrapeOffset`，演员队列使用 `actressOffset` 保存分页位置；扫描 `item=scan:<id>` / `item=scan:identity-<id>` 在所选 `lib` 的活动库范围内定位。`item=scrape:<id>` 或 `videoId` 深链接由服务端定位所在页，删除后的越界页回退到最后一页。演员 `item=actress:<normalizedName>` 使用完整名称定位所在页；`queue` 标记翻页目标领域，避免全部视图跳到其他队列。列表只读概要，URL 选中项及分页偏移规范化后才加载单项候选详情。
 - `/actresses/conflicts`: 旧的演员冲突入口，重定向到 `/pending?type=actress`。
 - `/pending/video/:videoId`: 从待确认工作台打开影片详情。

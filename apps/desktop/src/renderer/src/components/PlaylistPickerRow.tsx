@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { ListVideo } from 'lucide-react'
 import type { PlaylistBrowseItem } from '@shared/playlistTypes'
-import { assetUrl } from '../api'
 import { UI_ICON_SM } from './iconDefaults'
 import PlaylistCover from './PlaylistCover'
 import styles from './PlaylistPickerRow.module.css'
@@ -13,11 +12,8 @@ export default function PlaylistPickerRow({ item, action, onSelect, disabled = f
   disabled?: boolean
   selected?: boolean
 }): JSX.Element {
-  const cover = assetUrl(item.preview_cover_path, 320)
   const content = <>
-    <PlaylistCover variant="pick">
-      {cover ? <img src={cover} alt={item.name} /> : <span><ListVideo {...UI_ICON_SM} /></span>}
-    </PlaylistCover>
+    <PlaylistCover variant="pick" playlist={item} placeholder={<span><ListVideo {...UI_ICON_SM} /></span>} />
     <div className={styles.main}>
       <div className={styles.name}>{item.name}</div>
       <div className={styles.meta}>{item.video_count} 部影片</div>

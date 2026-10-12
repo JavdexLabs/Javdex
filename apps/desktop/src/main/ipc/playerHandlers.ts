@@ -10,14 +10,18 @@ import type { PlaybackTarget } from '@shared/desktop/playback'
 export function registerPlayerHandlers(
   backend: CatalogBackend,
   settings: DesktopSettingsStore,
-  openBuiltin: (target: PlaybackTarget) => Promise<PlayResult>
+  openBuiltin: (target: PlaybackTarget) => Promise<PlayResult>,
+  recentStarted?: (videoId: number) => Promise<void>
 ): void {
   const service = createPlayerService({
     catalog: backend,
     readPlayerPath: async () => (await settings.read()).playerPath,
     readPlayerPreference: async () => (await settings.read()).playerPreference,
     openBuiltin,
-    externalStarted: async videoId => { await removePlayedWatchLater(backend, videoId) }
+    externalStarted: async videoId => {
+      await recentStarted?.(videoId)
+      await removePlayedWatchLater(backend, videoId)
+    }
   })
   appCommandAdapter.register(IPC.PLAYER_PLAY, async (libraryId, videoId): Promise<PlayResult> =>
     service.playVideo(libraryId, videoId))

@@ -24,6 +24,8 @@ import Button from '../components/Button'
 import PlaylistCard from '../components/PlaylistCard'
 import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
 import { onPlaylistImportCompleted } from '../components/playlistImport/events'
+import { useRecentPlayback } from '../hooks/useRecentPlayback'
+import styles from './PlaylistsPage.module.css'
 
 export default function PlaylistsPage(): JSX.Element {
   const navigate = useNavigate()
@@ -43,6 +45,8 @@ export default function PlaylistsPage(): JSX.Element {
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
+  const recent = useRecentPlayback()
+  const showRecent = Boolean(recent.metadata && `${recent.metadata.name} ${recent.metadata.description}`.toLowerCase().includes(urlQ.trim().toLowerCase()))
   const context = `${location.key}:${location.pathname}:${location.search}`
   const [draft,setDraft] = useState<{context:string;value:string}>()
   const searchInput = draft?.context === context ? draft.value : urlQ
@@ -106,6 +110,7 @@ export default function PlaylistsPage(): JSX.Element {
       )
     }
     if (!page.total && !urlQ) {
+      if (showRecent) return <></>
       return (
         <EmptyState
           icon={<ListVideo {...UI_ICON_SM} aria-hidden />}
@@ -115,6 +120,7 @@ export default function PlaylistsPage(): JSX.Element {
       )
     }
     if (!page.total) {
+      if (showRecent) return <></>
       return (
         <EmptyState
           icon={<SearchX {...UI_ICON_SM} aria-hidden />}
@@ -163,7 +169,7 @@ export default function PlaylistsPage(): JSX.Element {
           }
           resultCount={
             <ResultCount  aria-live="polite">
-              共 {page.known ? page.total : '…'} 个
+              共 {page.known ? page.total + (showRecent ? 1 : 0) : '…'} 个
             </ResultCount>
           }
         />
@@ -175,6 +181,13 @@ export default function PlaylistsPage(): JSX.Element {
         showScrollToTop={showScrollToTop}
         onScrollToTop={scrollToTop}
       >
+        {showRecent && recent.metadata && <div className={styles.deviceList}>
+          <PlaylistCard item={recent.metadata} active={activeId === recent.metadata.id}
+            onOpen={() => navigateToPlaylistDetail(navigate, location, recent.metadata!.id)} />
+        </div>}
+        {recent.error && <EmptyState variant="compact" title="本机最近播放读取失败" description={recent.error}>
+          <Button onClick={() => void recent.reload()}>重试</Button>
+        </EmptyState>}
         {renderList()}
       </ListSurface>
 

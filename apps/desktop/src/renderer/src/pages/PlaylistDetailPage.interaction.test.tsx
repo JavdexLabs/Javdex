@@ -62,7 +62,7 @@ function page(id: number, offset = 0, total = 120): PlaylistPage {
     } as unknown as Video] : []
   }
 }
-async function mount(): Promise<void> {
+async function mount(initial = '/playlists/1'): Promise<void> {
   viewport = continuousViewport()
   const PlaylistDetailPage = (await import('./PlaylistDetailPage')).default
   const { PlaylistImportProvider } = await import('../components/playlistImport/PlaylistImportContext')
@@ -70,7 +70,7 @@ async function mount(): Promise<void> {
   await act(async () => {
     renderer = TestRenderer.create(
       <QueryClientProvider client={client!}>
-        <MemoryRouter initialEntries={['/playlists/1']}>
+        <MemoryRouter initialEntries={[initial]}>
           <PlaylistImportProvider>
             <NavigationProbe />
             <Routes>
@@ -93,7 +93,7 @@ async function resolveRequest(index: number, value: PlaylistPage): Promise<void>
 async function click(label: string): Promise<void> {
   if (label === '下一页') { await viewport.scroll(renderer!, 60); return }
   await act(async () => {
-    const button = renderer!.root.findAllByType('button').find(node => text(node) === label)
+    const button = renderer!.root.findAllByType('button').find(node => text(node) === label || node.props['aria-label'] === label)
     assert.ok(button, label)
     assert.equal(Boolean(button.props.disabled), false)
     button.props.onClick()
@@ -114,6 +114,68 @@ afterEach(async () => {
   metadataResponse = undefined
   removal = deferred<boolean>()
   url = ''
+  delete (fakeApi as Partial<ElectronApi>).recentPlayback
+})
+
+it('uses device-only history for the virtual list and confirms clear without catalog writes', async () => {
+  let clears = 0, removes = 0
+  Object.assign(fakeApi, { recentPlayback: {
+    metadata: async () => ({ ...page(0), name: '最近播放', local_kind: 'recently_played', video_count: 120, contains_video: false }),
+    page: (query: PlaylistPageQuery) => {
+      const request = { id: 0, query, ...deferred<PlaylistVideosPage | null>() }
+      requests.push(request); return request.promise
+    },
+    remove: async () => { removes++ }, clear: async () => { clears++ }, onChanged: () => () => {}
+  } })
+  await mount('/playlists/0')
+  await resolveRequest(0, page(0))
+  assert.deepEqual(metadataRequests, [])
+  assert.match(text(renderer!.root), /按最近播放 · 最新在前/)
+  assert.doesNotMatch(text(renderer!.root), /从网页导入|编辑|加入清单/)
+  await click('清空历史')
+  const Modal = (await import('../components/Modal')).default
+  assert.equal(renderer!.root.findByType(Modal).props.title, '清空本机最近播放')
+  assert.equal(clears, 0, 'opening confirmation does not clear history')
+  await act(async () => renderer!.root.findByType(Modal).props.onConfirm())
+  assert.equal(clears, 1)
+  assert.equal(removes, 0)
+  assert.deepEqual(metadataRequests, [])
+})
+
+it('shows a retryable recent-history read error instead of an endless loading state', async () => {
+  let fail = true
+  Object.assign(fakeApi, { recentPlayback: {
+    metadata: async () => { if (fail) throw new Error('history unreadable'); return { ...page(0), name: '最近播放', local_kind: 'recently_played', video_count: 0 } },
+    page: async () => ({ videos: [], total: 0, filteredTotal: 0, limit: 60, offset: 0 }), onChanged: () => () => {}
+  } })
+  await mount('/playlists/0')
+  assert.match(text(renderer!.root), /本机最近播放加载失败/)
+  assert.match(text(renderer!.root), /history unreadable/)
+  fail = false
+  await click('重试')
+  assert.match(text(renderer!.root), /在本机播放影片后会自动出现在这里/)
+  assert.deepEqual(metadataRequests, [])
+})
+
+it('retains the loaded recent-history grid after an automatic refresh fails and allows retry', async () => {
+  let fail = false
+  let changed!: () => void
+  Object.assign(fakeApi, { recentPlayback: {
+    metadata: async () => { if (fail) throw new Error('history unreadable'); return { ...page(0), name: '最近播放', local_kind: 'recently_played', video_count: 120 } },
+    page: async () => ({ videos: [{ ...page(0).videos[0], id: 1 }], total: 120, filteredTotal: 120, limit: 60, offset: 0 }),
+    onChanged: (listener: () => void) => { changed = listener; return () => {} }
+  } })
+  await mount('/playlists/0')
+  const grid = renderer!.root.findByProps({ role: 'group', 'aria-label': '影片' })
+  fail = true
+  await act(async () => changed())
+  assert.equal(renderer!.root.findByProps({ role: 'group', 'aria-label': '影片' }), grid)
+  assert.match(text(renderer!.root), /正在显示上次读取的记录/)
+  assert.doesNotMatch(text(renderer!.root), /本机最近播放加载失败/)
+  fail = false
+  await click('重试')
+  assert.equal(renderer!.root.findByProps({ role: 'group', 'aria-label': '影片' }), grid)
+  assert.doesNotMatch(text(renderer!.root), /最近播放更新失败/)
 })
 
 it('ignores an old playlist response arriving after navigation', async () => {
@@ -133,6 +195,20 @@ it('requests a bounded thumbnail for a playlist card', async () => {
   result.videos[0].cover_path = 'covers/card.jpg'
   await resolveRequest(0, result)
   assert.ok(renderer!.root.findAllByType('img').some(image => image.props.src === 'media://covers/card.jpg?size=640'))
+})
+
+it('shows built-in artwork and its source label, while a custom cover keeps priority', async () => {
+  metadataResponse = async id => ({ ...page(id), system_kind: 'favorites',
+    cover_path: id === 2 ? 'playlist_covers/custom.png' : null, preview_cover_path: 'covers/video.jpg' })
+  await mount()
+  await resolveRequest(0, page(1))
+  assert.ok(renderer!.root.findAllByType('img').some(image => /playlist-favorites\.png$/.test(image.props.src)))
+  assert.match(text(renderer!.root), /默认封面/)
+  assert.doesNotMatch(text(renderer!.root), /自动封面/)
+  await act(async () => navigate('/playlists/2'))
+  await resolveRequest(1, page(2))
+  assert.ok(renderer!.root.findAllByType('img').some(image => image.props.src === 'media://playlist_covers/custom.png'))
+  assert.match(text(renderer!.root), /自定义封面/)
 })
 
 it('does not refresh an old playlist when its removal finishes after navigation', async () => {

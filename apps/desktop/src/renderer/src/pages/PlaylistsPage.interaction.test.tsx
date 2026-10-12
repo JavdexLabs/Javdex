@@ -6,6 +6,7 @@ import TestRenderer, { act } from 'react-test-renderer'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { PlaylistListPage, PlaylistListQuery } from '@shared/playlistTypes'
+import type { ElectronApi } from '../../../preload/index'
 
 const requests: Array<{query:PlaylistListQuery;resolve:(page:PlaylistListPage)=>void;reject:(error:Error)=>void}>=[]
 let full=0
@@ -22,11 +23,25 @@ async function mount(initial='/playlists'){
   client=new QueryClient({defaultOptions:{queries:{retry:false}}})
   await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initial]}><Provider><Location/><Routes><Route path="/playlists" element={<Shell/>}><Route path=":playlistId" element={<div>Detail</div>}/></Route></Routes></Provider></MemoryRouter></QueryClientProvider>,{createNodeMock:viewport.createNodeMock})})
 }
-afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;viewport=continuousViewport();position=0;client?.clear();requests.length=0;full=0})
+afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;viewport=continuousViewport();position=0;client?.clear();requests.length=0;full=0;delete (api as typeof api & { recentPlayback?: ElectronApi['recentPlayback'] }).recentPlayback})
 function text(node:TestRenderer.ReactTestInstance):string{return node.children.map(child=>typeof child==='string'?child:text(child)).join('')}
 async function resolve(index:number,offset=0,total=125){await act(async()=>requests[index].resolve({offset,total,limit:60,hasExactName:false,items:Array.from({length:Math.min(60,total-offset)},(_,i)=>({id:offset+i+1,name:`List ${offset+i+1}`,description:null,preview_cover_path:null,video_count:0,contains_video:false}))}))}
 async function click(label:string){if(label==='下一页'){position+=60;await viewport.scroll(renderer!,position);return}const button=renderer!.root.findAllByType('button').find(node=>text(node)===label)!;assert.ok(button,label);assert.ok(!button.props.disabled);await act(async()=>button.props.onClick())}
 function cards(){return renderer!.root.findAllByType('button').filter(node=>node.props['data-playlist-card'])}
+it('shows a device-only recent card without changing catalog pagination or picker data', async () => {
+  Object.assign(api, { recentPlayback: { metadata: async () => ({ id: 0, name: '最近播放', local_kind: 'recently_played',
+    description: '仅此设备', links: [], cover_path: null, preview_cover_path: null, created_at: '', updated_at: null,
+    video_count: 2, contains_video: false }), onChanged: () => () => {} } })
+  await mount(); await resolve(0, 0, 2)
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].query.offset, 0)
+  const local = cards().find(card => text(card).includes('最近播放'))!
+  assert.ok(local)
+  assert.match(text(renderer!.root), /共 3 个/)
+  await act(async () => local.props.onClick())
+  assert.equal(url, '/playlists/0')
+  assert.equal(full, 0)
+})
 it('keeps a pending search draft when the grid reports the unchanged URL page', async () => {
   await mount(); await resolve(0)
   await act(async () => renderer!.root.findByType('input').props.onChange({ target: { value: 'draft' } }))

@@ -506,6 +506,13 @@ const api = {
     splitResource: (libraryId: number, videoId: number, resourceId: number) =>
       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
   },
+  recentPlayback: {
+    metadata: () => invokeApp(IPC.RECENT_PLAYBACK_METADATA),
+    page: (query: import('@shared/desktop/recentPlayback').RecentPlaybackPageQuery) => invokeApp(IPC.RECENT_PLAYBACK_PAGE, query),
+    remove: (videoId: number) => invokeApp(IPC.RECENT_PLAYBACK_REMOVE, videoId),
+    clear: () => invokeApp(IPC.RECENT_PLAYBACK_CLEAR),
+    onChanged: (cb: () => void) => onAppEvent(IPC.RECENT_PLAYBACK_CHANGED, cb)
+  },
   playlists: {
     listPage: (query: import('@shared/playlistTypes').PlaylistListQuery) => invokeApp(IPC.PLAYLIST_LIST_PAGE, query),
     metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>

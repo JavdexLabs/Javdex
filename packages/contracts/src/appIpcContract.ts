@@ -452,6 +452,10 @@ export interface AppIpcContract {
     result: PlayResult
   }
   [IPC.PLAYBACK_AVAILABILITY]: { args: []; result: import('./desktop/playback').PlaybackAvailability }
+  [IPC.RECENT_PLAYBACK_METADATA]: { args: []; result: import('./desktop/recentPlayback').RecentPlaybackMetadata }
+  [IPC.RECENT_PLAYBACK_PAGE]: { args: [query: import('./desktop/recentPlayback').RecentPlaybackPageQuery]; result: PlaylistVideosPage }
+  [IPC.RECENT_PLAYBACK_REMOVE]: { args: [videoId: number]; result: void }
+  [IPC.RECENT_PLAYBACK_CLEAR]: { args: []; result: void }
   [IPC.PLAYBACK_OPEN]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: PlayResult }
   [IPC.PLAYBACK_SNAPSHOT]: { args: []; result: import('./desktop/playback').PlaybackSnapshot | null }
   [IPC.PLAYBACK_CONTROL]: { args: [sessionId: string, command: import('./desktop/playback').PlaybackControl]; result: void }
@@ -481,6 +485,7 @@ export interface AppIpcContract {
 
 export interface AppIpcEventContract {
   [IPC.PLAYBACK_CHANGED]: import('./desktop/playback').PlaybackSnapshot | null
+  [IPC.RECENT_PLAYBACK_CHANGED]: null
   [IPC.PLAYBACK_AI_SUBTITLE_CHANGED]: import('./desktop/aiSubtitles').AiSubtitleSnapshot
   [IPC.LOCAL_MODELS_CHANGED]: import('./desktop/localModels').LocalModelSnapshot
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState

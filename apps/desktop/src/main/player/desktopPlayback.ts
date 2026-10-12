@@ -29,7 +29,7 @@ export function disposeBuiltinPlayback(): Promise<void> {
   return pending
 }
 
-export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore): (target: PlaybackTarget) => Promise<PlayResult> {
+export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore, recentStarted?: (videoId: number) => Promise<void>): (target: PlaybackTarget) => Promise<PlayResult> {
   const native = createLibmpvPlayback(getWindow)
   const resolver = createPlaybackSourceResolver(backend)
   const volume = createPlaybackVolume(settings)
@@ -94,7 +94,10 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       }
     },
     navigate: direction => navigateWindowHistory(getWindow(), direction),
-    started: async source => { await removePlayedWatchLater(backend, source.target.videoId) },
+    started: async source => {
+      await recentStarted?.(source.target.videoId)
+      await removePlayedWatchLater(backend, source.target.videoId)
+    },
     awake: playing => {
       if (playing && blocker == null) blocker = powerSaveBlocker.start('prevent-display-sleep')
       if (!playing && blocker != null) { powerSaveBlocker.stop(blocker); blocker = null }

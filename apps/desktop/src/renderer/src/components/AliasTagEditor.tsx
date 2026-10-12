@@ -89,6 +89,7 @@ export default function AliasTagEditor({
             <span className={styles.chipName}>{alias}</span>
           )}
           <ChipRemoveButton
+            reveal="always"
             onClick={(e) => {
               e.stopPropagation()
               removeAt(index)

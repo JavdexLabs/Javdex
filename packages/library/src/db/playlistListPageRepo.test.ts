@@ -6,7 +6,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { initDatabaseAtPath, closeDatabase } from './database'
 import { listPlaylistBrowsePage } from './playlistListPageRepo'
-import { listPlaylists, listPlaylistsForVideo } from './playlistRepo'
+import { getPlaylistById, listPlaylists, listPlaylistsForVideo } from './playlistRepo'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import { IPC } from '@shared/ipc-channels'
 import { appIpcSchemas } from '../../../../apps/desktop/src/main/ipc/ipcCommandSchemas'
@@ -25,6 +25,26 @@ function setup() {
   db.exec('INSERT INTO playlist_video(playlist_id,video_id,position) SELECT id,1,0 FROM playlists')
   return db
 }
+it('separates built-in identities from same-name user lists without changing references or default picker queries',()=>{
+  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
+  db.exec("INSERT INTO playlists(name,created_at) VALUES ('我喜欢','2026-10-12'),('稍后观看','2026-10-12')")
+  const builtin=listPlaylistBrowsePage({kind:'builtin',limit:2})
+  assert.equal(builtin.total,2)
+  const favorite=builtin.items.find(item=>item.system_kind==='favorites')!
+  assert.equal(favorite.name,'收藏')
+  assert.equal(getPlaylistById(favorite.id)!.name,'收藏')
+  assert.equal(listPlaylistBrowsePage({kind:'builtin',search:'收藏'}).total,1)
+  assert.equal(listPlaylistBrowsePage({kind:'custom',search:'收藏'}).hasExactName,false)
+  const custom=listPlaylistBrowsePage({kind:'custom',limit:1})
+  assert.equal(custom.total,2)
+  assert.equal(custom.items.length,1)
+  assert.ok(custom.items.every(item=>item.system_kind===null))
+  assert.equal(listPlaylistBrowsePage({kind:'custom',search:'稍后观看'}).total,1)
+  assert.equal(listPlaylistBrowsePage().total,4)
+  assert.equal((db.prepare('SELECT name FROM playlists WHERE id=?').get(favorite.id) as {name:string}).name,'我喜欢')
+  assert.ok(appIpcSchemas[IPC.PLAYLIST_LIST_PAGE].safeParse([{kind:'builtin'}]).success)
+  assert.ok(!appIpcSchemas[IPC.PLAYLIST_LIST_PAGE].safeParse([{kind:'invalid'}]).success)
+})
 it('matches full global list order, counts, cover fallback and per-video membership over all pages',()=>{
   setup()
   const full=listPlaylistsForVideo(1)

@@ -58,6 +58,8 @@ export type PlaylistPage = z.infer<typeof playlistPageSchema>
 /** Display-only fields; mutations use IDs or the caller's full create/edit input. */
 export type PlaylistBrowseItem = z.infer<typeof playlistBrowseItemSchema>
 export interface PlaylistListQuery {
+  /** Omit to include all catalog playlists (including picker destinations). */
+  kind?: 'builtin' | 'custom'
   search?: string
   limit?: number
   offset?: number

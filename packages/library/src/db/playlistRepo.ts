@@ -33,7 +33,7 @@ function normalizePlaylistInput(input: PlaylistCreateInput): {
 function playlistListSelect(extraSelect = ''): string {
   return `
     SELECT
-      p.*,
+      p.*, CASE WHEN p.system_kind='favorites' THEN '收藏' ELSE p.name END AS name,
       COUNT(pv.video_id) AS video_count,
       COALESCE(
         p.cover_path,
@@ -135,7 +135,7 @@ export function listPlaylists(): PlaylistListItem[] {
 
 export function getPlaylistById(id: number): Playlist | null {
   const db = getDb()
-  return (db.prepare('SELECT * FROM playlists WHERE id = ?').get(id) as Playlist | undefined) ?? null
+  return (db.prepare("SELECT *, CASE WHEN system_kind='favorites' THEN '收藏' ELSE name END AS name FROM playlists WHERE id = ?").get(id) as Playlist | undefined) ?? null
 }
 
 const PLAYLIST_VIDEO_SORT_COLUMNS: Record<PlaylistVideoSortBy, string> = {

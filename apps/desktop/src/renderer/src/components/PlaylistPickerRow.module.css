@@ -50,3 +50,38 @@ button.root[aria-pressed='true'] {
   font-size: 12px;
   line-height: 1.45;
 }
+
+.option {
+  grid-template-columns: 40px minmax(0, 1fr) 12px;
+  gap: var(--form-label-gap);
+  height: 56px;
+  min-height: 56px;
+  padding: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.option:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.option:hover:where(:not(:disabled)) {
+  background: var(--surface-control-hover);
+}
+
+.option:active:where(:not(:disabled)),
+.option[aria-selected='true'] {
+  background: var(--surface-selected);
+}
+
+.check {
+  color: var(--text-accent);
+  visibility: hidden;
+}
+
+.check[data-selected] {
+  visibility: visible;
+}

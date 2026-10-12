@@ -65,11 +65,21 @@
 
 .actions {
   display: flex;
-  gap: 4px;
-  align-items: center;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: var(--form-field-gap);
+  align-items: flex-end;
   flex-shrink: 0;
-  flex-wrap: wrap;
+}
+
+.playbackToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--form-field-gap);
+  min-height: var(--control-h-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .sectionHead {
@@ -117,5 +127,6 @@
 
   .actions {
     justify-self: start;
+    align-items: flex-start;
   }
 }

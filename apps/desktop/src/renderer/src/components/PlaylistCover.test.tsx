@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { before, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { renderedText } from '../test/renderedText'
 import type { PlaylistBrowseItem } from '@shared/playlistTypes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
@@ -48,7 +49,7 @@ it('does not identify built-in lists by their names or change legacy/custom-list
     { url: 'media://covers/legacy.jpg', kind: 'automatic' })
 })
 
-it('renders the same artwork in cards, details and pickers, retaining overlays and click behavior', () => {
+it('renders the same artwork in cards, details and pickers, retaining counts and click behavior', () => {
   let clicks = 0
   let tree: TestRenderer.ReactTestRenderer
   act(() => { tree = TestRenderer.create(<>
@@ -60,7 +61,7 @@ it('renders the same artwork in cards, details and pickers, retaining overlays a
   assert.equal(images.length, 3)
   assert.ok(images.every(image => image.props.src === images[0].props.src && image.props.draggable === false))
   assert.equal(tree!.root.findAllByProps({ 'data-builtin': true }).length, 3)
-  assert.equal(tree!.root.findAllByType('span').filter(node => node.props.className === 'count').length, 1)
+  assert.match(renderedText(tree!.root.findByType(PlaylistCard)), /3 部影片/)
   act(() => tree!.root.findAllByType('button').forEach(button => button.props.onClick()))
   assert.equal(clicks, 2)
   act(() => tree!.update(<PlaylistCover variant="detail" playlist={item({ cover_path: 'playlist_covers/custom.png' })} />))

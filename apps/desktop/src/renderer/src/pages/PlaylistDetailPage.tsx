@@ -1,5 +1,5 @@
 import ResultCount from '../components/ResultCount'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Filter, Import, Inbox, Pencil, SearchX, Trash2 } from 'lucide-react'
 import { RECENT_PLAYBACK_LIST_ID } from '@shared/desktop/recentPlayback'
@@ -77,7 +77,10 @@ export default function PlaylistDetailPage(): JSX.Element {
   const [resourceFilterOpen, setResourceFilterOpen] = useState(false)
   const resourceFilterButtonRef = useRef<HTMLButtonElement>(null)
   const previousVideoStackOpenRef = useRef(videoStackOpen)
-  const resourceFilters = parseVideoResourceFilters(searchParams.get(LIST_PARAM.resources))
+  const resourceFilteringAllowed = !recent && !(detail?.id === playlistId && detail.system_kind === 'watch_later')
+  const rawResourceFilters = searchParams.get(LIST_PARAM.resources)
+  const resourceFilters = useMemo(() => resourceFilteringAllowed ? parseVideoResourceFilters(rawResourceFilters) : [],
+    [resourceFilteringAllowed, rawResourceFilters])
   const resourceFilterKey = videoResourceFiltersParam(resourceFilters)
   const metadataKey = JSON.stringify([playlistId, videoSortBy, videoSortDir, recentScope])
   const loadKey = JSON.stringify([playlistId, videoSortBy, videoSortDir, resourceFilterKey, recentScope])
@@ -169,7 +172,7 @@ export default function PlaylistDetailPage(): JSX.Element {
     const result = recent ? await api.recentPlayback.page(query)
       : await api.playlists.videoPage(playlistId, { ...query, sortBy: videoSortBy, sortDir: videoSortDir })
     return result ? { ...result, unfilteredTotal: result.total, items: result.videos, total: result.filteredTotal } : null
-  }, true, relatedOffset)
+  }, displayedMetadataKey.current === metadataKey, relatedOffset)
   const refreshVideos = useRef(videos.reload); refreshVideos.current = videos.reload
   useEffect(() => { alignRelated(videos.known, videos.total) }, [alignRelated, videos.known, videos.total])
 
@@ -282,7 +285,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                   ariaLabel="清单操作"
                   variant="inline"
                   actions={recent ? [{ key: 'clear', icon: <Trash2 {...UI_ICON} />, label: '清空历史', onClick: () => setConfirmDelete(true) }] : [
-                    {
+                    ...(!detail.system_kind ? [{
                       key: 'import',
                       icon: <Import {...UI_ICON} />,
                       label: '从网页导入',
@@ -293,7 +296,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                           playlistName: detail.name
                         }
                       })
-                    },
+                    }] : []),
                     {
                       key: 'edit',
                       icon: <Pencil {...UI_ICON} />,
@@ -310,6 +313,22 @@ export default function PlaylistDetailPage(): JSX.Element {
                     }
                   ]}
                 />
+                {detail.system_kind === 'watch_later' && <label className={styles.playbackToggle}>
+                  播放后移除
+                  <Switch aria-label="播放后移除" checked={detail.remove_after_play === 1} disabled={savingPlayback}
+                    onChange={async event => {
+                      const removeAfterPlay = event.target.checked
+                      setSavingPlayback(true)
+                      try {
+                        await api.playlists.update(detail.id, { name: detail.name, description: detail.description, removeAfterPlay }, expectedPlaylistVersion(detail))
+                        const metadata = await api.playlists.metadata(detail.id, videoSortBy, videoSortDir)
+                        if (activeLoadKey.current !== loadKey) return
+                        metadataCache.current = { key: metadataKey, value: metadata }
+                        setDetail(metadata)
+                      } catch (error) { toast.show((error as Error).message, 'error') }
+                      finally { setSavingPlayback(false) }
+                    }} />
+                </label>}
               </div>
             </div>
 
@@ -323,22 +342,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 ) : null}
               </div>
               <div className={styles.sectionControls}>
-                {detail.system_kind === 'watch_later' && <label className={styles.sectionControls}>
-                  <Switch aria-label="播放后移除" checked={detail.remove_after_play === 1} disabled={savingPlayback}
-                    onChange={async event => {
-                      const removeAfterPlay = event.target.checked
-                      setSavingPlayback(true)
-                      try {
-                        await api.playlists.update(detail.id, { name: detail.name, description: detail.description, removeAfterPlay }, expectedPlaylistVersion(detail))
-                        const metadata = await api.playlists.metadata(detail.id, videoSortBy, videoSortDir)
-                        metadataCache.current = { key: metadataKey, value: metadata }
-                        setDetail(metadata)
-                      } catch (error) { toast.show((error as Error).message, 'error') }
-                      finally { setSavingPlayback(false) }
-                    }} />
-                  播放后移除
-                </label>}
-                <Button
+                {resourceFilteringAllowed && <Button
                   ref={resourceFilterButtonRef}
                   type="button"
                   size="sm"
@@ -348,7 +352,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 >
                   <Filter {...UI_ICON} aria-hidden />
                   资源筛选{resourceFilters.length > 0 ? ` · ${resourceFilters.length}` : ''}
-                </Button>
+                </Button>}
                 {recent ? <span>按最近播放 · 最新在前</span> : detail.system_kind === 'watch_later' ? <span>按加入时间 · 最早在前</span> : <SortSwitch
                   label="清单影片排序"
                   options={PLAYLIST_VIDEO_SORT_OPTIONS}
@@ -391,14 +395,14 @@ export default function PlaylistDetailPage(): JSX.Element {
           </div>
       </DetailScrollBody>
 
-      <PlaylistResourceFilterPopover
+      {resourceFilteringAllowed && <PlaylistResourceFilterPopover
         id={`playlist-resource-filter-${detail.id}`}
         open={resourceFilterOpen}
         anchorRef={resourceFilterButtonRef}
         value={resourceFilters}
         onChange={setResourceFilters}
         onClose={() => setResourceFilterOpen(false)}
-      />
+      />}
 
       {showEdit && (
         <PlaylistCreateModal

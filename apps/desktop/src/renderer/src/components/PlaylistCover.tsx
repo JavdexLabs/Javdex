@@ -3,14 +3,14 @@ import { playlistCoverSource, type PlaylistCoverData } from './playlistCoverSour
 import styles from './PlaylistCover.module.css'
 
 export default function PlaylistCover({ variant, playlist, placeholder = <span>无封面</span>, children }: {
-  variant: 'card' | 'detail' | 'pick'
+  variant: 'card' | 'detail' | 'pick' | 'shortcut' | 'option'
   playlist: PlaylistCoverData & { name: string }
   placeholder?: ReactNode
   children?: ReactNode
 }): JSX.Element {
-  const cover = playlistCoverSource(playlist, variant === 'pick' ? 320 : variant === 'card' ? 640 : undefined)
+  const cover = playlistCoverSource(playlist, variant === 'pick' || variant === 'shortcut' || variant === 'option' ? 320 : variant === 'card' ? 640 : undefined)
   return <div className={styles.root} data-variant={variant} data-builtin={cover.kind === 'builtin' || undefined}>
-    {cover.url ? <img src={cover.url} alt={playlist.name} draggable={false} /> : placeholder}
+    {cover.url ? <img src={cover.url} alt={playlist.system_kind === 'favorites' ? '收藏' : playlist.name} draggable={false} /> : placeholder}
     {children}
   </div>
 }

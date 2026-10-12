@@ -45,9 +45,12 @@ export async function validatePlaylistImportStartTargets(
   if (input.destination.kind === 'append') {
     const playlist = (await catalog.playlists.get({
       playlistId: input.destination.playlistId
-    })) as { id?: number; name?: string } | null
+    })) as { id?: number; name?: string; system_kind?: string | null } | null
     if (!playlist || typeof playlist.name !== 'string') {
       throw new PlaylistImportTargetError('TARGET_PLAYLIST_NOT_FOUND', '追加目标清单不存在。')
+    }
+    if (playlist.system_kind) {
+      throw new PlaylistImportTargetError('TARGET_PLAYLIST_BUILTIN', '内置清单不支持从网页导入，请选择自定义清单。')
     }
     return { id: library.id, name: library.name, playlistName: playlist.name }
   }

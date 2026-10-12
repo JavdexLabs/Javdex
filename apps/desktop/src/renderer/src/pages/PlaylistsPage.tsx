@@ -60,9 +60,13 @@ export default function PlaylistsPage(): JSX.Element {
     return ()=>clearTimeout(timer)
   },[context,draft,urlQ,setSearchParams])
   const offset=parsePlaylistOffset(searchParams.get(LIST_PARAM.playlistOffset))
-  const page=usePlaylistBrowsePage({search:urlQ,offset,limit:PLAYLIST_PAGE_SIZE})
+  const page=usePlaylistBrowsePage({search:urlQ,offset,limit:PLAYLIST_PAGE_SIZE,kind:'custom'})
+  const builtins=usePlaylistBrowsePage({search:urlQ,offset:0,limit:2,kind:'builtin'})
+  const builtinItems = [...builtins.items].sort((a, b) => Number(b.system_kind === 'favorites') - Number(a.system_kind === 'favorites'))
+  const hasBuiltins = builtinItems.length > 0 || showRecent
   const loading=page.loading
-  const loadList=page.reload
+  const reloadCustom=page.reload, reloadBuiltins=builtins.reload
+  const loadList=useCallback(() => { reloadCustom(); reloadBuiltins() }, [reloadCustom, reloadBuiltins])
   const move=useCallback((next:number)=>{
     // Search will reset the page on commit; an incidental anchor must not discard its draft.
     if (draft?.context === context && draft.value.trim() !== urlQ.trim()) return
@@ -110,17 +114,17 @@ export default function PlaylistsPage(): JSX.Element {
       )
     }
     if (!page.total && !urlQ) {
-      if (showRecent) return <></>
       return (
         <EmptyState
+          variant="compact"
           icon={<ListVideo {...UI_ICON_SM} aria-hidden />}
-          title="暂无清单"
+          title="暂无自定义清单"
           description="创建清单后，可以把影片按主题或待看计划归档。"
         />
       )
     }
     if (!page.total) {
-      if (showRecent) return <></>
+      if (hasBuiltins) return <EmptyState variant="compact" title="没有匹配的自定义清单" />
       return (
         <EmptyState
           icon={<SearchX {...UI_ICON_SM} aria-hidden />}
@@ -169,7 +173,7 @@ export default function PlaylistsPage(): JSX.Element {
           }
           resultCount={
             <ResultCount  aria-live="polite">
-              共 {page.known ? page.total + (showRecent ? 1 : 0) : '…'} 个
+              共 {page.known && builtins.known ? page.total + builtins.total + (showRecent ? 1 : 0) : '…'} 个
             </ResultCount>
           }
         />
@@ -181,14 +185,25 @@ export default function PlaylistsPage(): JSX.Element {
         showScrollToTop={showScrollToTop}
         onScrollToTop={scrollToTop}
       >
-        {showRecent && recent.metadata && <div className={styles.deviceList}>
-          <PlaylistCard item={recent.metadata} active={activeId === recent.metadata.id}
-            onOpen={() => navigateToPlaylistDetail(navigate, location, recent.metadata!.id)} />
-        </div>}
+        {hasBuiltins && <section className={styles.builtinSection} aria-label="内置清单">
+          <h2 className={styles.sectionTitle}>内置清单</h2>
+          <div className={styles.builtinGrid}>
+            {builtinItems.map(item => <PlaylistCard key={item.id} item={item} compact active={activeId === item.id}
+              onOpen={() => navigateToPlaylistDetail(navigate, location, item.id)} />)}
+            {showRecent && recent.metadata && <PlaylistCard item={recent.metadata} compact active={activeId === recent.metadata.id}
+              onOpen={() => navigateToPlaylistDetail(navigate, location, recent.metadata!.id)} />}
+          </div>
+        </section>}
+        {builtins.error && <EmptyState variant="compact" title="内置清单读取失败" description={builtins.error}>
+          <Button onClick={() => builtins.reload()}>重试</Button>
+        </EmptyState>}
         {recent.error && <EmptyState variant="compact" title="本机最近播放读取失败" description={recent.error}>
           <Button onClick={() => void recent.reload()}>重试</Button>
         </EmptyState>}
-        {renderList()}
+        <section className={styles.customSection} aria-label="我的清单">
+          <h2 className={styles.sectionTitle}>我的清单 <span className={styles.sectionCount}>{page.known ? `共 ${page.total} 个` : '…'}</span></h2>
+          {renderList()}
+        </section>
       </ListSurface>
 
 

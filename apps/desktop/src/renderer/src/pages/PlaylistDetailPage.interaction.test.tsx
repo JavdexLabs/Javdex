@@ -112,6 +112,7 @@ afterEach(async () => {
   requests.length = 0
   metadataRequests.length = 0
   metadataResponse = undefined
+  delete (fakeApi.playlists as Partial<ElectronApi['playlists']>).update
   removal = deferred<boolean>()
   url = ''
   delete (fakeApi as Partial<ElectronApi>).recentPlayback
@@ -127,11 +128,13 @@ it('uses device-only history for the virtual list and confirms clear without cat
     },
     remove: async () => { removes++ }, clear: async () => { clears++ }, onChanged: () => () => {}
   } })
-  await mount('/playlists/0')
+  await mount('/playlists/0?resources=none')
   await resolveRequest(0, page(0))
   assert.deepEqual(metadataRequests, [])
   assert.match(text(renderer!.root), /按最近播放 · 最新在前/)
-  assert.doesNotMatch(text(renderer!.root), /从网页导入|编辑|加入清单/)
+  assert.doesNotMatch(text(renderer!.root), /从网页导入|编辑|加入清单|资源筛选/)
+  assert.doesNotMatch(url, /resources=/)
+  assert.ok(requests.every(request => request.query.resourceKinds?.length === 0))
   await click('清空历史')
   const Modal = (await import('../components/Modal')).default
   assert.equal(renderer!.root.findByType(Modal).props.title, '清空本机最近播放')
@@ -140,6 +143,48 @@ it('uses device-only history for the virtual list and confirms clear without cat
   assert.equal(clears, 1)
   assert.equal(removes, 0)
   assert.deepEqual(metadataRequests, [])
+})
+
+it('keeps import and resource filtering for custom lists but only filtering for favorites', async () => {
+  await mount()
+  await resolveRequest(0, page(1))
+  assert.equal(renderer!.root.findAllByProps({ 'aria-label': '从网页导入' }).length > 0, true)
+  assert.match(text(renderer!.root), /资源筛选/)
+  metadataResponse = async id => ({ ...page(id), system_kind: 'favorites', name: '收藏' })
+  await act(async () => navigate('/playlists/2?resources=none'))
+  await resolveRequest(1, page(2))
+  assert.doesNotMatch(text(renderer!.root), /从网页导入|播放后移除/)
+  assert.equal(renderer!.root.findAllByProps({ 'aria-label': '从网页导入' }).length, 0)
+  assert.match(text(renderer!.root), /资源筛选/)
+  assert.deepEqual(requests[1].query.resourceKinds, ['none'])
+  assert.match(url, /resources=none/)
+})
+
+it('drops stale watch-later resource filters and saves its playback preference', async () => {
+  let removeAfterPlay = false
+  let updates = 0
+  metadataResponse = async id => ({ ...page(id), system_kind: 'watch_later', name: '稍后观看',
+    remove_after_play: removeAfterPlay ? 1 : 0, revision: updates + 1 })
+  Object.assign(fakeApi.playlists, { update: async (id: number, input: { removeAfterPlay: boolean }) => {
+    assert.equal(id, 2)
+    removeAfterPlay = input.removeAfterPlay
+    updates++
+    return true
+  } })
+  await mount('/playlists/2?resources=none')
+  assert.ok(requests.length > 0)
+  assert.ok(requests.every(request => request.query.resourceKinds?.length === 0))
+  await resolveRequest(requests.length - 1, page(2))
+  assert.doesNotMatch(url, /resources=/)
+  assert.doesNotMatch(text(renderer!.root), /从网页导入|资源筛选/)
+  assert.equal(renderer!.root.findAllByProps({ 'aria-label': '从网页导入' }).length, 0)
+  const Switch = (await import('../components/Switch')).default
+  const toggle = renderer!.root.findByType(Switch)
+  assert.equal(toggle.props.checked, false)
+  await act(async () => toggle.props.onChange({ target: { checked: true } }))
+  assert.equal(updates, 1)
+  assert.equal(renderer!.root.findByType(Switch).props.checked, true)
+  assert.equal(renderer!.root.findByType(Switch).props.disabled, false)
 })
 
 it('shows a retryable recent-history read error instead of an endless loading state', async () => {

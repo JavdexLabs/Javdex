@@ -1053,7 +1053,7 @@ export const MANAGE_OPERATION_INPUTS = {
     })
     .strict(),
   'playlists.list': emptyInput,
-  'playlists.listPage': pageQuerySchema
+  'playlists.listPage': pageQuerySchema.extend({ kind: z.enum(['builtin', 'custom']).optional() })
     .extend({
       search: searchTextSchema.optional(),
       videoId: idSchema.optional(),

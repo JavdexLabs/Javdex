@@ -831,6 +831,7 @@ export const appIpcSchemas = {
     pendingResourceIdentityResolution
   ]),
   [IPC.PLAYLIST_LIST_PAGE]: z.tuple([z.object({
+    kind: z.enum(['builtin', 'custom']).optional(),
     search: z.string().max(500).optional(), limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), videoId: positiveSafeInteger.optional(),
     locale: z.string().min(1).max(100).refine(value => { try { Intl.getCanonicalLocales(value); return true } catch { return false } }).optional()

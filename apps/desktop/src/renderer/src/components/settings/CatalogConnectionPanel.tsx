@@ -1,16 +1,16 @@
 import TextInput from '../TextInput'
 import { useEffect, useId, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import type { RemoteConnectionProbeResult, ThisComputerSettings } from '@shared/desktop/settings'
 import type { DesktopSessionState } from '@shared/desktop/session'
-import { ArrowRight, FolderOpen, LoaderCircle, Monitor, RotateCw } from 'lucide-react'
+import { FolderOpen, Info, LoaderCircle, Monitor, RotateCw } from 'lucide-react'
 import { api } from '../../api'
 import { useDesktopSession } from '../../desktop/DesktopSessionContext'
 import Button from '../Button'
 import SettingsSwitchRow from '../SettingsSwitchRow'
 import Modal from '../Modal'
 import { AppFormField } from '../FormPrimitives'
-import { UI_ICON_SM } from '../iconDefaults'
+import { UI_ICON, UI_ICON_SM } from '../iconDefaults'
 import SelectControl from '../SelectControl'
 import { SettingsCard, SettingsDisclosure, SettingsStatusPill } from './SettingsPrimitives'
 import SettingsFeedback from './SettingsFeedback'
@@ -39,7 +39,6 @@ const SESSION_STATES: Record<DesktopSessionState, { label: string; tone: string 
 }
 
 export default function CatalogConnectionPanel(): JSX.Element {
-  const navigate = useNavigate()
   const { session, reconnect } = useDesktopSession()
   const playerHintId = useId()
   const [savedSettings, setSavedSettings] = useState<ThisComputerSettings | null>(null)
@@ -353,17 +352,14 @@ export default function CatalogConnectionPanel(): JSX.Element {
         {restartError ? <p className={styles.sessionError} role="alert">{restartError}</p> : null}
         {session.mode === 'remote' ? (
           <aside className={styles.importGuide} aria-label="从本机资料库导入提示">
+            <Info {...UI_ICON} size={24} className={styles.importGuideIcon} />
             <div className={styles.importGuideCopy}>
-              <strong className={styles.importGuideTitle}>将已有本机资料导入服务端</strong>
-              <p className={styles.importGuideText}>导入会替换服务端现有资料，执行前自动备份；本机资料和原始视频保留。</p>
-              <SettingsDisclosure title="导入步骤与范围">
-                <p>先完成服务端连接与写入授权，再前往「备份与恢复 → 从本机资料库导入」，按向导对应资源目录并核对恢复影响。</p>
-                <p>导入影片资料、图片、清单和评分；两份资料不自动同步，原始视频不会上传。</p>
-              </SettingsDisclosure>
+              <p className={styles.importGuideText}>已有本机资料可导入服务端。</p>
+              <p className={styles.importGuideText}>
+                完成连接与写入授权后，在「<Link to={settingsPath('storage', 'backup')} draggable={false} className={styles.importGuideLink}>备份与恢复</Link>」中选择「从本机资料库导入」。
+              </p>
+              <p className={styles.importGuideNote}>将替换服务端现有资料，执行前自动备份；本机资料保留，不上传或修改原始视频，两份资料不自动同步。</p>
             </div>
-            <Button size="sm" className={styles.importGuideButton} onClick={() => navigate(settingsPath('storage', 'backup'))}>
-              前往备份与恢复 <ArrowRight {...UI_ICON_SM} aria-hidden />
-            </Button>
           </aside>
         ) : null}
       </SettingsCard>

@@ -4,12 +4,13 @@ import { getDb } from './database'
 
 const registered = new WeakSet<Database.Database>()
 export function normalizePlaylistListQuery(query: PlaylistListQuery = {}) {
-  const { search = '', limit = 60, offset = 0, videoId, locale } = query
+  const { search = '', limit = 60, offset = 0, videoId, locale, kind } = query
   if (typeof search !== 'string' || search.length > 500 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
     || !Number.isSafeInteger(offset) || offset < 0 || (videoId !== undefined && (!Number.isSafeInteger(videoId) || videoId <= 0))) throw new Error('清单分页参数无效')
   if (locale !== undefined && (typeof locale !== 'string' || !locale || locale.length > 100)) throw new Error('搜索语言无效')
   if (locale !== undefined) Intl.getCanonicalLocales(locale)
-  return { search: search.trim(), limit, offset, videoId, locale }
+  if (kind !== undefined && kind !== 'builtin' && kind !== 'custom') throw new Error('清单分组无效')
+  return { search: search.trim(), limit, offset, videoId, locale, kind }
 }
 function display(value: Buffer | null, limit: number): string | null {
   if (value === null) return null
@@ -30,17 +31,23 @@ export function listPlaylistBrowsePage(query: PlaylistListQuery = {}, database: 
     registered.add(database)
   }
   const folded = input.locale ? input.search.toLocaleLowerCase(input.locale) : input.search.toLowerCase()
-  const filter = input.search ? 'WHERE playlist_text_matches(p.name, ?, ?, 0) OR playlist_text_matches(p.description, ?, ?, 0)' : ''
+  const displayName = "CASE WHEN p.system_kind='favorites' THEN '收藏' ELSE p.name END"
+  const groupCondition = input.kind ? input.kind === 'builtin' ? 'p.system_kind IS NOT NULL' : 'p.system_kind IS NULL' : ''
+  const conditions = [
+    ...(groupCondition ? [groupCondition] : []),
+    ...(input.search ? [`(playlist_text_matches(${displayName}, ?, ?, 0) OR playlist_text_matches(p.description, ?, ?, 0))`] : [])
+  ]
+  const filter = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
   const params = input.search ? [folded, input.locale ?? '', folded, input.locale ?? ''] : []
   return database.transaction(() => {
     const total = (database.prepare(`SELECT COUNT(*) AS n FROM playlists p ${filter}`).get(...params) as { n: number }).n
     const offset = Math.min(input.offset, Math.max(0, Math.ceil(total / input.limit) - 1) * input.limit)
-    const hasExactName = Boolean(input.search && database.prepare('SELECT 1 FROM playlists WHERE playlist_text_matches(name, ?, ?, 1) LIMIT 1').get(folded, input.locale ?? ''))
+    const hasExactName = Boolean(input.search && database.prepare(`SELECT 1 FROM playlists p WHERE ${groupCondition ? `${groupCondition} AND ` : ''}playlist_text_matches(${displayName}, ?, ?, 1) LIMIT 1`).get(folded, input.locale ?? ''))
     const rows = database.prepare(`WITH page AS MATERIALIZED (
       SELECT p.id, p.created_at FROM playlists p ${filter} ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?
     ), projected AS MATERIALIZED (
       SELECT p.id, p.generation, p.revision, p.system_kind, p.cover_path AS custom_cover, page.created_at,
-        substr(CAST(p.name AS BLOB),1,516) AS name_prefix,
+        substr(CAST(${displayName} AS BLOB),1,516) AS name_prefix,
         substr(CAST(p.description AS BLOB),1,1028) AS description_prefix,
         (SELECT COUNT(*) FROM playlist_video pv WHERE pv.playlist_id=p.id) AS video_count,
         EXISTS(SELECT 1 FROM playlist_video pv WHERE pv.playlist_id=p.id AND pv.video_id=?) AS contains_video,

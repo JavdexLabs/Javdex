@@ -105,6 +105,8 @@ it('keeps picker rows and retry when a later page fails',async()=>{
 it('destination picker shows loading, empty, and retry',async()=>{
   const Destination=(await import('./PlaylistDestinationPicker')).default
   await act(async()=>{renderer=TestRenderer.create(<Destination value="" onChange={()=>{}}/>, {createNodeMock:viewport.createNodeMock})})
+  assert.equal(requests.length, 0, 'closed picker does not read candidates')
+  await click('选择目标清单')
   assert.equal(renderer!.root.findAllByProps({role:'status'}).length,1)
   await act(async()=>requests[0].reject(new Error('offline')))
   assert.match(text(renderer!.root), /清单读取失败/)
@@ -116,13 +118,53 @@ it('destination picker shows loading, empty, and retry',async()=>{
 it('import destination retains a selected identity across server pages without full options',async()=>{
   const Destination=(await import('./PlaylistDestinationPicker')).default
   function Host(){const [value,setValue]=React.useState(''),[label,setLabel]=React.useState('');return <Destination value={value} label={label} onChange={(id,name)=>{setValue(id);setLabel(name)}}/>}
+  viewport.owner.clientHeight = 224
   await act(async()=>{renderer=TestRenderer.create(<Host/>, {createNodeMock:viewport.createNodeMock})})
-  assert.equal(fullCalls,0);await resolve(0)
+  assert.equal(fullCalls,0)
+  await click('选择目标清单')
+  assert.equal(requests[0].query.kind, 'custom')
+  await resolve(0)
   const DestinationGrid=(await import('./ContinuousGrid')).default
-  assert.equal(renderer!.root.findByType(DestinationGrid).props.itemHeight,86)
+  assert.equal(renderer!.root.findByType(DestinationGrid).props.itemHeight,56)
   const row=renderer!.root.findAllByType('button').find(node=>node.props.title==='List 1')!
   await act(async()=>row.props.onClick())
+  assert.equal(renderer!.root.findAllByProps({ role: 'dialog' }).length, 0, 'selection closes the popup')
+  assert.equal(renderer!.root.findAllByType('button').find(node => node.props['aria-haspopup'] === 'dialog')!.props['aria-expanded'], false)
+  await click('List 1')
   await click('下一页');await resolve(1,60)
-  assert.match(text(renderer!.root), /已选：List 1/)
+  assert.match(text(renderer!.root), /List 1/)
   assert.ok(renderer!.root.findAllByType('button').filter(node=>/^List \d+$/.test(String(node.props.title ?? ''))).length <= 8)
+})
+
+it('destination picker prevents committing old search rows and closes after a fresh selection', async () => {
+  const Destination = (await import('./PlaylistDestinationPicker')).default
+  const selected: Array<[string, string]> = []
+  await act(async () => { renderer = TestRenderer.create(<Destination value="1" label="List 1" onChange={(id, name) => selected.push([id, name])} />, { createNodeMock: viewport.createNodeMock }) })
+  await click('List 1')
+  await resolve(0, 0, 3)
+  const stale = renderer!.root.findAllByProps({ role: 'option' }).find(node => node.props.title === 'List 2')!
+  await act(async () => renderer!.root.findByType('input').props.onChange({ target: { value: 'Fresh' } }))
+  assert.equal(renderer!.root.findAllByProps({ role: 'option' }).every(node => node.props.disabled), true)
+  await act(async () => stale.props.onClick())
+  assert.deepEqual(selected, [], 'a row from the previous query cannot be committed')
+  await act(async () => { await new Promise(done => setTimeout(done, 280)) })
+  assert.equal(requests[1].query.search, 'Fresh')
+  await act(async () => requests[1].resolve({ offset: 0, limit: 60, total: 1, items: [{ id: 501, name: 'Fresh target', video_count: 2, system_kind: null, preview_cover_path: null }] }))
+  const fresh = renderer!.root.findAllByProps({ role: 'option' }).find(node => node.props.title === 'Fresh target')!
+  await act(async () => fresh.props.onClick())
+  assert.deepEqual(selected, [['501', 'Fresh target']])
+  assert.equal(renderer!.root.findAllByProps({ role: 'dialog' }).length, 0)
+})
+
+it('destination picker closes and stops exposing candidates when disabled', async () => {
+  const Destination = (await import('./PlaylistDestinationPicker')).default
+  const onChange = (): void => {}
+  await act(async () => { renderer = TestRenderer.create(<Destination value="1" label="List 1" onChange={onChange} />, { createNodeMock: viewport.createNodeMock }) })
+  await click('List 1')
+  await resolve(0, 0, 3)
+  await act(async () => renderer!.update(<Destination value="1" label="List 1" onChange={onChange} disabled />))
+  assert.equal(renderer!.root.findAllByProps({ role: 'dialog' }).length, 0)
+  const trigger = renderer!.root.findAllByType('button').find(node => node.props['aria-haspopup'] === 'dialog')!
+  assert.equal(trigger.props.disabled, true)
+  assert.equal(trigger.props['aria-expanded'], false)
 })

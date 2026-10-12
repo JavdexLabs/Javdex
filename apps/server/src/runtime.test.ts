@@ -3940,6 +3940,13 @@ describe('server runtime lifecycle', () => {
       }
       const query = { search: 'Contract', videoId: 991, limit: 1, offset: 0 }
       assert.deepEqual(await remote.playlists.listPage(query), await local.playlists.listPage(query))
+      for (const kind of ['builtin', 'custom'] as const) {
+        const grouped = { kind, search: kind === 'builtin' ? '收藏' : 'Contract', limit: 2, offset: 0 }
+        const result = await remote.playlists.listPage(grouped)
+        assert.deepEqual(result, await local.playlists.listPage(grouped))
+        assert.equal(result.total, 1)
+        assert.ok(result.items.every(item => kind === 'builtin' ? item.system_kind === 'favorites' && item.name === '收藏' : !item.system_kind))
+      }
       assert.equal(await remote.playlists.get({ playlistId: 999999 }), null)
       const library = await remote.libraries.get({ libraryId: 1 })
       assert.ok(library)

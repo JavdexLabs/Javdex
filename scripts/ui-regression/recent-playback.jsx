@@ -13,7 +13,7 @@ const metadata = () => ({ id: 0, name: '最近播放', description: '仅此设�
   video_count: entries.length, contains_video: false })
 const changed = () => listeners.forEach(listener => listener())
 const lists = [
-  { id: 1, name: '我喜欢', system_kind: 'favorites', description: null, cover_path: null, preview_cover_path: null, video_count: 0, contains_video: false },
+  { id: 1, name: '收藏', system_kind: 'favorites', description: null, cover_path: null, preview_cover_path: null, video_count: 0, contains_video: false },
   { id: 2, name: '稍后观看', system_kind: 'watch_later', description: null, cover_path: null, preview_cover_path: null, video_count: 0, contains_video: false }
 ]
 window.api = {
@@ -21,8 +21,8 @@ window.api = {
     page: async ({ limit = 60, offset = 0, resourceKinds = [] }) => { const filtered = resourceKinds.length && !resourceKinds.includes('local') ? [] : entries
       return { videos: filtered.slice(offset, offset + limit), total: entries.length, filteredTotal: filtered.length, limit, offset } },
     clear: async () => { entries = []; changed() }, remove: async id => { entries = entries.filter(item => item.id !== id); changed() } },
-  playlists: { listPage: async ({ search = '', offset = 0, limit = 60 }) => {
-    const items = lists.filter(item => item.name.includes(search))
+  playlists: { listPage: async ({ search = '', offset = 0, limit = 60, kind }) => {
+    const items = lists.filter(item => item.name.includes(search) && (kind !== 'custom' || !item.system_kind))
     return { items, total: items.length, limit, offset, hasExactName: false } } },
   playlistImport: { onSnapshotChanged: () => () => {} }, mediaLibraries: { list: async () => [] }
 }

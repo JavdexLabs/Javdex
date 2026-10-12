@@ -61,6 +61,12 @@
   color: var(--text-muted);
 }
 
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .feedback {
   display: block;
   min-height: 18px;

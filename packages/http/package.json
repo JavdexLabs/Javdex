@@ -2,7 +2,7 @@
   "name": "@javdex/http",
   "version": "0.8.0",
   "private": true,
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "description": "Runtime-neutral LAN browser HTTP, pairing/auth storage, browse DTO projection, static file serving, manage upload/asset GET, chunked backup transfer, and original-file play Range streams. Desktop keeps webAccess lifecycle; management HTTP is registered separately by the server host.",
   "exports": {
     "./*": "./src/*.ts"

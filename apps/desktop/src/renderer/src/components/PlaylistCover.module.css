@@ -19,6 +19,11 @@
   font-size: 12px;
 }
 
+.root[data-variant='shortcut'] {
+  width: 64px;
+  border-radius: var(--radius-sm);
+}
+
 .root[data-variant='detail'] {
   width: 164px;
   border-radius: var(--radius-md);
@@ -31,7 +36,13 @@
   font-size: 12px;
 }
 
-.root[data-variant='pick'] > span {
+.root[data-variant='option'] {
+  width: 40px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.root:where([data-variant='pick'], [data-variant='option']) > span {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -48,16 +59,16 @@
   object-fit: cover;
 }
 
-:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root > img {
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root:not([data-builtin]) > img {
   filter: var(--privacy-image-filter);
   scale: var(--privacy-image-scale);
 }
 
-:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root:where([data-variant='card'], [data-variant='pick']) > img {
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root:not([data-builtin]):where([data-variant='card'], [data-variant='pick'], [data-variant='shortcut'], [data-variant='option']) > img {
   scale: var(--privacy-image-scale-compact);
 }
 
-:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root:has(> img)::after {
+:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .root:not([data-builtin]):has(> img)::after {
   position: absolute;
   inset: 0;
   z-index: 1;

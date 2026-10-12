@@ -18,7 +18,7 @@
 
 .root:focus-within {
   border-color: var(--text-accent);
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-input-ring);
 }
 
 .root input {
@@ -63,6 +63,7 @@
 }
 
 .root input:focus {
+  /* The compound field draws its only focus border and halo on the outer shell. */
   outline: none;
   box-shadow: none;
 }

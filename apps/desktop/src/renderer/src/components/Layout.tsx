@@ -29,8 +29,10 @@ import {
 } from '../globalSearchShortcut'
 import DesktopSessionOverlay from '../desktop/DesktopSessionOverlay'
 import { useDesktopSession } from '../desktop/DesktopSessionContext'
+import { interactionLayers } from '../interaction/interactionLayers'
 import { SidebarNavIcon, SidebarNavLabel, SidebarNavLink, SidebarNavRow } from './SidebarNav'
 import styles from './Layout.module.css'
+import PlaybackPanel from '../playback/PlaybackPanel'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
@@ -195,7 +197,7 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
 
   useEffect(() => {
     const handleGlobalSearchShortcut = (event: KeyboardEvent): void => {
-      if (!isGlobalSearchShortcut(event)) return
+      if (event.defaultPrevented || event.isComposing || interactionLayers.hasModal() || !isGlobalSearchShortcut(event)) return
       event.preventDefault()
       const go = (): void => {
         if (location.pathname !== ROUTE_PATH.home) navigate(ROUTE_PATH.home)
@@ -209,6 +211,7 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   }, [location.pathname, navigate, requestLeave])
 
   return (
+    <div className={styles.shell}>
     <div className={styles.root} data-background={hasBackgroundLayer || undefined}>
       {backgroundSrc && (
         <AppBackgroundLayer
@@ -241,8 +244,10 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
       <div className={styles.main}>
         <DesktopSessionOverlay />
         <div className={styles.content}>{children}</div>
+        <PlaybackPanel />
       </div>
       <AssetCryptoOverlay />
+    </div>
     </div>
   )
 }

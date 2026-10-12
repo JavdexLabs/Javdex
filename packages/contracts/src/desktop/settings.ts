@@ -6,6 +6,9 @@ export interface ThisComputerSettings {
   closeToTray: boolean
   theme: string
   playerPath: string | null
+  playerPreference: 'external' | 'builtin'
+  playbackVolume: number
+  resumePlayback: boolean
   proxyUrl: string
   proxyUrlEnabled: boolean
   llmProxyUrl: string
@@ -16,6 +19,8 @@ export interface ThisComputerSettingsPatch {
   mode?: 'local' | 'remote'
   remoteBaseUrl?: string | null
   playerPath?: string | null
+  playerPreference?: 'external' | 'builtin'
+  resumePlayback?: boolean
 }
 
 export interface ThisComputerSettingsUpdateResult {

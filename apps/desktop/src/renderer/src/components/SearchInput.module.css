@@ -16,8 +16,9 @@
 }
 
 .root:focus {
+  outline: none;
   border-color: var(--border-accent);
-  box-shadow: var(--search-focus-shadow, var(--focus-ring));
+  box-shadow: var(--focus-ring);
 }
 
 .root[data-full-width] {
@@ -30,8 +31,6 @@
 }
 
 .root[data-variant='toolbar'] {
-  --search-focus-shadow: 0 0 0 3px var(--accent-soft);
-
   box-sizing: border-box;
   min-width: 160px;
   max-width: min(420px, 48vw);

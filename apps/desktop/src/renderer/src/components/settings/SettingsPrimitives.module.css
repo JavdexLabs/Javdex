@@ -1,3 +1,144 @@
+.settingRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 12px;
+}
+
+.settingCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.settingTitle {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.settingDescription,
+.valueLabel {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.settingControls,
+.valueActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.valueRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding-block: 10px;
+}
+
+.settingRow + .settingRow,
+.valueRow + .settingRow,
+.settingRow + .valueRow {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.valueLabel {
+  flex: 0 0 auto;
+}
+
+.valueContent {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-body, 13px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.disclosure {
+  min-width: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.disclosureSummary {
+  display: flex;
+  min-height: var(--control-h-md);
+  align-items: center;
+  padding-block: 8px;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  cursor: pointer;
+  list-style: none;
+}
+
+.disclosureSummary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosureSummary:hover {
+  color: var(--text-primary);
+  background: var(--surface-control-hover);
+}
+
+.disclosureSummary:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.disclosureChevron {
+  flex: 0 0 auto;
+  transform: rotate(var(--disclosure-rotation, 0deg));
+  transition: transform var(--motion-fast);
+}
+
+.disclosure[open] {
+  --disclosure-rotation: 90deg;
+}
+
+.disclosureBody {
+  display: grid;
+  min-width: 0;
+  padding: 4px 0 12px 22px;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.disclosureBody > p {
+  margin: 0;
+}
+
+@media (width <= 720px) {
+  .settingRow,
+  .valueRow {
+    flex-wrap: wrap;
+  }
+
+  .settingControls {
+    max-width: 100%;
+    margin-left: auto;
+  }
+
+  .valueContent {
+    flex-basis: 60%;
+  }
+
+  .valueActions {
+    width: 100%;
+  }
+}
+
 .card {
   margin-bottom: 0;
   padding: var(--settings-card-pad-y, 16px) var(--settings-card-pad-x, 18px);
@@ -254,6 +395,11 @@
   width: 100%;
 }
 
+.numberStepper:has(.stepperValue:focus) {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
 .stepperField {
   display: inline-flex;
   align-items: flex-start;
@@ -326,6 +472,7 @@
 }
 
 .stepperValue:focus {
+  outline: none;
   background: color-mix(in srgb, var(--surface-control) 55%, transparent);
 }
 
@@ -346,4 +493,15 @@
 
 .numberStepperDisabled {
   opacity: 0.72;
+}
+
+@media (width <= 720px) {
+  .cardHead {
+    flex-direction: column;
+  }
+
+  .cardActions {
+    align-self: flex-end;
+    max-width: 100%;
+  }
 }

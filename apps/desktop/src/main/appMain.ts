@@ -34,11 +34,14 @@ import { nfoExportTaskController } from './nfo/export/nfoExportTaskController'
 import { bindNfoExportWindowGuard } from './nfo/export/nfoExportWindowGuard'
 import { createDesktopRuntime, type DesktopRuntime } from './bootstrap/createDesktopRuntime'
 import { bindMainWindow } from './desktop/mainWindowBindings'
+import { bindWindowNavigation } from './desktop/windowNavigation'
 import { actressQueryService } from './services/actressQueryService'
 import { mediaLibraryService } from './services/mediaLibraryService'
 import { videoMaintenanceService } from './services/videoMaintenanceService'
 import { videoLifecycleService } from './services/videoLifecycleService'
 import { videoQueryService } from './services/videoQueryService'
+import { disposeBuiltinPlayback, stopBuiltinPlayback } from './player/desktopPlayback'
+import { closeLocalModels } from './services/localModels/desktopLocalModels'
 
 let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
@@ -117,6 +120,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   bindNfoExportWindowGuard(mainWindow, nfoExportTaskController, () => shutdownInProgress)
   bindMainWindow(mainWindow)
+  bindWindowNavigation(mainWindow, process.platform, () => !nfoExportTaskController.isForegroundBlocking)
   const window = mainWindow
   window.on('close', (event) => {
     if (event.defaultPrevented || shutdownInProgress || !getSettings().closeToTray || !hasAppTray()) return
@@ -158,7 +162,7 @@ if (gotSingleInstanceLock) {
     configureDesktopLibraryRuntime()
     const runtime = await createDesktopRuntime(app.getPath('userData'), app.getVersion(), {
       local: {
-        onRestored: () => { webAccess.revoke() },
+        onRestored: () => { stopBuiltinPlayback(); webAccess.revoke() },
         queries: videoQueryService,
         videos: videoMaintenanceService,
         lifecycle: videoLifecycleService,
@@ -282,12 +286,15 @@ if (gotSingleInstanceLock) {
     event.preventDefault()
     if (shutdownInProgress) return
     shutdownInProgress = true
+    const playbackDisposal = disposeBuiltinPlayback()
     if (desktopRuntime?.mode === 'local') {
       automaticScanScheduler.stop()
       powerMonitor.off('resume', handleSystemResume)
     }
     let readerTerminationFailed = false
     void Promise.allSettled([
+      playbackDisposal,
+      closeLocalModels(),
       scanCoordinator.stopAndDrain(),
       catalogReadService.dispose().catch((error: unknown) => {
         readerTerminationFailed = true

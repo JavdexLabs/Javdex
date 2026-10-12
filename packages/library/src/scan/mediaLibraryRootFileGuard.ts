@@ -11,6 +11,13 @@ import { isPathUnderRoot } from './libraryPathUtils'
 
 const MANAGED_ROOT_FILE_ERROR = '只能操作身份有效的启用媒体库根目录内文件'
 
+export class MediaLibraryRootFileMissingError extends Error {
+  constructor() {
+    super(MANAGED_ROOT_FILE_ERROR)
+    this.name = 'MediaLibraryRootFileMissingError'
+  }
+}
+
 export interface AuthorizedMediaLibraryRoot {
   readonly root: MediaLibraryRoot
   readonly realPath: string
@@ -137,7 +144,16 @@ function inspectAuthorizedRootFile(
       rejectManagedRootFile()
     }
     return { ...authorization, fileRealPath, stat }
-  } catch {
+  } catch (error) {
+    if (
+      isMissingPathError(error) &&
+      (isPathUnderRoot(filePath, authorization.root.path) ||
+        isPathUnderRoot(filePath, authorization.realPath))
+    ) {
+      // A root disappearing during the file lookup is offline, not a missing file.
+      requireCurrentRootIdentity(authorization.root)
+      throw new MediaLibraryRootFileMissingError()
+    }
     rejectManagedRootFile()
   }
 }

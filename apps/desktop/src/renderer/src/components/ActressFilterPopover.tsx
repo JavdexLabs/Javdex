@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { ActressAvatarFilter, ActressListStatusFilter } from '@shared/actressTypes'
-import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+import { InteractionLayerOwner, useInteractionLayer } from '../interaction/useInteractionLayer'
 import SelectControl from './SelectControl'
 import FilterPanelContent, { FilterPanelShell, FilterFields, FilterField } from './FilterPanelContent'
 
@@ -38,14 +38,13 @@ export default function ActressFilterPopover({
   showFaceFilter = true
 }: Props): JSX.Element | null {
   const panelRef = useRef<HTMLDivElement>(null)
+  const layer = useInteractionLayer({ enabled: open, rootRef: panelRef, anchorRef, onDismiss: onClose })
 
   useEffect(() => {
     if (!open) return
     const onDoc = (event: MouseEvent): void => {
       const target = event.target as Node
-      if (panelRef.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      if (isDismissExemptPortaledTarget(target)) return
+      if (!layer.isTop() || layer.contains(target)) return
       onClose()
     }
     const timer = window.setTimeout(() => document.addEventListener('mousedown', onDoc), 0)
@@ -53,20 +52,12 @@ export default function ActressFilterPopover({
       window.clearTimeout(timer)
       document.removeEventListener('mousedown', onDoc)
     }
-  }, [open, onClose, anchorRef])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, layer])
 
   if (!open) return null
 
   return (
+    <InteractionLayerOwner.Provider value={layer.owner}>
     <FilterPanelShell
       ref={panelRef}
       role="dialog"
@@ -106,5 +97,6 @@ export default function ActressFilterPopover({
         </FilterFields>
       </FilterPanelContent>
     </FilterPanelShell>
+    </InteractionLayerOwner.Provider>
   )
 }

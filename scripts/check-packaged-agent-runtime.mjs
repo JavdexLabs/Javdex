@@ -183,6 +183,8 @@ for (const archive of archives) {
   const redundantRuntimeEntries = entries.filter(
     (entry) =>
       entry.startsWith('/out/resources/') ||
+      entry.startsWith('/out/server/') ||
+      entry === '/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm' ||
       entry.startsWith('/node_modules/@earendil-works/pi-coding-agent/') ||
       entry.startsWith('/node_modules/playwright-core/lib/vite/') ||
       /^\/out\/renderer\/icon-(?:16|32|48|512)\.png$/.test(entry) ||
@@ -190,6 +192,12 @@ for (const archive of archives) {
   )
   if (redundantRuntimeEntries.length > 0) {
     throw new Error(`${archive} contains ${redundantRuntimeEntries.length} redundant runtime files`)
+  }
+  if (process.platform === 'win32') {
+    const wrongNativeEntries = entries.filter(entry =>
+      /^\/node_modules\/@mariozechner\/clipboard-(?:android|darwin|freebsd|linux)-/.test(entry) ||
+      /^\/node_modules\/@earendil-works\/pi-tui\/native\/(?!win32(?:\/|$))/.test(entry))
+    if (wrongNativeEntries.length > 0) throw new Error(`${archive} contains foreign-platform native modules`)
   }
   const playwrightPackage = JSON.parse(
     extractFile(archive, path.join('node_modules', 'playwright-core', 'package.json')).toString('utf8')

@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { VideoPendingScrapeFilter, VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
-import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+import { InteractionLayerOwner, useInteractionLayer } from '../interaction/useInteractionLayer'
 import SelectControl from './SelectControl'
 import TextInput from './TextInput'
 import TagFilter from './TagFilter'
@@ -41,14 +41,13 @@ export default function LibraryFilterPopover({
   anchorRef
 }: Props): JSX.Element | null {
   const panelRef = useRef<HTMLDivElement>(null)
+  const layer = useInteractionLayer({ enabled: open, rootRef: panelRef, anchorRef, onDismiss: onClose })
 
   useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent): void => {
       const t = e.target as Node
-      if (panelRef.current?.contains(t)) return
-      if (anchorRef.current?.contains(t)) return
-      if (isDismissExemptPortaledTarget(t)) return
+      if (!layer.isTop() || layer.contains(t)) return
       onClose()
     }
     const timer = window.setTimeout(() => document.addEventListener('mousedown', onDoc), 0)
@@ -56,20 +55,12 @@ export default function LibraryFilterPopover({
       window.clearTimeout(timer)
       document.removeEventListener('mousedown', onDoc)
     }
-  }, [open, onClose, anchorRef])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, layer])
 
   if (!open) return null
 
   return (
+    <InteractionLayerOwner.Provider value={layer.owner}>
     <FilterPanelShell ref={panelRef} role="dialog" aria-label="筛选">
       <FilterPanelContent onReset={onReset} onClose={onClose}>
       <FilterFields>
@@ -155,5 +146,6 @@ export default function LibraryFilterPopover({
       </div>
       </FilterPanelContent>
     </FilterPanelShell>
+    </InteractionLayerOwner.Provider>
   )
 }

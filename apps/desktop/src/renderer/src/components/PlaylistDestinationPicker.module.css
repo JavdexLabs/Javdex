@@ -1,27 +1,116 @@
 .root {
+  min-width: 0;
+  width: 100%;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--form-label-gap);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-h-sm);
+  padding: 8px var(--control-pad-x);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--select-control-font-size, 13px);
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trigger[data-empty] {
+  color: var(--text-muted);
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.trigger:hover:where(:not(:disabled)) {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+}
+
+.trigger:active:where(:not(:disabled)) {
+  background: var(--surface-selected);
+}
+
+.trigger:focus,
+.trigger[aria-expanded='true'] {
+  outline: none;
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transform: rotate(0deg);
+  transition: transform var(--motion-fast);
+}
+
+.trigger[aria-expanded='true'] .chevron {
+  transform: rotate(180deg);
+}
+
+.layer {
+  width: min(280px, calc(100vw - 16px));
+}
+
+.popup {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  gap: var(--form-label-gap);
+  height: min(290px, calc(100vh - 32px));
   min-height: 0;
+  padding: var(--form-label-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-floating-control);
+}
+
+.searchField {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.searchIcon {
+  position: absolute;
+  top: 50%;
+  left: var(--control-pad-x);
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .search {
+  --text-input-pad-inline-start: 36px;
+
   width: 100%;
 }
 
 .list {
   display: flex;
   flex-direction: column;
-  height: min(320px, 40vh);
-  min-height: 160px;
+  flex: 1;
+  min-height: 0;
   min-width: 0;
 }
 
-.selection {
-  margin-block: var(--form-label-gap);
-  min-height: 1.5em;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@media (prefers-reduced-motion: reduce) {
+  .chevron { transition: none; }
 }

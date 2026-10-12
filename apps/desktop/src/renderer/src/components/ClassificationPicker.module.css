@@ -18,6 +18,8 @@
 }
 
 .options {
+  --classification-picker-max-h: 220px;
+
   display: grid;
   width: 100%;
   max-height: var(--classification-picker-max-h);

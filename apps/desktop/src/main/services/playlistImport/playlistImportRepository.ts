@@ -905,10 +905,13 @@ export class PlaylistImportRepository {
       throw new PlaylistImportTargetError('TARGET_LIBRARY_ARCHIVED', '目标媒体库已归档。')
     }
     if (input.destination.kind === 'append') {
-      const playlist = this.database.prepare('SELECT name FROM playlists WHERE id = ?')
-        .get(input.destination.playlistId) as { name: string } | undefined
+      const playlist = this.database.prepare('SELECT name, system_kind FROM playlists WHERE id = ?')
+        .get(input.destination.playlistId) as { name: string; system_kind: string | null } | undefined
       if (!playlist) {
         throw new PlaylistImportTargetError('TARGET_PLAYLIST_NOT_FOUND', '追加目标清单不存在。')
+      }
+      if (playlist.system_kind) {
+        throw new PlaylistImportTargetError('TARGET_PLAYLIST_BUILTIN', '内置清单不支持从网页导入，请选择自定义清单。')
       }
     }
     return { id: library.id, name: library.name }

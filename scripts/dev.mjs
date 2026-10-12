@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { buildMacAiRuntime } from './ai-runtime-build.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const electronViteBin = path.join(root, 'node_modules', 'electron-vite', 'bin', 'electron-vite.js')
 const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
+if (process.platform === 'darwin') await buildMacAiRuntime(root)
 
 const child = spawn(process.execPath, [electronViteBin, 'dev'], {
   cwd: root,

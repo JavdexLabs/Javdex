@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import Database from 'better-sqlite3'
 import { migrateDatabase } from '@library/db/migrations'
-import { PlaylistImportModuleImpl, type PlaylistImportRunDriver } from './playlistImportModule'
+import { PlaylistImportModuleImpl, validatePlaylistImportStartTargets, type PlaylistImportRunDriver } from './playlistImportModule'
 import { PlaylistImportRepository } from './playlistImportRepository'
 import type { CatalogBackend } from '../../application/catalogBackend'
 
@@ -57,6 +57,23 @@ function fixture(): {
 }
 
 describe('PlaylistImportModule interface', () => {
+  it('rejects both built-in import destinations through the local catalog boundary', async () => {
+    for (const systemKind of ['favorites', 'watch_later']) {
+      const catalog = { mode: 'local', libraries: { get: async () => ({ id: 1, name: 'Library', status: 'active' }) },
+        playlists: { get: async () => ({ id: 2, name: 'Builtin', system_kind: systemKind }) }
+      } as unknown as CatalogBackend
+      await assert.rejects(validatePlaylistImportStartTargets(catalog, { targetLibraryId: 1,
+        destination: { kind: 'append', playlistId: 2 }
+      }), /TARGET_PLAYLIST_BUILTIN/)
+    }
+    const catalog = { mode: 'local', libraries: { get: async () => ({ id: 1, name: 'Library', status: 'active' }) },
+      playlists: { get: async () => ({ id: 3, name: 'Custom', system_kind: null }) }
+    } as unknown as CatalogBackend
+    assert.deepEqual(await validatePlaylistImportStartTargets(catalog, { targetLibraryId: 1,
+      destination: { kind: 'append', playlistId: 3 }
+    }), { id: 1, name: 'Library', playlistName: 'Custom' })
+  })
+
   it('returns an initial browser handoff projected during the first agent dispatch', async () => {
     const { database, module, driver, calls } = fixture()
     driver.start = async (runId) => {

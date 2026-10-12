@@ -141,6 +141,137 @@ function runtimeInput(
 }
 
 describe('PiRuntime contract', () => {
+  for (const api of ['openai-responses', 'google-generative-ai', 'anthropic-messages'] as const) {
+    it(`streams ${api}, executes tools, retains native history and resumes with the supplied transport`, async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-native-protocol-'))
+      roots.push(root)
+      const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
+      const input = runtimeInput(root, requests)
+      input.model.model.api = api
+      input.model.model.modelId = api === 'google-generative-ai' ? 'gemini-3.8-flash' : 'test-model'
+      input.model.model.baseUrl = api === 'google-generative-ai' ? 'https://google.example/v1beta' : 'https://responses.example/v1'
+      if (api === 'anthropic-messages') {
+        input.model.model.providerId = 'minimax'
+        input.model.model.modelId = 'MiniMax-M2.7'
+        input.model.model.baseUrl = 'https://minimax.example/anthropic'
+      }
+      input.model.preset.thinkingLevel = 'minimal'
+      input.model.cacheCompatibility = {
+        supportsPromptCache: false, supportsLongCacheRetention: false, sendSessionAffinityHeaders: false,
+        evidence: { source: 'manual', checkedAt: '2026-10-11' }
+      }
+      let invocations = 0
+      input.tools = [{ name: 'only_tool', label: 'Only tool', description: 'Read a value',
+        schema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false },
+        schemaHash: 'hash', capability: 'test.read', effect: 'read', executionMode: 'parallel',
+        invoke: async ({ args }) => {
+          invocations++
+          assert.deepEqual(args, { value: 'ok' })
+          return { ok: true, content: 'tool-result', summary: 'Read value' }
+        }
+      }]
+      input.model.fetch = async (request, init) => {
+        const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
+        requests.push({ url, headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) })
+        const tool = requests.length === 1
+        const text = `native-turn-${requests.length}`
+        let chunks: unknown[]
+        if (api === 'google-generative-ai') {
+          chunks = [{ candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: tool
+            ? [{ functionCall: { name: 'only_tool', args: { value: 'ok' } }, thoughtSignature: 'bmF0aXZlLXNpZ25hdHVyZQ==' }]
+            : [{ text }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 } }]
+        } else if (api === 'anthropic-messages') {
+          const chunks = [
+            { type: 'message_start', message: { id: `msg_${requests.length}`, type: 'message', role: 'assistant',
+              model: 'MiniMax-M2.7', content: [], usage: { input_tokens: 10, output_tokens: 0 } } },
+            { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'unsigned reasoning' } },
+            { type: 'content_block_stop', index: 0 },
+            { type: 'content_block_start', index: 1, content_block: tool
+              ? { type: 'tool_use', id: 'call_native', name: 'only_tool', input: {} } : { type: 'text', text: '' } },
+            { type: 'content_block_delta', index: 1, delta: tool
+              ? { type: 'input_json_delta', partial_json: '{"value":"ok"}' } : { type: 'text_delta', text } },
+            { type: 'content_block_stop', index: 1 },
+            { type: 'message_delta', delta: { stop_reason: tool ? 'tool_use' : 'end_turn' }, usage: { output_tokens: 2 } },
+            { type: 'message_stop' }
+          ]
+          return new Response(chunks.map(chunk => `event: ${chunk.type}\ndata: ${JSON.stringify(chunk)}\n\n`).join(''), {
+            headers: { 'Content-Type': 'text/event-stream' }
+          })
+        } else {
+          const item = tool
+            ? { type: 'function_call', id: 'fc_native', call_id: 'call_native', name: 'only_tool', arguments: '{"value":"ok"}', status: 'completed' }
+            : { type: 'message', id: 'msg_native', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }
+          chunks = [
+            { type: 'response.created', response: { id: `resp_${requests.length}` } },
+            { type: 'response.output_item.added', output_index: 0, item: tool ? { ...item, arguments: '' } : { ...item, content: [] } },
+            tool ? { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"value":"ok"}' }
+              : { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: text },
+            { type: 'response.output_item.done', output_index: 0, item },
+            { type: 'response.completed', response: { id: `resp_${requests.length}`, status: 'completed', output: [item],
+              usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } }
+          ]
+        }
+        return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join(''), {
+          headers: { 'Content-Type': 'text/event-stream' }
+        })
+      }
+      const events: RuntimeObservation[] = []
+      let settled: (() => void) | undefined
+      const observer = { notify: (event: RuntimeObservation) => events.push(event), commit: async (event: RuntimeDurableObservation) => {
+        events.push(event)
+        if (event.type === 'agent.settled') settled?.()
+      } }
+      const port = createPiRuntimePort()
+      let opened = await port.open(input, observer)
+      const prompt = async (id: string) => {
+        const done = new Promise<void>(resolve => { settled = resolve })
+        const result = await opened.session.dispatch({ commandId: id, kind: 'prompt', content: { text: 'Use the tool and reply' } })
+        assert.equal(result.accepted, true)
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([done, new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('native protocol did not settle')), 10000)
+          })])
+        } finally { if (timer) clearTimeout(timer) }
+      }
+      try {
+        await prompt('native-1')
+        assert.equal(events.some(event => event.type === 'runtime.fault'), false, JSON.stringify(events.filter(event => event.type === 'runtime.fault')))
+        assert.equal(invocations, 1)
+        assert.equal(requests.length, 2)
+        assert.ok(events.some(event => event.type === 'assistant.delta' && event.text === 'native-turn-2'))
+        assert.equal(events.some(event => event.type === 'runtime.fault'), false)
+        if (api === 'google-generative-ai') {
+          assert.match(requests[0].url, /v1beta\/models\/gemini-3.8-flash:streamGenerateContent/)
+          assert.equal(requests[0].headers.get('x-goog-api-key'), 'test-key')
+          assert.match(JSON.stringify(requests[1].body.contents), /bmF0aXZlLXNpZ25hdHVyZQ==/)
+          assert.match(JSON.stringify(requests[1].body.contents), /functionResponse/)
+        } else if (api === 'anthropic-messages') {
+          assert.equal(requests[0].url, 'https://minimax.example/anthropic/v1/messages')
+          assert.equal(requests[0].headers.get('x-api-key'), 'test-key')
+          const history = JSON.stringify(requests[1].body.messages)
+          assert.match(history, /"type":"thinking","thinking":"unsigned reasoning","signature":""/)
+          assert.match(history, /tool_result/)
+        } else {
+          assert.equal(requests[0].url, 'https://responses.example/v1/responses')
+          assert.equal(requests[0].headers.get('authorization'), 'Bearer test-key')
+          assert.match(JSON.stringify(requests[1].body.input), /function_call_output/)
+        }
+        const ref = structuredClone(opened.session.ref)
+        await opened.session.dispose()
+        opened = await port.open({ ...input, resume: ref }, observer)
+        assert.equal(opened.source, 'restored')
+        await prompt('native-2')
+        assert.equal(requests.length, 3)
+        if (api === 'google-generative-ai') assert.match(JSON.stringify(requests[2].body.contents), /bmF0aXZlLXNpZ25hdHVyZQ==/)
+        if (api === 'anthropic-messages') assert.match(JSON.stringify(requests[2].body.messages), /"type":"thinking","thinking":"unsigned reasoning","signature":""/)
+        assert.equal(invocations, 1)
+        assert.equal(events.some(event => event.type === 'runtime.fault'), false)
+      } finally { await opened.session.dispose() }
+    })
+  }
+
   it('allows workspace reads and dev notes but keeps host-owned facts read-only', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-native-policy-'))
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-native-outside-'))

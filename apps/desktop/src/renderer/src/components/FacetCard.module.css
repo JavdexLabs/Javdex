@@ -33,7 +33,7 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  aspect-ratio: 1.49 / 1;
+  aspect-ratio: var(--facet-cover-aspect) / 1;
   overflow: hidden;
   background: linear-gradient(135deg, var(--thumb-gradient-start), var(--thumb-gradient-end));
   color: var(--text-2);
@@ -76,10 +76,15 @@
   color: var(--text-muted);
 }
 
+.metadata {
+  height: var(--facet-meta-height);
+}
+
 .name {
   padding: 9px 12px 2px;
   overflow: hidden;
   font-size: 13px;
+  line-height: 18px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -99,4 +104,5 @@
   padding: 0 12px 11px;
   color: var(--text-2);
   font-size: 12px;
+  line-height: 16px;
 }

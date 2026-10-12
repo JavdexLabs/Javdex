@@ -43,6 +43,10 @@ async function main(): Promise<void> {
       assert.equal(row.code, 'BACKUP-1')
       assert.equal(fs.readFileSync(path.join(host.imagesDir, row.cover_path), 'utf8'), 'original-image-plaintext')
       assert.equal((db.prepare('SELECT locator FROM video_resources').get() as { locator: string }).locator, path.join(dir, '来源 目录/电影 avi.avi'))
+      const builtins = db.prepare(`SELECT p.system_kind, COUNT(pv.video_id) AS video_count FROM playlists p
+        LEFT JOIN playlist_video pv ON pv.playlist_id=p.id WHERE p.system_kind IS NOT NULL
+        GROUP BY p.id ORDER BY p.system_kind`).all()
+      assert.deepEqual(builtins, [{ system_kind: 'favorites', video_count: 1 }, { system_kind: 'watch_later', video_count: 1 }])
     } finally { db.close() }
     return
   }
@@ -57,6 +61,7 @@ async function main(): Promise<void> {
   const videoFile = path.join(mediaRoot, '电影 avi.avi')
   fs.writeFileSync(videoFile, 'original-video-untouched')
   const video = insertTestVideoWithFile(db, { code: 'BACKUP-1', title: '跨设备资料', filePath: videoFile, libraryId: 1 })
+  db.prepare('INSERT INTO playlist_video (playlist_id,video_id) SELECT id,? FROM playlists WHERE system_kind IS NOT NULL').run(video.videoId)
   db.prepare('INSERT INTO media_library_roots (id, library_id, path, normalized_path) VALUES (1,1,?,?)').run(mediaRoot, mediaRoot.toLowerCase())
   db.prepare('UPDATE video_resources SET root_id=1 WHERE video_id=?').run(video.videoId)
   db.prepare("UPDATE videos SET cover_path='covers/opaque.avpk' WHERE id=?").run(video.videoId)

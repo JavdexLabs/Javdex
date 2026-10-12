@@ -1,12 +1,5 @@
-import { useEffect } from 'react'
+import { useInteractionLayer } from '../interaction/useInteractionLayer'
 
 export function useEscapeKey(onEscape: () => void, enabled = true): void {
-  useEffect(() => {
-    if (!enabled) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onEscape()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onEscape, enabled])
+  useInteractionLayer({ enabled, onDismiss: onEscape })
 }

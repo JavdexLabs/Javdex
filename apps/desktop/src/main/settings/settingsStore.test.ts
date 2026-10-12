@@ -249,6 +249,24 @@ describe('settingsStore recovery', () => {
 })
 
 describe('settingsStore LLM secret migration', () => {
+  it('preserves new native protocols and legacy custom endpoints that become built-in presets', () => {
+    writeSettings({
+      customLlmProviders: [
+        { id: 'gemini', name: 'My Gemini gateway', protocol: 'openai-chat', baseUrl: 'https://gateway.test/v1' },
+        { id: 'custom-google', name: 'Google', protocol: 'google-generative-ai', baseUrl: 'https://google.test/v1beta' },
+        { id: 'custom-responses', name: 'Responses', protocol: 'openai-responses', baseUrl: 'https://responses.test/v1' }
+      ],
+      llmProviderConfigs: { openai: { protocol: 'openai-responses' } },
+      llmCustomModels: [{ providerId: 'gemini', id: 'custom-gemini', name: 'Saved Gemini' }]
+    })
+    const settings = getSettings()
+    assert.equal(settings.llmProviderConfigs.openai.protocol, 'openai-responses')
+    assert.deepEqual(settings.llmProviderConfigs.gemini, { baseUrl: 'https://gateway.test/v1', protocol: 'openai-chat' })
+    assert.equal(settings.customLlmProviders.find(item => item.id === 'custom-google')!.protocol, 'google-generative-ai')
+    assert.equal(settings.customLlmProviders.find(item => item.id === 'custom-responses')!.protocol, 'openai-responses')
+    assert.equal(settings.llmCustomModels.find(item => item.providerId === 'gemini')!.id, 'custom-gemini')
+  })
+
   it('moves legacy API keys out of settings.json without exposing them publicly', () => {
     writeSettings({
       llmProviderConfigs: {

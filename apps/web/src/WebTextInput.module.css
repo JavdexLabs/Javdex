@@ -29,5 +29,5 @@ input.input {
 input.input:focus {
   outline: none;
   border-color: var(--text-accent);
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-input-ring);
 }

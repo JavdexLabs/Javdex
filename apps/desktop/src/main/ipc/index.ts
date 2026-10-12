@@ -4,8 +4,10 @@ import { registerAssetHandlers } from './assetHandlers'
 import { registerActressHandlers, type ActressHandlerDesktopQueries } from './actressHandlers'
 import { registerFacetHandlers } from './facetHandlers'
 import { registerPlayerHandlers } from './playerHandlers'
+import { registerBuiltinPlayback } from '../player/desktopPlayback'
 import { registerPluginDevHandlers } from './pluginDevHandlers'
 import { registerPlaylistHandlers } from './playlistHandlers'
+import { registerRecentPlaybackHandlers } from './recentPlaybackHandlers'
 import { registerScanHandlers } from './scanHandlers'
 import { registerScrapeHandlers } from './scrapeHandlers'
 import { registerSettingsHandlers } from './settingsHandlers'
@@ -64,6 +66,8 @@ export function registerIpcHandlers(
     backend: options.backend,
     workStore: options.workStore
   })
-  registerPlayerHandlers(options.backend, options.settings)
+  const recentStarted = registerRecentPlaybackHandlers(ctx, options.backend)
+  const openBuiltin = registerBuiltinPlayback(options.backend, getWindow, options.settings, recentStarted)
+  registerPlayerHandlers(options.backend, options.settings, openBuiltin, recentStarted)
   bindMainWindow(getWindow())
 }

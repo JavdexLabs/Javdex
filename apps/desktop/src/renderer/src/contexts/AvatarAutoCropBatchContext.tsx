@@ -64,6 +64,8 @@ const INITIAL_STATE: AvatarAutoCropBatchState = {
 }
 
 const Context = createContext<AvatarAutoCropBatchContextValue | null>(null)
+/** Projection Adapter for hosts/fixtures that supply batch state without running a queue. */
+export const AvatarAutoCropBatchStateProvider = Context.Provider
 
 function batchLog(
   code: string,

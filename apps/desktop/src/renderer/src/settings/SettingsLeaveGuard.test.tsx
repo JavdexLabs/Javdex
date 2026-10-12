@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { renderedText } from '../test/renderedText'
 import { createMemoryRouter, RouterProvider, Routes, Route } from 'react-router-dom'
 import SettingsLeaveGuard, { useSettingsFormGuard } from './SettingsLeaveGuard'
 import { useSettingsDraft } from './useSettingsDraft'
+import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
+import { NavigationGuardProvider } from '../interaction/NavigationGuard'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -38,12 +41,12 @@ it('blocks route changes with a draft and saves before continuing through the re
     {
       path: '*',
       element: (
-        <SettingsLeaveGuard>
+        <OverlayHistoryProvider><NavigationGuardProvider><SettingsLeaveGuard>
           <Routes>
             <Route path="/" element={<Form />} />
             <Route path="/next" element={<p>目标页面</p>} />
           </Routes>
-        </SettingsLeaveGuard>
+        </SettingsLeaveGuard></NavigationGuardProvider></OverlayHistoryProvider>
       )
     }
   ])
@@ -59,7 +62,7 @@ it('blocks route changes with a draft and saves before continuing through the re
     assert.equal(router.state.location.pathname, '/')
     const stay = renderer.root
       .findAllByType('button')
-      .find((button) => button.children.includes('继续编辑'))!
+      .find((button) => renderedText(button) === '继续编辑')!
     act(() => stay.props.onClick())
     assert.equal(renderer.root.findByType('input').props.value, 'edited')
     await act(async () => {
@@ -67,7 +70,7 @@ it('blocks route changes with a draft and saves before continuing through the re
     })
     const save = renderer.root
       .findAllByType('button')
-      .find((button) => button.children.includes('保存后离开'))!
+      .find((button) => renderedText(button) === '保存后离开')!
     await act(async () => {
       save.props.onClick()
     })

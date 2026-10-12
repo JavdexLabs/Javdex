@@ -5,6 +5,8 @@ import TestRenderer, { act } from 'react-test-renderer'
 import type { ActressGalleryPage, ActressGalleryPageQuery } from '@shared/actressTypes'
 import type { ElectronApi } from '../../../preload/index'
 import type { ImagePreviewLightboxProps } from './ImagePreviewLightbox'
+import { OverlayHistoryProvider } from '../interaction/OverlayHistoryContext'
+import { renderedText } from '../test/renderedText'
 
 const calls: ActressGalleryPageQuery[] = []
 let entries = Array.from({length:125}, (_,n) => n+1)
@@ -30,14 +32,14 @@ const fake = { actresses: {
 Object.defineProperty(globalThis,'React',{configurable:true,value:React})
 Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{
   api:fake,location:{href:'http://localhost/'},setTimeout,clearTimeout,
-  history:{state:null,pushState(){historyCount++},back(){window.dispatchEvent(new Event('popstate'))}}
+  history:{state:null,pushState(){historyCount++},go(){window.dispatchEvent(new Event('popstate'))}}
 })})
 Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}},activeElement:null}})
 let renderer: TestRenderer.ReactTestRenderer | undefined
 let Component: typeof import('./ActressGalleryPanel').default
 let Provider: typeof import('./ImagePreviewOverlayContext').ImagePreviewOverlayProvider
 let revision = {generation:1,revision:1}
-function tree() { return <Provider><Component key={1} actressId={1} revision={revision} posterPath={null} onChanged={()=>{ revision={...revision,revision:revision.revision+1}; renderer?.update(tree()) }} /></Provider> }
+function tree() { return <OverlayHistoryProvider><Provider><Component key={1} actressId={1} revision={revision} posterPath={null} onChanged={()=>{ revision={...revision,revision:revision.revision+1}; renderer?.update(tree()) }} /></Provider></OverlayHistoryProvider> }
 async function mount(t: TestContext) {
   Component=(await import('./ActressGalleryPanel')).default
   Provider=(await import('./ImagePreviewOverlayContext')).ImagePreviewOverlayProvider
@@ -48,7 +50,7 @@ async function mount(t: TestContext) {
 }
 function preview() { return renderer!.root.findAllByType('div').find(n=>n.props['data-lightbox'])?.props['data-lightbox'] as ImagePreviewLightboxProps | undefined }
 const tiles=()=>renderer!.root.findAllByType('button').filter(n=>/^写真 \d+$/.test(n.props['aria-label']??''))
-async function click(label:string) { await act(async()=>{const n=renderer!.root.findAllByType('button').find(n=>n.props['aria-label']===label || n.children.join('')===label)!;assert.ok(n,label);assert.ok(!n.props.disabled);n.props.onClick({stopPropagation(){},preventDefault(){},currentTarget:{blur(){}}})}) }
+async function click(label:string) { await act(async()=>{const n=renderer!.root.findAllByType('button').find(n=>n.props['aria-label']===label || renderedText(n)===label)!;assert.ok(n,label);assert.ok(!n.props.disabled);n.props.onClick({stopPropagation(){},preventDefault(){},currentTarget:{blur(){}}})}) }
 afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;calls.length=0;entries=Array.from({length:125},(_,n)=>n+1);hold=null;fail=false;historyCount=0;revision={generation:1,revision:1}})
 
 it('bounds grid and preview windows, crosses both page edges and preserves one history entry', async t=>{

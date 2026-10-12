@@ -19,7 +19,8 @@ export const playlistVideosPageSchema = z.object({
   limit: z.number(), offset: z.number()
 })
 export const playlistPageSchema = playlistMetadataSchema.extend(playlistVideosPageSchema.shape)
-export const playlistBrowseItemSchema = playlistSchema.pick({ id: true, name: true, description: true, generation: true, revision: true }).extend({
+export const playlistBrowseItemSchema = playlistSchema.pick({ id: true, name: true, description: true, generation: true, revision: true, system_kind: true }).extend({
+  cover_path: z.string().nullable().optional(),
   preview_cover_path: z.string().nullable(), video_count: z.number(), contains_video: z.boolean()
 })
 export const playlistListPageSchema = z.object({

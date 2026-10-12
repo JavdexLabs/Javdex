@@ -22,10 +22,11 @@ function buildExternalRatingMeta(stat: VideoExternalStats): string {
 
 interface Props {
   video: VideoDetail
+  rating?: number
   onRatingChange: (rating: number) => void
 }
 
-export default function VideoDetailRatings({ video, onRatingChange }: Props): JSX.Element {
+export default function VideoDetailRatings({ video, rating = video.rating, onRatingChange }: Props): JSX.Element {
   const selectedRating = selectDefaultExternalRating(video.external_stats)
   const externalRatings = selectedRating ? [selectedRating] : []
 
@@ -33,7 +34,7 @@ export default function VideoDetailRatings({ video, onRatingChange }: Props): JS
     <div className={styles.root} aria-label="评分">
       <div className={styles.group}>
         <span className={styles.label}>自定义评分</span>
-        <StarRating value={video.rating} onChange={onRatingChange} size={22} />
+        <StarRating value={rating} onChange={onRatingChange} size={22} />
       </div>
       {externalRatings.length > 0 && (
         <>

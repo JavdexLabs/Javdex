@@ -9,6 +9,8 @@ import type {
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import { useVideoLifecycleController } from './useVideoLifecycleController'
 import { useVideoResourceController } from './useVideoResourceController'
+import { useVideoScrapeController } from './useVideoScrapeController'
+import { useVideoRatingController } from './useVideoRatingController'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -46,7 +48,6 @@ import ActressAvatar from '../components/ActressAvatar'
 import type { VideoEditInput } from '@shared/videoTypes'
 import { expectedVideoVersion } from '@shared/protocol/versions'
 import type {
-  VideoDirectorChoiceRequired,
   VideoScrapeField,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
@@ -91,13 +92,6 @@ import {
   rememberRecentMediaLibraryId
 } from '../listView/recentMediaLibrary'
 import { resolveVideoDetailDefaultScraper } from './videoDetailScraperState'
-
-interface PendingDirectorChoice {
-  fields: VideoScrapeField[]
-  site: string
-  mode?: VideoScrapeUpdateMode
-  choice: VideoDirectorChoiceRequired
-}
 
 export default function DetailPage(): JSX.Element {
   const { id, videoId: videoIdParam } = useParams()
@@ -156,7 +150,6 @@ export default function DetailPage(): JSX.Element {
   const detailScopeKey = `${detailRouteSource}:${requestedLibraryId}:${videoId}`
   const currentDetailScopeRef = useRef(detailScopeKey)
   currentDetailScopeRef.current = detailScopeKey
-  const [scraping, setScraping] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [editIdentityConflict, setEditIdentityConflict] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -168,9 +161,6 @@ export default function DetailPage(): JSX.Element {
   const [videoDetailUseFirstSampleBackground, setVideoDetailUseFirstSampleBackground] =
     useState(false)
   const [showScrapeFields, setShowScrapeFields] = useState(false)
-  const [pendingDirectorChoice, setPendingDirectorChoice] =
-    useState<PendingDirectorChoice | null>(null)
-  const [directorChoiceBusy, setDirectorChoiceBusy] = useState(false)
   const [showCorrectImport, setShowCorrectImport] = useState(false)
   const [confirmDiscardForCorrect, setConfirmDiscardForCorrect] = useState(false)
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false)
@@ -218,14 +208,22 @@ export default function DetailPage(): JSX.Element {
     busy: deletingVideo, open: openDeletePreview, close: closeDeletePreview,
     commit: doDelete, reset: resetDeletion } = deletion
 
+  const { execute: executeRescrape, closeDirectorChoice, scraping, pendingDirectorChoice, directorChoiceBusy } = useVideoScrapeController({
+    video, scope: detailScopeKey,
+    scrape: api.scrape.one,
+    onSelected: (libraryId, name) => setScraperSelection({ libraryId, name }),
+    onPending: (id) => navigate(pendingCenterPath({ type: 'scrape', videoId: id })),
+    onApplied: () => { invalidateVideos(); void load({ silent: true }) },
+    notify: (message, tone) => toast.show(message, tone)
+  })
+
   const dismissOverlays = useCallback(() => {
     resetDeletion()
     setShowEdit(false)
     setEditIdentityConflict(null)
     setConfirmClear(false)
     setShowScrapeFields(false)
-    setPendingDirectorChoice(null)
-    setDirectorChoiceBusy(false)
+    closeDirectorChoice()
     setShowCorrectImport(false)
     setShowAddToPlaylist(false)
     setShowMaintenanceInfo(false)
@@ -234,7 +232,7 @@ export default function DetailPage(): JSX.Element {
     closeResourceMove()
     closeCoverPreview()
     closeResourceRemoval()
-  }, [closeCoverPreview, resetDeletion, closeResourceEditor, closeResourceMove, closeResourceRemoval])
+  }, [closeCoverPreview, closeDirectorChoice, resetDeletion, closeResourceEditor, closeResourceMove, closeResourceRemoval])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
@@ -371,7 +369,6 @@ export default function DetailPage(): JSX.Element {
     try {
       const res = await api.player.play(video.activeLibraryId, videoId)
       if (res.ok) {
-        toast.show('已交给系统打开', 'success')
         void load({ silent: true })
       } else if (res.fileMissing) {
         const primary = video?.resources.find((resource) => resource.is_primary === 1)
@@ -385,13 +382,12 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const handleOpenResource = async (resourceId: number): Promise<void> => {
+  const handleOpenResource = async (resourceId: number, player?: 'external'): Promise<void> => {
     if (!video) return
     try {
-      const result = await api.player.openResource(video.activeLibraryId, resourceId, videoId)
-      if (result.ok) {
-        toast.show('已交给系统打开', 'success')
-      } else if (result.fileMissing) {
+      const result = await api.player.openResource(video.activeLibraryId, resourceId, videoId, player)
+      if (result.ok) return
+      if (result.fileMissing) {
         const resource = video?.resources.find((item) => item.id === resourceId)
         if (resource?.kind === 'local') openResourceRemoval(resource)
         else toast.show(result.error ?? '本地资源不存在', 'error')
@@ -401,6 +397,14 @@ export default function DetailPage(): JSX.Element {
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     }
+  }
+
+  const handleBuiltinResource = async (resourceId: number): Promise<void> => {
+    if (!video) return
+    try {
+      const result = await api.playback.open({ libraryId: video.activeLibraryId, videoId, resourceId })
+      if (!result.ok) toast.show(result.error ?? '内置播放不可用', 'error')
+    } catch (error) { toast.show((error as Error).message, 'error') }
   }
 
   const handleReveal = async (): Promise<void> => {
@@ -504,58 +508,6 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const executeRescrape = async (
-    fields: VideoScrapeField[],
-    site: string,
-    mode?: VideoScrapeUpdateMode,
-    directorSelectionId?: number
-  ): Promise<void> => {
-    if (!video) return
-    setScraperSelection({ libraryId: video.activeLibraryId, name: site })
-    setScraping(true)
-    if (directorSelectionId != null) setDirectorChoiceBusy(true)
-    try {
-      const res = await api.scrape.one(
-        videoId,
-        site || undefined,
-        fields,
-        mode,
-        directorSelectionId,
-        video.activeLibraryId
-      )
-      if (res.directorChoice) {
-        setPendingDirectorChoice({ fields, site, mode, choice: res.directorChoice })
-        return
-      }
-      if (res.pending) {
-        toast.show('发现多个候选，已保存到待确认中心', 'info')
-        navigate(pendingCenterPath({ type: 'scrape', videoId }))
-        return
-      }
-      setPendingDirectorChoice(null)
-      const hasWarnings = res.warnings.length > 0
-      toast.show(
-        res.applied
-          ? hasWarnings
-            ? `已更新，部分字段未应用：${res.warnings.join('；')}`
-            : '匹配完成'
-          : hasWarnings
-            ? `所选字段未应用：${res.warnings.join('；')}`
-            : '所选字段无可写入内容',
-        res.applied && !hasWarnings ? 'success' : 'info'
-      )
-      if (res.applied) {
-        invalidateVideos()
-        void load({ silent: true })
-      }
-    } catch (e) {
-      toast.show(`匹配失败：${(e as Error).message}`, 'error')
-    } finally {
-      setScraping(false)
-      setDirectorChoiceBusy(false)
-    }
-  }
-
   const handleRescrape = (
     fields: VideoScrapeField[],
     site: string,
@@ -565,15 +517,13 @@ export default function DetailPage(): JSX.Element {
     void executeRescrape(fields, site, mode)
   }
 
-  const handleRating = async (rating: number): Promise<void> => {
-    if (!video) return
-    try {
-      await api.videos.setRating(videoId, rating, expectedVideoVersion(video))
-      setVideo((v) => (v ? { ...v, rating } : v))
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
+  const { handleRating, rating: displayedRating } = useVideoRatingController({
+    scopeKey: detailScopeKey,
+    video,
+    updateVideo: detail => { detailRequestRef.current += 1; setVideo(detail) },
+    invalidateVideos,
+    notifyError: message => toast.show(message, 'error')
+  })
 
   const handleEditSave = async (input: VideoEditInput): Promise<void> => {
     if (!video) return
@@ -786,7 +736,7 @@ export default function DetailPage(): JSX.Element {
             </div>
 
             <div className={styles.info}>
-              <VideoDetailRatings video={video} onRatingChange={handleRating} />
+              <VideoDetailRatings video={video} rating={displayedRating} onRatingChange={handleRating} />
 
               <VideoDetailPrimaryMeta video={video} />
 
@@ -946,8 +896,9 @@ export default function DetailPage(): JSX.Element {
 
       <VideoDetailSecondaryMeta
         video={video}
-        onOpenResource={(resourceId) => {
-          void handleOpenResource(resourceId)
+        onBuiltinResource={(resourceId) => { void handleBuiltinResource(resourceId) }}
+        onOpenResource={(resourceId, player) => {
+          void handleOpenResource(resourceId, player)
         }}
         onRevealResource={(resourceId) => {
           void handleRevealResource(resourceId)
@@ -1070,7 +1021,7 @@ export default function DetailPage(): JSX.Element {
         <DirectorScrapeChoiceModal
           choice={pendingDirectorChoice.choice}
           busy={directorChoiceBusy}
-          onCancel={() => setPendingDirectorChoice(null)}
+          onCancel={closeDirectorChoice}
           onChoose={(directorId) => {
             void executeRescrape(
               pendingDirectorChoice.fields,

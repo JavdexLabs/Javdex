@@ -4,10 +4,12 @@ import { useMemo, useState } from 'react'
 import { isIsoDate, toDateInputValue, actressMergeGenderGroup } from '@shared/actressProfileOptions'
 import type { Actress } from '@shared/actressTypes'
 import type { VideoDetail, VideoEditInput } from '@shared/videoTypes'
-import { selectDefaultExternalRating } from '@shared/externalRatings'
-import { assetUrl } from '../api'
+import { api, assetUrl } from '../api'
+import MetadataListInput, { type MetadataListOption } from './MetadataListInput'
+import { metadataListValues } from './metadataListDraft'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
 import ExternalRatingsEditor from './ExternalRatingsEditor'
+import { createExternalRatingsDraft, externalRatingsDraftErrors, externalRatingsFromDraft } from './externalRatingsDraft'
 import { EditForm, EditFormField, EditFormFields, EditFormHint, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
@@ -29,11 +31,29 @@ interface Props {
   onSave: (input: VideoEditInput) => Promise<void>
 }
 
-function castNamesByGender(actresses: Actress[], gender: 'female' | 'male'): string {
+function castNamesByGender(actresses: Actress[], gender: 'female' | 'male'): string[] {
   return actresses
     .filter((item) => actressMergeGenderGroup(item.gender) === gender)
     .map((item) => item.main_name)
-    .join(', ')
+}
+
+async function searchActors(query: string, gender: 'female' | 'male'): Promise<MetadataListOption[]> {
+  const page = await api.actresses.listPage({ search: query, gender, limit: 12, offset: 0 })
+  return page.items.map(actor => ({ key: String(actor.id), name: actor.main_name }))
+}
+const searchFemaleActors = (query: string): Promise<MetadataListOption[]> => searchActors(query, 'female')
+const searchMaleActors = (query: string): Promise<MetadataListOption[]> => searchActors(query, 'male')
+async function searchScrapedTags(query: string): Promise<MetadataListOption[]> {
+  const page = await api.tags.filterOptions({ search: query, limit: 12, offset: 0 })
+  return page.items.map(tag => {
+    const truncated = [...tag.label].length === 129 && tag.label.endsWith('…')
+    return {
+      key: String(tag.id), name: tag.label,
+      // The options endpoint returns display labels. Never save a truncated label as a name.
+      disabled: truncated,
+      description: truncated ? '请粘贴完整名称添加' : undefined
+    }
+  })
 }
 
 /** Modal form for manually editing a video's metadata. */
@@ -61,12 +81,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
     video.series_id ? { seriesId: video.series_id } : null
   )
   const [summary, setSummary] = useState(video.summary ?? '')
-  const [tags, setTags] = useState(
-    video.tags
+  const [tags, setTags] = useState({ values: video.tags
       .filter((t) => t.origin === 'scraped')
-      .map((t) => t.name)
-      .join(', ')
-  )
+      .map((t) => t.name), input: '' })
   const initialActressesFemale = useMemo(
     () => castNamesByGender(video.actresses, 'female'),
     [video.actresses]
@@ -75,28 +92,19 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
     () => castNamesByGender(video.actresses, 'male'),
     [video.actresses]
   )
-  const [actressesFemale, setActressesFemale] = useState(initialActressesFemale)
-  const [actressesMale, setActressesMale] = useState(initialActressesMale)
+  const [actressesFemale, setActressesFemale] = useState({ values: initialActressesFemale, input: '' })
+  const [actressesMale, setActressesMale] = useState({ values: initialActressesMale, input: '' })
   const [coverSourcePath, setCoverSourcePath] = useState<string | null>(null)
   const [links, setLinks] = useState<RelatedLinkInput[]>(
     (video.links ?? []).map(({ label, url }) => ({ label, url }))
   )
   const [saving, setSaving] = useState(false)
-  const [externalRatings, setExternalRatings] = useState<NonNullable<VideoEditInput['externalRatings']>>({
-    deletedSources: [],
-    defaultSource: selectDefaultExternalRating(video.external_stats)?.source ?? null
-  })
+  const [externalRatings, setExternalRatings] = useState(() => createExternalRatingsDraft(video.external_stats))
   const [ratingsChanged, setRatingsChanged] = useState(false)
   const metadataLocked = Boolean(video.has_pending_scrape)
   const mediaEditorsHidden =
     privacyMode.privacyModeEnabled &&
     privacyMode.privacyModeScopes.includes('mediaEditors')
-
-  const splitList = (s: string): string[] =>
-    s
-      .split(/[,，、]/)
-      .map((x) => x.trim())
-      .filter(Boolean)
 
   const handleSave = async (): Promise<void> => {
     setSaving(true)
@@ -114,11 +122,11 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         seriesAssignment,
         directorAssignment,
         summary: summary.trim() || null,
-        tags: splitList(tags),
-        actressesFemale: splitList(actressesFemale),
-        actressesMale: splitList(actressesMale),
+        tags: metadataListValues(tags),
+        actressesFemale: metadataListValues(actressesFemale),
+        actressesMale: metadataListValues(actressesMale),
         links: nextLinks,
-        ...(ratingsChanged ? { externalRatings } : {}),
+        ...(ratingsChanged ? { externalRatings: externalRatingsFromDraft(externalRatings) } : {}),
         ...(coverSourcePath && !mediaEditorsHidden ? { coverSourcePath } : {})
       })
     } finally {
@@ -136,7 +144,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
       size="xl"
       busy={saving}
       confirmText="保存"
-      confirmDisabled={saving || releaseDateInvalid}
+      confirmDisabled={saving || releaseDateInvalid || (!metadataLocked && externalRatingsDraftErrors(externalRatings).size > 0)}
       onCancel={onCancel}
       onConfirm={handleSave}
     >
@@ -280,26 +288,28 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
             <EditFormField
               label="女优"
               htmlFor="video-edit-actresses-female"
-              hint="多个演员用逗号分隔"
             >
-              <TextInput
+              <MetadataListInput
                 id="video-edit-actresses-female"
-                density="workspace"
+                label="女优"
                 value={actressesFemale}
-                onChange={(e) => setActressesFemale(e.target.value)}
+                onChange={setActressesFemale}
+                search={searchFemaleActors}
+                disabled={saving}
               />
             </EditFormField>
 
             <EditFormField
               label="男优"
               htmlFor="video-edit-actresses-male"
-              hint="多个演员用逗号分隔"
             >
-              <TextInput
+              <MetadataListInput
                 id="video-edit-actresses-male"
-                density="workspace"
+                label="男优"
                 value={actressesMale}
-                onChange={(e) => setActressesMale(e.target.value)}
+                onChange={setActressesMale}
+                search={searchMaleActors}
+                disabled={saving}
               />
             </EditFormField>
 
@@ -307,13 +317,15 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
               label="刮削标签"
               htmlFor="video-edit-tags"
               span={2}
-              hint="多个标签用逗号分隔；不影响自定义标签"
+              hint="不影响自定义标签"
             >
-              <TextInput
+              <MetadataListInput
                 id="video-edit-tags"
-                density="workspace"
+                label="刮削标签"
                 value={tags}
-                onChange={(e) => setTags(e.target.value)}
+                onChange={setTags}
+                search={searchScrapedTags}
+                disabled={saving}
               />
             </EditFormField>
           </EditFormFields>
@@ -321,7 +333,6 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
           </>
         )}
         {!metadataLocked && <ExternalRatingsEditor
-          ratings={video.external_stats}
           value={externalRatings}
           disabled={saving}
           onChange={(value) => { setExternalRatings(value); setRatingsChanged(true) }}

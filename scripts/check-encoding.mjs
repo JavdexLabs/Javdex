@@ -10,6 +10,7 @@ function* walk(target) {
   const stat = fs.statSync(target)
   if (stat.isDirectory()) {
     for (const entry of fs.readdirSync(target)) {
+      if (entry === 'node_modules') continue
       yield* walk(path.join(target, entry))
     }
     return

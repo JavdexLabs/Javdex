@@ -3,6 +3,7 @@ import { copyFileSync, cpSync, createReadStream, existsSync, mkdirSync } from 'f
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin, ViteDevServer } from 'vite'
+import { isPiGoogleAdapter, patchPiGoogleTransport } from './scripts/pi-google-transport.mjs'
 
 const MEDIAPIPE_RUNTIME_FILES = [
   'vision_wasm_module_internal.js',
@@ -66,6 +67,10 @@ function slimPiRuntimePlugin(): Plugin {
   return {
     name: 'slim-pi-runtime',
     enforce: 'pre',
+    transform(code, id) {
+      if (isPiGoogleAdapter(id)) return { code: patchPiGoogleTransport(code), map: null }
+      return null
+    },
     resolveId(source, importer) {
       if (
         source === '../../index.js' &&
@@ -144,6 +149,7 @@ export default defineConfig({
     },
     plugins: [react(), mediaPipeRuntimePlugin()],
     build: {
+      manifest: true,
       rollupOptions: {
         input: {
           index: resolve('apps/desktop/src/renderer/index.html')

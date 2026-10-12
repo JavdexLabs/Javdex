@@ -53,6 +53,7 @@
 .button:focus {
   --select-arrow-color: var(--text-accent);
 
+  outline: none;
   border-color: var(--border-accent);
   background-color: color-mix(in srgb, var(--surface-control-hover) 82%, var(--surface-control));
   box-shadow: var(--focus-ring);
@@ -116,7 +117,7 @@
 
 .menu {
   position: fixed;
-  z-index: 1400;
+  z-index: var(--layer-overlay);
   min-width: 132px;
   display: grid;
   gap: 2px;

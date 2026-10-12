@@ -26,6 +26,33 @@ afterEach(() => {
 })
 
 describe('desktop session IPC', () => {
+  it('requires a nonblank program path when saving external playback and permits unrelated legacy updates', async () => {
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-player-required-'))
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(tempRoot))
+    const backend = createUnconfiguredRemoteBackend()
+    const handlers = new Map<IpcChannel, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>()
+    const adapter = createTypedIpcAdapter<AppIpcContract>(appIpcSchemas, (channel, handler) => handlers.set(channel, handler))
+    registerDesktopSessionHandlers({ getWindow: () => null }, { backend, settings }, adapter)
+    const update = (patch: Parameters<typeof settings.write>[0]) => handlers.get(IPC.THIS_COMPUTER_UPDATE)!({} as IpcMainInvokeEvent, patch)
+    for (const playerPath of [undefined, null, '', '   ']) {
+      await assert.rejects(async () => update({ playerPreference: 'external', ...(playerPath === undefined ? {} : { playerPath }) }),
+        (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
+      assert.equal((await settings.read()).playerPreference, 'builtin')
+    }
+    await update({ playerPreference: 'external', playerPath: ' /usr/bin/mpv ' })
+    assert.equal((await settings.read()).playerPath, '/usr/bin/mpv')
+    await assert.rejects(async () => update({ playerPath: null }),
+      (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
+    assert.equal((await settings.read()).playerPath, '/usr/bin/mpv')
+    await update({ playerPreference: 'builtin', playerPath: null })
+    assert.equal((await settings.read()).playerPath, null)
+    // Existing external/system-association settings remain readable; connection changes are independent.
+    await settings.write({ playerPreference: 'external', playerPath: null })
+    await update({ mode: 'local' })
+    assert.equal((await settings.read()).playerPreference, 'external')
+    await assert.rejects(async () => update({ playerPreference: 'external' }),
+      (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
+  })
   it('broadcasts backend authentication changes without waiting for a settings request', () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-session-events-'))
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(tempRoot))

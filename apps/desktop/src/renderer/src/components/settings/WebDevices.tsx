@@ -7,7 +7,7 @@ import type { WebAccessStatus } from "@shared/webTypes";
 import { api } from "../../api";
 import Button from "../Button";
 import { WEB_ACCESS_LABEL } from "../../settings/settingsRoutes";
-import { SettingsCard } from "./SettingsPrimitives";
+import { SettingsCard, SettingsDisclosure } from "./SettingsPrimitives";
 import ConfirmModal from "../ConfirmModal";
 import styles from "./WebAccessPanel.module.css";
 
@@ -67,12 +67,8 @@ export default function WebDevices({
   } | null>(null);
   const pairSlot = useRef<HTMLDivElement>(null);
   const previousCandidate = useRef(candidate);
-  useEffect(() => {
-    if (previousCandidate.current !== candidate) {
-      pairSlot.current?.querySelector<HTMLElement>(candidate ? '[data-pair-identity]' : 'input:not(:disabled)')?.focus({ preventScroll: true });
-      previousCandidate.current = candidate;
-    }
-  }, [candidate]);
+  const previousPairing = useRef(false);
+  const pairFocusPending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -124,9 +120,21 @@ export default function WebDevices({
     0,
     Math.min(300, Math.ceil((status.pairingUntil - now) / 1000)),
   );
+  useEffect(() => {
+    if ((pairing && !previousPairing.current) || previousCandidate.current !== candidate) pairFocusPending.current = true;
+    previousPairing.current = pairing;
+    previousCandidate.current = candidate;
+    if (!pairing && !candidate) pairFocusPending.current = false;
+    if (!busy && pairFocusPending.current && status.running) {
+      const target = pairSlot.current?.querySelector<HTMLElement>(candidate ? '[data-pair-identity]' : 'input:not(:disabled)');
+      if (target) { target.focus({ preventScroll: true }); pairFocusPending.current = false; }
+    }
+  }, [pairing, status.running, busy, candidate]);
   return (
     <>
       <SettingsCard
+        as="section"
+        aria-label="设备配对"
         title="设备配对"
         hint="在新设备网页获取六位码，在这里核对并允许登录。"
       >
@@ -145,7 +153,7 @@ export default function WebDevices({
                 <Button variant="primary" className={styles.decisionButton} aria-busy={decision === "allow"} disabled={busy || candidate.expires <= now} onClick={() => void run(async () => { setDecision("allow"); onChange(await api.webAccess.pairDecide(candidate.code, true)); setDecisionFeedback("已允许登录"); setCandidate(null); setCode('') })}>{decision === "allow" ? <LoaderCircle {...UI_ICON_SM} className={styles.spinner} aria-hidden="true" /> : <Check {...UI_ICON_SM} aria-hidden="true" />}允许登录</Button>
                 <Button variant="danger" className={styles.decisionButton} aria-busy={decision === "deny"} disabled={busy} onClick={() => void run(async () => { setDecision("deny"); onChange(await api.webAccess.pairDecide(candidate.code, false)); setDecisionFeedback("已拒绝"); setCandidate(null) })}>{decision === "deny" ? <LoaderCircle {...UI_ICON_SM} className={styles.spinner} aria-hidden="true" /> : <X {...UI_ICON_SM} aria-hidden="true" />}拒绝</Button>
               </div>
-            </> : <>
+            </> : pairing && status.running ? <>
               <label className={styles.field}>新设备显示的配对码
                 <TextInput density="workspace" className={styles.codeInput} value={code} disabled={busy || !pairing || !status.running} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" maxLength={6}
                   onPaste={e => {
@@ -164,16 +172,20 @@ export default function WebDevices({
                   onChange={e => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setCandidate(null) }} />
               </label>
               <Button disabled={busy || !pairing || !status.running || code.length !== 6} onClick={() => void run(async () => { setCandidate({ ...(await api.webAccess.pairInspect(code)), code }) })}>核对设备</Button>
-            </>}
+            </> : <ol className={styles.pairSteps} aria-label="配对步骤">
+              <li className={styles.pairStep}><span className={styles.pairStepNumber}>1</span>开启配对</li>
+              <li className={styles.pairStep}><span className={styles.pairStepNumber}>2</span>输入新设备网页显示的六位码</li>
+              <li className={styles.pairStep}><span className={styles.pairStepNumber}>3</span>核对设备并允许登录</li>
+            </ol>}
           </div>
           <div className={styles.inlineFeedback} role="status">
-            {error && !confirm ? error : decisionFeedback ? decisionFeedback : candidate && candidate.expires <= now ? '配对码已过期，请重新获取' : candidate ? '请核对设备名称和配对码，仅允许你正在操作的设备。' : status.pairingActivity.length ? status.pairingActivity.map(item => `${item.name} · ${item.state === 'connected' ? '已连接' : '已批准，等待连接'}`).join('；') : !status.running ? `开启${WEB_ACCESS_LABEL}后即可配对。` : pairing ? '在新设备网页获取六位码，输入后核对设备。' : '开启配对后，在新设备网页获取六位码。'}
+            {error && !confirm ? error : decisionFeedback ? decisionFeedback : candidate && candidate.expires <= now ? '配对码已过期，请重新获取' : candidate ? '仅允许你正在操作的设备，配对后获得只读访问权限。' : status.pairingActivity.length ? status.pairingActivity.map(item => `${item.name} · ${item.state === 'connected' ? '已连接' : '已批准，等待连接'}`).join('；') : pairing ? '请在新设备打开网页并获取配对码。' : ''}
           </div>
         </div>
       </SettingsCard>
       <SettingsCard
         title={`授权设备 · ${status.devices.length}`}
-        hint="记住的设备长期有效，退出登录、撤销授权或修改密码后失效；临时登录不跨应用重启保留。"
+        hint="可重命名或撤销访问权限。"
       >
         {status.devices.length === 0 && (
           <p className={styles.hint}>暂无授权设备，登录或配对后会自动出现。</p>
@@ -257,6 +269,9 @@ export default function WebDevices({
             </Button>
           )}
         </div>
+        <SettingsDisclosure title="授权有效期与退出规则">
+          <p>记住的设备长期有效，退出登录、撤销授权或修改密码后失效；临时登录不跨应用重启保留。</p>
+        </SettingsDisclosure>
       </SettingsCard>
       {confirm && (
         <ConfirmModal

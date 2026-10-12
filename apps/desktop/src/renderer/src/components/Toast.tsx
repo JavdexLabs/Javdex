@@ -51,7 +51,9 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   return (
     <Ctx.Provider value={value}>
       {children}
-      <div className={styles.stack} hidden={Boolean(detail)} aria-live="polite" aria-relevant="additions" role="status">
+      <div className={styles.stack} hidden={Boolean(detail)} data-native-playback-occluder={items.length > 0 && !detail ? true : undefined}
+        data-interaction-preserve-surface={items.length > 0 && !detail ? true : undefined}
+        aria-live="polite" aria-relevant="additions" role="status">
         {items.map((t) => (
           <div key={t.id} className={`${styles.toast} ${styles[t.kind]}`}>
             <div className={t.kind === 'error' ? styles.summary : undefined}>{t.message}</div>

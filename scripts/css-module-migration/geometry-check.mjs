@@ -17,13 +17,14 @@ export async function checkStyleGeometry({ page, name, width, theme, output }) {
     const metrics = await layer.evaluate(el => {
       const css = getComputedStyle(el), box = el.getBoundingClientRect()
       return { position: css.position, zIndex: css.zIndex, width: box.width, visibility: css.visibility,
+        layerBase: Number(css.getPropertyValue('--layer-overlay')), layerStep: Number(css.getPropertyValue('--layer-step')),
         top: box.top, left: box.left, inlinePosition: el.style.position, inlineZIndex: el.style.zIndex,
         callerClass: el.classList.contains('fixture-caller-layer'), portal: el.parentElement === document.body }
     })
     assert.equal(metrics.position, 'fixed')
-    assert.equal(metrics.zIndex, '1200')
+    assert.equal(Number(metrics.zIndex), metrics.layerBase + metrics.layerStep)
     assert.equal(metrics.inlinePosition, '')
-    assert.equal(metrics.inlineZIndex, '')
+    assert.ok(metrics.inlineZIndex.includes('var(--layer-overlay'), 'layer-owned depth overrides caller zIndex')
     assert.equal(metrics.width, 180)
     assert.equal(metrics.visibility, 'visible')
     assert.equal(metrics.callerClass, true)

@@ -1,6 +1,7 @@
 import { backupRequestSchema, desktopBackupFileSchema } from '@shared/protocol/backup'
 import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import { z } from 'zod'
+import { LLM_PROVIDER_PROTOCOLS } from '@shared/llmProviders'
 import { IPC } from '@shared/ipc-channels'
 import type { ActressIpcContract } from '@shared/actressIpcContract'
 import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
@@ -10,7 +11,10 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
+import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackClearProgressSchema, aiSubtitleCommandSchema } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
+import { localModelVariant } from '../services/localModels/modelCatalog'
+import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS } from '@shared/desktop/localModels'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
 const scanAuditViewQuery = z.object({
@@ -281,7 +285,7 @@ const saveConnection = z.object({
   providerId: nonEmptyText,
   name: nonEmptyText,
   source: z.enum(['builtin', 'custom']),
-  protocol: z.enum(['openai-chat', 'anthropic-messages']),
+  protocol: z.enum(LLM_PROVIDER_PROTOCOLS),
   baseUrl: nonEmptyText,
   local: z.boolean().optional(),
   agentCompatible: z.boolean().optional(),
@@ -708,7 +712,9 @@ export const appIpcSchemas = {
       .object({
         mode: z.enum(['local', 'remote']).optional(),
         remoteBaseUrl: z.string().max(2048).nullable().optional(),
-        playerPath: z.string().max(4096).nullable().optional()
+        playerPath: z.string().max(4096).nullable().optional(),
+        playerPreference: z.enum(['external', 'builtin']).optional(),
+        resumePlayback: z.boolean().optional()
       })
       .strict()
   ]),
@@ -733,6 +739,31 @@ export const appIpcSchemas = {
     z.string().regex(/^[a-f0-9]{64}$/)
   ]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: noArgs,
+  [IPC.LOCAL_MODELS_SNAPSHOT]: noArgs,
+  [IPC.LOCAL_MODELS_COMMAND]: z.tuple([z.discriminatedUnion('action', [
+    z.object({ action: z.literal('translation'), mode: z.enum(['app-default', 'local']) }).strict(),
+    z.object({ action: z.literal('download-source'), source: z.enum(['official', 'hf-mirror']) }).strict(),
+    z.object({ action: z.literal('translation-model'), model: z.enum(LOCAL_TRANSLATION_MODEL_IDS) }).strict(),
+    z.object({ action: z.literal('usage'), expectedRevision: z.string().min(1).max(128).optional(), usage: z.object({
+      subtitleRecognition: z.object({ model: z.literal('kotoba'), variant: z.string().min(1).max(64) }).strict(),
+      subtitleTranslation: z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
+      textTranslation: z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1).max(64), mode: z.enum(['app-default', 'local']) }).strict()
+    }).strict() }).strict(),
+    ...(['download', 'delete', 'export', 'import', 'copy-download-url'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64).optional() }).strict()),
+    z.object({ action: z.literal('select'), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
+    ...(['cancel-download', 'choose-location', 'reset-location', 'clean-downloads', 'clear-cache'] as const).map(action => z.object({ action: z.literal(action) }).strict())
+  ]).superRefine((command, context) => {
+    if (command.action === 'usage') {
+      for (const [purpose, ref] of Object.entries(command.usage)) {
+        try { localModelVariant(ref.model, ref.variant) }
+        catch { context.addIssue({ code: 'custom', message: '未知或不匹配的本地模型精度', path: ['usage', purpose, 'variant'] }) }
+      }
+    }
+    if ('variant' in command && command.variant !== undefined) {
+      try { localModelVariant(command.model, command.variant) }
+      catch { context.addIssue({ code: 'custom', message: '未知或不匹配的本地模型精度', path: ['variant'] }) }
+    }
+  })]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: z.tuple([modelManagementApply]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: z.tuple([nonEmptyText]),
@@ -800,11 +831,18 @@ export const appIpcSchemas = {
     pendingResourceIdentityResolution
   ]),
   [IPC.PLAYLIST_LIST_PAGE]: z.tuple([z.object({
+    kind: z.enum(['builtin', 'custom']).optional(),
     search: z.string().max(500).optional(), limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), videoId: positiveSafeInteger.optional(),
     locale: z.string().min(1).max(100).refine(value => { try { Intl.getCanonicalLocales(value); return true } catch { return false } }).optional()
   }).strict()]),
   [IPC.PLAYLIST_LIST]: noArgs,
+  [IPC.RECENT_PLAYBACK_METADATA]: noArgs,
+  [IPC.RECENT_PLAYBACK_PAGE]: z.tuple([z.object({ limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional() }).strict()]),
+  [IPC.RECENT_PLAYBACK_REMOVE]: z.tuple([positiveSafeInteger]),
+  [IPC.RECENT_PLAYBACK_CLEAR]: noArgs,
   [IPC.PLAYLIST_GET]: z.tuple([
     id,
     z.enum(['added_at', 'release_date']).optional(),
@@ -962,8 +1000,17 @@ export const appIpcSchemas = {
   [IPC.PLAYLIST_IMPORT_CONTROL]: z.tuple([nonEmptyText, playlistImportControl]),
   [IPC.PLAYER_PLAY]: z.tuple([id, id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id, id]),
-  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id, id.optional()]),
+  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id, id.optional(), z.literal('external').optional()]),
   [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id, id]),
+  [IPC.PLAYBACK_AVAILABILITY]: z.tuple([]),
+  [IPC.PLAYBACK_OPEN]: z.tuple([playbackTargetSchema]),
+  [IPC.PLAYBACK_SNAPSHOT]: z.tuple([]),
+  [IPC.PLAYBACK_CONTROL]: z.tuple([playbackSessionIdSchema, playbackControlSchema]),
+  [IPC.PLAYBACK_VIEWPORT]: z.tuple([playbackViewportSchema]),
+  [IPC.PLAYBACK_SUBTITLE]: z.tuple([playbackSessionIdSchema]),
+  [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: z.tuple([]),
+  [IPC.PLAYBACK_AI_SUBTITLE_COMMAND]: z.tuple([playbackSessionIdSchema, aiSubtitleCommandSchema]),
+  [IPC.PLAYBACK_CLEAR_PROGRESS]: z.tuple([playbackClearProgressSchema]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),
   [IPC.ASSET_FETCH_REMOTE_IMAGE]: z.tuple([nonEmptyText]),

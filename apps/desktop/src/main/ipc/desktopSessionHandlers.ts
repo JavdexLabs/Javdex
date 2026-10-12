@@ -161,6 +161,13 @@ export function registerDesktopSessionHandlers(
 
   adapter.register(IPC.THIS_COMPUTER_UPDATE, async (patch: ThisComputerSettingsPatch) => {
     const current = await ports.settings.read()
+    if (patch.playerPreference !== undefined || patch.playerPath !== undefined) {
+      const preference = patch.playerPreference ?? current.playerPreference
+      const playerPath = patch.playerPath !== undefined ? patch.playerPath : current.playerPath
+      if (preference === 'external' && !playerPath?.trim()) {
+        throw structuredError('INVALID_INPUT', '请选择或输入外部播放器的程序路径后再保存。')
+      }
+    }
     const mode = patch.mode ?? current.mode
     const remoteBaseUrl =
       patch.remoteBaseUrl !== undefined ? patch.remoteBaseUrl : current.remoteBaseUrl

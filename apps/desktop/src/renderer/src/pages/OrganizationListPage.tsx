@@ -2,7 +2,7 @@ import PageHeader from '../components/PageHeader'
 import ListPage from '../components/ListPage'
 import ResultCount from '../components/ResultCount'
 import ContinuousGrid from '../components/ContinuousGrid'
-import FacetCard from '../components/FacetCard'
+import FacetCard, { facetCardHeight } from '../components/FacetCard'
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { Building2, Plus, SearchX } from 'lucide-react'
@@ -145,7 +145,7 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
             description={urlQ ? '调整搜索关键词后再试。' : '可手动新增，或在影片编辑时就地创建。'}
           />
         ) : (
-          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => (width - 2) / 1.49 + 64} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => (
+          <ContinuousGrid window={window} scope={`facet:${queryHash}`} label="分类" minWidth={200} itemHeight={width => facetCardHeight(width, 'organization')} pageSize={CLASSIFICATION_PAGE_SIZE} initialIndex={offset} onAnchor={index => move(Math.floor(index / CLASSIFICATION_PAGE_SIZE) * CLASSIFICATION_PAGE_SIZE)} itemKey={item => item.id} renderItem={item => (
             <FacetCard key={item.id} kind="organization" name={item.mainName}
               imageUrl={assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)}
               placeholder={<Building2 {...UI_ICON_SM} />} videoCount={item.videoCount}

@@ -8,12 +8,10 @@ import {
 import type { NormalizedModelUsage, ResolvedModelAccess } from './types'
 import type { JsonModelResponse } from '../services/llm/adapters/openaiChatAdapter'
 import type { ResolvedLlmModelRequestConfig } from '../services/llmClient'
-
-function endpoint(baseUrl: string, suffix: string): string {
-  const root = baseUrl.replace(/\/+$/, '')
-  if (suffix === 'messages' && !root.endsWith('/v1')) return `${root}/v1/messages`
-  return `${root}/${suffix}`
-}
+import { llmRequestEndpoints } from '../services/llmClient'
+import { llmRuntimeApiToProtocol } from '@shared/llmProviders'
+import { requestResponsesJson } from '../services/llm/adapters/openaiResponsesAdapter'
+import { requestGoogleJson } from '../services/llm/adapters/googleGenerativeAdapter'
 
 function normalizeJsonUsage(
   response: JsonModelResponse<unknown>,
@@ -49,18 +47,16 @@ async function toLegacyRequestConfig(
   try {
     const apiKey = lease.resolve()
     const anthropic = access.model.api === 'anthropic-messages'
+    const protocol = llmRuntimeApiToProtocol(access.model.api)
     return {
       providerId: access.model.providerId,
       providerName: access.model.providerId,
-      protocol: anthropic ? 'anthropic-messages' as const : 'openai-chat' as const,
+      protocol,
       apiKey,
       baseUrl: access.model.baseUrl,
       local: access.model.providerId === 'ollama' || access.model.providerId === 'lmstudio',
       modelId: access.model.modelId,
-      chatCompletionsUrl: anthropic ? undefined : endpoint(access.model.baseUrl, 'chat/completions'),
-      openAiModelsUrl: anthropic ? undefined : endpoint(access.model.baseUrl, 'models'),
-      messagesUrl: anthropic ? endpoint(access.model.baseUrl, 'messages') : undefined,
-      anthropicModelsUrl: anthropic ? endpoint(access.model.baseUrl, 'models') : undefined,
+      ...llmRequestEndpoints(protocol, access.model.baseUrl),
       promptCacheKey: affinityId && access.cacheCompatibility.supportsPromptCache === true
         ? affinityId
         : undefined,
@@ -83,6 +79,8 @@ export class ModelInvocation {
     private readonly dependencies: {
       requestAnthropic: typeof requestAnthropicJson
       requestOpenAi: typeof requestOpenAiJson
+      requestResponses?: typeof requestResponsesJson
+      requestGoogle?: typeof requestGoogleJson
     } = {
       requestAnthropic: requestAnthropicJson,
       requestOpenAi: requestOpenAiJson
@@ -102,7 +100,11 @@ export class ModelInvocation {
     config.signal = input.signal
     const response = config.protocol === 'anthropic-messages'
       ? await this.dependencies.requestAnthropic<T>(input.messages, config)
-      : await this.dependencies.requestOpenAi<T>(input.messages, config)
+      : config.protocol === 'openai-responses'
+        ? await (this.dependencies.requestResponses ?? requestResponsesJson)<T>(input.messages, config)
+        : config.protocol === 'google-generative-ai'
+          ? await (this.dependencies.requestGoogle ?? requestGoogleJson)<T>(input.messages, config)
+          : await this.dependencies.requestOpenAi<T>(input.messages, config)
     return {
       json: response.json,
       rawText: response.rawText,

@@ -17,6 +17,7 @@ export type SettingsTab =
   | MediaLibrarySettingsTab
   | 'video'
   | 'providers'
+  | 'local'
   | 'theme'
   | 'assets'
   | 'proxy'
@@ -72,13 +73,13 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
   },
   {
     id: 'models',
-    label: 'AI 模型',
-    hint: 'LLM 供应商',
+    label: 'AI 服务',
+    hint: '功能、云端服务与本地模型',
     defaultTab: 'usage',
     tabs: [
-      { id: 'usage', label: '用途与运行' },
-      { id: 'providers', label: '提供商与模型' },
-      { id: 'advanced', label: '高级' }
+      { id: 'usage', label: '功能' },
+      { id: 'providers', label: '云端服务' },
+      { id: 'local', label: '本地模型' }
     ]
   },
   {
@@ -128,6 +129,9 @@ export function resolveSettingsRoute(pathname: string): {
   if (pathname === '/settings/network/mode') {
     return { group: SETTINGS_GROUP_BY_ID.get('storage')!, tab: 'mode' }
   }
+  if (pathname === '/settings/models/advanced') {
+    return { group: SETTINGS_GROUP_BY_ID.get('models')!, tab: 'providers' }
+  }
   const match = matchPath({ path: ROUTE_PATH.settingsGroup, end: true }, pathname)
   const groupId = match?.params.group as SettingsGroup | undefined
   const group = (groupId && SETTINGS_GROUP_BY_ID.get(groupId)) || SETTINGS_GROUPS[0]
@@ -138,11 +142,17 @@ export function resolveSettingsRoute(pathname: string): {
 
 export function settingsPath(group: SettingsGroup, tab?: SettingsTab): string {
   if (group === 'network' && tab === 'mode') return settingsPath('storage', 'mode')
+  if (group === 'models' && tab === 'advanced') return settingsPath('models', 'providers')
   const config = SETTINGS_GROUP_BY_ID.get(group) ?? SETTINGS_GROUPS[0]
   return generatePath(ROUTE_PATH.settingsGroup, {
     group: config.id,
     tab: tab ?? config.defaultTab
   })
+}
+
+/** Usage drafts remain mounted while files are installed or providers are configured. */
+export function preservesModelUsageDraft(pathname: string): boolean {
+  return /^\/settings\/models\/(usage|providers|local|advanced)$/.test(pathname)
 }
 
 export function settingsPluginDevPath(): string {

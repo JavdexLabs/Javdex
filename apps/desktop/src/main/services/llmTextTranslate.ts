@@ -1,6 +1,11 @@
 import type { ResolvedLlmModelRequestConfig } from './llmClient'
+import { llmRequestEndpoints } from './llmClient'
+import { llmRuntimeApiToProtocol } from '@shared/llmProviders'
+import { requestResponsesText } from './llm/adapters/openaiResponsesAdapter'
+import { requestGoogleText } from './llm/adapters/googleGenerativeAdapter'
 import { modelManagement } from '../agent-platform/modelManagement'
 import { llmFetch } from '../utils/llmFetch'
+import { getLocalModels } from './localModels/desktopLocalModels'
 
 const TRANSLATE_TIMEOUT_MS = 60_000
 
@@ -37,11 +42,22 @@ export function normalizeTranslationOutput(text: string): string {
 export async function translateTextToChinese(text: string): Promise<string> {
   const trimmed = text.trim()
   if (!trimmed) throw new Error('没有可翻译的内容')
+  const local = getLocalModels()
+  if (await local.mode() === 'local') {
+    const output = normalizeTranslationOutput(await local.translateText(trimmed))
+    if (!output) throw new Error('本地模型未返回有效译文')
+    return output
+  }
 
-  const config = await resolveDefaultTranslationConfig()
+  return translateCloudTextToChinese(trimmed, await resolveDefaultTranslationConfig())
+}
+
+export async function translateCloudTextToChinese(trimmed: string, config: ResolvedLlmModelRequestConfig): Promise<string> {
   const raw =
     config.protocol === 'anthropic-messages'
       ? await requestAnthropicTranslate(trimmed, config)
+      : config.protocol === 'openai-responses' || config.protocol === 'google-generative-ai'
+        ? await requestNativeTranslate(trimmed, config)
       : await requestOpenAiTranslate(trimmed, config)
 
   const normalized = normalizeTranslationOutput(raw)
@@ -53,27 +69,35 @@ async function resolveDefaultTranslationConfig(): Promise<ResolvedLlmModelReques
   const access = modelManagement.resolve('app-default')
   const lease = await access.getCredentialLease()
   try {
-    const anthropic = access.model.api === 'anthropic-messages'
+    const protocol = llmRuntimeApiToProtocol(access.model.api)
     const root = access.model.baseUrl.replace(/\/+$/, '')
-    const anthropicRoot = root.endsWith('/v1') ? root : `${root}/v1`
     return {
       providerId: access.model.providerId,
       providerName: access.model.providerId,
-      protocol: anthropic ? 'anthropic-messages' : 'openai-chat',
+      protocol,
       apiKey: lease.resolve(),
       baseUrl: root,
       local: access.model.providerId === 'ollama' || access.model.providerId === 'lmstudio',
       modelId: access.model.modelId,
-      chatCompletionsUrl: anthropic ? undefined : `${root}/chat/completions`,
-      openAiModelsUrl: anthropic ? undefined : `${root}/models`,
-      messagesUrl: anthropic ? `${anthropicRoot}/messages` : undefined,
-      anthropicModelsUrl: anthropic ? `${anthropicRoot}/models` : undefined,
+      ...llmRequestEndpoints(protocol, root),
       maxTokens: access.preset.maxTokens,
       timeoutMs: access.preset.timeoutMs
     }
   } finally {
     lease.revoke()
   }
+}
+
+async function requestNativeTranslate(text: string, config: ResolvedLlmModelRequestConfig): Promise<string> {
+  const messages = [{ role: 'system' as const, content: SYSTEM_PROMPT }, { role: 'user' as const, content: text }]
+  const request = config.protocol === 'openai-responses' ? requestResponsesText : requestGoogleText
+  const result = await request(messages, {
+    ...config,
+    timeoutMs: Math.min(config.timeoutMs ?? TRANSLATE_TIMEOUT_MS, TRANSLATE_TIMEOUT_MS),
+    maxTokens: Math.min(config.maxTokens ?? 8192, Math.max(2048, estimateMaxTokens(text)))
+  })
+  if (!result.text) throw new Error('模型未返回译文')
+  return result.text
 }
 
 async function requestOpenAiTranslate(
@@ -100,7 +124,7 @@ async function requestOpenAiTranslate(
         ],
         stream: false,
         temperature: 0.2,
-        max_tokens: estimateMaxTokens(text)
+        max_tokens: config.providerId === 'minimax' ? Math.max(2048, estimateMaxTokens(text)) : estimateMaxTokens(text)
       }),
       signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS)
     })
@@ -153,7 +177,7 @@ async function requestAnthropicTranslate(
         model: config.modelId,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: text }],
-        max_tokens: estimateMaxTokens(text),
+        max_tokens: config.providerId === 'minimax' ? Math.max(2048, estimateMaxTokens(text)) : estimateMaxTokens(text),
         temperature: 0.2
       }),
       signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS)

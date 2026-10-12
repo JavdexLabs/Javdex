@@ -50,6 +50,16 @@ function collectMetrics(roots, web = false) {
   let globalStateClassCount = 0
   const violations = []
 
+  if (!web) {
+    const modules = cssFiles.filter(file => file.endsWith('.module.css')).map(file => ({ file, source: readFileSync(file, 'utf8') }))
+    const tokens = readFileSync(path.join(rendererRoot, 'styles.css'), 'utf8')
+    for (const match of tokens.matchAll(/^\s*(--(?:classification|organization)-[\w-]+):/gm)) {
+      const usage = new RegExp(`var\\(\\s*${match[1]}\\s*[,)]`)
+      const owners = modules.filter(module => usage.test(module.source))
+      if (owners.length === 1) violations.push(`${match[1]} belongs in ${relative(owners[0].file)}, not the global token Interface`)
+    }
+  }
+
   for (const file of cssFiles) {
     const source = readFileSync(file, 'utf8')
     const isModule = file.endsWith('.module.css')

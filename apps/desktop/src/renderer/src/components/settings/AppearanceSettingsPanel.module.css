@@ -14,6 +14,8 @@
 .controls {
   display: grid;
   min-width: 0;
+  width: 100%;
+  max-width: 540px;
 }
 
 .row {
@@ -37,7 +39,7 @@
 
 .segmented {
   display: inline-flex;
-  justify-self: end;
+  justify-self: start;
   align-items: center;
   height: var(--control-h-sm);
   padding: 2px;
@@ -83,7 +85,7 @@
 
 .ratio {
   width: min(100%, 320px);
-  justify-self: end;
+  justify-self: start;
 }
 
 .slider {
@@ -139,7 +141,7 @@
 .protection {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--settings-gap, 12px);
   min-height: var(--control-h-sm);
   color: var(--text-muted);
@@ -359,7 +361,7 @@
   justify-content: space-between;
   gap: 16px;
   min-height: var(--target-min);
-  padding: 10px 12px;
+  padding: 10px var(--settings-switch-row-pad-x, 12px);
   border-top: 1px solid var(--border-subtle);
 }
 

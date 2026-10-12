@@ -8,6 +8,24 @@ permissions:
   contents: read
 
 jobs:
+  ui-interaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - run: npm run test:ui
+        env:
+          JAVDEX_BROWSER_EXECUTABLE: ${{ steps.chrome.outputs.chrome-path }}
+
   desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 45

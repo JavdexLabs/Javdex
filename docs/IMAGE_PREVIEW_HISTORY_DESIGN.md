@@ -2,7 +2,7 @@
 
 本文说明 `ImagePreviewLightbox` 为什么依赖浏览器历史栈、macOS 闪退问题的成因，以及在保留原有返回交互的前提下如何修复。
 
-> 实施状态：方案已落地。历史项由 `ImagePreviewOverlayProvider` 协调，图片预览实例使用唯一 token，Lightbox 已通过 Portal 渲染到 `document.body`。
+> 实施状态：原图片预览修复已落地，实例使用唯一 token，Lightbox 通过 Portal 渲染到 `document.body`。2026-10-03 内置播放接入后，历史写入迁入应用级 `OverlayHistoryProvider`；第 1–10 节保留第一轮修复的诊断与方案，第 11 节描述当前扩展，不代表新增手势／安装包验收已完成。
 
 ## 1. 原有功能意图
 
@@ -15,11 +15,11 @@ Lightbox 是覆盖当前详情页的临时界面，不是一个独立业务页�
 - 系统或浏览器“后退”先关闭预览，而不是离开当前影片/演员详情；
 - 主动关闭预览后，不能在历史栈里留下一个需要再次后退的空条目。
 
-当前实现通过打开预览时执行 `history.pushState()`，给当前 URL 增加一个临时历史项；用户后退时触发 `popstate` 并关闭预览；点击关闭按钮或按 Esc 导致组件卸载时，再调用 `history.back()` 消费临时历史项。
+原始实现通过打开预览时执行 `history.pushState()`，给当前 URL 增加一个临时历史项；用户后退时触发 `popstate` 并关闭预览；点击关闭按钮或按 Esc 导致组件卸载时，再调用 `history.back()` 消费临时历史项。
 
 该设计的核心意图是正确的：**Lightbox 是详情页之上的一层，因此返回操作应先弹出这一层。** 问题不在是否使用历史栈，而在历史栈写操作与 React 组件生命周期绑定得过紧。
 
-## 2. 当前实现的问题
+## 2. 原始实现的问题
 
 相关代码位于 `apps/desktop/src/renderer/src/components/ImagePreviewLightbox.tsx`：
 
@@ -250,7 +250,7 @@ ImagePreviewLightbox
   - cleanup 不操作历史栈
 ```
 
-如果未来多个 overlay 都需要返回行为，应进一步抽象为通用 `OverlayHistoryCoordinator`，以栈结构管理 `image-preview`、确认弹窗和 leave guard。第一阶段不必一次重构所有 overlay，但 marker 格式应预留 `kind`。
+第一轮预留 `kind`，供未来多个观看 overlay 使用共享协调器；当前实现已按第 11 节合并图片与播放观看历史。普通确认弹窗和 leave guard 不因此变成返回栈条目。
 
 ## 7. 不推荐方案
 
@@ -326,3 +326,13 @@ Windows 至少回归鼠标返回键、Alt+Left、Esc 和关闭按钮；Linux 回
 - Lightbox mount/unmount cleanup 中不存在 `pushState()`、`back()` 或 `forward()`；
 - 所有历史事件以实例 token 判断所有权；
 - 完整类型检查、路由测试和跨平台手工回归通过。
+
+## 11. 当前共享观看历史（2026-10-03）
+
+`interaction/overlayHistory.ts` 持有一个可注入 history port 和临时层栈；`OverlayHistoryProvider` 是稳定应用级入口。图片 Context 保留预览启用状态、计数和 hook API，但不再独立监听 popstate、运行 back/fallback 或持有第二份历史栈。内置播放的 `playbackHistory.ts` 也通过同一入口管理展开、全屏和选项 token。
+
+marker 只包含 `{kind, token}`，保留 Router 字段；图片层额外兼容旧图片 marker。系统关闭、显式关闭和业务路由离开分别处理，cleanup 仅放弃所有权，不导航。显式关闭旧条目的遍历未结算时，新打开动作排队；fallback 只检查已变化的历史，不追加第二次 back。
+
+设置和插件离开保护由唯一 `NavigationGuardProvider` 组合，不再使用插件的 push/pop trap。同 URL 观看后退不触发草稿确认，真正离开路由才依次询问；在途观看遍历结算后才能继续业务跳转。调用方合同见 [路由文档](ROUTING_DESIGN.md#overlay-history)。
+
+自动回归覆盖图片入口、同 URL 观看层、主动关闭子层、快速关开、父子在途关闭、草稿保护组合与结构化复制。macOS 真实应用已验证播放选项／全屏／展开逐层返回，以及设置草稿取消和放弃返回；现代双指手势、物理鼠标返回键、图片与播放的完整手工共存矩阵仍待验收，不从这些自动回归推断通过。

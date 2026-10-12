@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act, type ReactTestRendererJSON } from 'react-test-renderer'
 import ClassificationDeleteModal from './ClassificationDeleteModal'
+import { renderedText } from '../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', {
@@ -29,7 +30,7 @@ function text(): string {
 
 function confirm(): TestRenderer.ReactTestInstance {
   assert.ok(renderer)
-  const button = renderer.root.findAllByType('button').find((item) => item.props.children === '删除系列')
+  const button = renderer.root.findAllByType('button').find((item) => renderedText(item) === '删除系列')
   assert.ok(button)
   return button
 }

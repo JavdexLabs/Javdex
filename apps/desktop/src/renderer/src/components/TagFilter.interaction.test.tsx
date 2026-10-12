@@ -5,6 +5,7 @@ import { afterEach, before, it } from 'node:test'
 import React, { useState } from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
+import { renderedText } from '../test/renderedText'
 
 const requests: Array<{ query: TagOptionsQuery; resolve: (value: TagFilterOptionsPage) => void; reject: (error: Error) => void }> = []
 const selections: number[][] = []
@@ -45,7 +46,7 @@ async function click(label: string) {
     await act(async () => cloud.props.onScroll({ currentTarget: { scrollTop: label==='下一页' ? 9840 : 0, clientHeight: 160, scrollHeight: 10000 } }))
     return
   }
-  const node=renderer!.root.findAllByType('button').find(n => React.Children.toArray(n.props.children).filter(value => typeof value === 'string' || typeof value === 'number').join('')===label)!
+  const node=renderer!.root.findAllByType('button').find(n => renderedText(n)===label)!
   assert.ok(node,label);assert.equal(Boolean(node.props.disabled),false)
   await act(async () => node.props.onClick())
 }

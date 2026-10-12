@@ -308,7 +308,7 @@
 
 .backdrop {
   position: fixed;
-  z-index: var(--z-modal, 1000);
+  z-index: var(--layer-overlay);
   inset: 0;
   display: grid;
   place-items: center;

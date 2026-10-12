@@ -1,5 +1,6 @@
 import { useOutletContext } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { Suspense, type ReactNode } from 'react'
+import EmptyState from '../components/EmptyState'
 
 export interface SettingsRouteOutletContext {
   settingsPage: ReactNode
@@ -8,10 +9,10 @@ export interface SettingsRouteOutletContext {
 
 export function SettingsSectionOutlet(): JSX.Element {
   const { settingsPage } = useOutletContext<SettingsRouteOutletContext>()
-  return <>{settingsPage}</>
+  return <Suspense fallback={<EmptyState loading />}>{settingsPage}</Suspense>
 }
 
 export function SettingsPluginDevOutlet(): JSX.Element {
   const { pluginDevPage } = useOutletContext<SettingsRouteOutletContext>()
-  return <>{pluginDevPage}</>
+  return <Suspense fallback={<EmptyState loading />}>{pluginDevPage}</Suspense>
 }

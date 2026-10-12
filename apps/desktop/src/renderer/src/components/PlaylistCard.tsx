@@ -1,32 +1,29 @@
 import type { PlaylistBrowseItem } from '@shared/playlistTypes'
-import { assetUrl } from '../api'
 import PlaylistCover from './PlaylistCover'
 import styles from './PlaylistCard.module.css'
 
-export default function PlaylistCard({ item, active, onOpen }: {
-  item: PlaylistBrowseItem
+export default function PlaylistCard({ item, active, onOpen, compact = false }: {
+  item: PlaylistBrowseItem & { local_kind?: 'recently_played' }
   active: boolean
   onOpen: () => void
+  compact?: boolean
 }): JSX.Element {
-  const cover = assetUrl(item.preview_cover_path, 640)
   return (
     <button
       type="button"
       className={styles.root}
       data-playlist-card
+      data-compact={compact || undefined}
       data-active={active || undefined}
       onClick={onOpen}
     >
-      <PlaylistCover variant="card">
-        {cover ? <img src={cover} alt={item.name} /> : <span>无封面</span>}
-        <span className={styles.count}>{item.video_count}</span>
-      </PlaylistCover>
+      <PlaylistCover variant={compact ? 'shortcut' : 'card'} playlist={item} />
       <div className={styles.main}>
-        <div className={styles.name}>{item.name}</div>
-        <div className={styles.meta}>{item.video_count} 部影片</div>
-        <div className={`${styles.description}${item.description ? '' : ` ${styles.emptyDescription}`}`}>
+        <div className={styles.name}>{item.system_kind === 'favorites' ? '收藏' : item.name}</div>
+        <div className={styles.meta}>{item.video_count} 部影片{compact && item.local_kind === 'recently_played' ? ' · 仅此设备' : ''}</div>
+        {!compact && <div className={`${styles.description}${item.description ? '' : ` ${styles.emptyDescription}`}`}>
           {item.description || '暂无简介'}
-        </div>
+        </div>}
       </div>
     </button>
   )

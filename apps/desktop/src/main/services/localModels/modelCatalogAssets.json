@@ -1,0 +1,84 @@
+[
+  {
+    "model": "kotoba",
+    "repoId": "kotoba-tech/kotoba-whisper-v2.0-ggml",
+    "revision": "e3a0cf6a62b95911703cfb97d819292e058f12c3",
+    "assets": [
+      {
+        "precision": "Q5_0",
+        "rfilename": "ggml-kotoba-whisper-v2.0-q5_0.bin",
+        "sha256": "4a3b92192b5d3578ff854a5876213e2e27af0c2d357492c2d14271e82c303658",
+        "size": 537819875
+      },
+      {
+        "precision": "F16",
+        "rfilename": "ggml-kotoba-whisper-v2.0.bin",
+        "sha256": "eff70a8a236e731abba774ba71e1f6d0fce53302137208c32207e694e0bf4546",
+        "size": 1519521155
+      }
+    ]
+  },
+  {
+    "model": "qwen3",
+    "repoId": "bartowski/Qwen_Qwen3-1.7B-GGUF",
+    "revision": "dcb19155b962dbb6389f4691a982043a8e651022",
+    "assets": [
+      {
+        "precision": "Q4_K_M",
+        "rfilename": "Qwen_Qwen3-1.7B-Q4_K_M.gguf",
+        "sha256": "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb",
+        "size": 1282439584
+      },
+      {
+        "precision": "Q5_K_M",
+        "rfilename": "Qwen_Qwen3-1.7B-Q5_K_M.gguf",
+        "sha256": "4287aca1b231f27dbd20012c4bf9693c89b6c849dc02b7027096da54564d4037",
+        "size": 1471805856
+      },
+      {
+        "precision": "Q6_K",
+        "rfilename": "Qwen_Qwen3-1.7B-Q6_K.gguf",
+        "sha256": "95aec3c8e76caf949b5a7a3b02adbb7e307eb0aa55880f6a6f9fb5f46abe6d4f",
+        "size": 1673007520
+      }
+    ]
+  },
+  {
+    "model": "qwen3",
+    "repoId": "Qwen/Qwen3-1.7B-GGUF",
+    "revision": "90862c4b9d2787eaed51d12237eafdfe7c5f6077",
+    "assets": [
+      {
+        "precision": "Q8_0",
+        "rfilename": "Qwen3-1.7B-Q8_0.gguf",
+        "sha256": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+        "size": 1834426016
+      }
+    ]
+  },
+  {
+    "model": "hy-mt2-7b",
+    "repoId": "tencent/Hy-MT2-7B-GGUF",
+    "revision": "ab8472660ac61fac25f1af43fac2599d52a8a775",
+    "assets": [
+      {
+        "precision": "Q4_K_M",
+        "rfilename": "Hy-MT2-7B-Q4_K_M.gguf",
+        "sha256": "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
+        "size": 4624648896
+      },
+      {
+        "precision": "Q6_K",
+        "rfilename": "HY-MT2-7B-Q6_K.gguf",
+        "sha256": "88ef0aba59952a4cfe4be36cb5baf797dbb370bc60e9dcbd7297036021e52831",
+        "size": 6164482720
+      },
+      {
+        "precision": "Q8_0",
+        "rfilename": "HY-MT2-7B-Q8_0.gguf",
+        "sha256": "58b3ad55dd6f6fa08c695cddc34fb5f8f708a844f78ae10508071914b0ed67c0",
+        "size": 7981928896
+      }
+    ]
+  }
+]

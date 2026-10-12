@@ -9,6 +9,7 @@ import type {
 } from '@shared/scrapeTypes'
 import PluginCard from '../PluginCard'
 import { PluginConfigModal } from './PluginConfigModals'
+import { renderedText } from '../../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', {
@@ -64,7 +65,7 @@ function text(): string {
 
 function button(label: string): TestRenderer.ReactTestInstance {
   assert.ok(renderer)
-  const found = renderer.root.findAllByType('button').find((item) => item.props.children === label)
+  const found = renderer.root.findAllByType('button').find((item) => renderedText(item) === label)
   assert.ok(found, `missing button ${label}`)
   return found
 }

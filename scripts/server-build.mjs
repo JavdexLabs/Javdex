@@ -58,6 +58,11 @@ async function main() {
     throw new Error('server:build requires out/web/index.html; run npm run web:build first')
   }
   fs.cpSync(webSource, path.join(outDir, 'web'), { recursive: true })
+  for (const file of ['LICENSE', 'NOTICE', 'LICENSES']) {
+    fs.cpSync(path.join(root, file), path.join(outDir, file), { recursive: true })
+  }
+  fs.mkdirSync(path.join(outDir, 'docs'), { recursive: true })
+  fs.copyFileSync(path.join(root, 'docs/THIRD_PARTY_NOTICES.md'), path.join(outDir, 'docs/THIRD_PARTY_NOTICES.md'))
 
   for (const file of ['index.js', 'webCatalogWorker.js']) {
     const source = fs.readFileSync(path.join(outDir, file), 'utf8')
@@ -70,7 +75,7 @@ async function main() {
     name: 'javdex-server',
     version: product.version,
     private: true,
-    license: 'MIT',
+    license: product.license,
     type: 'module',
     description: 'Production closure for the Javdex Node server. Native modules only; sources are bundled.',
     dependencies: {

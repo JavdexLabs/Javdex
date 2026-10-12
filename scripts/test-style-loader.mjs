@@ -1,8 +1,13 @@
 const CSS_MODULE_SUFFIX = '.module.css'
+import { isPiGoogleAdapter, patchPiGoogleTransport } from './pi-google-transport.mjs'
 
 export async function load(url, context, nextLoad) {
+  if (isPiGoogleAdapter(url)) {
+    const result = await nextLoad(url, context)
+    return { ...result, source: patchPiGoogleTransport(String(result.source)) }
+  }
   // Browser bundlers turn imported icons into URL strings; no pixels are mocked here.
-  if (url.endsWith('.png')) {
+  if (url.endsWith('.png') || url.endsWith('.svg')) {
     return {
       format: 'module',
       shortCircuit: true,

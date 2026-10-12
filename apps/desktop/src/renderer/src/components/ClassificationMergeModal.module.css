@@ -16,6 +16,8 @@
 }
 
 .card {
+  --classification-merge-card-min-h: 120px;
+
   position: relative;
   display: grid;
   place-items: center;

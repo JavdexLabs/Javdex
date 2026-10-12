@@ -13,9 +13,12 @@ export function writePlaylistImport(input: PlaylistImportWriteInput, database: D
     let playlistId: number
     if (input.destination.kind === 'append') {
       playlistId = input.destination.playlistId
-      if (!database.prepare('SELECT 1 FROM playlists WHERE id = ?').get(playlistId)) {
+      const playlist = database.prepare('SELECT system_kind FROM playlists WHERE id = ?')
+        .get(playlistId) as { system_kind: string | null } | undefined
+      if (!playlist) {
         throw new Error('TARGET_PLAYLIST_NOT_FOUND')
       }
+      if (playlist.system_kind) throw new Error('内置清单不支持从网页导入，请选择自定义清单。')
     } else {
       const name = input.destination.name.trim()
       if (!name) throw new Error('清单名称不能为空')

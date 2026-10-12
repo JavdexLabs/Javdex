@@ -12,6 +12,7 @@ import {
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
   isReservedLlmProviderId,
+  isLlmProviderProtocol,
   isValidCustomLlmProviderId,
   normalizeDefaultLlmSelection,
   type CustomLlmProviderDefinition,
@@ -496,6 +497,21 @@ function normalizeLlmSettings(parsed: ParsedSettings): Pick<
   | 'llmCustomModels'
 > {
   const llmProviderConfigs = normalizeLlmProviderConfigs(parsed.llmProviderConfigs)
+  // Newly shipped presets may have been configured as custom providers in older
+  // settings. Preserve those endpoints before removing reserved custom IDs.
+  if (Array.isArray(parsed.customLlmProviders)) {
+    for (const provider of parsed.customLlmProviders) {
+      if (!provider || typeof provider !== 'object') continue
+      const id = typeof provider.id === 'string' ? provider.id.trim() : ''
+      if (id !== 'gemini' && id !== 'bailian') continue
+      if (typeof provider.baseUrl !== 'string' || !provider.baseUrl.trim()) continue
+      llmProviderConfigs[id] = {
+        baseUrl: provider.baseUrl.trim(),
+        protocol: normalizeLlmProviderProtocol(provider.protocol) ?? 'openai-chat',
+        ...llmProviderConfigs[id]
+      }
+    }
+  }
   const customLlmProviders = normalizeCustomLlmProviders(parsed.customLlmProviders)
   const llmCustomModels = normalizeLlmCustomModels(parsed.llmCustomModels, customLlmProviders)
 
@@ -547,7 +563,7 @@ function normalizeLlmProviderConfigs(
 }
 
 function normalizeLlmProviderProtocol(value: unknown): LlmProviderProtocol | undefined {
-  if (value === 'openai-chat' || value === 'anthropic-messages') return value
+  if (isLlmProviderProtocol(value)) return value
   return undefined
 }
 
@@ -561,7 +577,7 @@ function normalizeCustomLlmProviders(value: unknown): CustomLlmProviderDefinitio
     const id = typeof input.id === 'string' ? input.id.trim() : ''
     const name = typeof input.name === 'string' ? input.name.trim() : ''
     const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : ''
-    const protocol = input.protocol === 'anthropic-messages' ? 'anthropic-messages' : 'openai-chat'
+    const protocol = normalizeLlmProviderProtocol(input.protocol) ?? 'openai-chat'
     if (!isValidCustomLlmProviderId(id) || isReservedLlmProviderId(id) || seen.has(id)) continue
     if (!name || !baseUrl) continue
     seen.add(id)

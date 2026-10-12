@@ -50,6 +50,22 @@ it('appends new videos and links without duplicating original members', () => {
     [{ video_id: 11, position: 0 }, { video_id: result.entries[1].videoId, position: 1 }])
 })
 
+it('rejects webpage imports into built-in lists before any catalog write', () => {
+  const db = fixture()
+  const builtins = db.prepare('SELECT id FROM playlists WHERE system_kind IS NOT NULL').all() as { id: number }[]
+  assert.equal(builtins.length, 2)
+  for (const { id } of builtins) {
+    assert.throws(() => writePlaylistImport({ destination: { kind: 'append', playlistId: id },
+      libraryId: 1, reusedMembership: 'preserve', sourceLinks: [{ label: 'Source', url: 'https://example.test/list' }],
+      entries: [{ kind: 'create', code: 'NEW-BUILTIN', title: null }]
+    }, db), /内置清单不支持从网页导入/)
+  }
+  for (const table of ['playlist_video', 'playlist_links', 'library_video_memberships']) {
+    assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n, 0)
+  }
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n, 2)
+})
+
 it('rolls back playlist, new videos, memberships and links when a later item fails', () => {
   const db = fixture()
   assert.throws(() => writePlaylistImport({ destination: { kind: 'create', name: 'Must roll back' },

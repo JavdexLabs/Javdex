@@ -1,5 +1,5 @@
 import { useDesktopSession } from './desktop/DesktopSessionContext'
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import ResetListStateOnReload from './listView/ResetListStateOnReload'
 import Layout from './components/Layout'
@@ -16,7 +16,7 @@ import DirectorDetailPage from './pages/DirectorDetailPage'
 import SeriesDetailPage from './pages/SeriesDetailPage'
 import PlaylistShell from './components/PlaylistShell'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
-import SettingsPage from './pages/SettingsPage'
+import EmptyState from './components/EmptyState'
 import PendingCenterShell from './components/PendingCenterShell'
 import MediaLibrarySettingsPage from './pages/MediaLibrarySettingsPage'
 import { PluginDevLeaveGuardProvider } from './components/pluginDev/PluginDevLeaveGuard'
@@ -25,6 +25,8 @@ import { DisplayModeProvider } from './components/DisplayModeContext'
 import { ThemeProvider, useTheme } from './components/ThemeProvider'
 import { AppBackgroundProvider } from './components/AppBackgroundContext'
 import { ImagePreviewOverlayProvider } from './components/ImagePreviewOverlayContext'
+import { OverlayHistoryProvider } from './interaction/OverlayHistoryContext'
+import { NavigationGuardProvider } from './interaction/NavigationGuard'
 import { AvatarAutoCropBatchProvider } from './contexts/AvatarAutoCropBatchContext'
 import { installDisableInputSpellcheck } from './installDisableInputSpellcheck'
 import { ROUTE_PATH, ROUTE_SEGMENT } from './listView/routePaths'
@@ -39,6 +41,8 @@ import {
 import { AgentMetadataCollectorProvider } from './components/agentMetadata/AgentMetadataCollectorContext'
 import { PlaylistImportProvider } from './components/playlistImport/PlaylistImportContext'
 import SettingsLeaveGuard from './settings/SettingsLeaveGuard'
+
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 function FacetDetailRoute({
   kind,
@@ -65,6 +69,8 @@ function AppContent(): JSX.Element {
           <AgentMetadataCollectorProvider>
           <DisplayModeProvider>
             <AppBackgroundProvider>
+              <OverlayHistoryProvider>
+              <NavigationGuardProvider>
               <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
                 <PluginDevLeaveGuardProvider>
                   <SettingsLeaveGuard>
@@ -179,7 +185,7 @@ function AppContent(): JSX.Element {
                         </Route>
                       </Route>
                     </Route>
-                    <Route path={ROUTE_PATH.settings} element={<SettingsPage />}>
+                    <Route path={ROUTE_PATH.settings} element={<Suspense fallback={<EmptyState loading />}><SettingsPage /></Suspense>}>
                       <Route index element={<Navigate to={settingsPath('overview')} replace />} />
                       {SETTINGS_GROUPS.flatMap((group) =>
                         group.tabs.map((tab) => (
@@ -209,6 +215,8 @@ function AppContent(): JSX.Element {
                   </SettingsLeaveGuard>
                 </PluginDevLeaveGuardProvider>
               </ImagePreviewOverlayProvider>
+              </NavigationGuardProvider>
+              </OverlayHistoryProvider>
             </AppBackgroundProvider>
           </DisplayModeProvider>
           </AgentMetadataCollectorProvider>

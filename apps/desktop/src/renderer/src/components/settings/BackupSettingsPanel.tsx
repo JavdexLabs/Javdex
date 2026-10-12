@@ -10,7 +10,7 @@ import Modal from '../Modal'
 import Checkbox from '../../../../../../../packages/ui/src/Checkbox'
 import Spinner from '../Spinner'
 import { UI_ICON_SM } from '../iconDefaults'
-import { SettingsCard } from './SettingsPrimitives'
+import { SettingsCard, SettingsDisclosure } from './SettingsPrimitives'
 import styles from './BackupSettingsPanel.module.css'
 
 const phaseLabels: Record<BackupJob['phase'], string> = {
@@ -209,7 +209,7 @@ export default function BackupSettingsPanel(): JSX.Element {
         <div><strong>恢复资料</strong><SettingsFeedback error={feedback?.scope === 'restore'} detail={feedback?.scope === 'restore' ? feedback.message : null} message={busyScope === 'restore' ? '正在读取导入来源，请稍候…' : feedback?.scope === 'restore' ? feedback.message : '替换当前资料库；执行前自动备份目标，原始视频不受影响。'} /></div>
         <div className={styles.actions}><Button disabled={!allowed || busy || active} onClick={() => file({ action: 'open' })}><Upload {...UI_ICON_SM} />选择备份文件</Button>{session.mode === 'remote' && <Button disabled={!allowed || busy || active} onClick={() => file({ action: 'importLocal' })}>从本机资料库导入</Button>}</div>
       </div>
-      <details className={styles.scope}><summary>备份范围与恢复说明</summary><p className={styles.hint}>包含全部媒体库的正式资料、清单、个人评分和正式图片；不包含原始视频、插件与模型配置、工作记录、待确认事项、运行任务和登录凭据。加密图片只在备份副本中解密，源图片保持原状。</p><p className={styles.hint}>本机资料导入后仍可独立使用，两份资料不自动同步。自动备份保留在目标设备，可在任务详情中另存；本轮不自动清理。</p></details>
+      <SettingsDisclosure title="备份范围与恢复说明"><p className={styles.hint}>包含全部媒体库的正式资料、清单、个人评分和正式图片；不包含原始视频、插件与模型配置、工作记录、待确认事项、运行任务和登录凭据。加密图片只在备份副本中解密，源图片保持原状。</p><p className={styles.hint}>本机资料导入后仍可独立使用，两份资料不自动同步。自动备份保留在目标设备，可在任务详情中另存；本轮不自动清理。</p></SettingsDisclosure>
       {!allowed && <p className={styles.hint}>请先连接资料库并完成写入授权。</p>}
     </SettingsCard>
     {job && <SettingsCard title={`${job.kind === 'backup' ? '资料库备份' : '恢复资料'} · ${phaseLabels[job.phase]}`}>

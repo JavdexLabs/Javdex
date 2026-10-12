@@ -26,6 +26,13 @@
   box-shadow: var(--shadow-elevated);
 }
 
+.root[data-compact='true'] {
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  min-height: 88px;
+  padding: 10px var(--form-section-gap);
+}
+
 .root:focus-visible {
   outline-offset: 3px;
 }
@@ -33,29 +40,6 @@
 .root[data-active='true'] {
   border-color: var(--border-accent);
   background: var(--surface-selected);
-}
-
-.count {
-  position: absolute;
-  right: 5px;
-  bottom: 5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-base) 82%, transparent);
-  color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-:where(:root[data-privacy-mode='true'][data-privacy-covers='true']) .count {
-  z-index: 2;
 }
 
 .main {

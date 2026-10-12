@@ -7,7 +7,7 @@ export type ButtonSize = 'md' | 'sm'
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
-  /** Pass false while idle to reserve the same indicator slot used during submission. */
+  /** Replaces the visible content with a centered indicator without changing its layout size. */
   busy?: boolean
 }
 
@@ -17,6 +17,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
     variant = 'default',
     size = 'md',
     className = '',
+    children,
     type = 'button',
     busy,
     disabled,
@@ -34,9 +35,10 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
     .join(' ')
 
   return <button ref={ref} type={type} className={classes} data-ui="button" {...rest}
-    data-busy-slot={busy !== undefined || undefined}
     aria-busy={busy ?? rest['aria-busy']}
-    disabled={busy ? true : disabled} />
+    disabled={busy ? true : disabled}>
+    <span className={styles.content}>{children}</span>
+  </button>
 })
 
 export default Button

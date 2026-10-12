@@ -288,6 +288,7 @@ export default function AppearanceSettingsPanel({
   const { mode, setMode, syncResourceTypeBadges } = useDisplayMode()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
+  const [avatarSaveError, setAvatarSaveError] = useState<string | null>(null)
   const [isCountingBatchAvatars, setIsCountingBatchAvatars] = useState(false)
   const [privacyScopesExpanded, setPrivacyScopesExpanded] = useState(false)
   const [batchConfirmCount, setBatchConfirmCount] = useState<number | null>(null)
@@ -321,11 +322,15 @@ export default function AppearanceSettingsPanel({
       avatarFaceRatio: normalizeAvatarFaceRatio(avatarCompositionDraft.avatarFaceRatio)
     }
     setIsSavingAvatarComposition(true)
+    setAvatarSaveError(null)
     try {
       const saved = await onPatchSettings(nextDraft)
-      if (saved === false) return false
+      if (saved === false) { setAvatarSaveError('保存未完成，请检查设置后重试。'); return false }
       avatarForm.accept(nextDraft, avatarCompositionDraft)
       return true
+    } catch (error) {
+      setAvatarSaveError((error as Error).message)
+      return false
     } finally {
       setIsSavingAvatarComposition(false)
     }
@@ -509,7 +514,7 @@ export default function AppearanceSettingsPanel({
         className={styles.compositionCard}
         title="智能头像构图"
         hint="预览构图效果，保存后用于后续处理；已有头像保持不变。"
-        actions={<SettingsFormActions placement="header" dirty={avatarForm.dirty} saving={isSavingAvatarComposition} conflict={avatarForm.conflict} onCancel={avatarForm.reset} onSave={() => void saveAvatarComposition()} />}
+        actions={<SettingsFormActions placement="header" dirty={avatarForm.dirty} saving={isSavingAvatarComposition} conflict={avatarForm.conflict} error={avatarSaveError} onCancel={() => { avatarForm.reset(); setAvatarSaveError(null) }} onSave={() => void saveAvatarComposition()} />}
       >
         <div className={styles.layout}>
           <AvatarCompositionPreview

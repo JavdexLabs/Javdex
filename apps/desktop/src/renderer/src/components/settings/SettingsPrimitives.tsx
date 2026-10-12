@@ -1,6 +1,6 @@
 import type { AriaAttributes, KeyboardEventHandler, ReactNode, RefObject } from 'react'
 import { useEffect, useId, useRef, useState } from 'react'
-import { Minus, Plus } from 'lucide-react'
+import { ChevronRight, Minus, Plus } from 'lucide-react'
 import type { SettingsGroup, SettingsTab, SettingsTabItem } from '../../settings/settingsRoutes'
 import { settingsTabDomId, settingsTabPanelDomId } from '../../settings/settingsRoutes'
 import EmptyState from '../EmptyState'
@@ -8,6 +8,7 @@ import { AppFormField } from '../FormPrimitives'
 import { UI_ICON_SM } from '../iconDefaults'
 import Switch from '../Switch'
 import styles from './SettingsPrimitives.module.css'
+import { SettingsSaveDetailsScope, SettingsSaveDetailsSlot } from './SettingsSaveDetailsScope'
 
 type CardProps = {
   as?: 'div' | 'section'
@@ -48,10 +49,13 @@ export function SettingsCard({
       className={`${styles.card}${className ? ` ${className}` : ''}`}
       {...ariaProps}
     >
-      {(title || hint || actions) && (
-        <SettingsCardHeader title={title} hint={hint} actions={actions} className={headerClassName} />
-      )}
-      {children}
+      <SettingsSaveDetailsScope>
+        {(title || hint || actions) && (
+          <SettingsCardHeader title={title} hint={hint} actions={actions} className={headerClassName} />
+        )}
+        <SettingsSaveDetailsSlot />
+        {children}
+      </SettingsSaveDetailsScope>
     </Component>
   )
 }
@@ -215,6 +219,52 @@ export function SettingsEmptyPanel({
 }
 
 export const SettingsFormField = AppFormField
+
+/** One setting or operation: short impact on the left, controls on the right. */
+export function SettingsRow({ title, description, children }: {
+  title: ReactNode
+  description?: ReactNode
+  children: ReactNode
+}): JSX.Element {
+  return (
+    <div className={styles.settingRow}>
+      <div className={styles.settingCopy}>
+        <span className={styles.settingTitle}>{title}</span>
+        {description ? <span className={styles.settingDescription}>{description}</span> : null}
+      </div>
+      <div className={styles.settingControls}>{children}</div>
+    </div>
+  )
+}
+
+/** Read-only configuration is text, never a disabled form control. */
+export function SettingsValueRow({ label, value, actions }: {
+  label: ReactNode
+  value: ReactNode
+  actions?: ReactNode
+}): JSX.Element {
+  return (
+    <div className={styles.valueRow}>
+      <span className={styles.valueLabel}>{label}</span>
+      <div className={styles.valueContent}>{value}</div>
+      {actions ? <div className={styles.valueActions}>{actions}</div> : null}
+    </div>
+  )
+}
+
+/** Native disclosure keeps fields mounted and supports keyboard activation. */
+export function SettingsDisclosure({ title, children, defaultOpen = false }: {
+  title: ReactNode
+  children: ReactNode
+  defaultOpen?: boolean
+}): JSX.Element {
+  return (
+    <details className={styles.disclosure} open={defaultOpen || undefined}>
+      <summary className={styles.disclosureSummary}><ChevronRight className={styles.disclosureChevron} {...UI_ICON_SM} aria-hidden /><span>{title}</span></summary>
+      <div className={styles.disclosureBody}>{children}</div>
+    </details>
+  )
+}
 
 export function SettingsStatusPill({
   status,

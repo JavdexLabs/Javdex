@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useEscapeKey } from '../hooks/useEscapeKey'
+import { InteractionLayerOwner, useInteractionLayer } from '../interaction/useInteractionLayer'
 import { Minus, Plus, RotateCcw, X } from 'lucide-react'
 import IconButton from './IconButton'
 import styles from './ImagePreviewLightbox.module.css'
@@ -71,6 +71,8 @@ export default function ImagePreviewLightbox({
   navigationStatus
 }: ImagePreviewLightboxProps): JSX.Element | null {
   const { register } = useImagePreviewOverlay()
+  const rootRef = useRef<HTMLDivElement>(null)
+  const layer = useInteractionLayer({ rootRef, modal: true, onDismiss: onClose })
   const src = items[index]?.src
   const assetId = items[index]?.id
   const canPrev = !loading && windowOffset + index > 0
@@ -256,13 +258,6 @@ export default function ImagePreviewLightbox({
   }, [clearChromeTimer, clearSwipeAnimation])
 
   useEffect(() => {
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = ''
-    }
-  }, [])
-
-  useEffect(() => {
     activeThumbRef.current?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
   }, [index, assetId])
 
@@ -294,10 +289,9 @@ export default function ImagePreviewLightbox({
     [holdChrome, index, loading, onIndexChange]
   )
 
-  useEscapeKey(onClose, true)
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (!layer.isTop() || e.defaultPrevented || e.isComposing) return
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         bumpChrome()
@@ -322,7 +316,7 @@ export default function ImagePreviewLightbox({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [bumpChrome, goNext, goPrev, resetView, zoomBy])
+  }, [bumpChrome, goNext, goPrev, layer, resetView, zoomBy])
 
   useEffect(() => {
     if (index < 0 || index >= items.length || !items[index]?.src) {
@@ -562,7 +556,11 @@ export default function ImagePreviewLightbox({
 
   return createPortal(
     (
+    <InteractionLayerOwner.Provider value={layer.owner}>
     <div
+      ref={rootRef}
+      tabIndex={-1}
+      style={layer.style}
       className={styles.root}
       role="dialog"
       aria-modal
@@ -759,6 +757,7 @@ export default function ImagePreviewLightbox({
         </div>
       </footer>
     </div>
+    </InteractionLayerOwner.Provider>
     ),
     document.body
   )

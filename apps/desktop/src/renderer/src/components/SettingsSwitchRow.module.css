@@ -1,13 +1,27 @@
 .root {
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   min-height: var(--target-min);
-  padding: 10px var(--settings-switch-row-pad-x, 12px);
+  margin-inline: -8px;
+  padding: 10px calc(var(--settings-switch-row-pad-x, 12px) + 8px);
   cursor: pointer;
   user-select: none;
-  transition: background var(--motion-fast);
+}
+
+.root::before {
+  position: absolute;
+  z-index: -1;
+  inset: 4px 0;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control-hover) 55%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  content: '';
+  transition: opacity var(--motion-fast);
 }
 
 .disabled {
@@ -16,11 +30,32 @@
 }
 
 .root + .root {
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid transparent;
 }
 
-.root:hover:not(.disabled) {
-  background: color-mix(in srgb, var(--surface-control-hover) 55%, transparent);
+.root + .root::after {
+  position: absolute;
+  inset: -1px 8px auto;
+  height: 1px;
+  background: var(--border-subtle);
+  pointer-events: none;
+  content: '';
+}
+
+.root:where(:has(input:focus-visible)):where(:not(.disabled))::before {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .root:hover:where(:not(.disabled))::before {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root::before {
+    transition: none;
+  }
 }
 
 .copy {

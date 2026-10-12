@@ -7,7 +7,14 @@ import type { DesktopSession } from '@shared/desktop/session'
 import { EMPTY_DESKTOP_SESSION } from '@shared/desktop/session'
 import type { DefaultPlayerDetectionResult, ThisComputerSettings, ThisComputerSettingsPatch } from '@shared/desktop/settings'
 import { DesktopSessionContext } from '../../desktop/DesktopSessionContext'
-import SettingsLeaveGuard from '../../settings/SettingsLeaveGuard'
+import LeaveGuard from '../../settings/SettingsLeaveGuard'
+import { OverlayHistoryProvider } from '../../interaction/OverlayHistoryContext'
+import { NavigationGuardProvider } from '../../interaction/NavigationGuard'
+import { renderedText } from '../../test/renderedText'
+
+function SettingsLeaveGuard({ children }: { children: React.ReactNode }): JSX.Element {
+  return <OverlayHistoryProvider><NavigationGuardProvider><LeaveGuard>{children}</LeaveGuard></NavigationGuardProvider></OverlayHistoryProvider>
+}
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -16,7 +23,7 @@ it('detects a player into the draft only and retains the chosen path on failed d
   let result: DefaultPlayerDetectionResult = { status: 'found', path: 'D:\\播放器\\Player.exe', extension: '.mp4' }
   let writes = 0
   const patches: ThisComputerSettingsPatch[] = []
-  const settings = { mode: 'remote', remoteBaseUrl: 'http://localhost:8096', playerPath: null } as ThisComputerSettings
+  const settings = { mode: 'remote', remoteBaseUrl: 'http://localhost:8096', playerPath: null, playerPreference: 'external' } as ThisComputerSettings
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
     addEventListener() {}, removeEventListener() {}, api: { thisComputer: {
       get: async () => settings,
@@ -35,7 +42,7 @@ it('detects a player into the draft only and retains the chosen path on failed d
       capabilities: {} as never, catalogReadsEnabled: true, reconnect: async () => {}, claimWriter: async () => { throw new Error('unused') }
     }}><SettingsLeaveGuard><Panel /></SettingsLeaveGuard></DesktopSessionContext.Provider> }])
     await act(async () => { tree = TestRenderer.create(<RouterProvider router={router!} />) })
-    assert.match(textOf(tree!.root), /播放服务端视频需设置/)
+    assert.match(textOf(tree!.root), /请先选择或输入程序路径/)
     assert.doesNotMatch(textOf(tree!.root), /播放设置（可选）/)
     await act(async () => { tree!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.onChange({ target: { value: 'http://new-server:8096' } }) })
     const detect = () => tree!.root.findAllByType('button').find(node => textOf(node) === '使用系统默认播放器')!
@@ -45,13 +52,20 @@ it('detects a player into the draft only and retains the chosen path on failed d
     assert.equal(tree!.root.findByProps({ placeholder: '选择程序或输入绝对路径' }).props.value, 'D:\\播放器\\Player.exe')
     result = { status: 'unavailable', message: '未找到默认程序，请选择程序。' }
     await act(async () => { detect().props.onClick() })
+    act(() => tree!.root.findAllByType('button').find(node => node.props.title === '保存失败')!.props.onClick())
     assert.match(textOf(tree!.root), /未找到默认程序/)
     assert.equal(tree!.root.findByProps({ placeholder: '选择程序或输入绝对路径' }).props.value, 'D:\\播放器\\Player.exe')
+    const { default: SelectControl } = await import('../SelectControl')
+    act(() => tree!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '默认播放方式')!.props.onChange({ target: { value: 'builtin' } }))
+    const { default: SettingsSwitchRow } = await import('../SettingsSwitchRow')
+    const recordingSwitch = () => tree!.root.findAllByType(SettingsSwitchRow).find(node => node.props.title === '保存续播进度')!
+    assert.equal(recordingSwitch().props.checked, true, 'missing preference defaults to enabled resume')
+    assert.equal(writes, 0, 'player preference is a draft until saved')
     await act(async () => { tree!.root.findAllByType('button').find(node => textOf(node) === '保存')!.props.onClick() })
     assert.equal(writes, 1)
-    assert.deepEqual(patches, [{ playerPath: 'D:\\播放器\\Player.exe' }])
+    assert.deepEqual(patches, [{ playerPath: 'D:\\播放器\\Player.exe', playerPreference: 'builtin', resumePlayback: true }])
     assert.equal(tree!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.value, 'http://new-server:8096')
-    assert.match(textOf(tree!.root), /有未保存的更改/)
+    assert.match(textOf(tree!.root), /待保存/)
     assert.doesNotMatch(textOf(tree!.root), /保存后生效/)
   } finally {
     act(() => tree?.unmount())
@@ -65,6 +79,97 @@ function textOf(node: TestRenderer.ReactTestInstance | string): string {
     ? node
     : node.children.map((child) => textOf(child as TestRenderer.ReactTestInstance)).join('')
 }
+
+it('shows built-in playback as the default and saves an external selection only after confirmation', async () => {
+  const previousWindow = globalThis.window
+  let settings: ThisComputerSettings = {
+    mode: 'local', remoteBaseUrl: null, closeToTray: false, theme: 'graphite',
+    playerPath: '/Applications/Player.app', playerPreference: 'builtin',
+    playbackVolume: 50, resumePlayback: false,
+    proxyUrl: '', proxyUrlEnabled: false, llmProxyUrl: '', llmProxyUrlEnabled: false
+  }
+  let resolveSettings: (settings: ThisComputerSettings) => void = () => {}
+  const loading = new Promise<ThisComputerSettings>(resolve => { resolveSettings = resolve })
+  const patches: ThisComputerSettingsPatch[] = []
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    addEventListener() {}, removeEventListener() {}, api: { thisComputer: {
+      get: async () => loading,
+      update: async (patch: ThisComputerSettingsPatch) => {
+        patches.push(patch)
+        settings = { ...settings, ...patch }
+        return { settings, restartRequired: false }
+      }
+    } }
+  } })
+  let tree: TestRenderer.ReactTestRenderer | undefined
+  let router: ReturnType<typeof createMemoryRouter> | undefined
+  try {
+    const { default: Panel } = await import('./CatalogConnectionPanel')
+    const { api } = await import('../../api')
+    const { default: SelectControl } = await import('../SelectControl')
+    const { default: SettingsFormActions } = await import('./SettingsFormActions')
+    const { SettingsCard } = await import('./SettingsPrimitives')
+    const { default: SettingsSwitchRow } = await import('../SettingsSwitchRow')
+    api.thisComputer = window.api.thisComputer
+    router = createMemoryRouter([{ path: '*', element: <DesktopSessionContext.Provider value={{
+      session: { ...EMPTY_DESKTOP_SESSION, state: 'available', mode: 'local' },
+      capabilities: {} as never, catalogReadsEnabled: true,
+      reconnect: async () => {}, claimWriter: async () => { throw new Error('unused') }
+    }}><SettingsLeaveGuard><Panel /></SettingsLeaveGuard></DesktopSessionContext.Provider> }])
+    await act(async () => { tree = TestRenderer.create(<RouterProvider router={router!} />) })
+    const preference = () => tree!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '默认播放方式')!
+    assert.equal(preference().props.value, 'builtin')
+    assert.equal(preference().props.disabled, true, 'loading settings cannot overwrite a saved preference')
+    assert.equal(tree!.root.findAllByType(SettingsFormActions).length, 2)
+    for (const title of ['资料库连接', '播放器']) {
+      const card = tree!.root.findAllByType(SettingsCard).find(node => node.props.title === title)!
+      assert.equal(card.props.actions.type, SettingsFormActions)
+      assert.equal(card.props.actions.props.placement, 'header')
+    }
+    const recordingSwitch = () => tree!.root.findAllByType(SettingsSwitchRow).find(node => node.props.title === '保存续播进度')!
+    assert.equal(recordingSwitch().props.checked, true)
+    await act(async () => { resolveSettings(settings) })
+    assert.equal(preference().props.value, 'builtin')
+    assert.equal(preference().props.disabled, false)
+    assert.equal(recordingSwitch().props.checked, false, 'an explicit saved choice overrides defaults')
+    assert.equal(recordingSwitch().props.disabled, false)
+    assert.equal(textOf(preference()), '内置播放器')
+    assert.match(textOf(tree!.root), /内置播放支持本机\/远程媒体库的影片文件/)
+    assert.equal(patches.length, 0, 'loading the default does not save settings')
+    act(() => preference().props.onChange({ target: { value: 'external' } }))
+    assert.equal(settings.playerPreference, 'builtin', 'selecting external is still a draft')
+    assert.equal(patches.length, 0)
+    assert.equal(recordingSwitch().props.disabled, true)
+    assert.match(recordingSwitch().props.description, /外部播放器自行管理续播进度/)
+    const saveButton = () => tree!.root.findAllByType('button').find(node => textOf(node) === '保存')!
+    const pathInput = () => tree!.root.findByProps({ placeholder: '选择程序或输入绝对路径' })
+    assert.equal(pathInput().props['aria-required'], true)
+    for (const path of ['', '   ']) {
+      act(() => pathInput().props.onChange({ target: { value: path } }))
+      assert.equal(saveButton().props.disabled, true)
+      const playerActions = tree!.root.findAllByType(SettingsFormActions)[1]
+      assert.equal(playerActions.findAllByType('button').find(node => node.props['aria-label'] === '取消更改')!.props.disabled, false)
+      // The leave guard uses the same save handler even when the header is disabled.
+      await act(async () => { playerActions.props.onSave() })
+      assert.equal(patches.length, 0)
+    }
+    act(() => pathInput().props.onChange({ target: { value: ' /Applications/Player.app ' } }))
+    assert.equal(saveButton().props.disabled, false)
+    await act(async () => { tree!.root.findAllByType('button').find(node => textOf(node) === '保存')!.props.onClick() })
+    assert.deepEqual(patches, [{ playerPath: '/Applications/Player.app', playerPreference: 'external', resumePlayback: false }])
+    assert.equal(preference().props.value, 'external')
+    assert.equal(textOf(preference()), '外部播放器')
+    assert.equal(settings.playerPath, '/Applications/Player.app')
+    assert.doesNotMatch(textOf(tree!.root), /待保存/)
+    act(() => preference().props.onChange({ target: { value: 'builtin' } }))
+    assert.equal(recordingSwitch().props.disabled, false)
+    assert.equal(recordingSwitch().props.checked, false, 'switching playback mode retains the resume preference')
+  } finally {
+    act(() => tree?.unmount())
+    router?.dispose()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
 
 it('shows both actual versions inside connection details, including mismatched and unknown servers', async () => {
   const previousWindow = globalThis.window
@@ -175,23 +280,24 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     ) }], { initialEntries: ['/settings'] })
     router = activeRouter
     await act(async () => { renderer = TestRenderer.create(<RouterProvider router={activeRouter} />) })
-    act(() => renderer!.root.findByType(SelectControl).props.onChange({ target: { value: 'local' } }))
-    assert.match(textOf(renderer!.root), /有未保存的更改/)
-    const save = renderer!.root.findAllByType('button').find((button) => button.children.includes('应用连接'))!
+    act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'local' } }))
+    assert.match(textOf(renderer!.root), /待保存/)
+    const save = renderer!.root.findAllByType('button').find((button) => renderedText(button) === '应用连接')!
     await act(async () => { save.props.onClick() })
     assert.deepEqual(writes, [{ mode: 'local', remoteBaseUrl: serverUrl }])
     assert.equal(persisted.mode, 'local')
     assert.match(textOf(renderer!.root), /已保存 · 重启后生效/)
     assert.match(textOf(renderer!.root), /当前使用：远程资料库.*重启后使用：本地资料库/)
-    assert.doesNotMatch(textOf(renderer!.root), /有未保存的更改/)
+    assert.doesNotMatch(textOf(renderer!.root), /待保存/)
     await act(async () => { await router!.navigate('/next') })
     assert.equal(router.state.location.pathname, '/next')
     await act(async () => { await router!.navigate('/settings') })
-    assert.equal(renderer!.root.findByType(SelectControl).props.value, 'local')
+    assert.equal(renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.value, 'local')
+    assert.ok(renderer!.root.findAllByType(SelectControl).some(node => node.props['aria-label'] === '默认播放方式'), 'local mode also exposes player preferences')
     assert.match(textOf(renderer!.root), /当前使用：远程资料库.*重启后使用：本地资料库/)
-    act(() => renderer!.root.findByType(SelectControl).props.onChange({ target: { value: 'remote' } }))
+    act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'remote' } }))
     assert.equal(renderer!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.value, serverUrl)
-    const probe = renderer!.root.findAllByType('button').find((button) => button.children.includes('测试连接'))!
+    const probe = renderer!.root.findAllByType('button').find((button) => renderedText(button) === '测试连接')!
     await act(async () => { probe.props.onClick() })
     assert.match(textOf(renderer!.root), /服务可达，版本匹配/)
     assert.equal(renderer!.root.findAllByType('button').filter(button => textOf(button) === '查看详情' && !button.props['aria-hidden']).length, 0)
@@ -203,9 +309,9 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     await act(async () => { releaseProbe!() })
     assert.equal(probe.props['aria-busy'], false)
 
-    assert.match(textOf(renderer!.root), /有未保存的更改/)
+    assert.match(textOf(renderer!.root), /待保存/)
     assert.equal(renderer!.root.findAllByType('button').find((button) => textOf(button) === '立即重启')!.props.disabled, true)
-    act(() => renderer!.root.findByType(SelectControl).props.onChange({ target: { value: 'local' } }))
+    act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'local' } }))
     const restart = renderer!.root.findAllByType('button').find((button) => textOf(button) === '立即重启')!
     assert.equal(restart.props.disabled, false)
     await act(async () => { restart.props.onClick() })

@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Code2, Settings } from 'lucide-react'
 import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import type { ActressScrapeField, ScraperPluginPackage, VideoScrapeField } from '@shared/scrapeTypes'
 import type {
-  PluginDevAgentContextStats,
   PluginDevAgentEvent,
-  PluginDevFrozenModelSummary,
   PluginDevAgentMessageInput,
-  PluginDevAgentPhase,
   PluginDevAgentSnapshot,
   PluginDevAgentWorkLogEntry,
   PluginDevDryRunResult,
@@ -48,7 +45,6 @@ import {
   packageFromPluginDevAgentEvent,
   pluginDevAgentEndNotice,
   pluginDevLoadedPluginIdentity,
-  projectPluginDevConversationStream,
   requiresPluginDevContinuationFeedback,
   resolvePluginDevAgentEvent,
   shouldApplyInitialPluginDevSnapshot,
@@ -66,12 +62,8 @@ import {
   testTargetsFromDryRun
 } from '@shared/pluginDevKindProfile'
 import styles from './PluginDevPanel.module.css'
-
-let conversationSeq = 0
-function nextConversationId(prefix: string): string {
-  conversationSeq += 1
-  return `${prefix}:${conversationSeq}`
-}
+import { draftFromPluginPackage, usePluginDevDraft } from './usePluginDevDraft'
+import { emptyPluginDevRun, nextConversationId, pluginDevRunReducer } from './pluginDevRunProjection'
 
 function canResumeAgentSession(
   sessionId: string | null,
@@ -187,40 +179,26 @@ export default function PluginDevPanel({
   const toast = useToast()
   const navigate = useNavigate()
   const leaveGuard = usePluginDevLeaveGuard()
+  const [run, dispatchRun] = useReducer(pluginDevRunReducer, undefined, emptyPluginDevRun)
+  const runRef = useRef(run); runRef.current = run
+  const transitionRun = useCallback((action: Parameters<typeof pluginDevRunReducer>[1]) => {
+    const next = pluginDevRunReducer(runRef.current, action)
+    runRef.current = next
+    dispatchRun({ type: 'patch', patch: next })
+  }, [])
+  const { agentSessionId, agentStatus, agentPhase, agentStep, contextStats, activeTool, conversationItems, waitingUserReason, pendingApproval, pendingUserRequest, frozenModel, execution, acceptance, executionPackageFingerprint, hasAgentHistory } = run
   const [modelManagement, setModelManagement] = useState<ModelManagementSnapshot | null>(null)
   const [modelManagementError, setModelManagementError] = useState<string | null>(null)
-  const [frozenModel, setFrozenModel] = useState<PluginDevFrozenModelSummary | null>(null)
   const [showConnectionModal, setShowConnectionModal] = useState(false)
   const [showCodeModal, setShowCodeModal] = useState(false)
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false)
   const [agentTab, setAgentTab] = useState<PluginDevAgentTab>('conversation')
-  const [kind, setKind] = useState<PluginKind>('video')
-  const [siteName, setSiteName] = useState('')
-  const [siteUrl, setSiteUrl] = useState('')
-  const [testTarget, setTestTarget] = useState('')
-  const [description, setDescription] = useState('')
-  const [version, setVersion] = useState('1.0.0')
-  const [author, setAuthor] = useState('Plugin Dev Agent')
-  const [supportedFieldIds, setSupportedFieldIds] = useState<string[]>([])
-  const [code, setCode] = useState('')
+  const { draft, edit: editDraft, applyGenerated: applyGeneratedPackage, load: loadDraft, reset: resetDraft } = usePluginDevDraft()
+  const { kind, siteName, siteUrl, testTarget, description, version, author, supportedFieldIds, code } = draft
   const [busy, setBusy] = useState<'save-key' | 'agent' | 'install' | 'clear-history' | null>(null)
   const [exportWorkLogBusy, setExportWorkLogBusy] = useState(false)
   const [dryRun, setDryRun] = useState<PluginDevDryRunResult | null>(null)
   const [dryRunPackageFingerprint, setDryRunPackageFingerprint] = useState<string | null>(null)
-  const [execution, setExecution] = useState<PluginExecutionArtifact | null>(null)
-  const [acceptance, setAcceptance] = useState<PluginRunAcceptanceOutcome | null>(null)
-  const [executionPackageFingerprint, setExecutionPackageFingerprint] = useState<string | null>(null)
-  const [hasAgentHistory, setHasAgentHistory] = useState(false)
-  const [agentSessionId, setAgentSessionId] = useState<string | null>(null)
-  const [agentStatus, setAgentStatus] = useState<PluginDevSessionStatus | null>(null)
-  const [agentPhase, setAgentPhase] = useState<PluginDevAgentPhase>('idle')
-  const [agentStep, setAgentStep] = useState(0)
-  const [contextStats, setContextStats] = useState<PluginDevAgentContextStats | null>(null)
-  const [activeTool, setActiveTool] = useState<string | null>(null)
-  const [conversationItems, setConversationItems] = useState<PluginDevConversationItem[]>([])
-  const [waitingUserReason, setWaitingUserReason] = useState<string | null>(null)
-  const [pendingApproval, setPendingApproval] = useState<PluginDevPendingApproval | null>(null)
-  const [pendingUserRequest, setPendingUserRequest] = useState<PluginDevPendingUserRequest | null>(null)
   const [loadedInstalledName, setLoadedInstalledName] = useState<string | null>(null)
   /** Non-null while editing a draft forked from a built-in plugin (not yet installed as custom). */
   const [forkedFromBuiltIn, setForkedFromBuiltIn] = useState<string | null>(null)
@@ -241,29 +219,27 @@ export default function PluginDevPanel({
   const snapshotGateRef = useRef(createPluginDevSnapshotGate())
   const latestSnapshotCursorRef = useRef(-1)
   const packageFingerprintRef = useRef<string | null>(null)
-  const executionRuntimeRef = useRef<string | null>(null)
   const onLoadConsumedRef = useRef(onLoadConsumed)
 
   const updateAgentSessionId = useCallback((sessionId: string | null): void => {
-    if (sessionId) setHasAgentHistory(true)
     agentSessionIdRef.current = sessionId
-    setAgentSessionId(sessionId)
-  }, [])
+    transitionRun({ type: 'patch', patch: { agentSessionId: sessionId, ...(sessionId ? { hasAgentHistory: true } : {}) } })
+  }, [transitionRun])
 
   const updateAgentStatus = useCallback((status: PluginDevSessionStatus | null): void => {
     agentStatusRef.current = status
-    setAgentStatus(status)
-  }, [])
+    transitionRun({ type: 'patch', patch: { agentStatus: status } })
+  }, [transitionRun])
 
   const updatePendingApproval = useCallback((approval: PluginDevPendingApproval | null): void => {
     pendingApprovalRef.current = approval
-    setPendingApproval(approval)
-  }, [])
+    transitionRun({ type: 'patch', patch: { pendingApproval: approval } })
+  }, [transitionRun])
 
   const updatePendingUserRequest = useCallback((request: PluginDevPendingUserRequest | null): void => {
     pendingUserRequestRef.current = request
-    setPendingUserRequest(request)
-  }, [])
+    transitionRun({ type: 'patch', patch: { pendingUserRequest: request } })
+  }, [transitionRun])
 
   const allFields = allFieldsForKind(kind)
   const kindProfile = useMemo(() => getPluginDevKindProfile(kind), [kind])
@@ -340,17 +316,6 @@ export default function PluginDevPanel({
     onLoadConsumedRef.current = onLoadConsumed
   }, [onLoadConsumed])
 
-  const applyGeneratedPackage = useCallback((pkg: ScraperPluginPackage): void => {
-    setKind(pkg.kind)
-    setSiteName(pkg.name)
-    setVersion(pkg.version ?? '1.0.0')
-    setDescription(pkg.description ?? '')
-    setAuthor(pkg.author ?? 'Plugin Dev Agent')
-    setSiteUrl((current) => pkg.homepage ?? current)
-    setSupportedFieldIds(pkg.supportedFields ?? [])
-    setCode(pkg.code)
-  }, [])
-
   const beginLocalAgentOperation = useCallback((
     kind: PluginDevLocalAgentOperation['kind'],
     sessionId: string | null
@@ -365,53 +330,21 @@ export default function PluginDevPanel({
   const finishLocalAgentOperation = useCallback((operation: PluginDevLocalAgentOperation): void => {
     if (localAgentOperationRef.current?.id !== operation.id) return
     localAgentOperationRef.current = null
-    setActiveTool(null)
+    transitionRun({ type: 'patch', patch: { activeTool: null } })
     setBusy(agentStatusRef.current === 'running' ? 'agent' : null)
-  }, [])
+  }, [transitionRun])
 
   const applyAgentSnapshot = useCallback((snapshot: PluginDevAgentSnapshot): void => {
     const { input, result } = snapshot
     latestSnapshotCursorRef.current = Math.max(latestSnapshotCursorRef.current, snapshot.cursor)
-    updateAgentSessionId(result.sessionId)
-    updateAgentStatus(result.status)
-    setFrozenModel(result.frozenModel ?? null)
-    setAgentPhase(snapshot.phase)
-    setAgentStep(snapshot.step)
-    setBusy((current) => {
-      if (localAgentOperationRef.current) return 'agent'
-      if (result.status === 'running') return 'agent'
-      return current === 'agent' ? null : current
-    })
-    setKind(input.kind)
-    setSiteName(input.siteName)
-    setSiteUrl(input.siteUrl ?? '')
-    setDescription(input.description ?? '')
-    setSupportedFieldIds(input.supportedFields)
-    setTestTarget(result.runTargets.map(runTargetLabel).join('\n'))
-    applyGeneratedPackage(result.package)
-    setExecution(result.execution ?? null)
-    setAcceptance(result.acceptance ?? null)
-    setExecutionPackageFingerprint(result.execution ? fingerprintPluginRuntime(result.package) : null)
-    setConversationItems(conversationFromWorkLog(snapshot.workLog))
-    updatePendingApproval(snapshot.pendingApprovals?.[0] ?? null)
-    updatePendingUserRequest(snapshot.pendingUserRequest ?? null)
-    const waiting = [...snapshot.events].reverse().find(
-      (event): event is Extract<PluginDevAgentEvent, { type: 'waiting_user' }> =>
-        event.type === 'waiting_user'
-    )
-    setWaitingUserReason(result.status === 'waiting_user' ? waiting?.reason ?? result.summary : null)
-    const context = [...snapshot.events].reverse().find(
-      (event): event is Extract<PluginDevAgentEvent, { type: 'context_updated' }> =>
-        event.type === 'context_updated'
-    )
-    setContextStats(context?.stats ?? null)
-  }, [
-    applyGeneratedPackage,
-    updateAgentSessionId,
-    updateAgentStatus,
-    updatePendingApproval,
-    updatePendingUserRequest
-  ])
+    agentSessionIdRef.current = result.sessionId
+    agentStatusRef.current = result.status
+    pendingApprovalRef.current = snapshot.pendingApprovals?.[0] ?? null
+    pendingUserRequestRef.current = snapshot.pendingUserRequest ?? null
+    transitionRun({ type: 'snapshot', snapshot, conversation: conversationFromWorkLog(snapshot.workLog) })
+    setBusy((current) => localAgentOperationRef.current || result.status === 'running' ? 'agent' : current === 'agent' ? null : current)
+    editDraft({ ...draftFromPluginPackage(result.package), siteUrl: result.package.homepage ?? input.siteUrl ?? '', testTarget: result.runTargets.map(runTargetLabel).join('\n') })
+  }, [editDraft, transitionRun])
 
   const readStableAgentSnapshot = useCallback(async (
     expectedSessionId?: string
@@ -469,133 +402,22 @@ export default function PluginDevPanel({
       const eventPackage = packageFromPluginDevAgentEvent(event)
       if (eventPackage) applyGeneratedPackage(eventPackage)
 
-      if (event.type === 'step_start') {
-        updateAgentStatus('running')
-        setBusy((current) => current ?? 'agent')
-        setAgentStep(event.step)
-        setActiveTool(null)
-      }
-      if (event.type === 'phase_updated') {
-        setAgentPhase(event.phase)
-        setAgentStep(event.step)
-      }
-      if (event.type === 'context_updated') {
-        setAgentStep(event.step)
-        setContextStats(event.stats)
-      }
-      if (event.type === 'tool_start') {
-        setAgentStep(event.step)
-        setActiveTool(event.tool)
-        setAgentTab('conversation')
-      }
-      if (
-        event.type === 'assistant_text_delta' ||
-        event.type === 'assistant_reasoning_delta' ||
-        event.type === 'assistant_reasoning' ||
-        (event.type === 'assistant_text' && event.turn !== undefined)
-      ) {
-        setConversationItems((prev) => projectPluginDevConversationStream(prev, event))
-      } else if (event.type === 'assistant_text') {
-        setConversationItems((prev) => [
-          ...prev,
-          { id: nextConversationId('agent'), type: 'agent', text: event.text }
-        ])
-      }
-      if (event.type === 'tool_result') {
-        setAgentStep(event.step)
-        setActiveTool(null)
-        setConversationItems((prev) => [
-          ...prev.slice(-120),
-          {
-            id: nextConversationId(`tool:${event.step}:${event.tool}`),
-            type: 'tool',
-            step: event.step,
-            tool: event.tool,
-            summary: event.summary,
-            detail: event.detail,
-            ok: event.ok
-          }
-        ])
-      }
-      if (event.type === 'workspace_status') {
-        setConversationItems((prev) => [
-          ...prev.slice(-120),
-          {
-            id: nextConversationId(`workspace:${event.step}`),
-            type: 'tool',
-            step: event.step,
-            tool: 'workspace_validate',
-            summary: event.message,
-            ok: event.valid
-          }
-        ])
-      }
-      if (event.type === 'package_updated') {
-        const nextRuntime = fingerprintPluginRuntime(event.package)
-        if (executionRuntimeRef.current && executionRuntimeRef.current !== nextRuntime) {
-          setExecution(null)
-          setAcceptance(null)
-          setExecutionPackageFingerprint(null)
-          executionRuntimeRef.current = null
-        }
-      }
-      if (event.type === 'run_targets_updated') {
-        setTestTarget(event.runTargets.map(runTargetLabel).join('\n'))
-      }
-      if (event.type === 'execution_updated') {
-        setExecution(event.execution)
-        setExecutionPackageFingerprint(packageFingerprintRef.current)
-        setAgentTab('result')
-      }
-      if (event.type === 'acceptance_updated') setAcceptance(event.outcome)
-      if (event.type === 'user_input_required') {
-        updateAgentStatus('waiting_user')
-        updatePendingUserRequest(event.request)
-        setWaitingUserReason(event.request.prompt)
-        setAgentTab('conversation')
-      }
-      if (event.type === 'approval_required') {
-        updatePendingApproval({
-          requestId: event.requestId,
-          tool: event.tool,
-          args: event.args,
-          reason: event.reason
-        })
-        setAgentTab('conversation')
-      }
-      if (event.type === 'waiting_user') {
-        updateAgentStatus('waiting_user')
-        setWaitingUserReason(event.reason)
-        setAgentTab('conversation')
-      }
-      if (event.type === 'done') {
-        updateAgentStatus(event.success ? 'completed' : 'failed')
-        updatePendingApproval(null)
-        updatePendingUserRequest(null)
-        setWaitingUserReason(null)
-        setActiveTool(null)
-        if (event.execution) {
-          setExecution(event.execution)
-          setExecutionPackageFingerprint(fingerprintPluginRuntime(event.package))
-        }
-        if (event.acceptance) setAcceptance(event.acceptance)
-        if (event.success && event.acceptance?.ready) setAgentTab('result')
-      }
-      if (event.type === 'error') {
-        setActiveTool(null)
-        updateAgentStatus('failed')
-        updatePendingApproval(null)
-        setWaitingUserReason(null)
-        setConversationItems((prev) => [
-          ...prev,
-          { id: nextConversationId('agent:error'), type: 'agent', text: event.message }
-        ])
-        toast.show(event.message, 'error')
-      }
+      transitionRun({ type: 'event', event, runtimeFingerprint: packageFingerprintRef.current })
+      const projected = runRef.current
+      agentStatusRef.current = projected.agentStatus
+      pendingApprovalRef.current = projected.pendingApproval
+      pendingUserRequestRef.current = projected.pendingUserRequest
+      if (event.type === 'step_start') setBusy((current) => current ?? 'agent')
+      if (event.type === 'run_targets_updated') editDraft({ testTarget: event.runTargets.map(runTargetLabel).join('\n') })
+      if (event.type === 'execution_updated' || (event.type === 'done' && event.success && event.acceptance?.ready)) setAgentTab('result')
+      if (['tool_start', 'user_input_required', 'approval_required', 'waiting_user'].includes(event.type)) setAgentTab('conversation')
+      if (event.type === 'error') toast.show(event.message, 'error')
     })
     return off
   }, [
     applyGeneratedPackage,
+    editDraft,
+    transitionRun,
     toast,
     updateAgentSessionId,
     updateAgentStatus,
@@ -610,7 +432,7 @@ export default function PluginDevPanel({
         const snapshot = await readStableAgentSnapshot()
         if (cancelled || !snapshot || localAgentOperationRef.current) return
         if (!shouldApplyInitialPluginDevSnapshot(snapshot.result.status)) {
-          setHasAgentHistory(true)
+          transitionRun({ type: 'patch', patch: { hasAgentHistory: true } })
           return
         }
         applyAgentSnapshot(snapshot)
@@ -621,69 +443,39 @@ export default function PluginDevPanel({
       }
     })()
     return () => { cancelled = true }
-  }, [applyAgentSnapshot, readStableAgentSnapshot])
+  }, [applyAgentSnapshot, readStableAgentSnapshot, transitionRun])
 
   const resetAgentUi = useCallback((): void => {
     snapshotGateRef.current.observeMutation()
-    updateAgentSessionId(null)
-    updateAgentStatus(null)
-    setAgentPhase('idle')
-    setAgentStep(0)
-    setContextStats(null)
-    setFrozenModel(null)
-    setActiveTool(null)
-    setWaitingUserReason(null)
-    updatePendingApproval(null)
-    updatePendingUserRequest(null)
-    setExecution(null)
-    setAcceptance(null)
-    setExecutionPackageFingerprint(null)
-    setConversationItems([])
+    agentSessionIdRef.current = null
+    agentStatusRef.current = null
+    pendingApprovalRef.current = null
+    pendingUserRequestRef.current = null
+    transitionRun({ type: 'reset' })
     setAgentTab('conversation')
-  }, [updateAgentSessionId, updateAgentStatus, updatePendingApproval, updatePendingUserRequest])
+  }, [transitionRun])
 
   const applyLoadedPackage = useCallback((pkg: ScraperPluginPackage): void => {
     const identity = pluginDevLoadedPluginIdentity(pkg.name, 'user')
-    setKind(pkg.kind)
-    setSiteName(pkg.name)
-    setVersion(pkg.version ?? '1.0.0')
-    setDescription(pkg.description ?? '')
-    setAuthor(pkg.author ?? 'Plugin Dev Agent')
-    setSiteUrl(pkg.homepage ?? '')
-    setCode(pkg.code)
-    setSupportedFieldIds(pkg.supportedFields ?? [])
+    loadDraft(pkg)
     setInstalledBaseline(fingerprintPluginPackage(pkg))
     setSelectedPluginName(identity.selectedPluginName)
     setLoadedInstalledName(identity.loadedInstalledName)
     setForkedFromBuiltIn(identity.forkedFromBuiltIn)
     setDryRun(null)
     setDryRunPackageFingerprint(null)
-    setExecution(null)
-    setAcceptance(null)
-    setExecutionPackageFingerprint(null)
     resetAgentUi()
     setFeedbackText('')
-  }, [resetAgentUi])
+  }, [loadDraft, resetAgentUi])
 
   const resetToNewPlugin = (nextKind: PluginKind): void => {
-    setKind(nextKind)
-    setSiteName('')
-    setSiteUrl('')
-    setTestTarget('')
-    setDescription('')
-    setVersion('1.0.0')
-    setAuthor('Plugin Dev Agent')
-    setSupportedFieldIds([])
-    setCode('')
+    resetDraft(nextKind)
     setSelectedPluginName('')
     setLoadedInstalledName(null)
     setForkedFromBuiltIn(null)
     setInstalledBaseline(null)
     setDryRun(null)
     setDryRunPackageFingerprint(null)
-    setExecution(null)
-    setAcceptance(null)
-    setExecutionPackageFingerprint(null)
     resetAgentUi()
     setFeedbackText('')
     setShowCodeModal(false)
@@ -782,8 +574,7 @@ export default function PluginDevPanel({
 
   useEffect(() => {
     packageFingerprintRef.current = currentRuntimeFingerprint
-    executionRuntimeRef.current = executionPackageFingerprint
-  }, [currentRuntimeFingerprint, executionPackageFingerprint])
+  }, [currentRuntimeFingerprint])
 
   const needsLeaveConfirm = hasUninstalledChanges || activeAgent
   const leaveConfirmMessage = activeAgent
@@ -867,7 +658,7 @@ export default function PluginDevPanel({
     snapshotGateRef.current.observeMutation()
     updateAgentStatus('cancelled')
     updatePendingApproval(null)
-    setActiveTool(null)
+    transitionRun({ type: 'patch', patch: { activeTool: null } })
     if (!localAgentOperationRef.current) setBusy(null)
   }
 
@@ -883,7 +674,7 @@ export default function PluginDevPanel({
     resetAgentUi()
     setAgentTab('conversation')
     if (userMessage?.trim()) {
-      setConversationItems([{ id: nextConversationId('user'), type: 'user', text: userMessage.trim() }])
+      transitionRun({ type: 'patch', patch: { conversationItems: [{ id: nextConversationId('user'), type: 'user', text: userMessage.trim() }] } })
     }
     updateAgentStatus('running')
     try {
@@ -898,12 +689,12 @@ export default function PluginDevPanel({
       }
       updateAgentSessionId(result.sessionId)
       updateAgentStatus(result.status)
-      setFrozenModel(result.frozenModel ?? null)
       applyGeneratedPackage(result.package)
-      setTestTarget(result.runTargets.map(runTargetLabel).join('\n'))
-      setExecution(result.execution ?? null)
-      setAcceptance(result.acceptance ?? null)
-      setExecutionPackageFingerprint(result.execution ? fingerprintPluginRuntime(result.package) : null)
+      editDraft({ testTarget: result.runTargets.map(runTargetLabel).join('\n') })
+      transitionRun({ type: 'patch', patch: {
+        frozenModel: result.frozenModel ?? null, execution: result.execution ?? null, acceptance: result.acceptance ?? null,
+        executionPackageFingerprint: result.execution ? fingerprintPluginRuntime(result.package) : null
+      } })
       if (priorDryRun) setDryRun(priorDryRun)
       if (shouldOpenResultAfterAgentDone(
         result.status,
@@ -911,13 +702,13 @@ export default function PluginDevPanel({
         result.acceptance
       )) setAgentTab('result')
       if (result.status === 'waiting_user') {
-        setWaitingUserReason(result.summary)
+        transitionRun({ type: 'patch', patch: { waitingUserReason: result.summary } })
         setAgentTab(result.acceptance?.ready ? 'result' : 'conversation')
       }
-      setConversationItems((prev) => [
-        ...prev,
+      transitionRun({ type: 'patch', patch: (state) => ({ conversationItems: [
+        ...state.conversationItems.slice(-119),
         { id: nextConversationId('agent'), type: 'agent', text: result.summary }
-      ])
+      ] }) })
       const toastInfo = pluginDevAgentEndNotice(result.status, result.acceptance?.ready === true)
       toast.show(toastInfo.message, toastInfo.kind)
       return true
@@ -962,10 +753,10 @@ export default function PluginDevPanel({
     if (dispatch.approval) updatePendingApproval(null)
     if (userResponse) updatePendingUserRequest(null)
     setBusy('agent')
-    setConversationItems((prev) => [...prev, { id: nextConversationId('user'), type: 'user', text }])
+    transitionRun({ type: 'patch', patch: (state) => ({ conversationItems: [...state.conversationItems.slice(-119), { id: nextConversationId('user'), type: 'user', text }] }) })
     updateAgentStatus('running')
     setAgentTab('conversation')
-    setWaitingUserReason(null)
+    transitionRun({ type: 'patch', patch: { waitingUserReason: null } })
     try {
       const result = await api.pluginDev.message({
         sessionId,
@@ -975,22 +766,22 @@ export default function PluginDevPanel({
         userResponse
       })
       updateAgentStatus(result.status)
-      setFrozenModel(result.frozenModel ?? null)
       applyGeneratedPackage(result.package)
-      setTestTarget(result.runTargets.map(runTargetLabel).join('\n'))
-      setExecution(result.execution ?? null)
-      setAcceptance(result.acceptance ?? null)
-      setExecutionPackageFingerprint(result.execution ? fingerprintPluginRuntime(result.package) : null)
+      editDraft({ testTarget: result.runTargets.map(runTargetLabel).join('\n') })
+      transitionRun({ type: 'patch', patch: {
+        frozenModel: result.frozenModel ?? null, execution: result.execution ?? null, acceptance: result.acceptance ?? null,
+        executionPackageFingerprint: result.execution ? fingerprintPluginRuntime(result.package) : null
+      } })
       if (shouldOpenResultAfterAgentDone(
         result.status,
         result.execution,
         result.acceptance
       )) setAgentTab('result')
-      if (result.status === 'waiting_user') setWaitingUserReason(result.summary)
-      setConversationItems((prev) => [
-        ...prev,
+      if (result.status === 'waiting_user') transitionRun({ type: 'patch', patch: { waitingUserReason: result.summary } })
+      transitionRun({ type: 'patch', patch: (state) => ({ conversationItems: [
+        ...state.conversationItems.slice(-119),
         { id: nextConversationId('agent'), type: 'agent', text: result.summary }
-      ])
+      ] }) })
       const toastInfo =
         result.status === 'completed'
           ? { message: 'Agent 继续完成', kind: 'success' as const }
@@ -1127,15 +918,15 @@ export default function PluginDevPanel({
       setLoadedInstalledName(descriptor.name)
       setForkedFromBuiltIn(null)
       setSelectedPluginName(descriptor.name)
-      setSiteName(descriptor.name)
+      editDraft({ siteName: descriptor.name })
       setInstalledBaseline(fingerprintPluginPackage({
         ...packageToInstall,
         name: descriptor.name
       }))
       if (agentSessionId) {
         updateAgentStatus('completed')
-        setAgentPhase('ready')
-        setWaitingUserReason(null)
+        transitionRun({ type: 'patch', patch: { agentPhase: 'ready' } })
+        transitionRun({ type: 'patch', patch: { waitingUserReason: null } })
       }
       void refreshUserPlugins(kind)
       toast.show(
@@ -1171,7 +962,7 @@ export default function PluginDevPanel({
       latestSnapshotCursorRef.current = -1
       initialSnapshotPendingRef.current = false
       resetToNewPlugin(kind)
-      setHasAgentHistory(false)
+      transitionRun({ type: 'patch', patch: { hasAgentHistory: false } })
       setShowClearHistoryModal(false)
       toast.show(
         cleared > 0 ? `已清除 ${cleared} 个历史会话，并回到新建插件` : '已回到新建插件',
@@ -1310,13 +1101,13 @@ export default function PluginDevPanel({
           onSelectPlugin={handleSelectPlugin}
           onStartAgent={() => void runPrimaryAgentAction()}
           onInstall={() => void install()}
-          onSiteNameChange={setSiteName}
-          onSiteUrlChange={setSiteUrl}
-          onTestTargetChange={setTestTarget}
-          onDescriptionChange={setDescription}
-          onVersionChange={setVersion}
-          onAuthorChange={setAuthor}
-          onSupportedFieldsChange={setSupportedFieldIds}
+          onSiteNameChange={(value) => editDraft({ siteName: value })}
+          onSiteUrlChange={(value) => editDraft({ siteUrl: value })}
+          onTestTargetChange={(value) => editDraft({ testTarget: value })}
+          onDescriptionChange={(value) => editDraft({ description: value })}
+          onVersionChange={(value) => editDraft({ version: value })}
+          onAuthorChange={(value) => editDraft({ author: value })}
+          onSupportedFieldsChange={(value) => editDraft({ supportedFieldIds: value })}
         />
 
         <PluginDevAgentRail

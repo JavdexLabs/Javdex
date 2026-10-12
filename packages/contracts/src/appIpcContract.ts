@@ -195,6 +195,8 @@ export interface AppIpcContract {
     result: PendingLibraryPathCleanup
   }
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: { args: []; result: ModelManagementSnapshot }
+  [IPC.LOCAL_MODELS_SNAPSHOT]: { args: []; result: import('./desktop/localModels').LocalModelSnapshot }
+  [IPC.LOCAL_MODELS_COMMAND]: { args: [command: import('./desktop/localModels').LocalModelCommand]; result: import('./desktop/localModels').LocalModelSnapshot }
   [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: {
     args: [input: ModelManagementApplyInput]
     result: ModelManagementApplyResult
@@ -449,12 +451,25 @@ export interface AppIpcContract {
     args: [libraryId: number, videoId: number]
     result: PlayResult
   }
+  [IPC.PLAYBACK_AVAILABILITY]: { args: []; result: import('./desktop/playback').PlaybackAvailability }
+  [IPC.RECENT_PLAYBACK_METADATA]: { args: []; result: import('./desktop/recentPlayback').RecentPlaybackMetadata }
+  [IPC.RECENT_PLAYBACK_PAGE]: { args: [query: import('./desktop/recentPlayback').RecentPlaybackPageQuery]; result: PlaylistVideosPage }
+  [IPC.RECENT_PLAYBACK_REMOVE]: { args: [videoId: number]; result: void }
+  [IPC.RECENT_PLAYBACK_CLEAR]: { args: []; result: void }
+  [IPC.PLAYBACK_OPEN]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: PlayResult }
+  [IPC.PLAYBACK_SNAPSHOT]: { args: []; result: import('./desktop/playback').PlaybackSnapshot | null }
+  [IPC.PLAYBACK_CONTROL]: { args: [sessionId: string, command: import('./desktop/playback').PlaybackControl]; result: void }
+  [IPC.PLAYBACK_VIEWPORT]: { args: [viewport: import('./desktop/playback').PlaybackViewport]; result: void }
+  [IPC.PLAYBACK_SUBTITLE]: { args: [sessionId: string]; result: void }
+  [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: { args: []; result: import('./desktop/aiSubtitles').AiSubtitleSnapshot }
+  [IPC.PLAYBACK_AI_SUBTITLE_COMMAND]: { args: [sessionId: string, command: import('./desktop/aiSubtitles').AiSubtitleCommand]; result: import('./desktop/aiSubtitles').AiSubtitleSnapshot }
+  [IPC.PLAYBACK_CLEAR_PROGRESS]: { args: [input: import('./desktop/playback').PlaybackClearProgress]; result: void }
   [IPC.PLAYER_REVEAL]: {
     args: [libraryId: number, videoId: number]
     result: PlayResult
   }
   [IPC.PLAYER_OPEN_RESOURCE]: {
-    args: [libraryId: number, resourceId: number, videoId?: number]
+    args: [libraryId: number, resourceId: number, videoId?: number, player?: 'external']
     result: PlayResult
   }
   [IPC.PLAYER_REVEAL_RESOURCE]: {
@@ -469,6 +484,10 @@ export interface AppIpcContract {
 }
 
 export interface AppIpcEventContract {
+  [IPC.PLAYBACK_CHANGED]: import('./desktop/playback').PlaybackSnapshot | null
+  [IPC.RECENT_PLAYBACK_CHANGED]: null
+  [IPC.PLAYBACK_AI_SUBTITLE_CHANGED]: import('./desktop/aiSubtitles').AiSubtitleSnapshot
+  [IPC.LOCAL_MODELS_CHANGED]: import('./desktop/localModels').LocalModelSnapshot
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState
   [IPC.SCAN_PROGRESS]: LibraryScanProgressEvent
   [IPC.SCAN_STATE_CHANGED]: LibraryScanEvent

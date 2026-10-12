@@ -238,9 +238,8 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
         child.kill('SIGKILL')
-        resolve()
       }, 5_000)
-      child.once('exit', () => {
+      child.once('close', () => {
         clearTimeout(timer)
         resolve()
       })
@@ -543,7 +542,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         } finally {
           restore()
         }
-        fs.rmSync(root, { recursive: true, force: true })
+        fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
         tempRoot = null
       }
     })

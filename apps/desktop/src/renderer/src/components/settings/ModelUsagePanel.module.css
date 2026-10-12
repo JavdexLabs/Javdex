@@ -14,19 +14,6 @@
 
 .advanced {
   grid-column: 1 / -1;
-  border-top: 1px solid var(--border-subtle);
-  padding-top: var(--settings-gap, 12px);
-}
-
-.advanced summary {
-  min-height: var(--control-h-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.advanced summary span {
-  margin-left: var(--settings-gap-sm, 8px);
-  color: var(--text-muted);
 }
 
 .assignmentCard {
@@ -95,9 +82,9 @@
   opacity: 0.72;
 }
 
-.controlInput:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: 1px;
+.controlInput:focus {
+  outline: none;
+  border-color: var(--border-accent);
   box-shadow: var(--focus-ring);
 }
 
@@ -107,8 +94,136 @@
   gap: 6px;
 }
 
+.binding {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: var(--form-field-gap);
+}
+
+.subtitleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--form-section-gap);
+}
+
+.subtitleCard {
+  container-type: inline-size;
+  container-name: subtitle-usage;
+}
+
+.stageBinding {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: var(--form-field-gap);
+  padding: var(--form-field-gap);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-elevated) 65%, var(--surface-panel));
+}
+
+.stageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--settings-gap-sm, 8px);
+  min-height: var(--target-min);
+  padding-bottom: var(--form-label-gap);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.stageTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--form-label-gap);
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.stageTitleIcon {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.stageStatus {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.stageStatusLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--settings-gap-sm, 8px);
+  overflow-wrap: anywhere;
+}
+
+.stageStatusIcon {
+  flex: none;
+}
+
+.stageActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bindingStatus {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--settings-gap-sm, 8px);
+  min-height: var(--control-h-sm);
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.bindingStatus > .bindingStatusLabel {
+  margin-right: auto;
+}
+
+.bindingStatusLabel[data-ready='true'] {
+  color: var(--text-accent);
+}
+
+.textBinding {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--form-field-gap);
+}
+
+.inlineBinding {
+  display: contents;
+}
+
+.inlineBindingStatus {
+  grid-column: 2 / -1;
+}
+
 @media (width <= 720px) {
-  .gridTwo {
+  .gridTwo,
+  .subtitleGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .textBinding {
+    grid-template-columns: 1fr;
+  }
+
+  .inlineBindingStatus {
+    grid-column: 1;
+  }
+
+  .cardHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@container subtitle-usage (width <= 750px) {
+  .subtitleGrid {
     grid-template-columns: 1fr;
   }
 
@@ -116,4 +231,48 @@
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+.cardHeaderMain {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--form-label-gap);
+}
+
+.cardIcon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.statusBadgeReady {
+  border-color: var(--border-success);
+  background: var(--surface-success);
+  color: var(--text-success);
+}
+
+.statusBadgeWarning {
+  border-color: var(--border-warning);
+  background: var(--surface-warning);
+  color: var(--text-warning);
 }

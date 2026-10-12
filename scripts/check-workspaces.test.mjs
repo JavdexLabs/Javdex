@@ -9,17 +9,19 @@ import test from 'node:test'
 const script = fileURLToPath(new URL('./check-workspaces.mjs', import.meta.url))
 const directories = ['apps/desktop', 'apps/web', 'apps/server', 'packages/contracts', 'packages/ui', 'packages/library', 'packages/http']
 
-test('workspace check rejects stale internal dependency pins and stale lock entries', () => {
+test('workspace check rejects stale versions, licenses and lock entries', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-workspace-check-'))
   const write = (file, value) => fs.writeFileSync(path.join(root, file), JSON.stringify(value))
   const run = () => spawnSync(process.execPath, [script], { cwd: root, encoding: 'utf8' })
   try {
     const version = '0.8.0-beta.2'
-    const lock = { version, packages: { '': { version } } }
-    write('package.json', { version, scripts: {} })
+    const license = 'GPL-3.0-or-later'
+    const product = { version, license, scripts: {} }
+    const lock = { version, packages: { '': { version, license } } }
+    write('package.json', product)
     for (const directory of directories) {
       fs.mkdirSync(path.join(root, directory, 'src'), { recursive: true })
-      const manifest = { name: `@javdex/${path.basename(directory)}`, version, private: true }
+      const manifest = { name: `@javdex/${path.basename(directory)}`, version, license, private: true }
       write(`${directory}/package.json`, manifest)
       lock.packages[directory] = { ...manifest }
     }
@@ -28,6 +30,34 @@ test('workspace check rejects stale internal dependency pins and stale lock entr
     lock.packages['apps/desktop'] = structuredClone(desktop)
     write('package-lock.json', lock)
     assert.equal(run().status, 0)
+
+    write('package.json', { ...product, license: 'GPL-3.0-only' })
+    const wrongProductLicense = run()
+    assert.notEqual(wrongProductLicense.status, 0)
+    assert.match(wrongProductLicense.stderr, /Product license must be GPL-3\.0-or-later/)
+    write('package.json', product)
+
+    lock.packages[''].license = 'MIT'
+    write('package-lock.json', lock)
+    const staleRootLicense = run()
+    assert.notEqual(staleRootLicense.status, 0)
+    assert.match(staleRootLicense.stderr, /Lockfile root license must match/)
+    lock.packages[''].license = license
+    write('package-lock.json', lock)
+
+    write('apps/desktop/package.json', { ...desktop, license: 'MIT' })
+    const staleWorkspaceLicense = run()
+    assert.notEqual(staleWorkspaceLicense.status, 0)
+    assert.match(staleWorkspaceLicense.stderr, /apps\/desktop: license must match/)
+    write('apps/desktop/package.json', desktop)
+
+    lock.packages['apps/desktop'].license = 'MIT'
+    write('package-lock.json', lock)
+    const staleLockedLicense = run()
+    assert.notEqual(staleLockedLicense.status, 0)
+    assert.match(staleLockedLicense.stderr, /apps\/desktop: lockfile license must match/)
+    lock.packages['apps/desktop'].license = license
+    write('package-lock.json', lock)
 
     desktop.dependencies['@javdex/contracts'] = '0.8.0-beta.1'
     write('apps/desktop/package.json', desktop)

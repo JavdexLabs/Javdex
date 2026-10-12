@@ -10,6 +10,7 @@ import type {
 import { buildScanAuditViewItems } from '@shared/scanAuditView'
 import type { ScanAuditSnapshotIdentity, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
 import type { PendingItemKey } from '../../listView/pendingRoutes'
+import { renderedText } from '../../test/renderedText'
 
 let fixtureAudit: LibraryScanAudit | null = null
 let fixtureUnrecognized: LibraryScanLatestSnapshot['unrecognized'] = []
@@ -240,7 +241,7 @@ describe('LibraryScanAuditPanel', () => {
     assert.match(output, /NFO 身份冲突/)
     const process = renderer!.root
       .findAllByType('button')
-      .find((candidate) => candidate.children.includes('处理待办'))
+      .find((candidate) => renderedText(candidate) === '处理待办')
     assert.ok(process)
     act(() => process.props.onClick())
     assert.deepEqual(opened, { domain: 'scan', id: 'identity-4' })
@@ -278,7 +279,7 @@ describe('LibraryScanAuditPanel', () => {
 
     const process = renderer!.root
       .findAllByType('button')
-      .find((candidate) => candidate.children.includes('处理待办'))
+      .find((candidate) => renderedText(candidate) === '处理待办')
     assert.ok(process)
     act(() => process.props.onClick())
     assert.deepEqual(opened, { domain: 'scrape', id: '8' })
@@ -315,7 +316,7 @@ describe('LibraryScanAuditPanel', () => {
     assert.equal(
       renderer!.root
         .findAllByType('button')
-        .some((candidate) => candidate.children.includes('处理待办')),
+        .some((candidate) => renderedText(candidate) === '处理待办'),
       false
     )
   })
@@ -366,7 +367,7 @@ it('limits a large failed audit to100 visible rows and queries only their pendin
   await renderPanel({scanSummary:summary({scannedFiles:201}),scanAudit:{...audit(files),schemaVersion:2},currentPendingScrapeIds:new Set([1,101,201])})
   assert.deepEqual(presenceRequests[0],Array.from({length:100},(_,i)=>i+1))
   assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,100)
-  const next=()=>renderer!.root.findAllByType('button').find(node=>node.children.includes('下一页'))!
+  const next=()=>renderer!.root.findAllByType('button').find(node=>renderedText(node)==='下一页')!
   await act(async()=>next().props.onClick())
   assert.deepEqual(presenceRequests.at(-1),Array.from({length:100},(_,i)=>101+i))
   await act(async()=>next().props.onClick())
@@ -384,7 +385,7 @@ it('routes all three kinds from one mixed pending presence response',async()=>{
   ]
   await renderPanel({scanSummary:summary(),scanAudit:{...audit(files),schemaVersion:2,pendingGroups:[{groupId:9,normalizedCode:'GROUP',resourceCount:1}]},currentPendingGroupIds:new Set([9]),currentPendingIdentityIds:new Set([7]),currentPendingScrapeIds:new Set([8]),onOpenPending:target=>opened.push(target)})
   assert.deepEqual(presenceRequests,[ [9,7,8] ])
-  const buttons=renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办'))
+  const buttons=renderer!.root.findAllByType('button').filter(node=>renderedText(node)==='处理待办')
   assert.equal(buttons.length,3)
   act(()=>buttons.forEach(button=>button.props.onClick()))
   assert.deepEqual(opened,[{domain:'scan',id:'identity-7'},{domain:'scrape',id:'8'},{domain:'scan',id:'9'}])
@@ -394,6 +395,6 @@ it('routes all three kinds from one mixed pending presence response',async()=>{
 it('keeps a stable audit anchor when a historical group is no longer pending',async()=>{
  await renderPanel({scanSummary:summary(),scanAudit:{...audit([]),pendingGroups:[{groupId:9,normalizedCode:'GONE',resourceCount:1}]}})
  assert.equal(renderer!.root.findAllByProps({'data-audit-anchor':'group:9'}).length,1)
- assert.equal(renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办')).length,0)
+ assert.equal(renderer!.root.findAllByType('button').filter(node=>renderedText(node)==='处理待办').length,0)
  assert.match(JSON.stringify(renderer!.toJSON()),/已处理/)
 })

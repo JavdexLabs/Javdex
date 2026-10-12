@@ -7,6 +7,13 @@ import { readTestUserDataPath } from '@shared/appIdentity'
 import type { ModelCacheCompatibility } from '@shared/aiConfigurationTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
+  BUILT_IN_LLM_PROVIDERS,
+  BUILT_IN_LLM_CATALOG_VERSION,
+  LLM_PROVIDER_PROTOCOLS,
+  isLlmProviderProtocol,
+  llmProtocolToRuntimeApi,
+  llmRuntimeApiToProtocol,
+  type LlmProviderProtocol,
   buildLlmProviderViewModels,
   inferLlmModelKind,
   isReservedLlmProviderId,
@@ -14,6 +21,7 @@ import {
   normalizeDefaultLlmSelection
 } from '@shared/llmProviders'
 import type { AppSettings } from '@shared/settingsTypes'
+import { llmRequestEndpoints } from '../services/llmClient'
 import {
   MODEL_MANAGEMENT_SCHEMA_VERSION,
   type ManagedModel,
@@ -86,7 +94,7 @@ const capabilitiesSchema = z.object({
   reasoning: capabilityStateSchema
 }).strict()
 const runtimeMetadataSchema = z.object({
-  api: z.enum(['openai-completions', 'anthropic-messages']),
+  api: z.enum(['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai']),
   contextWindow: safePositiveInteger,
   maxTokens: safePositiveInteger,
   capabilities: capabilitiesSchema,
@@ -105,7 +113,7 @@ const connectionSchema = z.object({
   providerId: nonEmptyString,
   name: nonEmptyString,
   source: z.enum(['builtin', 'custom']),
-  protocol: z.enum(['openai-chat', 'anthropic-messages']),
+  protocol: z.enum(LLM_PROVIDER_PROTOCOLS),
   baseUrl: nonEmptyString,
   proxyUrl: z.string().optional(),
   credentialRef: nonEmptyString,
@@ -142,6 +150,7 @@ const assignmentSchema = z.object({
 }).strict()
 const modelManagementDocumentSchema = z.object({
   schemaVersion: z.literal(MODEL_MANAGEMENT_SCHEMA_VERSION),
+  builtinCatalogVersion: safeNonNegativeInteger.optional(),
   revision: nonEmptyString,
   updatedAt: nonEmptyString,
   connections: z.array(connectionSchema),
@@ -233,7 +242,7 @@ function cacheCompatibility(
       evidence: { source: 'migration', checkedAt, note: 'Anthropic-compatible 连接未提供缓存证据' }
     }
   }
-  if (providerId === 'openai') {
+  if (providerId === 'openai' && (protocol === 'openai-chat' || protocol === 'openai-responses')) {
     return {
       supportsPromptCache: true,
       supportsLongCacheRetention: true,
@@ -242,7 +251,7 @@ function cacheCompatibility(
       evidence: { source: 'migration', checkedAt, note: 'OpenAI 显式兼容配置' }
     }
   }
-  if (providerId === 'openrouter') {
+  if (providerId === 'openrouter' && protocol === 'openai-chat') {
     return {
       supportsPromptCache: true,
       supportsLongCacheRetention: false,
@@ -261,12 +270,12 @@ function cacheCompatibility(
 
 function defaultMetadata(
   providerId: string,
-  protocol: 'openai-chat' | 'anthropic-messages',
+  protocol: LlmProviderProtocol,
   agentCompatible: boolean,
   checkedAt: string
 ): ModelRuntimeMetadata {
   return {
-    api: protocol === 'anthropic-messages' ? 'anthropic-messages' : 'openai-completions',
+    api: llmProtocolToRuntimeApi(protocol),
     contextWindow: MODEL_CONTEXT_DEFAULT,
     maxTokens: MODEL_OUTPUT_DEFAULT,
     capabilities: {
@@ -371,10 +380,29 @@ export function migrateModelManagementDocument(
         builtin: model.builtin === true,
         baseline: defaultMetadata(
           provider.id,
-          connection.protocol,
+          model.protocol ?? connection.protocol,
           connection.agentCompatible,
           checkedAt
         )
+      })
+    }
+  }
+  // A retired preset can still be the selected model in legacy settings.
+  // Preserve that identity instead of silently selecting a new shipped model.
+  const savedConnection = connections.find(item => item.providerId === settings.defaultLlmProviderId)
+  if (savedConnection && settings.defaultLlmModelId) {
+    const savedModel = models.find(item => item.connectionId === savedConnection.id && item.modelId === settings.defaultLlmModelId)
+    if (savedModel) {
+      savedModel.builtin = false
+    } else {
+      models.push({
+        id: modelRef(savedConnection.providerId, settings.defaultLlmModelId),
+        connectionId: savedConnection.id,
+        modelId: settings.defaultLlmModelId,
+        name: settings.defaultLlmModelId,
+        kind: 'chat',
+        builtin: false,
+        baseline: defaultMetadata(savedConnection.providerId, savedConnection.protocol, savedConnection.agentCompatible, checkedAt)
       })
     }
   }
@@ -400,6 +428,7 @@ export function migrateModelManagementDocument(
   ]
   return {
     schemaVersion: MODEL_MANAGEMENT_SCHEMA_VERSION,
+    builtinCatalogVersion: BUILT_IN_LLM_CATALOG_VERSION,
     revision,
     updatedAt: checkedAt,
     connections,
@@ -416,7 +445,7 @@ function getPublicSettingsWithoutSecrets(
       id,
       {
         ...(typeof config.baseUrl === 'string' ? { baseUrl: config.baseUrl } : {}),
-        ...(config.protocol === 'openai-chat' || config.protocol === 'anthropic-messages'
+        ...(isLlmProviderProtocol(config.protocol)
           ? { protocol: config.protocol }
           : {}),
         hasApiKey: false
@@ -554,12 +583,6 @@ function mergeOverrides(
   }
 }
 
-function endpoint(baseUrl: string, suffix: string, ensureV1 = false): string {
-  const root = baseUrl.replace(/\/+$/, '')
-  if (ensureV1 && !root.endsWith('/v1')) return `${root}/v1/${suffix}`
-  return `${root}/${suffix}`
-}
-
 function rendererSafeBaseUrl(value: string): string {
   try {
     const url = new URL(value)
@@ -640,7 +663,10 @@ export class ModelManagementModule {
     if (model.kind !== 'chat') throw new Error('嵌入模型不能执行生成测试')
     const connection = this.connection(document, model.connectionId)
     const config = {
-      ...this.providerRequestConfig(connection),
+      ...this.providerRequestConfig({
+        ...connection,
+        protocol: llmRuntimeApiToProtocol(effectiveModelMetadata(model).api)
+      }),
       modelId: model.modelId,
       signal
     }
@@ -700,9 +726,14 @@ export class ModelManagementModule {
         throw new Error(`读取模型配置失败：${formatSchemaIssues(parsed.error).join('；')}`)
       }
       const document = parsed.data as ModelManagementDocument
+      const catalogChanged = this.refreshBuiltInCatalog(document)
       const errors = validateModelManagementDocument(document)
       if (errors.length > 0) throw new Error(`读取模型配置失败：${errors.join('；')}`)
-      if (legacy.success) this.dependencies.store.write(document)
+      if (catalogChanged && !legacy.success) {
+        document.revision = this.dependencies.nextRevision()
+        document.updatedAt = this.dependencies.now().toISOString()
+      }
+      if (legacy.success || catalogChanged) this.dependencies.store.write(document)
       this.cache = structuredClone(document)
       return structuredClone(document)
     }
@@ -718,6 +749,61 @@ export class ModelManagementModule {
     this.dependencies.store.write(migrated)
     this.cache = structuredClone(migrated)
     return structuredClone(migrated)
+  }
+
+  /** Retire unused presets while keeping referenced models and user-managed choices. */
+  private refreshBuiltInCatalog(document: ModelManagementDocument): boolean {
+    const refreshModels = (document.builtinCatalogVersion ?? 0) < BUILT_IN_LLM_CATALOG_VERSION
+    let changed = refreshModels
+    const checkedAt = this.dependencies.now().toISOString()
+    if (refreshModels) {
+      const referenced = new Set(document.assignments.flatMap(assignment =>
+        assignment.model.mode === 'explicit' ? [assignment.model.modelRef] : []
+      ))
+      document.models = document.models.filter(model => {
+        if (!model.builtin) return true
+        const connection = document.connections.find(item => item.id === model.connectionId)
+        const provider = BUILT_IN_LLM_PROVIDERS.find(item => item.id === connection?.providerId)
+        if (provider?.models.some(item => item.id === model.modelId)) return true
+        if (!referenced.has(model.id)) return false
+        model.builtin = false
+        return true
+      })
+      document.builtinCatalogVersion = BUILT_IN_LLM_CATALOG_VERSION
+    }
+    for (const provider of BUILT_IN_LLM_PROVIDERS) {
+      const existing = document.connections.find(connection => connection.providerId === provider.id)
+      if (existing) {
+        // A previously custom connection can now have a shipped preset. Keep
+        // its endpoint, protocol, credentials and models when promoting it.
+        if (existing.source === 'custom' && (provider.id === 'gemini' || provider.id === 'bailian')) {
+          existing.source = 'builtin'
+          changed = true
+        }
+      }
+      const connection: ManagedModelConnection = existing ?? {
+        id: connectionId(provider.id), providerId: provider.id, name: provider.name,
+        source: 'builtin', protocol: provider.protocol, baseUrl: provider.defaultBaseUrl,
+        credentialRef: `llm-provider:${provider.id}`, local: provider.local === true,
+        agentCompatible: provider.agentCompatible, enabled: true
+      }
+      if (!existing) {
+        document.connections.push(connection)
+        changed = true
+      }
+      if (existing && !refreshModels) continue
+      for (const model of provider.models) {
+        // A saved manual model wins even when its ID is still in the new catalog.
+        if (document.models.some(item => item.connectionId === connection.id && item.modelId === model.id)) continue
+        document.models.push({
+          id: modelRef(provider.id, model.id), connectionId: connection.id,
+          modelId: model.id, name: model.name, kind: 'chat', builtin: true,
+          baseline: defaultMetadata(provider.id, model.protocol ?? connection.protocol, connection.agentCompatible, checkedAt)
+        })
+        changed = true
+      }
+    }
+    return changed
   }
 
   private snapshot(document: ModelManagementDocument): ModelManagementSnapshot {
@@ -873,9 +959,7 @@ export class ModelManagementModule {
         previousAgentCompatible !== next.agentCompatible
       if (connectionContractChanged) {
         for (const model of document.models.filter((item) => item.connectionId === next.id)) {
-          model.baseline.api = next.protocol === 'anthropic-messages'
-            ? 'anthropic-messages'
-            : 'openai-completions'
+          model.baseline.api = llmProtocolToRuntimeApi(next.protocol)
           model.baseline.capabilities.tools = next.agentCompatible
           model.baseline.cache = cacheCompatibility(
             next.providerId,
@@ -1041,7 +1125,6 @@ export class ModelManagementModule {
     if (!connection.local && !apiKey) {
       throw new Error(`请先为「${connection.name}」填写 API Key`)
     }
-    const anthropic = connection.protocol === 'anthropic-messages'
     return {
       providerId: connection.providerId,
       providerName: connection.name,
@@ -1049,10 +1132,7 @@ export class ModelManagementModule {
       apiKey,
       baseUrl: connection.baseUrl,
       local: connection.local,
-      chatCompletionsUrl: anthropic ? undefined : endpoint(connection.baseUrl, 'chat/completions'),
-      openAiModelsUrl: anthropic ? undefined : endpoint(connection.baseUrl, 'models'),
-      messagesUrl: anthropic ? endpoint(connection.baseUrl, 'messages', true) : undefined,
-      anthropicModelsUrl: anthropic ? endpoint(connection.baseUrl, 'models', true) : undefined
+      ...llmRequestEndpoints(connection.protocol, connection.baseUrl)
     }
   }
 

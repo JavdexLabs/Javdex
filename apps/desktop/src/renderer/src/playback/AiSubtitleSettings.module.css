@@ -1,0 +1,52 @@
+.root {
+  display: grid;
+  gap: var(--form-label-gap);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--form-section-gap);
+}
+
+.heading {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.note,
+.status,
+.error {
+  margin: 0;
+  font-size: inherit;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  color: var(--text-muted);
+}
+
+.status {
+  min-height: var(--control-h-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.error {
+  color: var(--text-danger);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--form-label-gap);
+}
+
+.field {
+  display: grid;
+  gap: var(--form-label-gap);
+  color: var(--text-secondary);
+}
+
+.progress {
+  width: 100%;
+  height: var(--form-label-gap);
+  accent-color: var(--text-accent);
+}

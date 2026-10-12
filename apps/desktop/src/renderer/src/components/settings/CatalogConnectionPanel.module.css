@@ -79,6 +79,15 @@
   gap: var(--settings-gap-sm, 8px);
 }
 
+.playerFields {
+  display: grid;
+  gap: var(--form-field-gap);
+}
+
+.playerClearButton {
+  justify-self: start;
+}
+
 .playerInputRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -90,7 +99,8 @@
   min-width: 0;
 }
 
-.playerPickButton {
+.playerPickButton,
+.defaultPlayerButton {
   gap: var(--settings-gap-sm, 8px);
   white-space: nowrap;
 }
@@ -216,40 +226,63 @@
 .importGuide {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--settings-gap, 12px);
+  gap: var(--form-section-gap, 16px);
   margin-top: var(--form-section-gap, 16px);
-  padding: var(--form-section-gap, 16px);
-  border: 1px solid var(--border-subtle);
+  padding: var(--settings-gap, 12px) var(--settings-card-pad-x, 18px);
+  border-inline-start: 2px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: var(--surface-base);
+  background: color-mix(in srgb, var(--surface-selected) 50%, var(--surface-panel));
+}
+
+.importGuideIcon {
+  flex-shrink: 0;
+  color: var(--text-accent);
 }
 
 .importGuideCopy {
-  flex: 1 1 360px;
+  display: grid;
+  gap: calc(var(--settings-gap-sm, 8px) / 2);
   min-width: 0;
-  color: var(--text-secondary);
-  font-size: var(--settings-fs-secondary, 12px);
-  line-height: var(--settings-lh, 1.45);
-}
-
-.importGuideTitle {
-  color: var(--text-primary);
 }
 
 .importGuideText,
 .importGuideNote {
-  margin: var(--form-label-gap) 0 0;
+  margin: 0;
+  line-height: var(--settings-lh, 1.45);
   overflow-wrap: anywhere;
 }
 
-.importGuideNote {
-  color: var(--text-muted);
-  font-size: var(--settings-fs-caption);
+.importGuideText {
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
 }
 
-.importGuideButton {
-  flex-shrink: 0;
+.importGuideNote {
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-caption, 11px);
+}
+
+.importGuideLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  border-radius: var(--radius-sm);
+  color: var(--text-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.importGuideLink:hover {
+  color: var(--text-primary);
+}
+
+.importGuideLink:active {
+  background: var(--surface-control-hover);
+}
+
+.importGuideLink:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
 }
 
 @container (width < 620px) {

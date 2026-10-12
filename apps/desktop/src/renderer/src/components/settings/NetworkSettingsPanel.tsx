@@ -1,5 +1,4 @@
 import TextInput from '../TextInput'
-import SettingsActionLabel from './SettingsActionLabel'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import type { SettingsSnapshot } from '@shared/settingsTypes'
@@ -102,15 +101,7 @@ export function ProxyConfigRow({
     }
   }
   const stale = result && result.url !== draft.url.trim()
-  const feedback = error
-    ? { tone: 'error', summary: error, detail: error }
-    : form.conflict
-      ? {
-          tone: 'error',
-          summary: '配置已在其他位置更新，你的输入已保留。',
-          detail: '取消更改可读取最新配置，保存会提交当前输入。'
-        }
-      : testing
+  const feedback = testing
         ? { tone: 'pending', summary: '正在测试输入的代理地址…', detail: null }
         : stale
           ? { tone: 'muted', summary: '地址已更改，请重新测试。', detail: null }
@@ -122,9 +113,7 @@ export function ProxyConfigRow({
               }
             : {
                 tone: 'muted',
-                summary: draft.enabled
-                  ? '地址与连接方式一起保存后生效。'
-                  : '当前使用直连；保留的代理地址不会被使用。',
+                summary: '测试当前地址，不保存配置，也不会启用代理。',
                 detail: null
               }
   const FeedbackIcon =
@@ -150,6 +139,8 @@ export function ProxyConfigRow({
           <SettingsFormActions placement="header"
             dirty={form.dirty}
             saving={saving}
+            error={error}
+            conflict={form.conflict}
             onSave={() => void save()}
             onCancel={() => {
               form.reset()
@@ -195,16 +186,14 @@ export function ProxyConfigRow({
               <Button
                 size="sm"
                 className={styles.testButton}
-                aria-describedby={`${id}-test-hint`}
+                aria-describedby={`${id}-hint`}
+                busy={testing}
                 disabled={testing || saving || !draft.url.trim()}
                 onClick={() => void test()}
               >
-                <SettingsActionLabel reserve="测试连接">{testing ? '测试中…' : '测试连接'}</SettingsActionLabel>
+                测试连接
               </Button>
             </div>
-            <small id={`${id}-test-hint`} className={styles.testHint}>
-              测试使用当前地址，不保存配置，也不会启用代理。
-            </small>
           </div>
         </div>
         <div className={styles.feedback} data-tone={feedback.tone}>

@@ -365,6 +365,55 @@ describe('videoRepo.getVideoDetail', () => {
     assert.equal(getVideoDetail(1)!.external_stats.length, 0)
     assert.equal(getVideoDetail(2)!.external_stats.length, 1)
   })
+
+  it('adds and edits ratings, preserving row identity and fetch time through atomic source renames', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(`INSERT INTO video_external_stats (video_id, source, rating_average, rating_count, fetched_at)
+      VALUES (1, 'A', 4.275, 10, '2024-06-01'), (1, 'B', 3, NULL, '2024-05-01'), (2, 'A', 2, 5, NULL)`).run()
+    const previous = getVideoDetail(1)!.external_stats
+    editVideoRecord(1, { externalRatings: { deletedSources: [], defaultSource: 'B', entries: [
+      { originalSource: 'A', source: 'B', ratingAverage: 4.5, ratingCount: null },
+      { originalSource: 'B', source: 'A', ratingAverage: 3.5, ratingCount: 176 },
+      { originalSource: null, source: 'Manual', ratingAverage: 8.5, ratingCount: 0 }
+    ] } })
+    const next = getVideoDetail(1)!.external_stats
+    const b = next.find((rating) => rating.source === 'B')!
+    assert.equal(b.id, previous.find((rating) => rating.source === 'A')!.id)
+    assert.equal(b.fetched_at, '2024-06-01')
+    assert.equal(b.rating_count, null)
+    assert.equal(b.is_default, 1)
+    assert.deepEqual(next.find((rating) => rating.source === 'Manual')?.rating_average, 8.5)
+    assert.equal(next.find((rating) => rating.source === 'Manual')?.fetched_at, null)
+    assert.equal(getVideoDetail(2)!.external_stats[0].rating_average, 2)
+  })
+
+  it('rejects conflicting, invalid and stale rating edits without changing other metadata', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("INSERT INTO video_external_stats (video_id, source, rating_average) VALUES (1, 'A', 4), (1, 'B', 3)").run()
+    const previous = getVideoDetail(1)!
+    const entry = { originalSource: 'A', source: 'Renamed', ratingAverage: 4.5, ratingCount: 10 }
+    for (const entries of [
+      [{ ...entry, source: 'B' }],
+      [entry, { ...entry, source: 'Other' }],
+      [{ ...entry, originalSource: 'Missing' }],
+      [{ ...entry, ratingAverage: NaN }],
+      [{ ...entry, ratingCount: 1.5 }],
+      [{ ...entry, source: ' ' }]
+    ]) {
+      assert.throws(() => editVideoRecord(1, {
+        title: 'Should not save', externalRatings: { deletedSources: [], defaultSource: null, entries }
+      }))
+      assert.deepEqual(getVideoDetail(1)!.external_stats, previous.external_stats)
+      assert.equal(getVideoDetail(1)!.title, previous.title)
+    }
+    assert.throws(() => editVideoRecord(1, { title: 'Should not save', externalRatings: {
+      deletedSources: ['B'], defaultSource: 'Missing', entries: [entry]
+    } }), /默认外部评分不存在/)
+    assert.deepEqual(getVideoDetail(1)!.external_stats, previous.external_stats)
+    assert.equal(getVideoDetail(1)!.title, previous.title)
+  })
 })
 
 describe('videoRepo.setPrimaryVideoResource', () => {

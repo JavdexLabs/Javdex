@@ -8,44 +8,26 @@ import {
   useState,
   type ReactNode
 } from 'react'
+import { useOverlayHistory } from '../interaction/OverlayHistoryContext'
+import { readOverlayHistoryMarker, withOverlayHistoryMarker } from '../interaction/overlayHistory'
 
-export const IMAGE_PREVIEW_HISTORY_KEY = 'avImagePreview'
-const HISTORY_CLOSE_FALLBACK_MS = 300
+export { IMAGE_PREVIEW_HISTORY_KEY } from '../interaction/overlayHistory'
 
 interface ImagePreviewHistoryMarker {
   token: string
   kind: 'image-preview'
 }
 
-interface ActiveHistoryPreview {
-  token: string
-  phase: 'open' | 'closing'
-  close: () => void
-}
-
-function createToken(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
 export function readImagePreviewHistoryMarker(state: unknown): ImagePreviewHistoryMarker | null {
-  if (!state || typeof state !== 'object') return null
-  const marker = (state as Record<string, unknown>)[IMAGE_PREVIEW_HISTORY_KEY]
-  if (!marker || typeof marker !== 'object') return null
-  const value = marker as Record<string, unknown>
-  return value.kind === 'image-preview' && typeof value.token === 'string'
-    ? { kind: 'image-preview', token: value.token }
-    : null
+  const marker = readOverlayHistoryMarker(state)
+  return marker?.kind === 'image-preview' ? { kind: 'image-preview', token: marker.token } : null
 }
 
 export function withImagePreviewHistoryMarker(
   state: unknown,
   token: string
 ): Record<string, unknown> {
-  const base = state && typeof state === 'object' ? state : {}
-  return {
-    ...base,
-    [IMAGE_PREVIEW_HISTORY_KEY]: { kind: 'image-preview', token }
-  }
+  return withOverlayHistoryMarker(state, { kind: 'image-preview', token })
 }
 
 interface ImagePreviewOverlayContextValue {
@@ -67,83 +49,10 @@ export function ImagePreviewOverlayProvider({
   previewEnabled?: boolean
 }): JSX.Element {
   const [openCount, setOpenCount] = useState(0)
-  const activeHistoryRef = useRef<ActiveHistoryPreview | null>(null)
-  const fallbackTimerRef = useRef<number | null>(null)
-
-  const clearFallback = useCallback(() => {
-    if (fallbackTimerRef.current != null) {
-      window.clearTimeout(fallbackTimerRef.current)
-      fallbackTimerRef.current = null
-    }
-  }, [])
-
-  const finishHistoryPreview = useCallback(
-    (token: string, fallbackClose?: () => void) => {
-      const active = activeHistoryRef.current
-      if (!active || active.token !== token) return
-      clearFallback()
-      activeHistoryRef.current = null
-      ;(active.close ?? fallbackClose)?.()
-    },
-    [clearFallback]
-  )
-
-  useEffect(() => {
-    const onPopState = (event: PopStateEvent): void => {
-      const active = activeHistoryRef.current
-      if (!active) return
-      const marker = readImagePreviewHistoryMarker(event.state)
-      if (marker?.token === active.token) return
-      finishHistoryPreview(active.token)
-    }
-    window.addEventListener('popstate', onPopState)
-    return () => {
-      window.removeEventListener('popstate', onPopState)
-      clearFallback()
-    }
-  }, [clearFallback, finishHistoryPreview])
-
-  const beginHistoryEntry = useCallback((close: () => void): string => {
-    const token = createToken()
-    activeHistoryRef.current = { token, phase: 'open', close }
-    window.history.pushState(
-      withImagePreviewHistoryMarker(window.history.state, token),
-      '',
-      window.location.href
-    )
-    return token
-  }, [])
-
-  const requestHistoryClose = useCallback(
-    (token: string, close: () => void): void => {
-      const active = activeHistoryRef.current
-      if (!active || active.token !== token) {
-        close()
-        return
-      }
-      if (active.phase === 'closing') return
-      const marker = readImagePreviewHistoryMarker(window.history.state)
-      if (marker?.token !== token) {
-        finishHistoryPreview(token, close)
-        return
-      }
-      active.phase = 'closing'
-      window.history.back()
-      fallbackTimerRef.current = window.setTimeout(() => {
-        finishHistoryPreview(token, close)
-      }, HISTORY_CLOSE_FALLBACK_MS)
-    },
-    [finishHistoryPreview]
-  )
-
-  const abandonHistoryEntry = useCallback(
-    (token: string): void => {
-      if (activeHistoryRef.current?.token !== token) return
-      clearFallback()
-      activeHistoryRef.current = null
-    },
-    [clearFallback]
-  )
+  const history = useOverlayHistory()
+  const beginHistoryEntry = useCallback((close: () => void) => history.open('image-preview', close), [history])
+  const requestHistoryClose = useCallback((token: string) => history.close(token), [history])
+  const abandonHistoryEntry = history.abandon
 
   const register = useCallback(() => {
     setOpenCount((count) => count + 1)

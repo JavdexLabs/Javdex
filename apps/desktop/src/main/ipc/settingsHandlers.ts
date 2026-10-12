@@ -1,6 +1,6 @@
 import { setCloseToTrayEnabled } from '../appTray'
 import { webAccess } from '../web/webAccess'
-import { dialog, shell } from 'electron'
+import { clipboard, dialog, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { IPC } from '@shared/ipc-channels'
@@ -23,6 +23,7 @@ import {
 } from '@library/assetStoragePaths'
 import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
+import { getLocalModels } from '../services/localModels/desktopLocalModels'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
@@ -287,6 +288,47 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
   appCommandAdapter.register(IPC.LLM_TRANSLATE_TO_CHINESE, async (text): Promise<string> => {
     if (typeof text !== 'string') throw new Error('无效的翻译内容')
     return translateTextToChinese(text)
+  })
+  appCommandAdapter.register(IPC.LOCAL_MODELS_SNAPSHOT, () => getLocalModels().snapshot())
+  appCommandAdapter.register(IPC.LOCAL_MODELS_COMMAND, async command => {
+    const models = getLocalModels(), window = ctx.getWindow()
+    if (command.action === 'download') await models.download(command.model, command.variant)
+    else if (command.action === 'copy-download-url') clipboard.writeText(await models.downloadUrl(command.model, command.variant))
+    else if (command.action === 'import') {
+      const model = (await models.snapshot()).models.find(item => item.id === command.model)!
+      const variant = model.variants.find(item => item.id === (command.variant ?? model.selectedVariant))!
+      const options = { title: `导入 ${model.name} · ${variant.precision} · ${variant.publisher}`,
+        properties: ['openFile'] as Array<'openFile'>,
+        filters: [{ name: '模型文件', extensions: variant.format === 'GGUF' ? ['gguf'] : ['bin'] }, { name: '所有文件', extensions: ['*'] }] }
+      const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
+      if (!result.canceled && result.filePaths[0]) await models.importModel(command.model, result.filePaths[0], variant.id)
+    }
+    else if (command.action === 'select') await models.selectVariant(command.model, command.variant)
+    else if (command.action === 'cancel-download') models.cancel()
+    else if (command.action === 'clean-downloads') await models.cleanDownloads()
+    else if (command.action === 'clear-cache') await models.clearCache()
+    else if (command.action === 'translation') await models.setTranslation(command.mode)
+    else if (command.action === 'download-source') await models.setDownloadSource(command.source)
+    else if (command.action === 'translation-model') await models.selectTranslationModel(command.model)
+    else if (command.action === 'usage') await models.setUsage(command.usage, command.expectedRevision)
+    else if (command.action === 'delete') {
+      const model = (await models.snapshot()).models.find(item => item.id === command.model)!
+      const variant = model.variants.find(item => item.id === (command.variant ?? model.selectedVariant))!
+      const options = { type: 'question' as const, title: '删除本地模型', message: `删除“${model.name} · ${variant.precision} · ${variant.publisher}”？`,
+        detail: '其它精度、字幕缓存和影片资料会保留。需要时可以重新下载；若删除当前选择，不会自动切换模型。', buttons: ['取消', '删除'], defaultId: 0, cancelId: 0 }
+      const result = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
+      if (result.response === 1) await models.remove(command.model, variant.id)
+    } else if (command.action === 'export' || command.action === 'choose-location') {
+      const variant = command.action === 'export' ? command.variant
+        ?? (await models.snapshot()).models.find(item => item.id === command.model)!.selectedVariant : undefined
+      const options = { title: command.action === 'export' ? '选择模型导出目录' : '选择本地模型保存位置', properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'> }
+      const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
+      if (!result.canceled && result.filePaths[0]) {
+        if (command.action === 'export') await models.exportModel(command.model, result.filePaths[0], variant)
+        else await models.relocate(result.filePaths[0])
+      }
+    } else if (command.action === 'reset-location') await models.relocate((await models.snapshot()).defaultDirectory)
+    return models.snapshot()
   })
 
   appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<SettingsSnapshot> => {

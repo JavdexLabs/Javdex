@@ -284,12 +284,23 @@ async function createControlledModelRuntime(input: RuntimeSessionInit) {
     allowModelNetwork: false,
     refreshOnCreate: false
   })
-  const compat = input.model.model.api === 'anthropic-messages'
+  const api = input.model.model.api
+  const compat = api === 'google-generative-ai'
+    ? undefined
+    : api === 'anthropic-messages'
     ? {
         supportsLongCacheRetention: input.model.cacheCompatibility.supportsLongCacheRetention,
-        sendSessionAffinityHeaders: input.model.cacheCompatibility.sendSessionAffinityHeaders
+        sendSessionAffinityHeaders: input.model.cacheCompatibility.sendSessionAffinityHeaders,
+        // MiniMax requires thinking blocks to survive subsequent tool turns,
+        // including responses without an Anthropic signature.
+        allowEmptySignature: input.model.model.providerId === 'minimax'
       }
-    : {
+    : api === 'openai-responses'
+      ? {
+          supportsLongCacheRetention: input.model.cacheCompatibility.supportsLongCacheRetention,
+          sendSessionAffinityHeaders: input.model.cacheCompatibility.sendSessionAffinityHeaders
+        }
+      : {
         supportsLongCacheRetention: input.model.cacheCompatibility.supportsLongCacheRetention,
         sendSessionAffinityHeaders: input.model.cacheCompatibility.sendSessionAffinityHeaders,
         sessionAffinityFormat: input.model.cacheCompatibility.sessionAffinityFormat,

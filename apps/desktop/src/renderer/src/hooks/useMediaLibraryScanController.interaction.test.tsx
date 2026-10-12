@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {afterEach,it} from 'node:test'
 import React from 'react'
 import TestRenderer,{act} from 'react-test-renderer'
+import {renderedText} from '../test/renderedText'
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import type {ScanAuditReadHeader} from '@shared/scanAuditReadTypes'
 import type {LibraryScanEvent,LibraryScanProgressEvent,ScanCompletionResult} from '@shared/libraryTypes'
@@ -152,7 +153,7 @@ it('retries a failed page through the real header controller without issuing the
  await act(async()=>{renderer=TestRenderer.create(<QueryClientProvider client={client}><Integrated/></QueryClientProvider>)})
  requests[0].resolve({summary,snapshot:{libraryId:1,runId:'old',finishedAt:summary.finishedAt},unrecognizedCount:0});await flush()
  assert.deepEqual(views,['old'])
- const retry=renderer!.root.findAllByType('button').find(node=>node.children.includes('重试'))
+ const retry=renderer!.root.findAllByType('button').find(node=>renderedText(node)==='重试')
  assert.ok(retry)
  await act(async()=>retry.props.onClick());assert.equal(requests.length,2)
  requests[1].resolve({summary:{...summary,runId:'next'},snapshot:{libraryId:1,runId:'next',finishedAt:summary.finishedAt},unrecognizedCount:0});await flush()

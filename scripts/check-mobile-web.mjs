@@ -23,7 +23,7 @@ const server = http.createServer((request, response) => {
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 let browser
-async function checkControlFocus(locator) {
+async function checkControlFocus(locator, textField = false) {
   const before = await locator.boundingBox()
   await locator.focus()
   await locator.page().waitForFunction(element =>
@@ -36,7 +36,10 @@ async function checkControlFocus(locator) {
   })
   assert.equal(style.outline, 'none')
   assert.equal(style.border, 'rgb(143, 210, 179)')
-  assert.equal(style.ring, 'rgb(143, 210, 179) 0px 0px 0px 1px')
+  if (textField) {
+    assert.match(style.ring, /0px 0px 0px 3px$/)
+    assert.match(style.ring, /(?:\/|,)\s*0\.18\)/, 'text inputs use a soft translucent halo')
+  } else assert.equal(style.ring, 'rgb(143, 210, 179) 0px 0px 0px 1px')
   const after = await locator.boundingBox()
   assert.equal(after.width, before.width)
   assert.equal(after.height, before.height)
@@ -546,7 +549,7 @@ try {
   assert.equal(await username.evaluate(el => document.activeElement === el), false)
   for (const name of ['username', 'password']) {
     assert.equal(await login.locator(`input[name="${name}"]`).evaluate(el => getComputedStyle(el).fontSize), '16px')
-    await checkControlFocus(login.locator(`input[name="${name}"]`))
+    await checkControlFocus(login.locator(`input[name="${name}"]`), true)
   }
   await username.fill('sample')
   await username.evaluate(el => el.setSelectionRange(3, 3))

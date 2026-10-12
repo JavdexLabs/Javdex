@@ -29,3 +29,14 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+.inlineDetail {
+  max-height: 180px;
+  padding: var(--form-label-gap);
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary);
+  scrollbar-gutter: stable;
+}

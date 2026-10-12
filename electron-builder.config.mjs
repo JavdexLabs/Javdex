@@ -5,6 +5,8 @@ import {
   PORTABLE_ELECTRON_LANGUAGES,
   prunePackagedRuntime
 } from './scripts/packaging-runtime.mjs'
+import { stagePackagedPlaybackRuntime, verifyPackagedPlaybackRuntime } from './scripts/playback-runtime.mjs'
+import { preparePackagedAiRuntime, stagePackagedAiRuntime, signPackagedAiTools, verifySignedAiRuntime } from './scripts/ai-runtime-build.mjs'
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
 
@@ -24,6 +26,11 @@ async function signMacApp(options) {
     })
   }
 
+  const originalIgnore = options.ignore
+  const aiTools = await signPackagedAiTools(options.app, identity, adHocEntitlements)
+  signOptions.ignore = file => aiTools(file) || (typeof originalIgnore === 'function' ? originalIgnore(file)
+    : (Array.isArray(originalIgnore) ? originalIgnore : originalIgnore ? [originalIgnore] : []).some(pattern => file.match(pattern)))
+
   await signAsync(signOptions)
 }
 
@@ -40,7 +47,21 @@ const base = {
     output: 'dist'
   },
   files: [
+    'LICENSE',
+    'NOTICE',
+    'LICENSES/**/*',
+    'docs/THIRD_PARTY_NOTICES.md',
     'out/**/*',
+    // Development binaries, synthetic media and copied Electron probes are not
+    // release inputs. A reviewed playback runtime is staged outside app.asar.
+    '!out/native-playback/**/*',
+    '!out/playback-acceptance/**/*',
+    '!out/libmpv-prototype/**/*',
+    '!out/playback-runtime/**/*',
+    '!out/ai-runtime/**/*',
+    '!out/ai-runtime-build/**/*',
+    '!out/ai-runtime-acceptance/**/*',
+    '!out/server/**/*',
     '!out/resources/**/*',
     '!out/renderer/icon-{16,32,48,512}.png',
     '!node_modules/@mediapipe/tasks-vision/**/*',
@@ -50,6 +71,8 @@ const base = {
     '!node_modules/**/*.d.ts.map',
     '!node_modules/**/*.map',
     '!node_modules/playwright-core/lib/vite/**/*',
+    // Photon is bundled into out/main/chunks with its adjacent WASM asset.
+    '!node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm',
     '!node_modules/@earendil-works/pi-coding-agent/**/*'
   ],
   asar: true,
@@ -62,6 +85,12 @@ const base = {
   ],
   win: {
     icon: 'build/icon.ico',
+    files: [
+      '!node_modules/@mariozechner/clipboard-{android,darwin,freebsd,linux}-*/**/*',
+      '!node_modules/@mariozechner/clipboard-win32-!(${arch})-*/**/*',
+      '!node_modules/@earendil-works/pi-tui/native/!(win32)/**/*',
+      '!node_modules/@earendil-works/pi-tui/native/win32/prebuilds/win32-!(${arch})/**/*'
+    ],
     electronLanguages: PORTABLE_ELECTRON_LANGUAGES,
     artifactName: '${productName}-Setup-${version}-${arch}.${ext}',
     legalTrademarks: 'Javdex',
@@ -118,8 +147,17 @@ function readSelectedTargets() {
 export default function buildConfig() {
   const selected = readSelectedTargets()
   const config = structuredClone(base)
+  // Platform files form a separate matcher in electron-builder. An exclusions-
+  // only matcher defaults to **/*, so retain the desktop allowlist here too.
+  config.win.files.unshift(...config.files)
 
-  config.afterPack = prunePackagedRuntime
+  config.beforePack = async context => { verifyPackagedPlaybackRuntime(context); await preparePackagedAiRuntime(context) }
+  config.afterPack = async context => {
+    prunePackagedRuntime(context)
+    stagePackagedPlaybackRuntime(context)
+    await stagePackagedAiRuntime(context)
+  }
+  config.afterSign = verifySignedAiRuntime
   config.mac.sign = signMacApp
 
   if (selected?.win) config.win.target = selected.win

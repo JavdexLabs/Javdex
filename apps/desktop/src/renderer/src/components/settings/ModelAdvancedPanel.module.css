@@ -13,6 +13,34 @@
   background: var(--surface-panel);
 }
 
+.embeddedCard {
+  container-type: inline-size;
+  container-name: embedded-model;
+  margin-top: var(--form-field-gap, 12px);
+  padding: var(--form-field-gap, 12px) 0 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.evidence {
+  margin-top: var(--form-field-gap, 12px);
+}
+
+.evidenceToggle {
+  min-height: var(--control-h-sm);
+  margin-bottom: var(--settings-gap-sm, 8px);
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  cursor: pointer;
+}
+
+.evidenceToggle:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
 .cardHeader {
   display: flex;
   align-items: flex-start;
@@ -79,9 +107,9 @@
   font: inherit;
 }
 
-.controlInput:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: 1px;
+.controlInput:focus {
+  outline: none;
+  border-color: var(--border-accent);
   box-shadow: var(--focus-ring);
 }
 
@@ -112,6 +140,17 @@
   padding: 7px 8px;
   border-radius: var(--radius-sm);
   background: var(--surface-elevated);
+}
+
+.embeddedSummary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@container embedded-model (width <= 360px) {
+  .advancedGrid,
+  .embeddedSummary {
+    grid-template-columns: 1fr;
+  }
 }
 
 .baselineLabel,

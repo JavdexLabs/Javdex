@@ -28,6 +28,19 @@ function createAgentRun(database: Database.Database, runId: string): void {
 }
 
 describe('PlaylistImportRepository', () => {
+  it('rejects built-in append targets before starting webpage import', () => {
+    const { database, repository } = setup()
+    try {
+      const builtins = database.prepare('SELECT id FROM playlists WHERE system_kind IS NOT NULL').all() as { id: number }[]
+      assert.equal(builtins.length, 2)
+      for (const { id } of builtins) {
+        assert.throws(() => repository.validateStartTargets({ targetLibraryId: 1,
+          destination: { kind: 'append', playlistId: id }
+        }), /TARGET_PLAYLIST_BUILTIN/)
+      }
+    } finally { database.close() }
+  })
+
   it('snapshots a workStore session that has no catalog tables', () => {
     const database = new Database(':memory:')
     const repository = new PlaylistImportRepository(database)

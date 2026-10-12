@@ -6,7 +6,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { initDatabaseAtPath, closeDatabase } from './database'
 import { listPlaylistBrowsePage } from './playlistListPageRepo'
-import { listPlaylists, listPlaylistsForVideo } from './playlistRepo'
+import { getPlaylistById, listPlaylists, listPlaylistsForVideo } from './playlistRepo'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import { IPC } from '@shared/ipc-channels'
 import { appIpcSchemas } from '../../../../apps/desktop/src/main/ipc/ipcCommandSchemas'
@@ -25,6 +25,26 @@ function setup() {
   db.exec('INSERT INTO playlist_video(playlist_id,video_id,position) SELECT id,1,0 FROM playlists')
   return db
 }
+it('separates built-in identities from same-name user lists without changing references or default picker queries',()=>{
+  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
+  db.exec("INSERT INTO playlists(name,created_at) VALUES ('我喜欢','2026-10-12'),('稍后观看','2026-10-12')")
+  const builtin=listPlaylistBrowsePage({kind:'builtin',limit:2})
+  assert.equal(builtin.total,2)
+  const favorite=builtin.items.find(item=>item.system_kind==='favorites')!
+  assert.equal(favorite.name,'收藏')
+  assert.equal(getPlaylistById(favorite.id)!.name,'收藏')
+  assert.equal(listPlaylistBrowsePage({kind:'builtin',search:'收藏'}).total,1)
+  assert.equal(listPlaylistBrowsePage({kind:'custom',search:'收藏'}).hasExactName,false)
+  const custom=listPlaylistBrowsePage({kind:'custom',limit:1})
+  assert.equal(custom.total,2)
+  assert.equal(custom.items.length,1)
+  assert.ok(custom.items.every(item=>item.system_kind===null))
+  assert.equal(listPlaylistBrowsePage({kind:'custom',search:'稍后观看'}).total,1)
+  assert.equal(listPlaylistBrowsePage().total,4)
+  assert.equal((db.prepare('SELECT name FROM playlists WHERE id=?').get(favorite.id) as {name:string}).name,'我喜欢')
+  assert.ok(appIpcSchemas[IPC.PLAYLIST_LIST_PAGE].safeParse([{kind:'builtin'}]).success)
+  assert.ok(!appIpcSchemas[IPC.PLAYLIST_LIST_PAGE].safeParse([{kind:'invalid'}]).success)
+})
 it('matches full global list order, counts, cover fallback and per-video membership over all pages',()=>{
   setup()
   const full=listPlaylistsForVideo(1)
@@ -33,7 +53,7 @@ it('matches full global list order, counts, cover fallback and per-video members
     const page=listPlaylistBrowsePage({videoId:1,offset})
     assert.equal(page.total,125);assert.ok(page.items.length<=60);actual.push(...page.items)
   }
-  assert.deepEqual(actual.map(({generation:_generation,revision:_revision,...item})=>item),full.map(item=>({id:item.id,name:item.name,description:item.description,preview_cover_path:item.preview_cover_path,video_count:item.video_count,contains_video:item.contains_video})))
+  assert.deepEqual(actual.map(({generation:_generation,revision:_revision,...item})=>item),full.map(item=>({id:item.id,name:item.name,description:item.description,system_kind:item.system_kind,cover_path:item.cover_path,preview_cover_path:item.preview_cover_path,video_count:item.video_count,contains_video:item.contains_video})))
   assert.ok(actual.every(item=>Number.isSafeInteger(item.generation)&&Number.isSafeInteger(item.revision)))
   assert.equal(actual.find(item=>item.id===4)!.preview_cover_path,'')
   assert.equal(listPlaylistBrowsePage({offset:9999}).offset,120)
@@ -62,6 +82,20 @@ it('bounds NUL/UTF8 display fields and preserves stored full identity without pr
   assert.equal((db.prepare('SELECT name FROM playlists WHERE id=1').get() as {name:string}).name,name)
   db.prepare('UPDATE playlists SET cover_path=? WHERE id=1').run('x'.repeat(4097))
   assert.equal(listPlaylistBrowsePage({search:'',offset:120}).items.find(item=>item.id===1)?.preview_cover_path,null)
+  assert.equal(listPlaylistBrowsePage({search:'',offset:120}).items.find(item=>item.id===1)?.cover_path,null)
+})
+it('projects built-in identity and separates a custom cover from the first video cover',()=>{
+  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
+  insertTestVideoWithFile(db,{code:'PL-1',filePath:'/synthetic/1.mp4'})
+  db.exec("UPDATE videos SET cover_path='covers/video.png'; INSERT INTO playlist_video(playlist_id,video_id,position) SELECT id,1,0 FROM playlists")
+  const favorite=listPlaylistBrowsePage().items.find(item=>item.system_kind==='favorites')!
+  assert.equal(favorite.cover_path,null)
+  assert.equal(favorite.preview_cover_path,'covers/video.png')
+  db.prepare('UPDATE playlists SET cover_path=? WHERE id=?').run('playlist_covers/custom.png',favorite.id)
+  const custom=listPlaylistBrowsePage().items.find(item=>item.id===favorite.id)!
+  assert.equal(custom.system_kind,'favorites')
+  assert.equal(custom.cover_path,'playlist_covers/custom.png')
+  assert.equal(custom.preview_cover_path,'playlist_covers/custom.png')
 })
 it('keeps total, page, membership and exact-name checks on one WAL snapshot',t=>{
   const db=setup(),external=new Database(db.name),prepare=db.prepare.bind(db)

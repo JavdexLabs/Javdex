@@ -4,7 +4,7 @@ import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
 import PluginCard from '../PluginCard'
 import SelectControl from '../SelectControl'
-import { SettingsCard, SettingsEmptyPanel, SettingsSectionBlock } from './SettingsPrimitives'
+import { SettingsCard, SettingsEmptyPanel, SettingsRow, SettingsSectionBlock } from './SettingsPrimitives'
 import type { PluginKind } from './PluginConfigModals'
 import Button from '../Button'
 import styles from './PluginsSettingsPanel.module.css'
@@ -240,7 +240,7 @@ export default function PluginsSettingsPanel({
     <SettingsCard
       className={styles.root}
       title="全局刮削来源"
-      hint="当前库可单独指定影片来源；未指定时跟随这里的全局默认。"
+      hint={kind === 'video' ? '当前媒体库可单独指定影片来源；未指定时使用全局默认。' : '演员资料使用这里指定的全局默认来源。'}
       actions={
         <>
           <Button type="button" size="sm" onClick={onOpenDev}>
@@ -287,13 +287,9 @@ export default function PluginsSettingsPanel({
         )}
       </div>
 
-      <div className={styles.compositeEntry}>
-        <div>
-          <strong>按字段组合来源</strong>
-          <p>{kind === 'video' ? '例如封面用一个插件，标题和评分用另一个，保存为一个组合插件。' : '例如头像用一个插件，生日和简介用另一个，保存为一个组合插件。'}</p>
-        </div>
+      <SettingsRow title="按字段组合来源" description={kind === 'video' ? '分别选择封面、标题、评分等字段的来源。' : '分别选择头像、生日、简介等字段的来源。'}>
         <Button size="sm" disabled={pluginBusy !== null} onClick={() => onCreateComposite(kind)}>创建组合插件</Button>
-      </div>
+      </SettingsRow>
 
       {kind === 'video' ? <SettingsSectionBlock
         title={

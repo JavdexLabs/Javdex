@@ -1,5 +1,5 @@
 import ScrollViewport from '../ScrollViewport'
-import type { KeyboardEventHandler, ReactNode } from 'react'
+import { useLayoutEffect, useRef, type KeyboardEventHandler, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   SETTINGS_GROUPS,
@@ -41,6 +41,12 @@ export default function SettingsWorkspaceShell({
   children: ReactNode
 }): JSX.Element {
   const shellOwnsTabs = tabsPlacement === 'shell'
+  const scrollRegion = useRef<HTMLDivElement>(null)
+  const scrollPositions = useRef(new Map<string, number>())
+  const pageKey = `${activeGroup.id}/${activeTab}`
+  useLayoutEffect(() => {
+    if (scrollRegion.current) scrollRegion.current.scrollTop = scrollPositions.current.get(pageKey) ?? 0
+  }, [pageKey])
   return (
     <ScrollViewport variant="fill">
       <div data-page-content className={`${styles.root} ${styles.overviewPage}`}>
@@ -72,24 +78,24 @@ export default function SettingsWorkspaceShell({
           ))}
         </nav>
 
-        <div className={styles.scrollRegion}>
+        {shellOwnsTabs && activeGroup.tabs.length > 1 ? (
+          <SettingsTabBar
+            group={activeGroup.id}
+            tabs={activeGroup.tabs}
+            activeTab={activeTab}
+            label={`${activeGroup.label}设置页签`}
+            onSelect={(tab) => onNavigate(activeGroup.id, tab)}
+            onKeyDown={onTabKeyDown}
+          />
+        ) : null}
+        <div className={styles.scrollRegion} ref={scrollRegion} data-settings-scroll-region
+          onScroll={(event) => scrollPositions.current.set(pageKey, event.currentTarget.scrollTop)}>
           <main
             id="settings-main-panel"
             className={styles.content}
             role="region"
             aria-label={`${activeGroup.label}设置`}
           >
-            {shellOwnsTabs && activeGroup.tabs.length > 1 ? (
-              <SettingsTabBar
-                group={activeGroup.id}
-                tabs={activeGroup.tabs}
-                activeTab={activeTab}
-                label={`${activeGroup.label}设置页签`}
-                onSelect={(tab) => onNavigate(activeGroup.id, tab)}
-                onKeyDown={onTabKeyDown}
-              />
-            ) : null}
-
             <section
               className={styles.section}
               role={shellOwnsTabs ? 'tabpanel' : undefined}

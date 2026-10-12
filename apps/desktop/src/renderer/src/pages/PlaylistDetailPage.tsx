@@ -1,11 +1,13 @@
 import ResultCount from '../components/ResultCount'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Filter, Import, Inbox, Pencil, SearchX } from 'lucide-react'
+import { Filter, Import, Inbox, Pencil, SearchX, Trash2 } from 'lucide-react'
+import { RECENT_PLAYBACK_LIST_ID } from '@shared/desktop/recentPlayback'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import type { SortDir } from '@shared/commonTypes'
 import type { PlaylistMetadata, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
 import type { VideoCard } from '@shared/videoTypes'
-import { api, assetUrl } from '../api'
+import { api } from '../api'
 import { expectedPlaylistVersion } from '@shared/protocol/versions'
 import { navigateToPlaylistList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
@@ -20,11 +22,13 @@ import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import Switch from '../components/Switch'
 import DetailActionBar from '../components/DetailActionBar'
 import EmptyState from '../components/EmptyState'
+import NoticeBanner, { NoticeBannerActions, NoticeBannerCopy } from '../components/NoticeBanner'
 import { UI_ICON } from '../components/iconDefaults'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import RelatedLinksList from '../components/RelatedLinksList'
 import Button from '../components/Button'
 import PlaylistCover from '../components/PlaylistCover'
+import { playlistCoverSource } from '../components/playlistCoverSource'
 import DetailPane, { DetailPaneOverlay } from '../components/DetailPane'
 import styles from './PlaylistDetailPage.module.css'
 import PlaylistResourceFilterPopover from '../components/PlaylistResourceFilterPopover'
@@ -42,29 +46,30 @@ const PLAYLIST_VIDEO_SORT_OPTIONS: SortSwitchOption<PlaylistVideoSortBy>[] = [
   { value: 'release_date', label: '发行', title: '发行日期' }
 ]
 
-function playlistDetailCover(detail: PlaylistMetadata): string | null {
-  return assetUrl(
-    detail.cover_path ?? detail.preview_cover_path ?? null
-  )
-}
-
 export default function PlaylistDetailPage(): JSX.Element {
   const { playlistId: playlistIdParam } = useParams()
   const playlistId = Number(playlistIdParam)
+  const recent = playlistId === RECENT_PLAYBACK_LIST_ID
+  const { session } = useDesktopSession()
+  const recentScope = recent ? JSON.stringify([session.mode, session.serverId, session.catalogId, session.generation]) : null
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const toast = useToast()
   const playlistImport = usePlaylistImport()
   const videoStackOpen = Boolean(useMatch({ path: ROUTE_MATCH.playlistVideoStack, end: false }))
-  const [detail, setDetail] = useState<PlaylistMetadata | null>(null)
+  const [detail, setDetail] = useState<(PlaylistMetadata & { local_kind?: 'recently_played' }) | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [recentLoadedScope, setRecentLoadedScope] = useState<string | null>(null)
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const requestSequence = useRef(0)
   const metadataCache = useRef<{ key: string; value: PlaylistMetadata | null } | null>(null)
+  const displayedMetadataKey = useRef<string | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [savingPlayback, setSavingPlayback] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const [videoRemoveTarget, setVideoRemoveTarget] = useState<VideoCard | null>(null)
   const [removingVideoId, setRemovingVideoId] = useState<number | null>(null)
   const [videoSortBy, setVideoSortBy] = useState<PlaylistVideoSortBy>('added_at')
@@ -72,10 +77,13 @@ export default function PlaylistDetailPage(): JSX.Element {
   const [resourceFilterOpen, setResourceFilterOpen] = useState(false)
   const resourceFilterButtonRef = useRef<HTMLButtonElement>(null)
   const previousVideoStackOpenRef = useRef(videoStackOpen)
-  const resourceFilters = parseVideoResourceFilters(searchParams.get(LIST_PARAM.resources))
+  const resourceFilteringAllowed = !recent && !(detail?.id === playlistId && detail.system_kind === 'watch_later')
+  const rawResourceFilters = searchParams.get(LIST_PARAM.resources)
+  const resourceFilters = useMemo(() => resourceFilteringAllowed ? parseVideoResourceFilters(rawResourceFilters) : [],
+    [resourceFilteringAllowed, rawResourceFilters])
   const resourceFilterKey = videoResourceFiltersParam(resourceFilters)
-  const metadataKey = JSON.stringify([playlistId, videoSortBy, videoSortDir])
-  const loadKey = JSON.stringify([playlistId, videoSortBy, videoSortDir, resourceFilterKey])
+  const metadataKey = JSON.stringify([playlistId, videoSortBy, videoSortDir, recentScope])
+  const loadKey = JSON.stringify([playlistId, videoSortBy, videoSortDir, resourceFilterKey, recentScope])
   const activeLoadKey = useRef(loadKey)
   activeLoadKey.current = loadKey
 
@@ -94,24 +102,29 @@ export default function PlaylistDetailPage(): JSX.Element {
     const sequence = ++requestSequence.current
     if (refreshMetadata) metadataCache.current = null
     setLoading(true)
+    setLoadError(null)
     try {
       const cached = metadataCache.current
       const metadata = !refreshMetadata && cached?.key === metadataKey
         ? cached.value
-        : await api.playlists.metadata(playlistId, videoSortBy, videoSortDir)
+        : recent ? await api.recentPlayback.metadata() : await api.playlists.metadata(playlistId, videoSortBy, videoSortDir)
       if (sequence !== requestSequence.current || activeLoadKey.current !== loadKey) return
       metadataCache.current = { key: metadataKey, value: metadata }
+      displayedMetadataKey.current = metadataKey
       setDetail(metadata)
+      setRecentLoadedScope(recentScope)
       if (refreshMetadata) refreshVideos.current()
       setLoadedKey(loadKey)
     } catch (e) {
       if (sequence !== requestSequence.current || activeLoadKey.current !== loadKey) return
       toast.show(String((e as Error).message), 'error')
-      setDetail(null)
+      setLoadError((e as Error).message)
+      setRecentLoadedScope(recentScope)
+      if (!recent || displayedMetadataKey.current !== metadataKey) setDetail(null)
     } finally {
       if (sequence === requestSequence.current && activeLoadKey.current === loadKey) setLoading(false)
     }
-  }, [playlistId, toast, videoSortBy, videoSortDir, loadKey, metadataKey])
+  }, [playlistId, recent, recentScope, toast, videoSortBy, videoSortDir, loadKey, metadataKey])
 
   const invalidatePendingRequest = useCallback(() => {
     requestSequence.current++
@@ -125,6 +138,7 @@ export default function PlaylistDetailPage(): JSX.Element {
   useEffect(() => onPlaylistImportCompleted((completedPlaylistId) => {
     if (completedPlaylistId === playlistId) void loadDetail()
   }), [loadDetail, playlistId])
+  useEffect(() => recent ? api.recentPlayback.onChanged(() => { void loadDetail() }) : undefined, [recent, loadDetail])
 
   useEffect(() => {
     const raw = searchParams.get(LIST_PARAM.resources)
@@ -151,12 +165,14 @@ export default function PlaylistDetailPage(): JSX.Element {
     )
   }, [setSearchParams])
 
-  const videoSession = `${playlistId}:${videoSortBy}:${videoSortDir}:${resourceFilterKey}`
+  const videoSession = `${playlistId}:${videoSortBy}:${videoSortDir}:${resourceFilterKey}:${recentScope ?? ''}`
   const { offset: relatedOffset, move: moveRelated, align: alignRelated } = useRelatedVideoOffset(videoSession)
-  const videos = useContinuousPage(JSON.stringify(['playlist-videos', playlistId, videoSortBy, videoSortDir, resourceFilterKey]), 60, async offset => {
-    const result = await api.playlists.videoPage(playlistId, { sortBy: videoSortBy, sortDir: videoSortDir, resourceKinds: parseVideoResourceFilters(resourceFilterKey), limit: 60, offset })
+  const videos = useContinuousPage(JSON.stringify(['playlist-videos', playlistId, videoSortBy, videoSortDir, resourceFilterKey, recentScope]), 60, async offset => {
+    const query = { resourceKinds: parseVideoResourceFilters(resourceFilterKey), limit: 60, offset }
+    const result = recent ? await api.recentPlayback.page(query)
+      : await api.playlists.videoPage(playlistId, { ...query, sortBy: videoSortBy, sortDir: videoSortDir })
     return result ? { ...result, unfilteredTotal: result.total, items: result.videos, total: result.filteredTotal } : null
-  }, true, relatedOffset)
+  }, displayedMetadataKey.current === metadataKey, relatedOffset)
   const refreshVideos = useRef(videos.reload); refreshVideos.current = videos.reload
   useEffect(() => { alignRelated(videos.known, videos.total) }, [alignRelated, videos.known, videos.total])
 
@@ -170,6 +186,18 @@ export default function PlaylistDetailPage(): JSX.Element {
 
   const deletePlaylist = async (): Promise<void> => {
     if (!detail) return
+    if (recent) {
+      if (clearing) return
+      setClearing(true)
+      try {
+        await api.recentPlayback.clear()
+        await loadDetail()
+        setConfirmDelete(false)
+        toast.show('本机最近播放已清空', 'success')
+      } catch (error) { toast.show((error as Error).message, 'error') }
+      finally { setClearing(false) }
+      return
+    }
     try {
       await api.playlists.remove(detail.id, expectedPlaylistVersion(detail))
       setConfirmDelete(false)
@@ -184,7 +212,8 @@ export default function PlaylistDetailPage(): JSX.Element {
     if (!detail || removingVideoId !== null) return
     setRemovingVideoId(video.id)
     try {
-      await api.playlists.removeVideo(detail.id, video.id, expectedPlaylistVersion(detail))
+      if (recent) await api.recentPlayback.remove(video.id)
+      else await api.playlists.removeVideo(detail.id, video.id, expectedPlaylistVersion(detail))
       await loadDetail()
       setVideoRemoveTarget(null)
       toast.show(`已从清单移出 ${video.code}`, 'success')
@@ -195,9 +224,6 @@ export default function PlaylistDetailPage(): JSX.Element {
     }
   }
 
-  const renderCover = (cover: string | null, label: string): JSX.Element =>
-    cover ? <img src={cover} alt={label} /> : <span>无封面</span>
-
   const videoOverlay =
     videoStackOpen ? (
       <DetailPaneOverlay>
@@ -205,7 +231,7 @@ export default function PlaylistDetailPage(): JSX.Element {
       </DetailPaneOverlay>
     ) : null
 
-  if (loading && (!detail || detail.id !== playlistId)) {
+  if (recent && recentLoadedScope !== recentScope || loading && (!detail || detail.id !== playlistId)) {
     return (
       <DetailPane stacked={videoStackOpen}>
         <EmptyState loading />
@@ -220,16 +246,18 @@ export default function PlaylistDetailPage(): JSX.Element {
         <DetailScrollBody onBack={() => navigateToPlaylistList(navigate, location)}>
           <EmptyState
             icon={<SearchX {...UI_ICON} aria-hidden />}
-            title="未找到该清单"
-            description="该播放清单可能已被删除。"
-          />
+            title={recent && loadError ? '本机最近播放加载失败' : '未找到该清单'}
+            description={recent && loadError ? loadError : '该播放清单可能已被删除。'}
+          >
+            {recent && loadError && <Button onClick={() => void loadDetail()}>重试</Button>}
+          </EmptyState>
         </DetailScrollBody>
         {videoOverlay}
       </DetailPane>
     )
   }
 
-  const cover = playlistDetailCover(detail)
+  const cover = playlistCoverSource(detail)
 
   return (
     <DetailPane stacked={videoStackOpen}>
@@ -237,13 +265,13 @@ export default function PlaylistDetailPage(): JSX.Element {
 
           <div className={styles.root} data-playlist-detail>
             <div className={styles.head}>
-              <PlaylistCover variant="detail">{renderCover(cover, detail.name)}</PlaylistCover>
+              <PlaylistCover variant="detail" playlist={detail} />
               <div className={styles.main}>
                 <div className={styles.kicker}>清单</div>
                 <h2 className={styles.title}>{detail.name}</h2>
                 <div className={styles.metaRow}>
                   <span className={styles.metaBadge}>{(videos.page?.unfilteredTotal ?? 0)} 部影片</span>
-                  <span className={styles.metaBadge}>{detail.cover_path ? '自定义封面' : '自动封面'}</span>
+                  <span className={styles.metaBadge}>{cover.kind === 'custom' ? '自定义封面' : cover.kind === 'builtin' ? '默认封面' : '自动封面'}</span>
                 </div>
                 {detail.description ? (
                   <p className={styles.description}>{detail.description}</p>
@@ -256,8 +284,8 @@ export default function PlaylistDetailPage(): JSX.Element {
                 <DetailActionBar
                   ariaLabel="清单操作"
                   variant="inline"
-                  actions={[
-                    {
+                  actions={recent ? [{ key: 'clear', icon: <Trash2 {...UI_ICON} />, label: '清空历史', onClick: () => setConfirmDelete(true) }] : [
+                    ...(!detail.system_kind ? [{
                       key: 'import',
                       icon: <Import {...UI_ICON} />,
                       label: '从网页导入',
@@ -268,7 +296,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                           playlistName: detail.name
                         }
                       })
-                    },
+                    }] : []),
                     {
                       key: 'edit',
                       icon: <Pencil {...UI_ICON} />,
@@ -276,7 +304,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                       onClick: () => setShowEdit(true)
                     }
                   ]}
-                  menuItems={detail.system_kind ? [] : [
+                  menuItems={recent || detail.system_kind ? [] : [
                     {
                       key: 'delete',
                       label: '删除播放清单',
@@ -285,6 +313,22 @@ export default function PlaylistDetailPage(): JSX.Element {
                     }
                   ]}
                 />
+                {detail.system_kind === 'watch_later' && <label className={styles.playbackToggle}>
+                  播放后移除
+                  <Switch aria-label="播放后移除" checked={detail.remove_after_play === 1} disabled={savingPlayback}
+                    onChange={async event => {
+                      const removeAfterPlay = event.target.checked
+                      setSavingPlayback(true)
+                      try {
+                        await api.playlists.update(detail.id, { name: detail.name, description: detail.description, removeAfterPlay }, expectedPlaylistVersion(detail))
+                        const metadata = await api.playlists.metadata(detail.id, videoSortBy, videoSortDir)
+                        if (activeLoadKey.current !== loadKey) return
+                        metadataCache.current = { key: metadataKey, value: metadata }
+                        setDetail(metadata)
+                      } catch (error) { toast.show((error as Error).message, 'error') }
+                      finally { setSavingPlayback(false) }
+                    }} />
+                </label>}
               </div>
             </div>
 
@@ -298,22 +342,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 ) : null}
               </div>
               <div className={styles.sectionControls}>
-                {detail.system_kind === 'watch_later' && <label className={styles.sectionControls}>
-                  <Switch aria-label="播放后移除" checked={detail.remove_after_play === 1} disabled={savingPlayback}
-                    onChange={async event => {
-                      const removeAfterPlay = event.target.checked
-                      setSavingPlayback(true)
-                      try {
-                        await api.playlists.update(detail.id, { name: detail.name, description: detail.description, removeAfterPlay }, expectedPlaylistVersion(detail))
-                        const metadata = await api.playlists.metadata(detail.id, videoSortBy, videoSortDir)
-                        metadataCache.current = { key: metadataKey, value: metadata }
-                        setDetail(metadata)
-                      } catch (error) { toast.show((error as Error).message, 'error') }
-                      finally { setSavingPlayback(false) }
-                    }} />
-                  播放后移除
-                </label>}
-                <Button
+                {resourceFilteringAllowed && <Button
                   ref={resourceFilterButtonRef}
                   type="button"
                   size="sm"
@@ -323,8 +352,8 @@ export default function PlaylistDetailPage(): JSX.Element {
                 >
                   <Filter {...UI_ICON} aria-hidden />
                   资源筛选{resourceFilters.length > 0 ? ` · ${resourceFilters.length}` : ''}
-                </Button>
-                {detail.system_kind === 'watch_later' ? <span>按加入时间 · 最早在前</span> : <SortSwitch
+                </Button>}
+                {recent ? <span>按最近播放 · 最新在前</span> : detail.system_kind === 'watch_later' ? <span>按加入时间 · 最早在前</span> : <SortSwitch
                   label="清单影片排序"
                   options={PLAYLIST_VIDEO_SORT_OPTIONS}
                   value={videoSortBy}
@@ -345,7 +374,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 variant="compact"
                 icon={<Inbox {...UI_ICON} aria-hidden />}
                 title="清单内暂无影片"
-                description="可在影片详情页通过「加入清单」添加。"
+                description={recent ? '在本机播放影片后会自动出现在这里。' : '可在影片详情页通过「加入清单」添加。'}
               />
             ) : videos.total === 0 ? (
               <EmptyState
@@ -359,22 +388,26 @@ export default function PlaylistDetailPage(): JSX.Element {
             ) : (
               <ContinuousPosterGrid window={videos.window} initialIndex={relatedOffset} onAnchor={index => moveRelated(Math.floor(index / 60) * 60)} scope={`playlist-videos:${playlistId}:${videoSortBy}:${videoSortDir}:${resourceFilterKey}`} onRemove={setVideoRemoveTarget} removeDisabled={removingVideoId !== null} />
             )}
+            {recent && loadError && <NoticeBanner tone="warning" role="alert">
+              <NoticeBannerCopy title="最近播放更新失败" body={`正在显示上次读取的记录。${loadError}`} />
+              <NoticeBannerActions><Button size="sm" onClick={() => void loadDetail()}>重试</Button></NoticeBannerActions>
+            </NoticeBanner>}
           </div>
       </DetailScrollBody>
 
-      <PlaylistResourceFilterPopover
+      {resourceFilteringAllowed && <PlaylistResourceFilterPopover
         id={`playlist-resource-filter-${detail.id}`}
         open={resourceFilterOpen}
         anchorRef={resourceFilterButtonRef}
         value={resourceFilters}
         onChange={setResourceFilters}
         onClose={() => setResourceFilterOpen(false)}
-      />
+      />}
 
       {showEdit && (
         <PlaylistCreateModal
           playlist={detail}
-          currentCoverUrl={playlistDetailCover(detail)}
+          currentCoverUrl={cover.url}
           onCancel={() => setShowEdit(false)}
           onUpdate={updatePlaylist}
         />
@@ -382,13 +415,14 @@ export default function PlaylistDetailPage(): JSX.Element {
 
       {confirmDelete && (
         <Modal
-          title="删除播放清单"
+          title={recent ? '清空本机最近播放' : '删除播放清单'}
           danger
-          confirmText="删除"
+          confirmText={recent ? '清空' : '删除'}
+          busy={clearing}
           onConfirm={() => void deletePlaylist()}
           onCancel={() => setConfirmDelete(false)}
         >
-          确定删除「{detail.name}」？不会删除清单中的影片资源。
+          {recent ? '仅清空此设备在当前资料库的播放历史，不删除影片、续播进度或其他设备记录。' : `确定删除「${detail.name}」？不会删除清单中的影片资源。`}
         </Modal>
       )}
 

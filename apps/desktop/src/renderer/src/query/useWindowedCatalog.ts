@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueries, type QueryKey } from '@tanstack/react-query'
+import { BROWSE_WINDOW_PAGES, createBrowseAnchorMemory, retainBrowsePages } from '../listView/browseWindow'
+import { useBrowseSession } from '../listView/useBrowseSession'
 
-export const CATALOG_WINDOW_PAGES = 3
+export const CATALOG_WINDOW_PAGES = BROWSE_WINDOW_PAGES
 export interface CatalogWindow<T> {
   total: number
   getItem(index: number): T | undefined
@@ -12,11 +14,7 @@ export interface CatalogWindow<T> {
   error: boolean
 }
 interface Page<T> { items: T[]; total: number; readRevision?: string }
-const positions = new Map<string, number>()
-function remember(key: string, offset: number): void {
-  positions.delete(key); positions.set(key, offset)
-  while (positions.size > 20) positions.delete(positions.keys().next().value!)
-}
+const positions = createBrowseAnchorMemory<number>()
 
 /** At most three observed pages per mounted surface. Unobserved pages are collected
  * immediately; cursor memory stores only twenty numeric anchors, never card DTOs.
@@ -29,11 +27,7 @@ export function useWindowedCatalog<T extends { id: number }, P extends Page<T>>(
   const [position, setPosition] = useState(() => ({ key, offsets: [positions.get(key) ?? 0], focus: positions.get(key) ?? 0 }))
   const state = position.key === key ? position : { key, offsets: [0], focus: 0 }
   const readRef = useRef(readPage); readRef.current = readPage
-  const scope = useRef({ key, generation: 0 })
-  if (scope.current.key !== key) scope.current = { key, generation: scope.current.generation + 1 }
-  const generation = scope.current.generation
-  const alive = useRef(true)
-  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  const session = useBrowseSession(key, enabled)
   const totalRef = useRef({ key, total: 0, known: false })
   if (totalRef.current.key !== key) totalRef.current = { key, total: 0, known: false }
   const results = useQueries({ queries: state.offsets.map(offset => ({
@@ -51,17 +45,12 @@ export function useWindowedCatalog<T extends { id: number }, P extends Page<T>>(
   const total = totalRef.current.total
   const onVisibleRange = useCallback((start: number, end: number) => {
     if (!enabled || !Number.isFinite(start) || !Number.isFinite(end)) return
-    const first = Math.floor(Math.max(0, start) / pageSize) * pageSize
-    const last = Math.floor(Math.max(start, end) / pageSize) * pageSize
-    const wanted: number[] = []
-    for (let offset = first; offset <= last && wanted.length < CATALOG_WINDOW_PAGES; offset += pageSize) {
-      if (!totalRef.current.known || offset < totalRef.current.total || offset === 0) wanted.push(offset)
-    }
-    if (!wanted.length) wanted.push(Math.max(0, Math.floor((totalRef.current.total - 1) / pageSize) * pageSize))
-    remember(key, wanted[0])
+    const knownTotal = totalRef.current.known ? totalRef.current.total : undefined
+    const wanted = retainBrowsePages(start, end, pageSize, [], knownTotal)
+    positions.remember(key, wanted[0])
     setPosition(previous => {
       const old = previous.key === key ? previous.offsets : []
-      const offsets = [...wanted, ...old.filter(offset => !wanted.includes(offset))].slice(0, CATALOG_WINDOW_PAGES)
+      const offsets = retainBrowsePages(start, end, pageSize, old, knownTotal)
       if (previous.key === key && previous.focus === wanted[0] && offsets.length === previous.offsets.length && offsets.every((offset, i) => offset === previous.offsets[i])) return previous
       return { key, offsets, focus: wanted[0] }
     })
@@ -74,12 +63,13 @@ export function useWindowedCatalog<T extends { id: number }, P extends Page<T>>(
   const items = [...pageMap].sort(([a], [b]) => a - b).flatMap(([, page]) => page.items)
   const getItem = (index: number): T | undefined => pageMap.get(Math.floor(index / pageSize) * pageSize)?.items[index % pageSize]
   const readRange = async (start: number, end: number, signal?: AbortSignal): Promise<{ id: number }[]> => {
+    const ticket = session.begin(key)
     if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(end) || end <= start || end > total) throw new Error('选择范围已变化，请重新选择')
     const rows: { id: number }[] = [], seen = new Set<number>()
     let revision: string | undefined
     let firstPage = true
     const checkActive = () => {
-      if (signal?.aborted || !alive.current || scope.current.key !== key || scope.current.generation !== generation) throw new Error('选择已取消')
+      if (signal?.aborted || !session.isCurrent(ticket)) throw new Error('选择已取消')
     }
     // Read one page at a time, outside the browsing cache; retain only identities.
     for (let offset = Math.floor(start / pageSize) * pageSize; offset < end; offset += pageSize) {

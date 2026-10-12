@@ -33,6 +33,7 @@
 - `/playlists`: 清单列表。
 - `/playlists/:playlistId`: 清单详情。
 - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
+- `/playlists/0`：桌面本机“最近播放”虚拟清单，复用详情与嵌套影片返回栈；`0` 不是资料库清单 ID，只调用独立的桌面历史接口，不传给资料库清单读写或选择器。
 - `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。扫描组合队列使用 `scanOffset`，刮削队列使用 `scrapeOffset`，演员队列使用 `actressOffset` 保存分页位置；扫描 `item=scan:<id>` / `item=scan:identity-<id>` 在所选 `lib` 的活动库范围内定位。`item=scrape:<id>` 或 `videoId` 深链接由服务端定位所在页，删除后的越界页回退到最后一页。演员 `item=actress:<normalizedName>` 使用完整名称定位所在页；`queue` 标记翻页目标领域，避免全部视图跳到其他队列。列表只读概要，URL 选中项及分页偏移规范化后才加载单项候选详情。
 - `/actresses/conflicts`: 旧的演员冲突入口，重定向到 `/pending?type=actress`。
 - `/pending/video/:videoId`: 从待确认工作台打开影片详情。
@@ -135,13 +136,24 @@
 
 ## Settings History
 
-设置工作区使用 Data Router 的 hash history，使 `SettingsLeaveGuard` 能统一阻止未保存表单的路由跳转。应用根由 `createHashRouter` / `RouterProvider` 提供，原有 `App` 内嵌路由树继续负责页面布局。
+设置工作区使用 Data Router 的 hash history。`NavigationGuardProvider` 持有唯一 `useBlocker`，组合设置未保存表单和插件未安装更改的离开保护；各功能只注册当前条件和确认决策，不创建额外 blocker 或 history trap。应用根由 `createHashRouter` / `RouterProvider` 提供，原有 `App` 内嵌路由树继续负责页面布局。
 
-设置子页统一写入路径：`models/usage`、`models/providers`、`models/advanced`；`plugins/video`、`plugins/actress`；`storage/mode`、`storage/assets`、`storage/export`。旧 `network/mode` 入口用 replace 跳转至 `storage/mode`。媒体库作用域继续使用现有 query，构建目标路径时保留该作用域，不在子面板维护第二套页签状态。
+设置子页统一写入路径：`models/usage`（用途配置）、`models/providers`、`models/local`；`plugins/video`、`plugins/actress`；`storage/mode`、`storage/assets`、`storage/export`。旧 `network/mode` 入口用 replace 跳转至 `storage/mode`，旧 `models/advanced` 跳转至 `models/providers`，能力与上限在提供商的模型详情中编辑。媒体库作用域继续使用现有 query，构建目标路径时保留该作用域，不在子面板维护第二套页签状态。
+
+AI 服务三页签之间保留已挂载的用途草稿；下载跳转用 `model`、`variant` query 定位文件，返回用途配置删除这两个定位参数并保留其余作用域。用途表单仅对这些确实保持挂载的目标声明 `preserveOnNavigate`；离开 AI 服务、关闭窗口及保存中的导航仍执行原离开保护。播放器的字幕模型入口定位 `models/usage#ai-subtitles`。
 
 ## Overlay History
 
 需要响应系统后退、鼠标返回键或 macOS 返回手势的全屏 overlay，不能在组件 Effect cleanup 中直接调用 `history.back()`。History 所有权、实例 token、关闭来源和跨平台测试规范见 [`IMAGE_PREVIEW_HISTORY_DESIGN.md`](IMAGE_PREVIEW_HISTORY_DESIGN.md)。
+
+`interaction/overlayHistory.ts` 是图片预览和内置播放观看层的唯一临时历史写入器，`OverlayHistoryProvider` 提供稳定应用级所有者。`avOverlay` 只包含 `kind/token`，保留 Router 的 `key/idx/usr`；图片层兼容保留 `avImagePreview`，播放层不带入该标记。不得把回调、影片来源或授权写入浏览器状态。
+
+- 打开由显式图片动作或 main 已提交的播放展示变化触发；订阅、普通时钟更新和 React cleanup 不导航。
+- 系统 pop 只关闭已弹出的层，不再后退。主动关闭一次消费所属层及子层；旧异步遍历未完成前，新 token 排队，不能被迟到的旧事件关闭。事件 marker 必须与实时游标一致，fallback 已结算后到达的旧事件不能确认新的遍历。超时检查不发起第二次后退。
+- 返回先关闭选项、退出全屏或收起展开播放，底栏继续同一会话且不拦截业务页面返回。离开业务路由只释放旧观看层，不额外后退，也不由前进标记复活已结束的层。
+- `NavigationGuardProvider` 忽略同一 pathname/search 的临时观看历史；真正离开时顺序组合草稿保护。主动关闭的遍历尚未完成时，业务跳转等待其结算，避免返回两次。待处理的业务目标与已确认草稿独立于 Router 的临时 blocker 状态保存；只继续当前有效 blocker，重放必须保留 PUSH／REPLACE／POP 的原始语义、目标 state 和历史游标，不能把 POP 降级为 PUSH。取消、卸载和新的业务目标使旧等待失效。
+
+主进程 `windowNavigation.ts` 将 Windows/Linux Alt+Left/Right、macOS ⌘[/⌘]、系统 app-command 和 Electron 的 legacy swipe 统一导向真实浏览器历史；macOS Option+Left/Right 保留系统文本按词编辑行为。原生播放器只提交受限 back/forward 动作，策略仍由 renderer 的历史与离开保护所有者决定。macOS 原生键位识别兼容中文输入源的【/】字符。[Electron legacy swipe](https://raw.githubusercontent.com/electron/electron/v43.4.1/docs/api/browser-window.md) 不是现代双指手势的支持承诺；后者及物理鼠标返回键仍需实机验收。
 
 ### 清单、分类与关联影片连续浏览
 

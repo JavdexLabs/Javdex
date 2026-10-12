@@ -24,7 +24,7 @@ export default function BuiltinPlaylistButton({ video, kind, className = '' }: {
     window.addEventListener('builtin-playlist-changed', listener)
     return () => window.removeEventListener('builtin-playlist-changed', listener)
   }, [kind, video.id])
-  const name = kind === 'favorites' ? '我喜欢' : '稍后观看'
+  const name = kind === 'favorites' ? '收藏' : '稍后观看'
   return <IconButton className={`${className} ${kind === 'watch_later' ? styles.watch : ''} ${selected ? (kind === 'favorites' ? styles.favorite : styles.selected) : ''}`}
     icon={kind === 'favorites' ? <Heart {...UI_ICON} fill={selected ? 'currentColor' : 'none'} /> : <Clock {...UI_ICON} />}
     label={`${selected ? '移出' : '加入'}${name}`} title={`${selected ? '移出' : '加入'}${name}`}

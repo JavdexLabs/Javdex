@@ -256,6 +256,39 @@
   min-width: 0;
 }
 
+.pairSteps {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-self: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.pairStep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pairStepNumber {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--surface-control);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .pairSlot[data-confirming="true"] {
   align-items: center;
 }

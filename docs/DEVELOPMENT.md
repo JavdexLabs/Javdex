@@ -54,7 +54,7 @@ npm start               # 预览生产构建
 node scripts/run-electron-tests.mjs packages/library/src/nfo/nfoArtifactCodec.test.ts
 ```
 
-测试应验证真实模块的输出、交互或外部副作用。不要用 JSX 源码字符串、固定控件总数或逐项复制 CSS 声明代替行为验证；虚拟列表行高等跨模块数值约束可以保留。类型契约使用 `*.typecheck.ts`，由 TypeScript 检查，不交给运行时测试器计数。平台或系统能力不满足时应明确 `skip` 并注明原因，不能直接返回并计为通过。清理记录与保留依据见 [测试检视记录](TEST_AUDIT_2026-09-27.md)。
+测试应验证真实模块的输出、交互或外部副作用。不要用 JSX 源码字符串、固定控件总数或逐项复制 CSS 声明代替行为验证；虚拟列表行高等跨模块数值约束可以保留。类型契约使用 `*.typecheck.ts`，由 TypeScript 检查，不交给运行时测试器计数。平台或系统能力不满足时应明确 `skip` 并注明原因，不能直接返回并计为通过。清理测试时保留已发布升级、故障回滚、权限边界及不同宿主的端到端验证；仅在断言不能验证声称的行为或有更完整的同路径覆盖时删除，不能因短小、较慢或存在平台跳过而删除。
 
 `npm run build` 生成 `out/`，并校验人脸检测资源与 Pi 运行时。生产构建通过不等于各平台安装包已完成验证。
 
@@ -64,7 +64,7 @@ node scripts/run-electron-tests.mjs packages/library/src/nfo/nfoArtifactCodec.te
 
 仅调整新连接的默认协议或地址时，不触发目录刷新，也不覆盖已保存连接。MiniMax 新连接使用 Anthropic Messages；同一连接内的新模型沿用该连接协议，不强制将已有 Chat 连接的模型切换为 Messages。MiniMax 的连接测试与短文本翻译预留思考预算；Pi 注册该供应商时允许无签名 thinking 块，工具后续轮次及恢复保持其内容类型。
 
-桌面构建同时生成 renderer manifest 并运行 `measure:renderer`：按静态依赖闭包去重统计 JS/CSS 与 gzip 字节，检查设置页及四个低频面板仍为延迟 chunk。该报告衡量产物体积，不宣称已验证启动时间或内存收益。职责边界、阶段计划与本轮证据见 [UI 架构优化记录](UI_ARCHITECTURE_OPTIMIZATION.md)。
+桌面构建同时生成 renderer manifest 并运行 `measure:renderer`：按静态依赖闭包去重统计 JS/CSS 与 gzip 字节，检查设置页及四个低频面板仍为延迟 chunk。该报告衡量产物体积，不宣称已验证启动时间或内存收益。UI 职责和样式约定见 [组件契约](UI_COMPONENT_CONTRACTS.md)，返回栈与浏览状态见 [路由设计](ROUTING_DESIGN.md)。
 
 ## 打包与发布
 
@@ -205,7 +205,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 桌面 Agent 工作记录与正式 catalog 使用独立连接：启动在 composition root 显式绑定运行存储和草稿仓储，远程模式只打开 workStore。远程 Agent 预览发送无本机路径的候选摘要，应用时只上传已选资源；服务端不得接管 Agent runtime 或依赖桌面草稿表。本地影片详情、演员编辑及清单正式写入与 Node 宿主共用 library 用例；传输权限、资源输入及能力差异仍由宿主负责，业务 schema 由 contracts 提供。新增工作记录访问不能回退到 `getDb()`，也不能通过 SQL 表名改写选择数据库。
 
-草稿应用、丢弃和影片删除后的工作清理依靠持久意图、catalog 回执及可重试清理恢复，不依赖跨库原子性。首次旧记录迁移保留源数据，ready 后不再复制。具体连接归属和提交顺序见 [服务端合同中的工作存储说明](SERVER_MODE_CONTRACT_INVENTORY.md#桌面工作存储与恢复)，实施与验收证据见 [架构优化方案](ARCHITECTURE_SIMPLIFICATION_PLAN.md)。涉及这些路径时，用独立 catalog/work 数据库及关闭重开测试验证恢复；同库测试不能代替跨存储验证。
+草稿应用、丢弃和影片删除后的工作清理依靠持久意图、catalog 回执及可重试清理恢复，不依赖跨库原子性。首次旧记录迁移保留源数据，ready 后不再复制。具体连接归属和提交顺序见 [服务端合同中的工作存储说明](SERVER_MODE_CONTRACT_INVENTORY.md#桌面工作存储与恢复)。涉及这些路径时，用独立 catalog/work 数据库及关闭重开测试验证恢复；同库测试不能代替跨存储验证。
 
 ### 0.8.0 后的四项维护性优化
 
@@ -240,7 +240,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 局域网 Web 移动端 | [移动端 Web 规范](MOBILE_WEB_GUIDELINES.md) |
 | 服务端模式部署与双模式 | [服务端模式](SERVER_MODE.md)、[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) |
 | 服务端模式现状与实现 | [当前状态与后续范围](SERVER_MODE_NEXT_STEPS.md)、[实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md) |
-| 共享用例、合同与工作存储优化（已完成，保留历史范围与验收） | [架构优化方案](ARCHITECTURE_SIMPLIFICATION_PLAN.md) |
+| 共享用例、合同与工作存储 | [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md#共享用例与结果校验) |
 | 服务端历史研究与验收证据 | [归档索引](archive/server-mode/README.md) |
 | 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |
 | 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |
@@ -253,6 +253,8 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 第三方集成与许可 | [第三方说明](THIRD_PARTY_NOTICES.md)、[GPL v3 或后续版本](../LICENSE)、[项目声明](../NOTICE) |
 
 提交改动时说明解决的问题、最终行为和验证结果。用户可见的功能与入口变化应同步更新使用指南；README 保持产品概览，版本细节记录在更新日志，实现约束留在对应设计文档。
+
+过程计划和回检记录完成后，将仍有效的约定并入对应设计、合同或使用文档，再删除重复记录；历史原文可从 Git 查阅。仍有未完成验收的记录、发布来源与产物核验、性能基准及第三方许可证据继续保留，不因单轮检查通过而视为全部完成。
 
 ### 局域网 Web 端
 

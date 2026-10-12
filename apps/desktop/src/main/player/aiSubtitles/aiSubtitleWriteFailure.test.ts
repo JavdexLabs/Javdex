@@ -125,3 +125,83 @@ test('a failed ASS write waits for explicit retry despite later scheduler public
     await fs.rm(root, { recursive: true, force: true })
   }
 })
+
+test('explicit retry during failed write completion redraws without another scheduler publication', { timeout: 5000 }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-retry-completion-'))
+  const playback = {
+    sessionId: 'retry-completion', phase: 'playing', seekable: true, duration: 60, position: 0, tracks: []
+  } as unknown as PlaybackSnapshot
+  const source: PlaybackSource = {
+    target: { libraryId: 1, videoId: 1, resourceId: 1 }, mode: 'local',
+    locator: path.join(root, 'fixture.mp4'), identityKey: 'retry-completion', resumeKey: 'retry-completion',
+    revision: 'one', title: 'fixture'
+  }
+  const writes: string[] = []
+  const updates: Array<{ filename: string; document: string }> = []
+  const recognizedStarts: number[] = []
+  let releaseFailedWrite!: () => void
+  const failedWrite = new Promise<void>(resolve => { releaseFailedWrite = resolve })
+  let nextChunkPaused = false
+  let retry: Promise<AiSubtitleSnapshot> | null = null
+  const rename = fs.rename
+  t.mock.method(fs, 'rename', async (from: Parameters<typeof fs.rename>[0], to: Parameters<typeof fs.rename>[1]) => {
+    if (typeof to === 'string' && to.startsWith(`${root}${path.sep}`) && to.endsWith('.ass')) {
+      writes.push(to)
+      if (writes.length === 1) {
+        await failedWrite
+        throw new Error('fixture first ASS rename denied')
+      }
+    }
+    await rename(from, to)
+  })
+  const native: NativePlayback = {
+    create: () => {}, load: () => {}, command: () => {}, read: () => ({ alive: true }),
+    viewport: () => {}, render: () => {}, addSubtitle: () => {}, destroy: () => {},
+    selectedAudioStream: () => 1,
+    updateGeneratedSubtitle: filename => { updates.push({ filename, document: readFileSync(filename, 'utf8') }) }
+  }
+  const runtime = createAiRuntimeInstaller(path.join(root, 'models'))
+  const controller = createAiSubtitleController({
+    root, native, runtime: { installed: async () => true, paths: runtime.paths },
+    playback: () => playback, source: () => source, resolve: async value => value, exportFile: async () => {},
+    changed: value => {
+      // The public command resumes after initialization, before the failed render's finalizer.
+      if (value.error && retry === null) retry = controller.command(playback.sessionId, { action: 'retry' })
+    },
+    inference: () => ({
+      probe: async (_locator, index) => ({ index, identity: 'fixture-audio' }),
+      recognize: async (_locator, _index, start, _end, signal) => {
+        recognizedStarts.push(start)
+        if (start === 0) return [{ start: 0, end: 2, japanese: 'こんにちは' }]
+        assert.equal(start, 30)
+        return new Promise<SubtitleCue[]>((_resolve, reject) => {
+          const abort = (): void => { reject(signal.reason) }
+          signal.addEventListener('abort', abort, { once: true })
+          nextChunkPaused = true
+          if (signal.aborted) abort()
+        })
+      },
+      translate: async cues => cues.map(cue => ({ ...cue, chinese: '你好' })),
+      translateText: async () => '你好', close: async () => {}
+    })
+  })
+  try {
+    await controller.command(playback.sessionId, { action: 'start' })
+    await until(() => nextChunkPaused && writes.length === 1)
+    releaseFailedWrite()
+    await until(() => retry !== null)
+    const retried = await retry!
+    assert.equal(retried.error, null)
+    await until(() => updates.length > 0)
+    assert.equal(updates.length, 1, 'explicit retry must redraw even when the failed render has not released its Promise')
+    assert.deepEqual(writes, [writes[0], writes[0]], 'retry must write the same track once')
+    assert.equal(updates[0].filename, writes[0])
+    assert.match(updates[0].document, /こんにちは/)
+    assert.match(updates[0].document, /你好/)
+    assert.deepEqual(recognizedStarts, [0, 30], 'display retry must not repeat ASR')
+  } finally {
+    releaseFailedWrite()
+    await controller.close()
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})

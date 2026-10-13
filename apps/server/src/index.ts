@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(issued)}\n`)
     return
   }
-  const server = await startJavdexServer(config, { bootstrapToken })
+  const server = await startJavdexServer(config, { bootstrapToken, updateJobId: process.env.JAVDEX_UPDATE_JOB?.trim() || undefined })
   process.stdout.write(`javdex-server listening on ${config.listenHost}:${server.port}\n`)
   let stopping = false
   const shutdown = (signal: NodeJS.Signals): void => {

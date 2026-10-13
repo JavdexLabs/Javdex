@@ -261,7 +261,10 @@ function validateRuntime(directory, target, inspectBinary, packaged) {
     && !lstatSync(path.join(directory, 'runtime.json')).isSymbolicLink(), 'missing playback runtime inventory')
   assert.ok(lstatSync(path.join(directory, 'runtime.json')).size <= 1024 * 1024, 'playback runtime inventory is too large')
   const manifest = JSON.parse(readFileSync(path.join(directory, 'runtime.json'), 'utf8'))
-  assert.equal(manifest.schemaVersion, packaged ? 2 : 1, 'unsupported playback inventory schema')
+  assert.equal(manifest.schemaVersion, 1, 'unsupported playback inventory schema')
+  // Build inputs and distribution projections are different first-version formats,
+  // not successive migrations. A source binding belongs only to the projection.
+  assert.equal(Object.hasOwn(manifest, 'sourceBundle'), packaged, 'playback inventory purpose mismatch')
   assert.equal(manifest.hashStage, 'pre-sign', 'playback inventory must describe pre-sign build inputs')
   for (const [key, value] of Object.entries({ platform: target.platformName, arch: target.archName, electronVersion: target.electronVersion })) {
     assert.equal(manifest[key], value, 'playback inventory target mismatch: ' + key)
@@ -406,7 +409,7 @@ export function stagePackagedPlaybackRuntime(context, options) {
   }
   const notice = `Corresponding playback source and build materials are supplied separately:\n${sourceBundle.fileName}\nSHA-256: ${sourceBundle.sha256}\nReviewed input inventory SHA-256: ${sourceBundle.inputInventorySha256}\n\nObtain this companion archive alongside the installer/ZIP. It contains the reviewed-runtime input inventory, source archives, build recipes and original notices. Binary hashes in that input inventory identify the pre-sign binaries shipped in the application. Keep the source archive available with any distribution of these binaries.\n`
   writeFileSync(path.join(destination, 'SOURCE-ACCESS.txt'), notice)
-  const manifest = { ...input.manifest, schemaVersion: 2, sourceBundle,
+  const manifest = { ...input.manifest, sourceBundle,
     files: { ...Object.fromEntries([...included].map(name => [name, input.manifest.files[name]])), 'SOURCE-ACCESS.txt': digest(path.join(destination, 'SOURCE-ACCESS.txt')) } }
   writeFileSync(path.join(destination, 'runtime.json'), JSON.stringify(manifest, null, 2) + '\n')
   const staged = validatePackagedPlaybackRuntime(destination, input.target, options?.inspectBinary)

@@ -4,6 +4,8 @@
 
 本页按 **0.8.0 正式版**说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0` 必须成对使用；0.7.x 或 0.8.0 Beta 桌面不能连接本版服务端。已有部署请先备份数据，再同时更新桌面与服务端。
 
+0.9.0-beta.1 正在准备。Beta 发布后需要同版本桌面、镜像以及新 Compose 的 `/program` 程序卷，认主与恢复使用容器管理入口；首次升级、签名信任和后续版本切换见 [服务端更新](SERVER_UPDATE.md)。下方 0.8.0 的历史 CLI 和下载说明不用于已托管更新的业务版本。
+
 ## 服务端能做什么
 
 - 独立保存影片、演员、分类、清单、正式图片和待确认资料，扫描已配置的媒体目录，导入本地 NFO 与配套图片。
@@ -85,7 +87,7 @@
 **服务端媒体库的来源目录必须允许服务进程读写，包括实际使用的子目录及文件。** 即使只计划扫描和播放，首次添加来源目录也需要创建 `.javdex-root` 标记；重命名媒体文件、导出 NFO 和配套图片还会写入媒体目录。部署时不要将媒体库来源配置为只读目录。
 
 - **Docker 挂载权限**：媒体卷使用读写挂载（示例为 `/absolute/path/to/media:/media:rw`），不能设为 `:ro` 或 `read_only: true`。配置文件 `/config/server.json` 的只读挂载可以保留。
-- **宿主机文件权限**：读写挂载不会自动授予文件系统权限。还需在宿主机或 NAS 上，让服务进程的 UID/GID 拥有所选目录及其内容的读写权限；官方镜像默认以 `node` 用户运行。Linux 目录还需要进入/遍历权限（`x`），上级目录也必须可遍历；网络共享需同时检查共享权限和 ACL。
+- **宿主机文件权限**：读写挂载不会自动授予文件系统权限。还需在宿主机或 NAS 上，让业务进程的 UID/GID 拥有所选目录及其内容的读写权限；业务默认为 `node`（1000/1000），开发中的托管镜像由容器内 root 管理进程启动该非 root 子进程。Linux 目录还需要进入/遍历权限（`x`），上级目录也必须可遍历；网络共享需同时检查共享权限和 ACL。
 - **分别检查数据与媒体目录**：`/data` 可写并不代表 `/media` 可写。使用挂载下的子目录创建媒体库或恢复目录映射时，也需检查该子目录的权限。
 
 ## 开发者源码构建与配置
@@ -97,7 +99,7 @@ npm ci
 npm run server:build
 ```
 
-产物为 `out/server`，包含网页和服务端入口。独立部署时在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动；不需要 Electron rebuild。仓库的 Dockerfile 只打包已经生成的 `out/server`，因此 源码方式的 `docker build` 和 `npm run server:smoke` 前必须先运行 `npm run server:build`；烟测会在产物不完整时直接报错。镜像内以 `node` 用户运行，不会替你生成配置或挂载媒体目录。若 Docker 构建环境无法访问默认 npm 源，可在运行容器烟测前设置 `JAVDEX_SMOKE_NPM_REGISTRY`，脚本会将其传给 Dockerfile 的 `NPM_CONFIG_REGISTRY` 构建参数。
+产物为 `out/server`，包含网页和服务端入口，另有 `out/updater` 容器内管理入口。独立 Node 部署仍可在产物目录安装生产依赖后，以 `node index.js start --config /etc/javdex/server.json` 启动，但不包含托管更新；不需要 Electron rebuild。源码方式的 `docker build` 和 `npm run server:smoke` 前必须先运行 `npm run server:build`，烟测会在产物不完整时直接报错。管理入口监督非 root 业务子进程，初始化并保留程序卷，不会替你选择媒体挂载；业务 Web 资源始终来自当前发行目录，不沿用旧镜像的 `/app/web`。若 Docker 构建环境无法访问默认 npm 源，可设置 `JAVDEX_SMOKE_NPM_REGISTRY`，脚本会将其传给 Dockerfile 的 `NPM_CONFIG_REGISTRY` 构建参数。
 
 `server:smoke` 在 Windows Docker Desktop 上使用 Docker 数据卷保存 SQLite；`server:smoke:backup` 使用独立测试容器和卷验证双向备份恢复及桌面本机导入，不覆盖已有资料。后者还需桌面导出 worker 和测试镜像，构建步骤见 [开发说明](DEVELOPMENT.md)。
 
@@ -150,6 +152,8 @@ javdex-server recover --config /etc/javdex/server.json
 旧离线迁库尚未正式发布，现已移除其 CLI、管理接口及专用包格式；不提供旧包或旧任务兼容入口。
 
 ## 更新与恢复限制
+
+开发代码改为单容器内置更新管理器，提供桌面在线更新与完整发行包离线上传；不用安装宿主机助手。首次从 0.8.0 采用该功能时仍需管理员更新部署，增加并保留程序卷，然后配对，见 [服务端更新](SERVER_UPDATE.md)。当前已发布 0.8.0 镜像没有这项能力，仍按下列手动方式升级。
 
 更新前正常停止服务，完整备份 `dataDir`、`imagesDir` 及部署配置，桌面数据目录也需单独备份。将 `.env` 中的 `JAVDEX_VERSION` 改为新版本，执行上面的 `pull` 和 `up -d`；桌面安装包同时升级到相同版本。保留原数据卷，不要执行 `docker compose down -v`。
 

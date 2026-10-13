@@ -76,6 +76,7 @@ export const IPC = {
 
   // Application release checks
   APP_UPDATE_GET_STATE: 'appUpdate:getState',
+  SERVER_UPDATE_CONTROL: 'serverUpdate:control',
   APP_UPDATE_CHECK: 'appUpdate:check',
   APP_UPDATE_OPEN_RELEASE: 'appUpdate:openRelease',
   APP_UPDATE_OPEN_PROJECT_PAGE: 'appUpdate:openProjectPage',

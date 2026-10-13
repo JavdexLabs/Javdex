@@ -30,6 +30,16 @@ v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 **schema 19**�
 
 旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `packages/library/src/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
 
+### 0.9.0 Beta：一次升级至 schema 20
+
+以远程 `main` 的已发布 0.8.0（`004dc15d`，schema 19）为基线，外部评分默认标记、默认评分回填和内置清单一次性升级至 schema 20。不再保留开发期 20 → 21 → 22 的分段迁移。新库直接使用最终结构；升级在同一事务中完成，失败时结构、数据和 `user_version` 一起回滚。`schema-v19.sql` 冻结实际 0.8.0 结构，验证升级后与新库一致、评分和自定义清单关系保留及重复打开不改写。
+
+旧开发版 21/22 以及结构不完整的开发版 20 明确拒绝，不自动降级或猜测修复；这不是已发布版本的升级路径。本次代码整理不改写个人数据库或模型目录。若已用开发版处理实际资料，先保留匹配的开发构建与升级前正式版备份，不要直接降低 `user_version`；开发备份也不会自动降版导入。
+
+版本只按实际发布的格式递增：结构未变的备份归档、协议和扫描审计保持原版本；新增本地模型配置、播放记录、缓存与运行库清单从各自 v1 开始。第三方库、模型权重版本和哈希不属于应用数据格式版本，不为统一编号而改动。
+
+内置云端模型目录在 0.8.0 中没有独立版本标记，本次定义为 1，而不是开发日期编号；后续随已发布目录逐次递增。模型管理文档因新增该字段从已发布 schema 3 一次升级到 4，已发布 schema 2/3 均直接迁入当前格式，不写中间版本，保存失败时不缓存或改写原文件。已有连接、用途、凭据引用及历史已发布设置升级路径保留。标为 schema 3 却含开发日期目录字段的未发布文档不会被当作正式 schema 3 自动迁移，原文件保留并明确报错。
+
 ## 检查与构建
 
 ```bash
@@ -85,7 +95,7 @@ npm run dist:linux           # Linux 目标
 
 本地模型是独立底层能力，默认存储于 Windows 标准用户配置的 `%LOCALAPPDATA%/Javdex/local-ai`，其他平台及隔离配置使用 `<userData>/local-ai`，由 `main/services/localModels` 管理目录、文件、运行依赖及文本推理。该服务层不依赖播放器或字幕模块；AI 字幕通过注入的模型运行接口调用它，字幕缓存位于同级 `cache/ai-subtitles`，抽取音频和任务日志位于 `cache/local-ai/work/ai-subtitles`。普通文本翻译直接调用共用文本引擎，不创建字幕引擎或字幕工作目录。文件管理和各功能的用途绑定保持独立。权重路径为 `models/<family>/<publisher>/<revision>/<precision>/<upstream-filename>`，各精度附来源、哈希、大小与许可；引擎使用 `runtimes/<engine>/<version>/<platform-arch[-cpu]>`，不与模型家族版本绑在一起。`downloads/<sha256>` 保留续传数据七天，`staging/install-<uuid>` 与 `staging/import-<uuid>` 保留遗留文件一天；启动与下载前清理过期项，操作期间持有排他锁。迁移仅复制并逐文件校验模型、运行库、下载和存储标识，配置提交后清理原副本，保留无关文件；缓存不迁移。
 
-AI 服务设置分为功能、云端服务、本地模型三个页签。提供商模型的能力覆盖在模型详情内维护；本地文件按语音输入／文本输入分组。本地配置 `local-models.json` v5 为字幕识别、字幕翻译和普通文本翻译保存独立的模型系列及精度 ID。v1–v4 升级沿用保存目录、下载来源及精度，将原共享翻译选择复制到两个翻译用途；不重命名或重新下载权重。
+AI 服务设置分为功能、云端服务、本地模型三个页签。提供商模型的能力覆盖在模型详情内维护；本地文件按语音输入／文本输入分组。本地配置 `local-models.json` 作为 0.8.0 后的新增格式，从单一 v1 开始，保存目录、下载来源、各家族所选精度、修订及三个用途的独立绑定。`usage` 是用途的唯一事实来源，不再持久保存重复的 `translation`／`translationModel`，也不保留未发布 v1–v5 的兼容和自动重写。未知或损坏文档保持原文件并阻止推理，只允许用户显式保存有效用途设置来恢复；正常重启不改写修订，不重命名或重新下载权重。
 
 每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
 
@@ -136,7 +146,7 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 | `files` | 相对路径到 SHA-256 的对象；精确覆盖全部文件，唯独不包含清单自身。禁止越界路径、符号链接和额外文件 |
 | `components` | 1–128 个组件；每项包含 `name`、`version`、`license`、`binaries`，以及指向清单内非空文件的 `licenseFile`、`sourceArchive`、`buildRecipe`；所有二进制有且仅有一个来源所有者，包括 Javdex addon 或 Linux helper。首轮 Windows 闭包含 106 个分别保留来源身份的组件，因此上限由 100 调整为 128；本轮精简配置为 76 个组件 |
 
-`beforePack` 核查完整 v1 输入；`afterPack` 再核查后，只将全部二进制、各组件的许可文件与 `SOURCE-ACCESS.txt` 复制到应用 Resources 的 `native-playback/`，随后由现有流程签名。分发目录的 `runtime.json` 为 v2：`files` 精确覆盖安装内容，保留组件来源引用，`sourceBundle` 绑定独立源码包的文件名、SHA-256、原 v1 清单摘要及当前打包工具摘要。`validatePackagedPlaybackRuntime` 验证该投影，拒绝源码/构建资料混入；v2 不能用作经过完整材料校验的 v1 打包输入。
+`beforePack` 核查完整 v1 输入；`afterPack` 再核查后，只将全部二进制、各组件的许可文件与 `SOURCE-ACCESS.txt` 复制到应用 Resources 的 `native-playback/`，随后由现有流程签名。分发目录的 `runtime.json` 也是独立的初版 v1 投影：`files` 精确覆盖安装内容，保留组件来源引用，`sourceBundle` 绑定独立源码包的文件名、SHA-256、原输入清单摘要及当前打包工具摘要。构建输入禁止出现 `sourceBundle`，分发投影必须包含它；`validatePackagedPlaybackRuntime` 验证该投影，拒绝源码/构建资料混入。两种用途不是 v1 → v2 的升级关系，不能互相替代，投影不能绕过完整输入材料校验。
 
 完整非二进制材料、原 v1 清单和当前打包工具另生成 `Javdex-Playback-Sources-<version>-<platform>-<arch>-<input hash>-<tools hash>.tar.gz`，位于 `dist/`，不装入应用。使用已有系统 `tar`，不存在或归档失败会停止打包；复用源码包前重新验证摘要。分发应用包时同时提供这个配套源码包，公开发布时须落实源码访问方式，不能只提供一个未交付的文件名。输入目录保持完整，不通过删除源码或伪造许可绕过门禁。
 
@@ -165,6 +175,10 @@ RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH �
 ## 官网开发
 
 服务端源码构建、Docker 部署及更新备份见 [服务端部署指南](SERVER_MODE.md)。当前能力与接口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，未完成验收和历史测试边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。服务端部署不需要 Electron，也不运行 `setup:desktop`。
+
+`server:build` 同时生成业务入口 `out/server` 与容器内管理入口 `out/updater`，后者也可单独运行 `server:updater:build` 构建，不是需要用户额外安装的宿主机程序。镜像生成对应架构的完整发行描述，发布流程从已验证镜像取出 JS、worker、Web 和原生依赖并生成签名 `.tar.gz`，不在升级时运行 npm 安装。
+
+更新流程测试为 `server:updater:test`，实际浏览器入口为 `test:ui:server-update`；`server:updater:smoke` 必须在 Linux Docker 环境运行，覆盖真实 0.8.0/schema 19、原生闭包、迁移后 worker 失败、容器中断恢复、单容器计数、非 root 业务与持久版本选择，已接入 amd64/arm64 CI。不能把本机合成进程测试或构建通过当成 Linux 容器验收。运行外壳、程序卷、发布签名和两层更新说明见 [服务端更新](SERVER_UPDATE.md) 与 [ADR-0030](adr/0030-manage-server-releases-inside-one-container.md)。
 
 官网源码位于 `website/`，图片使用 `docs/images/` 中的资源。
 
@@ -240,6 +254,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 局域网 Web 移动端 | [移动端 Web 规范](MOBILE_WEB_GUIDELINES.md) |
 | 服务端模式部署与双模式 | [服务端模式](SERVER_MODE.md)、[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) |
 | 服务端模式现状与实现 | [当前状态与后续范围](SERVER_MODE_NEXT_STEPS.md)、[实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md) |
+| 服务端更新与恢复 | [更新助手部署](SERVER_UPDATE.md)、[选型研究](SERVER_UPDATE_RESEARCH.md) |
 | 共享用例、合同与工作存储 | [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md#共享用例与结果校验) |
 | 服务端历史研究与验收证据 | [归档索引](archive/server-mode/README.md) |
 | 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |

@@ -5,7 +5,7 @@ import { AgentConfiguration } from './agentConfiguration'
 
 function snapshot(): ModelManagementSnapshot {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 'model-management:r1',
     updatedAt: '2026-08-22T00:00:00.000Z',
     connections: [],

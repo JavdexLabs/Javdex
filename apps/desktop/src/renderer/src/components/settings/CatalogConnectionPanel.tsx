@@ -16,6 +16,7 @@ import { SettingsCard, SettingsDisclosure, SettingsStatusPill } from './Settings
 import SettingsFeedback from './SettingsFeedback'
 import SettingsFormActions from './SettingsFormActions'
 import WriterAuthorizationForm from './WriterAuthorizationForm'
+import ServerUpdatePanel from './ServerUpdatePanel'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import { settingsPath } from '../../settings/settingsRoutes'
@@ -258,6 +259,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
           </dl>
         </SettingsDisclosure>
       </SettingsCard>
+      <ServerUpdatePanel />
       <SettingsCard
         title="资料库连接"
         hint="切换连接在重启后生效，现有资料不会自动转移。"

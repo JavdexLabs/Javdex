@@ -7,6 +7,7 @@ import { normalizeRelatedLinkUrl } from '@shared/relatedLinkUrl'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { buildVideoResourceSourceIdentity } from '@library/videoResourceIdentity'
 import {
+  BUILTIN_PLAYLISTS_SQL,
   CLASSIFICATION_V8_SCHEMA_SQL,
   AGENT_METADATA_SCHEMA_SQL,
   AGENT_PLATFORM_SCHEMA_SQL,
@@ -28,9 +29,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-import { BUILTIN_PLAYLISTS_SQL } from './schema'
-
-export const CURRENT_SCHEMA_VERSION = 22
+export const CURRENT_SCHEMA_VERSION = 20
 
 type Migration = {
   version: number
@@ -1547,20 +1546,13 @@ const MIGRATIONS: Migration[] = [
   },
   {
     version: 20,
+    // All changes since released 0.8.0 schema 19 ship in one atomic upgrade.
     migrate(database) {
       database.exec('ALTER TABLE video_external_stats ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1))')
-    }
-  },
-  {
-    version: 21,
-    migrate(database) {
       const videos = database.prepare('SELECT DISTINCT video_id FROM video_external_stats').all() as { video_id: number }[]
       for (const video of videos) ensureDefaultExternalRating(database, video.video_id)
+      database.exec(BUILTIN_PLAYLISTS_SQL)
     }
-  },
-  {
-    version: 22,
-    migrate(database) { database.exec(BUILTIN_PLAYLISTS_SQL) }
   }
 ]
 
@@ -1575,6 +1567,10 @@ export function migrateDatabase(database: Database.Database): void {
     throw new Error(
       `Database schema version ${current} is no longer supported. Use a matching application version or restore a pre-upgrade backup; do not lower user_version manually.`
     )
+  }
+  if (current === CURRENT_SCHEMA_VERSION && (!columnNames(database, 'video_external_stats').has('is_default')
+    || !columnNames(database, 'playlists').has('system_kind') || !columnNames(database, 'playlists').has('remove_after_play'))) {
+    throw new Error('Database uses an unreleased or incomplete schema 20 snapshot. Restore a released pre-upgrade backup; do not change user_version manually.')
   }
   // Before release, schema 16 briefly contained only the cleanup queue. Do not
   // silently accept that development snapshot as the consolidated schema 16.

@@ -154,6 +154,7 @@ export const IPC_DISPOSITION = {
   NFO_EXPORT_STATE: query('nfo.state'),
   EXTERNAL_LINK_OPEN: desktop('OS handler; no Javdex credentials'),
   APP_UPDATE_GET_STATE: desktop('Desktop release channel'),
+  SERVER_UPDATE_CONTROL: desktop('Paired independent deployment updater; remains available across catalog app versions'),
   APP_UPDATE_CHECK: desktop('Desktop release channel'),
   APP_UPDATE_OPEN_RELEASE: desktop('Open desktop release URL'),
   APP_UPDATE_OPEN_PROJECT_PAGE: desktop('Open project page'),

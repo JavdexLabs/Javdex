@@ -90,7 +90,7 @@ test('runtime inventory checks hashes, exact payload and binary/source ownership
   const staged = stagePackagedPlaybackRuntime(f.context, options)
   assert.equal(staged.binaryCount, 2)
   assert.ok(existsSync(path.join(staged.directory, 'playback.node')))
-  assert.equal(staged.manifest.schemaVersion, 2)
+  assert.equal(staged.manifest.schemaVersion, 1)
   assert.equal(staged.manifest.sourceBundle.inputInventorySha256, hash(readFileSync(path.join(f.directory, 'runtime.json'))))
   assert.deepEqual(staged.manifest.components, f.manifest.components)
   assert.equal(existsSync(path.join(staged.directory, 'sources')), false, 'source/build evidence is not installed')
@@ -111,7 +111,7 @@ test('runtime inventory checks hashes, exact payload and binary/source ownership
 test('distribution keeps dependency checks and rejects evidence leakage or reuse as reviewed input', t => {
   const f = fixture(t)
   const staged = stagePackagedPlaybackRuntime(f.context, { environment: f.environment, inspectBinary: () => {} })
-  assert.throws(() => validatePlaybackRuntime(staged.directory, target, () => {}), /schema/)
+  assert.throws(() => validatePlaybackRuntime(staged.directory, target, () => {}), /purpose mismatch/)
   writeFileSync(path.join(staged.directory, 'playback.node'), 'tampered')
   assert.throws(() => validatePackagedPlaybackRuntime(staged.directory, target, () => {}), /digest mismatch/)
   writeFileSync(path.join(staged.directory, 'playback.node'), 'synthetic runtime')

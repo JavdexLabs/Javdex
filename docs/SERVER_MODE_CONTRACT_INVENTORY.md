@@ -41,6 +41,7 @@
 | 后端端口 | `apps/desktop/src/main/application/catalogBackend.ts` | 桌面 application / workflows |
 | HTTP 管理 | `manage/operations.ts` + `manage/inputs.ts` | RemoteCatalogBackend、server |
 | HTTP 浏览 | `webTypes.ts` / `browser/dto.ts` | 只读网页；独立白名单 |
+| 托管更新（未发布） | `serverUpdateTypes.ts` + 独立 HTTPS 更新入口 | 桌面主进程；独立部署授权，不使用 writer / 网页凭据 |
 
 页面只提供业务目标、原版本和用户选择。writer token、HTTP 头、任意服务地址不进入 renderer。本地适配器直接调 library，不创建 localhost HTTP，也不模拟 writer token。
 
@@ -132,6 +133,12 @@ IPC 去向以 inventory 及其覆盖检查为准。兼容入口不要求一对�
 | writer / 回执 | [catalogWriter.ts](../packages/library/src/catalog/catalogWriter.ts) 管身份与交接，[catalogOperations.ts](../packages/library/src/catalog/catalogOperations.ts) 管幂等回执；忙时拒绝，不排队 |
 | 图片 / 播放 | [catalogUploads.ts](../packages/library/src/catalog/catalogUploads.ts)、[catalogImageApply.ts](../packages/library/src/catalog/catalogImageApply.ts)、[catalogPlay.ts](../packages/library/src/catalog/catalogPlay.ts)；上传成功不等于正式应用，播放有独立限时凭据 |
 | 备份与恢复 | [catalogBackup.ts](../packages/library/src/catalog/catalogBackup.ts)、[catalogBackupArchive.ts](../packages/library/src/catalog/catalogBackupArchive.ts)、[catalogBackupTransforms.ts](../packages/library/src/catalog/catalogBackupTransforms.ts)；快照、校验、路径转换与恢复保护 |
+
+## 托管更新（未发布）
+
+[updater/index.ts](../apps/server/src/updater/index.ts) 是官方单容器管理入口，以非 root 子进程运行当前发行目录的业务入口。内部通过 [UpdateDeployment](../apps/server/src/updater/deployment.ts) 隔离持久任务编排与进程、发行目录、快照细节；不安装宿主机助手、不控制 Docker daemon，也不让业务包自更新管理器。固定运行环境和签名完整发行包合同见 [serverUpdateTypes.ts](../packages/contracts/src/serverUpdateTypes.ts)。
+
+更新 HTTPS 使用独立协议与证书固定配对，凭据保存在桌面主进程安全存储，与业务连接和资料库身份绑定；可跨业务应用版本调用。renderer 只发用户操作，不持有已保存的更新凭据或任意上传路径。安装须人工确认；待验证业务仅开放健康检查，持久提交前核对真实 worker、应用/schema 和资料库身份，提交后只继续激活，不恢复旧数据。实现入口是 [updateManager.ts](../apps/server/src/updater/updateManager.ts)、[processDeployment.ts](../apps/server/src/updater/processDeployment.ts)、[updateGuard.ts](../apps/server/src/updateGuard.ts) 和 [桌面更新服务](../apps/desktop/src/main/desktop/serverUpdateService.ts)。操作与两层更新边界见 [服务端更新](SERVER_UPDATE.md)，实际验证结果见 [当前状态](SERVER_MODE_NEXT_STEPS.md#当前变更单容器托管更新2026-10-13未发布)。
 
 ## 已接线的功能补齐（C1–C7）
 

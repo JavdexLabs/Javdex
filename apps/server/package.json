@@ -1,6 +1,6 @@
 {
   "name": "@javdex/server",
-  "version": "0.8.0",
+  "version": "0.9.0-beta.1",
   "private": true,
   "license": "GPL-3.0-or-later",
   "description": "Independent Node catalog host: SQLite, image storage, query worker, LAN browse HTTP, manage HTTP handshake/claim/edit/backup/restore, CLI bind/recover, and process lifecycle.",
@@ -8,10 +8,11 @@
     "javdex-server": "./src/index.ts"
   },
   "dependencies": {
-    "@javdex/contracts": "0.8.0",
-    "@javdex/http": "0.8.0",
-    "@javdex/library": "0.8.0",
+    "@javdex/contracts": "0.9.0-beta.1",
+    "@javdex/http": "0.9.0-beta.1",
+    "@javdex/library": "0.9.0-beta.1",
     "better-sqlite3": "13.0.3",
+    "semver": "7.8.5",
     "sharp": "0.35.4",
     "zod": "^4.4.3"
   }

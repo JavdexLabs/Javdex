@@ -158,8 +158,11 @@ const modelManagementDocumentSchema = z.object({
   assignments: z.array(assignmentSchema)
 }).strict()
 
-// Accept only the previous persisted format; new IPC writes cannot configure these policies.
-const legacyModelDocumentSchema = modelManagementDocumentSchema.extend({
+// Released formats upgrade directly to the current document; no intermediate write.
+const previousModelDocumentSchema = modelManagementDocumentSchema.omit({ builtinCatalogVersion: true }).extend({
+  schemaVersion: z.literal(3)
+})
+const legacyModelDocumentSchema = previousModelDocumentSchema.extend({
   schemaVersion: z.literal(2),
   assignments: z.array(assignmentSchema.extend({
     runtime: assignmentSchema.shape.runtime.extend({ cacheRetention: z.enum(['none', 'short', 'long']) }),
@@ -710,16 +713,16 @@ export class ModelManagementModule {
     if (this.cache) return structuredClone(this.cache)
     const raw = this.dependencies.store.read()
     if (raw !== null) {
-      const legacy = legacyModelDocumentSchema.safeParse(raw)
+      const legacy = z.union([legacyModelDocumentSchema, previousModelDocumentSchema]).safeParse(raw)
       const candidate = legacy.success ? {
         ...legacy.data,
         schemaVersion: MODEL_MANAGEMENT_SCHEMA_VERSION,
         revision: this.dependencies.nextRevision(),
         updatedAt: this.dependencies.now().toISOString(),
-        assignments: legacy.data.assignments.map(({ compaction: _compaction, runtime, ...assignment }) => {
+        assignments: legacy.data.schemaVersion === 2 ? legacy.data.assignments.map(({ compaction: _compaction, runtime, ...assignment }) => {
           const { cacheRetention: _cacheRetention, ...settings } = runtime
           return { ...assignment, runtime: settings }
-        })
+        }) : legacy.data.assignments
       } : raw
       const parsed = modelManagementDocumentSchema.safeParse(candidate)
       if (!parsed.success) {

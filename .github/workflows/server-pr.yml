@@ -57,7 +57,16 @@ jobs:
           JAVDEX_BACKUP_SMOKE_IMAGE: javdex-server:smoke
 
   server:
-    runs-on: ubuntu-latest
+    name: Server managed runtime (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -72,4 +81,6 @@ jobs:
       - run: npm ci
       - run: npm run server:build
       - run: npm run server:test
+      - run: npm run server:updater:test
+      - run: npm run server:updater:smoke
       - run: npm run server:smoke

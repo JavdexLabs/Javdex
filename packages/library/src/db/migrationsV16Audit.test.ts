@@ -81,10 +81,11 @@ function legacyRows(after: ReturnType<typeof snapshot>, before: ReturnType<typeo
 
 function comparableSchema(db: Database.Database): SchemaRow[] {
   return schema(db).map((row) => {
-    if (row.name === 'video_external_stats' && row.type === 'table') {
-      const columns = (db.pragma('table_info(video_external_stats)') as Array<{ cid: number; name: string }>)
+    if ((row.name === 'video_external_stats' || row.name === 'playlists') && row.type === 'table') {
+      // Fresh tables declare final columns inline; upgrades append the same columns.
+      const columns = (db.pragma(`table_info(${row.name})`) as Array<{ cid: number; name: string }>)
         .map(({ cid: _cid, ...column }) => column).sort((a, b) => a.name.localeCompare(b.name))
-      return { ...row, sql: JSON.stringify({ columns, foreignKeys: db.pragma('foreign_key_list(video_external_stats)') }) }
+      return { ...row, sql: JSON.stringify({ columns, foreignKeys: db.pragma(`foreign_key_list(${row.name})`) }) }
     }
     if (row.name !== 'videos' || row.type !== 'table') return row
     const columns = (db.pragma('table_info(videos)') as Array<{ cid: number; name: string; type: string }>)

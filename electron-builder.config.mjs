@@ -51,7 +51,12 @@ const base = {
     'NOTICE',
     'LICENSES/**/*',
     'docs/THIRD_PARTY_NOTICES.md',
-    'out/**/*',
+    // Only production desktop/browser bundles; manager builds, test reports and
+    // diagnostic logs under out/ are not desktop distribution inputs.
+    'out/main/**/*',
+    'out/preload/**/*',
+    'out/renderer/**/*',
+    'out/web/**/*',
     // Development binaries, synthetic media and copied Electron probes are not
     // release inputs. A reviewed playback runtime is staged outside app.asar.
     '!out/native-playback/**/*',

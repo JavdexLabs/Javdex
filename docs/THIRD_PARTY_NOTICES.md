@@ -10,6 +10,10 @@
 
 内置播放开发分支使用 libmpv 和 FFmpeg。最终运行库的版本、构建选项、全部间接依赖及对应源码/构建资料仍须逐项审核；项目许可切换不是运行库合规或安装验收证明。上游规则见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)，实际输入合同见 [开发指南](DEVELOPMENT.md#内置播放运行库开发分支)。
 
+## 容器更新管理器
+
+容器更新管理器使用 node-semver 进行正式／预发布版本比较、node-tar 处理完整发行归档、Zod 校验更新合同。依赖采用各自上游许可，不改为 Javdex 项目许可；构建时从锁定安装复制其许可原文到管理入口的 `LICENSES/`，随镜像放在 `/opt/javdex-manager/LICENSES/`。当前锁定版本的 node-semver 为 ISC、node-tar 为 BlueOak-1.0.0、Zod 为 MIT；具体版权与授权以该目录原文为准。
+
 ## 云端服务品牌图标
 
 AI 服务设置使用 LM Studio、DeepSeek、MiniMax、Ollama、OpenAI、OpenRouter、Moonshot、智谱、SiliconFlow 与 Anthropic 官网提供的品牌图标，随应用本地打包。原始来源和处理方式见 [图标来源清单](../apps/desktop/src/renderer/src/assets/providers/README.md)。图标及商标归各权利人所有，仅用于识别相应服务，不适用 Javdex 源码许可，也不表示合作或背书。

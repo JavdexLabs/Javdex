@@ -40,7 +40,7 @@ function snapshot(): ModelManagementSnapshot {
   const first = metadata(true)
   const second = metadata(true)
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 'revision-1',
     updatedAt: '2026-08-22T00:00:00.000Z',
     validationErrors: [],

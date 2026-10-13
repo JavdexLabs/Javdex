@@ -54,6 +54,8 @@ GET https://api.github.com/repos/JavdexLabs/Javdex/releases/latest
 
 因此，预发布版本不会触发稳定版客户端提醒。改变标签格式前必须同步修改并测试 `appReleaseService.ts`。
 
+当前运行的桌面可以是 Beta：比较版本时，同系列正式版优先于 Beta，较旧正式版不会提示降级；候选 Release 和缓存仍只接受正式标签。这不增加 Beta 更新通道。
+
 ## 4. 发布前准备
 
 1. 确认工作区没有意外改动。
@@ -72,6 +74,8 @@ npm run packaging:list
 
 6. 确认 `build/packaging.targets.json` 中需要发布的平台与架构已启用。
 7. 检查数据库迁移、设置兼容和插件格式变化是否有升级说明。
+
+0.9.0 Beta 的发布准备清单见 [Beta 发布检查](reviews/v0.9.0-beta.1-readiness.md)，用户说明见 [发布说明](../.github/release-notes/v0.9.0-beta.1.md)。准备完成不等于已经打标签、推送或发布；实际发布前将 Changelog 的“发布准备”改为真实发布日期，并同步文档中的待发布状态。
 
 发布提交建议使用：
 
@@ -155,6 +159,8 @@ v0.5.0-beta.1
 
 GitHub Release 必须标记为 Prerelease。当前稳定客户端不会检测或提示预发布版本；如未来新增更新通道，需要另行定义通道选择、版本比较和降级规则。
 
+Beta 和正式 Release 都附带服务端 amd64／arm64 签名完整升级包、签名清单、公钥及校验和。两类发布都必须先通过签名配置检查，缺少 Ed25519 私钥或 key ID 时不得上传镜像。服务端 Beta 包只由用户在对应 Release 手动下载并离线上传；服务端与桌面的默认在线检查继续只读取正式 Release，不增加自动 Beta 通道。显式安装遵循 SemVer 升级方向，不能从正式版降回同系列 Beta。
+
 ## 10. 桌面、服务与网页同版本
 
 同一 Git 提交的根与 workspace `package.json` version 同时约束：
@@ -163,4 +169,4 @@ GitHub Release 必须标记为 Prerelease。当前稳定客户端不会检测或
 - `npm run server:build` 写入的 `out/server` 生产闭包
 - 网页包（桌面附带与服务闭包内的 `web/`）
 
-发布时三者必须来自同一源码版本。握手发现应用版本不一致时，桌面进入版本不符状态，不得写入远程资料库，也不得自动改连其他地址。Linux 服务镜像由同一提交的根目录 `Dockerfile` 构建，且只复制 `out/server`。禁止把不同提交的桌面包与服务闭包搭配使用。
+发布时三者必须来自同一源码版本。握手发现应用版本不一致时，桌面进入版本不符状态，不得写入远程资料库，也不得自动改连其他地址。Linux 服务镜像由同一提交的根目录 `Dockerfile` 构建，复制 `out/server` 业务闭包与 `out/updater` 管理入口；管理器不进入桌面安装包。禁止把不同提交的桌面包与服务闭包搭配使用。

@@ -14,6 +14,9 @@ import { registerSettingsHandlers } from './settingsHandlers'
 import { registerDesktopSessionHandlers } from './desktopSessionHandlers'
 import { registerVideoHandlers, type VideoHandlerDesktopPorts } from './videoHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
+import { createServerUpdateService } from '../desktop/serverUpdateService'
+import { appCommandAdapter } from './appContractAdapter'
+import { IPC } from '@shared/ipc-channels'
 import type { IpcContext } from './shared'
 import { configureIpcSecurity } from './ipcSecurity'
 import { registerLibraryCuratorHandlers } from './libraryCuratorHandlers'
@@ -52,6 +55,7 @@ export function registerIpcHandlers(
   registerNfoExportHandlers(ctx, options.backend)
   registerMediaLibraryHandlers(options.backend, options.mediaLibraryDesktop)
   registerUpdateHandlers(ctx)
+  appCommandAdapter.register(IPC.SERVER_UPDATE_CONTROL, createServerUpdateService(options.backend, ctx))
   registerAssetHandlers()
   registerScanHandlers(ctx, options.backend)
   registerVideoHandlers(options.backend, options.videoDesktop)

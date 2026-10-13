@@ -19,5 +19,5 @@
       "@http/*": ["packages/http/src/*"]
     }
   },
-  "include": ["apps/server/src/**/*"]
+  "include": ["apps/server/src/**/*", "scripts/server-updater-smoke.ts"]
 }

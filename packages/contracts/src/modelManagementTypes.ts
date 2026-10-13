@@ -6,7 +6,7 @@ import type { LlmApiKeyAction, LlmProviderProtocol } from './llmProviders'
 
 export type ModelWorkloadId = 'app-default' | 'plugin-developer' | 'library-curator'
 export type ModelCandidateKind = 'chat' | 'embedding'
-export const MODEL_MANAGEMENT_SCHEMA_VERSION = 3 as const
+export const MODEL_MANAGEMENT_SCHEMA_VERSION = 4 as const
 
 export interface ManagedModelConnection {
   id: string

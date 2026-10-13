@@ -1,4 +1,5 @@
 import { backupRequestSchema, desktopBackupFileSchema } from '@shared/protocol/backup'
+import { serverUpdateCommandSchema } from '@shared/serverUpdateTypes'
 import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import { z } from 'zod'
 import { LLM_PROVIDER_PROTOCOLS } from '@shared/llmProviders'
@@ -771,6 +772,7 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_PROXY_TEST]: z.tuple([z.enum(['scrape', 'llm']), text]),
   [IPC.SETTINGS_OVERVIEW_STATS]: noArgs,
   [IPC.APP_UPDATE_GET_STATE]: noArgs,
+  [IPC.SERVER_UPDATE_CONTROL]: z.tuple([serverUpdateCommandSchema]),
   [IPC.APP_UPDATE_CHECK]: noArgs,
   [IPC.APP_UPDATE_OPEN_RELEASE]: noArgs,
   [IPC.APP_UPDATE_OPEN_PROJECT_PAGE]: z.tuple([z.enum(['project', 'releases', 'license'])]),

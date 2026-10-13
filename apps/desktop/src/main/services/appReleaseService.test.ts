@@ -16,6 +16,14 @@ describe('app release service', () => {
     assert.equal(compareReleaseVersions('0.3.9', '0.4.0'), -1)
   })
 
+  it('checks stable updates from a beta without offering downgrades or beta targets', () => {
+    assert.equal(compareReleaseVersions('0.8.0', '0.9.0-beta.1'), -1)
+    assert.equal(compareReleaseVersions('0.9.0', '0.9.0-beta.1'), 1)
+    assert.equal(compareReleaseVersions('0.9.1', '0.9.0-beta.2'), 1)
+    assert.equal(compareReleaseVersions('0.9.0-beta.2', '0.9.0-beta.1'), null)
+    assert.equal(compareReleaseVersions('0.9.0', 'unknown'), null)
+  })
+
   it('accepts only trusted published GitHub releases', () => {
     const valid = {
       tag_name: 'v0.4.0',

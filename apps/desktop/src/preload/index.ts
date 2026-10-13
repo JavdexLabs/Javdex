@@ -290,6 +290,9 @@ const api = {
     onStateChanged: (cb: (state: UpdateCheckState) => void) =>
       onAppEvent(IPC.APP_UPDATE_STATE_CHANGED, cb)
   },
+  serverUpdate: {
+    control: (command: import('@shared/serverUpdateTypes').ServerUpdateCommand) => invokeApp(IPC.SERVER_UPDATE_CONTROL, command)
+  },
   webAccess: {
     deviceReset: () => invokeApp(IPC.WEB_ACCESS_DEVICE_RESET),
     deviceRename: (id: string, name: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_RENAME, id, name),

@@ -352,7 +352,7 @@ describe('ModelManagementModule', () => {
     const first = module.read()
     const second = module.read()
 
-    assert.equal(first.schemaVersion, 3)
+    assert.equal(first.schemaVersion, 4)
     assert.equal(first.revision, 'revision-1')
     assert.equal(second.revision, first.revision)
     assert.equal(store.backups, 1)
@@ -692,17 +692,57 @@ describe('ModelManagementModule', () => {
   })
 })
 
+it('upgrades released schema 3 directly to 4 once while preserving connections and purpose bindings', () => {
+  const current = migrateModelManagementDocument(DEFAULT_SETTINGS, 'released', new Date())
+  const { builtinCatalogVersion: _catalog, ...released } = current
+  const original = { ...released, schemaVersion: 3 }
+  const { module, store, credentials } = harness({ stored: original })
+  const state = module.read()
+  assert.equal(state.schemaVersion, 4)
+  const saved = store.value as ModelManagementDocument
+  assert.equal(saved.builtinCatalogVersion, 1)
+  assert.deepEqual(saved.connections, original.connections)
+  assert.deepEqual(saved.models, original.models)
+  assert.deepEqual(saved.assignments, original.assignments)
+  assert.equal(store.writes, 1); assert.equal(credentials.writes, 0)
+  const restarted = harness({ stored: saved })
+  assert.equal(restarted.module.read().revision, saved.revision)
+  assert.equal(restarted.store.writes, 0)
+})
+
+it('rejects unpublished schema 3 catalog extensions without rewriting the original document', () => {
+  const original = { ...migrateModelManagementDocument(DEFAULT_SETTINGS, 'development', new Date()),
+    schemaVersion: 3, builtinCatalogVersion: 20261011 }
+  const { module, store } = harness({ stored: original })
+  assert.throws(() => module.read(), /读取模型配置失败/)
+  assert.deepEqual(store.value, original)
+  assert.equal(store.writes, 0)
+})
+
+it('keeps a released schema 3 document untouched until its direct upgrade can be persisted', () => {
+  const { builtinCatalogVersion: _catalog, ...released } = migrateModelManagementDocument(DEFAULT_SETTINGS, 'released', new Date())
+  const original = { ...released, schemaVersion: 3 }
+  const { module, store } = harness({ stored: original })
+  store.failWrite = true
+  assert.throws(() => module.read(), /disk full/)
+  assert.deepEqual(store.value, original)
+  store.failWrite = false
+  assert.equal(module.read().schemaVersion, 4)
+  assert.equal(store.writes, 2, 'one failed attempt and one successful atomic save')
+})
+
 it('migrates v2 policies once while retaining connections, model choices and user limits', () => {
   const initial = harness()
   initial.module.read()
   const current = initial.store.value as ModelManagementDocument
-  const legacy = { ...current, schemaVersion: 2, assignments: current.assignments.map(item => ({
+  const { builtinCatalogVersion: _catalog, ...released } = current
+  const legacy = { ...released, schemaVersion: 2, assignments: current.assignments.map(item => ({
     ...item, runtime: { ...item.runtime, cacheRetention: 'long' },
     compaction: { enabled: false, reserveTokens: 123, keepRecentTokens: 456 }
   })) }
   const { module, store, credentials } = harness({ stored: legacy })
   const after = module.read()
-  assert.equal(after.schemaVersion, 3)
+  assert.equal(after.schemaVersion, 4)
   const migrated = store.value as ModelManagementDocument
   assert.deepEqual(migrated.connections, current.connections)
   assert.deepEqual(migrated.models, current.models)
@@ -717,7 +757,8 @@ it('keeps the legacy model file unchanged if policy migration cannot be persiste
   const initial = harness()
   initial.module.read()
   const current = initial.store.value as ModelManagementDocument
-  const legacy = { ...current, schemaVersion: 2, assignments: current.assignments.map(item => ({
+  const { builtinCatalogVersion: _catalog, ...released } = current
+  const legacy = { ...released, schemaVersion: 2, assignments: current.assignments.map(item => ({
     ...item, runtime: { ...item.runtime, cacheRetention: 'short' },
     compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 200 }
   })) }
@@ -726,5 +767,5 @@ it('keeps the legacy model file unchanged if policy migration cannot be persiste
   assert.throws(() => module.read(), /disk full/)
   assert.deepEqual(store.value, legacy)
   store.failWrite = false
-  assert.equal(module.read().schemaVersion, 3)
+  assert.equal(module.read().schemaVersion, 4)
 })

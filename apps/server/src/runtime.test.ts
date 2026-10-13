@@ -464,7 +464,7 @@ describe('server runtime lifecycle', () => {
   async function boot(
     dataDir: string,
     extraMounts: Record<string, string> = {},
-    bind: { listenHost?: string; accessHosts?: string[] } = {}
+    bind: { listenHost?: string; accessHosts?: string[]; updateJobId?: string } = {}
   ): Promise<{ base: string; config: ServerConfig }> {
     process.env.JAVDEX_TEST_USER_DATA = dataDir
     const listenHost = bind.listenHost ?? '127.0.0.1'
@@ -479,7 +479,7 @@ describe('server runtime lifecycle', () => {
       mediaMounts: { library: mediaRoot, ...extraMounts },
       web: { username: 'viewer', passwordHash }
     }
-    server = await startJavdexServer(config, { workerEntry })
+    server = await startJavdexServer(config, { workerEntry, updateJobId: bind.updateJobId })
     return { base: `http://${listenHost}:${server.port}`, config }
   }
 
@@ -512,6 +512,31 @@ describe('server runtime lifecycle', () => {
     }
     return { host: existing, cleanup: () => undefined }
   }
+
+  it('pending update verifies its real worker while blocking browser, playback and management until activation', async () => {
+    const dataDir = path.join(root, 'pending-update')
+    const original = await boot(dataDir)
+    const identity = await postManage(original.base, 'handshake.get', { input: {} }, { appVersion: '' })
+    await server!.stop()
+    server = undefined
+    const id = randomUUID()
+    const marker = path.join(dataDir, 'server-update-guard.json')
+    fs.writeFileSync(marker, JSON.stringify({ id, phase: 'verifying' }))
+    const pending = await boot(dataDir, {}, { updateJobId: id })
+    assert.equal((await fetch(pending.base + '/ready')).status, 200)
+    assert.equal((await fetch(pending.base + '/')).status, 503)
+    assert.equal((await fetch(pending.base + '/api/play/anything')).status, 503)
+    assert.equal((await postManage(pending.base, 'handshake.get', { input: {} }, { appVersion: '' })).status, 503)
+    fs.writeFileSync(marker, JSON.stringify({ id, phase: 'active' }))
+    let activated: Awaited<ReturnType<typeof postManage>> | undefined
+    for (let i = 0; i < 30; i++) {
+      activated = await postManage(pending.base, 'handshake.get', { input: {} }, { appVersion: '' })
+      if (activated.status === 200) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.equal(activated?.status, 200)
+    assert.deepEqual((activated!.json as { identity: unknown }).identity, (identity.json as { identity: unknown }).identity)
+  })
 
   it('does not listen after a schema upgrade failure', async () => {
     const dataDir = path.join(root, 'upgrade-fail')

@@ -15,7 +15,6 @@ import { MODEL_STORE_ENTRIES, canonicalStoragePath, localAiDirectories, ensureMo
 import { createLocalTextInference } from './textInference'
 type TextEngine = Pick<ReturnType<typeof createLocalTextInference>, 'translateText' | 'close'>
 import { DEFAULT_LOCAL_MODEL_VARIANTS, LOCAL_MODEL_DEFINITIONS, LOCAL_MODEL_VARIANTS, localModelAssets, localModelVariant } from './modelCatalog'
-const configFields = { directory: z.string().min(1), translation: z.enum(['app-default', 'local']) }
 const selectedSchema = z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string() }).strict()
 const translationRefSchema = z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1) }).strict()
 const usageSchema = z.object({
@@ -23,16 +22,17 @@ const usageSchema = z.object({
   subtitleTranslation: translationRefSchema,
   textTranslation: translationRefSchema.extend({ mode: z.enum(['app-default', 'local']) }).strict()
 }).strict()
-const configSchema = z.discriminatedUnion('version', [
-  z.object({ version: z.literal(1), ...configFields }).strict(),
-  z.object({ version: z.literal(2), ...configFields, selected: z.object({ kotoba: z.string(), qwen3: z.string() }).strict() }).strict(),
-  z.object({ version: z.literal(3), ...configFields, translationModel: z.enum(['qwen3', 'hy-mt2-7b']),
-    selected: z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string() }).strict() }).strict(),
-  z.object({ version: z.literal(4), ...configFields, downloadSource: z.enum(LOCAL_MODEL_DOWNLOAD_SOURCES).default('official'), translationModel: z.enum(LOCAL_TRANSLATION_MODEL_IDS),
-    selected: selectedSchema }).strict(),
-  z.object({ version: z.literal(5), ...configFields, downloadSource: z.enum(LOCAL_MODEL_DOWNLOAD_SOURCES), translationModel: z.enum(LOCAL_TRANSLATION_MODEL_IDS),
-    selected: selectedSchema, usage: usageSchema, revision: z.string().min(1) }).strict()
-])
+// New since released 0.8.0: one format, no unpublished intermediate upgrades.
+const configSchema = z.object({ version: z.literal(1), directory: z.string().min(1),
+  downloadSource: z.enum(LOCAL_MODEL_DOWNLOAD_SOURCES), selected: selectedSchema,
+  usage: usageSchema, revision: z.string().min(1) }).strict()
+function defaultUsage(selected = DEFAULT_LOCAL_MODEL_VARIANTS): LocalModelUsage {
+  return {
+    subtitleRecognition: { model: 'kotoba', variant: selected.kotoba },
+    subtitleTranslation: { model: 'qwen3', variant: selected.qwen3 },
+    textTranslation: { mode: 'app-default', model: 'qwen3', variant: selected.qwen3 }
+  }
+}
 export async function localModelFileHash(file: string): Promise<string> {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(file)) hash.update(chunk)
@@ -59,11 +59,7 @@ export function createLocalModelManager(userData: string, options: {
   let downloadSource: LocalModelDownloadSource = 'official'
   let translationModel: LocalTranslationModelId = 'qwen3'
   let selected = { ...DEFAULT_LOCAL_MODEL_VARIANTS }
-  let usage: LocalModelUsage = {
-    subtitleRecognition: { model: 'kotoba', variant: selected.kotoba },
-    subtitleTranslation: { model: 'qwen3', variant: selected.qwen3 },
-    textTranslation: { mode: 'app-default', model: 'qwen3', variant: selected.qwen3 }
-  }
+  let usage = defaultUsage(selected)
   let revision: string = randomUUID()
   let configInvalid = false
   let operation: LocalModelSnapshot['operation'] = null, activeModel: LocalModelId | null = null
@@ -127,22 +123,12 @@ export function createLocalModelManager(userData: string, options: {
       // Storage metadata is independent of purpose bindings. Keep the known location
       // when a purpose reference is damaged so explicit recovery cannot orphan files.
       directory = path.normalize(config.directory)
-      downloadSource = config.version >= 4 && 'downloadSource' in config ? config.downloadSource : 'official'
-      if (config.version === 5) revision = config.revision
-      const next = config.version === 1 ? { ...DEFAULT_LOCAL_MODEL_VARIANTS } : { ...DEFAULT_LOCAL_MODEL_VARIANTS, ...config.selected }
-      for (const id of LOCAL_MODEL_IDS) localModelVariant(id, next[id])
-      const nextModel = 'translationModel' in config ? config.translationModel : 'qwen3'
-      const migratedUsage: LocalModelUsage = {
-        subtitleRecognition: { model: 'kotoba', variant: next.kotoba },
-        subtitleTranslation: { model: nextModel, variant: next[nextModel] },
-        textTranslation: { mode: config.translation, model: nextModel, variant: next[nextModel] }
-      }
-      selected = next; usage = migratedUsage; translation = config.translation; translationModel = nextModel
-      const nextUsage = config.version === 5 ? config.usage : migratedUsage
-      for (const ref of Object.values(nextUsage)) localModelVariant(ref.model, ref.variant)
-      usage = nextUsage
+      downloadSource = config.downloadSource; revision = config.revision
+      for (const id of LOCAL_MODEL_IDS) localModelVariant(id, config.selected[id])
+      selected = config.selected; usage = defaultUsage(selected)
+      for (const ref of Object.values(config.usage)) localModelVariant(ref.model, ref.variant)
+      usage = config.usage
       translation = usage.textTranslation.mode; translationModel = usage.subtitleTranslation.model
-      if (config.version !== 5) await save()
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
         configInvalid = true; error = '本地模型用途配置无法读取，请重新保存用途设置后重试'
@@ -151,9 +137,9 @@ export function createLocalModelManager(userData: string, options: {
     await cleanModelTemporaryFiles(directory)
     await refresh()
   })()
-  async function save(nextDirectory = directory, nextTranslation = translation, nextSelected = selected, nextModel = translationModel, nextSource = downloadSource, nextUsage = usage): Promise<void> {
+  async function save(nextDirectory = directory, nextSelected = selected, nextSource = downloadSource, nextUsage = usage): Promise<void> {
     const nextRevision = randomUUID()
-    await atomicWrite(configFile, JSON.stringify({ version: 5, revision: nextRevision, usage: nextUsage, downloadSource: nextSource, directory: nextDirectory, translation: nextTranslation, selected: nextSelected, translationModel: nextModel }))
+    await atomicWrite(configFile, JSON.stringify({ version: 1, revision: nextRevision, usage: nextUsage, downloadSource: nextSource, directory: nextDirectory, selected: nextSelected }))
     revision = nextRevision
   }
   function available(models: LocalModelId[] = []): void {
@@ -258,7 +244,7 @@ export function createLocalModelManager(userData: string, options: {
       const nextUsage = structuredClone(usage)
       for (const ref of Object.values(nextUsage)) if (ref.model === id) ref.variant = variant
       if (nextUsage.textTranslation.variant !== usage.textTranslation.variant) await shutdownEngine()
-      await save(directory, translation, next, translationModel, downloadSource, nextUsage); selected = next; usage = nextUsage
+      await save(directory, next, downloadSource, nextUsage); selected = next; usage = nextUsage
       await refresh()
     } finally { operation = null; publish() }
   }
@@ -273,7 +259,7 @@ export function createLocalModelManager(userData: string, options: {
       await shutdownEngine()
       const nextUsage = { ...usage, subtitleTranslation: { model, variant: selected[model] },
         textTranslation: { ...usage.textTranslation, model, variant: selected[model] } }
-      await save(directory, translation, selected, model, downloadSource, nextUsage); translationModel = model; usage = nextUsage
+      await save(directory, selected, downloadSource, nextUsage); translationModel = model; usage = nextUsage
       await refresh()
     } finally { operation = null; publish() }
   }
@@ -292,7 +278,7 @@ export function createLocalModelManager(userData: string, options: {
       const nextSelected = { ...selected, kotoba: nextUsage.subtitleRecognition.variant,
         [nextUsage.textTranslation.model]: nextUsage.textTranslation.variant,
         [nextUsage.subtitleTranslation.model]: nextUsage.subtitleTranslation.variant }
-      await save(directory, nextUsage.textTranslation.mode, nextSelected, nextUsage.subtitleTranslation.model, downloadSource, nextUsage)
+      await save(directory, nextSelected, downloadSource, nextUsage)
       usage = nextUsage; selected = nextSelected; translation = nextUsage.textTranslation.mode; translationModel = nextUsage.subtitleTranslation.model
       configInvalid = false
       await refresh()
@@ -475,7 +461,7 @@ export function createLocalModelManager(userData: string, options: {
       await ready; available()
       if (configInvalid) throw new Error('本地模型设置损坏，请重新选择翻译方式后重试')
       operation = 'configure'; publish()
-      try { await save(directory, translation, selected, translationModel, value); downloadSource = value; error = null }
+      try { await save(directory, selected, value); downloadSource = value; error = null }
       finally { operation = null; publish() }
     },
     async setTranslation(value: LocalTranslationMode): Promise<void> {
@@ -485,7 +471,7 @@ export function createLocalModelManager(userData: string, options: {
       if (purposeCounts.textTranslation > 0 && value !== usage.textTranslation.mode) throw new Error('模型正在使用，请等待文本翻译完成')
       operation = 'configure'; publish()
       const nextUsage = { ...usage, textTranslation: { ...usage.textTranslation, mode: value } }
-      try { await save(directory, value, selected, translationModel, downloadSource, nextUsage); translation = value; usage = nextUsage; configInvalid = false; error = null }
+      try { await save(directory, selected, downloadSource, nextUsage); translation = value; usage = nextUsage; configInvalid = false; error = null }
       finally { operation = null; publish() }
     },
     async download(id: LocalModelId, variant?: string): Promise<void> {

@@ -195,7 +195,7 @@ test('desktop packaging keeps bundled Photon WASM and LAN web while excluding th
   for (const file of ['out/main/chunks/photon_rs_bg.wasm', 'out/web/index.html', 'node_modules/@silvia-odwyer/photon-node/LICENSE.md']) {
     assert.equal(selected(file), true, `${file} is required at runtime or for notices`)
   }
-  for (const file of ['out/server/index.js', 'out/server/web/index.html', 'node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm']) {
+  for (const file of ['out/server/index.js', 'out/server/web/index.html', 'out/updater/index.js', 'out/server-single-container-unit.log', 'out/server-update-ui/light-1440.png', 'node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm']) {
     assert.equal(selected(file), false, `${file} is a redundant desktop input`)
   }
 })

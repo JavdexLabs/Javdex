@@ -112,7 +112,7 @@ if (run.status !== 0) {
 const base = `http://127.0.0.1:${port}`
 try {
   let live = null
-  for (let i = 0; i < 40; i += 1) {
+  for (let i = 0; i < 240; i += 1) {
     try {
       live = await fetchLive(`${base}/live`)
       if (live.ok) break

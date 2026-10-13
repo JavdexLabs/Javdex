@@ -116,12 +116,14 @@ export function parseReleaseVersion(input: unknown): [number, number, number] | 
 
 export function compareReleaseVersions(left: string, right: string): number | null {
   const a = parseReleaseVersion(left)
-  const b = parseReleaseVersion(right)
+  // The offered release remains stable-only; the installed app may be a beta.
+  const prerelease = right.trim().match(/^v?(\d+\.\d+\.\d+)-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*$/)
+  const b = parseReleaseVersion(prerelease?.[1] ?? right)
   if (!a || !b) return null
   for (let index = 0; index < 3; index += 1) {
     if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1
   }
-  return 0
+  return prerelease ? 1 : 0
 }
 
 function isTrustedReleaseUrl(value: string): boolean {

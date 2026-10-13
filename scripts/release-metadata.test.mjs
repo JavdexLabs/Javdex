@@ -6,6 +6,9 @@ test('beta tags are prereleases even without a manual flag', () => {
   assert.deepEqual(releaseMetadata('0.8.0-beta.1', 'v0.8.0-beta.1'), {
     tag: 'v0.8.0-beta.1', version: '0.8.0-beta.1', prerelease: true
   })
+  assert.deepEqual(releaseMetadata('0.9.0-beta.1', 'v0.9.0-beta.1'), {
+    tag: 'v0.9.0-beta.1', version: '0.9.0-beta.1', prerelease: true
+  })
 })
 test('stable and manually marked prereleases retain their channel', () => {
   assert.equal(releaseMetadata('0.8.0').prerelease, false)

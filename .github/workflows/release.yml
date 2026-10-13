@@ -166,7 +166,18 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Validate server update signing before publishing images
+        env:
+          JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
+          JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
+        run: node scripts/server-update-release.mjs validate
       - run: npm run server:build
+        env:
+          JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
+          JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
+      - run: npm run server:updater:test
+      - name: Verify single-container updates before publishing this architecture
+        run: npm run server:updater:smoke
       - run: npm run server:smoke
       - uses: docker/login-action@v3
         with:
@@ -209,6 +220,9 @@ jobs:
     needs: [metadata, package, server-manifest]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release-')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -245,6 +259,24 @@ jobs:
           cp ".github/release-notes/$TAG.md" release-body.md
           printf '\n\n### Docker 服务端\n\n镜像：`%s:%s`（Linux amd64 / arm64）。\n\n下载下方 Compose 和 JSON 配置，部署步骤见 https://github.com/%s/blob/%s/docs/SERVER_MODE.md 。桌面与服务端须使用相同版本。\n' "$IMAGE" "$VERSION" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> release-body.md
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run server:updater:build
+      - name: Read verified server images for update packaging
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish signed server update artifacts
+        env:
+          JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
+          JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
+        run: node scripts/server-update-release.mjs publish --directory release-artifacts
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -263,3 +295,6 @@ jobs:
             release-artifacts/SHA256SUMS.txt
             release-artifacts/docker-compose.example.yml
             release-artifacts/javdex-server.example.json
+            release-artifacts/Javdex-server-update-*.json
+            release-artifacts/Javdex-server-*.tar.gz
+            release-artifacts/server-update-public.pem

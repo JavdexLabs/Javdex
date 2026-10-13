@@ -233,11 +233,9 @@ test('downloading another precision does not select it; selection and all instal
   } finally { await f.cleanup() }
 })
 
-test('legacy configuration retains the exact original precision and invalid variant identities cannot change it', async () => {
+test('new configuration starts with exact defaults and invalid variant identities cannot change it', async () => {
   const f = await fixture()
   try {
-    const directory = (await f.manager.snapshot()).directory
-    await fs.writeFile(path.join(f.root, 'local-models.json'), JSON.stringify({ version: 1, directory, translation: 'app-default' }))
     const restarted = createLocalModelManager(f.root, { installer: f.installer })
     try {
       assert.deepEqual((await restarted.snapshot()).models.map(item => item.selectedVariant), ['qwen3-q4_k_m', 'kotoba-q5_0', 'hy-mt2-7b-q4_k_m'])
@@ -387,29 +385,27 @@ test('active HY leases block family changes and repairs of either shared transla
   } finally { await f.cleanup() }
 })
 
-test('v2 Qwen settings migrate exact shared purpose bindings to v5 without changing mode or files', async () => {
+test('unpublished model configuration versions are rejected without silent rewriting', async () => {
   const f = await fixture()
   try {
-    const directory = (await f.manager.snapshot()).directory
-    const original = JSON.stringify({ version: 2, directory, translation: 'local', selected: { kotoba: 'kotoba-f16', qwen3: 'qwen3-official-q8_0' } })
+    await f.manager.setDownloadSource('hf-mirror')
     const configFile = path.join(f.root, 'local-models.json')
-    await fs.writeFile(configFile, original)
-    const restarted = createLocalModelManager(f.root, { installer: f.installer })
-    try {
-      const state = await restarted.snapshot()
-      assert.equal(state.translationModel, 'qwen3')
-      assert.equal(state.translation, 'local')
-      assert.equal(state.models.find(model => model.id === 'qwen3')!.selectedVariant, 'qwen3-official-q8_0')
-      assert.equal(state.models.find(model => model.id === 'kotoba')!.selectedVariant, 'kotoba-f16')
-      assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 5)
-      assert.deepEqual(state.usage.subtitleTranslation, { model: 'qwen3', variant: 'qwen3-official-q8_0' })
-      assert.deepEqual(state.usage.textTranslation, { mode: 'local', model: 'qwen3', variant: 'qwen3-official-q8_0' })
-      await restarted.setTranslation('app-default')
-      const saved = JSON.parse(await fs.readFile(configFile, 'utf8'))
-      assert.equal(saved.version, 5)
-      assert.equal(saved.translationModel, 'qwen3')
-      assert.equal(saved.selected.qwen3, 'qwen3-official-q8_0')
-    } finally { await restarted.close() }
+    const current = JSON.parse(await fs.readFile(configFile, 'utf8'))
+    assert.equal(current.version, 1)
+    const snapshots = [
+      { version: 1, directory: current.directory, translation: 'app-default' },
+      ...[2, 3, 4, 5].map(version => ({ ...current, version }))
+    ]
+    for (const document of snapshots) {
+      const original = JSON.stringify(document)
+      await fs.writeFile(configFile, original)
+      const restarted = createLocalModelManager(f.root, { installer: f.installer })
+      try {
+        assert.ok((await restarted.snapshot()).configurationError)
+        await assert.rejects(restarted.mode(), /设置损坏/)
+        assert.equal(await fs.readFile(configFile, 'utf8'), original)
+      } finally { await restarted.close() }
+    }
   } finally { await f.cleanup() }
 })
 
@@ -507,41 +503,14 @@ test('HY subtitles do not require other translators and their leases protect the
   } finally { await f.cleanup() }
 })
 
-test('v3 HY settings migrate exact shared purpose bindings to v5 while preserving other family selections', async () => {
+test('current configuration rejects cross-family precision identities without silently routing to Qwen', async () => {
   const f = await fixture()
   try {
-    const directory = (await f.manager.snapshot()).directory
-    const original = JSON.stringify({ version: 3, directory, translation: 'local', translationModel: 'hy-mt2-7b',
-      selected: { kotoba: 'kotoba-f16', qwen3: 'qwen3-official-q8_0', 'hy-mt2-7b': 'hy-mt2-7b-q6_k' } })
-    const configFile = path.join(f.root, 'local-models.json')
-    await fs.writeFile(configFile, original)
-    const restarted = createLocalModelManager(f.root, { installer: f.installer })
-    try {
-      const state = await restarted.snapshot()
-      assert.equal(state.directory, directory)
-      assert.equal(state.translationModel, 'hy-mt2-7b')
-      assert.equal(state.translation, 'local')
-      assert.deepEqual(state.models.map(model => model.selectedVariant), ['qwen3-official-q8_0', 'kotoba-f16', 'hy-mt2-7b-q6_k'])
-      assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 5)
-      assert.deepEqual(state.usage.subtitleTranslation, { model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' })
-      assert.deepEqual(state.usage.textTranslation, { mode: 'local', model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q6_k' })
-      await restarted.setTranslation('app-default')
-      const saved = JSON.parse(await fs.readFile(configFile, 'utf8'))
-      assert.equal(saved.version, 5)
-      assert.equal(saved.translationModel, 'hy-mt2-7b')
-      assert.equal(saved.selected['hy-mt2-7b'], 'hy-mt2-7b-q6_k')
-      assert.equal(Object.keys(saved.selected).length, 3)
-    } finally { await restarted.close() }
-  } finally { await f.cleanup() }
-})
-
-test('v4 rejects cross-family precision identities without silently routing to Qwen', async () => {
-  const f = await fixture()
-  try {
-    const directory = (await f.manager.snapshot()).directory
-    await fs.writeFile(path.join(f.root, 'local-models.json'), JSON.stringify({ version: 4, directory, translation: 'local',
-      translationModel: 'hy-mt2-7b', selected: { kotoba: 'kotoba-q5_0', qwen3: 'qwen3-q4_k_m',
-        'hy-mt2-7b': 'qwen3-q4_k_m' } }))
+    await f.manager.setDownloadSource('official')
+    const filename = path.join(f.root, 'local-models.json')
+    const config = JSON.parse(await fs.readFile(filename, 'utf8'))
+    config.selected['hy-mt2-7b'] = 'qwen3-q4_k_m'
+    await fs.writeFile(filename, JSON.stringify(config))
     const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
     try {
       await assert.rejects(restarted.mode(), /设置损坏/)
@@ -645,21 +614,23 @@ test('atomic purpose saves reject stale drafts and mismatched variants while per
     await assert.rejects(f.manager.setUsage({ ...usage, subtitleTranslation: { model: 'qwen3', variant: 'hy-mt2-7b-q8_0' } }), /不匹配/)
     assert.deepEqual((await f.manager.snapshot()).usage, saved.usage)
     const file = JSON.parse(await fs.readFile(path.join(f.root, 'local-models.json'), 'utf8'))
-    assert.equal(file.version, 5); assert.deepEqual(file.usage, saved.usage)
+    assert.equal(file.version, 1); assert.deepEqual(file.usage, saved.usage)
+    assert.equal('translation' in file, false); assert.equal('translationModel' in file, false)
     assert.equal((await f.manager.snapshot()).operation, null)
   } finally { await f.cleanup() }
 })
 
-test('v4 migration preserves mirror source, directory, weights and both formerly shared translation bindings', async () => {
+test('current configuration preserves mirror source, directory, weights and purpose bindings without rewriting on startup', async () => {
   const f = await fixture()
   try {
     for (const model of ['kotoba', 'qwen3'] as const) { await f.manager.download(model); await idle(f.manager) }
+    await f.manager.setDownloadSource('hf-mirror')
+    await f.manager.setTranslation('local')
     const before = await f.manager.snapshot(), runtime = f.installer(before.directory)
     const filename = `${runtime.paths().translationModel}.ready`, contents = await fs.readFile(filename, 'utf8')
     const selected = Object.fromEntries(before.models.map(model => [model.id, model.selectedVariant]))
     const configFile = path.join(f.root, 'local-models.json')
-    await fs.writeFile(configFile, JSON.stringify({ version: 4, directory: before.directory, translation: 'local',
-      translationModel: 'qwen3', downloadSource: 'hf-mirror', selected }))
+    const original = await fs.readFile(configFile, 'utf8')
     const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true })
     try {
       const after = await restarted.snapshot()
@@ -669,13 +640,14 @@ test('v4 migration preserves mirror source, directory, weights and both formerly
       assert.deepEqual(after.usage.subtitleTranslation, { model: 'qwen3', variant: selected.qwen3 })
       assert.deepEqual(after.usage.textTranslation, { mode: 'local', model: 'qwen3', variant: selected.qwen3 })
       assert.equal(await fs.readFile(filename, 'utf8'), contents)
-      assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 5)
+      assert.equal(JSON.parse(await fs.readFile(configFile, 'utf8')).version, 1)
+      assert.equal(await fs.readFile(configFile, 'utf8'), original)
       assert.equal(await restarted.subtitleRuntime().installed(), true)
     } finally { await restarted.close() }
   } finally { await f.cleanup() }
 })
 
-test('damaged v5 purpose references never reach the snapshot and explicit recovery preserves valid storage metadata', async () => {
+test('damaged purpose references never reach the snapshot and explicit recovery preserves valid storage metadata', async () => {
   const f = await fixture()
   try {
     await f.manager.download('qwen3'); await idle(f.manager)

@@ -23,6 +23,7 @@ import { configureServerLibraryHost, ensureServerCatalog } from './identity'
 import { assertSharpDecode } from './imageCodec'
 import { dispatchManageOperation, putManageUpload, getManageAsset } from './manageDispatch'
 import { SERVER_APP_VERSION } from './appVersion'
+import { readUpdateGuard } from './updateGuard'
 import { WebCatalogWorkerClient } from './webCatalogWorkerClient'
 import {
   setManageBrowserSurface,
@@ -118,19 +119,21 @@ function createBrowserSurface(
 
 export async function startJavdexServer(
   config: ServerConfig,
-  options: { workerEntry?: string; bootstrapToken?: string } = {}
+  options: { workerEntry?: string; bootstrapToken?: string; updateJobId?: string } = {}
 ): Promise<JavdexServerHandle> {
   if (process.versions.electron) {
     throw new Error('服务器宿主不能在 Electron 中启动')
   }
   await assertSharpDecode()
   ensureLocalDataDir(config.dataDir)
+  let updatePending = readUpdateGuard(config.dataDir, options.updateJobId) === 'verifying'
   const mountRoots = ensureMediaMounts(config.dataDir, config.imagesDir, config.mediaMounts)
   const lock = acquireDataDirLock(config.dataDir)
   let worker: WebCatalogWorkerClient | undefined
   let http: WebServer | undefined
   let ready = false
   let stopping = false
+  let activationTimer: ReturnType<typeof setInterval> | undefined
   const fail = async (error: unknown): Promise<never> => {
     setPlayGrantListener(null)
     setManageBrowserSurface(null)
@@ -153,16 +156,21 @@ export async function startJavdexServer(
     configureServerLibraryHost(config)
     ensureMediaAssetDirsAt(config.imagesDir)
     const database = initDatabaseAtPath(path.join(config.dataDir, 'library.db'))
-    recoverBackupOperations({ mode: 'remote', appVersion: SERVER_APP_VERSION, onRestored: () => { new WebSessions(Date.now, path.join(config.dataDir, 'web-devices.json')).clear() } }, database)
-    recoverInterruptedLibraryScanRuns(database)
-    recoverCatalogImages(database)
-    recoverCatalogMaintenance(database)
+    const recover = (): void => {
+      recoverBackupOperations({ mode: 'remote', appVersion: SERVER_APP_VERSION, onRestored: () => { new WebSessions(Date.now, path.join(config.dataDir, 'web-devices.json')).clear() } }, database)
+      recoverInterruptedLibraryScanRuns(database)
+      recoverCatalogImages(database)
+      recoverCatalogMaintenance(database)
+    }
+    if (!updatePending) recover()
     ensureServerCatalog(config, { bootstrapToken: isWriterBound(database) ? undefined : options.bootstrapToken })
     const workerEntry = options.workerEntry ?? defaultWebCatalogWorkerEntry()
     if (!fs.existsSync(workerEntry)) {
       throw new Error(`缺少 catalog 查询 worker: ${workerEntry}`)
     }
     worker = new WebCatalogWorkerClient(workerEntry, database.name)
+    // Exercise the real reader before declaring a pending update ready.
+    if (updatePending) await worker.readWebCollections()
     const catalog = gateCatalogUntilBound(
       constrainMediaToMounts(createWorkerWebCatalog(database, worker), mountRoots),
       () => isWriterBound(database)
@@ -177,6 +185,7 @@ export async function startJavdexServer(
       listenHost: config.listenHost,
       accessHosts: config.accessHosts,
       surface: 'browser',
+      maintenance: () => updatePending,
       probes: {
         live: () => ({ status: 'live' }),
         ready: () =>
@@ -202,13 +211,31 @@ export async function startJavdexServer(
     })
     const port = await http.start(config.port, config.listenHost)
     setManageBrowserSurface(createBrowserSurface(http, config, port))
-    automaticScanScheduler.start()
+    if (!updatePending) automaticScanScheduler.start()
+    else {
+      activationTimer = setInterval(() => {
+        if (stopping) return
+        try {
+          if (readUpdateGuard(config.dataDir, options.updateJobId) !== 'active') return
+          recover()
+          automaticScanScheduler.start()
+          updatePending = false
+          clearInterval(activationTimer)
+        } catch {
+          // Stay unavailable. The updater has committed and must not discard later writes.
+          ready = false
+          clearInterval(activationTimer)
+        }
+      }, 500)
+      activationTimer.unref()
+    }
     ready = true
     return {
       port,
       dataDir: config.dataDir,
       async stop(_signal?: NodeJS.Signals): Promise<void> {
         stopping = true
+        clearInterval(activationTimer)
         ready = false
         automaticScanScheduler.stop()
         try {

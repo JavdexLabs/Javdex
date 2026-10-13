@@ -2,6 +2,7 @@ import { build } from 'esbuild'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = path.join(root, 'out', 'server')
@@ -84,6 +85,10 @@ async function main() {
     }
   }
   fs.writeFileSync(path.join(outDir, 'package.json'), `${JSON.stringify(production, null, 2)}\n`)
+  const schema = Number(fs.readFileSync(path.join(root, 'packages/library/src/db/migrations.ts'), 'utf8').match(/export const CURRENT_SCHEMA_VERSION = (\d+)/)?.[1])
+  const commit = process.env.GITHUB_SHA || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+  if (!Number.isInteger(schema) || !/^[a-f0-9]{40}$/.test(commit)) throw new Error('Missing production build identity')
+  fs.writeFileSync(path.join(outDir, 'build-info.json'), `${JSON.stringify({ format: 1, build: commit, targetSchema: schema })}\n`)
   fs.writeFileSync(
     path.join(outDir, 'closure.json'),
     `${JSON.stringify(
@@ -97,6 +102,7 @@ async function main() {
     )}\n`
   )
   console.log(`server build written to ${outDir}`)
+  await import('./updater-build.mjs')
 }
 
 await main()

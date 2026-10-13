@@ -96,7 +96,7 @@ const BUILTIN_MODEL = (id: string, name: string, protocol?: LlmProviderProtocol)
 })
 
 /** Bump when shipped model choices change; saved choices become user-managed. */
-export const BUILT_IN_LLM_CATALOG_VERSION = 20261011
+export const BUILT_IN_LLM_CATALOG_VERSION = 1
 
 export const BUILT_IN_LLM_PROVIDERS: BuiltInLlmProviderDefinition[] = [
   {

@@ -7,16 +7,14 @@ import Database from 'better-sqlite3'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
-import { CATALOG_PROTOCOL_SCHEMA_SQL, CATALOG_IMAGE_UPLOAD_SCHEMA_SQL, CATALOG_TASK_SCHEMA_SQL, SCHEMA_SQL, BUILTIN_PLAYLISTS_SQL } from './schema'
 import { ActressIdentityConflictWorkflow } from '../../../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
+import { releasedV19Database } from '../testFixtures/releasedV19Database'
 
 it('adds built-in playlists on upgrade without claiming existing same-name lists', () => {
-  const db = new Database(':memory:')
+  const db = releasedV19Database()
   try {
-    db.exec(SCHEMA_SQL.replace(BUILTIN_PLAYLISTS_SQL, ''))
     db.exec("INSERT INTO playlists (name, created_at) VALUES ('我喜欢', '2026-01-01')")
-    db.pragma('user_version = 21')
     migrateDatabase(db)
     migrateDatabase(db)
     const rows = db.prepare('SELECT name, system_kind, remove_after_play FROM playlists ORDER BY id').all()
@@ -39,9 +37,9 @@ function ensureTagFixture(db: Database.Database): void {
 }
 
 function migrateFixture(db: Database.Database): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
-    description TEXT, cover_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT)`)
   if (Number(db.pragma('user_version', { simple: true })) > 0) {
+    db.exec(`CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+      description TEXT, cover_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT)`)
     db.exec(`CREATE TABLE IF NOT EXISTS video_external_stats (
       id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL, source TEXT NOT NULL,
       rating_average REAL, rating_count INTEGER, fetched_at TEXT,
@@ -286,21 +284,20 @@ function createV11StrmMigrationSchema(db: Database.Database): void {
 }
 
 describe('database schema', () => {
-  it('backfills schema 20 defaults deterministically while preserving manual selections', () => {
-    const db = new Database(':memory:')
+  it('backfills released schema 19 defaults deterministically and preserves later manual selections', () => {
+    const db = releasedV19Database()
     try {
-      db.exec(SCHEMA_SQL.replace(BUILTIN_PLAYLISTS_SQL, ''))
       for (const code of ['A', 'B', 'C']) db.prepare('INSERT INTO videos (code) VALUES (?)').run(code)
-      const insert = db.prepare('INSERT INTO video_external_stats (video_id, source, rating_average, fetched_at, is_default) VALUES (?, ?, ?, ?, ?)')
-      insert.run(1, 'Older', 4, '2024-01-01', 0)
-      insert.run(1, 'B', 4, '2025-01-01', 0)
-      insert.run(1, 'A', 3, '2025-01-01', 0)
-      insert.run(1, 'Empty', null, '2026-01-01', 0)
-      insert.run(2, 'Manual', 3, '2024-01-01', 1)
-      insert.run(2, 'Newer', 4, '2025-01-01', 0)
-      insert.run(3, 'Empty', null, null, 0)
-      db.pragma('user_version = 20')
+      const insert = db.prepare('INSERT INTO video_external_stats (video_id, source, rating_average, fetched_at) VALUES (?, ?, ?, ?)')
+      insert.run(1, 'Older', 4, '2024-01-01')
+      insert.run(1, 'B', 4, '2025-01-01')
+      insert.run(1, 'A', 3, '2025-01-01')
+      insert.run(1, 'Empty', null, '2026-01-01')
+      insert.run(2, 'Manual', 3, '2024-01-01')
+      insert.run(2, 'Newer', 4, '2025-01-01')
+      insert.run(3, 'Empty', null, null)
       migrateDatabase(db)
+      db.exec("UPDATE video_external_stats SET is_default=CASE WHEN source='Manual' THEN 1 ELSE 0 END WHERE video_id=2")
       migrateDatabase(db)
       assert.deepEqual(db.prepare('SELECT video_id, source FROM video_external_stats WHERE is_default = 1 ORDER BY video_id').all(), [
         { video_id: 1, source: 'A' }, { video_id: 2, source: 'Manual' }
@@ -308,10 +305,8 @@ describe('database schema', () => {
     } finally { db.close() }
   })
   it('upgrades schema 19 ratings without losing scores and remains idempotent', () => {
-    const db = new Database(':memory:')
+    const db = releasedV19Database()
     try {
-      db.exec(SCHEMA_SQL.replace(BUILTIN_PLAYLISTS_SQL, ''))
-      db.exec('ALTER TABLE video_external_stats DROP COLUMN is_default')
       db.prepare("INSERT INTO videos (code) VALUES ('TEST-20')").run()
       db.prepare("INSERT INTO video_external_stats (video_id, source, rating_average) VALUES (1, 'JavDB', 4.5)").run()
       db.pragma('user_version = 19')
@@ -1597,20 +1592,10 @@ describe('database schema', () => {
   it('leaves current-version databases unchanged', () => {
     const db = new Database(':memory:')
     try {
-      db.exec(`
-        CREATE TABLE actresses (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          main_name TEXT UNIQUE NOT NULL,
-          avatar_path TEXT,
-          avatar_source_path TEXT,
-          avatar_crop_json TEXT
-        )
-      `)
-      db.exec(CATALOG_PROTOCOL_SCHEMA_SQL)
-      db.exec(CATALOG_IMAGE_UPLOAD_SCHEMA_SQL)
-      db.exec(CATALOG_TASK_SCHEMA_SQL)
-      db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
-      migrateFixture(db)
+      migrateDatabase(db)
+      const before = db.serialize()
+      migrateDatabase(db)
+      assert.deepEqual(db.serialize(), before)
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       const cols = (db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]).map(
         (c) => c.name

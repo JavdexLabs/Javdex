@@ -2,6 +2,7 @@ import type { ScanAuditSnapshotIdentity, ScanAuditIndexQuery, ScanAuditIndexPage
 import type { ClassificationPageQuery, ClassificationListPage } from './classificationTypes'
 import type { WebAccessInput, WebAccessStatus } from './webTypes'
 import { IPC } from './ipc-channels'
+import type { ServerUpdateCommand, ServerUpdateSnapshot } from './serverUpdateTypes'
 import type { ExpectedVersions } from './protocol/versions'
 import type {
   ModelCandidate,
@@ -214,6 +215,7 @@ export interface AppIpcContract {
   [IPC.SETTINGS_OVERVIEW_STATS]: { args: []; result: LibraryOverviewStats }
 
   [IPC.APP_UPDATE_GET_STATE]: { args: []; result: UpdateCheckState }
+  [IPC.SERVER_UPDATE_CONTROL]: { args: [command: ServerUpdateCommand]; result: ServerUpdateSnapshot }
   [IPC.APP_UPDATE_CHECK]: { args: []; result: UpdateCheckState }
   [IPC.APP_UPDATE_OPEN_RELEASE]: { args: []; result: boolean }
   [IPC.APP_UPDATE_OPEN_PROJECT_PAGE]: { args: [page: ProjectPage]; result: boolean }

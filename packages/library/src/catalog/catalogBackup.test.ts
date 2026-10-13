@@ -100,7 +100,7 @@ async function historicalBackup(source: ReturnType<typeof fixture>, version: num
         for (const row of added.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>) db.exec(`DROP TABLE ${row.name}`)
       } finally { added.close() }
     }
-    if (version < 22) {
+    if (version < 20) {
       db.exec("DELETE FROM playlists WHERE system_kind IS NOT NULL; DROP INDEX idx_playlists_system_kind; ALTER TABLE playlists DROP COLUMN system_kind; ALTER TABLE playlists DROP COLUMN remove_after_play;")
     }
     if (version < 20) db.exec('ALTER TABLE video_external_stats DROP COLUMN is_default')

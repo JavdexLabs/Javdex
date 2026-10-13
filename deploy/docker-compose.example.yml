@@ -1,13 +1,21 @@
 services:
   javdex:
-    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the desktop version, for example 0.8.0}
+    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the desktop version, for example 0.9.0-beta.1}
     restart: unless-stopped
+    stop_grace_period: 150s
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "8096:8096"
+      # 更新入口仅向可信局域网或私有网络开放。
+      - "8097:8097"
     environment:
       JAVDEX_WEB_PASSWORD: "replace-with-a-long-password"
+      JAVDEX_UPDATE_PUBLIC_URL: "https://192.168.1.10:8097"
     volumes:
       - javdex-data:/data
+      # 必须保留：发行版本、配对凭据、更新日志和升级前快照。
+      - javdex-program:/program
       # 媒体库目录必须可读写；宿主机/NAS 权限也需允许容器内 node 用户读写。
       # 添加来源需写入 .javdex-root 标记，不要将媒体卷改为 :ro。
       - /absolute/path/to/media:/media:rw
@@ -16,3 +24,4 @@ services:
 
 volumes:
   javdex-data:
+  javdex-program:

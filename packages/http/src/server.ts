@@ -137,6 +137,8 @@ export class WebServer {
       surface?: HttpSurface
       /** Server host only. Desktop LAN browse must omit this so /live and /ready stay absent. */
       probes?: WebHealthProbes
+      /** Update validation serves health probes while holding all business traffic. */
+      maintenance?: () => boolean
       /** Server host only. Desktop LAN browse must omit this so /manage/v1 stays 404. */
       manage?: ManageHttpSurface
       /** Server host only. Resource-scoped playback; independent of browser sessions. */
@@ -274,6 +276,9 @@ export class WebServer {
     if (url.origin !== `http://${authority}`)
       throw new WebError(400, '请求地址无效')
     const originOk = !request.headers.origin || request.headers.origin === `http://${authority}`
+    if (this.options.maintenance?.() && !((request.method === 'GET' || request.method === 'HEAD') && (url.pathname === '/live' || url.pathname === '/ready'))) {
+      throw new WebError(503, '服务端正在更新验证，请稍后重试')
+    }
     if (await handleManageHttpRequest(request, response, url, this.options.manage, originOk)) {
       return
     }

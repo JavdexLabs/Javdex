@@ -1369,12 +1369,16 @@ CREATE TEMP TABLE IF NOT EXISTS playlist_import_decisions (
 );
 `
 
+const BUILTIN_PLAYLIST_SEEDS_SQL = `
+INSERT INTO playlists (name, system_kind, created_at) VALUES ('我喜欢', 'favorites', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT INTO playlists (name, system_kind, created_at) VALUES ('稍后观看', 'watch_later', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+`
+
 export const BUILTIN_PLAYLISTS_SQL = `
 ALTER TABLE playlists ADD COLUMN system_kind TEXT CHECK(system_kind IN ('favorites', 'watch_later'));
 ALTER TABLE playlists ADD COLUMN remove_after_play INTEGER NOT NULL DEFAULT 0 CHECK(remove_after_play IN (0, 1));
 CREATE UNIQUE INDEX idx_playlists_system_kind ON playlists(system_kind) WHERE system_kind IS NOT NULL;
-INSERT INTO playlists (name, system_kind, created_at) VALUES ('我喜欢', 'favorites', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-INSERT INTO playlists (name, system_kind, created_at) VALUES ('稍后观看', 'watch_later', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+${BUILTIN_PLAYLIST_SEEDS_SQL}
 `
 
 export const SCHEMA_SQL = `
@@ -1524,10 +1528,13 @@ CREATE TABLE IF NOT EXISTS playlists (
     name TEXT NOT NULL,
     description TEXT,
     cover_path TEXT,
+    system_kind TEXT CHECK(system_kind IN ('favorites', 'watch_later')),
+    remove_after_play INTEGER NOT NULL DEFAULT 0 CHECK(remove_after_play IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_playlists_created_at ON playlists(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_playlists_system_kind ON playlists(system_kind) WHERE system_kind IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS playlist_video (
     playlist_id INTEGER NOT NULL,
@@ -1685,6 +1692,6 @@ ${AGENT_PLATFORM_SCHEMA_SQL}
 
 ${AGENT_METADATA_SCHEMA_SQL}
 
-${BUILTIN_PLAYLISTS_SQL}
+${BUILTIN_PLAYLIST_SEEDS_SQL}
 
 `

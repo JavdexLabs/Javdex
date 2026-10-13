@@ -166,7 +166,7 @@ const definitions = {
     getModelManagement: async () => {
       if (pluginDevScenario && state === 'loading') return new Promise(() => {})
       if (pluginDevScenario && state === 'error') throw new Error('开发工作区模型配置读取失败')
-      return { schemaVersion: 3, revision: 'fixture-1', updatedAt: '2026-09-30',
+      return { schemaVersion: 4, revision: 'fixture-1', updatedAt: '2026-09-30',
       connections: [], models: [], validationErrors: [],
       assignments: ['app-default', 'plugin-developer', 'library-curator'].map(workloadId => ({
         workloadId, model: workloadId === 'app-default' ? { mode: 'explicit', modelRef: '' } : { mode: 'inherit-default' },

@@ -44,6 +44,7 @@ import { PLAY_GRANT_TTL_MS } from '@shared/protocol/limits'
 import { AgentMetadataDraftRepo } from '@library/db/agentMetadataDraftRepo'
 
 const previousUserData = process.env.JAVDEX_TEST_USER_DATA
+const mpvExecutable = process.env.JAVDEX_TEST_MPV_EXECUTABLE ?? '/usr/bin/mpv'
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -322,13 +323,16 @@ function startTcpRstProxy(targetPort: number): Promise<{
 async function mpvRpc(
   socketPath: string,
   command: unknown[],
-  timeoutMs = 8_000
+  timeoutMs = 8_000,
+  waitForFileLoaded = false
 ): Promise<{ error: string; data?: unknown }> {
   const requestId = Date.now() + Math.floor(Math.random() * 1_000)
   const payload = `${JSON.stringify({ command, request_id: requestId })}\n`
   return await new Promise((resolve, reject) => {
     const socket = createConnection(socketPath)
     let buffer = ''
+    let reply: { error: string; data?: unknown } | undefined
+    let fileLoaded = false
     const timer = setTimeout(() => {
       socket.destroy()
       reject(new Error(`mpv timeout ${JSON.stringify(command)}`))
@@ -339,11 +343,15 @@ async function mpvRpc(
       for (const line of buffer.split('\n')) {
         if (!line.trim()) continue
         try {
-          const parsed = JSON.parse(line) as { request_id?: number; error?: string; data?: unknown }
+          const parsed = JSON.parse(line) as { event?: string; request_id?: number; error?: string; data?: unknown }
+          if (parsed.event === 'file-loaded') fileLoaded = true
           if (parsed.request_id === requestId) {
+            reply = { error: parsed.error ?? 'success', data: parsed.data }
+          }
+          if (reply && (!waitForFileLoaded || reply.error !== 'success' || fileLoaded)) {
             clearTimeout(timer)
             socket.end()
-            resolve({ error: parsed.error ?? 'success', data: parsed.data })
+            resolve(reply)
             return
           }
         } catch {
@@ -365,7 +373,7 @@ async function startMpv(socketPath: string): Promise<{
 }> {
   fs.rmSync(socketPath, { force: true })
   const child = spawn(
-    '/usr/bin/mpv',
+    mpvExecutable,
     [
       '--vo=null',
       '--ao=null',
@@ -410,7 +418,7 @@ async function waitMpvTimePos(
 }
 
 describe('server runtime lifecycle', () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-server-runtime-')))
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(process.env.JAVDEX_TEST_TMP_DIR ?? os.tmpdir(), 'javdex-server-runtime-')))
   const workerEntry = path.join(root, 'webCatalogWorker.js')
   const staticRoot = path.join(root, 'web')
   const mediaRoot = path.join(root, 'media')
@@ -4401,9 +4409,49 @@ describe('server runtime lifecycle', () => {
     assert.equal(expired.status, 404)
   })
 
+  it('waits for the new mpv file before seeking when old time-pos is still visible', { timeout: 5000 }, async () => {
+    const directory = process.platform === 'win32' ? null : fs.mkdtempSync('/tmp/javdex-mpv-rpc-')
+    const socketPath = directory ? path.join(directory, 'ipc.sock') : `\\\\.\\pipe\\javdex-mpv-${randomUUID()}`
+    const sockets = new Set<Socket>()
+    const timers: ReturnType<typeof setTimeout>[] = []
+    let loaded = false
+    const ipc = createServer(socket => {
+      sockets.add(socket)
+      socket.on('error', () => {})
+      socket.on('close', () => sockets.delete(socket))
+      let buffer = ''
+      socket.on('data', chunk => {
+        buffer += chunk.toString('utf8')
+        const newline = buffer.indexOf('\n')
+        if (newline < 0) return
+        const input = JSON.parse(buffer.slice(0, newline)) as { command: unknown[]; request_id: number }
+        buffer = buffer.slice(newline + 1)
+        const reply = (error: string, data?: unknown): void => { socket.write(`${JSON.stringify({ request_id: input.request_id, error, data })}\n`) }
+        if (input.command[0] === 'loadfile') {
+          reply('success')
+          timers.push(setTimeout(() => { loaded = true; if (!socket.destroyed) socket.write(`${JSON.stringify({ event: 'file-loaded' })}\n`) }, 200))
+        } else if (input.command[0] === 'get_property') reply('success', loaded ? 0.3 : 2.4)
+        else if (input.command[0] === 'seek') reply(loaded ? 'success' : 'error running command')
+      })
+    })
+    try {
+      await new Promise<void>(resolve => ipc.listen(socketPath, resolve))
+      const result = await mpvRpc(socketPath, ['loadfile', 'new-file.mkv', 'replace'], 1000, true)
+      assert.equal(result.error, 'success')
+      await waitMpvTimePos(socketPath, value => value >= 0.2)
+      const seek = await mpvRpc(socketPath, ['seek', 2.2, 'absolute'])
+      assert.equal(seek.error, 'success')
+    } finally {
+      for (const timer of timers) clearTimeout(timer)
+      for (const socket of sockets) socket.destroy()
+      await new Promise<void>(resolve => ipc.close(() => resolve()))
+      if (directory) fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   it('plays real mpv Range grants through disconnect, expiry, and writer handoff', {
     timeout: 120_000,
-    skip: !fs.existsSync('/usr/bin/mpv')
+    skip: !fs.existsSync(mpvExecutable)
   }, async () => {
     const dataDir = path.join(root, 's13-m15-mpv')
     const { base, config } = await boot(dataDir)
@@ -4446,13 +4494,13 @@ describe('server runtime lifecycle', () => {
     const socketPath = path.join(dataDir, 'mpv.sock')
     const mpv = await startMpv(socketPath)
     try {
-      const loaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'])
+      const loaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'], 8000, true)
       assert.equal(loaded.error, 'success', JSON.stringify(loaded))
       const started = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
       assert.ok(started >= 0.2, String(started))
       closePlayStreams([play.grantId])
       await new Promise((resolve) => setTimeout(resolve, 200))
-      const reloaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'])
+      const reloaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'], 8000, true)
       assert.equal(reloaded.error, 'success', JSON.stringify(reloaded))
       const resumed = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
       assert.ok(resumed >= 0.2, String(resumed))
@@ -4497,7 +4545,7 @@ describe('server runtime lifecycle', () => {
       )
       assert.equal(nextGranted.status, 200, JSON.stringify(nextGranted.json))
       const nextPlay = nextGranted.json as { grantId: string; playbackHandle: string }
-      const seekLoad = await mpvRpc(socketPath, ['loadfile', nextPlay.playbackHandle, 'replace'])
+      const seekLoad = await mpvRpc(socketPath, ['loadfile', nextPlay.playbackHandle, 'replace'], 8000, true)
       assert.equal(seekLoad.error, 'success', JSON.stringify(seekLoad))
       await waitMpvTimePos(socketPath, (value) => value >= 0.15)
       const seeked = await mpvRpc(socketPath, ['seek', 2.2, 'absolute'])
@@ -4523,7 +4571,7 @@ describe('server runtime lifecycle', () => {
       )
       assert.equal(mkvGrant.status, 200, JSON.stringify(mkvGrant.json))
       const mkvPlay = mkvGrant.json as { playbackHandle: string }
-      const mkvLoad = await mpvRpc(socketPath, ['loadfile', mkvPlay.playbackHandle, 'replace'])
+      const mkvLoad = await mpvRpc(socketPath, ['loadfile', mkvPlay.playbackHandle, 'replace'], 8000, true)
       assert.equal(mkvLoad.error, 'success', JSON.stringify(mkvLoad))
       const mkvPos = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
       assert.ok(mkvPos >= 0.2, String(mkvPos))
@@ -4568,7 +4616,7 @@ describe('server runtime lifecycle', () => {
 
   it('plays a real mpv Range grant through a non-loopback listen address', {
     timeout: 60_000,
-    skip: process.platform !== 'linux' || !fs.existsSync('/usr/bin/mpv')
+    skip: process.platform !== 'linux' || !fs.existsSync(mpvExecutable)
   }, async () => {
     const lan = addNonLoopbackListenHost()
     assert.notEqual(lan.host, '127.0.0.1')
@@ -4619,7 +4667,7 @@ describe('server runtime lifecycle', () => {
       const socketPath = path.join(dataDir, 'mpv-lan.sock')
       const mpv = await startMpv(socketPath)
       try {
-        const loaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'])
+        const loaded = await mpvRpc(socketPath, ['loadfile', play.playbackHandle, 'replace'], 8000, true)
         assert.equal(loaded.error, 'success', JSON.stringify(loaded))
         const started = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
         assert.ok(started >= 0.2, String(started))

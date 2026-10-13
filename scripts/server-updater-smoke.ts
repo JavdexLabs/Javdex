@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     docker(['restart', '--time', '150', name])
     await waitReady()
     assert.equal((await client.control('status')).currentVersion, targetVersion, 'seed cannot overwrite a persistently selected release')
-    const uid = docker(['exec', name, 'node', '-e', "const fs=require('node:fs');for(const p of fs.readdirSync('/proc').filter(x=>/^\\d+$/.test(x))){try{const cmd=fs.readFileSync('/proc/'+p+'/cmdline','utf8');if(cmd.includes('/program/releases/')&&cmd.includes('/index.js'))console.log(fs.readFileSync('/proc/'+p+'/status','utf8').match(/^Uid:\\s+(\\d+)/m)[1])}catch{}}"])
+    const uid = docker(['exec', name, 'node', '-e', "const fs=require('node:fs');for(const p of fs.readdirSync('/proc').filter(x=>/^\\d+$/.test(x))){try{const cmd=fs.readFileSync('/proc/'+p+'/cmdline','utf8');const script=cmd.split('\\0')[1];if(script?.startsWith('/program/releases/')&&script.endsWith('/index.js'))console.log(fs.readFileSync('/proc/'+p+'/status','utf8').match(/^Uid:\\s+(\\d+)/m)[1])}catch{}}"])
     assert.equal(uid, '1000', 'business process must remain non-root')
     console.log('Single-container acceptance passed: real schema 19 upgrade to a signed beta, native closure, worker-failure and restart recovery, one running container, non-root business and persistent selection.')
   } catch (error) {

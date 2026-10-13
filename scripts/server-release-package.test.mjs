@@ -5,6 +5,8 @@ import os from 'node:os'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { createServer, request } from 'node:http'
+import { runInNewContext } from 'node:vm'
+import ts from 'typescript'
 import { build, transform } from 'esbuild'
 import { t } from 'tar'
 import { describeRelease, packageRelease } from './server-release-package.mjs'
@@ -15,6 +17,45 @@ import { requestBusiness } from '../apps/server/src/updater/businessHttp.ts'
 test('single-container smoke entrypoint compiles for the CommonJS TS loader used by npm', async () => {
   const sourcefile = 'scripts/server-updater-smoke.ts'
   await transform(fs.readFileSync(sourcefile, 'utf8'), { sourcefile, loader: 'ts', format: 'cjs', target: 'node22', logLevel: 'silent' })
+})
+
+function replayBusinessUidProbe(businessUid, extraBusiness = false) {
+  const source = ts.createSourceFile('scripts/server-updater-smoke.ts', fs.readFileSync('scripts/server-updater-smoke.ts', 'utf8'), ts.ScriptTarget.Latest, true)
+  const probes = []
+  const visit = node => {
+    if (ts.isStringLiteral(node) && node.text.includes("readdirSync('/proc')") && node.text.includes('/cmdline')) probes.push(node.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  assert.equal(probes.length, 1, 'replay the actual Docker node -e UID probe')
+  const probe = probes[0]
+  const files = new Map([
+    ['/proc/42/cmdline', ['/usr/local/bin/node', '/program/releases/verified/index.js', 'start'].join('\0')],
+    ['/proc/42/status', `Uid:\t${businessUid}\t${businessUid}\t${businessUid}\t${businessUid}\n`],
+    // docker exec runs this diagnostic as root; its inline source mentions the business path.
+    ['/proc/43/cmdline', ['/usr/local/bin/node', '-e', probe].join('\0')],
+    ['/proc/43/status', 'Uid:\t0\t0\t0\t0\n']
+  ])
+  if (extraBusiness) {
+    files.set('/proc/44/cmdline', ['/usr/local/bin/node', '/program/releases/other/index.js', 'start'].join('\0'))
+    files.set('/proc/44/status', 'Uid:\t0\t0\t0\t0\n')
+  }
+  const output = []
+  runInNewContext(probe, { console: { log: value => output.push(String(value)) }, require: name => {
+    assert.equal(name, 'node:fs')
+    return { readdirSync: directory => { assert.equal(directory, '/proc'); return extraBusiness ? ['42', '43', '44'] : ['42', '43'] },
+      readFileSync: file => { assert.ok(files.has(file), `unexpected probe path ${file}`); return files.get(file) } }
+  } })
+  return output
+}
+
+test('business UID probe excludes its own root node -e diagnostic process', () => {
+  assert.deepEqual(replayBusinessUidProbe(1000), ['1000'])
+})
+
+test('business UID probe still exposes a genuinely root or duplicate business process', () => {
+  assert.deepEqual(replayBusinessUidProbe(0), ['0'])
+  assert.deepEqual(replayBusinessUidProbe(1000, true), ['1000', '0'])
 })
 
 test('container readiness preserves the internal authority across mapped host ports', { timeout: 5000 }, async () => {

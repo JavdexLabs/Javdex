@@ -4,7 +4,7 @@
 
 本页按 **0.8.0 正式版**说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0` 必须成对使用；0.7.x 或 0.8.0 Beta 桌面不能连接本版服务端。已有部署请先备份数据，再同时更新桌面与服务端。
 
-0.9.0-beta.1 正在准备。Beta 发布后需要同版本桌面、镜像以及新 Compose 的 `/program` 程序卷，认主与恢复使用容器管理入口；首次升级、签名信任和后续版本切换见 [服务端更新](SERVER_UPDATE.md)。下方 0.8.0 的历史 CLI 和下载说明不用于已托管更新的业务版本。
+0.9.0-beta.1 采用单容器托管更新。部署前确认[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.1) 已提供同版本桌面、镜像和升级包，并保留新 Compose 的 `/program` 程序卷；认主与恢复使用容器管理入口。首次升级、签名信任和后续版本切换见 [服务端更新](SERVER_UPDATE.md)。下方 0.8.0 的历史 CLI 和下载说明不用于已托管更新的业务版本。
 
 ## 服务端能做什么
 

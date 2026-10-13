@@ -8,7 +8,7 @@
 
 ## 安装与更新
 
-当前正式版为 0.8.0，可通过“设置 → 关于”检查更新后前往下载。0.9.0-beta.1 正在准备，不会触发稳定版更新提醒；Beta 发布后需在 Release 页面手动选择对应版本。升级前退出应用并完整备份数据目录；从正式 0.8.0 升级会将数据库从 schema 19 一次升级到 20，模型管理文档从 schema 3 升级到 4。升级后的数据不要交给旧版打开，回退应恢复升级前备份；桌面与服务端须一起升级。旧开发快照不属于正式兼容路径，详见 [Beta 升级说明](../.github/release-notes/v0.9.0-beta.1.md#升级说明)。
+当前正式版为 0.8.0，可通过“设置 → 关于”检查更新后前往下载。0.9.0-beta.1 为预发布，不会触发稳定版更新提醒，需在[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.1) 手动选择版本并确认产物已发布。升级前退出应用并完整备份数据目录；从正式 0.8.0 升级会将数据库从 schema 19 一次升级到 20，模型管理文档从 schema 3 升级到 4。升级后的数据不要交给旧版打开，回退应恢复升级前备份；桌面与服务端须一起升级。旧开发快照不属于正式兼容路径，详见 [Beta 升级说明](../.github/release-notes/v0.9.0-beta.1.md#升级说明)。
 
 在 [官网](https://javdexlabs.github.io/Javdex/) 或 [GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest) 选择对应系统和架构的安装包。
 

@@ -25,11 +25,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const requiredBuildFiles = [
   path.join(root, 'out', 'server', 'index.js'),
   path.join(root, 'out', 'server', 'package.json'),
-  path.join(root, 'out', 'server', 'web', 'index.html')
+  path.join(root, 'out', 'server', 'web', 'index.html'),
+  path.join(root, 'out', 'updater', 'index.js'),
+  path.join(root, 'out', 'updater', 'package.mjs')
 ]
 const missingBuildFiles = requiredBuildFiles.filter(file => !fs.existsSync(file))
 if (missingBuildFiles.length > 0) {
-  process.stderr.write('server:smoke requires a complete out/server build. Run npm run server:build first.\n')
+  process.stderr.write('server:smoke requires complete out/server and out/updater builds. Run npm run server:build first.\n')
   for (const file of missingBuildFiles) process.stderr.write(`missing: ${path.relative(root, file)}\n`)
   process.exit(1)
 }
@@ -154,7 +156,7 @@ try {
 
   const bind = spawnSync(
     'docker',
-    ['exec', 'javdex-server-smoke', 'node', 'index.js', 'bind', '--config', '/config/server.json'],
+    ['exec', 'javdex-server-smoke', 'node', '/opt/javdex-manager/index.js', 'bind', '--config', '/config/server.json'],
     { encoding: 'utf8' }
   )
   assert.equal(bind.status, 0, bind.stderr + bind.stdout)

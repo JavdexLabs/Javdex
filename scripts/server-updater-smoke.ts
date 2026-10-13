@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { ServerUpdateClient } from '../packages/http/src/updateClient'
 import { updaterPairingSchema, type ServerReleaseDescriptor, type ServerUpdateManifest } from '../packages/contracts/src/serverUpdateTypes'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp'
+import { waitForUpdateStatus } from './server-updater-smoke-wait.mjs'
 
 async function main(): Promise<void> {
   // Real Linux images, real native modules and published schema 19. No mocked Docker.
@@ -89,7 +90,7 @@ async function main(): Promise<void> {
     await waitReady()
     const pairing = updaterPairingSchema.parse(JSON.parse(docker(['exec', name, 'node', '/opt/javdex-manager/index.js', 'pair', '--config', '/config/server.json'])))
     const client = new ServerUpdateClient(pairing)
-    const initial = await client.control('status')
+    const initial = await waitForUpdateStatus(() => client.control('status'))
     assert.equal(initial.currentVersion, '0.8.0'); assert.equal(initial.serverId, original.server_id)
     for (const kind of ['worker-failure', 'interrupted', 'good'] as const) {
       const closure = path.join(directory, kind)
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
     }
     docker(['restart', '--time', '150', name])
     await waitReady()
-    assert.equal((await client.control('status')).currentVersion, targetVersion, 'seed cannot overwrite a persistently selected release')
+    assert.equal((await waitForUpdateStatus(() => client.control('status'))).currentVersion, targetVersion, 'seed cannot overwrite a persistently selected release')
     const uid = docker(['exec', name, 'node', '-e', "const fs=require('node:fs');for(const p of fs.readdirSync('/proc').filter(x=>/^\\d+$/.test(x))){try{const cmd=fs.readFileSync('/proc/'+p+'/cmdline','utf8');const script=cmd.split('\\0')[1];if(script?.startsWith('/program/releases/')&&script.endsWith('/index.js'))console.log(fs.readFileSync('/proc/'+p+'/status','utf8').match(/^Uid:\\s+(\\d+)/m)[1])}catch{}}"])
     assert.equal(uid, '1000', 'business process must remain non-root')
     console.log('Single-container acceptance passed: real schema 19 upgrade to a signed beta, native closure, worker-failure and restart recovery, one running container, non-root business and persistent selection.')

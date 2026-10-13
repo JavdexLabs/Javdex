@@ -1,3 +1,5 @@
 *
 !out/server/
 !out/server/**
+!out/updater/
+!out/updater/**

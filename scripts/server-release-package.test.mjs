@@ -5,6 +5,9 @@ import os from 'node:os'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { createServer, request } from 'node:http'
+import https from 'node:https'
+import { execFileSync } from 'node:child_process'
+import { createHash, randomUUID, X509Certificate } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { build, transform } from 'esbuild'
@@ -13,10 +16,64 @@ import { describeRelease, packageRelease } from './server-release-package.mjs'
 import { isServerReleasePath } from '../packages/contracts/src/serverUpdateTypes.ts'
 import httpServer from '../packages/http/src/server.ts'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp.ts'
+import updateClient from '../packages/http/src/updateClient.ts'
+import { waitForUpdateStatus } from './server-updater-smoke-wait.mjs'
 
 test('single-container smoke entrypoint compiles for the CommonJS TS loader used by npm', async () => {
   const sourcefile = 'scripts/server-updater-smoke.ts'
   await transform(fs.readFileSync(sourcefile, 'utf8'), { sourcefile, loader: 'ts', format: 'cjs', target: 'node22', logLevel: 'silent' })
+})
+
+test('root Docker context includes both complete managed runtime closures', () => {
+  const dockerfile = fs.readFileSync('Dockerfile', 'utf8')
+  const rules = fs.readFileSync('.dockerignore', 'utf8').trim().split(/\r?\n/)
+  assert.equal(rules[0], '*', 'only explicit build closures should enter the image context')
+  for (const directory of ['out/server', 'out/updater']) {
+    assert.ok(dockerfile.includes(`COPY ${directory}`))
+    assert.ok(rules.includes(`!${directory}/`), `${directory} must be visible to Docker`)
+    assert.ok(rules.includes(`!${directory}/**`), `${directory} contents must be visible to Docker`)
+  }
+})
+
+test('smoke waits for the pinned updater listener after the business process is already ready', { timeout: 5000 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-smoke-listener-'))
+  const key = path.join(root, 'key.pem'), cert = path.join(root, 'cert.pem')
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-nodes', '-days', '1', '-subj', '/CN=isolated-smoke', '-keyout', key, '-out', cert], { stdio: 'ignore' })
+  const token = 'c'.repeat(64), serverId = randomUUID(), catalogId = randomUUID()
+  let requests = 0
+  const server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (incoming, response) => {
+    requests++; assert.equal(incoming.headers.authorization, `Bearer ${token}`); incoming.resume()
+    response.end(JSON.stringify({ protocolVersion: 1, paired: true, serverId, catalogId, currentVersion: '0.9.0-beta.1', job: null }))
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  await new Promise(resolve => server.close(resolve))
+  const client = new updateClient.ServerUpdateClient({ protocolVersion: 1, url: `https://127.0.0.1:${port}/`, token, serverId, catalogId,
+    certificateSha256: createHash('sha256').update(new X509Certificate(fs.readFileSync(cert)).raw).digest('hex') })
+  const listening = new Promise(resolve => setTimeout(() => server.listen(port, '127.0.0.1', resolve), 50))
+  try {
+    const status = await waitForUpdateStatus(() => client.control('status'), { timeoutMs: 1000, intervalMs: 10 })
+    assert.equal(status.currentVersion, '0.9.0-beta.1')
+    assert.equal(requests, 1)
+  } finally {
+    await listening
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('smoke status waiting is bounded and never retries certificate, identity or authorization failures', async () => {
+  for (const message of ['更新助手证书与配对信息不一致，请核对宿主机', '更新助手与已配对服务端身份不一致', '更新授权无效']) {
+    let calls = 0
+    const error = new Error(message)
+    await assert.rejects(waitForUpdateStatus(async () => { calls++; throw error }), failure => failure === error)
+    assert.equal(calls, 1)
+  }
+  let calls = 0
+  const unavailable = new Error('无法连接更新助手')
+  await assert.rejects(waitForUpdateStatus(async () => { calls++; throw unavailable }, { timeoutMs: 30, intervalMs: 10 }), error => error === unavailable)
+  assert.ok(calls > 1 && calls < 20)
 })
 
 function replayBusinessUidProbe(businessUid, extraBusiness = false) {

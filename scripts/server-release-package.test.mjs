@@ -4,14 +4,45 @@ import path from 'node:path'
 import os from 'node:os'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
+import { createServer, request } from 'node:http'
 import { build, transform } from 'esbuild'
 import { t } from 'tar'
 import { describeRelease, packageRelease } from './server-release-package.mjs'
 import { isServerReleasePath } from '../packages/contracts/src/serverUpdateTypes.ts'
+import httpServer from '../packages/http/src/server.ts'
+import { requestBusiness } from '../apps/server/src/updater/businessHttp.ts'
 
 test('single-container smoke entrypoint compiles for the CommonJS TS loader used by npm', async () => {
   const sourcefile = 'scripts/server-updater-smoke.ts'
   await transform(fs.readFileSync(sourcefile, 'utf8'), { sourcefile, loader: 'ts', format: 'cjs', target: 'node22', logLevel: 'silent' })
+})
+
+test('container readiness preserves the internal authority across mapped host ports', { timeout: 5000 }, async () => {
+  const server = new httpServer.WebServer({ username: 'probe', passwordHash: '', staticRoot: '.', catalog: {},
+    accessHosts: ['127.0.0.1'], probes: { live: () => ({ status: 'ok' }), ready: () => ({ ready: true }) } })
+  const internalPort = await server.start(0, '127.0.0.1')
+  // Real HTTP port forwarding exercises the same Host guard as Docker port mapping, without claiming container acceptance.
+  const proxy = createServer((incoming, response) => {
+    const upstream = request({ hostname: '127.0.0.1', port: internalPort, path: incoming.url, method: incoming.method, headers: incoming.headers }, forwarded => {
+      response.writeHead(forwarded.statusCode, forwarded.headers); forwarded.pipe(response)
+    })
+    upstream.on('error', () => { response.writeHead(502); response.end() })
+    incoming.pipe(upstream)
+  })
+  try {
+    await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${proxy.address().port}`
+    const rejected = await fetch(`${base}/ready`)
+    assert.equal(rejected.status, 403, 'the external port must still be rejected by the Host guard')
+    await rejected.arrayBuffer()
+    const ready = await requestBusiness(new URL('/ready', base), `127.0.0.1:${internalPort}`, { timeoutMs: 1000 })
+    assert.equal(ready.status, 200)
+    assert.deepEqual(JSON.parse(ready.body), { ready: true })
+  } finally {
+    proxy.closeAllConnections()
+    await new Promise(resolve => proxy.close(resolve))
+    await server.stop()
+  }
 })
 
 function fixture(root) {

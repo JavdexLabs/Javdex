@@ -11,6 +11,7 @@ import { ReleaseStore, fileHash, releaseId } from './releaseStore'
 import { BusinessSupervisor } from './supervisor'
 import { copyTree, restoreTree, treeBytes, treeHash } from './storage'
 import { readJsonIfExists, syncDirectory, writeJsonAtomic } from './files'
+import { requestBusiness } from './businessHttp'
 
 const run = promisify(execFile)
 const identitySchema = z.object({ schema: z.number().int().positive(), serverId: z.uuid(), catalogId: z.uuid(), busy: z.boolean() }).strict()
@@ -115,7 +116,7 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     while (Date.now() < end) {
       if (!this.supervisor.running) throw new Error('业务进程启动失败')
       try {
-        const response = await fetch(new URL('/ready', this.config.serverUrl), { headers: { Host: this.config.healthHost }, signal: AbortSignal.timeout(3000) })
+        const response = await requestBusiness(new URL('/ready', this.config.serverUrl), this.config.healthHost)
         if (response.ok) return
       } catch { /* Wait for the real worker and HTTP listener. */ }
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -148,9 +149,9 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     const end = Date.now() + (this.options.readyTimeoutMs ?? 60000)
     while (Date.now() < end) {
       try {
-        const response = await fetch(new URL('/manage/v1/handshake.get', this.config.serverUrl), { method: 'POST', headers: { Host: this.config.healthHost, 'Content-Type': 'application/json' }, body: JSON.stringify({ input: {} }), signal: AbortSignal.timeout(3000) })
+        const response = await requestBusiness(new URL('/manage/v1/handshake.get', this.config.serverUrl), this.config.healthHost, { body: JSON.stringify({ input: {} }) })
         if (response.ok) {
-          const hello = await response.json() as { appVersion: string; schemaVersion: number; identity: { serverId: string; catalogId: string } }
+          const hello = JSON.parse(response.body) as { appVersion: string; schemaVersion: number; identity: { serverId: string; catalogId: string } }
           const checked = await this.inspect()
           if (hello.appVersion === manifest.version && hello.schemaVersion === manifest.targetSchema && hello.identity.serverId === checked.identity.serverId && hello.identity.catalogId === checked.identity.catalogId) { this.supervisor.allowRestart(); return }
         }

@@ -7,6 +7,7 @@ import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { ServerUpdateClient } from '../packages/http/src/updateClient'
 import { updaterPairingSchema, type ServerReleaseDescriptor, type ServerUpdateManifest } from '../packages/contracts/src/serverUpdateTypes'
+import { requestBusiness } from '../apps/server/src/updater/businessHttp'
 
 async function main(): Promise<void> {
   // Real Linux images, real native modules and published schema 19. No mocked Docker.
@@ -34,11 +35,16 @@ async function main(): Promise<void> {
   fs.writeFileSync(path.join(configDir, 'keys.json'), JSON.stringify({ smoke: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString() }))
   const base = `http://127.0.0.1:${businessPort}`
   const waitReady = async (): Promise<void> => {
+    let lastStatus: number | undefined
     for (let i = 0; i < 240; i++) {
-      try { if ((await fetch(`${base}/ready`, { signal: AbortSignal.timeout(1000) })).ok) return } catch { /* Waiting for actual startup. */ }
+      try {
+        const response = await requestBusiness(new URL('/ready', base), '127.0.0.1:8096', { timeoutMs: 1000 })
+        lastStatus = response.status
+        if (response.ok) return
+      } catch { /* Waiting for actual startup. */ }
       await new Promise(resolve => setTimeout(resolve, 250))
     }
-    throw new Error('Isolated container did not become ready')
+    throw new Error(`Isolated container did not become ready (last HTTP status: ${lastStatus ?? 'unreachable'})`)
   }
   try {
     docker(['volume', 'create', dataVolume]); docker(['volume', 'create', programVolume])
@@ -123,6 +129,15 @@ async function main(): Promise<void> {
     const uid = docker(['exec', name, 'node', '-e', "const fs=require('node:fs');for(const p of fs.readdirSync('/proc').filter(x=>/^\\d+$/.test(x))){try{const cmd=fs.readFileSync('/proc/'+p+'/cmdline','utf8');if(cmd.includes('/program/releases/')&&cmd.includes('/index.js'))console.log(fs.readFileSync('/proc/'+p+'/status','utf8').match(/^Uid:\\s+(\\d+)/m)[1])}catch{}}"])
     assert.equal(uid, '1000', 'business process must remain non-root')
     console.log('Single-container acceptance passed: real schema 19 upgrade to a signed beta, native closure, worker-failure and restart recovery, one running container, non-root business and persistent selection.')
+  } catch (error) {
+    // Preserve bounded startup evidence before removing the owned test containers.
+    for (const container of created) {
+      console.error(`[updater-smoke] Container evidence for ${container}`)
+      for (const args of [['inspect', '--format', '{{json .State}}', container], ['logs', '--tail', '80', container]]) {
+        try { execFileSync('docker', args, { stdio: 'inherit', timeout: 5000 }) } catch { /* Keep the original acceptance failure. */ }
+      }
+    }
+    throw error
   } finally {
     for (const container of created.reverse()) try { docker(['rm', '--force', container]) } catch { /* Owned test container only. */ }
     for (const volume of [dataVolume, programVolume]) try { docker(['volume', 'rm', volume]) } catch { /* Preserve evidence if cleanup cannot complete. */ }

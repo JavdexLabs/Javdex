@@ -8,9 +8,11 @@ import { BusinessSupervisor } from './supervisor'
 import { ProcessUpdateDeployment } from './processDeployment'
 import { MANAGED_LOCK } from './storage'
 import { fixture, makeRelease, archiveRelease } from './testFixtures'
+import { requestBusiness } from './businessHttp'
 
-for (const badWorker of [false, true]) test(`synthetic host lifecycle: ${badWorker ? 'migration failure restores' : 'verified activation preserves'} data and persistent release`, async () => {
-  const { root, config } = await fixture()
+for (const accessHost of ['127.0.0.1', 'library.local']) for (const badWorker of [false, true]) test(`synthetic host lifecycle (${accessHost}): ${badWorker ? 'migration failure restores' : 'verified activation preserves'} data and persistent release`, async () => {
+  const { root, config } = await fixture({ accessHost })
+  const handshakeStatus = async () => (await requestBusiness(new URL('/manage/v1/handshake.get', config.serverUrl), config.healthHost)).status
   const supervisor = new BusinessSupervisor(config)
   try {
     const store = new ReleaseStore(config)
@@ -39,17 +41,17 @@ for (const badWorker of [false, true]) test(`synthetic host lifecycle: ${badWork
       assert.equal(store.current(), original.release)
     } else {
       await deployment.verify(manifest, original)
-      assert.equal((await fetch(`${config.serverUrl}/manage/v1/handshake.get`)).status, 503)
+      assert.equal(await handshakeStatus(), 503)
       const guard = JSON.parse(fs.readFileSync(path.join(config.dataDir, 'server-update-guard.json'), 'utf8')) as { id: string }
       const databaseFile = path.join(config.dataDir, 'catalog.fixture.json')
       const database = fs.readFileSync(databaseFile, 'utf8')
       fs.writeFileSync(databaseFile, JSON.stringify({ ...JSON.parse(database), serverId: randomUUID() }))
       await assert.rejects(deployment.activate(guard.id, manifest, original), /身份/)
-      assert.equal((await fetch(`${config.serverUrl}/manage/v1/handshake.get`)).status, 503)
+      assert.equal(await handshakeStatus(), 503)
       fs.writeFileSync(databaseFile, database)
       await deployment.activate(guard.id, manifest, original)
       assert.equal(store.current(), releaseId(manifest))
-      assert.equal((await fetch(`${config.serverUrl}/manage/v1/handshake.get`)).status, 200)
+      assert.equal(await handshakeStatus(), 200)
     }
     assert.equal(fs.statSync(path.join(config.dataDir, MANAGED_LOCK)).ino, inode)
     assert.equal(fs.readFileSync(path.join(config.dataDir, 'user-bytes'), 'utf8'), 'user data preserved')

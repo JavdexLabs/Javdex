@@ -17,7 +17,9 @@ import { isServerReleasePath } from '../packages/contracts/src/serverUpdateTypes
 import httpServer from '../packages/http/src/server.ts'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp.ts'
 import updateClient from '../packages/http/src/updateClient.ts'
-import { waitForUpdateStatus } from './server-updater-smoke-wait.mjs'
+import waitHelper from './server-updater-smoke-wait.ts'
+
+const { waitForUpdateStatus } = waitHelper
 
 test('single-container smoke entrypoint compiles for the CommonJS TS loader used by npm', async () => {
   const sourcefile = 'scripts/server-updater-smoke.ts'

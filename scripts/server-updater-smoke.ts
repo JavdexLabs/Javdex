@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { ServerUpdateClient } from '../packages/http/src/updateClient'
 import { updaterPairingSchema, type ServerReleaseDescriptor, type ServerUpdateManifest } from '../packages/contracts/src/serverUpdateTypes'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp'
-import { waitForUpdateStatus } from './server-updater-smoke-wait.mjs'
+import { waitForUpdateStatus } from './server-updater-smoke-wait'
 
 async function main(): Promise<void> {
   // Real Linux images, real native modules and published schema 19. No mocked Docker.

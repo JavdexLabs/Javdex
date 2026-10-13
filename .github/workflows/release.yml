@@ -175,6 +175,7 @@ jobs:
         env:
           JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
           JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
+      - run: npm run server:test
       - run: npm run server:updater:test
       - name: Verify single-container updates before publishing this architecture
         run: npm run server:updater:smoke

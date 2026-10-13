@@ -4,10 +4,15 @@ import path from 'node:path'
 import os from 'node:os'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
-import { build } from 'esbuild'
+import { build, transform } from 'esbuild'
 import { t } from 'tar'
 import { describeRelease, packageRelease } from './server-release-package.mjs'
 import { isServerReleasePath } from '../packages/contracts/src/serverUpdateTypes.ts'
+
+test('single-container smoke entrypoint compiles for the CommonJS TS loader used by npm', async () => {
+  const sourcefile = 'scripts/server-updater-smoke.ts'
+  await transform(fs.readFileSync(sourcefile, 'utf8'), { sourcefile, loader: 'ts', format: 'cjs', target: 'node22', logLevel: 'silent' })
+})
 
 function fixture(root) {
   const files = {

@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { inspectLinuxPlaybackBinary, inspectMacPlaybackBinary, inspectWindowsPlaybackBinary, stagePackagedPlaybackRuntime, validatePackagedPlaybackRuntime, validatePlaybackRuntime, verifyPackagedPlaybackRuntime } from './playback-runtime.mjs'
+import { stageLocalPlaybackRuntime, verifyLocalPlaybackRuntime } from './local-playback-package.mjs'
 import { stageWindowsDevelopmentLibraries } from './playback-native-build.mjs'
 
 const target = { platformName: 'darwin', archName: process.arch === 'x64' ? 'x64' : 'arm64', electronVersion: '43.4.1' }
@@ -201,6 +202,41 @@ function peFixture(t, { machine = 0x8664, imports = ['kernel32.dll', 'libmpv-2.d
   const check = () => { writeFileSync(file, data); return inspectWindowsPlaybackBinary(file, input) }
   return { directory, file, data, input, check }
 }
+
+test('explicit local packaging stages only the real transitive playback closure', t => {
+  const f = peFixture(t)
+  writeFileSync(f.file, f.data)
+  const mpv = peFixture(t, { imports: ['kernel32.dll', 'helper.dll', 'opengl32.dll'], delayed: [] })
+  writeFileSync(path.join(f.directory, 'libmpv-2.dll'), mpv.data)
+  writeFileSync(path.join(f.directory, 'unused.dll'), 'not a playback dependency')
+  writeFileSync(path.join(f.directory, 'opengl32.dll'), 'must use system WGL')
+  writeFileSync(path.join(f.directory, 'playback.old.node'), 'must not ship old addons')
+  const context = { electronPlatformName: 'win32', arch: 1, appOutDir: path.join(f.directory, 'app'),
+    packager: { info: { framework: { version: '43.4.1' } }, getResourcesDir: directory => path.join(directory, 'resources') } }
+  const options = { environment: { JAVDEX_LOCAL_PLAYBACK_DIR: f.directory } }
+  assert.throws(() => verifyLocalPlaybackRuntime(context, options), /helper.dll/)
+  assert.equal(existsSync(context.appOutDir), false, 'missing dependencies fail before package mutation')
+  const wrong = peFixture(t, { machine: 0xaa64, imports: ['kernel32.dll'], delayed: [] })
+  writeFileSync(path.join(f.directory, 'helper.dll'), wrong.data)
+  assert.throws(() => verifyLocalPlaybackRuntime(context, options), /architecture/)
+  const helper = peFixture(t, { imports: ['kernel32.dll'], delayed: [] })
+  writeFileSync(path.join(f.directory, 'helper.dll'), helper.data)
+  const staged = stageLocalPlaybackRuntime(context, options)
+  assert.equal(staged.manifest.purpose, 'local-development')
+  assert.deepEqual(Object.keys(staged.manifest.files).sort(), ['helper.dll', 'libmpv-2.dll', 'playback.node'])
+  for (const [name, expected] of Object.entries(staged.manifest.files)) {
+    assert.equal(hash(readFileSync(path.join(staged.directory, name))), expected)
+  }
+  for (const name of ['unused.dll', 'opengl32.dll', 'playback.old.node']) assert.equal(existsSync(path.join(staged.directory, name)), false)
+  assert.throws(() => stageLocalPlaybackRuntime(context, options), /overwrite/)
+})
+
+test('local playback packaging remains opt-in and separate from reviewed release inputs', () => {
+  assert.equal(verifyLocalPlaybackRuntime({}, { environment: {} }), null)
+  assert.throws(() => verifyLocalPlaybackRuntime({}, { environment: { JAVDEX_LOCAL_PLAYBACK_DIR: '' } }), /empty/)
+  assert.throws(() => verifyLocalPlaybackRuntime({}, { environment: { JAVDEX_LOCAL_PLAYBACK_DIR: 'build', JAVDEX_PLAYBACK_RUNTIME_DIR: 'reviewed' } }), /mutually exclusive/)
+  assert.throws(() => verifyLocalPlaybackRuntime({ electronPlatformName: 'darwin' }, { environment: { JAVDEX_LOCAL_PLAYBACK_DIR: 'build' } }), /Windows only/)
+})
 
 test('Windows development stages the transitive DLL closure and rejects missing/wrong-architecture libraries before copying', t => {
   const f = peFixture(t)

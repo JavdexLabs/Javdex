@@ -171,17 +171,16 @@ describe('Model management v2 panels', () => {
     assert.doesNotMatch(text(), /Route|Preset|Profile|ToolPack|verifier|grants/)
   })
 
-  it('shows configured providers first and keeps unconfigured built-ins collapsed', () => {
+  it('shows configured providers first and always displays available suppliers without a disclosure', () => {
     act(() => {
       renderer = TestRenderer.create(
         <ModelProvidersPanel snapshot={snapshot()} busy={false} apply={async () => true} />
       )
     })
     assert.match(text(), /Ready Provider/)
-    assert.doesNotMatch(text(), /Available Provider/)
-
-    const disclosure = renderer!.root.findByProps({ 'aria-expanded': false })
-    act(() => disclosure.props.onClick())
+    assert.match(text(), /可用供应商/)
+    assert.match(text(), /Available Provider/)
+    assert.equal(renderer!.root.findAllByType('button').some(button => button.props['aria-expanded'] !== undefined), false)
     assert.ok(text().indexOf('Ready Provider') < text().indexOf('Available Provider'))
   })
 

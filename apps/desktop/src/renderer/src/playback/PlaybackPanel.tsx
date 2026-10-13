@@ -66,6 +66,10 @@ export default function PlaybackPanel(): JSX.Element | null {
     // Docking unmounts the subtitle controls before IPC can acknowledge it.
     // Keep navigation in the stable panel and reject acknowledgements for old sessions.
     await api.playback.control(sessionId, { kind: 'presentation', value: 'docked' })
+    if (stateRef.current?.sessionId !== sessionId) return
+    presentationHistory.closeForNavigation()
+    // Overlay history.go is asynchronous and would otherwise undo the settings route.
+    await new Promise<void>(resolve => { history.afterTraversal(resolve) })
     if (stateRef.current?.sessionId === sessionId) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
   }
   const layer = useInteractionLayer({

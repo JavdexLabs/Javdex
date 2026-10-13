@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, ChevronUp, Circle, Plug, Plus, Search } from 'lucide-react'
+import { ChevronRight, Circle, Plug, Plus, Search } from 'lucide-react'
 import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import lmstudio from '../../assets/providers/lmstudio.png'
 import deepseek from '../../assets/providers/deepseek.png'
@@ -55,7 +55,6 @@ export default function ModelProvidersPanel({
 }): JSX.Element {
   const [query, setQuery] = useState('')
   const [targetProviderId, setTargetProviderId] = useState<string | 'new' | null>(null)
-  const [showAvailable, setShowAvailable] = useState(false)
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     if (!normalized) return snapshot.connections
@@ -64,8 +63,6 @@ export default function ModelProvidersPanel({
     )
   }, [query, snapshot.connections])
   const configured = filtered.filter((item) => item.status === 'ready' || item.source === 'custom')
-  const configuredCount = snapshot.connections.filter((item) => item.status === 'ready' || item.source === 'custom').length
-  const expanded = showAvailable || configuredCount === 0 || Boolean(query.trim())
   const available = filtered.filter((item) => item.source === 'builtin' && item.status !== 'ready')
 
   return (
@@ -125,35 +122,28 @@ export default function ModelProvidersPanel({
 
       {available.length > 0 ? (
         <section className={styles.panelCard}>
-          <button
-            type="button"
-            className={styles.disclosure}
-            aria-expanded={expanded}
-            onClick={() => setShowAvailable((value) => !value)}
-          >
-            <span className={styles.disclosureTitle}>可添加提供商</span>
-            <span className={styles.disclosureMeta}>{available.length} 个 {expanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}</span>
-          </button>
-          {expanded ? (
-            <div className={styles.availableGrid}>
-              {available.map((connection) => (
-                <button
-                  key={connection.id}
-                  type="button"
-                  className={styles.availableProvider}
-                  aria-label={`添加 ${connection.name}`}
-                  onClick={() => setTargetProviderId(connection.providerId)}
-                >
-                  <ProviderLogo connection={connection} compact />
-                  <span className={styles.availableIdentity}>
-                    <strong className={`${styles.providerName} ${styles.truncate}`} title={connection.name}>{connection.name}</strong>
-                    <span className={styles.compactMeta}>{providerDescription(connection)}</span>
-                  </span>
-                  <span className={styles.addIcon}><Plus size={16} aria-hidden="true" /></span>
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <header className={styles.availableHeader}>
+            <h3 className={styles.sectionTitle}>可用供应商</h3>
+            <span className={styles.providerCount}>{available.length} 个</span>
+          </header>
+          <div className={styles.availableGrid}>
+            {available.map((connection) => (
+              <button
+                key={connection.id}
+                type="button"
+                className={styles.availableProvider}
+                aria-label={`添加 ${connection.name}`}
+                onClick={() => setTargetProviderId(connection.providerId)}
+              >
+                <ProviderLogo connection={connection} compact />
+                <span className={styles.availableIdentity}>
+                  <strong className={`${styles.providerName} ${styles.truncate}`} title={connection.name}>{connection.name}</strong>
+                  <span className={styles.compactMeta}>{providerDescription(connection)}</span>
+                </span>
+                <span className={styles.addIcon}><Plus size={16} aria-hidden="true" /></span>
+              </button>
+            ))}
+          </div>
         </section>
       ) : null}
 

@@ -26,6 +26,7 @@
     "smoke:scraper-helper": "npm run build && electron . --javdex-scraper-helper-smoke",
     "dist": "node scripts/dist.mjs",
     "dist:win": "node scripts/dist.mjs --platform win",
+    "dist:win:local": "node scripts/dist.mjs --platform win --local-playback",
     "dist:mac": "node scripts/dist.mjs --platform mac",
     "dist:linux": "node scripts/dist.mjs --platform linux",
     "preview": "electron-vite preview",

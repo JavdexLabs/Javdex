@@ -26,11 +26,12 @@ function readManifest() {
 }
 
 function parseArgs(argv) {
-  const args = { list: false, only: null, platform: null, skipBuild: false }
+  const args = { list: false, only: null, platform: null, skipBuild: false, localPlayback: false }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--list') args.list = true
     else if (arg === '--skip-build') args.skipBuild = true
+    else if (arg === '--local-playback') args.localPlayback = true
     else if (arg === '--only') args.only = new Set(String(argv[++i] ?? '').split(',').filter(Boolean))
     else if (arg === '--platform') args.platform = String(argv[++i] ?? '')
   }
@@ -112,6 +113,15 @@ function main() {
   const merged = mergeTargets(selected)
   const platformFlags = Object.keys(merged)
   const targetConfig = JSON.stringify(merged)
+  if (args.localPlayback && (process.platform !== 'win32' || platformFlags.some(platform => platform !== 'win'))) {
+    throw new Error('--local-playback requires a Windows host and Windows-only targets')
+  }
+  if (args.localPlayback && process.env.JAVDEX_PLAYBACK_RUNTIME_DIR !== undefined) {
+    throw new Error('--local-playback cannot be combined with JAVDEX_PLAYBACK_RUNTIME_DIR')
+  }
+  if (platformFlags.includes('win') && !args.localPlayback && process.env.JAVDEX_PLAYBACK_RUNTIME_DIR === undefined) {
+    console.warn('此包不包含内置播放运行库。本机测试内置播放请运行 npm run dist:win:local；正式分发请提供 JAVDEX_PLAYBACK_RUNTIME_DIR。')
+  }
 
   console.log('将打包以下目标:')
   for (const item of selected) {
@@ -140,6 +150,7 @@ function main() {
   }
   run('npx', builderArgs, {
     ELECTRON_BUILDER_TARGETS: targetConfig,
+    ...(args.localPlayback ? { JAVDEX_LOCAL_PLAYBACK_DIR: join(root, 'out', 'native-playback') } : {}),
     ...pythonEnvironment
   })
 }

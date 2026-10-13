@@ -30,7 +30,9 @@ export function builtinPlaybackAvailability(): PlaybackAvailability {
   if (process.platform === 'linux' && linuxPlaybackBackend() !== 'x11') return { available: false, reason: 'Linux 内置播放首版需要 X11／XWayland；请退出后以 --javdex-x11 启动，或显式使用外部播放器' }
   if (process.platform === 'linux' && !process.env.DISPLAY) return { available: false, reason: '未提供 X11 显示（DISPLAY）；请启用 X11／XWayland，或显式使用外部播放器' }
   return fs.existsSync(runtimePath()) ? { available: true, reason: null }
-    : { available: false, reason: '未安装内置播放运行库；开发构建可运行 npm run playback:native:build' }
+    : { available: false, reason: app.isPackaged
+      ? '安装包缺少内置播放运行库，请使用包含播放运行库的安装包。'
+      : '未安装内置播放运行库；开发构建可运行 npm run playback:native:build' }
 }
 export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): NativePlayback {
   let bridge: Bridge | null = null

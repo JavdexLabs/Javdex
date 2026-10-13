@@ -23,8 +23,7 @@
   margin-bottom: var(--form-section-gap);
 }
 
-.sectionTitle,
-.disclosureTitle {
+.sectionTitle {
   margin: 0;
   color: var(--text-primary);
   font-size: var(--settings-fs-title, 14px);
@@ -95,8 +94,7 @@
 }
 
 .providerRow,
-.availableProvider,
-.disclosure {
+.availableProvider {
   color: var(--text-secondary);
   font: inherit;
   text-align: left;
@@ -189,8 +187,7 @@
 .providerAddress,
 .providerCount,
 .status,
-.compactMeta,
-.disclosureMeta {
+.compactMeta {
   color: var(--text-muted);
   font-size: var(--settings-fs-secondary, 12px);
   white-space: nowrap;
@@ -231,23 +228,13 @@
   color: var(--text-muted);
 }
 
-.disclosure {
+.availableHeader {
   display: flex;
   width: 100%;
   min-height: var(--control-h-sm);
   align-items: center;
   justify-content: space-between;
   gap: var(--settings-gap, 12px);
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-}
-
-.disclosureMeta {
-  display: flex;
-  align-items: center;
-  gap: var(--settings-gap-sm, 8px);
 }
 
 .availableGrid {
@@ -304,13 +291,11 @@
   border-color: var(--border-strong);
 }
 
-.disclosure:hover,
 .availableProvider:hover {
   color: var(--text-accent);
 }
 
 .providerRow:focus-visible,
-.disclosure:focus-visible,
 .availableProvider:focus-visible {
   outline: var(--focus-outline);
   outline-offset: 1px;

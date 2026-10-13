@@ -6,6 +6,7 @@ import {
   prunePackagedRuntime
 } from './scripts/packaging-runtime.mjs'
 import { stagePackagedPlaybackRuntime, verifyPackagedPlaybackRuntime } from './scripts/playback-runtime.mjs'
+import { stageLocalPlaybackRuntime, verifyLocalPlaybackRuntime } from './scripts/local-playback-package.mjs'
 import { preparePackagedAiRuntime, stagePackagedAiRuntime, signPackagedAiTools, verifySignedAiRuntime } from './scripts/ai-runtime-build.mjs'
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
@@ -156,10 +157,11 @@ export default function buildConfig() {
   // only matcher defaults to **/*, so retain the desktop allowlist here too.
   config.win.files.unshift(...config.files)
 
-  config.beforePack = async context => { verifyPackagedPlaybackRuntime(context); await preparePackagedAiRuntime(context) }
+  config.beforePack = async context => { verifyLocalPlaybackRuntime(context); verifyPackagedPlaybackRuntime(context); await preparePackagedAiRuntime(context) }
   config.afterPack = async context => {
     prunePackagedRuntime(context)
     stagePackagedPlaybackRuntime(context)
+    stageLocalPlaybackRuntime(context)
     await stagePackagedAiRuntime(context)
   }
   config.afterSign = verifySignedAiRuntime

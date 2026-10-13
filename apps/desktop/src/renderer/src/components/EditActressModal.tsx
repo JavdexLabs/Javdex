@@ -395,10 +395,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                       </SelectControl>
                     </EditFormField>
 
-                    <EditFormField label="三围" span={2}>
-                      <div className={styles.inlineFieldRow}>
+                    <div className={styles.inlineFieldRow}>
+                      <EditFormField label="胸围" htmlFor="actress-bust">
                         <div className={styles.inputSuffix}>
                           <TextInput
+                            id="actress-bust"
                             density="workspace"
                             inputMode="numeric"
                             pattern="[0-9]*"
@@ -409,8 +410,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                           />
                           <span className={styles.inputUnit}>cm</span>
                         </div>
+                      </EditFormField>
+                      <EditFormField label="腰围" htmlFor="actress-waist">
                         <div className={styles.inputSuffix}>
                           <TextInput
+                            id="actress-waist"
                             density="workspace"
                             inputMode="numeric"
                             pattern="[0-9]*"
@@ -421,8 +425,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                           />
                           <span className={styles.inputUnit}>cm</span>
                         </div>
+                      </EditFormField>
+                      <EditFormField label="臀围" htmlFor="actress-hip">
                         <div className={styles.inputSuffix}>
                           <TextInput
+                            id="actress-hip"
                             density="workspace"
                             inputMode="numeric"
                             pattern="[0-9]*"
@@ -433,8 +440,8 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                           />
                           <span className={styles.inputUnit}>cm</span>
                         </div>
-                      </div>
-                    </EditFormField>
+                      </EditFormField>
+                    </div>
                   </>
                 ) : null}
               </EditFormFields>

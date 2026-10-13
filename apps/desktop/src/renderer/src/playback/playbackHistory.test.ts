@@ -19,6 +19,39 @@ function fixture() {
   const pop = (delta = -1) => { index += delta; history.pop(stack[index]) }
   return { playback, history, state, pop, commands, goes, options, marker: () => readOverlayHistoryMarker(stack[index]), length: () => stack.length }
 }
+test('acknowledged docking consumes all layers before navigation without replaying transport commands', () => {
+  const f = fixture()
+  f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen')); f.playback.setOptions(true)
+  f.playback.closeForNavigation()
+  let navigated = false
+  f.history.afterTraversal(() => { navigated = true })
+  assert.equal(navigated, false)
+  assert.deepEqual(f.goes, [-3])
+  assert.deepEqual(f.commands, [])
+  f.pop(-3)
+  assert.equal(navigated, true)
+  assert.equal(f.marker(), null)
+  f.playback.observe(f.state('docked'))
+  assert.deepEqual(f.commands, [])
+  assert.deepEqual(f.goes, [-3])
+})
+
+test('navigation waits for both queued traversals when the docking event arrives first', () => {
+  const f = fixture()
+  f.playback.observe(f.state()); f.playback.setOptions(true)
+  f.playback.observe(f.state('docked'))
+  f.playback.closeForNavigation()
+  let navigated = false
+  f.history.afterTraversal(() => { navigated = true })
+  assert.deepEqual(f.goes, [-1])
+  f.pop()
+  assert.equal(navigated, false)
+  assert.deepEqual(f.goes, [-1, -1])
+  f.pop()
+  assert.equal(navigated, true)
+  assert.deepEqual(f.commands, [])
+})
+
 test('back closes options, exits fullscreen, then docks; never stops or rebuilds the session', () => {
   const f = fixture()
   f.playback.observe(f.state())

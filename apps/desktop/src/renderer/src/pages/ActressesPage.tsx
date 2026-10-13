@@ -75,7 +75,7 @@ import styles from './ActressesPage.module.css'
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
   { value: 'gallery', label: '写真', title: '写真数量' },
-  { value: 'age', label: '年龄', title: '出生日期' },
+  { value: 'age', label: '年龄', title: '年龄' },
   { value: 'cup_size', label: '罩杯', title: '罩杯' }
 ]
 
@@ -546,6 +546,7 @@ export default function ActressesPage(): JSX.Element {
                 <SortSwitch
                   label="排序"
                   options={ACTRESS_SORT_OPTIONS}
+                  quickValues={['video_count', 'gallery']}
                   value={sortBy}
                   dir={sortDir}
                   onChange={(nextSortBy, nextSortDir) =>

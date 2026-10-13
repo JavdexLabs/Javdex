@@ -5,6 +5,7 @@ import type { OverlayHistory } from '../interaction/overlayHistory'
 export function createPlaybackHistory(history: OverlayHistory, command: (id: string, value: PlaybackControl) => void, optionsChanged: (open: boolean) => void) {
   let state: PlaybackSnapshot | null = null
   let expanded: string | null = null, fullscreen: string | null = null, options: string | null = null
+  let closingForNavigation = false
   function closeOptions(): void {
     if (options) history.close(options)
   }
@@ -23,12 +24,12 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
       if (!expanded) expanded = history.open('playback-expanded', () => {
         expanded = null
         const current = state
-        if (!current || current.presentation === 'docked') return
+        if (closingForNavigation || !current || current.presentation === 'docked') return
         command(current.sessionId, current.phase === 'error' ? { kind: 'stop' } : { kind: 'presentation', value: 'docked' })
       })
       if (value.presentation === 'fullscreen' && !fullscreen) fullscreen = history.open('playback-fullscreen', () => {
         fullscreen = null
-        if (state?.presentation === 'fullscreen') command(state.sessionId, { kind: 'presentation', value: 'expanded' })
+        if (!closingForNavigation && state?.presentation === 'fullscreen') command(state.sessionId, { kind: 'presentation', value: 'expanded' })
       })
     },
     setOptions(value: boolean): void {
@@ -36,6 +37,14 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
       if (options || !state || state.presentation === 'docked' || state.phase === 'error') return
       options = history.open('playback-options', () => { options = null; optionsChanged(false) })
       optionsChanged(true)
+    },
+    /** Docking is acknowledged; consume layers even if its state event has not arrived. */
+    closeForNavigation(): void {
+      closingForNavigation = true
+      try {
+        const token = expanded ?? fullscreen ?? options
+        if (token) history.close(token)
+      } finally { closingForNavigation = false }
     },
     /** Effect cleanup can release ownership, but never back/push or control a session. */
     abandon(): void {

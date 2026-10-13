@@ -114,6 +114,36 @@ afterEach(async () => {
   sendControl = async () => {}; currentLocation = ''
 })
 
+for (const eventFirst of [true, false]) test(`subtitle settings wait for asynchronous history traversal (event first: ${eventFirst})`, async context => {
+  const stack: unknown[] = [null]
+  let index = 0
+  const traversals: number[] = []
+  context.mock.method(history, 'pushState', (state: unknown) => {
+    stack.splice(++index); stack.push(state); history.state = state
+  })
+  context.mock.method(history, 'go', (delta: number) => { traversals.push(delta) })
+  let acknowledge!: () => void
+  sendControl = () => new Promise<void>(resolve => { acknowledge = resolve })
+  await mount(undefined, '/libraries/1/video/2')
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  await act(async () => changed(snapshot()))
+  await options()
+  await act(async () => button('字幕模型设置').props.onClick())
+  if (eventFirst) await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  await act(async () => acknowledge())
+  assert.equal(currentLocation, '/libraries/1/video/2', 'navigation must not race history.go')
+  if (!eventFirst) await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  while (traversals.length) {
+    await act(async () => {
+      index += traversals.shift()!
+      history.state = stack[index]
+      window.dispatchEvent(Object.assign(new Event('popstate'), { state: history.state }))
+    })
+  }
+  assert.equal(currentLocation, '/settings/models/usage#ai-subtitles')
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'docked' } }])
+})
+
 test('docked title uses video metadata and links to the playing library without transport commands', async () => {
   const label = `TEST-002 ${'一个较长的影片标题'.repeat(12)}`
   getDetail = async () => ({ ...detail(), code: 'TEST-002', title: '一个较长的影片标题'.repeat(12) })

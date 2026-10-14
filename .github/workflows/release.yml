@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      overwrite_beta1:
+        description: "Explicitly authorized replacement of published v0.9.0-beta.1 only."
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - "release-*"
@@ -49,6 +54,12 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
           RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+      - name: Validate explicit Beta.1 replacement scope
+        if: inputs.overwrite_beta1
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+        run: test "$TAG" = v0.9.0-beta.1 && test "$VERIFY_ONLY" != true
 
   test:
     needs: metadata
@@ -346,6 +357,16 @@ jobs:
           JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
         run: node scripts/server-update-release.mjs publish --directory release-artifacts
 
+      - name: Replace explicitly authorized Beta.1 tag
+        if: inputs.overwrite_beta1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$TAG" = v0.9.0-beta.1
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -354,6 +375,7 @@ jobs:
           name: Javdex ${{ needs.metadata.outputs.tag }}
           body_path: release-body.md
           prerelease: ${{ needs.metadata.outputs.prerelease == 'true' }}
+          overwrite_files: true
           fail_on_unmatched_files: false
           files: |
             release-artifacts/*.AppImage

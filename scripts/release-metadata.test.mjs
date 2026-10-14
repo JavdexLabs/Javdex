@@ -57,4 +57,16 @@ for (const [lineEnding, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
       assert.ok(block && /if:.*!inputs\.verify_only/.test(block), `${name} must reject verification-only dispatches`)
     }
   })
+
+  test(`explicit Beta.1 tag replacement follows signed artifacts and remains opt-in (${lineEnding})`, () => {
+    assert.match(workflow, /overwrite_beta1:\s+description:.*\n\s+required: false\n\s+default: false\n\s+type: boolean/)
+    const update = workflow.indexOf('- name: Replace explicitly authorized Beta.1 tag')
+    assert.ok(update > workflow.indexOf('run: node scripts/server-update-release.mjs publish --directory release-artifacts'))
+    assert.ok(update < workflow.indexOf('- name: Publish release\n'))
+    const block = workflow.split('- name: Replace explicitly authorized Beta.1 tag\n')[1]?.split('\n      - ')[0]
+    assert.ok(block?.includes('if: inputs.overwrite_beta1'))
+    assert.ok(block?.includes('test "$TAG" = v0.9.0-beta.1'))
+    assert.ok(block?.includes('GH_TOKEN: ${{ github.token }}'))
+    assert.ok(block?.includes('-f sha="$GITHUB_SHA" -F force=true'))
+  })
 }

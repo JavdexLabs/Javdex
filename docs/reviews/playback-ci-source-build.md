@@ -125,3 +125,5 @@ Windows job `115770957935` 已完成固定源码依赖构建，libmpv 编译到 
 隔离 MinGW x64 编译循环直接使用已校验的固定 mpv 归档（SHA-256 `ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209`），未改动计时或线程源文件。诊断配置 `HAVE_WIN32_THREADS=0` 时只以同一重复定义失败；同一命令只改成 1 后完整计时文件编译通过，目标对象只包含一个该函数定义。旧 MinGW SDK 的计时常量/clock 声明只在诊断命令补齐，不进入生产配方；这是该编译单元的交叉编译证明，不冒充完整 libmpv、原生适配器或安装包验收。
 
 修复仅为 Windows mpv setup 显式增加官方 `-Dwin32-threads=enabled`，不修改上游源码、不放开自动探测、不移除计时功能，也不改变另外两平台后端。新增配方回归在修复前为 13 通过、1 失败，修复后完整构建/发布规划 28 通过、0 失败、0 跳过；打包 42 通过、0 失败、两个既有平台专属跳过；编码、语法与 diff 检查通过。诊断源码/配置保留在忽略的 `out/playback-win-threads-repro`，容器均自动清理，无生产调试日志。
+
+第六轮最终结果为三个非 Windows 包 job 成功、Windows 失败，server、server-manifest、Publish GitHub release 均 skipped。修复 `ed1efd7c1e462cd193147244dc6ae6610b0a5a0b` 已推送 `dev`，显式 `verify_only=true` 启动第七轮 [run 38544445106](https://github.com/JavdexLabs/Javdex/actions/runs/38544445106)，已核对 headSha 一致；四目标统一成功仍待此新源码的实际结果。未发布版本、覆盖已有资产或合并 main。

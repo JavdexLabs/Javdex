@@ -2,8 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { app, safeStorage, dialog } from 'electron'
 import { readTestUserDataPath } from '@shared/appIdentity'
-import { ServerUpdateClient } from '@http/updateClient'
-import { updaterPairingSchema, signedUpdateSchema, type ServerUpdateCommand, type ServerUpdateSnapshot } from '@shared/serverUpdateTypes'
+import { ServerUpdateClient, uploadServerUpdateBundle } from '@http/updateClient'
+import { updaterPairingSchema, type ServerUpdateCommand, type ServerUpdateSnapshot } from '@shared/serverUpdateTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
 import type { IpcContext } from '../ipc/shared'
 
@@ -60,25 +60,12 @@ export function createServerUpdateService(backend: CatalogBackend, ctx: IpcConte
     if (transferBusy) throw new Error('更新包正在传输')
     transferBusy = true
     try {
-      const manifestPath = await pick('选择官方更新签名清单', ['json'])
-      if (!manifestPath) return client.control('status')
-      if (fs.statSync(manifestPath).size > 65536) throw new Error('更新清单过大')
-      const signed = signedUpdateSchema.parse(JSON.parse(fs.readFileSync(manifestPath, 'utf8')))
-      const archivePath = await pick('选择对应的完整服务端发行包', ['gz', 'tar'])
-      if (!archivePath) return client.control('status')
-      let status = await client.import(signed)
-      if (!status.job || fs.statSync(archivePath).size !== status.job.totalBytes) throw new Error('所选发行包大小与官方清单不一致')
-      const fd = fs.openSync(archivePath, 'r')
+      const bundlePath = await pick('选择官方服务端升级包', ['javdex-update'])
+      if (!bundlePath) return client.control('status')
+      const fd = fs.openSync(bundlePath, 'r')
       try {
-        while (status.job?.phase === 'preparing' && status.job.receivedBytes < status.job.totalBytes) {
-          const offset = status.job.receivedBytes
-          const buffer = Buffer.alloc(Math.min(8 * 1024 ** 2, status.job.totalBytes - offset))
-          const bytes = fs.readSync(fd, buffer, 0, buffer.length, offset)
-          if (bytes !== buffer.length) throw new Error('发行包在上传期间发生变化，请重新选择')
-          status = await client.upload(status.job.id, offset, buffer)
-        }
+        return await uploadServerUpdateBundle(client, fd)
       } finally { fs.closeSync(fd) }
-      return status
     } finally { transferBusy = false }
   }
 }

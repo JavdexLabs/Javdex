@@ -5,6 +5,8 @@ import { closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openS
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { playbackPackagingFiles, playbackPackagingDigest } from './playback-source-materials.mjs'
 import { electronBuilderArchName } from './packaging-runtime.mjs'
 
 function digest(file) {
@@ -355,11 +357,8 @@ function createSourceBundle(input, context) {
   mkdirSync(output, { recursive: true })
   const inputInventorySha256 = digest(path.join(input.directory, 'runtime.json'))
   const sourceRoot = new URL('../', import.meta.url)
-  const packagingFiles = ['scripts/playback-runtime.mjs', 'scripts/packaging-runtime.mjs', 'scripts/dist.mjs',
-    'electron-builder.config.mjs', 'build/packaging.targets.json', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE']
-  const packagingHash = createHash('sha256')
-  for (const name of packagingFiles) packagingHash.update(name + '\0').update(readFileSync(new URL(name, sourceRoot)))
-  const packagingToolsSha256 = packagingHash.digest('hex')
+  const packagingFiles = playbackPackagingFiles
+  const packagingToolsSha256 = playbackPackagingDigest(fileURLToPath(sourceRoot))
   const version = context.packager.appInfo?.version ?? JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
   assert.match(version, /^[a-zA-Z0-9.+_-]+$/, 'invalid source bundle version')
   const fileName = `Javdex-Playback-Sources-${version}-${input.target.platformName}-${input.target.archName}-${inputInventorySha256.slice(0, 12)}-${packagingToolsSha256.slice(0, 8)}.tar.gz`
@@ -429,11 +428,14 @@ export function stagePackagedPlaybackRuntime(context, options) {
     mkdirSync(path.dirname(path.join(destination, name)), { recursive: true })
     cpSync(path.join(input.directory, name), path.join(destination, name), { errorOnExist: true, force: false })
   }
-  const notice = `Corresponding playback source and build materials are supplied separately:\n${sourceBundle.fileName}\nSHA-256: ${sourceBundle.sha256}\nReviewed input inventory SHA-256: ${sourceBundle.inputInventorySha256}\n\nObtain this companion archive alongside the installer/ZIP. It contains the reviewed-runtime input inventory, source archives, build recipes and original notices. Binary hashes in that input inventory identify the pre-sign binaries shipped in the application. Keep the source archive available with any distribution of these binaries.\n`
+  const version = context.packager.appInfo?.version ?? JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version
+  const notice = `Corresponding playback source and build materials:\nRelease download: Javdex-Playback-Sources-${version}.tar.gz\nUse its manifests/ entry for this platform and restore.mjs to restore reviewed-runtime and packaging-tools.\nOriginal CI companion: ${sourceBundle.fileName}\nOriginal companion SHA-256: ${sourceBundle.sha256}\nReviewed input inventory SHA-256: ${sourceBundle.inputInventorySha256}\n\nThe combined release archive has its own SHA256SUMS entry. Its platform manifest preserves the original companion binding, complete source/build materials and pre-sign binary hashes. Per-platform companion archives remain available in CI. Keep corresponding sources available with any distribution of these binaries.\n`
   writeFileSync(path.join(destination, 'SOURCE-ACCESS.txt'), notice)
   const manifest = { ...input.manifest, sourceBundle,
     files: { ...Object.fromEntries([...included].map(name => [name, input.manifest.files[name]])), 'SOURCE-ACCESS.txt': digest(path.join(destination, 'SOURCE-ACCESS.txt')) } }
   writeFileSync(path.join(destination, 'runtime.json'), JSON.stringify(manifest, null, 2) + '\n')
+  const output = path.resolve(context.packager.info.outDir ?? path.dirname(context.appOutDir))
+  writeFileSync(path.join(output, sourceBundle.fileName + '.runtime.json'), JSON.stringify(manifest, null, 2) + '\n')
   const staged = validatePackagedPlaybackRuntime(destination, input.target, options?.inspectBinary)
   console.log('Staged inventoried playback runtime: ' + input.target.platformName + '/' + input.target.archName + ', ' + staged.binaryCount + ' binaries')
   return staged

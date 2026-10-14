@@ -32,7 +32,7 @@
 
 Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、补齐封面与资料，按演员、厂商和系列浏览，也可以创建清单、导入网页收藏，并通过 NFO 与其他媒体软件交换资料。
 
-0.9.0-beta.2 修复首个 Beta 安装包缺少内置播放运行库的问题，并保留本地 AI、模型管理及单容器更新。升级影响见 [Beta 发布说明](.github/release-notes/v0.9.0-beta.2.md)，安装包与实际发布状态见[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.2)；Beta.1 不覆盖，下方正式版下载入口保持 0.8.0，不自动切换到 Beta。
+0.9.0-beta.3 在内置播放与单容器更新基础上，将发布附件精简为总源码包和每架构单文件升级包。升级前提及验证边界见 [Beta 发布说明](.github/release-notes/v0.9.0-beta.3.md)，安装包与实际发布状态见[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.3)；不覆盖 Beta.1／Beta.2，不兼容旧 Beta 的分离更新文件格式，下方正式版下载入口保持 0.8.0。
 
 <p align="center">
   <img src="docs/images/library.webp" alt="媒体库演示：竖版封面浏览、搜索、筛选与排序" width="1200">

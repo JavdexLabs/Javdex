@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
 import semver from 'semver'
 import { packageRelease } from './server-release-package.mjs'
+import { writeUpdateBundle } from '../packages/http/src/updateBundle.ts'
 
 function validateVersion(version) {
   if (typeof version !== 'string' || version.length > 128 || version.includes('+') || semver.valid(version) !== version) throw new Error('Unsupported server release version')
@@ -45,7 +46,7 @@ export function signedReleaseManifest(packaged, signer, now = Date.now()) {
   validateVersion(version)
   if (!/^linux\/(amd64|arm64)$/.test(platform) || !Number.isSafeInteger(schema) || schema < 19) throw new Error('Invalid server release platform or schema')
   const arch = platform.split('/')[1]
-  const archiveName = `Javdex-server-${version}-linux-${arch}.tar.gz`
+  const archiveName = `Javdex-server-${version}-linux-${arch}.javdex-update`
   const manifest = {
     format: 1, version, build, expiresAt: new Date(now + 365 * 86400_000).toISOString(),
     platform, sourceSchemas: Array.from({ length: schema - 18 }, (_, i) => i + 19),
@@ -110,11 +111,13 @@ async function main() {
       if (created) execFileSync('docker', ['rm', container], { stdio: 'ignore' })
       fs.rmSync(staging, { recursive: true, force: true })
     }
-    fs.writeFileSync(path.join(directory, `Javdex-server-update-linux-${arch}.json`), `${JSON.stringify(signedReleaseManifest(packaged, signer))}\n`)
+    const bundleFile = path.join(directory, `Javdex-server-${version}-linux-${arch}.javdex-update`)
+    await writeUpdateBundle(archiveFile, bundleFile, signedReleaseManifest(packaged, signer))
+    // The raw archive is a generated intermediate, not a public attachment.
+    fs.unlinkSync(archiveFile)
   }
-  fs.writeFileSync(path.join(directory, 'server-update-public.pem'), signer.publicKey)
   const checksums = []
-  for (const name of fs.readdirSync(directory).filter(name => /^Javdex-server-.*\.(?:json|tar|gz)$/.test(name) || name === 'server-update-public.pem').sort()) {
+  for (const name of fs.readdirSync(directory).filter(name => /^Javdex-server-.*\.javdex-update$/.test(name)).sort()) {
     const hash = createHash('sha256')
     for await (const chunk of fs.createReadStream(path.join(directory, name))) hash.update(chunk)
     checksums.push(`${hash.digest('hex')}  ${name}`)

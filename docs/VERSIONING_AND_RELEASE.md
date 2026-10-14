@@ -18,7 +18,7 @@ MAJOR.MINOR.PATCH
 
 预发布使用 SemVer 后缀，例如首个 0.8.0 Beta 可用 `0.8.0-beta.1`，对应标签 `v0.8.0-beta.1`；后续递增编号，不覆盖已有标签。发布时必须标记为 Prerelease，不能仅在标题写 Beta。预发布编号在实际发布时统一写入版本与锁文件，文档预告不代表已经发布。
 
-服务端与桌面必须由同一源码版本构建。Release 工作流在桌面打包成功后，分别在 Linux amd64 / arm64 原生 runner 构建服务端并运行容器烟测，将经过检查的镜像上传 GHCR，再合成 `ghcr.io/javdexlabs/javdex-server:<版本>`。两个架构成功后才发布 GitHub Release，并附带 Compose、JSON 配置及校验和。Beta 后缀自动标记 Prerelease，不更新 `latest` 或其他滚动镜像标签。
+服务端与桌面必须由同一源码版本构建。Release 工作流先完成四个原生桌面目标的源码构建、打包验证和播放源码汇总，再分别在 Linux amd64 / arm64 原生 runner 构建服务端并运行容器烟测，将经过检查的镜像上传 GHCR，合成 `ghcr.io/javdexlabs/javdex-server:<版本>`。两个架构成功后生成签名单文件升级包并发布 GitHub Release，交付第 6 节规定的 10 个附件。Beta 后缀自动标记 Prerelease，不更新 `latest` 或其他滚动镜像标签。
 
 首次发布后，维护者必须在 GitHub Packages 将 `javdex-server` 的可见性设为 **Public**，并在未登录 GHCR 的环境测试拉取。GHCR 新包默认私有，仓库公开不等于镜像公开，见 [GitHub Container registry 说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。工作流用 `GITHUB_TOKEN` 的 `packages: write` 发布，无需配置 Docker Hub 密码。镜像尚未公开时不要宣称普通用户已可直接拉取。
 
@@ -72,8 +72,9 @@ npm run build
 npm run packaging:list
 ```
 
-6. 确认 `build/packaging.targets.json` 中需要发布的平台与架构已启用。
+6. 确认 `build/packaging.targets.json` 中 Windows x64、macOS x64、macOS arm64、Linux x64 四个目标已启用，产出第 6 节规定的六个桌面包。各原生 runner 从固定源码构建播放运行库，打包后运行 `packaging:verify-playback-runtime`、`packaging:verify-agent-runtime`，macOS 另核对应用签名。四份平台源码包及对应 `.runtime.json` 留作 CI 汇总输入；总源码包校验成功后才允许发布服务端镜像。`verify_only` 也执行桌面验证与源码汇总，但不发布镜像或 Release。
 7. 检查数据库迁移、设置兼容和插件格式变化是否有升级说明。
+8. 核对发布正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接；不将示例或公钥作为附件。Beta 和正式版都需通过 Ed25519 签名配置检查，私钥和 key ID 缺失时不得上传镜像；镜像内置公钥必须与生成升级包的签名配置一致。
 
 0.9.0 Beta 的发布准备清单见 [Beta 发布检查](reviews/v0.9.0-beta.1-readiness.md)，用户说明见 [发布说明](../.github/release-notes/v0.9.0-beta.1.md)。准备完成不等于已经打标签、推送或发布；实际发布前将 Changelog 的“发布准备”改为真实发布日期，并同步文档中的待发布状态。
 
@@ -95,10 +96,11 @@ git push origin v0.4.0
 工作流依次执行：
 
 1. Windows 环境运行类型检查和完整测试。
-2. Windows、macOS、Linux 分别构建已启用目标。
-3. 汇总各平台构建产物。
-4. Linux amd64 / arm64 原生 runner 分别构建服务端、运行容器烟测并上传 GHCR，合成固定版本的多架构镜像。
-5. 在桌面产物与两种服务端架构均成功后，创建 GitHub Release，上传六个桌面安装包、Compose/JSON 部署示例与 SHA-256 校验和。
+2. Windows x64、macOS x64、macOS arm64、Linux x64 四个原生 runner 从固定源码构建播放运行库，生成六个桌面包；完成包内播放运行库与 Agent 运行时验证，macOS 另核对应用签名。
+3. 汇总四份平台播放源码包及其分发投影，核对来源、构建材料、运行库与安装包绑定，按 SHA-256 去重并逐文件往返验证，生成一个 `Javdex-Playback-Sources-<版本>.tar.gz`。四份平台源码包保留为 CI 产物。
+4. 仅在桌面打包和总源码包校验成功后，Linux amd64 / arm64 原生 runner 分别验证签名配置、构建服务端、运行容器烟测并上传 GHCR，合成固定版本的多架构镜像。
+5. 从已验证镜像取得各架构的完整程序闭包，封装签名清单和程序归档为两个 `.javdex-update`，读回验证内层字节；生成覆盖六个桌面包、总源码包和两个升级文件的 `SHA256SUMS.txt`。
+6. 创建 GitHub Release，上传第 6 节规定的 10 个附件；正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接。
 
 正式版进入 GitHub 最新正式 Release，供应用更新提醒与官网读取；服务镜像仍使用固定版本标签，当前工作流不创建 `latest` 滚动镜像标签。发布后核验默认分支包含发布代码，并检查 Pages 工作流生成的下载信息。
 
@@ -113,6 +115,15 @@ git push origin v0.4.0
 - 标题使用 `Javdex vX.Y.Z`；
 - 包含主要变化、修复和必要的升级说明；
 - 上传本次 workflow 生成的安装包，不混用旧构建产物。
+
+从 0.9.0-beta.3 起，Beta 和正式 Release 均交付以下 10 个附件：
+
+- 六个桌面包：Windows x64 EXE／ZIP、macOS x64／arm64 DMG、Linux x64 AppImage／DEB。
+- 一个总播放源码包：`Javdex-Playback-Sources-<版本>.tar.gz`，包含四个平台的来源、构建材料、对应清单和恢复工具；四份单平台源码包及 `.runtime.json` 仅保留为 CI 产物。
+- 两个签名完整升级文件：`Javdex-server-<版本>-linux-amd64.javdex-update` 与 `Javdex-server-<版本>-linux-arm64.javdex-update`。
+- 一个 `SHA256SUMS.txt`，覆盖上述九个下载文件的完整字节。
+
+Compose 示例、JSON 配置示例与部署说明使用本次源码提交的版本对应链接，不再作为附件；可信升级公钥内置镜像，不发布公钥附件或分离的签名 JSON／程序 `.tar.gz`。历史已公开 Release 的附件保持原样。
 
 推荐正文结构：
 
@@ -135,7 +146,7 @@ git push origin v0.4.0
 
 以下应用内更新提醒步骤针对正式版本。Beta 应核验 Release 标记为 Prerelease、稳定版更新接口未切换到 Beta、版本镜像可拉取且 `latest` 未被 Beta 覆盖；不得要求稳定客户端提示预发布。
 
-1. 确认 GitHub Release 页面和各平台文件可访问。
+1. 确认 GitHub Release 页面及 10 个附件可访问，`SHA256SUMS.txt` 验证其余九个文件；部署链接指向本次源码提交。核对四个原生桌面目标的包内运行库验证、macOS 签名、总源码包往返校验和两种服务端架构的容器烟测均通过，升级文件中的签名与内层归档摘要一致。构建或合成测试通过不能代替这些 CI 门禁，也不代表 GUI、硬解或干净机器安装验收。
 2. 在上一正式版中打开“设置 → 关于”。
 3. 点击“检查更新”，确认显示目标版本、Release 标题和说明摘要。
 4. 点击“前往下载”，确认打开正确的 Release 页面。
@@ -159,7 +170,11 @@ v0.5.0-beta.1
 
 GitHub Release 必须标记为 Prerelease。当前稳定客户端不会检测或提示预发布版本；如未来新增更新通道，需要另行定义通道选择、版本比较和降级规则。
 
-Beta 和正式 Release 都附带服务端 amd64／arm64 签名完整升级包、签名清单、公钥及校验和。两类发布都必须先通过签名配置检查，缺少 Ed25519 私钥或 key ID 时不得上传镜像。服务端 Beta 包只由用户在对应 Release 手动下载并离线上传；服务端与桌面的默认在线检查继续只读取正式 Release，不增加自动 Beta 通道。显式安装遵循 SemVer 升级方向，不能从正式版降回同系列 Beta。
+从 0.9.0-beta.3 起，Beta 和正式 Release 均使用第 6 节的 10 个附件及单文件服务端升级格式。每个 `.javdex-update` 内含签名 JSON 和完整程序 `.tar.gz`，只选择一个文件；签名中的大小与 SHA-256 绑定内层程序归档，Release 校验和绑定整个运输文件。在线检查读取有界文件前缀，准备时重新验证内嵌签名与所选目标一致；离线上传与续传按内层归档偏移计数。签名信任根、期限、版本、架构、schema、运行环境、解压闭包及原生依赖校验保持有效，运输格式见 [服务端更新](SERVER_UPDATE.md)。
+
+新读取器只接受单文件格式，不兼容历史 Beta 的 JSON＋归档入口。采用此格式需要新版桌面客户端和容器管理入口；旧管理器由管理员正常替换为新版基础镜像，保留 `/program` 及业务资料，业务升级包不能自更新镜像内的管理器。Beta.1／Beta.2 的已公开标签、镜像和附件不覆盖。
+
+两类发布都必须先通过签名配置检查，缺少 Ed25519 私钥或 key ID 时不得上传镜像；可信公钥内置镜像，不从上传包或下载附件建立信任。服务端 Beta 包只由用户在对应 Release 手动下载并离线上传；服务端与桌面的默认在线检查继续只读取正式 Release，稳定版下载入口保持当前正式版，不增加自动 Beta 通道。显式安装遵循 SemVer 升级方向，不能从正式版降回同系列 Beta。
 
 ## 10. 桌面、服务与网页同版本
 

@@ -2,7 +2,9 @@
 
 本功能在 0.9.0-beta.1 引入，正式 0.8.0 镜像没有托管更新能力；Beta 的产物与验证状态见[发布复核](reviews/v0.9.0-beta.1-release-audit.md)。新方案只部署一个 Linux Docker 容器：常驻管理进程负责监督、下载、校验、快照和恢复，业务程序以非 root 子进程运行。无需宿主机 Node/systemd 助手，不挂载 Docker socket，不使用 Docker-in-Docker。
 
-从 0.9.0-beta.1 开始，每个 Beta 和正式 Release 都生成 amd64／arm64 的签名完整升级包，并使用相同签名与原生兼容校验。默认在线检查只读取正式 Release，不追踪 Beta；Beta 包从对应 Release 手动下载并通过离线上传安装。版本按 SemVer 排序，允许 `beta.2 → beta.10 → 正式版`，拒绝相同版本、正式版退回同系列 Beta 或其他降级。架构、运行环境与 schema 检查不放宽。
+每个后续 Release 为 amd64／arm64 分别提供一个 `.javdex-update` 签名完整升级文件，内含签名 JSON 和程序归档，无需选择两份文件。默认在线检查只读取正式 Release，不追踪 Beta；Beta 包从对应 Release 手动下载并通过离线上传安装。版本按 SemVer 排序，拒绝同版本或降级；架构、运行环境与 schema 检查不放宽。已公开 Beta.1/Beta.2 的附件保持原样，但新读取器不兼容它们的 JSON＋归档格式。
+
+格式切换需要采用包含新读取器的桌面客户端与容器管理入口；旧管理器先由管理员正常替换为新版基础镜像，保留 `/program` 和业务资料。管理器位于镜像内，不能靠业务升级包自更新；不通过降低验收或兼容历史 Beta 格式绕过此前提。
 
 本机开发构建未配置发布信任根，发布前由管理员确认签名配置；发布镜像内嵌对应公钥。已使用空信任根开发镜像的部署需先替换为包含发布公钥的基础镜像，并保留 `/program`。仅更换基础镜像不会覆盖程序卷已选业务版本，随后须通过托管更新入口安装匹配签名包；不要清空程序卷或降低数据库版本来强制切换。
 
@@ -39,9 +41,9 @@ docker compose exec javdex node /opt/javdex-manager/index.js bind --config /conf
 部署侧 writer 恢复将 `bind` 换成 `recover`；不要直接调用镜像内 `/app/index.js`，该目录是首次初始化种子，并不一定是更新后的当前业务版本。正式 0.8.0 镜像继续使用其原有 CLI。
 
 - 在线：检查更新 → 准备在线更新 → 确认停服并安装。
-- 离线：选择官方签名 JSON 与服务器对应架构的完整 `.tar.gz` 发行包；不是 Docker image archive，也不是只有 JS 的源码包。
-- Beta：打开对应预发布 Release，下载匹配架构的清单与包。例如 amd64 为 `Javdex-server-update-linux-amd64.json` 和 `Javdex-server-0.9.0-beta.1-linux-amd64.tar.gz`；arm64 使用对应 arm64 文件。Beta 不会出现在默认在线检查中，安装后桌面也须更新到相同版本。
-- 续传：重新选择同一清单和包，从持久确认的偏移继续。管理进程/容器重启保留偏移；哈希、签名和原生兼容验证通过前不切换程序。
+- 离线：只选择一个官方 `.javdex-update` 文件，需匹配服务器架构；不是 Docker image archive，也不是只有 JS 的源码包。
+- Beta：在采用单文件格式的预发布 Release 下载 `Javdex-server-<version>-linux-amd64.javdex-update` 或对应 arm64 文件。Beta 不会出现在默认在线检查中，安装后桌面也须更新到相同版本。历史 Beta 的分离格式不提供兼容入口。
+- 续传：重新选择同一升级文件，从持久确认的程序归档偏移继续，不把容器头部和签名 JSON 算入上传偏移。管理进程/容器重启保留偏移；哈希、签名和原生兼容验证通过前不切换程序。
 - 完成：桌面版本匹配时自动重连，否则提示同步升级桌面。
 
 下载、上传、解压和原生依赖预检期间原业务继续运行。安装须再次人工确认，会中断业务访问与播放。解除本机配对只删除这台电脑的授权，不取消已提交安装；撤销所有设备须由管理员更换 `/program/state/token`（32 字节随机十六进制、0600），重启容器并重新配对。
@@ -49,6 +51,8 @@ docker compose exec javdex node /opt/javdex-manager/index.js bind --config /conf
 ## 发行包与两层更新
 
 业务发行包包含入口 JS、真实查询 worker、Web、许可及 Node 原生依赖；CI 在目标 Linux 架构的已验证镜像内形成生产依赖闭包，再生成签名包。升级不在服务器运行 npm install，也不执行上传包的安装脚本。签名绑定版本、构建、平台、运行环境、迁移路径、压缩/展开大小、SHA-256 与期限；目录描述精确覆盖普通文件，拒绝路径越界、链接、重复条目、特殊文件和超额解压。
+
+`.javdex-update` 的运输格式为 8 字节 ASCII `JVDXUPD1`、4 字节大端无符号 JSON 长度、签名 JSON、原始完整 `.tar.gz` 程序归档。清单不超过 65536 字节，不解压额外外层、不从包中建立公钥信任。签名中的大小/SHA-256 绑定内层程序归档，Release 的 SHA256SUMS 绑定整个运输文件。客户端先检查格式、大小和内层摘要，随后由已配对管理器验证签名与升级目标，再上传内层归档；最终摘要、解压闭包和原生校验仍由服务端执行。在线检查仅读取有界文件前缀，在线准备重新验证文件内签名与所选目标一致并流式下载内层归档；旧 JSON 发现和裸归档下载分支已移除。构造运输包后重新读回并核对内层字节，禁止覆盖已有输出文件。
 
 业务版本与容器运行外壳版本不是同一个概念：
 
@@ -77,7 +81,7 @@ docker compose exec javdex node /opt/javdex-manager/index.js bind --config /conf
 
 ## 发布维护与验证
 
-Beta 和正式发布流水线都需要 GitHub Secret `JAVDEX_SERVER_UPDATE_SIGNING_KEY`（Ed25519 私钥 PEM）和 repository variable `JAVDEX_SERVER_UPDATE_KEY_ID`。上传镜像前执行 `node scripts/server-update-release.mjs validate`，缺少配置、仅提供公钥或使用其他密钥类型都会失败，不发布缺少可信升级包的 Beta。镜像构建只写入派生公钥；私钥不进入镜像、包或源码。发布脚本核对已发布双架构镜像的源码身份和内置公钥，附完整 `.tar.gz`、签名 JSON、公钥与 SHA256SUMS；不再发布独立宿主机助手包。下载的公钥附件只供核对，不自动授予上传包信任。
+Beta 和正式发布流水线都需要 GitHub Secret `JAVDEX_SERVER_UPDATE_SIGNING_KEY`（Ed25519 私钥 PEM）和 repository variable `JAVDEX_SERVER_UPDATE_KEY_ID`。上传镜像前执行 `node scripts/server-update-release.mjs validate`，缺少配置、仅提供公钥或使用其他密钥类型都会失败，不发布缺少可信升级包的 Beta。镜像构建只写入派生公钥；私钥不进入镜像、包或源码。发布脚本核对双架构镜像的源码身份和内置公钥，只附两个 `.javdex-update` 与 SHA256SUMS，不再发布分离 JSON/归档或独立宿主机助手包。后续发布不再附带 Compose/JSON 示例和公钥文件，部署示例改为对应源码版本链接，镜像内置信任根不变。Beta.1/Beta.2 的历史公钥附件保留，仅供核对，不自动授予上传包信任。
 
 未设置签名密钥的本地构建保留空信任根，拒绝所有更新包。私有部署/隔离测试可显式将受信任 Ed25519 公钥表放在只读配置文件，并设置 `JAVDEX_UPDATE_KEYS_FILE`；不能信任上传包临时携带的任意公钥。密钥生成工具要求仓库外受保护目录：
 

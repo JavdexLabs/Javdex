@@ -8,6 +8,7 @@ import { test } from 'node:test'
 import { packageRelease } from './server-release-package.mjs'
 import { keyDirectoryOutsideRepository, releaseSigning, signedReleaseManifest } from './server-update-release.mjs'
 import { verifyUpdateManifest } from '../apps/server/src/updater/manifest.ts'
+import { readUpdateBundle, writeUpdateBundle, verifyBundleArchive } from '../packages/http/src/updateBundle.ts'
 
 const keys = generateKeyPairSync('ed25519') // Ephemeral test key, never a release credential.
 const env = {
@@ -88,7 +89,18 @@ for (const platform of ['linux/amd64', 'linux/arm64']) test(`beta ${platform} ar
     assert.equal(manifest.archive.bytes, fs.statSync(archive).size)
     assert.equal(manifest.archive.unpackedBytes, packaged.unpackedBytes)
     assert.equal(manifest.archive.sha256, createHash('sha256').update(fs.readFileSync(archive)).digest('hex'))
-    assert.equal(manifest.archive.url, `https://github.com/JavdexLabs/Javdex/releases/download/v${version}/${name}`)
+    const bundleName = `Javdex-server-${version}-linux-${arch}.javdex-update`
+    assert.equal(manifest.archive.url, `https://github.com/JavdexLabs/Javdex/releases/download/v${version}/${bundleName}`)
+    const bundle = path.join(root, bundleName)
+    await writeUpdateBundle(archive, bundle, signed)
+    const fd = fs.openSync(bundle, 'r')
+    try {
+      const wrapped = readUpdateBundle(fd)
+      assert.deepEqual(wrapped.signed, signed)
+      assert.equal(wrapped.archiveBytes, packaged.bytes)
+      await verifyBundleArchive(fd, wrapped.archiveOffset, wrapped.archiveBytes, packaged.sha256)
+      assert.ok(fs.statSync(bundle).size > manifest.archive.bytes, 'manifest binds inner archive, checksums bind entire bundle')
+    } finally { fs.closeSync(fd) }
     assert.deepEqual(manifest.sourceSchemas, [19, 20])
     assert.equal(manifest.targetSchema, 20)
     assert.equal(manifest.runtime, 'node22-bookworm-v1')

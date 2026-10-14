@@ -15,11 +15,12 @@ test('stable and manually marked prereleases retain their channel', () => {
   assert.equal(releaseMetadata('0.8.0').prerelease, false)
   assert.equal(releaseMetadata('0.8.0', undefined, true).prerelease, true)
 })
-test('Beta.2 uses a new prerelease tag without replacing Beta.1', () => {
-  assert.deepEqual(releaseMetadata('0.9.0-beta.2', ''), {
-    tag: 'v0.9.0-beta.2', version: '0.9.0-beta.2', prerelease: true
+test('Beta.3 uses a new prerelease tag without replacing earlier betas', () => {
+  assert.deepEqual(releaseMetadata('0.9.0-beta.3', ''), {
+    tag: 'v0.9.0-beta.3', version: '0.9.0-beta.3', prerelease: true
   })
-  assert.throws(() => releaseMetadata('0.9.0-beta.2', 'v0.9.0-beta.1'))
+  assert.throws(() => releaseMetadata('0.9.0-beta.3', 'v0.9.0-beta.1'))
+  assert.throws(() => releaseMetadata('0.9.0-beta.3', 'v0.9.0-beta.2'))
 })
 test('mismatched or unsafe tags fail before publishing', () => {
   assert.throws(() => releaseMetadata('0.8.0', 'v0.7.1'))
@@ -34,9 +35,18 @@ for (const [lineEnding, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
 
   test(`release packaging gates playback resources and delivers corresponding sources with checksums (${lineEnding})`, () => {
     assert.match(workflow, /run: npm run packaging:verify-playback-runtime/)
+    assert.match(workflow, /run: node scripts\/check-playback-installers\.mjs dist/)
+    assert.match(workflow, /dist\/Javdex-Playback-Sources-\*\.tar\.gz\.installers\.json/)
     assert.match(workflow, /dist\/Javdex-Playback-Sources-\*\.tar\.gz/)
-    assert.match(workflow, /-name 'Javdex-Playback-Sources-\*\.tar\.gz'/)
-    assert.match(workflow, /release-artifacts\/Javdex-Playback-Sources-\*\.tar\.gz/)
+    assert.match(workflow, /run: node scripts\/aggregate-playback-sources\.mjs source-artifacts/)
+    assert.match(workflow, /dist\/Javdex-Playback-Sources-\*\.tar\.gz\.runtime\.json/)
+    assert.match(workflow, /release-artifacts\/Javdex-Playback-Sources-\$\{\{ needs\.metadata\.outputs\.version \}\}\.tar\.gz/)
+    assert.ok(workflow.includes('sha256sum -- "Javdex-Playback-Sources-$VERSION.tar.gz"'))
+    assert.match(workflow, /needs: \[metadata, package, playback-sources\]/)
+    const attachments = workflow.split('files: |')[1]
+    for (const name of ['docker-compose.example.yml', 'javdex-server.example.json', 'server-update-public.pem']) assert.ok(!attachments.includes(name))
+    assert.ok(attachments.includes('release-artifacts/Javdex-server-*.javdex-update'))
+    assert.ok(!attachments.includes('Javdex-server-update-*.json') && !attachments.includes('Javdex-server-*.tar.gz'))
   })
 
   test(`release builds each playback architecture from source before packaging (${lineEnding})`, () => {

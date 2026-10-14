@@ -175,7 +175,13 @@ Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库�
 
 `beforePack` 核查完整 v1 输入；`afterPack` 再核查后，只将全部二进制、各组件的许可文件与 `SOURCE-ACCESS.txt` 复制到应用 Resources 的 `native-playback/`，随后由现有流程签名。分发目录的 `runtime.json` 也是独立的初版 v1 投影：`files` 精确覆盖安装内容，保留组件来源引用，`sourceBundle` 绑定独立源码包的文件名、SHA-256、原输入清单摘要及当前打包工具摘要。构建输入禁止出现 `sourceBundle`，分发投影必须包含它；`validatePackagedPlaybackRuntime` 验证该投影，拒绝源码/构建资料混入。两种用途不是 v1 → v2 的升级关系，不能互相替代，投影不能绕过完整输入材料校验。
 
-完整非二进制材料、原 v1 清单和当前打包工具另生成 `Javdex-Playback-Sources-<version>-<platform>-<arch>-<input hash>-<tools hash>.tar.gz`，位于 `dist/`，不装入应用。使用已有系统 `tar`，不存在或归档失败会停止打包；复用源码包前重新验证摘要。分发应用包时同时提供这个配套源码包，公开发布时须落实源码访问方式，不能只提供一个未交付的文件名。输入目录保持完整，不通过删除源码或伪造许可绕过门禁。
+完整非二进制材料、原 v1 清单和当前打包工具另生成 `Javdex-Playback-Sources-<version>-<platform>-<arch>-<input hash>-<tools hash>.tar.gz`，位于 `dist/`，不装入应用。使用已有系统 `tar`，不存在或归档失败会停止打包；复用源码包前重新验证摘要。同名 `.runtime.json` 为 CI 汇总使用的分发投影副本，包含原源码包绑定与二进制摘要，不进入 Release。输入目录保持完整，不通过删除源码或伪造许可绕过门禁。
+
+后续 Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `node scripts/aggregate-playback-sources.mjs <artifact-directory>`，verify-only 也运行此任务；总包成功后才允许发布服务端镜像。要求四种目标与六个桌面包齐全，核对原归档、输入清单、打包工具、原生源码版本、来源/许可证/配方及二进制绑定。Release 仅交付一个 `Javdex-Playback-Sources-<version>.tar.gz`，四份平台源码包仍保留为 CI 产物；Beta.2 及以前的公开附件不变。`sources/` 和 `LICENSES/` 以完整 SHA-256 定址去重，`platforms/` 保留平台记录和打包脚本，`manifests/` 记录逻辑材料路径、原输入绑定及安装包摘要。同名不同内容不合并；原始上游压缩归档保持完整，外层未压缩 tar 拆成原始头部/数据/填充片段，以共享内部相同上游文件并精确恢复原 tar 字节。汇总过程逐文件往返验证，不把四个压缩包再次套一层作为去重。
+
+原生 CI 在上传前执行 `scripts/check-playback-installers.mjs`：检查实际 EXE/ZIP/DMG/DEB/AppImage 内的运行库，与已通过包内验证的未封装应用逐文件匹配，macOS 同时核验挂载 app 签名并匹配签名后字节。生成 `.installers.json` 来源/摘要回执，仅留作 CI 产物；汇总验证最终文件摘要及嵌入清单摘要与回执一致，不仅按安装包文件名推定来源。提取器只在隔离 CI 执行安装器，不用于本机用户环境。原生源码归档还检查必需构建脚本、平台源码、版本、固定 SDK 与实际 Node headers；危险 tar 通过 parser.abort 拒绝并清理本轮临时目录。
+
+解开总包后，使用 Node.js 22+ 执行 `node restore.mjs windows-x64 <新目录路径>`（目标还包括 `macos-x64`、`macos-arm64`、`linux-x64`）；目标目录必须尚不存在。恢复工具先验证全部引用材料，再恢复原 `reviewed-runtime/`、`packaging-tools/` 和说明文件，保留文件模式。按平台 `build.json` 的工具链、补丁和配方重建；恢复工具不执行构建脚本。原单平台压缩包摘要记录来源，不能用来校验总包；总包摘要见 Release 的 SHA256SUMS。`SOURCE-ACCESS.txt` 同时说明公开总包与原 CI 绑定；分发安装包时须继续提供对应源码访问方式，不能仅提供未交付的文件名。普通用户无需下载源码包；系统 SDK、编译器和签名不由恢复工具提供。
 
 Windows 桌面打包保留当前架构的 clipboard/console 原生模块，排除其它平台与架构；桌面 `out/server` 不进入应用，局域网前端 `out/web` 保留。Photon 使用主进程 chunk 旁的 WASM，排除 node_modules 中的重复文件。Windows `files` 规则必须同时保留桌面允许列表：打包器把平台规则建成独立文件集，只有排除项会默认包含仓库全部文件；配置归一化回归及实际包内容检查共同覆盖这个边界。
 
@@ -203,7 +209,7 @@ RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH �
 
 服务端源码构建、Docker 部署及更新备份见 [服务端部署指南](SERVER_MODE.md)。当前能力与接口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，未完成验收和历史测试边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。服务端部署不需要 Electron，也不运行 `setup:desktop`。
 
-`server:build` 同时生成业务入口 `out/server` 与容器内管理入口 `out/updater`，后者也可单独运行 `server:updater:build` 构建，不是需要用户额外安装的宿主机程序。镜像生成对应架构的完整发行描述，发布流程从已验证镜像取出 JS、worker、Web 和原生依赖并生成签名 `.tar.gz`，不在升级时运行 npm 安装。
+`server:build` 同时生成业务入口 `out/server` 与容器内管理入口 `out/updater`，后者也可单独运行 `server:updater:build` 构建，不是需要用户额外安装的宿主机程序。镜像生成对应架构的完整发行描述，发布流程从已验证镜像取出 JS、worker、Web 和原生依赖，生成内层 `.tar.gz`，再与签名清单封装为每架构一个 `.javdex-update` 并验证读回摘要。只发布两个单文件包，不再发布分离 JSON 或裸归档，不在升级时运行 npm 安装。运输格式、在线读取与断点续传见 [服务端更新](SERVER_UPDATE.md)，实现位于 `packages/http/src/updateBundle.ts`；旧 Beta 格式不提供兼容分支。
 
 更新流程测试为 `server:updater:test`，实际浏览器入口为 `test:ui:server-update`；`server:updater:smoke` 必须在 Linux Docker 环境运行，覆盖真实 0.8.0/schema 19、原生闭包、迁移后 worker 失败、容器中断恢复、单容器计数、非 root 业务与持久版本选择，已接入 amd64/arm64 CI。不能把本机合成进程测试或构建通过当成 Linux 容器验收。运行外壳、程序卷、发布签名和两层更新说明见 [服务端更新](SERVER_UPDATE.md) 与 [ADR-0030](adr/0030-manage-server-releases-inside-one-container.md)。
 

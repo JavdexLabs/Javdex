@@ -192,6 +192,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify playback inside final installers and bind their digests
+        run: node scripts/check-playback-installers.mjs dist
+
       - name: Upload packaged artifacts
         # Keep builder diagnostics and update metadata in CI, not in public release assets.
         uses: actions/upload-artifact@v4
@@ -207,12 +210,38 @@ jobs:
             dist/*.yml
             dist/*.yaml
             dist/Javdex-Playback-Sources-*.tar.gz
+            dist/Javdex-Playback-Sources-*.tar.gz.runtime.json
+            dist/Javdex-Playback-Sources-*.tar.gz.installers.json
+          if-no-files-found: error
+
+  playback-sources:
+    name: Aggregate corresponding playback sources
+    needs: [metadata, package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Javdex-*
+          path: source-artifacts
+          merge-multiple: true
+      - name: Aggregate and verify corresponding playback sources
+        run: node scripts/aggregate-playback-sources.mjs source-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Playback-Sources-Combined
+          path: source-artifacts/playback-sources-combined/*.tar.gz
           if-no-files-found: error
 
   server:
     name: Server image (${{ matrix.arch }})
     if: ${{ !inputs.verify_only }}
-    needs: [metadata, package]
+    needs: [metadata, package, playback-sources]
     permissions:
       contents: read
       packages: write
@@ -286,7 +315,7 @@ jobs:
 
   release:
     name: Publish GitHub release
-    needs: [metadata, package, server-manifest]
+    needs: [metadata, package, playback-sources, server-manifest]
     if: ${{ !inputs.verify_only && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release-')) }}
     runs-on: ubuntu-latest
     permissions:
@@ -302,37 +331,37 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
       - name: Generate SHA-256 checksums
         shell: bash
         working-directory: release-artifacts
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
-          mapfile -d '' packages < <(find . -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.exe' -o -name '*.zip' -o -name 'Javdex-Playback-Sources-*.tar.gz' \) -printf '%f\0' | LC_ALL=C sort -z)
+          mapfile -d '' packages < <(find . -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.exe' -o -name '*.zip' \) -printf '%f\0' | LC_ALL=C sort -z)
           if [[ ${#packages[@]} -eq 0 ]]; then
             echo "No release packages were found." >&2
             exit 1
           fi
           sha256sum -- "${packages[@]}" > SHA256SUMS.txt
+          sha256sum -- "Javdex-Playback-Sources-$VERSION.tar.gz" >> SHA256SUMS.txt
 
-      - name: Attach server deployment files
+      - name: Prepare release description and versioned deployment links
         env:
           IMAGE: ${{ needs.metadata.outputs.image }}
           VERSION: ${{ needs.metadata.outputs.version }}
           TAG: ${{ needs.metadata.outputs.tag }}
         run: |
           set -euo pipefail
-          cp deploy/docker-compose.example.yml deploy/javdex-server.example.json release-artifacts/
-          cd release-artifacts
-          sha256sum docker-compose.example.yml javdex-server.example.json >> SHA256SUMS.txt
-          cd ..
           cp ".github/release-notes/$TAG.md" release-body.md
-          printf '\n\n### Docker 服务端\n\n镜像：`%s:%s`（Linux amd64 / arm64）。\n\n下载下方 Compose 和 JSON 配置，部署步骤见 https://github.com/%s/blob/%s/docs/SERVER_MODE.md 。桌面与服务端须使用相同版本。\n' "$IMAGE" "$VERSION" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> release-body.md
+          printf '\n\n### 下载与部署\n\n桌面用户选择对应系统的安装包即可，无需下载源码。`Javdex-Playback-Sources-%s.tar.gz` 为四个平台的总源码包，含摘要去重材料和恢复说明。\n\nDocker 镜像：`%s:%s`（Linux amd64 / arm64）。桌面与服务端须使用相同版本。\n\n[Compose 示例](https://github.com/%s/blob/%s/deploy/docker-compose.example.yml) · [JSON 配置示例](https://github.com/%s/blob/%s/deploy/javdex-server.example.json) · [部署说明](https://github.com/%s/blob/%s/docs/SERVER_MODE.md)。可信升级公钥已内置镜像，不需要下载公钥附件。\n' "$VERSION" "$IMAGE" "$VERSION" "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> release-body.md
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
       - run: npm run server:updater:build
       - name: Read verified server images for update packaging
         uses: docker/login-action@v3
@@ -361,10 +390,6 @@ jobs:
             release-artifacts/*.dmg
             release-artifacts/*.exe
             release-artifacts/*.zip
-            release-artifacts/Javdex-Playback-Sources-*.tar.gz
+            release-artifacts/Javdex-Playback-Sources-${{ needs.metadata.outputs.version }}.tar.gz
             release-artifacts/SHA256SUMS.txt
-            release-artifacts/docker-compose.example.yml
-            release-artifacts/javdex-server.example.json
-            release-artifacts/Javdex-server-update-*.json
-            release-artifacts/Javdex-server-*.tar.gz
-            release-artifacts/server-update-public.pem
+            release-artifacts/Javdex-server-*.javdex-update

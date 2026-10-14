@@ -8,6 +8,8 @@ import type { ServerUpdateManifest, SignedServerUpdate } from '@shared/serverUpd
 import type { DeploymentSnapshot, UpdateDeployment } from './deployment'
 import { verifyUpdateManifest, checkUpdateTarget, sha256 } from './manifest'
 import { ServerUpdateManager } from './updateManager'
+import { updateBundlePrefix } from '@http/updateBundle'
+import { uploadServerUpdateBundle } from '@http/updateClient'
 
 const directories: string[] = []
 afterEach(() => { for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true }) })
@@ -44,6 +46,38 @@ function fixture(): { dir: string; deployment: FixtureDeployment; manager: Serve
   const deployment = new FixtureDeployment()
   return { dir, deployment, manager: new ServerUpdateManager(dir, trusted, deployment) }
 }
+test('single-file offline upload resumes inner archive offsets and still requires trusted signatures', async () => {
+  const f = fixture(), selected = signed()
+  const file = path.join(f.dir, 'fixture.javdex-update')
+  fs.writeFileSync(file, Buffer.concat([updateBundlePrefix(selected), archive]))
+  let state = await f.manager.beginOffline(selected)
+  state = await f.manager.upload(state.job!.id, 0, (async function* () { yield archive.subarray(0, 7) })())
+  assert.equal(state.job?.receivedBytes, 7)
+  const offsets: number[] = []
+  const client = {
+    import: (value: SignedServerUpdate) => f.manager.beginOffline(value),
+    upload: async (id: string, offset: number, chunk: Buffer) => {
+      offsets.push(offset)
+      assert.deepEqual(chunk, archive.subarray(offset))
+      return f.manager.upload(id, offset, (async function* () { yield chunk })())
+    }
+  }
+  const fd = fs.openSync(file, 'r')
+  try {
+    const result = await uploadServerUpdateBundle(client, fd)
+    assert.equal(result.job?.phase, 'prepared')
+    assert.deepEqual(offsets, [7])
+    assert.deepEqual(f.deployment.events, ['prepare'])
+  } finally { fs.closeSync(fd) }
+  const bad = fixture()
+  const badFile = path.join(bad.dir, 'forged.javdex-update')
+  fs.writeFileSync(badFile, Buffer.concat([updateBundlePrefix({ ...selected, signature: 'invalid' }), archive]))
+  const invalid = fs.openSync(badFile, 'r')
+  try {
+    await assert.rejects(uploadServerUpdateBundle({ import: value => bad.manager.beginOffline(value), upload: async () => { assert.fail('Unsigned archive must never upload') } }, invalid), /签名/)
+    assert.equal((await bad.manager.status()).job, null)
+  } finally { fs.closeSync(invalid) }
+})
 async function wait(manager: ServerUpdateManager, phase: string): Promise<void> {
   for (let i = 0; i < 100; i++) {
     if ((await manager.status(false)).job?.phase === phase) return

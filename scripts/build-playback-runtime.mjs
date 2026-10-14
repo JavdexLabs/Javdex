@@ -62,7 +62,7 @@ const toolchain = { compiler: run(compiler, ['--version'], root, true), cmake: r
 if (platform === 'darwin') environment.MACOSX_DEPLOYMENT_TARGET = '12.0'
 const native = path.join(root, 'apps/desktop/src/main/player/native')
 const recipeFiles = ['build/playback-sources.json', 'scripts/build-playback-runtime.mjs', 'scripts/playback-source-build.mjs',
-  'scripts/playback-runtime.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
+  'scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
   'package.json', 'package-lock.json', 'LICENSE', 'NOTICE', 'LICENSES/Javdex-MIT.txt', 'LICENSES/node-gyp-MIT.txt',
   ...readdirSync(native).filter(name => /\.(cpp|mm|h)$|^CMakeLists.txt$/.test(name)).map(name => 'apps/desktop/src/main/player/native/' + name)]
 for (const parent of ['apps', 'packages']) {

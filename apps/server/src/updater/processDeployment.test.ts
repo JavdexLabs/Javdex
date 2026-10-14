@@ -2,13 +2,41 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { test } from 'node:test'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, generateKeyPairSync, sign } from 'node:crypto'
+import { updateBundlePrefix } from '@http/updateBundle'
 import { ReleaseStore, releaseId } from './releaseStore'
 import { BusinessSupervisor } from './supervisor'
 import { ProcessUpdateDeployment } from './processDeployment'
 import { MANAGED_LOCK } from './storage'
 import { fixture, makeRelease, archiveRelease } from './testFixtures'
 import { requestBusiness } from './businessHttp'
+
+test('online preparation verifies embedded signature then extracts only the signed program archive', async t => {
+  const { root, config } = await fixture()
+  const supervisor = new BusinessSupervisor(config)
+  try {
+    const keys = generateKeyPairSync('ed25519')
+    config.releaseKeys = { test: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString() }
+    const store = new ReleaseStore(config); await store.bootstrap()
+    const deployment = new ProcessUpdateDeployment(config, store, supervisor)
+    const next = path.join(root, 'next'); makeRelease(next, '0.8.1')
+    const archive = path.join(root, 'next.tar.gz')
+    const manifest = await archiveRelease(next, archive)
+    manifest.archive.url = 'https://github.com/JavdexLabs/Javdex/releases/download/v0.8.1/next.javdex-update'
+    const payload = JSON.stringify(manifest)
+    const signed = { keyId: 'test', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') }
+    let bytes = Buffer.concat([updateBundlePrefix(signed), fs.readFileSync(archive)])
+    t.mock.method(globalThis, 'fetch', async () => new Response(bytes))
+    await deployment.prepare(manifest)
+    await store.verifyInstalled(releaseId(manifest))
+    bytes = Buffer.concat([updateBundlePrefix({ ...signed, signature: 'invalid' }), fs.readFileSync(archive)])
+    await assert.rejects(deployment.prepare(manifest), /签名/)
+    bytes = fs.readFileSync(archive)
+    await assert.rejects(deployment.prepare(manifest), /支持/)
+    bytes = Buffer.concat([updateBundlePrefix(signed), fs.readFileSync(archive), Buffer.from('extra')])
+    await assert.rejects(deployment.prepare(manifest), /大小/)
+  } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
+})
 
 for (const accessHost of ['127.0.0.1', 'library.local']) for (const badWorker of [false, true]) test(`synthetic host lifecycle (${accessHost}): ${badWorker ? 'migration failure restores' : 'verified activation preserves'} data and persistent release`, async () => {
   const { root, config } = await fixture({ accessHost })

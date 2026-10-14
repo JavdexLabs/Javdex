@@ -5,7 +5,8 @@ import path from 'node:path'
 import { createServer } from 'node:net'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { ServerUpdateClient } from '../packages/http/src/updateClient'
+import { ServerUpdateClient, uploadServerUpdateBundle } from '../packages/http/src/updateClient'
+import { writeUpdateBundle } from '../packages/http/src/updateBundle'
 import { updaterPairingSchema, type ServerReleaseDescriptor, type ServerUpdateManifest } from '../packages/contracts/src/serverUpdateTypes'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp'
 import { waitForUpdateStatus } from './server-updater-smoke-wait'
@@ -99,10 +100,13 @@ async function main(): Promise<void> {
       const archive = path.join(directory, `${kind}.tar.gz`)
       execFileSync(process.execPath, ['scripts/server-release-package.mjs', 'archive', closure, archive], { stdio: 'inherit' })
       const payloadDescriptor = JSON.parse(dockerArchiveMetadata(archive, directory)) as ServerReleaseDescriptor
-      const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: payloadDescriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [19], targetSchema: 20, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.tar.gz`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(payloadDescriptor.files).reduce((sum, value) => sum + value.bytes, Buffer.byteLength(JSON.stringify(payloadDescriptor)) + 1), sha256: fingerprint(archive) } }
+      const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: payloadDescriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [19], targetSchema: 20, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.javdex-update`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(payloadDescriptor.files).reduce((sum, value) => sum + value.bytes, Buffer.byteLength(JSON.stringify(payloadDescriptor)) + 1), sha256: fingerprint(archive) } }
       const payload = JSON.stringify(manifest)
-      let state = await client.import({ keyId: 'smoke', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') })
-      for await (const chunk of fs.createReadStream(archive, { highWaterMark: 8 * 1024 ** 2 })) state = await client.upload(state.job!.id, state.job!.receivedBytes, Buffer.from(chunk))
+      const bundle = path.join(directory, `${kind}.javdex-update`)
+      await writeUpdateBundle(archive, bundle, { keyId: 'smoke', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') })
+      const fd = fs.openSync(bundle, 'r')
+      let state
+      try { state = await uploadServerUpdateBundle(client, fd) } finally { fs.closeSync(fd) }
       assert.equal(state.job?.phase, 'prepared')
       await client.control('install', state.job!.id)
       let interrupted = false

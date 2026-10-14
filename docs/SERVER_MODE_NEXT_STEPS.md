@@ -4,7 +4,7 @@
 
 **独立 Node 宿主、桌面远程模式、C1–C7 与备份恢复已实现。** 0.8.0 发布按当前发布工作流检查；历史 S13 全矩阵中未复验的场景继续保留其证据边界，不能因正式发布自动标为全部通过。当前功能和部署说明已同步到正式版；后续从实际问题及本页未完成范围继续，无需重新执行历史 S00–S12 或已经完成的 T0–T7。
 
-2026-10-14 用户改为发布 `0.9.0-beta.2`，不覆盖已公开 Beta.1。根/workspace/锁文件已统一为 Beta.2，schema 20 与模型管理文档 4 保持，正式 0.8.0 下载入口不变。当前发布进度见 [Beta.2 发布复核](reviews/v0.9.0-beta.2-release-audit.md)，首次发布与历史检查见 [Beta.1 发布复核](reviews/v0.9.0-beta.1-release-audit.md)和[发布检查](reviews/v0.9.0-beta.1-readiness.md)；下列历史本地实现记录不能替代最终 CI 结果。
+2026-10-15 准备发布 `0.9.0-beta.3`，汇总播放源码并采用单文件服务端升级格式，不兼容历史 Beta 的分离更新文件。根/workspace/锁文件统一为 Beta.3，schema 20 与模型管理文档 4 保持，正式 0.8.0 下载入口不变。用户授权发布完成后合入 main；当前发布与合入状态见 [Beta.3 发布复核](reviews/v0.9.0-beta.3-release-audit.md)，历史记录见 [Beta.2](reviews/v0.9.0-beta.2-release-audit.md)、[Beta.1](reviews/v0.9.0-beta.1-release-audit.md)和[发布检查](reviews/v0.9.0-beta.1-readiness.md)；下列历史本地实现记录不能替代最终 CI 结果。
 
 ## 当前变更：单容器托管更新（0.9.0 Beta）
 

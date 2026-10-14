@@ -14,6 +14,7 @@ import { MANAGED_LOCK } from './storage'
 import { ServerUpdateManager, readLimitedJson } from './updateManager'
 import { sha256 } from './manifest'
 import { signedUpdateSchema } from '@shared/serverUpdateTypes'
+import { fetchUpdateBundleManifest } from '@http/updateBundle'
 
 const controlSchema = z.discriminatedUnion('action', [
   z.object({ protocolVersion: z.literal(1), action: z.literal('status') }).strict(),
@@ -137,11 +138,11 @@ async function main(): Promise<void> {
           const status = await manager.status()
           const release = await fetchJson('https://api.github.com/repos/JavdexLabs/Javdex/releases/latest', 1024 * 1024) as { assets?: Array<{ name: string; browser_download_url: string }> }
           const platform = status.platform?.replace('/', '-')
-          const asset = release.assets?.find(a => a.name === `Javdex-server-update-${platform}.json`)
-          if (!asset) throw new Error('当前正式发布尚未提供服务端更新清单')
+          const asset = release.assets?.find(a => a.name.startsWith('Javdex-server-') && a.name.endsWith(`-${platform}.javdex-update`))
+          if (!asset) throw new Error('当前正式发布尚未提供单文件服务端升级包')
           const source = new URL(asset.browser_download_url)
           if (source.protocol !== 'https:' || source.hostname !== 'github.com' || !source.pathname.startsWith('/JavdexLabs/Javdex/releases/download/')) throw new Error('更新清单来源无效')
-          reply(200, await manager.setTarget(await fetchJson(source, 65536)))
+          reply(200, await manager.setTarget(await fetchUpdateBundleManifest(source)))
         } else if (input.action === 'import') reply(200, await manager.beginOffline(input.signed))
         else if (input.action === 'prepare') reply(200, await manager.prepare())
         else reply(200, await manager.install(input.jobId))

@@ -8,7 +8,7 @@ fs.mkdirSync(output, { recursive: true })
 await build({
   entryPoints: ['apps/server/src/updater/index.ts'], outfile: path.join(output, 'index.js'),
   bundle: true, platform: 'node', target: 'node22', format: 'esm',
-  alias: { '@shared': path.resolve('packages/contracts/src') },
+  alias: { '@shared': path.resolve('packages/contracts/src'), '@http': path.resolve('packages/http/src') },
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" }
 })
 // The image receives a standalone JS publisher, not source TS or npm tooling.

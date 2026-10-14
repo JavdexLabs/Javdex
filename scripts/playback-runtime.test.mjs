@@ -108,6 +108,8 @@ test('runtime inventory checks hashes, exact payload and binary/source ownership
   assert.equal(existsSync(path.join(staged.directory, 'sources')), false, 'source/build evidence is not installed')
   const archive = path.join(f.root, staged.manifest.sourceBundle.fileName)
   assert.equal(hash(readFileSync(archive)), staged.manifest.sourceBundle.sha256)
+  assert.deepEqual(JSON.parse(readFileSync(archive + '.runtime.json')), staged.manifest)
+  assert.match(readFileSync(path.join(staged.directory, 'SOURCE-ACCESS.txt'), 'utf8'), /Release download: Javdex-Playback-Sources-.*\.tar\.gz/)
   const extracted = path.join(f.root, 'extracted-sources')
   mkdirSync(extracted)
   const unpacked = spawnSync('tar', ['-xf', archive, '-C', extracted], { encoding: 'utf8' })

@@ -2,7 +2,37 @@ import https from 'node:https'
 import tls from 'node:tls'
 import { isIP } from 'node:net'
 import { createHash } from 'node:crypto'
-import { updaterPairingSchema, type UpdaterPairing, type ServerUpdateSnapshot, type SignedServerUpdate } from '@shared/serverUpdateTypes'
+import fs from 'node:fs'
+import { readUpdateBundle, verifyBundleArchive } from './updateBundle'
+import { updaterPairingSchema, signedUpdateSchema, updateManifestSchema, type UpdaterPairing, type ServerUpdateSnapshot, type SignedServerUpdate } from '@shared/serverUpdateTypes'
+
+/** Upload only the inner archive; journal offsets exclude the transport header. */
+export async function uploadServerUpdateBundle(client: Pick<ServerUpdateClient, 'import' | 'upload'>, fd: number): Promise<ServerUpdateSnapshot> {
+  const bundle = readUpdateBundle(fd)
+  const signed = signedUpdateSchema.parse(bundle.signed)
+  const manifest = updateManifestSchema.parse(JSON.parse(signed.payload))
+  if (bundle.archiveBytes !== manifest.archive.bytes) throw new Error('所选升级包大小与签名清单不一致')
+  await verifyBundleArchive(fd, bundle.archiveOffset, bundle.archiveBytes, manifest.archive.sha256)
+  // Import verifies the manager's baked-in trust root, expiry and target before
+  // any archive bytes are uploaded. No public key is accepted from the file.
+  let status = await client.import(signed)
+  if (!status.job || status.job.totalBytes !== bundle.archiveBytes || status.job.version !== manifest.version
+    || status.platform !== manifest.platform) throw new Error('升级任务与签名清单不一致')
+  if (!Number.isSafeInteger(status.job.receivedBytes) || status.job.receivedBytes < 0 || status.job.receivedBytes > status.job.totalBytes)
+    throw new Error('升级任务上传偏移无效')
+  while (status.job?.phase === 'preparing' && status.job.receivedBytes < status.job.totalBytes) {
+    const offset = status.job.receivedBytes
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('升级任务上传偏移无效')
+    const buffer = Buffer.alloc(Math.min(8 * 1024 ** 2, status.job.totalBytes - offset))
+    if (fs.readSync(fd, buffer, 0, buffer.length, bundle.archiveOffset + offset) !== buffer.length)
+      throw new Error('发行包在上传期间发生变化，请重新选择')
+    const next = await client.upload(status.job.id, offset, buffer)
+    if (!next.job || next.job.id !== status.job.id || next.job.totalBytes !== status.job.totalBytes
+      || next.job.receivedBytes !== offset + buffer.length) throw new Error('升级任务上传进度不一致，请查询状态后续传')
+    status = next
+  }
+  return status
+}
 
 /** Cert pin is checked before creating a request containing deployment credentials. */
 export class ServerUpdateClient {

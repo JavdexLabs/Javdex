@@ -1,7 +1,9 @@
 import fs from 'node:fs'
+import { openUpdateBundleStream } from '@http/updateBundle'
+import { verifyUpdateManifest } from './manifest'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { promisify, isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { ServerUpdateManifest } from '@shared/serverUpdateTypes'
 import { SERVER_RUNTIME_ID } from '@shared/serverUpdateTypes'
@@ -60,16 +62,22 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     const file = path.join(this.config.stateDir, `download-${manifest.archive.sha256}.tar.gz`)
     const response = await fetch(manifest.archive.url, { signal: AbortSignal.timeout(15 * 60_000) })
     if (!response.ok || !response.body) throw new Error('官方发行包下载失败')
-    const fd = fs.openSync(file, 'w', 0o600)
+    const bundle = await openUpdateBundleStream(response.body)
+    try {
+      if (!isDeepStrictEqual(verifyUpdateManifest(bundle.signed, this.config.releaseKeys), manifest))
+        throw new Error('更新包内签名清单与已选择目标不一致')
+    } catch (error) { await bundle.close(); throw error }
+    let fd: number | undefined
     let bytes = 0
     try {
-      for await (const part of response.body) {
+      fd = fs.openSync(file, 'w', 0o600)
+      for await (const part of bundle.archive) {
         bytes += part.length
         if (bytes > manifest.archive.bytes) throw new Error('发行包超过签名声明的大小')
         fs.writeSync(fd, part)
       }
       fs.fsyncSync(fd)
-    } finally { fs.closeSync(fd) }
+    } finally { if (fd !== undefined) fs.closeSync(fd); await bundle.close() }
     await this.releases.prepare(manifest, file)
     fs.unlinkSync(file)
   }

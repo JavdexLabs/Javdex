@@ -52,3 +52,5 @@ Run 38516660322 的完整 pretest、类型检查和打包回归通过，随后 `
 定向复现使用隔离 Node 进程预加载器：只把测试夹具的 `path.join` 替换为 `path.win32.join`、把实际 `release.yml` 的读取结果替换为 CRLF，然后导入两个真实测试文件。本机稳定复现相同四个失败（11 通过、4 失败）；只修正路径期望后剩两个换行失败（13 通过、2 失败）；规范换行后 18 通过、0 失败。没有把本机文本模拟算作 Windows 编译或包验收。
 
 修复只调整测试的宿主路径表示及换行规范化，并让全部 workflow 门禁同时覆盖 LF/CRLF；不改生产构建配方、源码 pin、运行库校验或发布条件。额外在隔离进程分别移除源码构建步骤、移除 verify-only 发布条件，两种变体在 LF 与 CRLF 都被原门禁拒绝（各两个失败），证明没有以减少要求取得通过。`npm run test:playback:build` 当前 23 通过、0 失败、0 跳过；`CI=true GITHUB_ACTIONS=true npm run test:packaging` 42 通过、0 失败、两个原有平台专属跳过；编码/diff 检查通过。无临时源码文件或调试日志遗留。
+
+修复 `2e54083418be4656ba9bef1466be7baaaba6c403` 已推送 `dev`，第三轮 [run 38518449745](https://github.com/JavdexLabs/Javdex/actions/runs/38518449745) 以显式 `verify_only=true` 启动，已核对 headSha 一致；启动后的首个快照为 queued，继续跟进，不记作验收成功。

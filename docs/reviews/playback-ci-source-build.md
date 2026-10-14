@@ -2,6 +2,8 @@
 
 日期：2026-10-14。基线：`dev` / `dcc2129`；修复提交：`f52b03b340bd358cec5cee4ed22a3458df725345`。本文件是修复验收记录，不是新版本发布记录。
 
+**本次修复验收已完成。** [第八轮 run 38551710888](https://github.com/JavdexLabs/Javdex/actions/runs/38551710888) 从 `cef4ff1cc66b3b6f37291bc3b7e925d65060f2ba` 执行，四个平台包任务全部成功；六个桌面包与四份配套源码已复核。实际加载、PCM EOF、源码及签名证据见文末“第八轮最终验收”。仅验证，未发布或覆盖已公开 Beta.1，未合并 main。
+
 ## 原因与修复
 
 发布任务没有准备 `JAVDEX_PLAYBACK_RUNTIME_DIR`，原打包器允许缺省运行库，而产物门禁只检查 Agent。`out/native-playback` 的开发产物本来就不应该进入正式安装包，因此没有放宽排除规则。缺库回归在修复前以 `Missing expected exception: win32/1` 失败，当前四个发布目标均拒绝无来源矩阵的 CI 打包。
@@ -21,9 +23,9 @@
 
 最终 macOS 输入的构建指纹为 `54db97d0be596c9aaad10680fbe1b2e2842592559c0b713ad103e581a9dbae27`；`--fingerprint` 与缓存复验记录一致。最终 app 由自身已签名的 `Contents/MacOS/Javdex` 加载包内 `playback.node` 成功（不是只用开发 Electron 代替），然后独立解码检查通过。配套源码包 SHA-256 为 `37fe4f09c59c56a527ac0a21eb3eeeda66cdce63a03dec912dc9d6987b56b017`，分发投影绑定的原输入清单摘要为 `06aa3eb434b21b0bc4ea3412c1e63c1c72bae4c29138a9ee027429ca3924ee02`。最终构建/发布规划测试为 20 通过、0 失败、0 跳过；打包测试为 42 通过、0 失败、2 个既有平台专属跳过。
 
-## 尚未完成
+## 验收范围与边界
 
-四目标统一验收尚未完成；实际 runner 结果及定向修复见下文。Linux arm64 容器证明 Linux 路径能构建/加载，不证明 x64 汇编、Ubuntu 的最低 ABI、AppImage/DEB 安装或 GUI/GL；macOS 的 `--dir` app 也不是 DMG 干净安装或 Developer ID/公证验收。PCM EOF 不代表 H.264/HEVC/AV1/字幕/网络/硬解的完整矩阵通过。
+四目标统一源码构建、打包与包内加载/PCM EOF 验收已完成；实际原生 runner 和产物证据见下文。Linux arm64 容器的早期证明不能代替此后的 Ubuntu 22.04 x64 原生结果；本轮仍不是 AppImage/DEB/NSIS/DMG 独立干净机器安装或 GUI/GL 验收。macOS 使用 ad-hoc 签名，不是 Developer ID/公证；Windows 安装包未作可信发布者签名。PCM EOF 不代表 H.264/HEVC/AV1/字幕/网络/硬解的完整矩阵通过。
 
 Release 新增 `verify_only=true` 的手动入口，只生成/核验桌面 CI 产物；服务镜像、镜像 manifest 和 GitHub Release 三道发布边界都拒绝此模式。2026-10-14 用户已授权将修复提交并推送 `dev`，随后执行四目标验证 CI；实际提交与 CI 证据在执行后补录。已公开 `v0.9.0-beta.1` 的标签、镜像和资产不改写，下一次正式分发需要新版本编号；没有合并 `main`。
 
@@ -143,3 +145,59 @@ Windows job `115770957935` 已完成固定源码依赖构建，libmpv 编译到 
 提交前第七轮已结束：Intel job `115795406403` 完整包验收也成功，最终仍为三个非 Windows 包通过、Windows 失败；server job `115810388305`、server-manifest job `115810389692`、Publish GitHub release job `115810390209` 全部 skipped，没有发布任何新版本。
 
 修复 `cef4ff1cc66b3b6f37291bc3b7e925d65060f2ba` 已推送 `dev`，显式 `verify_only=true` 启动第八轮 [run 38551710888](https://github.com/JavdexLabs/Javdex/actions/runs/38551710888)，已核对 headSha 一致。2026-10-14 10:44 UTC 为 in_progress，继续跟进真实四目标包验收；不重复触发，不将本机解析回归替代 Windows 实际链接、加载和 EOF 门禁。
+
+## 第八轮最终验收
+
+2026-10-14 11:36:47 UTC，run `38551710888` attempt 1 最终为 `success`，事件为 `workflow_dispatch`、源码 `cef4ff1cc66b3b6f37291bc3b7e925d65060f2ba`。完整 Windows 类型检查/测试 job `115811048562` 成功，构建规划 30 项通过；Electron 回归 2487 通过、0 失败、24 个既有平台专属跳过，后续 Node 回归 1323 通过、0 失败、1 个既有跳过。没有排除失败测试、放宽闭包或重跑旧源码来替代修复。
+
+| 目标 | 原生包 job | CI 产物 | 实际证据 |
+| --- | --- | --- | --- |
+| Windows x64 / VS 2022 + UCRT64 | `115819718824` | [Javdex-win-x64](https://github.com/JavdexLabs/Javdex/actions/runs/38551710888/artifacts/11890468353) | 固定源码 DLL、MSVC addon、EXE/ZIP 成功；`Javdex.exe` 从实际打包目录加载 addon；搬移后 libmpv PCM 达到 EOF |
+| macOS Intel | `115819719199` | [Javdex-mac-x64](https://github.com/JavdexLabs/Javdex/actions/runs/38551710888/artifacts/11890865593) | DMG 成功；实际 `Contents/MacOS/Javdex` 加载 addon；PCM EOF；外层 app 和原生二进制真实签名检查通过 |
+| macOS arm64 | `115819718644` | [Javdex-mac-arm64](https://github.com/JavdexLabs/Javdex/actions/runs/38551710888/artifacts/11890171136) | DMG 成功；实际 `Contents/MacOS/Javdex` 加载 addon；PCM EOF；外层 app 和原生二进制真实签名检查通过 |
+| Ubuntu 22.04 x64 | `115819718723` | [Javdex-linux-x64](https://github.com/JavdexLabs/Javdex/actions/runs/38551710888/artifacts/11888967773) | AppImage/DEB 成功；包内 X11 helper 私有协议、EOF/destroy、无显示受控失败；搬移后 libmpv PCM EOF |
+
+四个 `Verify packaged playback runtime and corresponding source delivery` 和 Agent 验证步骤均成功，各目标均为两份原生运行库二进制；实际执行日志不是只检查目录或 `require`。加载/解码进程清除开发库搜索路径；macOS/Windows 还由打包后实际宿主加载。Mac 签名步骤均有 `valid on disk` 与 `satisfies its Designated Requirement`；其它平台该 Mac 专属步骤正确 skipped，不将其算作可信签名通过。
+
+### 实际产物摘要
+
+已完整读取四个上传 ZIP，核对实际字节与 SHA-256，均同时匹配 GitHub artifacts API 和上传日志；并逐一计算 ZIP 内安装产物和对应源码文件的摘要。归档为 CI artifacts，不是 Release 资产，当前过期时间为 2027-01-12 10:44:49 UTC。
+
+| CI 归档 | 字节 | 实际 SHA-256 |
+| --- | ---: | --- |
+| Javdex-win-x64 | 385720153 | `ef354f74eef81bb0167738a1c06dc39c9f0ab8838435f0144a601117674a2c41` |
+| Javdex-mac-x64 | 242553954 | `116a25307e3cf1c27753b7b5945c2a9e6055637203119a90734da6e0e9a2977a` |
+| Javdex-mac-arm64 | 234945158 | `825b1e962bce82247fe092923ad887f19e8a18743a062ab4e0d843628bfd3007` |
+| Javdex-linux-x64 | 429312882 | `79587b17a39146dc54e532b0fb921a739ad6b64ec64b47f7101f3b55516b5bd9` |
+
+六个桌面包：
+
+| 文件 | 字节 | 实际 SHA-256 |
+| --- | ---: | --- |
+| Javdex-Setup-0.9.0-beta.1-x64.exe | 139282056 | `b9fa7a610144bb69ee07efa77cf458b5b503d84bffa40235ccbedad841b93baf` |
+| Javdex-Setup-0.9.0-beta.1-x64.zip | 188887823 | `de3983af22ce08925c143699b9804c8ef268762922594ff3e4bdfb2c882dd2ce` |
+| Javdex-0.9.0-beta.1-x64.dmg | 189897564 | `eb06bc989d755b2c42238e882fc46d910f3883ba9d597fdd6cc165b178f5b1a7` |
+| Javdex-0.9.0-beta.1-arm64.dmg | 182309781 | `74ea48a7858470bb6f62d794119814ce869b5a5f9accb7d2c28e5f0fc71c0670` |
+| Javdex-0.9.0-beta.1-amd64.deb | 143411312 | `b6fd611c84c25e29b6e7fa5f82877769a58c5be20b0b2039693a07e328d8c511` |
+| Javdex-0.9.0-beta.1-x86_64.AppImage | 180495773 | `647712e0d9391349b0026b5e29ef7a4083b035ae7781dfd80dd5082a3577ffd1` |
+
+四份对应源码：
+
+| 文件 | 字节 | 实际 SHA-256 |
+| --- | ---: | --- |
+| Javdex-Playback-Sources-0.9.0-beta.1-win32-x64-ed1391d1d039-270ed01c.tar.gz | 57898461 | `da6b1a248aa58c42b35a33929aa7085219f9fde6cb257668860efe271008e432` |
+| Javdex-Playback-Sources-0.9.0-beta.1-darwin-x64-18f3cccdab23-a5ada0e8.tar.gz | 52754162 | `79084fd941b7cc816d6d4c44ab87ddb61a813c36895a637309af184340780f06` |
+| Javdex-Playback-Sources-0.9.0-beta.1-darwin-arm64-734580fd5446-a5ada0e8.tar.gz | 52754181 | `b977dd9c6f9620a37395acffea4b5eeaf34c011890b833fd8b6bba60fdabb613` |
+| Javdex-Playback-Sources-0.9.0-beta.1-linux-x64-844ea45646b0-a5ada0e8.tar.gz | 105994675 | `686eecf7c6351cb60172bcca655fcea7ec0ff36b0aa2e6c0817273c23d3add60` |
+
+实际解析四份源码归档，确认 README、原始 input inventory、build receipt、libmpv 原始源码集合、Javdex 首选原生源码/SDK、许可证和 packaging-tools 均在；清单的输入摘要前缀匹配归档名称，receipt 的目标/SDK/构建指纹及各来源 pin 匹配本轮原生构建。三份关键配方 `scripts/playback-source-build.mjs`、`scripts/build-playback-runtime.mjs`、`build/playback-sources.json` 与源码提交一致。Windows checkout 保留 CRLF，比较时仅规范此换行表示；已用 Git 原文转换为 CRLF 复现相同字节摘要，未忽略内容变化或改写源码归档。
+
+额外随机读取实际 Windows ZIP 的 `resources/native-playback`：`playback.node` 为 `3d45c3990f4bc77febee08b383b2e8f46afe61f66eae92a876d61c6d93d55600`，`libmpv-2.dll` 为 `00de23fa0fb8cc01a83fed6c187cae8daaff397b6bae4d0aed129dba2042f44a`；二进制、许可证、SOURCE-ACCESS 的字节摘要均匹配包内 runtime.json，sourceBundle 的名称、完整摘要和输入清单摘要与实际配套源码一致。未在 Mac 上冒充 Windows 执行或重新运行下载的安装程序。
+
+本机首次并发下载因磁盘不足中断，仅清除本轮四个未完成 ZIP；之后三个目标流式核对，Windows 采用一次受控文件下载和随机读取。临时工具最初遇到 Windows CRLF 比较及嵌套 ZIP 流关闭问题，均只修正核对方式，未改生产代码、忽略验收失败或重触发 CI。所有四份完整上传数据与十个文件摘要最终核对通过。原始 job 日志与结构化证据保留在忽略目录 `out/playback-ci-final-38551710888-ap0dwm`；仅用于核对的 Windows 上传 ZIP 清理后可从上述 CI artifact 再取，不删除已有构建材料或用户文件。
+
+### 发布边界
+
+server job `115831142042`、server-manifest job `115831142908`、Publish GitHub release job `115831143516` 最终全部 skipped。公开 `v0.9.0-beta.1` 标签仍为 `d10f8c1aea09a74de4d788a9445a22ff4110ac89`，Release 仍为原 14 个资产；稳定 `releases/latest` 仍为 `v0.8.0`，远程 main 仍为 `004dc15d303dde90eb2829ca01d4f092b9f0ed2d`。本轮没有更新服务镜像、访问签名私钥、改写 Beta.1 或合并 main。
+
+公开 Beta.1 的旧安装包仍不包含此次修复；本节中同版本名称是 verify-only 的 CI 验证产物，不可覆盖旧 Release。修复后的正式分发须由用户授权新版本编号。本次四目标 CI 修复验收结束，保存并推送本记录后停用本次跟进。

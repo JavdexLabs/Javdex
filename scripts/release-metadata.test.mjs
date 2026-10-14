@@ -15,6 +15,12 @@ test('stable and manually marked prereleases retain their channel', () => {
   assert.equal(releaseMetadata('0.8.0').prerelease, false)
   assert.equal(releaseMetadata('0.8.0', undefined, true).prerelease, true)
 })
+test('Beta.2 uses a new prerelease tag without replacing Beta.1', () => {
+  assert.deepEqual(releaseMetadata('0.9.0-beta.2', ''), {
+    tag: 'v0.9.0-beta.2', version: '0.9.0-beta.2', prerelease: true
+  })
+  assert.throws(() => releaseMetadata('0.9.0-beta.2', 'v0.9.0-beta.1'))
+})
 test('mismatched or unsafe tags fail before publishing', () => {
   assert.throws(() => releaseMetadata('0.8.0', 'v0.7.1'))
   assert.throws(() => releaseMetadata('0.8.0', 'v0.8.0\nlatest'))
@@ -58,15 +64,9 @@ for (const [lineEnding, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
     }
   })
 
-  test(`explicit Beta.1 tag replacement follows signed artifacts and remains opt-in (${lineEnding})`, () => {
-    assert.match(workflow, /overwrite_beta1:\s+description:.*\n\s+required: false\n\s+default: false\n\s+type: boolean/)
-    const update = workflow.indexOf('- name: Replace explicitly authorized Beta.1 tag')
-    assert.ok(update > workflow.indexOf('run: node scripts/server-update-release.mjs publish --directory release-artifacts'))
-    assert.ok(update < workflow.indexOf('- name: Publish release\n'))
-    const block = workflow.split('- name: Replace explicitly authorized Beta.1 tag\n')[1]?.split('\n      - ')[0]
-    assert.ok(block?.includes('if: inputs.overwrite_beta1'))
-    assert.ok(block?.includes('test "$TAG" = v0.9.0-beta.1'))
-    assert.ok(block?.includes('GH_TOKEN: ${{ github.token }}'))
-    assert.ok(block?.includes('-f sha="$GITHUB_SHA" -F force=true'))
+  test(`release workflow cannot force-move existing tags (${lineEnding})`, () => {
+    assert.ok(!workflow.includes('overwrite_beta1'))
+    assert.ok(!workflow.includes('force=true'))
+    assert.ok(!workflow.includes('git/refs/tags/'))
   })
 }

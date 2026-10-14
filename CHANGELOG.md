@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.9.0-beta.2 — 2026-10-14
+
+- 修复 Beta.1 桌面安装包缺少内置播放运行库：四个原生目标从固定源码构建 libmpv，随包交付配套源码和许可；包内加载、PCM EOF、来源闭包与 macOS 签名加入发布门禁。
+- 修复 Windows 的构建工具路径、静态 pkgconf、必需线程后端和 GNU 导出表解析；修复 Linux 静态字体依赖链接及搬移前测试加载路径。
+- 修复模型管理器关闭与启动的竞态、既有重复 CSS 规则及跨平台测试路径/换行假定。
+- 维持数据库 schema 20、模型管理文档 4；不覆盖 Beta.1、稳定 latest 或 main。桌面和服务端使用相同 Beta.2，升级包仍严格校验签名、来源和版本。发布状态以 [Beta.2 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.2) 为准。
+
 ## 0.9.0-beta.1 — 2026-10-13
 
 这是 0.9.0 的首个 Beta。安装包与镜像的发布状态以对应 Release 为准，预发布不会触发稳定版更新提醒；版本与升级说明见 [Beta 发布说明](.github/release-notes/v0.9.0-beta.1.md)。

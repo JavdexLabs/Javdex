@@ -62,3 +62,5 @@ Run 38518449745 已通过 pretest、类型检查、打包/夹具和 23 项构建
 该原有用例在本机定向与整文件运行均通过，因此没有把它当作确定性复现或临时基础设施错误重跑。新增确定性启动屏障回归：暂停真实模型目录首次 lstat，在启动尚未完成时调用 `close()`，断言关闭不得释放随后可清理的 profile；修复前定向命令 `node scripts/run-electron-tests.mjs '--test-name-pattern=close drains delayed initialization' apps/desktop/src/main/services/localModels/localModelManager.test.ts` 稳定失败为 `close must not release the profile while startup still accesses its model directory`。`close()` 原先只等待下载 pending、未等待初始化 ready，因此测试清理 profile 后，较慢的启动文件检查仍可能继续。
 
 修复关闭边界：先标记关闭/取消，等待初始化结束（即使初始化失败，也完成关闭清理），再等待下载及关闭推理引擎。启动失败仍经 snapshot/mode 报告，另有失败启动回归证明没有隐藏它。两个新增回归通过；完整本地模型相关 Electron 测试 68 通过、0 失败、0 跳过；Node 类型检查、定向 ESLint、编码和 diff 检查通过。临时 profile 在回归 finally 中等待初始化结束后清理，没有改写用户资料或放宽任何平台验收。真实 Windows 故障是否消除仍须下一轮 CI 确认。
+
+修复 `1ce45d2379cab7024660dfa9d5078d93309f200f` 已推送 `dev`，第四轮 [run 38521347227](https://github.com/JavdexLabs/Javdex/actions/runs/38521347227) 以显式 `verify_only=true` 启动，继续跟进四目标真实验收。

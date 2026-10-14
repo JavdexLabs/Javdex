@@ -141,3 +141,5 @@ Windows job `115770957935` 已完成固定源码依赖构建，libmpv 编译到 
 诊断输入与真实工具输出保留在忽略的 `out/playback-exports-repro`，临时容器自动删除，无生产调试日志；未完成的诊断工具源码下载已清除。修复须以新提交、新 verify-only run 验证，继续保留已有公开 Beta.1 资产与 main 不变。
 
 提交前第七轮已结束：Intel job `115795406403` 完整包验收也成功，最终仍为三个非 Windows 包通过、Windows 失败；server job `115810388305`、server-manifest job `115810389692`、Publish GitHub release job `115810390209` 全部 skipped，没有发布任何新版本。
+
+修复 `cef4ff1cc66b3b6f37291bc3b7e925d65060f2ba` 已推送 `dev`，显式 `verify_only=true` 启动第八轮 [run 38551710888](https://github.com/JavdexLabs/Javdex/actions/runs/38551710888)，已核对 headSha 一致。2026-10-14 10:44 UTC 为 in_progress，继续跟进真实四目标包验收；不重复触发，不将本机解析回归替代 Windows 实际链接、加载和 EOF 门禁。

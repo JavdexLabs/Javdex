@@ -109,3 +109,9 @@ Linux 的 CMake 构建目标提前使用最终 `$ORIGIN` RPATH，但测试执行
 修复只为 Linux 搬移前的核心/控制/helper 测试命令添加步骤级环境，驱动在 spawn 时合并，不改变全局构建环境；之后的运行库与包验收仍去除 LD_LIBRARY_PATH/开发 PATH，并检查相对依赖与 PCM EOF。没有改成绝对 RPATH 或跳过失败测试。两个新增配方回归先以 11 通过、2 失败验证红灯，修复后全部构建/发布规划 27 通过、0 失败、0 跳过；打包 42 通过、0 失败、两个既有平台专属跳过；脚本语法、编码和 diff 检查通过。夹具位于忽略目录 `out/playback-pkgconf-repro`，隔离工具镜像保留用于复查，不进入提交或安装包。
 
 四个临时诊断容器已删除，复现镜像及夹具保留。修复 `2ab2b91e8de55b22225c509284ef4e300e3e93bd` 已推送 `dev`，显式 `verify_only=true` 启动第六轮 [run 38536746800](https://github.com/JavdexLabs/Javdex/actions/runs/38536746800)，headSha 已核对一致。2026-10-14 08:40 UTC 为 pending，等待同一 dev 发布并发组中第五轮 Intel 任务完成；不取消正常工作的旧任务，不重复触发。四目标统一验收仍未完成，没有公开新版本、覆盖 Beta.1 或合并 main。
+
+### 第五轮结束：Intel SDK 下载连接超时
+
+第五轮 Intel job `115752397165` 已完成共享 libmpv 的编译/安装，随后 node-gyp 获取固定 Electron 43.4.1 headers 时以 `ConnectTimeoutError` 失败：连接 `electronjs.org:443` 超过 10000ms。尚未执行原生适配器或 DMG 打包，不能记为 Intel 本轮通过；server、server-manifest、Publish GitHub release 最终均 skipped。
+
+这是日志直接指出的外部连接故障，本机对完全相同 SDK URL 的限时 HEAD/重定向检查返回 HTTP 200，但它不证明原 runner 的网络已经恢复。没有据暂时连接失败假设或修改业务/构建源码，也不跳过 SDK 校验。第六轮已经针对 Windows/Linux 的新修复开始运行（源码仍为 `2ab2b91`，metadata 成功、完整测试 in_progress），它会重新获取和验证同一 SDK；不额外重跑旧源码或重复启动任务。若新轮仍发生下载失败，再按实际日志处理有界的基础设施重试。

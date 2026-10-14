@@ -289,9 +289,6 @@
 
 .availableProvider:hover {
   border-color: var(--border-strong);
-}
-
-.availableProvider:hover {
   color: var(--text-accent);
 }
 

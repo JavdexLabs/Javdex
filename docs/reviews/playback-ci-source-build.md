@@ -34,3 +34,9 @@ Release 新增 `verify_only=true` 的手动入口，只生成/核验桌面 CI �
 修复已提交、推送到 `dev`，工作树干净。提交前复验：构建/发布规划 20 通过；打包 42 通过、0 失败、2 个平台专属跳过；编码与 diff 检查通过。
 
 已使用 `gh workflow run release.yml --ref dev -f verify_only=true` 启动 [run 38514777077](https://github.com/JavdexLabs/Javdex/actions/runs/38514777077)，源码 `f52b03b340bd358cec5cee4ed22a3458df725345`。2026-10-14 05:05 UTC 的实际快照为 metadata 成功、Windows 完整测试正在运行，四个平台打包尚未开始；不记作 CI 验收完成。独立的“Javdex 内置播放四目标 CI 验收”跟进已启用，旧 Beta 发布跟进保持暂停。只在失败、需要决策或全部核验完成时通知，并在完成后补充实际产物和发布任务 skipped 的证据。
+
+### 首轮失败：既有 CSS 重复规则
+
+Run 38514777077 在 Windows `pretest` 的 CSS lint 失败：`ModelProvidersPanel.module.css:294` 重复声明 `.availableProvider:hover`（首项在 290 行）。尚未进入四平台源码构建/打包；server、server-manifest、release 均为 skipped，没有公开任何新产物。
+
+定向反馈命令 `npx stylelint apps/desktop/src/renderer/src/components/settings/ModelProvidersPanel.module.css` 在本机先以相同 `no-duplicate-selectors` 错误、exit 2 失败。合并相邻的两个 hover 声明，不更改选择器、声明值或顺序，保留原边框与文字效果；再次运行该命令及完整 `npm run lint:css` 均 exit 0。沿用现有 stylelint 门禁作为回归，不禁用规则、不跳过检查；随后重跑完整 pretest，并以新源码启动 verify-only CI。

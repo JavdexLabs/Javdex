@@ -5,11 +5,35 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
 const input = { arch: 'x64', source: '/sources', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2 }
+test('Windows import library reads old and current GNU export name tables with LF or CRLF', () => {
+  // Binutils peXXigen.c prints ordinal/base/hint columns in the current format.
+  const tables = [
+    '[Ordinal/Name Pointer] Table\n\t[   0] mpv_create\n\t[  10] mpv_render_context_create\n\t[  27] mpv_terminate_destroy\n\nThe Function Table',
+    '[Ordinal/Name Pointer] Table -- Ordinal Base 1\n\t          Ordinal   Hint Name\n\t[   0] +base[   1]  0000 mpv_create\n\t[  10] +base[  11]  000a mpv_render_context_create\n\t[  27] +base[  28]  001b mpv_terminate_destroy\n\nThe Function Table'
+  ]
+  for (const table of tables)
+    for (const newline of ['\n', '\r\n'])
+      assert.deepEqual(playbackWindowsExportNames(table.replaceAll('\n', newline)), ['mpv_create', 'mpv_render_context_create', 'mpv_terminate_destroy'])
+})
+test('Windows import library only accepts safe libmpv names inside the export name table', () => {
+  const table = [
+    'Import table', '\t[   0] mpv_imported_only',
+    'Export Address Table -- Ordinal Base 1', '\t[   0] +base[   1] 00008120 Forwarder RVA -- mpv_forwarded',
+    '[Ordinal/Name Pointer] Table -- Ordinal Base 1', '\t          Ordinal   Hint Name',
+    '\t[   0] +base[   1]  0000 mpv_create',
+    '\t[   1] +base[   2]  0001 other_api', '\t[   2] +base[   3]  0002 mpv_unsafe.name',
+    '\t[   3] +base[   4]  0003 mpv_bad-name', '\t[   4] +base[   5]  0004 mpv_bad extra',
+    '\t[   5] +base[   6]  0005 <corrupt offset: ffffffff>',
+    '', 'The Function Table', '\t[   6] mpv_outside_table'
+  ].join('\n')
+  assert.deepEqual(playbackWindowsExportNames(table), ['mpv_create'])
+  assert.deepEqual(playbackWindowsExportNames('\t[   0] mpv_create\n'), [])
+})
 test('Windows source entrypoint uses the action installation rather than a second preinstalled MSYS', () => {
   const msys = 'D:\\a\\_temp\\msys64', expectedShell = path.win32.join(msys, 'usr/bin/bash.exe')
   const bootstrap = `

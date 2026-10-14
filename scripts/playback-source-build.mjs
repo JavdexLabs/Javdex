@@ -12,6 +12,13 @@ export function verifyPlaybackSource(file, source) {
   assert.equal(playbackFileSha256(file), source.sha256, `Source digest mismatch: ${source.id}`)
 }
 
+export function playbackWindowsExportNames(output) {
+  // GNU objdump's newer name table adds base and hexadecimal hint columns.
+  // Do not mistake import names or export-address/forwarder rows for exports.
+  const table = output.replaceAll('\r\n', '\n').split(/^\[Ordinal\/Name Pointer\] Table(?: -- Ordinal Base \d+)?[ \t]*$/m)[1]?.split(/\n[ \t]*\n/, 1)[0] ?? ''
+  return [...table.matchAll(/^[ \t]*\[[ \t]*\d+\][ \t]+(?:\+base\[[ \t]*\d+\][ \t]+[a-fA-F0-9]+[ \t]+)?(mpv_[a-zA-Z0-9_]+)[ \t]*$/gm)].map(match => match[1])
+}
+
 export function playbackPkgConfigEnvironment(prefix, platform, arch) {
   return {
     PKG_CONFIG: path.join(prefix, 'bin', platform === 'win32' ? 'pkgconf.exe' : 'pkgconf'),

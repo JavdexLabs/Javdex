@@ -127,3 +127,17 @@ Windows job `115770957935` 已完成固定源码依赖构建，libmpv 编译到 
 修复仅为 Windows mpv setup 显式增加官方 `-Dwin32-threads=enabled`，不修改上游源码、不放开自动探测、不移除计时功能，也不改变另外两平台后端。新增配方回归在修复前为 13 通过、1 失败，修复后完整构建/发布规划 28 通过、0 失败、0 跳过；打包 42 通过、0 失败、两个既有平台专属跳过；编码、语法与 diff 检查通过。诊断源码/配置保留在忽略的 `out/playback-win-threads-repro`，容器均自动清理，无生产调试日志。
 
 第六轮最终结果为三个非 Windows 包 job 成功、Windows 失败，server、server-manifest、Publish GitHub release 均 skipped。修复 `ed1efd7c1e462cd193147244dc6ae6610b0a5a0b` 已推送 `dev`，显式 `verify_only=true` 启动第七轮 [run 38544445106](https://github.com/JavdexLabs/Javdex/actions/runs/38544445106)，已核对 headSha 一致；四目标统一成功仍待此新源码的实际结果。未发布版本、覆盖已有资产或合并 main。
+
+### 第七轮：GNU objdump 导出名称表格式变化
+
+第七轮完整 Windows 回归成功，macOS arm64 job `115795406154` 与 Linux job `115795406237` 完整包验收成功。Windows job `115795406346` 已编译全部 238 个 libmpv 目标并安装 `libmpv-2.dll`，确认必需线程后端修复生效；固定 Electron SDK 下载/校验成功，随后以 `Could not extract libmpv exports` 失败，尚未构建 MSVC addon 或安装包。本次修复时 Intel job `115795406403` 已通过源码构建，仍在 Package，不据部分成功记作四目标完成。
+
+实际 CI 安装 Binutils `2.47-3`。旧代码只识别 `[ordinal] mpv_name`；[官方 2.47 分支 PE 输出实现](https://gnu.googlesource.com/binutils-gdb/+/refs/heads/binutils-2_47-branch/bfd/peXXigen.c) 的导出名称表已增加 base 与十六进制 hint 列。原 runner 没有输出捕获的 objdump 文本，因此未将本机输出冒充它的原始日志。
+
+定向差分复现对同一个真实 MinGW x64 小型 DLL 分别运行隔离工具镜像中的 GNU objdump 2.38 和 2.44，DLL 包含 26 个诊断导出函数，并非 libmpv 实现。生产提取规则在旧工具输出中读取 26 个名称，新工具输出中读取 0 个，稳定触发相同数量门禁错误；只换解析逻辑后，两份原始工具输出均读取相同的 26 个名称，数量仍要求大于 20。该证明验证 PE 导出提取，不冒充原生 Windows addon、libmpv 解码或安装包验收。
+
+将调用处的解析移到可直接回归的纯函数，兼容两种名称表与 LF/CRLF，并限定表范围和符号字符；不从导入表、地址/forwarder 行或损坏条目误生成导入库。两项新增回归先为 0 通过、2 失败，修复后通过；完整构建/发布规划 30 通过、0 失败、0 跳过，打包 42 通过、0 失败、两个既有平台专属跳过，脚本语法、编码与 diff 检查通过。没有变更源码 pin、关闭门禁、复制外部 libmpv SDK 或增加播放功能。
+
+诊断输入与真实工具输出保留在忽略的 `out/playback-exports-repro`，临时容器自动删除，无生产调试日志；未完成的诊断工具源码下载已清除。修复须以新提交、新 verify-only run 验证，继续保留已有公开 Beta.1 资产与 main 不变。
+
+提交前第七轮已结束：Intel job `115795406403` 完整包验收也成功，最终仍为三个非 Windows 包通过、Windows 失败；server job `115810388305`、server-manifest job `115810389692`、Publish GitHub release job `115810390209` 全部 skipped，没有发布任何新版本。

@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
@@ -192,7 +192,7 @@ if (platform === 'win32') {
   const dll = readdirSync(path.join(prefix, 'bin')).find(name => /^(lib)?mpv.*\.dll$/.test(name))
   assert.ok(dll, 'Source build did not install libmpv DLL')
   const exports = run('objdump', ['-p', path.join(prefix, 'bin', dll)], root, true)
-  const names = [...exports.matchAll(/\[\s*\d+\]\s+(mpv_[a-zA-Z0-9_]+)\s*$/gm)].map(match => match[1])
+  const names = playbackWindowsExportNames(exports)
   assert.ok(names.length > 20, 'Could not extract libmpv exports')
   const definition = path.join(buildRoot, 'mpv.def'); writeFileSync(definition, `LIBRARY ${dll}\nEXPORTS\n${names.join('\n')}\n`)
   // Visual Studio tools are added by the CI developer-command-prompt step.

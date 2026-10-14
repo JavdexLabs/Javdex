@@ -54,3 +54,11 @@ Run 38516660322 的完整 pretest、类型检查和打包回归通过，随后 `
 修复只调整测试的宿主路径表示及换行规范化，并让全部 workflow 门禁同时覆盖 LF/CRLF；不改生产构建配方、源码 pin、运行库校验或发布条件。额外在隔离进程分别移除源码构建步骤、移除 verify-only 发布条件，两种变体在 LF 与 CRLF 都被原门禁拒绝（各两个失败），证明没有以减少要求取得通过。`npm run test:playback:build` 当前 23 通过、0 失败、0 跳过；`CI=true GITHUB_ACTIONS=true npm run test:packaging` 42 通过、0 失败、两个原有平台专属跳过；编码/diff 检查通过。无临时源码文件或调试日志遗留。
 
 修复 `2e54083418be4656ba9bef1466be7baaaba6c403` 已推送 `dev`，第三轮 [run 38518449745](https://github.com/JavdexLabs/Javdex/actions/runs/38518449745) 以显式 `verify_only=true` 启动，已核对 headSha 一致；启动后的首个快照为 queued，继续跟进，不记作验收成功。
+
+### 第三轮失败：模型管理器关闭未等待启动
+
+Run 38518449745 已通过 pretest、类型检查、打包/夹具和 23 项构建规划测试，进入完整 Electron 回归后，“new configuration starts with exact defaults and invalid variant identities cannot change it” 以模型目录 `lstat ENOENT` 失败。四目标包尚未执行，三个发布任务均 skipped。
+
+该原有用例在本机定向与整文件运行均通过，因此没有把它当作确定性复现或临时基础设施错误重跑。新增确定性启动屏障回归：暂停真实模型目录首次 lstat，在启动尚未完成时调用 `close()`，断言关闭不得释放随后可清理的 profile；修复前定向命令 `node scripts/run-electron-tests.mjs '--test-name-pattern=close drains delayed initialization' apps/desktop/src/main/services/localModels/localModelManager.test.ts` 稳定失败为 `close must not release the profile while startup still accesses its model directory`。`close()` 原先只等待下载 pending、未等待初始化 ready，因此测试清理 profile 后，较慢的启动文件检查仍可能继续。
+
+修复关闭边界：先标记关闭/取消，等待初始化结束（即使初始化失败，也完成关闭清理），再等待下载及关闭推理引擎。启动失败仍经 snapshot/mode 报告，另有失败启动回归证明没有隐藏它。两个新增回归通过；完整本地模型相关 Electron 测试 68 通过、0 失败、0 跳过；Node 类型检查、定向 ESLint、编码和 diff 检查通过。临时 profile 在回归 finally 中等待初始化结束后清理，没有改写用户资料或放宽任何平台验收。真实 Windows 故障是否消除仍须下一轮 CI 确认。

@@ -233,6 +233,58 @@ test('downloading another precision does not select it; selection and all instal
   } finally { await f.cleanup() }
 })
 
+test('close drains delayed initialization before profile storage can be removed', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-local-model-startup-'))
+  const store = path.join(root, 'local-ai'), originalLstat = fs.lstat
+  let entered!: () => void, resume!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const gate = new Promise<void>(resolve => { resume = resolve })
+  let paused = false
+  t.mock.method(fs, 'lstat', async (...args: Parameters<typeof originalLstat>) => {
+    if (args[0] === store && !paused) { paused = true; entered(); await gate }
+    return originalLstat(...args)
+  })
+  const manager = createLocalModelManager(root, { runtimeSupported: () => false })
+  let closing: Promise<void> | undefined
+  try {
+    await started
+    let closed = false
+    closing = manager.close().then(() => { closed = true })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(closed, false, 'close must not release the profile while startup still accesses its model directory')
+    resume(); await closing
+    await fs.rm(root, { recursive: true, force: true })
+    await manager.snapshot()
+    assert.equal(await fs.access(root).then(() => true, () => false), false)
+  } finally {
+    resume()
+    await manager.snapshot().catch(() => {})
+    await (closing ?? manager.close())
+    t.mock.restoreAll()
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('close can drain failed startup without hiding initialization errors from reads', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-local-model-startup-failed-'))
+  const store = path.join(root, 'local-ai'), originalLstat = fs.lstat
+  const failure = Object.assign(new Error('fixture startup access denied'), { code: 'EACCES' })
+  t.mock.method(fs, 'lstat', async (...args: Parameters<typeof originalLstat>) => {
+    if (args[0] === store) throw failure
+    return originalLstat(...args)
+  })
+  const manager = createLocalModelManager(root, { runtimeSupported: () => false })
+  try {
+    await assert.rejects(manager.snapshot(), failure)
+    await manager.close()
+    await assert.rejects(manager.mode(), failure)
+  } finally {
+    await manager.close()
+    t.mock.restoreAll()
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('new configuration starts with exact defaults and invalid variant identities cannot change it', async () => {
   const f = await fixture()
   try {

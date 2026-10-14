@@ -499,6 +499,12 @@ export function createLocalModelManager(userData: string, options: {
         remove: async () => { await remove('kotoba', usage.subtitleRecognition.variant); await remove(usage.subtitleTranslation.model, usage.subtitleTranslation.variant) }
       }
     },
-    async close(): Promise<void> { closed = true; controller?.abort(); await pending; await shutdownEngine() }
+    async close(): Promise<void> {
+      closed = true; controller?.abort()
+      // The caller may remove the profile after close. Drain startup filesystem
+      // work too; startup failures remain observable through snapshot/mode.
+      await ready.catch(() => {})
+      await pending; await shutdownEngine()
+    }
   }
 }

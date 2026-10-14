@@ -64,6 +64,13 @@ test('Windows static pkgconf declares static API for both its library and CLI wi
     assert.ok(plan.filter(step => step !== configure).every(step => !step.args.some(arg => arg.includes('PKGCONFIG_IS_STATIC'))))
   }
 })
+test('Windows mpv explicitly retains its native thread backend with optional autodetection disabled', () => {
+  for (const platform of ['win32', 'darwin', 'linux']) {
+    const setup = playbackSourcePlan({ ...input, platform }).find(step => step.args.includes(path.join(input.source, 'mpv')))
+    assert.ok(setup.args.includes('-Dauto_features=disabled'))
+    assert.equal(setup.args.includes('-Dwin32-threads=enabled'), platform === 'win32')
+  }
+})
 test('private pkgconf must retain private include/library flags for static library resolution', () => {
   const env = playbackPkgConfigEnvironment('/private-prefix', 'linux', 'x64')
   assert.equal(env.PKG_CONFIG_ALLOW_SYSTEM_LIBS, '1')

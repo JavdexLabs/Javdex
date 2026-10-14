@@ -148,6 +148,8 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。用户已确认只保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
 
+关闭 mpv 可选自动探测时，Windows 仍显式启用官方 `win32-threads` 核心后端，与其原生计时实现配套；它不是额外播放功能。macOS/Linux 保持各自原有线程后端，不通过重新打开全部自动探测解决核心依赖。
+
 Release 分别在 Windows x64、macOS Intel、macOS arm64、Linux x64 的本架构 runner 上构建。Windows 打包使用 `windows-2022` 与 Visual Studio 17 2022；MSYS2 shell、make、UCRT64 GCC 必须来自同一次安装，CI 将 action 的 `msys2-location` 输出传给指纹和构建步骤。本机运行此正式源码构建入口时，需把 `JAVDEX_PLAYBACK_MSYS2_ROOT` 设为已安装 MSYS2 的绝对根路径，不猜测 `C:/msys64` 或混用另一套 MinGW。
 
 Windows 的自建 pkgconf 仅为构建工具，静态配置显式声明 `PKGCONFIG_IS_STATIC`，同时覆盖它的库和 CLI，避免 DLL 导入声明与静态归档不一致；该定义不传播到播放依赖。Linux 原生核心/控制/helper 测试发生在搬移之前，只对这些测试子进程传入私有前缀的 `LD_LIBRARY_PATH`；不修改全局构建环境。正式 helper 保持 `$ORIGIN`，搬移后的运行库与包内加载/解码检查仍清除开发搜索路径。

@@ -94,7 +94,7 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
   meson('mpv', ['-Dlibmpv=true', '-Dcplayer=false', '-Dgpl=true', '-Dbuild-date=false', '-Dgl=enabled', '-Dplain-gl=enabled',
     '-Diconv=enabled', '-Dzlib=enabled', '-Dlua=lua5.2',
     ...({ darwin: ['-Dcocoa=enabled', '-Dswift-build=enabled', `-Dswift-flags=-target ${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos12.0`, '-Dgl-cocoa=enabled', '-Dcoreaudio=enabled', '-Dvideotoolbox-gl=enabled'],
-      win32: ['-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled'],
+      win32: ['-Dwin32-threads=enabled', '-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled'],
       linux: ['-Dalsa=enabled', '-Dx11=enabled', '-Dgl-x11=enabled', '-Dvaapi=enabled', '-Dvaapi-x11=enabled'] }[platform])], 'shared')
   return steps
 }

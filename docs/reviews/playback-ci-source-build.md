@@ -115,3 +115,13 @@ Linux 的 CMake 构建目标提前使用最终 `$ORIGIN` RPATH，但测试执行
 第五轮 Intel job `115752397165` 已完成共享 libmpv 的编译/安装，随后 node-gyp 获取固定 Electron 43.4.1 headers 时以 `ConnectTimeoutError` 失败：连接 `electronjs.org:443` 超过 10000ms。尚未执行原生适配器或 DMG 打包，不能记为 Intel 本轮通过；server、server-manifest、Publish GitHub release 最终均 skipped。
 
 这是日志直接指出的外部连接故障，本机对完全相同 SDK URL 的限时 HEAD/重定向检查返回 HTTP 200，但它不证明原 runner 的网络已经恢复。没有据暂时连接失败假设或修改业务/构建源码，也不跳过 SDK 校验。第六轮已经针对 Windows/Linux 的新修复开始运行（源码仍为 `2ab2b91`，metadata 成功、完整测试 in_progress），它会重新获取和验证同一 SDK；不额外重跑旧源码或重复启动任务。若新轮仍发生下载失败，再按实际日志处理有界的基础设施重试。
+
+### 第六轮：Windows 必需线程后端被精简选项关闭
+
+第六轮完整 Windows 回归成功；Linux job `115770957924` 与 macOS arm64 job `115770958244` 完整包验收成功。Linux 实际 helper 私有协议、搬移后 PCM EOF、AppImage/DEB 打包、包内运行库与对应源码门禁通过，确认前轮步骤级加载环境修复没有替代最终无开发路径验收。Intel job `115770957917` 已通过固定 SDK 下载与源码构建，进入 Package；在本次定向修复时尚未结束，不重复处理第五轮超时。
+
+Windows job `115770957935` 已完成固定源码依赖构建，libmpv 编译到 `osdep/timer-win32.c` 时以 `redefinition of mp_thread_cpu_time_ns` 失败，前一处定义来自 `threads-posix.h`。固定 mpv 0.41.0 的 `win32-threads` 默认是 feature/auto；统一 `auto_features=disabled` 也将其关闭，选到 POSIX 线程头，与仍启用的 Windows 原生计时实现不配套。
+
+隔离 MinGW x64 编译循环直接使用已校验的固定 mpv 归档（SHA-256 `ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209`），未改动计时或线程源文件。诊断配置 `HAVE_WIN32_THREADS=0` 时只以同一重复定义失败；同一命令只改成 1 后完整计时文件编译通过，目标对象只包含一个该函数定义。旧 MinGW SDK 的计时常量/clock 声明只在诊断命令补齐，不进入生产配方；这是该编译单元的交叉编译证明，不冒充完整 libmpv、原生适配器或安装包验收。
+
+修复仅为 Windows mpv setup 显式增加官方 `-Dwin32-threads=enabled`，不修改上游源码、不放开自动探测、不移除计时功能，也不改变另外两平台后端。新增配方回归在修复前为 13 通过、1 失败，修复后完整构建/发布规划 28 通过、0 失败、0 跳过；打包 42 通过、0 失败、两个既有平台专属跳过；编码、语法与 diff 检查通过。诊断源码/配置保留在忽略的 `out/playback-win-threads-repro`，容器均自动清理，无生产调试日志。

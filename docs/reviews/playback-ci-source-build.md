@@ -93,3 +93,5 @@ Linux 修复保留私有 pkgconf 的静态 `-l`/其它链接旗标和私有 `-L`
 新增配方漂移回归与 Windows 真入口路径回归，workflow 绑定在 LF/CRLF 均检查；另在隔离进程将打包 runner 改回 windows-latest，两种换行的门禁均拒绝（7 通过、2 失败），未改写工作树。构建/发布规划 25 通过、0 失败、0 跳过；打包 42 通过、0 失败、两个既有平台专属跳过；编码与 diff 检查通过。诊断夹具在忽略的 `out/playback-link-repro`，不进入安装包或提交；两个临时容器已删除，隔离复现镜像保留以便复查，没有生产调试日志。两处实际源码失败需新提交、新 verify-only run 验证，不继续重跑旧源码。
 
 提交前完整 `npm run pretest` exit 0，包含全部生产边界、TypeScript/CSS lint、CSS 架构与共享控件检查。
+
+修复 `a12d1614da447fca3fd6332743e3ea51d0f40f4b` 已推送 `dev`，使用显式 `verify_only=true` 启动第五轮 [run 38531429780](https://github.com/JavdexLabs/Javdex/actions/runs/38531429780)，已核对 headSha 一致。2026-10-14 07:54 UTC 快照为 in_progress，仍待完整 Windows 回归与四目标包验收；不记作修复验收完成。现有跟进继续核对最新 run 和本记录，不重复触发，不发布或改写公开版本。

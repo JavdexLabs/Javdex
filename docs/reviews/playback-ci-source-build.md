@@ -39,4 +39,8 @@ Release 新增 `verify_only=true` 的手动入口，只生成/核验桌面 CI �
 
 Run 38514777077 在 Windows `pretest` 的 CSS lint 失败：`ModelProvidersPanel.module.css:294` 重复声明 `.availableProvider:hover`（首项在 290 行）。尚未进入四平台源码构建/打包；server、server-manifest、release 均为 skipped，没有公开任何新产物。
 
-定向反馈命令 `npx stylelint apps/desktop/src/renderer/src/components/settings/ModelProvidersPanel.module.css` 在本机先以相同 `no-duplicate-selectors` 错误、exit 2 失败。合并相邻的两个 hover 声明，不更改选择器、声明值或顺序，保留原边框与文字效果；再次运行该命令及完整 `npm run lint:css` 均 exit 0。沿用现有 stylelint 门禁作为回归，不禁用规则、不跳过检查；随后重跑完整 pretest，并以新源码启动 verify-only CI。
+定向反馈命令 `npx stylelint apps/desktop/src/renderer/src/components/settings/ModelProvidersPanel.module.css` 在本机先以相同 `no-duplicate-selectors` 错误、exit 2 失败。合并相邻的两个 hover 声明，不更改选择器、声明值或顺序，保留原边框与文字效果；再次运行该命令及完整 `npm run lint:css` 均 exit 0。另用 PostCSS 逐选择器对比修复前后的声明值与顺序，完全一致。沿用现有 stylelint 门禁作为回归，不禁用规则、不跳过检查；随后重跑完整 pretest，并以新源码启动 verify-only CI。
+
+修复提交 `c2f0d1dfbd6de3055657cbec86da491e4aec9bcb` 已推送 `dev`，使用同一显式 `verify_only=true` 命令启动 [run 38516660322](https://github.com/JavdexLabs/Javdex/actions/runs/38516660322)。已核对 headSha 与修复提交一致，metadata 成功、完整测试运行中，四目标包验收仍未完成。
+
+本机完整 `npm run pretest` 随后 exit 0，包含全部边界、TypeScript/CSS lint、CSS 架构及共享控件检查；编码与 diff 检查也通过。没有新增调试日志或降低检查规则。

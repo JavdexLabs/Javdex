@@ -64,3 +64,11 @@ Run 38518449745 已通过 pretest、类型检查、打包/夹具和 23 项构建
 修复关闭边界：先标记关闭/取消，等待初始化结束（即使初始化失败，也完成关闭清理），再等待下载及关闭推理引擎。启动失败仍经 snapshot/mode 报告，另有失败启动回归证明没有隐藏它。两个新增回归通过；完整本地模型相关 Electron 测试 68 通过、0 失败、0 跳过；Node 类型检查、定向 ESLint、编码和 diff 检查通过。临时 profile 在回归 finally 中等待初始化结束后清理，没有改写用户资料或放宽任何平台验收。真实 Windows 故障是否消除仍须下一轮 CI 确认。
 
 修复 `1ce45d2379cab7024660dfa9d5078d93309f200f` 已推送 `dev`，第四轮 [run 38521347227](https://github.com/JavdexLabs/Javdex/actions/runs/38521347227) 以显式 `verify_only=true` 启动，继续跟进四目标真实验收。
+
+### 第四轮 attempt 1：Windows 宿主原生退出故障
+
+第四轮的两个启动/关闭回归及原“new configuration starts…”用例在真实 Windows 全部通过，确认上次模型目录竞态回归不再失败。完整 Electron 测试统计 2512 项：2487 通过、1 个文件级失败、24 个既有平台专属跳过。
+
+本次失败文件 `scanner.test.ts` 的 70 项扫描断言全部通过（`scanFolders` suite 成功），随后子进程输出 `PostQueuedCompletionStatus: (6) The handle is invalid.` 并异常退出。上一轮同一扫描源码成功退出，本轮本机定向运行 70 通过、0 失败、0 跳过；两轮之间扫描模块、Electron/Node 锁定版本和测试宿主脚本均无改动。这是宿主原生退出失败而非扫描业务断言失败，但尚未确定其底层原因；[libuv Windows 异步关闭代码](https://raw.githubusercontent.com/libuv/libuv/v1.x/src/win/async.c) 可用于后续 IOCP 生命周期诊断，不据其最新源码推断当前 Electron 已包含某项修复。
+
+仅作一次有界的疑似临时宿主故障验证：执行 `gh run rerun 38521347227 --failed`，保留原源码 `1ce45d2379cab7024660dfa9d5078d93309f200f` 与 verify-only 输入，启动 attempt 2。不修改扫描业务，不排除失败文件，不自动将非零退出视为通过；若同类原生退出故障复现，必须转入 Windows 定向诊断而非继续盲重跑。三个发布任务在 attempt 1 均 skipped，四平台打包未执行；不记作本轮验收成功。

@@ -105,3 +105,19 @@ export function staticPlaybackDependencies(text, dependencies) {
   }
   return text
 }
+
+export function playbackLinuxAssDependency(text, pkgconf) {
+  const before = "libass = dependency('libass', static: true, version: '>= 0.12.2')"
+  assert.equal(text.split(before).length, 2, 'Pinned libass dependency recipe drift')
+  const executable = "'" + pkgconf.replaceAll('\\', '\\\\').replaceAll("'", "\\'") + "'"
+  // Keep the complete private archive closure, but let the linker resolve the
+  // host font provider dynamically. Meson's static dependency recursively
+  // selects OS fontconfig/uuid archives, which need not be PIC on Ubuntu 22.04.
+  // The source build supplies the private -L prefix through LDFLAGS already.
+  return text.replace(before, `${before}
+libass = declare_dependency(
+    dependencies: libass.partial_dependency(compile_args: true, includes: true),
+    link_args: run_command(find_program(${executable}),
+        '--libs-only-l', '--libs-only-other', '--static', 'libass',
+        check: true).stdout().strip().split())`)
+}

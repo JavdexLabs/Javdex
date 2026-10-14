@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { playbackBuildFingerprint, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
@@ -26,9 +26,14 @@ assert.ok(path.relative(root, matrix).startsWith('out' + path.sep), 'Build outpu
 const destination = path.join(matrix, `${platform}-${arch}`)
 mkdirSync(work, { recursive: true }); mkdirSync(cache, { recursive: true }); mkdirSync(matrix, { recursive: true })
 const environment = { ...process.env, LC_ALL: 'C', LANG: 'C' }
+const msysRoot = platform === 'win32' ? environment.JAVDEX_PLAYBACK_MSYS2_ROOT : undefined
 if (platform === 'win32') {
+  assert.ok(msysRoot && path.win32.isAbsolute(msysRoot), 'Set JAVDEX_PLAYBACK_MSYS2_ROOT to the installed MSYS2 location')
+  for (const file of ['usr/bin/bash.exe', 'usr/bin/make.exe', 'ucrt64/bin/gcc.exe'])
+    assert.ok(existsSync(path.win32.join(msysRoot, file)), 'Missing source build tool: ' + file)
   const pathKey = Object.keys(environment).find(key => key.toLowerCase() === 'path') ?? 'Path'
-  environment[pathKey] = ['C:/msys64/ucrt64/bin', 'C:/msys64/usr/bin', environment[pathKey] ?? ''].join(path.delimiter)
+  environment[pathKey] = [path.win32.join(msysRoot, 'ucrt64/bin'), path.win32.join(msysRoot, 'usr/bin'), environment[pathKey] ?? ''].join(path.win32.delimiter)
+  environment.MSYSTEM = 'UCRT64'
 }
 for (const name of ['JAVDEX_MPV_PREFIX', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH', 'LD_LIBRARY_PATH', 'LD_PRELOAD', 'CPATH', 'LIBRARY_PATH', 'CMAKE_PREFIX_PATH', 'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR', 'GIT_DIR', 'GIT_WORK_TREE', 'OBJC', 'OBJCPP']) delete environment[name]
 environment.GIT_CEILING_DIRECTORIES = work
@@ -38,7 +43,7 @@ const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'"
 const posix = value => platform === 'win32' ? String(value).replaceAll('\\', '/').replace(/^([A-Za-z]):\//, (_, drive) => '/' + drive.toLowerCase() + '/') : value
 function run(command, args = [], cwd = root, capture = false) {
   const windowsShell = platform === 'win32' && !/\.(exe|js|mjs)$/.test(command) && command !== process.execPath
-  const actual = windowsShell ? 'C:/msys64/usr/bin/bash.exe' : command
+  const actual = windowsShell ? path.win32.join(msysRoot, 'usr/bin/bash.exe') : command
   const parameters = windowsShell ? ['--noprofile', '--norc', '-c', [command, ...args].map(posix).map(quote).join(' ')] : args
   const result = spawnSync(actual, parameters, { cwd, env: environment, stdio: capture ? 'pipe' : 'inherit', encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
   if (result.error) throw result.error
@@ -51,7 +56,7 @@ environment.CC = compiler; environment.CXX = platform === 'win32' ? 'g++' : 'c++
 const toolchain = { compiler: run(compiler, ['--version'], root, true), cmake: run('cmake', ['--version'], root, true),
   python: run(python, ['--version'], root, true), make: run('make', ['--version'], root, true),
   ...(arch === 'x64' ? { nasm: run('nasm', ['--version'], root, true) } : {}),
-  ...(platform === 'win32' ? { vcToolsVersion: process.env.VCToolsVersion, windowsSdkVersion: process.env.WindowsSDKVersion } : {}),
+  ...(platform === 'win32' ? { msysRoot, vcToolsVersion: process.env.VCToolsVersion, windowsSdkVersion: process.env.WindowsSDKVersion } : {}),
   ...(platform === 'linux' ? { systemApis: run('pkg-config', ['--modversion', 'x11', 'xft', 'fontconfig', 'alsa', 'libva'], root, true) } : {}),
   ...(platform === 'darwin' ? { sdk: run('xcrun', ['--show-sdk-version'], root, true), swift: run('swiftc', ['--version'], root, true), deploymentTarget: '12.0' } : {}) }
 if (platform === 'darwin') environment.MACOSX_DEPLOYMENT_TARGET = '12.0'
@@ -131,6 +136,10 @@ for (const [id, dependencies] of [['mpv', ['libavcodec', 'libavfilter', 'libavfo
 // explicit feature switches so a host's optional SDK does not enter the closure.
 const mpvRecipe = path.join(sourceRoot, 'mpv/meson.build')
 let mpvRecipeText = readFileSync(mpvRecipe, 'utf8')
+if (platform === 'linux') {
+  mpvRecipeText = playbackLinuxAssDependency(mpvRecipeText, path.join(prefix, 'bin/pkgconf'))
+  patches.push({ id: 'mpv', operation: 'libass private archives with shared OS font provider dependencies' })
+}
 for (const [before, after] of [["dependency('sdl2', required: false)", "dependency('sdl2', required: get_option('sdl2-audio'))"],
   ["dependency('ffnvcodec', version: '>= 11.1.5.1', required: false)", "dependency('ffnvcodec', version: '>= 11.1.5.1', required: get_option('cuda-hwaccel'))"],
   ["dependency(version[0], version: version[1])", "dependency(version[0], static: true, version: version[1])"]]) {

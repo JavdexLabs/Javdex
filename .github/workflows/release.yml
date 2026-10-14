@@ -84,7 +84,7 @@ jobs:
       matrix:
         include:
           - platform: win
-            os: windows-latest
+            os: windows-2022
             arch: x64
           - platform: mac
             os: macos-15-intel
@@ -132,6 +132,7 @@ jobs:
 
       - name: Prepare Windows source build tools
         if: matrix.platform == 'win'
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -148,6 +149,8 @@ jobs:
       - name: Identify playback source/toolchain cache
         id: playback_fingerprint
         run: npm run playback:runtime:build -- --fingerprint
+        env:
+          JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
 
       - name: Cache source-built playback inputs
         # The exact compiler/SDK/options fingerprint is calculated before restore,
@@ -162,6 +165,8 @@ jobs:
 
       - name: Build playback runtime from pinned source
         run: npm run playback:runtime:build
+        env:
+          JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
 
       - name: Package
         run: npm run setup:desktop && npm run dist -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}

@@ -42,6 +42,12 @@ for (const [lineEnding, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
     assert.match(workflow, /--arch \$\{\{ matrix\.arch \}\}/)
     assert.match(workflow, /steps\.playback_fingerprint\.outputs\.fingerprint/)
     assert.ok(workflow.indexOf('-- --fingerprint') < workflow.indexOf('uses: actions/cache@v4'), 'compiler/SDK fingerprint must precede cache restore')
+    assert.match(workflow, /- platform: win\n\s+os: windows-2022\n\s+arch: x64/)
+    assert.match(workflow, /id: msys2\n\s+uses: msys2\/setup-msys2@v2/)
+    for (const name of ['Identify playback source/toolchain cache', 'Build playback runtime from pinned source']) {
+      const block = workflow.split(`- name: ${name}\n`)[1]?.split('\n      - ')[0]
+      assert.ok(block?.includes('JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}'), 'fingerprint and build must use the same action-installed toolchain')
+    }
   })
 
   test(`verification-only runs cannot enter any publishing job (${lineEnding})`, () => {

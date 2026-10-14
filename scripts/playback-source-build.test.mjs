@@ -4,11 +4,40 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { playbackBuildFingerprint, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { spawnSync } from 'node:child_process'
+import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
 const input = { arch: 'x64', source: '/sources', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2 }
+test('Windows source entrypoint uses the action installation rather than a second preinstalled MSYS', () => {
+  const msys = 'D:\\a\\_temp\\msys64', expectedShell = path.win32.join(msys, 'usr/bin/bash.exe')
+  const bootstrap = `
+    import assert from 'node:assert/strict'
+    import fs from 'node:fs'
+    import childProcess from 'node:child_process'
+    import { syncBuiltinESMExports } from 'node:module'
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    Object.defineProperty(process, 'arch', { value: 'x64' })
+    process.env.JAVDEX_PLAYBACK_MSYS2_ROOT = ${JSON.stringify(msys)}
+    delete process.env.pythonLocation
+    delete process.env.GITHUB_OUTPUT
+    const exists = fs.existsSync
+    fs.existsSync = file => String(file).startsWith(${JSON.stringify(msys)}) || exists(file)
+    childProcess.spawnSync = (command, args, options) => {
+      assert.equal(command, ${JSON.stringify(expectedShell)}, 'source commands must use the installed MSYS shell')
+      const key = Object.keys(options.env).find(key => key.toLowerCase() === 'path')
+      assert.ok(options.env[key].startsWith(${JSON.stringify(path.win32.join(msys, 'ucrt64/bin'))}))
+      return { status: 0, stdout: 'fixture-tool-version', stderr: '' }
+    }
+    syncBuiltinESMExports()
+    process.argv.push('--fingerprint')
+    await import('./scripts/build-playback-runtime.mjs')
+  `
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', bootstrap], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /^[a-f0-9]{64}\s*$/)
+})
 test('release adapters explicitly choose MSVC/static CRT or runtime-local Linux loader paths', () => {
   const native = { root: '/repo', arch: 'x64', prefix: '/prefix', include: '/sdk/include', nodeLibrary: '/sdk/x64/node.lib', delayHook: '/node-gyp/hook.cc', output: '/output' }
   const windows = playbackSourceNativePlan({ ...native, platform: 'win32' })[0].args
@@ -70,6 +99,15 @@ test('static dependency patches fail on upstream recipe drift and leave OS ABIs 
   assert.match(patched, /dependency\('alsa'\)/)
   assert.throws(() => staticPlaybackDependencies(recipe, ['missing']), /recipe drift/)
   assert.throws(() => staticPlaybackDependencies(recipe + recipe, ['libavcodec']), /recipe drift/)
+})
+test('Linux libass retains private static link flags without recursively selecting non-PIC OS archives', () => {
+  const before = "libass = dependency('libass', static: true, version: '>= 0.12.2')"
+  const after = playbackLinuxAssDependency(before, '/private-prefix/bin/pkgconf')
+  assert.match(after, /partial_dependency\(compile_args: true, includes: true\)/)
+  assert.match(after, /'--libs-only-l', '--libs-only-other', '--static', 'libass'/)
+  assert.ok(after.includes("find_program('/private-prefix/bin/pkgconf')"))
+  assert.throws(() => playbackLinuxAssDependency('dependency has changed', '/pkgconf'), /recipe drift/)
+  assert.throws(() => playbackLinuxAssDependency(before + before, '/pkgconf'), /recipe drift/)
 })
 test('native macOS packaging jobs select only their architecture without modifying the manifest', () => {
   const selected = [{ electronBuilder: { platform: 'mac', targets: [{ target: 'dmg', arch: ['arm64', 'x64'] }] } }]

@@ -148,7 +148,9 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。用户已确认只保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
 
-Release 分别在 Windows x64、macOS Intel、macOS arm64、Linux x64 的本架构 runner 上构建。Linux 构建基线为 Ubuntu 22.04，macOS C/Swift 最低部署目标均显式为 12.0；这不是对应旧系统的实际安装验收。根打包入口增加 `--arch x64|arm64`，各 macOS 任务只生产自己的 DMG。缓存键包含源码清单、构建/原生代码及依赖锁；构建器还核对编译器、SDK、Python、工具版本与架构，每次命中后重验精确文件、依赖和实际加载，不把缓存命中当作可信证明。
+Release 分别在 Windows x64、macOS Intel、macOS arm64、Linux x64 的本架构 runner 上构建。Windows 打包使用 `windows-2022` 与 Visual Studio 17 2022；MSYS2 shell、make、UCRT64 GCC 必须来自同一次安装，CI 将 action 的 `msys2-location` 输出传给指纹和构建步骤。本机运行此正式源码构建入口时，需把 `JAVDEX_PLAYBACK_MSYS2_ROOT` 设为已安装 MSYS2 的绝对根路径，不猜测 `C:/msys64` 或混用另一套 MinGW。
+
+Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库，系统 fontconfig 字体提供者采用动态 ABI，避免 Meson 递归选择非 PIC 的系统 UUID 静态库；没有改用系统 libass/FFmpeg 或放宽运行库闭包。macOS C/Swift 最低部署目标均显式为 12.0；这些基线不是对应旧系统的实际安装验收。根打包入口增加 `--arch x64|arm64`，各 macOS 任务只生产自己的 DMG。缓存键包含源码清单、构建/原生代码及依赖锁；构建器还核对编译器、SDK、Python、工具版本与架构，每次命中后重验精确文件、依赖和实际加载，不把缓存命中当作可信证明。
 
 源输入保留各上游独立的版本、许可、原始归档和构建来源，静态嵌入依赖列于 `build.json`，不是把它们重新授权为 GPL。两个二进制所有者分别为 libmpv 和 Javdex 原生适配器；完整原始归档、Javdex 首选原生源码、Electron headers、Node/node-gyp 声明及构建配方随独立的 `Javdex-Playback-Sources-*` 交付，许可原文同时进入应用。系统编译器/SDK、音频、字体及 GPU driver ABI 仍是宿主前提，不由源码包替代。
 

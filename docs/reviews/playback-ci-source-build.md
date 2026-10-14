@@ -23,7 +23,7 @@
 
 ## 尚未完成
 
-Windows x64、macOS Intel、Ubuntu 22.04 x64 尚未在对应 runner 运行新源码构建和安装包验收。Linux arm64 容器证明 Linux 路径能构建/加载，不证明 x64 汇编、Ubuntu 的最低 ABI、AppImage/DEB 安装或 GUI/GL；macOS 的 `--dir` app 也不是 DMG 干净安装或 Developer ID/公证验收。PCM EOF 不代表 H.264/HEVC/AV1/字幕/网络/硬解的完整矩阵通过。
+四目标统一验收尚未完成；实际 runner 结果及定向修复见下文。Linux arm64 容器证明 Linux 路径能构建/加载，不证明 x64 汇编、Ubuntu 的最低 ABI、AppImage/DEB 安装或 GUI/GL；macOS 的 `--dir` app 也不是 DMG 干净安装或 Developer ID/公证验收。PCM EOF 不代表 H.264/HEVC/AV1/字幕/网络/硬解的完整矩阵通过。
 
 Release 新增 `verify_only=true` 的手动入口，只生成/核验桌面 CI 产物；服务镜像、镜像 manifest 和 GitHub Release 三道发布边界都拒绝此模式。2026-10-14 用户已授权将修复提交并推送 `dev`，随后执行四目标验证 CI；实际提交与 CI 证据在执行后补录。已公开 `v0.9.0-beta.1` 的标签、镜像和资产不改写，下一次正式分发需要新版本编号；没有合并 `main`。
 
@@ -72,3 +72,24 @@ Run 38518449745 已通过 pretest、类型检查、打包/夹具和 23 项构建
 本次失败文件 `scanner.test.ts` 的 70 项扫描断言全部通过（`scanFolders` suite 成功），随后子进程输出 `PostQueuedCompletionStatus: (6) The handle is invalid.` 并异常退出。上一轮同一扫描源码成功退出，本轮本机定向运行 70 通过、0 失败、0 跳过；两轮之间扫描模块、Electron/Node 锁定版本和测试宿主脚本均无改动。这是宿主原生退出失败而非扫描业务断言失败，但尚未确定其底层原因；[libuv Windows 异步关闭代码](https://raw.githubusercontent.com/libuv/libuv/v1.x/src/win/async.c) 可用于后续 IOCP 生命周期诊断，不据其最新源码推断当前 Electron 已包含某项修复。
 
 仅作一次有界的疑似临时宿主故障验证：执行 `gh run rerun 38521347227 --failed`，保留原源码 `1ce45d2379cab7024660dfa9d5078d93309f200f` 与 verify-only 输入，启动 attempt 2。不修改扫描业务，不排除失败文件，不自动将非零退出视为通过；若同类原生退出故障复现，必须转入 Windows 定向诊断而非继续盲重跑。三个发布任务在 attempt 1 均 skipped，四平台打包未执行；不记作本轮验收成功。
+
+### 第四轮 attempt 2：macOS 两架构通过，Windows/Linux 源码构建失败
+
+Run 38521347227 attempt 2 的真实 Windows 完整测试 job `115720203959` 成功，未再次出现 IOCP 原生退出故障；这不证明已查明或修复 libuv 底层退出原因。macOS arm64 job `115728199404` 与 Intel job `115728199405` 的源码构建、DMG 打包、包内真实 addon 加载、迁移后 PCM 解码到 EOF、配套源码与真实签名检查全部成功。
+
+- [arm64 CI 产物](https://github.com/JavdexLabs/Javdex/actions/runs/38521347227/artifacts/11876771842)：`Javdex-mac-arm64`，234945079 字节，上传 ZIP SHA-256 `cbd6494f4a6535165b3a9c902567dae79c2a115b9cc735b5933d809826b1d248`。
+- [Intel CI 产物](https://github.com/JavdexLabs/Javdex/actions/runs/38521347227/artifacts/11877224282)：`Javdex-mac-x64`，242553265 字节，上传 ZIP SHA-256 `3260b765708b82d2883b70fa64d9a3f6cccb992a5ecc922684f6bcc0668769b9`。包内 `Contents/MacOS/Javdex` 实际加载成功，配套源码名为 `Javdex-Playback-Sources-0.9.0-beta.1-darwin-x64-84cb55c6f5a5-a5ada0e8.tar.gz`。
+
+这仍不是四目标验收完成：Windows job `115728199353` 和 Linux job `115728199394` 在固定源码构建阶段失败。最终 server、server-manifest、Publish GitHub release 均 skipped；上述材料只在 CI artifacts，不是覆盖已公开 Beta 资产。
+
+Windows 在 pkgconf 的 make 阶段报 `No rule to make target '/d/.../source/pkgconf/Makefile.am'`；归档中实际有该文件，日志中的 GCC/ld 却来自 `C:/mingw64`。构建入口写死另一套 `C:/msys64` shell/PATH，而 [setup-msys2](https://github.com/msys2/setup-msys2#outputs) 返回此次安装位置。新增回归在隔离 Node 子进程驱动真实 `--fingerprint` 入口，只替换工具执行/存在检查：输入 `D:\a\_temp\msys64`，修复前实际调用 C 盘 shell 而失败，修复后 shell 与 UCRT64 PATH 均来自所传安装根。它不是 Windows 原生编译证明。
+
+修复使用 action 的 `msys2-location`，指纹和实际构建传入同一 `JAVDEX_PLAYBACK_MSYS2_ROOT`，校验 shell/make/GCC 存在并明确 UCRT64；不再猜测默认目录。还将 Windows **打包** runner 固定为 `windows-2022`，对应现有 Visual Studio 17 2022 generator；本轮 `windows-latest` 已使用 VS 18，不能继续假定 VS 17 存在。[官方 Windows 2022 镜像工具表](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md)列出 VS 2022。根完整测试仍使用 windows-latest，未减少测试覆盖。
+
+Linux 共享 libmpv 链接时，Meson 对静态 libass 递归选择系统 `fontconfig.a`/`uuid.a`，Ubuntu 22.04 的 UUID 静态对象以 `R_X86_64_TPOFF32` 拒绝进入共享库。隔离 Ubuntu 22.04 **amd64** 容器实际编译固定 libass 0.17.5（归档 SHA-256 `2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc`，`b_staticpic=true`），以同一私有 `libass.a` 驱动最小共享库链接：原 Meson static dependency 稳定报相同 UUID relocation；改用真实补丁生成的链接声明后成功，`readelf -d` 无 `libass.so` 依赖，系统 fontconfig 采用共享库。
+
+Linux 修复保留私有 pkgconf 的静态 `-l`/其它链接旗标和私有 `-L` 前缀，让宿主字体提供者按动态 ABI 解析，避免递归固定到非 PIC 系统归档。FFmpeg、libass、HarfBuzz 等正式自建依赖仍在私有前缀编为 PIC 静态库；没有改用系统 codec、关闭字幕字体或放宽闭包白名单。该最小复现只构建 libass 和共享库，部分字体布局依赖由隔离系统提供，**不**代表正式 libmpv/安装包全闭包或原生 CI 已通过。
+
+新增配方漂移回归与 Windows 真入口路径回归，workflow 绑定在 LF/CRLF 均检查；另在隔离进程将打包 runner 改回 windows-latest，两种换行的门禁均拒绝（7 通过、2 失败），未改写工作树。构建/发布规划 25 通过、0 失败、0 跳过；打包 42 通过、0 失败、两个既有平台专属跳过；编码与 diff 检查通过。诊断夹具在忽略的 `out/playback-link-repro`，不进入安装包或提交；两个临时容器已删除，隔离复现镜像保留以便复查，没有生产调试日志。两处实际源码失败需新提交、新 verify-only run 验证，不继续重跑旧源码。
+
+提交前完整 `npm run pretest` exit 0，包含全部生产边界、TypeScript/CSS lint、CSS 架构与共享控件检查。

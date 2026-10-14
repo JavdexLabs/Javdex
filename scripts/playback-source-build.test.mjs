@@ -22,8 +22,8 @@ test('private pkgconf must retain private include/library flags for static libra
   const env = playbackPkgConfigEnvironment('/private-prefix', 'linux', 'x64')
   assert.equal(env.PKG_CONFIG_ALLOW_SYSTEM_LIBS, '1')
   assert.equal(env.PKG_CONFIG_ALLOW_SYSTEM_CFLAGS, '1')
-  assert.equal(env.PKG_CONFIG_LIBDIR.split(path.delimiter)[0], '/private-prefix/lib/pkgconfig')
-  assert.equal(env.PKG_CONFIG, '/private-prefix/bin/pkgconf')
+  assert.equal(env.PKG_CONFIG_LIBDIR.split(path.delimiter)[0], path.join('/private-prefix', 'lib/pkgconfig'))
+  assert.equal(env.PKG_CONFIG, path.join('/private-prefix', 'bin/pkgconf'))
 })
 test('source cache verifies both pinned size and digest, not just a filename', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'javdex-source-')), file = path.join(directory, 'source')
@@ -54,7 +54,7 @@ test('recipes build codecs/subtitles from source, disable implicit downloads and
       assert.ok(setup.args.includes('-Dauto_features=disabled'))
     }
     assert.ok(commands.includes('--enable-libdav1d'))
-    assert.ok(commands.includes(`--pkg-config=${input.prefix}/bin/${platform === 'win32' ? 'pkgconf.exe' : 'pkgconf'}`), 'FFmpeg requires its explicit pkg-config argument, not the ignored PKG_CONFIG environment variable')
+    assert.ok(commands.includes(`--pkg-config=${path.join(input.prefix, 'bin', platform === 'win32' ? 'pkgconf.exe' : 'pkgconf')}`), 'FFmpeg requires its explicit pkg-config argument, not the ignored PKG_CONFIG environment variable')
     assert.ok(commands.includes(tls)); assert.ok(commands.includes(audio))
     assert.ok(commands.includes('-Dplain-gl=enabled'))
     assert.ok(commands.includes('-Dlua=lua5.2'), 'native core must be able to explicitly disable load-scripts, ytdl and osc')

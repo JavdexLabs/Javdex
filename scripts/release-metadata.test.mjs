@@ -20,31 +20,35 @@ test('mismatched or unsafe tags fail before publishing', () => {
   assert.throws(() => releaseMetadata('0.8.0', 'v0.8.0\nlatest'))
 })
 
-test('release packaging gates playback resources and delivers corresponding sources with checksums', () => {
+// Git checks out CRLF on Windows. Assert identical workflow requirements for
+// both line-ending representations rather than depending on the test host.
+for (const [lineEnding, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
   const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
-  assert.match(workflow, /run: npm run packaging:verify-playback-runtime/)
-  assert.match(workflow, /dist\/Javdex-Playback-Sources-\*\.tar\.gz/)
-  assert.match(workflow, /-name 'Javdex-Playback-Sources-\*\.tar\.gz'/)
-  assert.match(workflow, /release-artifacts\/Javdex-Playback-Sources-\*\.tar\.gz/)
-})
+    .replace(/\r?\n/g, eol).replace(/\r\n/g, '\n')
 
-test('release builds each playback architecture from source before packaging', () => {
-  const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
-  const build = workflow.indexOf('run: npm run playback:runtime:build\n')
-  const packaging = workflow.indexOf('- name: Package\n')
-  assert.ok(build >= 0 && build < packaging, 'source runtime construction must run before electron-builder')
-  assert.match(workflow, /JAVDEX_PLAYBACK_RUNTIME_DIR:/)
-  assert.match(workflow, /macos-15-intel/)
-  assert.match(workflow, /--arch \$\{\{ matrix\.arch \}\}/)
-  assert.match(workflow, /steps\.playback_fingerprint\.outputs\.fingerprint/)
-  assert.ok(workflow.indexOf('-- --fingerprint') < workflow.indexOf('uses: actions/cache@v4'), 'compiler/SDK fingerprint must precede cache restore')
-})
+  test(`release packaging gates playback resources and delivers corresponding sources with checksums (${lineEnding})`, () => {
+    assert.match(workflow, /run: npm run packaging:verify-playback-runtime/)
+    assert.match(workflow, /dist\/Javdex-Playback-Sources-\*\.tar\.gz/)
+    assert.match(workflow, /-name 'Javdex-Playback-Sources-\*\.tar\.gz'/)
+    assert.match(workflow, /release-artifacts\/Javdex-Playback-Sources-\*\.tar\.gz/)
+  })
 
-test('verification-only runs cannot enter any publishing job', () => {
-  const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
-  assert.match(workflow, /verify_only:\s+description:.*\n\s+required: false\n\s+default: false\n\s+type: boolean/)
-  for (const name of ['server', 'server-manifest', 'release']) {
-    const block = workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z-]+:\n/)[0]
-    assert.ok(block && /if:.*!inputs\.verify_only/.test(block), `${name} must reject verification-only dispatches`)
-  }
-})
+  test(`release builds each playback architecture from source before packaging (${lineEnding})`, () => {
+    const build = workflow.indexOf('run: npm run playback:runtime:build\n')
+    const packaging = workflow.indexOf('- name: Package\n')
+    assert.ok(build >= 0 && build < packaging, 'source runtime construction must run before electron-builder')
+    assert.match(workflow, /JAVDEX_PLAYBACK_RUNTIME_DIR:/)
+    assert.match(workflow, /macos-15-intel/)
+    assert.match(workflow, /--arch \$\{\{ matrix\.arch \}\}/)
+    assert.match(workflow, /steps\.playback_fingerprint\.outputs\.fingerprint/)
+    assert.ok(workflow.indexOf('-- --fingerprint') < workflow.indexOf('uses: actions/cache@v4'), 'compiler/SDK fingerprint must precede cache restore')
+  })
+
+  test(`verification-only runs cannot enter any publishing job (${lineEnding})`, () => {
+    assert.match(workflow, /verify_only:\s+description:.*\n\s+required: false\n\s+default: false\n\s+type: boolean/)
+    for (const name of ['server', 'server-manifest', 'release']) {
+      const block = workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z-]+:\n/)[0]
+      assert.ok(block && /if:.*!inputs\.verify_only/.test(block), `${name} must reject verification-only dispatches`)
+    }
+  })
+}

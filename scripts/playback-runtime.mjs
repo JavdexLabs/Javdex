@@ -15,6 +15,7 @@ function digest(file) {
     return hash.digest('hex')
   } finally { closeSync(descriptor) }
 }
+export { digest as playbackFileSha256 }
 const linuxPlaybackHelper = 'playback-helper'
 const binary = file => file === linuxPlaybackHelper || /\.(node|dylib|dll)$|\.so(?:\.\d+)*$/.test(file)
 const text = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 4096
@@ -79,7 +80,10 @@ const linuxSystemLibraries = new Set([
   'libc.so.6', 'libm.so.6', 'libdl.so.2', 'libpthread.so.0', 'librt.so.1',
   'libgcc_s.so.1', 'libstdc++.so.6', 'libX11.so.6', 'libXext.so.6', 'libxcb.so.1',
   'libXrender.so.1', 'libXft.so.2', 'libfontconfig.so.1', 'libfreetype.so.6',
-  'libGL.so.1', 'libGLX.so.0', 'libOpenGL.so.0', 'libGLdispatch.so.0', 'libEGL.so.1'
+  'libXrandr.so.2', 'libXss.so.1', 'libXpresent.so.1',
+  'libGL.so.1', 'libGLX.so.0', 'libOpenGL.so.0', 'libGLdispatch.so.0', 'libEGL.so.1',
+  // Host audio and GPU-driver ABIs. These are OS prerequisites, not codecs.
+  'libasound.so.2', 'libva.so.2', 'libva-drm.so.2', 'libva-x11.so.2'
 ])
 
 function inspectLinuxHelperHeader(file, data, archName) {
@@ -254,7 +258,17 @@ export function validatePackagedPlaybackRuntime(directory, target, inspectBinary
   return validateRuntime(directory, target, inspectBinary, true)
 }
 
-function validateRuntime(directory, target, inspectBinary, packaged) {
+/** Signing changes Mach-O bytes. Keep the pre-sign source binding, verify each
+ * signed binary instead, and retain exact hashes for notices and other files. */
+export function validateSignedMacPlaybackRuntime(directory, target, {
+  inspectBinary = inspectPlaybackBinary,
+  verifySignature = file => tool('codesign', ['--verify', '--strict', file])
+} = {}) {
+  assert.equal(target.platformName, 'darwin', 'Signed playback verification requires macOS')
+  return validateRuntime(directory, target, inspectBinary, true, verifySignature)
+}
+
+function validateRuntime(directory, target, inspectBinary, packaged, verifySignature) {
   assert.ok(lstatSync(directory).isDirectory() && !lstatSync(directory).isSymbolicLink(), 'playback runtime must be a real directory')
   directory = realpathSync(directory)
   assert.ok(lstatSync(path.join(directory, 'runtime.json')).isFile()
@@ -280,7 +294,11 @@ function validateRuntime(directory, target, inspectBinary, packaged) {
     assert.match(manifest.files[name], /^[a-f0-9]{64}$/, 'invalid playback file digest')
   }
   assert.deepEqual(filesIn(directory), [...names, 'runtime.json'].sort(), 'playback files do not exactly match their inventory')
-  for (const name of names) assert.equal(digest(path.join(directory, name)), manifest.files[name], 'playback file digest mismatch: ' + name)
+  for (const name of names) {
+    const file = path.join(directory, name)
+    if (verifySignature && binary(name)) verifySignature(file)
+    else assert.equal(digest(file), manifest.files[name], 'playback file digest mismatch: ' + name)
+  }
   if (packaged) {
     assert.ok(manifest.sourceBundle && typeof manifest.sourceBundle === 'object', 'missing corresponding source bundle')
     assert.ok(!relativeFile(manifest.sourceBundle.fileName).includes('/'), 'source bundle must be a sibling artifact')
@@ -387,7 +405,11 @@ function createSourceBundle(input, context) {
 
 export function verifyPackagedPlaybackRuntime(context, { environment = process.env, inspectBinary } = {}) {
   const matrix = environment.JAVDEX_PLAYBACK_RUNTIME_DIR
-  if (matrix === undefined) return null // Default development packages retain external playback.
+  if (matrix === undefined) {
+    assert.ok(environment.CI !== 'true' && environment.GITHUB_ACTIONS !== 'true',
+      'A reviewed playback runtime is required for CI packaging; set JAVDEX_PLAYBACK_RUNTIME_DIR')
+    return null // Explicit local development packages may retain external playback.
+  }
   assert.ok(text(matrix), 'JAVDEX_PLAYBACK_RUNTIME_DIR must name a reviewed runtime matrix')
   const target = { platformName: context.electronPlatformName, archName: electronBuilderArchName(context.arch),
     electronVersion: context.packager.info.framework.version }

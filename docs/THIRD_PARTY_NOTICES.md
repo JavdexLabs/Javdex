@@ -10,6 +10,8 @@
 
 内置播放开发分支使用 libmpv 和 FFmpeg。最终运行库的版本、构建选项、全部间接依赖及对应源码/构建资料仍须逐项审核；项目许可切换不是运行库合规或安装验收证明。上游规则见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)，实际输入合同见 [开发指南](DEVELOPMENT.md#内置播放运行库开发分支)。
 
+CI 播放库的 [固定源码清单](../build/playback-sources.json) 单独保留 mpv/FFmpeg、FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。完整对应源码及配方在 `Javdex-Playback-Sources-*` 中随二进制交付，而非只提供上游链接；签名和摘要校验不代替许可复核。macOS 系统框架与 Linux 显示/字体/音频/GPU driver ABI 仍由宿主提供，不能据此省略解码依赖的源码材料。
+
 ## 容器更新管理器
 
 容器更新管理器使用 node-semver 进行正式／预发布版本比较、node-tar 处理完整发行归档、Zod 校验更新合同。依赖采用各自上游许可，不改为 Javdex 项目许可；构建时从锁定安装复制其许可原文到管理入口的 `LICENSES/`，随镜像放在 `/opt/javdex-manager/LICENSES/`。当前锁定版本的 node-semver 为 ISC、node-tar 为 BlueOak-1.0.0、Zod 为 MIT；具体版权与授权以该目录原文为准。

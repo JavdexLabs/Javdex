@@ -10,9 +10,20 @@ import test from 'node:test'
 import { inspectLinuxPlaybackBinary, inspectMacPlaybackBinary, inspectWindowsPlaybackBinary, stagePackagedPlaybackRuntime, validatePackagedPlaybackRuntime, validatePlaybackRuntime, verifyPackagedPlaybackRuntime } from './playback-runtime.mjs'
 import { stageLocalPlaybackRuntime, verifyLocalPlaybackRuntime } from './local-playback-package.mjs'
 import { stageWindowsDevelopmentLibraries } from './playback-native-build.mjs'
+import { findPackagedResources, verifyPackagedPlaybackResources } from './check-packaged-playback-runtime.mjs'
 
 const target = { platformName: 'darwin', archName: process.arch === 'x64' ? 'x64' : 'arm64', electronVersion: '43.4.1' }
 const hash = value => createHash('sha256').update(value).digest('hex')
+
+test('CI packaging cannot silently omit the built-in playback runtime on any release target', () => {
+  for (const [electronPlatformName, arch] of [['win32', 1], ['darwin', 1], ['darwin', 3], ['linux', 1]]) {
+    for (const environment of [{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }, { CI: 'true', JAVDEX_LOCAL_PLAYBACK_DIR: 'development-only' }]) {
+      assert.throws(() => verifyPackagedPlaybackRuntime({ electronPlatformName, arch }, {
+        environment
+      }), /playback runtime.*required|requires.*playback runtime/i, `${electronPlatformName}/${arch}`)
+    }
+  }
+})
 
 test('acceptance cleanup cannot report success after forced, failed or signalled exit', () => {
   for (const cleanup of [
@@ -134,6 +145,28 @@ test('reused companion source archive must still match its digest', t => {
   assert.deepEqual(second.manifest.sourceBundle, first.manifest.sourceBundle)
   writeFileSync(path.join(f.root, first.manifest.sourceBundle.fileName), 'tampered source delivery')
   assert.throws(() => stagePackagedPlaybackRuntime(context('third-package'), options), /source bundle digest mismatch/)
+})
+
+test('post-package playback gate rejects missing runtimes and missing or changed source delivery', t => {
+  const f = fixture(t)
+  const resources = f.context.packager.getResourcesDir()
+  assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target), /Missing packaged playback runtime/)
+  const staged = stagePackagedPlaybackRuntime(f.context, { environment: f.environment, inspectBinary: () => {} })
+  writeFileSync(path.join(resources, 'app.asar'), 'resource discovery fixture')
+  assert.deepEqual(findPackagedResources(f.root), [resources])
+  const checked = [], options = { inspectBinary: () => {}, verifyAppSignature: () => {}, verifySignature: file => checked.push(file) }
+  assert.equal(verifyPackagedPlaybackResources(resources, f.root, target, options).binaryCount, 2)
+  assert.equal(checked.length, 2, 'signed Mach-O binaries use signature checks, not stale pre-sign hashes')
+  assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target, {
+    ...options, verifySignature: () => { throw new Error('invalid native signature') }
+  }), /invalid native signature/)
+  const source = path.join(f.root, staged.manifest.sourceBundle.fileName)
+  writeFileSync(source, 'changed source delivery')
+  assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target, options), /source archive digest mismatch/)
+  rmSync(source)
+  assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target, options), /Missing corresponding playback source archive/)
+  writeFileSync(path.join(staged.directory, 'licenses/LICENSE.txt'), 'changed notice')
+  assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target, options), /digest mismatch/)
 })
 
 test('runtime inventory rejects wrong targets, modified/unlisted files and missing source evidence', t => {
@@ -526,6 +559,26 @@ test('macOS Mach-O fixture loads its runtime-local dependency after relocation, 
     const probe = path.join(f.root, 'probe')
     run('clang', ['-arch', arch, probeSource, '-o', probe])
     assert.equal(run(probe, [path.join(staged.directory, 'playback.node')]).trim(), '17')
+    // Exercise the real signed-resource gate without comparing modified Mach-O
+    // bytes to the original pre-sign hashes or rewriting the source inventory.
+    const app = path.join(f.root, 'PlaybackFixture.app'), resources = path.join(app, 'Contents/Resources')
+    const signedContext = { ...f.context, appOutDir: app,
+      packager: { ...f.context.packager, getResourcesDir: () => resources } }
+    const signed = stagePackagedPlaybackRuntime(signedContext, { environment: f.environment })
+    mkdirSync(path.join(app, 'Contents/MacOS'), { recursive: true })
+    run('clang', ['-arch', arch, probeSource, '-o', path.join(app, 'Contents/MacOS/PlaybackFixture')])
+    writeFileSync(path.join(resources, 'app.asar'), 'signed resource discovery fixture')
+    writeFileSync(path.join(app, 'Contents/Info.plist'), '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>PlaybackFixture</string><key>CFBundleIdentifier</key><string>com.javdex.playback-signing-test</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1.0</string></dict></plist>')
+    for (const name of ['playback.node', 'lib/libfixture.dylib']) {
+      run('codesign', ['--force', '--sign', '-', '--identifier', 'com.javdex.playback-native-test', '--timestamp=none', path.join(signed.directory, name)])
+    }
+    run('codesign', ['--force', '--sign', '-', '--deep', '--timestamp=none', app])
+    assert.notEqual(hash(readFileSync(path.join(signed.directory, 'playback.node'))), signed.manifest.files['playback.node'])
+    const inventory = readFileSync(path.join(signed.directory, 'runtime.json'), 'utf8')
+    assert.equal(verifyPackagedPlaybackResources(resources, f.root, target).binaryCount, 2)
+    assert.equal(readFileSync(path.join(signed.directory, 'runtime.json'), 'utf8'), inventory, 'verification cannot break the app resource seal')
+    writeFileSync(path.join(signed.directory, 'playback.node'), 'tampered signed binary')
+    assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target), /signature/)
     // Remove only our temporary source tree: the relocated fixture must not need it.
     rmSync(f.directory, { recursive: true })
     assert.equal(run(probe, [path.join(staged.directory, 'playback.node')]).trim(), '17')

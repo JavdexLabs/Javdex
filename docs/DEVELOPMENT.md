@@ -138,6 +138,22 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供入口、依赖库及 `runtime.json`，例如 `darwin-arm64/`、`win32-x64/` 和 `linux-x64/`。macOS/Windows 的入口为 `playback.node`；Linux 必须为有执行权限的 `playback-helper`，不接受旧的同进程 `playback.node`。未指定时不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。已有 macOS Mach-O、Windows PE 与 Linux ELF 技术检查；Windows x64 已准备实际源码/许可闭包并生成未签名 ZIP/NSIS，实际解压版与安装版在去除开发 PATH 的子进程中通过播放回归，见 Windows 验收记录。可信签名、独立干净机器及其它平台的正式安装关口仍须实际验证，不能用清单或命令选择测试代替。
 
+上述“未指定时不加入”仅适用于普通本机开发打包。CI／GitHub Actions 必须提供完整运行库矩阵，否则 `beforePack` 立即报错；本地开发专用目录不能替代 CI 的来源清单。打包后运行 `npm run packaging:verify-playback-runtime`，逐个检查应用 Resources 的 `native-playback`、平台／架构、准确文件集合、动态依赖、许可材料及配套源码归档。macOS 验证外层 app 与每个原生文件的真实签名，保留输入 `pre-sign` 摘要，不把签名改变的字节误判为输入损坏，也不在资源封装后改写清单；非二进制仍核对原摘要。其它平台继续核对全部文件摘要。配套源码归档随 CI 产物和 Release 一起交付并加入 SHA256SUMS。
+
+0.9.0-beta.1 的发布流水线曾未传入运行库矩阵，因此安装包不包含内置播放运行库；既有 CI 通过不能代表该能力已入包。此门禁修复防止再次静默发布，但不代替三平台实际运行库的准备与接入。已公开 Beta 的标签、镜像与安装包不覆盖；修复后的再次发布须使用新版本。
+
+### CI 固定源码构建
+
+`npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入，输出到 `out/playback-runtime/<platform>-<arch>`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
+
+当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。用户已确认只保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
+
+Release 分别在 Windows x64、macOS Intel、macOS arm64、Linux x64 的本架构 runner 上构建。Linux 构建基线为 Ubuntu 22.04，macOS C/Swift 最低部署目标均显式为 12.0；这不是对应旧系统的实际安装验收。根打包入口增加 `--arch x64|arm64`，各 macOS 任务只生产自己的 DMG。缓存键包含源码清单、构建/原生代码及依赖锁；构建器还核对编译器、SDK、Python、工具版本与架构，每次命中后重验精确文件、依赖和实际加载，不把缓存命中当作可信证明。
+
+源输入保留各上游独立的版本、许可、原始归档和构建来源，静态嵌入依赖列于 `build.json`，不是把它们重新授权为 GPL。两个二进制所有者分别为 libmpv 和 Javdex 原生适配器；完整原始归档、Javdex 首选原生源码、Electron headers、Node/node-gyp 声明及构建配方随独立的 `Javdex-Playback-Sources-*` 交付，许可原文同时进入应用。系统编译器/SDK、音频、字体及 GPU driver ABI 仍是宿主前提，不由源码包替代。
+
+`packaging:verify-playback-runtime` 除静态合同与签名检查，还在清除开发库搜索路径后实际加载包内 addon（Electron ABI）／helper，再从包内相对位置加载 libmpv，初始化核心所需的安全选项并解码原创 PCM WAV 到正常 EOF。不会以 `require` 成功代替解码，也不把无显示检查称作 GUI/GL、硬解、多格式、网络或独立干净机器验收。Linux `.deb` 声明保留 Electron 默认依赖，加上 X11/Xft、GL、ALSA、VA-API 的宿主包；AppImage 不安装系统包，宿主须具备这些显示/音频/驱动 ABI，不需要系统安装 mpv/FFmpeg。实际验证及剩余边界见 [源码构建复核](reviews/playback-ci-source-build.md)。
+
 `runtime.json` v1 的输入合同如下；清单由实际运行库构建生成，不手工填入虚假的摘要：
 
 | 字段 | 要求 |
@@ -165,7 +181,7 @@ Windows 直接解析 PE32+ 的 Machine、DLL 标志、section/RVA、普通与延
 
 Linux 使用 ELF header 和 GNU `readelf -dW` 核对 64 位小端、目标 x64/arm64、SONAME 与动态依赖，不执行待审核输入或用 `ldd`。仅入口 `playback-helper` 接受 ELF `ET_EXEC` 或 PIE `ET_DYN`，同时检查执行权限、非零入口、完整 program headers 及目标架构的标准 glibc interpreter；动态库仍只接受 `ET_DYN`。当前分发检查面向 glibc，musl 等运行时未纳入支持范围，也不从 ELF 类型推断最低发行版兼容性。
 
-RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH 存在时不误用被覆盖的 RPATH；helper 直接链接的 libmpv 及所有非系统 NEEDED 必须在这些目录中精确命中清单。helper 与库均计入摘要、许可／源码所有者并在复制后复核；执行权限不在内容摘要中，另行检查。禁止绝对／逃逸／空搜索项及动态 audit/filter 间接加载。系统依赖仅放行代码中明确列出的 glibc/C++ ABI、X11、GLVND 和 Xft/fontconfig/freetype 名称（不同架构 loader 分开）；这些是宿主提供的显示/字体前提，不代表可省略 mpv、FFmpeg、其它解码依赖或许可记录。该静态检查不能发现运行时 `dlopen` 的全部插件，不阻止用户自行设置 `LD_LIBRARY_PATH`／`LD_PRELOAD` 等 loader 环境，也不核对最低 GLIBC/C++ 符号版本；目标发行版、驱动及 ABI 基线仍须实际分发审核与干净安装。
+RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH 存在时不误用被覆盖的 RPATH；helper 直接链接的 libmpv 及所有非系统 NEEDED 必须在这些目录中精确命中清单。helper 与库均计入摘要、许可／源码所有者并在复制后复核；执行权限不在内容摘要中，另行检查。禁止绝对／逃逸／空搜索项及动态 audit/filter 间接加载。系统依赖仅放行代码中明确列出的 glibc/C++ ABI、X11（含 Xrandr/Xss/Xpresent）、GLVND、Xft/fontconfig/freetype、ALSA 与 VA-API 名称（不同架构 loader 分开）；这些是宿主提供的显示/字体/音频/驱动前提，不代表可省略 mpv、FFmpeg、其它解码依赖或许可记录。该静态检查不能发现运行时 `dlopen` 的全部插件，不阻止用户自行设置 `LD_LIBRARY_PATH`／`LD_PRELOAD` 等 loader 环境，也不核对最低 GLIBC/C++ 符号版本；目标发行版、驱动及 ABI 基线仍须实际分发审核与干净安装。
 
 代码签名可能改变二进制字节，因此保留的 `pre-sign` 摘要只证明输入与搬移阶段一致，不能拿它比较签名后的文件。最终包须另做签名完整性和分发产物摘要检查；正式播放运行库的签名/安装验收仍未完成，不由此输入清单自动推断。
 

@@ -137,6 +137,14 @@ const base = {
     maintainer: 'Javdex',
     artifactName: '${productName}-${version}-${arch}.${ext}',
     target: []
+  },
+  deb: {
+    // Preserve Electron's default dependencies, then declare the native X11/
+    // audio/GPU-driver ABIs. Codecs and libmpv are shipped privately, not apt deps.
+    depends: ['libgtk-3-0', 'libnotify4', 'libnss3', 'libxss1', 'libxtst6', 'xdg-utils',
+      'libatspi2.0-0', 'libuuid1', 'libsecret-1-0', 'libc6 (>= 2.35)', 'libstdc++6', 'libgcc-s1',
+      'libx11-6', 'libxext6', 'libxft2', 'libfontconfig1', 'libxrandr2', 'libxpresent1',
+      'libgl1', 'libglx0', 'libopengl0', 'libasound2', 'libva2', 'libva-drm2', 'libva-x11-2']
   }
 }
 

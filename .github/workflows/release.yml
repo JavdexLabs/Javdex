@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      verify_only:
+        description: "Build and verify desktop packages only; do not publish releases or server images."
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - "release-*"
@@ -71,22 +76,30 @@ jobs:
           JAVDEX_TEST_TIMEOUT_MS: "900000"
 
   package:
-    name: Package ${{ matrix.platform }}
+    name: Package ${{ matrix.platform }}-${{ matrix.arch }}
     needs: test
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: win
             os: windows-latest
+            arch: x64
           - platform: mac
-            os: macos-latest
+            os: macos-15-intel
+            arch: x64
+          - platform: mac
+            os: macos-15
+            arch: arm64
           - platform: linux
-            os: ubuntu-latest
+            os: ubuntu-22.04
+            arch: x64
     runs-on: ${{ matrix.os }}
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       GH_TOKEN: ${{ github.token }}
+      JAVDEX_PLAYBACK_RUNTIME_DIR: ${{ github.workspace }}/out/playback-runtime
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -101,13 +114,60 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm
+          sudo apt-get install -y rpm build-essential cmake nasm patchelf pkg-config xz-utils libx11-dev libxft-dev libxext-dev libxrandr-dev libxss-dev libxpresent-dev libgl1-mesa-dev libfontconfig1-dev libasound2-dev libva-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install macOS source build tools
+        if: matrix.platform == 'mac'
+        run: brew install cmake nasm
+
+      - name: Prepare Windows native compiler
+        if: matrix.platform == 'win'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Prepare Windows source build tools
+        if: matrix.platform == 'win'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            make tar xz diffutils
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-python
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Identify playback source/toolchain cache
+        id: playback_fingerprint
+        run: npm run playback:runtime:build -- --fingerprint
+
+      - name: Cache source-built playback inputs
+        # The exact compiler/SDK/options fingerprint is calculated before restore,
+        # so hosted-image updates can save a fresh cache instead of reusing an
+        # immutable stale key and rebuilding on every run.
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/playback-runtime
+            out/playback-runtime-build/sources
+          key: playback-source-v1-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.playback_fingerprint.outputs.fingerprint }}
+
+      - name: Build playback runtime from pinned source
+        run: npm run playback:runtime:build
+
       - name: Package
-        run: npm run setup:desktop && npm run dist -- --platform ${{ matrix.platform }}
+        run: npm run setup:desktop && npm run dist -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+
+      - name: Verify packaged playback runtime and corresponding source delivery
+        run: npm run packaging:verify-playback-runtime
 
       - name: Verify packaged Agent runtime
         run: npm run packaging:verify-agent-runtime
@@ -131,7 +191,7 @@ jobs:
         # Keep builder diagnostics and update metadata in CI, not in public release assets.
         uses: actions/upload-artifact@v4
         with:
-          name: Javdex-${{ matrix.platform }}
+          name: Javdex-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
             dist/*.AppImage
             dist/*.deb
@@ -141,10 +201,12 @@ jobs:
             dist/*.blockmap
             dist/*.yml
             dist/*.yaml
+            dist/Javdex-Playback-Sources-*.tar.gz
           if-no-files-found: error
 
   server:
     name: Server image (${{ matrix.arch }})
+    if: ${{ !inputs.verify_only }}
     needs: [metadata, package]
     permissions:
       contents: read
@@ -196,6 +258,7 @@ jobs:
 
   server-manifest:
     needs: [metadata, server]
+    if: ${{ !inputs.verify_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -219,7 +282,7 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [metadata, package, server-manifest]
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release-')
+    if: ${{ !inputs.verify_only && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release-')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -239,7 +302,7 @@ jobs:
         working-directory: release-artifacts
         run: |
           set -euo pipefail
-          mapfile -d '' packages < <(find . -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.exe' -o -name '*.zip' \) -printf '%f\0' | LC_ALL=C sort -z)
+          mapfile -d '' packages < <(find . -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.exe' -o -name '*.zip' -o -name 'Javdex-Playback-Sources-*.tar.gz' \) -printf '%f\0' | LC_ALL=C sort -z)
           if [[ ${#packages[@]} -eq 0 ]]; then
             echo "No release packages were found." >&2
             exit 1
@@ -293,6 +356,7 @@ jobs:
             release-artifacts/*.dmg
             release-artifacts/*.exe
             release-artifacts/*.zip
+            release-artifacts/Javdex-Playback-Sources-*.tar.gz
             release-artifacts/SHA256SUMS.txt
             release-artifacts/docker-compose.example.yml
             release-artifacts/javdex-server.example.json

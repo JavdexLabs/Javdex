@@ -11,7 +11,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveNodeGypPythonEnvironment } from './packaging-runtime.mjs'
 
@@ -26,7 +26,7 @@ function readManifest() {
 }
 
 function parseArgs(argv) {
-  const args = { list: false, only: null, platform: null, skipBuild: false, localPlayback: false }
+  const args = { list: false, only: null, platform: null, arch: null, skipBuild: false, localPlayback: false }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--list') args.list = true
@@ -34,6 +34,10 @@ function parseArgs(argv) {
     else if (arg === '--local-playback') args.localPlayback = true
     else if (arg === '--only') args.only = new Set(String(argv[++i] ?? '').split(',').filter(Boolean))
     else if (arg === '--platform') args.platform = String(argv[++i] ?? '')
+    else if (arg === '--arch') {
+      args.arch = String(argv[++i] ?? '')
+      if (!['x64', 'arm64'].includes(args.arch)) throw new Error('Unsupported packaging architecture')
+    }
   }
   return args
 }
@@ -65,20 +69,22 @@ function selectPlatforms(platforms, args) {
   return selected
 }
 
-function mergeTargets(selected) {
+export function mergeTargets(selected, arch = null) {
   /** @type {Record<string, { target: string, arch: string[] }[]>} */
   const byPlatform = {}
   for (const item of selected) {
     const { platform, targets } = item.electronBuilder
     if (!byPlatform[platform]) byPlatform[platform] = []
     for (const entry of targets) {
+      if (arch && !entry.arch.includes(arch)) continue
+      const target = { ...entry, arch: arch ? [arch] : [...entry.arch] }
       const existing = byPlatform[platform].find(
-        (row) => row.target === entry.target && row.arch.join(',') === entry.arch.join(',')
+        (row) => row.target === target.target && row.arch.join(',') === target.arch.join(',')
       )
-      if (!existing) byPlatform[platform].push(entry)
+      if (!existing) byPlatform[platform].push(target)
     }
   }
-  return byPlatform
+  return Object.fromEntries(Object.entries(byPlatform).filter(([, targets]) => targets.length > 0))
 }
 
 function run(command, commandArgs, env = {}) {
@@ -110,8 +116,9 @@ function main() {
     process.exit(1)
   }
 
-  const merged = mergeTargets(selected)
+  const merged = mergeTargets(selected, args.arch)
   const platformFlags = Object.keys(merged)
+  if (!platformFlags.length) throw new Error('No packaging targets match the requested architecture')
   const targetConfig = JSON.stringify(merged)
   if (args.localPlayback && (process.platform !== 'win32' || platformFlags.some(platform => platform !== 'win'))) {
     throw new Error('--local-playback requires a Windows host and Windows-only targets')
@@ -160,4 +167,4 @@ function readPackageVersion() {
   return pkg.version ?? '0.0.0'
 }
 
-main()
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) main()

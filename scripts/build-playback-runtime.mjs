@@ -41,11 +41,11 @@ environment.GIT_CEILING_DIRECTORIES = work
 // above. Bash performs the native/POSIX argument conversions for build tools.
 const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'"
 const posix = value => platform === 'win32' ? String(value).replaceAll('\\', '/').replace(/^([A-Za-z]):\//, (_, drive) => '/' + drive.toLowerCase() + '/') : value
-function run(command, args = [], cwd = root, capture = false) {
+function run(command, args = [], cwd = root, capture = false, overrides = {}) {
   const windowsShell = platform === 'win32' && !/\.(exe|js|mjs)$/.test(command) && command !== process.execPath
   const actual = windowsShell ? path.win32.join(msysRoot, 'usr/bin/bash.exe') : command
   const parameters = windowsShell ? ['--noprofile', '--norc', '-c', [command, ...args].map(posix).map(quote).join(' ')] : args
-  const result = spawnSync(actual, parameters, { cwd, env: environment, stdio: capture ? 'pipe' : 'inherit', encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+  const result = spawnSync(actual, parameters, { cwd, env: { ...environment, ...overrides }, stdio: capture ? 'pipe' : 'inherit', encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
   if (result.error) throw result.error
   assert.equal(result.status, 0, `${command} failed (${result.status}): ${result.stderr ?? ''}`)
   return capture ? result.stdout.trim() : ''
@@ -204,7 +204,7 @@ const adapterPlan = playbackSourceNativePlan({ platform, arch, root, prefix, inc
 for (const step of adapterPlan) {
   // Test binaries still load from the private build prefix before relocation.
   if (platform === 'win32') environment.PATH = [path.join(prefix, 'bin'), tools, originalPath].join(path.delimiter)
-  run(step.command, step.args, step.cwd)
+  run(step.command, step.args, step.cwd, false, step.env)
 }
 const staged = path.join(buildRoot, 'runtime'); mkdirSync(staged)
 const entry = platform === 'linux' ? 'playback-helper' : 'playback.node'

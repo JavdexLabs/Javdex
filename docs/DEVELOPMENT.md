@@ -150,6 +150,8 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 Release 分别在 Windows x64、macOS Intel、macOS arm64、Linux x64 的本架构 runner 上构建。Windows 打包使用 `windows-2022` 与 Visual Studio 17 2022；MSYS2 shell、make、UCRT64 GCC 必须来自同一次安装，CI 将 action 的 `msys2-location` 输出传给指纹和构建步骤。本机运行此正式源码构建入口时，需把 `JAVDEX_PLAYBACK_MSYS2_ROOT` 设为已安装 MSYS2 的绝对根路径，不猜测 `C:/msys64` 或混用另一套 MinGW。
 
+Windows 的自建 pkgconf 仅为构建工具，静态配置显式声明 `PKGCONFIG_IS_STATIC`，同时覆盖它的库和 CLI，避免 DLL 导入声明与静态归档不一致；该定义不传播到播放依赖。Linux 原生核心/控制/helper 测试发生在搬移之前，只对这些测试子进程传入私有前缀的 `LD_LIBRARY_PATH`；不修改全局构建环境。正式 helper 保持 `$ORIGIN`，搬移后的运行库与包内加载/解码检查仍清除开发搜索路径。
+
 Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库，系统 fontconfig 字体提供者采用动态 ABI，避免 Meson 递归选择非 PIC 的系统 UUID 静态库；没有改用系统 libass/FFmpeg 或放宽运行库闭包。macOS C/Swift 最低部署目标均显式为 12.0；这些基线不是对应旧系统的实际安装验收。根打包入口增加 `--arch x64|arm64`，各 macOS 任务只生产自己的 DMG。缓存键包含源码清单、构建/原生代码及依赖锁；构建器还核对编译器、SDK、Python、工具版本与架构，每次命中后重验精确文件、依赖和实际加载，不把缓存命中当作可信证明。
 
 源输入保留各上游独立的版本、许可、原始归档和构建来源，静态嵌入依赖列于 `build.json`，不是把它们重新授权为 GPL。两个二进制所有者分别为 libmpv 和 Javdex 原生适配器；完整原始归档、Javdex 首选原生源码、Electron headers、Node/node-gyp 声明及构建配方随独立的 `Javdex-Playback-Sources-*` 交付，许可原文同时进入应用。系统编译器/SDK、音频、字体及 GPU driver ABI 仍是宿主前提，不由源码包替代。

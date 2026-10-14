@@ -38,6 +38,10 @@ export function playbackSourceNativePlan(input) {
     steps[0].args.push('-G', 'Visual Studio 17 2022', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded')
   } else if (input.platform === 'linux') {
     steps[0].args.push('-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON', '-DCMAKE_INSTALL_RPATH=$ORIGIN')
+    // Tests run before libmpv is relocated beside the helper. Their loader
+    // environment must not leak into the later runtime/package acceptance.
+    for (const step of steps.filter(step => step.command !== 'cmake'))
+      step.env = { LD_LIBRARY_PATH: path.join(input.prefix, 'lib') }
   }
   return steps
 }
@@ -61,7 +65,8 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
     step('cmake', ['--build', output(id), '--parallel', String(jobs)])
     step('cmake', ['--install', output(id)])
   }
-  configure('pkgconf', ['--disable-shared', '--enable-static', '--with-pkg-config-dir='])
+  configure('pkgconf', ['--disable-shared', '--enable-static', '--with-pkg-config-dir=',
+    ...(platform === 'win32' ? ['CPPFLAGS=-DPKGCONFIG_IS_STATIC'] : [])])
   cmake('zlib', ['-DZLIB_BUILD_SHARED=OFF', '-DZLIB_BUILD_STATIC=ON', '-DZLIB_BUILD_TESTING=OFF'])
   cmake('freetype', ['-DBUILD_SHARED_LIBS=OFF', '-DFT_DISABLE_ZLIB=TRUE', '-DFT_DISABLE_BZIP2=TRUE', '-DFT_DISABLE_PNG=TRUE', '-DFT_DISABLE_HARFBUZZ=TRUE', '-DFT_DISABLE_BROTLI=TRUE'])
   meson('fribidi', ['-Ddocs=false', '-Dbin=false', '-Dtests=false'])

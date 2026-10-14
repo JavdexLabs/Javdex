@@ -95,3 +95,15 @@ Linux 修复保留私有 pkgconf 的静态 `-l`/其它链接旗标和私有 `-L`
 提交前完整 `npm run pretest` exit 0，包含全部生产边界、TypeScript/CSS lint、CSS 架构与共享控件检查。
 
 修复 `a12d1614da447fca3fd6332743e3ea51d0f40f4b` 已推送 `dev`，使用显式 `verify_only=true` 启动第五轮 [run 38531429780](https://github.com/JavdexLabs/Javdex/actions/runs/38531429780)，已核对 headSha 一致。2026-10-14 07:54 UTC 快照为 in_progress，仍待完整 Windows 回归与四目标包验收；不记作修复验收完成。现有跟进继续核对最新 run 和本记录，不重复触发，不发布或改写公开版本。
+
+### 第五轮：静态 pkgconf API 与 Linux 搬移前测试加载
+
+第五轮完整 Windows 回归 job `115744071716` 成功。Windows 打包 job `115752397259` 已使用正确的 `D:/a/_temp/msys64/ucrt64` GCC/ld 并通过原来失败的 configure/make 路径，随后 pkgconf/bomtool 静态链接报 `undefined reference to __imp_pkgconf_*`。Linux job `115752397121` 的共享 libmpv 与 X11 helper 编译/链接均成功，确认前轮 UUID 非 PIC 修复在真实 Ubuntu 22.04 x64 生效；之后 `mpv-core-test` 以找不到 `libmpv.so.2`、exit 127 失败，尚未执行搬移后的运行库或包验收。macOS arm64 job `115752397117` 已成功；Intel job `115752397165` 在修复时仍运行，不据部分成功宣称本轮完成。
+
+Windows 定向复现使用隔离 Ubuntu 22.04 容器中的 MinGW x64 交叉链接器，实际编译相同 pkgconf 2.5.1 归档（SHA-256 `cd05c9589b9f86ecf044c10a2269822bc9eb001eced2582cfffd658b0a50c243`）。完整静态 CLI 重现相同 `__imp_pkgconf_*` 链接失败；最小客户端调用一个公开函数、显式指定实际私有 `.a` 时仍以 `__imp_pkgconf_compare_version` 失败，排除误选归档。复现使用 GCC 10.3，原 CI 为 16.2，同类错误并不依赖新 GCC。
+
+只给客户端定义静态 API 仍不能解决库内跨对象调用；固定上游头文件 `libpkgconf-api.h` 以 `PKGCONFIG_IS_STATIC` 控制该声明。仅为 Windows 的 pkgconf configure 添加此定义，让库与 CLI 一致，随后完整 pkgconf/bomtool 编译和安装成功；再次用真实 `playbackSourcePlan` 输出的 configure 参数进行交叉构建/安装也成功。PE 只依赖 ADVAPI32/KERNEL32/msvcrt，不要求 libpkgconf DLL。该证明是 PE 交叉链接，不是 Windows 原生执行，正式 UCRT64 原生 CI 仍待通过；pkgconf 是 toolOnly，不进入播放安装包，也没有更改 codec 的编译定义。
+
+Linux 的 CMake 构建目标提前使用最终 `$ORIGIN` RPATH，但测试执行时共享 libmpv 尚在私有 prefix/lib，未搬移到测试程序旁。最小真实 ELF 复现生成 SONAME 为 `libmpv.so.2` 的测试库及 `$ORIGIN` 客户端：无开发路径时稳定 exit 127，同一二进制只为子进程添加私有 prefix/lib 后 exit 0，RPATH 仍为 `$ORIGIN`。它验证 loader 合同，不冒充真实 libmpv 解码。
+
+修复只为 Linux 搬移前的核心/控制/helper 测试命令添加步骤级环境，驱动在 spawn 时合并，不改变全局构建环境；之后的运行库与包验收仍去除 LD_LIBRARY_PATH/开发 PATH，并检查相对依赖与 PCM EOF。没有改成绝对 RPATH 或跳过失败测试。两个新增配方回归先以 11 通过、2 失败验证红灯，修复后全部构建/发布规划 27 通过、0 失败、0 跳过；打包 42 通过、0 失败、两个既有平台专属跳过；脚本语法、编码和 diff 检查通过。夹具位于忽略目录 `out/playback-pkgconf-repro`，隔离工具镜像保留用于复查，不进入提交或安装包。

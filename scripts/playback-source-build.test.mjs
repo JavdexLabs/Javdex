@@ -47,6 +47,23 @@ test('release adapters explicitly choose MSVC/static CRT or runtime-local Linux 
   assert.ok(linux.includes('-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON'))
   assert.ok(linux.includes('-DCMAKE_INSTALL_RPATH=$ORIGIN'))
 })
+test('Linux source adapter tests use the private library prefix before runtime relocation only', () => {
+  const native = { root: '/repo', arch: 'x64', prefix: '/private-prefix', include: '/sdk/include', nodeLibrary: '/sdk/x64/node.lib', delayHook: '/node-gyp/hook.cc', output: '/output' }
+  const linux = playbackSourceNativePlan({ ...native, platform: 'linux' })
+  for (const step of linux) {
+    assert.deepEqual(step.env, step.command === 'cmake' ? undefined : { LD_LIBRARY_PATH: path.join(native.prefix, 'lib') })
+  }
+  for (const platform of ['win32', 'darwin'])
+    assert.ok(playbackSourceNativePlan({ ...native, platform }).every(step => !step.env))
+})
+test('Windows static pkgconf declares static API for both its library and CLI without changing codec flags', () => {
+  for (const platform of ['win32', 'darwin', 'linux']) {
+    const plan = playbackSourcePlan({ ...input, platform })
+    const configure = plan.find(step => step.command === 'sh' && step.cwd === path.join(input.build, 'pkgconf'))
+    assert.equal(configure.args.includes('CPPFLAGS=-DPKGCONFIG_IS_STATIC'), platform === 'win32')
+    assert.ok(plan.filter(step => step !== configure).every(step => !step.args.some(arg => arg.includes('PKGCONFIG_IS_STATIC'))))
+  }
+})
 test('private pkgconf must retain private include/library flags for static library resolution', () => {
   const env = playbackPkgConfigEnvironment('/private-prefix', 'linux', 'x64')
   assert.equal(env.PKG_CONFIG_ALLOW_SYSTEM_LIBS, '1')

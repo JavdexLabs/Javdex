@@ -183,10 +183,11 @@ async function boot(): Promise<RemotePlaybackSource[]> {
     const grant = await read<PlayGrant>(await post('play.grant', envelope({
       libraryId: 1, videoId: item.videoId, resourceId: item.fileId, locatorRevision: resource.locatorRevision
     }), secret))
-    const url = new URL(grant.playbackHandle)
+    assert.match(grant.playbackHandle, /^\/play\/v1\//)
+    const url = new URL(grant.playbackHandle, base)
     assert.equal(url.origin, base)
     assert.equal(grant.resourceId, item.fileId)
-    sources.push({ playbackHandle: grant.playbackHandle, label: item.label })
+    sources.push({ playbackHandle: url.href, label: item.label })
   }
   const handle = sources[0].playbackHandle
   const head = await fetch(handle, { method: 'HEAD', signal: AbortSignal.timeout(10_000) })

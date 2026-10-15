@@ -35,6 +35,10 @@ it('serves real authenticated Range streams without touching the parent catalog'
       head: 200, range: 206, bytesMatch: true
     })
     const source = first.getSource(0)
+    const playbackUrl = new URL(source.playbackHandle)
+    assert.equal(playbackUrl.protocol, 'http:')
+    assert.equal(playbackUrl.hostname, '127.0.0.1')
+    assert.match(playbackUrl.pathname, /^\/play\/v1\//)
     assert.equal(source.label, path.basename(media))
     assert.equal(source.label.includes(root), false)
     assert.throws(() => first!.getSource(-1), /index/)

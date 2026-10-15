@@ -1,6 +1,6 @@
 # Javdex 官网
 
-以方案 C 为基础的优化版，源码是本目录的 `index.html`、`styles.css`、`app.js`。旧提案与临时预览产物已清理。
+静态产品介绍与下载页，源码是本目录的 `index.html`、`styles.css`、`app.js`。产品文案面向 0.9.0 稳定版功能，发布准备状态统一见 [根目录说明](../README.md)；功能与升级前提见 [使用指南](../docs/USER_GUIDE.md)、[0.9.0 发布说明](../.github/release-notes/v0.9.0.md) 和 [更新日志](../CHANGELOG.md)。
 
 ## 构建与预览
 
@@ -10,6 +10,8 @@ npx vite dist-pages --host 127.0.0.1 --port 4319 --strictPort
 ```
 
 构建时读取 GitHub 最新正式 Release，生成六个安装包的直接下载地址、文件名和大小。版本来自实际 Release，不跟随尚未发布的 package.json 版本。CI 中缺失安装包会使构建失败；本地网络异常使用 Release 页面兜底。可用 `--offline` 显式离线构建。
+
+保持 `releases/latest`、动态版本与 `release.json` 下载清单机制；不要为发布准备写死 0.9.0 标签、安装包地址或发布日期。正式发布后重新构建，才会读取新的实际正式版。
 
 ## 产品截图
 
@@ -26,7 +28,7 @@ node website/scripts/build.mjs
 
 更新根目录 README 的两张配图：运行 `node website/scripts/capture.mjs --readme`，随后运行 `python website/scripts/optimize-assets.py --readme`。此模式写入 `docs/images/`，展示浅色媒体库和深色影片详情，不覆盖官网截图。
 
-功能依据：`MediaLibraryCreateModal.tsx`、`VirtualPosterGrid.tsx`、`coverAspect.ts`、`DetailPage.tsx`、`NfoExportPanel.tsx`、`PluginsSettingsPanel.tsx`，以及根目录 README、`docs/NFO_COMPATIBILITY.md`。NFO 导入软件名单表示固定版本样本验证，不宣称支持其所有历史版本。
+功能依据：桌面的 `MediaLibraryCreateModal.tsx`、`DetailPage.tsx`、`VideoDetailMeta.tsx`、`playback/PlaybackPanel.tsx`、`pages/PlaylistsPage.tsx`、`components/settings/LocalModelsPanel.tsx`、`LocalModelUsagePanel.tsx`、`ServerUpdatePanel.tsx`，以及 [使用指南](../docs/USER_GUIDE.md)、[服务端托管更新](../docs/SERVER_UPDATE.md) 和 [NFO 兼容性](../docs/NFO_COMPATIBILITY.md)。播放文案需区分桌面 libmpv 与浏览器播放；最近播放、续播及本地推理只在当前电脑，不能描述成服务端同步或网页能力。NFO 导入软件名单表示固定版本样本验证，不宣称支持其所有历史版本。
 
 ## 素材
 
@@ -37,4 +39,4 @@ node website/scripts/build.mjs
 
 `optimize-assets.py` 需要 Pillow（`python -m pip install Pillow`）。封面和背景使用质量 88 的 WebP，保留原尺寸、横向构图；界面截图使用无损 WebP，并逐像素验证转换结果，避免损伤文字。转换成功后删除对应 PNG，避免重复保留。重新截图后运行压缩脚本，再构建网站。
 
-本地构建或截图不会触发线上发布。GitHub Pages 由 `.github/workflows/pages.yml` 部署：默认分支的官网相关改动、正式 Release 发布或成功的 Release 工作流会触发更新。发布 0.8.0 后需检查线上下载清单来自该正式 Release，不能把本地离线构建视为已更新下载地址。
+本地构建或截图不会触发线上发布。GitHub Pages 由 `.github/workflows/pages.yml` 部署：默认分支的官网相关改动、正式 Release 发布或成功的 Release 工作流会触发更新。0.9.0 正式发布后，需检查线上版本、六个下载入口与清单均来自该正式 Release；发布前继续显示实际最新正式版，不能把本地构建视为版本已发布或线上下载地址已更新。

@@ -1,6 +1,7 @@
 services:
   javdex:
-    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the desktop version, for example 0.9.0-beta.1}
+    # 基础镜像版本；新程序卷以此初始化，已有 /program 保留已选业务版本。
+    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the base image version, for example 0.9.0}
     restart: unless-stopped
     stop_grace_period: 150s
     security_opt:

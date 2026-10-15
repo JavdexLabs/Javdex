@@ -2,7 +2,7 @@
 
 ## 使用方式
 
-以下步骤用于桌面本地模式。0.8.0 也支持 [独立服务端部署](SERVER_MODE.md#docker-compose-快速开始)：由服务端提供网页、保存资料并持续运行，桌面无需一直开启。服务端地址、账号密码和端口由部署配置管理；连接服务端的桌面负责配对批准及授权管理。两种模式的网页均只读，不提供编辑后台或转码。
+本文对应 0.9.0 的局域网只读浏览入口，以下步骤用于桌面本地模式。也可使用 [独立服务端部署](SERVER_MODE.md#docker-compose-快速开始)：由服务端提供网页、保存资料并持续运行，桌面无需一直开启。服务端地址、账号密码和端口由部署配置管理；连接服务端的桌面负责配对批准及授权管理。两种模式的网页均只读，不提供编辑后台或转码。
 
 1. 在桌面端打开 **设置 → 网络 → 网页服务**。
 2. 设置访问账号与独立的 12–128 字符密码，选择端口（默认 `8096`），开启服务并保存。
@@ -39,7 +39,7 @@
 
 采用本地只读账号与服务端会话，参考 [Jellyfin 本地用户](https://jellyfin.org/docs/general/server/users/) 和 [OWASP 会话管理](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)：
 
-- 密码通过随机盐和 scrypt 保存，仅保留哈希；配置保存在应用数据目录的 `web-access.json`，不通过普通设置快照或 Web 接口返回。
+- 密码通过随机盐和 scrypt 保存，仅保留哈希；桌面本地模式配置保存在应用数据目录的 `web-access.json`，不通过普通设置快照或 Web 接口返回。独立服务端的凭据及数据目录配置见 [服务端部署指南](SERVER_MODE.md)。
 - 登录生成随机 256 位令牌，服务端仅存摘要。Cookie 使用 `HttpOnly`、`SameSite=Strict`；不把令牌放进 URL 或 localStorage。
 - 临时会话空闲 24 小时或累计 7 天过期，记住的设备不自动过期。记住的设备摘要与原始时间保存于权限为 `0600` 的 `web-devices.json`，不保存明文令牌；重启保留长期授权。浏览器 Cookie 设置一年有效期，每次访问会话接口续期；浏览器清理站点数据或 Cookie 自身失效仍需重新登录。最近活动按分钟持久化。
 - 退出登录、逐台撤销会撤销相应凭证；更改账号、重设密码或退出所有会话会撤销全部授权。关闭再开启 Web 服务、普通应用重启、保存未更改身份的服务配置保留有效的已记住设备。
@@ -55,22 +55,28 @@
 
 独立 React/Vite 浏览器入口在 `apps/web/src`，构建至 `out/web`，随 Electron 包一起发布；不加载桌面 renderer 或 preload。开发桌面应用前会自动构建 Web 页面。需要持续修改 Web 时，另开终端运行 `npm run web:dev`（监听并重建），刷新浏览器即可。
 
-HTTP 模块在 `apps/desktop/src/main/web`。`WebCatalog` 是只读目录适配层，输出显式 DTO；文件传输先按资源 ID 验证归属及真实根目录，再对打开的文件描述符复核身份，通过流式 HTTP Range 响应发送。它不接受任意文件路径或代理 URL。
+共用 HTTP 实现在 [packages/http/src](../packages/http/src)：`server.ts` 处理路由及会话边界，`auth.ts` 处理认证、设备会话与配对，`catalog.ts` 的 `WebCatalog` 提供只读目录适配并输出显式 DTO，`http.ts` 处理文件与 Range 传输。桌面 `apps/desktop/src/main/web` 中的同名模块是兼容转导出；`webAccess.ts` 仍负责 Electron 配置、启停与设备管理，并通过查询 worker 适配器接入目录。独立 Node 服务端复用该 HTTP 包，不加载 Electron。
+
+文件传输先按资源 ID 验证归属及真实根目录，再对打开的文件描述符复核身份，通过流式 HTTP Range 响应发送；不接受任意文件路径或代理 URL。浏览 surface 只开放只读浏览能力；独立服务端的管理及资源播放授权由单独的 surface 与凭据合同处理，浏览器会话不会获得管理权限，桌面本地网页服务不挂载管理接口。
+
+从仓库根目录运行以下检查；共用 HTTP 的认证、配对及目录回归仍位于桌面测试目录，通过转导出覆盖实际共享实现：
 
 ```sh
 npm run web:build
 npm run typecheck
+npm run check:http-boundaries
+npm run check:http-node-load
 node scripts/run-electron-tests.mjs apps/desktop/src/main/web/webServer.test.ts apps/desktop/src/main/web/pairing.test.ts apps/desktop/src/main/web/catalog.test.ts
 npm test
 npm run build
 ```
 
-可选的浏览器端到端检查（需要 Chrome 和 PATH 中的 ffmpeg）：
+可选的浏览器端到端检查需要 Chrome；首项还需要 PATH 中的 ffmpeg。真实桌面检查前先运行 `npm run setup:desktop` 与 `npm run build`，并使用可启动 Electron 的图形环境：
 
 ```sh
-node --import tsx scripts/web-smoke.mjs
+node --require ./scripts/register-test-paths.cjs --import tsx scripts/web-smoke.mjs
 node scripts/web-desktop-smoke.mjs
-node --import tsx scripts/web-auth-recovery-smoke.mjs
+node --require ./scripts/register-test-paths.cjs --import tsx scripts/web-auth-recovery-smoke.mjs
 ```
 
 第一个检查启动仅限回环的临时服务，使用合成目录和生成的三秒视频，不读取用户媒体库。在手机、平板、桌面、电视视口验证无横向溢出、网格列数、登录、搜索、详情、原生播放、返回、刷新和退出；截图保存在输出的临时目录。可用 `JAVDEX_WEB_QA_OUTPUT` 指定截图目录。第二个检查使用独立临时数据目录启动真实 Electron，验证设置入口、桌面批准配对、地址二维码、密码持久化、记住设备跨重启恢复、临时会话失效、逐台撤销与停止服务。
@@ -79,4 +85,4 @@ node --import tsx scripts/web-auth-recovery-smoke.mjs
 
 技术依据：[MDN HTTP Range](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Range_requests)、[MDN 媒体查询](https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/CSS_layout/Media_queries)。
 
-认证恢复检查覆盖轮询断网、配对中刷新、客户端时间偏差和批准响应丢失；HTTP 测试覆盖撤销连接隔离、写盘失败一致性与损坏记录重置。
+认证恢复检查覆盖轮询断网、配对中刷新、客户端时间偏差和批准响应丢失；HTTP 测试覆盖撤销连接隔离、写盘失败一致性与损坏记录重置。上述命令说明验证入口，不表示本次文档更新执行了浏览器或 Electron GUI 验收。

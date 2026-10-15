@@ -8,9 +8,15 @@
 
 第三方代码、模型与图标仍按各自许可分发，不因 Javdex 采用 GPL 而改写其声明。官网图标声明保留在 `website/assets/LUCIDE-LICENSE.txt`、`website/assets/platforms/LICENSE.txt`，随桌面使用的模型声明保留在 `apps/desktop/src/renderer/public/models/LICENSE-APACHE-2.0.txt`。
 
-内置播放开发分支使用 libmpv 和 FFmpeg。最终运行库的版本、构建选项、全部间接依赖及对应源码/构建资料仍须逐项审核；项目许可切换不是运行库合规或安装验收证明。上游规则见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)，实际输入合同见 [开发指南](DEVELOPMENT.md#内置播放运行库开发分支)。
+## 内置播放运行库
 
-CI 播放库的 [固定源码清单](../build/playback-sources.json) 单独保留 mpv/FFmpeg、FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。完整对应源码及配方在 `Javdex-Playback-Sources-*` 中随二进制交付，而非只提供上游链接；签名和摘要校验不代替许可复核。macOS 系统框架与 Linux 显示/字体/音频/GPU driver ABI 仍由宿主提供，不能据此省略解码依赖的源码材料。
+内置播放使用固定源码构建的 mpv 0.41.0 与 FFmpeg 9.0.2；[源码清单](../build/playback-sources.json) 将二者记录为 GPL-3.0-or-later，[构建配方](../scripts/playback-source-build.mjs) 显式启用 mpv GPL 及 FFmpeg GPL/version3 选项，不是本地 AI 工具所用的 LGPL FFmpeg 构建。实际输入、包内材料与验证合同见 [开发指南](DEVELOPMENT.md#固定源码构建与分发验证)。上游许可说明见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)。
+
+固定源码清单单独保留 FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、Windows node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。当前 SDK 固定为 Electron 43.4.1／Node headers 24.18.1；`build.json` 记录实际来源、构建选项、工具链与配方，`runtime.json` 绑定 `mpv` 和 `javdex-native` 两个二进制所有者。
+
+应用 Resources 的 `native-playback/` 包含二进制、`licenses/libmpv.txt`、`licenses/javdex.txt`、`SOURCE-ACCESS.txt` 与分发清单。完整对应源码和配方独立交付为一个 `Javdex-Playback-Sources-<version>.tar.gz`，纳入 Release 的 `SHA256SUMS.txt`，不装入应用。总包按内容摘要去重四目标材料，保留原始上游归档、Javdex 原生源码、SDK headers、许可、构建和打包工具，以及六个最终安装产物的来源绑定；附 `restore.mjs`，可分别恢复 Windows x64、macOS x64／arm64、Linux x64 的原始材料。四份单平台源码包及 `.runtime.json`／`.installers.json` 回执保留为 CI 产物，不作为额外 Release 附件。具体恢复方法见 [开发指南](DEVELOPMENT.md#固定源码构建与分发验证)。
+
+[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 保留公开总源码包、四目标恢复和六个安装产物来源核对的历史证据；0.9.0 当前准备状态见 [发布准备](reviews/v0.9.0-readiness.md)，本文不宣称稳定版已经发布或重新完成分发验收。源码材料、签名与摘要校验不能替代逐版本许可复核。macOS 系统框架与 Linux 显示/字体/音频/GPU driver ABI 仍由宿主提供，不能据此省略解码依赖的源码材料。
 
 ## 容器更新管理器
 
@@ -22,7 +28,7 @@ AI 服务设置使用 LM Studio、DeepSeek、MiniMax、Ollama、OpenAI、OpenRou
 
 ## node-gyp 延迟加载钩子
 
-Windows 原生播放 addon 的开发构建复用已安装的 [node-gyp](https://github.com/nodejs/node-gyp) 中 `src/win_delay_load_hook.cc`，将 Electron 导出的 Node 符号解析到当前可执行文件；不复制修改上游源码。该钩子采用 MIT，原声明保留于 [node-gyp MIT 声明](../LICENSES/node-gyp-MIT.txt)，随项目许可材料打包。正式运行库仍须记录实际使用的 node-gyp 版本、钩子源码与构建资料。
+Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://github.com/nodejs/node-gyp) 中 `src/win_delay_load_hook.cc`，将 Electron 导出的 Node 符号解析到当前可执行文件；构建不修改上游源码。该钩子采用 MIT，原声明保留于 [node-gyp MIT 声明](../LICENSES/node-gyp-MIT.txt)，随项目许可材料打包。固定源码构建将实际使用的钩子、node-gyp 原许可、依赖锁文件和构建配方复制进 `sources/javdex-native.tar.gz`，随上述总源码包交付，并将许可合并到包内 `licenses/javdex.txt`。历史 CLANG64 本地构建使用仓库自身的宿主重定向钩子，具体构建路径见开发指南。
 
 ## 本地 AI 运行库
 

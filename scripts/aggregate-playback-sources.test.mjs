@@ -8,7 +8,7 @@ import test from 'node:test'
 import { aggregatePlaybackSources, splitSourceTar } from './aggregate-playback-sources.mjs'
 import { restorePlatform, sha256, safePath } from './restore-playback-sources.mjs'
 
-const version = '0.9.0-beta.3'
+const version = '0.9.0'
 const targetNames = ['win32-x64', 'darwin-x64', 'darwin-arm64', 'linux-x64']
 const names = ['windows-x64', 'macos-x64', 'macos-arm64', 'linux-x64']
 const packagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/dist.mjs',

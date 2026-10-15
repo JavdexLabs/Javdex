@@ -2,9 +2,9 @@
 
 本页维护当前部署与操作方式。实现、合同和功能边界见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，进度与验证结果见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。桌面日常操作见 [使用指南](USER_GUIDE.md)，只读网页见 [LAN Web](LAN_WEB.md)。
 
-本页按 **0.8.0 正式版**说明部署。桌面安装包与 `ghcr.io/javdexlabs/javdex-server:0.8.0` 必须成对使用；0.7.x 或 0.8.0 Beta 桌面不能连接本版服务端。已有部署请先备份数据，再同时更新桌面与服务端。
+本页面向 **0.9.0 正式版的发布准备**：资料库 schema 为 **20**，桌面模型管理文档版本为 **4**。下列版本号是部署目标，不表示 Release、镜像或升级包已经发布；使用前须确认[正式 Release](https://github.com/JavdexLabs/Javdex/releases/latest) 已提供目标版本的桌面、双架构镜像和升级包。发布与待核验状态见 [发布准备检查](reviews/v0.9.0-readiness.md)。
 
-0.9.0-beta.1 采用单容器托管更新。部署前确认[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.1) 已提供同版本桌面、镜像和升级包，并保留新 Compose 的 `/program` 程序卷；认主与恢复使用容器管理入口。首次升级、签名信任和后续版本切换见 [服务端更新](SERVER_UPDATE.md)。下方 0.8.0 的历史 CLI 和下载说明不用于已托管更新的业务版本。
+官方部署使用单容器托管更新，必须持久保存 `/program` 程序卷；首次认主与 writer 恢复均通过容器管理入口执行。普通资料管理要求桌面与实际运行的服务端业务版本一致。已有部署先备份；从 0.8.0 首次采用、已有程序卷保留版本、签名信任和后续在线升级见 [服务端更新](SERVER_UPDATE.md)。
 
 ## 服务端能做什么
 
@@ -15,20 +15,22 @@
 
 ## Docker Compose 快速开始
 
-正式发布流程提供 `ghcr.io/javdexlabs/javdex-server` 镜像，支持 Linux amd64 和 arm64，Docker 会自动选择对应架构。用户只需要 Docker 与 Compose 插件，无需 Node.js、npm 或编译源码。镜像使用明确版本 `0.8.0`，不依赖 `latest` 滚动标签，以便与桌面版本保持一致。
+正式发布流程为 `ghcr.io/javdexlabs/javdex-server` 生成 Linux amd64 和 arm64 镜像，Docker 自动选择架构。部署只需要 Docker 与 Compose 插件，无需安装 Node.js、npm 或编译源码。以下以固定基础镜像版本 `0.9.0` 为例，不使用滚动标签。新程序卷从镜像初始化业务；已有程序卷优先运行已选择的业务版本，因此基础镜像标签不能代替实际业务版本检查。
 
-1. 从所选 Release 下载 `docker-compose.example.yml` 和 `javdex-server.example.json`，放在同一个目录。在该目录创建 `.env`，填写与桌面安装包一致的版本号（不含 `v`）：
+1. 确认目标正式 Release 可用后，从其发布说明中的对应源码版本链接保存 `deploy/docker-compose.example.yml` 和 `deploy/javdex-server.example.json`，放在同一个目录（保留文件名）。它们不是 Release 附件；不要混用其他分支的示例。在该目录创建 `.env`，填写基础镜像版本号（不含 `v`）；首次部署应与桌面安装包一致：
 
    ```dotenv
-   JAVDEX_VERSION=0.8.0
+   JAVDEX_VERSION=0.9.0
    ```
 
 2. 编辑 [Compose 示例](../deploy/docker-compose.example.yml) 和 [服务配置](../deploy/javdex-server.example.json)：
    - 将 `JAVDEX_WEB_PASSWORD` 替换为独立的 12–128 字符密码。
    - 将 `/absolute/path/to/media` 替换为 NAS 上真实媒体目录；这是宿主机路径，容器内统一使用 `/media`。
    - 将 `accessHosts` 中的 `192.168.1.10` 替换为其他设备实际访问的 NAS IP 或主机名，不填写 `http://` 或端口。
+   - 将 `JAVDEX_UPDATE_PUBLIC_URL` 替换为桌面能访问的 HTTPS 根地址，例如 `https://NAS实际IP:8097`；业务 HTTP 8096 和更新 HTTPS 8097 均只向可信局域网或私有网络开放。
    - **服务端媒体库目录必须具备读写权限**。媒体卷使用 `:rw` 挂载，并确保宿主机/NAS 的文件权限允许容器内 `node` 用户读写所选目录及其内容；具体要求见下文[媒体目录权限](#媒体目录权限)。
    - `/data` 使用持久数据卷，数据库与图片都保存在其中；不要将 SQLite 数据卷放在 SMB/NFS 共享上。
+   - `/program` 使用独立持久卷，保存业务发行选择、更新凭据、任务日志与升级前快照。不要与数据或图片目录互相包含，也不要用 Compose 的 `user:` 覆盖管理进程身份；管理器以容器内 root 启动非 root 业务子进程。
 
 3. 在配置文件所在目录拉取并启动，再查看启动日志：
 
@@ -41,15 +43,15 @@
 4. 在服务机器上生成首次连接令牌：
 
    ```bash
-   docker compose -f docker-compose.example.yml exec javdex node index.js bind --config /config/server.json
+   docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js bind --config /config/server.json
    ```
 
    在同版本桌面应用打开“设置 → 存储与导出 → 资料库连接”，选择远程资料库，填写 `http://NAS实际IP:8096`，点击“测试连接”核对服务和版本，再保存并点击“立即重启”。在“正在使用”填写命令输出的一次性令牌，点击“领取写入凭据”。连接测试不会领取凭据。令牌有效期为 10 分钟，过期后重新生成。网页密码与桌面写入令牌用途不同，首次认主完成前网页不能浏览资料。
 
 5. 在桌面创建媒体库，在“来源与扫描 → 添加目录”中选择服务端挂载 **`library`**（对应示例 `mediaMounts` 的键）或其中的子目录，然后启动扫描。不要选择桌面电脑的文件夹。
-6. 其他设备在浏览器打开同一地址，用配置中的账号密码登录；或在连接服务端的桌面中开启网页配对并批准新设备。远程桌面播放可在“资料库连接”设置播放器程序，例如 mpv 的绝对路径。该播放器接收服务端授权的原文件流，由播放器决定能否解码；网页仍按浏览器原生播放能力选择资源，不支持的文件可下载。
+6. 其他设备在浏览器打开同一地址，用配置中的账号密码登录；或在连接服务端的桌面中开启网页配对并批准新设备。远程桌面默认用内置播放器读取服务端授权的原文件流，在此电脑解码；也可在“资料库连接 → 播放器”选择支持网络播放的外部程序。播放运行库和平台要求见 [播放影片](USER_GUIDE.md#播放影片)。网页仍按浏览器原生播放能力选择资源，不支持的文件可下载；服务端不转码。
 
-关闭桌面不会关闭容器。示例已配置 `restart: unless-stopped`，Docker 启动后会恢复非手动停止的容器。服务配置修改后重新创建容器；密码不要提交到公开仓库。部署固定版本，不使用滚动标签，以免与桌面版本不匹配。
+关闭桌面不会关闭容器。示例已配置 `restart: unless-stopped`，Docker 启动后会恢复非手动停止的容器。服务配置修改后重新创建容器；密码不要提交到公开仓库。首次部署成功后，可按 [配对与客户端使用](SERVER_UPDATE.md#配对与客户端使用) 授权桌面托管更新。后续业务升级通过已配对入口安装签名 `.javdex-update`；管理器、Node 与系统更新仍由管理员更换基础镜像。
 
 ### 连接失败时
 
@@ -65,13 +67,15 @@
 
 ## 网络与凭据边界
 
-首版管理接口和网页面向可信局域网。应用本身不终止 TLS；跨不可信网络访问时，应由部署者在受控反向代理或私有网络入口终止 HTTPS，并限制来源。writer、网页登录 Cookie 和播放 grant 都应按凭据处理，不写入日志或分享链接。
+业务管理接口和网页面向可信局域网，默认使用 HTTP 8096；业务入口本身不终止 TLS。跨不可信网络访问时，应由部署者在受控反向代理或私有网络入口终止 HTTPS，并限制来源。独立更新入口使用 HTTPS 8097，桌面通过管理员提供的配对信息固定证书指纹。writer、网页登录 Cookie、播放 grant 和更新配对 JSON 都应按凭据处理，不写入日志或分享链接。
 
 `play.grant` 生成的资源地址固定有效 12 小时，持有者在期限内可读取对应资源。它是能力链接，不是永久媒体地址；不要转发到群聊、公开播放器列表或外部索引。需要立即收回时应撤销相关访问条件或停止服务，不能只等待网页退出。
 
 ## 版本
 
-桌面应用、服务镜像与网页包必须来自同一源码版本。握手发现应用版本不一致时，桌面进入版本不符状态，不打开本机权威库，也不自动改连其他地址。
+桌面应用、实际运行的服务端业务程序与其网页包必须来自同一源码版本。基础镜像标签只标识运行外壳及初始化种子；以业务握手/更新状态显示的版本为准。握手发现应用版本不一致时，桌面进入版本不符状态，不打开本机权威库，也不自动改连其他地址；独立更新配对仍可跨业务版本使用。
+
+0.8.0 正式资料库为 schema 19，0.9.0 首次打开时迁移至 schema 20。模型管理文档版本 4 属于桌面配置，不是数据库 schema 或服务端更新协议版本；模型与凭据配置仍保存在桌面，不随服务端备份转移。升级前另行备份桌面数据目录。
 
 ## 存储与进程
 
@@ -87,7 +91,7 @@
 **服务端媒体库的来源目录必须允许服务进程读写，包括实际使用的子目录及文件。** 即使只计划扫描和播放，首次添加来源目录也需要创建 `.javdex-root` 标记；重命名媒体文件、导出 NFO 和配套图片还会写入媒体目录。部署时不要将媒体库来源配置为只读目录。
 
 - **Docker 挂载权限**：媒体卷使用读写挂载（示例为 `/absolute/path/to/media:/media:rw`），不能设为 `:ro` 或 `read_only: true`。配置文件 `/config/server.json` 的只读挂载可以保留。
-- **宿主机文件权限**：读写挂载不会自动授予文件系统权限。还需在宿主机或 NAS 上，让业务进程的 UID/GID 拥有所选目录及其内容的读写权限；业务默认为 `node`（1000/1000），开发中的托管镜像由容器内 root 管理进程启动该非 root 子进程。Linux 目录还需要进入/遍历权限（`x`），上级目录也必须可遍历；网络共享需同时检查共享权限和 ACL。
+- **宿主机文件权限**：读写挂载不会自动授予文件系统权限。还需在宿主机或 NAS 上，让业务进程的 UID/GID 拥有所选目录及其内容的读写权限；业务默认为 `node`（1000/1000），托管镜像由容器内 root 管理进程启动该非 root 子进程，可通过 `JAVDEX_SERVER_UID/GID` 调整。Linux 目录还需要进入/遍历权限（`x`），上级目录也必须可遍历；网络共享需同时检查共享权限和 ACL。
 - **分别检查数据与媒体目录**：`/data` 可写并不代表 `/media` 可写。使用挂载下的子目录创建媒体库或恢复目录映射时，也需检查该子目录的权限。
 
 ## 开发者源码构建与配置
@@ -123,7 +127,14 @@ npm run server:build
 
 ## 启动与认主
 
-配置文件经 `--config` 或 `JAVDEX_SERVER_CONFIG` 提供。安装了 `javdex-server` 命令时使用下列形式；运行构建产物时将命令名替换为 `node /部署目录/index.js`，Docker 中使用镜像的 Node 入口：
+配置文件经 `--config` 或 `JAVDEX_SERVER_CONFIG` 提供。官方托管容器由 Compose 启动，认主和恢复应执行程序卷中当前版本的业务 CLI：
+
+```bash
+docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js bind --config /config/server.json
+docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js recover --config /config/server.json
+```
+
+不要直接运行镜像内 `/app/index.js`：它是初始化种子，不一定是当前业务版本。独立 Node 源码部署不含托管更新；运行构建产物时使用 `node /部署目录/index.js`，安装了 `javdex-server` 命令时使用下列形式：
 
 ```bash
 javdex-server start --config /etc/javdex/server.json
@@ -153,11 +164,13 @@ javdex-server recover --config /etc/javdex/server.json
 
 ## 更新与恢复限制
 
-开发代码改为单容器内置更新管理器，提供桌面在线更新与完整发行包离线上传；不用安装宿主机助手。首次从 0.8.0 采用该功能时仍需管理员更新部署，增加并保留程序卷，然后配对，见 [服务端更新](SERVER_UPDATE.md)。当前已发布 0.8.0 镜像没有这项能力，仍按下列手动方式升级。
+0.9.0 使用单容器内置更新管理器，提供正式版在线更新与完整签名包离线上传。0.8.0 镜像没有这项能力：首次升级须正常停服并完整备份 `dataDir`、`imagesDir`、部署配置及旧镜像，再采用 0.9.0 基础镜像、增加独立 `/program` 卷和更新端口；新卷首次启动直接采用镜像中的业务程序并迁移数据库，不会先为这次部署变更生成托管升级快照。具体步骤见 [部署与首次采用](SERVER_UPDATE.md#部署与首次采用)。
 
-更新前正常停止服务，完整备份 `dataDir`、`imagesDir` 及部署配置，桌面数据目录也需单独备份。将 `.env` 中的 `JAVDEX_VERSION` 改为新版本，执行上面的 `pull` 和 `up -d`；桌面安装包同时升级到相同版本。保留原数据卷，不要执行 `docker compose down -v`。
+已有托管程序卷时，更改 `.env` 的 `JAVDEX_VERSION` 并 `pull` / `up -d` 只更换基础镜像，不覆盖已选择的业务版本；后续业务切换需通过桌面配对入口完成。默认在线检查只读取正式 Release，预发布需显式离线导入；同版本、降级、错误架构、未知签名和不支持的 schema 路径均不能绕过。
 
-Beta 首次启动可能升级数据库。当前 schema 为 19，不应将升级后的库交给旧版应用；回退需恢复升级前完整备份及匹配版本，不可手工降低数据库版本。服务端备份不包含桌面采集草稿和运行记录，后者在桌面 `desktop-work.db` 中。资料库维护期间不能领取写入凭据。
+保留原数据与程序卷，不要执行 `docker compose down -v`。schema 20 不能交给 0.8.0 或其他旧版应用；回退需恢复升级前完整备份及匹配程序，不可手工降低 `user_version`、修改模型文档版本或清空程序卷强制切换。未发布或不完整的开发 schema 快照会被拒绝，应恢复受支持的升级前备份。提交前托管更新失败可自动恢复，提交后不自动覆盖新写入；出现“需要人工恢复”时保留现场，按 [安装、验证和恢复](SERVER_UPDATE.md#安装验证和恢复) 处理。
+
+服务端备份不包含桌面采集草稿和运行记录，后者在桌面 `desktop-work.db` 中，桌面数据目录也需单独备份。资料库维护期间不能领取写入凭据。
 
 ## 功能与使用边界
 

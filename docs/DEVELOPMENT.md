@@ -4,6 +4,8 @@
 
 本文面向从源码运行、修改或打包 Javdex 的开发者。安装和日常操作见使用指南。
 
+本文对应 0.9.0 稳定版准备，资料库使用 schema 20，模型管理文档使用格式 4；稳定版版本号不新增迁移。当前准备状态与验证边界见 [0.9.0 发布准备](reviews/v0.9.0-readiness.md)。本文描述源码与分发合同，不表示稳定版已发布或本次文档更新重新完成了原生构建、安装包及 GUI 验收。
+
 ## 环境与本地启动
 
 使用 Node.js 22、npm，以及 Windows、macOS 或 Linux。CI 使用 Node.js 22；依赖版本以仓库锁文件为准。
@@ -20,25 +22,25 @@ npm run dev
 
 开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../packages/contracts/src/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 
-## 0.8.0 数据库迁移
+## 数据格式与数据库迁移
 
 桌面本机“最近播放”不增加数据库表：`player/recentPlayback.ts` 在 Electron `userData/recent-playback.json` 中原子保存最多 1,000 个窄影片快照，同时限制 UTF-8 文件为 8 MiB，超出任一限制均从最旧记录开始淘汰，确保写入后仍可读取。按 mode／catalogId／serverId 的摘要隔离，不保存播放 URL、授权或资源路径。独立 `recentPlayback:*` IPC 读取／分页／移除／清空；桌面 `/playlists/0` 是虚拟入口，不能传给资料库清单接口。自动记录复用内置播放的真实启动信号与外部系统接受打开信号，晚到的资料读取不能跨资料库写入、覆盖较新播放或撤销已确认的清空／单条移除。资料库备份、服务器与 Web 不包含此数据。
 
-v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 **schema 19**：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级时执行 16 → 19；0.8.0 Beta 已使用 schema 19，不因正式版版本号变化重复升级。具体迁移以 `packages/library/src/db/migrations.ts` 为准。
+历史版本中，v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 schema 19：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级至 0.8.0 时执行 16 → 19，已有相同结构不重复升级。当前 0.9.0 使用 **schema 20**；从旧版升级会继续执行至 20，具体迁移以 [migrations.ts](../packages/library/src/db/migrations.ts) 为准。
 
 已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。正式 17 仍靠协议表结构识别，不能仅靠 `user_version = 17` 接受历史实验快照。
 
 旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `packages/library/src/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
 
-### 0.9.0 Beta：一次升级至 schema 20
+### 0.9.0：一次升级至 schema 20
 
-以远程 `main` 的已发布 0.8.0（`004dc15d`，schema 19）为基线，外部评分默认标记、默认评分回填和内置清单一次性升级至 schema 20。不再保留开发期 20 → 21 → 22 的分段迁移。新库直接使用最终结构；升级在同一事务中完成，失败时结构、数据和 `user_version` 一起回滚。`schema-v19.sql` 冻结实际 0.8.0 结构，验证升级后与新库一致、评分和自定义清单关系保留及重复打开不改写。
+以已发布 0.8.0（`004dc15d`，schema 19）为历史基线，外部评分默认标记、默认评分回填和内置清单一次性升级至 schema 20。不再保留开发期 20 → 21 → 22 的分段迁移。新库直接使用最终结构；升级在同一事务中完成，失败时结构、数据和 `user_version` 一起回滚。`schema-v19.sql` 冻结实际 0.8.0 结构，验证升级后与新库一致、评分和自定义清单关系保留及重复打开不改写。已有结构有效的 schema 20 数据库直接沿用，不因应用版本号改变重复迁移。
 
-旧开发版 21/22 以及结构不完整的开发版 20 明确拒绝，不自动降级或猜测修复；这不是已发布版本的升级路径。本次代码整理不改写个人数据库或模型目录。若已用开发版处理实际资料，先保留匹配的开发构建与升级前正式版备份，不要直接降低 `user_version`；开发备份也不会自动降版导入。
+旧开发版 21/22 以及结构不完整的开发版 20 明确拒绝，不自动降级或猜测修复；这不是已发布版本的升级路径。若已用开发版处理实际资料，先保留匹配的开发构建与升级前正式版备份，不要直接降低 `user_version`；开发备份也不会自动降版导入。
 
 版本只按实际发布的格式递增：结构未变的备份归档、协议和扫描审计保持原版本；新增本地模型配置、播放记录、缓存与运行库清单从各自 v1 开始。第三方库、模型权重版本和哈希不属于应用数据格式版本，不为统一编号而改动。
 
-内置云端模型目录在 0.8.0 中没有独立版本标记，本次定义为 1，而不是开发日期编号；后续随已发布目录逐次递增。模型管理文档因新增该字段从已发布 schema 3 一次升级到 4，已发布 schema 2/3 均直接迁入当前格式，不写中间版本，保存失败时不缓存或改写原文件。已有连接、用途、凭据引用及历史已发布设置升级路径保留。标为 schema 3 却含开发日期目录字段的未发布文档不会被当作正式 schema 3 自动迁移，原文件保留并明确报错。
+内置云端模型目录在 0.8.0 中没有独立版本标记，0.9.0 定义为 1，而不是开发日期编号；后续随已发布目录逐次递增。模型管理文档因新增该字段从已发布 schema 3 一次升级到 4，已发布 schema 2/3 均直接迁入当前格式，不写中间版本，保存失败时不缓存或改写原文件。已有连接、用途、凭据引用及历史已发布设置升级路径保留。标为 schema 3 却含开发日期目录字段的未发布文档不会被当作正式 schema 3 自动迁移，原文件保留并明确报错。已有有效格式 4 配置不因应用版本号改变再次升级。
 
 ## 检查与构建
 
@@ -94,7 +96,7 @@ Windows 本地使用内置播放时，先完成 `playback:native:build`，再运
 
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
 
-### 本地 AI 运行库（开发分支）
+### 本地 AI 运行库
 
 本地模型是独立底层能力，默认存储于 Windows 标准用户配置的 `%LOCALAPPDATA%/Javdex/local-ai`，其他平台及隔离配置使用 `<userData>/local-ai`，由 `main/services/localModels` 管理目录、文件、运行依赖及文本推理。该服务层不依赖播放器或字幕模块；AI 字幕通过注入的模型运行接口调用它，字幕缓存位于同级 `cache/ai-subtitles`，抽取音频和任务日志位于 `cache/local-ai/work/ai-subtitles`。普通文本翻译直接调用共用文本引擎，不创建字幕引擎或字幕工作目录。文件管理和各功能的用途绑定保持独立。权重路径为 `models/<family>/<publisher>/<revision>/<precision>/<upstream-filename>`，各精度附来源、哈希、大小与许可；引擎使用 `runtimes/<engine>/<version>/<platform-arch[-cpu]>`，不与模型家族版本绑在一起。`downloads/<sha256>` 保留续传数据七天，`staging/install-<uuid>` 与 `staging/import-<uuid>` 保留遗留文件一天；启动与下载前清理过期项，操作期间持有排他锁。迁移仅复制并逐文件校验模型、运行库、下载和存储标识，配置提交后清理原副本，保留无关文件；缓存不迁移。
 
@@ -112,11 +114,14 @@ Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校
 
 无 GUI 的实际推理检查：生成／提供一段公开或合成日语音频后，运行 `node --import tsx scripts/local-ai-platform-acceptance.ts --audio <音频>`。默认仅使用忽略目录 `out/ai-runtime-acceptance/`，不访问应用用户目录；首次联网下载权重，后续可用 `--offline`。Linux 验证镜像由 `scripts/local-ai-linux-acceptance.Dockerfile` 构建，只挂载此专用目录，在 `--network none` 下运行编译后的检查脚本；不是服务端或 GUI 验收。详细命令与边界见 [AI 字幕实施记录](AI_SUBTITLES_IMPLEMENTATION.md#macoslinux-运行库适配2026-10-07)。
 
-### 内置播放运行库（开发分支）
+<!-- 保留历史设计记录指向本节的链接。 -->
+<a id="内置播放运行库开发分支"></a>
+
+### 内置播放运行库
 
 Windows 新版 adapter 通过 `rendererFullscreenControls` 能力统一使用 renderer 经典工具栏与播放设置，原生 child window 只负责画面、输入和帧提交；旧 adapter 保留原生全屏控件。全屏按指针所在的顶部／底部区域分别显示标题栏／控制栏，鼠标在画面中间移动或暂停不会唤出它们；打开播放设置时同时固定显示标题栏与控制栏，关闭后恢复分区触发；键盘焦点、拖动和子菜单所有权保持操作区域可见。原生指针由 Windows 客户区像素换算为 DIP，再按网页缩放倍率换算为 CSS 像素，不能用播放时钟更新或任意鼠标活动唤出控制栏。全屏视频始终占满窗口，标题栏、控制栏和设置使用覆盖布局，显隐不改变 drawable 尺寸；renderer 报告这些表面及菜单与视频的交叠矩形，Windows 用窗口区域裁剪让 HTML 控件可见，关闭覆盖层后恢复完整画面。此改动同时涉及 renderer 与 addon，开发调试需重建两者并完整退出、重启 Electron；仅刷新页面仍会保留已加载的旧 addon。
 
-内置播放的实现与尚未通过的关口见 [实施计划](BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md)。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`，均不是可分发运行库。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，不把合成素材、截图、临时 Electron bundle 或开发运行文件收入 `app.asar`。
+内置播放的设计与分阶段验收边界见 [实施计划](BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
 原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Cocoa/WGL/X11 仅拥有平台窗口、GL context 和原生输入。macOS 构建先编译运行 C++ 的键位与核心回归，再生成 Cocoa addon；Linux CMake 构建运行共用核心与私有 X11 几何／句柄／键盘回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
 
@@ -136,17 +141,19 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 可选的 Linux 无 GUI 编译检查使用 `scripts/playback-linux-compile.Dockerfile`；需要本机已有可用 Docker，不能替代 GUI、GPU、音频或干净安装验收。用 `mktemp -d` 创建专用构建目录，只复制 `apps/desktop/src/main/player/native/` 为 `native/`、匹配 Electron 版本的 `include/node/` 为 `electron-headers/`，及 `scripts/playback-runtime.mjs`、`playback-runtime.test.mjs`、`packaging-runtime.mjs`、`playback-linux-helper-smoke.mjs` 为 `scripts/`，再将该 Dockerfile 复制到专用目录。不要把整个仓库、用户资料或凭据作为 context。镜像内安装 Debian 开发依赖、运行 C++ 回归及真实 ELF 搬移测试；`docker run --rm <构建镜像>` 仅验证 helper 加载、私有协议、EOF／destroy、无效 backend／句柄及无显示时的受控失败。此检查也由 Linux 开发构建调用，不创建 GL context，不播放素材。镜像中的系统 libmpv 没有来源闭包清单，检查必须拒绝将该 helper 单独作为正式运行库。
 
-经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供入口、依赖库及 `runtime.json`，例如 `darwin-arm64/`、`win32-x64/` 和 `linux-x64/`。macOS/Windows 的入口为 `playback.node`；Linux 必须为有执行权限的 `playback-helper`，不接受旧的同进程 `playback.node`。未指定时不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。已有 macOS Mach-O、Windows PE 与 Linux ELF 技术检查；Windows x64 已准备实际源码/许可闭包并生成未签名 ZIP/NSIS，实际解压版与安装版在去除开发 PATH 的子进程中通过播放回归，见 Windows 验收记录。可信签名、独立干净机器及其它平台的正式安装关口仍须实际验证，不能用清单或命令选择测试代替。
+经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供入口、依赖库及 `runtime.json`，例如 `darwin-arm64/`、`win32-x64/` 和 `linux-x64/`。macOS/Windows 的入口为 `playback.node`；Linux 必须为有执行权限的 `playback-helper`，不接受旧的同进程 `playback.node`。未指定时不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。技术检查覆盖 macOS Mach-O、Windows PE 与 Linux ELF；Windows 本地 ZIP/NSIS 的合成媒体播放回归见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，四目标源码构建与最终安装产物的验证合同见下文。独立干净机器、可信分发签名、公证与 GUI／硬解等验收须按具体记录判断，不能由清单或命令选择测试推定。
 
-上述“未指定时不加入”仅适用于普通本机开发打包。CI／GitHub Actions 必须提供完整运行库矩阵，否则 `beforePack` 立即报错；本地开发专用目录不能替代 CI 的来源清单。打包后运行 `npm run packaging:verify-playback-runtime`，逐个检查应用 Resources 的 `native-playback`、平台／架构、准确文件集合、动态依赖、许可材料及配套源码归档。macOS 验证外层 app 与每个原生文件的真实签名，保留输入 `pre-sign` 摘要，不把签名改变的字节误判为输入损坏，也不在资源封装后改写清单；非二进制仍核对原摘要。其它平台继续核对全部文件摘要。配套源码归档随 CI 产物和 Release 一起交付并加入 SHA256SUMS。
+上述“未指定时不加入”仅适用于普通本机开发打包。CI／GitHub Actions 必须提供完整运行库矩阵，否则 `beforePack` 立即报错；本地开发专用目录不能替代 CI 的来源清单。打包后运行 `npm run packaging:verify-playback-runtime`，逐个检查应用 Resources 的 `native-playback`、平台／架构、准确文件集合、动态依赖、许可材料及配套源码归档。macOS 验证外层 app 与每个原生文件的真实签名，保留输入 `pre-sign` 摘要，不把签名改变的字节误判为输入损坏，也不在资源封装后改写清单；非二进制仍核对原摘要。其它平台继续核对全部文件摘要。各平台配套源码归档留存为 CI 产物；Release 交付下述总源码包，并将总包加入 SHA256SUMS。
 
-0.9.0-beta.1 的发布流水线曾未传入运行库矩阵，因此安装包不包含内置播放运行库；既有 CI 通过不能代表该能力已入包。此门禁修复防止再次静默发布，但不代替三平台实际运行库的准备与接入。已公开 Beta 的标签、镜像与安装包不覆盖；修复后的再次发布须使用新版本。
+历史上曾有未传入运行库矩阵的公开安装包，后续源码构建与打包门禁的完成不追溯改变这些旧附件。已公开版本的标签、镜像与安装包不覆盖；改变分发内容须使用新版本。
 
-### CI 固定源码构建
+### 固定源码构建与分发验证
 
 `npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入，输出到 `out/playback-runtime/<platform>-<arch>`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
 
-当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。用户已确认只保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
+当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.4.1 和 Node SDK headers 24.18.1；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
+
+当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。构建仅保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
 
 关闭 mpv 可选自动探测时，Windows 仍显式启用官方 `win32-threads` 核心后端，与其原生计时实现配套；它不是额外播放功能。macOS/Linux 保持各自原有线程后端，不通过重新打开全部自动探测解决核心依赖。
 
@@ -160,7 +167,7 @@ Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库�
 
 源输入保留各上游独立的版本、许可、原始归档和构建来源，静态嵌入依赖列于 `build.json`，不是把它们重新授权为 GPL。两个二进制所有者分别为 libmpv 和 Javdex 原生适配器；完整原始归档、Javdex 首选原生源码、Electron headers、Node/node-gyp 声明及构建配方随独立的 `Javdex-Playback-Sources-*` 交付，许可原文同时进入应用。系统编译器/SDK、音频、字体及 GPU driver ABI 仍是宿主前提，不由源码包替代。
 
-`packaging:verify-playback-runtime` 除静态合同与签名检查，还在清除开发库搜索路径后实际加载包内 addon（Electron ABI）／helper，再从包内相对位置加载 libmpv，初始化核心所需的安全选项并解码原创 PCM WAV 到正常 EOF。不会以 `require` 成功代替解码，也不把无显示检查称作 GUI/GL、硬解、多格式、网络或独立干净机器验收。Linux `.deb` 声明保留 Electron 默认依赖，加上 X11/Xft、GL、ALSA、VA-API 的宿主包；AppImage 不安装系统包，宿主须具备这些显示/音频/驱动 ABI，不需要系统安装 mpv/FFmpeg。实际验证及剩余边界见 [源码构建复核](reviews/playback-ci-source-build.md)。
+`packaging:verify-playback-runtime` 除静态合同与签名检查，还在清除开发库搜索路径后实际加载包内 addon（Electron ABI）／helper，再从包内相对位置加载 libmpv，初始化核心所需的安全选项并解码原创 PCM WAV 到正常 EOF。不会以 `require` 成功代替解码，也不把无显示检查称作 GUI/GL、硬解、多格式、网络或独立干净机器验收。Linux `.deb` 声明保留 Electron 默认依赖，加上 X11/Xft、GL、ALSA、VA-API 的宿主包；AppImage 不安装系统包，宿主须具备这些显示/音频/驱动 ABI，不需要系统安装 mpv/FFmpeg。早期 verify-only CI 的实际验证及当时边界见 [源码构建复核](reviews/playback-ci-source-build.md)。
 
 `runtime.json` v1 的输入合同如下；清单由实际运行库构建生成，不手工填入虚假的摘要：
 
@@ -171,23 +178,32 @@ Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库�
 | `platform` / `arch` / `electronVersion` | 匹配正在打包的 Electron 平台、架构及实际版本；当前架构为 `arm64` / `x64` |
 | `mpvVersion` | 与 `components` 中名为 `mpv` 的版本一致 |
 | `files` | 相对路径到 SHA-256 的对象；精确覆盖全部文件，唯独不包含清单自身。禁止越界路径、符号链接和额外文件 |
-| `components` | 1–128 个组件；每项包含 `name`、`version`、`license`、`binaries`，以及指向清单内非空文件的 `licenseFile`、`sourceArchive`、`buildRecipe`；所有二进制有且仅有一个来源所有者，包括 Javdex addon 或 Linux helper。首轮 Windows 闭包含 106 个分别保留来源身份的组件，因此上限由 100 调整为 128；本轮精简配置为 76 个组件 |
+| `components` | 1–128 个组件；每项包含 `name`、`version`、`license`、`binaries`，以及指向清单内非空文件的 `licenseFile`、`sourceArchive`、`buildRecipe`；所有二进制有且仅有一个来源所有者，包括 Javdex addon 或 Linux helper。当前固定源码构建记录 `mpv` 与 `javdex-native` 两个二进制所有者，静态依赖各自的来源、许可及构建选项保留在原始源码、许可汇编与 `build.json` 中；历史 Windows 多 DLL 配置的 106／76 项不代表当前构建 |
 
 `beforePack` 核查完整 v1 输入；`afterPack` 再核查后，只将全部二进制、各组件的许可文件与 `SOURCE-ACCESS.txt` 复制到应用 Resources 的 `native-playback/`，随后由现有流程签名。分发目录的 `runtime.json` 也是独立的初版 v1 投影：`files` 精确覆盖安装内容，保留组件来源引用，`sourceBundle` 绑定独立源码包的文件名、SHA-256、原输入清单摘要及当前打包工具摘要。构建输入禁止出现 `sourceBundle`，分发投影必须包含它；`validatePackagedPlaybackRuntime` 验证该投影，拒绝源码/构建资料混入。两种用途不是 v1 → v2 的升级关系，不能互相替代，投影不能绕过完整输入材料校验。
 
 完整非二进制材料、原 v1 清单和当前打包工具另生成 `Javdex-Playback-Sources-<version>-<platform>-<arch>-<input hash>-<tools hash>.tar.gz`，位于 `dist/`，不装入应用。使用已有系统 `tar`，不存在或归档失败会停止打包；复用源码包前重新验证摘要。同名 `.runtime.json` 为 CI 汇总使用的分发投影副本，包含原源码包绑定与二进制摘要，不进入 Release。输入目录保持完整，不通过删除源码或伪造许可绕过门禁。
 
-后续 Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `node scripts/aggregate-playback-sources.mjs <artifact-directory>`，verify-only 也运行此任务；总包成功后才允许发布服务端镜像。要求四种目标与六个桌面包齐全，核对原归档、输入清单、打包工具、原生源码版本、来源/许可证/配方及二进制绑定。Release 仅交付一个 `Javdex-Playback-Sources-<version>.tar.gz`，四份平台源码包仍保留为 CI 产物；Beta.2 及以前的公开附件不变。`sources/` 和 `LICENSES/` 以完整 SHA-256 定址去重，`platforms/` 保留平台记录和打包脚本，`manifests/` 记录逻辑材料路径、原输入绑定及安装包摘要。同名不同内容不合并；原始上游压缩归档保持完整，外层未压缩 tar 拆成原始头部/数据/填充片段，以共享内部相同上游文件并精确恢复原 tar 字节。汇总过程逐文件往返验证，不把四个压缩包再次套一层作为去重。
+Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `node scripts/aggregate-playback-sources.mjs <artifact-directory>`，verify-only 也运行此任务；总包成功后才允许发布服务端镜像。要求四种目标与六个桌面包齐全，核对原归档、输入清单、打包工具、原生源码版本、来源/许可证/配方及二进制绑定。Release 仅交付一个 `Javdex-Playback-Sources-<version>.tar.gz`，四份平台源码包仍保留为 CI 产物；既有公开版本的附件不变。`sources/` 和 `LICENSES/` 以完整 SHA-256 定址去重，`platforms/` 保留平台记录和打包脚本，`manifests/` 记录逻辑材料路径、原输入绑定及安装包摘要。同名不同内容不合并；原始上游压缩归档保持完整，外层未压缩 tar 拆成原始头部/数据/填充片段，以共享内部相同上游文件并精确恢复原 tar 字节。汇总过程逐文件往返验证，不把四个压缩包再次套一层作为去重。
 
-原生 CI 在上传前执行 `scripts/check-playback-installers.mjs`：检查实际 EXE/ZIP/DMG/DEB/AppImage 内的运行库，与已通过包内验证的未封装应用逐文件匹配，macOS 同时核验挂载 app 签名并匹配签名后字节。生成 `.installers.json` 来源/摘要回执，仅留作 CI 产物；汇总验证最终文件摘要及嵌入清单摘要与回执一致，不仅按安装包文件名推定来源。提取器只在隔离 CI 执行安装器，不用于本机用户环境。原生源码归档还检查必需构建脚本、平台源码、版本、固定 SDK 与实际 Node headers；危险 tar 通过 parser.abort 拒绝并清理本轮临时目录。
+原生 CI 在上传前执行 [check-playback-installers.mjs](../scripts/check-playback-installers.mjs)：检查六个实际安装产物内的运行库，与已通过包内验证的未封装应用逐文件匹配，macOS 同时核验挂载 app 签名并匹配签名后字节。生成 `.installers.json` 来源/摘要回执，仅留作 CI 产物；汇总验证最终文件摘要及嵌入清单摘要与回执一致，不仅按安装包文件名推定来源。提取器只在隔离 CI 执行安装器，不用于本机用户环境。原生源码归档还检查必需构建脚本、平台源码、版本、固定 SDK 与实际 Node headers；危险 tar 通过 parser.abort 拒绝并清理该次临时目录。
+
+| 原生构建目标 | 最终安装产物 | 验证方式 |
+| --- | --- | --- |
+| Windows x64 | NSIS `.exe`、`.zip` | 静默安装 EXE、提取 ZIP，匹配运行库及来源绑定 |
+| macOS x64 | Intel `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
+| macOS arm64 | Apple Silicon `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
+| Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配运行库及来源绑定 |
+
+文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。0.9.0 稳定版须对自身提交及产物执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把上述无显示门禁记为新增 GUI、硬解或干净机器验证；当前状态见 [发布准备](reviews/v0.9.0-readiness.md)。
 
 解开总包后，使用 Node.js 22+ 执行 `node restore.mjs windows-x64 <新目录路径>`（目标还包括 `macos-x64`、`macos-arm64`、`linux-x64`）；目标目录必须尚不存在。恢复工具先验证全部引用材料，再恢复原 `reviewed-runtime/`、`packaging-tools/` 和说明文件，保留文件模式。按平台 `build.json` 的工具链、补丁和配方重建；恢复工具不执行构建脚本。原单平台压缩包摘要记录来源，不能用来校验总包；总包摘要见 Release 的 SHA256SUMS。`SOURCE-ACCESS.txt` 同时说明公开总包与原 CI 绑定；分发安装包时须继续提供对应源码访问方式，不能仅提供未交付的文件名。普通用户无需下载源码包；系统 SDK、编译器和签名不由恢复工具提供。
 
 Windows 桌面打包保留当前架构的 clipboard/console 原生模块，排除其它平台与架构；桌面 `out/server` 不进入应用，局域网前端 `out/web` 保留。Photon 使用主进程 chunk 旁的 WASM，排除 node_modules 中的重复文件。Windows `files` 规则必须同时保留桌面允许列表：打包器把平台规则建成独立文件集，只有排除项会默认包含仓库全部文件；配置归一化回归及实际包内容检查共同覆盖这个边界。
 
-Windows x64 精简播放库的本地构建入口为 `scripts/build-windows-playback-libraries.mjs`，显式传入 `--sources`、`--prefix`、`--toolchain`、`--msys`、`--python`、`--work` 和可选 `--jobs`。需要已准备的 FFmpeg 9.0.2/mpv 0.41.0 源码、CLANG64 依赖前缀、Clang、MSYS make/bash 及 Python Meson；入口不下载或安装工具。它保留解码、网络、字幕、WGL/WASAPI 和硬解接口，移除视频编码/封装、VapourSynth/Python、采集与终端画面依赖，仅保留 PNG/MJPEG 图像编码器。
+历史 Windows x64 精简播放库另有本地构建入口 `scripts/build-windows-playback-libraries.mjs`，显式传入 `--sources`、`--prefix`、`--toolchain`、`--msys`、`--python`、`--work` 和可选 `--jobs`。需要已准备的 FFmpeg 9.0.2/mpv 0.41.0 源码、CLANG64 依赖前缀、Clang、MSYS make/bash 及 Python Meson；入口不下载或安装工具，也不是上述 Release 固定源码构建入口。它保留解码、网络、字幕、WGL/WASAPI 和硬解接口，移除视频编码/封装、VapourSynth/Python、采集与终端画面依赖，仅保留 PNG/MJPEG 图像编码器。
 
-构建后以 `scripts/stage-windows-playback-profile.mjs --original <完整已审输入> --prefix <构建前缀> --destination <新空目录> --build <工作目录> --evidence <准备材料目录>` 生成独立 v1 输入；准备材料目录必须包含 `preparation.json` 与 `toolchain-lock.json`，工具链清单也可用 `--toolchain-lock <文件>` 显式指定。缺少清单在写入目标前拒绝，不依赖某次验收缓存的固定目录。之后从原 addon 的 PE 导入闭包选取 DLL，保留每个组件的源码、许可及配方，并加入本轮构建脚本、配置和工具记录。未知来源或缺失依赖会停止，不直接修改原矩阵。当前本机矩阵为 `out/playback-runtime/optimized/win32-x64`，打包设置 `JAVDEX_PLAYBACK_RUNTIME_DIR` 为 `out/playback-runtime/optimized`；实际安装/播放范围见 Windows 验收记录。
+构建后以 `scripts/stage-windows-playback-profile.mjs --original <完整已审输入> --prefix <构建前缀> --destination <新空目录> --build <工作目录> --evidence <准备材料目录>` 生成独立 v1 输入；准备材料目录必须包含 `preparation.json` 与 `toolchain-lock.json`，工具链清单也可用 `--toolchain-lock <文件>` 显式指定。缺少清单在写入目标前拒绝，不依赖某次验收缓存的固定目录。之后从原 addon 的 PE 导入闭包选取 DLL，保留每个组件的源码、许可及配方，并加入该次构建脚本、配置和工具记录。未知来源或缺失依赖会停止，不直接修改原矩阵。历史本机验收使用 `out/playback-runtime/optimized/win32-x64`，当时打包设置 `JAVDEX_PLAYBACK_RUNTIME_DIR` 为 `out/playback-runtime/optimized`；实际安装/播放范围见 Windows 验收记录。
 
 不会覆盖已存在的应用运行库目录。macOS 二进制必须包含目标架构；非系统动态依赖必须通过 `@loader_path` 指向该运行库清单内的二进制，禁止开发机绝对路径、依赖搜索型 `@rpath`、越界依赖和外部 rpath。动态库自身的 install name 可为规范的 `@rpath/<文件名>`，它不是一次依赖搜索。技术检查与搬移回归入口为 `npm run test:packaging`。
 
@@ -197,21 +213,23 @@ Linux 使用 ELF header 和 GNU `readelf -dW` 核对 64 位小端、目标 x64/a
 
 RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH 存在时不误用被覆盖的 RPATH；helper 直接链接的 libmpv 及所有非系统 NEEDED 必须在这些目录中精确命中清单。helper 与库均计入摘要、许可／源码所有者并在复制后复核；执行权限不在内容摘要中，另行检查。禁止绝对／逃逸／空搜索项及动态 audit/filter 间接加载。系统依赖仅放行代码中明确列出的 glibc/C++ ABI、X11（含 Xrandr/Xss/Xpresent）、GLVND、Xft/fontconfig/freetype、ALSA 与 VA-API 名称（不同架构 loader 分开）；这些是宿主提供的显示/字体/音频/驱动前提，不代表可省略 mpv、FFmpeg、其它解码依赖或许可记录。该静态检查不能发现运行时 `dlopen` 的全部插件，不阻止用户自行设置 `LD_LIBRARY_PATH`／`LD_PRELOAD` 等 loader 环境，也不核对最低 GLIBC/C++ 符号版本；目标发行版、驱动及 ABI 基线仍须实际分发审核与干净安装。
 
-代码签名可能改变二进制字节，因此保留的 `pre-sign` 摘要只证明输入与搬移阶段一致，不能拿它比较签名后的文件。最终包须另做签名完整性和分发产物摘要检查；正式播放运行库的签名/安装验收仍未完成，不由此输入清单自动推断。
+代码签名可能改变二进制字节，因此保留的 `pre-sign` 摘要只证明输入与搬移阶段一致，不能拿它比较签名后的文件。最终包另做签名完整性、签名后字节与分发产物摘要检查；上述历史记录包含 macOS 签名及六包来源核验，但不由此推定可信签名身份、公证、独立干净机器或后续版本已通过。
 
-**摘要不是签名，清单不是许可合规或播放验收证明。** Javdex 采用 GPL-3.0-or-later，应用 `LICENSE`、`NOTICE`、workspace 元数据、锁文件及当前公开许可说明已同步；此前 MIT 声明保留在 `LICENSES/Javdex-MIT.txt`，既有版本不追溯改写。构建来源、选项、源码与二进制对应关系、全部间接依赖及分发义务仍需复核，第三方代码保留各自版权和许可。mpv 默认构建与可选 LGPL 构建、FFmpeg 构建选项及依赖的许可边界分别见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 和 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)。当前 macOS 开发库仍依赖 Homebrew，Linux 隔离检查使用 Debian 开发库；尚未提供经过这些关口的正式运行库或干净安装包。
+**摘要不是签名，清单不是许可合规或播放验收证明。** Javdex 采用 GPL-3.0-or-later，应用 `LICENSE`、`NOTICE`、workspace 元数据、锁文件及当前公开许可说明已同步；此前 MIT 声明保留在 `LICENSES/Javdex-MIT.txt`，既有版本不追溯改写。构建来源、选项、源码与二进制对应关系、全部间接依赖及分发义务仍需逐版本复核，第三方代码保留各自版权和许可。实际版本、许可材料与源码交付见 [第三方说明](THIRD_PARTY_NOTICES.md#内置播放运行库)。本机原生开发可使用 Homebrew／系统开发库，Linux 隔离编译检查可使用 Debian 开发库；Release 使用固定源码构建并交付配套总源码包。两条构建路径及历史验收范围须分别判断。
 
 部分 macOS/Windows 播放回归以隔离资料目录运行：先生成 `playback:native:build`、`desktop:build`（远程另需 `server:build`），再运行 `node scripts/playback-media-acceptance.mjs` 检查合成素材，或 `node scripts/playback-subtitle-acceptance.mjs` 定向检查复杂 ASS 与原创 PGS；可加 `--bitmap-only` 缩短图像字幕回归。`npm run test:playback:fixtures` 独立核对原创 PGS 字节/像素结构，不依赖 FFmpeg、GUI 或播放运行库，已纳入根 `npm test`。远程使用 `node scripts/playback-remote-acceptance.mjs --media-matrix`；追加 `--system-subtitle-picker` 时会等待真实系统选择器分别选择生成的 SRT/ASS，不适合无人值守 CI，也不 mock 文件选择器。具体文件、像素证据、失败诊断及未覆盖范围见 [字幕验收说明](BUILTIN_PLAYBACK_SUBTITLE_ACCEPTANCE.md) 与 [PGS 验收合同/结果](BUILTIN_PLAYBACK_BITMAP_ACCEPTANCE.md)。Windows 原生输入可运行 `node scripts/playback-windows-input-acceptance.mjs`，它准备隔离暂停素材并写入只读状态，仍需实际鼠标/键盘检查及解锁的桌面。Windows GUI 宿主还接受 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 指向实际解压/安装后的绝对 exe 路径；该子进程不带源码入口参数，使用空 cwd、Windows 系统 PATH 并移除开发 mpv prefix，诊断桥从包内 Resources 加载。仍不代表独立干净机器或发布验收。
 
 `node scripts/playback-close-acceptance.mjs` 检查播放中正常关闭主窗口：窗口确实销毁，进程退出前内核已释放，随后应用正常退出。不要把清理移到可能被否决的 `close` 事件；本机实测还发现该事件中拆除活跃原生视图会让窗口留存。Windows 为 `closed` 清理保留私有隐藏 drawable/context，实际接受关闭时内核仍存活，原窗口销毁后内核释放、零窗口正常退出已通过；不用独立可见播放窗口代替主窗口嵌入。
 
-## 官网开发
+## 服务端构建与更新
 
 服务端源码构建、Docker 部署及更新备份见 [服务端部署指南](SERVER_MODE.md)。当前能力与接口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，未完成验收和历史测试边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。服务端部署不需要 Electron，也不运行 `setup:desktop`。
 
-`server:build` 同时生成业务入口 `out/server` 与容器内管理入口 `out/updater`，后者也可单独运行 `server:updater:build` 构建，不是需要用户额外安装的宿主机程序。镜像生成对应架构的完整发行描述，发布流程从已验证镜像取出 JS、worker、Web 和原生依赖，生成内层 `.tar.gz`，再与签名清单封装为每架构一个 `.javdex-update` 并验证读回摘要。只发布两个单文件包，不再发布分离 JSON 或裸归档，不在升级时运行 npm 安装。运输格式、在线读取与断点续传见 [服务端更新](SERVER_UPDATE.md)，实现位于 `packages/http/src/updateBundle.ts`；旧 Beta 格式不提供兼容分支。
+`server:build` 同时生成业务入口 `out/server` 与容器内管理入口 `out/updater`，后者也可单独运行 `server:updater:build` 构建，不是需要用户额外安装的宿主机程序。镜像生成对应架构的完整发行描述，发布流程从已验证镜像取出 JS、worker、Web 和原生依赖，生成内层 `.tar.gz`，再与签名清单封装为每架构一个 `.javdex-update` 并验证读回摘要。只发布两个单文件包，不再发布分离 JSON 或裸归档，不在升级时运行 npm 安装。运输格式、在线读取与断点续传见 [服务端更新](SERVER_UPDATE.md)，实现位于 `packages/http/src/updateBundle.ts`；旧预发布格式不提供兼容分支。
 
-更新流程测试为 `server:updater:test`，实际浏览器入口为 `test:ui:server-update`；`server:updater:smoke` 必须在 Linux Docker 环境运行，覆盖真实 0.8.0/schema 19、原生闭包、迁移后 worker 失败、容器中断恢复、单容器计数、非 root 业务与持久版本选择，已接入 amd64/arm64 CI。不能把本机合成进程测试或构建通过当成 Linux 容器验收。运行外壳、程序卷、发布签名和两层更新说明见 [服务端更新](SERVER_UPDATE.md) 与 [ADR-0030](adr/0030-manage-server-releases-inside-one-container.md)。
+更新流程测试为 `server:updater:test`，实际浏览器入口为 `test:ui:server-update`；`server:updater:smoke` 必须在 Linux Docker 环境运行，覆盖真实 0.8.0/schema 19、原生闭包、迁移后 worker 失败、容器中断恢复、单容器计数、非 root 业务与持久版本选择，已接入 amd64/arm64 CI。不能把本机合成进程测试或构建通过当成 Linux 容器验收。运行外壳、程序卷、发布签名和两层更新说明见 [服务端更新](SERVER_UPDATE.md) 与 [ADR-0031](adr/0031-manage-server-releases-inside-one-container.md)。
+
+## 官网开发
 
 官网源码位于 `website/`，图片使用 `docs/images/` 中的资源。
 
@@ -254,9 +272,9 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 草稿应用、丢弃和影片删除后的工作清理依靠持久意图、catalog 回执及可重试清理恢复，不依赖跨库原子性。首次旧记录迁移保留源数据，ready 后不再复制。具体连接归属和提交顺序见 [服务端合同中的工作存储说明](SERVER_MODE_CONTRACT_INVENTORY.md#桌面工作存储与恢复)。涉及这些路径时，用独立 catalog/work 数据库及关闭重开测试验证恢复；同库测试不能代替跨存储验证。
 
-### 0.8.0 后的四项维护性优化
+### 共享用例与控制器边界
 
-本轮按以下顺序实施，不改变数据库 schema、业务取舍、HTTP 输入或界面布局：
+以下四项维护性优化已实施；这些重构本身不改变数据库 schema、业务取舍、HTTP 输入或界面布局：
 
 | 阶段 | 实现与职责 | 验收入口 |
 |---|---|---|
@@ -265,7 +283,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 3. 详情操作流程 | `useVideoLifecycleController` 拥有预览、提交、失败重读和操作 ID；`useVideoResourceController` 拥有资源读取、标签编辑和删除。页面只接线、展示与导航，旧请求不能修改新的影片操作状态。 | `videoDetailControllers.test.tsx` 的用户操作、重复提交、失败重试及换页测试 |
 | 4. 共享查询入口 | `packages/library/src/catalog/videoQueryService.ts` 拥有作用域详情、资源归属检查和投影；桌面保留查询 worker，服务端显式提供路径投影和无成员资料读取策略。 | `videoQueryService.test.ts`、Node HTTP 测试、desktop/server 边界检查及 `catalog-query-boundary.test.mjs` |
 
-本轮远程 schema 收敛范围为 `videos.sources` 和生命周期预览／提交结果，不是宣称全部管理响应已经迁移。六个旧操作名的 schema 仍保留，但手动移出已停用；移动后的无来源成员归属自动清理，兼容结果 schema 不代表重新开放旧操作。共享包也未一刀切取消通配导出：已迁移的两个宿主入口禁止重新直接引用影片仓储，其余旧入口按业务改动逐步迁移。保留本地直连、服务端 HTTP、宿主路径策略和独立 workStore，不引入通用 RPC 框架或全局依赖注入容器。
+此处远程 schema 收敛范围为 `videos.sources` 和生命周期预览／提交结果，不是宣称全部管理响应已经迁移。六个旧操作名的 schema 仍保留，但手动移出已停用；移动后的无来源成员归属自动清理，兼容结果 schema 不代表重新开放旧操作。共享包也未一刀切取消通配导出：已迁移的两个宿主入口禁止重新直接引用影片仓储，其余旧入口按业务改动逐步迁移。保留本地直连、服务端 HTTP、宿主路径策略和独立 workStore，不引入通用 RPC 框架或全局依赖注入容器。
 
 回检约束：
 
@@ -274,7 +292,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 - 资源控制器提供打开／关闭／完成动作，不暴露目标状态 setter。影片作用域之外另有编辑和移动会话编号：同影片关闭后重开也隔离旧响应；同步提交锁防双击，失败可重试。成功的旧请求仍使列表缓存失效，但不关闭新会话、不提示或导航到新页面。
 - 回归入口为 `npm test` 与 `npm run server:test`；本机自动化通过不代表完整 GUI、跨平台安装或 Linux 故障注入验收。环境跳过项需单独报告。
 
-2026-09-28 本轮回检：`npm test` 退出码为 0（包含架构检查、lint、类型检查、打包脚本测试；Electron 3297 通过、2 项 Windows 路径语义测试跳过）；`npm run server:test` 退出码为 0（47 通过、6 项真实挂载／mpv／Linux 环境测试跳过）。详情控制器新增用例先复现重复保存与关闭后延迟重开，再验证修复；本轮未执行完整 GUI 或跨平台安装验收。
+历史回检（2026-09-28）：`npm test` 退出码为 0（包含架构检查、lint、类型检查、打包脚本测试；Electron 3297 通过、2 项 Windows 路径语义测试跳过）；`npm run server:test` 退出码为 0（47 通过、6 项真实挂载／mpv／Linux 环境测试跳过）。详情控制器新增用例先复现重复保存与关闭后延迟重开，再验证修复；该轮未执行完整 GUI 或跨平台安装验收，计数不代表当前版本重新运行的结果。
 
 ## 按任务查阅文档
 

@@ -15,12 +15,16 @@ test('stable and manually marked prereleases retain their channel', () => {
   assert.equal(releaseMetadata('0.8.0').prerelease, false)
   assert.equal(releaseMetadata('0.8.0', undefined, true).prerelease, true)
 })
-test('Beta.3 uses a new prerelease tag without replacing earlier betas', () => {
-  assert.deepEqual(releaseMetadata('0.9.0-beta.3', ''), {
-    tag: 'v0.9.0-beta.3', version: '0.9.0-beta.3', prerelease: true
+test('0.9.0 uses its own stable tag and cannot replace a prerelease tag', () => {
+  assert.deepEqual(releaseMetadata('0.9.0', ''), {
+    tag: 'v0.9.0', version: '0.9.0', prerelease: false
   })
-  assert.throws(() => releaseMetadata('0.9.0-beta.3', 'v0.9.0-beta.1'))
-  assert.throws(() => releaseMetadata('0.9.0-beta.3', 'v0.9.0-beta.2'))
+  assert.deepEqual(releaseMetadata('0.9.0', 'v0.9.0'), {
+    tag: 'v0.9.0', version: '0.9.0', prerelease: false
+  })
+  for (const tag of ['v0.9.0-beta.1', 'v0.9.0-beta.2', 'v0.9.0-beta.3']) {
+    assert.throws(() => releaseMetadata('0.9.0', tag))
+  }
 })
 test('mismatched or unsafe tags fail before publishing', () => {
   assert.throws(() => releaseMetadata('0.8.0', 'v0.7.1'))

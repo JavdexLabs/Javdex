@@ -1,26 +1,70 @@
 # 服务端模式：当前状态与后续范围
 
-核对日期：2026-09-27。`0.8.0` 正式版已发布，发布源码为 `8a819bd`，桌面安装包与双架构服务镜像已公开，代码已合入远程 main；检查与结果见 [0.8.0 发布复核](reviews/v0.8.0-release-audit.md)。已发布的 Beta 1 / Beta 3 及未发布产物的 Beta 2 记录见 [Beta 发布复核](reviews/beta2-release-audit-2026-09-27.md)。下文 PR #115、0.7.1 和更早提交属于历史验收记录，不能代替本轮复验。
+核对日期：2026-10-15。当前目标是 **0.9.0 正式版发布准备**，资料库 schema **20**、桌面模型管理文档版本 **4**。版本文件已统一为 0.9.0，正式发布与最终验证状态见 [0.9.0 发布准备检查](reviews/v0.9.0-readiness.md)。本文不表示 Release 已发布、最终 CI 已通过或代码已合入 main。
 
-**独立 Node 宿主、桌面远程模式、C1–C7 与备份恢复已实现。** 0.8.0 发布按当前发布工作流检查；历史 S13 全矩阵中未复验的场景继续保留其证据边界，不能因正式发布自动标为全部通过。当前功能和部署说明已同步到正式版；后续从实际问题及本页未完成范围继续，无需重新执行历史 S00–S12 或已经完成的 T0–T7。
+## 0.9.0 发布准备
 
-2026-10-15 准备发布 `0.9.0-beta.3`，汇总播放源码并采用单文件服务端升级格式，不兼容历史 Beta 的分离更新文件。根/workspace/锁文件统一为 Beta.3，schema 20 与模型管理文档 4 保持，正式 0.8.0 下载入口不变。用户授权发布完成后合入 main；当前发布与合入状态见 [Beta.3 发布复核](reviews/v0.9.0-beta.3-release-audit.md)，历史记录见 [Beta.2](reviews/v0.9.0-beta.2-release-audit.md)、[Beta.1](reviews/v0.9.0-beta.1-release-audit.md)和[发布检查](reviews/v0.9.0-beta.1-readiness.md)；下列历史本地实现记录不能替代最终 CI 结果。
+独立 Node 宿主、桌面远程模式、C1–C7、备份恢复与单容器托管更新均已有实现。服务端更新使用两个架构各自独立的单文件 `.javdex-update`，发布时还需同源码版本桌面、Linux amd64/arm64 镜像及校验和。部署示例由发布说明链接到对应源码提交，不再作为下载附件。现行部署与操作按 [部署说明](SERVER_MODE.md) 和 [服务端更新](SERVER_UPDATE.md) 维护。
 
-## 当前变更：单容器托管更新（0.9.0 Beta）
+| 事项 | 当前状态与待核验范围 |
+|---|---|
+| 版本与发布元数据 | 根/workspace/锁文件已统一为 0.9.0，工作区版本一致性检查已通过；tag、发布说明和正式版/预发布标记仍须在发布执行前核对 |
+| 桌面安装与播放源码 | 按 Release 工作流核对各目标平台安装包、运行时检查和对应播放源码总包，不能沿用历史候选哈希 |
+| 双架构服务端 | 逐架构核对最终提交的构建、测试、Linux 单容器升级和镜像 smoke；工作流已配置不代表本次运行成功 |
+| 签名与附件 | 发布时核对 Ed25519 签名配置、镜像内公钥、源码身份、两个 `.javdex-update` 与 `SHA256SUMS.txt`；私钥不得进入镜像、升级包或源码 |
+| 首次部署与在线正式版 | 分别验证新卷部署、0.8.0 正常停服后更换基础镜像、已有程序卷保留选择，以及正式 Release 可用后的在线检查/准备/安装；合成烟测不能代替这些实际发布路径 |
+| 发布状态 | 正式 Release、双架构镜像及正式附件尚待发布执行与核验，以 [发布准备检查](reviews/v0.9.0-readiness.md) 的实际记录为准 |
 
-按用户确认的方案，官方容器入口改为常驻管理进程监督非 root 业务子进程。桌面提供独立更新配对、在线准备、签名完整发行包离线续传和停服确认；程序卷持久保存发行选择、凭据、日志与升级前快照。提交前失败恢复原程序和资料，提交后不自动覆盖新写入。无需宿主机助手或 Docker socket；管理器、Node 与系统维护仍通过替换镜像完成。合同入口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md#托管更新)，部署与操作见 [服务端更新](SERVER_UPDATE.md)，决策见 [ADR-0031](adr/0031-manage-server-releases-inside-one-container.md)。
+## 托管更新与升级边界
 
-本轮 macOS arm64 工作区验证：全量 `npm test` 3808 项通过、18 项跳过；更新专项 24 项通过、1 项 Linux 文件锁测试跳过；`server:test` 48 项通过、6 项跳过，包含真实查询 worker 的待验证隔离。服务端类型、改动文件 lint、桌面与服务端构建及生产依赖闭包检查通过。浏览器覆盖配对、版本不符入口、停服确认、进度、错误详情及重连，两种尺寸和主题通过。
+官方容器入口是常驻管理进程，监督非 root 业务子进程。桌面提供独立 HTTPS 配对、正式版在线准备、单文件离线续传和停服确认。`/program` 持久保存当前/上一版业务、发行选择、配对凭据、任务日志与最近一次升级前快照；提交前失败恢复原程序和资料，提交后只继续激活，不自动覆盖新写入。无需宿主机助手或 Docker socket；管理器、Node 与系统维护仍通过替换镜像完成。合同入口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md#托管更新)，决策见 [ADR-0031](adr/0031-manage-server-releases-inside-one-container.md)。
 
-Linux 真正单容器升级烟测已接入 amd64/arm64 PR 与 Release CI，本机未运行，不能称容器验收通过。用户已授权配置正式签名密钥及发布，GitHub 签名配置已核对；最终 Linux CI、产物与升级包验证按[发布复核](reviews/v0.9.0-beta.1-release-audit.md)记录。正式 0.8.0 镜像仍没有托管更新能力。
+- 0.8.0 镜像没有托管更新能力。首次采用 0.9.0 须先正常停服、完整备份并更换基础镜像，增加独立 `/program` 和更新入口；空程序卷直接采用镜像种子，首次数据库迁移不自动生成托管升级快照。
+- 已有托管程序卷时，更换基础镜像保留先前业务版本；业务升级必须另经托管更新安装，不能只看镜像标签。`bind` / `recover` 通过 `/opt/javdex-manager/index.js` 运行当前业务 CLI。
+- 默认在线检查只读取 latest 正式 Release；预发布必须显式离线导入。SemVer 同版本/降级、错误架构、未知签名、过期清单、运行环境不符及不受支持的 schema 路径继续被拒绝，旧分离格式没有兼容入口。
+- 正式 0.8.0 为 schema 19，0.9.0 为 schema 20。未发布/不完整开发快照仍被迁移守卫拒绝；回退须恢复升级前完整备份和匹配程序，不能手改 `user_version` 或清空程序卷。模型管理文档版本 4 是桌面配置格式，不能当作数据库版本或服务端协议版本。
 
-## 当前变更：移除旧离线迁库（2026-09-27）
+## 当前功能与后续范围
 
-未正式发布的旧离线迁库已移除：不再提供 `migrate-auth`、`migration.*`、迁库包上传及桌面迁库能力。资料转移统一使用备份恢复/本机导入，远程操作先完成 writer 认主，来源库保留。归档、路径转换及预检归属备份模块；数据库版本升级、媒体库来源目录迁移及本地图片存储搬迁继续保留。
+| 范围 | 代码现状与后续边界 |
+|---|---|
+| 远程资料与 C1–C7 | 已接线；重命名、队列定位、精确查询、审计、来源、单条/批量采集及清单链接以 [合同](SERVER_MODE_CONTRACT_INVENTORY.md) 为准，没有待实施的 C1–C7 任务 |
+| Agent 与工作存储 | 插件、模型、浏览器会话、草稿和运行记录留在桌面；服务端仅做权威预览、正式应用或待确认存储，不部署 Agent runtime |
+| 资料库转移 | 统一使用桌面备份恢复/本机导入；旧 `migrate-auth`、`migration.*`、专用迁库包已移除，不再计划其 UI 或兼容入口 |
+| 恢复与升级 | 现行备份恢复、托管更新恢复需分别验收；历史迁库脚本的通过数量不可沿用 |
+| 架构与完整矩阵 | 仍有宿主装配与单例入口，历史 S13 的 M01–M15 / D01–D07 未因定向测试自动闭合；按实际缺口继续验证 |
+| 跨平台证据 | 历史 macOS/Linux arm64 安装与候选替换不代表 0.9.0 最终产物通过，也不补足 Windows/macOS x64 的运行证据；最终候选按目标环境复核 |
+| 固定产品边界 | 可信局域网、单 writer、无资料库同步、服务端无转码；远程不提供本机目录操作、根重绑、图片加密或目录搬迁 |
 
-当前验收使用 `server:smoke:backup`；下文涉及旧离线迁库的日期、命令和通过数量只保留作历史记录，不是可执行入口，也不再计划迁库凭据 UI。当前操作和限额以 [部署说明](SERVER_MODE.md) 与 [合同](SERVER_MODE_CONTRACT_INVENTORY.md) 为准。
+## 验证入口与证据边界
 
-本轮验证（Windows / Docker Desktop Linux，隔离工作区与测试卷）：`npm test` 通过，桌面 3308 项通过、6 项跳过；`server:test` 48 项通过、6 项跳过，无失败。包含旧 CLI/管理接口不可调用的回归；类型、lint、边界、CSS 与控件检查通过。桌面及服务端构建、`server:smoke:backup` 通过，覆盖双向恢复、加密图片导出、子目录映射、断点续传、恢复后授权和重启。跳过项不计入通过，未据此宣称 Linux 专属全矩阵已复验。未覆盖现有自测数据。
+从仓库根目录按改动运行。`npm ci` 不隐式准备 Electron；服务端专用检查不要先执行 `setup:desktop`，桌面测试/打包则需要它。下表是验证入口，不是本次执行结果。
+
+| 命令 | 用途与环境要求 |
+|---|---|
+| `npm run typecheck` / `npx tsc --noEmit -p tsconfig.server.json --composite false` | 桌面/Web 与服务端类型 |
+| `npm run pretest` / `npm test` | 静态检查与桌面测试；后者先准备桌面原生依赖 |
+| `npm run server:build` | Web、`out/server`、`out/updater` 与生产依赖闭包 |
+| `npm run server:test` / `npm run server:updater:test` | 真实查询 worker、业务隔离与更新安全/恢复测试；跳过项不计通过 |
+| `npm run test:ui:server-update` | 更新配对、确认、进度与错误界面；需要浏览器 |
+| `npm run server:smoke:node` | 宿主 Node 生产检查，不替代容器验收 |
+| `npm run server:smoke` | Docker 生产镜像检查，先构建 `out/server` 与 `out/updater` |
+| `npm run server:updater:smoke` | Linux Docker、真实原生依赖与 schema 19→20 合成签名更新；先构建，不是实际正式附件或线上更新验证 |
+| `npm run server:smoke:backup` | 独立 Docker 容器/卷验证双向恢复及桌面导入；先构建桌面导出 worker 和服务端镜像 |
+| `npm run smoke:same-version-install` | 同提交 Linux 桌面包与服务镜像；需 Docker、`out/server` 和 `dist/` Linux 产物 |
+
+Linux amd64/arm64 更新烟测已在 PR 与 Release 工作流中配置，最终运行状态须单独核对。缺少 Linux、Docker 或产物应失败，宿主合成测试不冒充容器验收。Cloud Docker 与构建前置条件见根 [AGENTS.md](../AGENTS.md)。当前候选的测试、安装、容器及 CI 证据应按 [发布准备检查](reviews/v0.9.0-readiness.md) 记录，不沿用历史通过数量。
+
+## 文档入口
+
+当前操作见 [部署说明](SERVER_MODE.md) 与 [服务端更新](SERVER_UPDATE.md)，合同与代码导航见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，发布与待核验项见 [发布准备检查](reviews/v0.9.0-readiness.md)，早期阶段要求与证据见 [历史归档索引](archive/server-mode/README.md)。审计与归档中的版本、旧命令、授权和环境仅适用于各自记录，不能解释为本次发布授权或验收结论。
+
+## 历史实施与验收记录
+
+以下完整保留早期实施记录，包括当时的“当前”“本轮”和旧离线迁库命令。它们不属于 0.9.0 操作步骤或当前候选证据；本次后续事项以上文为准。
+
+<details>
+<summary>展开早期实施与验收记录（不作为当前发布结论）</summary>
 
 ## PR #115 后续复核修复（2026-09-24，历史）
 
@@ -269,3 +313,5 @@ Linux 当时的完整脚本包括 NFO、播放/真实 mpv 解码、编辑冲突�
 当时日志：`/tmp/javdex-final-candidate-linux-upgrade.log`、`/tmp/javdex-final-candidate-mac-upgrade.log`、`/tmp/javdex-final-candidate-install-smoke.log`；三项均退出 0。Linux 截图/播放器日志：`/var/tmp/javdex-acceptance/javdex-remote-desktop-yNJqwk/evidence`；macOS：`/var/folders/h4/zxrt6zwx6dv1n16kwxzltqgh0000gn/T/javdex-remote-desktop-RMXIkU/evidence`。Linux 测试地址已移除。
 
 当时边界（仅该快照）：在用户当时确认的范围内，原 1–5 有定向记录。第 5 项目标平台为 macOS arm64 与 Linux arm64，当时完成了构建、安装及同版本候选替换保留数据检查。该记录不关闭 S13 全面验收或 S14 发布准备，也不补上未复现的 GUI 证据。Windows/macOS x64 当时尚无运行验收证据，列为后续事项。该快照没有修改版本号、发布或合并 main。当前分支可重复的服务端检查是 PR 工作流中的 `server:build` 与 `server:test`（`.github/workflows/server-pr.yml`）。
+
+</details>

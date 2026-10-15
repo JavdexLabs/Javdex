@@ -10,7 +10,7 @@ import { playbackFileSha256 } from './playback-runtime.mjs'
 test('installer receipt requires an inspected embedded runtime and binds final artifact bytes', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-installer-binding-test-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
-  const version = '0.9.0-beta.3', target = `${{ win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform]}-${process.arch}`
+  const version = '0.9.0', target = `${{ win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform]}-${process.arch}`
   const names = Object.entries(playbackInstallers(version)).filter(([, value]) => value === target).map(([name]) => name)
   for (const name of names) fs.writeFileSync(path.join(root, name), 'fixture package ' + name)
   const binding = { fileName: 'fixture-sources.tar.gz', inputInventorySha256: 'a'.repeat(64), sha256: 'b'.repeat(64), packagingToolsSha256: 'c'.repeat(64) }

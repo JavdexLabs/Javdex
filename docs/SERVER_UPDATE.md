@@ -1,16 +1,21 @@
 # 服务端托管更新
 
-本功能在 0.9.0-beta.1 引入，正式 0.8.0 镜像没有托管更新能力；Beta 的产物与验证状态见[发布复核](reviews/v0.9.0-beta.1-release-audit.md)。新方案只部署一个 Linux Docker 容器：常驻管理进程负责监督、下载、校验、快照和恢复，业务程序以非 root 子进程运行。无需宿主机 Node/systemd 助手，不挂载 Docker socket，不使用 Docker-in-Docker。
+本页面向 **0.9.0 正式版发布准备**，不表示正式 Release 已发布或 CI 已完成。0.9.0 的资料库 schema 为 **20**，桌面模型管理文档版本为 **4**；模型配置留在桌面，不随服务端升级包部署。发布执行状态见 [发布准备检查](reviews/v0.9.0-readiness.md)，功能与验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。
 
-每个后续 Release 为 amd64／arm64 分别提供一个 `.javdex-update` 签名完整升级文件，内含签名 JSON 和程序归档，无需选择两份文件。默认在线检查只读取正式 Release，不追踪 Beta；Beta 包从对应 Release 手动下载并通过离线上传安装。版本按 SemVer 排序，拒绝同版本或降级；架构、运行环境与 schema 检查不放宽。已公开 Beta.1/Beta.2 的附件保持原样，但新读取器不兼容它们的 JSON＋归档格式。
+官方方案只部署一个 Linux Docker 容器：常驻管理进程负责监督、下载、校验、快照和恢复，业务程序以非 root 子进程运行。无需宿主机 Node/systemd 助手，不挂载 Docker socket，不使用 Docker-in-Docker。0.8.0 镜像没有托管更新能力，首次采用须由管理员更换基础镜像。
 
-格式切换需要采用包含新读取器的桌面客户端与容器管理入口；旧管理器先由管理员正常替换为新版基础镜像，保留 `/program` 和业务资料。管理器位于镜像内，不能靠业务升级包自更新；不通过降低验收或兼容历史 Beta 格式绕过此前提。
+正式发布流程为 Linux 两种架构分别生成一个签名完整升级文件，内含签名 JSON 和程序归档；0.9.0 的目标文件名为：
 
-本机开发构建未配置发布信任根，发布前由管理员确认签名配置；发布镜像内嵌对应公钥。已使用空信任根开发镜像的部署需先替换为包含发布公钥的基础镜像，并保留 `/program`。仅更换基础镜像不会覆盖程序卷已选业务版本，随后须通过托管更新入口安装匹配签名包；不要清空程序卷或降低数据库版本来强制切换。
+- `Javdex-server-0.9.0-linux-amd64.javdex-update`
+- `Javdex-server-0.9.0-linux-arm64.javdex-update`
+
+用户只选匹配服务器架构的一个文件。默认在线检查读取 GitHub latest 正式 Release，不追踪预发布；预发布仍只能从对应 Release 手动下载并离线导入。版本按 SemVer 排序，拒绝同版本重装或降级；架构、签名、运行环境与 schema 检查不放宽。旧 JSON＋归档分离格式不受支持。
+
+管理器位于镜像内，不能靠业务升级包自更新。使用尚无单文件读取器的旧管理器或空信任根开发镜像时，须先换成包含当前读取器和受信任发布公钥的基础镜像，同时保留 `/program` 和业务资料。更换基础镜像不会覆盖程序卷已选业务版本，随后通过托管更新安装受信任的新版本包；不能靠清空程序卷、降低数据库版本或信任包内公钥强制切换。
 
 ## 部署与首次采用
 
-使用 [官方 Compose](../deploy/docker-compose.example.yml) 和已有业务 JSON 配置。需要 Docker；Compose 部署还需 Compose 插件。官方镜像支持 Linux amd64/arm64，内部固定运行环境为 `node22-bookworm-v1`。Node、init、OpenSSL 和文件锁工具随镜像提供。
+使用目标正式 Release 发布说明链接的同源码版本 [Compose](../deploy/docker-compose.example.yml) 和 [业务 JSON 配置](../deploy/javdex-server.example.json)，无需下载部署附件或单独公钥。需要 Docker；Compose 部署还需 Compose 插件。官方镜像支持 Linux amd64/arm64，内部固定运行环境为 `node22-bookworm-v1`。Node、init、OpenSSL 和文件锁工具随镜像提供。
 
 - `/data`：正式资料库，业务默认 UID/GID 1000/1000。
 - `/media`：原视频挂载，不纳入每次升级快照。
@@ -18,16 +23,26 @@
 - HTTP 8096 是业务入口，HTTPS 8097 是独立更新入口；将更新端口限制在可信局域网或私有网络。
 - `JAVDEX_UPDATE_PUBLIC_URL` 配置桌面能访问的 HTTPS 根地址，例如 `https://192.168.1.10:8097`。它不是 Docker daemon 地址。
 
-首次从正式 0.8.0 采用此方案时，管理员先正常停服，备份资料、图片、配置和原镜像，再更换为支持托管更新的镜像并增加 `javdex-program:/program`。旧桌面无法给旧镜像凭空增加更新权限。不要复用以前未发布宿主机助手的状态目录或镜像归档；没有这类开发产物的兼容迁移。
+从正式 0.8.0（schema 19）首次采用 0.9.0 时：
 
-程序卷只能使用空的专用目录/卷，不能与资料或图片互相包含，持久日志需可靠的本地 fsync 存储。图片目录只能在资料目录内或与资料目录独立，不能反向包含资料目录，避免恢复目标重叠。不要执行 `docker compose down -v`；只备份 `/data` 不能恢复配对凭据和发行选择。首次启动将镜像发行包复制到程序卷，此后重建容器优先使用已选择的发行包，不会被镜像的初始业务版本覆盖。
+1. 确认目标正式 Release 已提供同版本桌面、双架构镜像、两个 `.javdex-update` 和校验和；仅修改文档或出现预发布不能视为正式版可用。
+2. 完成或取消维护任务，正常停止原服务，完整备份资料、图片、部署配置与原镜像，并另行备份桌面数据目录。新程序卷首次启动会直接采用 0.9.0 种子并迁移数据库，不为这次基础部署变更自动生成托管升级快照。
+3. 在原 Compose 项目中采用新示例的管理入口、`javdex-program:/program`、8097 更新端口与 `JAVDEX_UPDATE_PUBLIC_URL`，保留原数据/图片卷、媒体挂载、访问地址及权限。不要因更换部署目录或 Compose 项目名而意外创建空数据卷。
+4. 将 `.env` 设为 `JAVDEX_VERSION=0.9.0`，执行 `docker compose -f docker-compose.example.yml pull` 和 `docker compose -f docker-compose.example.yml up -d`，查看日志并确认实际业务版本与 schema 20；已有 writer 关系随资料保留，无需为升级重新认主。
+5. 桌面同步升级到 0.9.0，连接后按下节获取并保存独立更新配对。普通业务连接要求同版本；更新授权与 writer 分离。
+
+已有托管 `/program` 的部署须保留程序卷：换成 0.9.0 基础镜像后仍运行先前选中的业务版本，再由桌面在线检查正式版或离线导入正式包并确认安装。若当前业务已是 0.9.0，则无需也不能再次安装同版本包。旧桌面不能为旧镜像增加更新能力；未发布宿主机助手的状态目录或镜像归档没有兼容迁移入口。
+
+首次初始化程序卷必须使用空的专用目录/卷；已初始化的托管程序卷应原样保留，不能与资料或图片互相包含，持久日志需可靠的本地 fsync 存储。图片目录只能在资料目录内或与资料目录独立，不能反向包含资料目录，避免恢复目标重叠。不要执行 `docker compose down -v`；只备份 `/data` 不能恢复配对凭据和发行选择。首次启动将镜像发行包复制到程序卷，此后重建容器优先使用已选择的发行包，不会被镜像的初始业务版本覆盖。
+
+schema 20 不能交给 0.8.0 业务程序。开发快照即使标为 schema 20，也可能因结构不完整而被拒绝；应恢复受支持的升级前完整备份，不能手改 SQLite `user_version` 或桌面模型文档版本。基础镜像首次切换的回退依靠管理员事先保存的备份与匹配旧程序；后续托管更新的自动恢复边界见下文。
 
 ## 配对与客户端使用
 
 首次启动自动生成 TLS 证书和随机更新凭据，不在日志输出秘密。管理员获取配对 JSON：
 
 ```bash
-docker compose exec javdex node /opt/javdex-manager/index.js pair --config /config/server.json
+docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js pair --config /config/server.json
 ```
 
 在桌面“设置 → 存储与导出 → 资料库连接 → 服务端更新”粘贴该 JSON。桌面核对证书指纹、serverId/catalogId，授权用操作系统安全存储加密保存，并绑定原连接地址。普通 writer 凭据和网页 Cookie 不授权更新；独立更新协议可用于客户端与业务版本不一致的情况，普通资料管理仍要求同版本。
@@ -35,14 +50,14 @@ docker compose exec javdex node /opt/javdex-manager/index.js pair --config /conf
 托管镜像生成首次 writer 令牌也使用管理入口，确保执行程序卷中当前版本的业务 CLI：
 
 ```bash
-docker compose exec javdex node /opt/javdex-manager/index.js bind --config /config/server.json
+docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js bind --config /config/server.json
 ```
 
-部署侧 writer 恢复将 `bind` 换成 `recover`；不要直接调用镜像内 `/app/index.js`，该目录是首次初始化种子，并不一定是更新后的当前业务版本。正式 0.8.0 镜像继续使用其原有 CLI。
+部署侧 writer 恢复将 `bind` 换成 `recover`；不要直接调用镜像内 `/app/index.js`，该目录是首次初始化种子，并不一定是更新后的当前业务版本。
 
-- 在线：检查更新 → 准备在线更新 → 确认停服并安装。
+- 在线正式版：检查更新 → 核对目标版本 → 准备在线更新 → 确认停服并安装。由服务端访问 GitHub 正式 Release 和匹配架构的升级文件；不自动追踪或安装预发布。目标正式 Release 尚无单文件升级包时会报错，不能据此认定 0.8.0 具备托管更新能力或 0.9.0 已发布。
 - 离线：只选择一个官方 `.javdex-update` 文件，需匹配服务器架构；不是 Docker image archive，也不是只有 JS 的源码包。
-- Beta：在采用单文件格式的预发布 Release 下载 `Javdex-server-<version>-linux-amd64.javdex-update` 或对应 arm64 文件。Beta 不会出现在默认在线检查中，安装后桌面也须更新到相同版本。历史 Beta 的分离格式不提供兼容入口。
+- 预发布：显式从对应预发布 Release 下载 `Javdex-server-<version>-linux-amd64.javdex-update` 或对应 arm64 文件。导入仍执行全部签名、版本与迁移检查，不能从正式版降到较低的预发布。安装后桌面也须更新到相同业务版本；历史分离格式不提供兼容入口。
 - 续传：重新选择同一升级文件，从持久确认的程序归档偏移继续，不把容器头部和签名 JSON 算入上传偏移。管理进程/容器重启保留偏移；哈希、签名和原生兼容验证通过前不切换程序。
 - 完成：桌面版本匹配时自动重连，否则提示同步升级桌面。
 
@@ -81,7 +96,9 @@ docker compose exec javdex node /opt/javdex-manager/index.js bind --config /conf
 
 ## 发布维护与验证
 
-Beta 和正式发布流水线都需要 GitHub Secret `JAVDEX_SERVER_UPDATE_SIGNING_KEY`（Ed25519 私钥 PEM）和 repository variable `JAVDEX_SERVER_UPDATE_KEY_ID`。上传镜像前执行 `node scripts/server-update-release.mjs validate`，缺少配置、仅提供公钥或使用其他密钥类型都会失败，不发布缺少可信升级包的 Beta。镜像构建只写入派生公钥；私钥不进入镜像、包或源码。发布脚本核对双架构镜像的源码身份和内置公钥，只附两个 `.javdex-update` 与 SHA256SUMS，不再发布分离 JSON/归档或独立宿主机助手包。后续发布不再附带 Compose/JSON 示例和公钥文件，部署示例改为对应源码版本链接，镜像内置信任根不变。Beta.1/Beta.2 的历史公钥附件保留，仅供核对，不自动授予上传包信任。
+正式与预发布流水线都需要 GitHub Secret `JAVDEX_SERVER_UPDATE_SIGNING_KEY`（Ed25519 私钥 PEM）和 repository variable `JAVDEX_SERVER_UPDATE_KEY_ID`。上传镜像前执行 `node scripts/server-update-release.mjs validate`，缺少配置、仅提供公钥或使用其他密钥类型都会失败，两类发布执行相同的签名要求。镜像构建只写入派生公钥；私钥不进入镜像、包或源码。发布脚本核对双架构镜像的源码身份和内置公钥；服务端更新附件为两个 `.javdex-update`，整个文件的摘要追加到 `SHA256SUMS.txt`。桌面安装包和对应播放源码包另按发布工作流交付；服务端不再发布分离 JSON/归档或独立宿主机助手包。Compose/JSON 示例使用对应源码提交链接，公钥内置镜像；历史公钥附件只供核对，不自动授予上传包信任。
+
+发布元数据要求 tag 与根版本一致；含预发布后缀的版本始终标记为 prerelease，显式 prerelease 标志也不能被版本号覆盖。在线更新不绕过正式 Release 入口。正式发布执行及其镜像、附件和 CI 结果须按 [发布准备检查](reviews/v0.9.0-readiness.md) 单独核验。
 
 未设置签名密钥的本地构建保留空信任根，拒绝所有更新包。私有部署/隔离测试可显式将受信任 Ed25519 公钥表放在只读配置文件，并设置 `JAVDEX_UPDATE_KEYS_FILE`；不能信任上传包临时携带的任意公钥。密钥生成工具要求仓库外受保护目录：
 
@@ -97,6 +114,6 @@ npm run test:ui:server-update   # 真实浏览器，两种主题/尺寸
 npm run server:updater:smoke    # Linux Docker 真正单容器升级验收
 ```
 
-宿主合成进程测试不等于 Linux 原生依赖或容器验收。Linux 烟测使用隔离容器/卷，从真实已发布 0.8.0/schema 19 升级到签名 Beta，验证失败恢复、更新中断、新库身份/清单保留、仅一个运行容器、非 root 业务和重建后版本保持，已接入 amd64/arm64 CI。缺少 Linux、Docker 或构建产物必须失败。本轮 macOS 不据此声称 Linux 容器验收通过，发布签名配置与实际部署仍待完成。
+宿主合成进程测试不等于 Linux 原生依赖或容器验收。Linux 烟测使用隔离容器/卷，从真实 0.8.0/schema 19 构造托管旧业务，再升级到临时签名的合成预发布目标，验证真实原生依赖、迁移、失败恢复、更新中断、资料库身份/清单保留、单个运行容器、非 root 业务和重启后版本保持。该脚本已配置到 amd64/arm64 PR 与 Release CI，但合成目标不等于正式 0.9.0 附件，也不替代管理员首次更换基础镜像路径或实际线上正式 Release 流程的验证。缺少 Linux、Docker 或构建产物必须失败；最终证据按源码提交、架构及实际产物记录，不沿用历史通过数量。
 
 选型历史见 [更新研究](SERVER_UPDATE_RESEARCH.md)、[部署研究](SERVER_UPDATE_DEPLOYMENT_RESEARCH.md)，现行取舍见 [ADR-0031](adr/0031-manage-server-releases-inside-one-container.md)。

@@ -10,7 +10,9 @@
 
 ## 按任务阅读
 
-本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（S01 起含 browser/manage/desktop/protocol 分组），Node 路径身份与资料库数据库在 `packages/library/src`，局域网浏览 HTTP 在 `packages/http/src`，共用 Checkbox 在 `packages/ui/src`。`apps/server` 包含 0.8.0 的独立 Node 宿主与管理接口，资料转移统一使用备份恢复和本机导入。当前状态及验证边界见 `docs/SERVER_MODE_NEXT_STEPS.md`，实现与合同见 `docs/SERVER_MODE_CONTRACT_INVENTORY.md`，阶段要求及历史证据见 `docs/archive/server-mode/README.md`。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
+本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（含 browser/manage/desktop/protocol 分组），Node 路径身份与资料库数据库在 `packages/library/src`，局域网浏览 HTTP 在 `packages/http/src`（桌面 Web 生命周期仍在 `apps/desktop/src/main/web/webAccess.ts`），共用 Checkbox 在 `packages/ui/src`。`apps/server` 包含独立 Node 宿主与管理接口，资料转移统一使用备份恢复和本机导入。当前状态及验证边界见 `docs/SERVER_MODE_NEXT_STEPS.md`，实现与合同见 `docs/SERVER_MODE_CONTRACT_INVENTORY.md`，阶段要求及历史证据见 `docs/archive/server-mode/README.md`。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
+
+0.9.0 稳定版准备沿用 schema 20 与模型管理文档格式 4，不因版本号去掉预发布后缀新增迁移。开发与打包合同见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)，发布规则见 [`docs/VERSIONING_AND_RELEASE.md`](docs/VERSIONING_AND_RELEASE.md)，当前准备状态见 [0.9.0 发布准备](docs/reviews/v0.9.0-readiness.md)。历史 CI、签名与安装包结果不自动成为 0.9.0 稳定版发布或新增 GUI 验收的证据。
 
 | 你在改什么 | 必读 | 可选 |
 |------------|------|------|
